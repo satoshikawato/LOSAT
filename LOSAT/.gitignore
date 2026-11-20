@@ -1,5 +1,7 @@
 target/
 routine.sh
+# A local build output (an ELF named `matrix`) was committed here once; keep it out.
+/matrix
 
 # Cargo.lock is intentionally not ignored for v0.1.0 CLI release
 # reproducibility. The lockfile should be reviewed and committed with the

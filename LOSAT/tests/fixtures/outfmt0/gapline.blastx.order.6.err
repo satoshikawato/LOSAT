@@ -1,0 +1,12 @@
+CFastaReader: Hyphens are invalid and will be ignored around line 2
+FASTA-Reader: Ignoring invalid residues at position(s): On line 2: 32
+CFastaReader: Bad gap size at line 3
+CFastaReader: Problem parsing gap mods at line 3
+CFastaReader: Hyphens are invalid and will be ignored around line 4
+FASTA-Reader: Ignoring invalid residues at position(s): On line 4: 22
+Unknown gap-type: bogus
+FASTA-Reader: Title ends with at least 20 valid nucleotide characters.  Was the sequence accidentally put in the title line?
+CFastaReader: Bad gap size at line 9
+CFastaReader: Bad gap size at line 11
+CFastaReader: Problem parsing gap mods at line 11
+There were conflicting gap-types around line 11

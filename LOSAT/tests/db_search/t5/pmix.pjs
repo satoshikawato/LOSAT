@@ -1,0 +1,27 @@
+{
+  "version": "1.2",
+  "dbname": "pmix",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "pmix",
+  "number-of-letters": 3080,
+  "number-of-sequences": 14,
+  "last-updated": "2026-11-14T12:34:00",
+  "number-of-volumes": 1,
+  "number-of-taxids": 5,
+  "bytes-total": 54302,
+  "bytes-to-cache": 3295,
+  "files": [
+    "pmix.pdb",
+    "pmix.phr",
+    "pmix.pin",
+    "pmix.pnd",
+    "pmix.pni",
+    "pmix.pog",
+    "pmix.pos",
+    "pmix.pot",
+    "pmix.psq",
+    "pmix.ptf",
+    "pmix.pto"
+  ]
+}

@@ -1,0 +1,3 @@
+Error: [blastn] Error: Tax database file has wrong magic number.
+Warning: [blastn] Query_1 qinv invalid letters: Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options 
+Warning: [blastn] Query_2 qempty: Sequence contains no data 

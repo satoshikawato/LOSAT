@@ -1,0 +1,592 @@
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastp",
+      service "rpsblast",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_1"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">NP_417964.1 putative DNA-binding
+ transcriptional regulator DctR [Escherichia coli str. K-12 substr. MG1655]"
+                  }
+                }
+              },
+              title "NP_417964.1 putative DNA-binding transcriptional
+ regulator DctR [Escherichia coli str. K-12 substr. MG1655]"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 176,
+              seq-data ncbieaa "MFLIITRDTMFFTAMKNILSKGNVVHIQNEEEIDVMLHQNAFVIID
+TLMNNVFHSNFLTQIERLKPVHVIIFSPFNIKRCLGKVPVTFVPRTITIIDFVALINGSYCSVPEAAVSLSRKQHQVL
+SCIANQMTTEDILEKLKISLKTFYCHKHNIMMILNLKRINELVRHQHIDYLV"
+            }
+          }
+        }
+      },
+      subject database "Cdd",
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, 1 }
+        },
+        {
+          name "MaskAtHash",
+          value boolean FALSE
+        },
+        {
+          name "SegFiltering",
+          value boolean FALSE
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "CompositionBasedStats",
+          value integer 1
+        },
+        {
+          name "SmithWatermanMode",
+          value boolean FALSE
+        },
+        {
+          name "DbLength",
+          value big-integer 15821058
+        },
+        {
+          name "MatrixName",
+          value string "BLOSUM62"
+        },
+        {
+          name "GapOpeningCost",
+          value integer 11
+        },
+        {
+          name "GapExtensionCost",
+          value integer 1
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 779229864
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 163
+          },
+          {
+            id str "blast_score",
+            value int 163
+          },
+          {
+            id str "e_value",
+            value real { 271276452115904, 10, -29 }
+          },
+          {
+            id str "bit_score",
+            value real { 663966174829429, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 20
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "num_positives",
+            value int 32
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 328863636363636, 10, -13 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_1",
+            general {
+              db "CDD",
+              tag id 197715
+            }
+          },
+          starts {
+            112,
+            0
+          },
+          lens {
+            57
+          },
+          strands {
+            unknown,
+            unknown
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 161
+          },
+          {
+            id str "blast_score",
+            value int 161
+          },
+          {
+            id str "e_value",
+            value real { 640329491108911, 10, -29 }
+          },
+          {
+            id str "bit_score",
+            value real { 656336198794299, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 19
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "num_positives",
+            value int 30
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 328863636363636, 10, -13 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_1",
+            general {
+              db "CDD",
+              tag id 99777
+            }
+          },
+          starts {
+            115,
+            0
+          },
+          lens {
+            57
+          },
+          strands {
+            unknown,
+            unknown
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 130
+          },
+          {
+            id str "blast_score",
+            value int 130
+          },
+          {
+            id str "e_value",
+            value real { 127741968324374, 10, -23 }
+          },
+          {
+            id str "bit_score",
+            value real { 547617986759107, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 23
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "num_positives",
+            value int 46
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 806136363636364, 10, -13 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_1",
+            general {
+              db "CDD",
+              tag id 442052
+            }
+          },
+          starts {
+            27,
+            39
+          },
+          lens {
+            141
+          },
+          strands {
+            unknown,
+            unknown
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 111
+          },
+          {
+            id str "blast_score",
+            value int 111
+          },
+          {
+            id str "e_value",
+            value real { 637219932106648, 10, -21 }
+          },
+          {
+            id str "bit_score",
+            value real { 464237997632244, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 17
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "num_positives",
+            value int 31
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 306136363636364, 10, -13 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_1",
+            general {
+              db "CDD",
+              tag id 441799
+            }
+          },
+          starts {
+            115,
+            69
+          },
+          lens {
+            53
+          },
+          strands {
+            unknown,
+            unknown
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 106
+          },
+          {
+            id str "blast_score",
+            value int 106
+          },
+          {
+            id str "e_value",
+            value real { 645931865365824, 10, -21 }
+          },
+          {
+            id str "bit_score",
+            value real { 445136480988115, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 23
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "num_positives",
+            value int 34
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 3175, 10, -2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_1",
+            general {
+              db "CDD",
+              tag id 513237
+            }
+          },
+          starts {
+            114,
+            1
+          },
+          lens {
+            55
+          },
+          strands {
+            unknown,
+            unknown
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 83
+          },
+          {
+            id str "blast_score",
+            value int 83
+          },
+          {
+            id str "e_value",
+            value real { 837599458712992, 10, -17 }
+          },
+          {
+            id str "bit_score",
+            value real { 35461365263611, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 17
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "num_positives",
+            value int 31
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 311818181818182, 10, -13 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_1",
+            general {
+              db "CDD",
+              tag id 443623
+            }
+          },
+          starts {
+            114,
+            136
+          },
+          lens {
+            54
+          },
+          strands {
+            unknown,
+            unknown
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 63
+          },
+          {
+            id str "blast_score",
+            value int 63
+          },
+          {
+            id str "e_value",
+            value real { 285676921972781, 10, -14 }
+          },
+          {
+            id str "bit_score",
+            value real { 284143131881032, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 8
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "num_positives",
+            value int 15
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 203863636363636, 10, -13 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_1",
+            general {
+              db "CDD",
+              tag id 381029
+            }
+          },
+          starts {
+            49,
+            6
+          },
+          lens {
+            35
+          },
+          strands {
+            unknown,
+            unknown
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 60
+          },
+          {
+            id str "blast_score",
+            value int 60
+          },
+          {
+            id str "e_value",
+            value real { 812339990602678, 10, -14 }
+          },
+          {
+            id str "bit_score",
+            value real { 270607781964619, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 11
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "num_positives",
+            value int 24
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 277727272727273, 10, -13 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_1",
+            general {
+              db "CDD",
+              tag id 519421
+            }
+          },
+          starts {
+            121,
+            65
+          },
+          lens {
+            48
+          },
+          strands {
+            unknown,
+            unknown
+          }
+        }
+      }
+    },
+    masks {
+    },
+    ka-blocks {
+      {
+        lambda { 329193081901044, 10, -15 },
+        k { 140171579265564, 10, -15 },
+        h { 408175671722627, 10, -15 },
+        gapped FALSE
+      },
+      {
+        lambda { 267, 10, -3 },
+        k { 78746148, 10, -9 },
+        h { 14, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 779229864",
+      "Effective search space used: 779229864",
+      "Length adjustment: 92"
+    }
+  }
+}

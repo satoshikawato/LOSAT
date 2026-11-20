@@ -1,0 +1,18 @@
+{
+  "version": "1.2",
+  "dbname": "prd_np_4",
+  "dbtype": "Protein",
+  "db-version": 4,
+  "description": "prd_np_4 (no parsed Seq-ids)",
+  "number-of-letters": 500,
+  "number-of-sequences": 2,
+  "last-updated": "2026-11-11T22:46:00",
+  "number-of-volumes": 1,
+  "bytes-total": 769,
+  "bytes-to-cache": 615,
+  "files": [
+    "prd_np_4.phr",
+    "prd_np_4.pin",
+    "prd_np_4.psq"
+  ]
+}

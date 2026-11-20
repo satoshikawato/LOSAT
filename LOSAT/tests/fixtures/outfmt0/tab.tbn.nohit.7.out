@@ -1,0 +1,5 @@
+# TBLASTN 2.17.0+
+# Query: q_nohit random protein of 40 residues
+# Database: User specified sequence set (Input: tests/db_search/tslice.fna)
+# 0 hits found
+# BLAST processed 1 queries

@@ -19,7 +19,8 @@
 //   cancel threshold, plan §2.3).
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { expect, test } from '@playwright/test';
+import { expect } from '@playwright/test';
+import { test } from './support/test';
 import type { SearchCase, TimedOptions, TimedRun } from './harness/engine';
 import { buildHarness, type HarnessFiles } from './support/browser';
 import { ENGINE, NO_ENGINE_REASON } from './support/engine';

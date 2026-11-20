@@ -1,0 +1,407 @@
+{
+  "Seq_annot": {
+    "desc": [
+      {
+        "user": {
+          "type": {
+            "str": "Hist Seqalign"
+          },
+          "data": [
+            {
+              "label": {
+                "str": "Hist Seqalign"
+              },
+              "data": {
+                "bool": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "user": {
+          "type": {
+            "str": "Blast Type"
+          },
+          "data": [
+            {
+              "label": {
+                "str": "blastx"
+              },
+              "data": {
+                "int": 3
+              }
+            }
+          ]
+        }
+      },
+      {
+        "user": {
+          "type": {
+            "str": "Blast Database Title"
+          },
+          "data": [
+            {
+              "label": {
+                "str": "n/a"
+              },
+              "data": {
+                "bool": false
+              }
+            }
+          ]
+        }
+      }
+    ],
+    "data": {
+      "align": [
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 205
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 205
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 7.90762153794527e-21
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 83.5741453431014
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 49
+              }
+            },
+            {
+              "id": {
+                "str": "comp_adjustment_method"
+              },
+              "value": {
+                "int": 2
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 66
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 82.1666666666667
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "Subject_1"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 48,
+                      "to": 83,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 15,
+                      "to": 26,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "Subject_1"
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "Subject_1"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 84,
+                      "to": 86,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "empty": {
+                      "local": {
+                        "str": "Subject_1"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "Subject_1"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 87,
+                      "to": 128,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 27,
+                      "to": 40,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "Subject_1"
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "Subject_1"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 129,
+                      "to": 131,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "empty": {
+                      "local": {
+                        "str": "Subject_1"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "Subject_1"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 132,
+                      "to": 149,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 41,
+                      "to": 46,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "Subject_1"
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "Subject_1"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 150,
+                      "to": 161,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "empty": {
+                      "local": {
+                        "str": "Subject_1"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "Subject_1"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 162,
+                      "to": 341,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 47,
+                      "to": 106,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "Subject_1"
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

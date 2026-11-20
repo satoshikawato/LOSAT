@@ -1,0 +1,22 @@
+
+                                          Tax BLAST report                                          
+
+Query= nq1 query nucleotide one
+
+Length=900
+
+                                           Organism Report                                           
+Accession                                 Description                                Score E-value 
+
+                                Mus musculus (house mouse) [rodents]                                
+ AF000001  d3 genbank one                                                              812   0.0     
+ AF000002  d3 genbank two                                                              252   2e-70   
+
+                                          Tax BLAST report                                          
+
+Query= nq2 unrelated query (no hits)
+
+Length=120
+
+                                           Organism Report                                           
+Accession...  Description... Score... E-value... 

@@ -7,6 +7,12 @@ const os = require("node:os");
 const path = require("node:path");
 const { test } = require("node:test");
 
+// The runs of this file keep guarded bytes in a cache of their own, not in the user's cache
+// directory (the host's default); the tests of the default name its environment themselves.
+const GUARD_CACHE = fs.mkdtempSync(path.join(os.tmpdir(), "losat-wasi-guard-tests-"));
+process.env.LOSAT_WASI_GUARD_CACHE = GUARD_CACHE;
+process.on("exit", () => fs.rmSync(GUARD_CACHE, { recursive: true, force: true }));
+
 // NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
 // CATCH_ALL(status)
 // return status;
@@ -40,33 +46,40 @@ function i32(value) {
 const vector = (items) => [...uleb(items.length), ...items.flat()];
 const name = (value) => [...uleb(Buffer.byteLength(value)), ...Buffer.from(value)];
 const section = (id, bytes) => [id, ...uleb(bytes.length), ...bytes];
-const body = (instructions) => {
-  const bytes = [0, ...instructions, 0x0b];
+const body = (instructions, locals = 0) => {
+  const bytes = [...(locals ? [1, locals, 0x7f] : [0]), ...instructions, 0x0b];
   return [...uleb(bytes.length), ...bytes];
 };
 
 // NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
 // CATCH_ALL(status); ... return status;
-// Entry/export/memory variations exercise Wasm ABI inspection only.
+// Entry/export/memory variations exercise Wasm ABI inspection only. `writes` appends that many
+// fd_write calls of 4,096 bytes to descriptor `fd` (standard output, or 2 for standard error)
+// after the worker part, exiting with the first nonzero WASI errno; a command that writes ends
+// with exit 0 after its writes (`status` is not used).
 function command({ threaded, status = 0, worker = null, entry = "_start",
-  aliases = [], exportMemory = true, memoryLimits = [1, 0, 1] }) {
+  aliases = [], exportMemory = true, memoryLimits = [1, 0, 1], writes = 0, fd = 1 }) {
   const types = vector([
     [0x60, 1, 0x7f, 0],                 // proc_exit(i32)
     [0x60, 0, 0],                       // _start()
     [0x60, 1, 0x7f, 1, 0x7f],          // thread-spawn(i32) -> i32
     [0x60, 2, 0x7f, 0x7f, 0],          // wasi_thread_start(i32, i32)
+    [0x60, 4, 0x7f, 0x7f, 0x7f, 0x7f, 1, 0x7f], // fd_write(fd, iovs, iovs_len, nwritten) -> errno
   ]);
   const imports = [[...name("wasi_snapshot_preview1"), ...name("proc_exit"), 0, 0]];
   if (threaded) {
     imports.push([...name("env"), ...name("memory"), 2, 3, 21, ...uleb(16384)]);
     imports.push([...name("wasi"), ...name("thread-spawn"), 0, 2]);
   }
+  if (writes) imports.push([...name("wasi_snapshot_preview1"), ...name("fd_write"), 0, 4]);
+  // Imported functions come first in the function index space (the memory is not one).
+  const imported = (threaded ? 2 : 1) + (writes ? 1 : 0);
   const exports = exportMemory ? [[...name("memory"), 2, 0]] : [];
   for (const exported of [entry, ...aliases].filter(Boolean)) {
-    exports.push([...name(exported), 0, threaded ? 2 : 1]);
+    exports.push([...name(exported), 0, imported]);
   }
   const functions = [1];
-  let main = [...i32(status), 0x10, 0];
+  let main = writes ? [] : [...i32(status), 0x10, 0];
   const bodies = [];
   if (worker) {
     // Spawn, then block in memory.atomic.wait32. A trapped worker cannot
@@ -74,7 +87,7 @@ function command({ threaded, status = 0, worker = null, entry = "_start",
     main = [...i32(0), 0x10, 1, 0x1a,
       ...i32(0), ...i32(0), 0x42, 0x7f, 0xfe, 1, 2, 0, 0x1a];
     functions.push(3);
-    if (worker !== "missing-export") exports.push([...name("wasi_thread_start"), 0, 3]);
+    if (worker !== "missing-export") exports.push([...name("wasi_thread_start"), 0, imported + 1]);
     bodies.push(body(worker === "trap"
       ? [...i32(-1), ...i32(0), ...i32(1), 0xfc, 11, 0] // OOB memory.fill
       : [...i32(0), ...i32(1), 0xfe, 0x17, 2, 0,      // atomic store + notify
@@ -82,8 +95,18 @@ function command({ threaded, status = 0, worker = null, entry = "_start",
   }
   if (threaded && !worker) {
     functions.push(3);
-    exports.push([...name("wasi_thread_start"), 0, 3]);
+    exports.push([...name("wasi_thread_start"), 0, imported + 1]);
     bodies.push(body([]));
+  }
+  if (writes) {
+    // The iovec at 16 names the 4,096 bytes at 4,096; nwritten goes to 24. Local 0 holds
+    // the errno, local 1 counts the writes.
+    main = [...main, ...i32(16), ...i32(4096), 0x36, 2, 0, ...i32(20), ...i32(4096), 0x36, 2, 0,
+      0x03, 0x40,
+      ...i32(fd), ...i32(16), ...i32(1), ...i32(24), 0x10, imported - 1, 0x22, 0,
+      0x04, 0x40, 0x20, 0, 0x10, 0, 0x0b,
+      0x20, 1, ...i32(1), 0x6a, 0x22, 1, ...i32(writes), 0x49, 0x0d, 0,
+      0x0b];
   }
   return Buffer.from([
     0, 97, 115, 109, 1, 0, 0, 0,
@@ -92,7 +115,52 @@ function command({ threaded, status = 0, worker = null, entry = "_start",
     ...section(3, vector(functions.map((type) => [type]))),
     ...(threaded ? [] : section(5, memoryLimits)),
     ...section(7, vector(exports)),
-    ...section(10, vector([body(main), ...bodies])),
+    ...section(10, vector([body(main, writes ? 2 : 0), ...bodies])),
+  ]);
+}
+
+// NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
+// CATCH_ALL(status); ... return status;
+// Host memory boundary only: one WASI call whose pointer argument is above 2 GiB.
+// clock_time_get writes the time to 0x80000008; the command exits with the call's
+// errno, or with 99 if no time arrived there. The serial memory starts at 2 GiB and
+// one page; the threaded one declares LOSAT's 65,535 pages and grows to that size.
+function highPointerCommand(threaded) {
+  const pages = 32769;
+  const types = vector([
+    [0x60, 1, 0x7f, 0],                    // proc_exit(i32)
+    [0x60, 0, 0],                          // _start()
+    [0x60, 1, 0x7f, 1, 0x7f],              // thread-spawn(i32) -> i32
+    [0x60, 2, 0x7f, 0x7f, 0],              // wasi_thread_start(i32, i32)
+    [0x60, 3, 0x7f, 0x7e, 0x7f, 1, 0x7f],  // clock_time_get(i32, i64, i32) -> i32
+  ]);
+  const imports = [
+    [...name("wasi_snapshot_preview1"), ...name("proc_exit"), 0, 0],
+    [...name("wasi_snapshot_preview1"), ...name("clock_time_get"), 0, 4],
+  ];
+  if (threaded) {
+    imports.push([...name("env"), ...name("memory"), 2, 3, 1, ...uleb(65535)]);
+    imports.push([...name("wasi"), ...name("thread-spawn"), 0, 2]);
+  }
+  const entry = imports.length - (threaded ? 1 : 0);
+  const address = i32(0x80000008 | 0);
+  const start = [1, 1, 0x7f,                                  // (local i32)
+    ...(threaded ? [...i32(pages - 1), 0x40, 0, 0x1a] : []),  // memory.grow; drop
+    ...i32(1), 0x42, 1, ...address, 0x10, 1, 0x22, 0,         // errno = clock_time_get(monotonic, 1, address)
+    0x04, 0x40, 0x20, 0, 0x10, 0, 0x0b,                       // if (errno) proc_exit(errno)
+    ...address, 0x29, 3, 0, 0x50,                             // i64.load(address) == 0
+    0x04, 0x40, ...i32(99), 0x10, 0, 0x0b,                    // if so: proc_exit(99)
+    0x0b];
+  const exports = [[...name("memory"), 2, 0], [...name("_start"), 0, entry]];
+  if (threaded) exports.push([...name("wasi_thread_start"), 0, entry + 1]);
+  return Buffer.from([
+    0, 97, 115, 109, 1, 0, 0, 0,
+    ...section(1, types),
+    ...section(2, vector(imports)),
+    ...section(3, vector(threaded ? [[1], [3]] : [[1]])),
+    ...(threaded ? [] : section(5, [1, 0, ...uleb(pages)])),
+    ...section(7, vector(exports)),
+    ...section(10, vector([[...uleb(start.length), ...start], ...(threaded ? [body([])] : [])])),
   ]);
 }
 
@@ -100,16 +168,12 @@ function run(options) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "losat-wasi-runner-"));
   try {
     const fixture = path.join(directory, "command.wasm");
-    const bytes = command(options);
+    const bytes = options.bytes || command(options);
     assert.ok(WebAssembly.validate(bytes));
     fs.writeFileSync(fixture, bytes);
     const runner = options.threaded ? "run_losat_wasi_threads.js" : "run_losat_wasi.js";
-    const env = { ...process.env, NODE_NO_WARNINGS: "1" };
-    for (const key of Object.keys(env)) {
-      if (key.startsWith("LOSAT_WASI_") || key.startsWith("LOSAT_WASM_MEMORY_")) delete env[key];
-    }
     const result = spawnSync(process.execPath, [path.join(__dirname, runner), fixture], {
-      env, encoding: "utf8", timeout: 10000, killSignal: "SIGKILL",
+      env: hostEnv(), encoding: "utf8", timeout: 10000, killSignal: "SIGKILL",
     });
     assert.ifError(result.error);
     return result;
@@ -134,6 +198,13 @@ test("worker memory trap terminates the command while its main thread waits", ()
   assert.match(result.stderr, /RuntimeError: memory access out of bounds/);
 });
 
+test("serial runner reports a rejected artifact and exits 1", () => {
+  const result = run({ threaded: false, bytes: command({ threaded: true }) });
+  assert.equal(result.signal, null, result.stderr);
+  assert.equal(result.status, 1, result.stderr);
+  assert.match(result.stderr, /expected serial-command, got threaded-command/);
+});
+
 test("missing thread entry is rejected before starting the command", () => {
   const result = run({ threaded: true, worker: "missing-export" });
   assert.equal(result.signal, null, result.stderr);
@@ -145,6 +216,122 @@ test("successful worker releases its parent and exits successfully", () => {
   const result = run({ threaded: true, worker: "success" });
   assert.equal(result.signal, null, result.stderr);
   assert.equal(result.status, 0, result.stderr);
+});
+
+// NCBI reference: c++/src/algo/blast/format/blast_format.cpp:68-93
+// CBlastFormat::CBlastFormat(..., CNcbiOstream& outfile, ...) : ..., m_Outfile(outfile),
+// The native command's write to standard output or error blocks while a slow reader drains a full
+// pipe. Node can leave a piped descriptor 1 or 2 non-blocking (wasi_artifact.js, the comment above
+// blockingStdioWrite: the serial runner's ExperimentalWarning, a thread worker's stdio), and the
+// guest's fd_write to a full pipe returned EAGAIN (WASI errno 6): LOSAT stopped with "Resource
+// temporarily unavailable (os error 6)". Python sets the pipe non-blocking here before the host
+// starts (O_NONBLOCK belongs to the open file description that the host inherits), so the test
+// does not depend on what Node prints. 64 writes of 4,096 bytes overfill the 64 KiB pipe of a
+// reader that waits a second; every byte must arrive and the exit be 0.
+const NONBLOCK = "import fcntl, os, sys; fd = int(sys.argv[1]); "
+  + "fcntl.fcntl(fd, fcntl.F_SETFL, fcntl.fcntl(fd, fcntl.F_GETFL) | os.O_NONBLOCK)";
+for (const threaded of [false, true]) {
+  for (const fd of [1, 2]) {
+    test(`${threaded ? "threaded" : "serial"} command output to ${fd === 1 ? "stdout" : "stderr"} waits for a slow reader of a full pipe`,
+      { skip: process.platform === "win32" && "needs sh" }, () => {
+        const directory = fs.mkdtempSync(path.join(os.tmpdir(), "losat-wasi-runner-"));
+        try {
+          const fixture = path.join(directory, "command.wasm");
+          const bytes = command({ threaded, worker: threaded ? "success" : null, writes: 64, fd });
+          assert.ok(WebAssembly.validate(bytes));
+          fs.writeFileSync(fixture, bytes);
+          // Descriptor 4 keeps the test's stderr for the exit line; for fd 2 the host's standard
+          // error is the slow pipe and its standard output /dev/null. The pipeline is a script file
+          // run by `sh`, not a `sh -c` string: the paths reach it only as its arguments, and CodeQL
+          // (js/shell-command-injection-from-environment, alerts #41 and #45) reads every argument
+          // of `sh -c` as part of the command.
+          const redirect = fd === 1 ? "4>&2" : "4>&2 2>&1 >/dev/null";
+          const pipeline = path.join(directory, "slow-reader.sh");
+          fs.writeFileSync(pipeline,
+            `{ python3 -c "$4" "$5" && "$1" "$2" "$3"; echo "exit $?" >&4; } ${redirect} | { sleep 1; wc -c; }\n`);
+          const result = spawnSync("sh", [pipeline,
+            process.execPath, path.join(__dirname, threaded ? "run_losat_wasi_threads.js" : "run_losat_wasi.js"),
+            fixture, NONBLOCK, String(fd)], {
+            env: hostEnv(), encoding: "utf8", timeout: 20000, killSignal: "SIGKILL",
+          });
+          assert.ifError(result.error);
+          assert.match(result.stderr, /^exit 0$/m, result.stderr);
+          assert.equal(Number(result.stdout.trim()), 64 * 4096, result.stderr);
+        } finally {
+          fs.rmSync(directory, { recursive: true, force: true });
+        }
+      });
+  }
+}
+
+// NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
+// CATCH_ALL(status); ... return status;
+// node:wasi answers EINVAL (28) to a pointer argument that JavaScript sees as negative;
+// both runners pass WASI arguments as unsigned values (wasi_artifact.js).
+for (const threaded of [false, true]) {
+  test(`${threaded ? "threaded" : "serial"} WASI call with a pointer above 2 GiB succeeds`, () => {
+    const result = run({ threaded, bytes: highPointerCommand(threaded) });
+    assert.equal(result.signal, null, result.stderr);
+    assert.equal(result.status, 0, result.stderr);
+  });
+}
+
+test("WASI imports receive i32 arguments as unsigned values", () => {
+  const { unsignedWasiImports } = require("./wasi_artifact");
+  const seen = [];
+  const imports = unsignedWasiImports({
+    clock_time_get: (...args) => { seen.push(args); return 0; },
+    proc_exit: (...args) => { seen.push(args); },
+  });
+  assert.deepEqual(Object.keys(imports), ["clock_time_get", "proc_exit"]);
+  assert.equal(imports.clock_time_get(1, 1n, -2147483640), 0);
+  imports.proc_exit(-1);
+  assert.deepEqual(seen, [[1, 1n, 2147483656], [4294967295]]);
+});
+
+// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
+// m_NumThreads = num_threads;
+// Host memory only: when the declared maximum cannot be reserved, the host provides a
+// shared memory with a smaller one. An engine either refuses to create the memory or
+// creates one that cannot grow; an explicit maximum is never replaced.
+test("shared memory steps down when the declared maximum cannot be reserved", () => {
+  const { createSharedMemory } = require("./wasi_artifact");
+  const tried = [];
+  // `refuses`: the constructor throws above the limit. Otherwise the memory is created
+  // with its initial pages only and cannot grow.
+  const engine = (limit, refuses) => descriptor => {
+    tried.push(descriptor.maximum);
+    if (descriptor.maximum > limit && refuses) throw new RangeError("could not allocate memory");
+    let pages = descriptor.initial;
+    return { descriptor, pages: () => pages, grow(delta) {
+      if (descriptor.maximum > limit) throw new RangeError("Unable to grow instance memory");
+      pages += delta;
+    } };
+  };
+  for (const refuses of [true, false]) {
+    tried.length = 0;
+    const whole = createSharedMemory(23, 65535, true, engine(65535, refuses));
+    assert.deepEqual(whole.memory.descriptor, { initial: 22, maximum: 65535, shared: true });
+    assert.deepEqual([whole.maximum, whole.memory.pages()], [65535, 23]);
+    const less = createSharedMemory(23, 65535, true, engine(20000, refuses));
+    assert.deepEqual([less.maximum, less.memory.pages()], [16384, 23]);
+    assert.deepEqual(tried, [65535, 65535, 49152, 32768, 24576, 16384]);
+    // Never below the 1 GiB of the earlier modules, nor below the initial size.
+    assert.throws(() => createSharedMemory(23, 65535, true, engine(16383, refuses)), RangeError);
+    assert.throws(() => createSharedMemory(23, 16384, true, engine(16383, refuses)), RangeError);
+    tried.length = 0;
+    assert.throws(() => createSharedMemory(30000, 65535, true, engine(20000, refuses)), RangeError);
+    assert.deepEqual(tried, [65535, 49152, 32768]);
+    // An explicit maximum is used as it is.
+    tried.length = 0;
+    assert.throws(() => createSharedMemory(23, 65535, false, engine(20000, refuses)), RangeError);
+    assert.deepEqual(tried, [65535]);
+  }
+  assert.throws(() => createSharedMemory(23, 65535, true, () => { throw new TypeError("other"); }), TypeError);
+  const real = createSharedMemory(3, 4, true);
+  assert.equal(real.maximum, 4);
+  assert.equal(real.memory.buffer.byteLength, 3 * 65536);
+  assert.ok(real.memory.buffer instanceof SharedArrayBuffer);
 });
 
 // NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
@@ -210,6 +397,278 @@ test("artifact preparation preserves validation and ABI rejection", () => {
   }
 });
 
+// Unset, the guard cache is in the user's cache directory; 0 turns it off; a default
+// directory that cannot be used only means that the guard is computed again.
+test("LOSAT_WASI_GUARD_CACHE is on by default in the user's cache directory, and 0 turns it off", () => {
+  const { defaultGuardCacheDir } = require("./wasi_thread_host");
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "losat-wasi-guard-home-"));
+  try {
+    const bytes = spawner(2, { bulk: true });
+    const reference = runThreaded(bytes, [], { LOSAT_WASI_GUARD_CACHE: "0" });
+    assert.equal(reference.status, 3, reference.stderr);
+    const user = { HOME: home, USERPROFILE: home, XDG_CACHE_HOME: path.join(home, "xdg"), LOCALAPPDATA: path.join(home, "local") };
+    const dir = defaultGuardCacheDir(user, process.platform, home);
+    assert.ok(dir.startsWith(home), dir);
+    for (const state of ["miss", "hit"]) {
+      const result = runThreaded(bytes, [], { ...user, LOSAT_WASI_GUARD_CACHE: undefined, LOSAT_WASI_THREADS_DEBUG: "1" });
+      assert.equal(result.status, 3, result.stderr);
+      assert.equal(result.stdout, reference.stdout);
+      assert.ok(result.stderr.includes(`guard cache ${state}: ${dir}${path.sep}guarded-`), result.stderr);
+    }
+    const off = runThreaded(bytes, [], { ...user, LOSAT_WASI_GUARD_CACHE: "0", LOSAT_WASI_THREADS_DEBUG: "1" });
+    assert.equal(off.stdout, reference.stdout);
+    assert.doesNotMatch(off.stderr, /guard cache/);
+    // A default directory under a file cannot be created: the run computes the guard.
+    const file = path.join(home, "file");
+    fs.writeFileSync(file, "");
+    const blocked = { ...user, XDG_CACHE_HOME: file, LOCALAPPDATA: file };
+    if (process.platform === "darwin") {
+      fs.rmSync(path.join(home, "Library"), { recursive: true, force: true });
+      fs.writeFileSync(path.join(home, "Library"), "");
+    }
+    const fallback = runThreaded(bytes, [], { ...blocked, LOSAT_WASI_GUARD_CACHE: undefined, LOSAT_WASI_THREADS_DEBUG: "1" });
+    assert.equal(fallback.status, 3, fallback.stderr);
+    assert.equal(fallback.stdout, reference.stdout);
+    assert.match(fallback.stderr, /guard cache unusable/);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("the default guard cache directory follows each platform's convention", () => {
+  const { defaultGuardCacheDir } = require("./wasi_thread_host");
+  const home = os.homedir();
+  assert.equal(defaultGuardCacheDir({ XDG_CACHE_HOME: "/x/cache" }, "linux"), path.join("/x/cache", "losat", "wasi-guard"));
+  assert.equal(defaultGuardCacheDir({ XDG_CACHE_HOME: "relative" }, "linux"), path.join(home, ".cache", "losat", "wasi-guard"));
+  assert.equal(defaultGuardCacheDir({}, "linux"), path.join(home, ".cache", "losat", "wasi-guard"));
+  assert.equal(defaultGuardCacheDir({ XDG_CACHE_HOME: "/x/cache" }, "darwin"), path.join(home, "Library", "Caches", "losat", "wasi-guard"));
+  assert.equal(defaultGuardCacheDir({ LOCALAPPDATA: "C:\\L" }, "win32"), path.join("C:\\L", "losat", "wasi-guard"));
+  assert.equal(defaultGuardCacheDir({}, "win32"), path.join(home, "AppData", "Local", "losat", "wasi-guard"));
+});
+
+// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
+// m_NumThreads = num_threads;
+// An artifact guarded at build time (`wasi_shared_memory.js guard`) runs as it is: the host
+// does not guard it again and writes nothing to the guard cache.
+test("the host runs an artifact guarded at build time as it is, without a guard cache entry", () => {
+  const { guardSharedMemory } = require("./wasi_shared_memory");
+  const { guardSharedMemoryCached } = require("./wasi_thread_host");
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "losat-wasi-guard-built-"));
+  try {
+    const bytes = spawner(2, { bulk: true });
+    const built = guardSharedMemory(bytes).bytes;
+    const reference = runThreaded(bytes, [], { LOSAT_WASI_GUARD_CACHE: "0" });
+    assert.equal(reference.status, 3, reference.stderr);
+    const cache = path.join(directory, "cache");
+    const result = runThreaded(built, [], { LOSAT_WASI_GUARD_CACHE: cache, LOSAT_WASI_THREADS_DEBUG: "1" });
+    assert.equal(result.status, 3, result.stderr);
+    assert.equal(result.stdout, reference.stdout);
+    assert.match(result.stderr, /shared-memory guards: 1 fills, 1 copies, \d+ grows, \d+ atomics \(guarded at build time\)/);
+    assert.doesNotMatch(result.stderr, /guard cache (miss|hit|invalid)/);
+    assert.equal(fs.existsSync(cache), false);
+    // A second run finds no index either (none was written).
+    const second = runThreaded(built, [], { LOSAT_WASI_GUARD_CACHE: cache, LOSAT_WASI_THREADS_DEBUG: "1" });
+    assert.equal(second.stdout, reference.stdout);
+    assert.doesNotMatch(second.stderr, /guard cache index hit/);
+    assert.equal(fs.existsSync(cache), false);
+    const cached = guardSharedMemoryCached(built);
+    assert.deepEqual([cached.cache, cached.bytes, cached.fill, cached.copy], ["guarded", built, 0, 0]);
+    // The variable is checked as for any other module.
+    const invalid = runThreaded(built, [], { LOSAT_WASI_GUARD_CACHE: "" });
+    assert.notEqual(invalid.status, 3);
+    assert.match(invalid.stderr, /LOSAT_WASI_GUARD_CACHE must name a directory or be 0/);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+// prepareThreadHost frees the module's bytes once the compile has copied them (freeBytes): a view
+// of a whole ArrayBuffer is detached at once; a part of Node's Buffer pool or of a larger buffer
+// is left as it is.
+test("prepareThreadHost frees the buffer of a module guarded at build time", async () => {
+  const { prepareThreadHost } = require("./wasi_thread_host");
+  const { guardSharedMemory } = require("./wasi_shared_memory");
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "losat-wasi-guard-free-"));
+  const { transfer } = ArrayBuffer.prototype;
+  const saved = process.env.LOSAT_WASI_GUARD_CACHE;
+  const freed = [];
+  try {
+    process.env.LOSAT_WASI_GUARD_CACHE = "0";
+    ArrayBuffer.prototype.transfer = function (...args) { freed.push(this.byteLength); return transfer.apply(this, args); };
+    const file = path.join(directory, "command.wasm");
+    fs.writeFileSync(file, guardSharedMemory(spawner(2, { bulk: true })).bytes);
+    await prepareThreadHost(file, "threaded-command");
+    assert.deepEqual(freed, [33 << 20]);
+  } finally {
+    ArrayBuffer.prototype.transfer = transfer;
+    if (saved === undefined) delete process.env.LOSAT_WASI_GUARD_CACHE; else process.env.LOSAT_WASI_GUARD_CACHE = saved;
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("freeBytes frees only a view of a whole ArrayBuffer", () => {
+  const { freeBytes } = require("./wasi_thread_host");
+  const whole = Buffer.allocUnsafeSlow(1 << 20).fill(1);
+  freeBytes(whole);
+  assert.equal(whole.length, 0);
+  assert.equal(whole.buffer.byteLength, 0);
+  freeBytes(whole);
+  const pooled = Buffer.from("abc");
+  assert.ok(pooled.buffer.byteLength > pooled.length);
+  freeBytes(pooled);
+  assert.equal(pooled.toString(), "abc");
+  const part = Buffer.allocUnsafeSlow(4096).fill(2).subarray(0, 100);
+  freeBytes(part);
+  assert.equal(part.length, 100);
+  assert.equal(part.buffer.byteLength, 4096);
+});
+
+test("the guard cache keeps the entries used last", () => {
+  const { guardSharedMemoryCached } = require("./wasi_thread_host");
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "losat-wasi-guard-keep-"));
+  const saved = process.env.LOSAT_WASI_GUARD_CACHE;
+  try {
+    process.env.LOSAT_WASI_GUARD_CACHE = directory;
+    const modules = Array.from({ length: 10 }, (_, i) => spawner(i + 1, { bulk: true }));
+    const sidecars = () => fs.readdirSync(directory).filter((file) => file.endsWith(".json"));
+    const stamp = (bytes, seconds) => {
+      const sha = require("node:crypto").createHash("sha256").update(bytes).digest("hex");
+      const file = sidecars().find((name) => name.includes(sha));
+      fs.utimesSync(path.join(directory, file), seconds, seconds);
+    };
+    modules.slice(0, 8).forEach((bytes, i) => {
+      assert.equal(guardSharedMemoryCached(bytes).cache, "miss");
+      stamp(bytes, 1000 + i);
+    });
+    // The oldest entry is used again (a hit), so the next two misses remove entries 1 and 2.
+    assert.equal(guardSharedMemoryCached(modules[0]).cache, "hit");
+    for (const bytes of modules.slice(8)) assert.equal(guardSharedMemoryCached(bytes).cache, "miss");
+    assert.equal(sidecars().length, 8);
+    assert.equal(fs.readdirSync(directory).filter((file) => file.endsWith(".wasm")).length, 8);
+    assert.equal(guardSharedMemoryCached(modules[0]).cache, "hit");
+    // Bytes without a sidecar and temporary files go once they are an hour old.
+    const old = Date.now() / 1000 - 7200;
+    const leftovers = [`guarded-${"a".repeat(64)}-${"b".repeat(64)}.wasm`, `guarded-${"c".repeat(64)}-${"d".repeat(64)}.json.1.ab.tmp`];
+    for (const [i, name] of leftovers.entries()) {
+      fs.writeFileSync(path.join(directory, name), "x");
+      if (i === 0) fs.utimesSync(path.join(directory, name), old, old);
+    }
+    assert.equal(guardSharedMemoryCached(modules[1]).cache, "miss");
+    const left = fs.readdirSync(directory);
+    assert.equal(left.includes(leftovers[0]), false);
+    assert.equal(left.includes(leftovers[1]), true);
+  } finally {
+    if (saved === undefined) delete process.env.LOSAT_WASI_GUARD_CACHE;
+    else process.env.LOSAT_WASI_GUARD_CACHE = saved;
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
+// m_NumThreads = num_threads;
+// The guard cache's index: a run compiles the cached bytes that the input file's index names at
+// once, and the checks that fail (cached bytes changed, another input's entry under this file's
+// index, an index that is not JSON) send it the way without the index, to its own input's output.
+// A file rewritten in place has another index name. At most GUARD_CACHE_KEEP index files stay.
+test("LOSAT_WASI_GUARD_CACHE's index compiles the cached bytes at once and keeps every check", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "losat-wasi-guard-index-"));
+  try {
+    // Two modules of the same length (a custom section pads each), with different outputs.
+    const pad = (bytes, length) => {
+      const payload = length - bytes.length - 4;
+      assert.ok(payload >= 0 && payload + 2 < 128);
+      return Buffer.concat([bytes, Buffer.from([0, payload + 2, 1, 112, ...new Array(payload).fill(0)])]);
+    };
+    const [rawA, rawB] = [spawner(2, { bulk: true }), spawner(3, { bulk: true })];
+    const length = Math.max(rawA.length, rawB.length) + 8;
+    const [a, b] = [pad(rawA, length), pad(rawB, length)];
+    const [refA, refB] = [runThreaded(a, []), runThreaded(b, [])];
+    assert.notEqual(refA.stdout, refB.stdout);
+    const cache = path.join(directory, "cache"), fixture = path.join(directory, "command.wasm");
+    const env = { LOSAT_WASI_GUARD_CACHE: cache, LOSAT_WASI_PRESPAWN: "2", LOSAT_WASI_THREADS_DEBUG: "1" };
+    const run = (file, expected, patterns, label) => {
+      const result = runFixture(file, [], env);
+      assert.equal(result.status, expected.status, `${label}\n${result.stderr}`);
+      assert.equal(result.stdout, expected.stdout, label);
+      for (const pattern of patterns) assert.match(result.stderr, pattern, label);
+      assert.match(result.stderr, /shared-memory guards: 1 fills, 1 copies/, label);
+      return result;
+    };
+    const indexOf = (file) => {
+      const stat = fs.statSync(file, { bigint: true });
+      return path.join(cache, `index-${stat.dev}-${stat.ino}-${stat.size}-${stat.mtimeNs}-${stat.ctimeNs}.json`);
+    };
+    const indexes = () => fs.readdirSync(cache).filter((name) => /^index-.*\.json$/.test(name));
+    fs.writeFileSync(fixture, a);
+    run(fixture, refA, [/guard cache miss: /], "cold");
+    assert.deepEqual(indexes(), [path.basename(indexOf(fixture))]);
+    run(fixture, refA, [/guard cache index hit: /], "indexed");
+    for (const file of fs.readdirSync(cache).filter((name) => name.endsWith(".wasm"))) {
+      const data = fs.readFileSync(path.join(cache, file));
+      data[data.length - 1] ^= 1;
+      fs.writeFileSync(path.join(cache, file), data);
+    }
+    run(fixture, refA, [/guard cache index stale: /, /guard cache invalid: /], "cached bytes changed");
+    run(fixture, refA, [/guard cache index hit: /], "rebuilt");
+    const other = path.join(directory, "other.wasm");
+    fs.writeFileSync(other, b);
+    run(other, refB, [/guard cache miss: /], "other input");
+    fs.copyFileSync(indexOf(other), indexOf(fixture));
+    run(fixture, refA, [/guard cache index stale: /, /guard cache hit: /], "another input's entry");
+    run(fixture, refA, [/guard cache index hit: /], "index written again");
+    const { atime, mtime } = fs.statSync(fixture);
+    fs.writeFileSync(fixture, b);
+    fs.utimesSync(fixture, atime, mtime);
+    // The old index (or, where the timestamps are coarse, the same name with the old input's
+    // SHA-256) does not serve the new input: this run takes the entry without the index and then
+    // writes the index of the file as it is now.
+    const rewritten = run(fixture, refB, [/guard cache hit: /], "rewritten in place");
+    assert.doesNotMatch(rewritten.stderr, /guard cache index hit: /, "rewritten in place");
+    assert.ok(fs.existsSync(indexOf(fixture)), "index of the rewritten file");
+    run(fixture, refB, [/guard cache index hit: /], "rewritten in place, indexed");
+    fs.writeFileSync(indexOf(fixture), "{");
+    run(fixture, refB, [/guard cache index not used /, /guard cache hit: /], "index not JSON");
+    const old = new Date(Date.now() - 86_400_000);
+    for (let i = 0; i < 10; i++) {
+      const file = path.join(cache, `index-1-${i}-1-1-1.json`);
+      fs.writeFileSync(file, "{}");
+      fs.utimesSync(file, old, old);
+    }
+    fs.writeFileSync(fixture, a);
+    run(fixture, refA, [/guard cache hit: /], "pruned");
+    assert.equal(indexes().length, 8);
+    assert.ok(indexes().includes(path.basename(indexOf(fixture))));
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:176-181
+// ```c++
+//     // ... and wait for the threads to finish
+//     Uint8 retv(0);
+//     NON_CONST_ITERATE(TBlastThreads, thread, the_threads) {
+//         void * result(0);
+//         (*thread)->Join(&result);
+// ```
+// The join of the test modules (spawner, reactorSpawner): wait until the thread count at address
+// 0 is `spawns` (the instructions that push it), keeping the count it compares in the i32 local
+// `counted`:
+//   block { loop { counted = count; if (counted == spawns) break; memory.atomic.wait32(0, counted, -1) } }
+// The wait expects the count that was compared, not a second load of it. With a second load, a
+// thread that adds the last count between the two loads and notifies before the wait starts left
+// the wait on a count that no thread changes again, with no notify to come: 20 of 22,000 runs of
+// the guard cache index test's 2-thread command with 2 standby workers hung so until killed, and
+// 0 of 22,000 with this form (2026-11-19, Node 24.21.0).
+// `late` puts the compare and the wait apart until every thread has added its count, as when
+// the threads end in that gap (spawner's `late`).
+function awaitCount(spawns, counted, late = false) {
+  const load = [...i32(0), 0xfe, 0x10, 2, 0];                                   // i32.atomic.load(0)
+  const apart = late ? [0x03, 0x40, ...load, ...spawns, 0x47, 0x0d, 0, 0x0b] : []; // loop { if (count != spawns) again }
+  return [0x02, 0x40, 0x03, 0x40, ...load, 0x22, counted, ...spawns, 0x46, 0x0d, 1, ...apart,
+    ...i32(0), 0x20, counted, 0x42, 0x7f, 0xfe, 0x01, 2, 0, 0x1a, 0x0c, 0, 0x0b, 0x0b];
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:156-180
 // ```c++
 //     // Create the threads ...
@@ -223,12 +682,25 @@ test("artifact preparation preserves validation and ABI rejection", () => {
 //         (*thread)->Join(&result);
 // ```
 // A command that starts `spawns` threads (start_arg 1, 2, 4, ...; exit 90 when a spawn
-// fails) and waits until every thread has added its start_arg and tid. It prints the
-// thread count and 'a' + the tid sum and exits with the start_arg sum, so a lost,
+// fails) and waits until every thread has added its start_arg and tid (awaitCount). It prints
+// the thread count and 'a' + the tid sum and exits with the start_arg sum, so a lost,
 // repeated or misdirected start changes stdout or the status. `bulk` adds a memory.fill
-// and a memory.copy for the shared-memory guard. The host options under test change
-// when workers boot, never this output.
-function spawner(spawns, { bulk = false } = {}) {
+// and a memory.copy for the shared-memory guard. `late`: the threads do not notify, and the
+// command waits only after every thread has added (awaitCount's `late`), so a join that waits
+// for a count already reached never returns. The host options under test change when workers
+// boot, never this output.
+// A module on the shared memory with no instruction for the shared-memory guard.
+function nothingToGuard() {
+  return Buffer.from([
+    0, 97, 115, 109, 1, 0, 0, 0,
+    ...section(1, [1, 0x60, 0, 0]),
+    ...section(2, vector([[...name("env"), ...name("memory"), 2, 3, 1, 4]])),
+    ...section(3, [1, 0]),
+    ...section(10, vector([body([])])),
+  ]);
+}
+
+function spawner(spawns, { bulk = false, late = false } = {}) {
   const types = vector([
     [0x60, 1, 0x7f, 0],                          // proc_exit(i32)
     [0x60, 0, 0],                                // _start()
@@ -251,9 +723,7 @@ function spawner(spawns, { bulk = false } = {}) {
     main.push(...i32(1 << i), 0x10, 1, ...i32(1), 0x48, 0x04, 0x40, ...i32(90), 0x10, 0, 0x0b);
   }
   main.push(
-    // block { loop { if (count == spawns) break; memory.atomic.wait32(0, count, -1) } }
-    0x02, 0x40, 0x03, 0x40, ...load(0), ...i32(spawns), 0x46, 0x0d, 1,
-    ...i32(0), ...load(0), 0x42, 0x7f, 0xfe, 0x01, 2, 0, 0x1a, 0x0c, 0, 0x0b, 0x0b,
+    ...awaitCount(i32(spawns), 0, late),                                       // local 0 = counted
     ...byte(32, [...load(0), ...i32(48), 0x6a]), ...byte(33, [...load(8), ...i32(97), 0x6a]),
     ...byte(34, i32(10)),
     ...i32(16), ...i32(32), 0x36, 2, 0, ...i32(20), ...i32(3), 0x36, 2, 0,  // iovec {32, 3}
@@ -263,7 +733,7 @@ function spawner(spawns, { bulk = false } = {}) {
     ...load(4), 0x10, 0,                                                       // proc_exit(sum)
   );
   const thread = [...add(4, [0x20, 1]), ...add(8, [0x20, 0]), ...add(0, i32(1)),
-    ...i32(0), ...i32(1), 0xfe, 0x00, 2, 0, 0x1a];                             // notify(0, 1)
+    ...(late ? [] : [...i32(0), ...i32(1), 0xfe, 0x00, 2, 0, 0x1a])];           // notify(0, 1)
   return Buffer.from([
     0, 97, 115, 109, 1, 0, 0, 0,
     ...section(1, types),
@@ -271,28 +741,34 @@ function spawner(spawns, { bulk = false } = {}) {
     ...section(3, vector([[1], [3]])),
     ...section(7, vector([[...name("memory"), 2, 0], [...name("_start"), 0, 3],
       [...name("wasi_thread_start"), 0, 4]])),
-    ...section(10, vector([body(main), body(thread)])),
+    ...section(10, vector([body(main, 1), body(thread)])),
   ]);
 }
 
+// The host's environment: no LOSAT_WASI_* of the caller, this file's guard cache, then
+// `extra`, where `undefined` leaves a variable out.
 function hostEnv(extra = {}) {
   const env = { ...process.env, NODE_NO_WARNINGS: "1" };
   for (const key of Object.keys(env)) {
     if (key.startsWith("LOSAT_WASI_") || key.startsWith("LOSAT_WASM_MEMORY_")) delete env[key];
   }
-  return { ...env, ...extra };
+  const merged = { ...env, LOSAT_WASI_GUARD_CACHE: GUARD_CACHE, ...extra };
+  return Object.fromEntries(Object.entries(merged).filter(([, value]) => value !== undefined));
 }
 
 // The command runner, or with `options` a driver that passes the test-only host options
 // (fault, startTimeoutMs, rejectAt) through createThreadHost as check_wasi_fault.js does.
+// `startDelayMs` waits that long between the host's creation and _start (its standby workers
+// have booted and wait for their threads by then).
 const DRIVER = `"use strict";
 const { createThreadHost } = require(${JSON.stringify(path.join(__dirname, "wasi_thread_host.js"))});
 (async () => {
   const [wasm, json, ...argv] = process.argv.slice(2);
-  const { rejectAt, ...options } = JSON.parse(json);
+  const { rejectAt, startDelayMs, ...options } = JSON.parse(json);
   if (rejectAt) options.rejectSpawn = attempt => attempt === rejectAt;
   const host = await createThreadHost(wasm, "threaded-command", argv, options);
   try {
+    if (startDelayMs) await new Promise(resolve => setTimeout(resolve, startDelayMs));
     process.exitCode = host.start();
     await host.waitForWorkers();
   } finally { await host.close(); }
@@ -304,16 +780,21 @@ function runThreaded(bytes, argv, env = {}, options = null) {
     const fixture = path.join(directory, "command.wasm");
     assert.ok(WebAssembly.validate(bytes));
     fs.writeFileSync(fixture, bytes);
-    let script = path.join(__dirname, "run_losat_wasi_threads.js");
-    if (options) fs.writeFileSync(script = path.join(directory, "driver.js"), DRIVER);
-    const result = spawnSync(process.execPath, [script, fixture, ...(options ? [JSON.stringify(options)] : []), ...argv], {
-      env: hostEnv(env), encoding: "utf8", timeout: 20000, killSignal: "SIGKILL",
-    });
-    assert.ifError(result.error);
-    return result;
+    return runFixture(fixture, argv, env, options, directory);
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }
+}
+
+// runThreaded for a module file that the caller keeps (`directory` receives the driver).
+function runFixture(fixture, argv, env = {}, options = null, directory = path.dirname(fixture)) {
+  let script = path.join(__dirname, "run_losat_wasi_threads.js");
+  if (options) fs.writeFileSync(script = path.join(directory, "driver.js"), DRIVER);
+  const result = spawnSync(process.execPath, [script, fixture, ...(options ? [JSON.stringify(options)] : []), ...argv], {
+    env: hostEnv(env), encoding: "utf8", timeout: 20000, killSignal: "SIGKILL",
+  });
+  assert.ifError(result.error);
+  return result;
 }
 
 const hostEvents = (stderr) => [...stderr.matchAll(/^\[losat-wasi-event\] (.+)$/gm)].map((m) => JSON.parse(m[1]));
@@ -346,7 +827,7 @@ function checkLifecycle(events, spawned, standby, label) {
 test("LOSAT_WASI_PRESPAWN keeps output and status with auto, fewer and more workers", () => {
   const bytes = spawner(3);
   const argv = ["-num_threads", "4"];
-  const reference = runThreaded(bytes, argv);
+  const reference = runThreaded(bytes, argv, { LOSAT_WASI_PRESPAWN: "0" });
   assert.deepEqual(outcome(reference), { status: 7, signal: null, stdout: "3g\n", stderr: "" });
   for (const [prespawn, standby] of [["auto", 3], ["1", 1], ["5", 5], ["0", 0]]) {
     assert.deepEqual(outcome(runThreaded(bytes, argv, { LOSAT_WASI_PRESPAWN: prespawn })), outcome(reference), prespawn);
@@ -369,6 +850,24 @@ test("LOSAT_WASI_PRESPAWN=auto reads -num_threads, and unused standby workers ar
   }
 });
 
+// A spawn that finds no standby worker left boots the next set of -num_threads workers together
+// with `auto`, and takes its first; a number of workers still boots one new worker per spawn after them.
+test("LOSAT_WASI_PRESPAWN=auto boots the next set together when its standby workers run out", () => {
+  const argv = ["-num_threads", "3"];
+  for (const [spawns, prespawn, standby, refills] of [[5, "auto", 5, [3]], [4, "auto", 5, [3]], [6, "auto", 8, [3, 6]],
+    [5, "2", 2, []]]) {
+    const label = `${spawns} spawns PRESPAWN=${prespawn}`;
+    const reference = runThreaded(spawner(spawns), argv, { LOSAT_WASI_PRESPAWN: "0" });
+    const result = runThreaded(spawner(spawns), argv, { LOSAT_WASI_PRESPAWN: prespawn, LOSAT_WASI_THREADS_DEBUG: "1" });
+    assert.equal(result.status, reference.status, `${label}\n${result.stderr}`);
+    assert.equal(result.stdout, reference.stdout, label);
+    const events = hostEvents(result.stderr);
+    checkLifecycle(events, spawns, standby, label);
+    assert.deepEqual(events.filter((e) => e.event === "standby_refill").map((e) => [e.tid, e.count]),
+      refills.map((tid) => [tid, 3]), label);
+  }
+});
+
 test("invalid LOSAT_WASI_PRESPAWN values fail before the command starts", () => {
   for (const value of ["", "-1", "255", "two", "1.5"]) {
     const result = runThreaded(spawner(1), [], { LOSAT_WASI_PRESPAWN: value });
@@ -388,20 +887,73 @@ for (const [fault, message] of [
   ["abnormal-exit", /WASI worker 1 exited unexpectedly with code 23/],
 ]) {
   test(`fault ${fault} has the same result with LOSAT_WASI_PRESPAWN`, () => {
-    for (const env of [{}, { LOSAT_WASI_PRESPAWN: "auto" }, { LOSAT_WASI_PRESPAWN: "3" }]) {
-      const result = runThreaded(spawner(1), ["-num_threads", "2"], env, { fault, startTimeoutMs: 1000 });
-      const label = `${fault} ${JSON.stringify(env)}`;
+    // The last run starts the guest after its standby worker waits, so its spawn returns without
+    // the start confirmation (startStandby): a `ready` event with `waiting: true` shows that path.
+    for (const [env, startDelayMs] of [[{ LOSAT_WASI_PRESPAWN: "0" }], [{}], [{ LOSAT_WASI_PRESPAWN: "auto" }],
+      [{ LOSAT_WASI_PRESPAWN: "3" }], [{}, 1500]]) {
+      const noWait = startDelayMs && (fault === "trap" || fault === "abnormal-exit");
+      const result = runThreaded(spawner(1), ["-num_threads", "2"], noWait ? { ...env, LOSAT_WASI_THREADS_DEBUG: "1" } : env,
+        { fault, startTimeoutMs: 1000, startDelayMs });
+      const label = `${fault} ${JSON.stringify(env)} ${startDelayMs ?? 0}`;
       assert.equal(result.signal, "SIGTERM", `${label}\n${result.stderr}`);
       assert.equal(result.stdout, "", label);
       assert.match(result.stderr, message, label);
+      if (noWait) {
+        assert.ok(hostEvents(result.stderr).some((e) => e.event === "ready" && e.waiting && e.tid === 1), label);
+      }
     }
   });
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:171-174
+// ```c++
+//     NON_CONST_ITERATE(TBlastThreads, thread, the_threads) {
+//         (*thread)->Run();
+//     }
+// ```
+// A spawn that takes a standby worker which already waits for its thread returns the tid without
+// waiting for the start confirmation; the threads, the output and the lifecycle are the same.
+test("a spawn returns at once when its standby worker waits, with the same threads and output", () => {
+  const bytes = spawner(3);
+  const argv = ["-num_threads", "4"];
+  const reference = runThreaded(bytes, argv, { LOSAT_WASI_PRESPAWN: "0" });
+  for (const startDelayMs of [3000, 0]) {
+    const result = runThreaded(bytes, argv, { LOSAT_WASI_THREADS_DEBUG: "1" }, { startDelayMs });
+    assert.equal(result.status, reference.status, result.stderr);
+    assert.equal(result.stdout, reference.stdout);
+    const events = hostEvents(result.stderr);
+    checkLifecycle(events, 3, 3, `delay ${startDelayMs}`);
+    // After 3 s all three standby workers wait; without the delay a spawn may still wait for one.
+    if (startDelayMs) assert.deepEqual(events.filter((e) => e.event === "ready" && e.waiting).map((e) => e.tid), [1, 2, 3]);
+  }
+});
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:176-181
+// ```c++
+//     // ... and wait for the threads to finish
+//     Uint8 retv(0);
+//     NON_CONST_ITERATE(TBlastThreads, thread, the_threads) {
+//         void * result(0);
+//         (*thread)->Join(&result);
+// ```
+// The test modules' join (awaitCount) when every thread adds its count between the join's compare
+// and its wait and notifies nobody (spawner's `late`): the wait sees a count other than the one
+// compared and the join compares again. A wait that expected a second load of the count slept on
+// the reached count until spawnSync's timeout. Both standby workers wait for their threads, so
+// each spawn returns before its thread runs and the first compare comes before the threads' counts.
+test("the test modules' join ends when the threads add their counts between its compare and its wait", () => {
+  const result = runThreaded(spawner(2, { late: true }), ["-num_threads", "3"], { LOSAT_WASI_THREADS_DEBUG: "1" },
+    { startDelayMs: 3000 });
+  // 2 threads, tid sum 3 ('a' + 3), start_arg sum 1 + 2.
+  assert.equal(result.status, 3, result.stderr);
+  assert.equal(result.stdout, "2d\n");
+  assert.deepEqual(hostEvents(result.stderr).filter((e) => e.event === "ready" && e.waiting).map((e) => e.tid), [1, 2]);
+});
+
 test("a rejected spawn has the same result with LOSAT_WASI_PRESPAWN", () => {
   const bytes = spawner(3);
   const argv = ["-num_threads", "4"];
-  const reference = runThreaded(bytes, argv, {}, { rejectAt: 2 });
+  const reference = runThreaded(bytes, argv, { LOSAT_WASI_PRESPAWN: "0" }, { rejectAt: 2 });
   assert.deepEqual(outcome(reference), { status: 90, signal: null, stdout: "", stderr: "" });
   for (const [prespawn, standby] of [["auto", 3], ["1", 1]]) {
     assert.deepEqual(outcome(runThreaded(bytes, argv, { LOSAT_WASI_PRESPAWN: prespawn }, { rejectAt: 2 })),
@@ -431,15 +983,17 @@ test("LOSAT_WASI_GUARD_CACHE returns the guard's bytes and rebuilds a bad entry"
   const saved = process.env.LOSAT_WASI_GUARD_CACHE;
   try {
     const cache = process.env.LOSAT_WASI_GUARD_CACHE = path.join(directory, "cache");
-    for (const [bytes, guards] of [[spawner(1, { bulk: true }), [1, 1]], [spawner(1), [0, 0]]]) {
+    // Bulk and atomic instructions; atomic instructions only; nothing to guard.
+    for (const [bytes, bulk] of [[spawner(1, { bulk: true }), [1, 1]], [spawner(1), [0, 0]], [nothingToGuard(), [0, 0]]]) {
       const expected = guardSharedMemory(bytes);
-      assert.deepEqual([expected.fill, expected.copy], guards);
-      assert.equal(expected.bytes.equals(bytes), guards[0] + guards[1] === 0);
+      assert.deepEqual([expected.fill, expected.copy], bulk);
+      const guards = expected.fill + expected.copy + expected.grow + expected.atomic;
+      assert.equal(expected.bytes.equals(bytes), guards === 0);
       const check = (state) => {
         const result = guardSharedMemoryCached(bytes);
         assert.equal(result.cache, state);
         assert.ok(result.bytes.equals(expected.bytes), state);
-        assert.deepEqual([result.fill, result.copy], [expected.fill, expected.copy], state);
+        assert.deepEqual([result.fill, result.copy, result.grow, result.atomic], [expected.fill, expected.copy, expected.grow, expected.atomic], state);
       };
       check("miss");
       check("hit");
@@ -460,7 +1014,8 @@ test("LOSAT_WASI_GUARD_CACHE returns the guard's bytes and rebuilds a bad entry"
         () => fs.writeFileSync(sidecar, "null"),
         () => fs.writeFileSync(sidecar, JSON.stringify({ ...record, fill: record.fill + 1 })),
         () => fs.writeFileSync(sidecar, JSON.stringify({ ...record, copy: record.copy + 1 })),
-        () => resealed({ fill: guards[0] + guards[1] === 0 ? 1 : 0, copy: 0 }),
+        () => resealed({ fill: guards === 0 ? 1 : 0, copy: 0, atomic: 0 }),
+        () => resealed({ atomic: -1 }),
         () => resealed({ fill: -1 }),
         () => resealed({ output_bytes: record.output_bytes + 1 }),
         () => resealed({ input_sha256: "0".repeat(64) }),
@@ -500,6 +1055,334 @@ test("LOSAT_WASI_GUARD_CACHE runs give the default host's output, cold and warm"
       assert.match(result.stderr, new RegExp(`guard cache ${state}: `));
       assert.match(result.stderr, /shared-memory guards: 1 fills, 1 copies/);
     }
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:156-180
+// ```c++
+//     // Create the threads ...
+//     NON_CONST_ITERATE(TBlastThreads, thread, the_threads) {
+//         thread->Reset(new CPrelimSearchThread(internal_data,
+//     ...
+//     // ... launch the threads ...
+//     NON_CONST_ITERATE(TBlastThreads, thread, the_threads) {
+//         (*thread)->Run();
+//     ...
+//         (*thread)->Join(&result);
+// ```
+// A threaded reactor whose `run(spawns)` export clears its counters, starts `spawns` threads
+// (start_arg 1, 2, 4, ...; -1 when a spawn fails), waits until every thread has added its
+// start_arg and tid, releases them, and returns the start_arg sum (the tid sum stays at
+// address 8). The threads wait for the release, so the threads of one call run at the same
+// time. Each call is one search of `spawns` + 1 threads; the API exports that the artifact
+// check asks for are aliases of `_initialize` and are never called.
+function reactorSpawner() {
+  const types = vector([
+    [0x60, 0, 0],                                // _initialize()
+    [0x60, 1, 0x7f, 1, 0x7f],                    // thread-spawn(i32) -> i32
+    [0x60, 2, 0x7f, 0x7f, 0],                    // wasi_thread_start(i32, i32)
+  ]);
+  const imports = [
+    [...name("env"), ...name("memory"), 2, 3, 1, ...uleb(16384)],
+    [...name("wasi"), ...name("thread-spawn"), 0, 1],
+  ];
+  const load = (address) => [...i32(address), 0xfe, 0x10, 2, 0];                   // i32.atomic.load
+  const store = (address, value) => [...i32(address), ...value, 0xfe, 0x17, 2, 0];  // i32.atomic.store
+  const add = (address, value) => [...i32(address), ...value, 0xfe, 0x1e, 2, 0, 0x1a]; // atomic add; drop
+  const spawns = [0x20, 0], i = 1;                                 // locals: 0 spawns, 1 i, 2 counted
+  const run = [...store(0, i32(0)), ...store(4, i32(0)), ...store(8, i32(0)), ...store(12, i32(0)),
+    // block { loop { if (i >= spawns) break; if (thread-spawn(1 << i) < 1) return -1; i += 1 } }
+    0x02, 0x40, 0x03, 0x40, 0x20, i, ...spawns, 0x4e, 0x0d, 1,
+    ...i32(1), 0x20, i, 0x74, 0x10, 0, ...i32(1), 0x48, 0x04, 0x40, ...i32(-1), 0x0f, 0x0b,
+    0x20, i, ...i32(1), 0x6a, 0x21, i, 0x0c, 0, 0x0b, 0x0b,
+    ...awaitCount(spawns, 2),
+    ...store(12, i32(1)), ...i32(12), ...spawns, 0xfe, 0x00, 2, 0, 0x1a,          // release; notify(12, spawns)
+    ...load(4),
+  ];
+  const thread = [...add(4, [0x20, 1]), ...add(8, [0x20, 0]), ...add(0, i32(1)),
+    ...i32(0), ...i32(1), 0xfe, 0x00, 2, 0, 0x1a,                              // notify(0, 1)
+    // block { loop { if (released) break; memory.atomic.wait32(12, 0, -1) } }
+    0x02, 0x40, 0x03, 0x40, ...load(12), ...i32(1), 0x46, 0x0d, 1,
+    ...i32(12), ...i32(0), 0x42, 0x7f, 0xfe, 0x01, 2, 0, 0x1a, 0x0c, 0, 0x0b, 0x0b];
+  const api = ["losat_web_run_pair", "losat_web_alloc", "losat_web_dealloc",
+    "losat_web_result_ptr", "losat_web_result_len", "losat_web_error_ptr", "losat_web_error_len"];
+  return Buffer.from([
+    0, 97, 115, 109, 1, 0, 0, 0,
+    ...section(1, types),
+    ...section(2, vector(imports)),
+    ...section(3, vector([[0], [1], [2]])),
+    ...section(7, vector([[...name("memory"), 2, 0], [...name("_initialize"), 0, 1],
+      ...api.map((alias) => [...name(alias), 0, 1]), [...name("run"), 0, 2],
+      [...name("wasi_thread_start"), 0, 3]])),
+    ...section(10, vector([body([]), body(run, 2), body(thread)])),
+  ]);
+}
+
+// A reactor's calls get the same threads, in the same order, with recycled workers
+// (LOSAT_WASI_RECYCLE, on by default) and without them. Recycled workers run the threads of
+// later calls; a call that needs more threads than there are idle workers boots new ones
+// instead of waiting for a worker whose thread runs (the threads of a call wait for each other).
+test("a reactor's thread workers outlive their threads (LOSAT_WASI_RECYCLE)", async () => {
+  const { createThreadHost } = require("./wasi_thread_host");
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "losat-wasi-recycle-"));
+  const saved = Object.fromEntries(["LOSAT_WASI_RECYCLE", "LOSAT_WASI_PRESPAWN"].map((key) => [key, process.env[key]]));
+  try {
+    const fixture = path.join(directory, "reactor.wasm");
+    const bytes = reactorSpawner();
+    assert.ok(WebAssembly.validate(bytes));
+    fs.writeFileSync(fixture, bytes);
+    delete process.env.LOSAT_WASI_PRESPAWN;
+    for (const recycle of [undefined, "1", "0"]) {
+      if (recycle === undefined) delete process.env.LOSAT_WASI_RECYCLE;
+      else process.env.LOSAT_WASI_RECYCLE = recycle;
+      const label = `LOSAT_WASI_RECYCLE=${recycle}`;
+      const host = await createThreadHost(fixture, "threaded-reactor");
+      try {
+        // Threads per call, and the recycled workers each call takes: none in the first call, the
+        // three of the first call (plus two new ones) for five threads, then two of the five.
+        let next = 1;
+        for (const [call, spawns, reusedCount] of [[0, 3, 0], [1, 5, 3], [2, 2, 2], [3, 5, 5]]) {
+          assert.equal(host.instance.exports.run(spawns), 2 ** spawns - 1, `${label} call ${call}`);
+          const events = await host.waitForWorkers();
+          const tids = Array.from({ length: spawns }, (_, k) => next + k);
+          next += spawns;
+          assert.equal(new Int32Array(host.memory.buffer, 8, 1)[0], tids.reduce((a, b) => a + b), `${label} call ${call}`);
+          for (const type of ["spawn_attempt", "spawned", "ready", "exited"]) {
+            assert.deepEqual(tidsOf(events, type), tids, `${label} call ${call} ${type}`);
+          }
+          assert.ok(events.filter((e) => e.event === "exited").every((e) => e.code === 0), label);
+          const reused = events.filter((e) => e.event === "spawned" && e.recycled !== undefined).length;
+          assert.equal(reused, recycle === "0" ? 0 : reusedCount, `${label} call ${call} recycled`);
+        }
+      } finally { await host.close(); }
+    }
+    process.env.LOSAT_WASI_RECYCLE = "yes";
+    await assert.rejects(createThreadHost(fixture, "threaded-reactor"), /LOSAT_WASI_RECYCLE must be 0 or 1/);
+  } finally {
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("LOSAT_WASI_PRESPAWN is auto when unset and 0 boots no worker", () => {
+  const bytes = spawner(3);
+  const argv = ["-num_threads", "4"];
+  for (const [env, standby] of [[{}, 3], [{ LOSAT_WASI_PRESPAWN: "0" }, 0]]) {
+    const result = runThreaded(bytes, argv, { ...env, LOSAT_WASI_THREADS_DEBUG: "1" });
+    assert.equal(result.status, 7, result.stderr);
+    assert.equal(result.stdout, "3g\n");
+    checkLifecycle(hostEvents(result.stderr), 3, standby, JSON.stringify(env));
+  }
+});
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbatlas.cpp:114-127
+// ```c++
+// CMemoryFile* CSeqDBAtlas::GetMemoryFile(const string& fileName)
+// ...
+//     m_FileMemMap[fileName].reset(file);
+// ```
+// A command whose main thread opens `file` (path_open on the preopened "/") and whose one
+// thread reads up to 64 bytes of it with that descriptor (fd_read); the main thread waits,
+// writes what the thread read to standard output and exits with the thread's errno.
+function descriptorReader(file) {
+  const types = vector([
+    [0x60, 1, 0x7f, 0],                          // proc_exit(i32)
+    [0x60, 0, 0],                                // _start()
+    [0x60, 1, 0x7f, 1, 0x7f],                    // thread-spawn(i32) -> i32
+    [0x60, 2, 0x7f, 0x7f, 0],                    // wasi_thread_start(i32, i32)
+    [0x60, 4, 0x7f, 0x7f, 0x7f, 0x7f, 1, 0x7f],  // fd_write / fd_read(i32, i32, i32, i32) -> i32
+    // path_open(fd, dirflags, path, path_len, oflags, rights_base, rights_inheriting, fdflags, fd_out) -> i32
+    [0x60, 9, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7e, 0x7e, 0x7f, 0x7f, 1, 0x7f],
+  ]);
+  const imports = [
+    [...name("wasi_snapshot_preview1"), ...name("proc_exit"), 0, 0],
+    [...name("env"), ...name("memory"), 2, 3, 1, ...uleb(16384)],
+    [...name("wasi"), ...name("thread-spawn"), 0, 2],
+    [...name("wasi_snapshot_preview1"), ...name("fd_write"), 0, 4],
+    [...name("wasi_snapshot_preview1"), ...name("path_open"), 0, 5],
+    [...name("wasi_snapshot_preview1"), ...name("fd_read"), 0, 4],
+  ];
+  const load = (address) => [...i32(address), 0x28, 2, 0];                          // i32.load
+  const store = (address, value) => [...i32(address), ...value, 0x36, 2, 0];         // i32.store
+  const pathBytes = Buffer.from(file);
+  // 0: thread done, 4: its errno, 8: the descriptor, 16: read iovec, 24: bytes read,
+  // 32: write iovec, 40: bytes written, 64: the path, 256: the bytes.
+  const main = [...pathBytes].flatMap((value, i) => [...i32(64 + i), ...i32(value), 0x3a, 0, 0]);
+  main.push(
+    // if (path_open(3, 0, 64, len, 0, FD_READ, 0, 0, 8) != 0) proc_exit(100)
+    ...i32(3), ...i32(0), ...i32(64), ...i32(pathBytes.length), ...i32(0), 0x42, 2, 0x42, 0, ...i32(0), ...i32(8),
+    0x10, 3, 0x04, 0x40, ...i32(100), 0x10, 0, 0x0b,
+    // if (thread-spawn(0) < 1) proc_exit(90)
+    ...i32(0), 0x10, 1, ...i32(1), 0x48, 0x04, 0x40, ...i32(90), 0x10, 0, 0x0b,
+    // block { loop { if (done) break; memory.atomic.wait32(0, 0, -1) } }
+    0x02, 0x40, 0x03, 0x40, ...i32(0), 0xfe, 0x10, 2, 0, 0x0d, 1,
+    ...i32(0), ...i32(0), 0x42, 0x7f, 0xfe, 0x01, 2, 0, 0x1a, 0x0c, 0, 0x0b, 0x0b,
+    ...store(32, i32(256)), ...store(36, load(24)),
+    ...i32(1), ...i32(32), ...i32(1), ...i32(40), 0x10, 2, 0x1a,               // fd_write(1, ...)
+    ...load(4), 0x10, 0,                                                         // proc_exit(errno)
+  );
+  const thread = [...store(16, i32(256)), ...store(20, i32(64)),
+    ...i32(4), ...load(8), ...i32(16), ...i32(1), ...i32(24), 0x10, 4, 0x36, 2, 0, // errno = fd_read(fd, ...)
+    ...i32(0), ...i32(1), 0xfe, 0x17, 2, 0,                                       // done (atomic store)
+    ...i32(0), ...i32(1), 0xfe, 0x00, 2, 0, 0x1a];                               // notify(0, 1)
+  return Buffer.from([
+    0, 97, 115, 109, 1, 0, 0, 0,
+    ...section(1, types),
+    ...section(2, vector(imports)),
+    ...section(3, vector([[1], [3]])),
+    ...section(7, vector([[...name("memory"), 2, 0], [...name("_start"), 0, 5],
+      [...name("wasi_thread_start"), 0, 6]])),
+    ...section(10, vector([body(main), body(thread)])),
+  ]);
+}
+
+test("a descriptor that the main thread opened reads on a thread worker (-num_threads 2)", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "losat-wasi-descriptor-"));
+  try {
+    const file = path.join(directory, "data.txt");
+    fs.writeFileSync(file, "read on another thread\n");
+    const bytes = descriptorReader(path.relative("/", file));
+    for (const env of [{}, { LOSAT_WASI_PRESPAWN: "0" }]) {
+      const result = runThreaded(bytes, ["-num_threads", "2"], env);
+      assert.deepEqual(outcome(result), { status: 0, signal: null, stdout: "read on another thread\n", stderr: "" },
+        JSON.stringify(env));
+    }
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:225-228
+// ```c++
+//         CBlastFormat formatter(opt, *db_adapter,
+//                                fmt_args->GetFormattedOutputChoice(),
+//                                query_opts->GetParseDeflines(),
+//                                m_CmdLineArgs->GetOutputStream(),
+// ```
+// A command whose main thread creates `file` (path_open on the preopened "/" with create and
+// truncate, for writing) and writes "main\n" to it, whose one thread writes "thread\n" with that
+// descriptor (fd_write), and whose main thread then writes "main again\n", closes it and exits with
+// the thread's errno: a write from a thread other than the one that opened -out.
+function descriptorWriter(file) {
+  const types = vector([
+    [0x60, 1, 0x7f, 0],                          // proc_exit(i32)
+    [0x60, 0, 0],                                // _start()
+    [0x60, 1, 0x7f, 1, 0x7f],                    // thread-spawn(i32) -> i32, fd_close(i32) -> i32
+    [0x60, 2, 0x7f, 0x7f, 0],                    // wasi_thread_start(i32, i32)
+    [0x60, 4, 0x7f, 0x7f, 0x7f, 0x7f, 1, 0x7f],  // fd_write(i32, i32, i32, i32) -> i32
+    // path_open(fd, dirflags, path, path_len, oflags, rights_base, rights_inheriting, fdflags, fd_out) -> i32
+    [0x60, 9, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7e, 0x7e, 0x7f, 0x7f, 1, 0x7f],
+  ]);
+  const imports = [
+    [...name("wasi_snapshot_preview1"), ...name("proc_exit"), 0, 0],
+    [...name("env"), ...name("memory"), 2, 3, 1, ...uleb(16384)],
+    [...name("wasi"), ...name("thread-spawn"), 0, 2],
+    [...name("wasi_snapshot_preview1"), ...name("fd_write"), 0, 4],
+    [...name("wasi_snapshot_preview1"), ...name("path_open"), 0, 5],
+    [...name("wasi_snapshot_preview1"), ...name("fd_close"), 0, 2],
+  ];
+  const load = (address) => [...i32(address), 0x28, 2, 0];                          // i32.load
+  const store = (address, value) => [...i32(address), ...value, 0x36, 2, 0];         // i32.store
+  const bytes = (address, text) => [...Buffer.from(text)].flatMap((value, i) => [...i32(address + i), ...i32(value), 0x3a, 0, 0]);
+  // fd_write(fd, iovec, 1, nwritten) of `length` bytes at `address` -> errno
+  const write = (iovec, address, length, nwritten) => [...store(iovec, i32(address)), ...store(iovec + 4, i32(length)),
+    ...load(8), ...i32(iovec), ...i32(1), ...i32(nwritten), 0x10, 2];
+  const exitIf = (code) => [0x04, 0x40, ...i32(code), 0x10, 0, 0x0b];             // if (errno) proc_exit(code)
+  const pathBytes = Buffer.from(file);
+  // 0: thread done, 4: its errno, 8: the descriptor, 16/32/48: iovecs, 24/40: bytes written,
+  // 64: the path, 256/272/288: the texts.
+  const main = [...bytes(64, file), ...bytes(256, "main\n"), ...bytes(272, "thread\n"), ...bytes(288, "main again\n")];
+  main.push(
+    // if (path_open(3, 0, 64, len, CREAT | TRUNC, FD_WRITE, 0, 0, 8) != 0) proc_exit(100)
+    ...i32(3), ...i32(0), ...i32(64), ...i32(pathBytes.length), ...i32(9), 0x42, 0xc0, 0, 0x42, 0, ...i32(0), ...i32(8),
+    0x10, 3, ...exitIf(100),
+    ...write(16, 256, 5, 24), ...exitIf(101),
+    // if (thread-spawn(0) < 1) proc_exit(90)
+    ...i32(0), 0x10, 1, ...i32(1), 0x48, 0x04, 0x40, ...i32(90), 0x10, 0, 0x0b,
+    // block { loop { if (done) break; memory.atomic.wait32(0, 0, -1) } }
+    0x02, 0x40, 0x03, 0x40, ...i32(0), 0xfe, 0x10, 2, 0, 0x0d, 1,
+    ...i32(0), ...i32(0), 0x42, 0x7f, 0xfe, 0x01, 2, 0, 0x1a, 0x0c, 0, 0x0b, 0x0b,
+    ...write(48, 288, 11, 24), ...exitIf(102),
+    ...load(8), 0x10, 4, ...exitIf(103),                                         // if (fd_close(fd)) proc_exit(103)
+    ...load(4), 0x10, 0,                                                         // proc_exit(errno)
+  );
+  const thread = [...i32(4), ...write(32, 272, 7, 40), 0x36, 2, 0,              // errno = fd_write(fd, ...)
+    ...i32(0), ...i32(1), 0xfe, 0x17, 2, 0,                                       // done (atomic store)
+    ...i32(0), ...i32(1), 0xfe, 0x00, 2, 0, 0x1a];                               // notify(0, 1)
+  return Buffer.from([
+    0, 97, 115, 109, 1, 0, 0, 0,
+    ...section(1, types),
+    ...section(2, vector(imports)),
+    ...section(3, vector([[1], [3]])),
+    ...section(7, vector([[...name("memory"), 2, 0], [...name("_start"), 0, 5],
+      [...name("wasi_thread_start"), 0, 6]])),
+    ...section(10, vector([body(main), body(thread)])),
+  ]);
+}
+
+test("a file that the main thread created is written on a thread worker (-num_threads 2)", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "losat-wasi-writer-"));
+  try {
+    for (const env of [{}, { LOSAT_WASI_PRESPAWN: "0" }]) {
+      const file = path.join(directory, `out-${Object.keys(env).length}.txt`);
+      const result = runThreaded(descriptorWriter(path.relative("/", file)), ["-num_threads", "2"], env);
+      assert.deepEqual(outcome(result), { status: 0, signal: null, stdout: "", stderr: "" }, JSON.stringify(env));
+      assert.equal(fs.readFileSync(file, "utf8"), "main\nthread\nmain again\n", JSON.stringify(env));
+    }
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:727-729
+// ```c++
+//             fstrm->open(AsString().c_str(),IOS_BASE::in | mode);
+// ```
+// The hosts' table of files (wasi_files.js, the comment above SHARED_FD_BASE) writes a
+// regular file at the OS's offset, as native write() does, until the guest seeks or reads it, and
+// at the table's position from then on. Another write to the same open file (as the descriptor 1
+// that macOS's /dev/stdout duplicates) moves the OS's offset, here through the table's descriptor.
+test("the table of files writes at the OS's offset until a seek or a read, then at its own position", () => {
+  const { sharedFileTable, sharedFileImports } = require("./wasi_files");
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "losat-wasi-table-"));
+  try {
+    const file = path.join(directory, "out.txt");
+    const memory = new WebAssembly.Memory({ initial: 1 });
+    const local = Object.fromEntries(["path_open", "fd_write", "fd_read", "fd_seek", "fd_close"].map(name => [name, () => 52]));
+    const table = sharedFileTable(), wasi = sharedFileImports(table, memory, local), bytes = new Uint8Array(memory.buffer);
+    const name = Buffer.from(path.relative("/", file));
+    bytes.set(name, 64);
+    // path_open(3, follow, 64, len, CREAT | TRUNC, FD_READ | FD_SEEK | FD_WRITE, 0, 0, 8)
+    assert.equal(wasi.path_open(3, 1, 64, name.length, 9, (1n << 1n) | (1n << 2n) | (1n << 6n), 0n, 0, 8), 0);
+    const fd = new DataView(memory.buffer).getUint32(8, true), descriptor = new Int32Array(table, 0, 1024).find(d => d >= 0);
+    const write = (text) => {
+      bytes.set(Buffer.from(text), 256);
+      new DataView(memory.buffer).setUint32(16, 256, true);
+      new DataView(memory.buffer).setUint32(20, text.length, true);
+      assert.equal(wasi.fd_write(fd, 16, 1, 24), 0);
+    };
+    write("abc");
+    fs.writeSync(descriptor, "zz");                        // the OS's offset moves to 5
+    write("Q");                                            // at the OS's offset
+    assert.equal(fs.readFileSync(file, "utf8"), "abczzQ");
+    assert.equal(wasi.fd_seek(fd, 1n, 0, 32), 0);         // from here on at the table's position
+    write("X");
+    assert.equal(wasi.fd_seek(fd, 0n, 2, 32), 0);
+    write("d");
+    assert.equal(fs.readFileSync(file, "utf8"), "aXczzQd");
+    assert.equal(wasi.fd_seek(fd, 0n, 0, 32), 0);
+    new DataView(memory.buffer).setUint32(16, 512, true);
+    new DataView(memory.buffer).setUint32(20, 2, true);
+    assert.equal(wasi.fd_read(fd, 16, 1, 24), 0);
+    assert.equal(Buffer.from(bytes.subarray(512, 514)).toString(), "aX");
+    write("Y");
+    assert.equal(wasi.fd_close(fd), 0);
+    assert.equal(fs.readFileSync(file, "utf8"), "aXYzzQd");
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }

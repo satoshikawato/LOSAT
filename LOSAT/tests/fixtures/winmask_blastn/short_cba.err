@@ -1,0 +1,17 @@
+Warning: [blastn] file read failed: bit array optimizations are not used.
+Warning: [blastn] file read failed: bit array optimizations are not used.
+Warning: [blastn] file read failed: bit array optimizations are not used.
+Warning: [blastn] file read failed: bit array optimizations are not used.
+BLAST engine error: Warning: NCBI C++ Exception:
+    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/algo/winmask/seq_masker_istat_obinary.cpp", line 197: Error: (Exception::format error) ncbi::CSeqMaskerIstatOBinary::CSeqMaskerIstatOBinary() - not enough data to fill the hash table
+    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/algo/winmask/seq_masker_istat_factory.cpp", line 358: Error: (Exception::creation failure) ncbi::CSeqMaskerIstatFactory::create() - could not create a unit counts container
+ Warning: NCBI C++ Exception:
+    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/algo/winmask/seq_masker_istat_obinary.cpp", line 197: Error: (Exception::format error) ncbi::CSeqMaskerIstatOBinary::CSeqMaskerIstatOBinary() - not enough data to fill the hash table
+    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/algo/winmask/seq_masker_istat_factory.cpp", line 358: Error: (Exception::creation failure) ncbi::CSeqMaskerIstatFactory::create() - could not create a unit counts container
+ Warning: NCBI C++ Exception:
+    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/algo/winmask/seq_masker_istat_obinary.cpp", line 197: Error: (Exception::format error) ncbi::CSeqMaskerIstatOBinary::CSeqMaskerIstatOBinary() - not enough data to fill the hash table
+    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/algo/winmask/seq_masker_istat_factory.cpp", line 358: Error: (Exception::creation failure) ncbi::CSeqMaskerIstatFactory::create() - could not create a unit counts container
+ Warning: NCBI C++ Exception:
+    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/algo/winmask/seq_masker_istat_obinary.cpp", line 197: Error: (Exception::format error) ncbi::CSeqMaskerIstatOBinary::CSeqMaskerIstatOBinary() - not enough data to fill the hash table
+    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/algo/winmask/seq_masker_istat_factory.cpp", line 358: Error: (Exception::creation failure) ncbi::CSeqMaskerIstatFactory::create() - could not create a unit counts container
+ 

@@ -1,0 +1,44 @@
+# BLASTX 2.17.0+
+# Query: b1 sp1 plus
+# Database: User specified sequence set (Input: tests/fasta/outfmt11/arch_bx_s.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 2 hits found
+b1	sp1	97.368	38	1	0	1	114	1	38	1.15e-25	78.2
+b1	sp2	78.378	37	8	0	4	114	2	38	6.21e-18	58.5
+# BLASTX 2.17.0+
+# Query: b2 sp2 minus
+# Database: User specified sequence set (Input: tests/fasta/outfmt11/arch_bx_s.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 2 hits found
+b2	sp2	97.143	35	1	0	105	1	6	40	5.00e-23	71.2
+b2	sp1	74.286	35	9	0	105	1	6	40	2.89e-15	51.2
+# BLASTX 2.17.0+
+# Query: b3 no hits
+# Database: User specified sequence set (Input: tests/fasta/outfmt11/arch_bx_s.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+b3	sp1	50.000	8	4	0	43	66	73	80	3.6	11.2
+# BLASTX 2.17.0+
+# Query: b4 sp1 minus
+# Database: User specified sequence set (Input: tests/fasta/outfmt11/arch_bx_s.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 2 hits found
+b4	sp1	100.000	40	0	0	120	1	41	80	1.90e-29	87.8
+b4	sp2	66.667	42	11	1	117	1	46	87	1.18e-16	55.5
+# BLASTX 2.17.0+
+# Query: b5 sp2 plus
+# Database: User specified sequence set (Input: tests/fasta/outfmt11/arch_bx_s.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 4 hits found
+b5	sp2	97.500	40	1	0	1	120	61	100	5.49e-30	89.4
+b5	sp1	61.538	39	12	1	4	120	58	93	9.47e-15	50.4
+b5	sp1	66.667	6	2	0	69	86	90	95	0.046	16.2
+b5	sp1	33.333	12	8	0	36	1	92	103	4.1	11.5
+# BLASTX 2.17.0+
+# Query: b6 sp1 plus
+# Database: User specified sequence set (Input: tests/fasta/outfmt11/arch_bx_s.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 2 hits found
+b6	sp1	100.000	40	0	0	1	120	71	110	1.13e-29	88.6
+b6	sp2	65.000	40	12	1	1	120	78	115	1.82e-15	52.4
+# BLAST processed 6 queries

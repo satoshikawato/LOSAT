@@ -1,15 +1,11 @@
 //! blastp's block search (`LOSAT_X_BPQBLOCK`) with the subjects' tabular IDs and titles made once
-//! for all blocks (`LOSAT_X_BPSUBJMETA`, `src/algorithm/blastp/blast_engine/x_subject_meta.rs`) on
-//! whole searches.
+//! for all blocks (`src/algorithm/blastp/blast_engine/x_subject_meta.rs`) on whole searches.
 //!
-//! The switch is not in the strict set (`src/utils/xswitch.rs`): it is off unless its variable is
-//! set, and it acts only in the `-subject` block search. These tests compare the report, standard
-//! error and exit code with the switch off and on and in its shadow mode
-//! (`LOSAT_X_BPSUBJMETASHADOW`), which makes each block's IDs and titles again as without the switch
-//! and compares them; its line at exit counts the blocks whose output took the stored values, so it
-//! shows whether the path ran (the block search writes tabular format 6 only; outfmt 0, `-db` and
-//! a subject whose ID cannot be written take the search of all queries or have no subject records,
-//! and the line counts nothing there). A difference stops the run.
+//! The stored values belong to the `-subject` block search (no switch of their own since
+//! 2026-10-31). These tests compare the report, standard error and exit code of that block search
+//! with the search of all queries (`LOSAT_X_BPQBLOCK=0`); the reach rows of the block run
+//! (`LOSAT_X_REACH`, `tests/reach_support`) show that it took blocks. A subject whose ID cannot be
+//! written is refused before any block runs, as in the search of all queries.
 //!
 //! NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:863-870
 //! ```c++
@@ -23,10 +19,11 @@
 //!         }
 //! ```
 
-use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+mod reach_support;
 
 /// The switches that joined the default set on 2026-10-17 (perf/perfmb-default-bundle), each
 /// `0`, the default before, unless the search sets it: every search here runs as it was written,
@@ -36,12 +33,9 @@ const PREVIOUS_DEFAULT: &[(&str, &str)] = &[
     ("LOSAT_X_BPLKPAHEAD", "0"),
     ("LOSAT_X_BPREDOLPT", "0"),
     ("LOSAT_X_BPREDOPAR", "0"),
-    ("LOSAT_X_BPSUBJMETA", "0"),
     ("LOSAT_X_DIAGLV", "0"),
     ("LOSAT_X_PAIRPARDISC", "0"),
     ("LOSAT_X_PAIRPARFOLD", "0"),
-    ("LOSAT_X_QBATCHPAR", "0"),
-    ("LOSAT_X_QDUSTPAR", "0"),
     ("LOSAT_X_QPREPPAR", "0"),
     ("LOSAT_X_RPTSTREAM", "0"),
 ];
@@ -51,9 +45,6 @@ fn fixture(name: &str) -> PathBuf {
         .join("tests/fasta")
         .join(name)
 }
-
-/// The subjects of the fixture's subject proteome (`MejoMJNV.faa`).
-const SUBJECTS: u64 = 124;
 
 /// A directory of one test (test-unique: tests of this file run side by side).
 fn test_dir(test: &str) -> PathBuf {
@@ -67,32 +58,6 @@ struct Run {
     stdout: Vec<u8>,
     stderr: String,
     code: Option<i32>,
-}
-
-impl Run {
-    /// The counters of the `[X_SHADOW] BPSUBJMETA` line, which must end with `identical`; `None`
-    /// without the line (a run that fails ends before `main` prints it).
-    fn shadow(&self) -> Option<HashMap<String, u64>> {
-        let prefix = "[X_SHADOW] BPSUBJMETA ";
-        let line = self.stderr.lines().find(|line| line.starts_with(prefix))?;
-        assert!(line.ends_with(" identical"), "{line}");
-        Some(
-            line[prefix.len()..]
-                .split(' ')
-                .filter_map(|field| field.split_once('='))
-                .map(|(key, value)| (key.to_string(), value.parse().expect("a count")))
-                .collect(),
-        )
-    }
-
-    /// Standard error without the shadow's line.
-    fn stderr_without_shadow(&self) -> String {
-        self.stderr
-            .lines()
-            .filter(|line| !line.starts_with("[X_SHADOW] BPSUBJMETA "))
-            .map(|line| format!("{line}\n"))
-            .collect()
-    }
 }
 
 /// One blastp run of the fixture queries (`MeenMJNV.faa`) against `subject` (`-subject FILE` or
@@ -123,7 +88,7 @@ fn blastp_with(
     outfmt: &str,
     extra: &[&str],
 ) -> Run {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
         if (text.starts_with("LOSAT_") && name != "LOSAT_BLASTX_WORKER_LOG")
@@ -163,12 +128,9 @@ fn with<'a>(base: &[(&'a str, &'a str)], extra: &[(&'a str, &'a str)]) -> Vec<(&
     base.iter().chain(extra).copied().collect()
 }
 
-const ON: (&str, &str) = ("LOSAT_X_BPSUBJMETA", "1");
-const SHADOW: (&str, &str) = ("LOSAT_X_BPSUBJMETASHADOW", "1");
-
-/// The switch off, on and in its shadow mode give the same report, standard error (but the shadow's
-/// line) and exit code; returns the run without the switch and the shadow's counters (`None` for a
-/// run that fails, which prints no line at exit).
+/// The block search (`base` names `LOSAT_X_BPQBLOCK`) and the search of all queries
+/// (`LOSAT_X_BPQBLOCK=0`) give the same report, standard error and exit code; returns the run of
+/// the search of all queries and the reach rows of the block run.
 fn same_runs(
     dir: &Path,
     task: &str,
@@ -176,7 +138,7 @@ fn same_runs(
     threads: u32,
     base: &[(&str, &str)],
     outfmt: &str,
-) -> (Run, Option<HashMap<String, u64>>) {
+) -> (Run, reach_support::Reach) {
     same_runs_with(dir, task, subject, threads, base, outfmt, &[])
 }
 
@@ -189,138 +151,64 @@ fn same_runs_with(
     base: &[(&str, &str)],
     outfmt: &str,
     extra: &[&str],
-) -> (Run, Option<HashMap<String, u64>>) {
+) -> (Run, reach_support::Reach) {
     let what = format!("{task} {base:?} threads {threads} outfmt {outfmt} {extra:?}");
-    let off = blastp_with(dir, task, subject, threads, base, outfmt, extra);
-    let on = blastp_with(
+    let all = blastp_with(
         dir,
         task,
         subject,
         threads,
-        &with(base, &[ON]),
+        &with(base, &[("LOSAT_X_BPQBLOCK", "0")]),
         outfmt,
         extra,
     );
-    assert!(on.stdout == off.stdout, "{what}: the report differs");
-    assert_eq!(on.stderr, off.stderr, "{what}: standard error differs");
-    assert_eq!(on.code, off.code, "{what}: the exit code differs");
-    let shadow = blastp_with(
+    let reach = reach_support::Reach::new("subj_meta");
+    let blocks = blastp_with(
         dir,
         task,
         subject,
         threads,
-        &with(base, &[SHADOW]),
+        &with(base, &[reach.var()]),
         outfmt,
         extra,
     );
-    assert!(
-        shadow.stdout == off.stdout,
-        "{what}: the report differs in the shadow mode"
-    );
-    assert_eq!(
-        shadow.stderr_without_shadow(),
-        off.stderr,
-        "{what}: standard error differs in the shadow mode"
-    );
-    assert_eq!(shadow.code, off.code, "{what}: the exit code differs");
-    let counts = shadow.shadow();
-    assert_eq!(
-        counts.is_some(),
-        off.code == Some(0),
-        "{what}: {}",
-        shadow.stderr
-    );
-    (off, counts)
+    assert!(blocks.stdout == all.stdout, "{what}: the report differs");
+    assert_eq!(blocks.stderr, all.stderr, "{what}: standard error differs");
+    assert_eq!(blocks.code, all.code, "{what}: the exit code differs");
+    (all, reach)
 }
 
-// The block search of blastp and blastp-fast at 1 and 4 threads, in blocks of one query batch and
-// of about 20,000 letters: every block's output stage takes the stored IDs and titles, and the
-// rows and standard error are those without the switch.
+// The block search in blocks of one query batch and of about 20,000 letters: every block's output
+// stage takes the stored IDs and titles, and the rows and standard error are those of the search
+// of all queries. The IDs and titles are made once per block search (`XBlockSubjects::new`) and read at the
+// start of each block's search and by its output, the same code at any thread count and in both
+// tasks (the task chooses only the lookup table, which neither reads nor writes these values):
+// blastp at 4 threads in both block sizes, blastp-fast at 1 thread in blocks of 20,000.
 #[test]
-fn block_search_reports_with_the_switch_are_the_reports_without_it() {
+fn block_search_reports_are_the_reports_of_the_search_of_all_queries() {
     let dir = test_dir("blocks");
     let subject = fixture("MejoMJNV.faa");
     let subject = [OsStr::new("-subject"), subject.as_os_str()];
-    for task in ["blastp", "blastp-fast"] {
-        for threads in [1, 4] {
-            let mut blocks_of = Vec::new();
-            for letters in ["1", "20000"] {
-                let base = [("LOSAT_X_BPQBLOCK", letters)];
-                let (off, counts) = same_runs(&dir, task, &subject, threads, &base, "6");
-                let counts = counts.expect("a line at exit");
-                let what = format!("{task} threads {threads} blocks of {letters}: {counts:?}");
-                assert_eq!(off.code, Some(0), "{what}: {}", off.stderr);
-                assert!(!off.stdout.is_empty(), "{what}: the fixture pair has rows");
-                assert!(counts["blocks"] > 1, "{what}");
-                assert_eq!(
-                    counts["subjects_compared"],
-                    counts["blocks"] * SUBJECTS,
-                    "{what}"
-                );
-                blocks_of.push(counts["blocks"]);
-            }
+    for (task, threads, sizes) in [
+        ("blastp", 4, &["1", "20000"][..]),
+        ("blastp-fast", 1, &["20000"][..]),
+    ] {
+        for &letters in sizes {
+            let base = [("LOSAT_X_BPQBLOCK", letters)];
+            let (all, reach) = same_runs(&dir, task, &subject, threads, &base, "6");
+            let what = format!("{task} threads {threads} blocks of {letters}");
+            assert_eq!(all.code, Some(0), "{what}: {}", all.stderr);
+            assert!(!all.stdout.is_empty(), "{what}: the fixture pair has rows");
             assert!(
-                blocks_of[0] > blocks_of[1],
-                "{task} {threads}: {blocks_of:?}"
+                reach.sides("LOSAT_X_BPQBLOCK").0,
+                "{what}: the block search did not run"
             );
         }
     }
     // With the parallel subject loop in runs (`LOSAT_X_BPSUBJRUN`), as the workstation runs it.
     let base = [("LOSAT_X_BPQBLOCK", "1"), ("LOSAT_X_BPSUBJRUN", "1")];
-    let (_, counts) = same_runs(&dir, "blastp-fast", &subject, 4, &base, "6");
-    let counts = counts.expect("a line at exit");
-    assert!(counts["blocks"] > 1, "{counts:?}");
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-// Where the block search is not taken (outfmt 0, which it does not write) or has no subject
-// records (`-db`), the switch changes nothing and its shadow compares nothing.
-#[test]
-fn the_switch_does_not_act_without_the_subject_block_search() {
-    let dir = test_dir("other-paths");
-    let subject = fixture("MejoMJNV.faa");
-    let subject = [OsStr::new("-subject"), subject.as_os_str()];
-    let base = [("LOSAT_X_BPQBLOCK", "1")];
-    for threads in [1, 4] {
-        let (off, counts) = same_runs(&dir, "blastp", &subject, threads, &base, "0");
-        assert_eq!(off.code, Some(0), "{}", off.stderr);
-        assert!(!off.stdout.is_empty());
-        let counts = counts.expect("a line at exit");
-        assert!(counts.values().all(|&count| count == 0), "{counts:?}");
-    }
-    // The search of all queries (no block search; the default searches this fixture in blocks).
-    let (_, counts) = same_runs(
-        &dir,
-        "blastp",
-        &subject,
-        4,
-        &[("LOSAT_X_BPQBLOCK", "0")],
-        "6",
-    );
-    let counts = counts.expect("a line at exit");
-    assert!(counts.values().all(|&count| count == 0), "{counts:?}");
-    // A database made with `LOSAT makedb`; its block search reads the definition lines per block.
-    let name = dir.join("MejoMJNV");
-    let output = Command::new(env!("CARGO_BIN_EXE_LOSAT"))
-        .arg("makedb")
-        .arg("-in")
-        .arg(fixture("MejoMJNV.faa"))
-        .args(["-dbtype", "prot"])
-        .arg("-out")
-        .arg(&name)
-        .output()
-        .expect("run LOSAT makedb");
-    assert!(
-        output.status.success(),
-        "makedb: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let db = [OsStr::new("-db"), name.as_os_str()];
-    let (off, counts) = same_runs(&dir, "blastp-fast", &db, 4, &base, "6");
-    assert_eq!(off.code, Some(0), "{}", off.stderr);
-    assert!(!off.stdout.is_empty());
-    let counts = counts.expect("a line at exit");
-    assert!(counts.values().all(|&count| count == 0), "{counts:?}");
+    let (_, reach) = same_runs(&dir, "blastp-fast", &subject, 4, &base, "6");
+    assert!(reach.sides("LOSAT_X_BPQBLOCK").0);
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -348,13 +236,13 @@ fn subject_file_with_an_undecodable_reported_title(dir: &Path, first_row: &[u8])
 }
 
 // A reported subject whose tabular ID cannot be written: the run is refused with the same message,
-// exit code and rows (none: LOSAT rejects it before any format is written) with the switch off, on
-// and in its shadow mode. The block search is not taken for such a subject set
-// (`x_query_block_plan`), so the switch is not reached and the shadow prints no line; this test
-// shows that the switch does not change the refusal. The check of the stored values with such
-// records is tested in `x_subject_meta.rs`.
+// exit code and rows (none: LOSAT rejects it before any format is written) in the block search and
+// in the search of all queries. The block search is not taken for such a subject set
+// (`x_query_block_plan`), so no block runs and no stored value is made. The check of the stored
+// values with such records is tested in `x_subject_meta.rs`. One search setting: the plan refuses
+// such a subject set whatever the block size, before any block runs, at any thread count.
 #[test]
-fn a_reported_subject_without_a_tabular_id_is_refused_alike_with_the_switch() {
+fn a_reported_subject_without_a_tabular_id_is_refused_alike_in_blocks() {
     let dir = test_dir("undecodable");
     let subject = fixture("MejoMJNV.faa");
     let reference = blastp(
@@ -373,22 +261,16 @@ fn a_reported_subject_without_a_tabular_id_is_refused_alike_with_the_switch() {
         .unwrap();
     let path = subject_file_with_an_undecodable_reported_title(&dir, first_row);
     let subject = [OsStr::new("-subject"), path.as_os_str()];
-    for threads in [1, 4] {
-        for letters in ["1", "20000"] {
-            let base = [("LOSAT_X_BPQBLOCK", letters)];
-            let (off, counts) = same_runs(&dir, "blastp", &subject, threads, &base, "6");
-            let what = format!("threads {threads} blocks of {letters}");
-            assert_ne!(off.code, Some(0), "{what}");
-            assert!(
-                off.stderr
-                    .contains("has a title whose first word starts with 'Subject_'"),
-                "{what}: {}",
-                off.stderr
-            );
-            assert!(off.stdout.is_empty(), "{what}");
-            assert!(counts.is_none(), "{what}: {counts:?}");
-        }
-    }
+    let base = [("LOSAT_X_BPQBLOCK", "1")];
+    let (all, _) = same_runs(&dir, "blastp", &subject, 4, &base, "6");
+    assert_ne!(all.code, Some(0));
+    assert!(
+        all.stderr
+            .contains("has a title whose non-UTF-8 bytes are in no encoding"),
+        "{}",
+        all.stderr
+    );
+    assert!(all.stdout.is_empty());
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -445,10 +327,11 @@ fn subject_file_with_retitled_reported_subjects(
 // Subjects whose tabular ID is not the title's first word: an empty title (`unnamed`), a
 // whitespace-only title, `Subject_` first words (NCBI generates their definition line: `Subject_99`,
 // a cp1252 / latin-1 byte, `Subject_ `, `Subject_3`) and `lcl|Subject_7`. With the stored IDs the
-// block search writes the same rows, in the columns that show the ID, accession and title, with
-// `-max_target_seqs 3`, in both tasks.
+// block search writes the same rows as the search of all queries, in the columns that show the ID, accession and title, with
+// `-max_target_seqs 3`, in blastp-fast (the IDs are made the same way in both tasks; its report,
+// as blastp's, shows all seven retitled subjects).
 #[test]
-fn generated_subject_ids_are_written_alike_with_the_switch() {
+fn generated_subject_ids_are_written_alike_in_blocks() {
     let dir = test_dir("generated-ids");
     let original = fixture("MejoMJNV.faa");
     let reference = blastp(
@@ -473,32 +356,28 @@ fn generated_subject_ids_are_written_alike_with_the_switch() {
     let subject = [OsStr::new("-subject"), path.as_os_str()];
     let outfmt = "6 qseqid sseqid sacc saccver stitle slen evalue bitscore";
     let base = [("LOSAT_X_BPQBLOCK", "1")];
-    for task in ["blastp", "blastp-fast"] {
-        let (off, counts) = same_runs_with(
-            &dir,
-            task,
-            &subject,
-            4,
-            &base,
-            outfmt,
-            &["-max_target_seqs", "3"],
+    let task = "blastp-fast";
+    let (all, reach) = same_runs_with(
+        &dir,
+        task,
+        &subject,
+        4,
+        &base,
+        outfmt,
+        &["-max_target_seqs", "3"],
+    );
+    assert_eq!(all.code, Some(0), "{task}: {}", all.stderr);
+    assert!(
+        reach.sides("LOSAT_X_BPQBLOCK").0,
+        "{task}: the block search did not run"
+    );
+    // The generated IDs are in the report, so the stored IDs were written.
+    for generated in [&b"unnamed"[..], b"Subject_99"] {
+        assert!(
+            all.stdout.windows(generated.len()).any(|w| w == generated),
+            "{task}: {} is not in the report",
+            String::from_utf8_lossy(generated)
         );
-        assert_eq!(off.code, Some(0), "{task}: {}", off.stderr);
-        let counts = counts.expect("a line at exit");
-        assert!(counts["blocks"] > 0, "{task}: {counts:?}");
-        assert_eq!(
-            counts["subjects_compared"],
-            counts["blocks"] * SUBJECTS,
-            "{task}: {counts:?}"
-        );
-        // The generated IDs are in the report, so the stored IDs were written.
-        for generated in [&b"unnamed"[..], b"Subject_99"] {
-            assert!(
-                off.stdout.windows(generated.len()).any(|w| w == generated),
-                "{task}: {} is not in the report",
-                String::from_utf8_lossy(generated)
-            );
-        }
     }
     let _ = std::fs::remove_dir_all(&dir);
 }

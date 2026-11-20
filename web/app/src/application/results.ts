@@ -4,11 +4,14 @@
 // rank), never by a row number of a table, and a detail that arrives after the selection
 // moved on is dropped. Values shown come from the stored outputs and the HSP records
 // (docs/web/results_columns.md); the domain functions group, sort and filter them.
-import type { RecordKey } from '../domain/dataset';
+import type { ProgramId, RecordKey, SequenceKind } from 'losat/domain';
+import type { ProgramDescription } from 'losat/ports';
+import { recordName } from '../domain/dataset';
 import { optionValue } from '../domain/argv';
-import { frame, out0Range, out0SubjectRange, out6Range, subjectSpan } from '../domain/hsp-table';
-import { splitOutfmt6Row, type Outfmt6Row } from '../domain/outfmt6';
-import { programById, residueUnit, type ProgramId, type SequenceKind } from '../domain/programs';
+import { frame, out0Range, out0SubjectRange, out6Range, subjectSpan, type HspTable } from '../domain/hsp-table';
+import { shownScores, splitOutfmt6Row, type Outfmt6Row } from '../domain/outfmt6';
+import { customOutfmt } from '../domain/output-format';
+import { programById, residueUnit } from '../domain/programs';
 import {
   buildResultIndex,
   filterQuery,
@@ -26,9 +29,8 @@ import {
   type SubjectSortKey,
   type ViewFilters,
 } from '../domain/result-index';
-import { verificationBadge, type Badge, type VerificationTable } from '../domain/verification';
+import { verificationBadge, type Badge, type OptionGrammar, type VerificationTable } from '../domain/verification';
 import type { RunStore } from '../ports/data';
-import type { ProgramDescription } from '../ports/engine';
 import type { AppState, RunView } from './coordinator';
 import { Store } from './store';
 
@@ -113,6 +115,12 @@ export interface LoadedRun {
   readonly out6: Uint8Array;
   readonly description: ProgramDescription;
   readonly limits: HitLimits;
+  /**
+   * Whether outfmt 0 has a search of its own (-num_descriptions / -num_alignments) that wrote nothing: outfmt 0
+   * always writes its header when its search succeeds, so an empty stream 0 next to the tabular records means that
+   * the search failed (abi_v2.md §7; its error is in the diagnostics).
+   */
+  readonly outfmt0Failed: boolean;
   readonly badge: Badge;
   readonly diagnostics: string;
   readonly kinds: { readonly query: SequenceKind; readonly subject: SequenceKind };
@@ -127,6 +135,11 @@ export interface ResultsState {
   /** Why the run has no results to show (not completed, cancelled, failed, or a read error). */
   readonly message?: string;
   readonly loaded?: LoadedRun;
+  /**
+   * The options' grammar of the run's mode (`describe`: which options take a value), for its
+   * command; also for a run without results. Undefined until the engine has described it.
+   */
+  readonly grammar?: OptionGrammar;
   readonly filters: ViewFilters;
   readonly subjectSort: SortSpec<SubjectSortKey>;
   readonly hspSort: SortSpec<HspSortKey>;
@@ -185,6 +198,8 @@ export class ResultsBrowser {
    * up: a map of every HSP built at each opening cost about 20 ms for 150,000 HSPs (W4b F1).
    */
   private rowsByRank = new Map<number, Int32Array>();
+  /** The E values and bit scores that the outfmt 6 rows of the loaded run show, made at the first filter on them. */
+  private scores: Pick<HspTable, 'eValue' | 'bitScore'> | undefined;
   private loadToken = 0;
   /** Subjects of the loaded run whose heading waits to be read. */
   private readonly headingQueue: number[] = [];
@@ -194,6 +209,8 @@ export class ResultsBrowser {
   private sections = new Map<string, Promise<string | undefined>>();
   /** Outfmt 0 subject headings of the loaded run read or being read, by subject record index. */
   private headingReads = new Map<number, Promise<string | undefined>>();
+  /** The options' grammar of each mode that the engine has described (one engine build: it does not change). */
+  private readonly grammars = new Map<ProgramId, OptionGrammar>();
 
   /** The table the verification badges come from (generated at build time). */
   get verification(): VerificationTable {
@@ -222,16 +239,19 @@ export class ResultsBrowser {
     const run = this.deps.runs.get().runs.find((r) => r.snapshot.runId === runId);
     this.rows = new Map();
     this.rowsByRank = new Map();
+    this.scores = undefined;
     this.sections = new Map();
     this.headingReads = new Map();
     this.headingQueue.length = 0;
     if (run === undefined) return;
     const filters = this.state.get().runId === runId ? this.state.get().filters : NO_FILTERS;
+    const grammar = this.grammars.get(run.snapshot.program);
     if (run.status !== 'completed') {
-      this.state.set({ ...INITIAL, filters, runId, phase: 'unavailable', message: unavailableMessage(run) });
+      this.state.set({ ...INITIAL, filters, runId, phase: 'unavailable', message: unavailableMessage(run), ...(grammar === undefined ? {} : { grammar }) });
+      if (grammar === undefined) this.describeGrammar(token, run.snapshot.program);
       return;
     }
-    this.state.set({ ...INITIAL, filters, runId, phase: 'loading' });
+    this.state.set({ ...INITIAL, filters, runId, phase: 'loading', ...(grammar === undefined ? {} : { grammar }) });
     try {
       const [table, out6, description, diagnostics] = await Promise.all([
         this.deps.data.readHitTable(runId),
@@ -242,20 +262,23 @@ export class ResultsBrowser {
       if (token !== this.loadToken) return;
       const program = programById(run.snapshot.program);
       const kinds = { query: program.query, subject: program.subject };
+      const limits = hitLimits(run.snapshot.argv, description.parameters);
       const loaded: LoadedRun = {
         run,
         index: buildResultIndex(table),
         out6,
         description,
-        limits: hitLimits(run.snapshot.argv, description.parameters),
+        limits,
+        outfmt0Failed: limits.outfmt0?.separate === true && run.result?.byteLengths[0] === 0,
         badge: verificationBadge(
           {
             program: run.snapshot.program,
             argv: run.snapshot.argv,
             formats: description.formats,
+            custom: customOutfmt(run.snapshot.argv),
             runtimePath: run.record.runtimePath,
             threads: run.record.threads,
-            grammar: grammarOf(description),
+            grammar: this.grammarOf(run.snapshot.program, description),
           },
           this.deps.verification,
         ),
@@ -266,12 +289,35 @@ export class ResultsBrowser {
       };
       const queries = this.queryEntries(loaded, this.state.get().filters);
       const first = queries.find((q) => q.hsps > 0) ?? queries[0];
-      this.state.set({ ...this.state.get(), phase: 'ready', loaded, queries });
+      this.state.set({ ...this.state.get(), phase: 'ready', loaded, queries, grammar: this.grammarOf(run.snapshot.program, description) });
       if (first !== undefined) this.selectQuery(first.qIdx);
     } catch (error) {
       if (token !== this.loadToken) return;
-      this.set({ phase: 'failed', message: `The results of run ${run.snapshot.number} could not be read: ${errorMessage(error)}` });
+      this.set({ phase: 'failed', message: unreadableResults(run, error) });
+      if (this.state.get().grammar === undefined) this.describeGrammar(token, run.snapshot.program);
     }
+  }
+
+  /** The grammar of a mode from its description, kept for the next run of the mode. */
+  private grammarOf(program: ProgramId, description: ProgramDescription): OptionGrammar {
+    let grammar = this.grammars.get(program);
+    if (grammar === undefined) {
+      grammar = optionGrammar(description);
+      this.grammars.set(program, grammar);
+    }
+    return grammar;
+  }
+
+  /** Sets the grammar of the mode of a run shown without results (`token`), once the engine describes it. */
+  private describeGrammar(token: number, program: ProgramId): void {
+    this.deps.describe(program).then(
+      (description) => {
+        const grammar = this.grammarOf(program, description);
+        if (token === this.loadToken) this.set({ grammar });
+      },
+      // The results report the engine's errors; the command keeps its words.
+      () => undefined,
+    );
   }
 
   selectQuery(qIdx: number): void {
@@ -492,8 +538,10 @@ export class ResultsBrowser {
       return;
     }
     const subjectRecords = loaded.run.snapshot.subject.records;
-    const filtered = filterQuery(query, state.filters, table, (subject) => [
-      subjectRecords[subject.sIdx]?.id ?? '',
+    const byScore = state.filters.maxEValue !== undefined || state.filters.minBitScore !== undefined;
+    if (byScore) this.scores ??= shownScores(table, loaded.out6);
+    const filtered = filterQuery(query, state.filters, this.scores ?? table, (subject) => [
+      recordName(subjectRecords[subject.sIdx]?.id ?? '', 'subject', subject.sIdx),
       this.row(subject.rows[0]!).sseqid,
     ]);
     const order = new Map(query.subjects.map((subject, i) => [subject.sIdx, i + 1]));
@@ -516,7 +564,7 @@ export class ResultsBrowser {
       ranges,
       hidden: { subjects: filtered.hiddenSubjects, hsps: filtered.hiddenHsps },
       queryTotals: { subjects: query.subjects.length, hsps: query.hspCount },
-      atSubjectLimit: loaded.limits.maxTargetSeqs !== undefined && query.subjects.length >= loaded.limits.maxTargetSeqs,
+      atSubjectLimit: loaded.limits.maxTargetSeqs !== undefined && query.subjects.length > 0 && query.subjects.length >= loaded.limits.maxTargetSeqs,
       outfmt0Subjects: query.subjects.filter((s) => out0SubjectRange(table, s.rows[0]!) !== undefined).length,
     });
   }
@@ -590,8 +638,9 @@ export class ResultsBrowser {
     loaded.run.snapshot.query.records.forEach((record, qIdx) => {
       const group = loaded.index.queries.get(qIdx);
       if (filters.queriesWithHitsOnly && group === undefined) return;
-      if (text !== '' && !record.id.toLowerCase().includes(text)) return;
-      entries.push({ qIdx, id: record.id, length: record.length, subjects: group?.subjects.length ?? 0, hsps: group?.hspCount ?? 0 });
+      const id = recordName(record.id, 'query', qIdx);
+      if (text !== '' && !id.toLowerCase().includes(text)) return;
+      entries.push({ qIdx, id, length: record.length, subjects: group?.subjects.length ?? 0, hsps: group?.hspCount ?? 0 });
     });
     return entries;
   }
@@ -630,31 +679,72 @@ export class ResultsBrowser {
   }
 }
 
+/** Why the selected query shows no HSP, in the order of the notices of the results (ResultNotices). */
+export type NoHspReason = 'dry-run' | 'empty-query' | 'no-tabular-hits' | 'no-queries' | 'no-hits' | 'filtered-out';
+
+/**
+ * Why the loaded run's selected query shows no HSP; undefined while it shows some, or nothing is
+ * loaded. A dry run (-dryrun; line RG E1w-3b) searched nothing.
+ */
+export function noHspReason(state: ResultsState): NoHspReason | undefined {
+  const loaded = state.loaded;
+  if (loaded === undefined) return undefined;
+  if (loaded.run.snapshot.dryRun === true) return 'dry-run';
+  if (loaded.run.snapshot.query.records.length === 0) return 'empty-query';
+  if (loaded.limits.maxTargetSeqs === 0) return 'no-tabular-hits';
+  if (state.queries.length === 0) return 'no-queries';
+  if (state.queryTotals === undefined) return undefined;
+  if (state.queryTotals.hsps === 0) return 'no-hits';
+  return state.subjects.length === 0 ? 'filtered-out' : undefined;
+}
+
 /** The task of a run: the argv's -task, else the default that the engine describes (none for a program without tasks). */
-function taskOf(argv: readonly string[], description: ProgramDescription): { task?: string } {
+export function taskOf(argv: readonly string[], description: ProgramDescription): { task?: string } {
   const task = optionValue(argv, '-task') ?? description.parameters.find((p) => p.flag === '-task')?.defaultValue;
   return task === undefined ? {} : { task };
 }
 
-/** The option grammar of `describe` that the verification badge reads options with. */
-function grammarOf(description: ProgramDescription) {
+/** The option grammar of `describe` that the verification badge and the commands read options with. */
+export function optionGrammar(description: ProgramDescription): OptionGrammar {
   const valued = new Set(description.parameters.filter((p) => p.takesValue).map((p) => p.flag));
   const task = description.parameters.find((p) => p.flag === '-task')?.defaultValue;
   return { takesValue: (flag: string) => valued.has(flag), ...(task === undefined ? {} : { defaultTask: task }) };
 }
 
-function unavailableMessage(run: RunView): string {
+/**
+ * Why the stored results of a completed run could not be read: opening the results, and reading
+ * one of its outputs in the Outputs, say it alike (WA2-BR-01).
+ */
+export function unreadableResults(run: RunView, error: unknown): string {
+  return `The results of run ${run.snapshot.number} could not be read: ${errorMessage(error)}`;
+}
+
+/**
+ * Why a run that has not completed has no results: the results page's sentence, also told to a
+ * screen reader as the run ends. A failed run that made the file of its `-logfile` keeps it (line RG
+ * E1w-3b), and the page shows it under the sentence (RunFiles).
+ */
+export function unavailableMessage(run: RunView): string {
   const n = run.snapshot.number;
   switch (run.status) {
     case 'cancelled':
       return `Run ${n} was cancelled. A cancelled run keeps no results.`;
-    case 'failed':
-      return `Run ${n} failed: ${run.record.error ?? 'no reason was recorded'}. A failed run keeps no results.`;
+    case 'failed': {
+      const files = run.record.runFiles ?? [];
+      const kept = files.length === 0 ? '' : ` It keeps the file of its -logfile, ${files.map((file) => file.name).join(', ')}.`;
+      return `Run ${n} failed: ${endSentence(run.record.error?.trim() ? run.record.error : 'no reason was recorded')} A failed run keeps no results.${kept}`;
+    }
     case 'completed':
       return '';
     default:
       return `Run ${n} has not finished yet. Its results appear when it completes.`;
   }
+}
+
+/** A message as a sentence of its own: no trailing space or line break, and one full stop at most. */
+function endSentence(message: string): string {
+  const text = message.trimEnd();
+  return /[.!?]["')\]]*$/.test(text) ? text : `${text}.`;
 }
 
 function errorMessage(error: unknown): string {

@@ -15,7 +15,7 @@ LOSAT の段階 E2f（S07++、BLASTN の query の batch と分割）を仕上�
 - **S07++ のコミット：**
   - エンジン：`93c58a2e4`（batch）、`bbb869a9e`（query の分割）、`74223fee3`（予備の段階の hit list）；
   - 文書：`a74be99f4`、`b951afeb2`、`7693a9c73`；
-  - ゲートの実行記録：`4a5371293`（`docs/evidence/losat_web_e2f/run-20260930T163727Z/`、`head.txt` は `7693a9c73`）。
+  - ゲートの実行記録：`4a5371293`（`docs/evidence/losat_web_e2f/run-20260930T163727Z/`、`head.txt` は `7693a9c73`。`head.txt` を含む run の記録の大半は 2026-10-23 にリリース資産へ移動：[ARCHIVED.md](../evidence/losat_web_e2f/ARCHIVED.md)）。
 - **ゲートの結果（`7693a9c73`）：すべて通過。**
   - fmt、clippy（エンジン 4 構成、アダプタ 3 構成）、試験 830 件。
   - fixture 47 件（`-num_threads` 1・2・4、NCBI の再実行もハッシュと一致）。

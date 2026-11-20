@@ -1,0 +1,79 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/culling_dom_s.faa).
+           45 sequences; 20,432 total letters
+
+
+
+Query= dqA domain x5
+
+Length=989
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+df03_frag                                                             449     9e-155
+
+
+> df03_frag
+Length=245
+
+ Score = 449 bits (1155),  Expect = 9e-155, Method: Compositional matrix adjust.
+ Identities = 215/215 (100%), Positives = 215/215 (100%), Gaps = 0/215 (0%)
+
+Query  698  FLRKALRAPAECVGIRAMVLSYPHEASSKEGIEMGFGFLNAIAYRENATTIRDKANNILL  757
+            FLRKALRAPAECVGIRAMVLSYPHEASSKEGIEMGFGFLNAIAYRENATTIRDKANNILL
+Sbjct  16   FLRKALRAPAECVGIRAMVLSYPHEASSKEGIEMGFGFLNAIAYRENATTIRDKANNILL  75
+
+Query  758  GCSEMLTGAYYNTGAPEQAQTLQGTASFASDRGQPDESDNASDHASDLVAQFVEADCKRA  817
+            GCSEMLTGAYYNTGAPEQAQTLQGTASFASDRGQPDESDNASDHASDLVAQFVEADCKRA
+Sbjct  76   GCSEMLTGAYYNTGAPEQAQTLQGTASFASDRGQPDESDNASDHASDLVAQFVEADCKRA  135
+
+Query  818  TVEAACHAAFYLALPIRNYALFAQGLRPRTKTVDEDASVRLQTVTSTSVHIELDRNAQPE  877
+            TVEAACHAAFYLALPIRNYALFAQGLRPRTKTVDEDASVRLQTVTSTSVHIELDRNAQPE
+Sbjct  136  TVEAACHAAFYLALPIRNYALFAQGLRPRTKTVDEDASVRLQTVTSTSVHIELDRNAQPE  195
+
+Query  878  RAQINKDLIKDDRVMRAIYFRFNRDYFWKNFAKNL  912
+            RAQINKDLIKDDRVMRAIYFRFNRDYFWKNFAKNL
+Sbjct  196  RAQINKDLIKDDRVMRAIYFRFNRDYFWKNFAKNL  230
+
+
+
+Lambda      K        H        a         alpha
+   0.321    0.135    0.400    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 16176468
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt0/culling_dom_s.faa).
+    Posted date:  Unknown
+  Number of letters in database: 20,432
+  Number of sequences in database:  45
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

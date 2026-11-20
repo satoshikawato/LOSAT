@@ -28,6 +28,10 @@
  {"case_id": "blastn:PemoMJNVA_vs_PeseMJNV", "argv": ["blastn", "-query", "LOSAT/tests/fasta/LC738870.fasta", "-subject", "LOSAT/tests/fasta/LC738873.fasta", "-outfmt", "6", "-task", "blastn"]},
  {"case_id": "blastn:MjeNMV_vs_MelaMJNV", "argv": ["blastn", "-query", "LOSAT/tests/fasta/LC738868.fasta", "-subject", "LOSAT/tests/fasta/LC738874.fasta", "-outfmt", "6", "-task", "blastn"]},
  {"case_id": "blastn:MjPMNV_vs_MlPMNV", "argv": ["blastn", "-query", "LOSAT/tests/fasta/AP027202.fasta", "-subject", "LOSAT/tests/fasta/LC738875.fasta", "-outfmt", "6", "-task", "blastn"]},
+ {"case_id": "blastn:dc_megablast_default", "argv": ["blastn", "-query", "LOSAT/tests/fasta/outfmt0/dc_query.fasta", "-subject", "LOSAT/tests/fasta/outfmt0/dc_subject.fasta", "-outfmt", "6", "-task", "dc-megablast"]},
+ {"case_id": "blastn:dc_megablast_word12_coding18", "argv": ["blastn", "-query", "LOSAT/tests/fasta/outfmt0/dc_query.fasta", "-subject", "LOSAT/tests/fasta/outfmt0/dc_subject.fasta", "-outfmt", "6", "-task", "dc-megablast", "-word_size", "12", "-template_type", "coding", "-template_length", "18"]},
+ {"case_id": "blastn:blastn_short_default", "argv": ["blastn", "-query", "LOSAT/tests/fasta/outfmt0/short_query.fasta", "-subject", "LOSAT/tests/fasta/outfmt0/short_subject.fasta", "-outfmt", "6", "-task", "blastn-short"]},
+ {"case_id": "blastn:blastn_short_word11", "argv": ["blastn", "-query", "LOSAT/tests/fasta/outfmt0/short_query.fasta", "-subject", "LOSAT/tests/fasta/outfmt0/short_subject.fasta", "-outfmt", "6", "-task", "blastn-short", "-word_size", "11"]},
  {"case_id": "blastp:WSSV.PajaWSV", "argv": ["blastp", "-query", "LOSAT/tests/fasta/WSSV.faa", "-subject", "LOSAT/tests/fasta/PajaWSV.faa", "-outfmt", "6"]},
  {"case_id": "blastp:WSSV.SicyWSV", "argv": ["blastp", "-query", "LOSAT/tests/fasta/WSSV.faa", "-subject", "LOSAT/tests/fasta/SicyWSV.faa", "-outfmt", "6"]},
  {"case_id": "blastp:WSSV.CoBV", "argv": ["blastp", "-query", "LOSAT/tests/fasta/WSSV.faa", "-subject", "LOSAT/tests/fasta/CoBV.faa", "-outfmt", "6"]},
@@ -44,8 +48,14 @@
  {"case_id": "blastp:AP027132.AP027133", "argv": ["blastp", "-query", "LOSAT/tests/fasta/AP027132.faa", "-subject", "LOSAT/tests/fasta/AP027133.faa", "-outfmt", "6"]},
  {"case_id": "blastp:AP027132.NZ_CP006932", "argv": ["blastp", "-query", "LOSAT/tests/fasta/AP027132.faa", "-subject", "LOSAT/tests/fasta/NZ_CP006932.faa", "-outfmt", "6"]},
  {"case_id": "blastp:AP027133.NZ_CP006932", "argv": ["blastp", "-query", "LOSAT/tests/fasta/AP027133.faa", "-subject", "LOSAT/tests/fasta/NZ_CP006932.faa", "-outfmt", "6"]},
+ {"case_id": "blastp:blastp_fast_x16_seg", "argv": ["blastp", "-query", "LOSAT/tests/fasta/outfmt0/x16_seg_q.faa", "-subject", "LOSAT/tests/fasta/outfmt0/x16_seg_s.faa", "-outfmt", "6", "-task", "blastp-fast", "-seg", "yes", "-soft_masking", "true"]},
+ {"case_id": "blastp:blastp_fast_lone_hsp_window", "argv": ["blastp", "-query", "LOSAT/tests/fasta/outfmt0/e2e_fast_lone2_query.faa", "-subject", "LOSAT/tests/fasta/outfmt0/e2e_fast_lone2_subject.faa", "-outfmt", "7", "-task", "blastp-fast", "-threshold", "8", "-evalue", "1e5", "-comp_based_stats", "D"]},
  {"case_id": "tblastn:PemoMJNVA_vs_MelaMJNV", "argv": ["tblastn", "-query", "LOSAT/tests/fasta/PemoMJNVA.faa", "-subject", "LOSAT/tests/fasta/MelaMJNV.fasta", "-outfmt", "6"]},
  {"case_id": "tblastn:AP027131_vs_AP027133", "argv": ["tblastn", "-query", "LOSAT/tests/fasta/AP027131.faa", "-subject", "LOSAT/tests/fasta/AP027133.fasta", "-outfmt", "6", "-db_gencode", "4"]},
+ {"case_id": "tblastn:qcov30_many", "argv": ["tblastn", "-query", "LOSAT/tests/fasta/outfmt0/e2e_many_query.faa", "-subject", "LOSAT/tests/fasta/outfmt0/e2e_many_subject.fna", "-outfmt", "6", "-qcov_hsp_perc", "30"]},
+ {"case_id": "tblastn:e2e_protein_vs_subject", "argv": ["tblastn", "-query", "LOSAT/tests/fasta/outfmt0/e2e_protein_query.faa", "-subject", "LOSAT/tests/fasta/outfmt0/e2e_tblastn_subject.fna", "-outfmt", "6"]},
  {"case_id": "blastx:MelaMJNV_vs_PemoMJNVA", "argv": ["blastx", "-query", "LOSAT/tests/fasta/MelaMJNV.fasta", "-subject", "LOSAT/tests/fasta/PemoMJNVA.faa", "-outfmt", "6"]},
- {"case_id": "blastx:AP027131_vs_AP027133", "argv": ["blastx", "-query", "LOSAT/tests/fasta/AP027131.fasta", "-subject", "LOSAT/tests/fasta/AP027133.faa", "-outfmt", "6", "-query_gencode", "4"]}
+ {"case_id": "blastx:AP027131_vs_AP027133", "argv": ["blastx", "-query", "LOSAT/tests/fasta/AP027131.fasta", "-subject", "LOSAT/tests/fasta/AP027133.faa", "-outfmt", "6", "-query_gencode", "4"]},
+ {"case_id": "blastx:best_hsp", "argv": ["blastx", "-query", "LOSAT/tests/fasta/outfmt0/bx_best_hsp_query.fna", "-subject", "LOSAT/tests/fasta/outfmt0/bx_best_hsp_subject.faa", "-outfmt", "6"]},
+ {"case_id": "blastx:multi_outfmt7", "argv": ["blastx", "-query", "LOSAT/tests/fasta/outfmt0/e2e_tblastn_subject.fna", "-subject", "LOSAT/tests/fasta/outfmt0/e2d_t_qp2.faa", "-outfmt", "7"]}
 ]

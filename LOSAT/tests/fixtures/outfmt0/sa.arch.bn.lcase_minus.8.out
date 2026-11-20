@@ -1,0 +1,122 @@
+Seq-annot ::= {
+  desc {
+    user {
+      type str "Hist Seqalign",
+      data {
+        {
+          label str "Hist Seqalign",
+          data bool TRUE
+        }
+      }
+    },
+    user {
+      type str "Blast Type",
+      data {
+        {
+          label str "blastn",
+          data int 1
+        }
+      }
+    },
+    user {
+      type str "Blast Database Title",
+      data {
+        {
+          label str "n/a",
+          data bool FALSE
+        }
+      }
+    }
+  },
+  data align {
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 242
+        },
+        {
+          id str "blast_score",
+          value int 242
+        },
+        {
+          id str "e_value",
+          value real { 601914206611342, 10, -144 }
+        },
+        {
+          id str "bit_score",
+          value real { 448009510099483, 10, -12 }
+        },
+        {
+          id str "num_ident",
+          value int 361
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 869583333333333, 10, -13 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 9,
+        ids {
+          local str "Query_1",
+          local str "Subject_2"
+        },
+        starts {
+          286,
+          40,
+          282,
+          -1,
+          281,
+          204,
+          279,
+          -1,
+          185,
+          205,
+          -1,
+          299,
+          181,
+          300,
+          -1,
+          304,
+          35,
+          306
+        },
+        lens {
+          164,
+          4,
+          1,
+          2,
+          94,
+          1,
+          4,
+          2,
+          146
+        },
+        strands {
+          minus,
+          plus,
+          minus,
+          plus,
+          minus,
+          plus,
+          minus,
+          plus,
+          minus,
+          plus,
+          minus,
+          plus,
+          minus,
+          plus,
+          minus,
+          plus,
+          minus,
+          plus
+        }
+      }
+    }
+  }
+}

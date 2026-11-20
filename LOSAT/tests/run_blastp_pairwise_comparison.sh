@@ -25,7 +25,7 @@ set -euo pipefail
 # const int kDfltArgOutputFormat = 0;
 # ```
 
-LOSAT_BIN="../target/debug/LOSAT"
+LOSAT_BIN="../target/debug/losat"
 REF_DIR="./blast_out/blastp_pairwise"
 FASTA_DIR="./fasta"
 source ./blastp_parity_options.sh

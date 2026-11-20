@@ -1,21 +1,56 @@
 // Pure parts of the engine runtime: the thread and renewal policy, the check of an engine
 // module before it is compiled, and the message of an instance that stopped. With
 // LOSAT_WEB_REACTORS, the module check also runs on the built reactors, and the
-// RecordScanner contract runs against the serial reactor in Node.
+// RecordScanner contract and the inflation of compressed sources run against the serial
+// reactor in Node.
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
+import { constants as zlib, gzipSync, zstdCompressSync } from 'node:zlib';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  instantiateSerial,
+  loadReactor,
+  ReactorInflater,
+  ReactorInputChecker,
+  ReactorScanner,
+  reopening,
+  toProgramDescription,
+} from 'losat';
+import type { FastaParserKind } from 'losat/domain';
+import { INFLATED_TOO_LARGE } from 'losat/ports';
 import { findReactors } from '../../build/reactors';
-import { ReactorAbi, stopMessage, type AbiExports } from '../../src/infra/reactor/abi';
-import { ABI_EXPORTS, inspectReactor } from '../../src/infra/reactor/artifact';
-import { instantiateSerial } from '../../src/infra/reactor/instance';
-import { ReactorInputChecker } from '../../src/infra/reactor/checker';
-import { toProgramDescription } from '../../src/infra/reactor/control';
-import { ReactorScanner, reopening } from '../../src/infra/reactor/scanner';
-import type { FastaParserKind } from '../../src/domain/dataset';
+import { ABI_VERSION, EngineStoppedError, ReactorAbi, stopMessage, type AbiExports } from '../../../packages/losat/src/infra/reactor/abi';
+import { ABI_EXPORTS, inspectReactor } from '../../../packages/losat/src/infra/reactor/artifact';
+import { inflateFile } from '../../src/infra/data/inflate';
 import { PROGRAMS } from '../../src/domain/programs';
-import { AUTO_MAX_THREADS, AUTO_SERIAL_BELOW_BYTES, chooseThreads, DEFAULT_RENEWAL, renewalReason } from '../../src/infra/engine-worker/policy';
+import {
+  AUTO_MANY_THREADS_FROM_BYTES,
+  AUTO_MAX_THREADS,
+  AUTO_SERIAL_BELOW_BYTES,
+  AUTO_SMALL_MAX_THREADS,
+  chooseThreads,
+  DEFAULT_RENEWAL,
+  renewalReason,
+} from '../../../packages/losat/src/infra/engine-worker/policy';
+import { InstanceUse } from '../../../packages/losat/src/infra/engine-worker/instance-use';
+import { EngineRuntime } from '../../../packages/losat/src/infra/engine-worker/runtime';
+import { warmUp, warmUpInputs } from '../../../packages/losat/src/infra/engine-worker/warm-up';
+
+// The runtime's calls of the warm-up are counted; the warm-up itself runs as it is.
+vi.mock('../../../packages/losat/src/infra/engine-worker/warm-up', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../packages/losat/src/infra/engine-worker/warm-up')>();
+  return { ...actual, warmUp: vi.fn(actual.warmUp) };
+});
 import { RECORD_SCANNER_CASES } from '../contract/record-scanner.contract';
+import type { MainLinks } from '../../../packages/losat/src/infra/engine-worker/link';
+
+/** The runtime's links to the main thread (link.ts): these tests start no threaded instance. */
+const NO_LINKS: MainLinks = {
+  link: () => {
+    throw new Error('unused');
+  },
+  fault: () => undefined,
+};
 
 describe('chooseThreads', () => {
   it('keeps an explicit request', () => {
@@ -28,11 +63,19 @@ describe('chooseThreads', () => {
   });
 
   it('runs Auto with up to half the logical processors from the threshold on, within the maximum', () => {
-    expect(chooseThreads('auto', AUTO_SERIAL_BELOW_BYTES, 8)).toBe(Math.min(AUTO_MAX_THREADS, 4));
-    expect(chooseThreads('auto', AUTO_SERIAL_BELOW_BYTES, 64)).toBe(AUTO_MAX_THREADS);
+    expect(chooseThreads('auto', AUTO_SERIAL_BELOW_BYTES, 8)).toBe(4);
+    expect(chooseThreads('auto', AUTO_MANY_THREADS_FROM_BYTES, 32)).toBe(16);
+    expect(chooseThreads('auto', AUTO_MANY_THREADS_FROM_BYTES, 64)).toBe(AUTO_MAX_THREADS);
+    expect(chooseThreads('auto', AUTO_MANY_THREADS_FROM_BYTES, 256)).toBe(AUTO_MAX_THREADS);
     expect(chooseThreads('auto', AUTO_SERIAL_BELOW_BYTES, 1)).toBe(1);
     // A browser that does not report the processors.
     expect(chooseThreads('auto', AUTO_SERIAL_BELOW_BYTES, 0)).toBe(1);
+  });
+
+  it('runs Auto on fewer threads below the size from which many threads pay', () => {
+    expect(chooseThreads('auto', AUTO_MANY_THREADS_FROM_BYTES - 1, 64)).toBe(AUTO_SMALL_MAX_THREADS);
+    expect(chooseThreads('auto', AUTO_SERIAL_BELOW_BYTES, 64)).toBe(AUTO_SMALL_MAX_THREADS);
+    expect(chooseThreads('auto', AUTO_MANY_THREADS_FROM_BYTES - 1, 8)).toBe(4);
   });
 });
 
@@ -75,9 +118,11 @@ interface ModuleSpec {
   /** env.memory: [flags, initial, maximum?] with flag bit 0 = has maximum, bit 1 = shared. */
   readonly importedMemory?: readonly number[];
   readonly ownMemory?: readonly number[];
+  /** What every function returns (0 to 63); 0 by default. */
+  readonly returns?: number;
 }
 
-/** A module whose functions all have type () -> i32 and return 0. */
+/** A module whose functions all have type () -> i32 and return 0 (or `returns`). */
 function moduleBytes(spec: ModuleSpec): Uint8Array {
   const functionImports = spec.functionImports ?? [];
   const exports = spec.exports ?? [];
@@ -98,7 +143,7 @@ function moduleBytes(spec: ModuleSpec): Uint8Array {
       7,
       vector(exports.map((e) => (e === 'memory' ? [...name(e), 2, 0] : [...name(e), 0, ...uleb(offset + functions.indexOf(e))]))),
     ),
-    ...section(10, vector(functions.map(() => [4, 0, 0x41, 0, 0x0b]))),
+    ...section(10, vector(functions.map(() => [4, 0, 0x41, spec.returns ?? 0, 0x0b]))),
   ]);
 }
 
@@ -137,6 +182,142 @@ describe('inspectReactor', () => {
   });
 });
 
+describe('loadReactor', () => {
+  const bytes = moduleBytes(SERIAL);
+  const asset = { url: '/engine/serial.wasm', sha256: createHash('sha256').update(bytes).digest('hex'), size: bytes.length, artifactSha256: 'a'.repeat(64) };
+  const serve = (type: string, status = 200) =>
+    vi.stubGlobal('fetch', async () => new Response(status === 200 ? (bytes as BufferSource) : null, { status, headers: { 'Content-Type': type } }));
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it('compiles a Wasm response while it arrives and returns the module after the SHA-256 check', async () => {
+    serve('application/wasm');
+    const streaming = vi.spyOn(WebAssembly, 'compileStreaming');
+    const loaded = await loadReactor(asset);
+    expect(streaming).toHaveBeenCalledTimes(1);
+    expect(loaded.module).toBeInstanceOf(WebAssembly.Module);
+    expect(loaded.artifact.kind).toBe('serial-reactor');
+  });
+
+  it('refuses bytes of another SHA-256 even when they compile', async () => {
+    serve('application/wasm');
+    await expect(loadReactor({ ...asset, sha256: 'b'.repeat(64) })).rejects.toMatchObject({
+      name: 'UnavailableError',
+      message: `LOSAT could not load its engine file /engine/serial.wasm: it is not the one of this release (SHA-256 ${asset.sha256})`,
+    });
+  });
+
+  it('compiles from the bytes when the response is not served as Wasm', async () => {
+    serve('application/octet-stream');
+    const streaming = vi.spyOn(WebAssembly, 'compileStreaming');
+    expect((await loadReactor(asset)).artifact.kind).toBe('serial-reactor');
+    expect(streaming).not.toHaveBeenCalled();
+  });
+
+  // Line WQA's sweep, D1 (2026-11-19): a file that could not be downloaded is LOSAT's failure, named with its URL and why;
+  // the browser's own words for a network error ("Failed to fetch") named no file.
+  it('reports a response that is not OK', async () => {
+    serve('text/plain', 404);
+    await expect(loadReactor(asset)).rejects.toMatchObject({
+      name: 'UnavailableError',
+      message: 'LOSAT could not download its engine file /engine/serial.wasm (HTTP 404)',
+    });
+  });
+
+  it('reports a network error with the file, not in the words of the browser', async () => {
+    vi.stubGlobal('fetch', async () => {
+      throw new TypeError('Failed to fetch');
+    });
+    await expect(loadReactor(asset)).rejects.toMatchObject({
+      name: 'UnavailableError',
+      message: 'LOSAT could not download its engine file /engine/serial.wasm (network error)',
+    });
+  });
+
+  it('reports a connection that ends during the body as a network error', async () => {
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(bytes.subarray(0, 8));
+        controller.error(new TypeError('network error'));
+      },
+    });
+    vi.stubGlobal('fetch', async () => new Response(body, { headers: { 'Content-Type': 'application/octet-stream' } }));
+    await expect(loadReactor(asset)).rejects.toMatchObject({
+      name: 'UnavailableError',
+      message: 'LOSAT could not download its engine file /engine/serial.wasm (network error)',
+    });
+  });
+});
+
+describe('EngineRuntime.prepare', () => {
+  // A serial module whose ABI version export returns the host's version, as a reactor's does.
+  function setup(use?: InstanceUse) {
+    const calls = { serial: 0, threads: 0 };
+    const runtime = new EngineRuntime({
+      serial: async () => {
+        calls.serial++;
+        return WebAssembly.compile(moduleBytes({ ...SERIAL, returns: ABI_VERSION }) as BufferSource);
+      },
+      threads: async () => {
+        calls.threads++;
+        throw new Error('unused');
+      },
+      builds: { serial: 'serial', threads: 'threads' },
+      main: NO_LINKS,
+      use,
+    });
+    return { runtime, calls };
+  }
+
+  it('starts the serial instance for one thread, once', async () => {
+    const { runtime, calls } = setup();
+    await runtime.prepare(1);
+    await runtime.prepare(1);
+    expect(calls.serial).toBe(1);
+  });
+
+  it('keeps a working instance of the other module, which a queued search may still use', async () => {
+    const { runtime, calls } = setup();
+    await runtime.prepare(1);
+    await runtime.prepare(4);
+    expect(calls).toEqual({ serial: 1, threads: 0 });
+  });
+
+  it('warms up once per argv, ignores a warm-up that the instance cannot run, and keeps the instance', async () => {
+    const { runtime, calls } = setup();
+    vi.mocked(warmUp).mockClear();
+    const argv = ['tblastx', '-query', 'q.fa', '-subject', 's.fa'];
+    // The module's exports only return 2: the warm-up's register finds no response.
+    await runtime.prepare(1, argv);
+    await runtime.prepare(1, [...argv]);
+    await runtime.prepare(1, [...argv, '-seg', 'no']);
+    await runtime.prepare(1);
+    expect(vi.mocked(warmUp).mock.calls.map(([, called]) => called)).toEqual([argv, [...argv, '-seg', 'no']]);
+    expect(vi.mocked(warmUp).mock.results.map((result) => result.value)).toEqual([false, false]);
+    expect(calls.serial).toBe(1);
+  });
+
+  it('starts no instance once the Gateway ends the runtime', async () => {
+    const use = InstanceUse.create();
+    const { runtime, calls } = setup(use);
+    expect(use.retire()).toBe(false);
+    // The keeper of a second threaded instance would answer on the Gateway's channel for its memory.
+    await expect(runtime.prepare(4)).rejects.toThrow('the runtime is ending');
+    await expect(runtime.prepare(1)).rejects.toThrow('the runtime is ending');
+    expect(calls).toEqual({ serial: 0, threads: 0 });
+  });
+
+  it('records that the threaded engine cannot start, and then prepares the serial one', async () => {
+    const { runtime, calls } = setup();
+    // Node is not cross-origin isolated: the threaded instance cannot start.
+    await expect(runtime.prepare(4)).rejects.toThrow(/cross-origin isolated/);
+    await runtime.prepare(4);
+    expect(calls).toEqual({ serial: 1, threads: 0 });
+  });
+});
+
 describe('stopMessage', () => {
   it('reports the last line that the engine wrote, and the trap', () => {
     expect(stopMessage(new Error('unreachable'), 'thread main panicked at src/x.rs\nindex out of bounds\n')).toBe(
@@ -158,6 +339,7 @@ describe('ReactorAbi', () => {
     const memory = new WebAssembly.Memory({ initial: 2 });
     let next = 1024;
     const released: number[] = [];
+    const ended: number[] = [];
     const bytes = new TextEncoder().encode(response);
     const ref: { abi?: ReactorAbi } = {};
     const send = () => {
@@ -187,9 +369,24 @@ describe('ReactorAbi', () => {
         released.push(handle);
         return 0;
       },
+      losat_web2_inflate_begin: () => {
+        send();
+        return 5;
+      },
+      // Inflated bytes on stream 5, and a stream that inflation never sends.
+      losat_web2_inflate_chunk: () => {
+        new Uint8Array(memory.buffer, 60_000, 3).set([1, 2, 3]);
+        ref.abi!.emit(5, 60_000, 3);
+        ref.abi!.emit(6, 60_000, 1);
+        return 0;
+      },
+      losat_web2_inflate_end: (handle: number) => {
+        ended.push(handle);
+        return 0;
+      },
     } as unknown as AbiExports;
     ref.abi = new ReactorAbi(exports);
-    return { abi: ref.abi, released };
+    return { abi: ref.abi, released, ended };
   }
 
   it('joins a response that the engine sends in several chunks (1 MiB each in the adapter)', () => {
@@ -203,6 +400,125 @@ describe('ReactorAbi', () => {
     expect(() => abi.register('blastn', 1, new Uint8Array([62, 115]))).toThrow(SyntaxError);
     expect(released).toEqual([7]);
   });
+
+  /**
+   * Instances that answer `inflate_begin` for a `.gz` name with the gzip response, as a list: each
+   * records the handles its `inflate_end` was called with, the `trapAt`-th instance opened
+   * (counting from 0) traps in `inflate_chunk` and the `beginTrapAt`-th in `inflate_begin`.
+   */
+  function fakeInstances(trapAt?: number, beginTrapAt?: number) {
+    const opened: Array<{ readonly abi: ReactorAbi; readonly ended: number[] }> = [];
+    const open = async () => {
+      const trap = opened.length === trapAt;
+      const beginTrap = opened.length === beginTrapAt;
+      const ended: number[] = [];
+      const memory = new WebAssembly.Memory({ initial: 2 });
+      let next = 1024;
+      let handles = 0;
+      const ref: { abi?: ReactorAbi } = {};
+      const put = (bytes: Uint8Array, stream: number) => {
+        new Uint8Array(memory.buffer, 60_000, bytes.length).set(bytes);
+        ref.abi!.emit(stream, 60_000, bytes.length);
+      };
+      const exports = {
+        memory,
+        losat_web2_alloc: (len: number) => {
+          const ptr = next;
+          next += len;
+          return ptr;
+        },
+        losat_web2_dealloc: () => 0,
+        losat_web2_inflate_begin: (ptr: number, len: number) => {
+          if (beginTrap) throw new WebAssembly.RuntimeError('unreachable');
+          // The engine's name rule, for `.gz` only.
+          if (!/\.gz$/i.test(new TextDecoder().decode(new Uint8Array(memory.buffer, ptr, len)))) return 0;
+          put(new TextEncoder().encode('{"compression":"gzip","plain_name":"a.fa"}'), 2);
+          return ++handles;
+        },
+        losat_web2_inflate_chunk: () => {
+          if (trap) throw new WebAssembly.RuntimeError('unreachable');
+          put(new TextEncoder().encode('>a\nACGT\n'), 5);
+          return 0;
+        },
+        losat_web2_inflate_end: (handle: number) => {
+          ended.push(handle);
+          return 0;
+        },
+      } as unknown as AbiExports;
+      ref.abi = new ReactorAbi(exports);
+      opened.push({ abi: ref.abi, ended });
+      return ref.abi;
+    };
+    return { opened, open };
+  }
+
+  it('opens an instance for each file, none of them the shared one, and lets it go at the end of its inflation', async () => {
+    const { opened, open } = fakeInstances();
+    const shared = reopening(open);
+    const inflater = new ReactorInflater(shared, open);
+    const a = await inflateFile(new File([new Uint8Array([0x1f, 0x8b])], 'a.fa.gz'), inflater);
+    const b = await inflateFile(new File([new Uint8Array([0x1f, 0x8b])], 'b.fa.gz'), inflater);
+    expect(await a.text()).toBe('>a\nACGT\n');
+    expect(await b.text()).toBe('>a\nACGT\n');
+    // The shared instance (0) only read the name rule, twice, and ended what it began; each file ran on a new one.
+    expect(opened.map((instance) => instance.ended)).toEqual([[1, 2], [1], [1]]);
+    expect(new Set(opened.map((instance) => instance.abi)).size).toBe(3);
+    // A plain name opens no instance, and a failed or cancelled inflation lets its instance go as well.
+    await inflateFile(new File(['>a\n'], 'plain.fa'), inflater);
+    expect(opened).toHaveLength(3);
+    const open1 = await inflater.open('c.fa.gz', () => undefined);
+    await open1!.cancel();
+    expect(opened.map((instance) => instance.ended)).toEqual([[1, 2, 3], [1], [1], [1]]);
+    await expect(open1!.push(new Uint8Array([1]))).rejects.toThrow('the inflation has ended');
+  });
+
+  it('stops the inflation of an instance that traps, ends none on it, and leaves the other inflations and the shared instance as they were', async () => {
+    // Instance 0 is the shared one; the first inflation's instance (1) traps in `inflate_chunk`.
+    const { opened, open } = fakeInstances(1);
+    const shared = reopening(open);
+    const inflater = new ReactorInflater(shared, open);
+    const first = await inflater.open('a.fa.gz', () => undefined);
+    const second = await inflater.open('b.fa.gz', () => undefined);
+    await expect(first!.push(new Uint8Array([1]))).rejects.toThrow(EngineStoppedError);
+    // Its instance is dead (ABI v2: no call after a trap) and is not called again.
+    await first!.cancel();
+    await expect(first!.push(new Uint8Array([1]))).rejects.toThrow('the inflation has ended');
+    expect(opened.map((instance) => instance.ended)).toEqual([[1, 2], [], []]);
+    // The other inflation runs on its own instance and goes on.
+    await second!.push(new Uint8Array([1]));
+    await second!.end();
+    expect(opened.map((instance) => instance.ended)).toEqual([[1, 2], [], [1]]);
+    // The shared instance still works, and the next file opens a new instance.
+    expect(opened[0]!.abi.stoppedBy).toBeUndefined();
+    const file = await inflateFile(new File([new Uint8Array([0x1f, 0x8b])], 'c.fa.gz'), inflater);
+    expect(await file.text()).toBe('>a\nACGT\n');
+    expect(opened).toHaveLength(4);
+  });
+
+  it('refuses the file whose name-rule call traps the shared instance, and the next file reopens the shared instance', async () => {
+    // Instance 0, the first shared one, traps in `inflate_begin`; `reopening` replaces it at its next use.
+    const { opened, open } = fakeInstances(undefined, 0);
+    const inflater = new ReactorInflater(reopening(open), open);
+    await expect(inflater.open('a.fa.gz', () => undefined)).rejects.toThrow(EngineStoppedError);
+    expect(opened).toHaveLength(1);
+    expect(opened[0]!.abi.stoppedBy).toBeDefined();
+    const file = await inflateFile(new File([new Uint8Array([0x1f, 0x8b])], 'b.fa.gz'), inflater);
+    expect(await file.text()).toBe('>a\nACGT\n');
+    // A new shared instance (1) read the name rule and ended it; the file ran on instance 2.
+    expect(opened.map((instance) => instance.ended)).toEqual([[], [1], [1]]);
+  });
+
+  it('reads the inflate response, gives stream 5 of a chunk to its sink only, and ends an inflation whose response cannot be read', () => {
+    const { abi, ended } = fakeReactor('{"compression":"zstd","plain_name":"a.fa"}', 7);
+    expect(abi.inflateBegin('a.fa.zst')).toEqual({ handle: 5, compression: 'zstd', plainName: 'a.fa' });
+    const received: number[][] = [];
+    abi.inflateChunk(5, new Uint8Array([9]), (bytes) => received.push([...bytes]));
+    expect(received).toEqual([[1, 2, 3]]);
+    expect(ended).toEqual([]);
+    const broken = fakeReactor('{"compression":', 4);
+    expect(() => broken.abi.inflateBegin('a.fa.zst')).toThrow(SyntaxError);
+    expect(broken.ended).toEqual([5]);
+  });
 });
 
 // --- the built reactors (LOSAT_WEB_REACTORS) ---------------------------------------------------
@@ -210,9 +526,17 @@ describe('ReactorAbi', () => {
 const reactors = findReactors();
 
 describe.skipIf(reactors === undefined)('the built reactors', () => {
-  it('are the two reactor kinds, with the shared memory of the certified threaded build (plan TD-7)', () => {
+  it('are the two reactor kinds, with the shared memory that the threaded build declares (plan TD-7)', () => {
     expect(inspectReactor(reactors!.serial.bytes).kind).toBe('serial-reactor');
-    expect(inspectReactor(reactors!.threads.bytes)).toMatchObject({ kind: 'threaded-reactor', memory: { maximum: 16384, shared: true } });
+    const threaded = inspectReactor(reactors!.threads.bytes);
+    expect(threaded).toMatchObject({ kind: 'threaded-reactor', memory: { shared: true } });
+    // The maximum that build_reactors.py recorded: 65,535 pages, or 16,384 in a build from
+    // before the 1 GiB limit was lifted (plan DW-28).
+    const recorded = JSON.parse(readFileSync(`${reactors!.dir}/artifacts.json`, 'utf8')) as {
+      artifacts: { threads: { memory: { maximum: number } } };
+    };
+    expect(threaded.memory.maximum).toBe(recorded.artifacts.threads.memory.maximum);
+    expect([16_384, 65_535]).toContain(threaded.memory.maximum);
     // The served threaded module is the artifact with the shared-memory guard.
     expect(reactors!.threads.sha256).not.toBe(reactors!.threads.artifactSha256);
     const sha256 = (path: string) => createHash('sha256').update(readFileSync(path)).digest('hex');
@@ -231,7 +555,7 @@ describe.skipIf(reactors === undefined)('responses of more than 1 MiB from the s
   it('scans and registers thousands of records', async () => {
     const instance = await instantiateSerial(new WebAssembly.Module(reactors!.serial.bytes as BufferSource));
     const scanner = new ReactorScanner(async () => instance.abi);
-    const scan = await scanner.scan(0, (async function* () {
+    const scan = await scanner.scan(1, (async function* () {
       yield fasta;
     })());
     expect(scan.records).toHaveLength(25_000);
@@ -277,13 +601,13 @@ describe.skipIf(reactors === undefined)('the serial reactor answers the search f
   // (with LOSAT_WEB_REACTORS) writes it again.
   it("FakeEngine's describe.json is the reactor's describe of every program", async () => {
     const abi = await open();
-    const described = Object.fromEntries(['blastn', 'blastp', 'tblastn', 'tblastx'].map((program) => [program, abi.describe(program)]));
+    const described = Object.fromEntries(PROGRAMS.map(({ id }) => [id, abi.describe(id)]));
     await expect(`${JSON.stringify(described, null, 1)}\n`).toMatchFileSnapshot('../../src/infra/fake/describe.json');
   });
 
   it('every field of the search form is an option that the engine describes', async () => {
     const abi = await open();
-    for (const program of PROGRAMS.filter((p) => p.unavailable === undefined)) {
+    for (const program of PROGRAMS) {
       const described = new Set(toProgramDescription(abi.describe(program.id)).parameters.map((option) => option.flag));
       for (const section of program.sections) {
         for (const field of section.fields) expect(described, `${program.id} ${field.flag}`).toContain(field.flag);
@@ -317,9 +641,193 @@ describe.skipIf(reactors === undefined)('the serial reactor answers the search f
     // What register still refuses: a first line that NCBI may read as a Seq-id and a gap line.
     const seqId = await checker.check('blastn', 'query', new TextEncoder().encode('AB123456\nACGT\n'));
     expect(seqId.ok).toBe(false);
-    expect(!seqId.ok && seqId.message).toMatch(/not supported by LOSAT Web/);
+    expect(!seqId.ok && seqId.message).toMatch(/not supported in the browser/);
     const gap = await checker.check('blastp', 'subject', new TextEncoder().encode('>p\nMK\n>?10\nMK\n'));
     expect(gap.ok).toBe(false);
-    expect(!gap.ok && gap.message).toMatch(/not supported by LOSAT Web/);
+    expect(!gap.ok && gap.message).toMatch(/not supported in the browser/);
   });
+});
+
+describe.skipIf(reactors === undefined)('the warm-up on the serial reactor', () => {
+  const open = async () => (await instantiateSerial(new WebAssembly.Module(reactors!.serial.bytes as BufferSource))).abi;
+  // Streams 0, 6 and 7 (the three output formats) of one search on an instance.
+  const search = (abi: ReactorAbi, argv: readonly string[], query: Uint8Array, subject: Uint8Array) => {
+    const q = abi.register(argv[0]!, 0, query).handle;
+    const s = abi.register(argv[0]!, 1, subject).handle;
+    const out: Record<number, string> = { 0: '', 6: '', 7: '' };
+    const decoder = new TextDecoder();
+    abi.run(argv, q, s, (stream, bytes) => {
+      if (stream in out) out[stream] += decoder.decode(bytes);
+    });
+    abi.release(q);
+    abi.release(s);
+    return out;
+  };
+
+  for (const program of PROGRAMS) {
+    it(`${program.id}: runs on the built-in sequences, which have hits, and leaves the next search as on a new instance`, async () => {
+      const argv = [program.id, '-query', 'query.fa', '-subject', 'subject.fa'];
+      const inputs = warmUpInputs(program.id);
+      const fresh = search(await open(), [...argv, '-num_threads', '1'], inputs.query, inputs.subject);
+      // A hit for each of the three blocks.
+      expect(fresh[6]!.trim().split('\n').length).toBeGreaterThanOrEqual(3);
+      const abi = await open();
+      // A region of the user's input is left out of the warm-up's argv.
+      expect(warmUp(abi, [...argv, '-query_loc', '5000-6000'])).toBe(true);
+      expect(search(abi, [...argv, '-num_threads', '1'], inputs.query, inputs.subject)).toEqual(fresh);
+    });
+  }
+
+  it('reports an argv that the engine refuses, and the instance still runs searches', async () => {
+    const abi = await open();
+    expect(warmUp(abi, ['blastn', '-query', 'q.fa', '-subject', 's.fa', '-word_size', '-1'])).toBe(false);
+    expect(abi.stoppedBy).toBeUndefined();
+    expect(warmUp(abi, ['blastn', '-query', 'q.fa', '-subject', 's.fa'])).toBe(true);
+  });
+});
+
+describe.skipIf(reactors === undefined)("the serial reactor inflates sources with the command line's decoders", () => {
+  const module = reactors === undefined ? undefined : new WebAssembly.Module(reactors.serial.bytes as BufferSource);
+  const instantiate = async () => (await instantiateSerial(module!)).abi;
+  const inflater = new ReactorInflater(reopening(instantiate), instantiate);
+  const decoder = new TextDecoder();
+  const A = '>a one\nACGT\n';
+  const B = '>b two\nGGCC\nTT\n';
+  // pzstd output: a skippable frame, then one frame of `>a\nACGT…` and `>b\nTTTT…`.
+  const PZSTD =
+    'UCpNGAQAAAA/AAAAKLUv/QRYlQEAhAI+YQpBQ0dUQUFBQ0NDR0dHVFRUCj5iClRUVFRHR0dHQ0NDQ0FBQUEKAgCYibw/ZwTZFtvJ';
+  const AB_TEXT = '>a\nACGTACGTACGTACGTACGTACGTAAAACCCGGGTTT\n>b\nTTTTGGGGCCCCAAAATTTTGGGGCCCCAAAA\n';
+  // `bzip2 -9c` of A, then of B: two bzip2 streams one after the other (as pbzip2 or `cat` writes them).
+  const TWO_BZIP2 =
+    'QlpoOTFBWSZTWa6jEEsAAAHfAAAQQAAAASiABAAiAaAAMQDTTQQBppoCaYaTyXi7kinChIV1GIJYQlpoOTFBWSZTWf/ayGYAAAJfgAAQQAAAAQiABAAQAISAIAAiDRppoQAwKKwKAaT5+LuSKcKEh/7WQzA=';
+  const sentence = (name: string, suffix: string, format: string, fault: string) =>
+    `'${name}' is named ${suffix} but is not ${format} data (${fault}); LOSAT reads a file named ${suffix} through ${format}`;
+  const inflated = async (bytes: Uint8Array | string, name: string) => {
+    const file = await inflateFile(new File([bytes as BlobPart], name), inflater);
+    return { name: file.name, text: decoder.decode(await file.arrayBuffer()) };
+  };
+  const failure = async (bytes: Uint8Array | string, name: string) => {
+    try {
+      await inflateFile(new File([bytes as BlobPart], name), inflater);
+    } catch (error) {
+      return (error as Error).message;
+    }
+    throw new Error(`${name} was inflated`);
+  };
+
+  it('keeps a plain name as it is, and inflates every member and frame under the plain name', async () => {
+    expect(await inflated(A, 'a.fa')).toEqual({ name: 'a.fa', text: A });
+    expect(await inflated(Buffer.concat([gzipSync(A), gzipSync(B)]), 'two.fa.GZ')).toEqual({ name: 'two.fa', text: A + B });
+    expect(await inflated(Buffer.concat([zstdCompressSync(A), zstdCompressSync(B)]), 'two.fa.zst')).toEqual({ name: 'two.fa', text: A + B });
+    expect(await inflated(Buffer.from(PZSTD, 'base64'), 'p.fa.zst')).toEqual({ name: 'p.fa', text: AB_TEXT });
+    expect(await inflated(Buffer.from(TWO_BZIP2, 'base64'), 'two.fa.Bz2')).toEqual({ name: 'two.fa', text: A + B });
+    expect(await inflated(gzipSync(''), '.gz')).toEqual({ name: 'input', text: '' });
+  });
+
+  it('inflates a file of several 8 MiB slices into several 8 MiB parts', async () => {
+    // 17 MiB of bytes that do not compress (xorshift32): each compressed file holds three slices.
+    let state = 2463534242;
+    const bytes = new Uint8Array(17 * 1024 * 1024 + 5).map(() => {
+      state ^= state << 13;
+      state ^= state >>> 17;
+      state ^= state << 5;
+      return state & 0xff;
+    });
+    const MIB = 1024 * 1024;
+    for (const [suffix, pack] of [
+      ['gz', gzipSync],
+      ['zst', zstdCompressSync],
+    ] as const) {
+      const packed = pack(bytes);
+      expect(packed.length).toBeGreaterThan(16 * MIB);
+      // The sizes of the Blobs made while the file inflates: its parts.
+      const parts: number[] = [];
+      const RealBlob = globalThis.Blob;
+      vi.stubGlobal(
+        'Blob',
+        class extends RealBlob {
+          constructor(blobParts?: BlobPart[], options?: BlobPropertyBag) {
+            super(blobParts, options);
+            parts.push(this.size);
+          }
+        },
+      );
+      let file: File;
+      try {
+        file = await inflateFile(new File([packed as BlobPart], `big.fa.${suffix}`), inflater);
+      } finally {
+        vi.unstubAllGlobals();
+      }
+      expect(file.name).toBe('big.fa');
+      expect(Buffer.compare(new Uint8Array(await file.arrayBuffer()), bytes)).toBe(0);
+      // Parts of 8 MiB and at most one engine chunk more (emit.rs CHUNK, 1 MiB), the last one with the
+      // rest: two or three parts for these 17 MiB, as the chunks fall.
+      expect(parts.reduce((sum, size) => sum + size, 0)).toBe(bytes.length);
+      expect(parts.length).toBeGreaterThanOrEqual(2);
+      for (const size of parts.slice(0, -1)) {
+        expect(size).toBeGreaterThanOrEqual(8 * MIB);
+        expect(size).toBeLessThanOrEqual(9 * MIB);
+      }
+      expect(parts.at(-1)).toBeGreaterThan(0);
+      expect(parts.at(-1)).toBeLessThanOrEqual(9 * MIB);
+    }
+  }, 60_000);
+
+  it("refuses a damaged, cut, mislabelled or empty file with the command line's sentence, and goes on", async () => {
+    const text = Array.from({ length: 300 }, (_, i) => `>r${i}\n${'ACGTTGCAAGTC'.repeat(30)}\n`).join('');
+    const checked = Buffer.from(zstdCompressSync(text, { params: { [zlib.ZSTD_c_checksumFlag]: 1 } }));
+    checked[checked.length - 1]! ^= 1;
+    expect(await failure(checked, 'bad.fa.zst')).toBe(sentence('bad.fa.zst', '.zst', 'zstd', "a zstd frame's checksum does not match its data"));
+    const gz = gzipSync(text);
+    expect(await failure(gz.subarray(0, gz.length >> 1), 'cut.fa.gz')).toBe(sentence('cut.fa.gz', '.gz', 'gzip', 'incomplete deflate stream'));
+    expect(await failure(A, 'text.fa.gz')).toBe(sentence('text.fa.gz', '.gz', 'gzip', 'invalid gzip header'));
+    expect(await failure('', 'e.fa.gz')).toBe(sentence('e.fa.gz', '.gz', 'gzip', 'the file is empty'));
+    expect(await failure('', 'e.fa.zst')).toBe(sentence('e.fa.zst', '.zst', 'zstd', 'the file is empty'));
+    expect(await failure(A, 'a.fa.bz2')).toBe(sentence('a.fa.bz2', '.bz2', 'bzip2', 'bzip2: bz2 header missing'));
+    expect(await inflated(gzipSync(A), 'after.fa.gz')).toEqual({ name: 'after.fa', text: A });
+  });
+
+  it('stops a downloaded Example set past its limit of inflated bytes, and goes on', async () => {
+    const big = new File([gzipSync('>r\n' + 'ACGT'.repeat(1 << 20))], 'set.fna.gz');
+    await expect(inflateFile(big, inflater, 1_000_000)).rejects.toMatchObject({ name: INFLATED_TOO_LARGE });
+    expect((await inflateFile(big, inflater, 5 * 1024 * 1024)).size).toBe(3 + 4 * (1 << 20));
+    expect(await inflated(gzipSync(A), 'after.fa.gz')).toEqual({ name: 'after.fa', text: A });
+  });
+
+  it("grows the linear memory of an instance by less than 1.5 windows when a zstd file's frame declares a window W", async () => {
+    // A frame of window 32 MiB (windowLog 25, header Window_Descriptor checked below) over 40 MiB of
+    // bytes that do not compress. The decoder's ring buffer is reserved at the frame's window
+    // (ruzstd `DecodeBuffer::reset`, at the first frame as at later ones: LOSAT/src/blastinput/compressed.rs
+    // `ZstdFrames::step`); where it grows by doubling instead, each step allocates the larger buffer
+    // while the smaller lives, a Wasm allocator cannot reuse the smaller regions for it, and the
+    // memory ends near 2 W, which no instance gives back. The reserved buffer is W and a little over; the
+    // 8 MiB slice of the file that inflateFile hands the engine at once adds to it.
+    const MIB = 1024 * 1024;
+    const W = 32 * MIB;
+    let state = 2463534242;
+    const bytes = new Uint8Array(40 * MIB).map(() => {
+      state ^= state << 13;
+      state ^= state >>> 17;
+      state ^= state << 5;
+      return state & 0xff;
+    });
+    const packed = zstdCompressSync(bytes, { params: { [zlib.ZSTD_c_windowLog]: 25 } });
+    // Window_Descriptor (byte 5 without Single_Segment_Flag): exponent 15 above 2^10, no mantissa.
+    expect(packed[4]! & 0x20).toBe(0);
+    expect(1 << (10 + (packed[5]! >> 3))).toBe(W);
+    const instances: ReactorAbi[] = [];
+    const instantiate = async () => {
+      const { abi } = await instantiateSerial(module!);
+      instances.push(abi);
+      return abi;
+    };
+    const own = new ReactorInflater(reopening(instantiate), instantiate);
+    const file = await inflateFile(new File([packed as BlobPart], 'w.fa.zst'), own);
+    expect(file.size).toBe(bytes.length);
+    // Instance 0 is the shared one (the name rule); instance 1 inflated the file.
+    expect(instances).toHaveLength(2);
+    const grown = instances[1]!.memoryBytes() - instances[0]!.memoryBytes();
+    expect(grown).toBeGreaterThan(W);
+    expect(grown).toBeLessThan(1.5 * W);
+  }, 60_000);
 });

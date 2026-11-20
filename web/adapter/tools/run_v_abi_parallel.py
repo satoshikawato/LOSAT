@@ -7,7 +7,7 @@ part per TBLASTX search; the longest parts start first. Each part is one `v_abi.
 process (it registers its own subjects and reuses them across its searches). The
 results of all parts are merged into DIR/v-abi-results.json and summarized.
 
-Usage: run_v_abi_parallel.py --native LOSAT --serial SERIAL.wasm --threads THREADS.wasm
+Usage: run_v_abi_parallel.py --native losat --serial SERIAL.wasm --threads THREADS.wasm
            --cases CASES.json --out DIR [--jobs 12]
 """
 from __future__ import annotations

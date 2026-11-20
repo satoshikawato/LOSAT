@@ -1,0 +1,226 @@
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastp",
+      service "plain",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_1"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">qs1 low-complexity run inside the alignment"
+                  }
+                }
+              },
+              title "qs1 low-complexity run inside the alignment"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 119,
+              seq-data ncbieaa "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKQQQQQQQQQQQQQ
+QQQQQQQQGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKC"
+            }
+          }
+        }
+      },
+      subject sequences {
+        {
+          id {
+            local str "Subject_1"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">ss1 subject with the same run"
+                }
+              }
+            },
+            title "ss1 subject with the same run"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 116,
+            seq-data ncbieaa "MWMEHSVLKAVFAVRRKVMDDPKIRDGPMAVMKQQQQQQQQQQQQQQQ
+QQQQQQGWENYCWPANMSWKVLMKYEFSSDIHPWICWIPKEQQTPGWWKTDTLHMAEMGLWMHKYPKC"
+          }
+        }
+      },
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, 1 }
+        },
+        {
+          name "MaskAtHash",
+          value boolean FALSE
+        },
+        {
+          name "SegFiltering",
+          value boolean TRUE
+        },
+        {
+          name "WordThreshold",
+          value integer 11
+        },
+        {
+          name "WindowSize",
+          value integer 40
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "UngappedMode",
+          value boolean FALSE
+        },
+        {
+          name "CompositionBasedStats",
+          value integer 2
+        },
+        {
+          name "SmithWatermanMode",
+          value boolean FALSE
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 10918
+        }
+      },
+      program-options {
+        {
+          name "LCaseMask",
+          value query-mask {
+            locations {
+              packed-int {
+                {
+                  from 33,
+                  to 33,
+                  id local str "Query_1"
+                }
+              }
+            },
+            frame notset
+          }
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 436
+          },
+          {
+            id str "blast_score",
+            value int 436
+          },
+          {
+            id str "e_value",
+            value real { 373435029720833, 10, -76 }
+          },
+          {
+            id str "bit_score",
+            value real { 17255524738001, 10, -11 }
+          },
+          {
+            id str "num_ident",
+            value int 110
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 112
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 3,
+          ids {
+            local str "Query_1",
+            local str "Subject_1"
+          },
+          starts {
+            0,
+            0,
+            81,
+            -1,
+            84,
+            81
+          },
+          lens {
+            81,
+            3,
+            35
+          },
+          strands {
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus
+          }
+        }
+      }
+    },
+    masks {
+      {
+        locations {
+          packed-int {
+            {
+              from 33,
+              to 53,
+              id local str "Query_1"
+            }
+          }
+        },
+        frame notset
+      }
+    },
+    ka-blocks {
+      {
+        lambda { 32400204748824, 10, -14 },
+        k { 135253905673837, 10, -15 },
+        h { 519997083974127, 10, -15 },
+        gapped FALSE
+      },
+      {
+        lambda { 267, 10, -3 },
+        k { 41, 10, -3 },
+        h { 14, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 10918",
+      "Effective search space used: 10918",
+      "Length adjustment: 13"
+    }
+  }
+}

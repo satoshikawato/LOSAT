@@ -18,7 +18,7 @@ This directory maintains the upstream packaging template and build script for `b
 Bioconda builds the default x86_64 Linux and macOS platforms and supports the
 additional ARM platforms through `extra.additional-platforms`.
 
-LOSAT v0.1.0 is intended to be submitted for:
+Each LOSAT release is built for:
 
 | Bioconda subdir | Architecture |
 | --- | --- |
@@ -32,36 +32,37 @@ use a separate channel or GitHub release artifact if added later.
 
 ## Files
 
-- `meta.yaml.template` — proposed Bioconda recipe. It contains one deliberate
-  placeholder for the SHA-256 of the tagged `v0.1.0` GitHub source archive.
+- `meta.yaml.template` — proposed Bioconda recipe of the next release (v0.2.0).
+  It contains one deliberate placeholder for the SHA-256 of the tagged GitHub
+  source archive.
 - `build.sh` — native Rust build/install script used by the proposed recipe.
 
 The recipe builds LOSAT from source on each Bioconda worker. It does not embed,
 link, invoke, or fall back to NCBI BLAST+.
 
-## After the v0.1.0 tag
+## After the v0.2.0 tag
 
 1. Download the immutable GitHub tag archive:
 
    ```bash
    curl -L \
-     -o LOSAT-v0.1.0.tar.gz \
-     https://github.com/satoshikawato/LOSAT/archive/refs/tags/v0.1.0.tar.gz
-   sha256sum LOSAT-v0.1.0.tar.gz
+     -o LOSAT-v0.2.0.tar.gz \
+     https://github.com/satoshikawato/LOSAT/archive/refs/tags/v0.2.0.tar.gz
+   sha256sum LOSAT-v0.2.0.tar.gz
    ```
 
-2. Copy `meta.yaml.template` to `meta.yaml` in a new
-   `bioconda-recipes/recipes/losat/` directory.
+2. Copy `meta.yaml.template` to `meta.yaml` in
+   `bioconda-recipes/recipes/losat/`.
 3. Replace only:
 
    ```text
-   __REPLACE_WITH_V0_1_0_TAG_TARBALL_SHA256__
+   __REPLACE_WITH_V0_2_0_TAG_TARBALL_SHA256__
    ```
 
    with the observed archive SHA-256.
 4. Copy `build.sh` alongside `meta.yaml`.
 5. Run the current Bioconda lint/build workflow without changing LOSAT's
-   certified program scope.
+   supported program scope.
 6. Submit the recipe to `bioconda/bioconda-recipes`.
 
 ## Recipe design constraints
@@ -72,13 +73,14 @@ The proposed recipe deliberately stays small:
 - use the Bioconda/conda-forge Rust compiler toolchain;
 - install the CLI with `cargo install --locked`;
 - generate third-party license metadata with `cargo-bundle-licenses`;
-- smoke-test `LOSAT --version`, top-level help, and the three certified program
-  subcommands;
+- smoke-test `losat --version`, top-level help, the help of the eight search
+  programs, and `-version` through each of NCBI's program names;
 - opt in to `linux-aarch64` and `osx-arm64` in addition to Bioconda's default
   x86_64 Linux/macOS builds.
 
-The recipe does not claim generic BLAST compatibility, database/remote search,
-threaded Wasm support, or a stable public Rust/Wasm API.
+The recipe installs the native `losat` executable and NCBI's program names only;
+the Wasm modules, the Web GUI and the Rust library API are not part of it, and
+remote search (`-remote`) is not provided.
 
 ## Pre-tag audit boundary
 
@@ -86,3 +88,7 @@ This upstream repository PR prepares the recipe source-of-truth only. It does
 not claim that Bioconda has already built or published all four platforms.
 Four-platform publication becomes true only after the downstream Bioconda PR
 passes its platform builds and is merged.
+
+## Program names
+
+`build.sh` links NCBI's program names (`blastn`, `makeblastdb`, ...) to `losat` in `$PREFIX/bin`. They clash with the files of the `blast` package when both are installed in one environment.

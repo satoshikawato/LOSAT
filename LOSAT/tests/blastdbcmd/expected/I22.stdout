@@ -1,0 +1,11 @@
+Database: protein in volumes; LOSAT seqdb fixture, protein, version 4; LOSAT seqdb fixture, protein, version 4
+	30 sequences; 2,403 total residues
+
+Date: Oct 12, 2026  4:12 PM	Longest sequence: 300 residues
+
+BLASTDB Version: 4
+
+Volumes:
+	{T}/seqdb/db/prot_mv.pal
+	{T}/seqdb/db/prot_old
+	{T}/seqdb/db/prot_v4

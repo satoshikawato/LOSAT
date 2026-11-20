@@ -1,0 +1,6 @@
+h_slice	13045	14223	15000	BDV02158.1	1	391	409	N/A	5.84e-169	393	65.140	2	1	BDV02158.1 serine hydroxymethyltransferase [Candidatus Hepatoplasma vulgare]
+h_slice	4572	5690	15000	BDV02443.1	68	441	442	N/A	1.37e-143	377	61.804	7	3	BDV02443.1 tRNA-specific 2-thiouridylase MnmA [Candidatus Hepatoplasma vulgare]
+h_slice	10544	11581	15000	BDV02702.1	1	346	354	N/A	6.19e-107	350	52.571	8	3	BDV02702.1 peptide chain release factor 1 [Candidatus Hepatoplasma vulgare]
+h_slice	1621	2868	15000	BDV02441.1	14	426	430	N/A	4.65e-99	417	44.844	5	4	BDV02441.1 aspartyl/glutamyl-tRNA amidotransferase subunit A [Candidatus Hepatoplasma vulgare]
+h_slice	14218	14835	15000	BDV02159.1	4	210	210	N/A	3.44e-78	207	57.971	1	1	BDV02159.1 uracil phosphoribosyltransferase [Candidatus Hepatoplasma vulgare]
+h_mut_10pct	148	1290	1397	BDV02158.1	2	383	409	N/A	1.30e-120	384	51.562	5	3	BDV02158.1 serine hydroxymethyltransferase [Candidatus Hepatoplasma vulgare]

@@ -1,0 +1,336 @@
+Seq-annot ::= {
+  desc {
+    user {
+      type str "Hist Seqalign",
+      data {
+        {
+          label str "Hist Seqalign",
+          data bool TRUE
+        }
+      }
+    },
+    user {
+      type str "Blast Type",
+      data {
+        {
+          label str "blastp",
+          data int 2
+        }
+      }
+    },
+    user {
+      type str "Blast Database Title",
+      data {
+        {
+          label str "PajaWSV proteins",
+          data bool FALSE
+        }
+      }
+    }
+  },
+  data align {
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 39
+        },
+        {
+          id str "blast_score",
+          value int 39
+        },
+        {
+          id str "e_value",
+          value real { 319624941840443, 10, -14 }
+        },
+        {
+          id str "bit_score",
+          value real { 196310157408208, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 11
+        },
+        {
+          id str "comp_adjustment_method",
+          value int 1
+        },
+        {
+          id str "num_positives",
+          value int 16
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 383048780487805, 10, -13 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 3,
+        ids {
+          local str "Query_1",
+          general {
+            db "BL_ORD_ID",
+            tag id 81
+          }
+        },
+        starts {
+          18,
+          2752,
+          35,
+          -1,
+          41,
+          2769
+        },
+        lens {
+          17,
+          6,
+          8
+        },
+        strands {
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown
+        }
+      }
+    },
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 36
+        },
+        {
+          id str "blast_score",
+          value int 36
+        },
+        {
+          id str "e_value",
+          value real { 769336375114857, 10, -14 }
+        },
+        {
+          id str "bit_score",
+          value real { 184754170130687, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 6
+        },
+        {
+          id str "comp_adjustment_method",
+          value int 1
+        },
+        {
+          id str "num_positives",
+          value int 7
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 903658536585366, 10, -14 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_1",
+          general {
+            db "BL_ORD_ID",
+            tag id 70
+          }
+        },
+        starts {
+          2,
+          136
+        },
+        lens {
+          7
+        },
+        strands {
+          unknown,
+          unknown
+        }
+      }
+    }
+  }
+}
+Seq-annot ::= {
+  desc {
+    user {
+      type str "Hist Seqalign",
+      data {
+        {
+          label str "Hist Seqalign",
+          data bool TRUE
+        }
+      }
+    },
+    user {
+      type str "Blast Type",
+      data {
+        {
+          label str "blastp",
+          data int 2
+        }
+      }
+    },
+    user {
+      type str "Blast Database Title",
+      data {
+        {
+          label str "PajaWSV proteins",
+          data bool FALSE
+        }
+      }
+    }
+  },
+  data align {
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 48
+        },
+        {
+          id str "blast_score",
+          value int 48
+        },
+        {
+          id str "e_value",
+          value real { 843178950256523, 10, -15 }
+        },
+        {
+          id str "bit_score",
+          value real { 23097811924077, 10, -12 }
+        },
+        {
+          id str "num_ident",
+          value int 10
+        },
+        {
+          id str "comp_adjustment_method",
+          value int 2
+        },
+        {
+          id str "num_positives",
+          value int 17
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 152058823529412, 10, -13 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_2",
+          general {
+            db "BL_ORD_ID",
+            tag id 73
+          }
+        },
+        starts {
+          42,
+          29
+        },
+        lens {
+          30
+        },
+        strands {
+          unknown,
+          unknown
+        }
+      }
+    },
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 42
+        },
+        {
+          id str "blast_score",
+          value int 42
+        },
+        {
+          id str "e_value",
+          value real { 531044875708075, 10, -14 }
+        },
+        {
+          id str "bit_score",
+          value real { 207866144685728, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 13
+        },
+        {
+          id str "comp_adjustment_method",
+          value int 2
+        },
+        {
+          id str "num_positives",
+          value int 24
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 21578431372549, 10, -12 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 5,
+        ids {
+          local str "Query_2",
+          general {
+            db "BL_ORD_ID",
+            tag id 5
+          }
+        },
+        starts {
+          100,
+          1172,
+          -1,
+          1191,
+          119,
+          1194,
+          -1,
+          1204,
+          129,
+          1207
+        },
+        lens {
+          19,
+          3,
+          10,
+          3,
+          14
+        },
+        strands {
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown
+        }
+      }
+    }
+  }
+}

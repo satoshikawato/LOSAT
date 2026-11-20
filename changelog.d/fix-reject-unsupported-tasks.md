@@ -1,0 +1,1 @@
+- `losat blastp -task blastp-short` and `losat tblastn -task tblastn-fast` are rejected when the arguments are parsed, with the message the search entrance printed before; the help and the Web task list no longer offer them.

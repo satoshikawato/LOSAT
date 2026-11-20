@@ -1,0 +1,190 @@
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastx",
+      service "plain",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_1"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">j1 two bases"
+                  }
+                }
+              },
+              title "j1 two bases"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 2,
+              seq-data ncbi2na '10'H
+            }
+          },
+          seq {
+            id {
+              local str "Query_2"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">j2 all N"
+                  }
+                }
+              },
+              title "j2 all N"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 30,
+              seq-data ncbi4na 'FFFFFFFFFFFFFFFFFFFFFFFFFFFFFF'H
+            }
+          }
+        }
+      },
+      subject sequences {
+        {
+          id {
+            local str "Subject_1"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">sp1 subject protein alpha"
+                }
+              }
+            },
+            title "sp1 subject protein alpha"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 137,
+            seq-data ncbieaa "MWMEHSVLKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKV
+LMKYEFSSDIHPWICWIPKEQQTPGWWKTDTLHMAEMGLWMHKYPKCMCVMVRYTDQSLRHWEINTDANFEKLKILHH
+MVGHGRTASEG"
+          }
+        },
+        {
+          id {
+            local str "Subject_2"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">sp2 subject protein beta, distant"
+                }
+              }
+            },
+            title "sp2 subject protein beta, distant"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 142,
+            seq-data ncbieaa "YWMEHSVLKADQLQLRKVMDDPKIRDGPMAVMKVWESYCFILHSIANM
+SAHVLMKYEFQSGIHPCNQWTCWIPKYMAVPGWCPTDTLHVSEMGLWMHCEPMCHMVRETTHALRHWKINEICNFEKL
+KAFPYQVPMGRAANEG"
+          }
+        }
+      },
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, 1 }
+        },
+        {
+          name "LongestIntronLength",
+          value integer 0
+        },
+        {
+          name "MaskAtHash",
+          value boolean FALSE
+        },
+        {
+          name "SegFilteringWindow",
+          value integer 12
+        },
+        {
+          name "SegFilteringLocut",
+          value real { 22, 10, -1 }
+        },
+        {
+          name "SegFilteringHicut",
+          value real { 25, 10, -1 }
+        },
+        {
+          name "WordThreshold",
+          value integer 12
+        },
+        {
+          name "WindowSize",
+          value integer 40
+        },
+        {
+          name "UngappedMode",
+          value boolean FALSE
+        },
+        {
+          name "QueryGeneticCode",
+          value integer 1
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "CompositionBasedStats",
+          value integer 2
+        },
+        {
+          name "SmithWatermanMode",
+          value boolean FALSE
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+    },
+    masks {
+    },
+    ka-blocks {
+      {
+        lambda { -1, 10, 0 },
+        k { -1, 10, 0 },
+        h { -1, 10, 0 },
+        gapped FALSE
+      },
+      {
+        lambda { -1, 10, 0 },
+        k { -1, 10, 0 },
+        h { -1, 10, 0 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 0",
+      "Effective search space used: 0",
+      "Length adjustment: 0"
+    }
+  }
+}

@@ -1,0 +1,42 @@
+#Post-RPSBLAST Processing Utility
+
+#Input data file:	arch/sdsite.asn
+#Output data file:	(stdout)
+#Annotation data at:	sites
+#E-Value cutoff:	0.01
+#Redundancy:	Full
+#Data requested:	Site annotations
+#Output format -- tab-delimited table
+#Show superfamilies: NO
+#DATA
+#SESSION	<session-ordinal>	<program>	<database>	<score-matrix>	<evalue-threshold>
+#QUERY	<query-id>	<seq-type>	<seq-length>	<definition-line>
+#SITES
+#<session-ordinal>	<query-id[readingframe]>	<annot-type>	<title>	<residue(coordinates)>	<complete-size>	<mapped-size>	<source-domain>
+#more such lines......
+#ENDSITES
+#MOTIFS
+#<session-ordinal>	<query-id[readingframe]>	<title>	<from>	<to>	<source-domain>
+#more such lines......
+#ENDMOTIFS
+#ENDQUERY	<query-id>
+#more query sections..
+#ENDSESSION	<session-ordinal>
+#more session sections..
+#ENDDATA
+#=====================================================================
+DATA
+SESSION	1	blastp	2.17.0+	Cdd	BLOSUM62	0.01
+QUERY	Query_1	Peptide	350	NP_416698.1 holocytochrome c synthase CcmH component [Escherichia coli str. K-12 substr. MG1655]
+SITES
+1	Query_1	Specific	putative catalytic site	C43,C46	2	2	319866
+1	Query_1	Specific	putative protein binding surface	E223,I226,M227,R230,V231,M233,D257,L260,G261,E264,A265,T267,R268,R294,S297,M298,F301,N302,E305	19	19	0
+ENDSITES
+MOTIFS
+1	Query_1	TPR repeat	I222	250R	0
+1	Query_1	TPR repeat	N255	288T	0
+1	Query_1	TPR repeat	I293	321K	0
+ENDMOTIFS
+ENDQUERY
+ENDSESSION	1
+ENDDATA

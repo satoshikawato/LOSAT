@@ -1,0 +1,420 @@
+//! The reports of each query batch of a TBLASTX search written when the batch loop takes the
+//! batch, and its final hit lists dropped, as NCBI prints each batch's result sets in its batch
+//! loop (line DBID, ID4t fix 2b); otherwise the loop keeps the final lists of every batch and
+//! writes all reports after the loop.
+//!
+//! This file is a child module of `blast_engine/run_impl.rs` (declared there with `#[path]`, as
+//! `x_batch_pipe.rs` is), so that it reads that file's types.
+//!
+//! NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:176-215
+//! ```c++
+//!         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup() ) {
+//!             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
+//!     ...
+//!             CRef<CSearchResultSet> results = lcl_blast->Run();
+//!     ...
+//!                 ITERATE(CSearchResultSet, result, *results) {
+//!                     formatter.PrintOneResultSet(**result, query_batch);
+//!                 }
+//!     ...
+//!         }
+//!         formatter.PrintEpilog(opt);
+//! ```
+//!
+//! When the stream acts (`check`), the loop writes a batch's reports right after it has taken
+//! the batch (`-db`: its titles read and its prefetch done) and added its queries' warnings: it
+//! calls the same report code (`BatchReports::write`) with the batch's final lists, numbered
+//! from the batch's first query as the batch made them, its queries' statistics, warnings and
+//! ids, and the batch's part of the query ranges (`batch_input`). After the loop it calls it once
+//! more with no query and the epilog. The batch's lists and warnings are then dropped.
+//!
+//! Why the bytes are those of the reports written after the loop (the argument of blastn's
+//! `x_rpt_stream.rs`, for TBLASTX):
+//! - every report of a query depends only on that query's final list and on fixed inputs. The
+//!   lists are final when the batch returns them (`HitCollector::finish`, or `culled_hit_order`
+//!   for `-culling_limit`: `-max_hsps`, `-qcov_hsp_perc` and `-max_target_seqs` per query, in
+//!   report order; nothing sorts across queries afterwards, ID4t fix 1). The coordinates move by
+//!   the query's and the subject's own range start (`shift_to_records`), and the rows, the
+//!   outfmt 7 headers and the outfmt 0 sections are written query by query from the query's
+//!   list, record, statistics and warnings, the subjects and the options. The writers write the
+//!   queries in order, so the reports of consecutive batches written one after the other are the
+//!   reports of all of them (outfmt 0 writes a window of queries at a time already, ID4t fix
+//!   2a). Formats 1 to 4 are outfmt 0 with another alignment section, made from the query's
+//!   aligned hits and records alone (`report::query_anchored`).
+//! - a database's reported sequences are numbered by rank among the sequences that the lists of
+//!   the call name (`database::reported_subjects`); the rank only indexes the call's records,
+//!   titles and ids, and every comparison is already made (the lists are final), so a rank among
+//!   one batch's sequences writes the same bytes as one among all.
+//! - what is not per query: the outfmt 0 prolog (written before the search, as without the
+//!   stream: a file sink, which writes it with the reports, is not streamed), the outfmt 0
+//!   epilog (the database lines and the options, fixed inputs) and outfmt 7's last line (the
+//!   number of queries formatted, NCBI's `m_QueriesFormatted`: the last call counts the queries
+//!   of every batch, `TblastxReportRun::queries_before`). Outfmt 6 has none.
+//! - the errors: an error of NCBI's that a batch meets (a reader error, an `eEOF` batch, a batch
+//!   without a query or without letters, an unknown matrix, the average subject length, a
+//!   database that cannot be read, a header file that cannot be read) comes after the reports of
+//!   the batches before, without the epilog, in both: here they were written when the loop took
+//!   them, so the error paths write only what follows them (`BatchReports::queries_written`). So
+//!   do LOSAT's refusals of what a batch's search meets (`ErrorAfterBatchReports`: an ungapped
+//!   extension that scores higher past the end of its query frame, `extension::query_batch`, a
+//!   one-hit merge of lengths that add up to 0, the ungapped re-evaluation of HSPs on a subject (or
+//!   its `-subject_loc` range) of fewer than 12 bases, `SubjectEmit::refuse_untranslated_frame`, and
+//!   the re-evaluation's fetch of a subject whose header cannot be read under a negative seqid list,
+//!   `subject_loop::x_fetch_keeps`). Any other error that LOSAT raises where NCBI would
+//!   not stop (LOSAT's refusals) is written without the reports of the batches before; so the
+//!   stream acts only where no such refusal can come after the first batch (`check`): a query batch whose concatenated query is too long for the diag
+//!   table (`check_diag_table_window`), a search space that overflows (`SearchSpaceOverflow`),
+//!   a `-db` whose sequences could not be read before the search (some of those read errors are
+//!   LOSAT's refusals, raised by the first batch with a valid context, `Off::Unreadable`),
+//!   and the refusals of the reports: a `-subject` record without a tabular id
+//!   (`tabular_subject_ids`), and with `-db` every sequence's stored data as the reports read it
+//!   (`TblastxDatabase::reports_may_refuse`: the header, the stored title, the tabular id, the
+//!   parsed Seq-ids, two sequences that the reports would join, the prefetch's taxids and
+//!   taxonomy database; the refusal of NCBI's taxonomy cache, which the batches ask for where
+//!   NCBI fetches a subject, so possibly in a later batch, `Off::TaxonomyCache`; a database with parsed Seq-ids of more than
+//!   `common::database::PARSED_CHECK_SEQUENCES_MAX` sequences is not read and keeps its reports
+//!   after the loop, `Off::LargeParsed`; blastn's reads nothing before the search since
+//!   2026-11-03 and refuses in the batch that reports the sequence). The refusals that depend on the
+//!   arguments only (the matrix, the `-seg` value) come in the first batch, where nothing of the
+//!   stream is written yet. Formats 1 to 4 (line RG T3c fix 1, `check`): the exception of NCBI's
+//!   merge in a query's section (a query record that is also a `-subject` record,
+//!   `query_anchored::write_section`) is NCBI's error, after the reports of the batches before and
+//!   of the batch's queries before, and the query's report up to its description table, without
+//!   the epilog, as NCBI's; the refusal of a `-db` sequence whose generated id (`lcl|Query_N`) is
+//!   that of a query of its batch (NCBI's scope is the batch's, `ResetScopeHistory`) comes before
+//!   that batch's first byte, after the batches before. Under `-parse_deflines` a `-db` sequence
+//!   with the id of a query of the run turns the stream off (`Off::Database`), so its refusal
+//!   (`common::database::refuse_reported_ids_of_queries`, in the batch that reports it) comes
+//!   before the first batch's reports. With one batch (the
+//!   first batch takes every query record) nothing can come after it, so the stream does not act
+//!   and nothing is checked. LOSAT's internal
+//!   invariant errors and panics are not argued; a write error of the output stops the run where
+//!   it happens (at the end without the stream).
+//! - what the report path writes to standard error (the query warnings) keeps its bytes and its
+//!   place before each query's report. `LOSAT_TIMING`'s blocks are printed when the loop takes a
+//!   batch, as before, so with the stream a block comes after the warnings of the batches before
+//!   it (the same lines in another order). The debugging output of the search, which a batch
+//!   writes while it is searched, keeps the reports at the end (`Off::Debug`).
+//!
+//! Off (the reports after the loop): outputs other than one format of the command line or ABI v1
+//! (the hit records and the format observer of the Web adapter, whose HSP numbers count over the
+//! whole search; a file sink, created when its report is written; two or more formats, which the
+//! library API allows on one stream); formats other than 0 to 4, 6 and 7 (the BLAST XML documents,
+//! the Seq-annots and the archive, whose framing and refusals are not argued here); the tabular
+//! reports with a field list or a delimiter and outfmt 10 and 20 (`Off::CustomTabular`: their
+//! refusals of a subject, a name of the taxonomy database or a definition line's ids, must come
+//! before the first byte, DECISIONS 5 of line CLI C2); the debugging output; the refusals above;
+//! and a database with parsed Seq-ids too large for the check (`Off::LargeParsed`).
+//!
+//! Diagnostics: with `LOSAT_X_STATS`, `[X_STATS] TBXRPTSTREAM off= check_s=` before the search
+//! (`off`: `none` when the loop writes each batch's reports, else the reason, `Off::name`;
+//! `check_s`: the seconds of `check`, the database's headers included).
+//!
+//! Memory: a batch's lists, statistics and warnings are dropped after its write. Kept for the
+//! whole search, as without the stream: one (empty) warnings slot per query, and with `-db` the
+//! header of every distinct sequence that a batch reported (`database::DatabaseTitles`, at most
+//! the database's sequences and at most the queries times the hit list size).
+
+use crate::api::local_blast::{OutputSink, ReportOutputs};
+use crate::blastinput::seq_range::{next_ranged_batch, Placements, QueryInput};
+use crate::utils::threading::SearchPool;
+
+use super::{
+    report, subject_tabular_id, writes_debug_output, QueryRuns, RunSubjects, ShownSubjects,
+    TblastxArgs,
+};
+
+/// Why the reports of a search are written after its batch loop (`check`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Off {
+    /// The first batch takes every query record: the one call after the loop writes them.
+    OneBatch,
+    /// Hit records, a format observer, a file sink, or two or more formats.
+    Outputs,
+    /// A format other than 0 to 4, 6 and 7.
+    Format,
+    /// A tabular report with a field list or a delimiter, or outfmt 10 or 20
+    /// (`TblastxOutputFormat::CustomTabular`), which is written after the loop (the module
+    /// doc).
+    CustomTabular,
+    /// The debugging output of the search.
+    Debug,
+    /// A concatenated query of a batch that the diag table could refuse.
+    Window,
+    /// A search space that could overflow.
+    SearchSpace,
+    /// A `-subject` record without a tabular id.
+    SubjectIds,
+    /// A `-db` whose sequences could not be read before the search: LOSAT refuses some of those
+    /// errors where NCBI's read error stops the run, at the first batch with a valid context,
+    /// which may follow a batch without one (`run_batch_loop`).
+    Unreadable,
+    /// A database with parsed Seq-ids of more sequences than the check reads
+    /// (`common::database::PARSED_CHECK_SEQUENCES_MAX`, `TblastxDatabase::parsed_beyond`).
+    LargeParsed,
+    /// With the batches' prefetch, a run that NCBI's taxonomy cache refuses
+    /// (`TblastxDatabase::prefetch_refused`): the batches ask for the refusal only where NCBI
+    /// fetches a subject (`run_batch_loop`), which may be a later batch.
+    TaxonomyCache,
+    /// A database sequence whose report could be refused (`ReportRefusal`).
+    Database(crate::algorithm::common::database::ReportRefusal),
+    /// Under `-parse_deflines`, two query records of the run with one id, which a batch could
+    /// refuse (`query_batch::QueryScopes`).
+    QueryIds,
+}
+
+impl Off {
+    /// The name of `[X_STATS] TBXRPTSTREAM off=`.
+    pub(super) fn name(self) -> &'static str {
+        use crate::algorithm::common::database::ReportRefusal;
+        match self {
+            Off::OneBatch => "one_batch",
+            Off::Outputs => "outputs",
+            Off::Format => "format",
+            Off::CustomTabular => "custom_tabular",
+            Off::Debug => "debug",
+            Off::Window => "window",
+            Off::SearchSpace => "search_space",
+            Off::SubjectIds => "subject_ids",
+            Off::Unreadable => "unreadable",
+            Off::LargeParsed => "large_parsed",
+            Off::TaxonomyCache => "taxonomy_cache",
+            Off::Database(ReportRefusal::Headers) => "database_headers",
+            Off::Database(ReportRefusal::Joined) => "database_joined",
+            Off::Database(ReportRefusal::Taxonomy) => "database_taxonomy",
+            Off::QueryIds => "query_ids",
+        }
+    }
+}
+
+/// Whether the loop writes each batch's reports when it takes the batch (`Ok`), or why not.
+/// With `-db` it reads every header of the database in `pool`
+/// (`TblastxDatabase::reports_may_refuse`), unless an earlier condition is off or the database
+/// has parsed Seq-ids and more sequences than the check reads (`Off::LargeParsed`).
+pub(super) fn check(
+    args: &TblastxArgs,
+    outputs: &ReportOutputs<'_>,
+    query_runs: &QueryRuns<'_>,
+    subjects: &RunSubjects<'_>,
+    unreadable: bool,
+    batch_size: u32,
+    pool: &SearchPool<'_>,
+) -> Result<(), Off> {
+    let input = query_runs.input;
+    let (first_end, _) = next_ranged_batch(&input.input_lengths, &input.skipped, 0, batch_size);
+    if first_end == input.input_lengths.len() {
+        return Err(Off::OneBatch);
+    }
+    let [format] = outputs.formats.as_slice() else {
+        return Err(Off::Outputs);
+    };
+    if outputs.hits.is_some()
+        || outputs.observer.is_some()
+        || matches!(format.sink, OutputSink::File(_))
+    {
+        return Err(Off::Outputs);
+    }
+    let format = report::output_format(format.outfmt);
+    // The custom tabular reports (line CLI C2, PR 2): their writer refuses a name of the
+    // taxonomy database for a subject with a taxid (DECISIONS 3) and reads the taxids and
+    // definition lines of the reported sequences, which a later batch's report call would do
+    // after the first batch's rows were written; and outfmt 20's header line comes with the
+    // first report. They keep the one report call after the search, where every refusal comes
+    // before the first byte, and never take the streamed path of the default 6 and 7.
+    if let report::TblastxOutputFormat::CustomTabular(_) = format {
+        return Err(Off::CustomTabular);
+    }
+    // Outfmt 1 to 4 are written per batch as outfmt 0 (line RG T3c fix 1): NCBI's exception of a
+    // section's merge comes where NCBI's does (`query_anchored::write_section`), and the refusal of
+    // a `-db` sequence whose generated id is that of a query of its batch
+    // (`anchored::refuse_anchored_reports`) before that batch's first byte, after the batches
+    // before, as NCBI's error in a later batch's format (DECISIONS T3a-7 (2) of line RG, BLASTN's
+    // and BLASTP's per batch and block). Under `-parse_deflines` the database check below turns
+    // the stream off for a sequence with the id of a query of the run (`database_check`), whose
+    // refusal in the batch loop (`common::database::refuse_reported_ids_of_queries`) then comes
+    // before the first batch's reports.
+    if !(format.is_pairwise() || format.is_tabular()) {
+        return Err(Off::Format);
+    }
+    if writes_debug_output() {
+        return Err(Off::Debug);
+    }
+    if unreadable {
+        return Err(Off::Unreadable);
+    }
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_query_info.c:311-315
+    // A batch's concatenated query holds each query's six frames, each at most a third of the
+    // query's letters, after a sentinel byte: at most `2 * letters + 7` per query. All queries
+    // bound every batch (`check_diag_table_window`).
+    let lengths = || {
+        query_runs
+            .records
+            .iter()
+            .map(|record| record.seq().len() as i128)
+    };
+    let concatenated: i128 = lengths().map(|letters| 2 * letters + 7).sum::<i128>() + 1;
+    if concatenated + i128::from(args.window()) > 1 << 30 {
+        return Err(Off::Window);
+    }
+    // The search space of a context (`context_cutoffs`, `try_compute_eff_lengths_tblastx`):
+    // the effective database length `db - n a`, at least 1, times the context's length minus
+    // the length adjustment `a`. The adjustment is between 0 and the smaller root of
+    // `n a^2 - (q n + db) a + c`, at most `2 c / (q n + db) <= 2 q` with `c <= q db`
+    // (`compute_length_adjustment_ncbi`; the bound of blastn's `x_rpt_stream::check`), and a
+    // context has at most a third of its query's letters, plus one. A negative `n` (an alias
+    // file's `NSEQ`, NCBI's `Int4`) adds `|n| a` to the database length: the bound takes `|n|`.
+    let db_length = i128::from(subjects.numbers.effective_length() / 3);
+    let factor = 2 * (lengths().max().unwrap_or(0) / 3 + 1) + 1;
+    if (db_length.abs() + i128::from(subjects.numbers.count.unsigned_abs()) * factor) * factor
+        > i128::from(i64::MAX)
+    {
+        return Err(Off::SearchSpace);
+    }
+    // Under `-parse_deflines`, two queries of the run with one id, which a batch's scope could
+    // hold (`QueryScopes`), and with `-db` the scope of every query for the database's sequences
+    // (`TblastxDatabase::reports_may_refuse`).
+    let queries = if args.parse_deflines {
+        Some(
+            crate::blastinput::query_batch::QueryScopes::of_records(
+                crate::blastinput::query_batch::QueryScopeSpan::Run,
+                "TBLASTX",
+                query_runs.input_records,
+            )
+            .map_err(|_| Off::QueryIds)?,
+        )
+    } else {
+        None
+    };
+    match &subjects.shown {
+        ShownSubjects::Fasta { records, .. } => {
+            if format.is_tabular()
+                && records
+                    .iter()
+                    .any(|record| subject_tabular_id(record).is_none())
+            {
+                return Err(Off::SubjectIds);
+            }
+            Ok(())
+        }
+        ShownSubjects::Database { database, .. } => database_check(
+            database,
+            format,
+            crate::algorithm::common::database::PARSED_CHECK_SEQUENCES_MAX,
+            queries.as_ref().map(|scopes| scopes.of_query(0)),
+            pool,
+        ),
+    }
+}
+
+/// The `-db` part of `check` for the report `format` (0 to 4, 6 or 7): a database with parsed Seq-ids
+/// of more than `max_parsed` sequences in its volumes is not read (`Off::LargeParsed`, NCBI's
+/// `nt` and `core_nt` with `common::database::PARSED_CHECK_SEQUENCES_MAX`: the reports after the
+/// loop, as blastn's), a run whose prefetch NCBI's taxonomy cache refuses is not streamed
+/// (`Off::TaxonomyCache`), else every header is read in `pool` (`TblastxDatabase::reports_may_refuse`,
+/// with `queries`: under `-parse_deflines` the scope of every query of the run).
+fn database_check(
+    database: &crate::algorithm::tblastx::database::TblastxDatabase,
+    format: report::TblastxOutputFormat,
+    max_parsed: u32,
+    queries: Option<&crate::blastinput::query_batch::QueryScope>,
+    pool: &SearchPool<'_>,
+) -> Result<(), Off> {
+    if database.parsed_beyond(max_parsed) {
+        return Err(Off::LargeParsed);
+    }
+    let pairwise = format.is_pairwise();
+    let shown = crate::algorithm::common::database::ParsedShown {
+        tabular: format.tabular_reads_subject(),
+        pairwise,
+        structured: format.is_structured_xml(),
+        joined: pairwise || format.tabular_joins_subjects(),
+        sam: false,
+        taxonomy: format.writes_taxonomy(),
+        words: format.printed_ids(),
+        stops_at_failed_lookup: format.is_tabular()
+            && crate::report::tabular::may_stop_at_failed_lookup(format.tabular_spec()),
+        prefetched: format.prefetches_subjects()
+            && !crate::algorithm::common::database::prefetch_always_off(),
+        one_by_one: crate::algorithm::common::database::prefetch_may_be_off(),
+    };
+    // The batches' prefetch reads the taxonomy database (`run_batch_loop`).
+    let prefetch = format.prefetches_subjects() && database.taxdb_found();
+    if prefetch && database.prefetch_refused() {
+        return Err(Off::TaxonomyCache);
+    }
+    match database.reports_may_refuse(shown, prefetch, queries, pool) {
+        Some(refusal) => Err(Off::Database(refusal)),
+        None => Ok(()),
+    }
+}
+
+/// The part of the query input of the searched queries `searched`, numbered from 0 as a batch's
+/// lists number them (blastn's `x_rpt_stream::batch_input`).
+pub(super) fn batch_input(input: &QueryInput, searched: std::ops::Range<usize>) -> QueryInput {
+    QueryInput {
+        placements: if input.placements.ranged() {
+            Placements(input.placements.0[searched.clone()].to_vec())
+        } else {
+            Placements::default()
+        },
+        ordinals: input.ordinals[searched].to_vec(),
+        input_lengths: Vec::new(),
+        skipped: Vec::new(),
+        range_length: input.range_length,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::algorithm::common::database::ReportRefusal;
+
+    // Line DBID, DECISIONS 19: the `-db` part of `check` does not read a database with parsed
+    // Seq-ids of more than its bound (`Off::LargeParsed`, before any header is read: nrefuse_v5,
+    // whose headers refuse the reports, is not read above its bound), and reads it up to the
+    // bound, at one thread and in a pool, for outfmt 6 and 0.
+    #[test]
+    #[cfg_attr(
+        not(feature = "parallel"),
+        ignore = "needs threads: a build without the parallel feature has none"
+    )]
+    fn a_database_with_parsed_seqids_beyond_the_bound_keeps_its_reports_after_the_loop() {
+        let open = |name: &str| {
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/db_search/ids")
+                .join(name);
+            crate::algorithm::tblastx::database::TblastxDatabase::open(
+                path.to_str().unwrap(),
+                &crate::blastinput::ncbi_environment::ApplicationSettings::default(),
+            )
+            .unwrap_or_else(|error| panic!("{name}: {error:#}"))
+        };
+        let formats = [
+            report::TblastxOutputFormat::Tabular,
+            report::TblastxOutputFormat::Pairwise(crate::report::pairwise::PairwiseView::Pairwise),
+        ];
+        let answers = |pool: &SearchPool<'_>| {
+            ["nucl_v5", "nrefuse_v5"].map(|name| {
+                let database = open(name);
+                let count = database.num_oids();
+                formats.map(|format| {
+                    [count, count - 1].map(|max| database_check(&database, format, max, None, pool))
+                })
+            })
+        };
+        let headers = Err(Off::Database(ReportRefusal::Headers));
+        let large = Err(Off::LargeParsed);
+        let serial = answers(&SearchPool::x_serial());
+        assert_eq!(
+            serial,
+            [
+                [[Ok(()), large], [Ok(()), large]],
+                [[headers, large], [headers, large]],
+            ]
+        );
+        let parallel =
+            crate::utils::threading::with_search_pool(4, "TBLASTX", |pool| Ok(answers(pool)))
+                .unwrap();
+        assert_eq!(serial, parallel);
+    }
+}

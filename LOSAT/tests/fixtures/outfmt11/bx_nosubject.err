@@ -1,0 +1,1 @@
+Command line argument error: Argument "subject". File is not accessible:  `tests/fasta/outfmt11/does_not_exist.fa'

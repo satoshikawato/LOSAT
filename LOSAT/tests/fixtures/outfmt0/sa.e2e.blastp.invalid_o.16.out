@@ -1,0 +1,403 @@
+<?xml version="1.0" encoding="US-ASCII"?>
+<BlastXML2
+    xmlns="http://www.ncbi.nlm.nih.gov"
+    xmlns:xs="http://www.w3.org/2001/XMLSchema-instance"
+    xs:schemaLocation="http://www.ncbi.nlm.nih.gov http://www.ncbi.nlm.nih.gov/data_specs/schema_alt/NCBI_BlastOutput2.xsd"
+>
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>blastp</program>
+      <version>BLASTP 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <subjects>Subject_1</subjects>
+          <subjects>Subject_2</subjects>
+          <subjects>Subject_3</subjects>
+          <subjects>Subject_4</subjects>
+          <subjects>Subject_5</subjects>
+          <subjects>Subject_6</subjects>
+          <subjects>Subject_7</subjects>
+          <subjects>Subject_8</subjects>
+          <subjects>Subject_9</subjects>
+          <subjects>Subject_10</subjects>
+          <subjects>Subject_11</subjects>
+          <subjects>Subject_12</subjects>
+          <subjects>Subject_13</subjects>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>BLOSUM62</matrix>
+          <expect>10</expect>
+          <gap-open>11</gap-open>
+          <gap-extend>1</gap-extend>
+          <filter>F</filter>
+          <cbs>2</cbs>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <bl2seq>
+            <Search>
+              <query-id>Query_1</query-id>
+              <query-title>q1 allx</query-title>
+              <query-len>30</query-len>
+              <hits></hits>
+              <stat>
+                <Statistics>
+                  <hsp-len>0</hsp-len>
+                  <eff-space>0</eff-space>
+                  <kappa>-1</kappa>
+                  <lambda>-1</lambda>
+                  <entropy>-1</entropy>
+                </Statistics>
+              </stat>
+              <message>Query_1 q1 allx:  Query_1 q1 allx: Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options  No hits found</message>
+            </Search>
+          </bl2seq>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>blastp</program>
+      <version>BLASTP 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <subjects>Subject_1</subjects>
+          <subjects>Subject_2</subjects>
+          <subjects>Subject_3</subjects>
+          <subjects>Subject_4</subjects>
+          <subjects>Subject_5</subjects>
+          <subjects>Subject_6</subjects>
+          <subjects>Subject_7</subjects>
+          <subjects>Subject_8</subjects>
+          <subjects>Subject_9</subjects>
+          <subjects>Subject_10</subjects>
+          <subjects>Subject_11</subjects>
+          <subjects>Subject_12</subjects>
+          <subjects>Subject_13</subjects>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>BLOSUM62</matrix>
+          <expect>10</expect>
+          <gap-open>11</gap-open>
+          <gap-extend>1</gap-extend>
+          <filter>F</filter>
+          <cbs>2</cbs>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <bl2seq>
+            <Search>
+              <query-id>Query_2</query-id>
+              <query-title>q2 withO</query-title>
+              <query-len>60</query-len>
+              <hits>
+                <Hit>
+                  <num>1</num>
+                  <description>
+                    <HitDescr>
+                      <id>BDT62167.1</id>
+                      <title>BDT62167.1 wsv343-like protein [Litopenaeus vannamei majanivirus Nimav-1_LVa]</title>
+                    </HitDescr>
+                  </description>
+                  <len>4337</len>
+                  <hsps>
+                    <Hsp>
+                      <num>1</num>
+                      <bit-score>20.7866</bit-score>
+                      <score>42</score>
+                      <evalue>0.105364</evalue>
+                      <identity>9</identity>
+                      <positive>11</positive>
+                      <query-from>28</query-from>
+                      <query-to>46</query-to>
+                      <hit-from>2062</hit-from>
+                      <hit-to>2080</hit-to>
+                      <align-len>19</align-len>
+                      <gaps>0</gaps>
+                      <qseq>NNNKDDRDDVDDDDDDDDD</qseq>
+                      <hseq>NNKKRKRSTVDDDNEDQSK</hseq>
+                      <midline>NN K  R  VDDD++D   </midline>
+                    </Hsp>
+                    <Hsp>
+                      <num>2</num>
+                      <bit-score>20.4014</bit-score>
+                      <score>41</score>
+                      <evalue>0.126231</evalue>
+                      <identity>14</identity>
+                      <positive>26</positive>
+                      <query-from>5</query-from>
+                      <query-to>55</query-to>
+                      <hit-from>1923</hit-from>
+                      <hit-to>1972</hit-to>
+                      <align-len>51</align-len>
+                      <gaps>1</gaps>
+                      <qseq>DNDDDYMSISSGDNDDEVKDTILNNNKDDRDDVDDDDDDDDDSDIEFDIDT</qseq>
+                      <hseq>ETDDDY-KIFSKEDKEEIKRAIANWNKIVEDTANSIVNEYVVENVHYPLFT</hseq>
+                      <midline>+ DDDY  I S ++ +E+K  I N NK   D  +   ++    ++ + + T</midline>
+                    </Hsp>
+                    <Hsp>
+                      <num>3</num>
+                      <bit-score>18.8606</bit-score>
+                      <score>37</score>
+                      <evalue>0.526252</evalue>
+                      <identity>12</identity>
+                      <positive>17</positive>
+                      <query-from>13</query-from>
+                      <query-to>46</query-to>
+                      <hit-from>2000</hit-from>
+                      <hit-to>2033</hit-to>
+                      <align-len>34</align-len>
+                      <gaps>0</gaps>
+                      <qseq>ISSGDNDDEVKDTILNNNKDDRDDVDDDDDDDDD</qseq>
+                      <hseq>ISSKKNTEDVKRTKRRITKRKRDENAQLDNDEQQ</hseq>
+                      <midline>ISS  N ++VK T     K  RD+    D+D+  </midline>
+                    </Hsp>
+                    <Hsp>
+                      <num>4</num>
+                      <bit-score>16.1642</bit-score>
+                      <score>30</score>
+                      <evalue>4.06385</evalue>
+                      <identity>7</identity>
+                      <positive>8</positive>
+                      <query-from>29</query-from>
+                      <query-to>42</query-to>
+                      <hit-from>1262</hit-from>
+                      <hit-to>1275</hit-to>
+                      <align-len>14</align-len>
+                      <gaps>0</gaps>
+                      <qseq>NNKDDRDDVDDDDD</qseq>
+                      <hseq>NRKKKRSEYDGDDD</hseq>
+                      <midline>N K  R + D DDD</midline>
+                    </Hsp>
+                  </hsps>
+                </Hit>
+                <Hit>
+                  <num>2</num>
+                  <description>
+                    <HitDescr>
+                      <id>BDT62149.1</id>
+                      <title>BDT62149.1 dUTPase [Litopenaeus vannamei majanivirus Nimav-1_LVa]</title>
+                    </HitDescr>
+                  </description>
+                  <len>462</len>
+                  <hsps>
+                    <Hsp>
+                      <num>1</num>
+                      <bit-score>15.3938</bit-score>
+                      <score>28</score>
+                      <evalue>8.96607</evalue>
+                      <identity>6</identity>
+                      <positive>9</positive>
+                      <query-from>4</query-from>
+                      <query-to>22</query-to>
+                      <hit-from>7</hit-from>
+                      <hit-to>25</hit-to>
+                      <align-len>19</align-len>
+                      <gaps>0</gaps>
+                      <qseq>SDNDDDYMSISSGDNDDEV</qseq>
+                      <hseq>AKNNDYYMGFYKVHNDAFI</hseq>
+                      <midline>+ N+D YM      ND  +</midline>
+                    </Hsp>
+                  </hsps>
+                </Hit>
+              </hits>
+              <stat>
+                <Statistics>
+                  <hsp-len>34</hsp-len>
+                  <eff-space>280280</eff-space>
+                  <kappa>0.041</kappa>
+                  <lambda>0.267</lambda>
+                  <entropy>0.14</entropy>
+                </Statistics>
+              </stat>
+              <message>Query_2 q2 withO:  Query_2 q2 withO: One or more O characters replaced by X for alignment score calculations at positions 58 </message>
+            </Search>
+          </bl2seq>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>blastp</program>
+      <version>BLASTP 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <subjects>Subject_1</subjects>
+          <subjects>Subject_2</subjects>
+          <subjects>Subject_3</subjects>
+          <subjects>Subject_4</subjects>
+          <subjects>Subject_5</subjects>
+          <subjects>Subject_6</subjects>
+          <subjects>Subject_7</subjects>
+          <subjects>Subject_8</subjects>
+          <subjects>Subject_9</subjects>
+          <subjects>Subject_10</subjects>
+          <subjects>Subject_11</subjects>
+          <subjects>Subject_12</subjects>
+          <subjects>Subject_13</subjects>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>BLOSUM62</matrix>
+          <expect>10</expect>
+          <gap-open>11</gap-open>
+          <gap-extend>1</gap-extend>
+          <filter>F</filter>
+          <cbs>2</cbs>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <bl2seq>
+            <Search>
+              <query-id>Query_3</query-id>
+              <query-title>q3 manyO</query-title>
+              <query-len>60</query-len>
+              <hits>
+                <Hit>
+                  <num>1</num>
+                  <description>
+                    <HitDescr>
+                      <id>BDT62167.1</id>
+                      <title>BDT62167.1 wsv343-like protein [Litopenaeus vannamei majanivirus Nimav-1_LVa]</title>
+                    </HitDescr>
+                  </description>
+                  <len>4337</len>
+                  <hsps>
+                    <Hsp>
+                      <num>1</num>
+                      <bit-score>20.7866</bit-score>
+                      <score>42</score>
+                      <evalue>0.0828136</evalue>
+                      <identity>14</identity>
+                      <positive>26</positive>
+                      <query-from>5</query-from>
+                      <query-to>55</query-to>
+                      <hit-from>1923</hit-from>
+                      <hit-to>1972</hit-to>
+                      <align-len>51</align-len>
+                      <gaps>1</gaps>
+                      <qseq>DNDDDYMSISSGDNDDEVKDTIONNNKDDRDDVDDDDDDDDDSDIEFDIDT</qseq>
+                      <hseq>ETDDDY-KIFSKEDKEEIKRAIANWNKIVEDTANSIVNEYVVENVHYPLFT</hseq>
+                      <midline>+ DDDY  I S ++ +E+K  I N NK   D  +   ++    ++ + + T</midline>
+                    </Hsp>
+                    <Hsp>
+                      <num>2</num>
+                      <bit-score>20.4014</bit-score>
+                      <score>41</score>
+                      <evalue>0.117664</evalue>
+                      <identity>9</identity>
+                      <positive>11</positive>
+                      <query-from>28</query-from>
+                      <query-to>45</query-to>
+                      <hit-from>2062</hit-from>
+                      <hit-to>2079</hit-to>
+                      <align-len>18</align-len>
+                      <gaps>0</gaps>
+                      <qseq>NNNKDDRDDVDDDDDDDD</qseq>
+                      <hseq>NNKKRKRSTVDDDNEDQS</hseq>
+                      <midline>NN K  R  VDDD++D  </midline>
+                    </Hsp>
+                    <Hsp>
+                      <num>3</num>
+                      <bit-score>19.2458</bit-score>
+                      <score>38</score>
+                      <evalue>0.311859</evalue>
+                      <identity>12</identity>
+                      <positive>17</positive>
+                      <query-from>13</query-from>
+                      <query-to>46</query-to>
+                      <hit-from>2000</hit-from>
+                      <hit-to>2033</hit-to>
+                      <align-len>34</align-len>
+                      <gaps>0</gaps>
+                      <qseq>ISSGDNDDEVKDTIONNNKDDRDDVDDDDDDDDD</qseq>
+                      <hseq>ISSKKNTEDVKRTKRRITKRKRDENAQLDNDEQQ</hseq>
+                      <midline>ISS  N ++VK T     K  RD+    D+D+  </midline>
+                    </Hsp>
+                    <Hsp>
+                      <num>4</num>
+                      <bit-score>16.1642</bit-score>
+                      <score>30</score>
+                      <evalue>4.58487</evalue>
+                      <identity>7</identity>
+                      <positive>8</positive>
+                      <query-from>29</query-from>
+                      <query-to>42</query-to>
+                      <hit-from>1262</hit-from>
+                      <hit-to>1275</hit-to>
+                      <align-len>14</align-len>
+                      <gaps>0</gaps>
+                      <qseq>NNKDDRDDVDDDDD</qseq>
+                      <hseq>NRKKKRSEYDGDDD</hseq>
+                      <midline>N K  R + D DDD</midline>
+                    </Hsp>
+                  </hsps>
+                </Hit>
+                <Hit>
+                  <num>2</num>
+                  <description>
+                    <HitDescr>
+                      <id>BDT62149.1</id>
+                      <title>BDT62149.1 dUTPase [Litopenaeus vannamei majanivirus Nimav-1_LVa]</title>
+                    </HitDescr>
+                  </description>
+                  <len>462</len>
+                  <hsps>
+                    <Hsp>
+                      <num>1</num>
+                      <bit-score>15.3938</bit-score>
+                      <score>28</score>
+                      <evalue>9.43223</evalue>
+                      <identity>6</identity>
+                      <positive>9</positive>
+                      <query-from>4</query-from>
+                      <query-to>22</query-to>
+                      <hit-from>7</hit-from>
+                      <hit-to>25</hit-to>
+                      <align-len>19</align-len>
+                      <gaps>0</gaps>
+                      <qseq>SDNDDDYMSISSGDNDDEV</qseq>
+                      <hseq>AKNNDYYMGFYKVHNDAFI</hseq>
+                      <midline>+ N+D YM      ND  +</midline>
+                    </Hsp>
+                  </hsps>
+                </Hit>
+              </hits>
+              <stat>
+                <Statistics>
+                  <hsp-len>34</hsp-len>
+                  <eff-space>280280</eff-space>
+                  <kappa>0.041</kappa>
+                  <lambda>0.267</lambda>
+                  <entropy>0.14</entropy>
+                </Statistics>
+              </stat>
+              <message>Query_3 q3 manyO:  Query_3 q3 manyO: One or more O characters replaced by X for alignment score calculations at positions 26, 58 </message>
+            </Search>
+          </bl2seq>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+</BlastXML2>

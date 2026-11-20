@@ -1,5 +1,7 @@
 //! NCBI genetic-code tables used by translated searches.
 
+use std::sync::OnceLock;
+
 // NCBI reference: c++/src/algo/blast/api/blast_aux.cpp:588-603
 // ```c++
 // const string kGenCode = CGen_code_table::GetNcbieaa(genetic_code);
@@ -147,7 +149,15 @@ const TABLES: &[(u8, &[u8; 64])] = &[
 
 pub struct GeneticCode {
     pub table: [u8; 64],
+    /// The code's slot of `DISPLAY_TABLES`.
+    display: &'static OnceLock<Box<[u8; 4096]>>,
 }
+
+// No NCBI counterpart: one slot per row of `TABLES` for the display's translation table of that
+// code (`tblastx::report::display_table`; graduated `LOSAT_X_DISPTABLE`), made at its first use and
+// kept for the process, so a code is tabulated once however many `GeneticCode` values name it.
+static DISPLAY_TABLES: [OnceLock<Box<[u8; 4096]>>; TABLES.len()] =
+    [const { OnceLock::new() }; TABLES.len()];
 
 impl GeneticCode {
     // NCBI reference: c++/src/algo/blast/api/blast_aux.cpp:588-600
@@ -159,9 +169,18 @@ impl GeneticCode {
     pub fn try_from_id(id: u8) -> Result<Self, String> {
         TABLES
             .iter()
-            .find(|(code, _)| *code == id)
-            .map(|(_, table)| Self { table: **table })
+            .position(|(code, _)| *code == id)
+            .map(|row| Self {
+                table: *TABLES[row].1,
+                display: &DISPLAY_TABLES[row],
+            })
             .ok_or_else(|| format!("unsupported genetic code {id}"))
+    }
+
+    /// No NCBI counterpart: the slot that holds this code's display translation table
+    /// (`tblastx::report::display_table`).
+    pub(crate) fn display_slot(&self) -> &'static OnceLock<Box<[u8; 4096]>> {
+        self.display
     }
 
     // NCBI reference: c++/src/algo/blast/core/gencode_singleton.c:65-69
@@ -189,7 +208,7 @@ impl GeneticCode {
         if codon.len() != 3 {
             return b'X';
         }
-        // EXPERIMENT (LOSAT_X_CODONFAST): three unambiguous bases select exactly
+        // Fast path (was LOSAT_X_CODONFAST): three unambiguous bases select exactly
         // one (i, j, k) of the loops below, so the answer is that one table entry.
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:375-379,394-403
         // ```c
@@ -209,13 +228,11 @@ impl GeneticCode {
         //                      index2 = index1 + k;
         //                      taa = codes[index2];
         // ```
-        // The reference path below ports this nested loop. When the switch is on and all three
+        // The path below ports this nested loop, for codons with an ambiguous base. When all three
         // bases are unambiguous, only one (i, j, k) passes the `&` tests, so the loop would end
         // with `aa = codes[i*16+j*4+k]` and the table is read once instead.
-        if x_codon_fast() {
-            if let Some(aa) = self.x_get_unambiguous(codon) {
-                return aa;
-            }
+        if let Some(aa) = self.x_get_unambiguous(codon) {
+            return aa;
         }
         let masks = [
             base_mask(codon[0]),
@@ -252,27 +269,6 @@ impl GeneticCode {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:394-403
-// ```c
-//    for (i = 0; i < 4; i++) {
-//       if (codon[0] & mapping[i]) {
-//          index0 = i * 16;
-//          for (j = 0; j < 4; j++) {
-//             if (codon[1] & mapping[j]) {
-//                index1 = index0 + (j * 4);
-//                for (k = 0; k < 4; k++) {
-//                   if (codon[2] & mapping[k]) {
-//                      index2 = index1 + k;
-//                      taa = codes[index2];
-// ```
-// No NCBI counterpart: the switch is read once per process. It chooses between the loop
-// above and a single table read that gives the same amino acid.
-fn x_codon_fast() -> bool {
-    use std::sync::OnceLock;
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_CODONFAST"))
-}
-
 impl GeneticCode {
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:375-379,394-403
     /// ```c
@@ -295,7 +291,7 @@ impl GeneticCode {
     /// This is the one (i, j, k) that `s_CodonToAA` reaches when every codon byte has a single
     /// bit set: `mapping[]` gives the index of that bit. Ambiguous bases return `None` and use
     /// the loop in `get`.
-    /// EXPERIMENT (LOSAT_X_CODONFAST): the amino acid of three unambiguous
+    /// Fast path of `get` (was LOSAT_X_CODONFAST): the amino acid of three unambiguous
     /// bases, `None` when a base is ambiguous or not a base.
     #[inline]
     fn x_get_unambiguous(&self, codon: &[u8]) -> Option<u8> {
@@ -306,7 +302,7 @@ impl GeneticCode {
     }
 }
 
-// EXPERIMENT (LOSAT_X_CODONFAST): position of a base in NCBI's
+// Position of a base in NCBI's
 // `mapping[4] = { 8, 2, 1, 4 }` (T, C, A, G) when `base_mask` has exactly that
 // one bit, 4 otherwise.
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:375-379,395-396
@@ -361,9 +357,99 @@ pub(crate) fn base_mask(base: u8) -> u8 {
     }
 }
 
+/// `NCBI4NA_TO_IUPACNA`: the letter of each ncbi4na code.
+const NCBI4NA_LETTERS: &[u8; 16] = b"-ACMGRSVTWYHKDBN";
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:812-819
+// ```c
+//    /* Conversion table from forward to reverse strand residue in the blastna
+//       encoding */
+//    Uint1 conversion_table[16] = {
+//      0,  8, 4, 12,
+//      2, 10, 6, 14,
+//      1,  9, 5, 13,
+//      3, 11, 7, 15
+//    };
+// ```
+const NCBI4NA_COMPLEMENT: [u8; 16] = [0, 8, 4, 12, 2, 10, 6, 14, 1, 9, 5, 13, 3, 11, 7, 15];
+
+/// NCBI's `conversion_table` on the letters of the ncbi4na codes, in either case. Any other
+/// byte stays: `U`, which the reader stores as `T` before a search translates a sequence
+/// (`fasta_reader`), has no code here. LOSAT keeps the case of a letter because a lowercase
+/// letter is a masked residue (`FastaRecord::sequence`).
+static COMPLEMENT: [u8; 256] = {
+    let mut table = [0u8; 256];
+    let mut byte = 0;
+    while byte < 256 {
+        table[byte] = byte as u8;
+        byte += 1;
+    }
+    let mut code = 0;
+    while code < 16 {
+        let letter = NCBI4NA_LETTERS[code];
+        let complement = NCBI4NA_LETTERS[NCBI4NA_COMPLEMENT[code] as usize];
+        table[letter as usize] = complement;
+        table[letter.to_ascii_lowercase() as usize] = complement.to_ascii_lowercase();
+        code += 1;
+    }
+    table
+};
+
+/// The complement of one nucleotide letter (`COMPLEMENT`).
+#[inline]
+pub(crate) fn complement(base: u8) -> u8 {
+    COMPLEMENT[base as usize]
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:828-833
+// ```c
+//    for (index = 0; index < length; ++index) {
+//         if (sequence[index] == FENCE_SENTRY)
+//                 rev_sequence[length-index] = FENCE_SENTRY;
+//         else
+//                 rev_sequence[length-index] = conversion_table[sequence[index]];
+//    }
+// ```
+/// The letters of the reverse strand, last to first, without NCBI's sentinels (the callers
+/// add their own) and its `FENCE_SENTRY` (a letter here is never one).
+pub(crate) fn revcomp(sequence: &[u8]) -> Vec<u8> {
+    sequence
+        .iter()
+        .rev()
+        .map(|&base| complement(base))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // The letters that the bases pair with, the case kept, and every other byte unchanged.
+    #[test]
+    fn complement_pairs_the_ncbi4na_letters_and_keeps_every_other_byte() {
+        let (letters, complements) = (b"AGCTYRWSKMDVHBN", b"TCGARYWSMKHBDVN");
+        for byte in 0..=255u8 {
+            let upper = letters
+                .iter()
+                .position(|&letter| letter == byte)
+                .map(|at| complements[at]);
+            let lower = letters
+                .iter()
+                .position(|&letter| letter + 32 == byte)
+                .map(|at| complements[at] + 32);
+            assert_eq!(complement(byte), upper.or(lower).unwrap_or(byte), "{byte}");
+        }
+        assert_eq!(complement(b'U'), b'U');
+        assert_eq!(complement(b'-'), b'-');
+    }
+
+    #[test]
+    fn revcomp_reverses_and_complements_keeping_the_case() {
+        assert_eq!(revcomp(b"ACGTN"), b"NACGT");
+        assert_eq!(revcomp(b"GaTtaCA"), b"TGtaAtC");
+        assert_eq!(revcomp(b"AGCTYRWSKMDVHBN"), b"NVDBHKMSWYRAGCT");
+        assert_eq!(revcomp(b""), b"");
+    }
 
     // EXPERIMENT: the table path of `get` against NCBI's nested loops.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:375-379,394-405

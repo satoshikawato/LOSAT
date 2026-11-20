@@ -1,0 +1,2 @@
+Error: [blastp] Error: Offset error at end of taxdb file.
+Warning: [blastp] Query_1 q1 copy: One or more O characters replaced by X for alignment score calculations at positions 0 

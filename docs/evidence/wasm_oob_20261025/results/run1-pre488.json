@@ -1,0 +1,25 @@
+{
+  "node": "v24.21.0",
+  "nproc": 4,
+  "threads": 16,
+  "arms": {
+    "default": {
+      "runs": 800,
+      "fail": 2,
+      "oob": 0,
+      "other": [
+        {
+          "run": 225,
+          "exit": -15,
+          "head": "RangeError: Offset is outside the bounds of the DataView\n    at DataView.prototype.getUint32 (<anonymous>)\n    at /home/runner/work/LOSAT/LOSAT/LOSAT/tests/wasi_thread_host.js:713:28\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n"
+        },
+        {
+          "run": 771,
+          "exit": -15,
+          "head": "RangeError: Offset is outside the bounds of the DataView\n    at DataView.prototype.getUint32 (<anonymous>)\n    at /home/runner/work/LOSAT/LOSAT/LOSAT/tests/wasi_thread_host.js:713:28\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n"
+        }
+      ],
+      "probes": []
+    }
+  }
+}

@@ -15,12 +15,14 @@ use super::{
 //     struct LinkedHSP *next;
 // } LinkedHSP;
 // ```
+// `merit` is an `i64`, not NCBI's `Int4`, which overflows for a limit near `INT4_MAX` plus 3
+// (NCBI parity DECISIONS 17: LOSAT does not reproduce the overflow).
 #[derive(Clone)]
 struct Entry {
     id: usize,
     oid: usize,
     hsp: Hsp,
-    merit: i32,
+    merit: i64,
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:79-120
@@ -549,6 +551,10 @@ impl Node {
     //     return q;
     // }
     // ```
+    #[expect(
+        clippy::boxed_local,
+        reason = "the recursion hands the children over as boxes; a by-value `self` would copy a whole node into every frame of a tree that can be deep"
+    )]
     fn rip(self: Box<Self>, out: &mut Vec<Entry>) {
         out.extend(self.list);
         if let Some(l) = self.left {
@@ -610,11 +616,11 @@ impl Node {
 pub(crate) struct Culling {
     trees: Vec<Option<Box<Node>>>,
     lengths: Vec<i32>,
-    limit: i32,
+    limit: i64,
     next_id: usize,
 }
 impl Culling {
-    pub fn new(lengths: Vec<i32>, limit: i32) -> Self {
+    pub fn new(lengths: Vec<i32>, limit: i64) -> Self {
         Self {
             trees: (0..lengths.len()).map(|_| None).collect(),
             lengths,
@@ -786,7 +792,7 @@ pub(crate) fn traceback_pipe(
     max: usize,
     trace: &mut dyn ResultsObserver,
 ) {
-    let mut culling = Culling::new(lengths, limit);
+    let mut culling = Culling::new(lengths, i64::from(limit));
     for query in queries.iter_mut() {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c:709-712
         // ```c++

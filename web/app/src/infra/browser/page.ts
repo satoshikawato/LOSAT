@@ -22,6 +22,7 @@ function guard(event: BeforeUnloadEvent): void {
 
 export const browserPage: PagePort = {
   wakeLockSupported: wakeLock() !== undefined,
+  handheld: typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches,
 
   async requestWakeLock(): Promise<WakeLockHandle> {
     const api = wakeLock();

@@ -1,0 +1,123 @@
+RPSBLAST 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: rps_mini26
+           3 sequences; 560 total letters
+
+
+
+Query= allx a query of X only
+
+Length=60
+
+
+***** No hits found *****
+
+
+
+
+
+Effective search space used: 0
+
+
+Query= oj_tk TK-TMK with an O at 30 and a J at 60
+
+Length=398
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [W...  52.1    3e-12
+
+
+>CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [White 
+spot syndrome virus] residues 1-190
+Length=190
+
+ Score = 52.1 bits (124),  Expect = 3e-12, Method: Composition-based stats.
+ Identities = 175/190 (92%), Positives = 176/190 (93%), Gaps = 4/190 (2%)
+
+Query  1    MQLILSHHLTMAGRVELVTGPMFAGKSTYOKNIYQQENGGNKHCLFVKHSLETRYGCGT-  59
+            MQLILSHHLTMAGRVELVTGPMFAGKSTY KNIYQQENGGNKHCLFVKHSLETRY     
+Sbjct  1    MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRY-GCGT  59
+
+Query  60   -JTIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIV  118
+               +     EVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIV
+Sbjct  60   GTIVTHAG-EVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIV  118
+
+Query  119  IAALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICV  178
+            IAALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICV
+Sbjct  119  IAALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICV  178
+
+Query  179  GGAEMYAAAC  188
+            GGAEMYAAAC
+Sbjct  179  GGAEMYAAAC  188
+
+
+
+Lambda      K        H        a         alpha
+   0.320    0.137    0.405    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 169824
+
+
+Query= rr_part ribonucleotide reductase residues 281-520
+
+Length=240
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:102 f102 ribonucleotide reductase large subunit [White spot s...  52.4    7e-13
+
+
+>CDD:102 f102 ribonucleotide reductase large subunit [White spot syndrome 
+virus] residues 301-480
+Length=180
+
+ Score = 52.4 bits (125),  Expect = 7e-13, Method: Composition-based stats.
+ Identities = 158/158 (100%), Positives = 158/158 (100%), Gaps = 0/158 (0%)
+
+Query  32   GGDKRRGAAAIYISDWHLDVKDFIDCRKNAGNEDLRTRDLFPAIWVSDLFMERVKAGKNW  91
+            GGDKRRGAAAIYISDWHLDVKDFIDCRKNAGNEDLRTRDLFPAIWVSDLFMERVKAGKNW
+Sbjct  12   GGDKRRGAAAIYISDWHLDVKDFIDCRKNAGNEDLRTRDLFPAIWVSDLFMERVKAGKNW  71
+
+Query  92   SLMCPHECPGLSDVHGEEFKALYEKYEAEGKGKEVVKARALFDQINSARIETGTPYVCFK  151
+            SLMCPHECPGLSDVHGEEFKALYEKYEAEGKGKEVVKARALFDQINSARIETGTPYVCFK
+Sbjct  72   SLMCPHECPGLSDVHGEEFKALYEKYEAEGKGKEVVKARALFDQINSARIETGTPYVCFK  131
+
+Query  152  DTINRKSNQENVGIIKSSNLCTEIVQYSDSEETAVCNL  189
+            DTINRKSNQENVGIIKSSNLCTEIVQYSDSEETAVCNL
+Sbjct  132  DTINRKSNQENVGIIKSSNLCTEIVQYSDSEETAVCNL  169
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.404    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 99803
+
+
+  Database: rps_mini26
+    Posted date:  Nov 7, 2026  10:01 PM
+  Number of letters in database: 560
+  Number of sequences in database:  3
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Window for multiple hits: 40

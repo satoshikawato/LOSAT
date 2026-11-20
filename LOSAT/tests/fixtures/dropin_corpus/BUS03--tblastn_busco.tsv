@@ -1,0 +1,32 @@
+# TBLASTN 2.17.0+
+# Query: BDV02158.1 serine hydroxymethyltransferase [Candidatus Hepatoplasma vulgare]
+# Database: tdb
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 2 hits found
+BDV02158.1	h_slice	66.230	382	129	0	1	382	13045	14190	1.93e-169	516
+BDV02158.1	h_mut_10pct	51.697	383	180	3	2	382	148	1287	5.02e-120	348
+# TBLASTN 2.17.0+
+# Query: BDV02159.1 uracil phosphoribosyltransferase [Candidatus Hepatoplasma vulgare]
+# Database: tdb
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+BDV02159.1	h_slice	57.971	207	86	1	4	210	14218	14835	4.28e-79	248
+# TBLASTN 2.17.0+
+# Query: BDV02443.1 tRNA-specific 2-thiouridylase MnmA [Candidatus Hepatoplasma vulgare]
+# Database: tdb
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+BDV02443.1	h_slice	59.893	374	149	1	68	441	4572	5690	6.89e-137	424
+# TBLASTN 2.17.0+
+# Query: BDV02702.1 peptide chain release factor 1 [Candidatus Hepatoplasma vulgare]
+# Database: tdb
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+BDV02702.1	h_slice	52.571	350	158	3	1	346	10544	11581	3.83e-106	332
+# TBLASTN 2.17.0+
+# Query: BDV02441.1 aspartyl/glutamyl-tRNA amidotransferase subunit A [Candidatus Hepatoplasma vulgare]
+# Database: tdb
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+BDV02441.1	h_slice	44.844	417	225	4	14	426	1621	2868	3.94e-78	254
+# BLAST processed 5 queries

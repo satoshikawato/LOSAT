@@ -1,0 +1,581 @@
+{
+"BlastOutput2": [
+{
+    "report": {
+      "program": "blastx",
+      "version": "BLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1",
+          "Subject_2",
+          "Subject_3",
+          "Subject_4",
+          "Subject_5",
+          "Subject_6",
+          "Subject_7",
+          "Subject_8",
+          "Subject_9",
+          "Subject_10",
+          "Subject_11",
+          "Subject_12",
+          "Subject_13",
+          "Subject_14",
+          "Subject_15",
+          "Subject_16",
+          "Subject_17",
+          "Subject_18",
+          "Subject_19",
+          "Subject_20",
+          "Subject_21",
+          "Subject_22",
+          "Subject_23",
+          "Subject_24",
+          "Subject_25",
+          "Subject_26",
+          "Subject_27",
+          "Subject_28",
+          "Subject_29",
+          "Subject_30",
+          "Subject_31",
+          "Subject_32",
+          "Subject_33",
+          "Subject_34",
+          "Subject_35"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 1e-30,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "query_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_1",
+            "query_title": "m_big MelaMJNV 26001-36003, 301-700 and 1501-1800 in lower case",
+            "query_len": 10003,
+            "query_masking": [
+              {
+                "from": 39,
+                "to": 69
+              },
+              {
+                "from": 129,
+                "to": 153
+              },
+              {
+                "from": 270,
+                "to": 300
+              },
+              {
+                "from": 300,
+                "to": 699
+              },
+              {
+                "from": 1044,
+                "to": 1086
+              },
+              {
+                "from": 1275,
+                "to": 1332
+              },
+              {
+                "from": 1500,
+                "to": 1797
+              },
+              {
+                "from": 2949,
+                "to": 2973
+              },
+              {
+                "from": 3135,
+                "to": 3207
+              },
+              {
+                "from": 3363,
+                "to": 3420
+              },
+              {
+                "from": 3435,
+                "to": 3474
+              },
+              {
+                "from": 3486,
+                "to": 3522
+              },
+              {
+                "from": 3735,
+                "to": 3795
+              },
+              {
+                "from": 4428,
+                "to": 4470
+              },
+              {
+                "from": 4647,
+                "to": 4692
+              },
+              {
+                "from": 5367,
+                "to": 5457
+              },
+              {
+                "from": 5508,
+                "to": 5553
+              },
+              {
+                "from": 5667,
+                "to": 5700
+              },
+              {
+                "from": 5781,
+                "to": 5850
+              },
+              {
+                "from": 5925,
+                "to": 5958
+              },
+              {
+                "from": 6807,
+                "to": 6843
+              },
+              {
+                "from": 7536,
+                "to": 7581
+              },
+              {
+                "from": 7962,
+                "to": 7986
+              },
+              {
+                "from": 8769,
+                "to": 8820
+              },
+              {
+                "from": 9111,
+                "to": 9132
+              },
+              {
+                "from": 9324,
+                "to": 9429
+              },
+              {
+                "from": 9888,
+                "to": 9927
+              },
+              {
+                "from": 298,
+                "to": 697
+              },
+              {
+                "from": 952,
+                "to": 973
+              },
+              {
+                "from": 1147,
+                "to": 1180
+              },
+              {
+                "from": 1498,
+                "to": 1798
+              },
+              {
+                "from": 1987,
+                "to": 2029
+              },
+              {
+                "from": 3127,
+                "to": 3190
+              },
+              {
+                "from": 3214,
+                "to": 3250
+              },
+              {
+                "from": 3412,
+                "to": 3445
+              },
+              {
+                "from": 3733,
+                "to": 3766
+              },
+              {
+                "from": 3787,
+                "to": 3844
+              },
+              {
+                "from": 3886,
+                "to": 3931
+              },
+              {
+                "from": 4312,
+                "to": 4360
+              },
+              {
+                "from": 4654,
+                "to": 4693
+              },
+              {
+                "from": 4903,
+                "to": 4945
+              },
+              {
+                "from": 5668,
+                "to": 5698
+              },
+              {
+                "from": 5779,
+                "to": 5827
+              },
+              {
+                "from": 6880,
+                "to": 6910
+              },
+              {
+                "from": 7003,
+                "to": 7033
+              },
+              {
+                "from": 7150,
+                "to": 7195
+              },
+              {
+                "from": 7207,
+                "to": 7240
+              },
+              {
+                "from": 7462,
+                "to": 7495
+              },
+              {
+                "from": 7537,
+                "to": 7564
+              },
+              {
+                "from": 8053,
+                "to": 8077
+              },
+              {
+                "from": 8296,
+                "to": 8338
+              },
+              {
+                "from": 8545,
+                "to": 8614
+              },
+              {
+                "from": 9337,
+                "to": 9466
+              },
+              {
+                "from": 9715,
+                "to": 9727
+              },
+              {
+                "from": 164,
+                "to": 197
+              },
+              {
+                "from": 299,
+                "to": 698
+              },
+              {
+                "from": 998,
+                "to": 1082
+              },
+              {
+                "from": 1250,
+                "to": 1319
+              },
+              {
+                "from": 1499,
+                "to": 1799
+              },
+              {
+                "from": 1916,
+                "to": 1961
+              },
+              {
+                "from": 2714,
+                "to": 2732
+              },
+              {
+                "from": 3152,
+                "to": 3179
+              },
+              {
+                "from": 3422,
+                "to": 3449
+              },
+              {
+                "from": 3464,
+                "to": 3500
+              },
+              {
+                "from": 3734,
+                "to": 3806
+              },
+              {
+                "from": 5405,
+                "to": 5441
+              },
+              {
+                "from": 5666,
+                "to": 5699
+              },
+              {
+                "from": 5768,
+                "to": 5828
+              },
+              {
+                "from": 6290,
+                "to": 6335
+              },
+              {
+                "from": 6725,
+                "to": 6752
+              },
+              {
+                "from": 7529,
+                "to": 7565
+              },
+              {
+                "from": 7667,
+                "to": 7700
+              },
+              {
+                "from": 8072,
+                "to": 8126
+              },
+              {
+                "from": 8789,
+                "to": 8822
+              },
+              {
+                "from": 9008,
+                "to": 9035
+              },
+              {
+                "from": 9116,
+                "to": 9158
+              },
+              {
+                "from": 9365,
+                "to": 9470
+              }
+            ],
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "BDT61962.1",
+                    "title": "BDT61962.1 baculoviral IAP repeat-containing protein [Penaeus monodon majanivirus A]"
+                  }
+                ],
+                "len": 577,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 231.876,
+                    "score": 590,
+                    "evalue": 2.05297e-67,
+                    "identity": 128,
+                    "positive": 187,
+                    "query_from": 1802,
+                    "query_to": 2707,
+                    "query_frame": -1,
+                    "hit_from": 4,
+                    "hit_to": 356,
+                    "align_len": 357,
+                    "gaps": 59,
+                    "qseq": "SSPGCMFAQNLYSLEDLNKYCKPP----QIHKTFIKYARDTLIYEQHRLETFADWPHDFVSPIELAADGFYFLKKQDHVMCVFCVGILGLFEMGDIVREKHKHAFPGCAFVRGDKTCNIPAVKKNIFEKLSHEYKP-------------------------PKQTKSPLLDYIGIFEYNISSVRFKRDTFEKRLASF-KDWPEYLVQKPQDLAEAGFYYCGLSDHVACFYCEGGILNWERNDIPWHEHAKYYPTCNYLYLKKGKNFIDNIQ------LKISENTLYESFD-------------------EMDLLMELDIVRCIVSIGYSINDAKCILKKHVTETGWPYLSIEPYVLD",
+                    "hseq": "SHPNSFLQQEEYRLTTFSEHETSPIDTTRVYRNMPFVSYDCLRYEEKRLGTFIDWPHEWLKPSELAADGFYYLRKDDHCACIFCRGIVGAWEKTDTPRGEHERHFPHCPFIRGQPTGNVPIVQGNILARLPVLHASLDDCGSRRVEADACRFSSRHMAGSYPECRGSP--DETGLYQHS-GPKRSDFTTLDSRLKSYVEGWP-ILGLHARDLAEAGFFYCGLSDHVRCFHCGKGLRNWISSDIPWKEHARWYPKCRFVLLTKGQDYINEVQQEHPPYTRTASTTIYSGIDKAASGSSNSPTEVQSVSEQELDLLMSLDVVKCVLEMGYPSCIVRACLKDRVEQTGEPYFVIEPCLED",
+                    "midline": "S P     Q  Y L   +++   P    ++++     + D L YE+ RL TF DWPH+++ P ELAADGFY+L+K DH  C+FC GI+G +E  D  R +H+  FP C F+RG  T N+P V+ NI  +L   +                           P+   SP  D  G+++++    R    T + RL S+ + WP  L    +DLAEAGF+YCGLSDHV CF+C  G+ NW  +DIPW EHA++YP C ++ L KG+++I+ +Q       + +  T+Y   D                   E+DLLM LD+V+C++ +GY     +  LK  V +TG PY  IEP + D"
+                  },
+                  {
+                    "num": 2,
+                    "bit_score": 199.134,
+                    "score": 505,
+                    "evalue": 2.99561e-56,
+                    "identity": 117,
+                    "positive": 161,
+                    "query_from": 4450,
+                    "query_to": 5262,
+                    "query_frame": -2,
+                    "hit_from": 45,
+                    "hit_to": 357,
+                    "align_len": 315,
+                    "gaps": 46,
+                    "qseq": "LYSEEYRLYTFIDWPHDWLSPSSLSADGFYYTRQGDRVACISCRLVMSEFKKGCNIREEHKRLSPNCKFYE-RKTVKYPTISFMFL---------------------------------YPDIPRITNNNYGILEHHTSKHEHYLDIEKRLESF-KGWPHWLVQKPQDLAEAGFFYEGPNDSVRCFHCSGNIFNWEKEDIPWNMHAKWHPNCTYVLLKKGADFIYRNNQE--TYEKN-SEKLYHTWQGINSNVSHMSTLILT------EFLMDLDIVKCVVSMGYPISIAKVSLVMHVEEKGWPFLRIDEYIDDM",
+                    "hseq": "LRYEEKRLGTFIDWPHEWLKPSELAADGFYYLRKDDHCACIFCRGIVGAWEKTDTPRGEHERHFPHCPFIRGQPTGNVPIVQGNILARLPVLHASLDDCGSRRVEADACRFSSRHMAGSYPEC-RGSPDETGLYQHSGPKRSDFTTLDSRLKSYVEGWP-ILGLHARDLAEAGFFYCGLSDHVRCFHCGKGLRNWISSDIPWKEHARWYPKCRFVLLTKGQDYINEVQQEHPPYTRTASTTIYSGIDKAASGSSNSPTEVQSVSEQELDLLMSLDVVKCVLEMGYPSCIVRACLKDRVEQTGEPYFVIEPCLEDV",
+                    "midline": "L  EE RL TFIDWPH+WL PS L+ADGFYY R+ D  ACI CR ++  ++K    R EH+R  P+C F   + T   P +    L                                 YP+  R + +  G+ +H   K   +  ++ RL+S+ +GWP  L    +DLAEAGFFY G +D VRCFHC   + NW   DIPW  HA+W+P C +VLL KG D+I    QE   Y +  S  +Y       S  S+  T + +      + LM LD+VKCV+ MGYP  I +  L   VE+ G P+  I+  ++D+"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 71,
+              "eff_space": 38849278,
+              "kappa": 0.041,
+              "lambda": 0.267,
+              "entropy": 0.14
+            }
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastx",
+      "version": "BLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1",
+          "Subject_2",
+          "Subject_3",
+          "Subject_4",
+          "Subject_5",
+          "Subject_6",
+          "Subject_7",
+          "Subject_8",
+          "Subject_9",
+          "Subject_10",
+          "Subject_11",
+          "Subject_12",
+          "Subject_13",
+          "Subject_14",
+          "Subject_15",
+          "Subject_16",
+          "Subject_17",
+          "Subject_18",
+          "Subject_19",
+          "Subject_20",
+          "Subject_21",
+          "Subject_22",
+          "Subject_23",
+          "Subject_24",
+          "Subject_25",
+          "Subject_26",
+          "Subject_27",
+          "Subject_28",
+          "Subject_29",
+          "Subject_30",
+          "Subject_31",
+          "Subject_32",
+          "Subject_33",
+          "Subject_34",
+          "Subject_35"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 1e-30,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "query_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_2",
+            "query_title": "q_alln 300 N",
+            "query_len": 300,
+            "stat": {
+              "hsp_len": 0,
+              "eff_space": 0,
+              "kappa": -1,
+              "lambda": -1,
+              "entropy": -1
+            },
+            "message": "Query_2 q_alln 300 N:  Query_2 q_alln 300 N: Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options  No hits found \u000ANo hits found"
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastx",
+      "version": "BLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1",
+          "Subject_2",
+          "Subject_3",
+          "Subject_4",
+          "Subject_5",
+          "Subject_6",
+          "Subject_7",
+          "Subject_8",
+          "Subject_9",
+          "Subject_10",
+          "Subject_11",
+          "Subject_12",
+          "Subject_13",
+          "Subject_14",
+          "Subject_15",
+          "Subject_16",
+          "Subject_17",
+          "Subject_18",
+          "Subject_19",
+          "Subject_20",
+          "Subject_21",
+          "Subject_22",
+          "Subject_23",
+          "Subject_24",
+          "Subject_25",
+          "Subject_26",
+          "Subject_27",
+          "Subject_28",
+          "Subject_29",
+          "Subject_30",
+          "Subject_31",
+          "Subject_32",
+          "Subject_33",
+          "Subject_34",
+          "Subject_35"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 1e-30,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "query_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_3",
+            "query_title": "q_short2 two bases",
+            "query_len": 2,
+            "stat": {
+              "hsp_len": 0,
+              "eff_space": 0,
+              "kappa": -1,
+              "lambda": -1,
+              "entropy": -1
+            },
+            "message": "Query_3 q_short2 two bases:  Query_3 q_short2 two bases: Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options  No hits found \u000ANo hits found"
+          }
+        ]
+      }
+    }
+  }
+]
+}

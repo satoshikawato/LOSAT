@@ -7,6 +7,7 @@ use crate::blastinput::fasta_reader::FastaRecord;
 use anyhow::{ensure, Context, Result};
 
 use crate::common::GapEditOp;
+#[cfg(test)]
 use crate::core::blast_encoding::encode_iupac_to_blastna;
 use crate::report::pairwise::PairwiseHit;
 use crate::stats::{
@@ -15,8 +16,8 @@ use crate::stats::{
 use crate::utils::dust::MaskedInterval;
 
 use super::alignment::build_blastna_matrix;
-use super::hsp::{BlastnHitList, BlastnHsp};
-use super::lookup::reverse_complement;
+use super::hsp::{BlastnHitList, BlastnHsp, BlastnHspList};
+use super::lookup::{reverse_complement, reverse_complement_in_place};
 use super::x_subject_store::SubjectLetters;
 
 /// The regions that the report prints in lowercase.
@@ -28,95 +29,283 @@ pub(crate) struct DisplayMasks<'a> {
     pub query_offsets: &'a crate::blastinput::seq_range::Placements,
     /// Per subject, with `-lcase_masking`: the input lowercase of the subject's record.
     pub subject: Option<&'a [Vec<MaskedInterval>]>,
+    /// Per reported database sequence (by rank), with `-db_soft_mask`: its stored masks of the
+    /// search's algorithm in the order they are stored (`BlastnDatabase::display_masks`).
+    pub database: Option<&'a [Vec<MaskedInterval>]>,
 }
 
-/// Every HSP of the final hit list, in the order of the tabular formats (queries, then the
-/// subjects and HSPs of each query as ranked), with its displayed rows.
+impl<'a> Rows<'a> {
+    /// The rows' inputs of a report call of `queries` and `subjects`, its shown masks made
+    /// once for every window of its queries (`pairwise_hits`).
+    // Kept out of line: this runs only for outfmt 0 or hit records, and inlining it into the
+    // shared post-processing makes every BLASTN run compile it in Wasm hosts.
+    #[inline(never)]
+    pub(crate) fn new(
+        queries: &'a [FastaRecord],
+        subjects: SubjectLetters<'a>,
+        masks: &DisplayMasks<'_>,
+    ) -> Self {
+        let query_masks: Vec<Vec<MaskedInterval>> = masks
+            .query
+            .iter()
+            .zip(queries)
+            .enumerate()
+            .map(|(q_idx, (query_masks, query))| {
+                shown_query_masks(
+                    query_masks,
+                    query.seq().len(),
+                    masks.query_offsets.offset(q_idx),
+                )
+            })
+            .collect();
+        // A subject set's lowercase is merged first; a database's masks are kept as stored
+        // (`shown_subject_masks` merges what it keeps).
+        let subject_masks: Option<Vec<Vec<MaskedInterval>>> = match (masks.database, masks.subject)
+        {
+            (Some(database), _) => Some(database.to_vec()),
+            (None, Some(subject)) => Some(subject.iter().map(|masks| merged(masks)).collect()),
+            (None, None) => None,
+        };
+        Rows {
+            queries,
+            subjects,
+            query_masks,
+            subject_masks,
+        }
+    }
+}
+
+/// Every HSP of the final hit lists `hit_lists` (those of all queries of `rows`, or of a window
+/// of them), in the order of the tabular formats (queries, then the subjects and HSPs of each
+/// query as ranked), with its displayed rows.
 // Kept out of line: this runs only for outfmt 0 or hit records, and inlining it into the
 // shared post-processing makes every BLASTN run compile it in Wasm hosts.
 #[inline(never)]
 pub(crate) fn pairwise_hits(
     hit_lists: &[Option<BlastnHitList>],
-    queries: &[FastaRecord],
-    subjects: SubjectLetters<'_>,
-    masks: &DisplayMasks<'_>,
+    rows: &Rows<'_>,
+    x_pool: Option<&crate::utils::threading::SearchPool<'_>>,
 ) -> Result<Vec<PairwiseHit>> {
-    let mut hits = Vec::new();
-    let query_masks: Vec<Vec<MaskedInterval>> = masks
-        .query
+    let hsp_lists = hit_lists
         .iter()
-        .zip(queries)
-        .enumerate()
-        .map(|(q_idx, (query_masks, query))| {
-            shown_query_masks(
-                query_masks,
-                query.seq().len(),
-                masks.query_offsets.offset(q_idx),
+        .flatten()
+        .flat_map(|hit_list| &hit_list.hsplist_array);
+    // EXPERIMENT (LOSAT_X_PAIRWISEPAR): each subject's list of each query on the pool, the rows
+    // collected in the list order (`report::x_pairwise_par`); the same function of each list.
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    if let Some(pool) = x_pool {
+        use rayon::prelude::*;
+        let lists: Vec<&BlastnHspList> = hsp_lists.collect();
+        let rows_of_lists: Vec<Result<Vec<PairwiseHit>>> = pool.install(|| {
+            lists
+                .par_iter()
+                .map(|hsp_list| {
+                    let mut hits = Vec::with_capacity(hsp_list.hsps.len());
+                    rows.list(hsp_list, &mut hits)?;
+                    Ok(hits)
+                })
+                .collect()
+        });
+        let mut hits = Vec::with_capacity(lists.iter().map(|list| list.hsps.len()).sum());
+        for list_rows in rows_of_lists {
+            hits.append(&mut list_rows?);
+        }
+        return Ok(hits);
+    }
+    #[cfg(not(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    )))]
+    let _ = x_pool;
+    let mut hits = Vec::new();
+    for hsp_list in hsp_lists {
+        rows.list(hsp_list, &mut hits)?;
+    }
+    Ok(hits)
+}
+
+/// The windows of the queries `0..num_queries` whose outfmt 0 rows are made and written
+/// together (`x_pairwise_par::query_windows` of the estimates of their HSPs' lengths in a report
+/// of `line_length` columns a line, the report's `PairwiseConfig::line_length`, before any row is
+/// made, with the budget of `x_pool`, `x_pairwise_par::window_bytes`).
+#[inline(never)]
+pub(crate) fn pairwise_windows(
+    hit_lists: &[Option<BlastnHitList>],
+    num_queries: usize,
+    x_pool: Option<&crate::utils::threading::SearchPool<'_>>,
+    line_length: usize,
+) -> Vec<std::ops::Range<usize>> {
+    use crate::report::x_pairwise_par::{query_estimate_of, query_windows, window_bytes};
+    let estimates: Vec<usize> = (0..num_queries)
+        .map(|q_idx| {
+            query_estimate_of(
+                hit_lists
+                    .get(q_idx)
+                    .and_then(Option::as_ref)
+                    .into_iter()
+                    .flat_map(|hit_list| &hit_list.hsplist_array)
+                    .flat_map(|hsp_list| &hsp_list.hsps)
+                    .map(|hsp| hsp.length),
+                line_length,
             )
         })
         .collect();
-    let subject_masks: Option<Vec<Vec<MaskedInterval>>> = masks
-        .subject
-        .map(|masks| masks.iter().map(|masks| merged(masks)).collect());
-    for hit_list in hit_lists.iter().flatten() {
-        for hsp_list in &hit_list.hsplist_array {
-            let list_subject_masks = subject_masks.as_ref().and_then(|subject_masks| {
-                let s_idx = hsp_list.hsps.first()?.s_idx as usize;
-                Some(shown_subject_masks(&subject_masks[s_idx], &hsp_list.hsps))
-            });
-            for hsp in &hsp_list.hsps {
-                let query = queries
-                    .get(hsp.q_idx as usize)
-                    .context("BLASTN HSP of an unknown query")?;
-                let s_idx = hsp.s_idx as usize;
-                let subject = subjects
-                    .records()
-                    .get(s_idx)
-                    .context("BLASTN HSP of an unknown subject")?;
-                let subject_length = subjects.len(s_idx);
-                let (mut query_row, mut subject_row) =
-                    displayed_rows(hsp, query.seq(), subject_length, |from, to| {
-                        subjects.upper_letters(s_idx, from, to)
-                    })?;
-                lowercase_masked(
-                    &mut query_row,
-                    hsp.q_start,
-                    1,
-                    &query_masks[hsp.q_idx as usize],
-                );
-                if let Some(subject_masks) = &list_subject_masks {
-                    let step = if hsp.s_start > hsp.s_end { -1 } else { 1 };
-                    lowercase_masked(&mut subject_row, hsp.s_start, step, subject_masks);
-                }
-                let gaps = query_row
-                    .iter()
-                    .chain(&subject_row)
-                    .filter(|&&residue| residue == b'-')
-                    .count();
-                hits.push(PairwiseHit {
-                    hit: hsp.clone().into_hit(),
-                    query_seq: Some(String::from_utf8(query_row).context("BLASTN query row")?),
-                    subject_seq: Some(
-                        String::from_utf8(subject_row).context("BLASTN subject row")?,
-                    ),
-                    query_frame: None,
-                    subject_frame: None,
-                    positives: None,
-                    gaps: Some(gaps),
-                    subject_length: Some(subject_length),
-                    // The title after its first word (the `bio` description of the
-                    // inputs that `bio` read alike); the reports take the subject's title
-                    // bytes by subject index.
-                    subject_title: subject.title.iter().position(|&byte| byte == b' ').map(
-                        |space| String::from_utf8_lossy(&subject.title[space + 1..]).into_owned(),
-                    ),
-                    comp_adjust_method: None,
-                    sum_n: None,
-                });
+    query_windows(&estimates, window_bytes(x_pool))
+}
+
+/// The displayed rows of one HSP (the query on its plus strand, the subject reverse-complemented
+/// with it for a minus-strand HSP, upper case, no masking) for BLAST XML, which recounts its
+/// identities from them (`algorithm::blastn::blast_xml`). The same function of the HSP as the
+/// outfmt 0 rows, without a `PairwiseHit`, written into two buffers that the caller reuses.
+pub(crate) fn xml_rows_into(
+    hsp: &BlastnHsp,
+    queries: &[FastaRecord],
+    subjects: SubjectLetters<'_>,
+    query_row: &mut Vec<u8>,
+    subject_row: &mut Vec<u8>,
+) -> Result<()> {
+    let query = queries
+        .get(hsp.q_idx as usize)
+        .context("BLASTN HSP of an unknown query")?;
+    let s_idx = hsp.s_idx as usize;
+    subjects
+        .records()
+        .get(s_idx)
+        .context("BLASTN HSP of an unknown subject")?;
+    displayed_rows_into(
+        hsp,
+        query.seq(),
+        subjects.len(s_idx),
+        |from, to| subjects.upper_letters(s_idx, from, to),
+        query_row,
+        subject_row,
+    )
+}
+
+/// What the displayed rows of an HSP read besides the HSP (`pairwise_hits`).
+pub(crate) struct Rows<'a> {
+    queries: &'a [FastaRecord],
+    subjects: SubjectLetters<'a>,
+    /// Per query, the shown masks (`shown_query_masks`).
+    query_masks: Vec<Vec<MaskedInterval>>,
+    /// Per subject, the masks that `shown_subject_masks` shows with its HSPs: of a subject set's
+    /// record with `-lcase_masking`, its merged lowercase (`DisplayMasks::subject`); of a reported
+    /// database sequence with `-db_soft_mask`, its stored masks as stored
+    /// (`DisplayMasks::database`).
+    subject_masks: Option<Vec<Vec<MaskedInterval>>>,
+}
+
+impl Rows<'_> {
+    /// The shown masks of query `q_idx` (`shown_query_masks`), the query's `TMaskedQueryRegions`
+    /// in record positions (the query-anchored reports, `algorithm::blastn::anchored`).
+    pub(crate) fn query_masks(&self, q_idx: usize) -> &[MaskedInterval] {
+        self.query_masks.get(q_idx).map_or(&[], Vec::as_slice)
+    }
+
+    /// The masks of the subject of the HSPs `hsps` (one subject's list of a query) that NCBI's
+    /// `GetSubjectMasks` gives with them (`subject_mask_regions`), in their order and unmerged:
+    /// the query-anchored reports place each one on the first row that meets it
+    /// (`query_anchored::fill_loc_list`). None without subject masks.
+    pub(crate) fn subject_masks(&self, hsps: &[BlastnHsp]) -> Vec<MaskedInterval> {
+        match (self.subject_masks.as_deref(), hsps.first()) {
+            (Some(subject_masks), Some(hsp)) => {
+                subject_mask_regions(&subject_masks[hsp.s_idx as usize], hsps).collect()
             }
+            _ => Vec::new(),
         }
     }
-    Ok(hits)
+
+    /// The rows of every HSP of one subject's list, appended to `hits` in the list's order.
+    fn list(&self, hsp_list: &BlastnHspList, hits: &mut Vec<PairwiseHit>) -> Result<()> {
+        let (queries, subjects) = (self.queries, self.subjects);
+        let list_subject_masks = self.subject_masks.as_deref().and_then(|subject_masks| {
+            let s_idx = hsp_list.hsps.first()?.s_idx as usize;
+            Some(shown_subject_masks(&subject_masks[s_idx], &hsp_list.hsps))
+        });
+        for hsp in &hsp_list.hsps {
+            let query = queries
+                .get(hsp.q_idx as usize)
+                .context("BLASTN HSP of an unknown query")?;
+            let s_idx = hsp.s_idx as usize;
+            let subject = subjects
+                .records()
+                .get(s_idx)
+                .context("BLASTN HSP of an unknown subject")?;
+            let subject_length = subjects.len(s_idx);
+            let (mut query_row, mut subject_row) =
+                displayed_rows(hsp, query.seq(), subject_length, |from, to| {
+                    subjects.upper_letters(s_idx, from, to)
+                })?;
+            // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1796-1798
+            // ```c++
+            //     x_FillIdentityInfo(aln_vec_info->alnRowInfo->sequence[0],
+            //                        aln_vec_info->alnRowInfo->sequence[1],
+            //                        aln_vec_info->match,
+            // ```
+            // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2127-2140
+            // ```c++
+            //     int min_length=min<int>((int)sequence_standard.size(), (int)sequence.size());
+            //     ...
+            //     for(int i=0; i<min_length; i++){
+            //         if(sequence_standard[i]==sequence[i]){
+            //     ...
+            //             match ++;
+            // ```
+            // The identities that outfmt 0 shows are those of the displayed rows (the stored
+            // letters in upper case, before the masks' lower case), counted again (series NP,
+            // M4a-2b decision H6): with `-db_hard_mask` the engine's `num_ident` counts a masked
+            // letter ('B' in the traceback) as a mismatch. Elsewhere the two counts are equal.
+            let displayed_ident = query_row
+                .iter()
+                .zip(&subject_row)
+                .filter(|(query, subject)| query == subject)
+                .count();
+            lowercase_masked(
+                &mut query_row,
+                hsp.q_start,
+                1,
+                &self.query_masks[hsp.q_idx as usize],
+            );
+            if let Some(subject_masks) = &list_subject_masks {
+                let step = if hsp.s_start > hsp.s_end { -1 } else { 1 };
+                lowercase_masked(&mut subject_row, hsp.s_start, step, subject_masks);
+            }
+            let gaps = query_row
+                .iter()
+                .chain(&subject_row)
+                .filter(|&&residue| residue == b'-')
+                .count();
+            let mut hit = hsp.clone().into_hit();
+            hit.num_ident = displayed_ident;
+            hits.push(PairwiseHit {
+                hit,
+                query_seq: Some(String::from_utf8(query_row).context("BLASTN query row")?),
+                subject_seq: Some(String::from_utf8(subject_row).context("BLASTN subject row")?),
+                query_frame: None,
+                subject_frame: None,
+                positives: None,
+                gaps: Some(gaps),
+                subject_length: Some(subject_length),
+                // The title after its first word; the reports take the subject's title
+                // bytes by subject index.
+                subject_title: subject
+                    .title
+                    .iter()
+                    .position(|&byte| byte == b' ')
+                    .map(|space| String::from_utf8_lossy(&subject.title[space + 1..]).into_owned()),
+                comp_adjust_method: None,
+                sum_n: None,
+                subject_stored_gaps: Vec::new(),
+                // The Seq-align's `num_ident` (`seqalign::query_records` writes the same
+                // `hsp.num_ident`): the engine's count, which "Max ident" and the sorts read.
+                seqalign_num_ident: hsp.num_ident,
+            });
+        }
+        Ok(())
+    }
 }
 
 // The rows of one HSP as NCBI shows them: the query on its plus strand.
@@ -152,7 +341,66 @@ fn displayed_rows(
     subject_length: usize,
     subject_letters: impl FnOnce(usize, usize) -> Vec<u8>,
 ) -> Result<(Vec<u8>, Vec<u8>)> {
-    let (qs, qe) = (hsp.internal_q_offset_0, hsp.internal_q_end_0);
+    let (mut query_row, mut subject_row) = (Vec::new(), Vec::new());
+    displayed_rows_into(
+        hsp,
+        query,
+        subject_length,
+        subject_letters,
+        &mut query_row,
+        &mut subject_row,
+    )?;
+    Ok((query_row, subject_row))
+}
+
+/// `displayed_rows` into `query_row` and `subject_row` (cleared first; their capacity is kept),
+/// reversed in place for a minus-strand HSP.
+fn displayed_rows_into(
+    hsp: &BlastnHsp,
+    query: &[u8],
+    subject_length: usize,
+    subject_letters: impl FnOnce(usize, usize) -> Vec<u8>,
+    query_row: &mut Vec<u8>,
+    subject_row: &mut Vec<u8>,
+) -> Result<()> {
+    context_rows_into(
+        hsp,
+        query,
+        subject_length,
+        subject_letters,
+        query_row,
+        subject_row,
+    )?;
+    if hsp.query_frame < 0 {
+        reverse_complement_in_place(query_row);
+        reverse_complement_in_place(subject_row);
+    }
+    Ok(())
+}
+
+/// The two rows in the direction of the HSP's query context (cleared first; their capacity is
+/// kept): a minus-strand HSP's rows are still to be reverse-complemented.
+fn context_rows_into(
+    hsp: &BlastnHsp,
+    query: &[u8],
+    subject_length: usize,
+    subject_letters: impl FnOnce(usize, usize) -> Vec<u8>,
+    query_row: &mut Vec<u8>,
+    subject_row: &mut Vec<u8>,
+) -> Result<()> {
+    query_row.clear();
+    subject_row.clear();
+    // An HSP outside its query context (a negative `Int4` offset) never reaches a report
+    // (`run::hsp_outside_query_context`). The end is not below the offset, so neither cast
+    // wraps; the range test below would refuse one that did.
+    ensure!(
+        hsp.internal_q_offset_0 >= 0,
+        "BLASTN HSP outside its sequences"
+    );
+    let (qs, qe) = (
+        hsp.internal_q_offset_0 as usize,
+        hsp.internal_q_end_0 as usize,
+    );
     let (ss, se) = (hsp.internal_s_offset_0, hsp.internal_s_end_0);
     ensure!(
         qs <= qe && qe <= query.len() && ss <= se && se <= subject_length,
@@ -166,9 +414,14 @@ fn displayed_rows(
     let subject = subject_letters(ss, se);
     let ungapped = [GapEditOp::Sub((qe - qs) as u32)];
     let ops = hsp.gap_info.as_deref().unwrap_or(&ungapped);
+    // The rows live in a `PairwiseHit` while the reports are written: their exact size, not
+    // what growing leaves (a third more on the alignments of the BLASTN hit records). A
+    // reused buffer keeps its capacity.
+    let columns = ops.iter().map(|op| op.num() as usize).sum();
+    query_row.reserve_exact(columns);
+    subject_row.reserve_exact(columns);
     // Offsets into the two segments.
     let (mut q, mut s) = (0, 0);
-    let (mut query_row, mut subject_row) = (Vec::new(), Vec::new());
     for op in ops {
         let n = op.num() as usize;
         let (take_query, take_subject) = match op {
@@ -201,11 +454,7 @@ fn displayed_rows(
         q == context.len() && s == subject.len(),
         "BLASTN edit script does not span its HSP"
     );
-    if hsp.query_frame < 0 {
-        query_row = reverse_complement(&query_row);
-        subject_row = reverse_complement(&subject_row);
-    }
-    Ok((query_row, subject_row))
+    Ok(())
 }
 
 // NCBI reference: c++/src/algo/blast/api/blast_aux.cpp:878-892
@@ -245,7 +494,7 @@ fn displayed_rows(
 // so it is not shown. The masks of the search lie in the searched letters (`query_length`
 // of them); `Map` moves them by the start of the query's interval (`offset`, 0 without
 // `-query_loc`) into record coordinates, as the report's HSPs.
-fn shown_query_masks(
+pub(crate) fn shown_query_masks(
     masks: &[MaskedInterval],
     query_length: usize,
     offset: usize,
@@ -295,20 +544,51 @@ fn shown_query_masks(
 //     }
 // }
 // ```
-// The subject masks shown with the HSPs of one subject: the lowercase regions of its record
-// (record coordinates) that meet the closed range `[offset, end]` of an HSP in the searched
-// letters (the end is one past the HSP). With `-subject_loc` the two coordinates differ by
-// the interval's start, so a region of the record is kept by where it would lie in the
-// interval, and shown where it lies in the record.
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/seqinfosrc_seqdb.cpp:121-133
+// ```c++
+//     CSeqDB::TSequenceRanges ranges;
+//     m_iSeqDb->GetMaskData(index, m_FilteringAlgoId, ranges);
+//     ITERATE(CSeqDB::TSequenceRanges, itr, ranges) {
+//         for (size_t it=0; it<target.size(); it++) {
+//             if (target[it] != TSeqRange::GetEmpty() &&
+//                 target[it].IntersectingWith(*itr)) {
+//                 CRef<CSeq_interval> si
+//                     (new CSeq_interval(*id, itr->first, itr->second-1));
+//                 CRef<CSeqLocInfo> sli(new CSeqLocInfo(si, kFrame));
+//                 retval.push_back(sli);
+//                 break;
+//             }
+//         }
+//     }
+// ```
+// The subject masks shown with the HSPs of one subject (`GetMasks` of the subject set's
+// `CSeqVecSeqInfoSrc` or of the database's `CSeqDbSeqInfoSrc`): each mask `[start, end)` that
+// holds a letter (a stored database mask `TSeqRange(first, second-1)` of none is empty) and meets
+// the closed range `[offset, end]` of an HSP in the searched letters (the end is one past the
+// HSP), in the order of `masks`, merged for `lowercase_masked`, which marks each position once
+// (the merged lowercase of a subject set's record is kept as it is). With `-subject_loc` the
+// record's coordinates and the searched letters' differ by the interval's start, so a region of
+// the record is kept by where it would lie in the interval, and shown where it lies in the
+// record.
 fn shown_subject_masks(masks: &[MaskedInterval], hsps: &[BlastnHsp]) -> Vec<MaskedInterval> {
+    merged(&subject_mask_regions(masks, hsps).collect::<Vec<_>>())
+}
+
+/// The masks of `masks` that `GetSubjectMasks` gives with the HSPs `hsps` (`shown_subject_masks`
+/// before the merge), in their order.
+fn subject_mask_regions<'m>(
+    masks: &'m [MaskedInterval],
+    hsps: &'m [BlastnHsp],
+) -> impl Iterator<Item = MaskedInterval> + 'm {
     masks
         .iter()
         .filter(|mask| {
-            hsps.iter()
-                .any(|hsp| mask.start <= hsp.internal_s_end_0 && hsp.internal_s_offset_0 < mask.end)
+            mask.start < mask.end
+                && hsps.iter().any(|hsp| {
+                    mask.start <= hsp.internal_s_end_0 && hsp.internal_s_offset_0 < mask.end
+                })
         })
         .cloned()
-        .collect()
 }
 
 /// The masked positions as disjoint intervals in order, for `lowercase_masked`.
@@ -440,19 +720,22 @@ pub(crate) fn query_ungapped_karlin_blastna(
         return None;
     }
     let matrix = build_blastna_matrix(reward, penalty);
-    let mut probabilities = Vec::new();
+    // At most 16 residues x 4 bases: a fixed array in place of a vector grown for each query.
+    let mut probabilities = [(0i32, 0f64); 64];
+    let mut num_probabilities = 0usize;
     for (residue, &count) in counts.iter().enumerate() {
         if count == 0.0 {
             continue;
         }
         for base in 0..4 {
-            probabilities.push((matrix[residue * 16 + base], count / sum * 0.25));
+            probabilities[num_probabilities] = (matrix[residue * 16 + base], count / sum * 0.25);
+            num_probabilities += 1;
         }
     }
     let sfp = score_freq_profile_from_probabilities(
         penalty.min(reward),
         reward.max(penalty),
-        &probabilities,
+        &probabilities[..num_probabilities],
     );
     compute_karlin_params_ungapped(&sfp).ok()
 }
@@ -488,14 +771,57 @@ mod tests {
             q_idx: 0,
             s_idx: 0,
             raw_score: 0,
-            internal_q_offset_0: q.0,
-            internal_q_end_0: q.1,
+            internal_q_offset_0: q.0 as i32,
+            internal_q_end_0: q.1 as i32,
             internal_s_offset_0: s.0,
             internal_s_end_0: s.1,
             internal_query_context_offset: 0,
             gap_info: ops,
             num_positives: 0,
         }
+    }
+
+    // seqinfosrc_seqdb.cpp:121-133 (quoted at `shown_subject_masks`): a stored mask is shown
+    // when it holds a letter and meets the closed range `[offset, end]` of an HSP (the end one
+    // past the HSP); overlapping and nested masks (hand-made masks of the M4a-2 edge databases)
+    // are merged for the display. A subject set's merged lowercase is kept as it is.
+    #[test]
+    fn database_masks_meeting_an_hsp_are_shown() {
+        let masks = [
+            MaskedInterval::new(600, 700),
+            MaskedInterval::new(100, 200),
+            MaskedInterval::new(150, 250),
+            MaskedInterval::new(250, 260),
+            MaskedInterval::new(300, 300),
+            MaskedInterval::new(900, 950),
+        ];
+        // The mask 600-700 holds 600..=699: it meets an HSP from 699 on, not one from 700 on.
+        let hsps = [
+            hsp(1, (0, 10), (199, 250), None),
+            hsp(1, (0, 10), (700, 760), None),
+        ];
+        assert!(shown_subject_masks(&masks[..1], &hsps).is_empty());
+        let hsps = [
+            hsp(1, (0, 10), (199, 250), None),
+            hsp(1, (0, 10), (699, 701), None),
+        ];
+        // 100-200, 150-250 and 250-260 meet the first HSP, 600-700 the second; the empty 300-300
+        // and 900-950 none.
+        assert_eq!(
+            shown_subject_masks(&masks, &hsps),
+            [MaskedInterval::new(100, 260), MaskedInterval::new(600, 700)]
+        );
+        // Merged lowercase runs are kept as they are.
+        let runs = merged(&masks);
+        assert_eq!(
+            shown_subject_masks(&runs, &hsps),
+            [MaskedInterval::new(100, 260), MaskedInterval::new(600, 700)]
+        );
+        let hsps = [hsp(1, (0, 10), (940, 960), None)];
+        assert_eq!(
+            shown_subject_masks(&runs, &hsps),
+            [MaskedInterval::new(900, 950)]
+        );
     }
 
     #[test]
@@ -532,6 +858,33 @@ mod tests {
         )
         .unwrap();
         assert_eq!((q.as_slice(), s.as_slice()), (&b"CCGGT"[..], &b"CCGG-"[..]));
+    }
+
+    // The XML rows are written into buffers that the caller reuses: stale contents are cleared
+    // and the minus-strand reversal in place gives the rows of `displayed_rows`.
+    #[test]
+    fn rows_into_reused_buffers_equal_displayed_rows() {
+        let query = record(b"AACCGGTT");
+        let subject = record(b"CCGGT");
+        let (mut q, mut s) = (b"stale row".to_vec(), b"x".to_vec());
+        for (frame, window, ops) in [
+            (-1, (1, 6), vec![GapEditOp::Ins(1), GapEditOp::Sub(4)]),
+            (1, (0, 5), vec![GapEditOp::Sub(5)]),
+        ] {
+            let hsp = hsp(frame, window, (0, 4 + usize::from(frame > 0)), Some(ops));
+            let letters = |from: usize, to: usize| subject.seq()[from..to].to_ascii_uppercase();
+            let once = displayed_rows(&hsp, query.seq(), subject.seq().len(), letters).unwrap();
+            displayed_rows_into(
+                &hsp,
+                query.seq(),
+                subject.seq().len(),
+                letters,
+                &mut q,
+                &mut s,
+            )
+            .unwrap();
+            assert_eq!((q.clone(), s.clone()), once);
+        }
     }
 
     #[test]

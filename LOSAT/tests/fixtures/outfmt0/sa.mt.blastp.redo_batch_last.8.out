@@ -1,0 +1,500 @@
+Seq-annot ::= {
+  desc {
+    user {
+      type str "Hist Seqalign",
+      data {
+        {
+          label str "Hist Seqalign",
+          data bool TRUE
+        }
+      }
+    },
+    user {
+      type str "Blast Type",
+      data {
+        {
+          label str "blastp",
+          data int 2
+        }
+      }
+    },
+    user {
+      type str "Blast Database Title",
+      data {
+        {
+          label str "n/a",
+          data bool FALSE
+        }
+      }
+    }
+  },
+  data align {
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 257
+        },
+        {
+          id str "blast_score",
+          value int 257
+        },
+        {
+          id str "e_value",
+          value real { 182751953444661, 10, -49 }
+        },
+        {
+          id str "bit_score",
+          value real { 103604523290804, 10, -12 }
+        },
+        {
+          id str "num_ident",
+          value int 60
+        },
+        {
+          id str "comp_adjustment_method",
+          value int 2
+        },
+        {
+          id str "num_positives",
+          value int 60
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 1, 10, 2 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_2",
+          local str "Subject_3"
+        },
+        starts {
+          0,
+          0
+        },
+        lens {
+          60
+        },
+        strands {
+          plus,
+          plus
+        }
+      }
+    }
+  }
+}
+Seq-annot ::= {
+  desc {
+    user {
+      type str "Hist Seqalign",
+      data {
+        {
+          label str "Hist Seqalign",
+          data bool TRUE
+        }
+      }
+    },
+    user {
+      type str "Blast Type",
+      data {
+        {
+          label str "blastp",
+          data int 2
+        }
+      }
+    },
+    user {
+      type str "Blast Database Title",
+      data {
+        {
+          label str "n/a",
+          data bool FALSE
+        }
+      }
+    }
+  },
+  data align {
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 248
+        },
+        {
+          id str "blast_score",
+          value int 248
+        },
+        {
+          id str "e_value",
+          value real { 41210283447569, 10, -38 }
+        },
+        {
+          id str "bit_score",
+          value real { 100137727107548, 10, -12 }
+        },
+        {
+          id str "num_ident",
+          value int 181
+        },
+        {
+          id str "comp_adjustment_method",
+          value int 2
+        },
+        {
+          id str "num_positives",
+          value int 324
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 534895366218236, 10, -13 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 65,
+        ids {
+          local str "Query_3",
+          local str "Subject_1"
+        },
+        starts {
+          303,
+          92,
+          334,
+          -1,
+          336,
+          123,
+          365,
+          -1,
+          383,
+          152,
+          403,
+          -1,
+          408,
+          172,
+          418,
+          -1,
+          421,
+          182,
+          -1,
+          201,
+          440,
+          202,
+          463,
+          -1,
+          465,
+          225,
+          495,
+          -1,
+          498,
+          255,
+          -1,
+          301,
+          544,
+          303,
+          609,
+          -1,
+          622,
+          368,
+          -1,
+          372,
+          626,
+          373,
+          -1,
+          387,
+          640,
+          392,
+          649,
+          -1,
+          655,
+          401,
+          689,
+          -1,
+          697,
+          435,
+          724,
+          -1,
+          726,
+          462,
+          -1,
+          469,
+          733,
+          470,
+          -1,
+          491,
+          754,
+          496,
+          762,
+          -1,
+          765,
+          504,
+          -1,
+          506,
+          767,
+          511,
+          778,
+          -1,
+          780,
+          522,
+          786,
+          -1,
+          793,
+          528,
+          811,
+          -1,
+          812,
+          546,
+          820,
+          -1,
+          823,
+          554,
+          833,
+          -1,
+          834,
+          564,
+          840,
+          -1,
+          842,
+          570,
+          854,
+          -1,
+          855,
+          582,
+          -1,
+          600,
+          873,
+          601,
+          897,
+          -1,
+          898,
+          625,
+          -1,
+          653,
+          926,
+          654,
+          938,
+          -1,
+          942,
+          666,
+          -1,
+          672,
+          948,
+          673,
+          971,
+          -1,
+          978,
+          696,
+          -1,
+          710,
+          992,
+          711
+        },
+        lens {
+          31,
+          2,
+          29,
+          18,
+          20,
+          5,
+          10,
+          3,
+          19,
+          1,
+          23,
+          2,
+          30,
+          3,
+          46,
+          2,
+          65,
+          13,
+          4,
+          1,
+          14,
+          5,
+          9,
+          6,
+          34,
+          8,
+          27,
+          2,
+          7,
+          1,
+          21,
+          5,
+          8,
+          3,
+          2,
+          5,
+          11,
+          2,
+          6,
+          7,
+          18,
+          1,
+          8,
+          3,
+          10,
+          1,
+          6,
+          2,
+          12,
+          1,
+          18,
+          1,
+          24,
+          1,
+          28,
+          1,
+          12,
+          4,
+          6,
+          1,
+          23,
+          7,
+          14,
+          1,
+          20
+        },
+        strands {
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus
+        }
+      }
+    }
+  }
+}

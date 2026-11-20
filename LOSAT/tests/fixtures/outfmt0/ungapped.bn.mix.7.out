@@ -1,0 +1,13 @@
+# BLASTN 2.17.0+
+# Query: qmix
+# Database: User specified sequence set (Input: tests/fixtures/blastn_regression/inputs/mix_s.fa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 7 hits found
+qmix	smix	100.000	302	0	0	100	401	100	401	4.20e-161	553
+qmix	smix	100.000	200	0	0	501	700	700	501	5.88e-105	367
+qmix	smix	100.000	152	0	0	750	901	800	951	1.55e-78	279
+qmix	smix	100.000	140	0	0	121	260	1001	1140	6.26e-72	257
+qmix	smix2	100.000	300	0	0	301	600	300	1	5.30e-160	549
+qmix	smix2	100.000	200	0	0	601	800	381	580	5.88e-105	367
+qmix	smix2	100.000	12	0	0	730	741	521	510	0.18	23.2
+# BLAST processed 1 queries

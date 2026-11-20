@@ -1,12 +1,16 @@
 //! NCBI's `CFastaReader` with the flags of `CBlastFastaInputSource`
-//! (`fNoParseID | fDLOptional`, `fAssumeNuc` or `fAssumeProt`, `fNoSplit`,
+//! (`fNoParseID | fDLOptional` or, with `-parse_deflines`, `fParseRawID`, `fAssumeNuc` or
+//! `fAssumeProt`, `fNoSplit`,
 //! `fHyphensIgnoreAndWarn`, `fDisableNoResidues`, `fQuickIDCheck`), as overridden by
 //! `CCustomizedFastaReader` and `CBlastInputReader`.
 
 use std::io::Read;
 
-use super::stream::{input_space, trim_input_end, trim_input_space, trim_input_start, LineReader};
+use super::stream::LineReader;
 use super::{FastaRecord, ReadError, ReaderConfig};
+use crate::ncbi_str::{
+    is_blank, is_space, truncate_spaces, truncate_spaces_begin, truncate_spaces_end,
+};
 
 /// The kinds of reader problems (`ILineError::EProblem`) that LOSAT meets, for
 /// `PostWarning`'s list of ignored problems.
@@ -45,8 +49,6 @@ const IGNORED_PROBLEMS: [Problem; 3] = [
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum GapType {
     Unknown,
-    Fragment,
-    Clone,
     ShortArm,
     Heterochromatin,
     Centromere,
@@ -214,10 +216,9 @@ struct Gap {
     length: u32,
 }
 
-/// The title of a defline and its line number (`SLineTextAndLoc`).
+/// The title of a defline (`SLineTextAndLoc`; its line number is not read).
 struct LineText {
     text: Vec<u8>,
-    line: u64,
 }
 
 /// What a residue byte of a data line is (`ParseDataLine`'s `ECharType`, with the
@@ -466,7 +467,7 @@ const CHECK_CLASSES: [CheckClass; 256] = {
         let byte = index as u8;
         table[index] = if byte.is_ascii_alphabetic() || byte == b'*' {
             CheckClass::Good
-        } else if byte == b'-' || input_space(byte) || byte.is_ascii_digit() {
+        } else if byte == b'-' || is_space(byte) || byte.is_ascii_digit() {
             CheckClass::Neutral
         } else if byte == b';' {
             CheckClass::Comment
@@ -503,10 +504,30 @@ pub(crate) struct FastaReader<R: Read> {
     titles: Vec<LineText>,
     /// The title of the record (`x_ApplyMods`' `processed_title`).
     title: Vec<u8>,
-    /// The local ID of the record (`GenerateID`), once its defline is read.
+    /// The local ID of the record (`GenerateID`), once its defline is read; with
+    /// `-parse_deflines` the id that `Query=` shows.
     local_id: Option<String>,
+    /// The Seq-ids of the record under `-parse_deflines`, once its defline is read.
+    believed: Option<std::sync::Arc<super::believed::BelievedIds>>,
+    /// Whether the ids of the record name a protein (`believed::named_molecule`).
+    believed_molecule: Option<bool>,
+    /// The keys of the ids of the subjects read so far (`believed::duplicate_id`).
+    believed_keys: std::collections::HashSet<u64>,
+    /// The ids of the other role's records of the search (`set_id_scope`).
+    id_scope: Option<std::sync::Arc<crate::seqid::id_scope::IdScope>>,
+    /// The defline of the record, as written, when its ids are too (`IdScope`'s records without a
+    /// mark have generated ids).
+    believed_written: Vec<u8>,
+    /// The defline line as read, kept when the configuration asks for it
+    /// (`ReaderConfig::keep_defline`).
+    defline: Vec<u8>,
     /// Bad positions of a data line, reused.
     bad_positions: Vec<u32>,
+    /// EXPERIMENT (LOSAT_X_BNQPACK): a nucleotide record's letters are packed as it is assembled
+    /// (`x_packed`), its `sequence` left empty (`FastaInputSource::x_pack_letters`).
+    x_pack: bool,
+    /// The packed letters of the record assembled last, until the caller takes them.
+    x_packed: Option<crate::sequence::packed_letters::PackedLetters>,
 }
 
 /// Where a reader message goes: `LOG_POST_X(1, Warning << message)` with no listener.
@@ -544,8 +565,57 @@ impl<R: Read> FastaReader<R> {
             titles: Vec::new(),
             title: Vec::new(),
             local_id: None,
+            believed: None,
+            believed_molecule: None,
+            believed_keys: std::collections::HashSet::new(),
+            id_scope: None,
+            believed_written: Vec::new(),
+            defline: Vec::new(),
             bad_positions: Vec::new(),
+            x_pack: false,
+            x_packed: None,
         }
+    }
+
+    /// LOSAT_X_QSTREAM's second reading in parts (`FastaInputSource::x_from_reader_at`): a reader
+    /// that has read nothing counts its lines from `lines` and its local IDs from `next_id`.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:364-367
+    /// ```c++
+    ///     CRef<CSeqIdGenerator> idgen
+    ///         (new CSeqIdGenerator(m_Config.GetLocalIdCounterInitValue(),
+    ///                              m_Config.GetLocalIdPrefix()));
+    ///     m_InputReader->SetIDGenerator(*idgen);
+    /// ```
+    /// No NCBI counterpart for the start itself: NCBI reads the query file once, with one reader
+    /// whose counter starts at the configuration's value (1) and whose line count starts at 0
+    /// (`LineReader::new`); a reader of a part starts both where that one reader has them at the
+    /// part's first byte. It reads the same records (scheduling only).
+    #[cfg_attr(not(all(unix, feature = "parallel")), allow(dead_code))]
+    pub(crate) fn x_start_at(&mut self, lines: u64, next_id: i64) {
+        self.lines.x_start_at(lines);
+        self.id_counter = next_id;
+    }
+
+    /// The search whose records this reader reads under `-parse_deflines`.
+    pub(crate) fn set_id_scope(
+        &mut self,
+        id_scope: Option<std::sync::Arc<crate::seqid::id_scope::IdScope>>,
+    ) {
+        self.id_scope = id_scope;
+    }
+
+    /// EXPERIMENT (LOSAT_X_BNQPACK): pack the letters of the nucleotide records read from now on.
+    pub(crate) fn x_pack_letters(&mut self) {
+        self.x_pack = true;
+    }
+
+    /// EXPERIMENT (LOSAT_X_BNQPACK): the packed letters of the record read last, if it was packed
+    /// (its `sequence` is then empty).
+    pub(crate) fn x_take_packed(
+        &mut self,
+    ) -> Option<crate::sequence::packed_letters::PackedLetters> {
+        self.x_packed.take()
     }
 
     /// `LineNumber()`.
@@ -583,13 +653,7 @@ impl<R: Read> FastaReader<R> {
         message: &[u8],
         warn: Warn<'_>,
     ) -> Result<(), ReadError> {
-        if IGNORED_PROBLEMS.contains(&problem) {
-            return Ok(());
-        }
-        let mut line = Vec::with_capacity(message.len() + 1);
-        line.extend_from_slice(message);
-        line.push(b'\n');
-        warn(&line).map_err(ReadError::Write)
+        post_line_warning(problem, message, warn)
     }
 
     /// `FASTA_ERROR`: `PostWarning` with `eDiag_Error` and no listener throws
@@ -656,11 +720,10 @@ impl<R: Read> FastaReader<R> {
     /// reads from the next line (oracle BI net2, net5).
     pub(crate) fn read_one_seq(&mut self, warn: Warn<'_>) -> Result<FastaRecord, ReadError> {
         if self.config.data_loaders {
-            let line = trim_input_space(self.lines.next_line()).to_vec();
-            if !line.is_empty() && line[0].is_ascii_alphanumeric() {
-                if let Some(rejection) = super::seq_id::reject_seq_id_line(&line, &self.config) {
-                    return Err(ReadError::Unsupported(rejection));
-                }
+            let (program, role) = (self.config.program, self.config.role);
+            let line = self.lines.next_line();
+            if let Some(rejection) = super::seq_id::reject_seq_id_line(line, program, role) {
+                return Err(ReadError::Unsupported(rejection));
             }
             self.lines.unget_line();
         }
@@ -787,6 +850,8 @@ impl<R: Read> FastaReader<R> {
         self.titles.clear();
         self.title.clear();
         self.local_id = None;
+        self.believed = None;
+        self.believed_molecule = None;
 
         let mut need_defline = true;
         while !self.lines.at_eof() {
@@ -815,8 +880,14 @@ impl<R: Read> FastaReader<R> {
                     self.lines.put_line(raw);
                     self.lines.unget_line();
                 } else if need_defline {
-                    self.parse_def_line(next_line);
+                    let parsed = if self.config.parse_deflines {
+                        self.parse_believed_def_line(next_line, warn)
+                    } else {
+                        self.parse_def_line(next_line);
+                        Ok(())
+                    };
                     self.lines.put_line(raw);
+                    parsed?;
                     need_defline = false;
                     continue;
                 } else {
@@ -827,12 +898,25 @@ impl<R: Read> FastaReader<R> {
             }
             self.lines.next_line();
             let raw = self.lines.take_line();
-            let line = trim_input_space(&raw);
+            // `NStr::TruncateSpaces_Unsafe(line)` (`eTrunc_Both`, fasta.cpp:376).
+            let line = truncate_spaces(&raw);
             if line.is_empty() || matches!(line[0], b'!' | b'#' | b';') {
                 self.lines.put_line(raw);
                 continue;
             }
             if need_defline {
+                if self.config.parse_deflines {
+                    let line_number = self.line_number();
+                    self.lines.put_line(raw);
+                    return Err(ReadError::Parse {
+                        code: super::ParseErrorCode::NoDefline,
+                        message: format!(
+                            "CFastaReader: Input doesn't start with a defline or comment around \
+                             line {line_number}"
+                        ),
+                        line: line_number,
+                    });
+                }
                 self.parse_def_line(b">");
                 need_defline = false;
             }
@@ -931,16 +1015,20 @@ impl<R: Read> FastaReader<R> {
     /// The `CFastaReader` user object with the raw defline is not output.
     fn parse_def_line(&mut self, defline: &[u8]) {
         self.titles.clear();
+        if self.config.keep_defline {
+            self.defline.clear();
+            self.defline.extend_from_slice(defline);
+        }
         let len = defline.len();
-        if len > 1 && !defline[1..].iter().all(|&byte| input_space(byte)) {
+        if len > 1 && !is_blank(&defline[1..]) {
             let start = 1 + defline[1..]
                 .iter()
-                .position(|&byte| !input_space(byte))
+                .position(|&byte| !is_space(byte))
                 .unwrap_or(len - 1);
             let title_start = start
                 + defline[start..]
                     .iter()
-                    .position(|&byte| !input_space(byte))
+                    .position(|&byte| !is_space(byte))
                     .unwrap_or(len - start);
             if title_start < len {
                 let end = title_start
@@ -951,11 +1039,104 @@ impl<R: Read> FastaReader<R> {
                         .unwrap_or(len - title_start - 1);
                 self.titles.push(LineText {
                     text: defline[title_start..end].to_vec(),
-                    line: self.line_number(),
                 });
             }
         }
         self.local_id = Some(self.generate_id());
+    }
+
+    /// `ParseDefLine` with `fParseRawID` (`-parse_deflines`, `believed`): the ids of the first word
+    /// (a generated local id for none, and for a word with a range), and the title after it.
+    fn parse_believed_def_line(&mut self, defline: &[u8], warn: Warn<'_>) -> Result<(), ReadError> {
+        use super::believed::{
+            duplicate_id, generated_ids, named_molecule, parse_believed_defline,
+            refuse_range_in_archive, refused_id, BelievedIds,
+        };
+        self.titles.clear();
+        if self.config.keep_defline {
+            self.defline.clear();
+            self.defline.extend_from_slice(defline);
+        }
+        let line_number = self.line_number();
+        let mut written = Ok(());
+        let parsed = parse_believed_defline(
+            defline,
+            self.config.protein,
+            self.config.program,
+            line_number,
+            &mut |message: &[u8]| {
+                let mut line = message.to_vec();
+                line.push(b'\n');
+                if written.is_ok() {
+                    written = warn(&line);
+                }
+            },
+        );
+        written.map_err(ReadError::Write)?;
+        let parsed = parsed.map_err(|message| ReadError::Parse {
+            code: super::ParseErrorCode::Format,
+            message,
+            line: line_number,
+        })?;
+        let len = defline.len();
+        let mut title_start = parsed.title_search;
+        while title_start < len && is_space(defline[title_start]) {
+            title_start += 1;
+        }
+        if title_start < len {
+            let end = title_start
+                + 1
+                + defline[title_start + 1..]
+                    .iter()
+                    .position(|&byte| byte < b' ')
+                    .unwrap_or(len - title_start - 1);
+            self.titles.push(LineText {
+                text: defline[title_start..end].to_vec(),
+            });
+        }
+        if parsed.range && self.config.keep_defline && self.config.archive_known {
+            return Err(ReadError::Unsupported(refuse_range_in_archive(
+                self.config.role,
+                self.config.program,
+            )));
+        }
+        self.believed_molecule = named_molecule(&parsed.ids);
+        self.believed_written.clear();
+        if self.id_scope.is_some() && !parsed.ids.is_empty() && !parsed.range {
+            self.believed_written.extend_from_slice(defline);
+        }
+        let ids = if parsed.ids.is_empty() || parsed.range {
+            generated_ids(&self.generate_id())
+        } else {
+            parsed.ids
+        };
+        // Two queries with one id are the scopes' of the query batches (`QueryScopes`), which
+        // NCBI's formatter empties after each batch against a database.
+        let refusal = refused_id(
+            &ids,
+            self.config.role,
+            "-parse_deflines",
+            self.config.program,
+        )
+        .or_else(|| {
+            (self.config.role != "query")
+                .then(|| {
+                    duplicate_id(
+                        &ids,
+                        &mut self.believed_keys,
+                        self.config.role,
+                        self.config.program,
+                    )
+                })
+                .flatten()
+        });
+        if let Some(refusal) = refusal {
+            return Err(ReadError::Unsupported(refusal));
+        }
+        let believed = BelievedIds::new(ids, self.config.strand);
+        self.local_id = Some(believed.bare_id());
+        self.believed = Some(std::sync::Arc::new(believed));
+        Ok(())
     }
 
     /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta_reader_utils.cpp:466-483
@@ -1159,6 +1340,20 @@ impl<R: Read> FastaReader<R> {
             return self.parse_gap_line(s, warn);
         }
         self.check_data_line(s)?;
+        if self
+            .believed_molecule
+            .is_some_and(|named| named != self.config.protein)
+            && !super::believed::reads_the_same_in_both(s)
+        {
+            return Err(ReadError::Unsupported(anyhow::anyhow!(
+                "the Seq-id of the {} on line {} names the other molecule under -parse_deflines \
+                 (NCBI BLAST+ reads its letters as that molecule); this is not supported by \
+                 LOSAT's {}",
+                self.config.role,
+                self.line_number(),
+                self.config.program
+            )));
+        }
         let (types, residues, masked) = if self.config.protein {
             (&PROTEIN_CHAR_TYPES, &PROTEIN_RESIDUES, &PROTEIN_MASKED)
         } else {
@@ -1224,7 +1419,11 @@ impl<R: Read> FastaReader<R> {
             )?;
         }
         if !self.bad_positions.is_empty() {
-            let mut message = b"FASTA-Reader: Ignoring invalid residues at position(s): ".to_vec();
+            let mut message = format!(
+                "FASTA-Reader: Ignoring invalid {}residues at position(s): ",
+                super::believed::nuc_or_prot(self.believed_molecule)
+            )
+            .into_bytes();
             convert_bad_indexes_to_string(&mut message, self.line_number(), &self.bad_positions);
             self.post_warning(Problem::InvalidResidue, &message, warn)?;
         }
@@ -1319,417 +1518,17 @@ impl<R: Read> FastaReader<R> {
         }
     }
 
-    /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1094-1349
-    /// ```c++
-    /// bool CFastaReader::ParseGapLine(
-    ///     const TStr& line, ILineErrorListener * pMessageListener)
-    /// {
-    ///     _ASSERT( NStr::StartsWith(line, ">?") );
-    ///
-    ///     // just in case there's a gap before this one,
-    ///     // even though somewhat unusual
-    ///     CloseGap();
-    ///
-    ///     // sRemainingLine will hold the part of the line left to parse
-    ///     TStr sRemainingLine = line.substr(2);
-    ///     NStr::TruncateSpacesInPlace(sRemainingLine);
-    ///
-    ///     const TSeqPos uPos = GetCurrentPos(eRawPos);
-    ///
-    ///     // check if size is unknown
-    ///     SGap::EKnownSize eIsKnown = SGap::eKnownSize_Yes;
-    ///     if( NStr::StartsWith(sRemainingLine, "unk") ) {
-    ///         eIsKnown = SGap::eKnownSize_No;
-    ///         sRemainingLine = sRemainingLine.substr(3);
-    ///         NStr::TruncateSpacesInPlace(sRemainingLine, NStr::eTrunc_Begin);
-    ///     }
-    ///
-    ///     // extract the gap size
-    ///     TSeqPos uGapSize = 0;
-    ///     {
-    ///         // find how many digits in number
-    ///         TStr::size_type uNumDigits = 0;
-    ///         while( uNumDigits != sRemainingLine.size() &&
-    ///                ::isdigit(sRemainingLine[uNumDigits]) )
-    ///         {
-    ///             ++uNumDigits;
-    ///         }
-    ///         TStr sDigits = sRemainingLine.substr(
-    ///             0, uNumDigits);
-    ///         uGapSize = NStr::StringToUInt(sDigits, NStr::fConvErr_NoThrow);
-    ///         if( uGapSize <= 0 ) {
-    ///             FASTA_WARNING(LineNumber(),
-    ///                 "CFastaReader: Bad gap size at line " << LineNumber(),
-    ///                 ILineError::eProblem_NonPositiveLength,
-    ///                 "gapline" );
-    ///             // try to continue the best we can
-    ///             uGapSize = 1;
-    ///         }
-    ///         sRemainingLine = sRemainingLine.substr(sDigits.length());
-    ///         NStr::TruncateSpacesInPlace(sRemainingLine, NStr::eTrunc_Begin);
-    ///     }
-    ///
-    ///     // extract the raw key-value pairs for the gap
-    ///     typedef multimap<TStr, TStr> TModKeyValueMultiMap;
-    ///     TModKeyValueMultiMap modKeyValueMultiMap;
-    ///     while( ! sRemainingLine.empty() ) {
-    ///         TStr::size_type uOpenBracketPos = TStr::npos;
-    ///         if ( NStr::StartsWith(sRemainingLine, "[") ) {
-    ///             uOpenBracketPos = 0;
-    ///         }
-    ///         TStr::size_type uPosOfEqualSign = TStr::npos;
-    ///         if( uOpenBracketPos != TStr::npos ) {
-    ///             // uses "1" to skip the '['
-    ///             uPosOfEqualSign = sRemainingLine.find('=', uOpenBracketPos + 1);
-    ///         }
-    ///         TStr::size_type uCloseBracketPos = TStr::npos;
-    ///         if( uPosOfEqualSign != TStr::npos ) {
-    ///             uCloseBracketPos = sRemainingLine.find(']', uPosOfEqualSign + 1);
-    ///         }
-    ///         if( uCloseBracketPos == TStr::npos )
-    ///         {
-    ///             FASTA_WARNING(LineNumber(),
-    ///                 "CFastaReader: Problem parsing gap mods at line "
-    ///                 << LineNumber(),
-    ///                 ILineError::eProblem_ParsingModifiers,
-    ///                 "gapline" );
-    ///             break; // give up on mod-parsing
-    ///         }
-    ///
-    ///         // extract the key and the value
-    ///         TStr sKey = NStr::TruncateSpaces_Unsafe(
-    ///             sRemainingLine.substr(uOpenBracketPos + 1,
-    ///                 (uPosOfEqualSign - uOpenBracketPos - 1) ) );
-    ///         TStr sValue = NStr::TruncateSpaces_Unsafe(
-    ///             sRemainingLine.substr(uPosOfEqualSign + 1,
-    ///                 uCloseBracketPos - uPosOfEqualSign - 1) );
-    ///
-    ///         // remember what we saw
-    ///         modKeyValueMultiMap.insert(
-    ///             TModKeyValueMultiMap::value_type(sKey, sValue) );
-    ///
-    ///         // prepare for the next loop around
-    ///         sRemainingLine = sRemainingLine.substr(uCloseBracketPos + 1);
-    ///         NStr::TruncateSpacesInPlace(sRemainingLine, NStr::eTrunc_Begin);
-    ///     }
-    /// ```
-    /// The rest of the function (the modifiers, quoted at `gap_mod_warnings`) only warns:
-    /// without `fParseGaps` `AssembleSeq` turns each gap into a run of `N` or `X`.
+    /// `ParseGapLine` (`gap_line_size`): the gap of the line, as a run of `N` or `X` that
+    /// `AssembleSeq` puts at this position.
     fn parse_gap_line(&mut self, line: &[u8], warn: Warn<'_>) -> Result<(), ReadError> {
-        let mut remaining = trim_input_space(&line[2..]);
         let position = self.seq_data.len() as u32;
-        if let Some(rest) = remaining.strip_prefix(b"unk") {
-            remaining = trim_input_start(rest);
-        }
-        let digits = remaining
-            .iter()
-            .position(|byte| !byte.is_ascii_digit())
-            .unwrap_or(remaining.len());
-        // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp (NStr::StringToUInt with
-        // fConvErr_NoThrow): an empty string or a value over UINT_MAX converts to 0.
-        let mut gap_size = std::str::from_utf8(&remaining[..digits])
-            .ok()
-            .and_then(|text| text.parse::<u32>().ok())
-            .unwrap_or(0);
-        if gap_size == 0 {
-            let line = self.line_number();
-            self.post_warning(
-                Problem::NonPositiveLength,
-                format!("CFastaReader: Bad gap size at line {line}").as_bytes(),
-                warn,
-            )?;
-            gap_size = 1;
-        }
-        remaining = trim_input_start(&remaining[digits..]);
-        let mut mods: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
-        while !remaining.is_empty() {
-            let close = if remaining.starts_with(b"[") {
-                remaining[1..]
-                    .iter()
-                    .position(|&byte| byte == b'=')
-                    .map(|equal| equal + 1)
-                    .and_then(|equal| {
-                        remaining[equal + 1..]
-                            .iter()
-                            .position(|&byte| byte == b']')
-                            .map(|close| (equal, equal + 1 + close))
-                    })
-            } else {
-                None
-            };
-            let Some((equal, close)) = close else {
-                let line = self.line_number();
-                self.post_warning(
-                    Problem::ParsingModifiers,
-                    format!("CFastaReader: Problem parsing gap mods at line {line}").as_bytes(),
-                    warn,
-                )?;
-                break;
-            };
-            let key = trim_input_space(&remaining[1..equal]).to_vec();
-            let value = trim_input_space(&remaining[equal + 1..close]).to_vec();
-            mods.push((key, value));
-            remaining = trim_input_start(&remaining[close + 1..]);
-        }
-        // `multimap` iterates in key order (stable for equal keys).
-        mods.sort_by(|left, right| left.0.cmp(&right.0));
-        self.gap_mod_warnings(&mods, warn)?;
+        let gap_size = gap_line_size(line, self.line_number(), warn)?;
         self.gaps.push(Gap {
             position,
             length: gap_size,
         });
         self.total_gap_length = self.total_gap_length.saturating_add(gap_size);
         self.check_length()?;
-        Ok(())
-    }
-
-    /// The warnings of `ParseGapLine` about the gap modifiers. Without `fParseGaps` the
-    /// gap type and linkage evidence are not kept (`AssembleSeq` warns that the
-    /// modifiers are ignored, an ignored problem).
-    ///
-    /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1190-1340
-    /// ```c++
-    ///     // remember if there is a gap-type conflict
-    ///     bool bConflictingGapTypes = false;
-    ///     // extract the mods, if any
-    ///     SGap::TNullableGapType pGapType;
-    ///     CSeq_gap::ELinkEvid eLinkEvid = CSeq_gap::eLinkEvid_UnspecifiedOnly;
-    ///     set<CLinkage_evidence::EType> setOfLinkageEvidence;
-    ///
-    ///     if (m_gap_type && modKeyValueMultiMap.empty()) // fall back to default values coming from caller
-    ///     {
-    ///         ...
-    ///     }
-    ///
-    ///     ITERATE(TModKeyValueMultiMap, modKeyValue_it, modKeyValueMultiMap) {
-    ///         const TStr & sKey   = modKeyValue_it->first;
-    ///         const TStr & sValue = modKeyValue_it->second;
-    ///
-    ///         string canonicalKey = CanonicalizeString(sKey);
-    ///         if(  canonicalKey == "gap-type") {
-    ///
-    ///             const CSeq_gap::SGapTypeInfo *pGapTypeInfo = CSeq_gap::NameToGapTypeInfo(sValue);
-    ///             if( pGapTypeInfo ) {
-    ///                  CSeq_gap::EType eGapType = pGapTypeInfo->m_eType;
-    ///
-    ///                 if( ! pGapType ) {
-    ///                     pGapType.Reset( new SGap::TGapTypeObj(eGapType) );
-    ///                     eLinkEvid = pGapTypeInfo->m_eLinkEvid;
-    ///                 } else if( eGapType != *pGapType ) {
-    ///                     // check if pGapType already set and different
-    ///                     bConflictingGapTypes = true;
-    ///                 }
-    ///             } else {
-    ///                 FASTA_WARNING_EX(
-    ///                     LineNumber(),
-    ///                     "Unknown gap-type: " << sValue,
-    ///                     ILineError::eProblem_ParsingModifiers,
-    ///                     "gapline",
-    ///                     "gap-type",
-    ///                     sValue );
-    ///             }
-    ///             continue;
-    ///
-    ///         }
-    ///
-    ///         if( canonicalKey == "linkage-evidence") {
-    ///             // could be semi-colon separated
-    ///             vector<CTempString> arrLinkageEvidences;
-    ///             NStr::Split(sValue, ";", arrLinkageEvidences,
-    ///                         NStr::fSplit_MergeDelimiters | NStr::fSplit_Truncate);
-    ///
-    ///             ITERATE(vector<CTempString>, link_evid_it, arrLinkageEvidences) {
-    ///                 CTempString sLinkEvid = *link_evid_it;
-    ///                 CEnumeratedTypeValues::TNameToValue::const_iterator find_iter =
-    ///                     linkage_evidence_to_value_map.find(CanonicalizeString(sLinkEvid));
-    ///                 if( find_iter != linkage_evidence_to_value_map.end() ) {
-    ///                     setOfLinkageEvidence.insert(
-    ///                         static_cast<CLinkage_evidence::EType>(
-    ///                         find_iter->second));
-    ///                 } else {
-    ///                     FASTA_WARNING_EX(
-    ///                         LineNumber(),
-    ///                         "Unknown linkage-evidence: " << sValue,
-    ///                         ILineError::eProblem_ParsingModifiers,
-    ///                         "gapline",
-    ///                         "linkage-evidence",
-    ///                         sValue );
-    ///                 }
-    ///             }
-    ///             continue;
-    ///         }
-    ///
-    ///         // unknown mod.
-    ///         FASTA_WARNING_EX(
-    ///             LineNumber(),
-    ///             "Unknown gap modifier name(s): " << sKey,
-    ///             ILineError::eProblem_UnrecognizedQualifierName,
-    ///             "gapline", sKey, kEmptyStr );
-    ///     }
-    ///
-    ///     if( bConflictingGapTypes ) {
-    ///         FASTA_WARNING_EX(LineNumber(),
-    ///             "There were conflicting gap-types around line " << LineNumber(),
-    ///             ILineError::eProblem_ContradictoryModifiers,
-    ///             "gapline", "gap-type", kEmptyStr );
-    ///     }
-    ///
-    ///     // check validation beyond basic parsing problems
-    ///
-    ///     // if no gap-type set (but linkage-evidence explicitly set, use "unknown")
-    ///     if( ! pGapType && ! setOfLinkageEvidence.empty() ) {
-    ///         pGapType.Reset( new SGap::TGapTypeObj(CSeq_gap::eType_unknown) );
-    ///     }
-    ///
-    ///     // check if linkage-evidence(s) compatible with gap-type
-    ///     switch( eLinkEvid ) {
-    ///     case CSeq_gap::eLinkEvid_UnspecifiedOnly:
-    ///         if( setOfLinkageEvidence.empty() ) {
-    ///             if( pGapType ) {
-    ///                 // silently add the required "unspecified"
-    ///                 setOfLinkageEvidence.insert(CLinkage_evidence::eType_unspecified);
-    ///             }
-    ///         } else if( setOfLinkageEvidence.size() > 1 ||
-    ///             *setOfLinkageEvidence.begin() != CLinkage_evidence::eType_unspecified )
-    ///         {
-    ///             // only "unspecified" is allowed
-    ///             FASTA_WARNING(
-    ///                 LineNumber(),
-    ///                 "FASTA-Reader: Unknown gap-type can have linkage-evidence "
-    ///                     "of type 'unspecified' only.",
-    ///                 ILineError::eProblem_ExtraModifierFound,
-    ///                 "gapline");
-    ///             setOfLinkageEvidence.clear();
-    ///             setOfLinkageEvidence.insert(CLinkage_evidence::eType_unspecified);
-    ///         }
-    ///         break;
-    ///     case CSeq_gap::eLinkEvid_Forbidden:
-    ///         if( ! setOfLinkageEvidence.empty() ) {
-    ///             FASTA_WARNING(LineNumber(),
-    ///                 "FASTA-Reader: This gap-type cannot have any "
-    ///                 "linkage-evidence specified, so any will be ignored.",
-    ///                 ILineError::eProblem_ModifierFoundButNoneExpected,
-    ///                 "gapline" );
-    ///             setOfLinkageEvidence.clear();
-    ///         }
-    ///         break;
-    ///     case CSeq_gap::eLinkEvid_Required:
-    ///         if( setOfLinkageEvidence.empty() ) {
-    ///             setOfLinkageEvidence.insert(CLinkage_evidence::eType_unspecified);
-    ///         }
-    ///         if( setOfLinkageEvidence.size() == 1 &&
-    ///             *setOfLinkageEvidence.begin() == CLinkage_evidence::eType_unspecified)
-    ///         {
-    ///             FASTA_WARNING(LineNumber(),
-    ///                 "CFastaReader: This gap-type should have at least one "
-    ///                 "specified linkage-evidence.",
-    ///                 ILineError::eProblem_ExpectedModifierMissing,
-    ///                 "gapline" );
-    ///         }
-    ///         break;
-    ///         // intentionally omitted "default:" so a compiler warning will
-    ///         // hopefully let us know if we've forgotten a case
-    ///     }
-    /// ```
-    /// The caller's default gap type (`m_gap_type`) is not set by the BLAST input source.
-    /// `NStr::Split` with `fSplit_MergeDelimiters | fSplit_Truncate` drops empty pieces.
-    fn gap_mod_warnings(
-        &self,
-        mods: &[(Vec<u8>, Vec<u8>)],
-        warn: Warn<'_>,
-    ) -> Result<(), ReadError> {
-        let line = self.line_number();
-        let mut conflicting = false;
-        let mut gap_type: Option<GapType> = None;
-        let mut link_evid = LinkEvid::UnspecifiedOnly;
-        let mut evidence: std::collections::BTreeSet<u8> = std::collections::BTreeSet::new();
-        for (key, value) in mods {
-            let canonical_key = canonicalize_string(key);
-            if canonical_key == b"gap-type" {
-                match gap_type_info(value) {
-                    Some((value_type, value_evid)) => match gap_type {
-                        None => {
-                            gap_type = Some(value_type);
-                            link_evid = value_evid;
-                        }
-                        Some(current) if current != value_type => conflicting = true,
-                        Some(_) => {}
-                    },
-                    None => {
-                        let mut message = b"Unknown gap-type: ".to_vec();
-                        message.extend_from_slice(value);
-                        self.post_warning(Problem::ParsingModifiers, &message, warn)?;
-                    }
-                }
-                continue;
-            }
-            if canonical_key == b"linkage-evidence" {
-                for piece in value
-                    .split(|&byte| byte == b';')
-                    .filter(|piece| !piece.is_empty())
-                {
-                    match linkage_evidence_value(&canonicalize_string(piece)) {
-                        Some(evidence_value) => {
-                            evidence.insert(evidence_value);
-                        }
-                        None => {
-                            let mut message = b"Unknown linkage-evidence: ".to_vec();
-                            message.extend_from_slice(value);
-                            self.post_warning(Problem::ParsingModifiers, &message, warn)?;
-                        }
-                    }
-                }
-                continue;
-            }
-            let mut message = b"Unknown gap modifier name(s): ".to_vec();
-            message.extend_from_slice(key);
-            self.post_warning(Problem::UnrecognizedQualifierName, &message, warn)?;
-        }
-        if conflicting {
-            self.post_warning(
-                Problem::ContradictoryModifiers,
-                format!("There were conflicting gap-types around line {line}").as_bytes(),
-                warn,
-            )?;
-        }
-        if gap_type.is_none() && !evidence.is_empty() {
-            gap_type = Some(GapType::Unknown);
-        }
-        match link_evid {
-            LinkEvid::UnspecifiedOnly => {
-                if !evidence.is_empty()
-                    && (evidence.len() > 1 || !evidence.contains(&LINKAGE_UNSPECIFIED))
-                {
-                    self.post_warning(
-                        Problem::ExtraModifierFound,
-                        b"FASTA-Reader: Unknown gap-type can have linkage-evidence of type 'unspecified' only.",
-                        warn,
-                    )?;
-                }
-            }
-            LinkEvid::Forbidden => {
-                if !evidence.is_empty() {
-                    self.post_warning(
-                        Problem::ModifierFoundButNoneExpected,
-                        b"FASTA-Reader: This gap-type cannot have any linkage-evidence specified, so any will be ignored.",
-                        warn,
-                    )?;
-                }
-            }
-            LinkEvid::Required => {
-                if evidence.is_empty() {
-                    evidence.insert(LINKAGE_UNSPECIFIED);
-                }
-                if evidence.len() == 1 && evidence.contains(&LINKAGE_UNSPECIFIED) {
-                    self.post_warning(
-                        Problem::ExpectedModifierMissing,
-                        b"CFastaReader: This gap-type should have at least one specified linkage-evidence.",
-                        warn,
-                    )?;
-                }
-            }
-        }
-        let _ = gap_type;
         Ok(())
     }
 
@@ -1817,8 +1616,28 @@ impl<R: Read> FastaReader<R> {
             self.parse_title(title, warn)?;
         }
         self.titles = titles;
+        self.add_to_id_scope()?;
         let gap_char = if self.config.protein { b'X' } else { b'N' };
-        let mut sequence = if self.total_gap_length > 0 {
+        // EXPERIMENT (LOSAT_X_BNQPACK): the letters the branches below would give, packed from the
+        // buffer (`U` as `T` first, the mask as lower-case intervals) instead of copied out of it.
+        self.x_packed = None;
+        if self.x_pack && self.total_gap_length == 0 && !self.config.protein {
+            for residue in self.seq_data.iter_mut() {
+                *residue = if *residue == b'U' { b'T' } else { *residue };
+            }
+            self.x_packed = crate::sequence::packed_letters::PackedLetters::pack_masked(
+                &self.seq_data,
+                &self.mask,
+            );
+        }
+        let mut sequence = if self.x_packed.is_some() {
+            if self.seq_data.len() < SEQ_DATA_KEPT {
+                self.seq_data.clear();
+            } else {
+                self.seq_data = Vec::new();
+            }
+            Vec::new()
+        } else if self.total_gap_length > 0 {
             let mut new_data =
                 Vec::with_capacity(self.seq_data.len() + self.total_gap_length as usize);
             let mut pos = 0usize;
@@ -1858,9 +1677,12 @@ impl<R: Read> FastaReader<R> {
                 *residue = if *residue == b'U' { b'T' } else { *residue };
             }
         }
-        for &(from, to) in &self.mask {
-            for residue in &mut sequence[from as usize..=to as usize] {
-                *residue = residue.to_ascii_lowercase();
+        // A packed record's mask is in its intervals.
+        if self.x_packed.is_none() {
+            for &(from, to) in &self.mask {
+                for residue in &mut sequence[from as usize..=to as usize] {
+                    *residue = residue.to_ascii_lowercase();
+                }
             }
         }
         Ok(FastaRecord {
@@ -1868,7 +1690,43 @@ impl<R: Read> FastaReader<R> {
             title: std::mem::take(&mut self.title),
             sequence,
             warnings: Vec::new(),
+            source: (self.config.keep_defline || self.believed.is_some()).then(|| {
+                Box::new(super::RecordSource {
+                    defline: std::mem::take(&mut self.defline),
+                    uncut: None,
+                    believed: self.believed.take(),
+                    cut_from: 0,
+                    uncut_length: 0,
+                })
+            }),
         })
+    }
+
+    /// `-parse_deflines` (`IdScope::add_record`): the record's letters are complete and its letters
+    /// in `seq_data` are in upper case, whether or not they are packed next. Cold: no reader without
+    /// the option has an id scope.
+    fn add_to_id_scope(&mut self) -> Result<(), ReadError> {
+        use crate::seqid::id_scope::RecordMark;
+        let (Some(scope), Some(believed)) = (&self.id_scope, &mut self.believed) else {
+            return Ok(());
+        };
+        let mark = (!self.believed_written.is_empty() && !believed.subject_local()).then(|| {
+            RecordMark::new(
+                &self.believed_written,
+                self.config.protein,
+                &self.seq_data,
+                self.gaps.iter().map(|gap| (gap.position, gap.length)),
+                !self.mask.is_empty(),
+            )
+        });
+        let shared = scope
+            .add_record(&believed.ids, mark, self.config.role, self.config.program)
+            .map_err(ReadError::Unsupported)?;
+        // The defline made the only handle of the ids.
+        if let Some(ids) = std::sync::Arc::get_mut(believed) {
+            ids.shared = shared;
+        }
+        Ok(())
     }
 
     /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:670-686
@@ -1923,10 +1781,10 @@ impl<R: Read> FastaReader<R> {
     /// The long-title and modifier warnings are ignored problems.
     fn parse_title(&mut self, title: LineText, warn: Warn<'_>) -> Result<(), ReadError> {
         self.create_warnings_for_seq_data_in_title(&title.text, warn)?;
-        // `TruncateSpacesInPlace` on the title's own bytes.
+        // `TruncateSpacesInPlace` (`eTrunc_Both`) on the title's own bytes.
         let mut text = title.text;
-        text.truncate(trim_input_end(&text).len());
-        let leading = text.len() - trim_input_start(&text).len();
+        text.truncate(truncate_spaces_end(&text).len());
+        let leading = text.len() - truncate_spaces_begin(&text).len();
         text.drain(..leading);
         self.title = text;
         Ok(())
@@ -2000,8 +1858,9 @@ impl<R: Read> FastaReader<R> {
         text: &[u8],
         warn: Warn<'_>,
     ) -> Result<(), ReadError> {
-        if let Some(message) = seq_data_in_title_warning(text, self.config.protein) {
-            let problem = if self.config.protein {
+        if let Some((message, protein)) = seq_data_in_title_warning(text, Some(self.config.protein))
+        {
+            let problem = if protein {
                 Problem::UnexpectedAminoAcids
             } else {
                 Problem::UnexpectedNucResidues
@@ -2010,6 +1869,427 @@ impl<R: Read> FastaReader<R> {
         }
         Ok(())
     }
+}
+
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1094-1349
+/// ```c++
+/// bool CFastaReader::ParseGapLine(
+///     const TStr& line, ILineErrorListener * pMessageListener)
+/// {
+///     _ASSERT( NStr::StartsWith(line, ">?") );
+///
+///     // just in case there's a gap before this one,
+///     // even though somewhat unusual
+///     CloseGap();
+///
+///     // sRemainingLine will hold the part of the line left to parse
+///     TStr sRemainingLine = line.substr(2);
+///     NStr::TruncateSpacesInPlace(sRemainingLine);
+///
+///     const TSeqPos uPos = GetCurrentPos(eRawPos);
+///
+///     // check if size is unknown
+///     SGap::EKnownSize eIsKnown = SGap::eKnownSize_Yes;
+///     if( NStr::StartsWith(sRemainingLine, "unk") ) {
+///         eIsKnown = SGap::eKnownSize_No;
+///         sRemainingLine = sRemainingLine.substr(3);
+///         NStr::TruncateSpacesInPlace(sRemainingLine, NStr::eTrunc_Begin);
+///     }
+///
+///     // extract the gap size
+///     TSeqPos uGapSize = 0;
+///     {
+///         // find how many digits in number
+///         TStr::size_type uNumDigits = 0;
+///         while( uNumDigits != sRemainingLine.size() &&
+///                ::isdigit(sRemainingLine[uNumDigits]) )
+///         {
+///             ++uNumDigits;
+///         }
+///         TStr sDigits = sRemainingLine.substr(
+///             0, uNumDigits);
+///         uGapSize = NStr::StringToUInt(sDigits, NStr::fConvErr_NoThrow);
+///         if( uGapSize <= 0 ) {
+///             FASTA_WARNING(LineNumber(),
+///                 "CFastaReader: Bad gap size at line " << LineNumber(),
+///                 ILineError::eProblem_NonPositiveLength,
+///                 "gapline" );
+///             // try to continue the best we can
+///             uGapSize = 1;
+///         }
+///         sRemainingLine = sRemainingLine.substr(sDigits.length());
+///         NStr::TruncateSpacesInPlace(sRemainingLine, NStr::eTrunc_Begin);
+///     }
+///
+///     // extract the raw key-value pairs for the gap
+///     typedef multimap<TStr, TStr> TModKeyValueMultiMap;
+///     TModKeyValueMultiMap modKeyValueMultiMap;
+///     while( ! sRemainingLine.empty() ) {
+///         TStr::size_type uOpenBracketPos = TStr::npos;
+///         if ( NStr::StartsWith(sRemainingLine, "[") ) {
+///             uOpenBracketPos = 0;
+///         }
+///         TStr::size_type uPosOfEqualSign = TStr::npos;
+///         if( uOpenBracketPos != TStr::npos ) {
+///             // uses "1" to skip the '['
+///             uPosOfEqualSign = sRemainingLine.find('=', uOpenBracketPos + 1);
+///         }
+///         TStr::size_type uCloseBracketPos = TStr::npos;
+///         if( uPosOfEqualSign != TStr::npos ) {
+///             uCloseBracketPos = sRemainingLine.find(']', uPosOfEqualSign + 1);
+///         }
+///         if( uCloseBracketPos == TStr::npos )
+///         {
+///             FASTA_WARNING(LineNumber(),
+///                 "CFastaReader: Problem parsing gap mods at line "
+///                 << LineNumber(),
+///                 ILineError::eProblem_ParsingModifiers,
+///                 "gapline" );
+///             break; // give up on mod-parsing
+///         }
+///
+///         // extract the key and the value
+///         TStr sKey = NStr::TruncateSpaces_Unsafe(
+///             sRemainingLine.substr(uOpenBracketPos + 1,
+///                 (uPosOfEqualSign - uOpenBracketPos - 1) ) );
+///         TStr sValue = NStr::TruncateSpaces_Unsafe(
+///             sRemainingLine.substr(uPosOfEqualSign + 1,
+///                 uCloseBracketPos - uPosOfEqualSign - 1) );
+///
+///         // remember what we saw
+///         modKeyValueMultiMap.insert(
+///             TModKeyValueMultiMap::value_type(sKey, sValue) );
+///
+///         // prepare for the next loop around
+///         sRemainingLine = sRemainingLine.substr(uCloseBracketPos + 1);
+///         NStr::TruncateSpacesInPlace(sRemainingLine, NStr::eTrunc_Begin);
+///     }
+/// ```
+/// The rest of the function (the modifiers, quoted at `gap_mod_warnings`) only warns:
+/// without `fParseGaps` `AssembleSeq` turns each gap into a run of `N` or `X`.
+///
+/// The size of the gap line `line` (it starts with `>?`), line `line_number` of the input, after
+/// its warnings: the reader of the four programs (`FastaReader::parse_gap_line`) and BLASTX's
+/// (`blastx::input`) read gap lines with it.
+pub(crate) fn gap_line_size(
+    line: &[u8],
+    line_number: u64,
+    warn: Warn<'_>,
+) -> Result<u32, ReadError> {
+    let mut remaining = truncate_spaces(&line[2..]);
+    if let Some(rest) = remaining.strip_prefix(b"unk") {
+        remaining = truncate_spaces_begin(rest);
+    }
+    let digits = remaining
+        .iter()
+        .position(|byte| !byte.is_ascii_digit())
+        .unwrap_or(remaining.len());
+    // `NStr::StringToUInt(sDigits, NStr::fConvErr_NoThrow)`: 0 for an empty string or a value
+    // over UINT_MAX.
+    let mut gap_size = crate::ncbi_str::string_to_uint(&remaining[..digits]).unwrap_or(0);
+    if gap_size == 0 {
+        post_line_warning(
+            Problem::NonPositiveLength,
+            format!("CFastaReader: Bad gap size at line {line_number}").as_bytes(),
+            warn,
+        )?;
+        gap_size = 1;
+    }
+    remaining = truncate_spaces_begin(&remaining[digits..]);
+    let mut mods: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
+    while !remaining.is_empty() {
+        let close = if remaining.starts_with(b"[") {
+            remaining[1..]
+                .iter()
+                .position(|&byte| byte == b'=')
+                .map(|equal| equal + 1)
+                .and_then(|equal| {
+                    remaining[equal + 1..]
+                        .iter()
+                        .position(|&byte| byte == b']')
+                        .map(|close| (equal, equal + 1 + close))
+                })
+        } else {
+            None
+        };
+        let Some((equal, close)) = close else {
+            post_line_warning(
+                Problem::ParsingModifiers,
+                format!("CFastaReader: Problem parsing gap mods at line {line_number}").as_bytes(),
+                warn,
+            )?;
+            break;
+        };
+        let key = truncate_spaces(&remaining[1..equal]).to_vec();
+        let value = truncate_spaces(&remaining[equal + 1..close]).to_vec();
+        mods.push((key, value));
+        remaining = truncate_spaces_begin(&remaining[close + 1..]);
+    }
+    // `multimap` iterates in key order (stable for equal keys).
+    mods.sort_by(|left, right| left.0.cmp(&right.0));
+    gap_mod_warnings(line_number, &mods, warn)?;
+    Ok(gap_size)
+}
+
+/// The warnings of `ParseGapLine` about the gap modifiers. Without `fParseGaps` the
+/// gap type and linkage evidence are not kept (`AssembleSeq` warns that the
+/// modifiers are ignored, an ignored problem).
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1190-1340
+/// ```c++
+///     // remember if there is a gap-type conflict
+///     bool bConflictingGapTypes = false;
+///     // extract the mods, if any
+///     SGap::TNullableGapType pGapType;
+///     CSeq_gap::ELinkEvid eLinkEvid = CSeq_gap::eLinkEvid_UnspecifiedOnly;
+///     set<CLinkage_evidence::EType> setOfLinkageEvidence;
+///
+///     if (m_gap_type && modKeyValueMultiMap.empty()) // fall back to default values coming from caller
+///     {
+///         ...
+///     }
+///
+///     ITERATE(TModKeyValueMultiMap, modKeyValue_it, modKeyValueMultiMap) {
+///         const TStr & sKey   = modKeyValue_it->first;
+///         const TStr & sValue = modKeyValue_it->second;
+///
+///         string canonicalKey = CanonicalizeString(sKey);
+///         if(  canonicalKey == "gap-type") {
+///
+///             const CSeq_gap::SGapTypeInfo *pGapTypeInfo = CSeq_gap::NameToGapTypeInfo(sValue);
+///             if( pGapTypeInfo ) {
+///                  CSeq_gap::EType eGapType = pGapTypeInfo->m_eType;
+///
+///                 if( ! pGapType ) {
+///                     pGapType.Reset( new SGap::TGapTypeObj(eGapType) );
+///                     eLinkEvid = pGapTypeInfo->m_eLinkEvid;
+///                 } else if( eGapType != *pGapType ) {
+///                     // check if pGapType already set and different
+///                     bConflictingGapTypes = true;
+///                 }
+///             } else {
+///                 FASTA_WARNING_EX(
+///                     LineNumber(),
+///                     "Unknown gap-type: " << sValue,
+///                     ILineError::eProblem_ParsingModifiers,
+///                     "gapline",
+///                     "gap-type",
+///                     sValue );
+///             }
+///             continue;
+///
+///         }
+///
+///         if( canonicalKey == "linkage-evidence") {
+///             // could be semi-colon separated
+///             vector<CTempString> arrLinkageEvidences;
+///             NStr::Split(sValue, ";", arrLinkageEvidences,
+///                         NStr::fSplit_MergeDelimiters | NStr::fSplit_Truncate);
+///
+///             ITERATE(vector<CTempString>, link_evid_it, arrLinkageEvidences) {
+///                 CTempString sLinkEvid = *link_evid_it;
+///                 CEnumeratedTypeValues::TNameToValue::const_iterator find_iter =
+///                     linkage_evidence_to_value_map.find(CanonicalizeString(sLinkEvid));
+///                 if( find_iter != linkage_evidence_to_value_map.end() ) {
+///                     setOfLinkageEvidence.insert(
+///                         static_cast<CLinkage_evidence::EType>(
+///                         find_iter->second));
+///                 } else {
+///                     FASTA_WARNING_EX(
+///                         LineNumber(),
+///                         "Unknown linkage-evidence: " << sValue,
+///                         ILineError::eProblem_ParsingModifiers,
+///                         "gapline",
+///                         "linkage-evidence",
+///                         sValue );
+///                 }
+///             }
+///             continue;
+///         }
+///
+///         // unknown mod.
+///         FASTA_WARNING_EX(
+///             LineNumber(),
+///             "Unknown gap modifier name(s): " << sKey,
+///             ILineError::eProblem_UnrecognizedQualifierName,
+///             "gapline", sKey, kEmptyStr );
+///     }
+///
+///     if( bConflictingGapTypes ) {
+///         FASTA_WARNING_EX(LineNumber(),
+///             "There were conflicting gap-types around line " << LineNumber(),
+///             ILineError::eProblem_ContradictoryModifiers,
+///             "gapline", "gap-type", kEmptyStr );
+///     }
+///
+///     // check validation beyond basic parsing problems
+///
+///     // if no gap-type set (but linkage-evidence explicitly set, use "unknown")
+///     if( ! pGapType && ! setOfLinkageEvidence.empty() ) {
+///         pGapType.Reset( new SGap::TGapTypeObj(CSeq_gap::eType_unknown) );
+///     }
+///
+///     // check if linkage-evidence(s) compatible with gap-type
+///     switch( eLinkEvid ) {
+///     case CSeq_gap::eLinkEvid_UnspecifiedOnly:
+///         if( setOfLinkageEvidence.empty() ) {
+///             if( pGapType ) {
+///                 // silently add the required "unspecified"
+///                 setOfLinkageEvidence.insert(CLinkage_evidence::eType_unspecified);
+///             }
+///         } else if( setOfLinkageEvidence.size() > 1 ||
+///             *setOfLinkageEvidence.begin() != CLinkage_evidence::eType_unspecified )
+///         {
+///             // only "unspecified" is allowed
+///             FASTA_WARNING(
+///                 LineNumber(),
+///                 "FASTA-Reader: Unknown gap-type can have linkage-evidence "
+///                     "of type 'unspecified' only.",
+///                 ILineError::eProblem_ExtraModifierFound,
+///                 "gapline");
+///             setOfLinkageEvidence.clear();
+///             setOfLinkageEvidence.insert(CLinkage_evidence::eType_unspecified);
+///         }
+///         break;
+///     case CSeq_gap::eLinkEvid_Forbidden:
+///         if( ! setOfLinkageEvidence.empty() ) {
+///             FASTA_WARNING(LineNumber(),
+///                 "FASTA-Reader: This gap-type cannot have any "
+///                 "linkage-evidence specified, so any will be ignored.",
+///                 ILineError::eProblem_ModifierFoundButNoneExpected,
+///                 "gapline" );
+///             setOfLinkageEvidence.clear();
+///         }
+///         break;
+///     case CSeq_gap::eLinkEvid_Required:
+///         if( setOfLinkageEvidence.empty() ) {
+///             setOfLinkageEvidence.insert(CLinkage_evidence::eType_unspecified);
+///         }
+///         if( setOfLinkageEvidence.size() == 1 &&
+///             *setOfLinkageEvidence.begin() == CLinkage_evidence::eType_unspecified)
+///         {
+///             FASTA_WARNING(LineNumber(),
+///                 "CFastaReader: This gap-type should have at least one "
+///                 "specified linkage-evidence.",
+///                 ILineError::eProblem_ExpectedModifierMissing,
+///                 "gapline" );
+///         }
+///         break;
+///         // intentionally omitted "default:" so a compiler warning will
+///         // hopefully let us know if we've forgotten a case
+///     }
+/// ```
+/// The caller's default gap type (`m_gap_type`) is not set by the BLAST input source.
+/// `NStr::Split` with `fSplit_MergeDelimiters | fSplit_Truncate` drops empty pieces.
+fn gap_mod_warnings(
+    line: u64,
+    mods: &[(Vec<u8>, Vec<u8>)],
+    warn: Warn<'_>,
+) -> Result<(), ReadError> {
+    let mut conflicting = false;
+    let mut gap_type: Option<GapType> = None;
+    let mut link_evid = LinkEvid::UnspecifiedOnly;
+    let mut evidence: std::collections::BTreeSet<u8> = std::collections::BTreeSet::new();
+    for (key, value) in mods {
+        let canonical_key = canonicalize_string(key);
+        if canonical_key == b"gap-type" {
+            match gap_type_info(value) {
+                Some((value_type, value_evid)) => match gap_type {
+                    None => {
+                        gap_type = Some(value_type);
+                        link_evid = value_evid;
+                    }
+                    Some(current) if current != value_type => conflicting = true,
+                    Some(_) => {}
+                },
+                None => {
+                    let mut message = b"Unknown gap-type: ".to_vec();
+                    message.extend_from_slice(value);
+                    post_line_warning(Problem::ParsingModifiers, &message, warn)?;
+                }
+            }
+            continue;
+        }
+        if canonical_key == b"linkage-evidence" {
+            for piece in value
+                .split(|&byte| byte == b';')
+                .filter(|piece| !piece.is_empty())
+            {
+                match linkage_evidence_value(&canonicalize_string(piece)) {
+                    Some(evidence_value) => {
+                        evidence.insert(evidence_value);
+                    }
+                    None => {
+                        let mut message = b"Unknown linkage-evidence: ".to_vec();
+                        message.extend_from_slice(value);
+                        post_line_warning(Problem::ParsingModifiers, &message, warn)?;
+                    }
+                }
+            }
+            continue;
+        }
+        let mut message = b"Unknown gap modifier name(s): ".to_vec();
+        message.extend_from_slice(key);
+        post_line_warning(Problem::UnrecognizedQualifierName, &message, warn)?;
+    }
+    if conflicting {
+        post_line_warning(
+            Problem::ContradictoryModifiers,
+            format!("There were conflicting gap-types around line {line}").as_bytes(),
+            warn,
+        )?;
+    }
+    if gap_type.is_none() && !evidence.is_empty() {
+        gap_type = Some(GapType::Unknown);
+    }
+    match link_evid {
+        LinkEvid::UnspecifiedOnly => {
+            if !evidence.is_empty()
+                && (evidence.len() > 1 || !evidence.contains(&LINKAGE_UNSPECIFIED))
+            {
+                post_line_warning(
+                    Problem::ExtraModifierFound,
+                    b"FASTA-Reader: Unknown gap-type can have linkage-evidence of type 'unspecified' only.",
+                    warn,
+                )?;
+            }
+        }
+        LinkEvid::Forbidden => {
+            if !evidence.is_empty() {
+                post_line_warning(
+                    Problem::ModifierFoundButNoneExpected,
+                    b"FASTA-Reader: This gap-type cannot have any linkage-evidence specified, so any will be ignored.",
+                    warn,
+                )?;
+            }
+        }
+        LinkEvid::Required => {
+            if evidence.is_empty() {
+                evidence.insert(LINKAGE_UNSPECIFIED);
+            }
+            if evidence.len() == 1 && evidence.contains(&LINKAGE_UNSPECIFIED) {
+                post_line_warning(
+                    Problem::ExpectedModifierMissing,
+                    b"CFastaReader: This gap-type should have at least one specified linkage-evidence.",
+                    warn,
+                )?;
+            }
+        }
+    }
+    let _ = gap_type;
+    Ok(())
+}
+
+/// `PostWarning` without a listener (`FastaReader::post_warning`): the message on a line of its own,
+/// unless the reader ignores the problem.
+fn post_line_warning(problem: Problem, message: &[u8], warn: Warn<'_>) -> Result<(), ReadError> {
+    if IGNORED_PROBLEMS.contains(&problem) {
+        return Ok(());
+    }
+    let mut line = Vec::with_capacity(message.len() + 1);
+    line.extend_from_slice(message);
+    line.push(b'\n');
+    warn(&line).map_err(ReadError::Write)
 }
 
 /// The message of `CreateWarningsForSeqDataInTitle` for the title text `text` (see
@@ -2062,18 +2342,30 @@ impl<R: Read> FastaReader<R> {
 ///                 << "accidentally put in the title line?",
 /// ```
 /// Exactly one of `fAssumeNuc` and `fAssumeProt` is set, so exactly one test runs.
-pub(crate) fn seq_data_in_title_warning(text: &[u8], protein: bool) -> Option<&'static [u8]> {
+///
+/// `assumed_protein` is `Some(true)` for `fAssumeProt`, `Some(false)` for `fAssumeNuc` and
+/// `None` for neither (convert2blastmask's reader), which makes both checks: the amino acid
+/// check goes on from where the nucleotide check stopped, at a byte that is no unambiguous
+/// nucleotide, and the bytes after it are letters, so it is the check of the last 50 bytes.
+/// The warning and whether it is the amino acid one.
+pub(crate) fn seq_data_in_title_warning(
+    text: &[u8],
+    assumed_protein: Option<bool>,
+) -> Option<(&'static [u8], bool)> {
     let length = text.len();
-    if !protein {
-        if length > 20
-            && text[length - 20..]
-                .iter()
-                .all(|byte| matches!(byte, b'A' | b'C' | b'G' | b'T' | b'a' | b'c' | b'g' | b't'))
-        {
-            return Some(b"FASTA-Reader: Title ends with at least 20 valid nucleotide characters.  Was the sequence accidentally put in the title line?");
-        }
-    } else if length > 50 && text[length - 50..].iter().all(u8::is_ascii_alphabetic) {
-        return Some(b"FASTA-Reader: Title ends with at least 50 valid amino acid characters.  Was the sequence accidentally put in the title line?");
+    if assumed_protein != Some(true)
+        && length > 20
+        && text[length - 20..]
+            .iter()
+            .all(|byte| matches!(byte, b'A' | b'C' | b'G' | b'T' | b'a' | b'c' | b'g' | b't'))
+    {
+        return Some((b"FASTA-Reader: Title ends with at least 20 valid nucleotide characters.  Was the sequence accidentally put in the title line?", false));
+    }
+    if assumed_protein != Some(false)
+        && length > 50
+        && text[length - 50..].iter().all(u8::is_ascii_alphabetic)
+    {
+        return Some((b"FASTA-Reader: Title ends with at least 50 valid amino acid characters.  Was the sequence accidentally put in the title line?", true));
     }
     None
 }
@@ -2207,7 +2499,7 @@ fn fast_path_tables_match_their_definitions() {
         // CheckDataLine (fasta.cpp:730-750).
         let class = if byte.is_ascii_alphabetic() || byte == b'*' {
             "good"
-        } else if byte == b'-' || input_space(byte) || byte.is_ascii_digit() {
+        } else if byte == b'-' || is_space(byte) || byte.is_ascii_digit() {
             "neutral"
         } else if byte == b';' {
             "comment"

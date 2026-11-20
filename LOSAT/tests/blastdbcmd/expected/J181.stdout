@@ -1,0 +1,28 @@
+{
+  "version": "1.2",
+  "dbname": "p5",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "prot_ids",
+  "number-of-letters": 2466,
+  "number-of-sequences": 18,
+  "last-updated": "2026-10-29T19:13:00",
+  "number-of-volumes": 1,
+  "number-of-taxids": 5,
+  "bytes-total": 55010,
+  "bytes-to-cache": 2717,
+  "files": [
+    "/x/y/p5.pdb",
+    "/x/y/p5.phr",
+    "/x/y/p5.pin",
+    "/x/y/p5.pjs",
+    "/x/y/p5.pnd",
+    "/x/y/p5.pni",
+    "/x/y/p5.pog",
+    "/x/y/p5.pos",
+    "/x/y/p5.pot",
+    "/x/y/p5.psq",
+    "/x/y/p5.ptf",
+    "/x/y/p5.pto"
+  ]
+}

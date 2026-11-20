@@ -1,0 +1,30 @@
+# BLASTN 2.17.0+
+# Query: q_a 1500 of a
+# Database: ndb
+# Fields: query id, subject id, evalue, bit score, subject title
+# 3 hits found
+q_a	a_l6k	0.0	2771	a_l6k exact slice of LC738875
+q_a	a_mut_8pct	0.0	2074	a_mut_8pct substitutions and indels
+q_a	b_p6k	0.0	1114	b_p6k slice of AP027202
+# BLASTN 2.17.0+
+# Query: q_c_amb 1400 across the ambiguity codes, 4 percent substitutions
+# Database: ndb
+# Fields: query id, subject id, evalue, bit score, subject title
+# 2 hits found
+q_c_amb	c_amb	0.0	1249	c_amb ambiguity codes and an N block
+q_c_amb	c_amb	0.0	887	c_amb ambiguity codes and an N block
+# BLASTN 2.17.0+
+# Query: q_d_minus reverse complement of d, 12 percent substitutions
+# Database: ndb
+# Fields: query id, subject id, evalue, bit score, subject title
+# 1 hits found
+q_d_minus	d_mut_15pct	0.0	2335	d_mut_15pct
+# BLASTN 2.17.0+
+# Query: q_e_p diverged
+# Database: ndb
+# 0 hits found
+# BLASTN 2.17.0+
+# Query: q_nohit random
+# Database: ndb
+# 0 hits found
+# BLAST processed 5 queries

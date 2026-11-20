@@ -1,4 +1,4 @@
-//! EXPERIMENT (LOSAT_X_RPTSTREAM, shadow LOSAT_X_RPTSTREAMSHADOW): blastn writes the reports of
+//! EXPERIMENT (LOSAT_X_RPTSTREAM): blastn writes the reports of
 //! each query batch when the batch loop of `run_in_pool` takes the batch, and drops its final hit
 //! lists, as NCBI prints each batch's result sets in its batch loop; without the switch the loop
 //! keeps the final lists of every batch and writes all reports after the loop.
@@ -21,10 +21,9 @@
 //!         formatter.PrintEpilog(opt);
 //! ```
 //!
-//! With the switch on, the loop writes a batch's reports right after it has taken the batch (in
-//! batch order: a LOSAT_X_QBATCHPAR slot's result is taken under the loop's own key, in order,
-//! as before), finished its lists (`-db`: `finish_query_hit_list`, the titles, the HSPs of score
-//! 0) and given its gie to the mixer and the slots. It calls the same report code
+//! With the switch on, the loop writes a batch's reports right after it has searched the batch (in
+//! batch order), finished its lists (`-db`: `finish_query_hit_list`, the titles, the HSPs of score
+//! 0) and given its gie to the mixer. It calls the same report code
 //! (`write_reports`) with the batch's queries, their final lists numbered from 0 (as the batch
 //! made them), their warnings, lengths, masks, Karlin-Altschul blocks and search spaces, and the
 //! batch's part of the query ranges; after the loop it calls it once more with no query and the
@@ -32,11 +31,14 @@
 //!
 //! Why the bytes are those of the reports written after the loop:
 //! - every report of a query depends only on that query's final list and on fixed inputs: the
-//!   lists are finished per query (`finish_query_hit_list`: `-max_hsps`, `-subject_besthit`, the
-//!   sort, `-max_target_seqs`; the HSPs of score 0), the coordinates move by the query's and the
+//!   lists are finished per query (`finish_query_hit_list`: `-max_hsps`, `-qcov_hsp_perc`,
+//!   `-subject_besthit`, the sort, `-max_target_seqs`; the HSPs of score 0), the coordinates move
+//!   by the query's and the
 //!   subject's own range start (`shift_to_records`), and the rows, outfmt 7 headers and outfmt 0
 //!   sections are written query by query from the query's list, record, masks, blocks and search
-//!   space, the subject records and the options. BLASTN has no culling and no cross-query sort.
+//!   space, the subject records and the options. BLASTN has no cross-query sort, and its culling
+//!   (`-culling_limit`, `culling.rs`) is NCBI's pipe, which culls each query's tree on its own and is the first
+//!   step of `finish_query_hit_list`.
 //!   The writers write the queries in order, so the reports of consecutive batches written one
 //!   after the other are the reports of all of them. A query's warnings come before its report
 //!   in both (`QueryWarnings`), with the first format (or all at once without a format).
@@ -48,29 +50,64 @@
 //!   switch; a sink that writes it with the reports is a file sink, which is not streamed), the
 //!   outfmt 0 epilog (the database lines and the options, fixed inputs), outfmt 7's last line
 //!   (the number of queries formatted, NCBI's `m_QueriesFormatted`: the last call counts the
-//!   queries of every batch, `BlastnReportInputs::queries_before`), and outfmt 6 has none. LOSAT's
-//!   BLASTN writes outfmt 0, 6 and 7 only (no XML, JSON, SAM or HTML).
+//!   queries of every batch, `BlastnReportInputs::queries_before`), and outfmt 6 has none. The
+//!   formats 8, 9 and 12 (OF3) write per query like 6; BLAST XML (5, OF4a) is not argued here
+//!   and is never streamed (`Off::Xml`, below). The tabular reports with a field list or a
+//!   delimiter and outfmt 10 and 20 (`algorithm::blastn::tabular`) write per query like 6 and 7
+//!   (the delimiter and the kind change only how a row is written; `qcovs` and `qcovus` are a
+//!   query's and a subject's; the texts of the rows' lookups of the taxonomy database are a
+//!   taxid's), and outfmt 20's line of the field names comes with the first report
+//!   (`queries_before` 0: the first batch's call), or, where an error of NCBI's stops the first
+//!   batch, from `write_before_failed_batch` as without the switch. The texts of opening the
+//!   taxonomy database that a batch's rows keep (`TaxdbRun::open_for_rows`) go to the first
+//!   report call whose rows look a name up (`common::database::tabular_names`), as they go to the
+//!   first such row of the one call.
 //! - the errors: an error of NCBI's that a batch meets (a reader error, an `eEOF` batch, a batch
 //!   of queries without letters, `ErrorAfterInvalidBatches`, a header file that cannot be read)
 //!   comes after the reports of the batches before, without the epilog, in both: here they were
 //!   written when the loop took them, so the error paths write only what follows them (the
 //!   batch's title and reader warnings). An error that LOSAT raises where NCBI would not stop
-//!   (LOSAT's refusals) is written without the reports of the batches before; so with two or more
-//!   batches the switch acts only where no such refusal can come after the first batch (`check`):
-//!   scoring options with Karlin-Altschul values and greedy gap costs that LOSAT supports (the
-//!   refusals of `search_query_batch` for scoring options without values or large greedy gap
-//!   costs), no negative `CHUNK_SIZE` (the refusal in `search_query_chunks`), search spaces that
-//!   cannot overflow (`SearchSpace`), subjects whose report ids are all supported (a subject set's
-//!   `tabular_subject_ids`, made once here), and with `-db` stored data that the traceback and the
-//!   reports read without a refusal: every definition line (as blastp's block search does) and
-//!   the ambiguity data of every sequence, which the preliminary stage does not read
-//!   (`database::x_streaming_refusal`; one pass over the database's sequences before the search,
-//!   in the pool). With one batch (the first batch takes every query record) nothing can come
-//!   after it, so none of these checks is made and no subject value is made ahead (the one call
-//!   makes them as without the switch). LOSAT's internal invariant errors and panics are not
-//!   argued; a write error of the output stops the run where it happens (at the end without the
-//!   switch); a `-db` file that changes or fails after the preliminary stage has read it is not
-//!   argued either.
+//!   (LOSAT's refusals) is written without the reports of the batches before by the off path,
+//!   and after them with the switch (drop-in DECISIONS 44: as NCBI reads them, the stored data
+//!   and the report ids of a batch's reported subjects are checked in that batch, nothing is read
+//!   before the search). These are the refusals of a reported subject: with `-db` a definition
+//!   line that does not read as the reports read it, holds a byte outside ' ' ..= '~' or gives no
+//!   tabular subject id (`database::reported_subjects`), with parsed Seq-ids a header that the
+//!   reports refuse and two sequences that outfmt 0 would join (`check_reported_parsed`,
+//!   `refuse_joined_hits`), one that the batches' prefetch reads where no report reads it (the
+//!   Seq-annots with `PRE_FETCH_SEQS_LIMIT=2147483647`, a table of fields that read nothing of the
+//!   subject) and cannot read as NCBI does (`check_prefetched_parsed`), ambiguity data that the
+//!   traceback cannot decode (`traceback_listed`), a taxid or a lookup of the taxonomy database
+//!   that the prefetch refuses (`batch_prefetch`), and what a custom
+//!   tabular report reads (the taxonomy fields, the names of the taxonomy database, `sall*`); with
+//!   a subject set a report id (`tabular_subject_ids`; the ids are made once where LOSAT refuses
+//!   none, `SubjectCache`) and with `-parse_deflines` the parsed ids that a custom tabular report
+//!   shows. Each is made by the report call (or the search) of the batch before that batch writes
+//!   a byte, so the output is the reports of the batches before (without the epilog) and their
+//!   query warnings, then the refusal and its exit status (the search's refusals, of the titles'
+//!   reading, the traceback and the prefetch, come after the batch's title warnings, as without
+//!   the switch; where several sequences are refused, the one named is the batch's first, not the
+//!   search's). The parsed ids of `-parse_deflines` without `sall*` are refused while the rows are
+//!   made (`TabularSubjects::values`), after the rows of the queries before in both paths, so
+//!   their bytes do not change. An error of NCBI's of the taxonomy database or of reading the
+//!   database that a later batch's prefetch or report meets likewise comes after the reports of
+//!   the batches before, as NCBI's loop writes them (without the switch after none); any other
+//!   input that LOSAT does not refuse gives the same bytes either way. Outfmt 17 writes its
+//!   document only at the end (`SamDocument::finish`), so a refusal in a later batch finds nothing
+//!   written there either.
+//!   BLAST XML has refusals of its own (a `-db` name, query title or id, or a title of a subject
+//!   with a hit that cannot be written, `blast_xml.rs`), made per report call; `-outfmt 5` is
+//!   never streamed (`Off::Xml`, any number of batches). The refusals of the options and the
+//!   query lengths that a later batch could meet keep the reports after the loop: scoring options
+//!   without Karlin-Altschul values or large greedy gap costs (`search_query_batch`, in
+//!   `context_statistics`), a negative
+//!   `CHUNK_SIZE` (`search_query_chunks`), a search space that could overflow (`SearchSpace`) and
+//!   an ungapped cutoff of a query too long (`UngappedCutoff`). With one batch (the first batch takes
+//!   every query record) nothing can come after it, so none of these checks is made and no
+//!   subject value is made ahead (the one call makes them as without the switch). LOSAT's
+//!   internal invariant errors and panics are not argued; a write error of the output stops the
+//!   run where it happens (at the end without the switch); a `-db` file that changes or fails
+//!   after the preliminary stage has read it is not argued either.
 //! - what the report path writes to standard error (the query warnings) keeps its bytes and its
 //!   place before each query's report; `-verbose` and the debug and trace output, which a batch
 //!   writes while it is searched and the reports write again, keep the reports at the end
@@ -83,81 +120,70 @@
 //! adapter, whose HSP numbers count over the whole search; file sinks, which are created when
 //! their report is written; two or more formats, which the library API allows on one stream,
 //! where the off path writes each format for all queries and the batch writes would interleave
-//! them); `-verbose` and the debug output (`x_debug_output`, the list LOSAT_X_QBATCHPAR uses); and
-//! the refusals above. The command line (`-out` file or standard output) and ABI v1 are streamed.
+//! them); `-verbose` and the debug output (`x_debug_output`); BLAST XML; and the refusals of the
+//! options and the query lengths above. The command line (`-out` file or standard output) and ABI
+//! v1 are streamed (an ABI caller gets the reports of the batches before a refusal, then its
+//! error).
+//!
+//! The taxonomy database (DBID item T): NCBI prefetches the subjects that each batch reports
+//! before the batch's reports in outfmt 0, 5, 6, 7 and 17, and with `taxdb.bti` on the search path
+//! the taxonomy database writes its messages there; the batch loop adds them to the warnings of
+//! the batch's first query (`run_in_pool`), so both paths write them before that query's report.
+//! Their lookups can be refused (a taxonomy database or a taxid that LOSAT cannot read as NCBI
+//! does), in the batch that first reports the sequence, and so can the run for NCBI's taxonomy
+//! cache (`TaxdbRun::cache_collision`), in the first batch that fetches a subject (NCBI looks
+//! nothing up before it); either writes the refusal after the reports of the batches before
+//! (above).
+//!
+//! `finish_sam` at NCBI's five error sites writes the document of the batches before as in the off
+//! path. Memory: the records of the batches before are rendered text, and each batch's lists are
+//! dropped, as for any streamed search.
 //!
 //! Memory: a batch's lists, flags, masks, Karlin-Altschul blocks and search spaces are dropped
 //! after its write, and so are its queries' warnings. Kept for the whole search, as without the
-//! switch: one (empty) warnings slot per query, and with `-db` the stored title of every distinct
-//! sequence that a batch reported (`database::DatabaseTitles`, at most the database's sequences
-//! and at most the queries times the hit list size), which the next batches read instead of
-//! reading the definition line again.
+//! switch: one (empty) warnings slot per query, and with `-db` the header of every distinct
+//! sequence that a batch reported (`database::DatabaseTitles`: its stored title or its parsed
+//! Seq-ids and titles, `ReportedHeader`; at most the database's sequences and at most the queries
+//! times the hit list size), which the next batches read instead of reading the definition line
+//! again.
 //!
-//! LOSAT_X_QBATCHPAR: the writes happen while the slots search the batches ahead (they write
-//! nothing; the batch loop alone writes), which is the point for the many-batch searches. The
-//! error paths still stop every slot before they write. A slot's panic, which ends a release
-//! build at once, then ends it after the reports of the batches taken so far, possibly in the
-//! middle of one (what its buffered writer had flushed).
-//!
-//! The shadow (`LOSAT_X_RPTSTREAMSHADOW`, implies the switch) keeps the final lists and values of
-//! every batch as the off path does, copies every byte that the batch writes send to each format
-//! and to standard error, and at the end (and on the error paths that write the reports of the
-//! batches before, and on LOSAT's errors of a batch, where the off path writes none) writes the
-//! reports the off path's way into memory and compares the bytes: on a difference it prints
-//! `[X_SHADOW] RPTSTREAM ... DIFFERENT` and panics; at the end of the search it prints
-//! `[X_SHADOW] RPTSTREAM batches= bytes= checks= off= identical` (batches: the batches whose
-//! reports were written by the loop; bytes: the bytes compared; checks: the comparisons; off: why
-//! the switch did not act, `none` when it did). With `LOSAT_X_STATS` and the switch,
-//! `[X_STATS] RPTSTREAM batches= queries= off= one_batch= check_s=` (`one_batch`: 1 when the
-//! checks were skipped for a search of one batch; `check_s`: the seconds of `check`, the `-db`
-//! pass included).
+//! With `LOSAT_X_STATS` and the switch,
+//! `[X_STATS] RPTSTREAM batches= queries= off= one_batch= check_s=` (batches: the batches whose
+//! reports were written by the loop; off: why the switch did not act, `none` when it did;
+//! `one_batch`: 1 when the checks were skipped for a search of one batch; `check_s`: the seconds of
+//! `check`).
 
-use std::io::{self, Write};
 use std::ops::Range;
 use std::sync::{Arc, OnceLock};
 
 use anyhow::Result;
 
-use crate::api::local_blast::{FormatOutput, OutputSink, ReportOutputs};
+use crate::api::local_blast::{OutputSink, ReportOutputs};
 use crate::blastinput::seq_range::{next_ranged_batch, Placements, QueryInput};
 use crate::config::NuclScoringSpec;
+use crate::report::sam::SamDocument;
 use crate::stats::NuclValues;
 use crate::utils::dust::MaskedInterval;
-use crate::utils::threading::SearchPool;
 
 use super::{
-    check_greedy_gap_costs, configure_task, database, record_title, x_debug_output, BlastnArgs,
+    check_greedy_gap_costs, configure_task, record_title, x_debug_output, BlastnArgs,
     BlastnOutputFormat, QueryBatching, SubjectLetters, SubjectRanges, SubjectSource,
 };
 
-// No NCBI counterpart: reads the switches once (LOSAT_X_RPTSTREAM is a strict-set switch since
-// 2026-10-17: on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set; the shadow, off
-// unless set to any value, implies the switch). They choose when LOSAT writes the same reports.
-/// 0 = off, 1 = LOSAT_X_RPTSTREAM, 2 = LOSAT_X_RPTSTREAMSHADOW.
-fn mode() -> u8 {
-    static MODE: OnceLock<u8> = OnceLock::new();
-    *MODE.get_or_init(|| {
-        if std::env::var_os("LOSAT_X_RPTSTREAMSHADOW").is_some() {
-            2
-        } else if crate::utils::xswitch::on("LOSAT_X_RPTSTREAM") {
-            1
-        } else {
-            0
-        }
-    })
-}
-
-/// Whether the switch (or its shadow) is set: the reports may be written batch by batch, so a
-/// batch's query records need not outlive the batch (LOSAT_X_QSTREAM reads them per batch only
-/// then, `x_query_stream`).
+// No NCBI counterpart: reads the switch once (LOSAT_X_RPTSTREAM is a strict-set switch since
+// 2026-10-17: on unless it is `0`). It chooses when LOSAT writes the same reports.
+/// Whether the switch is on: the reports may be written batch by batch, so a batch's query
+/// records need not outlive the batch (LOSAT_X_QSTREAM reads them per batch only then,
+/// `x_query_stream`).
 pub(super) fn switch_on() -> bool {
-    mode() != 0
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_RPTSTREAM"))
 }
 
 /// Why the reports of a search are written after its batch loop (`Stream::start`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Off {
-    /// Neither switch is set.
+    /// The switch is off (`LOSAT_X_RPTSTREAM=0`).
     NotSet,
     /// Hit records, a format observer, a file sink, or two or more formats (`ReportOutputs` other
     /// than one format of the command line's kind).
@@ -166,16 +192,17 @@ pub(super) enum Off {
     Debug,
     /// Scoring options without Karlin-Altschul values, or greedy gap costs that LOSAT refuses.
     Scoring,
+    /// `-outfmt 5` (BLAST XML), 15 and 16 (the XML2 / JSON documents), which are written after
+    /// the loop (the module doc has the reason).
+    Xml,
     /// A negative `CHUNK_SIZE`.
     ChunkSize,
+    /// An ungapped (`-ungapped`) search with a query of 2^30 letters or more, which LOSAT refuses
+    /// in the batch that holds it (the word cutoff's doubled length overflows NCBI's `Int4`): a
+    /// later batch's refusal would come after the first batch's reports.
+    UngappedCutoff,
     /// A database length times a query length that could overflow NCBI's 64-bit search space.
     SearchSpace,
-    /// A subject of the set whose tabular id LOSAT refuses.
-    SubjectIds,
-    /// A database whose definition lines do not all read as the reports read them.
-    Titles,
-    /// A database sequence whose ambiguity data the traceback cannot decode.
-    Ambiguity,
 }
 
 impl Off {
@@ -184,43 +211,35 @@ impl Off {
             Off::NotSet => "not_set",
             Off::Outputs => "outputs",
             Off::Debug => "debug",
+            Off::Xml => "xml",
             Off::Scoring => "scoring",
             Off::ChunkSize => "chunk_size",
+            Off::UngappedCutoff => "ungapped_cutoff",
             Off::SearchSpace => "search_space",
-            Off::SubjectIds => "subject_ids",
-            Off::Titles => "titles",
-            Off::Ambiguity => "ambiguity",
         }
     }
 }
 
 /// The report values of a subject set's subjects that every batch's reports would make again
-/// (`post_process_hits_and_write`), made once: the tabular ids of every subject (all supported:
-/// `Off::SubjectIds`), and for outfmt 0 the titles and, with `-lcase_masking`, the lowercase
+/// (`post_process_hits_and_write`), made once: the tabular ids of every subject (`None` where
+/// LOSAT refuses one: each batch's report then makes them and refuses the subjects it reports,
+/// as without the switch), and for outfmt 0 the titles and, with `-lcase_masking`, the lowercase
 /// masks. None of them depends on the hit lists.
 pub(super) struct SubjectCache {
-    pub(super) ids: Vec<Arc<[u8]>>,
+    pub(super) ids: Option<Vec<crate::algorithm::common::tabular::SubjectId>>,
     pub(super) titles: Option<Vec<Arc<[u8]>>>,
     pub(super) masks: Option<Vec<Vec<MaskedInterval>>>,
 }
 
 /// What the report calls of a search wrote before a call (`write_reports`): the number of
-/// queries whose reports were written, and the subject values made once. The default is the
-/// off path's single call.
-#[derive(Clone, Copy, Default)]
+/// queries whose reports were written, the subject values made once, and the SAM document that
+/// the calls add to (outfmt 17 writes its document at the end: `SamDocument`). The default is
+/// the off path's single call.
+#[derive(Default)]
 pub(super) struct Written<'a> {
     pub(super) queries: usize,
     pub(super) subjects: Option<&'a SubjectCache>,
-}
-
-/// The bytes that the batch writes sent to each format and to standard error, and the
-/// comparisons made (the shadow).
-struct Shadow {
-    outfmts: Vec<String>,
-    formats: Vec<Vec<u8>>,
-    diagnostics: Vec<u8>,
-    checks: u64,
-    compared: u64,
+    pub(super) sam: Option<&'a mut SamDocument>,
 }
 
 /// What `check` found where the switch acts: the subject values made once (a subject set of a
@@ -230,12 +249,14 @@ struct Ready {
     one_batch: bool,
 }
 
-/// The streaming of one search's reports: whether it acts (`off`), what it has written, and the
-/// shadow's copies. Its drop prints the summary lines.
+/// The streaming of one search's reports: whether it acts (`off`) and what it has written. Its
+/// drop prints the summary line.
 pub(super) struct Stream {
     off: Option<Off>,
     cache: Option<SubjectCache>,
-    shadow: Option<Shadow>,
+    /// The SAM document of the run (outfmt 17 joins the streaming: its records are held as
+    /// rendered bytes until the last call, or an NCBI error, writes it).
+    sam: Option<SamDocument>,
     batches: u64,
     queries: usize,
     one_batch: bool,
@@ -244,8 +265,7 @@ pub(super) struct Stream {
 
 impl Stream {
     /// The streaming of a search with these outputs and subjects, `query_input` and `lengths` its
-    /// query input and the searched queries' lengths, `batching` with the first batch's size
-    /// (`run_in_pool`).
+    /// query input and the searched queries' lengths, `batching` with the first batch's size.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn start(
         args: &BlastnArgs,
@@ -256,11 +276,10 @@ impl Stream {
         query_input: &QueryInput,
         lengths: &[usize],
         batching: QueryBatching,
-        pool: &SearchPool<'_>,
     ) -> Self {
         let started = std::time::Instant::now();
         let checked = check(
-            mode(),
+            switch_on(),
             args,
             outputs,
             output_formats,
@@ -269,28 +288,26 @@ impl Stream {
             query_input,
             lengths,
             batching,
-            pool,
         );
         let check_seconds = started.elapsed().as_secs_f64();
         let (off, cache, one_batch) = match checked {
             Ok(Ready { cache, one_batch }) => (None, cache, one_batch),
             Err(off) => (Some(off), None, false),
         };
-        let shadow = (mode() == 2 && off.is_none()).then(|| Shadow {
-            outfmts: outputs
-                .formats
-                .iter()
-                .map(|format| format.outfmt.to_string())
-                .collect(),
-            formats: vec![Vec::new(); outputs.formats.len()],
-            diagnostics: Vec::new(),
-            checks: 0,
-            compared: 0,
-        });
+        if switch_on() {
+            crate::utils::xreach::x_reach!("LOSAT_X_RPTSTREAM", off.is_none());
+        }
+        // NCBI writes the document when its formatter is destroyed, whatever the number of
+        // batches (`CBlast_SAM_Formatter`): the stream holds it for the calls.
+        let sam = output_formats
+            .iter()
+            .find_map(|format| format.sam_spec())
+            .filter(|_| off.is_none())
+            .map(|spec| sam_document(args, spec));
         Stream {
             off,
             cache,
-            shadow,
+            sam,
             batches: 0,
             queries: 0,
             one_batch,
@@ -303,13 +320,8 @@ impl Stream {
         self.off.is_none()
     }
 
-    /// Whether the off path's values are kept for the shadow's comparison.
-    pub(super) fn shadow(&self) -> bool {
-        self.shadow.is_some()
-    }
-
     /// Writes the reports of one batch of `queries` queries (or, with `epilog`, the epilogs) to
-    /// `outputs` with `write`, which gets what earlier calls wrote. The shadow copies the bytes.
+    /// `outputs` with `write`, which gets what earlier calls wrote.
     pub(super) fn write<F>(
         &mut self,
         outputs: &mut ReportOutputs<'_>,
@@ -324,41 +336,9 @@ impl Stream {
         let written = Written {
             queries: self.queries,
             subjects: self.cache.as_ref(),
+            sam: self.sam.as_mut(),
         };
-        let result = match self.shadow.as_mut() {
-            None => write(outputs, written),
-            Some(shadow) => {
-                let outfmts: Vec<&str> =
-                    outputs.formats.iter().map(|format| format.outfmt).collect();
-                let mut tees: Vec<SinkTee<'_, '_>> = outputs
-                    .formats
-                    .iter_mut()
-                    .zip(shadow.formats.iter_mut())
-                    .map(|(format, copy)| SinkTee {
-                        sink: &mut format.sink,
-                        copy,
-                    })
-                    .collect();
-                let mut diagnostics = WriteTee {
-                    inner: &mut *outputs.diagnostics,
-                    copy: &mut shadow.diagnostics,
-                };
-                let mut teed = ReportOutputs {
-                    formats: tees
-                        .iter_mut()
-                        .zip(outfmts)
-                        .map(|(tee, outfmt)| FormatOutput {
-                            outfmt,
-                            sink: OutputSink::Writer(tee),
-                        })
-                        .collect(),
-                    diagnostics: &mut diagnostics,
-                    hits: None,
-                    observer: None,
-                };
-                write(&mut teed, written)
-            }
-        };
+        let result = write(outputs, written);
         if !epilog {
             self.batches += 1;
         }
@@ -366,81 +346,31 @@ impl Stream {
         result
     }
 
-    /// The shadow: writes with `write_old` (the off path's call) into memory and compares the
-    /// bytes with those that the batch writes sent (`what` names the place in a difference).
-    /// Without the shadow nothing runs.
-    pub(super) fn check<F>(&mut self, what: &str, write_old: F)
-    where
-        F: FnOnce(&mut ReportOutputs<'_>) -> Result<()>,
-    {
-        let Some(shadow) = self.shadow.as_mut() else {
-            return;
-        };
-        let mut formats: Vec<Vec<u8>> = vec![Vec::new(); shadow.outfmts.len()];
-        let mut diagnostics = Vec::new();
-        let result = {
-            let mut memory = ReportOutputs {
-                formats: shadow
-                    .outfmts
-                    .iter()
-                    .zip(formats.iter_mut())
-                    .map(|(outfmt, bytes)| FormatOutput {
-                        outfmt,
-                        sink: OutputSink::Writer(bytes),
-                    })
-                    .collect(),
-                diagnostics: &mut diagnostics,
-                hits: None,
-                observer: None,
-            };
-            write_old(&mut memory)
-        };
-        shadow.checks += 1;
-        let difference = match result {
-            Err(error) => Some(format!(
-                "the reports written after the loop fail: {error:#}"
-            )),
-            Ok(()) => formats
-                .iter()
-                .zip(&shadow.formats)
-                .enumerate()
-                .find_map(|(index, (old, streamed))| {
-                    first_difference(old, streamed).map(|at| {
-                        format!(
-                            "format {index} ({}) differs at byte {at} of {} / {}",
-                            shadow.outfmts[index],
-                            old.len(),
-                            streamed.len()
-                        )
-                    })
-                })
-                .or_else(|| {
-                    first_difference(&diagnostics, &shadow.diagnostics).map(|at| {
-                        format!(
-                            "the standard error differs at byte {at} of {} / {}",
-                            diagnostics.len(),
-                            shadow.diagnostics.len()
-                        )
-                    })
-                }),
-        };
-        if let Some(difference) = difference {
-            eprintln!(
-                "[X_SHADOW] RPTSTREAM batches={} checks={} DIFFERENT ({what}: {difference})",
-                self.batches, shadow.checks
-            );
-            panic!("LOSAT_X_RPTSTREAMSHADOW: the reports written batch by batch differ from those written after the loop");
+    /// Writes the SAM document of the batches taken so far, if it holds a record: NCBI's
+    /// formatter is destroyed when an error leaves the `try` block that holds it, so the
+    /// records of the batches before the error are written before the error's lines
+    /// (`blastn_app.cpp:186-327`). The off path does the same in its `write_before_failed_batch`
+    /// call.
+    pub(super) fn finish_sam(&mut self, outputs: &mut ReportOutputs<'_>) -> Result<()> {
+        if !self.sam.as_ref().is_some_and(SamDocument::has_records) {
+            return Ok(());
         }
-        shadow.compared +=
-            formats.iter().map(|bytes| bytes.len() as u64).sum::<u64>() + diagnostics.len() as u64;
+        self.write(outputs, 0, true, |outputs, written| {
+            let document = written.sam.expect("the stream holds a SAM document");
+            // One format: more are never streamed (`Off::Outputs`).
+            let mut writer = outputs.formats[0].sink.open()?;
+            document.finish(&mut writer)?;
+            writer.flush()?;
+            Ok(())
+        })
     }
 }
 
-// No NCBI counterpart: the summary lines of the switch (with LOSAT_X_STATS) and of the shadow;
-// they print counters and change no value NCBI computes.
+// No NCBI counterpart: the summary line of the switch (with LOSAT_X_STATS); it prints counters and
+// changes no value NCBI computes.
 impl Drop for Stream {
     fn drop(&mut self) {
-        if mode() == 0 {
+        if !switch_on() {
             return;
         }
         let off = self.off.map_or("none", Off::name);
@@ -453,17 +383,13 @@ impl Drop for Stream {
                 self.check_seconds
             );
         }
-        if mode() == 2 {
-            let (checks, compared) = self
-                .shadow
-                .as_ref()
-                .map_or((0, 0), |shadow| (shadow.checks, shadow.compared));
-            eprintln!(
-                "[X_SHADOW] RPTSTREAM batches={} bytes={compared} checks={checks} off={off} identical",
-                self.batches
-            );
-        }
     }
+}
+
+/// The SAM document of an outfmt 17 report with `spec`: `args` give the command line that its
+/// `@PG` line shows (`BlastnArgs::command_line`).
+pub(super) fn sam_document(args: &BlastnArgs, spec: crate::report::sam::SamSpec) -> SamDocument {
+    SamDocument::new(spec, crate::NCBI_BLAST_VERSION, args.command_line.clone())
 }
 
 /// The query input of the searched queries `searched` (a batch's), numbered from 0 as the batch's
@@ -484,86 +410,19 @@ pub(super) fn batch_input(query_input: &QueryInput, searched: Range<usize>) -> Q
     }
 }
 
-/// The first byte at which `a` and `b` differ (or the shorter one's length), `None` if equal.
-fn first_difference(a: &[u8], b: &[u8]) -> Option<usize> {
-    if a == b {
-        return None;
-    }
-    Some(
-        a.iter()
-            .zip(b)
-            .position(|(left, right)| left != right)
-            .unwrap_or(a.len().min(b.len())),
-    )
-}
-
-/// A format's sink during a batch write of the shadow: the bytes go to the sink and are copied.
-/// A sink of the command line or of ABI v1 is a writer (the file sink is not streamed, `check`);
-/// `Stdout` is written unbuffered, the same bytes in the same order.
-struct SinkTee<'s, 'r> {
-    sink: &'s mut OutputSink<'r>,
-    copy: &'s mut Vec<u8>,
-}
-
-impl Write for SinkTee<'_, '_> {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        let written = match self.sink {
-            OutputSink::Writer(writer) => writer.write(buf)?,
-            OutputSink::Stdout => io::stdout().write(buf)?,
-            OutputSink::File(_) => {
-                return Err(io::Error::other(
-                    "LOSAT_X_RPTSTREAM does not stream a file sink",
-                ))
-            }
-        };
-        self.copy.extend_from_slice(&buf[..written]);
-        Ok(written)
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        match self.sink {
-            OutputSink::Writer(writer) => writer.flush(),
-            OutputSink::Stdout => io::stdout().flush(),
-            OutputSink::File(_) => Ok(()),
-        }
-    }
-}
-
-/// Standard error during a batch write of the shadow: the bytes go to it and are copied.
-struct WriteTee<'s> {
-    inner: &'s mut (dyn Write + Send),
-    copy: &'s mut Vec<u8>,
-}
-
-impl Write for WriteTee<'_> {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        let written = self.inner.write(buf)?;
-        self.copy.extend_from_slice(&buf[..written]);
-        Ok(written)
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        self.inner.flush()
-    }
-}
-
-/// Why the switch does not act for this search, or what it needs where it does (`Stream::start`;
-/// the module doc has the reasons). `mode` is `mode()` (a parameter for the unit tests).
-#[allow(clippy::too_many_arguments)]
-fn check(
-    mode: u8,
+/// The reasons of `check` that need neither the query records nor the subjects: the switch off,
+/// the outputs, the verbose and debug output and BLAST XML. Where one
+/// applies the reports are written after the loop whatever the query file holds, so
+/// LOSAT_X_QSTREAM reads the records before the search (its `off=reports`) instead of reading them
+/// twice to keep them all for those reports. `on` is `switch_on()`.
+pub(super) fn refused_before_reading(
+    on: bool,
     args: &BlastnArgs,
     outputs: &ReportOutputs<'_>,
     output_formats: &[BlastnOutputFormat],
-    source: SubjectSource<'_>,
-    subject_ranges: SubjectRanges<'_>,
-    query_input: &QueryInput,
-    lengths: &[usize],
-    batching: QueryBatching,
-    pool: &SearchPool<'_>,
-) -> std::result::Result<Ready, Off> {
-    if mode == 0 {
-        return Err(Off::NotSet);
+) -> Option<Off> {
+    if !on {
+        return Some(Off::NotSet);
     }
     if outputs.hits.is_some()
         || outputs.observer.is_some()
@@ -573,10 +432,43 @@ fn check(
             .iter()
             .any(|format| matches!(format.sink, OutputSink::File(_)))
     {
-        return Err(Off::Outputs);
+        return Some(Off::Outputs);
     }
     if x_debug_output(args) {
-        return Err(Off::Debug);
+        return Some(Off::Debug);
+    }
+    // BLAST XML (DESIGN_OF4 Q8, Owner-delegated 2026-10-20; OWNER_DECISIONS 20): the XML writer
+    // refuses a query title or the title of a subject with a hit that NCBI's definition line
+    // generator reads past the end of (`names::Refusal`; every other text is written as NCBI's
+    // stream writes it, since line RG item K4h), and that check is made by the report call of the
+    // batch that holds the query or the subject. With several batches a later batch's refusal
+    // would come after the first batch's Iterations were written, so outfmt 5 is never streamed:
+    // the one report call after the search finds every refusal before the first byte.
+    if output_formats
+        .iter()
+        .any(|format| format.is_structured_xml())
+    {
+        return Some(Off::Xml);
+    }
+    None
+}
+
+/// Why the switch does not act for this search, or what it needs where it does (`Stream::start`;
+/// the module doc has the reasons). `on` is `switch_on()` (a parameter for the unit tests).
+#[allow(clippy::too_many_arguments)]
+fn check(
+    on: bool,
+    args: &BlastnArgs,
+    outputs: &ReportOutputs<'_>,
+    output_formats: &[BlastnOutputFormat],
+    source: SubjectSource<'_>,
+    subject_ranges: SubjectRanges<'_>,
+    query_input: &QueryInput,
+    lengths: &[usize],
+    batching: QueryBatching,
+) -> std::result::Result<Ready, Off> {
+    if let Some(off) = refused_before_reading(on, args, outputs, output_formats) {
+        return Err(off);
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:138-170
     // ```c++
@@ -604,7 +496,8 @@ fn check(
             one_batch: true,
         });
     }
-    // The scoring of `search_query_batch` (`context_blocks`: `NuclValues::gapped` fails exactly
+    // The scoring of `search_query_batch` (`context_blocks`, called in
+    // `context_statistics::karlin_blocks`: `NuclValues::gapped` fails exactly
     // where `check_gaps` does, for every context) and its greedy gap costs: neither depends on
     // the queries.
     let config = configure_task(args);
@@ -624,39 +517,59 @@ fn check(
     if batching.split.negative_chunk_size() {
         return Err(Off::ChunkSize);
     }
-    // The search space of a context (`search_query_batch`): the effective database length
+    if args.ungapped
+        && !lengths.iter().all(|&length| {
+            crate::algorithm::blastn::ungapped::cutoff_context_length_supported(length)
+        })
+    {
+        return Err(Off::UngappedCutoff);
+    }
+    // The search space of a context (`search_query_batch`, in `context_statistics`): the
+    // effective database length
     // `db - n x a` (at least 1) times the effective query length `q - a` (at least 1), with the
     // length adjustment `a` between 0 and the smaller root of `n a^2 - (q n + db) a + c`, which is
     // at most `2 c / (q n + db) <= 2 q` (`compute_length_adjustment_ncbi`, `c <= q db`). So
-    // `(db + n (2 q + 1)) (2 q + 1)` bounds every product that can overflow there.
+    // `(db + n (2 q + 1)) (2 q + 1)` bounds every product that can overflow there; a negative
+    // `n` (an alias file's `NSEQ`, NCBI's `Int4`) adds `|n| a` to the database length, so the
+    // bound takes `|n|`.
     let metadata = source.metadata();
     let db_length = if args.db_length() > 0 {
         i128::from(args.db_length())
     } else {
-        metadata.db_len_total as i128
+        i128::from(metadata.db_len_total)
     };
     let factor = 2 * lengths.iter().copied().max().unwrap_or(0) as i128 + 1;
-    if (db_length.abs() + metadata.db_num_seqs as i128 * factor) * factor > i128::from(i64::MAX) {
+    if (db_length.abs() + i128::from(metadata.db_num_seqs.unsigned_abs()) * factor) * factor
+        > i128::from(i64::MAX)
+    {
         return Err(Off::SearchSpace);
     }
-    match source {
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:310-312
+    // ```c++
+    //                 ITERATE(CSearchResultSet, result, *results) {
+    //                     formatter.PrintOneResultSet(**result, query_batch);
+    //                 }
+    // ```
+    // The stored data and the report ids of the reported subjects (a database's definition
+    // lines, ambiguity data and taxonomy, a subject set's ids) are checked by the report call of
+    // the batch that reports them, as NCBI's formatter reads them for each batch's result sets
+    // (drop-in DECISIONS 44): a refusal there comes after the reports of the batches before (the
+    // module doc).
+    let cache = match source {
         SubjectSource::Prepared(prepared) => {
-            // `tabular_subject_ids` of every subject.
-            let ids: Option<Vec<Arc<[u8]>>> = prepared
+            // `tabular_subject_ids` of every subject, where every lookup finds its id.
+            let ids: Option<Vec<crate::algorithm::common::tabular::SubjectId>> = prepared
                 .records
                 .iter()
                 .map(|subject| {
-                    crate::report::defline::tabular_subject_id(
-                        subject.local_id.as_bytes(),
-                        &subject.title,
-                        false,
-                    )
-                    .ok()
-                    .map(Arc::from)
+                    subject
+                        .subject_tabular_id(false)
+                        .ok()
+                        .flatten()
+                        .map(|id| Some(Arc::from(id)))
                 })
                 .collect();
-            let ids = ids.ok_or(Off::SubjectIds)?;
-            let pairwise = output_formats.contains(&BlastnOutputFormat::Pairwise);
+            let pairwise = output_formats.iter().any(|format| format.is_pairwise());
             let titles = pairwise.then(|| prepared.records.iter().map(record_title).collect());
             // The records as read with `-subject_loc` (never packed), else the searched ones.
             let masks = (pairwise && args.lcase_masking).then(|| {
@@ -668,24 +581,20 @@ fn check(
                     .map(|index| subject_records.lowercase_masks(index))
                     .collect()
             });
-            Ok(Ready {
-                cache: Some(SubjectCache { ids, titles, masks }),
-                one_batch: false,
-            })
+            Some(SubjectCache { ids, titles, masks })
         }
-        SubjectSource::Database(db) => match database::x_streaming_refusal(db, pool) {
-            Some(off) => Err(off),
-            None => Ok(Ready {
-                cache: None,
-                one_batch: false,
-            }),
-        },
-    }
+        SubjectSource::Database(_) => None,
+    };
+    Ok(Ready {
+        cache,
+        one_batch: false,
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::api::local_blast::FormatOutput;
     use crate::blastinput::seq_range::RecordPlacement;
 
     // EXPERIMENT (LOSAT_X_RPTSTREAM): a batch's part of the query input numbers its queries from
@@ -727,47 +636,6 @@ mod tests {
         assert_eq!(batch.ordinals, [1, 2]);
     }
 
-    // EXPERIMENT (LOSAT_X_RPTSTREAMSHADOW): the shadow's tees send every byte on and copy it.
-    #[test]
-    fn the_tees_send_and_copy_every_byte() {
-        let mut target: Vec<u8> = Vec::new();
-        let mut copy = Vec::new();
-        {
-            let mut sink = OutputSink::Writer(&mut target);
-            let mut tee = SinkTee {
-                sink: &mut sink,
-                copy: &mut copy,
-            };
-            tee.write_all(b"row 1\n").unwrap();
-            write!(tee, "row {}\n", 2).unwrap();
-            tee.flush().unwrap();
-        }
-        assert_eq!(target, b"row 1\nrow 2\n");
-        assert_eq!(copy, target);
-        let mut errors: Vec<u8> = Vec::new();
-        let mut copy = Vec::new();
-        {
-            let mut tee = WriteTee {
-                inner: &mut errors,
-                copy: &mut copy,
-            };
-            tee.write_all(b"Warning: one\n").unwrap();
-        }
-        assert_eq!(
-            (errors.as_slice(), copy.as_slice()),
-            (&b"Warning: one\n"[..], &b"Warning: one\n"[..])
-        );
-        let path = std::path::Path::new("never-created");
-        let mut sink = OutputSink::File(path);
-        let mut copy = Vec::new();
-        let mut tee = SinkTee {
-            sink: &mut sink,
-            copy: &mut copy,
-        };
-        assert!(tee.write_all(b"x").is_err(), "a file sink is not streamed");
-        assert!(!path.exists());
-    }
-
     /// The arguments of a `blastn` command line (`extra` after `-query q -subject s`).
     fn args(extra: &[&str]) -> BlastnArgs {
         use clap::Parser;
@@ -793,13 +661,38 @@ mod tests {
             title: title.to_vec(),
             sequence: b"ACGTTGCA".iter().copied().cycle().take(letters).collect(),
             warnings: Vec::new(),
+            source: Default::default(),
         }
     }
 
     /// `check` for queries of 1,000 letters each (`queries`), first batches of `batch_size`
     /// letters, the subjects `subjects` and the outputs `outputs`.
     fn checked(
-        mode: u8,
+        on: bool,
+        extra: &[&str],
+        subjects: &[crate::blastinput::fasta_reader::FastaRecord],
+        queries: usize,
+        batch_size: u32,
+        split: crate::algorithm::blastn::query_split::SplitSizes,
+        outputs: &mut ReportOutputs<'_>,
+    ) -> std::result::Result<Ready, Off> {
+        checked_as(
+            &[BlastnOutputFormat::Tabular],
+            on,
+            extra,
+            subjects,
+            queries,
+            batch_size,
+            split,
+            outputs,
+        )
+    }
+
+    /// `checked` for the output formats `formats`.
+    #[allow(clippy::too_many_arguments)]
+    fn checked_as(
+        formats: &[BlastnOutputFormat],
+        on: bool,
         extra: &[&str],
         subjects: &[crate::blastinput::fasta_reader::FastaRecord],
         queries: usize,
@@ -826,13 +719,11 @@ mod tests {
             batch_size,
             split,
         };
-        // A one-thread pool (the `-db` pass is not reached for a subject set).
-        let pool = SearchPool::x_serial();
         check(
-            mode,
+            on,
             &args,
             &*outputs,
-            &[BlastnOutputFormat::Tabular],
+            formats,
             SubjectSource::Prepared(&prepared),
             SubjectRanges {
                 placements: &Placements::default(),
@@ -841,15 +732,15 @@ mod tests {
             &query_input,
             &lengths,
             batching,
-            &pool,
         )
     }
 
     // EXPERIMENT (LOSAT_X_RPTSTREAM): where the switch acts, and why not elsewhere: one format of
     // the command line's kind only; with one batch no refusal is checked (and nothing is made
-    // ahead); with more, every refusal that could come after the first batch is.
+    // ahead); with more, the refusals of the options and the query lengths that could come after
+    // the first batch are, and a subject set's refused ids are left to the batches' reports.
     #[test]
-    fn the_switch_acts_only_where_no_refusal_can_follow_the_first_batch() {
+    fn the_switch_acts_where_the_outputs_and_options_allow() {
         use crate::algorithm::blastn::query_split::SplitSizes;
         let plain = SplitSizes::new(false, None, None);
         let good = vec![
@@ -865,21 +756,21 @@ mod tests {
         let single =
             |sink: &mut Vec<u8>, errors: &mut Vec<u8>| -> std::result::Result<Ready, Off> {
                 let mut outputs = ReportOutputs::single("6", OutputSink::Writer(sink), errors);
-                checked(1, &[], &good, 10, 4000, plain, &mut outputs)
+                checked(true, &[], &good, 10, 4000, plain, &mut outputs)
             };
         // Not set.
         let mut outputs = ReportOutputs::single("6", OutputSink::Writer(&mut one), &mut errors);
         assert_eq!(
-            checked(0, &[], &good, 10, 4000, plain, &mut outputs).err(),
+            checked(false, &[], &good, 10, 4000, plain, &mut outputs).err(),
             Some(Off::NotSet)
         );
         drop(outputs);
         // Hit records, an observer-like second output: two formats; a file sink.
-        let mut on_hits = |_: &[crate::report::PairwiseHit]| {};
+        let mut on_hits = |_: Arc<Vec<crate::report::PairwiseHit>>| {};
         let mut outputs = ReportOutputs::single("6", OutputSink::Writer(&mut one), &mut errors);
         outputs.hits = Some(&mut on_hits);
         assert_eq!(
-            checked(1, &[], &good, 10, 4000, plain, &mut outputs).err(),
+            checked(true, &[], &good, 10, 4000, plain, &mut outputs).err(),
             Some(Off::Outputs)
         );
         drop(outputs);
@@ -887,33 +778,43 @@ mod tests {
         let mut outputs = ReportOutputs::single("6", OutputSink::Writer(&mut one), &mut errors2);
         outputs.formats.push(FormatOutput {
             outfmt: "7",
+            refusal: crate::api::local_blast::FormatRefusal::FailsCall,
             sink: OutputSink::Writer(&mut two),
         });
         assert_eq!(
-            checked(1, &[], &good, 10, 4000, plain, &mut outputs).err(),
+            checked(true, &[], &good, 10, 4000, plain, &mut outputs).err(),
             Some(Off::Outputs)
         );
         drop(outputs);
         let path = std::path::Path::new("never-created");
         let mut outputs = ReportOutputs::single("6", OutputSink::File(path), &mut errors);
         assert_eq!(
-            checked(1, &[], &good, 10, 4000, plain, &mut outputs).err(),
+            checked(true, &[], &good, 10, 4000, plain, &mut outputs).err(),
             Some(Off::Outputs)
         );
         drop(outputs);
         // Several batches (4,000 letters of 10,000): the subject values are made once.
         let ready = single(&mut one, &mut errors).expect("acts");
         assert!(!ready.one_batch);
-        assert_eq!(ready.cache.as_ref().map(|cache| cache.ids.len()), Some(2));
+        assert_eq!(
+            ready
+                .cache
+                .as_ref()
+                .and_then(|cache| cache.ids.as_ref())
+                .map(Vec::len),
+            Some(2)
+        );
         // One batch (20,000 letters): no check, nothing made ahead, even with a refused id.
         let mut outputs = ReportOutputs::single("6", OutputSink::Writer(&mut one), &mut errors);
-        let ready = checked(1, &[], &refused, 10, 20_000, plain, &mut outputs).expect("acts");
+        let ready = checked(true, &[], &refused, 10, 20_000, plain, &mut outputs).expect("acts");
         assert!(ready.one_batch && ready.cache.is_none());
-        // Several batches: the refusals that could come after the first batch.
-        assert_eq!(
-            checked(1, &[], &refused, 10, 4000, plain, &mut outputs).err(),
-            Some(Off::SubjectIds)
-        );
+        // Several batches with a refused id: the switch acts, and each batch's report makes the
+        // ids (and refuses the subjects that it reports, as without the switch).
+        let ready = checked(true, &[], &refused, 10, 4000, plain, &mut outputs).expect("acts");
+        assert!(!ready.one_batch);
+        assert!(ready.cache.is_some_and(|cache| cache.ids.is_none()));
+        // Several batches: the refusals of the options and the query lengths that could come
+        // after the first batch.
         let scoring = [
             "-task",
             "blastn",
@@ -927,12 +828,12 @@ mod tests {
             "1",
         ];
         assert_eq!(
-            checked(1, &scoring, &good, 10, 4000, plain, &mut outputs).err(),
+            checked(true, &scoring, &good, 10, 4000, plain, &mut outputs).err(),
             Some(Off::Scoring)
         );
         assert_eq!(
             checked(
-                1,
+                true,
                 &["-dbsize", "9000000000000000000"],
                 &good,
                 10,
@@ -945,7 +846,7 @@ mod tests {
         );
         assert_eq!(
             checked(
-                1,
+                true,
                 &[],
                 &good,
                 10,
@@ -956,15 +857,34 @@ mod tests {
             .err(),
             Some(Off::ChunkSize)
         );
-        // The shadow mode checks the same.
-        assert!(checked(2, &[], &good, 10, 4000, plain, &mut outputs).is_ok());
-    }
-
-    #[test]
-    fn the_first_difference_is_the_first_unequal_byte_or_the_shorter_length() {
-        assert_eq!(first_difference(b"abc", b"abc"), None);
-        assert_eq!(first_difference(b"abc", b"abd"), Some(2));
-        assert_eq!(first_difference(b"ab", b"abc"), Some(2));
-        assert_eq!(first_difference(b"", b"a"), Some(0));
+        // BLAST XML, XML2 and JSON (outfmt 5, 16 and 15) are never streamed, with one batch
+        // (20,000 letters) or several.
+        for batch_size in [20_000, 4000] {
+            for xml in [
+                [BlastnOutputFormat::Xml],
+                [BlastnOutputFormat::Xml2(
+                    crate::report::blast_xml2::Xml2Kind::Single16,
+                )],
+                [BlastnOutputFormat::Xml2(
+                    crate::report::blast_xml2::Xml2Kind::Single15,
+                )],
+            ] {
+                assert_eq!(
+                    checked_as(&xml, true, &[], &good, 10, batch_size, plain, &mut outputs).err(),
+                    Some(Off::Xml)
+                );
+            }
+        }
+        // The BLAST archive (outfmt 11) is streamed, with several batches (4,000 letters) or one
+        // (20,000 letters).
+        let archive = [BlastnOutputFormat::Archive];
+        assert!(
+            checked_as(&archive, true, &[], &good, 10, 4000, plain, &mut outputs)
+                .is_ok_and(|ready| !ready.one_batch)
+        );
+        assert!(
+            checked_as(&archive, true, &[], &good, 10, 20_000, plain, &mut outputs)
+                .is_ok_and(|ready| ready.one_batch)
+        );
     }
 }

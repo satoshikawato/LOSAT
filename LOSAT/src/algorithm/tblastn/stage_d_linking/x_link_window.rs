@@ -1,84 +1,87 @@
-//! EXPERIMENT (LOSAT_X_TBNLINKWIN): the candidates of a head in tblastn's uneven-gap linking
+//! The candidates of a head in tblastn's uneven-gap linking
 //! chosen by subject position.
 //!
 //! NCBI's loop (c++/src/algo/blast/core/link_hsps.c:1602-1757, `s_BlastUnevenGapLinkHSPs`) tests
-//! every HSP whose query offsets fall in the window of the head set
-//! (`s_HSPOffsetEndBinarySearch` .. `s_HSPOffsetBinarySearch`) with
-//! `s_LinkedHSPSetsAdmissible`, which merges the two sets and checks each pair of neighbours. A
-//! short query puts nearly every HSP of the subject list in that window, so a genome searched
-//! with one protein (thousands of HSPs per list, a handful of links) costs a number of
-//! admissibility tests that grows with the square of the list (perf-si-20261012 session 21: a
-//! 411-residue protein x the human genome, 85,908 HSPs, 159 million candidates, 13 admissible).
+//! every HSP whose query offsets fall in the window of the head set (1697-1711,
+//! `s_HSPOffsetEndBinarySearch` .. `s_HSPOffsetBinarySearch`; an HSP whose predecessor in its set
+//! ends at `left_offset` or later is skipped, 1719) with `s_LinkedHSPSetsAdmissible` (1407-1491),
+//! which merges the two sets and checks each pair of neighbours. A short query puts nearly every
+//! HSP of the subject list in that window, so a genome searched with one protein (thousands of
+//! HSPs per list, a handful of links) costs a number of admissibility tests that grows with the
+//! square of the list (perf-si-20261012 session 21: a 411-residue protein x the human genome,
+//! 85,908 HSPs, 159 million candidates, 13 admissible).
 //!
 //! Every admissible merged set is ordered by query offset (the merge) and, by the checks, has
 //! each subject start before the next one and each next start at most `longest_intron` after the
 //! end before it. So a candidate set whose subject range [lowest start, highest end] lies more
 //! than `longest_intron` after the head set's range, or ends more than `longest_intron` before
 //! it, is not admissible: all HSPs of the earlier set come first in the merged order, and the
-//! pair where the sets meet breaks the gap check. Here the HSPs that are alone in their set are
-//! looked up by subject start (same context and frame sign as the head, start within
-//! `longest_intron` plus the longest HSP of the list), the HSPs of sets of two or more are all
-//! kept, and the candidates are tested in NCBI's order (query offset order, inside the same
-//! query-offset window) with NCBI's tests. When the query-offset window has no more HSPs than the
-//! subject starts looked up, the whole window is tested, as NCBI does. Only candidates that cannot
-//! be admissible are left out, and the loop keeps the first best one in that order, so every
-//! link, E-value and number is NCBI's.
+//! pair where the sets meet breaks the gap check. A set of two or more is such a merged set
+//! itself, so when its range meets R = [lowest start - `longest_intron`, highest end +
+//! `longest_intron`] of the head set, one of its HSPs does: R is longer than `longest_intron`, the
+//! most a gap inside the set can be. Here the HSPs are looked up by subject start (same context
+//! and frame sign as the head, start within `longest_intron` plus the longest HSP of the list,
+//! which takes every HSP that meets R); an HSP alone in its set is a candidate if it lies in the
+//! query-offset window, and an HSP of a set of two or more brings every HSP of its set that lies
+//! in the window, wherever the one met lies. The candidates are tested in NCBI's order (query
+//! offset order) with NCBI's tests, including the skip at 1719; every HSP of a set has the set's
+//! sum score, number and E-value, so the HSPs of a set left in give the results that all of them
+//! give. When the query-offset window has no more HSPs than the subject starts looked up, the
+//! whole window is tested, as NCBI does. Only candidates that cannot be admissible are left out,
+//! and the loop keeps the first best one in that order, so every link, E-value and number is
+//! NCBI's.
 //!
-//! `LOSAT_X_TBNLINKWIN` is in the strict set (`utils/xswitch.rs`): on unless it is `0`, or
-//! `LOSAT_X_DEFAULT=0` and it is not set. With `LOSAT_X_TBNLINKWINSHADOW` set as well (any
-//! value), the whole window of each head whose candidates were chosen is tested too (a head that
-//! takes its whole window needs no check), and the search stops (panic) if an admissible
-//! candidate is not among the chosen ones. With `LOSAT_X_STATS`
-//! set, `main` prints `[X_STATS] TBNLINKWIN heads= window= chosen= shadow_heads=` at exit (the
-//! heads, the candidates of their query-offset windows, the candidates tested), when a list was
-//! linked with the switch. blastx keeps its own linking (`blastx/linking.rs`).
+//! Every linking call looks the candidates up this way (the former switch `LOSAT_X_TBNLINKWIN`
+//! graduated on 2026-10-26). The sets come from the lookup since `LOSAT_X_TBNLINKSETS`
+//! (2026-10-26, in `STRICT_SET`); with `LOSAT_X_TBNLINKSETS=0` every HSP of a set of two or more
+//! in the window is a candidate, as before (repeat-family queries form thousands of small sets,
+//! and each head tested all of them again). NCBI's loop over the whole window is the reference of
+//! the unit test. With `LOSAT_X_STATS` set, `main` prints
+//! `[X_STATS] TBNLINKWIN heads= window= chosen= sets=` at exit (the heads, the candidates of their
+//! query-offset windows, the candidates tested, the sets of two or more brought in by the
+//! lookup), when a list was linked. blastx keeps its own linking (`blastx/linking.rs`).
 
-use super::{sets_admissible, LocalLinkParameters, WorkHsp};
+use super::{chain_head, LocalLinkParameters, WorkHsp};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
-// No NCBI counterpart: reads LOSAT_X_TBNLINKWIN once; it does not change any value NCBI
-// computes.
-/// EXPERIMENT (LOSAT_X_TBNLINKWIN): whether the linking loop tests the chosen candidates only; a
-/// switch of the strict set, on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set.
-pub(super) fn x_tbn_link_window() -> bool {
+// No NCBI counterpart: the unit test of this file runs the linking call over NCBI's whole window
+// as well; it does not change any value NCBI computes.
+/// Whether the linking loop tests the whole window, as NCBI does (the unit tests' reference, set
+/// per test thread); the search always tests the chosen candidates.
+#[cfg(test)]
+pub(super) fn x_whole_window_forced() -> bool {
+    tests::X_FORCE.get() == Some(false)
+}
+
+// No NCBI counterpart: reads the switch once; it does not change any value NCBI computes.
+/// Whether a set of two or more is a candidate only when the lookup meets one of its HSPs
+/// (`LOSAT_X_TBNLINKSETS`, read once; a unit test sets it per test thread).
+fn x_sets_on() -> bool {
     #[cfg(test)]
-    if let Some((on, _)) = tests::X_FORCE.get() {
+    if let Some(on) = tests::X_SETS.get() {
         return on;
     }
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBNLINKWIN"))
-}
-
-// No NCBI counterpart: reads LOSAT_X_TBNLINKWINSHADOW once.
-/// EXPERIMENT (LOSAT_X_TBNLINKWIN): whether each head's whole window is tested as well.
-fn x_shadow() -> bool {
-    #[cfg(test)]
-    if let Some((_, shadow)) = tests::X_FORCE.get() {
-        return shadow;
-    }
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("LOSAT_X_TBNLINKWINSHADOW").is_some())
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBNLINKSETS"))
 }
 
 // No NCBI counterpart: LOSAT_X_STATS counters; they do not change any value NCBI computes.
-/// Heads, candidates of their query-offset windows, candidates tested, heads checked by the
-/// shadow.
+/// Heads, candidates of their query-offset windows, candidates tested, sets brought in by the
+/// lookup.
 static STATS: [AtomicU64; 4] = [const { AtomicU64::new(0) }; 4];
 
 /// The `[X_STATS] TBNLINKWIN` line (printed by `main` at exit) with `LOSAT_X_STATS`, when a list
-/// was linked with the switch.
+/// was linked.
 // No NCBI counterpart: prints the counters above; it does not change any value NCBI computes.
 pub fn print_summary() {
-    let [heads, window, chosen, shadow] = STATS.each_ref().map(|v| v.load(Ordering::Relaxed));
+    let [heads, window, chosen, sets] = STATS.each_ref().map(|v| v.load(Ordering::Relaxed));
     if heads > 0 && std::env::var_os("LOSAT_X_STATS").is_some() {
-        eprintln!(
-            "[X_STATS] TBNLINKWIN heads={heads} window={window} chosen={chosen} shadow_heads={shadow}"
-        );
+        eprintln!("[X_STATS] TBNLINKWIN heads={heads} window={window} chosen={chosen} sets={sets}");
     }
 }
 
-/// EXPERIMENT (LOSAT_X_TBNLINKWIN): the lookup of one subject list's linking call.
+/// The lookup of one subject list's linking call.
 pub(super) struct XLinkWindow {
     /// (context, frame sign, subject start, rank in the query offset order) of every HSP, sorted.
     by_subject: Vec<(usize, i8, i32, usize)>,
@@ -88,13 +91,16 @@ pub(super) struct XLinkWindow {
     span: i64,
     /// `longest_intron`.
     intron: i64,
-    /// The ranks of the HSPs of sets of two or more (sorted), and whether an HSP is among them.
+    /// `LOSAT_X_TBNLINKSETS`: the sets come from the lookup.
+    sets: bool,
+    /// Without `sets`: the ranks of the HSPs of sets of two or more (sorted), and whether an HSP
+    /// is among them.
     linked: Vec<usize>,
     is_linked: Vec<bool>,
     /// The chosen ranks, then the chosen HSPs in the query offset order.
     ranks: Vec<usize>,
     chosen: Vec<usize>,
-    /// heads, window, chosen, shadow heads (flushed to `STATS` when dropped).
+    /// heads, window, chosen, sets (flushed to `STATS` when dropped).
     counts: [u64; 4],
 }
 
@@ -128,13 +134,19 @@ impl XLinkWindow {
             .iter()
             .map(|item| item.value.hsp.s_end as i64 - item.value.hsp.s_start as i64)
             .fold(0, i64::max);
+        let sets = x_sets_on();
         XLinkWindow {
             by_subject,
             rank,
             span,
             intron: link.longest_intron as i64,
+            sets,
             linked: Vec::new(),
-            is_linked: vec![false; work.len()],
+            is_linked: if sets {
+                Vec::new()
+            } else {
+                vec![false; work.len()]
+            },
             ranks: Vec::new(),
             chosen: Vec::new(),
             counts: [0; 4],
@@ -161,7 +173,6 @@ impl XLinkWindow {
         head: usize,
         left: usize,
         right: usize,
-        link: &LocalLinkParameters,
     ) -> &'a [usize] {
         let context = work[head].value.context;
         let sign = work[head].value.hsp.frame.signum();
@@ -172,9 +183,10 @@ impl XLinkWindow {
             high = high.max(work[id].value.hsp.s_end as i64);
             member = work[id].next;
         }
-        // An HSP alone in its set can be admissible only with a start in [from, to]: one that
-        // starts after `to` begins more than `intron` after the head set's highest end, and one
-        // that starts before `from` ends more than `intron` before its lowest start.
+        // An HSP can be admissible, or meet [low - intron, high + intron] (as one HSP of every
+        // admissible set does), only with a start in [from, to]: one that starts after `to`
+        // begins more than `intron` after the head set's highest end, and one that starts before
+        // `from` ends more than `intron` before its lowest start.
         let (from, to) = (low - self.intron - self.span, high + self.intron);
         let first = self
             .by_subject
@@ -200,41 +212,75 @@ impl XLinkWindow {
         }
         let window = left..right;
         self.ranks.clear();
-        self.ranks.extend(
-            self.by_subject[first..last]
-                .iter()
-                .map(|&(_, _, _, rank)| rank)
-                .filter(|rank| window.contains(rank)),
-        );
-        let linked_left = self.linked.partition_point(|&rank| rank < left);
-        let linked_right = self.linked.partition_point(|&rank| rank < right);
-        self.ranks
-            .extend_from_slice(&self.linked[linked_left..linked_right]);
+        if self.sets {
+            // The HSPs met alone in their set, and every HSP in the window of each set met. The
+            // starts of a set increase along its chain (the admissibility checks), so the set is
+            // brought in once, by its first HSP met: the one that has no predecessor, or one that
+            // starts before `from`. The head's own set cannot be admissible with itself.
+            for &(_, _, _, rank) in &self.by_subject[first..last] {
+                let id = offset_order[rank];
+                match work[id].prev {
+                    None if work[id].next.is_none() => {
+                        if window.contains(&rank) {
+                            self.ranks.push(rank);
+                        }
+                    }
+                    Some(prev) if work[prev].value.hsp.s_start as i64 >= from => {}
+                    _ => {
+                        let set = chain_head(work, id);
+                        if set == head {
+                            continue;
+                        }
+                        self.counts[3] += 1;
+                        #[cfg(test)]
+                        tests::X_PATHS.set({
+                            let mut paths = tests::X_PATHS.get();
+                            paths[2] += 1;
+                            // The set's first HSP is in the window but not met: only the walk
+                            // from the head of the set brings it in.
+                            let start = work[set].value.hsp.s_start as i64;
+                            paths[3] += u64::from(start < from && window.contains(&self.rank[set]));
+                            paths
+                        });
+                        let mut member = Some(set);
+                        while let Some(member_id) = member {
+                            let member_rank = self.rank[member_id];
+                            if window.contains(&member_rank) {
+                                self.ranks.push(member_rank);
+                            }
+                            member = work[member_id].next;
+                        }
+                    }
+                }
+            }
+        } else {
+            self.ranks.extend(
+                self.by_subject[first..last]
+                    .iter()
+                    .map(|&(_, _, _, rank)| rank)
+                    .filter(|rank| window.contains(rank)),
+            );
+            let linked_left = self.linked.partition_point(|&rank| rank < left);
+            let linked_right = self.linked.partition_point(|&rank| rank < right);
+            self.ranks
+                .extend_from_slice(&self.linked[linked_left..linked_right]);
+        }
         self.ranks.sort_unstable();
         self.ranks.dedup();
         self.chosen.clear();
         self.chosen
             .extend(self.ranks.iter().map(|&rank| offset_order[rank]));
         self.counts[2] += self.chosen.len() as u64;
-        if x_shadow() {
-            self.counts[3] += 1;
-            for &candidate in &offset_order[left..right] {
-                if sets_admissible(work, head, candidate, link)
-                    && self.ranks.binary_search(&self.rank[candidate]).is_err()
-                {
-                    panic!(
-                        "LOSAT_X_TBNLINKWINSHADOW: HSP {candidate} is admissible with the set of HSP {head} but was not chosen"
-                    );
-                }
-            }
-        }
         &self.chosen
     }
 
     // No NCBI counterpart: bookkeeping of the lookup after `s_CombineLinkedHSPSets`.
-    /// Notes the set whose head is `head` after a link: its HSPs are kept as candidates from
-    /// then on.
+    /// Notes the set whose head is `head` after a link: without `sets`, its HSPs are kept as
+    /// candidates from then on.
     pub(super) fn linked(&mut self, work: &[WorkHsp], head: usize) {
+        if self.sets {
+            return;
+        }
         let mut member = Some(head);
         while let Some(id) = member {
             if !self.is_linked[id] {
@@ -267,11 +313,14 @@ mod tests {
     use std::cell::Cell;
 
     thread_local! {
-        /// (switch, shadow) for the linking calls of this test thread.
-        pub(super) static X_FORCE: Cell<Option<(bool, bool)>> = const { Cell::new(None) };
+        /// `Some(false)`: the linking calls of this test thread test NCBI's whole window.
+        pub(super) static X_FORCE: Cell<Option<bool>> = const { Cell::new(None) };
+        /// `Some(on)`: `LOSAT_X_TBNLINKSETS` of the linking calls of this test thread.
+        pub(super) static X_SETS: Cell<Option<bool>> = const { Cell::new(None) };
         /// Heads of this test thread whose candidates were chosen (`[0]`) and whose whole window
-        /// was taken (`[1]`).
-        pub(super) static X_PATHS: Cell<[u64; 2]> = const { Cell::new([0; 2]) };
+        /// was taken (`[1]`), sets brought in by the lookup (`[2]`), and those of them whose first
+        /// HSP lies in the window, not met by the lookup (`[3]`).
+        pub(super) static X_PATHS: Cell<[u64; 4]> = const { Cell::new([0; 4]) };
     }
 
     /// xorshift64*: the test's own random numbers.
@@ -301,7 +350,11 @@ mod tests {
         let mut out = Vec::with_capacity(count);
         while out.len() < count {
             let context = random.range(0, contexts as i32 - 1) as usize;
-            let sign = if random.next() % 2 == 0 { 1 } else { -1 };
+            let sign = if random.next().is_multiple_of(2) {
+                1
+            } else {
+                -1
+            };
             let mut q = random.range(0, 300);
             let mut s = random.range(0, subject_aa - 2_000);
             let pieces = random.range(1, 6);
@@ -309,7 +362,7 @@ mod tests {
                 if out.len() == count {
                     break;
                 }
-                let length = if random.next() % 50 == 0 {
+                let length = if random.next().is_multiple_of(50) {
                     random.range(300, 1_500)
                 } else {
                     random.range(8, 60)
@@ -328,7 +381,7 @@ mod tests {
                 q = (hsp.q_end + random.range(-link.overlap_size - 2, link.gap_size + 2))
                     .clamp(0, 390);
                 s = hsp.s_end + random.range(-link.overlap_size - 2, link.longest_intron + 5);
-                if random.next() % 8 == 0 {
+                if random.next().is_multiple_of(8) {
                     // the same query offset again, elsewhere on the subject
                     s = random.range(0, subject_aa - 2_000);
                 }
@@ -337,8 +390,78 @@ mod tests {
         out
     }
 
+    /// A subject list of repeat copies: `families` patterns of two to five pieces that keep the
+    /// linking gaps in the query, each copied to `count / families` places on the subject (on
+    /// `contexts` query contexts and both strands) with the subject gaps drawn per copy (most
+    /// within `longest_intron`, some just past it) and scores that fall along the copy, so that
+    /// the lists form many small sets spread over the subject, whose HSPs reach past the
+    /// query-offset windows of the heads, and later sets of a copy link with its earlier ones.
+    fn repeats(
+        random: &mut Random,
+        count: usize,
+        families: usize,
+        contexts: usize,
+        subject_aa: i32,
+        link: &LocalLinkParameters,
+    ) -> Vec<(usize, GappedHsp)> {
+        let mut out = Vec::with_capacity(count);
+        let patterns: Vec<(usize, Vec<(i32, i32)>)> = (0..families)
+            .map(|_| {
+                let context = random.range(0, contexts as i32 - 1) as usize;
+                let mut q = random.range(0, 150);
+                let pieces = (0..random.range(2, 5))
+                    .map(|_| {
+                        let piece = (q, q + random.range(8, 30));
+                        q = piece.1 + random.range(-link.overlap_size + 1, link.gap_size / 2);
+                        piece
+                    })
+                    .collect();
+                (context, pieces)
+            })
+            .collect();
+        while out.len() < count {
+            let (context, pieces) = &patterns[out.len() % families];
+            let sign = if random.next().is_multiple_of(2) {
+                1
+            } else {
+                -1
+            };
+            let frame = sign * random.range(1, 3) as i8;
+            let mut s = random.range(0, subject_aa - 2_000);
+            for (piece, &(q_start, q_end)) in pieces.iter().enumerate() {
+                if out.len() == count {
+                    break;
+                }
+                let fall = 12 * piece as i32;
+                let s_end = s + (q_end - q_start) + random.range(-2, 2);
+                out.push((
+                    *context,
+                    GappedHsp {
+                        frame,
+                        score: random.range(60 - fall, 110 - fall),
+                        q_start,
+                        q_end,
+                        q_gapped_start: q_start,
+                        s_start: s,
+                        s_end,
+                        s_gapped_start: s,
+                    },
+                ));
+                s = s_end
+                    + if random.next().is_multiple_of(6) {
+                        link.longest_intron + random.range(1, 5)
+                    } else {
+                        random.range(-link.overlap_size + 1, link.longest_intron)
+                    };
+            }
+        }
+        out
+    }
+
+    /// The linked list of `input`: NCBI's whole window (`sets` = `None`), or the chosen
+    /// candidates with `LOSAT_X_TBNLINKSETS` on or off.
     fn link_with(
-        force: (bool, bool),
+        sets: Option<bool>,
         input: &[(usize, GappedHsp)],
         contexts: usize,
         subject_nt: i32,
@@ -359,19 +482,53 @@ mod tests {
             };
             contexts
         ];
-        X_FORCE.set(Some(force));
+        X_FORCE.set(Some(sets.is_some()));
+        X_SETS.set(sets);
         let linked = link_preliminary_hsps(
             input,
             &vec![400; contexts],
             &lengths,
             subject_nt,
             &vec![gapped; contexts],
-            &gumbel,
+            Some(&gumbel),
             link,
         )
         .unwrap();
         X_FORCE.set(None);
+        X_SETS.set(None);
         linked
+    }
+
+    /// Links `input` the three ways and compares the chosen candidates' lists (switch on and off)
+    /// with the whole window's: order, sets, numbers, E-value bits, best E-value. Returns the
+    /// HSPs in sets.
+    fn check(
+        input: &[(usize, GappedHsp)],
+        contexts: usize,
+        subject_aa: i32,
+        link: &LocalLinkParameters,
+        label: &str,
+    ) -> usize {
+        let subject_nt = subject_aa * 3 + 2;
+        let expected = link_with(None, input, contexts, subject_nt, link);
+        for sets in [true, false] {
+            let actual = link_with(Some(sets), input, contexts, subject_nt, link);
+            let label = format!("{label}, LOSAT_X_TBNLINKSETS {sets}");
+            assert_eq!(
+                actual.best_evalue.to_bits(),
+                expected.best_evalue.to_bits(),
+                "{label}"
+            );
+            assert_eq!(actual.hsps.len(), expected.hsps.len(), "{label}");
+            for (a, e) in actual.hsps.iter().zip(&expected.hsps) {
+                assert_eq!(
+                    (a.context, a.hsp, a.num, a.evalue.to_bits(), a.source_index),
+                    (e.context, e.hsp, e.num, e.evalue.to_bits(), e.source_index),
+                    "{label}"
+                );
+            }
+        }
+        expected.hsps.iter().filter(|hsp| hsp.num > 1).count()
     }
 
     // NCBI reference: c++/src/algo/blast/core/link_hsps.c:1414-1491 (s_LinkedHSPSetsAdmissible)
@@ -380,14 +537,16 @@ mod tests {
     // if (left_hsp->hsp->subject.end > right_hsp->hsp->subject.offset + overlap || ...
     //     left_hsp->hsp->subject.offset >= right_hsp->hsp->subject.offset || ...) break;
     // ```
-    // The chosen candidates give NCBI's links: on random lists the linked list (order, sets,
-    // numbers, E-value bits, best E-value) is the one of the whole window, with the shadow
-    // checking every head as well, for several sizes, contexts and intron lengths.
+    // The chosen candidates give NCBI's links: on random lists and on lists of repeat copies
+    // (many small sets over the whole subject, several contexts) the linked list (order, sets,
+    // numbers, E-value bits, best E-value) is the one of the whole window, with
+    // `LOSAT_X_TBNLINKSETS` on and off, for several sizes, contexts and intron lengths; heads take
+    // both paths and the lookup brings sets in.
     #[test]
     fn x_chosen_candidates_give_the_links_of_the_whole_window() {
         let mut random = Random(0x9E37_79B9_7F4A_7C15);
         let mut links = 0;
-        X_PATHS.set([0; 2]);
+        X_PATHS.set([0; 4]);
         for (count, contexts, intron) in [
             (2, 1, 122),
             (7, 1, 40),
@@ -407,33 +566,54 @@ mod tests {
                 };
                 let subject_aa = [3_000, 20_000, 200_000, 2_000_000][round];
                 let input = hsps(&mut random, count, contexts, subject_aa, &link);
-                let subject_nt = subject_aa * 3 + 2;
-                let expected = link_with((false, false), &input, contexts, subject_nt, &link);
-                for force in [(true, false), (true, true)] {
-                    let actual = link_with(force, &input, contexts, subject_nt, &link);
-                    let label = format!("{count} HSPs, {contexts} contexts, intron {intron}, subject {subject_aa}, {force:?}");
-                    assert_eq!(
-                        actual.best_evalue.to_bits(),
-                        expected.best_evalue.to_bits(),
-                        "{label}"
-                    );
-                    assert_eq!(actual.hsps.len(), expected.hsps.len(), "{label}");
-                    for (a, e) in actual.hsps.iter().zip(&expected.hsps) {
-                        assert_eq!(
-                            (a.context, a.hsp, a.num, a.evalue.to_bits(), a.source_index),
-                            (e.context, e.hsp, e.num, e.evalue.to_bits(), e.source_index),
-                            "{label}"
-                        );
-                    }
-                }
-                links += expected.hsps.iter().filter(|hsp| hsp.num > 1).count();
+                let label = format!(
+                    "{count} HSPs, {contexts} contexts, intron {intron}, subject {subject_aa}"
+                );
+                links += check(&input, contexts, subject_aa, &link, &label);
             }
         }
         assert!(links > 100, "the lists must link: {links} HSPs in sets");
+        let random_paths = X_PATHS.get();
+        let mut repeat_links = 0;
+        for (count, families, contexts, intron) in [
+            (60, 2, 1, 122),
+            (600, 3, 1, 122),
+            (600, 5, 3, 40),
+            (2_000, 4, 2, 122),
+            (2_000, 1, 1, 900),
+        ] {
+            for subject_aa in [5_000, 20_000, 200_000, 2_000_000] {
+                let link = LocalLinkParameters {
+                    gap_decay_rate: 0.1,
+                    gap_size: 40,
+                    overlap_size: 9,
+                    longest_intron: intron,
+                    cutoff_small_gap: 0,
+                };
+                let input = repeats(&mut random, count, families, contexts, subject_aa, &link);
+                let label = format!(
+                    "repeats: {count} HSPs, {families} families, {contexts} contexts, \
+                     intron {intron}, subject {subject_aa}"
+                );
+                repeat_links += check(&input, contexts, subject_aa, &link, &label);
+            }
+        }
         let paths = X_PATHS.get();
+        assert!(
+            repeat_links > 1_000,
+            "the repeats must link: {repeat_links} HSPs in sets"
+        );
         assert!(
             paths[0] > 0 && paths[1] > 0,
             "both kinds of heads must occur: {paths:?}"
+        );
+        assert!(
+            random_paths[2] > 0 && paths[2] - random_paths[2] > 1_000,
+            "the lookup must bring sets in, on both kinds of lists: {random_paths:?} {paths:?}"
+        );
+        assert!(
+            paths[3] - random_paths[3] > 100,
+            "the repeats must bring in sets whose first HSP the lookup did not meet: {paths:?}"
         );
     }
 }

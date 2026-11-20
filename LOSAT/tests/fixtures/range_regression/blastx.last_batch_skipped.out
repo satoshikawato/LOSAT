@@ -1,0 +1,94 @@
+BLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input: tests/db_search/bslice.faa).
+           35 sequences; 14,391 total letters
+
+
+
+Query= m_big MelaMJNV 26001-36003, 301-700 and 1501-1800 in lower case
+
+Length=10003
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT61961.1 hypothetical protein [Penaeus monodon majanivirus A]       236     2e-82
+BDT61867.1 wsv216-like protein [Penaeus monodon majanivirus A]        22.3    0.42 
+BDT61889.1 hypothetical protein [Penaeus monodon majanivirus A]       21.2    0.86 
+
+
+> BDT61961.1 hypothetical protein [Penaeus monodon majanivirus 
+A]
+Length=207
+
+ Score = 236 bits (601),  Expect = 2e-82, Method: Compositional matrix adjust.
+ Identities = 140/199 (70%), Positives = 165/199 (83%), Gaps = 4/199 (2%)
+ Frame = -1
+
+Query  985  MREYGNIYYSSMGGLLNALTEAGYSISKNDLSKRDNIESSYGDNGVILSHASEEalcltl  806
+            MREYG IYYSSM GLLNALTEAGY IS +DLS RD I+SSY D+GVI++HASEEALCLTL
+Sbjct  1    MREYGKIYYSSMVGLLNALTEAGYPISIHDLSDRDGIKSSYRDDGVIITHASEEALCLTL  60
+
+Query  805  ycalglLIEKGITVNLSKSN-ADYLLNFPAVRIEIRPNRENNTIVRGRVYKKDN-ITIGD  632
+            YCALGLL+EKGITVNL +SN A+YLL+FP V++E+RPN E NTIVRGR+ + D+ + IG+
+Sbjct  61   YCALGLLMEKGITVNLKRSNAAEYLLHFPTVKVEVRPNCETNTIVRGRIQRNDDRVAIGE  120
+
+Query  631  Y-VNVNDIHNGGKEYPYPSKTQYSYGD-TLRSIIIESKGRGLKAHDILSTVLYIDSYDRS  458
+              VN +DI+NGGK Y Y +K  YS+    L+++IIESKGRG  A+D LSTVLYIDSYDRS
+Sbjct  121  EPVNTSDIYNGGKAYVYQNKALYSHSSGHLKTVIIESKGRGHTANDTLSTVLYIDSYDRS  180
+
+Query  457  RLSDIIADIANYPLKFFRA  401
+            RL DII DIA YPLKFFRA
+Sbjct  181  RLPDIIEDIAKYPLKFFRA  199
+
+
+> BDT61867.1 wsv216-like protein [Penaeus monodon majanivirus A]
+Length=918
+
+ Score = 22.3 bits (46),  Expect = 0.42, Method: Compositional matrix adjust.
+ Identities = 12/26 (46%), Positives = 15/26 (58%), Gaps = 0/26 (0%)
+ Frame = -1
+
+Query  751  SNADYLLNFPAVRIEIRPNRENNTIV  674
+            S+ D LL+   VRI +    ENN IV
+Sbjct  106  SSKDTLLSIKQVRIRMSEKGENNRIV  131
+
+
+ Score = 20.0 bits (40),  Expect = 2.1, Method: Compositional matrix adjust.
+ Identities = 7/13 (54%), Positives = 10/13 (77%), Gaps = 0/13 (0%)
+ Frame = -1
+
+Query  727  FPAVRIEIRPNRE  689
+            +P  +IEIRPN +
+Sbjct  376  YPRSQIEIRPNEK  388
+
+
+> BDT61889.1 hypothetical protein [Penaeus monodon majanivirus 
+A]
+Length=504
+
+ Score = 21.2 bits (43),  Expect = 0.86, Method: Compositional matrix adjust.
+ Identities = 11/29 (38%), Positives = 14/29 (48%), Gaps = 0/29 (0%)
+ Frame = -1
+
+Query  673  RGRVYKKDNITIGDYVNVNDIHNGGKEYP  587
+            R      +N    DY NV D +N G+E P
+Sbjct  374  RTTTVAAENAADDDYGNVEDDYNDGEEDP  402
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 1896150

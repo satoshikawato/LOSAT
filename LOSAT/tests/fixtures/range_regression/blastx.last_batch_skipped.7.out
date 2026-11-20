@@ -1,0 +1,9 @@
+# BLASTX 2.17.0+
+# Query: m_big MelaMJNV 26001-36003, 301-700 and 1501-1800 in lower case
+# Database: User specified sequence set (Input: tests/db_search/bslice.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 4 hits found
+m_big	BDT61961.1	70.352	199	55	4	985	401	1	199	1.57e-82	236
+m_big	BDT61867.1	46.154	26	14	0	751	674	106	131	0.42	22.3
+m_big	BDT61867.1	53.846	13	6	0	727	689	376	388	2.1	20.0
+m_big	BDT61889.1	37.931	29	18	0	673	587	374	402	0.86	21.2

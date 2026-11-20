@@ -1,0 +1,654 @@
+//! BLAST XML2 and JSON (outfmt 16 and 15) of BLASTX: what the frozen-fixture rows cannot show.
+//! The `-subject` report that NCBI holds back one query (a failed batch loses it), the run that stops
+//! at its first batch (the prolog alone), and the searches LOSAT refuses before the first byte (a title
+//! of punctuation alone, on which NCBI crashes; a query that is not a regular file, DECISIONS 22), with
+//! the output held in memory when a later batch can still refuse (DECISIONS 21), and the taxonomy
+//! database of a `-db` taxid (DECISIONS 28). The titles, taxonomy names and `-db` names with a byte >=
+//! 0x80 or a control byte are written as NCBI writes them: the rows `db.xb.blastx.*` and
+//! `db.x16_bx_taxid.nonascii.*` of `db_search_manifest/blastx.tsv`, `tests/xml_dbname.rs` and
+//! `taxbad_blastx_db_{15,16}` below.
+//! BLASTX reads its queries in batches of 10,002 bases and not `BATCH_SIZE`, so the queries of the
+//! failed-batch tests are padded to 10,003 bases (`tests/db_search/make_x16_blastx_inputs.py`). The bytes
+//! of NCBI BLAST+ 2.17.0 are in `tests/fixtures/outfmt16` (`badbatch_blastx_{sub,db,dbtax}_{15,16}`:
+//! `blastx -query qnx_bad.fna -subject sprot.faa | -db db/sprot | -db db/sprot_tax (BLASTDB=the `good`
+//! taxdb) -num_threads 1 -outfmt N`, run in that directory; `firstbad_blastx_*` with `qnx_firstbad.fna`).
+//!
+//! NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2363-2404, :2206-2219
+//! (the `-subject` result is written when the next query's arrives, or by `PrintEpilog`, which a
+//! failed batch does not reach).
+
+use std::fs;
+use std::path::{Path, PathBuf};
+#[cfg(unix)]
+use std::process::Stdio;
+use std::process::{Command, Output};
+
+mod temp_support;
+use temp_support::{home_and_worker_log, Finished, RunFiles};
+
+fn fixtures() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/outfmt16")
+}
+
+fn temp_dir(stem: &str) -> PathBuf {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system time before Unix epoch")
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!(
+        "losat_outfmt16_blastx_{stem}_{}_{}",
+        std::process::id(),
+        nanos
+    ));
+    fs::create_dir_all(&dir).expect("temp dir");
+    dir
+}
+
+/// LOSAT with an empty home, a worker log and `env`: the home and the log are removed when the
+/// returned files are dropped (the log is kept when the test panics).
+fn command(env: &[(&str, &str)]) -> (Command, RunFiles) {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
+    for (name, _) in std::env::vars_os() {
+        if name.to_string_lossy().starts_with("LOSAT_") {
+            command.env_remove(name);
+        }
+    }
+    // NCBI's variables change a report (and the search path): none leaks in, and `~/.ncbirc`
+    // (which can name a taxonomy database or BLASTDB) is not read: HOME is an empty directory.
+    for (name, _) in std::env::vars_os() {
+        if name.to_string_lossy().starts_with("NCBI") {
+            command.env_remove(name);
+        }
+    }
+    for name in ["BATCH_SIZE", "CHUNK_SIZE", "BLASTDB"] {
+        command.env_remove(name);
+    }
+    let files = home_and_worker_log(&mut command, "losat_outfmt16");
+    command.envs(env.iter().copied());
+    (command, files)
+}
+
+fn run_in(dir: &Path, args: &[&str], env: &[(&str, &str)]) -> Finished<Output> {
+    let (mut command, files) = command(env);
+    let output = command
+        .current_dir(dir)
+        .args(args)
+        .output()
+        .expect("run LOSAT");
+    Finished::new(output, files)
+}
+
+const PROTEIN: &str = "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTASEG";
+const OTHER_PROTEIN: &str = "WQERTYIPASDFGHKLCVNMWQERTYIPASDFGHKLCVNMWQERTYIPASDFGHKLCVNM";
+
+/// One codon per amino acid.
+fn codon(letter: char) -> &'static str {
+    match letter {
+        'A' => "GCT",
+        'C' => "TGC",
+        'D' => "GAT",
+        'E' => "GAA",
+        'F' => "TTC",
+        'G' => "GGT",
+        'H' => "CAC",
+        'I' => "ATC",
+        'K' => "AAA",
+        'L' => "CTG",
+        'M' => "ATG",
+        'N' => "AAC",
+        'P' => "CCT",
+        'Q' => "CAG",
+        'R' => "CGT",
+        'S' => "TCT",
+        'T' => "ACC",
+        'V' => "GTG",
+        'W' => "TGG",
+        'Y' => "TAC",
+        other => panic!("no codon for {other}"),
+    }
+}
+
+fn back_translate(protein: &str) -> String {
+    protein.chars().map(codon).collect()
+}
+
+/// `core` followed by repeats of a short sequence up to 10,003 bases: NCBI's query batch of 10,002
+/// bases is then closed by this query alone.
+fn batch_of_its_own(core: &str) -> String {
+    let mut query = core.to_string();
+    while query.len() < 10_003 {
+        query.push_str("ACGTTGCAAGCTTGCA");
+    }
+    query
+}
+
+fn fasta(path: &Path, records: &[(&[u8], &[u8])]) {
+    let mut text = Vec::new();
+    for (title, sequence) in records {
+        text.extend_from_slice(b">");
+        text.extend_from_slice(title);
+        text.push(b'\n');
+        text.extend_from_slice(sequence);
+        text.push(b'\n');
+    }
+    fs::write(path, text).expect("write FASTA");
+}
+
+/// Standard error of the failed batches (`qnx_bad.fna`, `qnx_firstbad.fna`).
+const READER_ERROR: &str = "BLAST query error: CFastaReader: Near line";
+
+/// `blastx -query QUERY (-subject sprot.faa | -db db/sprot | -db db/sprot_tax with the `good` taxdb in
+/// BLASTDB)` in `tests/fixtures/outfmt16`: what NCBI BLAST+ 2.17.0 wrote in `<stem>_{sub,db,dbtax}_{15,16}`
+/// (`.out`, and `.err` when stderr was not empty), with the exit status `rc`. LOSAT, at one, four,
+/// eight and sixteen threads, writes the same stdout and stderr, which starts as `stderr_start`.
+fn equals_frozen(stem: &str, query: &str, modes: &[&str], rc: i32, stderr_start: &str) {
+    let dir = fixtures();
+    let taxdb = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/seqdb/taxdb/good");
+    for format in ["15", "16"] {
+        for &mode in modes {
+            let name = format!("{stem}_{mode}_{format}");
+            let out = fs::read(dir.join(format!("{name}.out"))).unwrap();
+            let err = fs::read(dir.join(format!("{name}.err"))).unwrap_or_default();
+            for threads in ["1", "4", "8", "16"] {
+                let mut args = vec!["blastx", "-query", query];
+                args.extend(match mode {
+                    "sub" => ["-subject", "sprot.faa"],
+                    "db" => ["-db", "db/sprot"],
+                    _ => ["-db", "db/sprot_tax"],
+                });
+                args.extend(["-num_threads", threads, "-outfmt", format]);
+                let env: Vec<(&str, &str)> = if mode == "dbtax" {
+                    vec![("BLASTDB", taxdb.to_str().unwrap())]
+                } else {
+                    vec![]
+                };
+                let output = run_in(&dir, &args, &env);
+                let case = format!("{name} threads {threads}");
+                assert_eq!(output.status.code(), Some(rc), "{case}");
+                assert_eq!(
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&out),
+                    "{case}: stdout"
+                );
+                assert_eq!(
+                    String::from_utf8_lossy(&output.stderr),
+                    String::from_utf8_lossy(&err),
+                    "{case}: stderr"
+                );
+                assert!(
+                    String::from_utf8_lossy(&output.stderr).starts_with(stderr_start),
+                    "{case}"
+                );
+            }
+        }
+    }
+}
+
+/// A query of a batch NCBI did not search lists no `query-masking` (`unsearchedmask_blastx_*`:
+/// `blastx -lcase_masking`, queries `m_big` (10,003 bases, a batch of its own: BLASTX does not read
+/// `BATCH_SIZE`, so the padding makes the batches; its lower-case runs are listed), `q_alln_lc`
+/// (300 N with a lower-case run) and `q_short_lc` (two lower-case bases)): the masks of the first
+/// query are the only ones in the document, and the other two have no `hits` member.
+#[test]
+fn a_query_of_an_unsearched_batch_lists_no_masks() {
+    let dir = fixtures();
+    for format in ["15", "16"] {
+        for mode in ["sub", "db"] {
+            let name = format!("unsearchedmask_blastx_{mode}_{format}");
+            let expected = fs::read(dir.join(format!("{name}.out"))).unwrap();
+            for threads in ["1", "4", "8", "16"] {
+                let mut args = vec!["blastx", "-query", "qnx_unsearched_lc.fna"];
+                args.extend(if mode == "sub" {
+                    ["-subject", "sprot.faa"]
+                } else {
+                    ["-db", "db/sprot"]
+                });
+                args.extend(["-lcase_masking", "-num_threads", threads, "-outfmt", format]);
+                let output = run_in(&dir, &args, &[]);
+                let case = format!("{name} threads {threads}");
+                assert_eq!(output.status.code(), Some(0), "{case}");
+                assert_eq!(
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&expected),
+                    "{case}"
+                );
+                assert!(output.stderr.is_empty(), "{case}");
+            }
+        }
+    }
+    let out = fs::read_to_string(fixtures().join("unsearchedmask_blastx_sub_16.out")).unwrap();
+    assert_eq!(out.matches("<query-masking>").count(), 1, "{out}");
+    assert_eq!(out.matches(" &#xa;No hits found").count(), 2, "{out}");
+}
+
+/// Design §5.2 row 22 for BLASTX (`blastx_{sub,db}_badbatch_fmt{15,16}`): the third query's batch fails to
+/// read. `-db` has written the reports of the two queries before it; `-subject` only the first one's (the
+/// second is held back and lost), and neither has an epilog. `dbtax` is a `-db` search with the taxonomy
+/// database on the search path: the output is written batch by batch there too (the taxonomy database holds
+/// no name LOSAT would refuse, DECISIONS 32), and the run that ends with the reader error has written the
+/// batches before it.
+#[test]
+fn a_failed_batch_keeps_the_db_report_and_loses_the_held_subject_report() {
+    equals_frozen(
+        "badbatch_blastx",
+        "qnx_bad.fna",
+        &["sub", "db", "dbtax"],
+        1,
+        READER_ERROR,
+    );
+    let dbtax = fs::read_to_string(fixtures().join("badbatch_blastx_dbtax_16.out")).unwrap();
+    assert!(dbtax.contains("<sciname>Homo sapiens</sciname>"), "{dbtax}");
+}
+
+/// A first batch that fails to read (the whole file is one batch): NCBI has written the prolog and nothing
+/// else (`PrintProlog` comes before the first batch is read); the error and the exit status 1 are NCBI's.
+#[test]
+fn a_first_batch_that_fails_to_read_leaves_the_prolog_alone() {
+    equals_frozen(
+        "firstbad_blastx",
+        "qnx_firstbad.fna",
+        &["sub", "db"],
+        1,
+        READER_ERROR,
+    );
+}
+
+/// A query that is a header and no sequence stops the search with `Sequence contains no data` (exit
+/// status 3) after the prolog (`emptyseq_blastx_*`): the document is the prolog alone, as NCBI's.
+#[test]
+fn a_query_without_a_sequence_leaves_the_prolog_alone() {
+    equals_frozen(
+        "emptyseq_blastx",
+        "qnx_empty.fna",
+        &["sub", "db"],
+        3,
+        "BLAST engine error: Warning: Sequence contains no data",
+    );
+}
+
+/// The title of punctuation that NCBI's `x_CleanAndCompress` reads past the end of.
+const PUNCTUATION: &[u8] = b", ,";
+
+fn refused(output: &Output, what: &str, label: &str) {
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(1), "{label}: {stderr}");
+    assert!(output.stdout.is_empty(), "{label}: nothing is written");
+    assert!(
+        stderr.contains(&format!(
+            "{what} with punctuation that NCBI BLAST+ 2.17.0 crashes on when it makes the definition line is not supported by LOSAT's BLASTX"
+        )),
+        "{label}: {stderr}"
+    );
+}
+
+/// The title that NCBI BLAST+ 2.17.0 cannot make (punctuation alone) is refused for 15 and 16 as for 5,
+/// before the first byte, also when the title is that of a later query batch or of a subject that only a
+/// later batch hits.
+#[test]
+fn a_title_of_punctuation_is_refused_in_15_and_16() {
+    let dir = temp_dir("q2");
+    let (query, subject) = (dir.join("q.fa"), dir.join("s.fa"));
+    let nucleotide = back_translate(PROTEIN);
+    let padded = batch_of_its_own("");
+    for format in ["15", "16"] {
+        for threads in ["1", "4", "8", "16"] {
+            let run = || {
+                run_in(
+                    &dir,
+                    &[
+                        "blastx",
+                        "-query",
+                        query.to_str().unwrap(),
+                        "-subject",
+                        subject.to_str().unwrap(),
+                        "-num_threads",
+                        threads,
+                        "-outfmt",
+                        format,
+                    ],
+                    &[],
+                )
+            };
+            // a query title, first or second, in the same batch or in a later one
+            for position in 0..2 {
+                for later_batch in [false, true] {
+                    let filler: &[u8] = if later_batch {
+                        padded.as_bytes()
+                    } else {
+                        nucleotide.as_bytes()
+                    };
+                    let mut records: Vec<(&[u8], &[u8])> =
+                        vec![(b"q1 ok", filler), (b"q2 ok", nucleotide.as_bytes())];
+                    records[position].0 = PUNCTUATION;
+                    fasta(&query, &records);
+                    fasta(&subject, &[(b"s1 subject", PROTEIN.as_bytes())]);
+                    refused(
+                        &run(),
+                        "a query title",
+                        &format!("{format} {threads} {position} {later_batch}"),
+                    );
+                }
+            }
+            // a subject title with a hit, in a batch after one without hits
+            fasta(
+                &query,
+                &[
+                    (b"q1 no hit", padded.as_bytes()),
+                    (b"q2 ok", nucleotide.as_bytes()),
+                ],
+            );
+            fasta(
+                &subject,
+                &[
+                    (b"s1 ok", OTHER_PROTEIN.as_bytes()),
+                    (PUNCTUATION, PROTEIN.as_bytes()),
+                ],
+            );
+            refused(
+                &run(),
+                "a subject title",
+                &format!("{format} {threads} subject"),
+            );
+        }
+    }
+    fs::remove_dir_all(dir).ok();
+}
+
+/// DECISIONS 22 for 15 and 16: a query that is not a regular file cannot be read twice (the pre-scan of the
+/// titles, DECISIONS 21), so it is refused before the search with nothing written; the other formats read
+/// it once.
+#[cfg(unix)]
+#[test]
+fn a_query_that_is_not_a_regular_file_is_refused_in_15_and_16() {
+    use std::io::Write;
+    let dir = temp_dir("pipe");
+    let subject = dir.join("s.fa");
+    fasta(&subject, &[(b"s1 subject", PROTEIN.as_bytes())]);
+    let text = format!(">q1 plain\n{}\n", back_translate(PROTEIN)).into_bytes();
+    for (format, expected) in [("15", true), ("16", true), ("6", false)] {
+        let (mut command, _files) = command(&[]);
+        let mut child = command
+            .args([
+                "blastx",
+                "-query",
+                "/dev/stdin",
+                "-subject",
+                subject.to_str().unwrap(),
+                "-outfmt",
+                format,
+                "-evalue",
+                "1e-10",
+            ])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("run LOSAT");
+        let mut stdin = child.stdin.take().expect("stdin");
+        let text = text.clone();
+        let writer = std::thread::spawn(move || {
+            let _ = stdin.write_all(&text);
+        });
+        let output = child.wait_with_output().expect("wait");
+        writer.join().expect("writer thread");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if expected {
+            assert_eq!(output.status.code(), Some(1), "{format}: {stderr}");
+            assert!(output.stdout.is_empty(), "{format}: nothing is written");
+            assert!(
+                stderr.contains(&format!(
+                    "unsupported BLASTX query input for -outfmt {format}: use a regular file"
+                )),
+                "{format}: {stderr}"
+            );
+        } else {
+            assert_eq!(output.status.code(), Some(0), "{format}: {stderr}");
+            assert!(String::from_utf8_lossy(&output.stdout).starts_with("q1\ts1\t"));
+        }
+    }
+    fs::remove_dir_all(dir).ok();
+}
+
+/// DECISIONS 28 and 30: a `-db` search with the taxonomy database on the search path whose scientific name of
+/// a reported taxid has a byte >= 0x80 (`high_bytes_utf8`: 9606, first reported by the second batch) writes
+/// what NCBI BLAST+ 2.17.0 writes (`taxbad_blastx_db_{15,16}`: `BLASTDB=.../high_bytes_utf8 blastx -query
+/// qnx_late.fna -db db/sprot_tax -num_threads 1 -outfmt N`, run in that directory): the XML2 document is
+/// cut at the byte of the second report's `sciname` (`Error: [blastx]  Frame type= eFrameNamed, ...` and its
+/// trace on standard error, exit status 0, the first batch's report before it), the JSON one has the name's
+/// bytes as they are. Without the taxonomy database the same search writes both reports with the taxid
+/// alone.
+#[test]
+fn a_taxdb_name_outside_us_ascii_in_a_later_batch_is_written_as_ncbi_writes_it() {
+    let dir = fixtures();
+    let taxdb = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/seqdb/taxdb/high_bytes_utf8");
+    for format in ["15", "16"] {
+        let name = format!("taxbad_blastx_db_{format}");
+        let out = fs::read(dir.join(format!("{name}.out"))).unwrap();
+        let err = fs::read(dir.join(format!("{name}.err"))).unwrap_or_default();
+        for threads in ["1", "4", "8", "16"] {
+            let args = [
+                "blastx",
+                "-query",
+                "qnx_late.fna",
+                "-db",
+                "db/sprot_tax",
+                "-num_threads",
+                threads,
+                "-outfmt",
+                format,
+            ];
+            let without = run_in(&dir, &args, &[]);
+            assert_eq!(without.status.code(), Some(0), "{format} {threads}");
+            let text = String::from_utf8_lossy(&without.stdout);
+            // two sequences are hit, both by the second query
+            assert_eq!(text.matches("gnl|BL_ORD_ID|").count(), 2, "{text}");
+            assert!(text.contains("9606") && !text.contains("sciname"), "{text}");
+            let with = run_in(&dir, &args, &[("BLASTDB", taxdb.to_str().unwrap())]);
+            let case = format!("{name} threads {threads}");
+            assert_eq!(with.status.code(), Some(0), "{case}");
+            assert_eq!(
+                String::from_utf8_lossy(&with.stdout),
+                String::from_utf8_lossy(&out),
+                "{case}: stdout"
+            );
+            assert_eq!(
+                String::from_utf8_lossy(&with.stderr),
+                String::from_utf8_lossy(&err),
+                "{case}: stderr"
+            );
+        }
+    }
+}
+
+/// DECISIONS 32: the output of a `-db` search with the taxonomy database on the search path is held in memory
+/// only when some sequence of the database has a taxid whose lookup would be refused (the pre-pass,
+/// `algorithm::common::database::taxdb_may_refuse`, unit-tested in `taxdb_prepass_tests`). `db/sprot_mixtax` is
+/// `sprot.faa` with taxid 10090 and a third protein, never hit, with taxid 9606; `qnx_late.fna` is two batches
+/// (the second hits the first two sequences). With the `good` taxonomy database or with `high_bytes_utf8` (the
+/// name of 9606 has bytes >= 0x80) the run writes what NCBI BLAST+ 2.17.0 writes
+/// (`mixtax_blastx_{good,badname}_{15,16}`: it never looks 9606 up, so no name is written). The same taxonomy
+/// database with `db/sprot_tax`, where 9606 is reported in the second batch, is cut at the name
+/// (`a_taxdb_name_outside_us_ascii_in_a_later_batch_is_written_as_ncbi_writes_it`).
+#[test]
+fn a_taxid_that_is_in_the_database_but_never_reported_writes_no_name() {
+    let dir = fixtures();
+    for format in ["15", "16"] {
+        for (case, taxdb) in [("good", "good"), ("badname", "high_bytes_utf8")] {
+            let name = format!("mixtax_blastx_{case}_{format}");
+            let out = fs::read(dir.join(format!("{name}.out"))).unwrap();
+            let err = fs::read(dir.join(format!("{name}.err"))).unwrap_or_default();
+            let taxdb = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/seqdb/taxdb")
+                .join(taxdb);
+            for threads in ["1", "4", "8", "16"] {
+                let args = [
+                    "blastx",
+                    "-query",
+                    "qnx_late.fna",
+                    "-db",
+                    "db/sprot_mixtax",
+                    "-num_threads",
+                    threads,
+                    "-outfmt",
+                    format,
+                ];
+                let output = run_in(&dir, &args, &[("BLASTDB", taxdb.to_str().unwrap())]);
+                let case = format!("{name} threads {threads}");
+                assert_eq!(output.status.code(), Some(0), "{case}");
+                assert_eq!(
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&out),
+                    "{case}: stdout"
+                );
+                assert_eq!(
+                    String::from_utf8_lossy(&output.stderr),
+                    String::from_utf8_lossy(&err),
+                    "{case}: stderr"
+                );
+            }
+        }
+    }
+}
+
+/// The rows `db.x16_bx_taxid.*` of `db_search_manifest/blastx.tsv` (outfmt 15 and 16 of BLASTX with a taxonomy
+/// database in `BLASTDB`, the offset error of `[blastx]` on standard error), at one, four, eight
+/// and sixteen threads: the bytes of NCBI BLAST+ 2.17.0 (`blastx -num_threads 1`) for stdout,
+/// stderr and the exit status; the rows of kind `losat-rejection` write nothing and name their
+/// reason.
+#[test]
+fn the_taxdb_rows_match_the_frozen_ncbi_bytes_at_1_4_8_and_16_threads() {
+    let engine = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let manifest = fs::read_to_string(engine.join("tests/db_search_manifest/blastx.tsv")).unwrap();
+    let mut rows = 0;
+    for line in manifest
+        .lines()
+        .filter(|line| line.starts_with("db.x16_bx_taxid."))
+    {
+        let cells: Vec<&str> = line.split('\t').collect();
+        let (id, kind, db, query, extra, outfmt, rc, covers) = (
+            cells[0], cells[2], cells[3], cells[4], cells[5], cells[6], cells[7], cells[11],
+        );
+        let mut env: Vec<(&str, &str)> = Vec::new();
+        for token in extra.split_whitespace() {
+            let (name, value) = token
+                .split_once('=')
+                .unwrap_or_else(|| panic!("{id}: the extra argument {token:?} is not NAME=VALUE"));
+            assert!(
+                ["BLASTDB", "BATCH_SIZE", "CHUNK_SIZE"].contains(&name),
+                "{id}: {token}"
+            );
+            env.push((name, value));
+        }
+        for threads in ["1", "4", "8", "16"] {
+            let output = run_in(
+                engine,
+                &[
+                    "blastx",
+                    "-db",
+                    db,
+                    "-query",
+                    query,
+                    "-outfmt",
+                    outfmt,
+                    "-num_threads",
+                    threads,
+                ],
+                &env,
+            );
+            let rc: i32 = rc.parse().unwrap();
+            assert_eq!(output.status.code(), Some(rc), "{id} threads {threads}");
+            if kind == "losat-rejection" {
+                let expect = covers.split("expect: ").nth(1).unwrap();
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                assert!(output.stdout.is_empty(), "{id}: nothing is written");
+                assert!(stderr.contains(expect), "{id}: {stderr}");
+                continue;
+            }
+            let frozen = engine.join("tests/fixtures/db_search");
+            let out = fs::read(frozen.join(format!("{id}.out"))).unwrap();
+            let err = fs::read(frozen.join(format!("{id}.err"))).unwrap_or_default();
+            assert!(
+                output.stdout == out,
+                "{id} threads {threads}: stdout differs"
+            );
+            assert_eq!(
+                String::from_utf8_lossy(&output.stderr),
+                String::from_utf8_lossy(&err),
+                "{id} threads {threads}: stderr"
+            );
+        }
+        rows += 1;
+    }
+    assert!(rows >= 8, "{rows} rows");
+}
+
+/// The taxonomy database is read by the formats that prefetch the reported subjects (0, 5, 6 and 7,
+/// since DBID item T: the volume's lookup of each fetched subject's taxid) and by 15 and 16, and by
+/// no other: a `taxdb.bti` of the search path whose record of the database's taxid (9606) NCBI
+/// reads from unmapped memory (`btd_empty`, NCBI BLAST+ crashes) changes no byte of outfmt 8 and
+/// adds no line to standard error, while the other formats refuse it (rc 1, DBID DECISIONS 13 (3))
+/// at 1, 4, 8 and 16 threads. BLASTX has written the outfmt 0 prolog by then, so outfmt 0 keeps
+/// those first lines (the start of the bytes without the taxonomy database, no `Query=`); the
+/// other formats write nothing.
+#[test]
+fn the_taxdb_is_read_by_the_prefetching_formats_only() {
+    let engine = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let (db, query) = (
+        "tests/db_search/x16_taxid",
+        "tests/db_search/x16_bx_taxid_q.fna",
+    );
+    let damaged = "tests/seqdb/taxdb/btd_empty";
+    let refusal = "unsupported database: the taxonomy record of taxid 9606";
+    for format in ["8", "0", "5", "6", "7"] {
+        for threads in ["1", "4", "8", "16"] {
+            let args = [
+                "blastx",
+                "-db",
+                db,
+                "-query",
+                query,
+                "-outfmt",
+                format,
+                "-num_threads",
+                threads,
+            ];
+            let without = run_in(engine, &args, &[]);
+            let with = run_in(engine, &args, &[("BLASTDB", damaged)]);
+            let case = format!("outfmt {format} threads {threads}");
+            assert_eq!(without.status.code(), Some(0), "{case}");
+            assert!(!without.stdout.is_empty(), "{case}");
+            if ["8"].contains(&format) {
+                assert_eq!(with.status.code(), Some(0), "{case}");
+                assert!(with.stderr.is_empty(), "{case}: {:?}", with.stderr);
+                assert!(with.stdout == without.stdout, "{case}: stdout");
+                continue;
+            }
+            assert_eq!(with.status.code(), Some(1), "{case}");
+            let stderr = String::from_utf8_lossy(&with.stderr);
+            assert!(stderr.contains(refusal), "{case}: {stderr}");
+            if format == "0" {
+                assert!(!with.stdout.is_empty(), "{case}");
+                assert!(with.stdout.len() < without.stdout.len(), "{case}");
+                assert!(
+                    without.stdout.starts_with(&with.stdout),
+                    "{case}: the prolog"
+                );
+                assert!(
+                    !with.stdout.windows(6).any(|window| window == b"Query="),
+                    "{case}"
+                );
+            } else {
+                assert!(with.stdout.is_empty(), "{case}");
+            }
+        }
+    }
+    for format in ["15", "16"] {
+        let output = run_in(
+            engine,
+            &["blastx", "-db", db, "-query", query, "-outfmt", format],
+            &[("BLASTDB", damaged)],
+        );
+        assert_eq!(output.status.code(), Some(1), "outfmt {format}");
+        assert!(output.stdout.is_empty(), "outfmt {format}");
+    }
+}

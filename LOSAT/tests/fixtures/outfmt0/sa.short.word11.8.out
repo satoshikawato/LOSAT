@@ -1,0 +1,2305 @@
+Seq-annot ::= {
+  desc {
+    user {
+      type str "Hist Seqalign",
+      data {
+        {
+          label str "Hist Seqalign",
+          data bool TRUE
+        }
+      }
+    },
+    user {
+      type str "Blast Type",
+      data {
+        {
+          label str "blastn",
+          data int 1
+        }
+      }
+    },
+    user {
+      type str "Blast Database Title",
+      data {
+        {
+          label str "n/a",
+          data bool FALSE
+        }
+      }
+    }
+  },
+  data align {
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 25
+        },
+        {
+          id str "blast_score",
+          value int 25
+        },
+        {
+          id str "e_value",
+          value real { 125802035969734, 10, -24 }
+        },
+        {
+          id str "bit_score",
+          value real { 500517360472832, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 25
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 1, 10, 2 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_1",
+          local str "Subject_1"
+        },
+        starts {
+          0,
+          1000
+        },
+        lens {
+          25
+        },
+        strands {
+          plus,
+          plus
+        }
+      }
+    }
+  }
+}
+Seq-annot ::= {
+  desc {
+    user {
+      type str "Hist Seqalign",
+      data {
+        {
+          label str "Hist Seqalign",
+          data bool TRUE
+        }
+      }
+    },
+    user {
+      type str "Blast Type",
+      data {
+        {
+          label str "blastn",
+          data int 1
+        }
+      }
+    },
+    user {
+      type str "Blast Database Title",
+      data {
+        {
+          label str "n/a",
+          data bool FALSE
+        }
+      }
+    }
+  },
+  data align {
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 30
+        },
+        {
+          id str "blast_score",
+          value int 30
+        },
+        {
+          id str "e_value",
+          value real { 161274977880477, 10, -27 }
+        },
+        {
+          id str "bit_score",
+          value real { 599635063104911, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 30
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 1, 10, 2 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_2",
+          local str "Subject_1"
+        },
+        starts {
+          0,
+          2000
+        },
+        lens {
+          30
+        },
+        strands {
+          minus,
+          plus
+        }
+      }
+    },
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 11
+        },
+        {
+          id str "blast_score",
+          value int 11
+        },
+        {
+          id str "e_value",
+          value real { 351382069681574, 10, -16 }
+        },
+        {
+          id str "bit_score",
+          value real { 222987793103011, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 11
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 371666666666667, 10, -13 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_2",
+          local str "Subject_1"
+        },
+        starts {
+          19,
+          1512
+        },
+        lens {
+          11
+        },
+        strands {
+          minus,
+          plus
+        }
+      }
+    }
+  }
+}
+Seq-annot ::= {
+  desc {
+    user {
+      type str "Hist Seqalign",
+      data {
+        {
+          label str "Hist Seqalign",
+          data bool TRUE
+        }
+      }
+    },
+    user {
+      type str "Blast Type",
+      data {
+        {
+          label str "blastn",
+          data int 1
+        }
+      }
+    },
+    user {
+      type str "Blast Database Title",
+      data {
+        {
+          label str "n/a",
+          data bool FALSE
+        }
+      }
+    }
+  },
+  data align {
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 11
+        },
+        {
+          id str "blast_score",
+          value int 11
+        },
+        {
+          id str "e_value",
+          value real { 334765882165343, 10, -16 }
+        },
+        {
+          id str "bit_score",
+          value real { 222987793103011, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 11
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 397857142857143, 10, -13 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_3",
+          local str "Subject_1"
+        },
+        starts {
+          3,
+          2426
+        },
+        lens {
+          11
+        },
+        strands {
+          plus,
+          plus
+        }
+      }
+    },
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 11
+        },
+        {
+          id str "blast_score",
+          value int 11
+        },
+        {
+          id str "e_value",
+          value real { 334765882165343, 10, -16 }
+        },
+        {
+          id str "bit_score",
+          value real { 222987793103011, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 11
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 397857142857143, 10, -13 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_3",
+          local str "Subject_1"
+        },
+        starts {
+          3,
+          3583
+        },
+        lens {
+          11
+        },
+        strands {
+          plus,
+          plus
+        }
+      }
+    }
+  }
+}
+Seq-annot ::= {
+  desc {
+    user {
+      type str "Hist Seqalign",
+      data {
+        {
+          label str "Hist Seqalign",
+          data bool TRUE
+        }
+      }
+    },
+    user {
+      type str "Blast Type",
+      data {
+        {
+          label str "blastn",
+          data int 1
+        }
+      }
+    },
+    user {
+      type str "Blast Database Title",
+      data {
+        {
+          label str "n/a",
+          data bool FALSE
+        }
+      }
+    }
+  },
+  data align {
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 35
+        },
+        {
+          id str "blast_score",
+          value int 35
+        },
+        {
+          id str "e_value",
+          value real { 2072912091743, 10, -28 }
+        },
+        {
+          id str "bit_score",
+          value real { 69875276573699, 10, -12 }
+        },
+        {
+          id str "num_ident",
+          value int 35
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 1, 10, 2 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_5",
+          local str "Subject_2"
+        },
+        starts {
+          0,
+          2000
+        },
+        lens {
+          35
+        },
+        strands {
+          plus,
+          plus
+        }
+      }
+    },
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 11
+        },
+        {
+          id str "blast_score",
+          value int 11
+        },
+        {
+          id str "e_value",
+          value real { 435044467224806, 10, -16 }
+        },
+        {
+          id str "bit_score",
+          value real { 222987793103011, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 11
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 319285714285714, 10, -13 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_5",
+          local str "Subject_1"
+        },
+        starts {
+          4,
+          20
+        },
+        lens {
+          11
+        },
+        strands {
+          plus,
+          plus
+        }
+      }
+    },
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 11
+        },
+        {
+          id str "blast_score",
+          value int 11
+        },
+        {
+          id str "e_value",
+          value real { 435044467224806, 10, -16 }
+        },
+        {
+          id str "bit_score",
+          value real { 222987793103011, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 11
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 319285714285714, 10, -13 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_5",
+          local str "Subject_1"
+        },
+        starts {
+          3,
+          3738
+        },
+        lens {
+          11
+        },
+        strands {
+          minus,
+          plus
+        }
+      }
+    }
+  }
+}
+Seq-annot ::= {
+  desc {
+    user {
+      type str "Hist Seqalign",
+      data {
+        {
+          label str "Hist Seqalign",
+          data bool TRUE
+        }
+      }
+    },
+    user {
+      type str "Blast Type",
+      data {
+        {
+          label str "blastn",
+          data int 1
+        }
+      }
+    },
+    user {
+      type str "Blast Database Title",
+      data {
+        {
+          label str "n/a",
+          data bool FALSE
+        }
+      }
+    }
+  },
+  data align {
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 45
+        },
+        {
+          id str "blast_score",
+          value int 45
+        },
+        {
+          id str "e_value",
+          value real { 309335468335813, 10, -36 }
+        },
+        {
+          id str "bit_score",
+          value real { 896988171001148, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 45
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 1, 10, 2 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_7",
+          local str "Subject_2"
+        },
+        starts {
+          0,
+          3000
+        },
+        lens {
+          45
+        },
+        strands {
+          minus,
+          plus
+        }
+      }
+    }
+  }
+}
+Seq-annot ::= {
+  desc {
+    user {
+      type str "Hist Seqalign",
+      data {
+        {
+          label str "Hist Seqalign",
+          data bool TRUE
+        }
+      }
+    },
+    user {
+      type str "Blast Type",
+      data {
+        {
+          label str "blastn",
+          data int 1
+        }
+      }
+    },
+    user {
+      type str "Blast Database Title",
+      data {
+        {
+          label str "n/a",
+          data bool FALSE
+        }
+      }
+    }
+  },
+  data align {
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 48
+        },
+        {
+          id str "blast_score",
+          value int 48
+        },
+        {
+          id str "e_value",
+          value real { 543184951438457, 10, -38 }
+        },
+        {
+          id str "bit_score",
+          value real { 956458792580396, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 48
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 1, 10, 2 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_8",
+          local str "Subject_3"
+        },
+        starts {
+          0,
+          290
+        },
+        lens {
+          48
+        },
+        strands {
+          plus,
+          plus
+        }
+      }
+    },
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 38
+        },
+        {
+          id str "blast_score",
+          value int 38
+        },
+        {
+          id str "e_value",
+          value real { 503997112536106, 10, -32 }
+        },
+        {
+          id str "bit_score",
+          value real { 758223387316238, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 38
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 796666666666667, 10, -13 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_8",
+          local str "Subject_3"
+        },
+        starts {
+          10,
+          304
+        },
+        lens {
+          38
+        },
+        strands {
+          plus,
+          plus
+        }
+      }
+    },
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 38
+        },
+        {
+          id str "blast_score",
+          value int 38
+        },
+        {
+          id str "e_value",
+          value real { 503997112536106, 10, -32 }
+        },
+        {
+          id str "bit_score",
+          value real { 758223387316238, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 38
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 796666666666667, 10, -13 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_8",
+          local str "Subject_3"
+        },
+        starts {
+          10,
+          306
+        },
+        lens {
+          38
+        },
+        strands {
+          plus,
+          plus
+        }
+      }
+    },
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 38
+        },
+        {
+          id str "blast_score",
+          value int 38
+        },
+        {
+          id str "e_value",
+          value real { 503997112536106, 10, -32 }
+        },
+        {
+          id str "bit_score",
+          value real { 758223387316238, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 38
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 796666666666667, 10, -13 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_8",
+          local str "Subject_3"
+        },
+        starts {
+          10,
+          308
+        },
+        lens {
+          38
+        },
+        strands {
+          plus,
+          plus
+        }
+      }
+    },
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 38
+        },
+        {
+          id str "blast_score",
+          value int 38
+        },
+        {
+          id str "e_value",
+          value real { 503997112536106, 10, -32 }
+        },
+        {
+          id str "bit_score",
+          value real { 758223387316238, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 38
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 796666666666667, 10, -13 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_8",
+          local str "Subject_3"
+        },
+        starts {
+          10,
+          310
+        },
+        lens {
+          38
+        },
+        strands {
+          plus,
+          plus
+        }
+      }
+    },
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 38
+        },
+        {
+          id str "blast_score",
+          value int 38
+        },
+        {
+          id str "e_value",
+          value real { 503997112536106, 10, -32 }
+        },
+        {
+          id str "bit_score",
+          value real { 758223387316238, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 38
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 796666666666667, 10, -13 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_8",
+          local str "Subject_3"
+        },
+        starts {
+          10,
+          312
+        },
+        lens {
+          38
+        },
+        strands {
+          plus,
+          plus
+        }
+      }
+    },
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 38
+        },
+        {
+          id str "blast_score",
+          value int 38
+        },
+        {
+          id str "e_value",
+          value real { 503997112536106, 10, -32 }
+        },
+        {
+          id str "bit_score",
+          value real { 758223387316238, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 38
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 796666666666667, 10, -13 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_8",
+          local str "Subject_3"
+        },
+        starts {
+          10,
+          314
+        },
+        lens {
+          38
+        },
+        strands {
+          plus,
+          plus
+        }
+      }
+    },
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 38
+        },
+        {
+          id str "blast_score",
+          value int 38
+        },
+        {
+          id str "e_value",
+          value real { 503997112536106, 10, -32 }
+        },
+        {
+          id str "bit_score",
+          value real { 758223387316238, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 38
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 796666666666667, 10, -13 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_8",
+          local str "Subject_3"
+        },
+        starts {
+          10,
+          316
+        },
+        lens {
+          38
+        },
+        strands {
+          plus,
+          plus
+        }
+      }
+    },
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 38
+        },
+        {
+          id str "blast_score",
+          value int 38
+        },
+        {
+          id str "e_value",
+          value real { 503997112536106, 10, -32 }
+        },
+        {
+          id str "bit_score",
+          value real { 758223387316238, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 38
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 796666666666667, 10, -13 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_8",
+          local str "Subject_3"
+        },
+        starts {
+          10,
+          318
+        },
+        lens {
+          38
+        },
+        strands {
+          plus,
+          plus
+        }
+      }
+    },
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 38
+        },
+        {
+          id str "blast_score",
+          value int 38
+        },
+        {
+          id str "e_value",
+          value real { 503997112536106, 10, -32 }
+        },
+        {
+          id str "bit_score",
+          value real { 758223387316238, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 38
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 796666666666667, 10, -13 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_8",
+          local str "Subject_3"
+        },
+        starts {
+          10,
+          320
+        },
+        lens {
+          38
+        },
+        strands {
+          plus,
+          plus
+        }
+      }
+    },
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 38
+        },
+        {
+          id str "blast_score",
+          value int 38
+        },
+        {
+          id str "e_value",
+          value real { 503997112536106, 10, -32 }
+        },
+        {
+          id str "bit_score",
+          value real { 758223387316238, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 38
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 796666666666667, 10, -13 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_8",
+          local str "Subject_3"
+        },
+        starts {
+          10,
+          322
+        },
+        lens {
+          38
+        },
+        strands {
+          plus,
+          plus
+        }
+      }
+    },
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 41
+        },
+        {
+          id str "blast_score",
+          value int 41
+        },
+        {
+          id str "e_value",
+          value real { 8169283217767, 10, -32 }
+        },
+        {
+          id str "bit_score",
+          value real { 817694008895485, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 41
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 859166666666667, 10, -13 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_8",
+          local str "Subject_1"
+        },
+        starts {
+          7,
+          480
+        },
+        lens {
+          41
+        },
+        strands {
+          plus,
+          plus
+        }
+      }
+    },
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 38
+        },
+        {
+          id str "blast_score",
+          value int 38
+        },
+        {
+          id str "e_value",
+          value real { 503997112536106, 10, -32 }
+        },
+        {
+          id str "bit_score",
+          value real { 758223387316238, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 38
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 796666666666667, 10, -13 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_8",
+          local str "Subject_1"
+        },
+        starts {
+          10,
+          485
+        },
+        lens {
+          38
+        },
+        strands {
+          plus,
+          plus
+        }
+      }
+    },
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 38
+        },
+        {
+          id str "blast_score",
+          value int 38
+        },
+        {
+          id str "e_value",
+          value real { 503997112536106, 10, -32 }
+        },
+        {
+          id str "bit_score",
+          value real { 758223387316238, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 38
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 796666666666667, 10, -13 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_8",
+          local str "Subject_1"
+        },
+        starts {
+          10,
+          487
+        },
+        lens {
+          38
+        },
+        strands {
+          plus,
+          plus
+        }
+      }
+    },
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 38
+        },
+        {
+          id str "blast_score",
+          value int 38
+        },
+        {
+          id str "e_value",
+          value real { 503997112536106, 10, -32 }
+        },
+        {
+          id str "bit_score",
+          value real { 758223387316238, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 38
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 796666666666667, 10, -13 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_8",
+          local str "Subject_1"
+        },
+        starts {
+          10,
+          489
+        },
+        lens {
+          38
+        },
+        strands {
+          plus,
+          plus
+        }
+      }
+    },
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 38
+        },
+        {
+          id str "blast_score",
+          value int 38
+        },
+        {
+          id str "e_value",
+          value real { 503997112536106, 10, -32 }
+        },
+        {
+          id str "bit_score",
+          value real { 758223387316238, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 38
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 796666666666667, 10, -13 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_8",
+          local str "Subject_1"
+        },
+        starts {
+          10,
+          491
+        },
+        lens {
+          38
+        },
+        strands {
+          plus,
+          plus
+        }
+      }
+    },
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 38
+        },
+        {
+          id str "blast_score",
+          value int 38
+        },
+        {
+          id str "e_value",
+          value real { 503997112536106, 10, -32 }
+        },
+        {
+          id str "bit_score",
+          value real { 758223387316238, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 38
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 796666666666667, 10, -13 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_8",
+          local str "Subject_1"
+        },
+        starts {
+          10,
+          493
+        },
+        lens {
+          38
+        },
+        strands {
+          plus,
+          plus
+        }
+      }
+    },
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 38
+        },
+        {
+          id str "blast_score",
+          value int 38
+        },
+        {
+          id str "e_value",
+          value real { 503997112536106, 10, -32 }
+        },
+        {
+          id str "bit_score",
+          value real { 758223387316238, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 38
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 796666666666667, 10, -13 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_8",
+          local str "Subject_1"
+        },
+        starts {
+          10,
+          495
+        },
+        lens {
+          38
+        },
+        strands {
+          plus,
+          plus
+        }
+      }
+    },
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 38
+        },
+        {
+          id str "blast_score",
+          value int 38
+        },
+        {
+          id str "e_value",
+          value real { 503997112536106, 10, -32 }
+        },
+        {
+          id str "bit_score",
+          value real { 758223387316238, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 38
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 796666666666667, 10, -13 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_8",
+          local str "Subject_1"
+        },
+        starts {
+          10,
+          497
+        },
+        lens {
+          38
+        },
+        strands {
+          plus,
+          plus
+        }
+      }
+    },
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 38
+        },
+        {
+          id str "blast_score",
+          value int 38
+        },
+        {
+          id str "e_value",
+          value real { 503997112536106, 10, -32 }
+        },
+        {
+          id str "bit_score",
+          value real { 758223387316238, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 38
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 796666666666667, 10, -13 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_8",
+          local str "Subject_1"
+        },
+        starts {
+          10,
+          499
+        },
+        lens {
+          38
+        },
+        strands {
+          plus,
+          plus
+        }
+      }
+    },
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 38
+        },
+        {
+          id str "blast_score",
+          value int 38
+        },
+        {
+          id str "e_value",
+          value real { 503997112536106, 10, -32 }
+        },
+        {
+          id str "bit_score",
+          value real { 758223387316238, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 38
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 796666666666667, 10, -13 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_8",
+          local str "Subject_1"
+        },
+        starts {
+          10,
+          501
+        },
+        lens {
+          38
+        },
+        strands {
+          plus,
+          plus
+        }
+      }
+    },
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 34
+        },
+        {
+          id str "blast_score",
+          value int 34
+        },
+        {
+          id str "e_value",
+          value real { 122862734166984, 10, -29 }
+        },
+        {
+          id str "bit_score",
+          value real { 678929225210575, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 37
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 796666666666667, 10, -13 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_8",
+          local str "Subject_1"
+        },
+        starts {
+          10,
+          473
+        },
+        lens {
+          38
+        },
+        strands {
+          plus,
+          plus
+        }
+      }
+    },
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 34
+        },
+        {
+          id str "blast_score",
+          value int 34
+        },
+        {
+          id str "e_value",
+          value real { 122862734166984, 10, -29 }
+        },
+        {
+          id str "bit_score",
+          value real { 678929225210575, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 37
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 796666666666667, 10, -13 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_8",
+          local str "Subject_1"
+        },
+        starts {
+          10,
+          475
+        },
+        lens {
+          38
+        },
+        strands {
+          plus,
+          plus
+        }
+      }
+    },
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 34
+        },
+        {
+          id str "blast_score",
+          value int 34
+        },
+        {
+          id str "e_value",
+          value real { 122862734166984, 10, -29 }
+        },
+        {
+          id str "bit_score",
+          value real { 678929225210575, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 37
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 796666666666667, 10, -13 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_8",
+          local str "Subject_1"
+        },
+        starts {
+          10,
+          477
+        },
+        lens {
+          38
+        },
+        strands {
+          plus,
+          plus
+        }
+      }
+    },
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 33
+        },
+        {
+          id str "blast_score",
+          value int 33
+        },
+        {
+          id str "e_value",
+          value real { 485476494866516, 10, -29 }
+        },
+        {
+          id str "bit_score",
+          value real { 659105684684159, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 36
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 775833333333333, 10, -13 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_8",
+          local str "Subject_1"
+        },
+        starts {
+          11,
+          472
+        },
+        lens {
+          37
+        },
+        strands {
+          plus,
+          plus
+        }
+      }
+    },
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 11
+        },
+        {
+          id str "blast_score",
+          value int 11
+        },
+        {
+          id str "e_value",
+          value real { 652566700837209, 10, -16 }
+        },
+        {
+          id str "bit_score",
+          value real { 222987793103011, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 11
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 234166666666667, 10, -13 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_8",
+          local str "Subject_1"
+        },
+        starts {
+          9,
+          1837
+        },
+        lens {
+          11
+        },
+        strands {
+          minus,
+          plus
+        }
+      }
+    },
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 19
+        },
+        {
+          id str "blast_score",
+          value int 19
+        },
+        {
+          id str "e_value",
+          value real { 1098096870599, 10, -18 }
+        },
+        {
+          id str "bit_score",
+          value real { 381576117314338, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 25
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 5675, 10, -2 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_8",
+          local str "Subject_2"
+        },
+        starts {
+          11,
+          1724
+        },
+        lens {
+          27
+        },
+        strands {
+          plus,
+          plus
+        }
+      }
+    },
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 19
+        },
+        {
+          id str "blast_score",
+          value int 19
+        },
+        {
+          id str "e_value",
+          value real { 1098096870599, 10, -18 }
+        },
+        {
+          id str "bit_score",
+          value real { 381576117314338, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 25
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 5675, 10, -2 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_8",
+          local str "Subject_2"
+        },
+        starts {
+          13,
+          1724
+        },
+        lens {
+          27
+        },
+        strands {
+          plus,
+          plus
+        }
+      }
+    },
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 19
+        },
+        {
+          id str "blast_score",
+          value int 19
+        },
+        {
+          id str "e_value",
+          value real { 1098096870599, 10, -18 }
+        },
+        {
+          id str "bit_score",
+          value real { 381576117314338, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 25
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 5675, 10, -2 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_8",
+          local str "Subject_2"
+        },
+        starts {
+          15,
+          1724
+        },
+        lens {
+          27
+        },
+        strands {
+          plus,
+          plus
+        }
+      }
+    },
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 19
+        },
+        {
+          id str "blast_score",
+          value int 19
+        },
+        {
+          id str "e_value",
+          value real { 1098096870599, 10, -18 }
+        },
+        {
+          id str "bit_score",
+          value real { 381576117314338, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 25
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 5675, 10, -2 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_8",
+          local str "Subject_2"
+        },
+        starts {
+          17,
+          1724
+        },
+        lens {
+          27
+        },
+        strands {
+          plus,
+          plus
+        }
+      }
+    },
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 19
+        },
+        {
+          id str "blast_score",
+          value int 19
+        },
+        {
+          id str "e_value",
+          value real { 1098096870599, 10, -18 }
+        },
+        {
+          id str "bit_score",
+          value real { 381576117314338, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 25
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 5675, 10, -2 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_8",
+          local str "Subject_2"
+        },
+        starts {
+          19,
+          1724
+        },
+        lens {
+          27
+        },
+        strands {
+          plus,
+          plus
+        }
+      }
+    },
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 19
+        },
+        {
+          id str "blast_score",
+          value int 19
+        },
+        {
+          id str "e_value",
+          value real { 1098096870599, 10, -18 }
+        },
+        {
+          id str "bit_score",
+          value real { 381576117314338, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 25
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 5675, 10, -2 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_8",
+          local str "Subject_2"
+        },
+        starts {
+          21,
+          1724
+        },
+        lens {
+          27
+        },
+        strands {
+          plus,
+          plus
+        }
+      }
+    },
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 18
+        },
+        {
+          id str "blast_score",
+          value int 18
+        },
+        {
+          id str "e_value",
+          value real { 433899036495276, 10, -20 }
+        },
+        {
+          id str "bit_score",
+          value real { 361752576787922, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 24
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 546666666666667, 10, -13 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_8",
+          local str "Subject_2"
+        },
+        starts {
+          10,
+          1725
+        },
+        lens {
+          26
+        },
+        strands {
+          plus,
+          plus
+        }
+      }
+    },
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 14
+        },
+        {
+          id str "blast_score",
+          value int 14
+        },
+        {
+          id str "e_value",
+          value real { 105774459119367, 10, -17 }
+        },
+        {
+          id str "bit_score",
+          value real { 282458414682259, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 17
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 38, 10, 0 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_8",
+          local str "Subject_2"
+        },
+        starts {
+          7,
+          1844
+        },
+        lens {
+          18
+        },
+        strands {
+          plus,
+          plus
+        }
+      }
+    }
+  }
+}

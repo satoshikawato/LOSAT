@@ -203,7 +203,7 @@
 //! # Index 1 (large gaps, link_hsps.c:771-896)
 //!
 //! The candidates of H are the remaining HSPs before H with qo > qe(H) and
-//! so > se(H). Every pass sweeps the remaining HSPs with score > cutoff[1] by
+//! so > se(H). Every pass sweeps the remaining HSPs with score > `cutoff[1]` by
 //! decreasing `q_end_trim`: every candidate of H has qe >= qo > qe(H), so it
 //! has its value of this pass before H is visited, as in NCBI's list-order
 //! loop. "qo > qe(H)" is then a prefix of the HSPs by decreasing qo, which the
@@ -229,7 +229,7 @@
 //! The tree returns the largest candidate whatever its sum, NCBI the largest
 //! one above its start value: 0, or `sum - 1` of the previous choice. They
 //! agree because every candidate in the tree has a positive sum (an HSP with
-//! score > cutoff[1] has a sum of at least score - cutoff[1] > 0, the sums
+//! score > `cutoff[1]` has a sum of at least score - `cutoff[1]` > 0, the sums
 //! being exact), and the previous choice, when it remains, is itself a
 //! candidate above `sum - 1` ("What a search returns").
 //!
@@ -255,7 +255,7 @@
 //! add-back is clamped to the range of the key, which does not change what the
 //! kernel selects:
 //!
-//! - Only best[index] receives an add-back, and between two passes no other
+//! - Only `best[index]` receives an add-back, and between two passes no other
 //!   value grows. A value reaches the top only while its HSP is the maximum;
 //!   it then stays above every other value until the HSP is removed or the
 //!   next pass writes its pass value back, so no two values are at the top.
@@ -352,17 +352,38 @@ impl<K: Copy + Ord + Default> MaxTree<K> {
 
     #[inline]
     fn set(&mut self, i: usize, v: [K; 2]) {
-        let mut pos = self.cap + i;
-        self.nodes[pos] = v;
-        while pos > 1 {
-            pos >>= 1;
-            let l = self.nodes[pos * 2];
-            let r = self.nodes[pos * 2 + 1];
-            let m = [l[0].max(r[0]), l[1].max(r[1])];
-            if self.nodes[pos] == m {
-                break;
+        let leaf = self.cap + i;
+        self.nodes[leaf] = v;
+        // On wasm32 (LOSAT Web) each channel walks up on its own, which leaves the same tree (a
+        // parent whose channel does not change leaves its ancestors' channel unchanged). Walking
+        // both channels at once, LLVM made the two maxima of `u64` keys one 64x2 vector, which needs
+        // an unsigned compare that WebAssembly lacks; V8 ran it as lane extracts, scalar compares
+        // and lane inserts.
+        #[cfg(target_arch = "wasm32")]
+        for c in 0..2 {
+            let mut pos = leaf;
+            while pos > 1 {
+                pos >>= 1;
+                let m = self.nodes[pos * 2][c].max(self.nodes[pos * 2 + 1][c]);
+                if self.nodes[pos][c] == m {
+                    break;
+                }
+                self.nodes[pos][c] = m;
             }
-            self.nodes[pos] = m;
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let mut pos = leaf;
+            while pos > 1 {
+                pos >>= 1;
+                let l = self.nodes[pos * 2];
+                let r = self.nodes[pos * 2 + 1];
+                let m = [l[0].max(r[0]), l[1].max(r[1])];
+                if self.nodes[pos] == m {
+                    break;
+                }
+                self.nodes[pos] = m;
+            }
         }
     }
 
@@ -509,7 +530,7 @@ impl IncrOptions {
         static OPTIONS: OnceLock<IncrOptions> = OnceLock::new();
         *OPTIONS.get_or_init(|| IncrOptions {
             verify: std::env::var_os("LOSAT_LINK_FAST_VERIFY").is_some(),
-            wide_keys: std::env::var_os("LOSAT_LINK_WIDE_KEYS").is_some(),
+            wide_keys: crate::utils::xdiag::var_os("LOSAT_LINK_WIDE_KEYS").is_some(),
         })
     }
 }
@@ -662,8 +683,8 @@ pub(super) fn link_hsp_group_incr(
 //    number_of_hsps = hp_frame_number[frame_index];
 // ```
 // NCBI links each group as a sublist of the one sorted array. The kernel on the group's records
-// wherever they lie (a Vec of its own, or a sub-slice of the linking call's list for
-// LOSAT_X_LINKSLICES, tblastx/x_link_slices.rs): it wraps link_hsp_group_incr_with_slice, adds
+// wherever they lie (a Vec of its own, or a sub-slice of the linking call's list,
+// tblastx/x_link_slices.rs): it wraps link_hsp_group_incr_with_slice, adds
 // the LOSAT_LINK_STATS line and changes no value of the result.
 /// `link_hsp_group_incr` on the group's records in place.
 #[allow(clippy::too_many_arguments)]
@@ -837,6 +858,7 @@ fn verify_pass(
 // n * 2^32 < 2^63). The u64 key when the group fits it, else the u128 key (module documentation,
 // "Sums"); both run the same kernel.
 /// Links one group with the u64 key when it fits, else with the u128 key.
+#[cfg(test)]
 #[allow(clippy::too_many_arguments)]
 pub(super) fn link_hsp_group_incr_with(
     mut group_hits: Vec<UngappedHit>,
@@ -941,7 +963,7 @@ pub(super) fn link_hsp_group_incr_with_slice(
 // The replacement for the per-group body of s_BlastEvenGapLinkHSPs: same rounds, same selection
 // rule, same removal; a pass after the first computes again only the HSPs described in the
 // module documentation. It takes the group's records as a slice (its own Vec, or a sub-slice of
-// the linking call's list for LOSAT_X_LINKSLICES) and hands the same slice back: the body indexes,
+// the linking call's list, `x_link_slices.rs`) and hands the same slice back: the body indexes,
 // reads and writes fields of the records and never adds, removes or moves one.
 #[allow(clippy::too_many_arguments)]
 fn link_group<'g, K: LinkKey>(
@@ -985,7 +1007,7 @@ fn link_group<'g, K: LinkKey>(
 
     let c = [cutoffs.cutoff_small_gap, cutoffs.cutoff_big_gap];
     let gap_prob = cutoffs.gap_prob;
-    let ignore_small_gaps = cutoffs.ignore_small_gaps;
+    let ignore_small_gaps = cutoffs.ignore_small_gaps();
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:545-550
     // ```c
@@ -1150,12 +1172,245 @@ fn link_group<'g, K: LinkKey>(
 
     let mut tree = MaxTree::<K>::new(n);
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:584-589
+    // ```c
+    //       first_pass=1;    /* do full search */
+    //       path_changed=1;
+    // ...
+    //       while (number_of_hsps > 0)
+    // ```
+    // The rounds, one call of `LinkRounds::round` each (its own function on wasm32 only).
     let mut remaining = n;
     let mut first_pass = true;
     let mut path_changed = true;
-    let int4_max = i32::MAX as f64;
-
     while remaining > 0 {
+        let round = LinkRounds {
+            n,
+            c,
+            gap_prob,
+            ignore_small_gaps,
+            msz,
+            w,
+            eff_query_len,
+            eff_subject_len,
+            eff_search_space,
+            gap_decay_rate,
+            options,
+            group_hits: &mut *group_hits,
+            stats: &mut stats,
+            score: &score,
+            qo: &qo,
+            so: &so,
+            qe: &qe,
+            se: &se,
+            sl: &sl,
+            lk: &lk,
+            sum: &mut sum,
+            xsum: &mut xsum,
+            num: &mut num,
+            link: &mut link,
+            indeg: &mut indeg,
+            alive: &mut alive,
+            next_active: &mut next_active,
+            prev_active: &mut prev_active,
+            children: &mut children,
+            queued: &mut queued,
+            sum_changed: &mut sum_changed,
+            sum_changed_list: &mut sum_changed_list,
+            leaf_dirty: &mut leaf_dirty,
+            leaf_list: &mut leaf_list,
+            seeds: &mut seeds,
+            addback_hsps: &mut addback_hsps,
+            removed: &mut removed,
+            heap: &mut heap,
+            grid_index: &grid_index,
+            grid_items: &grid_items,
+            qorder: &mut qorder,
+            iorder: &mut iorder,
+            rr: &rr,
+            kq: &kq,
+            fen: &mut fen,
+            tree: &mut tree,
+            remaining: &mut remaining,
+            first_pass: &mut first_pass,
+            path_changed: &mut path_changed,
+            active_head: &mut active_head,
+        };
+        if !round.round() {
+            break;
+        }
+    }
+
+    (group_hits, stats)
+}
+
+// No NCBI counterpart for the struct and the function boundary: link_group's locals that its
+// round loop uses (s_BlastEvenGapLinkHSPs' `while (number_of_hsps > 0)`, link_hsps.c:589),
+// borrowed for one round, so that a round is one call of `round`. On wasm32 (LOSAT Web) `round`
+// is a function of its own: V8 runs the first calls of a freshly compiled function in its baseline
+// code (Liftoff) and switches to its optimized code (TurboFan) only at a later call, never inside a
+// running call (no on-stack replacement for Wasm), and a group was one long call. Elsewhere
+// `round` is inlined into the loop, which it was the body of.
+/// One round's view of a group: its read-only values, and references to the pass values and
+/// structures and to the loop's variables, which `link_group` owns.
+struct LinkRounds<'r, K> {
+    // Read-only values of the group.
+    n: usize,
+    c: [i32; 2],
+    gap_prob: f64,
+    ignore_small_gaps: bool,
+    msz: usize,
+    w: i32,
+    eff_query_len: f64,
+    eff_subject_len: f64,
+    eff_search_space: i64,
+    gap_decay_rate: f64,
+    options: IncrOptions,
+    // The group's records and counters, the trimmed offsets, scores and pass values, and the
+    // structures of the passes: link_group's locals of the same names.
+    group_hits: &'r mut [UngappedHit],
+    stats: &'r mut IncrStats,
+    score: &'r [i32],
+    qo: &'r [i32],
+    so: &'r [i32],
+    qe: &'r [i32],
+    se: &'r [i32],
+    sl: &'r [f64],
+    lk: &'r [f64],
+    sum: &'r mut [Vec<i64>; 2],
+    xsum: &'r mut [Vec<f64>; 2],
+    num: &'r mut [Vec<i16>; 2],
+    link: &'r mut [Vec<u32>; 2],
+    indeg: &'r mut Vec<i32>,
+    alive: &'r mut Vec<bool>,
+    next_active: &'r mut Vec<u32>,
+    prev_active: &'r mut Vec<u32>,
+    children: &'r mut [Children; 2],
+    queued: &'r mut [Vec<bool>; 2],
+    sum_changed: &'r mut [Vec<bool>; 2],
+    sum_changed_list: &'r mut Vec<(u8, u32)>,
+    leaf_dirty: &'r mut Vec<bool>,
+    leaf_list: &'r mut Vec<u32>,
+    seeds: &'r mut [Vec<u32>; 2],
+    addback_hsps: &'r mut Vec<u32>,
+    removed: &'r mut Vec<u32>,
+    heap: &'r mut BinaryHeap<Reverse<u32>>,
+    grid_index: &'r FxHashMap<u64, (u32, u32)>,
+    grid_items: &'r [u32],
+    qorder: &'r mut Vec<u32>,
+    iorder: &'r mut Vec<u32>,
+    rr: &'r [u32],
+    kq: &'r [u32],
+    fen: &'r mut Vec<K>,
+    tree: &'r mut MaxTree<K>,
+    // The loop's variables: number_of_hsps, first_pass, path_changed and the head of the list of
+    // remaining HSPs.
+    remaining: &'r mut usize,
+    first_pass: &'r mut bool,
+    path_changed: &'r mut bool,
+    active_head: &'r mut u32,
+}
+
+impl<K: LinkKey> LinkRounds<'_, K> {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:589-980
+    // ```c
+    //       while (number_of_hsps > 0)
+    //       {
+    // ...
+    //          number_of_hsps--;
+    // ```
+    // One round of the loop: the body of `link_group`'s loop statement for statement, on
+    // link_group's locals through the fields of the same names (the loop's variables read at the
+    // start and written back at the end).
+    /// Runs one round: a pass when the best chains cannot be used again, the choice of the
+    /// ordering method, and the removal of the chosen chain. False when no chain is left.
+    #[cfg_attr(target_arch = "wasm32", inline(never))]
+    #[cfg_attr(not(target_arch = "wasm32"), inline(always))]
+    fn round(self) -> bool {
+        let int4_max = i32::MAX as f64;
+        let LinkRounds {
+            n,
+            c,
+            gap_prob,
+            ignore_small_gaps,
+            msz,
+            w,
+            eff_query_len,
+            eff_subject_len,
+            eff_search_space,
+            gap_decay_rate,
+            options,
+            group_hits,
+            stats,
+            score,
+            qo,
+            so,
+            qe,
+            se,
+            sl,
+            lk,
+            sum,
+            xsum,
+            num,
+            link,
+            indeg,
+            alive,
+            next_active,
+            prev_active,
+            children,
+            queued,
+            sum_changed,
+            sum_changed_list,
+            leaf_dirty,
+            leaf_list,
+            seeds,
+            addback_hsps,
+            removed,
+            heap,
+            grid_index,
+            grid_items,
+            qorder,
+            iorder,
+            rr,
+            kq,
+            fen,
+            tree,
+            remaining: remaining_at,
+            first_pass: first_pass_at,
+            path_changed: path_changed_at,
+            active_head: active_head_at,
+        } = self;
+        let mut remaining = *remaining_at;
+        let mut first_pass = *first_pass_at;
+        let mut path_changed = *path_changed_at;
+        let mut active_head = *active_head_at;
+        // The vectors that a round only indexes, as slices: their buffers and lengths are values
+        // of this call, so they are not read again from link_group's frame after each store
+        // (that is what `round` would otherwise do where it is its own function, on wasm32).
+        // Inlined into link_group (other targets), the loop compiles to fewer instructions with
+        // these slices and references than as the locals it was (callgrind: link_group -5 to -6 %
+        // on TBLASTX at one thread).
+        let (indeg, alive, next_active, prev_active, leaf_dirty, fen) = (
+            &mut indeg[..],
+            &mut alive[..],
+            &mut next_active[..],
+            &mut prev_active[..],
+            &mut leaf_dirty[..],
+            &mut fen[..],
+        );
+        let [sum0, sum1] = sum;
+        let sum = [&mut sum0[..], &mut sum1[..]];
+        let [xsum0, xsum1] = xsum;
+        let xsum = [&mut xsum0[..], &mut xsum1[..]];
+        let [num0, num1] = num;
+        let num = [&mut num0[..], &mut num1[..]];
+        let [link0, link1] = link;
+        let link = [&mut link0[..], &mut link1[..]];
+        let [queued0, queued1] = queued;
+        let queued = [&mut queued0[..], &mut queued1[..]];
+        let [changed0, changed1] = sum_changed;
+        let sum_changed = [&mut changed0[..], &mut changed1[..]];
+
         stats.rounds += 1;
         let mut best: [Option<usize>; 2] = [None, None];
         let mut use_current_max = false;
@@ -1545,18 +1800,8 @@ fn link_group<'g, K: LinkKey>(
             sum_changed_list.clear();
 
             if options.verify {
-                let (expected, expected_indeg) = verify_pass(
-                    &alive,
-                    &score,
-                    &qo,
-                    &so,
-                    &qe,
-                    &se,
-                    &sl,
-                    &lk,
-                    c,
-                    ignore_small_gaps,
-                );
+                let (expected, expected_indeg) =
+                    verify_pass(alive, score, qo, so, qe, se, sl, lk, c, ignore_small_gaps);
                 let mut cur = active_head;
                 while cur != NONE {
                     let i = cur as usize;
@@ -1615,13 +1860,17 @@ fn link_group<'g, K: LinkKey>(
         };
         if !ignore_small_gaps {
             if let Some(bi) = best[0] {
-                addback(&mut tree, 0, bi, &mut stats);
+                addback(tree, 0, bi, stats);
                 addback_hsps.push(bi as u32);
-                let k = num[0][bi] as usize;
-                let divisor = gap_decay_divisor(gap_decay_rate, k);
+                // NCBI's Int2 count: a wrapped (negative) count is not "> 1" (link_hsps.c:918).
+                // BLAST_GapDecayDivisor takes it as an unsigned and raises the rate to the Int4
+                // `nsegs - 1`; `as usize` sign-extends and gap_decay_divisor truncates
+                // `num_segments - 1` to the same i32.
+                let k = num[0][bi];
+                let divisor = gap_decay_divisor(gap_decay_rate, k as usize);
                 prob[0] = small_gap_sum_e(
                     WINDOW_SIZE,
-                    k as i16,
+                    k,
                     xsum[0][bi],
                     eff_query_len as i32,
                     eff_subject_len as i32,
@@ -1637,10 +1886,10 @@ fn link_group<'g, K: LinkKey>(
                 }
             }
             if let Some(bi) = best[1] {
-                let k = num[1][bi] as usize;
-                let divisor = gap_decay_divisor(gap_decay_rate, k);
+                let k = num[1][bi];
+                let divisor = gap_decay_divisor(gap_decay_rate, k as usize);
                 prob[1] = ncbi_large_gap_sum_e(
-                    k as i16,
+                    k,
                     xsum[1][bi],
                     eff_query_len as i32,
                     eff_subject_len as i32,
@@ -1667,27 +1916,20 @@ fn link_group<'g, K: LinkKey>(
             // ...
             // ordering_method = eLinkLargeGaps;
             // ```
-            // Only large gaps are considered when cutoff[0] == 0.
-            addback(&mut tree, 1, bi, &mut stats);
+            // Only large gaps are considered when cutoff[0] == 0, and their E-value is not
+            // divided by `1 - gap_prob`.
+            addback(tree, 1, bi, stats);
             addback_hsps.push(bi as u32);
-            let k = num[1][bi] as usize;
-            let divisor = gap_decay_divisor(gap_decay_rate, k);
+            let k = num[1][bi];
+            let divisor = gap_decay_divisor(gap_decay_rate, k as usize);
             prob[1] = ncbi_large_gap_sum_e(
-                k as i16,
+                k,
                 xsum[1][bi],
                 eff_query_len as i32,
                 eff_subject_len as i32,
                 eff_search_space,
                 divisor,
             );
-            if k > 1 {
-                let denom = 1.0 - gap_prob;
-                if denom == 0.0 || (prob[1] / denom) > int4_max {
-                    prob[1] = int4_max;
-                } else {
-                    prob[1] /= denom;
-                }
-            }
         }
 
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:936-937
@@ -1706,7 +1948,8 @@ fn link_group<'g, K: LinkKey>(
         } else if let Some(i) = best[1 - ordering] {
             i
         } else {
-            break;
+            // No HSP is left to start a chain: the group ends here.
+            return false;
         };
         let evalue = prob[ordering];
 
@@ -1770,7 +2013,11 @@ fn link_group<'g, K: LinkKey>(
             }
             cur = next as usize;
         }
-    }
 
-    (group_hits, stats)
+        *remaining_at = remaining;
+        *first_pass_at = first_pass;
+        *path_changed_at = path_changed;
+        *active_head_at = active_head;
+        true
+    }
 }

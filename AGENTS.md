@@ -64,12 +64,19 @@ authoritative, current guidance for agent behavior in LOSAT.
      a standard output closed at the start (`>&-`), where NCBI's first write
      fails (outfmt 0 exit 6, outfmt 6/7 abort), is the `/dev/null` that the
      Rust runtime opens before `main`, so LOSAT discards the report and exits
-     as the search ends. Errors raised after argument parsing, the outfmt 0 write
+     as the search ends; a `-query` or `-subject` whose name ends in `.gz`,
+     `.bz2` or `.zst` is inflated before it is read (NCBI reads the file as
+     text and stops at its first line; exception 8); a failed write of `losat rpsbproc`'s
+     report, where NCBI's rpsbproc drops the writes and exits 0 (a closed pipe: SIGPIPE),
+     stops LOSAT with a message and exit 4, and a failed write to its standard error
+     (NCBI: SIGPIPE) with exit 4 and no message (exception 9). Errors raised after argument parsing, the outfmt 0 write
      failure ("BLAST failed to write output", exit 6), all other warnings, and
      every search result must still match NCBI. Non-UTF-8
-     file names, `.ncbirc` keys that change output, and NCBI C++ Toolkit
-     words (`-version`, `-dryrun`, `-logfile`, ...; also in an option's value)
-     are explicit rejections, not exceptions.
+     file names and `.ncbirc` keys that change output are explicit rejections, not
+     exceptions. `-version` and `-version-full*` (NCBI's forms, LOSAT's package),
+     `-help-full` (the text of `-help`), and on the command line `-xmlhelp` (NCBI's XML
+     without the options LOSAT refuses by name), `-logfile`, `-conffile` and `-dryrun`,
+     run as in NCBI (README, NCBI C++ Toolkit options).
    - Approved exceptions for NCBI defects (`PD-LOSAT-NCBI-DEFECTS`): where
      NCBI BLAST+ fails (a crash, a debug-only assumption, a read past a buffer)
      and LOSAT's result was shown to equal NCBI's output for a nearby input
@@ -77,12 +84,42 @@ authoritative, current guidance for agent behavior in LOSAT.
      split again (CHUNK_SIZE/OVERLAP_CHUNK_SIZE; NCBI stops with a
      CCoreException) is searched once. BLASTN, TBLASTX and TBLASTN: outfmt 0
      titles made only of punctuation stop at the end of the string (NCBI
-     reads past it and crashes). BLASTP: a one-hit gapped start whose window
-     of 11 letters passes the end of a sequence reads the letters past it as
-     the sentinel (NCBI reads past its buffer and can crash; LOSAT's output
-     equals NCBI's under valgrind). Deterministic NCBI results, even wrong-looking ones, are
-     reproduced, not excepted; NCBI failures without a checkable valid result
-     are explicit rejections.
+     reads past it and crashes), and so does the tabular first word of such a
+     title for an `lcl|Subject_N` id of a database (version 1.10). BLASTP,
+     TBLASTN and BLASTX (version 1.48 for the last two): a one-hit gapped
+     start whose window of 11 letters passes the end of a sequence reads the
+     letters past it as the sentinel (NCBI reads past its buffer and can
+     crash; in the searches LOSAT runs that NCBI finishes under valgrind,
+     NCBI's output equals LOSAT's). Taxid lists with `-db`: a taxid whose
+     ancestors form a cycle (the root, its own parent in
+     `taxonomy4blast.sqlite3`) expands to every taxid below it, each visited
+     once (NCBI's recursive query does not end; LOSAT's `-taxids 1` equals
+     NCBI's `-taxids` of the root's children). Seqid lists with `-db`: an
+     accession stored under more than about 500 sequences of a version 5
+     database selects its first sequence (NCBI's LMDB lookup fails with
+     `Accessions to Oids lookup error`). TBLASTX: a cutoff whose quotient
+     `K * searchsp / E` passes the range of a double keeps the finite cutoff of
+     `ln K + ln searchsp - ln E` (NCBI's undefined conversion gives a cutoff of
+     1; version 1.12). rpsbproc: PSSM-IDs of 2^31 and more are
+     compared as signed 32-bit values without NCBI's `int` overflow, so every row
+     of the data is found (version 1.13); a motif check that reads the stored list of
+     motif positions past its end counts as failed (version 1.14); coordinate
+     arithmetic that overflows NCBI's signed `int` (a hit, site or motif at 2^31,
+     an XML coordinate of -2^31, protein and nucleotide queries alike) is computed
+     as its mathematical value, NCBI's later conversions kept (version 1.26).
+     Deterministic NCBI
+     results, even wrong-looking ones, are reproduced, not excepted; NCBI failures without a checkable valid result
+     are explicit rejections. So are the results of a database with parsed
+     Seq-ids that PD-LOSAT-NCBI-DEFECTS 1.10 lists, such as a reported sequence
+     that NCBI's lookup by id finds as another sequence and following hits whose
+     ids NCBI takes for one sequence. A sequence that a seqid list keeps without a
+     definition line is reproduced, not rejected: NCBI drops its hits at the
+     Seq-aligns (a positive list, PD-LOSAT-NCBI-DEFECTS 1.32) or where its search
+     fetches the subject again (a negative list, 1.34). Approved
+     difference: a `gb`, `emb` or `dbj` id prints the stored type, where NCBI's
+     process-wide id table can print the type of another id of the same prefix,
+     digit count and version (maintainer, 2026-10-21, for the tabular `sseqid`
+     with `-db`; the other places accepted on 2026-11-02, PD-LOSAT-NCBI-DEFECTS 1.10).
 
 4. NCBI code comments are mandatory for modifications.
    - Every code change must include NCBI C/C++ reference comments with file path
@@ -104,6 +141,20 @@ authoritative, current guidance for agent behavior in LOSAT.
 8. Correct timing, order, and context.
    - Call algorithms at the exact same timing and order as NCBI.
    - Input/output data must match NCBI exactly.
+   - Frozen outputs are never rewritten. The comparisons skip or replace only
+     what their tools name: the CL tag of SAM's @PG line (OWNER_DECISIONS 7,
+     `db_search_fixtures.strip_sam_cl`), the database lines of the approved
+     TBLASTX `-db_gencode` rows (`check_losat.py` `normalize_database_lines`),
+     the run directory and makeblastdb's time and path lines of the drop-in
+     corpus (`dropin_corpus.py`), the `-out` and binary paths in captured stderr
+     (`capture_outputs.py`), and one checkout-path prefix. The TBLASTN Stage G
+     cases name inputs under the developer machine's checkout
+     `/mnt/c/Users/genom/GitHub/LOSAT` (Owner 2026-11-05: replace the prefix
+     when comparing): they run with a relative run root of the same length
+     (outfmt 0 wraps the path at 68 columns), and the run root in their output
+     and stderr is replaced by that prefix before hashing
+     (`LOSAT/tests/frozen_paths.py`). That is the one replacement of a
+     checkout-path prefix.
 
 9. Algorithmic fidelity over aesthetics.
    - Do not refactor for readability if it changes logic.
@@ -171,16 +222,59 @@ authoritative, current guidance for agent behavior in LOSAT.
   pruning, ordering, statistics, and formatting as NCBI. If a faster path cannot
   be proven byte-identical on the relevant fixtures, keep it disabled or remove
   it.
+- Forbidden optimizations include approximations in mathematical calculations
+  and skipping validation or edge-case handling.
 - For performance paths, rule 8 ("Correct timing, order, and context") binds the
   values and the order that reach the output: work may run earlier, in another
   order or on other threads when every value and every decision the output
   depends on is the same, as in the default unit path of TBLASTX
-  (`LOSAT_X_PAIRPAR`: units of one subject searched in parallel, results put
+  (`tblastx/x_pair_par.rs`: units of one subject searched in parallel, results put
   back in scan order). Owner approval 2026-10-15.
 - Rule 9's "preserving ... Big O complexity" means not making it worse: a path
   may do less work than NCBI's, as the default incremental TBLASTX linking
   kernel (`sum_stats_linking/linking_incr.rs`) replaces NCBI's rescans with an
   index. Owner approval 2026-10-15.
+
+### Speed-up switches (`LOSAT_X_*`)
+- A speed-up that keeps every output byte lands on by default, in its own pull request: its
+  `LOSAT_X_<NAME>` joins `STRICT_SET` in `LOSAT/src/utils/xswitch.rs` and the `export` block of
+  `docs/agents/diagnostics.md` (both sorted), its entry there says since when and on what evidence,
+  and `LOSAT_X_<NAME>=0` runs the previous path. Owner, 2026-10-17.
+- A switch whose path runs only under a rule (input sizes, threads, options, memory) marks the
+  decision with `x_reach!("LOSAT_X_<NAME>", own_path)`, never inside a per-hit loop, and adds its
+  row to `LOSAT/tests/switch_reach_expected.tsv` (class `conditional`; `platform` for a CPU or
+  target rule; `always` without a rule).
+- Tests of both sides, narrow: a unit test compares the new function with the one `=0` runs in the
+  same process (random and edge inputs, every field or table cell, not only what a report prints);
+  an integration test compares the default's report with `=0`'s (and with the frozen NCBI bytes
+  where the file has them) and shows that the new path ran (`LOSAT_X_REACH`, or a counter of the
+  live path printed with `LOSAT_X_STATS` or `LOSAT_TIMING`).
+- No run-time comparison modes: no `LOSAT_X_<NAME>SHADOW` or `...VERIFY` variable. A check of the
+  new path against the old one is a unit test.
+- Lifetime: a switch graduates at the first graduation check after it reaches `main`: on `dev` for 7
+  days and in two full-set platform-checks runs (push to `main`, weekly or dispatch) in which every
+  `outputs (<id>)` job and the cross-platform compare passed and no `cargo test (<id>)` job failed.
+  Graduation removes the variable and the tests' `=0` arms; an always-on switch also loses its
+  previous code; a conditional or platform switch keeps its rule and fallback and moves to
+  `GRADUATED` (its `x_reach!` marks and TSV row stay).
+- A switch's tuning variables (`LOSAT_X_<NAME>MIN`, `..._POOL`, a value switch's number) become
+  constants with their built-in values when the switch graduates. Diagnostic variables
+  (`LOSAT_X_STATS`, `LOSAT_X_REACH`, `LOSAT_TIMING`; `docs/agents/diagnostics.md`) change no output
+  and are not switches.
+
+- A speed-up pull request's body names the structural cause the change removes (what allocates,
+  copies, waits or rescans, and why), says whether the new form holds for every input, and lists the
+  inputs where it does not with their ratios. A body that only says "X is slow" or "X uses memory"
+  is not ready for review. Owner, 2026-10-27.
+- No new conditional switch (a path that runs only under a rule) while these structural items are
+  open: one lookup table per parallel unit in blastx and tblastx, and tblastn's OID-order hand-back
+  waits (blastn's QBATCHPAR slots, each holding a lookup table and a query-batch copy, were removed
+  on 2026-10-28). A rule-limited path lands only as a deadline fallback that its body names as such
+  and the Owner approves. An Owner-delegated decision (a working session's choice under the
+  Owner's standing delegation) is not that approval (Owner, 2026-11-05).
+  Thresholds (`..MIN`, capacities, backoffs) and stacked variants of one loop are folded to one form
+  per family before graduation freezes them as constants. Owner, 2026-10-27 (audit of #329-#553
+  after #554 was closed).
 
 ### Benchmark target protocol
 - Treat repository benchmark figures as compute-program benchmarks, not as
@@ -220,6 +314,10 @@ authoritative, current guidance for agent behavior in LOSAT.
   other behavior in the same run.
 - Frame concatenation shares boundary sentinels; frame offset advances by
   `aa_len + 1`, not `aa_len + 2`.
+- Offsets are frame-relative and 0-based on both sides: each subject frame is
+  searched as its own sequence (`blast_engine.c:811-812`) and
+  `s_AdjustInitialHSPOffsets` (`blast_gapalign.c:2384-2392`) subtracts the query
+  context start; linking compares these offsets, never concatenated-buffer ones.
 - Length adjustment asymmetry: query uses full adjustment, subject uses one third;
   effective search space uses full adjustment for both.
 - Masking: SEG applies to query only; extension uses masked sequence while identity
@@ -229,6 +327,13 @@ authoritative, current guidance for agent behavior in LOSAT.
   not during linking.
 - Cutoff score capping: `min(BLAST_Cutoffs, gap_trigger, cutoff_score_max)`;
   tblastx uses `scale_factor = 1.0`.
+- The per-subject cutoff update uses the search space
+  `MIN(subject length, query context length) * subject length` with the
+  untranslated (nucleotide) subject length, an amino-acid query frame length and
+  no length adjustment (`blast_parameters.c:360-362`); with `-subject` it runs
+  for each subject (`blast_engine.c:1439-1440`), with `-db` once, from the
+  average subject length (`blast_engine.c:1372-1374`, `blast_parameters.c:233-234`).
+  `cutoff_score_max` and E-values use the length-adjusted `eff_searchsp`.
 
 ---
 
@@ -260,6 +365,11 @@ authoritative, current guidance for agent behavior in LOSAT.
 
 The `LOSAT_TRACE_*`, `LOSAT_DEBUG_*`, `LOSAT_TIMING`, `LOSAT_DIAGNOSTICS` and related
 variables are listed in [`docs/agents/diagnostics.md`](docs/agents/diagnostics.md).
+A new diagnostic variable that no test, script or CI step sets is read through `utils/xdiag.rs` (the
+`diagnostics` feature) and listed in `xdiag::NAMES` and in the "Diagnostic build" block of
+docs/agents/diagnostics.md; one that
+tests or scripts set is read directly, once per process when it sits on a per-subject or per-hit path,
+unless a test changes it in its own process.
 
 ---
 
@@ -292,12 +402,23 @@ cd LOSAT && cargo fmt
   `// NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/<dir>/<file>:<lines> <Case>`
   above it and a row in `docs/evidence/ncbi_unit_cases/LEDGER.tsv` (statuses: ported,
   partial, e2e, to-port, n-a, superseded; `python3 LOSAT/tests/ncbi_unit_case_ledger.py`).
-  Do not add integration binaries under `LOSAT/tests/` for unit tests (each links the whole
-  crate and sees only `pub` items) and do not make private items `pub` for a test. Cases that
-  need the object manager, GenBank, BLAST databases, or PSI/RPS/PHI are `n-a`; whole-search
-  cases (bl2seq) become fixture rows, not unit tests.
+  Do not add integration-test files under `LOSAT/tests/` for unit tests (an integration test sees
+  only `pub` items, and each file adds to its suite's build) and do not make private items `pub`
+  for a test. Cases that need the object manager, sequences fetched by id (GenBank, or a BLAST
+  database as a data loader), or a program LOSAT lacks or an option it refuses (deltablast,
+  rpstblastn, psiblast `-phi_pattern`, ...) are `n-a`; whole-search cases (bl2seq) become
+  fixture rows, not unit tests.
+- A new integration-test file `LOSAT/tests/<file>.rs` goes into its suite: its program's (`blastn`,
+  `blastp`, `blastx`, `tblastn`, `tblastx`) or `common` (the command line, the output formats and
+  shared parts): two lines in `LOSAT/tests/suites/<suite>.rs`; run it as
+  `cargo test --test <suite> <file>::`. A file that changes the process environment or process-wide
+  state (`set_var`, `remove_var`, `set_current_dir`, `set_hook`, `take_hook`, rayon's
+  `build_global`, the global allocator `#[global_allocator]`) gets its own `[[test]]` in `LOSAT/Cargo.toml` instead, since the tests of a suite
+  share one process; `tests/suite_layout.rs` checks both. An integration test reaches the engine
+  through `losat::api` and the `losat` binary only (every other module is `pub(crate)`); a test of
+  an engine item that `api` does not expose lives in the crate, as above.
 - Integration tests must compare output with NCBI BLAST+ and verify hit counts,
-  bit scores, E-values, and coordinates.
+  bit scores, E-values, and coordinates, on real short and long sequences.
 - NCBI BLAST+ execution is allowed only as a comparison oracle during testing
   and diagnostics; it must not be part of LOSAT's feature implementation,
   runtime execution, build pipeline, fallback handling, or unsupported-feature
@@ -310,10 +431,8 @@ cd LOSAT && cargo fmt
 ```bash
 cd LOSAT/tests && bash run_comparison.sh
 cd LOSAT/tests && bash run_all_tests.sh
-bash compare_tblastx_results.sh
 bash tests/compare_self_tblastx.sh
 bash tests/compare_long_sequences_debug.sh
-bash docs/compare_seg_mask.sh
 ```
 
 ---
@@ -321,39 +440,55 @@ bash docs/compare_seg_mask.sh
 ## Repository Layout (Concise)
 
 ```
-LOSAT/                     # Rust crate root
-├── Cargo.toml
+LOSAT/                     # Rust crate root: library `LOSAT`, command `losat`
+├── Cargo.toml             # Test targets are listed by hand (`autotests = false`)
+├── build.rs               # WASI targets only: links the reactor start file, sets `losat_wasi_threads`
 ├── src/
-│   ├── main.rs            # CLI entry; dispatch to blastn/tblastx
-│   ├── algorithm/         # Core algorithms (tblastx, blastn, blastp, common)
-│   ├── core/              # NCBI-ported primitives (stats, filters, encoding)
-│   ├── stats/             # Karlin-Altschul and sum statistics
-│   ├── align/             # Alignment utilities/traceback
-│   ├── report/            # Output formatting (outfmt 0/6/7)
-│   ├── format/            # Format helpers
-│   ├── post/              # Post-processing (chaining/filtering)
-│   ├── api/               # Options and API layer
-│   ├── blastinput/        # CLI argument parsing
-│   ├── config/            # Compatibility/config helpers
-│   ├── seed/              # Word finding
-│   ├── sequence/          # Sequence storage/encoding
-│   └── utils/             # Shared utilities and tables
+│   ├── lib.rs             # Module list; `api` is the public surface, the others are `pub(crate)` but the hidden `web_adapter` and `main_entry`
+│   ├── main.rs            # The binary `losat`: calls `main_entry` (cli/main_entry.rs) and nothing else
+│   ├── cli.rs             # CLI v2 boundary: NCBI's single-dash options and the top-level -help
+│   ├── cli/main_entry.rs  # Command entry: blastn, blastp, blastx, tblastn, tblastx, psiblast, rpsblast, makeblastdb, blastdbcmd, rpsbproc
+│   ├── common.rs          # Shared hit type, gap edit operations and the HSP comparators
+│   ├── algorithm/         # One directory per program (blastn, blastp, blastx, tblastn, tblastx, psiblast) and common/
+│   ├── api/               # Library API: FASTA records in memory, `run_collect`, `run_batches` (library surface plan)
+│   ├── blastinput/        # Application layer, FASTA and compressed input, shared value parsers;
+│   │                      # per-program args in `algorithm/<program>/args.rs`
+│   ├── core/              # NCBI core/ ports shared by several programs (encoding, HSP lists, SEG, composition adjustment)
+│   ├── stats/             # Karlin-Altschul (incl. composition lambda), Spouge, length adjustment and sum statistics
+│   ├── report/            # Output formats: pairwise, tabular, XML, XML2, JSON, ASN.1 archive, SAM
+│   ├── seqdb/             # Reader of BLAST database volumes (NCBI CSeqDB), for `-db`
+│   ├── seqid/             # Seq-ids of database sequences (CSeq_id, deflines, id formatting)
+│   ├── writedb/           # Writer of BLAST database volumes (NCBI CWriteDB) and `losat makeblastdb`
+│   ├── blastdbcmd/        # `losat blastdbcmd`: -info and sequence retrieval
+│   ├── rpsbproc/          # `losat rpsbproc`: NCBI's rpsbproc 0.5.1 (archives of rpsblast -outfmt 11, CDD data; protein queries: domain hits, sites, motifs; not yet nucleotide queries (PS16c) and XML input (PS16d))
+│   ├── utils/             # DUST, SEG, WindowMasker, matrices, genetic codes, threading, switches (`xswitch`)
+│   ├── sequence/          # Sequence storage and 2-bit packed nucleotides
+│   ├── config/            # Scoring matrix and scoring specs (`ScoringMatrix`, `*ScoringSpec`)
+│   ├── web_api.rs         # wasm32 only: Wasm ABI v1 exports and their dispatch to the programs
+│   ├── web_api/           # ABI v1 searches of BLASTN, BLASTP, TBLASTX and their input reader
+│   └── web_adapter.rs     # Hidden façade: the engine items that web/adapter names, each named on its own
 └── tests/
-    ├── run_comparison.sh  # Compare vs NCBI BLAST+
-    ├── run_all_tests.sh
-    ├── unit/              # Rust unit tests
-    ├── blast_out/ ncbi_out/ losat_out/ fasta/
-    └── plots/
+    ├── suites/            # Six test targets (five programs and common); each includes its files by `#[path]`
+    ├── unit/              # Data only: `.tsv` files read by in-crate tests, NCBI reference outputs (`helpers/`)
+    ├── *.rs               # Test files of the suites, and two targets of their own: `blastn_report_stream_api`, `thread_memory` (`suite_layout.rs` checks)
+    ├── fixtures/ db_search/ blastdbcmd/ seqdb/ fasta/ ...   # Inputs and frozen NCBI outputs
+    ├── *.py               # Gate scripts (fast regressions, platform checks, switch reach)
+    └── *.sh               # Older comparison scripts (run_comparison.sh, run_all_tests.sh)
 ```
 
-Additional scripts and datasets live at repo root: `tests/`, `losat_out/`, and
-`compare_tblastx_results.sh`.
+More comparison scripts live in `tests/` at the repo root.
 
 ```
 web/                       # LOSAT Web (browser application)
 ├── AGENTS.md              # Rules for code under web/
 ├── adapter/               # Rust crate: Wasm ABI v2 over the LOSAT library (added in session S05)
 └── app/                   # Vite + Vue 3 + TypeScript application
+
+python/                    # pylosat: the Python binding of losat::api (PyO3, its own Cargo root)
+├── AGENTS.md              # Rules for code under python/
+├── src/                   # Rust crate: the extension module
+├── pylosat/               # Python package
+└── tests/                 # pytest, against the losat executable of the same commit
 ```
 
 ### Scope of these rules for `web/`
@@ -366,14 +501,36 @@ permitted by that decision are not "unauthorized features" under requirement 5. 
 change under `LOSAT/`, including one made for LOSAT Web, remains subject to all the
 requirements above.
 
+### Scope of these rules for `python/`
+
+Code under `python/` follows [`python/AGENTS.md`](python/AGENTS.md) under
+[`PD-LOSAT-PYTHON-BINDING-BOUNDARY`](docs/product_decisions/PD-LOSAT-PYTHON-BINDING-BOUNDARY.md),
+as `web/` does under its decision: it computes no BLAST behavior or compatibility output, so it
+carries no NCBI reference comments, and what that decision permits there is not an "unauthorized
+feature" under requirement 5. Every change under `LOSAT/`, including one made for the binding,
+remains subject to all the requirements above.
+
+---
+
+## Evidence and Run Output
+
+- `docs/evidence/` keeps summaries, scripts, and small records (manifests, hashes, short logs).
+  Output of one run (a gate, sweep, capture, or benchmark) that is over 1 MiB in total or has
+  over 100 files goes to a GitHub release asset with a manifest, not into the tree; the evidence
+  directory keeps `README.md` (release, asset name, asset sha256, file count, bytes) and
+  `MANIFEST.tsv` (path, bytes, sha256 per file). Owner, 2026-10-22: evidence that nothing reads
+  goes to release assets (first release: `evidence-archive-20261022`). Files that code, tests,
+  CI, scripts, or skills read stay in the tree.
+
 ---
 
 ## Entry Points
 
-- CLI: `LOSAT/src/main.rs`
+- CLI: `LOSAT/src/cli/main_entry.rs` (`main_entry`, which `LOSAT/src/main.rs` calls)
 - TBLASTX engine: `LOSAT/src/algorithm/tblastx/blast_engine/run_impl.rs`
 - BLASTN engine: `LOSAT/src/algorithm/blastn/blast_engine/run.rs`
 - BLASTP engine: `LOSAT/src/algorithm/blastp/blast_engine.rs`
+- rpsbproc: `LOSAT/src/rpsbproc/mod.rs` (`run`)
 
 ---
 
@@ -397,23 +554,26 @@ requirements above.
 
 ## Conventions and Porting Notes
 
-- Match NCBI function names when porting (example: `s_BlastAaExtendTwoHit` ->
-  `extend_hit_two_hit`).
+- Match NCBI function names when porting (example: `s_BlastAaScanSubject` ->
+  `s_blast_aa_scan_subject`).
 - Keep NCBI terminology in comments: query_offset, subject_offset, context, frame.
 - Use `#[inline]` for hot-path functions; use `unsafe` only when necessary and
   always add safety comments.
 - Prefer `cargo fmt` and `cargo clippy` conventions for Rust style.
+- Prefer explicit types over inference in public APIs.
+- Explain every deviation from the NCBI implementation, and every performance
+  optimization and why it is safe, in a code comment.
+- A line or stage ID (`DI-8f`, `SF S3`) or an Owner decision that the repository cites for the
+  first time gets its row in `docs/decisions/` (`LINE_IDS.md`, `OWNER_DECISIONS.md`) in the same
+  pull request.
 
 ---
 
 ## Other Guidance Files (Reference Only)
 
 - `CLAUDE.md`
-- `cursorrules.mdc`
-- `.cursor/rules/cursorrules.mdc`
-- `.cursor/rules/global_rules.mdc`
 
-This file consolidates their requirements; if there is a conflict, follow this file.
+`CLAUDE.md` imports this file; if they conflict, follow this file.
 
 ---
 

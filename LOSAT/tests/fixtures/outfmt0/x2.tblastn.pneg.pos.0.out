@@ -1,0 +1,59 @@
+PSITBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/x2_pssmneg_s.fna).
+           1 sequences; 93 total letters
+
+
+
+Query= x2 pssmneg
+
+Length=24
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+pssmneg WGY in frame 1                                                10.2    0.80 
+
+
+> pssmneg WGY in frame 1
+Length=93
+
+ Score = 10.2 bits (15),  Expect = 0.80
+ Identities = 4/4 (100%), Positives = 4/4 (100%), Gaps = 0/4 (0%)
+ Frame = +1
+
+Query  13  YAAA  16
+           YAAA
+Sbjct  52  YAAA  63
+
+
+
+Lambda      K        H        a         alpha
+   0.340    0.148    0.466    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0460    0.140     1.90     42.6     43.6 
+
+Effective search space used: 744
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt0/x2_pssmneg_s.fna).
+    Posted date:  Unknown
+  Number of letters in database: 93
+  Number of sequences in database:  1
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 13

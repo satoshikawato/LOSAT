@@ -1,0 +1,21 @@
+{
+  "version": "1.2",
+  "dbname": "plook_v4",
+  "dbtype": "Protein",
+  "db-version": 4,
+  "description": "plook_v4 (parsed Seq-ids)",
+  "number-of-letters": 3300,
+  "number-of-sequences": 15,
+  "last-updated": "2026-11-02T22:50:00",
+  "number-of-volumes": 1,
+  "bytes-total": 5516,
+  "bytes-to-cache": 3524,
+  "files": [
+    "plook_v4.phr",
+    "plook_v4.pin",
+    "plook_v4.pog",
+    "plook_v4.psd",
+    "plook_v4.psi",
+    "plook_v4.psq"
+  ]
+}

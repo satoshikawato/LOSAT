@@ -1,0 +1,2012 @@
+{
+"BlastOutput2": [
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/bslice"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_1",
+          "query_title": "BDT62524.1 hypothetical protein [Metapenaeus ensis majanivirus]",
+          "query_len": 370,
+          "hits": [
+          ],
+          "stat": {
+            "db_num": 35,
+            "db_len": 14391,
+            "hsp_len": 55,
+            "eff_space": 500000000,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          },
+          "message": "No hits found"
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/bslice"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_2",
+          "query_title": "BDT62525.1 wsv465-like protein [Metapenaeus ensis majanivirus]",
+          "query_len": 377,
+          "hits": [
+          ],
+          "stat": {
+            "db_num": 35,
+            "db_len": 14391,
+            "hsp_len": 55,
+            "eff_space": 500000000,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          },
+          "message": "No hits found"
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/bslice"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_3",
+          "query_title": "BDT62529.1 innexin [Metapenaeus ensis majanivirus]",
+          "query_len": 386,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|0",
+                  "accession": "0",
+                  "title": "BDT61857.1 innexin [Penaeus monodon majanivirus A]"
+                }
+              ],
+              "len": 378,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 344.739,
+                  "score": 883,
+                  "evalue": 8.49767e-96,
+                  "identity": 168,
+                  "positive": 246,
+                  "query_from": 1,
+                  "query_to": 353,
+                  "hit_from": 1,
+                  "hit_to": 354,
+                  "align_len": 358,
+                  "gaps": 9,
+                  "qseq": "MIPISVLANLRSLFKGKNSEVDINSKIFKLQYRTTTTILFCLCLLITTNSLVGNPISCLYDSSISYLKEDTVNTYCWIYSTFTIPRYYSHQYQASVAHPGVGTYNSKTDDVKLYHTYYQWVPFILFFQALMFYSPHWLWKIWEGGKVQSTIAGLSVPIKSNQERQKVTLGLIEYLRASHRHHDYYAKKYLFCEFLSILNCILNILLLNKFLNGMFLDYGNKVLAYYQN-DNVTTINPMTIVFPKVTKCSVPLYGASGSKEIKDLLCILALNNFNDKIFLFMWFWLIILSVLNTLNFIYHVLIFVIPHTRKIY----LNRIAKDLQTSNFFNQVGDSFFLYLVKKNVDTLTFDYLFSNL",
+                  "hseq": "MASLGLLSTLRGILQGKRN-ADIENLISKLHYRVTTTTVFCFCLLVTTNTLVGDPISCVYDSGHPKLNDKVVNTYCWIHTTFTLPNR-PYRDMSAISSPGIGTHN--LSDPVTYHAYYQWVPFMLFIQGLLFYAPHYIWKTWEGGRMQSITADLSVPILNKEDQRKRVNQLADYLQNSLWNNNTYALKYLFCQCLSLVNCIVNMVLMNKFLNGKFLTYGADVFSYSEAVDQESRTDPMIEVFPRVTKCSMSMFGSSGTLQKHDFLCVLAVNVINEKIYLAMWLWFILLISLSILVFFFHLAVFAVPVIRRLYLVYLLGSGDKARIVARTFNQMGDVFLLYLLKKNVECQSLNLLLTEL",
+                  "midline": "M  + +L+ LR + +GK +  DI + I KL YR TTT +FC CLL+TTN+LVG+PISC+YDS    L +  VNTYCWI++TFT+P    ++  ++++ PG+GT+N    D   YH YYQWVPF+LF Q L+FY+PH++WK WEGG++QS  A LSVPI + ++++K    L +YL+ S  +++ YA KYLFC+ LS++NCI+N++L+NKFLNG FL YG  V +Y +  D  +  +PM  VFP+VTKCS+ ++G+SG+ +  D LC+LA+N  N+KI+L MW W I+L  L+ L F +H+ +F +P  R++Y    L    K    +  FNQ+GD F LYL+KKNV+  + + L + L"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 35,
+            "db_len": 14391,
+            "hsp_len": 55,
+            "eff_space": 500000000,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          }
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/bslice"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_4",
+          "query_title": "BDT62536.1 hypothetical protein [Metapenaeus ensis majanivirus]",
+          "query_len": 295,
+          "hits": [
+          ],
+          "stat": {
+            "db_num": 35,
+            "db_len": 14391,
+            "hsp_len": 53,
+            "eff_space": 500000000,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          },
+          "message": "No hits found"
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/bslice"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_5",
+          "query_title": "BDT62539.1 hypothetical protein [Metapenaeus ensis majanivirus]",
+          "query_len": 341,
+          "hits": [
+          ],
+          "stat": {
+            "db_num": 35,
+            "db_len": 14391,
+            "hsp_len": 54,
+            "eff_space": 500000000,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          },
+          "message": "No hits found"
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/bslice"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_6",
+          "query_title": "BDT62541.1 hypothetical protein [Metapenaeus ensis majanivirus]",
+          "query_len": 534,
+          "hits": [
+          ],
+          "stat": {
+            "db_num": 35,
+            "db_len": 14391,
+            "hsp_len": 58,
+            "eff_space": 500000000,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          },
+          "message": "No hits found"
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/bslice"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_7",
+          "query_title": "BDT62542.1 hypothetical protein [Metapenaeus ensis majanivirus]",
+          "query_len": 516,
+          "hits": [
+          ],
+          "stat": {
+            "db_num": 35,
+            "db_len": 14391,
+            "hsp_len": 57,
+            "eff_space": 500000000,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          },
+          "message": "No hits found"
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/bslice"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_8",
+          "query_title": "BDT62543.1 hypothetical protein [Metapenaeus ensis majanivirus]",
+          "query_len": 543,
+          "hits": [
+          ],
+          "stat": {
+            "db_num": 35,
+            "db_len": 14391,
+            "hsp_len": 58,
+            "eff_space": 500000000,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          },
+          "message": "No hits found"
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/bslice"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_9",
+          "query_title": "BDT62544.1 wsv192-like protein [Metapenaeus ensis majanivirus]",
+          "query_len": 351,
+          "hits": [
+          ],
+          "stat": {
+            "db_num": 35,
+            "db_len": 14391,
+            "hsp_len": 54,
+            "eff_space": 500000000,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          },
+          "message": "No hits found"
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/bslice"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_10",
+          "query_title": "BDT62555.1 baculoviral IAP repeat-containing protein [Metapenaeus ensis majanivirus]",
+          "query_len": 432,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|32",
+                  "accession": "32",
+                  "title": "BDT61962.1 baculoviral IAP repeat-containing protein [Penaeus monodon majanivirus A]"
+                }
+              ],
+              "len": 577,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 88.1965,
+                  "score": 217,
+                  "evalue": 1.57135e-18,
+                  "identity": 83,
+                  "positive": 145,
+                  "query_from": 25,
+                  "query_to": 323,
+                  "hit_from": 47,
+                  "hit_to": 371,
+                  "align_len": 343,
+                  "gaps": 62,
+                  "qseq": "YEDYRRYTFTINTLSWQYKDWIDSSKKDALAKIGYYLSGYKWAPQLTCCFCNGNVESEWNLQDKNWSKNKTKIPIHLCLREKDLRERDGMVTNISLEYSPIDSYI--CGDVVPDCPNPSFNKQNIQ-----------DNGILPYTF-KYKEYNKLEDRIKTFYTNGWNEINSTQTPEDMAKAGFIYKGENDKVTCYQCGQSIYRWDDKDNDPWHEHAKHASHCQHVYIRKGGDFINNIKK--------------------------SLCGIHVIHEHEVDELIKINTVKYILDMNIFQQPD-IIRQLVKKQIQVTGQPFFTLNDILSPLFTDM---HKRTADN",
+                  "hseq": "YEEKRLGTF----IDWPH-EWL---KPSELAADGFYY--LRKDDHCACIFCRGIVGA-WEKTDTPRGEHERHFPHCPFIRGQPTGNVPIVQGNILARLPVLHASLDDCGSRRVEADACRFSSRHMAGSYPECRGSPDETGLYQHSGPKRSDFTTLDSRLKS-YVEGWPILGLHA--RDLAEAGFFYCGLSDHVRCFHCGKGLRNWISSDI-PWKEHARWYPKCRFVLLTKGQDYINEVQQEHPPYTRTASTTIYSGIDKAASGSSNSPTEVQSVSEQELDLLMSLDVVKCVLEMGY---PSCIVRACLKDRVEQTGEPYFVIEPCLEDVIHRMSVTENRVADN",
+                  "midline": "YE+ R  TF    + W + +W+   K   LA  G+Y    +      C FC G V + W   D    +++   P    +R +       +  NI      + + +  CG    +     F+ +++            + G+  ++  K  ++  L+ R+K+ Y  GW  +       D+A+AGF Y G +D V C+ CG+ +  W   D  PW EHA+    C+ V + KG D+IN +++                          S   +  + E E+D L+ ++ VK +L+M     P  I+R  +K +++ TG+P+F +   L  +   M     R ADN"
+                }
+              ]
+            },
+            {
+              "num": 2,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|9",
+                  "accession": "9",
+                  "title": "BDT61876.1 baculoviral IAP repeat-containing protein [Penaeus monodon majanivirus A]"
+                }
+              ],
+              "len": 181,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 66.6254,
+                  "score": 161,
+                  "evalue": 4.04111e-12,
+                  "identity": 32,
+                  "positive": 52,
+                  "query_from": 159,
+                  "query_to": 245,
+                  "hit_from": 80,
+                  "hit_to": 162,
+                  "align_len": 87,
+                  "gaps": 4,
+                  "qseq": "YKEYNKLEDRIKTFYTNGWNEINSTQTPEDMAKAGFIYKGENDKVTCYQCGQSIYRWDDKDNDPWHEHAKHASHCQHVYIRKGGDFI",
+                  "hseq": "HQEYVMHQRRLETF---RWWPKETAQSPHKLAEAGFVSSGLGDTVYCFHCGVYLEQW-EKNDMPWKEHAKWSPRCRYVKMVKGDKFI",
+                  "midline": "++EY   + R++TF    W    + Q+P  +A+AGF+  G  D V C+ CG  + +W +K++ PW EHAK +  C++V + KG  FI"
+                }
+              ]
+            },
+            {
+              "num": 3,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|34",
+                  "accession": "34",
+                  "title": "BDT61964.1 baculoviral IAP repeat-containing protein [Penaeus monodon majanivirus A]"
+                }
+              ],
+              "len": 719,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 66.2402,
+                  "score": 160,
+                  "evalue": 5.14738e-12,
+                  "identity": 43,
+                  "positive": 77,
+                  "query_from": 162,
+                  "query_to": 302,
+                  "hit_from": 251,
+                  "hit_to": 396,
+                  "align_len": 152,
+                  "gaps": 17,
+                  "qseq": "YNKLEDRIKTFYTNGWNEINSTQTPEDMAKAGFIYKGENDKVTCYQCGQSIYRWDDKDNDPWHEHAKHASHCQHVYIRKGGDFINNIKKSLCGIHV----------IHEHEVDELIKINTVKYILDMNIFQQPDI-IRQLVKKQIQVTGQPF",
+                  "hseq": "YKTTQSRLESFL--NWPH-RHRQKIEALVEAGFYYLGISDHVQCFHCGACLRNWEE-DDDPWRVHAEWYPECYYVQLKKGKEFIDKVRLEVSRIPMWRHSSSTSQDTSEHDWNILLGLDYTKRLILVQGF--PVVAVRDALCEQILQTGIPF",
+                  "midline": "Y   + R+++F    W      Q  E + +AGF Y G +D V C+ CG  +  W++ D+DPW  HA+    C +V ++KG +FI+ ++  +  I +            EH+ + L+ ++  K ++ +  F  P + +R  + +QI  TG PF"
+                },
+                {
+                  "num": 2,
+                  "bit_score": 26.5646,
+                  "score": 57,
+                  "evalue": 5.2086,
+                  "identity": 27,
+                  "positive": 46,
+                  "query_from": 140,
+                  "query_to": 252,
+                  "hit_from": 99,
+                  "hit_to": 210,
+                  "align_len": 116,
+                  "gaps": 7,
+                  "qseq": "PSFNKQNIQDNGILPYTFKYKEYNKLEDRIKTFYTNGWNEINSTQTPEDMAKAGFIYKGENDKVTCYQCGQSIYRWDDKDNDPWHEHAKHASHCQHVYIRKGGDF---INNIKKSL",
+                  "hseq": "PPLPRSKIFENRFDPATGLPADLRYEIKRLETFI--DWP--NKVVQAKDLAAAGFFYTRDTTCCICFSCHKYMNFSYDKPIVIRDMHLKKSPNCKFAQGKSVGNIPIRMSNILNSI",
+                  "midline": "P   +  I +N   P T    +      R++TF    W   N     +D+A AGF Y  +     C+ C + +    DK       H K + +C+    +  G+    ++NI  S+"
+                }
+              ]
+            },
+            {
+              "num": 4,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|33",
+                  "accession": "33",
+                  "title": "BDT61963.1 baculoviral IAP repeat-containing protein [Penaeus monodon majanivirus A]"
+                }
+              ],
+              "len": 728,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 58.5362,
+                  "score": 140,
+                  "evalue": 1.09135e-09,
+                  "identity": 52,
+                  "positive": 88,
+                  "query_from": 186,
+                  "query_to": 370,
+                  "hit_from": 292,
+                  "hit_to": 473,
+                  "align_len": 194,
+                  "gaps": 21,
+                  "qseq": "PEDMAKAGFIYKGENDKVTCYQCGQSIYRWDDKDNDPWHEHAKHASHCQHVYIRKGGDFINNI---------KKSLCGIHVIHEHEVDELIKINTVKYILDMNIFQQPDIIRQLVKKQIQVTGQPFFTLNDILSPLFTDMHKRTADNTYSGGYYDYNLHEFIDDKSLKKYLRNSDIVQYVLKFLPNRQVIDFLN",
+                  "hseq": "PKKLIAAGFFYSGYGDHVNCFHCGVGIRNW-EKGDDPWTQHAMWNPECHYVRTLMGQTFIDTAKTVKNVLFRKPTRERTYSVTDEDWNAVMGLDITKDLL-ISLFPVA-AVRDCVREQILVHKIPFITKHEGL------YYVREKIAAY--GNMDITLAKKISRMS-TEYIQNYHAVYSVMYFLMDLKRIFIMN",
+                  "midline": "P+ +  AGF Y G  D V C+ CG  I  W +K +DPW +HA     C +V    G  FI+           K +    + + + + + ++ ++  K +L +++F     +R  V++QI V   PF T ++ L       + R     Y  G  D  L + I   S  +Y++N   V  V+ FL + + I  +N"
+                },
+                {
+                  "num": 2,
+                  "bit_score": 28.8758,
+                  "score": 63,
+                  "evalue": 1.06716,
+                  "identity": 21,
+                  "positive": 31,
+                  "query_from": 168,
+                  "query_to": 236,
+                  "hit_from": 112,
+                  "hit_to": 174,
+                  "align_len": 72,
+                  "gaps": 12,
+                  "qseq": "RIKTFYTNGWNEINSTQTPEDMAKAGFIYKGENDKVTCYQCGQSIYRWDDKDNDPWHEH---AKHASHCQHV",
+                  "hseq": "RLETFIDWPLGEVIEAR---DLAAAGFFYSRRNVECICFCCKVRI------SFKPCTRHGCCARHASTSQYI",
+                  "midline": "R++TF      E+   +   D+A AGF Y   N +  C+ C   I         P   H   A+HAS  Q++"
+                }
+              ]
+            },
+            {
+              "num": 5,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|29",
+                  "accession": "29",
+                  "title": "BDT61959.1 baculoviral IAP repeat-containing protein [Penaeus monodon majanivirus A]"
+                }
+              ],
+              "len": 261,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 52.7582,
+                  "score": 125,
+                  "evalue": 6.03864e-08,
+                  "identity": 38,
+                  "positive": 59,
+                  "query_from": 189,
+                  "query_to": 312,
+                  "hit_from": 142,
+                  "hit_to": 252,
+                  "align_len": 125,
+                  "gaps": 15,
+                  "qseq": "MAKAGFIYKGENDKVTCYQCGQSIYRWDDKDNDPWHEHAKHASHCQHVYIRKGGDFINNIKKSLCGIHVIHEHEVDELIKINTVKYILDMNIFQQPD-IIRQLVKKQIQVTGQPFFTLNDILSPL",
+                  "hseq": "MAESGFYFTGELDAVRCFSCQIDIYGWQHND-DPISVHAQWSPDCEYIQAIVDDNFIDSVR----------DKRYDTLIDPNVYQTLKDCGI---PDYIIRHAHRKHIIQSGELFTDAVQCLSVI",
+                  "midline": "MA++GF + GE D V C+ C   IY W   D DP   HA+ +  C+++      +FI++++          +   D LI  N  + + D  I   PD IIR   +K I  +G+ F      LS +"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 35,
+            "db_len": 14391,
+            "hsp_len": 56,
+            "eff_space": 500000000,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          }
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/bslice"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_11",
+          "query_title": "BDT62556.1 baculoviral IAP repeat-containing protein [Metapenaeus ensis majanivirus]",
+          "query_len": 465,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|32",
+                  "accession": "32",
+                  "title": "BDT61962.1 baculoviral IAP repeat-containing protein [Penaeus monodon majanivirus A]"
+                }
+              ],
+              "len": 577,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 96.2857,
+                  "score": 238,
+                  "evalue": 4.72299e-21,
+                  "identity": 71,
+                  "positive": 121,
+                  "query_from": 158,
+                  "query_to": 385,
+                  "hit_from": 186,
+                  "hit_to": 435,
+                  "align_len": 256,
+                  "gaps": 34,
+                  "qseq": "NYGSYEKRLDSFIKNGWSNINLNQDPKDMAEAGFVFEYQDNDEVWCFYCQRTIYKWDSKCDPWYEHAKHVPYCRYVCTIKSPDFVKQVQQE-----TTCGTFI--------------------VHEYELDKLMELSIIQHAILYFKPH-FVRKVLKKRIEKKAEPFFSVQKCINAV--KETIKENSQDEEIIKKNVKETTIGLKESDMSNVVVVVASESDIGSSEKETNDDLKETNIESKEDEITLAQKRENNSFF",
+                  "hseq": "DFTTLDSRLKSYVE-GWPILGLHA--RDLAEAGF-FYCGLSDHVRCFHCGKGLRNWISSDIPWKEHARWYPKCRFVLLTKGQDYINEVQQEHPPYTRTASTTIYSGIDKAASGSSNSPTEVQSVSEQELDLLMSLDVVKCVLEMGYPSCIVRACLKDRVEQTGEPYFVIEPCLEDVIHRMSVTENRVADNCSESTEREPSYG--GTDISSSIFQQQAPIFPSTSETMGNRVASIQSLPSESTEVELLSQQQQVSIL",
+                  "midline": "++ + + RL S+++ GW  + L+   +D+AEAGF F    +D V CF+C + +  W S   PW EHA+  P CR+V   K  D++ +VQQE      T  T I                    V E ELD LM L +++  +    P   VR  LK R+E+  EP+F ++ C+  V  + ++ EN   +   +   +E + G   +D+S+ +    +     +SE   N      ++ S+  E+ L  +++  S  "
+                },
+                {
+                  "num": 2,
+                  "bit_score": 45.8246,
+                  "score": 107,
+                  "evalue": 8.7223e-06,
+                  "identity": 26,
+                  "positive": 40,
+                  "query_from": 156,
+                  "query_to": 233,
+                  "hit_from": 44,
+                  "hit_to": 114,
+                  "align_len": 78,
+                  "gaps": 7,
+                  "qseq": "CLNYGSYEKRLDSFIKNGWSNINLNQDPKDMAEAGFVFEYQDNDEVWCFYCQRTIYKWDSKCDPWYEHAKHVPYCRYV",
+                  "hseq": "CLRY--EEKRLGTFID--WPHEWLK--PSELAADGFYYLRKD-DHCACIFCRGIVGAWEKTDTPRGEHERHFPHCPFI",
+                  "midline": "CL Y   EKRL +FI   W +  L   P ++A  GF +  +D D   C +C+  +  W+    P  EH +H P+C ++"
+                },
+                {
+                  "num": 3,
+                  "bit_score": 27.335,
+                  "score": 59,
+                  "evalue": 2.9288,
+                  "identity": 13,
+                  "positive": 21,
+                  "query_from": 413,
+                  "query_to": 449,
+                  "hit_from": 530,
+                  "hit_to": 568,
+                  "align_len": 39,
+                  "gaps": 2,
+                  "qseq": "CKDCLQDKIDLLFFPCRHW-GCGNCTLPI-HCLDCNIEI",
+                  "hseq": "CKVCMDSEIAIVFLPCSHMVTCVSCAVSLRQCPICRRDI",
+                  "midline": "CK C+  +I ++F PC H   C +C + +  C  C  +I"
+                }
+              ]
+            },
+            {
+              "num": 2,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|34",
+                  "accession": "34",
+                  "title": "BDT61964.1 baculoviral IAP repeat-containing protein [Penaeus monodon majanivirus A]"
+                }
+              ],
+              "len": 719,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 65.0846,
+                  "score": 157,
+                  "evalue": 1.16601e-11,
+                  "identity": 64,
+                  "positive": 106,
+                  "query_from": 87,
+                  "query_to": 312,
+                  "hit_from": 179,
+                  "hit_to": 411,
+                  "align_len": 239,
+                  "gaps": 19,
+                  "qseq": "DSSAEKNHKCK-GKKFEMKNIPIELCQILRSIQNRDRICSNVCKQSEVKVSHSSNL-LSNLGIEEGSPVNRCLNYGSYEKRLDSFIKNGWSNINLNQDPKDMAEAGFVFEYQDNDEVWCFYCQRTIYKWDSKCDPWYEHAKHVPYCRYVCTIKSPDFVKQVQQETTCGTFIVH---------EYELDKLMELSIIQHAILY--FKPHFVRKVLKKRIEKKAEPFFSVQKCINAVKETIK",
+                  "hseq": "DMHLKKSPNCKFAQGKSVGNIPIRMSNILNSIVNQKRVAVTSATATATATATVDQEDLIKTRYEYAGPLHDY--YKTTQSRLESFL--NWPHRH-RQKIEALVEAGFYY-LGISDHVQCFHCGACLRNWEEDDDPWRVHAEWYPECYYVQLKKGKEFIDKVRLEVSRIPMWRHSSSTSQDTSEHDWNILLGLDYTKRLILVQGFPVVAVRDALCEQILQTGIPFSREVDCTSAVRKKIE",
+                  "midline": "D   +K+  CK  +   + NIPI +  IL SI N+ R+       +    +      L     E   P++    Y + + RL+SF+   W + +  Q  + + EAGF +    +D V CF+C   +  W+   DPW  HA+  P C YV   K  +F+ +V+ E +      H         E++ + L+ L   +  IL   F    VR  L ++I +   PF     C +AV++ I+"
+                }
+              ]
+            },
+            {
+              "num": 3,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|9",
+                  "accession": "9",
+                  "title": "BDT61876.1 baculoviral IAP repeat-containing protein [Penaeus monodon majanivirus A]"
+                }
+              ],
+              "len": 181,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 60.077,
+                  "score": 144,
+                  "evalue": 3.84601e-10,
+                  "identity": 32,
+                  "positive": 45,
+                  "query_from": 159,
+                  "query_to": 242,
+                  "hit_from": 83,
+                  "hit_to": 162,
+                  "align_len": 84,
+                  "gaps": 4,
+                  "qseq": "YGSYEKRLDSFIKNGWSNINLNQDPKDMAEAGFVFEYQDNDEVWCFYCQRTIYKWDSKCDPWYEHAKHVPYCRYVCTIKSPDFV",
+                  "hseq": "YVMHQRRLETF---RWWPKETAQSPHKLAEAGFV-SSGLGDTVYCFHCGVYLEQWEKNDMPWKEHAKWSPRCRYVKMVKGDKFI",
+                  "midline": "Y  +++RL++F    W      Q P  +AEAGFV      D V+CF+C   + +W+    PW EHAK  P CRYV  +K   F+"
+                }
+              ]
+            },
+            {
+              "num": 4,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|33",
+                  "accession": "33",
+                  "title": "BDT61963.1 baculoviral IAP repeat-containing protein [Penaeus monodon majanivirus A]"
+                }
+              ],
+              "len": 728,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 59.6918,
+                  "score": 143,
+                  "evalue": 5.28091e-10,
+                  "identity": 54,
+                  "positive": 90,
+                  "query_from": 138,
+                  "query_to": 329,
+                  "hit_from": 251,
+                  "hit_to": 447,
+                  "align_len": 211,
+                  "gaps": 33,
+                  "qseq": "SSNLLSNLGIEEGS---------PVNRCLNYGSYEKRLDSFIKNGWSNINLNQDPKDMAEAGFVFEYQDNDEVWCFYCQRTIYKWDSKCDPWYEHAKHVPYCRYVCTIKSPDFVKQV--------QQETTCGTFIVHEYELDKLMELSIIQHAILYFKP-HFVRKVLKKRIEKKAEPFFSVQKCINAVKETIKE-NSQDEEIIKKNVKETT",
+                  "hseq": "AGNILSEMGIESYSGPEHENFVTPISRKYTYDDWP----------LGDIML---PKKLIAAGFFYSGY-GDHVNCFHCGVGIRNWEKGDDPWTQHAMWNPECHYVRTLMGQTFIDTAKTVKNVLFRKPTRERTYSVTDEDWNAVMGLDITKDLLISLFPVAAVRDCVREQILVHKIPFITKHEGLYYVREKIAAYGNMDITLAKKISRMST",
+                  "midline": "+ N+LS +GIE  S         P++R   Y  +             +I L   PK +  AGF +     D V CF+C   I  W+   DPW +HA   P C YV T+    F+           ++ T   T+ V + + + +M L I +  ++   P   VR  ++++I     PF +  + +  V+E I    + D  + KK  + +T"
+                },
+                {
+                  "num": 2,
+                  "bit_score": 30.0314,
+                  "score": 66,
+                  "evalue": 0.516382,
+                  "identity": 16,
+                  "positive": 22,
+                  "query_from": 413,
+                  "query_to": 456,
+                  "hit_from": 682,
+                  "hit_to": 727,
+                  "align_len": 46,
+                  "gaps": 2,
+                  "qseq": "CKDCLQDKIDLLFFPCRHWG-CGNCTLP-IHCLDCNIEITAYTKPF",
+                  "hseq": "CKICLNSCVKTVTLPCRHMSCCGNCIVTQTKCPICRKKIKYTLEPY",
+                  "midline": "CK CL   +  +  PCRH   CGNC +    C  C  +I    +P+"
+                }
+              ]
+            },
+            {
+              "num": 5,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|29",
+                  "accession": "29",
+                  "title": "BDT61959.1 baculoviral IAP repeat-containing protein [Penaeus monodon majanivirus A]"
+                }
+              ],
+              "len": 261,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 50.8322,
+                  "score": 120,
+                  "evalue": 2.47363e-07,
+                  "identity": 43,
+                  "positive": 69,
+                  "query_from": 159,
+                  "query_to": 309,
+                  "hit_from": 119,
+                  "hit_to": 254,
+                  "align_len": 154,
+                  "gaps": 21,
+                  "qseq": "YGSYEKRLDSF--IKNGWSNINLNQDPKDMAEAGFVFEYQDNDEVWCFYCQRTIYKWDSKCDPWYEHAKHVPYCRYVCTIKSPDFVKQVQQETTCGTFIVHEYELDKLMELSIIQHAILYFKP-HFVRKVLKKRIEKKAEPFFSVQKCINAVKE",
+                  "hseq": "YKTPKKRFLSFTNFPNRYCNVN------RMAESGFYFT-GELDAVRCFSCQIDIYGWQHNDDPISVHAQWSPDCEYIQAIVDDNFIDSVRDK-----------RYDTLIDPNVYQTLKDCGIPDYIIRHAHRKHIIQSGELFTDAVQCLSVIEK",
+                  "midline": "Y + +KR  SF    N + N+N       MAE+GF F   + D V CF CQ  IY W    DP   HA+  P C Y+  I   +F+  V+ +             D L++ ++ Q       P + +R   +K I +  E F    +C++ +++"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 35,
+            "db_len": 14391,
+            "hsp_len": 57,
+            "eff_space": 500000000,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          }
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/bslice"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_12",
+          "query_title": "BDT62557.1 baculoviral IAP repeat-containing protein [Metapenaeus ensis majanivirus]",
+          "query_len": 438,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|34",
+                  "accession": "34",
+                  "title": "BDT61964.1 baculoviral IAP repeat-containing protein [Penaeus monodon majanivirus A]"
+                }
+              ],
+              "len": 719,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 83.9593,
+                  "score": 206,
+                  "evalue": 2.6811e-17,
+                  "identity": 40,
+                  "positive": 66,
+                  "query_from": 252,
+                  "query_to": 370,
+                  "hit_from": 243,
+                  "hit_to": 363,
+                  "align_len": 121,
+                  "gaps": 2,
+                  "qseq": "HVDPIHEKFVSQEERLNSLSKWP-GNQNVVAKVAEAGFFYTGKQDLVTCFYCDGSIYNWNKYSDPWYEHAAHFPHCFHILITKGNEYINRV-LQLSYIRKLECLKYTSEQIYNEIVNVLLN",
+                  "hseq": "YAGPLHDYYKTTQSRLESFLNWPHRHRQKIEALVEAGFYYLGISDHVQCFHCGACLRNWEEDDDPWRVHAEWYPECYYVQLKKGKEFIDKVRLEVSRIPMWRHSSSTSQDTSEHDWNILLG",
+                  "midline": "+  P+H+ + + + RL S   WP  ++  +  + EAGF+Y G  D V CF+C   + NW +  DPW  HA  +P C+++ + KG E+I++V L++S I        TS+       N+LL "
+                },
+                {
+                  "num": 2,
+                  "bit_score": 70.0922,
+                  "score": 170,
+                  "evalue": 3.65503e-13,
+                  "identity": 36,
+                  "positive": 50,
+                  "query_from": 35,
+                  "query_to": 131,
+                  "hit_from": 246,
+                  "hit_to": 333,
+                  "align_len": 98,
+                  "gaps": 11,
+                  "qseq": "PMYENIVGQDRRLLTFYLFKWPKR-TNVIEGYSKLTPLEMANAGFFYTGLTDKVVCFYCGGSISNWERAYDPWYEHAVNFPYCFYVAIHKGYTYIKSV",
+                  "hseq": "PLHDYYKTTQSRLESF--LNWPHRHRQKIEA--------LVEAGFYYLGISDHVQCFHCGACLRNWEEDDDPWRVHAEWYPECYYVQLKKGKEFIDKV",
+                  "midline": "P+++       RL +F    WP R    IE         +  AGF+Y G++D V CF+CG  + NWE   DPW  HA  +P C+YV + KG  +I  V"
+                },
+                {
+                  "num": 3,
+                  "bit_score": 31.5722,
+                  "score": 70,
+                  "evalue": 0.161914,
+                  "identity": 18,
+                  "positive": 22,
+                  "query_from": 265,
+                  "query_to": 302,
+                  "hit_from": 126,
+                  "hit_to": 163,
+                  "align_len": 39,
+                  "gaps": 2,
+                  "qseq": "ERLNSLSKWPGNQNVVAK-VAEAGFFYTGKQDLVTCFYC",
+                  "hseq": "KRLETFIDWP-NKVVQAKDLAAAGFFYTRDTTCCICFSC",
+                  "midline": "+RL +   WP N+ V AK +A AGFFYT       CF C"
+                },
+                {
+                  "num": 4,
+                  "bit_score": 28.8758,
+                  "score": 63,
+                  "evalue": 0.895636,
+                  "identity": 17,
+                  "positive": 23,
+                  "query_from": 45,
+                  "query_to": 92,
+                  "hit_from": 126,
+                  "hit_to": 163,
+                  "align_len": 48,
+                  "gaps": 10,
+                  "qseq": "RRLLTFYLFKWPKRTNVIEGYSKLTPLEMANAGFFYTGLTDKVVCFYC",
+                  "hseq": "KRLETF--IDWPNKV--------VQAKDLAAAGFFYTRDTTCCICFSC",
+                  "midline": "+RL TF    WP +         +   ++A AGFFYT  T   +CF C"
+                }
+              ]
+            },
+            {
+              "num": 2,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|32",
+                  "accession": "32",
+                  "title": "BDT61962.1 baculoviral IAP repeat-containing protein [Penaeus monodon majanivirus A]"
+                }
+              ],
+              "len": 577,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 82.0333,
+                  "score": 201,
+                  "evalue": 1.01035e-16,
+                  "identity": 41,
+                  "positive": 52,
+                  "query_from": 247,
+                  "query_to": 343,
+                  "hit_from": 174,
+                  "hit_to": 271,
+                  "align_len": 98,
+                  "gaps": 1,
+                  "qseq": "TKLKRHVDPIHEKFVSQEERLNS-LSKWPGNQNVVAKVAEAGFFYTGKQDLVTCFYCDGSIYNWNKYSDPWYEHAAHFPHCFHILITKGNEYINRVLQ",
+                  "hseq": "TGLYQHSGPKRSDFTTLDSRLKSYVEGWPILGLHARDLAEAGFFYCGLSDHVRCFHCGKGLRNWISSDIPWKEHARWYPKCRFVLLTKGQDYINEVQQ",
+                  "midline": "T L +H  P    F + + RL S +  WP        +AEAGFFY G  D V CF+C   + NW     PW EHA  +P C  +L+TKG +YIN V Q"
+                },
+                {
+                  "num": 2,
+                  "bit_score": 72.0182,
+                  "score": 175,
+                  "evalue": 9.94494e-14,
+                  "identity": 40,
+                  "positive": 53,
+                  "query_from": 33,
+                  "query_to": 133,
+                  "hit_from": 180,
+                  "hit_to": 271,
+                  "align_len": 101,
+                  "gaps": 9,
+                  "qseq": "TTPMYENIVGQDRRLLTFYLFKWPKRTNVIEGYSKLTPLEMANAGFFYTGLTDKVVCFYCGGSISNWERAYDPWYEHAVNFPYCFYVAIHKGYTYIKSVLQ",
+                  "hseq": "SGPKRSDFTTLDSRLKS-YVEGWP-----ILG---LHARDLAEAGFFYCGLSDHVRCFHCGKGLRNWISSDIPWKEHARWYPKCRFVLLTKGQDYINEVQQ",
+                  "midline": "+ P   +    D RL + Y+  WP     I G   L   ++A AGFFY GL+D V CF+CG  + NW  +  PW EHA  +P C +V + KG  YI  V Q"
+                },
+                {
+                  "num": 3,
+                  "bit_score": 57.3806,
+                  "score": 137,
+                  "evalue": 2.84895e-09,
+                  "identity": 24,
+                  "positive": 33,
+                  "query_from": 263,
+                  "query_to": 326,
+                  "hit_from": 48,
+                  "hit_to": 111,
+                  "align_len": 64,
+                  "gaps": 0,
+                  "qseq": "QEERLNSLSKWPGNQNVVAKVAEAGFFYTGKQDLVTCFYCDGSIYNWNKYSDPWYEHAAHFPHC",
+                  "hseq": "EEKRLGTFIDWPHEWLKPSELAADGFYYLRKDDHCACIFCRGIVGAWEKTDTPRGEHERHFPHC",
+                  "midline": "+E+RL +   WP      +++A  GF+Y  K D   C +C G +  W K   P  EH  HFPHC"
+                },
+                {
+                  "num": 4,
+                  "bit_score": 55.4546,
+                  "score": 132,
+                  "evalue": 9.39434e-09,
+                  "identity": 21,
+                  "positive": 35,
+                  "query_from": 385,
+                  "query_to": 437,
+                  "hit_from": 526,
+                  "hit_to": 576,
+                  "align_len": 53,
+                  "gaps": 2,
+                  "qseq": "DDKTMKCKICFKNNVEIVLQPCTHMVTCTKCTINLKKCPTCNQTIHIIQKPII",
+                  "hseq": "EDRT--CKVCMDSEIAIVFLPCSHMVTCVSCAVSLRQCPICRRDIKHVCRAIV",
+                  "midline": "+D+T  CK+C  + + IV  PC+HMVTC  C ++L++CP C + I  + + I+"
+                },
+                {
+                  "num": 5,
+                  "bit_score": 51.9878,
+                  "score": 123,
+                  "evalue": 1.13851e-07,
+                  "identity": 26,
+                  "positive": 41,
+                  "query_from": 37,
+                  "query_to": 119,
+                  "hit_from": 42,
+                  "hit_to": 114,
+                  "align_len": 83,
+                  "gaps": 10,
+                  "qseq": "YENIVGQDRRLLTFYLFKWPKRTNVIEGYSKLTPLEMANAGFFYTGLTDKVVCFYCGGSISNWERAYDPWYEHAVNFPYCFYV",
+                  "hseq": "YDCLRYEEKRLGTF--IDWP--------HEWLKPSELAADGFYYLRKDDHCACIFCRGIVGAWEKTDTPRGEHERHFPHCPFI",
+                  "midline": "Y+ +  +++RL TF    WP        +  L P E+A  GF+Y    D   C +C G +  WE+   P  EH  +FP+C ++"
+                },
+                {
+                  "num": 6,
+                  "bit_score": 41.9726,
+                  "score": 97,
+                  "evalue": 0.000104828,
+                  "identity": 14,
+                  "positive": 21,
+                  "query_from": 221,
+                  "query_to": 251,
+                  "hit_from": 530,
+                  "hit_to": 560,
+                  "align_len": 31,
+                  "gaps": 0,
+                  "qseq": "CKICFENNIAFIFSPCYHMVACMQCITKLKR",
+                  "hseq": "CKVCMDSEIAIVFLPCSHMVTCVSCAVSLRQ",
+                  "midline": "CK+C ++ IA +F PC HMV C+ C   L++"
+                }
+              ]
+            },
+            {
+              "num": 3,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|33",
+                  "accession": "33",
+                  "title": "BDT61963.1 baculoviral IAP repeat-containing protein [Penaeus monodon majanivirus A]"
+                }
+              ],
+              "len": 728,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 75.0998,
+                  "score": 183,
+                  "evalue": 1.34254e-14,
+                  "identity": 90,
+                  "positive": 141,
+                  "query_from": 43,
+                  "query_to": 423,
+                  "hit_from": 109,
+                  "hit_to": 413,
+                  "align_len": 382,
+                  "gaps": 78,
+                  "qseq": "QDRRLLTFYLFKWPKRTNVIEGYSKLTPLEMANAGFFYTGLTDKVVCFYCGGSISNWERAYDPWYEHAVNFPYCFYVAIHKGYTYIKSVLQLDFLRKQMVLKKKTAKEIVDLFKSELENNHISYMPFIPTSQNDDDKLTCLANLHHEMINKHDLPLSKFLLKTNENDTKIDDNSSNIKCKICFENNIAFIFSPCYHMVACMQCITKLKRHVDPIHEKFVSQEERLNSLSKWP-GNQNVVAKVAEAGFFYTGKQDLVTCFYCDGSIYNWNKYSDPWYEHAAHFPHCFHILITKGNEYINRVLQLSYIRKLECLKYTSEQIYNEIVNVLLNDLTSHIPHYTDDKDDDKTMKCKICFKNNVEIVLQPCTHMVTCTKCTINLKKCP",
+                  "hseq": "ETKRLETF--IDWPL-GEVIEAR------DLAAAGFFYSRRNVECICFCCKVRIS-----FKPCTRHGC-------CARHASTSQYITEKHLNSAYCDFAMEKVTGNVPIRI------NKIISKI--IGHQETDNEKNSCGNNEGRSRGASGEEDGGDS--RESENDSSSRISAGNILSEMGIES------------------------YSGPEHENFVTPISRKYTYDDWPLGDIMLPKKLIAAGFFYSGYGDHVNCFHCGVGIRNWEKGDDPWTQHAMWNPECHYVRTLMGQTFIDTA--------------------KTVKNVLFRKPTRERTYSVTDEDWNAVMGLDI--TKDLLISLFPVAAVRDCVREQILVHKIP",
+                  "midline": "+ +RL TF    WP    VIE        ++A AGFFY+    + +CF C   IS     + P   H          A H   +   +   L+       ++K T    + +      N  IS +  I   + D++K +C  N         +        + +END+    ++ NI  ++  E+                        +  P HE FV+   R  +   WP G+  +  K+  AGFFY+G  D V CF+C   I NW K  DPW +HA   P C ++    G  +I+                        + NVL    T    +   D+D +  M   I    ++ I L P   +  C +  I + K P"
+                },
+                {
+                  "num": 2,
+                  "bit_score": 69.707,
+                  "score": 169,
+                  "evalue": 4.93562e-13,
+                  "identity": 40,
+                  "positive": 59,
+                  "query_from": 33,
+                  "query_to": 150,
+                  "hit_from": 264,
+                  "hit_to": 368,
+                  "align_len": 118,
+                  "gaps": 13,
+                  "qseq": "TTPMYENIVGQDRRLLTFYLFKWPKRTNVIEGYSKLTPLEMANAGFFYTGLTDKVVCFYCGGSISNWERAYDPWYEHAVNFPYCFYVAIHKGYTYIKSVLQLDFLRKQMVLKKKTAKE",
+                  "hseq": "SGPEHENFVTPISRKYTYD--DWPLGDIML-------PKKLIAAGFFYSGYGDHVNCFHCGVGIRNWEKGDDPWTQHAMWNPECHYVRTLMGQTFIDTAKTV----KNVLFRKPTRER",
+                  "midline": "+ P +EN V    R  T+    WP    ++       P ++  AGFFY+G  D V CF+CG  I NWE+  DPW +HA+  P C YV    G T+I +   +    K ++ +K T + "
+                },
+                {
+                  "num": 3,
+                  "bit_score": 43.8986,
+                  "score": 102,
+                  "evalue": 3.45567e-05,
+                  "identity": 22,
+                  "positive": 30,
+                  "query_from": 373,
+                  "query_to": 435,
+                  "hit_from": 665,
+                  "hit_to": 726,
+                  "align_len": 63,
+                  "gaps": 1,
+                  "qseq": "TSHIPHYTDDKDDDKTMKCKICFKNNVEIVLQPCTHMVTCTKCTINLKKCPTCNQTIHIIQKP",
+                  "hseq": "SSEIKEAPDSVIGDRYL-CKICLNSCVKTVTLPCRHMSCCGNCIVTQTKCPICRKKIKYTLEP",
+                  "midline": "+S I    D    D+ + CKIC  + V+ V  PC HM  C  C +   KCP C + I    +P"
+                },
+                {
+                  "num": 4,
+                  "bit_score": 29.261,
+                  "score": 64,
+                  "evalue": 0.783706,
+                  "identity": 11,
+                  "positive": 14,
+                  "query_from": 221,
+                  "query_to": 246,
+                  "hit_from": 682,
+                  "hit_to": 707,
+                  "align_len": 26,
+                  "gaps": 0,
+                  "qseq": "CKICFENNIAFIFSPCYHMVACMQCI",
+                  "hseq": "CKICLNSCVKTVTLPCRHMSCCGNCI",
+                  "midline": "CKIC  + +  +  PC HM  C  CI"
+                }
+              ]
+            },
+            {
+              "num": 4,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|9",
+                  "accession": "9",
+                  "title": "BDT61876.1 baculoviral IAP repeat-containing protein [Penaeus monodon majanivirus A]"
+                }
+              ],
+              "len": 181,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 70.8626,
+                  "score": 172,
+                  "evalue": 2.2155e-13,
+                  "identity": 33,
+                  "positive": 49,
+                  "query_from": 254,
+                  "query_to": 340,
+                  "hit_from": 77,
+                  "hit_to": 164,
+                  "align_len": 88,
+                  "gaps": 1,
+                  "qseq": "DPIHEKFVSQEERLNSLSKWPG-NQNVVAKVAEAGFFYTGKQDLVTCFYCDGSIYNWNKYSDPWYEHAAHFPHCFHILITKGNEYINR",
+                  "hseq": "NPIHQEYVMHQRRLETFRWWPKETAQSPHKLAEAGFVSSGLGDTVYCFHCGVYLEQWEKNDMPWKEHAKWSPRCRYVKMVKGDKFIIR",
+                  "midline": "+PIH+++V  + RL +   WP        K+AEAGF  +G  D V CF+C   +  W K   PW EHA   P C ++ + KG+++I R"
+                },
+                {
+                  "num": 2,
+                  "bit_score": 69.3218,
+                  "score": 168,
+                  "evalue": 6.44612e-13,
+                  "identity": 40,
+                  "positive": 52,
+                  "query_from": 35,
+                  "query_to": 135,
+                  "hit_from": 78,
+                  "hit_to": 169,
+                  "align_len": 101,
+                  "gaps": 9,
+                  "qseq": "PMYENIVGQDRRLLTFYLFKWPKRTNVIEGYSKLTPLEMANAGFFYTGLTDKVVCFYCGGSISNWERAYDPWYEHAVNFPYCFYVAIHKGYTYIKSVLQLD",
+                  "hseq": "PIHQEYVMHQRRLETFRW--WPKET-------AQSPHKLAEAGFVSSGLGDTVYCFHCGVYLEQWEKNDMPWKEHAKWSPRCRYVKMVKGDKFIIRWGPLD",
+                  "midline": "P+++  V   RRL TF    WPK T         +P ++A AGF  +GL D V CF+CG  +  WE+   PW EHA   P C YV + KG  +I     LD"
+                }
+              ]
+            },
+            {
+              "num": 5,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|29",
+                  "accession": "29",
+                  "title": "BDT61959.1 baculoviral IAP repeat-containing protein [Penaeus monodon majanivirus A]"
+                }
+              ],
+              "len": 261,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 58.151,
+                  "score": 139,
+                  "evalue": 1.61539e-09,
+                  "identity": 30,
+                  "positive": 47,
+                  "query_from": 250,
+                  "query_to": 346,
+                  "hit_from": 109,
+                  "hit_to": 205,
+                  "align_len": 97,
+                  "gaps": 0,
+                  "qseq": "KRHVDPIHEKFVSQEERLNSLSKWPGNQNVVAKVAEAGFFYTGKQDLVTCFYCDGSIYNWNKYSDPWYEHAAHFPHCFHILITKGNEYINRVLQLSY",
+                  "hseq": "KRYAKRTRTLYKTPKKRFLSFTNFPNRYCNVNRMAESGFYFTGELDAVRCFSCQIDIYGWQHNDDPISVHAQWSPDCEYIQAIVDDNFIDSVRDKRY",
+                  "midline": "KR+       + + ++R  S + +P     V ++AE+GF++TG+ D V CF C   IY W    DP   HA   P C +I     + +I+ V    Y"
+                },
+                {
+                  "num": 2,
+                  "bit_score": 43.5134,
+                  "score": 101,
+                  "evalue": 3.66352e-05,
+                  "identity": 30,
+                  "positive": 39,
+                  "query_from": 52,
+                  "query_to": 131,
+                  "hit_from": 118,
+                  "hit_to": 200,
+                  "align_len": 85,
+                  "gaps": 7,
+                  "qseq": "LFKWPKR-----TNVIEGYSKLTPLEMANAGFFYTGLTDKVVCFYCGGSISNWERAYDPWYEHAVNFPYCFYVAIHKGYTYIKSV",
+                  "hseq": "LYKTPKKRFLSFTNFPNRYCNVN--RMAESGFYFTGELDAVRCFSCQIDIYGWQHNDDPISVHAQWSPDCEYIQAIVDDNFIDSV",
+                  "midline": "L+K PK+     TN    Y  +    MA +GF++TG  D V CF C   I  W+   DP   HA   P C Y+       +I SV"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 35,
+            "db_len": 14391,
+            "hsp_len": 56,
+            "eff_space": 500000000,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          }
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/bslice"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_13",
+          "query_title": "BDT62560.1 hypothetical protein [Metapenaeus ensis majanivirus]",
+          "query_len": 343,
+          "hits": [
+          ],
+          "stat": {
+            "db_num": 35,
+            "db_len": 14391,
+            "hsp_len": 54,
+            "eff_space": 500000000,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          },
+          "message": "No hits found"
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/bslice"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_14",
+          "query_title": "BDT62561.1 hypothetical protein [Metapenaeus ensis majanivirus]",
+          "query_len": 329,
+          "hits": [
+          ],
+          "stat": {
+            "db_num": 35,
+            "db_len": 14391,
+            "hsp_len": 54,
+            "eff_space": 500000000,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          },
+          "message": "No hits found"
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/bslice"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_15",
+          "query_title": "BDT62562.1 wsv306-like protein [Metapenaeus ensis majanivirus]",
+          "query_len": 408,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|23",
+                  "accession": "23",
+                  "title": "BDT61939.1 wsv306-like protein [Penaeus monodon majanivirus A]"
+                }
+              ],
+              "len": 426,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 402.134,
+                  "score": 1032,
+                  "evalue": 4.44773e-113,
+                  "identity": 203,
+                  "positive": 266,
+                  "query_from": 27,
+                  "query_to": 408,
+                  "hit_from": 5,
+                  "hit_to": 425,
+                  "align_len": 423,
+                  "gaps": 43,
+                  "qseq": "HYKPNCATVNIFCTSDKDCHLQCSSAVHYANSHDTGIDKEQQDSSTIIINLCNLLTNQCEPNMIQKGYYDMAINDLKKLSQMEKFLPKAMWDYIKINDGKRFIVARARFYENLSFHLKEGTLLDAAIQRIINEHKKNNKRNYSNKLQQIN----IVDDD----------------------NDNISMDLYVKQLFGRTAKPSSSQDIILTRDLEHDKKRGEYCTLI-------------ATNTAAAAATAATIKSPSKPNDKIVAFNNQYPLQFHCNEEMNAGIMMAAYQDNDGNILPICVCTYPYYLTGPTCKHRTYNRVVDYELWEKTGYADFLTDPFNDYKKANRICKSKTINTTAVFDERDGCFYCQPLAAHFAQSLQMRGPYEPALILDKDYIDSLNVN--QSFKINIDYLDLLNKFY",
+                  "hseq": "HIKPNCSAVDIFCTDDRDCHVQCGSSALSVSSHT--IIPEKDDYSVVTIYLCNKSTKRCEPNTVLKGFYDMAMHDLKGLLKRKSTLSRGLHSYLQMYDGKYFILARARFYESLSLHLHDNENLEMAIRNIRSEHQRKRRTYLYEKIKYLEHEGAVTDKDEVKKMMDWLSTPALTSQNPIAENTTITMDVYKQQLFGHRMPHPPRDTTVLTRAEEYDDRRGEYVQNVTAVLPRQHDRHRRGEHLLKPTTTTTTLERHEELSSNLQTKSPSRELQFHCNEEMGAGIMMAAFRDGDGIILPVCICTHPLYLTGPTCKHRTYDSVIDYELWEKSGIPEFLTDPFNDYTKANDICKRTTLNTTAVFDEREGVFRCQPLAAHIGQSLQFRGPYEPALILDRDYIDTFNANHQQGFKINVDYIDLLGKFW",
+                  "midline": "H KPNC+ V+IFCT D+DCH+QC S+    +SH   I  E+ D S + I LCN  T +CEPN + KG+YDMA++DLK L + +  L + +  Y+++ DGK FI+ARARFYE+LS HL +   L+ AI+ I +EH++  +     K++ +     + D D                      N  I+MD+Y +QLFG           +LTR  E+D +RGEY   +               +      T  T++   + +  +   +    LQFHCNEEM AGIMMAA++D DG ILP+C+CT+P YLTGPTCKHRTY+ V+DYELWEK+G  +FLTDPFNDY KAN ICK  T+NTTAVFDER+G F CQPLAAH  QSLQ RGPYEPALILD+DYID+ N N  Q FKIN+DY+DLL KF+"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 35,
+            "db_len": 14391,
+            "hsp_len": 56,
+            "eff_space": 500000000,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          }
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/bslice"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_16",
+          "query_title": "BDT62564.1 wsv310-like protein [Metapenaeus ensis majanivirus]",
+          "query_len": 371,
+          "hits": [
+          ],
+          "stat": {
+            "db_num": 35,
+            "db_len": 14391,
+            "hsp_len": 55,
+            "eff_space": 500000000,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          },
+          "message": "No hits found"
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/bslice"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_17",
+          "query_title": "BDT62569.1 wsv282-like protein [Metapenaeus ensis majanivirus]",
+          "query_len": 480,
+          "hits": [
+          ],
+          "stat": {
+            "db_num": 35,
+            "db_len": 14391,
+            "hsp_len": 57,
+            "eff_space": 500000000,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          },
+          "message": "No hits found"
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/bslice"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_18",
+          "query_title": "BDT62575.1 wsv137-like protein [Metapenaeus ensis majanivirus]",
+          "query_len": 421,
+          "hits": [
+          ],
+          "stat": {
+            "db_num": 35,
+            "db_len": 14391,
+            "hsp_len": 56,
+            "eff_space": 500000000,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          },
+          "message": "No hits found"
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/bslice"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_19",
+          "query_title": "BDT62587.1 hypothetical protein [Metapenaeus ensis majanivirus]",
+          "query_len": 282,
+          "hits": [
+          ],
+          "stat": {
+            "db_num": 35,
+            "db_len": 14391,
+            "hsp_len": 53,
+            "eff_space": 500000000,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          },
+          "message": "No hits found"
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/bslice"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_20",
+          "query_title": "BDT62588.1 wsv267-like protein [Metapenaeus ensis majanivirus]",
+          "query_len": 320,
+          "hits": [
+          ],
+          "stat": {
+            "db_num": 35,
+            "db_len": 14391,
+            "hsp_len": 54,
+            "eff_space": 500000000,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          },
+          "message": "No hits found"
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/bslice"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_21",
+          "query_title": "BDT62589.1 hypothetical protein [Metapenaeus ensis majanivirus]",
+          "query_len": 292,
+          "hits": [
+          ],
+          "stat": {
+            "db_num": 35,
+            "db_len": 14391,
+            "hsp_len": 53,
+            "eff_space": 500000000,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          },
+          "message": "No hits found"
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/bslice"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_22",
+          "query_title": "BDT62590.1 hypothetical protein [Metapenaeus ensis majanivirus]",
+          "query_len": 324,
+          "hits": [
+          ],
+          "stat": {
+            "db_num": 35,
+            "db_len": 14391,
+            "hsp_len": 54,
+            "eff_space": 500000000,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          },
+          "message": "No hits found"
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/bslice"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_23",
+          "query_title": "BDT62593.1 SARAF-like protein [Metapenaeus ensis majanivirus]",
+          "query_len": 355,
+          "hits": [
+          ],
+          "stat": {
+            "db_num": 35,
+            "db_len": 14391,
+            "hsp_len": 54,
+            "eff_space": 500000000,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          },
+          "message": "No hits found"
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/bslice"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_24",
+          "query_title": "BDT62596.1 wsv161-like protein [Metapenaeus ensis majanivirus]",
+          "query_len": 430,
+          "hits": [
+          ],
+          "stat": {
+            "db_num": 35,
+            "db_len": 14391,
+            "hsp_len": 56,
+            "eff_space": 500000000,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          },
+          "message": "No hits found"
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/bslice"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_25",
+          "query_title": "BDT62597.1 hypothetical protein [Metapenaeus ensis majanivirus]",
+          "query_len": 339,
+          "hits": [
+          ],
+          "stat": {
+            "db_num": 35,
+            "db_len": 14391,
+            "hsp_len": 54,
+            "eff_space": 500000000,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          },
+          "message": "No hits found"
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/bslice"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_26",
+          "query_title": "BDT62598.1 hypothetical protein [Metapenaeus ensis majanivirus]",
+          "query_len": 335,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|24",
+                  "accession": "24",
+                  "title": "BDT61945.1 hypothetical protein [Penaeus monodon majanivirus A]"
+                }
+              ],
+              "len": 251,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 35.039,
+                  "score": 79,
+                  "evalue": 0.0142825,
+                  "identity": 12,
+                  "positive": 18,
+                  "query_from": 283,
+                  "query_to": 307,
+                  "hit_from": 219,
+                  "hit_to": 243,
+                  "align_len": 25,
+                  "gaps": 0,
+                  "qseq": "QKQNCIHCIYNVFERLVSCFEFIIK",
+                  "hseq": "ERTDCHKCLIHVFNRLVDCFELLIK",
+                  "midline": "++ +C  C+ +VF RLV CFE +IK"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 35,
+            "db_len": 14391,
+            "hsp_len": 54,
+            "eff_space": 500000000,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          }
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/bslice"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_27",
+          "query_title": "BDT62599.1 hypothetical protein [Metapenaeus ensis majanivirus]",
+          "query_len": 424,
+          "hits": [
+          ],
+          "stat": {
+            "db_num": 35,
+            "db_len": 14391,
+            "hsp_len": 56,
+            "eff_space": 500000000,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          },
+          "message": "No hits found"
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/bslice"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_28",
+          "query_title": "BDT62606.1 wsv131-like protein [Metapenaeus ensis majanivirus]",
+          "query_len": 480,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|33",
+                  "accession": "33",
+                  "title": "BDT61963.1 baculoviral IAP repeat-containing protein [Penaeus monodon majanivirus A]"
+                }
+              ],
+              "len": 728,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 28.1054,
+                  "score": 61,
+                  "evalue": 1.89784,
+                  "identity": 11,
+                  "positive": 23,
+                  "query_from": 360,
+                  "query_to": 400,
+                  "hit_from": 206,
+                  "hit_to": 246,
+                  "align_len": 41,
+                  "gaps": 0,
+                  "qseq": "LMKNKKIDNDDNSNGNNNNNDNNNSKNNDNNNNDDNSNNNS",
+                  "hseq": "IIGHQETDNEKNSCGNNEGRSRGASGEEDGGDSRESENDSS",
+                  "midline": "++ +++ DN+ NS GNN       S   D  ++ ++ N++S"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 35,
+            "db_len": 14391,
+            "hsp_len": 57,
+            "eff_space": 500000000,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          }
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/bslice"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_29",
+          "query_title": "BDT62609.1 wsv415-like protein [Metapenaeus ensis majanivirus]",
+          "query_len": 518,
+          "hits": [
+          ],
+          "stat": {
+            "db_num": 35,
+            "db_len": 14391,
+            "hsp_len": 57,
+            "eff_space": 500000000,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          },
+          "message": "No hits found"
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/bslice"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_30",
+          "query_title": "BDT62611.1 hypothetical protein [Metapenaeus ensis majanivirus]",
+          "query_len": 441,
+          "hits": [
+          ],
+          "stat": {
+            "db_num": 35,
+            "db_len": 14391,
+            "hsp_len": 56,
+            "eff_space": 500000000,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          },
+          "message": "No hits found"
+        }
+      }
+    }
+  }
+]
+}

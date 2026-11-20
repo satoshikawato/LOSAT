@@ -1,0 +1,3 @@
+NCBI C++ Exception:
+    T0 "/opt/conda/conda-bld/blast_1787399212531/work/c++/src/objtools/readers/fasta.cpp", line 393: Error: (CObjReaderParseException::eNoDefline) ncbi::objects::CFastaReader::ReadOneSeq() - CFastaReader: Input doesn't start with a defline or comment around line 1 (m_Pos = 1)
+

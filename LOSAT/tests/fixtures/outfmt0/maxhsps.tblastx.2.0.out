@@ -1,0 +1,427 @@
+TBLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/tblastx_multi_subject.fasta).
+           4 sequences; 40,000 total letters
+
+
+
+Query= LC738874_100001_110000 window 100001-110000 of LC738874.1 MAG:
+Melicertus latisulcatus majanivirus Okinawa2016 DNA, complete genome
+
+Length=10000
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value   N
+
+LC738875_120001_130000 window 120001-130000 of LC738875.1 MAG: Me...  225     7e-167  7
+LC738875_270001_280000 window 270001-280000 of LC738875.1 MAG: Me...  25.8    1.5     1
+LC738875_130001_140000 window 130001-140000 of LC738875.1 MAG: Me...  24.9    2.8     1
+LC738875_300001_310000 window 300001-310000 of LC738875.1 MAG: Me...  24.0    5.3     1
+
+
+> LC738875_120001_130000 window 120001-130000 of LC738875.1 MAG: 
+Melicertus latisulcatus pemonivirus Okinawa2016 DNA, complete 
+genome
+Length=10000
+
+ Score = 225 bits (489),  Expect(7) = 7e-167
+ Identities = 90/188 (48%), Positives = 123/188 (65%), Gaps = 0/188 (0%)
+ Frame = +3/+3
+
+Query  8919  SFLGGLMGHVTDTTSVFKNIERFERLSGRLGDVASMLHHQNCNCPFRLHHCSDKTDDESL  9098
+             S L  L  HVTDTTS FKN+ERFERL+GR GD  +M H QNCNCPF LHH    + DE L
+Sbjct  3288  SLLANLNLHVTDTTSFFKNLERFERLTGRHGDTYAMTHQQNCNCPFTLHHDFRPSLDEHL  3467
+
+Query  9099  MPSYIHFEDEIDKNEILKTPYQIHTLLAIKNYVATISRIDPLVGGPSVIRRLKEWSDMGA  9278
+             +PS+ +   E+   ++   PYQ   LL  K+YV  I+++DP + G +++RR+ EWS+MG 
+Sbjct  3468  VPSFAYSRPEVTPEDVRSRPYQAQNLLNDKHYVMAITKVDPTITGAAILRRVSEWSEMGV  3647
+
+Query  9279  GTKYIGSFISDRKTIEDSPFRVAGSNLDVIVRPAAARGILGILKCHRQHFCTADLKLTTA  9458
+             G++Y+G+    R T+  S F+ +G N+D+IVRP  ARG+LGIL CHR+H C    KL   
+Sbjct  3648  GSRYVGTHEPTRATLAASTFKTSGVNIDIIVRPDNARGVLGILGCHRRHVCALTAKLCAT  3827
+
+Query  9459  SEQFSSLR  9482
+             +   S+ R
+Sbjct  3828  TSVPSAFR  3851
+
+
+ Score = 152 bits (328),  Expect(7) = 7e-167
+ Identities = 63/130 (48%), Positives = 92/130 (71%), Gaps = 0/130 (0%)
+ Frame = +3/+3
+
+Query  6780  ISSLLGLNDSINKGCNIVNPGTVLVPSAELFNCPGLANDKFRAIVNRCHDPTLSHALKTS  6959
+             ++ L  +N ++    ++V P TV++P++ELF+CPGLA DKFR++  R  DP +++A K +
+Sbjct  912   VTCLTPVNTAMGSIPSVVWPNTVILPTSELFDCPGLAYDKFRSMACRSWDPVVANAAKEA  1091
+
+Query  6960  HSITNALASISPNAEKLYFVSKDERRFFNSIVNAILTGMDPVATSLLNTSCDQTLVEISN  7139
+              SI   LA  +P AE LYF SKDERRFFNS+ + IL GM P A+S+ NT+CDQ++     
+Sbjct  1092  RSIVATLARTAPAAEALYFPSKDERRFFNSVCDGILKGMGPKASSVFNTTCDQSVARRDP  1271
+
+Query  7140  MSGLPIFVGR  7169
+             ++GLP+FVGR
+Sbjct  1272  VTGLPVFVGR  1301
+
+
+> LC738875_270001_280000 window 270001-280000 of LC738875.1 MAG: 
+Melicertus latisulcatus pemonivirus Okinawa2016 DNA, complete 
+genome
+Length=10000
+
+ Score = 25.8 bits (50),  Expect = 1.5
+ Identities = 11/31 (35%), Positives = 17/31 (55%), Gaps = 0/31 (0%)
+ Frame = -2/-3
+
+Query  792  IILYLFC*LELYNHLLLFSFFSALVH*YCIY  700
+            I LY FC*  ++ +L+    +  +  * CIY
+Sbjct  905  IFLYFFC*WSIHYNLMTDMHYLTIFL*RCIY  813
+
+
+ Score = 24.4 bits (47),  Expect = 3.8
+ Identities = 9/29 (31%), Positives = 14/29 (48%), Gaps = 0/29 (0%)
+ Frame = -2/-1
+
+Query  3195  Y*STQLIFLVHLYYSFFYKMPYLSSFYGY  3109
+             Y  + + F  H YY ++Y   Y   +Y Y
+Sbjct  2626  YARSTITFY*HYYYYYYYHYYYYYYYYYY  2540
+
+
+> LC738875_130001_140000 window 130001-140000 of LC738875.1 MAG: 
+Melicertus latisulcatus pemonivirus Okinawa2016 DNA, complete 
+genome
+Length=10000
+
+ Score = 24.9 bits (48),  Expect = 2.8
+ Identities = 9/23 (39%), Positives = 13/23 (57%), Gaps = 0/23 (0%)
+ Frame = +2/+3
+
+Query  6428  RPPTHGNSRYGRDHFIVTGYAGP  6496
+             R   HGNS +   + ++ GYA P
+Sbjct  9882  RVSVHGNSEHAGRNALLAGYAEP  9950
+
+
+ Score = 23.5 bits (45),  Expect = 7.2
+ Identities = 8/14 (57%), Positives = 8/14 (57%), Gaps = 0/14 (0%)
+ Frame = +2/+2
+
+Query  2942  TSGRKWSRWWCRCC  2983
+             TS   WSR  C CC
+Sbjct  2060  TSSLLWSRCCCCCC  2101
+
+
+> LC738875_300001_310000 window 300001-310000 of LC738875.1 MAG: 
+Melicertus latisulcatus pemonivirus Okinawa2016 DNA, complete 
+genome
+Length=10000
+
+ Score = 24.0 bits (46),  Expect = 5.3
+ Identities = 9/13 (69%), Positives = 10/13 (77%), Gaps = 0/13 (0%)
+ Frame = +2/-1
+
+Query  4979  *SHHLCCYQNKK*  5017
+             *S + CCY NKK*
+Sbjct  271   *SKYFCCYLNKK*  233
+
+
+ Score = 23.4 bits (45),  Expect = 7.6
+ Identities = 10/25 (40%), Positives = 14/25 (56%), Gaps = 0/25 (0%)
+ Frame = +3/+3
+
+Query  7038  FFNSIVNAILTGMDPVATSLLNTSC  7112
+             FFN+       G+D  ++S LNT C
+Sbjct  4092  FFNAFSYLYCHGIDMHSSSYLNTLC  4166
+
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 43510514
+
+
+Query= AvCLPV_120001_120300 window 120001-120300 of LC738883.1 MAG:
+Armadillidium vulgare clopovirus TUMSAT20210906 DNA, complete genome
+
+Length=300
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 978946
+
+
+Query= LC738874_120001_130000 window 120001-130000 of LC738874.1 MAG:
+Melicertus latisulcatus majanivirus Okinawa2016 DNA, complete genome
+
+Length=10000
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value   N
+
+LC738875_300001_310000 window 300001-310000 of LC738875.1 MAG: Me...  123     1e-129  10
+LC738875_130001_140000 window 130001-140000 of LC738875.1 MAG: Me...  171     1e-68   4 
+LC738875_270001_280000 window 270001-280000 of LC738875.1 MAG: Me...  26.3    1.1     1 
+LC738875_120001_130000 window 120001-130000 of LC738875.1 MAG: Me...  25.8    1.5     1 
+
+
+> LC738875_300001_310000 window 300001-310000 of LC738875.1 MAG: 
+Melicertus latisulcatus pemonivirus Okinawa2016 DNA, complete 
+genome
+Length=10000
+
+ Score = 123 bits (263),  Expect(10) = 1e-129
+ Identities = 50/116 (43%), Positives = 71/116 (61%), Gaps = 0/116 (0%)
+ Frame = +3/+3
+
+Query  7437  LSQRKSLAELHCKKNIKTKTHLGRVTATSWVVCALKKISNGDPDIFLKLLEDVGVYHLSH  7616
+             L+ RK LA +H   N++T+THLGRVTATSW V A++ +S+GD  +F +L  DV  YHL+H
+Sbjct  5568  LTDRKGLAAIHATTNVRTRTHLGRVTATSWAVDAIRTVSSGDSALFTRLAVDVDTYHLAH  5747
+
+Query  7617  MNPANTYVYFSDNCLSNEDQMGLKGYIDRMKNTDGQLVLHESAKKELTRGTFHSTN  7784
+              N AN + Y+S NC SN+ + GL GYI R      +  +       L+R    +T+
+Sbjct  5748  TNSANFFPYYSSNCNSNDSENGLWGYIRRTSEKTAKAEIERGRFANLSRAGVANTD  5915
+
+
+ Score = 116 bits (249),  Expect(10) = 1e-129
+ Identities = 40/82 (49%), Positives = 62/82 (76%), Gaps = 0/82 (0%)
+ Frame = +3/+3
+
+Query  5787  LISVHTDVLSDTSTEIYRQKFRRYCIFSFCIYLLNAPLHAQYLSPLPYNYFNFYSYLFAH  5966
+             L S     +++++  +YR+KFRRYC+F F +YLLN  LH ++ SPLP+N+FN +SYL+ H
+Sbjct  3945  LASTRECAITESTLTVYRRKFRRYCLFCFSLYLLNRGLHPEHTSPLPFNFFNAFSYLYCH  4124
+
+Query  5967  GPELKTTSFLNTMCFLNNNIFK  6032
+             G ++ ++S+LNT+CFL N IF+
+Sbjct  4125  GIDMHSSSYLNTLCFLQNRIFR  4190
+
+
+> LC738875_130001_140000 window 130001-140000 of LC738875.1 MAG: 
+Melicertus latisulcatus pemonivirus Okinawa2016 DNA, complete 
+genome
+Length=10000
+
+ Score = 171 bits (368),  Expect(4) = 1e-68
+ Identities = 71/129 (55%), Positives = 90/129 (70%), Gaps = 0/129 (0%)
+ Frame = +1/+3
+
+Query  9148  IAYTHVPDSFPGLFFKVLVPIRHLKKGETIGGYYTQAAKEREAGNGDAVKKYFRGKTVLI  9327
+             IA+ + P++FPG+FFKV VP   L+KGETIG YYT+AA  RE  +   V   FR KTVL+
+Sbjct  4989  IAFNYNPETFPGMFFKVRVPSLPLEKGETIGEYYTRAALSREEKDRRNVSSLFRFKTVLV  5168
+
+Query  9328  FQVGKCTILGACGGDDIHVIFKMLFGFFWYFIDKSVHLTDDEFENGKCTYHLPPLSWYLM  9507
+             F+VGKCT+LG CGGDD+ VI K+LFGFF+YF+D  + L+  E       Y +PPL WYL 
+Sbjct  5169  FKVGKCTVLGECGGDDMSVISKLLFGFFFYFMDHHIKLSVSEAMRMIDKYGIPPLEWYLF  5348
+
+Query  9508  TDFFLRTVP  9534
+             +DFF  T P
+Sbjct  5349  SDFFFYTHP  5375
+
+
+ Score = 64.8 bits (135),  Expect(4) = 1e-68
+ Identities = 26/53 (49%), Positives = 40/53 (75%), Gaps = 0/53 (0%)
+ Frame = +1/+3
+
+Query  8932  SILIFSMGSVIIVGLRKLGLTPLSVLQAVSAIADTQEHPITIANVEIVNVVST  9090
+             SIL+F+ G++I+VGL+   LT L V++++S+I DT E+P+ +  V IVN VST
+Sbjct  4770  SILVFASGALIVVGLQDSSLTRLCVIKSISSIVDTLEYPVRVKRVTIVNTVST  4928
+
+
+> LC738875_270001_280000 window 270001-280000 of LC738875.1 MAG: 
+Melicertus latisulcatus pemonivirus Okinawa2016 DNA, complete 
+genome
+Length=10000
+
+ Score = 26.3 bits (51),  Expect = 1.1
+ Identities = 7/17 (41%), Positives = 11/17 (65%), Gaps = 0/17 (0%)
+ Frame = +1/-1
+
+Query  589   YLLHYYHQPVFVYHYYH  639
+             Y  +YYH   + Y+YY+
+Sbjct  2590  YYYYYYHYYYYYYYYYY  2540
+
+
+ Score = 24.9 bits (48),  Expect = 2.8
+ Identities = 7/19 (37%), Positives = 12/19 (63%), Gaps = 0/19 (0%)
+ Frame = +1/-1
+
+Query  598   HYYHQPVFVYHYYHLF*IY  654
+             HYY+   + Y+YY+ +  Y
+Sbjct  2596  HYYYYYYYHYYYYYYYYYY  2540
+
+
+> LC738875_120001_130000 window 120001-130000 of LC738875.1 MAG: 
+Melicertus latisulcatus pemonivirus Okinawa2016 DNA, complete 
+genome
+Length=10000
+
+ Score = 25.8 bits (50),  Expect = 1.5
+ Identities = 9/18 (50%), Positives = 13/18 (72%), Gaps = 0/18 (0%)
+ Frame = -3/+2
+
+Query  4922  TLNNRIEFLFFSHIMYYI  4869
+             TL+N +  LFF H +Y+I
+Sbjct  8999  TLSNTLYTLFFLHFIYFI  9052
+
+
+ Score = 23.5 bits (45),  Expect = 7.2
+ Identities = 8/15 (53%), Positives = 8/15 (53%), Gaps = 0/15 (0%)
+ Frame = +2/+3
+
+Query  7478  KHQNQNPSWASHGNL  7522
+             KH N  PSW   G L
+Sbjct  5721  KHANNYPSWGIDGKL  5765
+
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 43510514
+
+
+Query= LC738874_30001_40000 window 30001-40000 of LC738874.1 MAG:
+Melicertus latisulcatus majanivirus Okinawa2016 DNA, complete genome
+
+Length=10000
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value  N
+
+LC738875_270001_280000 window 270001-280000 of LC738875.1 MAG: Me...  142     1e-83  8
+LC738875_300001_310000 window 300001-310000 of LC738875.1 MAG: Me...  28.1    0.041  3
+LC738875_120001_130000 window 120001-130000 of LC738875.1 MAG: Me...  25.4    2.0    1
+LC738875_130001_140000 window 130001-140000 of LC738875.1 MAG: Me...  24.4    3.8    1
+
+
+> LC738875_270001_280000 window 270001-280000 of LC738875.1 MAG: 
+Melicertus latisulcatus pemonivirus Okinawa2016 DNA, complete 
+genome
+Length=10000
+
+ Score = 142 bits (305),  Expect(8) = 1e-83
+ Identities = 50/92 (54%), Positives = 65/92 (71%), Gaps = 0/92 (0%)
+ Frame = -3/-3
+
+Query  971   GILEHHTSKHEHYLDIEKRLESFKGWPHWLVQKPQDLAEAGFFYEGPNDSVRCFHCSGNI  792
+             G  +H   KH ++L  E R ESF  WP  + Q+P+DLAEAGFFY G +D VRCFHC   +
+Sbjct  4283  GFPQHCKPKHSNFLKTETRRESFDKWPDRVTQRPEDLAEAGFFYCGLSDHVRCFHCGNGL  4104
+
+Query  791   FNWEKEDIPWNMHAKWHPNCTYVLLKKGADFI  696
+              NWEK+DIPWN HAKW+P C +V+++KG  F+
+Sbjct  4103  RNWEKDDIPWNEHAKWYPECNFVIIEKGKIFV  4008
+
+
+ Score = 138 bits (295),  Expect(4) = 7e-49
+ Identities = 49/86 (57%), Positives = 62/86 (72%), Gaps = 0/86 (0%)
+ Frame = -3/-3
+
+Query  2546  FSTTKERLESFENWPDGLVQKPLDLANAGFFYEGANDYVRCFHCYGGLYNWEKGDIPWNE  2367
+             F  T+ R ESF+ WPD + Q+P DLA AGFFY G +D+VRCFHC  GL NWEK DIPWNE
+Sbjct  4247  FLKTETRRESFDKWPDRVTQRPEDLAEAGFFYCGLSDHVRCFHCGNGLRNWEKDDIPWNE  4068
+
+Query  2366  HAKWYPKCQHIKSKRGIEFIHNIEEE  2289
+             HAKWYP+C  +  ++G  F+ ++  E
+Sbjct  4067  HAKWYPECNFVIIEKGKIFVDHVRRE  3990
+
+
+> LC738875_300001_310000 window 300001-310000 of LC738875.1 MAG: 
+Melicertus latisulcatus pemonivirus Okinawa2016 DNA, complete 
+genome
+Length=10000
+
+ Score = 28.1 bits (55),  Expect(3) = 0.041
+ Identities = 10/21 (48%), Positives = 16/21 (76%), Gaps = 0/21 (0%)
+ Frame = -2/+1
+
+Query  780   ERRYTLEYARKMASKLHLCPS  718
+             +R+ T+ YAR ++S +HL PS
+Sbjct  7876  DRKKTIRYARVISSVVHLVPS  7938
+
+
+ Score = 28.1 bits (55),  Expect = 0.30
+ Identities = 10/28 (36%), Positives = 15/28 (54%), Gaps = 0/28 (0%)
+ Frame = +2/-3
+
+Query  809   ENSEQNHSDPHKRIQLRRDLVAFVQANE  892
+             E  +Q H   HK+ Q R+D + F   N+
+Sbjct  2084  EEEQQQHHHHHKQQQQRQDFIDFAVTND  2001
+
+
+> LC738875_120001_130000 window 120001-130000 of LC738875.1 MAG: 
+Melicertus latisulcatus pemonivirus Okinawa2016 DNA, complete 
+genome
+Length=10000
+
+ Score = 25.4 bits (49),  Expect = 2.0
+ Identities = 7/15 (47%), Positives = 10/15 (67%), Gaps = 0/15 (0%)
+ Frame = -2/-2
+
+Query  8805  WVEYNRLPIYHAFHL  8761
+             W+ ++  P YH FHL
+Sbjct  6504  WLRFSTGPCYHLFHL  6460
+
+
+ Score = 24.9 bits (48),  Expect = 2.8
+ Identities = 11/27 (41%), Positives = 16/27 (59%), Gaps = 0/27 (0%)
+ Frame = +1/-1
+
+Query  7636  LGINVLRTTLFLEDFGRRSITIYCYGF  7716
+             L I+  RTT FL    RR ++++C  F
+Sbjct  8968  LRISFRRTTFFLCSLTRRILSLHCILF  8888
+
+
+> LC738875_130001_140000 window 130001-140000 of LC738875.1 MAG: 
+Melicertus latisulcatus pemonivirus Okinawa2016 DNA, complete 
+genome
+Length=10000
+
+ Score = 24.4 bits (47),  Expect = 3.8
+ Identities = 7/10 (70%), Positives = 9/10 (90%), Gaps = 0/10 (0%)
+ Frame = +2/+1
+
+Query  3089  YRRFYWKRIQ  3118
+             YRRF WKR++
+Sbjct  5044  YRRFLWKRVR  5073
+
+
+ Score = 23.5 bits (45),  Expect = 7.2
+ Identities = 7/13 (54%), Positives = 10/13 (77%), Gaps = 0/13 (0%)
+ Frame = -2/+1
+
+Query  5754  LKRLQNLIHHHHH  5716
+             LK + +L +HHHH
+Sbjct  4066  LKAVMHLHYHHHH  4104
+
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 43510514
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt0/tblastx_multi_subject.fasta).
+    Posted date:  Unknown
+  Number of letters in database: 40,000
+  Number of sequences in database:  4
+
+
+
+Matrix: BLOSUM62
+Neighboring words threshold: 13
+Window for multiple hits: 40

@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="US-ASCII"?>
+<BlastXML2
+    xmlns="http://www.ncbi.nlm.nih.gov"
+    xmlns:xs="http://www.w3.org/2001/XMLSchema-instance"
+    xs:schemaLocation="http://www.ncbi.nlm.nih.gov http://www.ncbi.nlm.nih.gov/data_specs/schema_alt/NCBI_BlastOutput2.xsd"
+>
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>tblastn</program>
+      <version>TBLASTN 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <db>tests/db_search/tslice</db>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>BLOSUM62</matrix>
+          <expect>10</expect>
+          <gap-open>11</gap-open>
+          <gap-extend>1</gap-extend>
+          <filter>L;</filter>
+          <cbs>2</cbs>
+          <db-gencode>1</db-gencode>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <search>
+            <Search>
+              <query-id>Query_1</query-id>
+              <query-title>BDT62095.1 hypothetical protein [Litopenaeus vannamei majanivirus Nimav-1_LVa], stretches 41-100 and 191-230 in lower case</query-title>
+              <query-len>271</query-len>
+              <query-masking>
+                <Range>
+                  <from>40</from>
+                  <to>99</to>
+                </Range>
+                <Range>
+                  <from>102</from>
+                  <to>138</to>
+                </Range>
+                <Range>
+                  <from>190</from>
+                  <to>229</to>
+                </Range>
+              </query-masking>
+              <hits>
+                <Hit>
+                  <num>1</num>
+                  <description>
+                    <HitDescr>
+                      <id>gnl|BL_ORD_ID|2</id>
+                      <accession>2</accession>
+                      <title>v_slice LvMJNV 21001-39000 with ambiguity codes</title>
+                    </HitDescr>
+                  </description>
+                  <len>18000</len>
+                  <hsps>
+                    <Hsp>
+                      <num>1</num>
+                      <bit-score>160.999</bit-score>
+                      <score>406</score>
+                      <evalue>1.17332e-47</evalue>
+                      <identity>128</identity>
+                      <positive>128</positive>
+                      <query-from>140</query-from>
+                      <query-to>271</query-to>
+                      <hit-from>16656</hit-from>
+                      <hit-to>17051</hit-to>
+                      <hit-frame>3</hit-frame>
+                      <align-len>132</align-len>
+                      <gaps>0</gaps>
+                      <qseq>KRNDDIYMSTIDVDCHSCLNRHRSGKSTNDDNENRLQNRKRKYDSLENKLKydssenkvnmtrtearmrnniikitnqtnkaiesmkeiinIAKNITNILNERGNNIKKTLNDIEQTISEKQRINFIRKTKK</qseq>
+                      <hseq>KRNDDIYMSTIDVDCHSCLKRHRSGKSTNDDNENRLQNRKRKYDSLEXKLKYDSSENKVNMTRTEARMRNNIIKIXNQTNKAIESMKEIINIAKNITNILNEXGNNIKKTLNDIEQTISEKQRINFIRKTKK</hseq>
+                      <midline>KRNDDIYMSTIDVDCHSCL RHRSGKSTNDDNENRLQNRKRKYDSLE KLKYDSSENKVNMTRTEARMRNNIIKI NQTNKAIESMKEIINIAKNITNILNE GNNIKKTLNDIEQTISEKQRINFIRKTKK</midline>
+                    </Hsp>
+                    <Hsp>
+                      <num>2</num>
+                      <bit-score>83.5741</bit-score>
+                      <score>205</score>
+                      <evalue>6.43483e-21</evalue>
+                      <identity>39</identity>
+                      <positive>39</positive>
+                      <query-from>1</query-from>
+                      <query-to>40</query-to>
+                      <hit-from>16239</hit-from>
+                      <hit-to>16358</hit-to>
+                      <hit-frame>3</hit-frame>
+                      <align-len>40</align-len>
+                      <gaps>0</gaps>
+                      <qseq>MDQMKTLQDDKDKALQYKDYSMWRDINDKDKYRSIEELSI</qseq>
+                      <hseq>MDQMKTLQDDKDKALQYKDYXMWRDINDKDKYRSIEELSI</hseq>
+                      <midline>MDQMKTLQDDKDKALQYKDY MWRDINDKDKYRSIEELSI</midline>
+                    </Hsp>
+                  </hsps>
+                </Hit>
+              </hits>
+              <stat>
+                <Statistics>
+                  <db-num>5</db-num>
+                  <db-len>33385</db-len>
+                  <hsp-len>51</hsp-len>
+                  <eff-space>2392060</eff-space>
+                  <kappa>0.041</kappa>
+                  <lambda>0.267</lambda>
+                  <entropy>0.14</entropy>
+                </Statistics>
+              </stat>
+            </Search>
+          </search>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+</BlastXML2>

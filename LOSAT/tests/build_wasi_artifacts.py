@@ -12,8 +12,8 @@ import tomllib
 ROOT = Path(__file__).resolve().parents[2]
 CRATE = ROOT / "LOSAT"
 SPECS = {
-    "serial-command": ("wasm32-wasip1", ["--bin", "LOSAT", "--no-default-features"], []),
-    "threaded-command": ("wasm32-wasip1-threads", ["--bin", "LOSAT", "--features", "wasm-threads"], ["parallel", "wasm-threads"]),
+    "serial-command": ("wasm32-wasip1", ["--bin", "losat", "--no-default-features"], []),
+    "threaded-command": ("wasm32-wasip1-threads", ["--bin", "losat", "--features", "wasm-threads"], ["parallel", "wasm-threads"]),
     "threaded-reactor": ("wasm32-wasip1-threads", ["--lib", "--features", "wasm-threads"], ["parallel", "wasm-threads"]),
     "serial-reactor": ("wasm32-wasip1", ["--lib", "--no-default-features"], []),
 }
@@ -21,6 +21,31 @@ SPECS = {
 
 def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+# NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:173-180
+# (*thread)->Run(); (*thread)->Join(&result);
+# Build identity only: the shared memory's maximum is a link argument in the target
+# rustflags (.cargo/config.toml). A build that lost it would silently declare Rust's 1 GiB.
+def declared_maximum_pages(rustflags):
+    """The `--max-memory` of the rustflags in 64 KiB pages, or None if they set none."""
+    sizes = [flag.rsplit("=", 1)[1] for flag in rustflags if flag.startswith("link-arg=--max-memory=")]
+    return int(sizes[-1]) // 65536 if sizes else None
+
+
+# NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:173-180
+# (*thread)->Run(); (*thread)->Join(&result);
+# Host compatibility only: the threaded modules are written with the shared-memory guard
+# (wasi_shared_memory.js), so that every host, browsers included, runs guarded bytes (release
+# v0.2.0 DECISIONS 52). The guard exits 1, and the build fails, when it declines an encoding,
+# finds nothing to guard or cannot verify its output; nothing unguarded is written.
+def write_artifact(node, kind, built, destination):
+    """Writes the artifact of `kind` to `destination`; returns the guard's record of a threaded one, else None."""
+    if kind.startswith("threaded-"):
+        return json.loads(subprocess.check_output(
+            [node, str(CRATE / "tests/wasi_shared_memory.js"), "guard", str(built), str(destination)], text=True))
+    shutil.copyfile(built, destination)
+    return None
 
 
 # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
@@ -65,10 +90,22 @@ def main():
         for previous, expected in recorded.items():
             if digest(previous) != expected:
                 raise RuntimeError(f"build overwrote another artifact: {previous}")
-        built = target / kind / triple / "release/LOSAT.wasm"
-        identity = json.loads(subprocess.check_output([args.node, str(CRATE / "tests/wasi_artifact.js"), str(built), kind], text=True))
+        # The reactor is the cdylib of the library crate `losat` and the command is the `losat`
+        # binary; both are `release/losat.wasm`, and each build names its target (`--lib` or
+        # `--bin losat`, SPECS) so that Cargo copies only that one there.
+        built = target / kind / triple / "release" / "losat.wasm"
         destination = out / f"losat-{kind}.wasm"
-        shutil.copyfile(built, destination)
+        guard = write_artifact(args.node, kind, built, destination)
+        # The identity is the written artifact's (the guard keeps the imports, exports and memory).
+        identity = json.loads(subprocess.check_output([args.node, str(CRATE / "tests/wasi_artifact.js"), str(destination), kind], text=True))
+        expected_maximum = declared_maximum_pages(config["target"][triple]["rustflags"])
+        if expected_maximum is not None and identity["memory"]["maximum"] != expected_maximum:
+            raise RuntimeError(f"{kind}: the module declares a memory maximum of {identity['memory']['maximum']} pages, "
+                               f"the rustflags ask for {expected_maximum}")
+        if guard is not None:
+            identity["shared_memory_guard"] = {"unguarded_sha256": guard["input_sha256"], "version": guard["version"],
+                                               "fill": guard["fill"], "copy": guard["copy"], "grow": guard["grow"], "atomic": guard["atomic"],
+                                               "atomic_helpers": guard["atomic_helpers"], "guard_sha256": guard["guard_sha256"]}
         recorded[built] = digest(built)
         identity.update(target=triple, features=features, rust=rust, node=json.loads(node),
                         argv=argv, cwd=str(CRATE), target_rustflags=config["target"][triple]["rustflags"],
@@ -82,7 +119,7 @@ def main():
     runtime_files = {}
     # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:173-180
     # (*thread)->Run(); (*thread)->Join(&result);
-    runtime_names = ["run_losat_wasi_threads.js", "wasi_thread_host.js", "wasi_artifact.js", "wasi_shared_memory.js"]
+    runtime_names = ["run_losat_wasi_threads.js", "wasi_thread_host.js", "wasi_thread_worker.js", "wasi_artifact.js", "wasi_shared_memory.js", "wasi_files.js"]
     if args.include_serial:
         runtime_names.append("run_losat_wasi.js")
     for name in runtime_names:

@@ -1,0 +1,1 @@
+- CI: the `cargo test (k/2)` jobs save the dependency cache also when their tests fail.

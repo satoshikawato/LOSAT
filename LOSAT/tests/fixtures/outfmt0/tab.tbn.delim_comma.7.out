@@ -1,0 +1,38 @@
+# TBLASTN 2.17.0+
+# Query: BDT61866.1 wsv220-like protein [Penaeus monodon majanivirus A]
+# Database: User specified sequence set (Input: tests/db_search/tslice.fna)
+# Fields: query id, subject id, evalue
+# 3 hits found
+BDT61866.1,m_minus,0.0
+BDT61866.1,v_slice,0.0
+BDT61866.1,m_plus,4.4
+# TBLASTN 2.17.0+
+# Query: BDT62090.1 hypothetical protein [Litopenaeus vannamei majanivirus Nimav-1_LVa]
+# Database: User specified sequence set (Input: tests/db_search/tslice.fna)
+# Fields: query id, subject id, evalue
+# 5 hits found
+BDT62090.1,v_slice,0.0
+BDT62090.1,v_slice,7.04e-18
+BDT62090.1,v_slice,4.2
+BDT62090.1,v_slice,6.8
+BDT62090.1,v_mut_8pct,0.11
+# TBLASTN 2.17.0+
+# Query: BDT62092.1 tyrosine recombinase [Litopenaeus vannamei majanivirus Nimav-1_LVa]
+# Database: User specified sequence set (Input: tests/db_search/tslice.fna)
+# Fields: query id, subject id, evalue
+# 10 hits found
+BDT62092.1,v_slice,0.0
+BDT62092.1,v_slice,7.51e-13
+BDT62092.1,v_slice,1.89e-09
+BDT62092.1,v_slice,1.89e-09
+BDT62092.1,v_slice,9.4
+BDT62092.1,v_mut_8pct,0.0
+BDT62092.1,v_mut_8pct,0.002
+BDT62092.1,v_far_22pct,0.0
+BDT62092.1,v_far_22pct,0.90
+BDT62092.1,m_minus,7.3
+# TBLASTN 2.17.0+
+# Query: q_nohit random protein of 40 residues
+# Database: User specified sequence set (Input: tests/db_search/tslice.fna)
+# 0 hits found
+# BLAST processed 4 queries

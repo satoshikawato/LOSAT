@@ -20,11 +20,12 @@ fn fixture(name: &str) -> PathBuf {
 }
 
 const TIMING: (&str, &str) = ("LOSAT_TIMING", "1");
-const THREADS: [u32; 2] = [1, 4];
+const STATS: (&str, &str) = ("LOSAT_X_STATS", "1");
+const THREADS: [u32; 4] = [1, 4, 8, 16];
 
 /// The lines `LOSAT_TIMING` printed for a TBLASTX batch before the stage lines were added, in
-/// their order.
-const OLD_LINES: [&str; 10] = [
+/// their order, except `identity_calc` (always 0, no longer printed).
+const OLD_LINES: [&str; 9] = [
     "read_queries",
     "build_lookup",
     "read_subjects",
@@ -32,7 +33,6 @@ const OLD_LINES: [&str; 10] = [
     "ungapped_extend",
     "reevaluate",
     "sum_stats_linking",
-    "identity_calc",
     "search_total",
     "total",
 ];
@@ -73,7 +73,7 @@ const LINK_STAGES: [&str; 7] = [
 /// CI) needs that file name as soon as a search has more than one thread, and it selects
 /// nothing. Returns the report and the standard error.
 fn tblastx(subject: &Path, threads: u32, variables: &[(&str, &str)]) -> (Vec<u8>, String) {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         if name.to_string_lossy().starts_with("LOSAT_") && name != "LOSAT_BLASTX_WORKER_LOG" {
             command.env_remove(name);
@@ -192,7 +192,7 @@ fn count(line: &str, name: &str) -> u64 {
 }
 
 /// Checks the two linking lines of one run against its `x_subject` line. `timed` says whether
-/// the run's linking calls take the path the timer is in (the default path): then the first
+/// the run's linking calls take the path the timer is in (the in-place path): then the first
 /// call is counted for at least one subject and at most `subjects`, and the second for no more
 /// subjects than the first; otherwise both lines are all zero.
 fn check_link_lines(stderr: &str, subjects: u64, timed: bool, what: &str) {
@@ -309,11 +309,17 @@ fn the_stage_lines_follow_the_old_lines_and_add_up() {
 }
 
 // No NCBI counterpart (a timer). The paths a subject can take all reach the stage lines: the
-// reference frame loop (`LOSAT_X_PAIRPAR=0`), the previous paths (`LOSAT_X_DEFAULT=0`), and
-// several subject records with one too short to search (counted as a subject, all of it in the
-// last stage). The linking lines count the calls of the default linking path, whichever seed
-// stage ran before it, and are all zero on the previous paths, whose linking calls take the
-// reference body. The report does not depend on the timer.
+// default (the reference frame loop at one thread, the unit path at four, eight and sixteen),
+// `LOSAT_X_PAIRPARGATE=0` (the unit path at one thread too), the debugging output
+// `LOSAT_DEBUG_CUTOFFS` (the one path whose linking calls take the reference body, which is not
+// timed), and several subject records with one too short to search (counted as a subject, all of it
+// in the last stage). The linking lines count the calls of the in-place linking path, whichever
+// seed stage ran before it, and are all zero with `LOSAT_DEBUG_CUTOFFS`. The report does not depend
+// on the timer. At one thread the cost rule sends the subject to the reference frame loop
+// (`[X_STATS] PAIRPAR units=0`; not with `LOSAT_X_PAIRPARGATE=0`, which turns the cost rule off).
+// The `LOSAT_DEBUG_CUTOFFS` arm is the only search of this file whose linking calls take the
+// reference body, so the report of each other arm is also compared with the default path's report
+// of the same subject and thread count (the debug lines are on stderr).
 #[test]
 fn every_path_of_a_subject_is_timed_and_the_report_is_the_same() {
     let single = fixture("short_hsp.subject.fna");
@@ -332,16 +338,37 @@ fn every_path_of_a_subject_is_timed_and_the_report_is_the_same() {
         format!(">first\n{first}\n>short\nACGTACGTAC\n>third\n{reversed}\n"),
     )
     .expect("write FASTA");
+    let mut default_reports = std::collections::HashMap::new();
     for (subject, subjects) in [(&single, 1), (&several, 3)] {
         for path in [
             &[][..],
-            &[("LOSAT_X_PAIRPAR", "0")][..],
-            &[("LOSAT_X_DEFAULT", "0")][..],
+            &[("LOSAT_X_PAIRPARGATE", "0")][..],
+            &[("LOSAT_DEBUG_CUTOFFS", "1")][..],
         ] {
             for threads in THREADS {
                 let what = format!("{subjects} subject(s) {path:?} threads {threads}");
-                let (expected, plain_stderr) = tblastx(subject, threads, path);
+                let (expected, plain_stderr) =
+                    tblastx(subject, threads, &[path, &[STATS][..]].concat());
                 assert!(!expected.is_empty(), "{what}: no hits");
+                if threads == 1 && !path.contains(&("LOSAT_X_PAIRPARGATE", "0")) {
+                    let line = plain_stderr
+                        .lines()
+                        .find(|line| line.starts_with("[X_STATS] PAIRPAR "))
+                        .unwrap_or_else(|| panic!("{what}: no PAIRPAR line:\n{plain_stderr}"));
+                    assert!(
+                        line.split_whitespace().any(|field| field == "units=0"),
+                        "{what}: the frame loop:\n{plain_stderr}"
+                    );
+                }
+                if path.is_empty() {
+                    default_reports.insert((subjects, threads), expected.clone());
+                } else {
+                    assert_eq!(
+                        expected,
+                        default_reports[&(subjects, threads)],
+                        "{what}: the report of the default path"
+                    );
+                }
                 assert!(
                     !plain_stderr.contains("[TIMING]"),
                     "{what}: a [TIMING] line without LOSAT_TIMING:\n{plain_stderr}"
@@ -350,7 +377,7 @@ fn every_path_of_a_subject_is_timed_and_the_report_is_the_same() {
                 let (report, stderr) = tblastx(subject, threads, &variables);
                 assert_eq!(report, expected, "{what}");
                 check_stage_lines(&stderr, subjects, &what);
-                let timed = !path.contains(&("LOSAT_X_DEFAULT", "0"));
+                let timed = !path.contains(&("LOSAT_DEBUG_CUTOFFS", "1"));
                 check_link_lines(&stderr, subjects, timed, &what);
             }
         }

@@ -1,0 +1,158 @@
+<?xml version="1.0" encoding="US-ASCII"?>
+<!DOCTYPE BlastOutput PUBLIC "-//NCBI//NCBI BlastOutput/EN" "http://www.ncbi.nlm.nih.gov/dtd/NCBI_BlastOutput.dtd">
+<BlastOutput>
+  <BlastOutput_program>blastp</BlastOutput_program>
+  <BlastOutput_version>BLASTP 2.17.0+</BlastOutput_version>
+  <BlastOutput_reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</BlastOutput_reference>
+  <BlastOutput_db></BlastOutput_db>
+  <BlastOutput_query-ID>Query_1</BlastOutput_query-ID>
+  <BlastOutput_query-def>BDT63074.1 tyrosine recombinase [Sicyonia whispovirus]</BlastOutput_query-def>
+  <BlastOutput_query-len>897</BlastOutput_query-len>
+  <BlastOutput_param>
+    <Parameters>
+      <Parameters_matrix>BLOSUM62</Parameters_matrix>
+      <Parameters_expect>10</Parameters_expect>
+      <Parameters_gap-open>11</Parameters_gap-open>
+      <Parameters_gap-extend>1</Parameters_gap-extend>
+      <Parameters_filter>F</Parameters_filter>
+    </Parameters>
+  </BlastOutput_param>
+<BlastOutput_iterations>
+<Iteration>
+  <Iteration_iter-num>1</Iteration_iter-num>
+  <Iteration_query-ID>Query_1</Iteration_query-ID>
+  <Iteration_query-def>BDT63074.1 tyrosine recombinase [Sicyonia whispovirus]</Iteration_query-def>
+  <Iteration_query-len>897</Iteration_query-len>
+<Iteration_hits>
+</Iteration_hits>
+  <Iteration_stat>
+    <Statistics>
+      <Statistics_db-num>0</Statistics_db-num>
+      <Statistics_db-len>0</Statistics_db-len>
+      <Statistics_hsp-len>73</Statistics_hsp-len>
+      <Statistics_eff-space>49819040</Statistics_eff-space>
+      <Statistics_kappa>0.041</Statistics_kappa>
+      <Statistics_lambda>0.267</Statistics_lambda>
+      <Statistics_entropy>0.14</Statistics_entropy>
+    </Statistics>
+  </Iteration_stat>
+  <Iteration_message>No hits found</Iteration_message>
+</Iteration>
+<Iteration>
+  <Iteration_iter-num>2</Iteration_iter-num>
+  <Iteration_query-ID>Query_2</Iteration_query-ID>
+  <Iteration_query-def>nohit a query without hits</Iteration_query-def>
+  <Iteration_query-len>12</Iteration_query-len>
+<Iteration_hits>
+</Iteration_hits>
+  <Iteration_stat>
+    <Statistics>
+      <Statistics_db-num>0</Statistics_db-num>
+      <Statistics_db-len>0</Statistics_db-len>
+      <Statistics_hsp-len>0</Statistics_hsp-len>
+      <Statistics_eff-space>800856</Statistics_eff-space>
+      <Statistics_kappa>0.041</Statistics_kappa>
+      <Statistics_lambda>0.267</Statistics_lambda>
+      <Statistics_entropy>0.14</Statistics_entropy>
+    </Statistics>
+  </Iteration_stat>
+  <Iteration_message>No hits found</Iteration_message>
+</Iteration>
+<Iteration>
+  <Iteration_iter-num>3</Iteration_iter-num>
+  <Iteration_query-ID>Query_3</Iteration_query-ID>
+  <Iteration_query-def>BDT63075.1 wsv226-like protein [Sicyonia whispovirus]</Iteration_query-def>
+  <Iteration_query-len>1142</Iteration_query-len>
+<Iteration_hits>
+<Hit>
+  <Hit_num>1</Hit_num>
+  <Hit_id>BDT63562.1</Hit_id>
+  <Hit_def>BDT63562.1 wsv226-like protein [Pasiphaea japonica whispovirus]</Hit_def>
+  <Hit_accession>Subject_65</Hit_accession>
+  <Hit_len>1101</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>510.76</Hsp_bit-score>
+      <Hsp_score>1314</Hsp_score>
+      <Hsp_evalue>1.40753e-164</Hsp_evalue>
+      <Hsp_query-from>125</Hsp_query-from>
+      <Hsp_query-to>1140</Hsp_query-to>
+      <Hsp_hit-from>76</Hsp_hit-from>
+      <Hsp_hit-to>1097</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>336</Hsp_identity>
+      <Hsp_positive>538</Hsp_positive>
+      <Hsp_gaps>136</Hsp_gaps>
+      <Hsp_align-len>1087</Hsp_align-len>
+      <Hsp_qseq>ETALEAEADLYEQEIRRNVSEFVAGLPHVTGDYAEAERFGAPYLPPGKRRKETYRFWASKDFRAQYLGHLAGNRWIGEFVRGEIDATTCVGMLRSVATAYGCGPIIRIALSCLNTLASGYSNSNNFEVKREDLVASINPPWRATRPLSMHPEALNATNPSKVVSKLLGEKTRCVALDWKDTSRELGFCDSRNVGVLTNLIYAIAVPAYTAEMILSTEGKMEQHVL-----------RKQGMQPPIERVELLKQKSVLCAIHSLTQYFSGPVRDSDVNDDDRTRRGVPSGKHLFAAPLRLPPFDAHPVVNLENHPLFTTDPLSTDGNPLR--VLASVSTPAHSAVALKHRSGRRP-------------------KKLLGLSKNGIELHVL--PALKDTGSRRRKKKVVRSDVMTNR----QRDPLLHMATKEPPVFVRNVLAVAGNYGWFALIVGYMSSPDVLFNKTNCDGLFAPDLIRKYRSEQITTTPLRNRRIDTRFEGLELVDAMGHTSGFRIRPASLSDDHCGGDSD------DGGLGVIGARDNPFYTKTNRPAWYSDASLEDLFGR--VTLEQHVRAFDDRIGVFEDLLEG---DDRWLVNLQDKKDVLDRCKLALTFLLEAQTVMLLNVHGLSEQEVRDAIRDLKSATPMLTTLGKEDEDPAARKILATETRR-RELCSTAE-SLIEMVPLHSLVEDRPEGEGHVRKARLSFPAPVRDSPHDLMEDMKKTFLSIDLCQFMLQSCEENKVRFFHGECREAAHEFLREVYRGAARYHVKDAHVRGTRVCLTWHRPFDAPAHRALAGVPRCKMSRLLSCIEKSSGTNPLPTVAVAAGKEVLTLPSLMCLSTRAITPKPVRHTLLELMYGTRAAATISTLTCLSWINWCMEA--DPKRFYGPVYESVMEIKCPRRPELLGMPPRGTK-----------RKMCQHLEQLSDAQKISCWLKDDIRCHPF-----RVCFPKFRKAASKIDALRPHSRGESEAESEVGSGSGYP--AGTAAKDDVFVFKSIYSNITAPPRQKPLFGEKKSTGRMGFKDIYAVALISLPSTLDQETKDIAADLGIETDI</Hsp_qseq>
+      <Hsp_hseq>ETNTKQEDALYID----NDKNFINQLPHITGVCEDAVKYGRPYLPTNEMAKIVDGYWNTNNRKKKYLGYLCGNFAINAFVSNTIDATTCIGFLRSRATAFGYPGLKCLAEMCLST-----SSNNSFTVPRKQMMAATFPEEMRRRPSTIQQ----MSETCQVYKKLANKNTVCVTMDWSEASKKINYDYSRKVCLLQNLIVIILLPAYTMDVILDTDRELERYVLASVGQQDDRDKYKYNQQTKEEKKNLLDDLCVLSAMSYLYTFFSGDGKDD-------------KSIHLYNAPLRLPPFDDHPVINLHECPYF-----SDCGETARRKVVASISTPSQSMVTLNHRVQRTPLNNVNGCKDDKEQTSDNTYNKLIGVTNSGIEVRVVKKPTATQSSCLRKKKREVKHSRLAQKLGEITRDPVTHMNRRERPLFLRSMLALCGSYGWFSIVLGYNPTLDVLFMGNDHDGLFSPHWIRRFRKRYVSMTPMRNRKIDLRFHGLELADTPGNACAFRIRPASLCNSNDVYQTSPKTVKKRWTLNVLQGNRNPFFTRLLNFNWYNPSCMSDIFGDQPIYMEQHVAVFDNCLDMFSNLVRGTANENRWKANLLDKREVFNSCIFSLIIRLKCFCQCLHKKH--KDIEIKKKLKNVRQLRGLRA------------QTLCRETKQLKKLCTKVESSIIGAMEFNRNMGNEKEYNTNKNKKR-----KVISDKKLLQKTVASDMDALSVCYMLYDECDMNYQRFEDAEVRETAFEMVREMYRVSARLHLKDLLMRGTKMSLTWQKPYNPVAEATMSNIPRCRIPWIVHRFENRTLNEKMSTLQI--------------LETRDQVYRPIRHTLLQLVFGEKMANYVSVVTCFQWMDWCLNGVNKPEEYYWDVNRLVDSRKKNQNNNCLDTDIDNKRRNNKRNRDDLTRESEIEITNMSDIEIINMWLNNDTKDLPYGTLNGSIINKHWRRKKSSSSGDSDDDLYENE-NCNGGRKSKVPVVGGDFINYVIDSDDSSNTNETQQLKGKVHKHNKRNTGRMGFRDVYMICLISLPVVIHEKCKKIIRELYLETSL</Hsp_hseq>
+      <Hsp_midline>ET  + E  LY      N   F+  LPH+TG   +A ++G PYLP  +  K    +W + + + +YLG+L GN  I  FV   IDATTC+G LRS ATA+G   +  +A  CL+T     S++N+F V R+ ++A+  P     RP ++       +   +V  KL  + T CV +DW + S+++ +  SR V +L NLI  I +PAYT ++IL T+ ++E++VL            K   Q   E+  LL    VL A+  L  +FSG  +D                 HL+ APLRLPPFD HPV+NL   P F     S  G   R  V+AS+STP+ S V L HR  R P                    KL+G++ +GIE+ V+  P    +   R+KK+ V+   +  +     RDP+ HM  +E P+F+R++LA+ G+YGWF++++GY  + DVLF   + DGLF+P  IR++R   ++ TP+RNR+ID RF GLEL D  G+   FRIRPASL + +    +          L V+    NPF+T+     WY+ + + D+FG   + +EQHV  FD+ + +F +L+ G   ++RW  NL DK++V + C  +L   L+     L   H   + E++  +++++    +              + L  ET++ ++LC+  E S+I  +  +  + +  E   +  K R      V      L + +     ++ +C  +   C+ N  RF   E RE A E +RE+YR +AR H+KD  +RGT++ LTW +P++  A   ++ +PRC++  ++   E  +    + T+ +              L TR    +P+RHTLL+L++G + A  +S +TC  W++WC+     P+ +Y  V   V   K  +    L       +           R+    +  +SD + I+ WL +D +  P+      +    +R+  S           E+E     G  S  P   G      +    S  +N T   + K     K++TGRMGF+D+Y + LISLP  + ++ K I  +L +ET +</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+<Hit>
+  <Hit_num>2</Hit_num>
+  <Hit_id>BDT63532.1</Hit_id>
+  <Hit_def>BDT63532.1 wsv285-like protein [Pasiphaea japonica whispovirus]</Hit_def>
+  <Hit_accession>Subject_35</Hit_accession>
+  <Hit_len>1068</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>23.8682</Hsp_bit-score>
+      <Hsp_score>50</Hsp_score>
+      <Hsp_evalue>4.574</Hsp_evalue>
+      <Hsp_query-from>1078</Hsp_query-from>
+      <Hsp_query-to>1134</Hsp_query-to>
+      <Hsp_hit-from>480</Hsp_hit-from>
+      <Hsp_hit-to>537</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>14</Hsp_identity>
+      <Hsp_positive>33</Hsp_positive>
+      <Hsp_gaps>3</Hsp_gaps>
+      <Hsp_align-len>59</Hsp_align-len>
+      <Hsp_qseq>FVFKSIYSNITAP--PRQKPLFGEKKSTGRMGFKDIYAVALISLPSTLDQETKDIAADL</Hsp_qseq>
+      <Hsp_hseq>FINKSL-NDIENPLMCKEKNIFGDDQFDQYATYKELFTAAVCSNPTNVYRVVCDLFVNL</Hsp_hseq>
+      <Hsp_midline>F+ KS+ ++I  P   ++K +FG+ +      +K+++  A+ S P+ + +   D+  +L</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+</Iteration_hits>
+  <Iteration_stat>
+    <Statistics>
+      <Statistics_db-num>0</Statistics_db-num>
+      <Statistics_db-len>0</Statistics_db-len>
+      <Statistics_hsp-len>75</Statistics_hsp-len>
+      <Statistics_eff-space>64327296</Statistics_eff-space>
+      <Statistics_kappa>0.041</Statistics_kappa>
+      <Statistics_lambda>0.267</Statistics_lambda>
+      <Statistics_entropy>0.14</Statistics_entropy>
+    </Statistics>
+  </Iteration_stat>
+</Iteration>
+<Iteration>
+  <Iteration_iter-num>4</Iteration_iter-num>
+  <Iteration_query-ID>Query_4</Iteration_query-ID>
+  <Iteration_query-def>BDT63076.1 hypothetical protein [Sicyonia whispovirus]</Iteration_query-def>
+  <Iteration_query-len>109</Iteration_query-len>
+<Iteration_hits>
+</Iteration_hits>
+  <Iteration_stat>
+    <Statistics>
+      <Statistics_db-num>0</Statistics_db-num>
+      <Statistics_db-len>0</Statistics_db-len>
+      <Statistics_hsp-len>54</Statistics_hsp-len>
+      <Statistics_eff-space>3415170</Statistics_eff-space>
+      <Statistics_kappa>0.041</Statistics_kappa>
+      <Statistics_lambda>0.267</Statistics_lambda>
+      <Statistics_entropy>0.14</Statistics_entropy>
+    </Statistics>
+  </Iteration_stat>
+  <Iteration_message>No hits found</Iteration_message>
+</Iteration>
+</BlastOutput_iterations>
+</BlastOutput>
+

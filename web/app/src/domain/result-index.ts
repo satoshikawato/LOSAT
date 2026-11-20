@@ -2,8 +2,8 @@
 // each query grouped by subject in the engine's order, sorting and filtering with the
 // engine's values, the limits that a query may have reached, and the orientation of an
 // HSP. Nothing here computes or formats a BLAST value.
+import type { SequenceKind } from 'losat/domain';
 import type { HspTable } from './hsp-table';
-import type { SequenceKind } from './programs';
 
 export interface SubjectGroup {
   /** 0-based record index of the subject in the run's subject input. */
@@ -152,13 +152,15 @@ export interface FilteredQuery {
 }
 
 /**
- * Applies the HSP filters to one query. `subjectIds(sIdx)` gives the texts that the text
- * filter searches: the subject's ID in the record table and its outfmt 6 `sseqid`.
+ * Applies the HSP filters to one query. `scores` are the E values and bit scores that the
+ * filters compare: the ones that the rows show (shownScores). `subjectIds(sIdx)` gives the
+ * texts that the text filter searches: the subject's ID in the record table and its outfmt 6
+ * `sseqid`.
  */
 export function filterQuery(
   query: QueryGroup,
   filters: ViewFilters,
-  table: HspTable,
+  scores: Pick<HspTable, 'eValue' | 'bitScore'>,
   subjectIds: (subject: SubjectGroup) => readonly string[],
 ): FilteredQuery {
   if (!hasHspFilters(filters)) return { subjects: query.subjects, hiddenSubjects: 0, hiddenHsps: 0 };
@@ -172,8 +174,8 @@ export function filterQuery(
     }
     const rows = subject.rows.filter(
       (row) =>
-        (filters.maxEValue === undefined || table.eValue[row]! <= filters.maxEValue) &&
-        (filters.minBitScore === undefined || table.bitScore[row]! >= filters.minBitScore),
+        (filters.maxEValue === undefined || scores.eValue[row]! <= filters.maxEValue) &&
+        (filters.minBitScore === undefined || scores.bitScore[row]! >= filters.minBitScore),
     );
     hiddenHsps += subject.rows.length - rows.length;
     if (rows.length > 0) subjects.push(rows.length === subject.rows.length ? subject : { sIdx: subject.sIdx, rows });
@@ -184,10 +186,29 @@ export function filterQuery(
 // --- limits that a query may have reached -----------------------------------------------------------
 
 export interface HitLimits {
-  /** Subjects kept per query (-max_target_seqs, or the engine's described default). */
+  /** Subjects kept per query (-max_target_seqs, -num_alignments or the engine's described default). */
   readonly maxTargetSeqs?: number;
+  /** The option that sets `maxTargetSeqs` where it is not -max_target_seqs (the tabular formats' -num_alignments). */
+  readonly subjectFlag?: '-num_alignments';
   /** HSPs kept per subject (-max_hsps), if set. */
   readonly maxHsps?: number;
+  /**
+   * What outfmt 0 does with the run's -num_descriptions / -num_alignments; only where one of them is
+   * given. `alignments` is the number of subjects per query whose alignments outfmt 0 shows, `hitList`
+   * the size of its hit list (the larger of the two numbers), and `separate` whether that is not the
+   * tabular formats' size, so that the run searched twice and outfmt 0 has a hit list of its own.
+   */
+  readonly outfmt0?: {
+    readonly alignments?: number;
+    readonly hitList?: number;
+    readonly separate: boolean;
+  };
+  /**
+   * -sorthits is given: outfmt 0 orders its hit list by that key (BLAST+'s description table and
+   * alignments), so the subjects whose alignments it shows are the first ones in that order, not
+   * the first ones in the engine's order ("#").
+   */
+  readonly sorted?: true;
 }
 
 /** The parts of the engine's description of an option that the limits read. */
@@ -197,25 +218,65 @@ export interface DescribedOption {
   readonly defaultValue?: string;
 }
 
+const countOf = (text: string | undefined): number | undefined =>
+  text !== undefined && /^\s*\+?\d+\s*$/.test(text) ? Number.parseInt(text, 10) : undefined;
+
+/** The default of an option from its description (its `default`, or the "default: N" of its help). */
+const describedDefaultOf = (described: readonly DescribedOption[], flag: string): number | undefined => {
+  const option = described.find((o) => o.flag === flag);
+  return countOf(option?.defaultValue ?? option?.help.match(/default:\s*(\d+)/i)?.[1]);
+};
+
+/** Whether the argv gives `flag`, as `-flag value` or `-flag=value`. */
+export const flagGiven = (argv: readonly string[], flag: string): boolean =>
+  argv.some((word) => word === flag || word.startsWith(`${flag}=`));
+
 /**
  * The hit limits of a run from its argv; where the argv does not set -max_target_seqs,
  * from the default that the engine describes (its `default`, or the "default: N" of its
  * help text). A limit that cannot be read is left out, so nothing is claimed about it.
+ *
+ * The sizes follow BLAST+ (`blast_args.cpp:2894-2973`; the adapter searches once for each
+ * distinct hit list size, abi_v2.md §7): the tabular formats keep -max_target_seqs, else
+ * -num_alignments, else the default of -max_target_seqs, subjects per query, and those are
+ * the HSP records and the results screen. Outfmt 0 keeps -max_target_seqs, or the larger of
+ * -num_descriptions (500) and -num_alignments (250) where either is given, and shows the
+ * alignments of the first -num_alignments subjects.
  */
-export function hitLimits(argv: readonly string[], described: readonly DescribedOption[]): HitLimits {
+export function hitLimits(words: readonly string[], described: readonly DescribedOption[]): HitLimits {
+  // The adapter accepts `-flag=value` as the CLI does (the app writes `-flag value`).
+  const argv = words.flatMap((word) => {
+    const joined = /^(-[A-Za-z_][A-Za-z0-9_]*)=(.*)$/s.exec(word);
+    return joined === null ? [word] : [joined[1]!, joined[2]!];
+  });
   const given = (flag: string): string | undefined => {
     const at = argv.lastIndexOf(flag);
     return at >= 0 ? argv[at + 1] : undefined;
   };
-  const count = (text: string | undefined): number | undefined =>
-    text !== undefined && /^\s*\+?\d+\s*$/.test(text) ? Number.parseInt(text, 10) : undefined;
-  const option = described.find((o) => o.flag === '-max_target_seqs');
-  const describedDefault = option?.defaultValue ?? option?.help.match(/default:\s*(\d+)/i)?.[1];
-  const maxTargetSeqs = count(given('-max_target_seqs')) ?? count(describedDefault);
-  const maxHsps = count(given('-max_hsps'));
+  const alignmentsGiven = flagGiven(argv, '-num_alignments') || flagGiven(argv, '-num_descriptions');
+  const maxTargetSeqs = countOf(given('-max_target_seqs'));
+  const numAlignments = countOf(given('-num_alignments'));
+  const numDescriptions = countOf(given('-num_descriptions'));
+  const byAlignments = maxTargetSeqs === undefined && numAlignments !== undefined;
+  const tabular = maxTargetSeqs ?? numAlignments ?? describedDefaultOf(described, '-max_target_seqs');
+  const maxHsps = countOf(given('-max_hsps'));
+  let outfmt0: HitLimits['outfmt0'];
+  if (alignmentsGiven && maxTargetSeqs === undefined) {
+    const descriptions = numDescriptions ?? describedDefaultOf(described, '-num_descriptions');
+    const alignments = numAlignments ?? describedDefaultOf(described, '-num_alignments');
+    const hitList = descriptions === undefined || alignments === undefined ? undefined : Math.max(descriptions, alignments);
+    outfmt0 = {
+      ...(alignments === undefined ? {} : { alignments }),
+      ...(hitList === undefined ? {} : { hitList }),
+      separate: hitList === undefined || tabular === undefined || hitList !== tabular,
+    };
+  }
   return {
-    ...(maxTargetSeqs === undefined ? {} : { maxTargetSeqs }),
+    ...(tabular === undefined ? {} : { maxTargetSeqs: tabular }),
+    ...(byAlignments ? { subjectFlag: '-num_alignments' as const } : {}),
     ...(maxHsps === undefined ? {} : { maxHsps }),
+    ...(outfmt0 === undefined ? {} : { outfmt0 }),
+    ...(flagGiven(argv, '-sorthits') ? { sorted: true as const } : {}),
   };
 }
 

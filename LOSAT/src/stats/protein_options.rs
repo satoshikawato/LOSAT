@@ -3,6 +3,7 @@
 //! preferred gap costs of a matrix and the suggested word threshold and window.
 
 use super::protein_tables::{ProteinMatrixTable, ProteinTableRow, PROTEIN_MATRIX_TABLES};
+use crate::config::ScoringMatrix;
 
 /// NCBI reference: c++/src/algo/blast/core/ncbi_math.c:437-441
 /// ```c
@@ -45,6 +46,57 @@ pub fn matrix_table(name: &str, standard_only: bool) -> Option<&'static ProteinM
     tables
         .iter()
         .find(|table| table.name.eq_ignore_ascii_case(name))
+}
+
+/// The table of `matrix`: the one whose name is `matrix.ncbi_name()` (`strcasecmp`), found by
+/// its index in `PROTEIN_MATRIX_TABLES` instead of the name.
+///
+/// NCBI reference: c++/src/algo/blast/core/blast_stat.c:2958-2992 (the order of the tables)
+/// ```c
+///    matrix_info = MatrixInfoNew("BLOSUM80", blosum80_values, blosum80_prefs, BLOSUM80_VALUES_MAX);
+///    ListNodeAddPointer(&retval, 0, matrix_info);
+///
+///    matrix_info = MatrixInfoNew("BLOSUM62", blosum62_values, blosum62_prefs, BLOSUM62_VALUES_MAX);
+/// ...
+///    matrix_info = MatrixInfoNew("PAM70", pam70_values, pam70_prefs, PAM70_VALUES_MAX);
+///    ListNodeAddPointer(&retval, 0, matrix_info);
+///
+///    if (!standard_only) {
+///        matrix_info = MatrixInfoNew("IDENTITY", prot_idenity_values,
+/// ```
+pub fn scoring_matrix_table(matrix: ScoringMatrix) -> &'static ProteinMatrixTable {
+    let index = match matrix {
+        ScoringMatrix::Blosum80 => 0,
+        ScoringMatrix::Blosum62 => 1,
+        ScoringMatrix::Blosum50 => 2,
+        ScoringMatrix::Blosum45 => 3,
+        ScoringMatrix::Pam250 => 4,
+        ScoringMatrix::Blosum90 => 5,
+        ScoringMatrix::Pam30 => 6,
+        ScoringMatrix::Pam70 => 7,
+        ScoringMatrix::Identity => 8,
+    };
+    &PROTEIN_MATRIX_TABLES[index]
+}
+
+/// The first row of `table` with the gap costs, the search of the table loaders.
+///
+/// NCBI reference: c++/src/algo/blast/core/blast_stat.c:3612-3616
+/// ```c
+///       for (index=0; index<max_number_values; index++)
+///       {
+///          if (BLAST_Nint(values[index][0]) == gap_open &&
+///             BLAST_Nint(values[index][1]) == gap_extend)
+///          {
+/// ```
+pub fn gap_costs_row(
+    table: &'static ProteinMatrixTable,
+    gap_open: i32,
+    gap_extend: i32,
+) -> Option<&'static ProteinTableRow> {
+    table.values.iter().find(|row| {
+        blast_nint(row.0[0]) == i64::from(gap_open) && blast_nint(row.0[1]) == i64::from(gap_extend)
+    })
 }
 
 /// Why `Blast_KarlinBlkGappedLoadFromTables` fails: 1, the matrix is not in the tables;
@@ -95,14 +147,7 @@ pub fn karlin_blk_gapped_load_from_tables(
     standard_only: bool,
 ) -> Result<&'static ProteinTableRow, TableStatus> {
     let table = matrix_table(name, standard_only).ok_or(TableStatus::UnknownMatrix)?;
-    table
-        .values
-        .iter()
-        .find(|row| {
-            blast_nint(row.0[0]) == i64::from(gap_open)
-                && blast_nint(row.0[1]) == i64::from(gap_extend)
-        })
-        .ok_or(TableStatus::UnknownGapCosts)
+    gap_costs_row(table, gap_open, gap_extend).ok_or(TableStatus::UnknownGapCosts)
 }
 
 /// `snprintf` into what is left of a fixed buffer: at most `size - 1` bytes are written
@@ -343,183 +388,6 @@ pub fn suggested_window_size(matrix_name: &str) -> i32 {
     } else {
         40
     }
-}
-
-/// The options that NCBI's `BLAST_ValidateOptions` checks for blastp and tblastn, as their
-/// option handlers set them.
-pub struct ProteinOptionsCheck<'a> {
-    /// Not `-ungapped`.
-    pub gapped: bool,
-    pub gap_open: i32,
-    pub gap_extend: i32,
-    /// The matrix name as typed.
-    pub matrix_name: &'a str,
-    pub threshold: f64,
-    pub word_size: i32,
-    /// Whether the compressed-alphabet lookup table is used (`eCompressedAaLookupTable`).
-    pub compressed_lookup: bool,
-    pub evalue: f64,
-}
-
-/// NCBI's `BLAST_ValidateOptions` for blastp and tblastn, in its order, with NCBI's
-/// messages (`CInputException`): the scoring options, the lookup table options, the hit
-/// saving options and the word size of the identity matrix. LOSAT has no greedy or
-/// Smith-Waterman extension option, `-xdrop_ungap` or cutoff score option for these
-/// programs, so NCBI's other checks cannot fail.
-///
-/// NCBI reference: c++/src/algo/blast/core/blast_options.c:1759-1776
-/// ```c
-///    if ((status = BlastExtensionOptionsValidate(program_number, ext_options,
-///                                                blast_msg)) != 0)
-///        return status;
-///    if ((status = BlastScoringOptionsValidate(program_number, score_options,
-///                                                blast_msg)) != 0)
-///        return status;
-///    if ((status = LookupTableOptionsValidate(program_number,
-///                     lookup_options, blast_msg)) != 0)
-///        return status;
-///    if ((status = BlastInitialWordOptionsValidate(program_number,
-///                     word_options, blast_msg)) != 0)
-///        return status;
-///    if ((status = BlastHitSavingOptionsValidate(program_number, hit_options,
-///                                                blast_msg)) != 0)
-///        return status;
-/// ```
-pub fn validate_protein_options(check: &ProteinOptionsCheck<'_>) -> anyhow::Result<()> {
-    use crate::blastinput::app::options_error;
-    // NCBI reference: c++/src/algo/blast/core/blast_options.c:910-936 (the scoring
-    // check of BLAST_ValidateOptions; blastp and tblastn may use IDENTITY)
-    // ```c
-    //                 if (options->gapped_calculation && !Blast_ProgramIsRpsBlast(program_number))
-    //                 {
-    //                     Int2 status=0;
-    //                     Boolean std_matrix_only =
-    //                         (program_number != eBlastTypeBlastp &&
-    //                          program_number != eBlastTypeTblastn);
-    //                     if ((status=Blast_KarlinBlkGappedLoadFromTables(NULL, options->gap_open,
-    //                           options->gap_extend, options->matrix, std_matrix_only)) != 0)
-    //                      {
-    // 			if (status == 1)
-    // 			{
-    // ...
-    // 				buffer = BLAST_PrintMatrixMessage(options->matrix,
-    //                                                   std_matrix_only);
-    // ...
-    // 			else if (status == 2)
-    // 			{
-    // ...
-    // 				buffer = BLAST_PrintAllowedValues(options->matrix,
-    //                         options->gap_open, options->gap_extend);
-    // ```
-    if check.gapped {
-        match karlin_blk_gapped_load_from_tables(
-            check.gap_open,
-            check.gap_extend,
-            check.matrix_name,
-            false,
-        ) {
-            Ok(_) => {}
-            Err(TableStatus::UnknownMatrix) => {
-                return Err(options_error(&print_matrix_message(
-                    check.matrix_name,
-                    false,
-                )))
-            }
-            Err(TableStatus::UnknownGapCosts) => {
-                return Err(options_error(&print_allowed_values(
-                    check.matrix_name,
-                    check.gap_open,
-                    check.gap_extend,
-                )))
-            }
-        }
-    }
-    // NCBI reference: c++/src/algo/blast/core/blast_options.c:1303-1395 (the lookup
-    // check of BLAST_ValidateOptions for blastp and tblastn)
-    // ```c
-    //     if (program_number != eBlastTypeBlastn &&
-    //         program_number != eBlastTypeMapping &&
-    //         (!Blast_ProgramIsRpsBlast(program_number)) &&
-    //         options->threshold <= 0)
-    //     {
-    //         Blast_MessageWrite(blast_msg, eBlastSevError, kBlastMessageNoContext,
-    //                          "Non-zero threshold required");
-    // ...
-    //             if (options->word_size > 7) {
-    //                 Blast_MessageWrite(blast_msg, eBlastSevError,
-    //                                    kBlastMessageNoContext,
-    //                                    "Word-size must be less than "
-    //                                    "8 for a tblastn, blastp or blastx search");
-    // ...
-    //         if (options->word_size > 5 &&
-    //             options->lut_type != eCompressedAaLookupTable) {
-    //            Blast_MessageWrite(blast_msg, eBlastSevError,
-    //                               kBlastMessageNoContext,
-    //                               "Blastp, Blastx or Tblastn with word size"
-    //                               " > 5 requires a "
-    //                               "compressed alphabet lookup table");
-    //            return BLASTERR_OPTION_VALUE_INVALID;
-    //         }
-    //         else if (options->lut_type == eCompressedAaLookupTable &&
-    //                  options->word_size != 5 && options->word_size != 6 &&
-    //                  options->word_size != 7) {
-    //            Blast_MessageWrite(blast_msg, eBlastSevError, kBlastMessageNoContext,
-    //                          "Compressed alphabet lookup table requires "
-    //                          "word size 5, 6 or 7");
-    // ```
-    // (`threshold <= 0` is false for NaN, as in C.)
-    if check.threshold <= 0.0 {
-        return Err(options_error("Non-zero threshold required"));
-    }
-    if check.word_size <= 0 {
-        return Err(options_error("Word-size must be greater than zero"));
-    }
-    if check.word_size > 7 {
-        return Err(options_error(
-            "Word-size must be less than 8 for a tblastn, blastp or blastx search",
-        ));
-    }
-    if check.word_size > 5 && !check.compressed_lookup {
-        return Err(options_error(
-            "Blastp, Blastx or Tblastn with word size > 5 requires a compressed alphabet lookup table",
-        ));
-    }
-    if check.compressed_lookup && !(5..=7).contains(&check.word_size) {
-        return Err(options_error(
-            "Compressed alphabet lookup table requires word size 5, 6 or 7",
-        ));
-    }
-    // NCBI reference: c++/src/algo/blast/core/blast_options.c:1518-1521 (the hit
-    // saving check; LOSAT's blastp and tblastn have no cutoff score option)
-    // ```c
-    // 	if (options->expect_value <= 0.0 && options->cutoff_score <= 0)
-    // 	{
-    // 		Blast_MessageWrite(blast_msg, eBlastSevError, kBlastMessageNoContext,
-    //          "expect value or cutoff score must be greater than zero");
-    // ```
-    if check.evalue <= 0.0 {
-        return Err(options_error(
-            "expect value or cutoff score must be greater than zero",
-        ));
-    }
-    // NCBI reference: c++/src/algo/blast/core/blast_options.c:1783-1795
-    // ```c
-    //        char* matrix = BLAST_StrToUpper(score_options->matrix);
-    //        Boolean is_identity = strcmp(matrix, "IDENTITY") == 0;
-    // ...
-    //        if (lookup_options->word_size > 5 && is_identity) {
-    //
-    //            Blast_MessageWrite(blast_msg, eBlastSevError,
-    //                               kBlastMessageNoContext,
-    //                               "Word size larger than 5 is not supported for "
-    //                               "the identity scoring matrix");
-    // ```
-    if check.word_size > 5 && check.matrix_name.eq_ignore_ascii_case("IDENTITY") {
-        return Err(options_error(
-            "Word size larger than 5 is not supported for the identity scoring matrix",
-        ));
-    }
-    Ok(())
 }
 
 #[cfg(test)]

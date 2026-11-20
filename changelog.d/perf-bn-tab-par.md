@@ -1,0 +1,1 @@
+- `blastn` with two or more threads formats the outfmt 6 / 7 rows of each report on the search's threads (in pieces of up to 512 rows of one query, written in order) instead of on one thread while the others wait, where no `LOSAT_X_QBATCHPAR` slot is searching (`LOSAT_X_BNTABPAR`, one of the switches above; `=0` formats them on one thread). Outputs do not change.

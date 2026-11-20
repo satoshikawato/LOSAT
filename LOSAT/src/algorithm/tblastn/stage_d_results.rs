@@ -11,6 +11,12 @@ use super::stage_d_linking::{
     compare_preliminary_lists_for_kappa, score_compare, LinkedHsp, LinkedHspList,
 };
 
+// `-culling_limit`: NCBI's culling writer and pipe over these hit lists (a child module for
+// the private fields of `KappaResultHitList`).
+#[path = "culling.rs"]
+mod culling;
+pub(super) use culling::PrelimCulling;
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.h:152-181;
 // core/blast_kappa.c:2494-2515:
 // while (NULL != (hsp_list = BlastCompo_HeapPop(heap)))
@@ -162,6 +168,41 @@ impl KappaResultHitList {
         self.lists.sort_by(compare_result_lists);
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:827-857;
+    // c++/src/algo/blast/core/blast_hits.c:3331-3337 (`core::blast_hspstream`)
+    // ```c
+    //     	  if (MIN_BUF_SZ + 100 < hit_list->hsplist_count) {
+    //         	  int max_index = hit_list->hsplist_count -1;
+    // ...
+    //         	  Blast_HitListSortByEvalue(hit_list);
+    // ...
+    //         			  s_TrimHitList(hit_list, i);
+    // ```
+    /// `BlastHSPCBSStreamClose`'s trim of this query's preliminary hit list (`ADAPTIVE_CBS`):
+    /// sorted by E-value (`Blast_HitListSortByEvalue`: the lists left without HSPs, last,
+    /// removed) and cut where the E-values pass the limit, when it holds enough lists.
+    pub(super) fn cbs_close_trim(&mut self, hitlist_size: usize) {
+        use crate::core::blast_hspstream::{cbs_trim_count, cbs_trim_sorts};
+        let count = self.lists.len();
+        if !cbs_trim_sorts(count, hitlist_size) {
+            return;
+        }
+        self.lists.sort_unstable_by(compare_result_lists);
+        let sorted = self
+            .lists
+            .iter()
+            .position(|list| list.hsps.hsps.is_empty())
+            .unwrap_or(count);
+        self.lists.truncate(sorted);
+        self.heapified = false;
+        let lists = &self.lists;
+        if let Some(keep) =
+            cbs_trim_count(count, sorted, hitlist_size, |i| lists[i].hsps.best_evalue)
+        {
+            self.lists.truncate(keep);
+        }
+    }
+
     // NCBI c++/src/algo/blast/api/blast_seqalign.cpp:1572-1577:
     // for (int index = 0; index < hit_list->hsplist_count; index++) {
     //     BlastHSPList* hsp_list = hit_list->hsplist_array[index];
@@ -212,6 +253,73 @@ impl KappaResultHitList {
     // Int4 hsplist_count, hsplist_max;
     // double worst_evalue; Int4 low_score; Boolean heapified;
     // BlastHSPList** hsplist_array;
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:845-865
+    // ```c
+    //    for (subject_index = 0;
+    //         subject_index < hit_list->hsplist_count; ++subject_index) {
+    //    	  	  BlastHSPList * hsp_list = hit_list->hsplist_array[subject_index];
+    //    	  	  if(hit_options->max_hsps_per_subject) {
+    //    	  		  Blast_TrimHSPListByMaxHsps(hsp_list, hit_options);
+    //    	  	  }
+    //    	  	  if(hit_options->query_cov_hsp_perc) {
+    //    	  		  Blast_HSPListReapByQueryCoverage(hsp_list, hit_options, query_info, program_number);
+    //    	  		  if(hsp_list->hspcnt == 0){
+    //    	  			hit_list->hsplist_array[subject_index] =  Blast_HSPListFree(hsp_list);
+    //    	  		  }
+    //    	  	  }
+    //    ...
+    //    }
+    //    if(hit_options->query_cov_hsp_perc) {
+    //         Blast_HitListPurgeNullHSPLists(hit_list);
+    //    }
+    // ```
+    /// `s_FilterBlastResults` of `-max_hsps` (`max_hsps`, 0 keeps every HSP) and
+    /// `-qcov_hsp_perc` (`query_cov_hsp_perc`, 0 removes none) on the final hit list of a
+    /// query of `query_length` residues: each list cut to its first HSPs, then its HSPs below
+    /// the coverage removed (its best e-value set again when one is), and the lists left
+    /// empty removed. The payloads follow their HSPs.
+    pub(super) fn filter_results(
+        &mut self,
+        max_hsps: usize,
+        query_cov_hsp_perc: f64,
+        query_length: usize,
+    ) {
+        use crate::core::blast_hits::{reap_by_query_coverage, trim_by_max_hsps};
+        let extent = |linked: &LinkedHsp| {
+            (
+                i64::from(linked.hsp.q_start),
+                i64::from(linked.hsp.q_end),
+                query_length as i64,
+            )
+        };
+        for list in &mut self.lists {
+            trim_by_max_hsps(&mut list.hsps.hsps, max_hsps);
+            trim_by_max_hsps(&mut list.payloads, max_hsps);
+            let removed = if query_cov_hsp_perc <= 0.0 {
+                false
+            } else if list.payloads.is_empty() {
+                reap_by_query_coverage(&mut list.hsps.hsps, query_cov_hsp_perc, extent)
+            } else {
+                let mut paired: Vec<_> = std::mem::take(&mut list.hsps.hsps)
+                    .into_iter()
+                    .zip(std::mem::take(&mut list.payloads))
+                    .collect();
+                let removed =
+                    reap_by_query_coverage(&mut paired, query_cov_hsp_perc, |(linked, _)| {
+                        extent(linked)
+                    });
+                (list.hsps.hsps, list.payloads) = paired.into_iter().unzip();
+                removed
+            };
+            if removed {
+                refresh_best_evalue(&mut list.hsps);
+            }
+        }
+        if query_cov_hsp_perc > 0.0 {
+            self.lists.retain(|list| !list.hsps.hsps.is_empty());
+        }
+    }
+
     pub(super) fn lists(&self) -> &[KappaResultList] {
         &self.lists
     }
@@ -220,6 +328,11 @@ impl KappaResultHitList {
     /// ordinal ids to ranks, in the same order).
     pub(super) fn lists_mut(&mut self) -> &mut [KappaResultList] {
         &mut self.lists
+    }
+
+    /// The hit list after `cut` removes lists from it (`database::drop_unaligned`).
+    pub(super) fn with_lists_mut(&mut self, cut: impl FnOnce(&mut Vec<KappaResultList>)) {
+        cut(&mut self.lists);
     }
 
     pub(super) fn worst_evalue(&self) -> f64 {
@@ -250,19 +363,32 @@ fn refresh_best_evalue(list: &mut LinkedHspList) {
 // if (evalue1 < 1.0e-180 && evalue2 < 1.0e-180) return 0;
 // if ((retval = s_EvalueComp(h1->evalue, h2->evalue)) != 0) return retval;
 // return ScoreCompareHSPs(v1, v2);
-fn sort_hsps_by_evalue(list: &mut KappaResultList) {
-    let compare = |a: &LinkedHsp, b: &LinkedHsp| {
-        let evalue = if a.evalue < 1.0e-180 && b.evalue < 1.0e-180 {
-            Ordering::Equal
-        } else if a.evalue < b.evalue {
-            Ordering::Less
-        } else if a.evalue > b.evalue {
-            Ordering::Greater
-        } else {
-            Ordering::Equal
-        };
-        evalue.then_with(|| score_compare(&a.hsp, &b.hsp))
+/// The order of a list's HSPs in the reports (`sort_hsps_by_evalue`, `evalue_order`).
+fn compare_report_hsps(a: &LinkedHsp, b: &LinkedHsp) -> Ordering {
+    let evalue = if a.evalue < 1.0e-180 && b.evalue < 1.0e-180 {
+        Ordering::Equal
+    } else if a.evalue < b.evalue {
+        Ordering::Less
+    } else if a.evalue > b.evalue {
+        Ordering::Greater
+    } else {
+        Ordering::Equal
     };
+    evalue.then_with(|| score_compare(&a.hsp, &b.hsp))
+}
+
+/// The indices of `list`'s HSPs (and payloads) in the order `sort_hsps_by_evalue` puts them
+/// (`KappaResultHitList::sort_hsps_for_report`, before the reports), without moving them: the
+/// same stable sort by `compare_report_hsps`.
+pub(super) fn evalue_order(list: &KappaResultList) -> Vec<usize> {
+    let hsps = &list.hsps.hsps;
+    let mut order: Vec<usize> = (0..hsps.len()).collect();
+    order.sort_by(|&a, &b| compare_report_hsps(&hsps[a], &hsps[b]));
+    order
+}
+
+fn sort_hsps_by_evalue(list: &mut KappaResultList) {
+    let compare = compare_report_hsps;
     if list.payloads.is_empty() {
         list.hsps.hsps.sort_by(compare);
     } else {

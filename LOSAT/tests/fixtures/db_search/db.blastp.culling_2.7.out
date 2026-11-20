@@ -1,0 +1,232 @@
+# BLASTP 2.17.0+
+# Query: BDT62524.1 hypothetical protein [Metapenaeus ensis majanivirus]
+# Database: tests/db_search/paja
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+BDT62524.1	BDT63561.1	56.250	16	7	0	334	349	79	94	7.5	21.2
+# BLASTP 2.17.0+
+# Query: BDT62525.1 wsv465-like protein [Metapenaeus ensis majanivirus]
+# Database: tests/db_search/paja
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 2 hits found
+BDT62525.1	BDT63563.1	35.294	51	30	2	78	125	1151	1201	3.2	22.7
+BDT62525.1	BDT63541.1	22.901	131	74	6	7	112	72	200	7.8	21.2
+# BLASTP 2.17.0+
+# Query: BDT62529.1 innexin [Metapenaeus ensis majanivirus]
+# Database: tests/db_search/paja
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 7 hits found
+BDT62529.1	BDT63509.1	30.556	36	25	0	144	179	650	685	0.56	25.0
+BDT62529.1	BDT63503.1	36.000	25	16	0	20	44	696	720	0.92	24.3
+BDT62529.1	BDT63556.1	24.167	120	70	4	169	276	1119	1229	1.4	23.9
+BDT62529.1	BDT63561.1	37.500	24	15	0	219	242	434	457	3.7	22.3
+BDT62529.1	BDT63515.1	25.490	51	30	1	235	277	621	671	4.1	22.3
+BDT62529.1	BDT63528.1	33.333	42	24	1	36	77	18	55	4.4	22.3
+BDT62529.1	BDT63560.1	38.889	18	11	0	172	189	222	239	8.0	21.2
+# BLASTP 2.17.0+
+# Query: BDT62536.1 hypothetical protein [Metapenaeus ensis majanivirus]
+# Database: tests/db_search/paja
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 4 hits found
+BDT62536.1	BDT63501.1	22.535	71	49	2	174	238	186	256	0.58	24.6
+BDT62536.1	BDT63563.1	33.333	51	26	1	20	62	2238	2288	0.87	23.9
+BDT62536.1	BDT63553.1	53.333	15	7	0	250	264	49	63	7.1	21.2
+BDT62536.1	BDT63533.1	40.909	22	13	0	112	133	1218	1239	8.6	20.8
+# BLASTP 2.17.0+
+# Query: BDT62539.1 hypothetical protein [Metapenaeus ensis majanivirus]
+# Database: tests/db_search/paja
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+BDT62539.1	BDT63544.1	23.256	86	57	2	185	268	154	232	0.31	25.4
+# BLASTP 2.17.0+
+# Query: BDT62541.1 hypothetical protein [Metapenaeus ensis majanivirus]
+# Database: tests/db_search/paja
+# 0 hits found
+# BLASTP 2.17.0+
+# Query: BDT62542.1 hypothetical protein [Metapenaeus ensis majanivirus]
+# Database: tests/db_search/paja
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+BDT62542.1	BDT63563.1	31.818	66	33	3	4	61	2188	2249	7.0	21.9
+# BLASTP 2.17.0+
+# Query: BDT62543.1 hypothetical protein [Metapenaeus ensis majanivirus]
+# Database: tests/db_search/paja
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+BDT62543.1	BDT63575.1	35.135	37	21	1	467	500	302	338	1.6	24.3
+# BLASTP 2.17.0+
+# Query: BDT62544.1 wsv192-like protein [Metapenaeus ensis majanivirus]
+# Database: tests/db_search/paja
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 3 hits found
+BDT62544.1	BDT63528.1	22.664	428	219	12	8	348	629	1031	1.21e-21	89.4
+BDT62544.1	BDT63501.1	28.889	45	32	0	302	346	890	934	6.6	21.6
+BDT62544.1	BDT63530.1	30.000	50	26	2	130	170	319	368	8.7	21.2
+# BLASTP 2.17.0+
+# Query: BDT62555.1 baculoviral IAP repeat-containing protein [Metapenaeus ensis majanivirus]
+# Database: tests/db_search/paja
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 4 hits found
+BDT62555.1	BDT63570.1	27.083	48	31	1	158	201	372	419	4.1	22.3
+BDT62555.1	BDT63508.1	63.636	11	4	0	337	347	1240	1250	6.7	21.9
+BDT62555.1	BDT63516.1	60.000	15	6	0	342	356	1056	1070	7.2	21.6
+BDT62555.1	BDT63523.1	46.154	26	12	2	99	124	518	541	7.6	21.6
+# BLASTP 2.17.0+
+# Query: BDT62556.1 baculoviral IAP repeat-containing protein [Metapenaeus ensis majanivirus]
+# Database: tests/db_search/paja
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 2 hits found
+BDT62556.1	BDT63568.1	28.571	70	41	4	377	437	376	445	4.1	22.3
+BDT62556.1	BDT63579.1	22.727	44	34	0	108	151	2784	2827	8.1	21.6
+# BLASTP 2.17.0+
+# Query: BDT62557.1 baculoviral IAP repeat-containing protein [Metapenaeus ensis majanivirus]
+# Database: tests/db_search/paja
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 2 hits found
+BDT62557.1	BDT63579.1	21.171	222	136	8	13	217	3469	3668	3.2	22.7
+BDT62557.1	BDT63562.1	33.333	39	26	0	156	194	954	992	7.6	21.6
+# BLASTP 2.17.0+
+# Query: BDT62560.1 hypothetical protein [Metapenaeus ensis majanivirus]
+# Database: tests/db_search/paja
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 5 hits found
+BDT62560.1	BDT63522.1	28.571	77	44	2	269	343	966	1033	0.43	25.4
+BDT62560.1	BDT63528.1	24.528	53	32	1	243	287	646	698	1.3	23.9
+BDT62560.1	BDT63539.1	34.286	35	16	2	229	257	43	76	5.3	21.2
+BDT62560.1	BDT63576.1	35.484	31	17	1	136	166	3	30	5.5	20.8
+BDT62560.1	BDT63550.1	47.619	21	9	1	314	334	35	53	7.0	20.8
+# BLASTP 2.17.0+
+# Query: BDT62561.1 hypothetical protein [Metapenaeus ensis majanivirus]
+# Database: tests/db_search/paja
+# 0 hits found
+# BLASTP 2.17.0+
+# Query: BDT62562.1 wsv306-like protein [Metapenaeus ensis majanivirus]
+# Database: tests/db_search/paja
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 5 hits found
+BDT62562.1	BDT63539.1	31.818	132	83	2	259	383	6	137	2.44e-22	86.3
+BDT62562.1	BDT63556.1	22.826	92	69	2	309	399	562	652	0.89	24.6
+BDT62562.1	BDT63554.1	24.038	104	72	4	191	290	136	236	1.0	24.3
+BDT62562.1	BDT63499.1	22.500	120	86	4	78	195	534	648	2.3	23.1
+BDT62562.1	BDT63562.1	44.000	25	12	1	10	34	589	611	7.4	21.6
+# BLASTP 2.17.0+
+# Query: BDT62564.1 wsv310-like protein [Metapenaeus ensis majanivirus]
+# Database: tests/db_search/paja
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 3 hits found
+BDT62564.1	BDT63505.1	26.316	152	91	4	96	244	190	323	0.20	26.6
+BDT62564.1	BDT63515.1	23.684	76	54	2	46	119	721	794	1.0	24.3
+BDT62564.1	BDT63538.1	25.424	59	34	2	183	241	570	618	8.3	21.2
+# BLASTP 2.17.0+
+# Query: BDT62569.1 wsv282-like protein [Metapenaeus ensis majanivirus]
+# Database: tests/db_search/paja
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 4 hits found
+BDT62569.1	BDT63531.1	31.900	279	184	3	200	473	301	578	2.57e-40	146
+BDT62569.1	BDT63556.1	38.710	31	13	1	359	389	767	791	3.1	23.1
+BDT62569.1	BDT63547.1	25.926	27	20	0	326	352	155	181	3.2	22.7
+BDT62569.1	BDT63574.1	27.059	85	45	4	255	322	588	672	6.5	21.9
+# BLASTP 2.17.0+
+# Query: BDT62575.1 wsv137-like protein [Metapenaeus ensis majanivirus]
+# Database: tests/db_search/paja
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 4 hits found
+BDT62575.1	BDT63514.1	34.454	119	62	5	297	402	181	296	1.63e-08	48.5
+BDT62575.1	BDT63577.1	29.348	92	45	4	59	130	260	351	0.18	26.9
+BDT62575.1	BDT63566.1	28.261	46	28	1	10	55	449	489	2.5	23.1
+BDT62575.1	BDT63561.1	27.586	58	41	1	44	101	70	126	3.9	22.3
+# BLASTP 2.17.0+
+# Query: BDT62587.1 hypothetical protein [Metapenaeus ensis majanivirus]
+# Database: tests/db_search/paja
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 5 hits found
+BDT62587.1	BDT63579.1	26.389	72	41	3	146	205	2247	2318	1.0	23.9
+BDT62587.1	BDT63579.1	28.333	60	40	1	51	107	3089	3148	6.6	21.2
+BDT62587.1	BDT63516.1	23.333	90	66	3	39	126	1425	1513	1.0	23.9
+BDT62587.1	BDT63542.1	28.571	42	29	1	97	138	571	611	4.3	21.6
+BDT62587.1	BDT63538.1	26.531	49	23	2	120	165	439	477	7.8	20.8
+# BLASTP 2.17.0+
+# Query: BDT62588.1 wsv267-like protein [Metapenaeus ensis majanivirus]
+# Database: tests/db_search/paja
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 3 hits found
+BDT62588.1	BDT63580.1	26.154	65	42	2	143	203	810	872	0.97	23.9
+BDT62588.1	BDT63553.1	41.667	24	14	0	278	301	286	309	1.6	23.1
+BDT62588.1	BDT63533.1	23.438	128	74	5	184	305	1343	1452	7.1	21.2
+# BLASTP 2.17.0+
+# Query: BDT62589.1 hypothetical protein [Metapenaeus ensis majanivirus]
+# Database: tests/db_search/paja
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 2 hits found
+BDT62589.1	BDT63510.1	30.233	86	40	3	179	264	719	784	0.93	23.9
+BDT62589.1	BDT63503.1	23.404	188	95	10	22	168	1045	1224	1.2	23.5
+# BLASTP 2.17.0+
+# Query: BDT62590.1 hypothetical protein [Metapenaeus ensis majanivirus]
+# Database: tests/db_search/paja
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+BDT62590.1	BDT63579.1	31.111	45	27	1	41	81	3665	3709	6.2	21.6
+# BLASTP 2.17.0+
+# Query: BDT62593.1 SARAF-like protein [Metapenaeus ensis majanivirus]
+# Database: tests/db_search/paja
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 5 hits found
+BDT62593.1	BDT63563.1	31.034	58	28	1	144	189	1577	1634	0.68	24.6
+BDT62593.1	BDT63579.1	34.375	32	19	1	66	95	2335	2366	2.3	23.1
+BDT62593.1	BDT63509.1	37.143	35	22	0	298	332	542	576	3.4	22.3
+BDT62593.1	BDT63522.1	29.114	79	37	3	167	226	19	97	7.8	21.2
+BDT62593.1	BDT63580.1	27.692	65	42	2	18	82	4765	4824	9.8	20.8
+# BLASTP 2.17.0+
+# Query: BDT62596.1 wsv161-like protein [Metapenaeus ensis majanivirus]
+# Database: tests/db_search/paja
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 3 hits found
+BDT62596.1	BDT63502.1	23.864	176	112	7	135	299	350	514	0.002	33.5
+BDT62596.1	BDT63523.1	34.043	47	30	1	248	294	1196	1241	0.009	31.2
+BDT62596.1	BDT63503.1	28.302	53	34	1	167	215	2228	2280	2.5	23.1
+# BLASTP 2.17.0+
+# Query: BDT62597.1 hypothetical protein [Metapenaeus ensis majanivirus]
+# Database: tests/db_search/paja
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 2 hits found
+BDT62597.1	BDT63528.1	27.027	111	46	5	182	264	505	608	1.8	23.1
+BDT62597.1	BDT63580.1	45.833	24	13	0	310	333	556	579	6.6	21.6
+# BLASTP 2.17.0+
+# Query: BDT62598.1 hypothetical protein [Metapenaeus ensis majanivirus]
+# Database: tests/db_search/paja
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 2 hits found
+BDT62598.1	BDT63528.1	55.556	18	8	0	284	301	506	523	0.063	27.7
+BDT62598.1	BDT63530.1	47.826	23	9	1	304	326	407	426	1.6	23.5
+# BLASTP 2.17.0+
+# Query: BDT62599.1 hypothetical protein [Metapenaeus ensis majanivirus]
+# Database: tests/db_search/paja
+# 0 hits found
+# BLASTP 2.17.0+
+# Query: BDT62606.1 wsv131-like protein [Metapenaeus ensis majanivirus]
+# Database: tests/db_search/paja
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 3 hits found
+BDT62606.1	BDT63512.1	26.389	288	178	11	51	335	49	305	3.57e-06	42.0
+BDT62606.1	BDT63580.1	46.667	30	15	1	430	458	3602	3631	0.11	27.7
+BDT62606.1	BDT63518.1	26.042	96	61	3	156	245	22	113	5.9	21.9
+# BLASTP 2.17.0+
+# Query: BDT62609.1 wsv415-like protein [Metapenaeus ensis majanivirus]
+# Database: tests/db_search/paja
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 4 hits found
+BDT62609.1	BDT63547.1	24.375	320	190	9	235	515	139	445	5.45e-11	57.4
+BDT62609.1	BDT63575.1	26.984	63	40	3	232	292	65	123	0.59	25.4
+BDT62609.1	BDT63532.1	22.764	123	87	3	85	205	859	975	4.2	22.7
+BDT62609.1	BDT63522.1	28.947	38	27	0	422	459	1146	1183	5.9	22.3
+# BLASTP 2.17.0+
+# Query: BDT62611.1 hypothetical protein [Metapenaeus ensis majanivirus]
+# Database: tests/db_search/paja
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 5 hits found
+BDT62611.1	BDT63580.1	21.429	126	89	4	240	365	4091	4206	0.46	25.8
+BDT62611.1	BDT63547.1	38.235	34	20	1	335	367	425	458	0.86	24.6
+BDT62611.1	BDT63556.1	28.571	42	25	1	4	40	1696	1737	5.0	22.3
+BDT62611.1	BDT63566.1	48.000	25	9	1	207	227	434	458	6.0	21.9
+BDT62611.1	BDT63553.1	33.333	18	12	0	394	411	166	183	7.9	21.6
+# BLAST processed 30 queries

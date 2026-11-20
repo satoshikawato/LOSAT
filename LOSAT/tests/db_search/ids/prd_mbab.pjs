@@ -1,0 +1,24 @@
+{
+  "version": "1.2",
+  "dbname": "prd_mbab",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "prd_mbab (parsed Seq-ids)",
+  "number-of-letters": 750,
+  "number-of-sequences": 3,
+  "last-updated": "2026-11-11T20:30:00",
+  "number-of-volumes": 1,
+  "bytes-total": 50397,
+  "bytes-to-cache": 890,
+  "files": [
+    "prd_mbab.pdb",
+    "prd_mbab.phr",
+    "prd_mbab.pin",
+    "prd_mbab.pog",
+    "prd_mbab.pos",
+    "prd_mbab.pot",
+    "prd_mbab.psq",
+    "prd_mbab.ptf",
+    "prd_mbab.pto"
+  ]
+}

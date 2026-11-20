@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="US-ASCII"?>
+<BlastXML2
+    xmlns="http://www.ncbi.nlm.nih.gov"
+    xmlns:xs="http://www.w3.org/2001/XMLSchema-instance"
+    xs:schemaLocation="http://www.ncbi.nlm.nih.gov http://www.ncbi.nlm.nih.gov/data_specs/schema_alt/NCBI_BlastOutput2.xsd"
+>
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>tblastx</program>
+      <version>TBLASTX 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <db>tests/db_search/taxfilter/tfn</db>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>BLOSUM62</matrix>
+          <expect>10</expect>
+          <filter>L;</filter>
+          <query-gencode>1</query-gencode>
+          <db-gencode>1</db-gencode>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <search>
+            <Search>
+              <query-id>Query_1</query-id>
+              <query-title>first nucleotide query with a title long enough to be cut</query-title>
+              <query-len>429</query-len>
+              <query-masking>
+                <Range>
+                  <from>79</from>
+                  <to>271</to>
+                </Range>
+                <Range>
+                  <from>289</from>
+                  <to>313</to>
+                </Range>
+                <Range>
+                  <from>316</from>
+                  <to>376</to>
+                </Range>
+                <Range>
+                  <from>17</from>
+                  <to>68</to>
+                </Range>
+                <Range>
+                  <from>161</from>
+                  <to>245</to>
+                </Range>
+                <Range>
+                  <from>302</from>
+                  <to>362</to>
+                </Range>
+              </query-masking>
+              <hits></hits>
+              <stat>
+                <Statistics>
+                  <db-num>16</db-num>
+                  <db-len>10937</db-len>
+                  <hsp-len>16</hsp-len>
+                  <eff-space>22352</eff-space>
+                  <kappa>0.133956144488482</kappa>
+                  <lambda>0.317605957635731</lambda>
+                  <entropy>0.401214524497119</entropy>
+                </Statistics>
+              </stat>
+              <message>Query_1 first nucleotide .. :  Query_1 first nucleotide .. : Filtering resulted in an empty database.  No hits found</message>
+            </Search>
+          </search>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>tblastx</program>
+      <version>TBLASTX 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <db>tests/db_search/taxfilter/tfn</db>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>BLOSUM62</matrix>
+          <expect>10</expect>
+          <filter>L;</filter>
+          <query-gencode>1</query-gencode>
+          <db-gencode>1</db-gencode>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <search>
+            <Search>
+              <query-id>Query_2</query-id>
+              <query-title>second</query-title>
+              <query-len>444</query-len>
+              <query-masking>
+                <Range>
+                  <from>10</from>
+                  <to>40</to>
+                </Range>
+                <Range>
+                  <from>62</from>
+                  <to>110</to>
+                </Range>
+                <Range>
+                  <from>224</from>
+                  <to>248</to>
+                </Range>
+              </query-masking>
+              <hits></hits>
+              <stat>
+                <Statistics>
+                  <db-num>16</db-num>
+                  <db-len>10937</db-len>
+                  <hsp-len>16</hsp-len>
+                  <eff-space>23232</eff-space>
+                  <kappa>0.133956144488482</kappa>
+                  <lambda>0.317605957635731</lambda>
+                  <entropy>0.401214524497119</entropy>
+                </Statistics>
+              </stat>
+              <message>Query_2 second:  Query_2 second: Filtering resulted in an empty database.  No hits found</message>
+            </Search>
+          </search>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+</BlastXML2>

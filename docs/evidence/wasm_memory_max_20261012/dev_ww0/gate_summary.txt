@@ -1,0 +1,22 @@
+09:25:41 head 636f31aea base fb8b10ee68d5d44e756517e36fae0a02054f6981 steps: base_reactors reactors sections identity adapter native host_tests v_abi v_abi_high wasi_matrix app_check engine_runtime e2e_engine e2e_fake (uncommitted paths: 0)
+09:33:49 base-reactors exit=0 | threads memory {'module': 'env', 'name': 'memory', 'imported': True, 'initial': 26, 'maximum': 16384, 'shared': True} ['-C', 'target-feature=+simd128']
+09:37:27 reactors exit=0 | threads memory {'module': 'env', 'name': 'memory', 'imported': True, 'initial': 26, 'maximum': 65535, 'shared': True} ['-C', 'target-feature=+simd128', '-C', 'link-arg=--max-memory=4294901760']
+09:37:27 sections exit=0 | 4 lines with 'differ'
+09:37:27 build-identity exit=0 | }
+09:37:27 adapter-fmt exit=0 | 
+09:42:04 adapter-cargo-test exit=0 | 14 passed 0 failed
+09:47:18 native exit=0 | sha256 cc773c9613eb25c5
+09:47:31 host-node-tests exit=0 | ℹ tests 40 ℹ pass 40 ℹ fail 0 
+09:47:31 host-py-wasm-performance exit=0 | OK
+09:48:24 v-abi-quick exit=0 | 68 runs matched the native CLI; frozen hashes: 16/16 equal
+09:49:24 v-abi-quick-heap-2.44GiB exit=0 | 68 runs matched the native CLI; frozen hashes: 16/16 equal
+09:56:38 wasi-artifacts exit=0 | threaded-reactor: 35303125896bf981d6cb320275f4f6abaa8f9bbcd09223c4a2a73586a2ab7e3e
+09:58:00 wasi-matrix exit=0 | 419 command/oracle records; reactor lifecycle gates PASS; format failures=0
+09:58:04 app-npm-ci exit=0 | Run `npm audit` for details.
+09:58:39 app-check exit=0 |  Test Files 21 passed | 1 skipped (22); Tests 406 passed | 40 skipped (446);
+09:58:47 app-engine-runtime-vitest exit=0 |  Test Files 2 passed (2)  Tests 73 passed (73) 
+10:03:37 e2e-engine exit=1 |  44 failed; 60 skipped; 94 passed (4.3m);
+10:07:05 e2e-fake exit=1 |  31 failed; 103 skipped; 64 passed (3.1m);
+10:07:05 done
+10:11:35 e2e-engine-webkit exit=0 |  23 skipped; 43 passed (2.2m);
+10:13:55 e2e-fake-webkit exit=0 |  38 skipped; 28 passed (1.9m);

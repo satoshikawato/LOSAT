@@ -1,0 +1,52 @@
+TBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: empty B
+           0 sequences; 100 total letters
+
+
+
+Query= P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName:
+Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains:
+RecName: Full=Hemopressin [Homo sapiens] >P69906.2 RecName:
+Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName:
+Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin
+[Pan paniscus] >P69907.2 RecName: Full=Hemoglobin subunit alpha;
+AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain;
+Contains: RecName: Full=Hemopressin [Pan troglodytes]
+
+Length=142
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.319    0.130    0.385    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 4455
+
+
+  Database: empty B
+    Posted date:  Nov 13, 2026  1:00 PM
+  Number of letters in database: 100
+  Number of sequences in database:  0
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 13
+Window for multiple hits: 40

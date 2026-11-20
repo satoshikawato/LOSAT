@@ -1,0 +1,108 @@
+BLASTN 2.17.0+
+
+
+Reference: Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb
+Miller (2000), "A greedy algorithm for aligning DNA sequences", J
+Comput Biol 2000; 7(1-2):203-14.
+
+
+
+Database: s60k Sakai 2000001-2060000 mutated
+           1 sequences; 59,980 total letters
+
+
+
+Query= m1
+
+Length=300
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 17029776
+
+
+Query= m2_alllc
+
+Length=200
+
+
+***** No hits found *****
+
+
+
+
+
+Effective search space used: 0
+
+
+Query= m3
+
+Length=300
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 17029776
+
+
+Query= m4_alllc
+
+Length=80
+
+
+***** No hits found *****
+
+
+
+
+
+Effective search space used: 0
+
+
+Query= m5half
+
+Length=350
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 20027976
+
+
+  Database: s60k Sakai 2000001-2060000 mutated
+    Posted date:  Oct 25, 2026  11:46 AM
+  Number of letters in database: 59,980
+  Number of sequences in database:  1
+
+
+
+Matrix: blastn matrix 1 -2
+Gap Penalties: Existence: 0, Extension: 2.5

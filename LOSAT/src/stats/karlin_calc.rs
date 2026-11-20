@@ -7,7 +7,9 @@
 //!   - check_ideal logic: use kbp_ideal if computed Lambda >= ideal Lambda
 
 use crate::config::ScoringMatrix;
+use crate::stats::sum_statistics::{blast_expm1, blast_powi};
 use crate::stats::KarlinParams;
+use crate::utils::glibc_fma_libm::GlibcLibm;
 use crate::utils::matrix::{ncbistdaa, protein_score, BLASTAA_SIZE};
 
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_stat.h:121-122
@@ -170,7 +172,7 @@ pub fn compute_std_aa_composition() -> [f64; BLASTAA_SIZE] {
 /// Stores probability distribution of alignment scores
 #[derive(Debug, Clone)]
 pub struct ScoreFreqProfile {
-    /// Score probabilities: sprob[score] = probability of score
+    /// Score probabilities: `sprob[score]` = probability of score
     /// Indexed by score value (negative scores are valid)
     sprob: Vec<f64>,
     /// Minimum score with non-zero probability
@@ -186,7 +188,7 @@ pub struct ScoreFreqProfile {
 impl ScoreFreqProfile {
     pub fn new(score_min: i32, score_max: i32) -> Self {
         let range = (score_max - score_min + 1) as usize;
-        let mut sprob = vec![0.0; range];
+        let sprob = vec![0.0; range];
 
         Self {
             sprob,
@@ -225,8 +227,36 @@ impl ScoreFreqProfile {
         self.score_avg
     }
 
-    pub fn sprob(&self) -> &[f64] {
-        &self.sprob
+    /// A profile whose fields are given as NCBI's caller sets them, without the normalization of
+    /// `BlastScoreFreqCalc`: `sprob[0]` is the probability of `score_min`.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:2700-2726
+    // ```c
+    //     score_freqs = Blast_ScoreFreqNew(min_score, max_score);
+    //     ...
+    //     score_freqs->obs_min = min_score;
+    //     score_freqs->obs_max = max_score;
+    //     ...
+    //             score_freqs->sprob[kScore] +=
+    //                 (std_probs[aa_alphabet[r]]/effective_length);
+    //     ...
+    //     for (s = min_score; s <= max_score; s++) {
+    //         score_freqs->score_avg += (s * score_freqs->sprob[s]);
+    //     }
+    // ```
+    pub(crate) fn from_ncbi_parts(
+        score_min: i32,
+        sprob: Vec<f64>,
+        obs_min: i32,
+        obs_max: i32,
+        score_avg: f64,
+    ) -> Self {
+        Self {
+            sprob,
+            obs_min,
+            obs_max,
+            score_avg,
+            score_min,
+        }
     }
 }
 
@@ -274,6 +304,10 @@ pub fn score_freq_profile_from_probabilities(
         }
     }
 
+    #[expect(
+        clippy::manual_range_contains,
+        reason = "NaN: `!(a..=b).contains(&x)` is true for NaN, the comparisons are false"
+    )]
     if score_sum > 0.0001 || score_sum < -0.0001 {
         for score in obs_min..=obs_max {
             let prob = sfp.get_prob(score) / score_sum;
@@ -369,6 +403,10 @@ pub fn compute_score_freq_profile_for_matrix(
 
     // Compute average score (also normalize probabilities)
     let mut score_avg = 0.0;
+    #[expect(
+        clippy::manual_range_contains,
+        reason = "NaN: `!(a..=b).contains(&x)` is true for NaN, the comparisons are false"
+    )]
     if score_sum > 0.0001 || score_sum < -0.0001 {
         for score in obs_min..=obs_max {
             let prob = sfp.get_prob(score) / score_sum;
@@ -382,8 +420,25 @@ pub fn compute_score_freq_profile_for_matrix(
     sfp
 }
 
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/ncbi_math.c:405-418
-fn blast_gcd(mut a: i32, mut b: i32) -> i32 {
+/// NCBI reference: c++/src/algo/blast/core/ncbi_math.c:405-419
+/// ```c
+/// Int4 BLAST_Gcd(Int4 a, Int4 b)
+/// {
+///    Int4   c;
+///
+///    b = ABS(b);
+///    if (b > a)
+///       c=a, a=b, b=c;
+///
+///    while (b != 0) {
+///       c = a%b;
+///       a = b;
+///       b = c;
+///    }
+///    return a;
+/// }
+/// ```
+pub(crate) fn blast_gcd(mut a: i32, mut b: i32) -> i32 {
     let mut c: i32;
 
     b = b.abs();
@@ -412,57 +467,6 @@ fn blast_score_chk(lo: i32, hi: i32) -> Result<(), String> {
     Ok(())
 }
 
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/ncbi_math.c:33-55
-#[rustfmt::skip]
-fn blast_expm1(x: f64) -> f64 {
-    let absx = x.abs();
-    if absx > 0.33 {
-        return x.exp() - 1.0;
-    }
-    if absx < 1.0e-16 {
-        return x;
-    }
-    x * (1.0
-        + x * (1.0 / 2.0
-            + x * (1.0 / 6.0
-                + x * (1.0 / 24.0
-                    + x * (1.0 / 120.0
-                        + x * (1.0 / 720.0
-                            + x * (1.0 / 5040.0
-                                + x * (1.0 / 40320.0
-                                    + x * (1.0 / 362880.0
-                                        + x * (1.0 / 3628800.0
-                                            + x * (1.0 / 39916800.0
-                                                + x * (1.0 / 479001600.0
-                                                    + x / 6227020800.0))))))))))))
-}
-
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/ncbi_math.c:444-470
-fn blast_powi(mut x: f64, mut n: i32) -> f64 {
-    if n == 0 {
-        return 1.0;
-    }
-    if x == 0.0 {
-        if n < 0 {
-            return f64::INFINITY;
-        }
-        return 0.0;
-    }
-    if n < 0 {
-        x = 1.0 / x;
-        n = -n;
-    }
-    let mut y = 1.0;
-    while n > 0 {
-        if (n & 1) != 0 {
-            y *= x;
-        }
-        n /= 2;
-        x *= x;
-    }
-    y
-}
-
 /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2491-2563
 fn nlm_karlin_lambda_nr(
     sfp: &ScoreFreqProfile,
@@ -478,7 +482,7 @@ fn nlm_karlin_lambda_nr(
         return Err("GCD must be positive".to_string());
     }
 
-    let x0 = (-lambda0).exp();
+    let x0 = (-lambda0).glibc_exp();
     let mut x = if x0 > 0.0 && x0 < 1.0 { x0 } else { 0.5 };
     let mut a = 0.0;
     let mut b = 1.0;
@@ -540,7 +544,7 @@ fn nlm_karlin_lambda_nr(
         k += 1;
     }
 
-    Ok(-x.ln() / d as f64)
+    Ok(-x.glibc_ln() / d as f64)
 }
 
 /// Compute Lambda using Newton-Raphson method
@@ -580,6 +584,58 @@ fn compute_lambda_nr(sfp: &ScoreFreqProfile, initial_guess: f64) -> Result<f64, 
     )
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:550-572
+// ```c
+// static double
+// s_CalcLambda(double probs[], int min_score, int max_score, double lambda0)
+// {
+//
+//     int i;                 /* loop index */
+//     int score_range;       /* range of possible scores */
+//     double avg;            /* expected score of aligning two characters */
+//     Blast_ScoreFreq freq;  /* score frequency data */
+//
+//     score_range = max_score - min_score + 1;
+//     avg = 0.0;
+//     for (i = 0;  i < score_range;  i++) {
+//         avg += (min_score + i) * probs[i];
+//     }
+//     freq.score_min = min_score;
+//     freq.score_max = max_score;
+//     freq.obs_min = min_score;
+//     freq.obs_max = max_score;
+//     freq.sprob0 = probs;
+//     freq.sprob = &probs[-min_score];
+//     freq.score_avg = avg;
+//
+//     return Blast_KarlinLambdaNR(&freq, lambda0);
+// }
+// ```
+/// NCBI's `s_CalcLambda` as written: the probabilities `probs` of the scores `min_score` to
+/// `max_score` as given (not normalized, the observed range as given), -1.0 where
+/// `Blast_KarlinLambdaNR` gives it. The composition-based statistics call it: the position-based
+/// ones (`core::composition_adjustment::compo_scale`) and the redo's `calc_lambda` callback
+/// (`core::composition_adjustment::redo_alignment::redo_calc_lambda`).
+pub(crate) fn calc_lambda_of_score_probs(
+    probs: Vec<f64>,
+    min_score: i32,
+    max_score: i32,
+    lambda0: f64,
+) -> f64 {
+    let mut score_avg = 0.0;
+    for (i, &prob) in probs.iter().enumerate() {
+        score_avg += (min_score + i as i32) as f64 * prob;
+    }
+    let sfp = ScoreFreqProfile {
+        sprob: probs,
+        obs_min: min_score,
+        obs_max: max_score,
+        score_avg,
+        score_min: min_score,
+    };
+    compute_lambda_nr(&sfp, lambda0).unwrap_or(-1.0)
+}
+
 /// Compute H from Lambda
 /// Reference: NCBI BlastKarlinLtoH (blast_stat.c:2607-2633)
 fn compute_h_from_lambda(sfp: &ScoreFreqProfile, lambda: f64) -> Result<f64, String> {
@@ -592,7 +648,7 @@ fn compute_h_from_lambda(sfp: &ScoreFreqProfile, lambda: f64) -> Result<f64, Str
 
     blast_score_chk(low, high)?;
 
-    let etonlam = (-lambda).exp();
+    let etonlam = (-lambda).glibc_exp();
 
     let mut sum = (low as f64) * sfp.get_prob(low);
     for score in (low + 1)..=high {
@@ -604,54 +660,14 @@ fn compute_h_from_lambda(sfp: &ScoreFreqProfile, lambda: f64) -> Result<f64, Str
         lambda * sum / scale
     } else {
         // Underflow: use log form
-        lambda * (lambda * high as f64 + sum.ln()).exp()
+        lambda * (lambda * high as f64 + sum.glibc_ln()).glibc_exp()
     };
 
     Ok(h)
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2346-2348,2353-2356
-// ```c
-//     for (iterCounter = 0;
-//          ((iterCounter < iterlimit) && (innerSum > sumlimit));
-//          outerSum += innerSum /= ++iterCounter) {
-// ...
-//         for (ptrP = alignmentScoreProbabilities +
-//                  (highAlignmentScore-lowAlignmentScore);
-//              ptrP >= alignmentScoreProbabilities;
-//              *ptrP-- =innerSum) {
-// ```
-// No NCBI counterpart: the switch is read once per process. It chooses between the
-// scalar convolution loop above and the eight-lane variant in `compute_k_from_lambda_h_impl`.
-fn x_karlin_fast() -> bool {
-    use std::sync::OnceLock;
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_KARLINFAST"))
-}
-
 /// Compute K from Lambda and H
 /// Reference: NCBI BlastKarlinLHtoK (blast_stat.c:2247-2418)
-fn compute_k_from_lambda_h(sfp: &ScoreFreqProfile, lambda: f64, h: f64) -> Result<f64, String> {
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2353-2364
-    // ```c
-    //         for (ptrP = alignmentScoreProbabilities +
-    //                  (highAlignmentScore-lowAlignmentScore);
-    //              ptrP >= alignmentScoreProbabilities;
-    //              *ptrP-- =innerSum) {
-    //             ptr1  = ptrP - first;
-    //             ptr1e = ptrP - last;
-    //             ptr2  = probArrayStartLow + first;
-    //             for (innerSum = 0.; ptr1 >= ptr1e; ) {
-    //                 innerSum += *ptr1  *  *ptr2;
-    //         ptr1--;
-    //         ptr2++;
-    //             }
-    // ```
-    // Dispatch point of LOSAT_X_KARLINFAST: with the switch off, `x_fast` is false and the
-    // scalar port of this loop below runs. With it on, the lanes replace part of the same loop.
-    compute_k_from_lambda_h_impl(sfp, lambda, h, x_karlin_fast())
-}
-
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2247-2248,2346-2348,2412-2413
 // ```c
 // BlastKarlinLHtoK(Blast_ScoreFreq* sfp, double lambda, double H)
@@ -664,14 +680,11 @@ fn compute_k_from_lambda_h(sfp: &ScoreFreqProfile, lambda: f64, h: f64) -> Resul
 //     K = -exp((double)-2.0*outerSum) /
 //              (firstTermClosedForm*BLAST_Expm1(-(double)lambda));
 // ```
-// The body ports BlastKarlinLHtoK. `x_fast` only changes how the convolution `innerSum`
-// values are produced, not which values or the order of the additions in each of them.
-fn compute_k_from_lambda_h_impl(
-    sfp: &ScoreFreqProfile,
-    lambda: f64,
-    h: f64,
-    x_fast: bool,
-) -> Result<f64, String> {
+// The body ports BlastKarlinLHtoK. The eight-lane convolution (was LOSAT_X_KARLINFAST) only changes
+// how the convolution `innerSum` values are produced, not which values or the order of the
+// additions in each of them; the scalar loop below it runs where `first != 0` and for the
+// lowest positions of each pass.
+fn compute_k_from_lambda_h(sfp: &ScoreFreqProfile, lambda: f64, h: f64) -> Result<f64, String> {
     if lambda <= 0.0 || h <= 0.0 {
         return Err("Lambda and H must be positive".to_string());
     }
@@ -706,7 +719,7 @@ fn compute_k_from_lambda_h_impl(
     range = high - low;
 
     let mut first_term_closed_form = h / lambda;
-    let exp_minus_lambda = (-lambda).exp();
+    let exp_minus_lambda = (-lambda).glibc_exp();
 
     if low == -1 && high == 1 {
         let low_prob = sfp.get_prob(low * divisor);
@@ -732,8 +745,8 @@ fn compute_k_from_lambda_h_impl(
     let mut low_alignment_score = 0;
     let mut high_alignment_score = 0;
     let mut inner_sum = 1.0;
-    let mut oldsum = 1.0;
-    let mut oldsum2 = 1.0;
+    // NCBI's `oldsum` and `oldsum2` (blast_stat.c:2266, 2344, 2379-2380) are read only under
+    // `#ifdef ADD_GEOMETRIC_TERMS_TO_K` (blast_stat.c:2383-2410), which nothing defines.
     alignment_score_probabilities[0] = 1.0;
 
     let mut iter_counter = 0;
@@ -745,7 +758,7 @@ fn compute_k_from_lambda_h_impl(
 
         let mut ptr_p_idx = (high_alignment_score - low_alignment_score) as isize;
         while ptr_p_idx >= 0 {
-            // EXPERIMENT (LOSAT_X_KARLINFAST): away from both ends (`first == 0`
+            // Eight-lane convolution (was LOSAT_X_KARLINFAST): away from both ends (`first == 0`
             // and `last == range`) every new probability is the same `range + 1`
             // term sum over values that this pass has not overwritten yet, so
             // eight of them are accumulated side by side.  Each lane performs
@@ -767,7 +780,7 @@ fn compute_k_from_lambda_h_impl(
             // way. A sum reads only positions at or below its own `ptrP`. NCBI writes downwards,
             // so it has not overwritten any of them yet, and reading all eight from the array
             // before the writes gives the same values.
-            if x_fast && first == 0 {
+            if first == 0 {
                 const LANES: isize = 8;
                 let width = range as isize;
                 while ptr_p_idx - (LANES - 1) > width {
@@ -824,15 +837,12 @@ fn compute_k_from_lambda_h_impl(
             i += 1;
         }
 
-        oldsum2 = oldsum;
-        oldsum = inner_sum;
-
         iter_counter += 1;
         inner_sum /= iter_counter as f64;
         outer_sum += inner_sum;
     }
 
-    let k = -(-2.0 * outer_sum).exp() / (first_term_closed_form * blast_expm1(-lambda));
+    let k = -(-2.0 * outer_sum).glibc_exp() / (first_term_closed_form * blast_expm1(-lambda));
 
     if k <= 0.0 {
         return Err("Computed K is non-positive".to_string());
@@ -889,78 +899,64 @@ pub fn apply_check_ideal(computed: KarlinParams, ideal: KarlinParams) -> KarlinP
     }
 }
 
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2833-2852
+// ```c
+// Blast_ScoreBlkKbpIdealCalc(BlastScoreBlk* sbp)
+// {
+//    stdrfp = Blast_ResFreqNew(sbp);
+//    Blast_ResFreqStdComp(sbp, stdrfp);
+//    sfp = Blast_ScoreFreqNew(sbp->loscore, sbp->hiscore);
+//    BlastScoreFreqCalc(sbp, sfp, stdrfp, stdrfp);
+//    sbp->kbp_ideal = Blast_KarlinBlkNew();
+//    Blast_KarlinBlkUngappedCalc(sbp->kbp_ideal, sfp);
+// }
+// ```
+pub fn compute_blosum62_ideal_karlin_params() -> Result<KarlinParams, String> {
+    // Memo (was LOSAT_X_IDEALMEMO): the function has no inputs (standard
+    // composition, BLOSUM62, score range -4..11), so its value is computed
+    // once per process. TBLASTN and BLASTX call it for every query batch and,
+    // in the parallel redo, on every worker.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2843-2848,2754-2754
+    // ```c
+    //    stdrfp = Blast_ResFreqNew(sbp);
+    //    Blast_ResFreqStdComp(sbp, stdrfp);
+    //    sfp = Blast_ScoreFreqNew(sbp->loscore, sbp->hiscore);
+    //    BlastScoreFreqCalc(sbp, sfp, stdrfp, stdrfp);
+    //    sbp->kbp_ideal = Blast_KarlinBlkNew();
+    //    Blast_KarlinBlkUngappedCalc(sbp->kbp_ideal, sfp);
+    // ...
+    //    status = Blast_ScoreBlkKbpIdealCalc(sbp);
+    // ```
+    // NCBI computes `kbp_ideal` once per score block, in `Blast_ScoreBlkKbpIdealCalc` called from
+    // `Blast_ScoreBlkKbpUngappedCalc`; BLOSUM62 with the standard composition has no other inputs.
+    // The memo keeps the value of the first call of the port below and returns it again. It is reuse only.
+    use std::sync::OnceLock;
+    static IDEAL: OnceLock<Result<KarlinParams, String>> = OnceLock::new();
+    IDEAL
+        .get_or_init(x_compute_blosum62_ideal_karlin_params)
+        .clone()
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2843-2848
+// ```c
+//    stdrfp = Blast_ResFreqNew(sbp);
+//    Blast_ResFreqStdComp(sbp, stdrfp);
+//    sfp = Blast_ScoreFreqNew(sbp->loscore, sbp->hiscore);
+//    BlastScoreFreqCalc(sbp, sfp, stdrfp, stdrfp);
+//    sbp->kbp_ideal = Blast_KarlinBlkNew();
+//    Blast_KarlinBlkUngappedCalc(sbp->kbp_ideal, sfp);
+// ```
+// The body of the original `compute_blosum62_ideal_karlin_params`, moved into its own function so
+// that the memo can call it; the computation is unchanged.
+fn x_compute_blosum62_ideal_karlin_params() -> Result<KarlinParams, String> {
+    let std_comp = compute_std_aa_composition();
+    let sfp = compute_score_freq_profile(&std_comp, &std_comp, -4, 11);
+    compute_karlin_params_ungapped(&sfp)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // EXPERIMENT (LOSAT_X_KARLINFAST): the side-by-side sums give the bits of the
-    // one-at-a-time loop.
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2353-2364
-    // ```c
-    //         for (ptrP = alignmentScoreProbabilities +
-    //                  (highAlignmentScore-lowAlignmentScore);
-    //              ptrP >= alignmentScoreProbabilities;
-    //              *ptrP-- =innerSum) {
-    //             ptr1  = ptrP - first;
-    //             ptr1e = ptrP - last;
-    //             ptr2  = probArrayStartLow + first;
-    //             for (innerSum = 0.; ptr1 >= ptr1e; ) {
-    //                 innerSum += *ptr1  *  *ptr2;
-    //         ptr1--;
-    //         ptr2++;
-    //             }
-    // ```
-    // The test compares the bits of K from the eight-lane variant and the scalar loop for
-    // random compositions.
-    #[test]
-    fn x_karlin_k_lanes_match_scalar_loop_bitwise() {
-        let mut state = 0x9E37_79B9_7F4A_7C15u64;
-        let mut next = move || {
-            state ^= state << 13;
-            state ^= state >> 7;
-            state ^= state << 17;
-            state
-        };
-        let standard = compute_std_aa_composition();
-        let mut checked = 0;
-        for round in 0..400 {
-            // A composition between the Robinson frequencies and a skewed one.
-            let mut comp = [0.0f64; BLASTAA_SIZE];
-            let mut total = 0.0;
-            for (index, slot) in comp.iter_mut().enumerate() {
-                if standard[index] > 0.0 {
-                    let weight =
-                        1.0 + (next() % 1000) as f64 / if round % 4 == 0 { 50.0 } else { 400.0 };
-                    *slot = standard[index] * weight;
-                    total += *slot;
-                }
-            }
-            for slot in &mut comp {
-                *slot /= total;
-            }
-            let sfp = compute_score_freq_profile(&comp, &standard, -4, 11);
-            let Ok(lambda) = compute_lambda_nr(&sfp, BLAST_KARLIN_LAMBDA0_DEFAULT) else {
-                continue;
-            };
-            let Ok(h) = compute_h_from_lambda(&sfp, lambda) else {
-                continue;
-            };
-            let slow = compute_k_from_lambda_h_impl(&sfp, lambda, h, false);
-            let fast = compute_k_from_lambda_h_impl(&sfp, lambda, h, true);
-            match (slow, fast) {
-                (Ok(slow), Ok(fast)) => {
-                    assert_eq!(slow.to_bits(), fast.to_bits(), "round {round}");
-                    checked += 1;
-                }
-                (Err(slow), Err(fast)) => assert_eq!(slow, fast),
-                other => panic!("round {round}: {other:?}"),
-            }
-        }
-        assert!(
-            checked > 300,
-            "only {checked} compositions reached the K series"
-        );
-    }
 
     #[test]
     fn test_compute_aa_composition() {

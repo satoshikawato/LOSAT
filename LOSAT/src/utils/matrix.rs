@@ -33,6 +33,7 @@ pub const BLAST_SCORE_MIN: i32 = i16::MIN as i32;
 pub mod ncbistdaa {
     pub const GAP: u8 = 0;
     pub const A: u8 = 1;
+    #[cfg(test)]
     pub const B: u8 = 2;
     pub const C: u8 = 3;
     pub const D: u8 = 4;
@@ -54,11 +55,11 @@ pub mod ncbistdaa {
     pub const W: u8 = 20;
     pub const X: u8 = 21;
     pub const Y: u8 = 22;
+    #[cfg(test)]
     pub const Z: u8 = 23;
     pub const U: u8 = 24;
     pub const STOP: u8 = 25;
     pub const O: u8 = 26;
-    pub const J: u8 = 27;
 }
 
 /// Standard matrix order `ARNDCQEGHILKMFPSTWYVBJZX*`.
@@ -130,7 +131,7 @@ pub fn ncbistdaa_to_blosum62(ncbi: u8) -> u8 {
 /// 'N','P','Q','R','S','T','V','W','X','Y','Z','U','*','O','J'};
 /// ```
 #[inline(always)]
-pub fn aa_char_to_ncbistdaa(aa: u8) -> u8 {
+pub const fn aa_char_to_ncbistdaa(aa: u8) -> u8 {
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_encoding.c:110-121
     // ```c
     // ... AMINOACID_TO_NCBISTDAA ...
@@ -281,7 +282,7 @@ const BLOSUM62_NCBISTDAA_DIRECT_SCORES: [i32; BLOSUM62_NCBISTDAA_DIRECT_SIZE] =
     build_blosum62_ncbistdaa_direct_scores();
 
 #[inline(always)]
-fn ncbistdaa_to_blosum62_direct_index(ncbi: u8) -> usize {
+const fn ncbistdaa_to_blosum62_direct_index(ncbi: u8) -> usize {
     if ncbi < BLASTAA_SIZE as u8 {
         NCBISTDAA_TO_BLOSUM62_DIRECT[ncbi as usize]
     } else {
@@ -290,7 +291,7 @@ fn ncbistdaa_to_blosum62_direct_index(ncbi: u8) -> usize {
 }
 
 #[inline(always)]
-pub fn blosum62_score_ncbistdaa_direct(aa1_ncbi: u8, aa2_ncbi: u8) -> i32 {
+pub const fn blosum62_score_ncbistdaa_direct(aa1_ncbi: u8, aa2_ncbi: u8) -> i32 {
     if aa1_ncbi < BLASTAA_SIZE as u8 && aa2_ncbi < BLASTAA_SIZE as u8 {
         return BLOSUM62_NCBISTDAA_DIRECT_SCORES
             [aa1_ncbi as usize * BLASTAA_SIZE + aa2_ncbi as usize];
@@ -321,6 +322,89 @@ pub fn blosum62_ncbistdaa_score_row(row_ncbi: usize) -> &'static [i32] {
     debug_assert!(row_ncbi < BLASTAA_SIZE);
     let start = row_ncbi * BLASTAA_SIZE;
     &BLOSUM62_NCBISTDAA_DIRECT_SCORES[start..start + BLASTAA_SIZE]
+}
+
+/// The rows of a [`ScoreRows`]: one for each NCBISTDAA letter and one that every other byte reads.
+const SCORE_ROW_COUNT: usize = BLASTAA_SIZE + 1;
+
+/// A matrix's scores for every two bytes in NCBI's form `matrix[q][s]`: a row for each byte of the
+/// first letter, holding the score against every byte of the second. A score is two loads and
+/// tests no code, as in NCBI's walks (`score += matrix[q[i]][s[i]]`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:846-847 (and :903-904)
+/// ```c
+///     for (i = 0; i < n; i++) {
+///         score += matrix[q[i]][s[i]];
+/// ```
+///
+/// The bytes past the alphabet (`BLASTAA_SIZE` and above) read one row, the last: the functions
+/// of this module take every such first byte as X (`ncbistdaa_to_blosum62`,
+/// `ncbistdaa_to_blosum62_direct_index`); the tests compare every two bytes with the function the
+/// table is built from. A row holds the function's score for each of the 256 second bytes.
+pub struct ScoreRows {
+    rows: [&'static [i32; 256]; 256],
+}
+
+impl ScoreRows {
+    /// The score of `a` against `b`.
+    #[inline(always)]
+    pub fn score(&self, a: u8, b: u8) -> i32 {
+        self.rows[a as usize][b as usize]
+    }
+
+    /// The rows of `data`: a byte below `BLASTAA_SIZE` reads its own row, every other byte the
+    /// last.
+    const fn of(data: &'static [[i32; 256]; SCORE_ROW_COUNT]) -> Self {
+        let mut rows = [&data[BLASTAA_SIZE]; 256];
+        let mut a = 0;
+        while a < BLASTAA_SIZE {
+            rows[a] = &data[a];
+            a += 1;
+        }
+        Self { rows }
+    }
+}
+
+/// The rows of the scores `score(a, b)` for the first bytes `0..SCORE_ROW_COUNT`.
+const fn blosum62_ncbistdaa_row_data() -> [[i32; 256]; SCORE_ROW_COUNT] {
+    let mut data = [[0; 256]; SCORE_ROW_COUNT];
+    let mut a = 0;
+    while a < SCORE_ROW_COUNT {
+        let mut b = 0;
+        while b < 256 {
+            data[a][b] = blosum62_score_ncbistdaa_direct(a as u8, b as u8);
+            b += 1;
+        }
+        a += 1;
+    }
+    data
+}
+
+static BLOSUM62_NCBISTDAA_ROW_DATA: [[i32; 256]; SCORE_ROW_COUNT] = blosum62_ncbistdaa_row_data();
+
+/// `blosum62_score_ncbistdaa_direct` for every two bytes, as [`ScoreRows`] at a static address.
+pub static BLOSUM62_NCBISTDAA_ROWS: ScoreRows = ScoreRows::of(&BLOSUM62_NCBISTDAA_ROW_DATA);
+
+/// `protein_score(matrix, ..)` for every two bytes, as [`ScoreRows`]. BLOSUM62's are the static
+/// `BLOSUM62_NCBISTDAA_ROWS` (`protein_score` gives BLOSUM62 the scores of
+/// `blosum62_score_ncbistdaa_direct` for every two bytes, as `standard_score` relies on; the tests
+/// compare them). The other matrices' are built at the first call for the matrix and kept for the
+/// process (about 31 KiB for each matrix used: 29 rows of 256 scores and 256 row pointers).
+pub fn protein_score_rows(matrix: ScoringMatrix) -> &'static ScoreRows {
+    static ROWS: [OnceLock<&'static ScoreRows>; ScoringMatrix::ALL.len()] =
+        [const { OnceLock::new() }; ScoringMatrix::ALL.len()];
+    if matrix == ScoringMatrix::Blosum62 {
+        return &BLOSUM62_NCBISTDAA_ROWS;
+    }
+    ROWS[matrix as usize].get_or_init(|| {
+        let mut data = Box::new([[0i32; 256]; SCORE_ROW_COUNT]);
+        for (a, row) in data.iter_mut().enumerate() {
+            for (b, score) in row.iter_mut().enumerate() {
+                *score = protein_score(matrix, a as u8, b as u8);
+            }
+        }
+        Box::leak(Box::new(ScoreRows::of(Box::leak(data))))
+    })
 }
 
 const BLOSUM45_TEXT: &str = r#"
@@ -519,6 +603,51 @@ const PAM250_TEXT: &str = r#"
 /***/   -8, -8, -8, -8, -8, -8, -8, -8, -8, -8, -8, -8, -8, -8, -8, -8, -8, -8, -8, -8, -8, -8, -8, -8,  1
 "#;
 
+// NCBI reference: c++/src/util/tables/sm_identity.c:38-96
+// ```c
+// static const TNCBIScore s_IdentityPSM[25 * 25] = {
+//     /*       A,  R,  N,  D,  C,  Q,  E,  G,  H,  I,  L,  K,  M,
+//              F,  P,  S,  T,  W,  Y,  V,  B,  J,  Z,  X,  *        */
+//     /*A*/    9, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5,
+// ...
+//     /*X*/   -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5,
+//             -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5,
+// ...
+// const SNCBIPackedScoreMatrix NCBISM_Identity = {
+//     "ARNDCQEGHILKMFPSTWYVBJZX*",
+//     s_IdentityPSM,
+//     -5
+// };
+// ```
+// (The X row is -5 throughout, its diagonal included.)
+const IDENTITY_TEXT: &str = r#"
+/*A*/  9, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5,
+/*R*/ -5,  9, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5,
+/*N*/ -5, -5,  9, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5,
+/*D*/ -5, -5, -5,  9, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5,
+/*C*/ -5, -5, -5, -5,  9, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5,
+/*Q*/ -5, -5, -5, -5, -5,  9, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5,
+/*E*/ -5, -5, -5, -5, -5, -5,  9, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5,
+/*G*/ -5, -5, -5, -5, -5, -5, -5,  9, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5,
+/*H*/ -5, -5, -5, -5, -5, -5, -5, -5,  9, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5,
+/*I*/ -5, -5, -5, -5, -5, -5, -5, -5, -5,  9, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5,
+/*L*/ -5, -5, -5, -5, -5, -5, -5, -5, -5, -5,  9, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5,
+/*K*/ -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5,  9, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5,
+/*M*/ -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5,  9, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5,
+/*F*/ -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5,  9, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5,
+/*P*/ -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5,  9, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5,
+/*S*/ -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5,  9, -5, -5, -5, -5, -5, -5, -5, -5, -5,
+/*T*/ -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5,  9, -5, -5, -5, -5, -5, -5, -5, -5,
+/*W*/ -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5,  9, -5, -5, -5, -5, -5, -5, -5,
+/*Y*/ -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5,  9, -5, -5, -5, -5, -5, -5,
+/*V*/ -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5,  9, -5, -5, -5, -5, -5,
+/*B*/ -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5,  9, -5, -5, -5, -5,
+/*J*/ -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5,  9, -5, -5, -5,
+/*Z*/ -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5,  9, -5, -5,
+/*X*/ -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5,
+/***/ -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5,  9
+"#;
+
 // NCBI reference: ncbi-blast/c++/src/util/tables/raw_scoremat.c:81-109
 // ```c
 // for (i = 0;  i < dim;  ++i) {
@@ -610,6 +739,13 @@ fn pam250_scores() -> &'static [i8] {
         .as_slice()
 }
 
+fn identity_scores() -> &'static [i8] {
+    static SCORES: OnceLock<Vec<i8>> = OnceLock::new();
+    SCORES
+        .get_or_init(|| parse_matrix_scores(IDENTITY_TEXT))
+        .as_slice()
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct ProteinScoreMatrix {
     pub scores: &'static [i8],
@@ -658,12 +794,34 @@ pub fn standard_protein_matrix(matrix: ScoringMatrix) -> ProteinScoreMatrix {
             scores: pam250_scores(),
             defscore: -8,
         },
+        ScoringMatrix::Identity => ProteinScoreMatrix {
+            scores: identity_scores(),
+            defscore: -5,
+        },
     }
 }
 
+#[cfg(test)]
 #[inline(always)]
 pub fn protein_defscore(matrix: ScoringMatrix) -> i32 {
     standard_protein_matrix(matrix).defscore
+}
+
+/// The score of two NCBIstdaa letters in a standard matrix (`sbp->matrix->data[q][s]`), BLOSUM62's
+/// from its direct table: BLASTP's extensions and counts, and the positives of a PSSM search's
+/// alignments (`pssm_search::traceback0::final_hsp`).
+///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3409-3438
+/// ```c
+/// score += sbp->matrix->data[*query_var][*subject_var];
+/// ```
+#[inline(always)]
+pub fn standard_score(matrix: ScoringMatrix, query_residue: u8, subject_residue: u8) -> i32 {
+    if matrix == ScoringMatrix::Blosum62 {
+        blosum62_score_ncbistdaa_direct(query_residue, subject_residue)
+    } else {
+        protein_score(matrix, query_residue, subject_residue)
+    }
 }
 
 #[inline(always)]
@@ -719,6 +877,17 @@ pub fn protein_display_score(matrix: ScoringMatrix, query: u8, subject: u8) -> i
     // const char k_PSymbol[ePMatrixSize + 1] = "ARNDCQEGHILKMFPSTWYVBZX";
     // ```
     const SYMBOLS: &[u8] = b"ARNDCQEGHILKMFPSTWYVBZX";
+    // A byte-indexed table instead of `SYMBOLS.contains`: on wasm32 the
+    // slice search compiles to a `memchr` call per residue pair.
+    const IS_SYMBOL: [bool; 256] = {
+        let mut table = [false; 256];
+        let mut i = 0;
+        while i < SYMBOLS.len() {
+            table[SYMBOLS[i] as usize] = true;
+            i += 1;
+        }
+        table
+    };
     if (query == b'U' && matches!(subject, b'U' | b'C')) || (query == b'C' && subject == b'U') {
         return protein_score(
             matrix,
@@ -729,12 +898,12 @@ pub fn protein_display_score(matrix: ScoringMatrix, query: u8, subject: u8) -> i
     if query == b'*' && subject == b'*' {
         return 1;
     }
-    if (query == b'*' && SYMBOLS.contains(&subject))
-        || (subject == b'*' && SYMBOLS.contains(&query))
+    if (query == b'*' && IS_SYMBOL[subject as usize])
+        || (subject == b'*' && IS_SYMBOL[query as usize])
     {
         return -4;
     }
-    if !SYMBOLS.contains(&query) || !SYMBOLS.contains(&subject) {
+    if !IS_SYMBOL[query as usize] || !IS_SYMBOL[subject as usize] {
         return -1000;
     }
     protein_score(
@@ -818,21 +987,6 @@ pub fn blosum62_score(aa1_ncbi: u8, aa2_ncbi: u8) -> i32 {
     blosum62_score_ncbistdaa_direct(aa1_ncbi, aa2_ncbi)
 }
 
-#[inline(always)]
-pub fn blosum62_score_direct(b1: usize, b2: usize) -> i32 {
-    protein_score_direct(ScoringMatrix::Blosum62, b1, b2)
-}
-
-pub const AA_TABLE_SIZE: usize = BLOSUM62_SIZE * BLOSUM62_SIZE * BLOSUM62_SIZE;
-pub static MATRIX: [i8; BLOSUM62_SIZE * BLOSUM62_SIZE] = BLOSUM62;
-pub const NCBI_AA_SIZE: usize = BLASTAA_SIZE;
-pub const STOP_CODON: u8 = ncbistdaa::STOP;
-
-#[inline(always)]
-pub fn aa_char_to_ncbi_index(aa: u8) -> u8 {
-    ncbistdaa_to_blosum62(aa_char_to_ncbistdaa(aa))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -881,6 +1035,32 @@ mod tests {
         }
     }
 
+    // No NCBI counterpart: the rows give the scores of the functions they are built from for
+    // every two bytes (the bytes past the alphabet read one row).
+    #[test]
+    fn the_score_rows_hold_the_scores_of_every_two_bytes() {
+        for a in 0..=u8::MAX {
+            for b in 0..=u8::MAX {
+                assert_eq!(
+                    BLOSUM62_NCBISTDAA_ROWS.score(a, b),
+                    blosum62_score_ncbistdaa_direct(a, b),
+                    "BLOSUM62 {a} {b}"
+                );
+                for matrix in ScoringMatrix::ALL {
+                    assert_eq!(
+                        protein_score_rows(matrix).score(a, b),
+                        protein_score(matrix, a, b),
+                        "{matrix:?} {a} {b}"
+                    );
+                }
+            }
+        }
+        assert!(std::ptr::eq(
+            protein_score_rows(ScoringMatrix::Pam30),
+            protein_score_rows(ScoringMatrix::Pam30)
+        ));
+    }
+
     #[test]
     fn test_blosum62_ncbistdaa_score_row_matches_direct_scores() {
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:562-563
@@ -923,6 +1103,39 @@ mod tests {
         assert_eq!(protein_defscore(ScoringMatrix::Blosum80), -6);
         assert_eq!(protein_defscore(ScoringMatrix::Pam30), -17);
         assert_eq!(protein_defscore(ScoringMatrix::Pam250), -8);
+        assert_eq!(protein_defscore(ScoringMatrix::Identity), -5);
+    }
+
+    // NCBI reference: c++/src/util/tables/sm_identity.c:38-96 (9 on the diagonal, -5
+    // elsewhere, the X row -5 throughout; defscore -5)
+    #[test]
+    fn identity_matrix_is_ncbis_packed_table() {
+        let identity = standard_protein_matrix(ScoringMatrix::Identity);
+        let symbols = b"ARNDCQEGHILKMFPSTWYVBJZX*";
+        for (r, &row) in symbols.iter().enumerate() {
+            for c in 0..symbols.len() {
+                let expected = if r == c && row != b'X' { 9 } else { -5 };
+                assert_eq!(
+                    identity.scores[r * PROTEIN_MATRIX_SIZE + c],
+                    expected,
+                    "{} {}",
+                    row as char,
+                    symbols[c] as char
+                );
+            }
+        }
+        assert_eq!(
+            protein_score(ScoringMatrix::Identity, ncbistdaa::W, ncbistdaa::W),
+            9
+        );
+        assert_eq!(
+            protein_score(ScoringMatrix::Identity, ncbistdaa::X, ncbistdaa::X),
+            -5
+        );
+        assert_eq!(
+            protein_score(ScoringMatrix::Identity, ncbistdaa::A, ncbistdaa::GAP),
+            BLAST_SCORE_MIN
+        );
     }
 
     #[test]
@@ -1003,5 +1216,58 @@ mod tests {
             rows += 1;
         }
         assert_eq!(rows, 131072);
+    }
+
+    // The slice search that the byte table in protein_display_score replaced.
+    fn protein_display_score_slice_search(matrix: ScoringMatrix, query: u8, subject: u8) -> i32 {
+        const SYMBOLS: &[u8] = b"ARNDCQEGHILKMFPSTWYVBZX";
+        if (query == b'U' && matches!(subject, b'U' | b'C')) || (query == b'C' && subject == b'U') {
+            return protein_score(
+                matrix,
+                aa_char_to_ncbistdaa(b'C'),
+                aa_char_to_ncbistdaa(b'C'),
+            );
+        }
+        if query == b'*' && subject == b'*' {
+            return 1;
+        }
+        if (query == b'*' && SYMBOLS.contains(&subject))
+            || (subject == b'*' && SYMBOLS.contains(&query))
+        {
+            return -4;
+        }
+        if !SYMBOLS.contains(&query) || !SYMBOLS.contains(&subject) {
+            return -1000;
+        }
+        protein_score(
+            matrix,
+            aa_char_to_ncbistdaa(query),
+            aa_char_to_ncbistdaa(subject),
+        )
+    }
+
+    #[test]
+    fn display_score_byte_table_equals_slice_search_for_all_byte_pairs() {
+        for matrix in [
+            ScoringMatrix::Blosum45,
+            ScoringMatrix::Blosum50,
+            ScoringMatrix::Blosum62,
+            ScoringMatrix::Blosum80,
+            ScoringMatrix::Blosum90,
+            ScoringMatrix::Pam30,
+            ScoringMatrix::Pam70,
+            ScoringMatrix::Pam250,
+            ScoringMatrix::Identity,
+        ] {
+            for query in 0..=u8::MAX {
+                for subject in 0..=u8::MAX {
+                    assert_eq!(
+                        protein_display_score(matrix, query, subject),
+                        protein_display_score_slice_search(matrix, query, subject),
+                        "{matrix:?} {query} {subject}"
+                    );
+                }
+            }
+        }
     }
 }

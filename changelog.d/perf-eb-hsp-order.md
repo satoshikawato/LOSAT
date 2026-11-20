@@ -1,0 +1,2 @@
+- BLASTN sorts its HSP lists through an order of their positions, as NCBI sorts its array of HSP pointers, instead of taking a scratch copy of the whole list. Reports do not change.
+  Sakai x EDL933 (5.5 Mb genomes) blastn `-subject`: peak memory 0.94 of the previous version's at 1 thread (103 to 97 MiB) and 0.95 to 0.98 at 16 threads; dc-megablast 0.99 at 1 thread; 31,168 cDNAs x 3 Mb blastn `-subject` 0.97 at 1 thread. Time unchanged.

@@ -9,7 +9,7 @@ TLOSAN 実装後の `origin/feature/tlosan-tblastn-v0.2.0` の `2976bd5f427cc544
 段階別の実行指示は[セッション用 INSTRUCTION PROMPTS](losatx_blastx_v0.2.0_sessions/README.md)に分離した。
 
 LOSATX は LOSAT による NCBI BLASTX の純 Rust 実装を指す。公開検索コマンドは
-`LOSAT blastx` とする。本書はユーザーの「v0.2.0 では LOSATN、LOSATP、
+`losat blastx` とする。本書はユーザーの「v0.2.0 では LOSATN、LOSATP、
 TLOSATX と同等の NCBI 互換性を必須とする」という要件を実装・検証可能な
 条件に分解したものである。既定設定だけの試作版を v0.2.0 完了とは扱わない。
 
@@ -108,7 +108,7 @@ BLASTN 専用 reward/penalty、DUST、核酸 lookup 等は BLASTX へ移植し�
 
 | ID | 必須能力 | 具体的範囲・成功条件 |
 | --- | --- | --- |
-| X01 | CLI | `LOSAT blastx`、`-task blastx`、CLI v2 の canonical 表記、help、既存 root version 規約 |
+| X01 | CLI | `losat blastx`、`-task blastx`、CLI v2 の canonical 表記、help、既存 root version 規約 |
 | X02 | ローカル入力 | 必須 `-query` 核酸 FASTA、`-subject` 蛋白 FASTA。単一・複数 record、順序、ID・説明文、LF/CRLF、終端改行なし |
 | X03 | 出力先 | stdout と `-out`。同じ report bytes、I/O エラーを成功扱いしない |
 | X04 | 翻訳 | `-query_gencode` 26 ID、`-strand both/plus/minus`、正負六フレーム、曖昧コドン、stop、不完全末端コドン |
@@ -687,7 +687,7 @@ scope 行の状態は `REQUIRED` / `UNSUPPORTED` / `NOT_APPLICABLE`、実装・�
 
 ```bash
 # 同一 local-subject contract、code 4、標準 tabular
-LOSAT blastx -query LOSAT/tests/fasta/AP027131.fasta \
+losat blastx -query LOSAT/tests/fasta/AP027131.fasta \
   -subject LOSAT/tests/fasta/AP027133.faa \
   -task blastx -query_gencode 4 -outfmt 6 -num_threads 1 \
   -out /tmp/losatx-candidate.out
@@ -710,9 +710,9 @@ cargo build --manifest-path LOSAT/Cargo.toml --release --locked
 cargo test --manifest-path LOSAT/Cargo.toml --locked
 cargo fmt --manifest-path LOSAT/Cargo.toml -- --check
 cargo clippy --manifest-path LOSAT/Cargo.toml --all-targets --locked -- -D warnings
-cargo build --manifest-path LOSAT/Cargo.toml --release --locked --bin LOSAT \
+cargo build --manifest-path LOSAT/Cargo.toml --release --locked --bin losat \
   --target wasm32-wasip1 --no-default-features
-cargo build --manifest-path LOSAT/Cargo.toml --release --locked --bin LOSAT \
+cargo build --manifest-path LOSAT/Cargo.toml --release --locked --bin losat \
   --target wasm32-wasip1-threads --features wasm-threads
 ```
 

@@ -1,0 +1,8 @@
+@HD	VN:1.2	SO:coordinate	GO:reference
+@SQ	SN:Query_1	LN:480
+@SQ	SN:Query_3	LN:300
+@SQ	SN:Query_4	LN:480
+@PG	ID:0	VN:2.17.0+	CL:/home/kawato/micromamba/bin/blastn -query tests/fasta/outfmt0/sam_multi_q.fna -subject tests/fasta/outfmt0/sam_multi_s.fna -task megablast -max_target_seqs 1 -outfmt 17 	PN:blastn
+Subject_4	0	Query_1	31	255	45H200M4D100M2I119M22H	*	0	0	*	*	AS:i:329	EV:f:7.02498e-178	NM:i:6	PI:f:94.03	BS:f:608.668
+Subject_4	0	Query_3	1	255	115H130M4D100M2I65M76H	*	0	0	*	*	AS:i:217	EV:f:7.9167e-116	NM:i:6	PI:f:92.88	BS:f:401.843
+Subject_4	16	Query_4	28	255	22H119M2I100M4D200M45H	*	0	0	*	*	AS:i:329	EV:f:7.02498e-178	NM:i:6	PI:f:94.03	BS:f:608.668

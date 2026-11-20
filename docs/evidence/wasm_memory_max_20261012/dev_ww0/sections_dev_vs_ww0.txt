@@ -1,0 +1,34 @@
+== serial
+type                              1618      1618 890a54920254 890a54920254 equal
+import                             796       796 c254b344f1c9 c254b344f1c9 equal
+  memory import (flags, initial, maximum): None None
+function                          5015      5015 21433fd91743 21433fd91743 equal
+table                                7         7 ea996b52d855 ea996b52d855 equal
+memory                               3         3 d421088e22a2 d421088e22a2 equal
+global                              14        14 90301628d2be 90301628d2be equal
+export                             649       649 8f7cd8c1e727 8f7cd8c1e727 equal
+element                           2601      2601 fff52e828283 fff52e828283 equal
+code                           5090855   5090855 9894c31f34e3 9894c31f34e3 equal
+data                            464496    464496 25ef16aef249 25ef16aef249 equal
+custom:name                     437109    437109 33fd39518475 33fd39518475 equal
+custom:producers                   184       184 97ebb8b26bf4 97ebb8b26bf4 equal
+custom:target_features             173       173 6c1cebe9004d 6c1cebe9004d equal
+differing sections: none
+== threads
+type                              1746      1746 2b3f12f83bbb 2b3f12f83bbb equal
+import                             833       833 46695e8f31fa a38165b7f3c7 DIFFERENT
+  memory import (flags, initial, maximum): (3, 26, 16384) (3, 26, 65535)
+  differing byte offsets in the section: [15, 16, 17] (count 3, lengths 833 833)
+function                          7875      7875 c1f366d00fcd c1f366d00fcd equal
+table                                7         7 0bac36403027 0bac36403027 equal
+global                              30        30 ac8339f2010e ac8339f2010e equal
+export                             670       670 0db815e6c9c3 0db815e6c9c3 equal
+start                                1         1 68aa2e2ee5df 68aa2e2ee5df equal
+element                           5173      5173 5ca6748d1241 5ca6748d1241 equal
+datacount                            1         1 084fed08b978 084fed08b978 equal
+code                           6752822   6752822 510620f42bf1 510620f42bf1 equal
+data                            533904    533904 fc8ab30325ff fc8ab30325ff equal
+custom:name                     738069    738069 2712065596a7 2712065596a7 equal
+custom:producers                   184       184 97ebb8b26bf4 97ebb8b26bf4 equal
+custom:target_features             182       182 35d4e342e8ee 35d4e342e8ee equal
+differing sections: ['import']

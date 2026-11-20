@@ -48,8 +48,8 @@ flock "$BUILD_ROOT/oracle.lock" python3 docs/evidence/losat_web_e1a/capture_outp
 ## Work directories and inputs
 
 - Each run gets its own directory under `$BUILD_ROOT/<task>/` (or `$TASK_DIR`), and each agent
-  gets its own output path and target directory. Append results as they arrive, so that a stop
-  or a usage limit loses nothing.
+  gets its own output path. Agents share their worktree's target directory (skill
+  `losat-worktree`). Append results as they arrive, so that a stop or a usage limit loses nothing.
 - Read inputs from the worktree on the Linux clone, never from `/mnt/c`.
 - Gate A reads its lexical fixtures from `/tmp/losat-pr5-runtime-cert-*`, created by
   `stage_lexical_fixtures()` in `LOSAT/tests/ci_fast_regressions.py`. Never delete it during a

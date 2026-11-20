@@ -1,0 +1,176 @@
+{
+  "BlastOutput2": {
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/ids/prot_v5"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_2",
+          "query_title": "qp2 unrelated protein",
+          "query_len": 45,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "gnl|mydb|prot10",
+                  "accession": "prot10",
+                  "title": "general id protein"
+                }
+              ],
+              "len": 137,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 17.3198,
+                  "score": 33,
+                  "evalue": 0.431987,
+                  "identity": 7,
+                  "positive": 13,
+                  "query_from": 4,
+                  "query_to": 26,
+                  "hit_from": 45,
+                  "hit_to": 65,
+                  "align_len": 23,
+                  "gaps": 2,
+                  "qseq": "NWKMVCRYVPYLEEDMEAWMLWK",
+                  "hseq": "SWKVLMKY--EFSSDIHPWITWK",
+                  "midline": "+WK++ +Y      D+  W+ WK"
+                },
+                {
+                  "num": 2,
+                  "bit_score": 14.2382,
+                  "score": 25,
+                  "evalue": 4.933,
+                  "identity": 4,
+                  "positive": 7,
+                  "query_from": 24,
+                  "query_to": 37,
+                  "hit_from": 1,
+                  "hit_to": 14,
+                  "align_len": 14,
+                  "gaps": 0,
+                  "qseq": "LWKEHLTFQWCNYF",
+                  "hseq": "MWMEHSVLKAVNHV",
+                  "midline": "+W EH   +  N+ "
+                }
+              ]
+            },
+            {
+              "num": 2,
+              "description": [
+                {
+                  "id": "pir||S00007",
+                  "accession": "S00007",
+                  "title": "pir protein"
+                }
+              ],
+              "len": 137,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 16.5494,
+                  "score": 31,
+                  "evalue": 0.61923,
+                  "identity": 5,
+                  "positive": 10,
+                  "query_from": 6,
+                  "query_to": 22,
+                  "hit_from": 94,
+                  "hit_to": 110,
+                  "align_len": 17,
+                  "gaps": 0,
+                  "qseq": "KMVCRYVPYLEEDMEAW",
+                  "hseq": "KCICVMVGYVDQSLRHW",
+                  "midline": "K +C  V Y+++ +  W"
+                }
+              ]
+            },
+            {
+              "num": 3,
+              "description": [
+                {
+                  "id": "sp|P00012|",
+                  "accession": "P00012",
+                  "title": "bare uniprot-like accession"
+                }
+              ],
+              "len": 137,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 16.5494,
+                  "score": 31,
+                  "evalue": 0.700802,
+                  "identity": 6,
+                  "positive": 10,
+                  "query_from": 6,
+                  "query_to": 22,
+                  "hit_from": 94,
+                  "hit_to": 110,
+                  "align_len": 17,
+                  "gaps": 0,
+                  "qseq": "KMVCRYVPYLEEDMEAW",
+                  "hseq": "KCMCVMVRYLDQSLRHW",
+                  "midline": "K +C  V YL++ +  W"
+                }
+              ]
+            },
+            {
+              "num": 4,
+              "description": [
+                {
+                  "id": "sp|P00019.3|NAME_HUMAN",
+                  "accession": "P00019",
+                  "title": "with taxid",
+                  "taxid": 9606
+                }
+              ],
+              "len": 137,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 14.6234,
+                  "score": 26,
+                  "evalue": 3.59332,
+                  "identity": 5,
+                  "positive": 6,
+                  "query_from": 32,
+                  "query_to": 41,
+                  "hit_from": 70,
+                  "hit_to": 79,
+                  "align_len": 10,
+                  "gaps": 0,
+                  "qseq": "QWCNYFWTDV",
+                  "hseq": "QWPGWFTTDT",
+                  "midline": "QW  +F TD "
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 51,
+            "db_len": 4677,
+            "hsp_len": 15,
+            "eff_space": 117360,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          }
+        }
+      }
+    }
+  }
+}

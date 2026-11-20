@@ -1,0 +1,25 @@
+{
+  "version": "1.2",
+  "dbname": "txr_s",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "txr_s (parsed Seq-ids)",
+  "number-of-letters": 545,
+  "number-of-sequences": 3,
+  "last-updated": "2026-11-13T21:29:00",
+  "number-of-volumes": 1,
+  "number-of-taxids": 2,
+  "bytes-total": 50198,
+  "bytes-to-cache": 677,
+  "files": [
+    "txr_s.pdb",
+    "txr_s.phr",
+    "txr_s.pin",
+    "txr_s.pog",
+    "txr_s.pos",
+    "txr_s.pot",
+    "txr_s.psq",
+    "txr_s.ptf",
+    "txr_s.pto"
+  ]
+}

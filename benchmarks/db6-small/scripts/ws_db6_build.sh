@@ -14,6 +14,6 @@ export PATH=$HOME/.cargo/bin:/usr/bin:/bin CARGO_BUILD_JOBS=4 TMPDIR=$D3/tmp RUS
 N=$D3/bin/LOSAT-db6-${SHA:0:8}
 git -C $R fetch -q origin dev && git -C $R checkout -q --detach "$SHA" || { echo "FAILED checkout"; exit 1; }
 touch $R/LOSAT/src/main.rs
-(cd $R/LOSAT && numactl --physcpubind=$CPUS --membind=$node cargo build --release --locked --bin LOSAT --target-dir $D3/target_db6) > $D3/logs/s14build.log 2>&1 || { echo "FAILED build"; tail -20 $D3/logs/s14build.log; exit 1; }
+(cd $R/LOSAT && numactl --physcpubind=$CPUS --membind=$node cargo build --release --locked --bin losat --target-dir $D3/target_db6) > $D3/logs/s14build.log 2>&1 || { echo "FAILED build"; tail -20 $D3/logs/s14build.log; exit 1; }
 grep -q "Compiling LOSAT" $D3/logs/s14build.log || { echo "FAILED: no Compiling line"; exit 1; }
-cp $D3/target_db6/release/LOSAT $N && echo "$(date '+%F %T') built $N $(sha256sum $N | cut -c1-16) from $(git -C $R rev-parse HEAD) on node $node CPUs $CPUS"
+cp $D3/target_db6/release/losat $N && echo "$(date '+%F %T') built $N $(sha256sum $N | cut -c1-16) from $(git -C $R rev-parse HEAD) on node $node CPUs $CPUS"

@@ -1,0 +1,11 @@
+case	threads	verdict	sha256_16	rows	runs	high_memory
+p03	1	same	bbef153094025db8	4794	native:rc0:bbef1530:3.4s A:rc0:bbef1530:4.5s B:rc0:bbef1530:4.2s B-high:rc0:bbef1530:4.1s	shared memory: initial 40000 pages, maximum 65535 pages (module declares 65535)
+p03	8	same	bbef153094025db8	4794	native:rc0:bbef1530:1.6s A:rc0:bbef1530:3.0s B:rc0:bbef1530:2.9s B-high:rc0:bbef1530:3.2s	shared memory: initial 40000 pages, maximum 65535 pages (module declares 65535)
+d04	1	same	1da3bfe7d96d50a9	29926	native:rc0:1da3bfe7:121.1s A:rc0:1da3bfe7:148.8s B:rc0:1da3bfe7:145.2s B-high:rc0:1da3bfe7:162.0s	shared memory: initial 40000 pages, maximum 65535 pages (module declares 65535)
+d04	8	same	1da3bfe7d96d50a9	29926	native:rc0:1da3bfe7:50.5s A:rc0:1da3bfe7:63.6s B:rc0:1da3bfe7:54.6s B-high:rc0:1da3bfe7:48.2s	shared memory: initial 40000 pages, maximum 65535 pages (module declares 65535)
+blastp_ap	1	same	e3adaaa0e718403f	6158	native:rc0:e3adaaa0:17.4s A:rc0:e3adaaa0:24.3s B:rc0:e3adaaa0:23.7s B-high:rc0:e3adaaa0:23.8s	shared memory: initial 40000 pages, maximum 65535 pages (module declares 65535)
+blastp_ap	8	same	e3adaaa0e718403f	6158	native:rc0:e3adaaa0:3.7s A:rc0:e3adaaa0:6.2s B:rc0:e3adaaa0:6.0s B-high:rc0:e3adaaa0:5.9s	shared memory: initial 40000 pages, maximum 65535 pages (module declares 65535)
+tblastn_ap	1	same	9430925a3f4c68dd	3280	native:rc0:9430925a:11.4s A:rc0:9430925a:14.6s B:rc0:9430925a:14.9s B-high:rc0:9430925a:14.4s	shared memory: initial 40000 pages, maximum 65535 pages (module declares 65535)
+tblastn_ap	8	same	9430925a3f4c68dd	3280	native:rc0:9430925a:11.7s A:rc0:9430925a:33.1s B:rc0:9430925a:26.4s B-high:rc0:9430925a:16.6s	shared memory: initial 40000 pages, maximum 65535 pages (module declares 65535)
+blastn_big	1	same	9a30fc9c61c4eb33	54402	native:rc0:9a30fc9c:9.4s A:rc0:9a30fc9c:16.0s B:rc0:9a30fc9c:34.3s B-high:rc0:9a30fc9c:19.9s	shared memory: initial 40000 pages, maximum 65535 pages (module declares 65535)
+blastn_big	8	same	9a30fc9c61c4eb33	54402	native:rc0:9a30fc9c:5.3s A:rc0:9a30fc9c:6.4s B:rc0:9a30fc9c:5.9s B-high:rc0:9a30fc9c:7.6s	shared memory: initial 40000 pages, maximum 65535 pages (module declares 65535)

@@ -1,0 +1,117 @@
+{
+"BlastOutput2": [
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/taxfilter/tfp"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_1",
+          "query_title": "allx only X residues",
+          "query_len": 36,
+          "hits": [
+          ],
+          "stat": {
+            "db_num": 23,
+            "db_len": 3263,
+            "hsp_len": 0,
+            "eff_space": 0,
+            "kappa": -1,
+            "lambda": -1,
+            "entropy": -1
+          },
+          "message": "Query_1 allx only X residues:  Query_1 allx only X residues: Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options Filtering resulted in an empty database.  No hits found"
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/taxfilter/tfp"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_2",
+          "query_title": "nothing",
+          "query_len": 0,
+          "hits": [
+          ],
+          "stat": {
+            "db_num": 23,
+            "db_len": 3263,
+            "hsp_len": 0,
+            "eff_space": 0,
+            "kappa": -1,
+            "lambda": -1,
+            "entropy": -1
+          },
+          "message": "Query_2 nothing:  Query_2 nothing: Sequence contains no data Filtering resulted in an empty database.  No hits found"
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/taxfilter/tfp"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_3",
+          "query_title": "valid after them",
+          "query_len": 47,
+          "hits": [
+          ],
+          "stat": {
+            "db_num": 23,
+            "db_len": 3263,
+            "hsp_len": 8,
+            "eff_space": 5226,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          },
+          "message": "Query_3 valid after them:  Query_3 valid after them: Filtering resulted in an empty database.  No hits found"
+        }
+      }
+    }
+  }
+]
+}

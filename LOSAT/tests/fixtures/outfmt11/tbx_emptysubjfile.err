@@ -1,0 +1,3 @@
+Warning: [tblastx] Subject_1 e1 empty record: Subject sequence contains no data
+Warning: [tblastx] Subject_2 e2 empty too: Subject sequence contains no data
+BLAST engine error: The average subject length is too short

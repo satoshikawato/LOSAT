@@ -1,0 +1,101 @@
+BLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/sm3_g2_s.fna).
+           1 sequences; 515 total letters
+
+
+
+Query= g2q
+
+Length=150
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+g2s                                                                   163     4e-45
+
+
+> g2s
+Length=515
+
+ Score = 163 bits (180),  Expect = 4e-45
+ Identities = 132/150 (88%), Gaps = 0/150 (0%)
+ Strand=Plus/Plus
+
+Query  1    TGTGTAAATGGTTTGCCTTCGATCCGCGAAAAGAACTTTTGGAATAATGGGATGGTCGCC  60
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  31   TGTGTAAATGGTTTGCCTTCGATCCGCGAAAAGAACTTTTGGAATAATGGGATGGTCGCC  90
+
+Query  61   cgatgacgacttaggagtaggtgtgcagtgCGCTGTCGCGGCATCGACTCCCGATCCGTG  120
+             |  |  |     || |  || | |  | |||||||||||||||||||||||||||||||
+Sbjct  91   GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGCGCTGTCGCGGCATCGACTCCCGATCCGTG  150
+
+Query  121  GAAGGTCGGGCTTTATGTGTCAAAACTCAT  150
+            ||||||||||||||||||||||||||||||
+Sbjct  151  GAAGGTCGGGCTTTATGTGTCAAAACTCAT  180
+
+
+ Score = 163 bits (180),  Expect = 4e-45
+ Identities = 150/150 (100%), Gaps = 0/150 (0%)
+ Strand=Plus/Plus
+
+Query  1    TGTGTAAATGGTTTGCCTTCGATCCGCGAAAAGAACTTTTGGAATAATGGGATGGTCGCC  60
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  221  TGTGTAAATGGTTTGCCTTCGATCCGCGAAAAGAACTTTTGGAATAATGGGATGGTCGCC  280
+
+Query  61   cgatgacgacttaggagtaggtgtgcagtgCGCTGTCGCGGCATCGACTCCCGATCCGTG  120
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  281  CGATGACGACTTAGGAGTAGGTGTGCAGTGCGCTGTCGCGGCATCGACTCCCGATCCGTG  340
+
+Query  121  GAAGGTCGGGCTTTATGTGTCAAAACTCAT  150
+            ||||||||||||||||||||||||||||||
+Sbjct  341  GAAGGTCGGGCTTTATGTGTCAAAACTCAT  370
+
+
+ Score = 73.4 bits (80),  Expect = 6e-18
+ Identities = 40/40 (100%), Gaps = 0/40 (0%)
+ Strand=Plus/Plus
+
+Query  1    TGTGTAAATGGTTTGCCTTCGATCCGCGAAAAGAACTTTT  40
+            ||||||||||||||||||||||||||||||||||||||||
+Sbjct  401  TGTGTAAATGGTTTGCCTTCGATCCGCGAAAAGAACTTTT  440
+
+
+ Score = 73.4 bits (80),  Expect = 6e-18
+ Identities = 40/40 (100%), Gaps = 0/40 (0%)
+ Strand=Plus/Plus
+
+Query  91   CGCTGTCGCGGCATCGACTCCCGATCCGTGGAAGGTCGGG  130
+            ||||||||||||||||||||||||||||||||||||||||
+Sbjct  476  CGCTGTCGCGGCATCGACTCCCGATCCGTGGAAGGTCGGG  515
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 70056
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt0/sm3_g2_s.fna).
+    Posted date:  Unknown
+  Number of letters in database: 515
+  Number of sequences in database:  1
+
+
+
+Matrix: blastn matrix 2 -3
+Gap Penalties: Existence: 5, Extension: 2

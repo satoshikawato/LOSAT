@@ -1,0 +1,45 @@
+#Post-RPSBLAST Processing Utility
+
+#Input data file:	arch/mfirst.asn
+#Output data file:	(stdout)
+#Annotation data at:	rd5
+#E-Value cutoff:	0.01
+#Redundancy:	Concise
+#Data requested:	Domain hits and site annotations
+#Output format -- tab-delimited table
+#Show superfamilies: NO
+#DATA
+#SESSION	<session-ordinal>	<program>	<database>	<score-matrix>	<evalue-threshold>
+#QUERY	<query-id>	<seq-type>	<seq-length>	<definition-line>
+#DOMAINS
+#<session-ordinal>	<query-id[readingframe]>	<hit-type>	<PSSM-ID>	<from>	<to>	<E-Value>	<bitscore>	<accession>	<short-name>	<incomplete>	<superfamily PSSM-ID>
+#more such lines......
+#ENDDOMAINS
+#SITES
+#<session-ordinal>	<query-id[readingframe]>	<annot-type>	<title>	<residue(coordinates)>	<complete-size>	<mapped-size>	<source-domain>
+#more such lines......
+#ENDSITES
+#MOTIFS
+#<session-ordinal>	<query-id[readingframe]>	<title>	<from>	<to>	<source-domain>
+#more such lines......
+#ENDMOTIFS
+#ENDQUERY	<query-id>
+#more query sections..
+#ENDSESSION	<session-ordinal>
+#more session sections..
+#ENDDATA
+#=====================================================================
+DATA
+SESSION	1	blastp	2.17.0+	Cdd	BLOSUM62	0.01
+QUERY	Query_1	Peptide	185	NP_416542.1 dTDP-4-dehydrorhamnose 3,5-epimerase [Escherichia coli str. K-12 substr. MG1655]
+DOMAINS
+1	Query_1	Specific	273510	2	179	9.32362e-118	330.896	TIGR01221	rmlC	-	532251
+ENDDOMAINS
+SITES
+1	Query_1	Specific	active site	N49,S51,H62,Q64,K72,H119,Y132,D169	8	8	380337
+1	Query_1	Specific	catalytic site	H62,K72,Y132	3	3	380337
+1	Query_1	Specific	homodimer interface	R23,G24,F25,F26,Y27,E28,S29,F30,N31,S33,Q47,D48,N49,H50,S51,R52,S53,S54,V57,R59,T77,K133,Y137,S166	24	24	380337
+ENDSITES
+ENDQUERY
+ENDSESSION	1
+ENDDATA

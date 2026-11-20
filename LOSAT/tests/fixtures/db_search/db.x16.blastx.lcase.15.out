@@ -1,0 +1,190 @@
+{
+"BlastOutput2": [
+{
+    "report": {
+      "program": "blastx",
+      "version": "BLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/bslice"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "query_gencode": 1
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_1",
+          "query_title": "m_fam_lc MelaMJNV 26001-29000, 301-700 and 1501-1800 in lower case",
+          "query_len": 3000,
+          "query_masking": [
+            {
+              "from": 39,
+              "to": 69
+            },
+            {
+              "from": 129,
+              "to": 153
+            },
+            {
+              "from": 270,
+              "to": 300
+            },
+            {
+              "from": 300,
+              "to": 699
+            },
+            {
+              "from": 1044,
+              "to": 1086
+            },
+            {
+              "from": 1275,
+              "to": 1332
+            },
+            {
+              "from": 1500,
+              "to": 1797
+            },
+            {
+              "from": 2949,
+              "to": 2973
+            },
+            {
+              "from": 298,
+              "to": 697
+            },
+            {
+              "from": 952,
+              "to": 973
+            },
+            {
+              "from": 1147,
+              "to": 1180
+            },
+            {
+              "from": 1498,
+              "to": 1798
+            },
+            {
+              "from": 1987,
+              "to": 2029
+            },
+            {
+              "from": 164,
+              "to": 197
+            },
+            {
+              "from": 299,
+              "to": 698
+            },
+            {
+              "from": 998,
+              "to": 1082
+            },
+            {
+              "from": 1250,
+              "to": 1319
+            },
+            {
+              "from": 1499,
+              "to": 1799
+            },
+            {
+              "from": 1916,
+              "to": 1961
+            },
+            {
+              "from": 2714,
+              "to": 2732
+            }
+          ],
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|32",
+                  "accession": "32",
+                  "title": "BDT61962.1 baculoviral IAP repeat-containing protein [Penaeus monodon majanivirus A]"
+                }
+              ],
+              "len": 577,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 231.876,
+                  "score": 590,
+                  "evalue": 1.61264e-68,
+                  "identity": 128,
+                  "positive": 187,
+                  "query_from": 1802,
+                  "query_to": 2707,
+                  "query_frame": -3,
+                  "hit_from": 4,
+                  "hit_to": 356,
+                  "align_len": 357,
+                  "gaps": 59,
+                  "qseq": "SSPGCMFAQNLYSLEDLNKYCKPP----QIHKTFIKYARDTLIYEQHRLETFADWPHDFVSPIELAADGFYFLKKQDHVMCVFCVGILGLFEMGDIVREKHKHAFPGCAFVRGDKTCNIPAVKKNIFEKLSHEYKP-------------------------PKQTKSPLLDYIGIFEYNISSVRFKRDTFEKRLASF-KDWPEYLVQKPQDLAEAGFYYCGLSDHVACFYCEGGILNWERNDIPWHEHAKYYPTCNYLYLKKGKNFIDNIQ------LKISENTLYESFD-------------------EMDLLMELDIVRCIVSIGYSINDAKCILKKHVTETGWPYLSIEPYVLD",
+                  "hseq": "SHPNSFLQQEEYRLTTFSEHETSPIDTTRVYRNMPFVSYDCLRYEEKRLGTFIDWPHEWLKPSELAADGFYYLRKDDHCACIFCRGIVGAWEKTDTPRGEHERHFPHCPFIRGQPTGNVPIVQGNILARLPVLHASLDDCGSRRVEADACRFSSRHMAGSYPECRGSP--DETGLYQHS-GPKRSDFTTLDSRLKSYVEGWP-ILGLHARDLAEAGFFYCGLSDHVRCFHCGKGLRNWISSDIPWKEHARWYPKCRFVLLTKGQDYINEVQQEHPPYTRTASTTIYSGIDKAASGSSNSPTEVQSVSEQELDLLMSLDVVKCVLEMGYPSCIVRACLKDRVEQTGEPYFVIEPCLED",
+                  "midline": "S P     Q  Y L   +++   P    ++++     + D L YE+ RL TF DWPH+++ P ELAADGFY+L+K DH  C+FC GI+G +E  D  R +H+  FP C F+RG  T N+P V+ NI  +L   +                           P+   SP  D  G+++++    R    T + RL S+ + WP  L    +DLAEAGF+YCGLSDHV CF+C  G+ NW  +DIPW EHA++YP C ++ L KG+++I+ +Q       + +  T+Y   D                   E+DLLM LD+V+C++ +GY     +  LK  V +TG PY  IEP + D"
+                },
+                {
+                  "num": 2,
+                  "bit_score": 76.2554,
+                  "score": 186,
+                  "evalue": 5.20591e-17,
+                  "identity": 30,
+                  "positive": 40,
+                  "query_from": 1325,
+                  "query_to": 1492,
+                  "query_frame": -3,
+                  "hit_from": 522,
+                  "hit_to": 577,
+                  "align_len": 56,
+                  "gaps": 0,
+                  "qseq": "EHMYEDRICKVCMSNEARVVYFPCTHMIACEDCTLALESCPICRKDINYVVRPIIS",
+                  "hseq": "ERMREDRTCKVCMDSEIAIVFLPCSHMVTCVSCAVSLRQCPICRRDIKHVCRAIVS",
+                  "midline": "E M EDR CKVCM +E  +V+ PC+HM+ C  C ++L  CPICR+DI +V R I+S"
+                },
+                {
+                  "num": 3,
+                  "bit_score": 38.891,
+                  "score": 89,
+                  "evalue": 2.24022e-05,
+                  "identity": 57,
+                  "positive": 97,
+                  "query_from": 2270,
+                  "query_to": 2914,
+                  "query_frame": -3,
+                  "hit_from": 45,
+                  "hit_to": 288,
+                  "align_len": 259,
+                  "gaps": 59,
+                  "qseq": "IHLEQRRVETFINQFKENIDESLPIHYRLLAKAGFFYMKKDVIACFCCKLQIDVKTLRTSDDIIMIHKKSSPGCMFAQNLYS----LEDLNKYCKPPQIHKTF--------------------------IKYARDTLIYEQH-------------RLETFAD-WPHDFVSPIELAADGFYFLKKQDHVMCVFCVGILGLFEMGDIVREKHKHAFPGCAFVRGDKTCNIPAVKKNIFEKLSHEYKPPKQTKSPLLDYIGI",
+                  "hseq": "LRYEEKRLGTFIDWPHEWLKPSE------LAADGFYYLRKD-DHCACIFCRGIVGAWEKTDTPRGEHERHFPHCPFIRGQPTGNVPIVQGNILARLPVLHASLDDCGSRRVEADACRFSSRHMAGSYPECRGSPDETGLYQHSGPKRSDFTTLDSRLKSYVEGWPILGLHARDLAEAGFFYCGLSDHVRCFHCGKGLRNWISSDIPWKEHARWYPKCRFVLLTK-------GQDYINEVQQEHPPYTRTASTTI-YSGI",
+                  "midline": "+  E++R+ TFI+   E +  S       LA  GF+Y++KD   C C   +  V     +D     H++  P C F +   +    +   N   + P +H +                            + + D     QH             RL+++ + WP   +   +LA  GF++    DHV C  C   L  +   DI  ++H   +P C FV   K        ++   ++  E+ P  +T S  + Y GI"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 35,
+            "db_len": 14391,
+            "hsp_len": 62,
+            "eff_space": 11463298,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          }
+        }
+      }
+    }
+  }
+]
+}

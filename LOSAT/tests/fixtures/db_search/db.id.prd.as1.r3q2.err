@@ -1,0 +1,4 @@
+Warning: [psiblast] Failed to retrieve sequence gb|AAA00001|
+Warning: [psiblast] Query_1 q1: Composition-based score adjustment conditioned on sequence properties and unconditional composition-based score adjustment is not supported with PSSMs, resetting to default value of standard composition-based statistics 
+Warning: [psiblast] Failed to retrieve sequence gb|AAA00001|
+Warning: [psiblast] Query_2 q2: Composition-based score adjustment conditioned on sequence properties and unconditional composition-based score adjustment is not supported with PSSMs, resetting to default value of standard composition-based statistics 

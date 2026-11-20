@@ -1,0 +1,303 @@
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastp",
+      service "plain",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_1"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">pl1 qp1 with a low-complexity run"
+                  }
+                }
+              },
+              title "pl1 qp1 with a low-complexity run"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 176,
+              seq-data ncbieaa "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSW
+KVLMKYEFSSDIHPCNLWICWIPKPPPPPPPPPPPPEEEEEEEEEEEEPPPPPPPPPPPPEMATPGWWNTDTLHMSEM
+GLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTASEG"
+            }
+          }
+        }
+      },
+      subject sequences {
+        {
+          id {
+            local str "Subject_1"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">sp1 subject protein alpha"
+                }
+              }
+            },
+            title "sp1 subject protein alpha"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 137,
+            seq-data ncbieaa "MWMEHSVLKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKV
+LMKYEFSSDIHPWICWIPKEQQTPGWWKTDTLHMAEMGLWMHKYPKCMCVMVRYTDQSLRHWEINTDANFEKLKILHH
+MVGHGRTASEG"
+          }
+        },
+        {
+          id {
+            local str "Subject_2"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">sp2 subject protein beta, distant"
+                }
+              }
+            },
+            title "sp2 subject protein beta, distant"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 142,
+            seq-data ncbieaa "YWMEHSVLKADQLQLRKVMDDPKIRDGPMAVMKVWESYCFILHSIANM
+SAHVLMKYEFQSGIHPCNQWTCWIPKYMAVPGWCPTDTLHVSEMGLWMHCEPMCHMVRETTHALRHWKINEICNFEKL
+KAFPYQVPMGRAANEG"
+          }
+        }
+      },
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, 1 }
+        },
+        {
+          name "MaskAtHash",
+          value boolean FALSE
+        },
+        {
+          name "SegFiltering",
+          value boolean TRUE
+        },
+        {
+          name "WordThreshold",
+          value integer 11
+        },
+        {
+          name "WindowSize",
+          value integer 40
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "UngappedMode",
+          value boolean FALSE
+        },
+        {
+          name "CompositionBasedStats",
+          value integer 2
+        },
+        {
+          name "SmithWatermanMode",
+          value boolean FALSE
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 12144
+        }
+      },
+      program-options {
+        {
+          name "RequiredStart",
+          value integer 89
+        },
+        {
+          name "RequiredEnd",
+          value integer 149
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 204
+          },
+          {
+            id str "blast_score",
+            value int 204
+          },
+          {
+            id str "e_value",
+            value real { 326352241599788, 10, -41 }
+          },
+          {
+            id str "bit_score",
+            value real { 831889457671841, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 37
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 40
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 677131147540984, 10, -13 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_1",
+            local str "Subject_1"
+          },
+          starts {
+            109,
+            70
+          },
+          lens {
+            41
+          },
+          strands {
+            plus,
+            plus
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 139
+          },
+          {
+            id str "blast_score",
+            value int 139
+          },
+          {
+            id str "e_value",
+            value real { 215505662571153, 10, -31 }
+          },
+          {
+            id str "bit_score",
+            value real { 581509733325561, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 30
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 34
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 709918032786885, 10, -13 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 3,
+          ids {
+            local str "Query_1",
+            local str "Subject_2"
+          },
+          starts {
+            107,
+            75,
+            132,
+            -1,
+            134,
+            100
+          },
+          lens {
+            25,
+            2,
+            16
+          },
+          strands {
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus
+          }
+        }
+      }
+    },
+    masks {
+      {
+        locations {
+          packed-int {
+            {
+              from 89,
+              to 106,
+              id local str "Query_1"
+            }
+          }
+        },
+        frame notset
+      }
+    },
+    ka-blocks {
+      {
+        lambda { 325305055003019, 10, -15 },
+        k { 132420065684132, 10, -15 },
+        h { 526323697828114, 10, -15 },
+        gapped FALSE
+      },
+      {
+        lambda { 267, 10, -3 },
+        k { 41, 10, -3 },
+        h { 14, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 12144",
+      "Effective search space used: 12144",
+      "Length adjustment: 13"
+    }
+  }
+}

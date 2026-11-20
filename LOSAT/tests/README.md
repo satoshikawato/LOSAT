@@ -12,8 +12,8 @@ From the repository root:
 
 ```bash
 cd LOSAT
-cargo build --release --bin LOSAT
-cargo build --release --bin LOSAT --target wasm32-wasip1-threads --features wasm-threads --target-dir target/threaded-command
+cargo build --release --bin losat
+cargo build --release --bin losat --target wasm32-wasip1-threads --features wasm-threads --target-dir target/threaded-command
 cd tests
 
 ./run_comparison.sh
@@ -25,7 +25,7 @@ cd tests
 Requirements: Bash 4+, a current Node.js release with WASI support (the current
 frozen snapshot used Node 26.8.2), NCBI BLAST+ (`blastn`, `blastp`,
 `tblastx`, `makeblastdb`), Python 3 with `matplotlib`, `pandas` and `seaborn>=0.12`.
-`--bin LOSAT` builds the command artifact with `_start`; library Wasm artifacts
+`--bin losat` builds the command artifact with `_start`; library Wasm artifacts
 cannot run these CLI comparisons. Missing or incorrect artifacts fail explicitly.
 
 To compare Wasm with a fresh NCBI oracle without running native LOSAT:
@@ -150,21 +150,67 @@ check per-instance bounds that can lag behind the actual shared memory.
 Before compiling the threaded module, `wasi_shared_memory.js` guards every copy
 and fill. If a range exceeds the instance's cached memory length, it executes
 `memory.grow(0)` to refresh that instance, then performs the original operation.
-This requests no additional pages; real invalid accesses still trap. The
-on-disk Wasm artifact is unchanged, and normal optimizing compilation and
-threading remain enabled. No extra flags or rebuild are needed. Adapter parsing
-and compilation are included in the measured startup time. Keep `wasi_shared_memory.js`, `wasi_artifact.js`, and `wasi_thread_host.js`
-beside `run_losat_wasi_threads.js` when copying the runner; set
+This requests no additional pages; real invalid accesses still trap. Normal
+optimizing compilation and threading remain enabled. No extra flags are needed.
+
+Atomic memory instructions (loads, stores, read-modify-writes, compare-exchanges,
+`memory.atomic.wait32/64`, `memory.atomic.notify`) get the same guard, through one
+helper per opcode and memarg. V8's baseline compiler
+[checks each atomic access](https://github.com/nodejs/node/blob/v26.8.2/deps/v8/src/wasm/baseline/liftoff-compiler.cc)
+against the same per-instance bound, where it leaves plain accesses to the trap
+handler: a rayon worker trapped at its first `Stealer::steal`, in `Arc::clone`, on
+memory that existed (dc-megablast at 16 threads, 1 of the 483 threaded runs on record;
+`docs/evidence/wasm_oob_20261101/`).
+
+On ARM64 outside macOS V8 checks plain multi-byte stores against that bound too: real
+blastp at 16 threads trapped in `dlmalloc` in 64 and 100 of 100 runs on `ubuntu-24.04-arm`
+(Node 26.8.2, 24.21) with only the bulk instructions guarded, 11 and 29 with the atomics too.
+A module has about 200,000 such stores, so they stay as they are. Instead `memory.grow`
+goes through a helper that records the new size in low memory, and each atomic instruction
+that reads memory (all but the stores and notify) compares `memory.size` with the
+record afterwards and refreshes a stale bound. A thread that takes a lock or reads a
+published address therefore has the new bound before it uses the address.
+
+A host of a guarded module must not write bytes 16-19 of the shared memory (the record), and
+must not grow the memory by more than 0 pages while a search runs: `memory.grow(0)` is always
+safe, and so is growing before the first instance exists. The guard changes no import, export
+or memory limit.
+
+The build applies the same guard to the threaded artifacts, so that hosts other
+than this runner (browsers) get guarded bytes too (release v0.2.0 DECISIONS 52):
+`build_wasi_artifacts.py` writes `losat-threaded-command.wasm` and
+`losat-threaded-reactor.wasm` guarded (their JSON records the unguarded SHA-256
+under `shared_memory_guard`), the release workflow guards the threaded release
+artifact, and LOSAT Web's build guards its threaded reactor (`web/app/build/reactors.ts`).
+`prepare_release_candidate_v020.py wasm` takes the threaded artifact with
+`--unguarded-binary`, refuses it unless it is the guard's output of that module,
+and records both hashes in the sidecar; `verify_release_archive_v020.py` and
+`aggregate` refuse a threaded archive without a guard.
+The command line is
+`node wasi_shared_memory.js guard <input.wasm> <output.wasm>` and
+`node wasi_shared_memory.js verify <file.wasm>`; both print a JSON record. A
+guarded module carries a custom section `losat.shared_memory_guard` with the
+guard's version and counts. The runner, and the guard function itself, use a
+module that has it as it is (it is not guarded twice and not written to the
+guard cache). `guard` exits 1 and writes nothing when the reader declines an
+instruction encoding, when the module has no `memory.fill`, `memory.copy`,
+`memory.grow` or atomic instruction, or when its output does not verify; `verify`
+exits 1 unless the helpers, the call sites and the counts are the guard's own. `memory.init` is not guarded: only
+`__wasm_init_memory` (the module's start) and `__wasm_init_tls` (the spawning
+thread, from `pthread_create`) use it. Adapter parsing
+and compilation are included in the measured startup time. Keep `run_losat_wasi_threads.js`,
+`wasi_thread_host.js`, `wasi_thread_worker.js`, `wasi_artifact.js`,
+`wasi_shared_memory.js`, and `wasi_files.js` together when copying the runner; set
 `LOSAT_WASI_THREADS_DEBUG=1` to log the number of guarded instructions.
 Unsupported module encodings fail explicitly. This guard addresses the observed
-copy/fill bounds race; it does not suppress other memory faults or fix OOM.
+stale-bound traps; it does not suppress other memory faults or fix OOM.
 
 Run the host regression checks with
 `"$NODE_BIN" --test test_wasi_runners.js test_wasi_shared_memory.js`
 (or substitute `node`). They exercise real Wasm commands, exit codes, worker
 exceptions, shared-memory growth, overlapping copies, and invalid ranges, and
-the two opt-in host variables `LOSAT_WASI_PRESPAWN` and `LOSAT_WASI_GUARD_CACHE`
-(see "Threading contract gates").
+the host variables `LOSAT_WASI_PRESPAWN`, `LOSAT_WASI_RECYCLE` and
+`LOSAT_WASI_GUARD_CACHE` (see "Threading contract gates").
 
 Each completed search immediately prints its measured wall time, for example
 `Finished WSSV.PajaWSV.losatp.wasm: 7.446 s`. Failed searches also
@@ -239,7 +285,7 @@ verifies the opposite build order:
 
 ```bash
 python build_wasi_artifacts.py --target-dir ../target --output-dir ../../.tmp/wasi-artifacts
-python check_wasm_threading.py --native ../target/release/LOSAT \
+python check_wasm_threading.py --native ../target/release/losat \
   --threaded ../../.tmp/wasi-artifacts/losat-threaded-command.wasm \
   --reactor ../../.tmp/wasi-artifacts/losat-threaded-reactor.wasm \
   --output-dir ../../.tmp/threading-gates
@@ -248,16 +294,36 @@ python check_wasm_threading.py --native ../target/release/LOSAT \
 For compatibility checks, add `--include-serial` to the builder and pass
 `--serial` and `--serial-reactor` with those explicit artifacts to the checker.
 To also check native without parallel support, build it using
-`cargo build --release --bin LOSAT --no-default-features --target-dir target/native-serial`
+`cargo build --release --bin losat --no-default-features --target-dir target/native-serial`
 from the crate directory and pass `--native-serial` to the checker.
 The comparison gate requires NCBI BLAST+ 2.17.0 only as a test oracle. It retains
 raw bytes, argv, stderr, artifact identity, and worker lifecycle records.
+It also runs every psiblast row of `outfmt0_manifest.tsv` (through
+`docs/evidence/losat_web_e2a/check_losat.py`) through each WASI command it is given (the
+threaded one, and `--serial`) at `-num_threads 1`, with a wrapper script in the place
+of the binary (`<output-dir>/psiblast-fixtures/<kind>/`).
+Its `makeblastdb-logfile/` section runs every makeblastdb `-logfile` row of the drop-in
+corpus (`dropin_corpus.py check`, frozen NCBI bytes) through each WASI command, then two
+runs that append a log, a warning and an error to one file, whose stdout, stderr, exit
+status and log bytes (without the lines of the time and the path) must be the native
+command's.
+Its `stdin/` section reads standard input in every search program through each WASI
+command (`-query -`, no `-query`, an empty pipe, `-subject -`, both, and a regular file as
+the standard input) and requires the native command's stdout, stderr and exit status of
+the same run.
+Its `blastx-xml-fixtures/` section runs every blastx row of BLAST XML, XML2 and JSON
+(`-outfmt` 5 and 13 to 16; `--outfmts` of the two checkers) of `outfmt0_manifest.tsv`
+(`check_losat.py`) and of `db_search_manifest/blastx*.tsv` (`db_search_fixtures.py check`)
+through each WASI command at `-num_threads 1`, exactly: in these formats blastx reads its
+query file before the search, on the open file itself.
 
 Every supported explicit N > 1 uses N total compute threads: the caller plus
 N-1 child workers. Diagnostics report pool_threads=N and caller_participates=true;
 host spawn/ready/exit counts are N-1. n1 creates no child workers; serial targets reject n2/n4. Invalid or excessive requests and
 invalid `LOSAT_WASI_THREAD_CAP` settings fail before spawning workers. Repeated
-reactor calls join all guest workers and await host exit events. Recoverable
+reactor calls join all guest workers and await the host's record of each guest
+thread's end (`exited`: the Node worker's exit, or with `LOSAT_WASI_RECYCLE` the
+worker's report that the thread returned). Recoverable
 spawn rejection returns the underlying cause and clears old result bytes;
 traps and worker failures terminate the host process and require a fresh one.
 
@@ -268,38 +334,83 @@ The detailed performance parser rejects absent or inconsistent evidence.
 `LOSAT_TBLASTX_SERIAL_SCAN_CHUNKS=1` describes sequential diagnostic chunking;
 the old `LOSAT_TBLASTX_PARALLEL_SCAN_CHUNKS` name has been removed.
 
-Two host variables of the Node threaded runner (`wasi_thread_host.js`) shorten
-its fixed startup cost. Both are off by default, and without them the runner
-behaves as before; neither changes the module, the guest or its output.
+Three host variables of the Node threaded runner (`wasi_thread_host.js`) shorten
+its fixed startup cost. None changes the module, the guest or its output.
+`LOSAT_WASI_PRESPAWN` (`auto`) and `LOSAT_WASI_RECYCLE` (`1`) are on by default
+since 2026-10-18 and `LOSAT_WASI_GUARD_CACHE` since 2026-10-19
+(`LOSAT_WASI_PRESPAWN=0`, `LOSAT_WASI_RECYCLE=0` and `LOSAT_WASI_GUARD_CACHE=0`
+give the runner of before).
 
-- `LOSAT_WASI_PRESPAWN=auto|N` boots thread workers before `_start`, all at
-  once, instead of one per `thread-spawn` call while the guest waits. `auto`
+- `LOSAT_WASI_PRESPAWN=auto|N` (`auto` when unset) boots thread workers before
+  `_start`, all at once, instead of one per `thread-spawn` call while the guest
+  waits. `auto`
   takes N-1 from `-num_threads N` in the command line (0 when it is absent, not
   a number, below 2, or above the guest's limit of 255 threads); an integer from
   0 to 254 sets the count, and any other value is an error before the command
   starts. Each worker instantiates the module with the shared memory and waits.
-  `thread-spawn` hands the next waiting worker its tid and start argument and
-  returns the tid after the same start confirmation and timeout as a new worker;
-  when none is left it creates workers as before. Unused workers are terminated
+  `thread-spawn` hands the next standby worker its tid and start argument. A
+  worker that already waits for its order has instantiated the module, so the
+  spawn returns the tid without waiting for its start confirmation, as
+  `pthread_create` returns before the new thread runs; a failure of that thread
+  still ends the command. A worker that still boots is waited for as for a new
+  worker, with the same timeout and message. When none is left, `auto` boots the next N workers together (the most one set
+  of threads asks for: a pool whose threads are all new, such as blastn's
+  query-batch slots, `standby_refill` event) and an integer creates one worker
+  per spawn as before. Unused workers are terminated
   when the run ends and never keep the process alive. With
   `LOSAT_WASI_THREADS_DEBUG=1`, spawn-attempt, spawned, ready and exit events keep
   their meaning for the guest's threads (`spawned` of a prebooted worker carries
-  its `standby` index), and prebooted workers have their own `standby_spawned`,
+  its `standby` index; the `ready` of a worker that already waited carries
+  `waiting: true` and is written at the hand-over, before the thread starts), and prebooted workers have their own `standby_spawned`,
   `standby_unused` and `standby_exited` events (`standby_rejected` when a worker
   cannot be created). The test-only startup faults act at worker boot, so with
   this variable an injected startup error ends the command as soon as a
-  prebooted worker boots, which can be before the first `thread-spawn`.
-- `LOSAT_WASI_GUARD_CACHE=<dir>` stores the output of the shared-memory guard
+  prebooted worker boots, which can be before the first `thread-spawn`. A
+  reactor has no `-num_threads` when it is created, so `auto` boots none there.
+- `LOSAT_WASI_RECYCLE=0|1` (`1` when unset; any other value is an error when
+  the host is created) keeps a reactor's thread workers between calls, as the
+  browser's thread host does. When a guest thread returns, its worker
+  instantiates the module again on the shared memory (a new instance for every
+  guest thread, as before) and waits for a start order; `thread-spawn` takes a
+  waiting worker, waits briefly for one that is instantiating again, and boots a
+  new worker only when every worker runs a thread (a thread of the previous pool
+  returns only after the next pool's spawns). `close()` ends the workers. The
+  guest gets the same threads in the same order. Commands are not affected:
+  their workers exit with their threads. With `LOSAT_WASI_THREADS_DEBUG=1`,
+  `spawned` of a recycled worker carries its `recycled` index, and `exited`
+  (code 0) records that the worker reported its thread's return. Measured on
+  p03 (TBLASTX, `-num_threads 8`, ABI v2 reactor, i9): the host's spawns took
+  148-205 ms of every later search without it and 1 ms with it.
+- `LOSAT_WASI_GUARD_CACHE=<dir>|0` stores the output of the shared-memory guard
   in `<dir>` (created if needed), keyed by the SHA-256 of the artifact and of
-  `wasi_shared_memory.js`. A later run uses the stored bytes only when their
-  SHA-256 and length match the sidecar record, whose own SHA-256 covers the
-  key and the fill/copy counts; otherwise it recomputes the guard and replaces
-  the entry through a temporary file and a rename. The stored bytes are the
-  guard's output, byte for byte. With `LOSAT_WASI_THREADS_DEBUG=1` the runner
-  logs `guard cache hit`, `miss` or `invalid`.
+  `wasi_shared_memory.js`. Unset, the directory is `losat/wasi-guard` in the
+  user's cache directory (`$XDG_CACHE_HOME` if absolute, else `~/.cache`;
+  `~/Library/Caches` on macOS; `%LOCALAPPDATA%` on Windows), and a run that
+  cannot use it computes the guard as before; a directory that the variable
+  names must work. `0` turns the cache off. A later run uses the stored bytes
+  only when their SHA-256 and length match the sidecar record, whose own
+  SHA-256 covers the key and the fill/copy counts; otherwise it recomputes the
+  guard and replaces the entry through a temporary file and a rename. A write
+  keeps the 8 entries used last. The stored bytes are the guard's output, byte
+  for byte. An index file `index-<dev>-<ino>-<size>-<mtimeNs>-<ctimeNs>.json`,
+  named by the identity of the input file, records the input's SHA-256 and the
+  guard version, so that a later run compiles the cached guarded bytes at once;
+  index files are kept and pruned like entries (8). Every check of a hit still
+  runs, during the compile: the input's SHA-256 from the input read again, the
+  guard version, the sidecar, and the length and SHA-256 of the cached bytes. A
+  check that fails discards the compiled module, and the run takes the path
+  without the index, which writes the index again. With
+  `LOSAT_WASI_THREADS_DEBUG=1` the runner logs `guard cache hit`, `miss`,
+  `invalid` or `unusable`, and for the index `guard cache index hit: <path>`,
+  `guard cache index stale: <path>`, `guard cache index not used (<reason>)`,
+  `guard cache index: cached bytes did not compile (<reason>)` and
+  `guard cache index not written (<reason>)`. Measured on the i9 (threaded command, 6.8 MB):
+  the guard takes 150-220 ms and a hit 9-13 ms; TBLASTX p03 at 8 threads took
+  0.83-1.05 s instead of 0.95-1.18 s (8 pairs). `test_wasi_runners.js` keeps
+  its own cache directory.
 
 The nightly workflow (`nightly.yml`, also `workflow_dispatch` and release
-readiness) runs `check_wasm_threading_regressions.py --jobs 3` against all frozen
+readiness; its schedule tests `main` and starts a run of `dev`) runs `check_wasm_threading_regressions.py --jobs 3` against all frozen
 manifest rows and `check_tblastx_thread_thresholds.py` for the LC738874/LC738875
 E-value 10/100/10000 sweep. The frozen runner executes every row and fails on
 any mismatch except the known ones in `frozen_mismatch_allowlist.json` (which
@@ -307,13 +418,33 @@ pass only with their listed output); an entry that matches again, or is not
 executed, fails so the list is cleaned. Pull requests run
 `ci_fast_regressions.py` instead: the `capture_outputs.py` cases of the programs
 selected from the changed paths against the S02 baseline and the frozen hashes,
-the outfmt 0 fixtures and the BLASTP/BLASTN `-db` fixtures (`db_search_fixtures.py`), without NCBI executables (TBLASTX runs only its short
-cases; `--all-cases` runs all of them nightly). `--jobs` overlaps independent
+the `-subject` fixtures of `outfmt0_manifest.tsv` (`check_losat.py`) and the `-db` fixtures of the five programs
+(`db_search_fixtures.py`), and the command lines of the downstream tools and each program's common forms
+(`dropin_corpus.py`, inputs and provenance in `dropin_corpus/README.md`), without NCBI executables (TBLASTX runs only its short
+cases; `--all-cases` runs all of them nightly). Besides the rules the comparison tools name
+(the SAM @PG CL tag, `check_losat.py`'s database lines of the approved TBLASTX rows, the drop-in
+corpus's `<RUNDIR>` and makeblastdb report lines, the `{OUT}` and `{LOSAT}` paths of the captured stderr), there
+is one replacement of a checkout-path prefix (Owner 2026-11-05: replace the prefix when comparing):
+the TBLASTN Stage G cases froze NCBI's outfmt 0/7 bytes of inputs named under the developer
+machine's checkout `/mnt/c/Users/genom/GitHub/LOSAT`, so `capture_outputs.py` runs them from the
+repository root with the relative run root of `frozen_paths.py` in its place (of the same length,
+so outfmt 0 wraps its `Database:` lines at the same columns) and puts the prefix back into the
+output and stderr before hashing; no link to that path is needed. Both manifests freeze NCBI's
+outfmt 0/6/7 and, in the rows `sa.*` and `db.sa.*`, outfmt 8 (Seq-annot, ASN.1 text),
+12 (Seq-annot, JSON) and 9 (Seq-annot, binary ASN.1; the ids ending `.9`, a subset of the 8
+rows' searches) of all five programs (the BLASTX `-subject` rows are 8, 9 and 12 only);
+and 5 (BLAST XML, text) of BLASTN and BLASTP (OF4a: the ids ending `.5` and the `x5.*` rows of
+`outfmt0_manifest.tsv`, each the search of an existing row; `check_xml_layout.py` of the OF4 line
+checks the layout of the frozen files);
+`run_oracle.py --freeze --only sa.` and `db_search_fixtures.py freeze --only db.sa.`
+freeze those rows alone (`--only` takes any id prefix, so `--only sa.multi.megablast.9` freezes
+one row). The fixture directories carry a `.gitattributes` with `-text` for the binary `.out` files. `--jobs` overlaps independent
 comparison processes; it does not change a search's requested thread count.
 The frozen runner uses a 3600-second per-search deadline, configurable with a
 positive `--timeout-seconds`; long genome cases can exceed a 900-second limit.
 A deadline failure remains a failed attempt, even if a later retry succeeds.
 These runs are correctness checks and must not be used for speed comparisons.
+
 Native Gate A's frozen LOSAT hashes are not rewritten: an approved new output
 goes into a new manifest version (`platform_native_v011_canonical.tsv` = v0.1.0's
 43 hashes with the approved Sakai.MG1655.megablast output, PD 1.3; the driver
@@ -352,3 +483,47 @@ manually dispatched `wasm-threading.yml` workflow accepts
 explicit opt-ins. `benchmark_wasm_threading.py` defaults to native/threaded;
 include `serial` in `--kinds` when comparing the compatibility build. Frozen
 v0.1.0 certification and release contracts retain their historical target scope.
+
+## Rust integration tests
+
+The files `tests/*.rs` are built into eight test binaries: the suites `blastn`, `blastp`, `blastx`,
+`tblastn`, `tblastx` and `common` (`tests/suites/<suite>.rs`, one module per file) and the two files that
+change the process environment or process-wide state, `blastn_report_stream_api` and
+`thread_memory` (a counting global allocator). Unit tests are in the crate (`#[cfg(test)]` modules
+next to the code, `cargo test --lib`). A test
+is named `<file>::<test>`. Run one file with `cargo test --all-features --test blastn blastn_strand::`
+(keep `--test <suite>`, since the filter is a substring: `blastx_hitbf::` alone also runs
+`tblastx_hitbf::`), or with nextest `-E 'test(/^blastn_strand::/)'` (the binary id is `losat::blastn`). A
+new file goes into its program's suite root (`common` for the command line, the output formats and the
+shared parts) with two lines, `#[path = "../<file>.rs"]` and `mod <file>;`; `tests/suite_layout.rs`
+checks that every file is in exactly one binary. Plain `cargo test` runs a suite's tests together, up to
+the CPU count at once; pass `-- --test-threads N` on a busy machine.
+A helper directory module (`run_local_support/`, `reach_support/`) is compiled once per file that
+declares it, so a `static` in it is per copy, and a name it makes needs `module_path!()`.
+
+Coverage: Nightly's `coverage (k/4)` jobs run the test set of ci.yml's `rust-tests`
+(`cargo llvm-cov nextest --all-features --partition count:k/4`), and `coverage report` adds the shards'
+lcov files (`coverage_summary.py`, tested by `test_coverage_summary.py`) into the line and function
+coverage of LOSAT's sources. The job summary has the totals and a table by module; the artifact
+`coverage` has the merged lcov file and a table per file. The jobs run in the nightly run of dev and in
+dispatched runs of other branches, not on `main`; they have no threshold and do not change the run's
+result. cargo-llvm-cov leaves out the test files (`tests/`, `examples/`, `tests.rs`, `*_tests.rs`), but
+inline `#[cfg(test)]` modules of `src` files are counted (about a third of the functions, 2026-11-07).
+Locally, `cargo llvm-cov nextest --all-features` (cargo-llvm-cov 0.9.1 and the `llvm-tools-preview`
+component) ran the tests 6.3 times as long as `cargo nextest run` (2026-11-07, 8 test threads on a loaded
+32-core machine); set `LLVM_PROFILE_FILE_NAME=LOSAT-%8m.profraw` as the jobs do, or its default writes
+one profile file per process (29 GB for the whole test set). Profile files of an earlier run stay in the
+target directory and are counted again; `cargo llvm-cov clean --profraw-only` removes them.
+
+## Python tool tests
+
+The `test_*.py` files here test the Python tools beside them (regression drivers, certification
+audits, ratchets, release tooling) with small files and stand-in programs. ci.yml's `rust lint` and the
+other workflows run each file by name. `check_tests_in_ci.py` (tested by
+`test_check_tests_in_ci.py`) fails `rust lint` when a `test_*.py` or `test_*.js` file of the
+repository is named in the `run:` commands of no workflow that runs on push, pull request or
+schedule (or of a workflow one of them calls); a release workflow that runs only when dispatched
+does not count. `python/tests/`, pylosat's pytest suite, runs as a directory in `python.yml`;
+web/app's vitest and Playwright files (`*.test.ts`, `*.spec.ts`) run as suites in `web.yml` and are
+not read. Add the step that runs a new test file in the same pull request, and delete a test
+together with the tool it tests.

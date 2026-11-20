@@ -1,0 +1,16 @@
+Blast4-archive ::= {
+  request {
+    body get-request-info {
+      request-id "Error"
+    }
+  },
+  results {
+  },
+  messages {
+    {
+      code 2,
+      message "Command line argument error: Argument ""query"". File is not
+ accessible: `tests/fasta/outfmt11/no_such_query.faa'"
+    }
+  }
+}

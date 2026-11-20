@@ -1,0 +1,56 @@
+#Post-RPSBLAST Processing Utility
+
+#Input data file:	arch/nt68.asn
+#Output data file:	(stdout)
+#Annotation data at:	nt
+#E-Value cutoff:	0.01
+#Redundancy:	Concise
+#Data requested:	Domain hits and site annotations
+#Output format -- tab-delimited table
+#Show superfamilies: NO
+#DATA
+#SESSION	<session-ordinal>	<program>	<database>	<score-matrix>	<evalue-threshold>
+#QUERY	<query-id>	<seq-type>	<seq-length>	<definition-line>
+#DOMAINS
+#<session-ordinal>	<query-id[readingframe]>	<hit-type>	<PSSM-ID>	<from>	<to>	<E-Value>	<bitscore>	<accession>	<short-name>	<incomplete>	<superfamily PSSM-ID>
+#more such lines......
+#ENDDOMAINS
+#SITES
+#<session-ordinal>	<query-id[readingframe]>	<annot-type>	<title>	<residue(coordinates)>	<complete-size>	<mapped-size>	<source-domain>
+#more such lines......
+#ENDSITES
+#MOTIFS
+#<session-ordinal>	<query-id[readingframe]>	<title>	<from>	<to>	<source-domain>
+#more such lines......
+#ENDMOTIFS
+#ENDQUERY	<query-id>
+#more query sections..
+#ENDSESSION	<session-ordinal>
+#more session sections..
+#ENDDATA
+#=====================================================================
+DATA
+SESSION	1	tblastn	2.17.0+	Cdd	BLOSUM62	0.01
+QUERY	Query_1	Nucleotide	5000	mg00068_335001-340000
+DOMAINS
+1	Query_1[1]	Specific	517326	3751	4395	1.64913e-105	335.332	pfam06545	AllG	-	-
+1	Query_1[1]	Specific	491845	1423	1749	1.65252e-37	136.99	pfam11392	AllH	-	-
+1	Query_1[1]	Specific	440430	289	882	3.6905e-26	110.429	COG0666	ANKYR	-	-
+1	Query_1[2]	Non-specific	505031	1793	3304	6.43366e-152	476.845	NF004760	PRK06091	-	-
+ENDDOMAINS
+1	Query_1[1]	Specific	oligomer interface	L604-606,E619-621,K622-624,G625-627,L631-633,S634-636,E646-648,A655-657,N685-687,V691-693,W697-699,L709-711,E712-714,V721-723,L724-726,N727-729,Q748-750,A751-753,L763-765,E772-774,D799-801,Y805-807,K811-813,E823-825,L826-828,E835-837,R838-840,G841-843,E847-849,E850-852,L862-864,A871-873	36	0	0
+1	Query_1[1]	Specific	oligomer interface	K397-399,T409-411,L412-414,L421-423,Y424-426,Q427-429,Y433-435,A436-438,A448-450,D457-459,D484-486,T490-492,L604-606,E619-621,K622-624,G625-627,L631-633,S634-636,E646-648,A655-657,N685-687,V691-693,W697-699,L709-711,E712-714,V721-723,L724-726,N727-729,Q748-750,A751-753,L763-765,E772-774,D799-801	36	0	0
+1	Query_1[1]	Specific	oligomer interface	L313-315,Q322-324,Q325-327,G328-330,I334-336,D337-339,T349-351,A358-360,D385-387,Q391-393,K397-399,T409-411,L412-414,L421-423,Y424-426,Q427-429,Y433-435,A436-438,A448-450,D457-459,D484-486,T490-492,L496-498,L508-510,I511-513,L520-522,N523-525,D526-528,L532-534,T535-537,I547-549,P556-558	36	0	0
+MOTIFS
+1	Query_1[1]	ANK repeat	601	689	0
+1	Query_1[1]	ANK repeat	691	803	0
+1	Query_1[1]	ANK repeat	805	884	0
+1	Query_1[1]	ANK repeat	394	488	0
+1	Query_1[1]	ANK repeat	490	689	0
+1	Query_1[1]	ANK repeat	691	803	0
+1	Query_1[1]	ANK repeat	391	488	0
+1	Query_1[1]	ANK repeat	490	584	0
+ENDMOTIFS
+ENDQUERY
+ENDSESSION	1
+ENDDATA

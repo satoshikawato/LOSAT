@@ -1,0 +1,14 @@
+Database: protein in volumes
+	10 sequences; 801 total residues
+
+Date: Oct 12, 2026  4:12 PM	Longest sequence: 300 residues
+
+BLASTDB Version: 4
+
+Volumes:
+	{T}/seqdb/db/prot_mv.00
+	{T}/seqdb/db/prot_mv.01
+	{T}/seqdb/db/prot_mv.02
+	{T}/seqdb/db/prot_mv.03
+	{T}/seqdb/db/prot_mv.04
+	{T}/seqdb/db/prot_mv.05

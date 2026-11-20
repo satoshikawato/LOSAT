@@ -22,7 +22,7 @@ fn fasta(name: &str) -> PathBuf {
 /// --all-features`, as in CI) needs that file name as soon as a search has more than one
 /// thread, and it selects nothing.
 fn losat() -> Command {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         if name.to_string_lossy().starts_with("LOSAT_") && name != "LOSAT_BLASTX_WORKER_LOG" {
             command.env_remove(name);
@@ -82,19 +82,19 @@ fn inputs(dir: &Path) -> (PathBuf, PathBuf) {
     (query, set)
 }
 
-/// The database of `fasta_file` made by `LOSAT makedb` in `dir` under `name`.
+/// The database of `fasta_file` made by `losat makeblastdb` in `dir` under `name`.
 fn makedb(dir: &Path, fasta_file: &Path, name: &str) -> String {
     let db = dir.join(name).to_str().unwrap().to_string();
     let output = losat()
-        .arg("makedb")
+        .arg("makeblastdb")
         .arg("-in")
         .arg(fasta_file)
         .args(["-dbtype", "nucl", "-out", &db])
         .output()
-        .expect("run LOSAT makedb");
+        .expect("run losat makeblastdb");
     assert!(
         output.status.success(),
-        "makedb: {}",
+        "makeblastdb: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     db
@@ -149,7 +149,7 @@ fn a_database_search_gives_the_same_report_at_every_thread_count() {
         }
     }
     // The reports name the database: outfmt 7 by the `-db` value, outfmt 0 by its title
-    // (makedb's default title: the input file's name) and its numbers.
+    // (makeblastdb's default title: the input file's name) and its numbers.
     let comments = String::from_utf8(tblastx(&query, &["-db", &db], "7", 1)).unwrap();
     assert!(
         comments.contains(&format!("\n# Database: {db}\n")),
@@ -415,5 +415,137 @@ fn database_arguments_are_checked_as_ncbi_checks_them() {
         ),
         "{stderr}"
     );
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+// Line DBID, ID4t fix 2b (formats 1 to 4 too since line RG T3c fix 1): the loop writes each query
+// batch's reports when it takes the batch where no refusal of LOSAT's can come after the first
+// batch (`report_stream::check`, shown by
+// `[X_STATS] TBXRPTSTREAM off=`), and those reports are the bytes of the reports written after the
+// loop (here: a `LOSAT_DEBUG*` variable, which no code reads, keeps them after the loop; the
+// db_search rows db.id.tblastx.stream.* compare them with NCBI's). A refusal in the second batch
+// finds nothing written, as with one batch.
+#[test]
+fn each_query_batch_is_reported_where_no_refusal_can_follow() {
+    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let ids = |name: &str| {
+        manifest
+            .join("tests/db_search/ids")
+            .join(name)
+            .to_str()
+            .unwrap()
+            .to_string()
+    };
+    let qnucl = manifest.join("tests/seqid/fasta/qnucl.fa");
+    let queries = manifest.join("tests/db_search/ids/nucl.fna");
+    let run = |query: &Path, db: &str, outfmt: &str, env: &[(&str, &str)]| {
+        let mut command = losat();
+        command
+            .arg("tblastx")
+            .arg("-query")
+            .arg(query)
+            .args(["-db", &ids(db), "-max_hsps", "1", "-max_target_seqs", "5"])
+            .args(["-outfmt", outfmt])
+            .env("LOSAT_X_STATS", "1")
+            .current_dir(manifest);
+        for (name, value) in env {
+            command.env(name, value);
+        }
+        let output = command.output().unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+        let off = stderr
+            .lines()
+            .find_map(|line| line.strip_prefix("[X_STATS] TBXRPTSTREAM off="))
+            .and_then(|rest| rest.split(' ').next())
+            .unwrap_or("")
+            .to_string();
+        (off, output)
+    };
+    let batches = [("BATCH_SIZE", "1500")];
+    let taxdb = [
+        ("BATCH_SIZE", "1500"),
+        ("BLASTDB", "tests/seqdb/taxdb/good"),
+    ];
+    // NCBI's messages of a taxonomy database with a bad magic number, with each batch's prefetch;
+    // a taxonomy record that LOSAT refuses (`btd_empty`) keeps the reports after the loop.
+    let messages = [
+        ("BATCH_SIZE", "1500"),
+        ("BLASTDB", "tests/seqdb/taxdb/bad_magic"),
+    ];
+    let refused = [
+        ("BATCH_SIZE", "1500"),
+        ("BLASTDB", "tests/seqdb/taxdb/btd_empty"),
+    ];
+    for (db, outfmt, env, expected) in [
+        ("nucl_v5", "0", &batches[..], "none"),
+        ("nucl_v5", "6", &batches[..], "none"),
+        ("nucl_v5", "7", &batches[..], "none"),
+        ("nucl_v4", "0", &batches[..], "none"),
+        ("nucl_v5", "7", &taxdb[..], "none"),
+        ("nucl_v5", "7", &messages[..], "none"),
+        // Where the taxonomy database names its taxid, outfmt 0 writes the title NCBI makes from it
+        // (`ParsedSubject::with_source`; line RG T5, the RefSeq `NC_000019.1` without a title among
+        // them), so no refusal can follow and the batches are written as they come; one with a
+        // bad magic number names none (line DBID N1b L1).
+        ("nucl_v5", "0", &taxdb[..], "none"),
+        ("nucl_v5", "0", &messages[..], "none"),
+        ("nucl_v5", "7", &refused[..], "database_taxonomy"),
+        ("njoined", "6", &batches[..], "none"),
+        ("njoined", "0", &batches[..], "database_joined"),
+        ("nrefuse_v5", "6", &batches[..], "database_headers"),
+        // Formats 1 to 4 are written per batch as outfmt 0 (line RG T3c fix 1).
+        ("nucl_v5", "1", &batches[..], "none"),
+        ("nucl_v4", "4", &batches[..], "none"),
+        ("njoined", "2", &batches[..], "database_joined"),
+        ("nucl_v5", "5", &batches[..], "format"),
+        (
+            "nucl_v5",
+            "6",
+            &[("BATCH_SIZE", "1000000")][..],
+            "one_batch",
+        ),
+    ] {
+        let what = format!("{db} outfmt {outfmt} {env:?}");
+        let (off, streamed) = run(&queries, db, outfmt, env);
+        assert_eq!(off, expected, "{what}");
+        if off != "none" {
+            continue;
+        }
+        let debug = [env, &[("LOSAT_DEBUG_REPORT_STREAM_TEST", "1")][..]].concat();
+        let (after_loop, kept) = run(&queries, db, outfmt, &debug);
+        assert_eq!(after_loop, "debug", "{what}");
+        assert_eq!(streamed.status.code(), Some(0), "{what}");
+        assert!(streamed.stdout.len() > 1000, "{what}");
+        assert_eq!(streamed.stdout, kept.stdout, "{what}");
+        let other_lines = |stderr: &[u8]| -> Vec<String> {
+            String::from_utf8_lossy(stderr)
+                .lines()
+                .filter(|line| !line.starts_with("[X_STATS] TBXRPTSTREAM "))
+                .map(str::to_string)
+                .collect()
+        };
+        assert_eq!(
+            other_lines(&streamed.stderr),
+            other_lines(&kept.stderr),
+            "{what}"
+        );
+    }
+    // The query without hits first: the subject that the reports refuse is reported by the
+    // second batch, and nothing of the first is written.
+    let dir = temp_dir("stream");
+    let text = std::fs::read_to_string(&qnucl).unwrap();
+    let second = text.find("\n>").unwrap() + 1;
+    let reversed = dir.join("reversed.fa");
+    std::fs::write(&reversed, format!("{}{}", &text[second..], &text[..second])).unwrap();
+    let (off, output) = run(&reversed, "nrefuse_v5", "6", &[("BATCH_SIZE", "1")]);
+    assert_eq!(off, "database_headers");
+    assert_eq!(output.status.code(), Some(1));
+    assert!(
+        output.stdout.is_empty(),
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    assert!(String::from_utf8_lossy(&output.stderr)
+        .contains("by which NCBI BLAST+'s formatters do not find the sequence"));
     std::fs::remove_dir_all(&dir).unwrap();
 }

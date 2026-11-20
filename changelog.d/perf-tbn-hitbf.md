@@ -1,0 +1,1 @@
+- `tblastn` takes the two-hit test's two common outcomes (too far, overlap) without a branch: proteins x a D. melanogaster genome x0.803 and one protein x the human genome x0.890 at one thread, x0.837 and x0.909 at 8 threads (`LOSAT_X_TBNHITBF`, one of the switches above; `=0` turns it off; same results).

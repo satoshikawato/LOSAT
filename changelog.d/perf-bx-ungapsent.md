@@ -1,0 +1,1 @@
+- `blastx` runs the two-hit ungapped extension of word size 3 inside its seed loops, with the walks stopped by the sequences' sentinels instead of a bound test and the residue-code checks made once per query batch and subject (`LOSAT_X_BXUNGAPSENT`, one of the switches above; `=0` turns it off; shadow `LOSAT_X_BXUNGAPSENTSHADOW`). Reports do not change.

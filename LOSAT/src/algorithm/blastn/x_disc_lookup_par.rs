@@ -1,8 +1,8 @@
 //! EXPERIMENT (LOSAT_X_DISCLUTPAR, in the strict set: default ON since 2026-10-17, off with
-//! `LOSAT_X_DISCLUTPAR=0` or `LOSAT_X_DEFAULT=0`; shadow LOSAT_X_DISCLUTPARSHADOW): the
+//! `LOSAT_X_DISCLUTPAR=0`): the
 //! discontiguous megablast tables of `build_disc_mb_lookup` (`s_FillDiscMBTable`) filled by the
 //! threads of the search pool, each thread owning a fixed set of table cells of both templates'
-//! tables. The plan of the cells and the pool test are those of LOSAT_X_PAIRPAR's megablast table
+//! tables. The plan of the cells and the pool test are those of PAIRPAR's megablast table
 //! (`x_mb_lookup_par.rs`).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:754-767,775-786,788-804
@@ -116,7 +116,7 @@
 //! same start `v` (0 in every build: the arrays are allocated zeroed, as NCBI's `calloc`). No job
 //! reads or writes `helper_array` or `helper_array2` (the jobs' `SharedTables` holds neither), the
 //! flush runs after the last join, and their only readers are after the fill
-//! (`build_disc_mb_lookup`: `disc_longest_chain` and the shadow; the arrays are dropped there).
+//! (`build_disc_mb_lookup`: `disc_longest_chain`; the arrays are dropped there).
 //!
 //! Why three phases (scheduling only): in a first version every worker read every word and applied
 //! those of its cells, writing `next_pos[index]` itself; each worker then paid the whole read
@@ -155,7 +155,9 @@
 //! chunk. Before each chunk a reader gives back the room above `bucket_keep` (four times a
 //! bucket's share of a chunk, plus 64 entries) that one of its buckets grew for an earlier chunk,
 //! so that the buckets of one template reserve at most `6 * CHUNK_POSITIONS + 68 * P^2` entries
-//! (24 MiB plus 544 bytes per bucket) whatever the input. Measured on blocks of one chunk, each a
+//! (24 MiB plus 544 bytes per bucket) whatever the input (LOSAT_X_DCSEEDLEAN's
+//! `csr_on_pool_steps`: two sets of buckets for chunks of half the size, at most
+//! `6 * CHUNK_POSITIONS + 136 * P^2` entries, and twice the bucket headers). Measured on blocks of one chunk, each a
 //! different unmasked repeat of period 1 to 4 (each chunk's words on the cells of one or two
 //! owners, which change from chunk to chunk): 16, 15 and 12 MiB per template at P = 4, 16 and 64,
 //! where buckets that kept their room reserved 16, 32 and 48 MiB (up to 2 x P x 4 MiB). The
@@ -199,18 +201,19 @@
 //! which `run.rs` `search_query_batch` calls for a query batch (and for each query chunk of a
 //! split batch). That function runs inside the search's pool: `utils::threading::with_search_pool`
 //! builds a pool of `-num_threads` threads when there are two or more and runs the whole search
-//! with `ThreadPool::install` on the pool's slot zero (`-subject` and `-db` alike); a
-//! LOSAT_X_QBATCHPAR slot of `m >= 2` threads searches its batch the same way on a private pool
-//! of `m` threads (`with_search_pool` again). With `-num_threads 1`, in a QBATCHPAR slot of one
-//! thread, in a build without the `parallel` feature or WebAssembly without `wasm-threads`, the
-//! calling thread is no rayon worker (or there is no pool) and the original loop runs.
+//! with `ThreadPool::install` on the pool's slot zero (`-subject` and `-db` alike). With
+//! `-num_threads 1`, in a build without the `parallel` feature or WebAssembly without
+//! `wasm-threads`, the calling thread is no rayon worker (or there is no pool) and the original
+//! loop runs.
 //! `rayon::current_thread_index` reads a thread-local and starts no pool, and
 //! `rayon::current_num_threads` is only asked on a worker, where it is the size of that worker's
 //! pool, so rayon's global pool is never started or used (the command line never builds it; a
 //! program that embeds LOSAT and calls a one-thread search from a thread of its own rayon pool
 //! would see that pool used, as `x_mb_lookup_par` and `x_link_sort` say). Each phase is one
 //! `rayon::scope` whose jobs use only their own buckets and cells and never wait for anything (no
-//! lock, spin or sleep), so no job can block a thread that steals it.
+//! lock, spin or sleep), so no job can block a thread that steals it. The CSR build of
+//! LOSAT_X_DCCSR (`csr`) is the exception: one `rayon::broadcast` whose jobs spin at a barrier,
+//! which needs every thread of the pool free to join it (its doc gives the conditions).
 //!
 //! Paths that reach it: `blastn -task dc-megablast`, `-subject` and `-db`, with one template
 //! (`coding` or `optimal`) or two (`coding_and_optimal`), template lengths 16, 18 and 21 and
@@ -220,53 +223,58 @@
 //! `coordination::determine_template`); then they build this table too. The callers in
 //! `x_pair_seed_disc.rs` are unit tests (on the test thread, so the original loop).
 //!
-//! The shadow implies the switch: after the tables are built, it builds them again the other
-//! way (serially with the original loop when the pool built them; with four parts one after
-//! another when no pool was there) and compares every element of every array and the longest
-//! chain. A difference prints `[X_SHADOW] DISCLUTPAR ... DIFFERENT ...` and panics; at exit
-//! `main` prints `[X_SHADOW] DISCLUTPAR tables=<compared> pool=<built on a pool>
-//! two_templates=<of them with two templates> cells=<elements compared> diffs=0 identical`.
 //! With LOSAT_TIMING (any switch state) `main` prints `[TIMING] disc_lookup_build: <s>s
 //! (builds=<n> parallel=<n on a pool>)` when at least one table was built: `<s>` is the sum of
-//! the wall times of every build of the process (allocation, fill and longest chain, not the
-//! shadow's second build); with LOSAT_X_QBATCHPAR it includes the slots' builds, which run
-//! concurrently. A second line, `[TIMING] disc_lookup_split: alloc= loop= pool_fill= chain=
-//! chunks= read_wall= read_max= read_sum= read_late= update_... link_... buckets_peak=
-//! x_prefault_wall= x_prefault_max= x_prefault_sum= x_prefault_late= x_prefault_rounds=
-//! x_prefault_touches=`, splits the same builds: the allocation of the tables, the fill by the
-//! original loop, the fill on the pool (the prefault rounds included) and the longest chain
-//! (seconds, summed); then, for the pool fills only (not the shadow's partitioned build), their
-//! chunks, and per phase (read = A, update = B, link = C), summed over the chunks: the calling
-//! worker's wall time from before the phase's first job to the return of its last (`wall`), the
-//! longest job (`max`), the jobs' summed running time (`sum`) and the latest start of a job after
-//! the phase began (`late`); the most the buckets of one fill reserved (both templates); and the
-//! same four times of the prefault rounds (phase P), the number of rounds and the zeros they
+//! the wall times of every build of the process (allocation, fill and longest chain). A second line,
+//! `[TIMING] disc_lookup_split: alloc= loop= pool_fill= chain= chunks= read_wall= read_max=
+//! read_sum= read_late= update_... link_... buckets_peak= x_prefault_wall= x_prefault_max=
+//! x_prefault_sum= x_prefault_late= x_prefault_rounds= x_prefault_touches=`, splits the same
+//! builds: the allocation of the tables, the fill by the original loop, the fill on the pool (the
+//! prefault rounds included) and the longest chain (seconds, summed); then, for the pool fills
+//! only, their chunks, and per phase (read = A, update = B, link = C), summed over the chunks: the
+//! calling worker's wall time from before the phase's first job to the return of its last (`wall`),
+//! the longest job (`max`), the jobs' summed running time (`sum`) and the latest start of a job
+//! after the phase began (`late`); the most the buckets of one fill reserved (both templates); and
+//! the same four times of the prefault rounds (phase P), the number of rounds and the zeros they
 //! wrote (one per page touched). The jobs' start and end are taken only with LOSAT_TIMING.
 
 use super::x_mb_lookup_par::{plan, pool_threads, Shared, K_COMPRESSION_FACTOR_SHIFT};
 use super::{
-    build_unmasked_ranges, disc_longest_chain, fill_disc_mb_tables, DiscTables, DiscTablesRef,
-    DiscWords, PvArrayType, BLAST2NA_MASK, PV_ARRAY_MASK,
+    build_unmasked_ranges, x_range_words, DiscTables, DiscWords, PvArrayType, PV_ARRAY_MASK,
 };
+#[cfg(test)]
+use super::{disc_longest_chain, fill_disc_mb_tables};
 use crate::algorithm::blastn::disc_lookup::compute_discontiguous_index;
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+use crate::algorithm::blastn::disc_lookup::DiscTemplateType;
 #[cfg(test)]
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
-/// No NCBI counterpart: reads the switches once (LOSAT_X_DISCLUTPAR, in the strict set: on
-/// unless `LOSAT_X_DISCLUTPAR=0` or `LOSAT_X_DEFAULT=0`; LOSAT_X_DISCLUTPARSHADOW, off unless set
-/// to any value, implies the switch). They choose between two LOSAT code paths with the same
-/// result and change no value NCBI computes.
-fn switches() -> (bool, bool) {
-    static SWITCHES: OnceLock<(bool, bool)> = OnceLock::new();
-    *SWITCHES.get_or_init(|| {
-        let shadow = std::env::var_os("LOSAT_X_DISCLUTPARSHADOW").is_some();
-        (
-            shadow || crate::utils::xswitch::on("LOSAT_X_DISCLUTPAR"),
-            shadow,
-        )
-    })
+/// No NCBI counterpart: reads LOSAT_X_DISCLUTPAR once (a switch of the strict set: on unless
+/// `LOSAT_X_DISCLUTPAR=0`). It chooses between two LOSAT code paths with the same result and
+/// changes no value NCBI computes.
+fn on() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_DISCLUTPAR"))
+}
+
+/// No NCBI counterpart: reads LOSAT_X_DCSEEDLEAN once (a switch of the strict set: on unless
+/// `LOSAT_X_DCSEEDLEAN=0`): the CSR of a one-template table built on a pool (`csr`) is read and
+/// placed in steps over two sets of buckets (`csr_on_pool_steps`) instead of `csr_on_pool`'s
+/// chunks. It chooses between two LOSAT code paths with the same result and changes no value NCBI
+/// computes.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+fn seed_lean_on() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_DCSEEDLEAN"))
 }
 
 /// No NCBI counterpart: the number of workers of the fill when `on`, i.e. the size of the
@@ -278,23 +286,15 @@ fn parts_for(on: bool) -> Option<usize> {
     pool_threads()
 }
 
-/// No NCBI counterpart: dispatch test of `build_disc_mb_lookup` (the switch, or its shadow, and
-/// a search pool of two threads or more).
+/// No NCBI counterpart: dispatch test of `build_disc_mb_lookup` (the switch and a search pool of
+/// two threads or more).
 pub(super) fn parts() -> Option<usize> {
-    parts_for(switches().0)
+    let parts = parts_for(on());
+    if on() {
+        crate::utils::xreach::x_reach!("LOSAT_X_DISCLUTPAR", parts.is_some());
+    }
+    parts
 }
-
-/// No NCBI counterpart: LOSAT_X_DISCLUTPARSHADOW is set.
-pub(super) fn shadow() -> bool {
-    switches().1
-}
-
-// No NCBI counterpart: counters of the shadow's summary line.
-static SHADOW_TABLES: AtomicU64 = AtomicU64::new(0);
-static SHADOW_POOL_TABLES: AtomicU64 = AtomicU64::new(0);
-static SHADOW_TWO_TEMPLATE_TABLES: AtomicU64 = AtomicU64::new(0);
-static SHADOW_CELLS: AtomicU64 = AtomicU64::new(0);
-static SHADOW_DIFFS: AtomicU64 = AtomicU64::new(0);
 
 // No NCBI counterpart: the summed wall time of the builds, their number and the number built on a
 // pool, for LOSAT_TIMING (any switch state); they change no value NCBI computes.
@@ -406,8 +406,7 @@ impl BuildClock {
     }
 }
 
-/// The `[TIMING]` lines (with LOSAT_TIMING, when a table was built) and the shadow's summary line
-/// (with LOSAT_X_DISCLUTPARSHADOW), printed by `main` at exit.
+/// The `[TIMING]` lines (with LOSAT_TIMING, when a table was built), printed by `main` at exit.
 // No NCBI counterpart: prints counters; it does not change any value NCBI computes.
 pub fn print_summary() {
     let load = |c: &AtomicU64| c.load(Ordering::Relaxed);
@@ -451,17 +450,6 @@ pub fn print_summary() {
             load(&PREFAULT_TOUCHES)
         ));
         eprintln!("{split}");
-    }
-    if shadow() {
-        let diffs = load(&SHADOW_DIFFS);
-        eprintln!(
-            "[X_SHADOW] DISCLUTPAR tables={} pool={} two_templates={} cells={} diffs={diffs} {}",
-            load(&SHADOW_TABLES),
-            load(&SHADOW_POOL_TABLES),
-            load(&SHADOW_TWO_TEMPLATE_TABLES),
-            load(&SHADOW_CELLS),
-            if diffs == 0 { "identical" } else { "DIFFERENT" }
-        );
     }
 }
 
@@ -721,6 +709,10 @@ impl SharedBuckets {
     #[inline(always)]
     unsafe fn at<'b>(self, a: usize, o: usize) -> &'b mut Vec<Entry> {
         debug_assert!(a < self.parts && o < self.parts);
+        // SAFETY: `a * parts + o < len`: the callers pass `a, o < parts` (job indices, `0..parts`,
+        // `owner` values) on `parts * parts` buckets (`second` is empty only for one template,
+        // where nothing indexes it); no other job takes bucket `(a, o)` (the contract above), and
+        // each caller holds one bucket's borrow at a time.
         unsafe { &mut (*self.ptr.add(a * self.parts + o)).0 }
     }
 }
@@ -729,22 +721,22 @@ impl SharedBuckets {
 /// smallest page of the targets; where pages are larger, some get more than one touch, which writes
 /// the same 0). The argument that the round maps no page the fill does not write holds at this
 /// granularity; for 2 MiB transparent huge pages see `Fill::prefault` and the size rule.
-const PAGE_BYTES: usize = 4096;
+pub(super) const PAGE_BYTES: usize = 4096;
 
 /// log2 of the 4-byte elements of a page (every array the round touches holds 4-byte elements).
-const PAGE_ELEMS_SHIFT: usize = 10;
+pub(super) const PAGE_ELEMS_SHIFT: usize = 10;
 
 const _: () = assert!(PAGE_BYTES == 4 << PAGE_ELEMS_SHIFT);
 const _: () = assert!(std::mem::size_of::<PvArrayType>() == 4);
 
 /// The element offset of `ptr` (4-byte elements) in its page: element `i` of an array that starts
 /// there lies on the array's page `(offset + i) >> PAGE_ELEMS_SHIFT` (its first page is 0).
-fn page_offset<T>(ptr: *const T) -> usize {
+pub(super) fn page_offset<T>(ptr: *const T) -> usize {
     (ptr as usize % PAGE_BYTES) / 4
 }
 
 /// The pages of an array of `len` 4-byte elements from page offset `offset`.
-fn pages_of(offset: usize, len: usize) -> usize {
+pub(super) fn pages_of(offset: usize, len: usize) -> usize {
     if len == 0 {
         0
     } else {
@@ -754,7 +746,7 @@ fn pages_of(offset: usize, len: usize) -> usize {
 
 /// The arrays whose pages the prefault round touches (`FaultJob::pages`, `Faults::marks`, and
 /// the tests' log of touches): `HASHTABLE` + template and `PV_ARRAY`.
-const HASHTABLE: usize = 0;
+pub(super) const HASHTABLE: usize = 0;
 const PV_ARRAY: usize = 2;
 
 /// No NCBI counterpart (scheduling only): 512 page bits on a 64-byte line of their own.
@@ -766,13 +758,13 @@ struct BitLine([u64; 8]);
 /// `r`'s bits are the `stride` words from word `r * stride`, a whole number of lines, so no two
 /// readers' bits share a line. A set bit: in phase A of the current chunk, the reader read a word
 /// whose cell (or the cell's presence-vector word) lies on that page.
-struct PageBits {
+pub(super) struct PageBits {
     lines: Vec<BitLine>,
     stride: usize,
 }
 
 impl PageBits {
-    fn new(pages: usize, parts: usize) -> Self {
+    pub(super) fn new(pages: usize, parts: usize) -> Self {
         let stride = pages.div_ceil(64).div_ceil(8) * 8;
         Self {
             lines: vec![BitLine([0; 8]); parts * stride / 8],
@@ -780,7 +772,7 @@ impl PageBits {
         }
     }
 
-    fn shared(&mut self) -> SharedBits {
+    pub(super) fn shared(&mut self) -> SharedBits {
         SharedBits {
             ptr: self.lines.as_mut_ptr().cast::<u64>(),
             stride: self.stride,
@@ -791,7 +783,7 @@ impl PageBits {
 /// No NCBI counterpart (scheduling only): `PageBits` shared by the jobs: in phase A each reader
 /// writes only its own bits; in the prefault round the jobs only read them.
 #[derive(Clone, Copy)]
-struct SharedBits {
+pub(super) struct SharedBits {
     ptr: *mut u64,
     stride: usize,
 }
@@ -806,7 +798,7 @@ impl SharedBits {
     /// Clears reader `r`'s bits.
     ///
     /// SAFETY: phase A, job `r`.
-    unsafe fn clear(self, r: usize) {
+    pub(super) unsafe fn clear(self, r: usize) {
         // SAFETY: reader `r`'s bits (above).
         unsafe { std::ptr::write_bytes(self.ptr.add(r * self.stride), 0, self.stride) };
     }
@@ -815,7 +807,7 @@ impl SharedBits {
     ///
     /// SAFETY: phase A, job `r`; `page < 64 * stride`.
     #[inline(always)]
-    unsafe fn mark(self, r: usize, page: usize) {
+    pub(super) unsafe fn mark(self, r: usize, page: usize) {
         debug_assert!(page < 64 * self.stride);
         // SAFETY: in reader `r`'s bits (above).
         unsafe { *self.ptr.add(r * self.stride + (page >> 6)) |= 1u64 << (page & 63) };
@@ -825,7 +817,7 @@ impl SharedBits {
     ///
     /// SAFETY: no job writes the bits; `w < stride`.
     #[inline(always)]
-    unsafe fn word(self, r: usize, w: usize) -> u64 {
+    pub(super) unsafe fn word(self, r: usize, w: usize) -> u64 {
         debug_assert!(w < self.stride);
         // SAFETY: as above.
         unsafe { *self.ptr.add(r * self.stride + w) }
@@ -846,18 +838,18 @@ impl SharedBits {
 /// the element, and its value before and after the write.
 #[cfg(test)]
 #[derive(Clone, Copy, Debug)]
-struct Touch {
-    array: usize,
-    index: usize,
-    before: u32,
-    after: u32,
+pub(super) struct Touch {
+    pub(super) array: usize,
+    pub(super) index: usize,
+    pub(super) before: u32,
+    pub(super) after: u32,
 }
 
 /// The log of the prefault round's writes: in tests a list of `Touch`es, else nothing.
 #[cfg(test)]
-type TouchLog = Vec<Touch>;
+pub(super) type TouchLog = Vec<Touch>;
 #[cfg(not(test))]
-type TouchLog = ();
+pub(super) type TouchLog = ();
 
 /// No NCBI counterpart (scheduling only): what toucher `j` of a fill keeps for the prefault round,
 /// on lines of its own (it writes them in the round; the calling thread reads them after it): its
@@ -911,7 +903,7 @@ struct Faults {
 
 /// No NCBI counterpart (scheduling only): the middle element of page `page` of an array of `len`
 /// 4-byte elements from page offset `offset` (`page < pages_of(offset, len)`).
-fn middle(offset: usize, len: usize, page: usize) -> usize {
+pub(super) fn middle(offset: usize, len: usize, page: usize) -> usize {
     let lo = (page << PAGE_ELEMS_SHIFT).saturating_sub(offset);
     let hi = (((page + 1) << PAGE_ELEMS_SHIFT) - offset).min(len);
     debug_assert!(lo < hi);
@@ -957,7 +949,7 @@ fn page_touchers(
 ///
 /// SAFETY: `i < t.len`, and no other job reads or writes element `i` during the phase.
 #[inline(always)]
-unsafe fn touch(t: Shared<u32>, i: usize, array: usize, log: &mut TouchLog) {
+pub(super) unsafe fn touch(t: Shared<u32>, i: usize, array: usize, log: &mut TouchLog) {
     debug_assert!(i < t.len);
     #[cfg(test)]
     // SAFETY: as the caller's.
@@ -1064,8 +1056,8 @@ impl Fill<'_, '_> {
     /// loop of `fill_disc_mb_tables` (the same resets, `accum`, `index` and template indices),
     /// into the buckets `(a, owner of the cell)` of each template, in reading order. A range is
     /// entered up to `template_length - 1` positions before `s0` (not before its start), so that
-    /// the template window of `accum` and the test `valid_bases < template_length` at the
-    /// positions from `s0` on are those of the loop.
+    /// the template window of `accum` and the words (`x_range_words`) at the positions from `s0`
+    /// on are those of the loop.
     ///
     /// The job first empties its buckets, giving back the room above `keep` entries that a bucket
     /// grew in an earlier chunk (`empty`). For the prefault round (`Fill::prefault`), for each
@@ -1118,63 +1110,67 @@ impl Fill<'_, '_> {
             let first_pos = seg.start + (s0.max(seg.stream) - seg.stream);
             let end_pos = seg.start + (s1.min(seg.stream + len) - seg.stream);
             let warm_start = seg.start.max(first_pos.saturating_sub(template_length - 1));
-            let mut accum: u64 = 0;
-            let mut valid_bases = 0usize;
-            for pos in warm_start..end_pos {
-                let val = seg.seq[pos];
-                if (val & BLAST2NA_MASK) != 0 {
-                    accum = 0;
-                    valid_bases = 0;
-                    continue;
-                }
-                accum = (accum << 2) | val as u64;
-                valid_bases += 1;
-                if valid_bases < template_length || pos < first_pos {
-                    continue;
-                }
-                // The 1-based start of the word in the concatenated query.
-                let index = (seg.query_offset + pos + 2 - template_length) as u32;
-                let ecode1 = compute_discontiguous_index(accum, words.template_type);
-                let o1 = self.owner[(ecode1 as usize) >> self.block_shift] as usize;
-                // SAFETY: row `a` is this job's.
-                unsafe {
-                    self.first.at(a, o1).push(Entry {
-                        index,
-                        value: ecode1,
-                    })
-                };
-                // SAFETY (the marks): reader `a`'s bits; the pages are in the arrays.
-                if mark1 {
+            x_range_words(
+                &seg.seq[warm_start..end_pos],
+                template_length,
+                u64::MAX,
+                || {},
+                |accum, i| {
+                    let pos = warm_start + i;
+                    // A word ends `lut_word_length - 1` letters or more after `warm_start`, so at
+                    // or after `first_pos` (`warm_start` is at most that many letters before it).
+                    debug_assert!(pos >= first_pos);
+                    // The 1-based start of the word in the concatenated query.
+                    let index = (seg.query_offset + pos + 2 - template_length) as u32;
+                    let ecode1 = compute_discontiguous_index(accum, words.template_type);
+                    let o1 = self.owner[(ecode1 as usize) >> self.block_shift] as usize;
+                    // SAFETY: row `a` is this job's.
                     unsafe {
-                        faults.marks[0].mark(a, (cells1 + ecode1 as usize) >> PAGE_ELEMS_SHIFT)
+                        self.first.at(a, o1).push(Entry {
+                            index,
+                            value: ecode1,
+                        })
                     };
-                }
-                if mark_pv && ((ecode1 as usize) >> bts) < pv_len {
-                    let page = (pv + ((ecode1 as usize) >> bts)) >> PAGE_ELEMS_SHIFT;
-                    unsafe { faults.marks[PV_ARRAY].mark(a, page) };
-                }
-                if !two_templates {
-                    continue;
-                }
-                let ecode2 = compute_discontiguous_index(accum, words.second_template_type);
-                let o2 = self.owner[(ecode2 as usize) >> self.block_shift] as usize;
-                // SAFETY: as above.
-                unsafe {
-                    self.second.at(a, o2).push(Entry {
-                        index,
-                        value: ecode2,
-                    })
-                };
-                if mark2 {
+                    // SAFETY (the marks): reader `a`'s bits; the pages are in the arrays.
+                    if mark1 {
+                        unsafe {
+                            faults.marks[0].mark(a, (cells1 + ecode1 as usize) >> PAGE_ELEMS_SHIFT)
+                        };
+                    }
+                    if mark_pv && ((ecode1 as usize) >> bts) < pv_len {
+                        let page = (pv + ((ecode1 as usize) >> bts)) >> PAGE_ELEMS_SHIFT;
+                        // SAFETY: reader `a`'s bits (`read`'s contract); `ecode1 >> bts < pv_len`
+                        // (tested above), so `page < pages_of(pv, pv_len) <= 64 * stride`:
+                        // `mark_pv` implies `round_on`, and `fill_with` sized `marks[PV_ARRAY]` for
+                        // those pages.
+                        unsafe { faults.marks[PV_ARRAY].mark(a, page) };
+                    }
+                    if !two_templates {
+                        return;
+                    }
+                    let ecode2 = compute_discontiguous_index(accum, words.second_template_type);
+                    let o2 = self.owner[(ecode2 as usize) >> self.block_shift] as usize;
+                    // SAFETY: as above.
                     unsafe {
-                        faults.marks[1].mark(a, (cells2 + ecode2 as usize) >> PAGE_ELEMS_SHIFT)
+                        self.second.at(a, o2).push(Entry {
+                            index,
+                            value: ecode2,
+                        })
                     };
-                }
-                if mark_pv && ((ecode2 as usize) >> bts) < pv_len {
-                    let page = (pv + ((ecode2 as usize) >> bts)) >> PAGE_ELEMS_SHIFT;
-                    unsafe { faults.marks[PV_ARRAY].mark(a, page) };
-                }
-            }
+                    if mark2 {
+                        unsafe {
+                            faults.marks[1].mark(a, (cells2 + ecode2 as usize) >> PAGE_ELEMS_SHIFT)
+                        };
+                    }
+                    if mark_pv && ((ecode2 as usize) >> bts) < pv_len {
+                        let page = (pv + ((ecode2 as usize) >> bts)) >> PAGE_ELEMS_SHIFT;
+                        // SAFETY: as for `ecode1`'s presence-vector page: reader `a`'s bits, and
+                        // `ecode2 >> bts < pv_len` (tested above) keeps `page` in
+                        // `marks[PV_ARRAY]`.
+                        unsafe { faults.marks[PV_ARRAY].mark(a, page) };
+                    }
+                },
+            );
             g += 1;
         }
     }
@@ -1208,7 +1204,7 @@ impl Fill<'_, '_> {
     /// word comes (here, the cell is empty before the first chunk). The later chunks run without
     /// marks (`read::<false>`) and without the round; their first writes to other pages are the
     /// loop's (a read, then the write). This needs the three arrays zeroed at the start of the
-    /// fill, as their callers allocate them (NCBI's `calloc`: `build_disc_mb_lookup`, the shadow).
+    /// fill, as their callers allocate them (NCBI's `calloc`: `build_disc_mb_lookup`).
     ///
     /// Pages and max RSS: at the granularity of 4 KiB pages the round touches only pages the fill
     /// writes, so the 4 KiB pages it maps are pages the fill maps anyway. Under transparent huge
@@ -1468,7 +1464,7 @@ fn run_phase<F: Fn(usize) + Sync>(
 ///          mb_lt->hashtable2[ecode2] = index;
 /// ```
 /// Fills the tables as the word loop of `fill_disc_mb_tables` does, with `parts` workers on the
-/// search pool (or one after another, `in_pool == false`, for the shadow without a pool).
+/// search pool (or one after another, `in_pool == false`, for the unit tests without a pool).
 pub(super) fn fill(parts: usize, words: &DiscWords<'_>, tables: DiscTables<'_>, in_pool: bool) {
     fill_with(
         parts,
@@ -1479,6 +1475,622 @@ pub(super) fn fill(parts: usize, words: &DiscWords<'_>, tables: DiscTables<'_>, 
         PREFAULT_RULE,
         &|_| {},
     );
+}
+
+/// EXPERIMENT (LOSAT_X_DCCSR, `x_dc_csr.rs`): the CSR of a one-template table built from its
+/// words on the search pool of `parts` threads instead of the chains (`fill`), with the
+/// presence bits and helper counters into `pv_array` and `helper_array` (zeroed, of the fill's
+/// lengths); returns it and whether the pool built it (otherwise `x_dc_csr::build` did, on this
+/// thread: no pool of `parts` threads around it, or a build without threads).
+///
+/// The words are read by the fill's readers (`Fill::read::<false>`, which touches no table,
+/// counter or prefault state; the same chunks of `CHUNK_POSITIONS` positions and the same
+/// spans) into the same `parts x parts` buckets, once to count and once to place. Owner `o`
+/// holds a contiguous run of the cell blocks (block `b` goes to owner `b * parts / blocks`, so
+/// the owners' cells follow each other in cell order) and makes every write to its cells:
+/// - it zeroes `offsets` over its cells; per chunk, after the readers, for `a` in `0..parts`,
+///   for each entry of bucket `(a, o)` in order: `offsets[ecode] += 1` (the element of the entry
+///   16 ahead prefetched), adding up its entries;
+/// - after the last chunk, its base is the number of entries of the owners before it, and it
+///   runs the sum pass (`x_dc_csr::sum_cells`) over its cells from that base, with the
+///   presence-vector words and counters of its blocks (a block owns whole ones);
+/// - per chunk, after the readers, for `a` in `0..parts`, for each entry of bucket `(a, o)` in
+///   order: `p = offsets[ecode] - 1; offsets[ecode] = p; qs[p] = index`.
+///
+/// A cell gets its words in the fill's order (chunks in order, the readers' spans in stream
+/// order, a bucket in reading order), so the counts, sums and runs are those of
+/// `x_dc_csr::build`. The whole build is one `rayon::broadcast` (one job on each of the pool's
+/// `parts` threads) whose threads pass an `x_dc_csr::SpinBarrier` after each chunk's reading and
+/// after each chunk's owner work: one `rayon::scope` per phase and chunk, as `fill` runs them,
+/// started its last job about 0.15 ms late each time on the workstation (0.35 s over the 37
+/// tables of 31,168 cDNAs at 4 threads per slot; v4-R R16). The barrier waits for every thread
+/// of the pool, so it needs them free while the table is built: `build_disc_mb_lookup` runs on
+/// the search thread before its batch is scanned, with nothing else queued on its pool, and the
+/// broadcast's jobs wait for nothing but each other.
+///
+/// EXPERIMENT (LOSAT_X_DCSEEDLEAN): with the switch on, the pool's build is `csr_on_pool_steps`
+/// (the same CSR: the reading and the owners' work of the chunks in steps over two sets of
+/// buckets, one barrier per step).
+pub(super) fn csr(
+    parts: usize,
+    words: &DiscWords<'_>,
+    cells: usize,
+    pv_array: &mut [PvArrayType],
+    pv_array_bts: usize,
+    helper_array: &mut [u32],
+    x_offsets: Vec<u32>,
+) -> (super::x_dc_csr::Csr, bool) {
+    // One template: `read` pushes into the first buckets only (`SharedBuckets::at`).
+    assert!(!words.two_templates);
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    if (2..=255).contains(&parts)
+        && rayon::current_thread_index().is_some()
+        && rayon::current_num_threads() == parts
+    {
+        // EXPERIMENT (LOSAT_X_DCSEEDLEAN): every build on a pool takes the steps.
+        let csr = if seed_lean_on() {
+            crate::utils::xreach::x_reach!("LOSAT_X_DCSEEDLEAN", true);
+            csr_on_pool_steps(
+                parts,
+                words,
+                cells,
+                pv_array,
+                pv_array_bts,
+                helper_array,
+                STEP_POSITIONS,
+                x_offsets,
+            )
+        } else {
+            csr_on_pool(
+                parts,
+                words,
+                cells,
+                pv_array,
+                pv_array_bts,
+                helper_array,
+                CHUNK_POSITIONS,
+                x_offsets,
+            )
+        };
+        return (csr, true);
+    }
+    let _ = parts;
+    let csr = super::x_dc_csr::build(
+        words,
+        cells,
+        pv_array,
+        pv_array_bts,
+        helper_array,
+        x_offsets,
+    );
+    (csr, false)
+}
+
+/// `csr` on the calling worker's pool of `parts` threads (see there), in chunks of `chunk`
+/// positions (`CHUNK_POSITIONS`; the tests take others).
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+fn csr_on_pool(
+    parts: usize,
+    words: &DiscWords<'_>,
+    cells: usize,
+    pv_array: &mut [PvArrayType],
+    pv_array_bts: usize,
+    helper_array: &mut [u32],
+    chunk: usize,
+    x_offsets: Vec<u32>,
+) -> super::x_dc_csr::Csr {
+    use super::x_dc_csr::{assemble, prefetch, sum_cells, Poison, SpinBarrier};
+    let chunk = chunk.max(1);
+    let (block_shift, mut owner) = plan(cells, pv_array_bts, parts);
+    debug_assert!(
+        block_shift >= K_COMPRESSION_FACTOR_SHIFT && block_shift >= pv_array_bts,
+        "a block must own whole counters and presence-vector words"
+    );
+    let blocks = owner.len();
+    for (b, o) in owner.iter_mut().enumerate() {
+        *o = (b * parts / blocks) as u8;
+    }
+    // Owner `o`'s cells `own[o].0 .. own[o].1` (empty when it has no block).
+    let mut own = vec![(0usize, 0usize); parts];
+    for (b, &o) in owner.iter().enumerate().rev() {
+        let r = (b << block_shift)..((b + 1) << block_shift).min(cells);
+        let e = &mut own[o as usize];
+        *e = (r.start, if e.1 == 0 { r.end } else { e.1 });
+    }
+    // Once per table: the owners' cells cover the table (every element of `offsets` is written),
+    // and the positions, which bound the words, fit the `u32` offsets.
+    assert_eq!(own.iter().map(|&(c0, c1)| c1 - c0).sum::<usize>(), cells);
+    // `sum_cells` (x_dc_csr.rs) writes the helper word of every 2048 cells.
+    assert!(pv_array_bts >= 5 && cells.is_multiple_of(2048) && helper_array.len() == cells >> 11);
+    let (segments, total) = segments(words);
+    assert!(
+        total <= u32::MAX as usize,
+        "DCCSR: more positions than u32 offsets"
+    );
+    // The reading-only `Fill`: `read::<false>` uses only the words, the segments, the owners and
+    // the buckets.
+    let mut first: Vec<Bucket> = (0..parts * parts).map(|_| Bucket::default()).collect();
+    let mut second: Vec<Bucket> = Vec::new();
+    let mut counters = [OwnerCounters::new(0, parts), OwnerCounters::new(0, parts)];
+    let mut marks = [0, 1, 2].map(|_| PageBits::new(0, parts));
+    let mut touch = [0, 1, 2].map(|_| PageBits::new(0, 1));
+    let mut jobs: Vec<FaultJob> = Vec::new();
+    let fill = Fill {
+        words,
+        segments: &segments,
+        owner: &owner,
+        block_shift,
+        parts,
+        keep: bucket_keep(chunk, parts),
+        tables: SharedTables::new(&mut [], &mut [], &mut [], &mut [], &mut [], pv_array_bts),
+        first: SharedBuckets::new(&mut first, parts),
+        second: SharedBuckets::new(&mut second, parts),
+        counters: [counters[0].shared(), counters[1].shared()],
+        faults: Faults {
+            offsets: [0; 3],
+            lens: [0; 3],
+            marks: [marks[0].shared(), marks[1].shared(), marks[2].shared()],
+            touch: [touch[0].shared(), touch[1].shared(), touch[2].shared()],
+            jobs: SharedJobs {
+                ptr: jobs.as_mut_ptr(),
+                len: 0,
+            },
+        },
+        #[cfg(test)]
+        unmarked_reads: AtomicUsize::new(0),
+    };
+    // `offsets` is written in full by its owners (zeroed, then counted, summed and placed) and
+    // `offsets[cells]` below; `qs` gets one element per word (`total` positions bound them).
+    // EXPERIMENT (LOSAT_X_MBLUTKEEP): `x_offsets` is the batch loop's kept table or an empty vector.
+    let mut offsets = super::x_dc_csr::x_offsets_buffer(x_offsets, cells + 1);
+    let mut qs: Vec<u32> = Vec::with_capacity(total);
+    let ob = Shared {
+        ptr: offsets.as_mut_ptr(),
+        len: cells + 1,
+    };
+    let qb = Shared {
+        ptr: qs.as_mut_ptr(),
+        len: total,
+    };
+    let pv = Shared::new(pv_array);
+    let helper = Shared::new(helper_array);
+    let mut own_words = vec![0u64; parts];
+    let own_w = Shared::new(&mut own_words);
+    let chunks = total.div_ceil(chunk);
+    let span = |c: usize, a: usize| {
+        let start = c * chunk;
+        let end = total.min(start + chunk);
+        (
+            start + (end - start) * a / parts,
+            start + (end - start) * (a + 1) / parts,
+        )
+    };
+    let bar = SpinBarrier::new(parts);
+    let (fill, own, bar) = (&fill, &own, &bar);
+    rayon::broadcast(|ctx| {
+        let o = ctx.index();
+        let _poison = Poison(bar);
+        let (ob, qb, pv, helper, own_w) = (ob, qb, pv, helper, own_w);
+        let (c0, c1) = own[o];
+        // SAFETY (all of the job's accesses): reader `o` uses only the buckets `(o, *)` and owner
+        // `o` only the buckets `(*, o)`, between barriers that separate the readers from the
+        // owners; owner `o` alone writes `offsets[c0 .. c1]`, the presence-vector words and
+        // counters of its blocks, its entry of the owners' words (read by the later owners after
+        // a barrier) and `qs` at its places, which lie in `base .. base + its words` (disjoint
+        // from the other owners'); every element read was written before by the same thread or
+        // before a barrier.
+        // SAFETY: `o = ctx.index() < parts` (`csr` runs this only on a pool of `parts` threads),
+        // so the buckets, cells and places the paragraph above gives job `o` are its alone.
+        unsafe {
+            std::ptr::write_bytes(ob.ptr.add(c0), 0, c1 - c0);
+            let mut got = 0u64;
+            for c in 0..chunks {
+                let (s0, s1) = span(c, o);
+                fill.read::<false>(o, s0, s1, [false; 3]);
+                bar.wait();
+                for a in 0..parts {
+                    let es = fill.first.at(a, o);
+                    got += es.len() as u64;
+                    for j in 0..es.len() {
+                        if let Some(ahead) = es.get(j + 16) {
+                            prefetch(ob.ptr.wrapping_add(ahead.value as usize));
+                        }
+                        let cell = es[j].value as usize;
+                        ob.set(cell, ob.get(cell) + 1);
+                    }
+                }
+                if c + 1 == chunks {
+                    own_w.set(o, got);
+                }
+                bar.wait();
+            }
+            let base: u64 = (0..o).map(|p| own_w.get(p)).sum();
+            if c0 < c1 {
+                sum_cells(
+                    pv.ptr,
+                    pv.len,
+                    helper.ptr,
+                    ob.ptr,
+                    base as u32,
+                    c0,
+                    c1,
+                    pv_array_bts,
+                );
+            }
+            for c in 0..chunks {
+                let (s0, s1) = span(c, o);
+                fill.read::<false>(o, s0, s1, [false; 3]);
+                bar.wait();
+                for a in 0..parts {
+                    for e in fill.first.at(a, o).iter() {
+                        let cell = e.value as usize;
+                        let p = ob.get(cell) - 1;
+                        ob.set(cell, p);
+                        qb.set(p as usize, e.index);
+                    }
+                }
+                if c + 1 < chunks {
+                    bar.wait();
+                }
+            }
+        }
+    });
+    let n_words: u64 = own_words.iter().sum();
+    assert!(
+        n_words <= total as u64 && n_words <= u32::MAX as u64,
+        "DCCSR: more words than positions"
+    );
+    // SAFETY: no job is running; `offsets[cells]` is no cell's end. Every element of `offsets`
+    // was written (the owners' cells cover `0 .. cells`) and the runs partition `0 .. n_words`,
+    // each place written once.
+    unsafe {
+        ob.set(cells, n_words as u32);
+        assemble(offsets, qs, cells, n_words as usize)
+    }
+}
+
+/// No NCBI counterpart (scheduling only, LOSAT_X_DCSEEDLEAN): the positions of a chunk of
+/// `csr_on_pool_steps`, half of `CHUNK_POSITIONS`, so that its two sets of buckets keep room
+/// (`bucket_keep`) for about as many entries as `csr_on_pool`'s one set (module comment). Chunks
+/// of `CHUNK_POSITIONS` took more cycles on the workstation (v4-A15 s18 screening).
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+const STEP_POSITIONS: usize = CHUNK_POSITIONS / 2;
+
+/// NCBI reference: `Fill::read`'s (blast_nalookup.c:749-767,775,793), first template only.
+/// EXPERIMENT (LOSAT_X_DCSEEDLEAN): the words that end at the stream positions `[s0, s1)`, read
+/// by `Fill::read`'s loop (the same ranges entered up to `template_length - 1` positions before
+/// `s0`, resets, `accum`, `index` and first-template index), `f(ecode1, index)` for each, in
+/// reading order. The template is the const `TT` (`DiscTemplateType::from_value`), so the index is computed
+/// without the per-word dispatch of `compute_discontiguous_index`, and a range is read through
+/// one slice (one bounds check per range).
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+#[inline(always)]
+fn lean_span<const TT: u8>(
+    segments: &[Segment<'_>],
+    template_length: usize,
+    s0: usize,
+    s1: usize,
+    f: &mut impl FnMut(u32, u32),
+) {
+    let template = const { DiscTemplateType::from_value(TT as i32) };
+    if s0 >= s1 {
+        return;
+    }
+    let mut g = segments.partition_point(|seg| seg.stream + (seg.end - seg.start) <= s0);
+    while g < segments.len() && segments[g].stream < s1 {
+        let seg = &segments[g];
+        let len = seg.end - seg.start;
+        let first_pos = seg.start + (s0.max(seg.stream) - seg.stream);
+        let end_pos = seg.start + (s1.min(seg.stream + len) - seg.stream);
+        let warm_start = seg.start.max(first_pos.saturating_sub(template_length - 1));
+        // The 1-based start of the word that ends at `warm_start + i` in the concatenated query
+        // is `base + i` (`Fill::read`'s `index`; formed only for words, where it is >= 1).
+        let base = (seg.query_offset + warm_start + 2).wrapping_sub(template_length);
+        let first = first_pos - warm_start;
+        x_range_words(
+            &seg.seq[warm_start..end_pos],
+            template_length,
+            u64::MAX,
+            || {},
+            |accum, i| {
+                // A word ends `template_length - 1` letters or more after `warm_start`, so at or
+                // after `first_pos` (`warm_start` is at most that many letters before it).
+                debug_assert!(i >= first);
+                f(
+                    compute_discontiguous_index(accum, template),
+                    base.wrapping_add(i) as u32,
+                );
+            },
+        );
+        g += 1;
+    }
+}
+
+/// No NCBI counterpart (LOSAT_X_DCSEEDLEAN): `lean_span` with the words' template (one instance
+/// per template).
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+#[inline(always)]
+fn lean_words(
+    words: &DiscWords<'_>,
+    segments: &[Segment<'_>],
+    s0: usize,
+    s1: usize,
+    mut f: impl FnMut(u32, u32),
+) {
+    let tl = words.template_length;
+    let f = &mut f;
+    match words.template_type as u8 {
+        1 => lean_span::<1>(segments, tl, s0, s1, f),
+        2 => lean_span::<2>(segments, tl, s0, s1, f),
+        3 => lean_span::<3>(segments, tl, s0, s1, f),
+        4 => lean_span::<4>(segments, tl, s0, s1, f),
+        5 => lean_span::<5>(segments, tl, s0, s1, f),
+        6 => lean_span::<6>(segments, tl, s0, s1, f),
+        7 => lean_span::<7>(segments, tl, s0, s1, f),
+        8 => lean_span::<8>(segments, tl, s0, s1, f),
+        9 => lean_span::<9>(segments, tl, s0, s1, f),
+        10 => lean_span::<10>(segments, tl, s0, s1, f),
+        11 => lean_span::<11>(segments, tl, s0, s1, f),
+        12 => lean_span::<12>(segments, tl, s0, s1, f),
+        _ => lean_span::<0>(segments, tl, s0, s1, f),
+    }
+}
+
+/// No NCBI counterpart (scheduling only, LOSAT_X_DCSEEDLEAN): what one thread of
+/// `csr_on_pool_steps` reads with.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+struct StepCtx<'a, 'w> {
+    t: usize,
+    chunks: usize,
+    /// The entries a bucket keeps room for from one chunk to the next (`bucket_keep`).
+    keep: usize,
+    block_shift: usize,
+    words: &'a DiscWords<'w>,
+    segments: &'a [Segment<'w>],
+    owner: &'a [u8],
+    /// Chunk `k`'s buckets are set `k % 2`.
+    sets: [SharedBuckets; 2],
+    bar: &'a super::x_dc_csr::SpinBarrier,
+}
+
+/// No NCBI counterpart (scheduling only, LOSAT_X_DCSEEDLEAN): `Fill::read::<false>` of a
+/// one-template table through `lean_words`: reader `c.t`'s words of `[s0, s1)` into row `c.t` of
+/// `set`, each in the bucket of its cell's owner, after emptying the row (`empty`).
+///
+/// SAFETY: row `c.t` of `set` is this reader's (no other thread uses it during the step).
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+#[inline(never)]
+unsafe fn read_lean_row(c: &StepCtx<'_, '_>, set: SharedBuckets, s0: usize, s1: usize) {
+    let (t, owner, shift) = (c.t, c.owner, c.block_shift);
+    for o in 0..set.parts {
+        // SAFETY: row `t` is this reader's.
+        unsafe { empty(set.at(t, o), c.keep) };
+    }
+    lean_words(c.words, c.segments, s0, s1, |cell, index| {
+        debug_assert!(((cell as usize) >> shift) < owner.len());
+        // SAFETY: the cell is in the table, whose blocks `owner` covers; row `t` is this reader's.
+        unsafe {
+            let o = *owner.get_unchecked((cell as usize) >> shift) as usize;
+            set.at(t, o).push(Entry { index, value: cell });
+        }
+    });
+}
+
+/// No NCBI counterpart (scheduling only, LOSAT_X_DCSEEDLEAN): one pass of `csr_on_pool_steps`
+/// on thread `c.t`. Step `k` (`0 ..= chunks`) reads chunk `k` (if any) into row `c.t` of set
+/// `k % 2`, then applies `op` to each entry of column `c.t` of set `(k - 1) % 2` (chunk `k - 1`,
+/// if any: bucket `(0, t)` to `(parts - 1, t)`, each in order), with the cell of the entry 16
+/// places after it in its bucket (if any); a barrier ends each step.
+///
+/// SAFETY: row `t` of a set is written only by reader `t` and column `t` read only by owner `t`;
+/// a set read at step `k` was written at step `k - 1` and is written again at step `k + 1`, with
+/// barriers between; `op` touches only owner `t`'s cells and places.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+#[inline(always)]
+unsafe fn steps_pass(
+    c: &StepCtx<'_, '_>,
+    span: &impl Fn(usize, usize) -> (usize, usize),
+    mut op: impl FnMut(Entry, Option<u32>),
+) {
+    let (t, parts) = (c.t, c.sets[0].parts);
+    for k in 0..=c.chunks {
+        if k < c.chunks {
+            let (s0, s1) = span(k, t);
+            // SAFETY: row `t` of set `k % 2` is this reader's during step `k`.
+            unsafe { read_lean_row(c, c.sets[k % 2], s0, s1) };
+        }
+        if k >= 1 {
+            let set = c.sets[(k - 1) % 2];
+            for a in 0..parts {
+                // SAFETY: column `t` of set `(k - 1) % 2` is this owner's during step `k`.
+                let es = unsafe { set.at(a, t) };
+                for j in 0..es.len() {
+                    op(es[j], es.get(j + 16).map(|e| e.value));
+                }
+            }
+        }
+        c.bar.wait();
+    }
+}
+
+/// No NCBI counterpart (scheduling only): EXPERIMENT (LOSAT_X_DCSEEDLEAN) `csr` on the calling
+/// worker's pool of `parts` threads, as `csr_on_pool` builds it (the same owners, buckets, count
+/// pass, sum pass and place pass, so the same CSR) but in steps: two sets of buckets, chunk `k`'s
+/// in set `k % 2`; step `k` of a pass reads chunk `k` with the lean loop (`read_lean_row`) and
+/// then does the owner's work of chunk `k - 1`, and one barrier ends the step (`steps_pass`).
+/// `csr_on_pool` waits twice per chunk (after the reading, after the owners' work), so each
+/// chunk costs the slowest reading plus the slowest owner's work; here a step costs the slowest
+/// thread's reading and owner's work together (about as many barriers per pass: half-size
+/// chunks, one barrier each). The place pass prefetches the `offsets` element of the entry 16
+/// ahead, as the count pass does. Chunks of `chunk` positions (`STEP_POSITIONS`; the tests take
+/// others).
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+#[allow(clippy::too_many_arguments)]
+fn csr_on_pool_steps(
+    parts: usize,
+    words: &DiscWords<'_>,
+    cells: usize,
+    pv_array: &mut [PvArrayType],
+    pv_array_bts: usize,
+    helper_array: &mut [u32],
+    chunk: usize,
+    x_offsets: Vec<u32>,
+) -> super::x_dc_csr::Csr {
+    use super::x_dc_csr::{assemble, prefetch, sum_cells, Poison, SpinBarrier};
+    let chunk = chunk.max(1);
+    let (block_shift, mut owner) = plan(cells, pv_array_bts, parts);
+    debug_assert!(
+        block_shift >= K_COMPRESSION_FACTOR_SHIFT && block_shift >= pv_array_bts,
+        "a block must own whole counters and presence-vector words"
+    );
+    let blocks = owner.len();
+    for (b, o) in owner.iter_mut().enumerate() {
+        *o = (b * parts / blocks) as u8;
+    }
+    // Owner `o`'s cells `own[o].0 .. own[o].1` (empty when it has no block).
+    let mut own = vec![(0usize, 0usize); parts];
+    for (b, &o) in owner.iter().enumerate().rev() {
+        let r = (b << block_shift)..((b + 1) << block_shift).min(cells);
+        let e = &mut own[o as usize];
+        *e = (r.start, if e.1 == 0 { r.end } else { e.1 });
+    }
+    assert_eq!(own.iter().map(|&(c0, c1)| c1 - c0).sum::<usize>(), cells);
+    // `sum_cells` (x_dc_csr.rs) writes the helper word of every 2048 cells.
+    assert!(pv_array_bts >= 5 && cells.is_multiple_of(2048) && helper_array.len() == cells >> 11);
+    let (segments, total) = segments(words);
+    assert!(
+        total <= u32::MAX as usize,
+        "DCCSR: more positions than u32 offsets"
+    );
+    let mut set0: Vec<Bucket> = (0..parts * parts).map(|_| Bucket::default()).collect();
+    let mut set1: Vec<Bucket> = (0..parts * parts).map(|_| Bucket::default()).collect();
+    let sets = [
+        SharedBuckets::new(&mut set0, parts),
+        SharedBuckets::new(&mut set1, parts),
+    ];
+    // As `csr_on_pool`'s (EXPERIMENT LOSAT_X_MBLUTKEEP: `x_offsets` is the batch loop's kept table
+    // or an empty vector).
+    let mut offsets = super::x_dc_csr::x_offsets_buffer(x_offsets, cells + 1);
+    let mut qs: Vec<u32> = Vec::with_capacity(total);
+    let ob = Shared {
+        ptr: offsets.as_mut_ptr(),
+        len: cells + 1,
+    };
+    let qb = Shared {
+        ptr: qs.as_mut_ptr(),
+        len: total,
+    };
+    let pv = Shared::new(pv_array);
+    let helper = Shared::new(helper_array);
+    let mut own_words = vec![0u64; parts];
+    let own_w = Shared::new(&mut own_words);
+    let chunks = total.div_ceil(chunk);
+    let span = |c: usize, a: usize| {
+        let start = c * chunk;
+        let end = total.min(start + chunk);
+        (
+            start + (end - start) * a / parts,
+            start + (end - start) * (a + 1) / parts,
+        )
+    };
+    let bar = SpinBarrier::new(parts);
+    let keep = bucket_keep(chunk, parts);
+    let (segments, own, owner, bar) = (&segments, &own, &owner, &bar);
+    rayon::broadcast(|ctx| {
+        let t = ctx.index();
+        let _poison = Poison(bar);
+        let (ob, qb, pv, helper, own_w) = (ob, qb, pv, helper, own_w);
+        let (c0, c1) = own[t];
+        let c = StepCtx {
+            t,
+            chunks,
+            keep,
+            block_shift,
+            words,
+            segments,
+            owner,
+            sets,
+            bar,
+        };
+        // SAFETY (all of the job's accesses): `steps_pass`'s for the sets; owner `t` alone writes
+        // `offsets[c0 .. c1]`, the presence-vector words and counters of its blocks, its entry of
+        // the owners' words (read by the later owners after a barrier) and `qs` at its places,
+        // which lie in `base .. base + its words` (disjoint from the other owners'), as in
+        // `csr_on_pool`.
+        unsafe {
+            std::ptr::write_bytes(ob.ptr.add(c0), 0, c1 - c0);
+            let mut got = 0u64;
+            steps_pass(&c, &span, |e, ahead| {
+                if let Some(cell) = ahead {
+                    prefetch(ob.ptr.wrapping_add(cell as usize));
+                }
+                let cell = e.value as usize;
+                ob.set(cell, ob.get(cell) + 1);
+                got += 1;
+            });
+            own_w.set(t, got);
+            bar.wait();
+            let base: u64 = (0..t).map(|p| own_w.get(p)).sum();
+            if c0 < c1 {
+                sum_cells(
+                    pv.ptr,
+                    pv.len,
+                    helper.ptr,
+                    ob.ptr,
+                    base as u32,
+                    c0,
+                    c1,
+                    pv_array_bts,
+                );
+            }
+            steps_pass(&c, &span, |e, ahead| {
+                if let Some(cell) = ahead {
+                    prefetch(ob.ptr.wrapping_add(cell as usize));
+                }
+                let cell = e.value as usize;
+                let p = ob.get(cell) - 1;
+                ob.set(cell, p);
+                qb.set(p as usize, e.index);
+            });
+        }
+    });
+    let n_words: u64 = own_words.iter().sum();
+    assert!(
+        n_words <= total as u64 && n_words <= u32::MAX as u64,
+        "DCCSR: more words than positions"
+    );
+    // SAFETY: as `csr_on_pool`'s.
+    unsafe {
+        ob.set(cells, n_words as u32);
+        assemble(offsets, qs, cells, n_words as usize)
+    }
 }
 
 /// No NCBI counterpart (scheduling only): when the prefault round runs and which pages it touches
@@ -1508,7 +2120,7 @@ const PREFAULT_RULE: PrefaultRule = PrefaultRule {
 };
 
 /// See `PrefaultRule::min_words_per_page` and `PREFAULT_RULE`.
-const PREFAULT_MIN_WORDS_PER_PAGE: usize = 8;
+pub(super) const PREFAULT_MIN_WORDS_PER_PAGE: usize = 8;
 
 /// No NCBI counterpart (scheduling only): after phase A of the first chunk, between two phases
 /// (no job running), sets in `faults.touch[k]` the pages the round touches: for each array, the
@@ -1705,7 +2317,7 @@ fn fill_with<P: Fn(u8) + Sync>(
         #[cfg(test)]
         unmarked_reads: AtomicUsize::new(0),
     };
-    // LOSAT_TIMING's split covers the pool fills only (not the shadow's partitioned build).
+    // LOSAT_TIMING's split covers the pool fills only.
     let mut clock = (in_pool && timing_on()).then(|| JobClock::new(parts));
     let measure = clock.is_some() || cfg!(test);
     let mut stats = FillStats::default();
@@ -1730,6 +2342,8 @@ fn fill_with<P: Fn(u8) + Sync>(
         // `Fill::link`); `run_jobs` returns after every job of the phase has returned.
         run_phase(&mut clock, 0, parts, in_pool, |a| {
             let (s0, s1) = span(a);
+            // SAFETY: `run_phase` runs job `a` once for each `a < parts`, so the buckets `(a, *)`
+            // and reader `a`'s marks are this job's alone (`read`'s contract; all-phases note).
             if mark.contains(&true) {
                 unsafe { fill.read::<true>(a, s0, s1, mark) }
             } else {
@@ -1754,6 +2368,8 @@ fn fill_with<P: Fn(u8) + Sync>(
         }
         run_phase(&mut clock, 1, parts, in_pool, |o| {
             probe(o as u8);
+            // SAFETY: job `o` alone takes the buckets `(*, o)`, whose cells `read` put in `o`'s
+            // blocks (`owner`), and `counters[_].of(o)`: `update`'s contract (all-phases note).
             unsafe { fill.update(o) }
         });
         run_phase(&mut clock, 2, parts, in_pool, |a| unsafe { fill.link(a) });
@@ -1808,7 +2424,7 @@ fn fill_with<P: Fn(u8) + Sync>(
 /// Tests only (`FillStats::first_pages`, `check_prefault`): the pages of `v` that hold an element
 /// other than 0 (a fast test per page: most pages are all zero or all written).
 #[cfg(test)]
-fn nonzero_pages(v: &[u32]) -> std::collections::BTreeSet<usize> {
+pub(super) fn nonzero_pages(v: &[u32]) -> std::collections::BTreeSet<usize> {
     static ZEROS: [u32; 1024] = [0; 1024];
     let base = v.as_ptr() as usize;
     let mut pages = std::collections::BTreeSet::new();
@@ -1822,114 +2438,6 @@ fn nonzero_pages(v: &[u32]) -> std::collections::BTreeSet<usize> {
         i = end;
     }
     pages
-}
-
-/// No NCBI counterpart (scheduling only): the parts of the shadow's partitioned build when no
-/// pool built the tables (as `x_mb_lookup_par::shadow_check`).
-const SHADOW_PARTS_OFF_POOL: usize = 4;
-
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:785-786,803-804,808-824
-/// ```c
-///          mb_lt->next_pos[index] = mb_lt->hashtable[ecode1];
-///          mb_lt->hashtable[ecode1] = index;
-/// ...
-///          mb_lt->next_pos2[index] = mb_lt->hashtable2[ecode2];
-///          mb_lt->hashtable2[ecode2] = index;
-/// ...
-///    longest_chain = 2;
-///    for (index = 0; index < mb_lt->hashsize / kCompressionFactor; index++)
-///        longest_chain = MAX(longest_chain, helper_array[index]);
-/// ```
-/// LOSAT_X_DISCLUTPARSHADOW: builds the tables again the other way (with the original loop when
-/// the pool built `built`, `pool_parts` = `Some`; otherwise partitioned in four parts one after
-/// another) and compares every element of every array and the longest chain; panics at the first
-/// difference after printing it.
-pub(super) fn shadow_check(
-    words: &DiscWords<'_>,
-    pool_parts: Option<usize>,
-    built: &DiscTablesRef<'_>,
-    longest_chain: usize,
-) {
-    let mut hashtable = vec![0u32; built.hashtable.len()];
-    let mut next_pos = vec![0u32; built.next_pos.len()];
-    let mut helper_array = vec![0u32; built.helper_array.len()];
-    let mut hashtable2 = vec![0u32; built.hashtable2.len()];
-    let mut next_pos2 = vec![0u32; built.next_pos2.len()];
-    let mut helper_array2 = vec![0u32; built.helper_array2.len()];
-    let mut pv_array = vec![0 as PvArrayType; built.pv_array.len()];
-    let tables = DiscTables {
-        hashtable: &mut hashtable,
-        next_pos: &mut next_pos,
-        helper_array: &mut helper_array,
-        hashtable2: &mut hashtable2,
-        next_pos2: &mut next_pos2,
-        helper_array2: &mut helper_array2,
-        pv_array: &mut pv_array,
-        pv_array_bts: built.pv_array_bts,
-    };
-    let other = match pool_parts {
-        Some(_) => {
-            fill_disc_mb_tables(words, tables);
-            "serial"
-        }
-        None => {
-            fill(SHADOW_PARTS_OFF_POOL, words, tables, false);
-            "partitioned"
-        }
-    };
-    let other_chain = disc_longest_chain(&helper_array, &helper_array2, words.two_templates);
-    let mut difference = None;
-    for (name, have, again) in [
-        ("hashtable", built.hashtable, hashtable.as_slice()),
-        ("next_pos", built.next_pos, next_pos.as_slice()),
-        ("helper_array", built.helper_array, helper_array.as_slice()),
-        ("hashtable2", built.hashtable2, hashtable2.as_slice()),
-        ("next_pos2", built.next_pos2, next_pos2.as_slice()),
-        (
-            "helper_array2",
-            built.helper_array2,
-            helper_array2.as_slice(),
-        ),
-        ("pv_array", built.pv_array, pv_array.as_slice()),
-    ] {
-        if let Some(i) = (0..have.len()).find(|&i| have[i] != again[i]) {
-            difference = Some(format!(
-                "{name}[{i}]: built {} {other} {}",
-                have[i], again[i]
-            ));
-            break;
-        }
-    }
-    if difference.is_none() && longest_chain != other_chain {
-        difference = Some(format!(
-            "longest_chain: built {longest_chain} {other} {other_chain}"
-        ));
-    }
-    if let Some(what) = difference {
-        SHADOW_DIFFS.fetch_add(1, Ordering::Relaxed);
-        eprintln!(
-            "[X_SHADOW] DISCLUTPAR DIFFERENT {what} (pool parts {pool_parts:?}, compared with the {other} build; template_length {}, two_templates {})",
-            words.template_length, words.two_templates
-        );
-        panic!("LOSAT_X_DISCLUTPARSHADOW: the discontiguous megablast tables differ: {what}");
-    }
-    SHADOW_TABLES.fetch_add(1, Ordering::Relaxed);
-    SHADOW_POOL_TABLES.fetch_add(u64::from(pool_parts.is_some()), Ordering::Relaxed);
-    SHADOW_TWO_TEMPLATE_TABLES.fetch_add(u64::from(words.two_templates), Ordering::Relaxed);
-    SHADOW_CELLS.fetch_add(
-        [
-            built.hashtable.len(),
-            built.next_pos.len(),
-            built.helper_array.len(),
-            built.hashtable2.len(),
-            built.next_pos2.len(),
-            built.helper_array2.len(),
-            built.pv_array.len(),
-        ]
-        .iter()
-        .sum::<usize>() as u64,
-        Ordering::Relaxed,
-    );
 }
 
 #[cfg(test)]
@@ -2560,20 +3068,6 @@ mod tests {
         .unwrap();
     }
 
-    /// The tables of `b` as the shadow reads them.
-    fn tables_ref(b: &Built, pv_array_bts: usize) -> DiscTablesRef<'_> {
-        DiscTablesRef {
-            hashtable: &b.hashtable,
-            next_pos: &b.next_pos,
-            helper_array: &b.helper_array,
-            hashtable2: &b.hashtable2,
-            next_pos2: &b.next_pos2,
-            helper_array2: &b.helper_array2,
-            pv_array: &b.pv_array,
-            pv_array_bts,
-        }
-    }
-
     /// `DiscWords` of `case` with the templates of `combo`.
     fn words_of<'a>(
         case: &'a Case,
@@ -2594,144 +3088,6 @@ mod tests {
                 crate::algorithm::blastn::disc_lookup::DiscTemplateType::Contiguous
             },
             two_templates,
-        }
-    }
-
-    // The shadow passes equal tables both ways (built on a pool: compared with the original loop;
-    // built serially: compared with the partitioned fill) and counts them.
-    #[test]
-    fn shadow_check_passes_equal_tables() {
-        let mut rng = Lcg(0x5AAD_0001);
-        let case = random_case(&mut rng);
-        let query_refs: Vec<&[u8]> = case.queries.iter().map(Vec::as_slice).collect();
-        let approx: usize = case.queries.iter().map(Vec::len).sum();
-        for combo in [
-            (11usize, DiscWordType::Coding, 18usize),
-            (12, DiscWordType::TwoTemplates, 21),
-        ] {
-            let (_, bts) = compute_mb_pv_params(1 << (2 * combo.0), approx, false, combo.0);
-            let words = words_of(&case, &query_refs, combo);
-            let before = SHADOW_TABLES.load(Ordering::Relaxed);
-            let two_before = SHADOW_TWO_TEMPLATE_TABLES.load(Ordering::Relaxed);
-            let serial = build(&case, combo, How::Serial);
-            shadow_check(
-                &words,
-                None,
-                &tables_ref(&serial, bts),
-                serial.longest_chain,
-            );
-            let parted = build(&case, combo, How::Parts(3, false));
-            shadow_check(
-                &words,
-                Some(3),
-                &tables_ref(&parted, bts),
-                parted.longest_chain,
-            );
-            assert!(SHADOW_TABLES.load(Ordering::Relaxed) >= before + 2);
-            if combo.1 == DiscWordType::TwoTemplates {
-                assert!(SHADOW_TWO_TEMPLATE_TABLES.load(Ordering::Relaxed) >= two_before + 2);
-            }
-        }
-    }
-
-    // A table with one element changed (a second-template chain link, the last element of
-    // `next_pos2`) makes the shadow panic.
-    #[test]
-    #[should_panic(expected = "LOSAT_X_DISCLUTPARSHADOW")]
-    fn shadow_check_panics_on_a_difference() {
-        let mut rng = Lcg(0x5AAD_0002);
-        let case = Case {
-            queries: vec![(0..3000).map(|_| rng.below(4) as u8).collect()],
-            offsets: vec![0],
-            masks: Vec::new(),
-        };
-        let query_refs: Vec<&[u8]> = case.queries.iter().map(Vec::as_slice).collect();
-        let combo = (11usize, DiscWordType::TwoTemplates, 16usize);
-        let (_, bts) = compute_mb_pv_params(1 << 22, 3000, false, 11);
-        let words = words_of(&case, &query_refs, combo);
-        let mut b = build(&case, combo, How::Serial);
-        let last = b.next_pos2.len() - 1;
-        b.next_pos2[last] ^= 1;
-        shadow_check(&words, Some(2), &tables_ref(&b, bts), b.longest_chain);
-    }
-
-    // The shadow compares every array and the longest chain: correct tables with one element of
-    // one array changed (or the longest chain off by one) make it panic, naming that array,
-    // whichever array it is, when it compares with the original loop (tables built on a pool) and
-    // with the partitioned fill (tables built without one). A shadow that skipped an array would
-    // pass that array's change.
-    #[test]
-    fn shadow_check_compares_every_array() {
-        use std::panic::{catch_unwind, AssertUnwindSafe};
-        let mut rng = Lcg(0x5AAD_0003);
-        let case = Case {
-            queries: vec![(0..3000).map(|_| rng.below(4) as u8).collect()],
-            offsets: vec![0],
-            masks: Vec::new(),
-        };
-        let query_refs: Vec<&[u8]> = case.queries.iter().map(Vec::as_slice).collect();
-        let combo = (11usize, DiscWordType::TwoTemplates, 16usize);
-        let (_, bts) = compute_mb_pv_params(1 << 22, 3000, false, 11);
-        let words = words_of(&case, &query_refs, combo);
-        let good = build(&case, combo, How::Serial);
-        assert_not_trivial(&good, true);
-        for pool_parts in [Some(2), None] {
-            shadow_check(
-                &words,
-                pool_parts,
-                &tables_ref(&good, bts),
-                good.longest_chain,
-            );
-        }
-        let flip = |v: &mut [u32]| {
-            // An element the fill wrote, when there is one (a chain head, a link, a counter).
-            let i = v.iter().position(|&x| x > 1).unwrap_or(v.len() / 2);
-            v[i] ^= 1;
-        };
-        for target in [
-            "hashtable",
-            "next_pos",
-            "helper_array",
-            "hashtable2",
-            "next_pos2",
-            "helper_array2",
-            "pv_array",
-            "longest_chain",
-        ] {
-            let mut b = good.clone();
-            match target {
-                "hashtable" => flip(&mut b.hashtable),
-                "next_pos" => flip(&mut b.next_pos),
-                "helper_array" => flip(&mut b.helper_array),
-                "hashtable2" => flip(&mut b.hashtable2),
-                "next_pos2" => flip(&mut b.next_pos2),
-                "helper_array2" => flip(&mut b.helper_array2),
-                "pv_array" => flip(&mut b.pv_array),
-                _ => b.longest_chain += 1,
-            }
-            assert!(b != good, "{target} unchanged");
-            for pool_parts in [Some(2), None] {
-                let result = catch_unwind(AssertUnwindSafe(|| {
-                    shadow_check(&words, pool_parts, &tables_ref(&b, bts), b.longest_chain)
-                }));
-                let payload = result
-                    .err()
-                    .unwrap_or_else(|| panic!("{target} {pool_parts:?}: the shadow passed"));
-                let message = payload
-                    .downcast_ref::<String>()
-                    .cloned()
-                    .or_else(|| payload.downcast_ref::<&str>().map(|m| m.to_string()))
-                    .unwrap_or_default();
-                let named = if target == "longest_chain" {
-                    "differ: longest_chain: ".to_string()
-                } else {
-                    format!("differ: {target}[")
-                };
-                assert!(
-                    message.starts_with("LOSAT_X_DISCLUTPARSHADOW") && message.contains(&named),
-                    "{target} {pool_parts:?}: {message}"
-                );
-            }
         }
     }
 
@@ -2987,6 +3343,10 @@ mod tests {
     /// One query of 60,000 letters: random letters with ten runs of 600 letters, each a repeat of
     /// period 1 to 5 (unmasked), so a few cells get hundreds of words (counters far above zero)
     /// and most blocks get no repeated cell (counters that stay where they start).
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     fn counter_case() -> Case {
         let mut rng = Lcg(0xC0DE_0C01);
         let mut seq: Vec<u8> = (0..60_000).map(|_| rng.below(4) as u8).collect();
@@ -3377,7 +3737,7 @@ mod tests {
         let touched = check_prefault(&got, &stats);
         let cells = touched[HASHTABLE].len();
         assert!(
-            cells + 2 * 512 >= pages && cells % 512 == 0 && cells > 0,
+            cells + 2 * 512 >= pages && cells.is_multiple_of(512) && cells > 0,
             "{cells} of {pages}"
         );
         assert!(touched[PV_ARRAY].is_empty());
@@ -3500,7 +3860,7 @@ mod tests {
         for (pages, parts) in [(1usize, 1usize), (4097, 16), (16385, 3), (33, 255)] {
             let mut marks = PageBits::new(pages, parts);
             let shared = marks.shared();
-            assert!(shared.stride % 8 == 0 && shared.stride * 64 >= pages);
+            assert!(shared.stride.is_multiple_of(8) && shared.stride * 64 >= pages);
             for r in 0..parts {
                 assert_eq!(shared.ptr.wrapping_add(r * shared.stride) as usize % 64, 0);
             }
@@ -3536,5 +3896,179 @@ mod tests {
                 }
             }
         }
+    }
+
+    // EXPERIMENT (LOSAT_X_DCCSR): the CSR built on the pool (`csr_on_pool`, and LOSAT_X_DCSEEDLEAN's
+    // `csr_on_pool_steps`), in chunks of any size, is the serial build's and lists the chains of
+    // the original loop (`x_dc_csr::x_assert_runs_are_the_chains` compares every cell's run with
+    // its chain, the presence vector, the counters, the longest chain and the two builds; it
+    // panics on a difference).
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    fn check_csr(case: &Case, combo: (usize, DiscWordType, usize), parts: usize, chunk: usize) {
+        let reference = build(case, combo, How::Serial);
+        let query_refs: Vec<&[u8]> = case.queries.iter().map(Vec::as_slice).collect();
+        let words = words_of(case, &query_refs, combo);
+        let cells = reference.hashtable.len();
+        let approx: usize = case.queries.iter().map(Vec::len).sum();
+        let (_, pv_array_bts) = compute_mb_pv_params(cells, approx, false, combo.0);
+        // EXPERIMENT (LOSAT_X_DCSEEDLEAN): `csr_on_pool` and `csr_on_pool_steps`.
+        for steps in [false, true] {
+            let mut pv = vec![0; reference.pv_array.len()];
+            let mut helper = vec![0; reference.helper_array.len()];
+            let build = if steps {
+                csr_on_pool_steps
+            } else {
+                csr_on_pool
+            };
+            let csr = build(
+                parts,
+                &words,
+                cells,
+                &mut pv,
+                pv_array_bts,
+                &mut helper,
+                chunk,
+                Vec::new(),
+            );
+            super::super::x_dc_csr::x_assert_runs_are_the_chains(
+                &words,
+                &csr,
+                true,
+                &pv,
+                &helper,
+                pv_array_bts,
+                &reference.hashtable,
+                &reference.next_pos,
+                &reference.pv_array,
+                &reference.helper_array,
+                reference.longest_chain,
+            );
+        }
+    }
+
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    #[test]
+    fn csr_on_a_pool_lists_the_chains() {
+        let mut rng = Lcg(0xC5A0_0001);
+        let one_template: Vec<_> = combos()
+            .into_iter()
+            .filter(|c| c.1 != DiscWordType::TwoTemplates)
+            .collect();
+        for threads in [2usize, 3, 5] {
+            crate::utils::threading::with_search_pool(threads, "blastn", |_pool| {
+                for round in 0..16 {
+                    let case = if round % 2 == 0 {
+                        random_case(&mut rng)
+                    } else {
+                        random_layout(&mut rng)
+                    };
+                    let combo = one_template[rng.below(one_template.len() as u64) as usize];
+                    let chunk = [1usize, 97, 5000, CHUNK_POSITIONS][round % 4];
+                    check_csr(&case, combo, threads, chunk);
+                }
+                // `csr` takes the pool there, and builds on this thread off it.
+                let case = random_case(&mut rng);
+                let query_refs: Vec<&[u8]> = case.queries.iter().map(Vec::as_slice).collect();
+                let words = words_of(&case, &query_refs, (11, DiscWordType::Coding, 16));
+                let mut pv = vec![0; 1 << 15];
+                let mut helper = vec![0; (1 << 22) / 2048];
+                let (_, on_pool) = csr(
+                    threads,
+                    &words,
+                    1 << 22,
+                    &mut pv,
+                    7,
+                    &mut helper,
+                    Vec::new(),
+                );
+                assert!(on_pool, "threads {threads}");
+                Ok(())
+            })
+            .unwrap();
+        }
+        let case = random_case(&mut rng);
+        let query_refs: Vec<&[u8]> = case.queries.iter().map(Vec::as_slice).collect();
+        let words = words_of(&case, &query_refs, (11, DiscWordType::Coding, 16));
+        let mut pv = vec![0; 1 << 15];
+        let mut helper = vec![0; (1 << 22) / 2048];
+        let (_, on_pool) = csr(4, &words, 1 << 22, &mut pv, 7, &mut helper, Vec::new());
+        assert!(!on_pool, "off a pool");
+    }
+
+    // EXPERIMENT (LOSAT_X_DCCSR): a table of more positions than a quarter of its cells, built on
+    // a pool, is laid out as CSR (with the switch on) and answers `count_hits`, `contains_hit`
+    // and `longest_chain` as the chains of the original loop; its runs are the chains.
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    #[test]
+    fn a_large_table_on_a_pool_answers_from_its_csr() {
+        let mut rng = Lcg(0xC5A0_0002);
+        let seq: Vec<u8> = (0..1_200_000)
+            .map(|i| {
+                if i % 7919 < 2 {
+                    14
+                } else if i % 3 == 0 {
+                    (i / 5 % 4) as u8
+                } else {
+                    rng.below(4) as u8
+                }
+            })
+            .collect();
+        let case = Case {
+            queries: vec![seq.clone(), seq[..300_000].to_vec()],
+            offsets: vec![0, 1_200_001],
+            masks: vec![
+                vec![MaskedInterval {
+                    start: 524_280,
+                    end: 524_300,
+                }],
+                Vec::new(),
+            ],
+        };
+        let combo = (11usize, DiscWordType::Coding, 16usize);
+        let reference = build(&case, combo, How::Serial);
+        let query_refs: Vec<&[u8]> = case.queries.iter().map(Vec::as_slice).collect();
+        let approx: usize = case.queries.iter().map(Vec::len).sum();
+        crate::utils::threading::with_search_pool(4, "blastn", |_pool| {
+            let lookup = build_disc_mb_lookup(
+                &query_refs,
+                &case.offsets,
+                combo.0,
+                combo.2,
+                combo.1,
+                &case.masks,
+                approx,
+            );
+            let disc = lookup.disc().expect("a discontiguous table");
+            assert_eq!(disc.x_csr().is_some(), super::super::x_dc_csr::on());
+            assert_eq!(lookup.longest_chain(), reference.longest_chain);
+            let mut chain = Vec::new();
+            for cell in (0..reference.hashtable.len()).step_by(3) {
+                chain.clear();
+                let mut q = reference.hashtable[cell];
+                while q != 0 {
+                    chain.push(q);
+                    q = reference.next_pos[q as usize];
+                }
+                assert_eq!(lookup.count_hits(cell as u64), chain.len(), "cell {cell}");
+                for &q in chain.iter().take(3) {
+                    assert!(lookup.contains_hit(cell as u64, q), "cell {cell} {q}");
+                }
+                assert!(!lookup.contains_hit(cell as u64, 1_500_002), "cell {cell}");
+                if let Some(csr) = disc.x_csr() {
+                    assert_eq!(csr.run(cell), chain.as_slice(), "cell {cell}");
+                }
+            }
+            Ok(())
+        })
+        .unwrap();
     }
 }

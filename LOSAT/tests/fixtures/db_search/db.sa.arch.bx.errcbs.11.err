@@ -1,0 +1,3 @@
+Warning: [blastx] The parameter -num_descriptions is ignored for output formats > 4 . Use -max_target_seqs to control output
+BLAST query/options error: Composition-adjusted searched are not supported with an ungapped search, please add -comp_based_stats F or do a gapped search
+Please refer to the BLAST+ user manual.

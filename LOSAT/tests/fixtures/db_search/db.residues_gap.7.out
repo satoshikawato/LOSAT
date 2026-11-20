@@ -1,0 +1,121 @@
+# BLASTP 2.17.0+
+# Query: q_plain
+# Database: tests/db_search/residues_gap
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 19 hits found
+q_plain	s_plain	100.000	142	0	0	1	142	1	142	2.90e-105	286
+q_plain	s_Z	97.887	142	3	0	1	142	1	142	1.49e-103	282
+q_plain	s_J	97.887	142	3	0	1	142	1	142	1.02e-102	280
+q_plain	s_B	97.887	142	3	0	1	142	1	142	1.53e-102	280
+q_plain	s_X	97.887	142	3	0	1	142	1	142	1.73e-102	280
+q_plain	s_O	97.887	142	3	0	1	142	1	142	1.73e-102	280
+q_plain	s_Zrun	97.183	142	4	0	1	142	1	142	1.88e-102	279
+q_plain	s_U	97.887	142	3	0	1	142	1	142	3.60e-102	279
+q_plain	s_Urun	97.183	142	4	0	1	142	1	142	4.68e-102	278
+q_plain	s_Xrun	97.183	142	4	0	1	142	1	142	5.34e-102	278
+q_plain	s_Orun	97.183	142	4	0	1	142	1	142	5.34e-102	278
+q_plain	s_Brun	97.183	142	4	0	1	142	1	142	1.26e-101	277
+q_plain	s_Jrun	97.183	142	4	0	1	142	1	142	1.34e-101	277
+q_plain	s_star	97.887	142	3	0	1	142	1	142	6.67e-101	275
+q_plain	s_starrun	97.183	142	4	0	1	142	1	142	8.23e-100	273
+q_plain	s_dashrun	97.260	146	-4	2	1	142	1	142	6.64e-98	268
+q_plain	s_mix	94.406	143	6	2	1	142	1	142	2.23e-93	256
+q_plain	s_dash	97.931	145	-3	6	1	142	1	142	6.35e-92	253
+q_plain	s_beta	43.448	145	74	3	3	141	4	146	8.08e-37	113
+# BLASTP 2.17.0+
+# Query: q_U three U
+# Database: tests/db_search/residues_gap
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 19 hits found
+q_U	s_U	100.000	142	0	0	1	142	1	142	2.96e-106	289
+q_U	s_J	97.887	142	3	0	1	142	1	142	1.10e-102	280
+q_U	s_X	97.887	142	3	0	1	142	1	142	1.99e-102	279
+q_U	s_O	97.887	142	3	0	1	142	1	142	1.99e-102	279
+q_U	s_plain	97.887	142	3	0	1	142	1	142	3.60e-102	279
+q_U	s_Z	97.887	142	3	0	1	142	1	142	7.43e-102	278
+q_U	s_B	97.887	142	3	0	1	142	1	142	7.68e-102	278
+q_U	s_star	97.887	142	3	0	1	142	1	142	9.37e-101	275
+q_U	s_Xrun	95.775	142	6	0	1	142	1	142	5.61e-100	273
+q_U	s_Orun	95.775	142	6	0	1	142	1	142	5.61e-100	273
+q_U	s_Zrun	95.775	142	6	0	1	142	1	142	5.92e-100	273
+q_U	s_Jrun	95.775	142	6	0	1	142	1	142	6.06e-100	273
+q_U	s_Urun	96.479	142	5	0	1	142	1	142	6.91e-100	273
+q_U	s_Brun	95.775	142	6	0	1	142	1	142	2.36e-99	271
+q_U	s_starrun	95.775	142	6	0	1	142	1	142	8.83e-98	268
+q_U	s_dashrun	95.890	146	-2	2	1	142	1	142	7.11e-96	263
+q_U	s_dash	97.931	145	-3	6	1	142	1	142	8.92e-92	252
+q_U	s_mix	92.308	143	9	2	1	142	1	142	9.04e-90	247
+q_U	s_beta	42.069	145	76	3	3	141	4	146	1.38e-34	108
+# BLASTP 2.17.0+
+# Query: q_O three O
+# Database: tests/db_search/residues_gap
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 19 hits found
+q_O	s_Z	97.887	142	3	0	1	142	1	142	1.60e-102	280
+q_O	s_plain	97.887	142	3	0	1	142	1	142	1.73e-102	280
+q_O	s_U	97.887	142	3	0	1	142	1	142	1.99e-102	279
+q_O	s_X	97.887	142	3	0	1	142	1	142	2.53e-102	279
+q_O	s_O	100.000	142	0	0	1	142	1	142	2.53e-102	279
+q_O	s_J	97.887	142	3	0	1	142	1	142	2.89e-102	279
+q_O	s_B	97.887	142	3	0	1	142	1	142	2.89e-102	279
+q_O	s_star	97.887	142	3	0	1	142	1	142	8.58e-101	275
+q_O	s_Urun	95.775	142	6	0	1	142	1	142	2.18e-100	274
+q_O	s_Zrun	95.775	142	6	0	1	142	1	142	2.41e-100	274
+q_O	s_Xrun	95.775	142	6	0	1	142	1	142	3.99e-100	273
+q_O	s_Orun	96.479	142	5	0	1	142	1	142	3.99e-100	273
+q_O	s_Jrun	95.775	142	6	0	1	142	1	142	5.49e-100	273
+q_O	s_Brun	95.775	142	6	0	1	142	1	142	1.20e-99	272
+q_O	s_starrun	95.775	142	6	0	1	142	1	142	5.69e-98	268
+q_O	s_dashrun	95.890	146	-2	2	1	142	1	142	4.59e-96	263
+q_O	s_dash	97.931	145	-3	6	1	142	1	142	8.17e-92	253
+q_O	s_mix	92.308	143	9	2	1	142	1	142	9.23e-91	250
+q_O	s_beta	42.069	145	76	3	3	141	4	146	2.83e-35	109
+# BLASTP 2.17.0+
+# Query: q_C cysteine where the subjects have their letters
+# Database: tests/db_search/residues_gap
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 19 hits found
+q_C	s_U	97.887	142	3	0	1	142	1	142	2.96e-106	289
+q_C	s_J	97.887	142	3	0	1	142	1	142	1.10e-102	280
+q_C	s_X	97.887	142	3	0	1	142	1	142	1.99e-102	279
+q_C	s_O	97.887	142	3	0	1	142	1	142	1.99e-102	279
+q_C	s_plain	97.887	142	3	0	1	142	1	142	3.60e-102	279
+q_C	s_Z	97.887	142	3	0	1	142	1	142	7.43e-102	278
+q_C	s_B	97.887	142	3	0	1	142	1	142	7.68e-102	278
+q_C	s_star	97.887	142	3	0	1	142	1	142	9.37e-101	275
+q_C	s_Xrun	95.775	142	6	0	1	142	1	142	5.61e-100	273
+q_C	s_Orun	95.775	142	6	0	1	142	1	142	5.61e-100	273
+q_C	s_Zrun	95.775	142	6	0	1	142	1	142	5.92e-100	273
+q_C	s_Jrun	95.775	142	6	0	1	142	1	142	6.06e-100	273
+q_C	s_Urun	95.775	142	6	0	1	142	1	142	6.91e-100	273
+q_C	s_Brun	95.775	142	6	0	1	142	1	142	2.36e-99	271
+q_C	s_starrun	95.775	142	6	0	1	142	1	142	8.83e-98	268
+q_C	s_dashrun	95.890	146	-2	2	1	142	1	142	7.11e-96	263
+q_C	s_dash	97.931	145	-3	6	1	142	1	142	8.92e-92	252
+q_C	s_mix	92.308	143	9	2	1	142	1	142	9.04e-90	247
+q_C	s_beta	42.069	145	76	3	3	141	4	146	1.38e-34	108
+# BLASTP 2.17.0+
+# Query: q_beta
+# Database: tests/db_search/residues_gap
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 19 hits found
+q_beta	s_beta	98.639	147	2	0	1	147	1	147	1.55e-108	295
+q_beta	s_plain	43.448	145	74	3	4	146	3	141	3.32e-37	114
+q_beta	s_J	42.069	145	76	3	4	146	3	141	8.39e-36	111
+q_beta	s_X	42.069	145	76	3	4	146	3	141	1.23e-35	110
+q_beta	s_O	42.069	145	76	3	4	146	3	141	1.23e-35	110
+q_beta	s_Z	42.069	145	76	3	4	146	3	141	1.34e-35	110
+q_beta	s_B	42.069	145	76	3	4	146	3	141	1.98e-35	110
+q_beta	s_U	42.069	145	76	3	4	146	3	141	2.05e-35	110
+q_beta	s_Jrun	41.379	145	77	3	4	146	3	141	2.26e-35	110
+q_beta	s_Zrun	41.379	145	77	3	4	146	3	141	6.76e-35	108
+q_beta	s_Xrun	41.379	145	77	3	4	146	3	141	8.05e-35	108
+q_beta	s_Orun	41.379	145	77	3	4	146	3	141	8.05e-35	108
+q_beta	s_Urun	41.379	145	77	3	4	146	3	141	1.72e-34	107
+q_beta	s_Brun	41.379	145	77	3	4	146	3	141	3.00e-34	107
+q_beta	s_star	42.069	145	76	3	4	146	3	141	3.98e-34	107
+q_beta	s_starrun	41.379	145	77	3	4	146	3	141	1.01e-32	103
+q_beta	s_dashrun	42.953	149	69	5	4	146	3	141	7.02e-31	98.6
+q_beta	s_mix	42.177	147	73	5	4	146	3	141	2.39e-30	97.4
+q_beta	s_dash	43.243	148	70	9	4	146	3	141	2.87e-25	84.3
+# BLAST processed 5 queries

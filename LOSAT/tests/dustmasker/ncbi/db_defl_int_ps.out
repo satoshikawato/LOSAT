@@ -1,0 +1,53 @@
+>gnl|BL_ORD_ID|0 
+>gnl|BL_ORD_ID|1 gi|123|gb|ABC12345.1| some title
+199 - 279
+430 - 480
+578 - 670
+>gnl|BL_ORD_ID|2 lcl|myid title here
+199 - 279
+430 - 480
+578 - 670
+>gnl|BL_ORD_ID|3 ref|NC_000001.11| chromosome
+199 - 279
+430 - 480
+578 - 670
+>gnl|BL_ORD_ID|4 sp|P12345|NAME_HUMAN prot
+199 - 279
+430 - 480
+578 - 670
+>gnl|BL_ORD_ID|5 plainid double spaces
+199 - 279
+430 - 480
+578 - 670
+>gnl|BL_ORD_ID|6 id_trailing_period title ends with period
+199 - 279
+430 - 480
+578 - 670
+>gnl|BL_ORD_ID|7 id_tab tab inside
+199 - 279
+430 - 480
+578 - 670
+>gnl|BL_ORD_ID|8 gnl|db|123 gnl title
+199 - 279
+430 - 480
+578 - 670
+>gnl|BL_ORD_ID|9 id_only
+199 - 279
+430 - 480
+578 - 670
+>gnl|BL_ORD_ID|10 pdb|1ABC|A chain
+199 - 279
+430 - 480
+578 - 670
+>gnl|BL_ORD_ID|11 emb|X1234.1|; semicolon
+199 - 279
+430 - 480
+578 - 670
+>gnl|BL_ORD_ID|12 123456
+199 - 279
+430 - 480
+578 - 670
+>gnl|BL_ORD_ID|13 id with,comma, and
+199 - 279
+430 - 480
+578 - 670

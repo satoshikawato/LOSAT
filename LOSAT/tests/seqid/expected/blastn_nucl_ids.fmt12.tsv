@@ -1,0 +1,17 @@
+{"local":{"str":"Subject_31"}}
+{"local":{"str":"Subject_30"}}
+{"other":{"accession":"NM_000001","version":1}}
+{"embl":{"accession":"AJ000003","version":1}}
+{"gi":654321}
+{"other":{"accession":"NC_000005","version":11}}
+{"ddbj":{"accession":"AB000004","version":1}}
+{"local":{"str":"mynuc6"}}
+{"ddbj":{"accession":"AB000009"}}
+{"general":{"db":"mydb","tag":{"str":"nuc7"}}}
+{"tpg":{"accession":"BK000012","version":1}}
+{"local":{"str":"mynuc_10"}}
+{"other":{"accession":"NM_000008","version":2}}
+{"gi":1111}
+{"genbank":{"name":"LOCUS13","accession":"AB000013","version":1}}
+{"patent":{"seqid":14,"cit":{"country":"US","id":{"number":"1234567"}}}}
+{"gi":1515}

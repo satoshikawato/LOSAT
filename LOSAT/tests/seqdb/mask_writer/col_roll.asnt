@@ -1,0 +1,418 @@
+Blast-db-mask-info ::= {
+  algo-id 0,
+  algo-program windowmasker,
+  algo-options "",
+  masks {
+    masks {
+      packed-int {
+          {
+            from 0,
+            to 0,
+            id local id 1
+          },
+          {
+            from 2,
+            to 2,
+            id local id 1
+          },
+          {
+            from 4,
+            to 4,
+            id local id 1
+          },
+          {
+            from 6,
+            to 6,
+            id local id 1
+          },
+          {
+            from 8,
+            to 8,
+            id local id 1
+          },
+          {
+            from 10,
+            to 10,
+            id local id 1
+          },
+          {
+            from 12,
+            to 12,
+            id local id 1
+          },
+          {
+            from 14,
+            to 14,
+            id local id 1
+          },
+          {
+            from 16,
+            to 16,
+            id local id 1
+          },
+          {
+            from 18,
+            to 18,
+            id local id 1
+          },
+          {
+            from 20,
+            to 20,
+            id local id 1
+          },
+          {
+            from 22,
+            to 22,
+            id local id 1
+          },
+          {
+            from 24,
+            to 24,
+            id local id 1
+          },
+          {
+            from 26,
+            to 26,
+            id local id 1
+          },
+          {
+            from 28,
+            to 28,
+            id local id 1
+          },
+          {
+            from 30,
+            to 30,
+            id local id 1
+          },
+          {
+            from 32,
+            to 32,
+            id local id 1
+          },
+          {
+            from 34,
+            to 34,
+            id local id 1
+          },
+          {
+            from 36,
+            to 36,
+            id local id 1
+          },
+          {
+            from 38,
+            to 38,
+            id local id 1
+          }
+      },
+      packed-int {
+          {
+            from 0,
+            to 0,
+            id local id 2
+          },
+          {
+            from 2,
+            to 2,
+            id local id 2
+          },
+          {
+            from 4,
+            to 4,
+            id local id 2
+          },
+          {
+            from 6,
+            to 6,
+            id local id 2
+          },
+          {
+            from 8,
+            to 8,
+            id local id 2
+          },
+          {
+            from 10,
+            to 10,
+            id local id 2
+          },
+          {
+            from 12,
+            to 12,
+            id local id 2
+          },
+          {
+            from 14,
+            to 14,
+            id local id 2
+          },
+          {
+            from 16,
+            to 16,
+            id local id 2
+          },
+          {
+            from 18,
+            to 18,
+            id local id 2
+          },
+          {
+            from 20,
+            to 20,
+            id local id 2
+          },
+          {
+            from 22,
+            to 22,
+            id local id 2
+          },
+          {
+            from 24,
+            to 24,
+            id local id 2
+          },
+          {
+            from 26,
+            to 26,
+            id local id 2
+          },
+          {
+            from 28,
+            to 28,
+            id local id 2
+          },
+          {
+            from 30,
+            to 30,
+            id local id 2
+          },
+          {
+            from 32,
+            to 32,
+            id local id 2
+          },
+          {
+            from 34,
+            to 34,
+            id local id 2
+          },
+          {
+            from 36,
+            to 36,
+            id local id 2
+          },
+          {
+            from 38,
+            to 38,
+            id local id 2
+          }
+      },
+      packed-int {
+          {
+            from 0,
+            to 0,
+            id local id 3
+          },
+          {
+            from 2,
+            to 2,
+            id local id 3
+          },
+          {
+            from 4,
+            to 4,
+            id local id 3
+          },
+          {
+            from 6,
+            to 6,
+            id local id 3
+          },
+          {
+            from 8,
+            to 8,
+            id local id 3
+          },
+          {
+            from 10,
+            to 10,
+            id local id 3
+          },
+          {
+            from 12,
+            to 12,
+            id local id 3
+          },
+          {
+            from 14,
+            to 14,
+            id local id 3
+          },
+          {
+            from 16,
+            to 16,
+            id local id 3
+          },
+          {
+            from 18,
+            to 18,
+            id local id 3
+          },
+          {
+            from 20,
+            to 20,
+            id local id 3
+          },
+          {
+            from 22,
+            to 22,
+            id local id 3
+          },
+          {
+            from 24,
+            to 24,
+            id local id 3
+          },
+          {
+            from 26,
+            to 26,
+            id local id 3
+          },
+          {
+            from 28,
+            to 28,
+            id local id 3
+          },
+          {
+            from 30,
+            to 30,
+            id local id 3
+          },
+          {
+            from 32,
+            to 32,
+            id local id 3
+          },
+          {
+            from 34,
+            to 34,
+            id local id 3
+          },
+          {
+            from 36,
+            to 36,
+            id local id 3
+          },
+          {
+            from 38,
+            to 38,
+            id local id 3
+          }
+      },
+      packed-int {
+          {
+            from 0,
+            to 0,
+            id local id 4
+          },
+          {
+            from 2,
+            to 2,
+            id local id 4
+          },
+          {
+            from 4,
+            to 4,
+            id local id 4
+          },
+          {
+            from 6,
+            to 6,
+            id local id 4
+          },
+          {
+            from 8,
+            to 8,
+            id local id 4
+          },
+          {
+            from 10,
+            to 10,
+            id local id 4
+          },
+          {
+            from 12,
+            to 12,
+            id local id 4
+          },
+          {
+            from 14,
+            to 14,
+            id local id 4
+          },
+          {
+            from 16,
+            to 16,
+            id local id 4
+          },
+          {
+            from 18,
+            to 18,
+            id local id 4
+          },
+          {
+            from 20,
+            to 20,
+            id local id 4
+          },
+          {
+            from 22,
+            to 22,
+            id local id 4
+          },
+          {
+            from 24,
+            to 24,
+            id local id 4
+          },
+          {
+            from 26,
+            to 26,
+            id local id 4
+          },
+          {
+            from 28,
+            to 28,
+            id local id 4
+          },
+          {
+            from 30,
+            to 30,
+            id local id 4
+          },
+          {
+            from 32,
+            to 32,
+            id local id 4
+          },
+          {
+            from 34,
+            to 34,
+            id local id 4
+          },
+          {
+            from 36,
+            to 36,
+            id local id 4
+          },
+          {
+            from 38,
+            to 38,
+            id local id 4
+          }
+      }
+    },
+    more FALSE
+  }
+}

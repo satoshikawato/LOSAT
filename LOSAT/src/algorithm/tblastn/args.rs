@@ -1,25 +1,17 @@
-//! Pinned NCBI TBLASTN local-subject search and Stage E report options.
-use anyhow::{Context, Result};
+//! TBLASTN's options (NCBI c++/src/algo/blast/blastinput/tblastn_args.cpp and blast_args.cpp)
+//! and LOSAT's limits.
+use anyhow::Result;
 use clap::Args;
 use std::io::Write;
 use std::path::PathBuf;
 
-use crate::blastinput::query_batch::query_batches;
 use crate::blastinput::value_parsers::*;
+
 use crate::utils::genetic_code::GeneticCode;
 
-use super::database::TblastnDatabase;
-use super::stage_d_pipeline::{
-    run_local_for_report_threads, LocalStageDProfile, LocalStageDScoring, SubjectSetNumbers,
-};
-use super::stage_d_stats::LocalSubjectParameters;
-use super::stage_e_report::{render, ShownSubjects};
-use super::x_subject_store::SubjectLetters;
-use crate::algorithm::blastn::blast_engine::{QueryReading, NO_DATA_MESSAGE};
-use crate::algorithm::common::database::{HeaderReadError, PreliminaryReadError};
-use crate::api::local_blast::{OutputSink, ReportOutputs};
-use crate::blastinput::fasta_reader::FastaRecord;
+use super::stage_d_pipeline::LocalStageDScoring;
 use crate::config::ScoringMatrix;
+use crate::core::composition_adjustment::redo_alignment::BlastCompoAdjustMode;
 
 // NCBI reference: c++/src/algo/blast/blastinput/tblastn_args.cpp:54-61
 // ```c++
@@ -31,6 +23,10 @@ use crate::config::ScoringMatrix;
 //     arg.Reset(new CTaskCmdLineArgs(tasks, kDefaultTask));
 //     m_Args.push_back(arg);
 // ```
+/// TBLASTN's `-task`: the command line's parser, and the check of `run_local` (`TaskParser::check`).
+pub(crate) const TBLASTN_TASK: TaskParser =
+    task_parser("TBLASTN", &["tblastn", "tblastn-fast"], &[]);
+
 // NCBI reference: c++/src/algo/blast/api/tblastn_options.cpp:54-85
 // ```c++
 // SetWordThreshold(BLAST_WORD_THRESHOLD_TBLASTN);
@@ -71,9 +67,13 @@ pub struct TblastnArgs {
         long,
         value_name = "NAME",
         conflicts_with_all = ["subject", "subject_loc"],
-        help = "BLAST database name (a nucleotide database without parsed Seq-ids)"
+        help = "BLAST database name (a nucleotide database, with or without parsed Seq-ids)"
     )]
     pub db: Option<String>,
+    /// `-taxids`, `-taxidlist`, `-negative_taxids`, `-negative_taxidlist` and
+    /// `-no_taxid_expansion` (line DI-8).
+    #[command(flatten)]
+    pub db_filter: crate::blastinput::db_filter::DbFilterArgs,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2231-2237
     // ```c++
     //     // DB size
@@ -88,10 +88,48 @@ pub struct TblastnArgs {
     // (`stage_d_pipeline::SubjectSetNumbers`).
     #[arg(long, value_parser = ncbi_int8, value_name = "LETTERS", help = "Effective length of the database")]
     pub dbsize: Option<i64>,
-    #[arg(long, default_value = "tblastn", value_parser = ["tblastn", "tblastn-fast"])]
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2663
+    // ```c++
+    //     arg_desc.AddFlag(kArgShowGIs, "Show NCBI GIs in deflines?", true);
+    // ```
+    #[arg(
+        long = "show_gis",
+        default_value_t = false,
+        help = "Show NCBI GIs in deflines?"
+    )]
+    pub show_gis: bool,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2050-2052
+    // ```c++
+    //     arg_desc.AddDefaultKey(kArgParseDeflines, "TF", "Should the query and "
+    // ```
+    // `-parse_deflines` is a flag of the programs (blast_args.cpp:1961).
+    #[arg(
+        long = "parse_deflines",
+        default_value_t = false,
+        help = "Should the query and subject defline(s) be parsed?"
+    )]
+    pub parse_deflines: bool,
+    /// The ids of the search's records under `-parse_deflines` (`run`).
+    #[arg(skip)]
+    pub id_scope: Option<std::sync::Arc<crate::seqid::id_scope::IdScope>>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:234-238
+    // ```c++
+    //     arg_desc.AddOptionalKey(kArgEffSearchSpace, "int_value",
+    //                             "Effective length of the search space",
+    //                             CArgDescriptions::eInt8);
+    // ```
+    #[arg(long, value_parser = crate::blastinput::value_parsers::nonnegative_ncbi_int8, value_name = "INT_VALUE", help = "Effective length of the search space")]
+    pub searchsp: Option<i64>,
+    // `tblastn-fast`: word size 5, the compressed lookup table and threshold 20 (`resolve`).
+    #[arg(long, default_value = "tblastn", value_parser = TBLASTN_TASK)]
     pub task: String,
     #[arg(long, value_name = "PATH", value_parser = ncbi_output_path())]
     pub out: Option<PathBuf>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3532-3535
+    // (quoted at `BlastpArgs::export_search_strategy`). The search strategy file
+    // (`report::archive::strategy`), created by `run` before the other options are read.
+    #[arg(long, value_name = "filename", value_parser = ncbi_output_path(), help = "File name to record the search strategy used")]
+    pub export_search_strategy: Option<PathBuf>,
     // An omitted value keeps the default of the task (10).
     #[arg(long, value_parser = tblastn_real, help = "Expectation value (E) threshold for saving hits [default: 10]")]
     pub evalue: Option<f64>,
@@ -126,6 +164,11 @@ pub struct TblastnArgs {
     // arg_desc.AddOptionalKey(kArgFinalGappedXDropoff, "float_value", ...);
     // opt.SetGapXDropoff(args[kArgGappedXDropoff].AsDouble());
     // opt.SetGapXDropoffFinal(args[kArgFinalGappedXDropoff].AsDouble());
+    // NCBI c++/src/algo/blast/blastinput/blast_args.cpp:209-214,276-278:
+    // arg_desc.AddOptionalKey(kArgUngappedXDropoff, "float_value", ...);
+    // opt.SetXDropoff(args[kArgUngappedXDropoff].AsDouble());
+    #[arg(long, value_parser = tblastn_real, help = "X-dropoff value (in bits) for ungapped extensions [default: 7]")]
+    pub xdrop_ungap: Option<f64>,
     #[arg(long, value_parser = tblastn_real, help = "X-dropoff value (in bits) for preliminary gapped extensions [default: 15]")]
     pub xdrop_gap: Option<f64>,
     #[arg(long, value_parser = tblastn_real, help = "X-dropoff value (in bits) for final gapped alignment [default: 25]")]
@@ -137,7 +180,7 @@ pub struct TblastnArgs {
         help = "Use composition-based statistics: 0 (F, f) none, 1 composition-based statistics, 2 (D, d, T, t) conditional compositional score matrix adjustment, 3 unconditional compositional score matrix adjustment"
     )]
     pub comp_based_stats: String,
-    #[arg(long, default_value = "0")]
+    #[arg(long, default_value = "0", value_name = "SPEC", help = crate::cli::outfmt_help("0 to 16, 18 and 20", "6, 7, 10 and 20", "; with -in_pssm: 0 to 4, 6, 7 and 10"))]
     pub outfmt: String,
     // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:1945-1949
     // ```c++
@@ -166,6 +209,7 @@ pub struct TblastnArgs {
     #[arg(
         long = "subject_loc",
         value_name = "RANGE",
+        conflicts_with_all = crate::blastinput::db_filter::DB_FILTER_OPTIONS,
         help = "Location on the subject sequence in 1-based offsets (Format: start-stop)"
     )]
     pub subject_loc: Option<String>,
@@ -196,12 +240,130 @@ pub struct TblastnArgs {
     #[arg(long, value_parser = nonnegative_ncbi_integer, help = "Multiple hits window size, use 0 to specify 1-hit algorithm [default: 40, or the matrix's suggestion]")]
     pub window_size: Option<i32>,
     // An omitted value keeps the default hit list size (500).
-    #[arg(long, value_parser = blastn_count, help = "Maximum number of aligned sequences to keep [default: 500]")]
+    #[arg(long, value_parser = blastn_count, help = "Maximum number of aligned sequences to keep [default: 500]", conflicts_with_all = ["num_descriptions", "num_alignments"])]
     pub max_target_seqs: Option<usize>,
+    // NCBI blast_args.cpp:2665-2685,2732-2738: 0 or more; -max_target_seqs excludes both.
+    #[arg(long = "num_descriptions", value_name = "int_value", value_parser = report_count, help = "Number of database sequences to show one-line descriptions for. Not applicable for outfmt > 4 [default: 500]")]
+    pub num_descriptions: Option<usize>,
+    #[arg(long = "num_alignments", value_name = "int_value", value_parser = report_count, help = "Number of database sequences to show alignments for [default: 250]")]
+    pub num_alignments: Option<usize>,
+    /// `-line_length`, `-sorthits` and `-sorthsps` (NCBI's formatting handler,
+    /// `blastinput::report_counts::FormattingArgs`).
+    #[command(flatten)]
+    pub formatting: crate::blastinput::report_counts::FormattingArgs,
+    // NCBI blast_args.cpp:196-206: -qcov_hsp_perc in 0..100, -max_hsps >= 1.
+    #[arg(long = "max_hsps", value_parser = blastn_count, help = "Set maximum number of HSPs per subject sequence to save for each query")]
+    pub max_hsps: Option<usize>,
+    #[arg(long = "qcov_hsp_perc", value_parser = tblastn_query_coverage, help = "Percent query coverage per hsp")]
+    pub qcov_hsp_perc: Option<f64>,
+    // NCBI blast_args.cpp:3335-3340 (CHspFilteringArgs::ExtractAlgorithmOptions):
+    // opts.SetCullingLimit(args[kArgCullingLimit].AsInteger());
+    /// If the query range of a hit is enveloped by that of at least this many
+    /// higher-scoring hits, delete the hit (default: 0, no culling).
+    #[arg(long, value_parser = nonnegative_ncbi_integer)]
+    pub culling_limit: Option<i32>,
     #[arg(long, default_value_t = 1, value_parser = blastn_count)]
     pub num_threads: usize,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3169-3181
+    // ```c++
+    //     if (m_MTMode >= 0) {
+    //     	arg_desc.AddDefaultKey(kArgMTMode, "int_value",
+    //                                "Multi-thread mode to use in BLAST search:\n "
+    //                                "0 auto split by database or queries \n "
+    //                                "1 split by queries\n "
+    //                                "2 split by database",
+    //                                CArgDescriptions::eInteger,
+    //                                NStr::IntToString(0));
+    //     	arg_desc.SetConstraint(kArgMTMode,
+    //                                new CArgAllowValuesBetween(0, 2, true));
+    //     	arg_desc.SetDependency(kArgMTMode,
+    //                                CArgDescriptions::eRequires,
+    //                                kArgNumThreads);
+    //     }
+    // ```
+    // `-mt_mode` is read and has no effect: LOSAT's output is the same at every thread count
+    // and for every value, and equals NCBI's `-num_threads 1` output (Owner 2026-10-13;
+    // CLI DECISIONS 5). NCBI's `-mt_mode 1` (and `0` when it chooses to split by queries)
+    // runs the queries in batches and writes the end of an outfmt 0 report or each XML
+    // document per batch (`blastn_app.cpp:134-170`, `blastx_app.cpp` `x_RunMTBySplitQuery`);
+    // that framing is not reproduced. The value must be 0 to 2 and `-num_threads` must be
+    // given with it, as in NCBI (clap's `requires` ignores a default value).
+    #[arg(long, value_name = "int_value", value_parser = crate::blastinput::value_parsers::ncbi_mt_mode, requires = "num_threads", help = "Multi-thread mode: 0 auto, 1 split by queries, 2 split by database (accepted; the output does not depend on it)")]
+    pub mt_mode: Option<u8>,
     #[arg(long)]
     pub ungapped: bool,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1133-1143,1241-1247
+    // ```c++
+    //     if (m_DbTarget == eNucleotideDb) {
+    //         arg_desc.SetCurrentGroup("PSI-TBLASTN options");
+    //
+    //         // PSI-tblastn checkpoint
+    //         arg_desc.AddOptionalKey(kArgPSIInputChkPntFile, "psi_chkpt_file",
+    //                                 "PSI-TBLASTN checkpoint file",
+    //                                 CArgDescriptions::eInputFile);
+    //         arg_desc.SetDependency(kArgPSIInputChkPntFile,
+    //                                 CArgDescriptions::eExcludes,
+    //                                 kArgRemote);
+    // ...
+    //     if (!m_IsDeltaBlast) {
+    //         arg_desc.SetDependency(kArgPSIInputChkPntFile,
+    //                                CArgDescriptions::eExcludes,
+    //                                kArgQuery);
+    //         arg_desc.SetDependency(kArgPSIInputChkPntFile,
+    //                                CArgDescriptions::eExcludes,
+    //                                kArgQueryLocation);
+    //     }
+    // ```
+    // PSI-TBLASTN (line PS, item PS7, DECISIONS 35): the query is a PSSM. The exclusions are
+    // errors of the argument parser, reported with LOSAT's text
+    // (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES, exception 1; `-remote` is refused by the parser,
+    // `cli.rs`). The file is read with the options (`check_options`, `in_pssm.rs`); the default
+    // `-query -` is not read.
+    #[arg(
+        long = "in_pssm",
+        value_name = "psi_chkpt_file",
+        value_parser = ncbi_input_path(),
+        conflicts_with_all = ["query", "query_loc"],
+        help = "PSI-TBLASTN checkpoint file"
+    )]
+    pub in_pssm: Option<PathBuf>,
+    /// The run's BLAST archive (outfmt 11), made by `run` and `run_local` before the search
+    /// reads the arguments (`archive::handle_for`).
+    #[arg(skip)]
+    pub archive: Option<crate::report::archive::ArchiveHandle>,
+    /// The run's search strategy export (`-export_search_strategy`), made by `run`
+    /// (`strategy::StrategyExport::for_run`).
+    #[arg(skip)]
+    pub strategy: Option<crate::report::archive::strategy::StrategyExport>,
+    /// Whether `taxdb.bti` is on NCBI's search path (`SeqDB_ResolveDbPath("taxdb.bti")`), asked
+    /// before the search where a tabular field list looks every taxid up (the plural names of the
+    /// taxonomy database, the organism report; `algorithm::tblastn::tabular`), by the command line
+    /// and the library (`common::database::subject_taxonomy`); `None` elsewhere (LOSAT Web has no
+    /// files: not found). Not a public option.
+    #[arg(skip)]
+    pub tabular_taxdb: Option<bool>,
+    /// The taxonomy database of a `-subject` search's organism report (outfmt 18), made with
+    /// `tabular_taxdb` (`common::database::SubjectTaxdb`); `None` elsewhere. Not a public option.
+    #[arg(skip)]
+    pub subject_taxdb: Option<crate::algorithm::common::database::SubjectTaxdb>,
+    /// The `[BLAST] BLASTDB` setting through which a `-subject` search's tabular reports look for
+    /// the taxonomy database (`common::database::subject_taxonomy`), which a search of records of
+    /// the library (`api::run`) reads from the call's application settings when a report looks
+    /// every taxid up; `None` elsewhere (the command line passes its settings, LOSAT Web has no
+    /// files). Not a public option.
+    #[arg(skip)]
+    pub taxdb_setting: Option<crate::algorithm::common::database::TaxdbSetting>,
+    // NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_input.hpp:180-182
+    // ```c++
+    //     int GetLocalIdCounterInitValue() const { return m_LocalIdCounter; }
+    //     ...
+    //     void SetLocalIdCounterInitValue(int val) { m_LocalIdCounter = val; }
+    // ```
+    // The position in the whole input of the first of these records, as a reader's counter
+    // starts there (`api::run_batches`): a query's `Query_N` in the messages. 0 on the command
+    // line, whose records are the whole input.
+    #[arg(skip)]
+    pub first_query_ordinal: usize,
 }
 
 // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:997-1056
@@ -211,8 +373,11 @@ pub struct TblastnArgs {
 // return (genetic_codes.find(val) != genetic_codes.end());
 // ```
 // Stage A product decision admits 32 from gc.prt:340-347 for TBLASTN only.
+/// `NStr::StringToInt(value)` of `CArgAllowGeneticCodeInteger` is
+/// `value_parsers::genetic_code_number` (LOSAT's "invalid" message for the values outside 0..=255).
 pub fn tblastn_genetic_code(value: &str) -> std::result::Result<u8, String> {
-    let id = value.parse::<u8>().map_err(|_| "invalid genetic code ID")?;
+    let id = crate::blastinput::value_parsers::genetic_code_number(value)
+        .ok_or("invalid genetic code ID")?;
     GeneticCode::try_from_id(id).map(|_| id)
 }
 
@@ -225,6 +390,9 @@ pub struct ResolvedTblastnArgs {
     pub gap_extend: i32,
     pub xdrop_gap: f64,
     pub xdrop_gap_final: f64,
+    /// `-xdrop_ungap` or 7 bits (`CBlastProteinOptionsHandle::SetInitialWordOptionsDefaults`,
+    /// blast_prot_options.cpp:100-104).
+    pub xdrop_ungap: f64,
     pub word_size: i32,
     /// Whether the compressed-alphabet lookup table is used (word sizes 5-7, tblastn-fast).
     pub compressed_lookup: bool,
@@ -239,19 +407,47 @@ pub struct ResolvedTblastnArgs {
     pub matrix_name: String,
     pub threshold: f64,
     pub window_size: i32,
+    /// The hit list size (`ReportCounts::hitlist_size`): the -max_target_seqs value, the
+    /// larger of the numbers of descriptions and alignments of the pairwise report when
+    /// one of them is given, the -num_alignments value of a tabular format, or 500.
     pub hitlist_size: usize,
-    /// The -max_target_seqs value, which also sets the numbers of descriptions and
-    /// alignments of the pairwise report (500 and 250 when it is not given).
-    pub max_target_seqs_given: Option<usize>,
+    /// The numbers of descriptions and alignments of the pairwise report: the
+    /// -max_target_seqs value, -num_descriptions and -num_alignments, or 500 and 250.
+    pub num_descriptions: usize,
+    pub num_alignments: usize,
+    // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:263-265
+    // ```c++
+    //         formatter.SetLineLength(fmt_args->GetLineLength());
+    //         formatter.SetHitsSortOption(fmt_args->GetHitsSortOption());
+    //         formatter.SetHspsSortOption(fmt_args->GetHspsSortOption());
+    // ```
+    /// `-line_length`, `-sorthits` and `-sorthsps` of the pairwise report.
+    pub formatting: crate::blastinput::report_counts::FormattingArgs,
+    /// Whether -max_target_seqs was given (the text of LOSAT's limit on the hit list size).
+    pub max_target_seqs_given: bool,
+    /// The -max_hsps value, or 0 (every HSP).
+    pub max_hsps: usize,
+    /// The -qcov_hsp_perc value, or 0 (no filter).
+    pub query_cov_hsp_perc: f64,
+    /// The -culling_limit value (0: no culling).
+    pub culling_limit: i32,
     pub composition_mode: crate::blastinput::app::CompositionMode,
     /// The `-comp_based_stats` value as typed.
     pub comp_based_stats: String,
     pub num_threads: usize,
     /// The `-query_loc` range, as given.
     pub query_range: Option<crate::blastinput::seq_range::SequenceRange>,
+    /// `-in_pssm`: the query's PSSM (PSI-TBLASTN, `in_pssm.rs`).
+    pub pssm: Option<std::sync::Arc<crate::algorithm::pssm_search::PsiSearch>>,
 }
 
 impl TblastnArgs {
+    /// `-culling_limit`, 0 (no culling) when it is not given. The BLAST archive records
+    /// whether it was given (`culling_limit`).
+    pub fn culling_limit_value(&self) -> i32 {
+        self.culling_limit.unwrap_or(0)
+    }
+
     /// The `-db` value as NCBI keeps it (white space at its ends removed), `None` for a
     /// search of `-subject`.
     ///
@@ -272,6 +468,15 @@ impl TblastnArgs {
         self.check_options(&mut std::io::sink())
     }
 
+    /// `check_options` for the output formats of a `run_local` call (their numbers).
+    pub fn check_options_for_formats(
+        &self,
+        outfmts: &[i32],
+        diagnostics: &mut dyn Write,
+    ) -> Result<ResolvedTblastnArgs> {
+        self.check_options_with(Some(outfmts), diagnostics)
+    }
+
     /// NCBI's `CBlastAppArgs::SetOptions` for tblastn after the files are opened: the task's
     /// options, each argument handler in the order of `CTblastnAppArgs` (with the warnings
     /// that they post to `diagnostics`), and `Validate`, with NCBI's errors.
@@ -289,13 +494,24 @@ impl TblastnArgs {
     ///     }
     /// ```
     pub fn check_options(&self, diagnostics: &mut dyn Write) -> Result<ResolvedTblastnArgs> {
+        self.check_options_with(None, diagnostics)
+    }
+
+    fn check_options_with(
+        &self,
+        outfmts: Option<&[i32]>,
+        diagnostics: &mut dyn Write,
+    ) -> Result<ResolvedTblastnArgs> {
         use crate::blastinput::app::{
             formatting_handler_check, parse_comp_based_stats, parse_formatting_string,
             parse_seg_option,
         };
+        use crate::blastinput::protein_options_check::{
+            validate_protein_options, ProteinOptionsCheck,
+        };
         use crate::stats::protein_options::{
             protein_gap_existence_extend_params, suggested_threshold, suggested_window_size,
-            validate_protein_options, ProteinOptionsCheck, SuggestionProgram,
+            SuggestionProgram,
         };
         // NCBI reference: c++/src/algo/blast/api/blast_options_handle.cpp:436-447
         // ```c
@@ -321,14 +537,45 @@ impl TblastnArgs {
         // m_Opts->SetCompositionBasedStats(eCompositionMatrixAdjust);
         // SetDbGeneticCode(BLAST_GENETIC_CODE);
         // ```
-        let fast = self.task == "tblastn-fast";
+        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastn_args.cpp:138-149
+        // ```c++
+        //     if (args.Exist(kArgPSIInputChkPntFile) && args[kArgPSIInputChkPntFile]) {
+        //        CPSIBlastOptionsHandle * rv(new CPSIBlastOptionsHandle(locality));
+        //        rv->SetPSITblastnDefaults();
+        //        if (args[kTask].AsString() == "blastx-fast") {
+        //            rv->SetWordSize(6);
+        // ...
+        //        return CRef<CBlastOptionsHandle>(rv);
+        //     }
+        //     else {
+        //         return x_CreateOptionsHandleWithTask(locality, args[kTask].AsString());
+        //     }
+        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_options.cpp:69-75
+        // ```c++
+        // void CPSIBlastOptionsHandle::SetPSITblastnDefaults(void)
+        // {
+        //     m_Opts->SetProgram(ePSITblastn);
+        //     m_Opts->SetSmithWatermanMode(false);
+        //     m_Opts->SetDbGeneticCode(BLAST_GENETIC_CODE);
+        //     m_Opts->SetWordThreshold(BLAST_WORD_THRESHOLD_TBLASTN);
+        // }
+        // ```
+        // With `-in_pssm` (PSI-TBLASTN, DECISIONS 35 of line PS) the options are psiblast's handle
+        // with tblastn's program, threshold 13 and genetic code: the defaults of blastp's protein
+        // handle (word size 3, window 40, X-drops 15 and 25, BLOSUM62 11/1, e-value 10, the same
+        // values as tblastn's) without sum statistics (the handle never calls
+        // `SetSumStatisticsMode`). `-task` is checked and has no effect (the test names
+        // `blastx-fast`, which is not a tblastn task).
+        let psi = self.in_pssm.is_some();
+        let fast = !psi && self.task == "tblastn-fast";
         let mut word_size: i32 = if fast { 5 } else { 3 };
         let mut compressed_lookup = fast;
         let mut threshold: f64 = if fast { 20.0 } else { 13.0 };
         let mut evalue = 10.0;
         let (mut gap_open, mut gap_extend) = (11, 1);
         let (mut xdrop_gap, mut xdrop_gap_final) = (15.0, 25.0);
-        let mut sum_stats = true;
+        let mut sum_stats = !psi;
         // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:251-322 (the
         // generic search handler)
         // ```c
@@ -419,7 +666,7 @@ impl TblastnArgs {
         //             const string& seg_opts = args[kArgSegFiltering].AsString();
         // ```
         let soft_masking = self.soft_masking.unwrap_or(false);
-        let seg = parse_seg_option(self.seg.as_deref().unwrap_or("12 2.2 2.5"), "TBLASTN")?;
+        let seg = parse_seg_option(self.seg.as_deref().unwrap_or("12 2.2 2.5"))?;
         // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:586-623 (the word
         // threshold handler: the matrix's suggestion replaces only tblastn's default 13)
         // ```c
@@ -469,7 +716,6 @@ impl TblastnArgs {
         let query_range = crate::blastinput::seq_range::parse_optional_range(
             self.query_loc.as_deref(),
             crate::blastinput::seq_range::RangeRole::Query,
-            "TBLASTN",
         )?;
         // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:2874-2886 and
         // 2960-2977 (the formatting handler: other programs' formats, the hit list size
@@ -480,12 +726,20 @@ impl TblastnArgs {
         //     }
         // ```
         let choice = parse_formatting_string(&self.outfmt)?;
-        formatting_handler_check(&choice, false)?;
-        if self.max_target_seqs.is_some_and(|size| size < 5) {
-            diagnostics.write_all(&crate::report::query_warnings::few_matches_warning(
-                "tblastn",
-            ))?;
-        }
+        formatting_handler_check(&choice, crate::blastinput::app::Program::Tblastn)?;
+        // The hit list size and the counts of the pairwise report
+        // (`blastinput::report_counts`), with the handler's warnings. The formats of a
+        // `run_local` call are those of `outfmts`; the command line has the one `-outfmt`.
+        let own_outfmt = [choice.number];
+        let (counts, warnings) = crate::blastinput::report_counts::run_report_counts_with(
+            "tblastn",
+            outfmts.unwrap_or(&own_outfmt),
+            self.max_target_seqs,
+            self.num_descriptions,
+            self.num_alignments,
+            &self.formatting,
+        )?;
+        diagnostics.write_all(&warnings)?;
         // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:893-903 (the
         // composition-based statistics handler; `blastinput/app.rs`)
         // ```c
@@ -498,8 +752,56 @@ impl TblastnArgs {
         //                                    ungapped.get());
         //     }
         // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:866-875
+        // ```c
+        //         if(program == ePSITblastn) {
+        //             compo_mode = eNoCompositionBasedStats;
+        //         }
+        //
+        //         if (ungapped && *ungapped && compo_mode != eNoCompositionBasedStats) {
+        //             NCBI_THROW(CInputException, eInvalidInput,
+        // ```
+        // PSI-TBLASTN takes any value as mode 0, before the test of an ungapped search.
         let (composition_mode, _) =
-            parse_comp_based_stats(&self.comp_based_stats, false, self.ungapped)?;
+            parse_comp_based_stats(&self.comp_based_stats, false, self.ungapped && !psi)?;
+        let composition_mode = if psi {
+            crate::blastinput::app::CompositionMode::NoCompositionBasedStats
+        } else {
+            composition_mode
+        };
+        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1338-1340
+        // ```c++
+        //     if (args.Exist(kArgPSIInputChkPntFile) && args[kArgPSIInputChkPntFile]) {
+        //         CNcbiIstream& in = args[kArgPSIInputChkPntFile].AsInputFile();
+        //         _ASSERT(m_Pssm.Empty());
+        // ```
+        // The PSSM is read by the last handler of tblastn's options (`CPsiBlastArgs`, after the
+        // composition-based statistics, tblastn_args.cpp:128-130), before `Validate`.
+        let pssm = match self.in_pssm.as_deref() {
+            Some(path) => Some(std::sync::Arc::new(super::in_pssm::read(
+                path,
+                &matrix_name,
+                self.export_search_strategy.is_some(),
+                self.db.is_some(),
+                self.archive.as_ref(),
+                diagnostics,
+            )?)),
+            None => None,
+        };
+        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1050-1055
+        // ```c
+        //     if (m_Target == eDatabase && args[kArgDbGeneticCode] &&
+        //         (program == eTblastn || program == eTblastx) ) {
+        //         opt.SetDbGeneticCode(args[kArgDbGeneticCode].AsInteger());
+        //     }
+        // ```
+        // PSI-TBLASTN keeps the genetic code 1 of its handle; the value is only checked.
+        let db_gencode = if psi {
+            super::in_pssm::check_db_gencode(self.db_gencode)?;
+            1
+        } else {
+            self.db_gencode
+        };
         validate_protein_options(&ProteinOptionsCheck {
             gapped: !self.ungapped,
             gap_open,
@@ -508,7 +810,11 @@ impl TblastnArgs {
             threshold,
             word_size,
             compressed_lookup,
+            hitlist_size: counts.hitlist_size,
             evalue,
+            psiblast: false,
+            psi_tblastn: psi,
+            x_dropoff: self.xdrop_ungap,
         })?;
         Ok(ResolvedTblastnArgs {
             task: self.task.clone(),
@@ -517,10 +823,11 @@ impl TblastnArgs {
             gap_extend,
             xdrop_gap,
             xdrop_gap_final,
+            xdrop_ungap: self.xdrop_ungap.unwrap_or(7.0),
             word_size,
             compressed_lookup,
             sum_stats,
-            db_gencode: self.db_gencode,
+            db_gencode,
             gapped: !self.ungapped,
             max_intron_length: self.max_intron_length.unwrap_or(0),
             seg,
@@ -529,73 +836,85 @@ impl TblastnArgs {
             matrix_name,
             threshold,
             window_size,
-            hitlist_size: self.max_target_seqs.unwrap_or(500),
-            max_target_seqs_given: self.max_target_seqs,
+            hitlist_size: counts.hitlist_size,
+            num_descriptions: counts.num_descriptions,
+            formatting: self.formatting,
+            num_alignments: counts.num_alignments,
+            max_target_seqs_given: self.max_target_seqs.is_some(),
+            // NCBI blast_args.cpp:313-319: SetQueryCovHspPerc, SetMaxHspsPerSubject.
+            max_hsps: self.max_hsps.unwrap_or(0),
+            query_cov_hsp_perc: self.qcov_hsp_perc.unwrap_or(0.0),
+            culling_limit: self.culling_limit_value(),
             composition_mode,
             comp_based_stats: self.comp_based_stats.clone(),
             num_threads: self.num_threads,
             query_range,
+            pssm,
         })
     }
 }
 
-/// LOSAT's limits, checked where NCBI starts the search: the options that NCBI runs and
-/// LOSAT's TBLASTN does not implement are rejected, and the others select the search.
-fn search_settings(args: &ResolvedTblastnArgs) -> Result<SearchSettings> {
+/// LOSAT's limits of the search: the options that NCBI runs and LOSAT's TBLASTN does not, refused
+/// where NCBI searches the first query batch (with IDENTITY's compressed lookup table,
+/// `check_identity_compressed_lookup_of`): a run that NCBI stops before (a first batch without
+/// letters, a PSSM that its checks reject, the PSSM engine's error, the object manager's stop) gives
+/// NCBI's error (NCBI BLAST+ 2.17.0 `-xdrop_gap 5e8` or `-ungapped`: line RG D3-1 review 4c N1, as
+/// psiblast's `validate_requested_blastp_support`).
+pub(super) fn check_search_limits(args: &ResolvedTblastnArgs) -> Result<()> {
     use crate::blastinput::app::CompositionMode;
-    // NCBI's compressed lookup table (blast_aalookup.c, word size 5 and more or
-    // tblastn-fast) is not implemented by LOSAT's TBLASTN.
-    if args.compressed_lookup {
-        if args.task == "tblastn-fast" {
-            anyhow::bail!(
-                "-task tblastn-fast (word size {} with the compressed lookup table) is not supported by LOSAT's TBLASTN",
-                args.word_size
-            );
-        }
-        anyhow::bail!(
-            "-word_size {} (the compressed lookup table) is not supported by LOSAT's TBLASTN",
-            args.word_size
-        );
-    }
     if !args.gapped {
-        anyhow::bail!("-ungapped (an ungapped search) is not supported by LOSAT's TBLASTN");
+        anyhow::bail!("{}", crate::cli::run_refusal("TBLASTN", "ungapped"));
+    }
+    // The gapped X-drops that NCBI's kernels cannot size are refused where the search starts
+    // (`core::x_drop::check_gapped_x_dropoffs`), at the search's gapped Lambda: the matrix's, or a
+    // PSSM query's `kbp_gap_psi` (`PsiSearch::gapped_karlin`, whose Lambda NCBI's X-drops read,
+    // blast_parameters.c:455-458). A PSI-TBLASTN run that NCBI's object manager ends as its query
+    // joins the scope never gets here (NCBI BLAST+ 2.17.0 writes that stop with any -xdrop_gap,
+    // line RG D3-1 fix 4). (A name that LOSAT has no matrix for is refused below.)
+    if let Ok(matrix) = args.matrix_name.parse::<ScoringMatrix>() {
+        let gapped = crate::stats::lookup_protein_params(&crate::config::ProteinScoringSpec {
+            matrix,
+            gap_open: args.gap_open,
+            gap_extend: args.gap_extend,
+        });
+        // The final X-drop reaches the unscaled `ALIGN_EX` only without the composition-based
+        // redo: mode 0, or IDENTITY's reset (below).
+        crate::core::x_drop::check_gapped_x_dropoffs(
+            "TBLASTN",
+            (args.xdrop_gap, args.xdrop_gap_final),
+            crate::core::x_drop::gapped_x_dropoffs(
+                args.xdrop_gap,
+                args.xdrop_gap_final,
+                args.pssm
+                    .as_deref()
+                    .map_or(gapped.lambda, |psi| psi.gapped_karlin(&gapped).lambda),
+            ),
+            (args.gap_open, args.gap_extend),
+            args.composition_mode == CompositionMode::NoCompositionBasedStats
+                || args.matrix_name.eq_ignore_ascii_case("identity"),
+        )?;
     }
     // NCBI reference: c++/src/algo/blast/core/blast_parameters.c:774-815 (uneven gap
     // linking of the HSPs, `longest_intron`)
-    if args.max_intron_length != 0 {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:781-787
+    // ```c
+    //    if (params->do_sum_stats) {
+    //       BlastLinkHSPParametersNew(program_number, gapped_calculation,
+    //                                 &params->link_hsp_params);
+    //
+    //       if((Blast_QueryIsTranslated(program_number) ||
+    // 	  Blast_SubjectIsTranslated(program_number)) &&
+    // 	 program_number != eBlastTypeTblastx) {
+    // ```
+    // The largest intron is read by the linking of the HSPs only: without sum statistics (the
+    // default of `-in_pssm`, or `-sum_stats false`) NCBI ignores it (DECISIONS 35 Q3 of line PS).
+    if args.max_intron_length != 0 && args.sum_stats {
         anyhow::bail!(
             "-max_intron_length {} (uneven gap linking) is not supported by LOSAT's TBLASTN",
             args.max_intron_length
         );
     }
-    // NCBI reference: c++/src/algo/blast/core/blast_traceback.c:1486-1499
-    // ```c
-    //     } else if (ext_params->options->compositionBasedStats > 0 ||
-    //                ext_params->options->eTbackExt == eSmithWatermanTbck) {
-    // ...
-    //         retval =
-    //                 Blast_RedoAlignmentCore_MT(program_number,
-    // ...
-    //     } else {
-    // ```
-    // The composition mode selects the ordinary traceback (mode 0) or the composition
-    // redo; LOSAT's TBLASTN implements modes 0 and 2.
-    let composition_mode2 = match args.composition_mode {
-        CompositionMode::NoCompositionBasedStats => false,
-        CompositionMode::CompositionMatrixAdjust => true,
-        CompositionMode::CompositionBasedStats | CompositionMode::CompoForceFullMatrixAdjust => {
-            anyhow::bail!(
-                "-comp_based_stats {} (composition mode {}) is not supported by LOSAT's TBLASTN",
-                args.comp_based_stats,
-                args.composition_mode as i32
-            )
-        }
-    };
-    // NCBI c++/src/algo/blast/blastinput/blast_args.cpp:3152-3187:
-    // arg_desc.SetConstraint(kArgNumThreads, new CArgAllowValuesGreaterThanOrEqual(1));
-    // NCBI c++/src/algo/blast/api/prelim_stage.cpp:145-147:
-    // TBlastThreads the_threads(GetNumberOfThreads());
-    crate::utils::threading::validate_threads(args.num_threads)?;
+    let (compo_adjust_mode, _) = composition(args);
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:409,3687
     // ```c
     //     *pbestEvalue = DBL_MAX;
@@ -616,58 +935,132 @@ fn search_settings(args: &ResolvedTblastnArgs) -> Result<SearchSettings> {
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:43-70 (the
     // preliminary hit list size through NCBI's `int`; `blastn/hsp.rs`)
     // A hit list size whose preliminary size is not positive crashes NCBI.
-    if crate::algorithm::blastn::hsp::get_prelim_hitlist_size(
+    crate::algorithm::blastn::hsp::check_prelim_hitlist_size(
         args.hitlist_size,
-        composition_mode2,
+        args.max_target_seqs_given,
+        compo_adjust_mode.is_enabled(),
         true,
-    ) < 1
-    {
-        anyhow::bail!(
-            "a -max_target_seqs of {}, whose preliminary hit list size overflows NCBI BLAST+'s 32-bit int (NCBI crashes), is not supported by LOSAT's TBLASTN",
-            args.hitlist_size
-        );
-    }
+        "TBLASTN",
+    )?;
+    Ok(())
+}
+
+/// The search's composition mode, and IDENTITY's reset (IDENTITY with a mode above 0, which NCBI
+/// searches in mode 0).
+fn composition(args: &ResolvedTblastnArgs) -> (BlastCompoAdjustMode, bool) {
+    use crate::blastinput::app::CompositionMode;
+    let identity_cbs_reset = args.matrix_name.eq_ignore_ascii_case("identity")
+        && args.composition_mode != CompositionMode::NoCompositionBasedStats;
+    let mode = match args.composition_mode {
+        _ if identity_cbs_reset => BlastCompoAdjustMode::NoCompositionBasedStats,
+        CompositionMode::NoCompositionBasedStats => BlastCompoAdjustMode::NoCompositionBasedStats,
+        CompositionMode::CompositionBasedStats => BlastCompoAdjustMode::CompositionBasedStats,
+        CompositionMode::CompositionMatrixAdjust => BlastCompoAdjustMode::CompositionMatrixAdjust,
+        CompositionMode::CompoForceFullMatrixAdjust => BlastCompoAdjustMode::ForceFullMatrixAdjust,
+    };
+    (mode, identity_cbs_reset)
+}
+
+/// The options of the search: the composition mode, IDENTITY's reset and the scoring; a matrix and
+/// word size that LOSAT's TBLASTN does not implement is refused (LOSAT's limits of the search
+/// itself are `check_search_limits`).
+pub(super) fn search_settings(args: &ResolvedTblastnArgs) -> Result<SearchSettings> {
+    // NCBI reference: c++/src/algo/blast/core/blast_traceback.c:1486-1499
+    // ```c
+    //     } else if (ext_params->options->compositionBasedStats > 0 ||
+    //                ext_params->options->eTbackExt == eSmithWatermanTbck) {
+    // ...
+    //         retval =
+    //                 Blast_RedoAlignmentCore_MT(program_number,
+    // ...
+    //     } else {
+    // ```
+    // The composition mode selects the ordinary traceback (mode 0) or the composition
+    // redo, whose matrix adjustment rule modes 1 to 3 pick (`blast_adjust_scores`; item SC5 of
+    // line NP).
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:143-155
+    // ```c++
+    //     if (opts_memento->m_ScoringOpts->matrix &&
+    //         strcasecmp("identity", opts_memento->m_ScoringOpts->matrix) == 0 &&
+    //         opts_memento->m_ExtnOpts->compositionBasedStats > 0) {
+    //
+    //         opts_memento->m_ExtnOpts->compositionBasedStats = 0;
+    // ...
+    //         search_messages.AddMessageAllQueries(eBlastSevWarning, 0, os.str());
+    //     }
+    // ```
+    // IDENTITY has no composition data: NCBI searches it in mode 0, whatever mode was asked,
+    // with a warning for each query of the first query batch (`IDENTITY_CBS_RESET_MESSAGE`; the
+    // later batches start in mode 0, `tblastn_app::search`). The reset is made with the score
+    // block, before the HSP writer takes the preliminary hit list size
+    // (`blast_aux_priv.cpp:175-229`), so that size is mode 0's too.
+    let (compo_adjust_mode, identity_cbs_reset) = composition(args);
+    // NCBI c++/src/algo/blast/blastinput/blast_args.cpp:3152-3187:
+    // arg_desc.SetConstraint(kArgNumThreads, new CArgAllowValuesGreaterThanOrEqual(1));
+    // NCBI c++/src/algo/blast/api/prelim_stage.cpp:145-147:
+    // TBlastThreads the_threads(GetNumberOfThreads());
+    crate::utils::threading::validate_threads(args.num_threads)?;
     let matrix: Option<ScoringMatrix> = args.matrix_name.parse().ok();
     let threshold = args.threshold;
     let window = args.window_size;
-    let profile_supported = (matrix == Some(ScoringMatrix::Blosum62)
-        && args.word_size == 3
-        && args.gap_open == 11
-        && args.gap_extend == 1
-        && threshold == 13.0
-        && window == 40)
-        || (matrix == Some(ScoringMatrix::Blosum45)
-            && !composition_mode2
-            && args.word_size == 2
-            && args.gap_open == 14
-            && args.gap_extend == 2
-            && threshold == 16.0
-            && window == 60);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:137 and
+    // c++/src/algo/blast/core/aa_ungapped.c:214-224
+    // ```c
+    //         Boolean multiple_hits = (word_params->options->window_size > 0);
+    // ...
+    //     if (ewp->diag_table->multiple_hits) {
+    //         status = s_BlastAaWordFinder_TwoHit(subject, query,
+    // ...
+    //     } else {
+    //         status = s_BlastAaWordFinder_OneHit(subject, query,
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:910-936
+    // ```c
+    //       if (options->gapped_calculation && !Blast_ProgramIsRpsBlast(program_number)) {
+    //           Int2 status=0;
+    //           if ((status=Blast_KarlinBlkGappedLoadFromTables(NULL, options->gap_open,
+    //              options->gap_extend, options->matrix, std_matrix_only)) != 0)
+    // ```
+    // Every matrix of NCBI's tables (the nine of blastp and tblastn, IDENTITY with them) and
+    // every gap cost pair of its table, as `validate_protein_options` has checked them; the
+    // threshold and window are the options' (the matrix's suggested values by default). The
+    // standard table takes word sizes 2 to 4 and the compressed one 5 to 7; the word finder is
+    // the two-hit one (a window above 0) or the one-hit one (a window of 0,
+    // `XTwoHit::x_pairs_one_hit`).
+    let profile_supported = (2..=7).contains(&args.word_size);
     let Some(matrix) = matrix.filter(|_| profile_supported) else {
         anyhow::bail!(
-            "the matrix {} with gap costs {}/{}, word size {}, threshold {} and window size {} (composition mode {}) is not supported by LOSAT's TBLASTN; it implements BLOSUM62 11/1 with word size 3, threshold 13 and window size 40, and BLOSUM45 14/2 with word size 2, threshold 16, window size 60 and -comp_based_stats 0",
+            "the matrix {} with word size {} is not supported by LOSAT's TBLASTN; it implements word sizes 2 to 7",
             args.matrix_name,
-            args.gap_open,
-            args.gap_extend,
-            args.word_size,
-            threshold,
-            window,
-            args.composition_mode as i32
+            args.word_size
         );
     };
     Ok(SearchSettings {
-        composition_mode2,
+        compo_adjust_mode,
+        identity_cbs_reset,
         scoring: LocalStageDScoring {
             matrix,
             gap_open: args.gap_open,
             gap_extend: args.gap_extend,
             word_size: args.word_size as usize,
-            threshold: threshold as i32,
+            threshold,
             window,
             gap_xdrop_bits: args.xdrop_gap,
             final_xdrop_bits: args.xdrop_gap_final,
+            word_xdrop_bits: args.xdrop_ungap,
         },
     })
+}
+
+// No NCBI counterpart: LOSAT Web's host has no file system.
+/// The browser's refusal of `-in_pssm` (a PSSM query): the host has no PSSM files (line PS, item
+/// PSW1). The Web's checks of the options (`check_options`) and its runs (the adapter's `run`,
+/// before `run_local`) make it; the library API's records take the option (`api::Inputs::pssm`).
+pub fn refuse_browser_pssm_query(args: &TblastnArgs) -> Result<()> {
+    if args.in_pssm.is_some() {
+        anyhow::bail!("-in_pssm (a PSSM query) is not supported in the browser yet");
+    }
+    Ok(())
 }
 
 /// The checks of the options alone, without the inputs (the `validate` of web ABI v2):
@@ -675,458 +1068,26 @@ fn search_settings(args: &ResolvedTblastnArgs) -> Result<SearchSettings> {
 pub fn check_options(args: &TblastnArgs) -> Result<()> {
     // The host has no database files (`run_local`).
     if args.db.is_some() {
-        anyhow::bail!("-db (a database search) is not supported by LOSAT Web yet");
+        anyhow::bail!("-db (a database search) is not supported in the browser yet");
     }
-    search_settings(&args.resolve()?).map(|_| ())
+    refuse_browser_pssm_query(args)?;
+    let resolved = args.resolve()?;
+    search_settings(&resolved)?;
+    check_search_limits(&resolved)?;
+    // Without the inputs: IDENTITY with the compressed lookup table, which the search refuses where
+    // it searches its first query batch.
+    check_identity_compressed_lookup_of(&resolved)
 }
 
-impl TblastnArgs {
-    // NCBI c++/src/app/blast/tblastn_app.cpp:288-301:
-    // results = lcl_blast.Run();
-    // formatter.PrintOneResultSet(**result, query);
-    // NCBI c++/src/algo/blast/format/blast_format.cpp:1411-1458:
-    // PrintOneResultSet dispatches the complete result to outfmt 0/6/7.
-    /// `settings` are the NCBI application settings that LOSAT reproduces
-    /// (`ncbi_environment::check_ncbi_application_settings`): the readers of the subjects
-    /// and of the queries (`fasta_reader`) use them.
-    ///
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_scope_src.cpp:67-72
-    /// ```c++
-    ///     CNcbiApplication* app = CNcbiApplication::Instance();
-    ///     if (app) {
-    ///         const CNcbiRegistry& registry = app->GetConfig();
-    ///         x_LoadDataLoadersConfig(registry);
-    ///         x_LoadBlastDbDataLoaderConfig(registry);
-    ///     }
-    /// ```
-    pub fn run(
-        self,
-        settings: crate::blastinput::ncbi_environment::ApplicationSettings,
-    ) -> Result<()> {
-        use crate::blastinput::app;
-        use crate::blastinput::fasta_reader::{read_subjects, FastaInputSource, ReaderConfig};
-        use crate::blastinput::input_files;
-        use crate::blastinput::seq_range;
-        let args = self;
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3624-3627
-        // ```c
-        //     if (GetExportSearchStrategyStream(args) ||
-        //            m_FormattingArgs->ArchiveFormatRequested(args)) {
-        //         locality = CBlastOptions::eBoth;
-        //     }
-        // ```
-        // `ArchiveFormatRequested` parses `-outfmt` (blast_args.cpp:2745-2748) before the
-        // option handlers run; a format that NCBI runs and LOSAT does not write is rejected
-        // there too.
-        let choice = app::parse_formatting_string(&args.outfmt)?;
-        let format = app::report_format(&choice, "TBLASTN", false, args.out.as_deref(), false)?;
-        // LOSAT's thread capability is checked before any input or output, as for BLASTN.
-        crate::utils::threading::validate_threads(args.num_threads)?;
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2553-2562
-        // ```c
-        //         CRef<blast::CBlastQueryVector> subjects;
-        //         m_Scope = ReadSequencesToBlast(*subj_input_stream, IsProtein(),
-        //                                        subj_range, parse_deflines,
-        //                                        use_lcase_masks, subjects, m_IsMapper);
-        //         m_Subjects.Reset(new blast::CObjMgr_QueryFactory(*subjects));
-        //
-        //     } else if (!m_IsIgBlast){
-        //         // IgBlast permits use of germline database
-        //         NCBI_THROW(CInputException, eInvalidInput,
-        //            "Either a BLAST database or subject sequence(s) must be specified");
-        //     }
-        // ```
-        // The handler of the database arguments reads the subjects (an empty subject set
-        // fails there), before the query and the output are opened.
-        // `-db`: the database is opened with the options (`search_cli`), as NCBI's
-        // `InitializeSubject` opens it after `SetOptions`.
-        let (subjects, subject_placements, x_subject_stores) = if args.db.is_some() {
-            (Vec::new(), seq_range::Placements::default(), None)
-        } else {
-            let Some(subject_path) = args.subject.clone() else {
-                return Err(app::missing_subject_error());
-            };
-            input_files::check_utf8_file_name(&subject_path, "subject", "TBLASTN")?;
-            let subject_file = input_files::open_input(&subject_path, "subject", "TBLASTN")?;
-            // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2537-2545
-            // ```c++
-            //             subj_input_stream = &args[kArgSubject].AsInputFile();
-            //         }
-            //
-            //         TSeqRange subj_range;
-            //         if (args.Exist(kArgSubjectLocation) && args[kArgSubjectLocation]) {
-            //             subj_range =
-            //                 ParseSequenceRange(args[kArgSubjectLocation].AsString(),
-            //                             "Invalid specification of subject location");
-            //         }
-            // ```
-            // The subject range is read after the subject file is opened, before it is read.
-            let subject_range = seq_range::parse_optional_range(
-                args.subject_loc.as_deref(),
-                seq_range::RangeRole::Subject,
-                "TBLASTN",
-            )?;
-            // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:230-246
-            // ```c++
-            //     SDataLoaderConfig dlconfig(read_proteins);
-            //     dlconfig.OptimizeForWholeLargeSequenceRetrieval();
-            //
-            //     CBlastInputSourceConfig iconfig(dlconfig);
-            //     iconfig.SetRange(range);
-            //     iconfig.SetBelieveDeflines(parse_deflines);
-            //     iconfig.SetLowercaseMask(use_lcase_masking);
-            //     iconfig.SetSubjectLocalIdMode();
-            //     if (!read_proteins && gaps_to_Ns) {
-            //         iconfig.SetConvertGapsToNs(true);
-            //     }
-            //
-            //     CRef<CBlastFastaInputSource> fasta(new CBlastFastaInputSource(in, iconfig));
-            //     CRef<CBlastInput> input(new CBlastInput(fasta));
-            //     CRef<CScope> scope(new CScope(*CObjectManager::GetInstance()));
-            //     sequences = input->GetAllSeqs(*scope);
-            // ```
-            // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2466-2470
-            // ```c++
-            //     EMoleculeType mol_type = Blast_SubjectIsNucleotide(opts.GetProgramType())
-            //         ? CSearchDatabase::eBlastDbIsNucleotide
-            //         : CSearchDatabase::eBlastDbIsProtein;
-            //     m_IsProtein = (mol_type == CSearchDatabase::eBlastDbIsProtein);
-            // ```
-            // TBLASTN's subjects are nucleotide (`read_proteins` = `IsProtein()` is false, so the
-            // reader assumes nucleotides, `fAssumeNuc`). NCBI reads the records one at a time, writes
-            // each one's messages as it reads it, and checks each one's range after reading it: a
-            // range that starts past the end of a record stops the reading there
-            // (`read_subjects`). Records without residues (and intervals without letters) are
-            // read without a message and reported when the formatter sets up the subjects
-            // (`before_prolog`).
-            let mut subject_source = FastaInputSource::from_argument(
-                &subject_path,
-                subject_file,
-                ReaderConfig::subject("TBLASTN", false, settings.data_loaders),
-            );
-            // EXPERIMENT (LOSAT_X_TBNSTORE): each record's letters packed as it is read
-            // (`x_read_subject_stores`); a subject range keeps the letters.
-            // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:515-520
-            // ```c
-            //     virtual SBlastSequence GetCompressedPlusStrand() {
-            //         SBlastSequence retval(size());
-            //         string ncbi4na = kEmptyStr;
-            //         m_SeqVector.GetSeqData(m_SeqVector.begin(), m_SeqVector.end(), ncbi4na);
-            //         s_Ncbi4naToNcbi2na(ncbi4na, size(), retval.data.get());
-            // ```
-            // Dispatch point: NCBI keeps the subjects in its scope and makes each one's search forms
-            // from it. With the switch the records keep their deflines and the letters are held packed,
-            // made again when a subject is searched or reported; without it the records keep them.
-            // Diagnostic (LOSAT_TIMING): the subject FASTA for the common line (utils/xtiming.rs);
-            // with LOSAT_X_TBNSTORE the packing of each record is in this interval too. No NCBI
-            // counterpart.
-            let t_read_fasta = crate::utils::xtiming::clock();
-            let (read_subject_records, x_subject_stores) = {
-                let mut stderr = std::io::stderr();
-                let mut warn = |message: &[u8]| std::io::Write::write_all(&mut stderr, message);
-                if super::x_subject_store::x_tbn_store() && subject_range.is_none() {
-                    super::x_subject_store::x_read_subject_stores(
-                        &mut subject_source,
-                        &mut warn,
-                        args.num_threads,
-                    )?
-                } else {
-                    (
-                        read_subjects(&mut subject_source, subject_range.as_ref(), &mut warn)?,
-                        None,
-                    )
-                }
-            };
-            crate::utils::xtiming::add(crate::utils::xtiming::Phase::ReadFasta, t_read_fasta);
-            drop(subject_source);
-            let (subjects, subject_placements) =
-                match seq_range::cut_subjects(&read_subject_records, subject_range.as_ref())? {
-                    Some((cut, placements)) => (cut, placements),
-                    None => (read_subject_records, seq_range::Placements::default()),
-                };
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
-            // ```c
-            // CObjMgr_QueryFactory::CObjMgr_QueryFactory(CBlastQueryVector & queries)
-            //     : m_QueryVector(& queries)
-            // {
-            //     if (queries.Empty()) {
-            //         NCBI_THROW(CBlastException, eInvalidArgument, "Empty CBlastQueryVector");
-            //     }
-            // ```
-            // `m_Subjects.Reset(new blast::CObjMgr_QueryFactory(*subjects))` (blast_args.cpp:2557)
-            // fails for a subject input without records.
-            if subjects.is_empty() {
-                return Err(app::empty_subjects_error());
-            }
-            (subjects, subject_placements, x_subject_stores)
-        };
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3456-3481
-        // ```c
-        //     if (args.Exist(kArgQuery) && args[kArgQuery].HasValue() &&
-        //         m_InputStream == NULL) {
-        // ...
-        //         else {
-        //             m_InputStream = &args[kArgQuery].AsInputFile();
-        //         }
-        //     }
-        // ...
-        //     else {
-        //         m_OutputStream = &args[kArgOutput].AsOutputFile();
-        //     }
-        // ```
-        // The query is opened and the output file created before the options are checked;
-        // `-` is standard input and standard output.
-        input_files::check_utf8_file_name(&args.query, "query", "TBLASTN")?;
-        let query_file = input_files::open_input(&args.query, "query", "TBLASTN")?;
-        if let Some(path) = args.out.as_deref() {
-            input_files::check_utf8_file_name(path, "out", "TBLASTN")?;
-        }
-        let out_file = match args.out.as_deref().filter(|path| path.as_os_str() != "-") {
-            Some(path) => Some(std::io::BufWriter::new(
-                std::fs::File::create(path).map_err(|_| crate::cli::inaccessible("out", path))?,
-            )),
-            None => None,
-        };
-        let pairwise = format == Some(app::ReportFormat::Pairwise);
-        let outfmt = choice.normalized();
-        let mut stderr = std::io::stderr();
-        let mut stream = crate::cli::ReportStream {
-            inner: match out_file {
-                Some(file) => Box::new(file) as Box<dyn std::io::Write + Send>,
-                None => crate::cli::report_standard_output(),
-            },
-            failed: false,
-        };
-        let result = {
-            let mut outputs =
-                ReportOutputs::single(&outfmt, OutputSink::Writer(&mut stream), &mut stderr);
-            search_cli(
-                args,
-                query_file,
-                &subjects,
-                &subject_placements,
-                x_subject_stores.as_deref(),
-                &mut outputs,
-                &choice,
-                settings,
-            )
-        };
-        let flushed = std::io::Write::flush(&mut stream);
-        // NCBI reference: ncbi-blast/c++/src/app/blast/blast_app_util.hpp:252-255
-        // ```c
-        //     catch (const std::ios::failure&) {                                      \
-        //         LOG_POST(Error << "BLAST failed to write output");                  \
-        //         exit_code = BLAST_OUTPUT_ERROR;                                     \
-        //     }                                                                       \
-        // ```
-        // The outfmt 0 formatter's stream throws when a write fails; for outfmt 6/7 NCBI
-        // aborts and LOSAT reports the error (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 3).
-        if stream.failed && pairwise {
-            return Err(crate::cli::NativeError {
-                exit: 6,
-                message: "BLAST failed to write output\n".to_string(),
-            }
-            .into());
-        }
-        result?;
-        flushed.context("failed to write the output")
-    }
-}
-
-/// The part of `run` after the files are opened: NCBI's processing of the options,
-/// `Query is Empty!`, the query batch size and the subjects without letters, the reading of
-/// the queries and the search.
-#[allow(clippy::too_many_arguments)]
-fn search_cli(
-    args: TblastnArgs,
-    query_file: std::fs::File,
-    subjects: &[FastaRecord],
-    subject_placements: &crate::blastinput::seq_range::Placements,
-    // EXPERIMENT (LOSAT_X_TBNSTORE): the subjects' letters, packed (the records keep none).
-    x_subject_stores: Option<&[crate::sequence::packed_subject::PackedNucleotide]>,
-    outputs: &mut ReportOutputs<'_>,
-    choice: &crate::blastinput::app::FormatChoice,
-    settings: crate::blastinput::ncbi_environment::ApplicationSettings,
-) -> Result<()> {
-    use crate::blastinput::fasta_reader::{
-        read_queries, FastaInputSource, QueryEnd, QueryRecords, ReaderConfig,
-    };
-    let resolved = args.check_options(outputs.diagnostics)?;
-    // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:189-193
-    // ```c++
-    //         CRef<CBlastDatabaseArgs> db_args(m_CmdLineArgs->GetBlastDatabaseArgs());
-    //         CRef<CLocalDbAdapter> db_adapter;
-    //         CRef<CScope> scope(new CScope(*CObjectManager::GetInstance()));
-    //         InitializeSubject(db_args, m_OptsHndl, m_CmdLineArgs->ExecuteRemotely(),
-    //                          db_adapter, scope);
-    // ```
-    // The database of `-db` is opened after the options are processed, before
-    // `Query is Empty!` (as BLASTN's).
-    let database = match args.database_name() {
-        Some(name) => Some(super::database::TblastnDatabase::open(name, &settings)?),
-        None => None,
-    };
-    // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:200-221
-    // ```c++
-    //         SDataLoaderConfig dlconfig =
-    //             InitializeQueryDataLoaderConfiguration(query_opts->QueryIsProtein(),
-    //                                                    db_adapter);
-    // ...
-    //         if (pssm.Empty()) {
-    //             CBlastInputSourceConfig iconfig(dlconfig, query_opts->GetStrand(),
-    //                                          query_opts->UseLowercaseMasks(),
-    //                                          query_opts->GetParseDeflines(),
-    //                                          query_opts->GetRange());
-    //             if(IsIStreamEmpty(m_CmdLineArgs->GetInputStream())){
-    //                	ERR_POST(Warning << "Query is Empty!");
-    //                	return BLAST_EXIT_SUCCESS;
-    //             }
-    //             fasta.Reset(new CBlastFastaInputSource(
-    //                                          m_CmdLineArgs->GetInputStream(),
-    //                                          iconfig));
-    // ```
-    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastn_args.cpp:51,106
-    // ```c++
-    //     const bool kQueryIsProtein = true;
-    // ...
-    //     m_QueryOptsArgs.Reset(new CQueryOptionsArgs(kQueryIsProtein));
-    // ```
-    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:328-330
-    // ```c++
-    //     flags += (m_ReadProteins
-    //               ? CFastaReader::fAssumeProt
-    //               : CFastaReader::fAssumeNuc);
-    // ```
-    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:856-860
-    // ```c++
-    // 	char c;
-    // 	CNcbiStreampos orig_p = in.tellg();
-    // 	// Piped input
-    // 	if(orig_p < 0)
-    // 		return false;
-    // ```
-    // The query of tblastn is a protein (`QueryIsProtein()`, `fAssumeProt`) and its data
-    // loaders are those of the subjects (`SDataLoaderConfig`). The position is taken on the
-    // opened file, before it is read (`stream_is_empty`). When the subjects were read from
-    // standard input too, `cin` has reached its end (a failed stream), so NCBI gets no
-    // position for the query either, and its reader is at its end: no query batch is read.
-    let shared_standard_input = args.query.as_os_str() == "-"
-        && args
-            .subject
-            .as_deref()
-            .is_some_and(|path| path.as_os_str() == "-");
-    let mut query_source = FastaInputSource::from_argument(
-        &args.query,
-        query_file,
-        ReaderConfig::query("TBLASTN", true, settings.data_loaders),
-    );
-    if !shared_standard_input && query_source.stream_is_empty() {
-        outputs
-            .diagnostics
-            .write_all(b"Warning: [tblastn] Query is Empty!\n")?;
-        return Ok(());
-    }
-    let batch_size = before_prolog(subjects, x_subject_stores, outputs.diagnostics)?;
-    // NCBI reference: ncbi-blast/c++/src/app/blast/tblastn_app.cpp:267-270
-    // ```c
-    // 	if(UseXInclude(*fmt_args, args[kArgOutput].AsString())) {
-    //         	formatter.SetBaseFile(args[kArgOutput].AsString());
-    //         }
-    //         formatter.PrintProlog();
-    // ```
-    // The XInclude formats written to standard output fail after the formatter is made.
-    crate::blastinput::app::xinclude_check(choice)?;
-    // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:275-277
-    // ```c++
-    //             for (; !input->End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
-    //
-    //                 query =  input->GetNextSeqBatch(*scope);
-    // ```
-    // The records are read here, and their messages are written batch by batch
-    // (`read_query_batches`). What ends the reading (the end of the input, an `eEOF`, a
-    // reader error or LOSAT's rejection of a Seq-id line) comes in the batch that NCBI reads
-    // it in, after the reports of the batches before.
-    // Diagnostic (LOSAT_TIMING): the query FASTA for the common line (utils/xtiming.rs). No NCBI
-    // counterpart.
-    let t_read_fasta = crate::utils::xtiming::clock();
-    let QueryRecords { records, end } = read_queries(&mut query_source);
-    crate::utils::xtiming::add(crate::utils::xtiming::Phase::ReadFasta, t_read_fasta);
-    drop(query_source);
-    let reading = match end {
-        QueryEnd::Input => QueryReading::End,
-        QueryEnd::EofError => QueryReading::BlankLines,
-        QueryEnd::Error { error, warnings } => QueryReading::Error { error, warnings },
-    };
-    search(
-        &args,
-        resolved,
-        batch_size,
-        &records,
-        reading,
-        subjects,
-        subject_placements,
-        x_subject_stores,
-        database.as_ref(),
-        outputs,
-    )
-}
-
-/// NCBI's steps of tblastn between `Query is Empty!` and the outfmt 0 prolog that concern
-/// the subjects: the query batch size, then the formatter, which sets up the subjects and
-/// warns about each one without letters (a record without residues, or an interval that
-/// starts just past its record's end). Such a subject stays in the database statistics
-/// with no letters and is never searched (`scan_protein_words_by_chunk` skips subjects
-/// shorter than a word). Returns the query batch size.
-///
-/// NCBI reference: ncbi-blast/c++/src/app/blast/tblastn_app.cpp:217-221
-/// ```c
-///             fasta.Reset(new CBlastFastaInputSource(
-///                                          m_CmdLineArgs->GetInputStream(),
-///                                          iconfig));
-///             input.Reset(new CBlastInput(&*fasta,
-///                                         m_CmdLineArgs->GetQueryBatchSize()));
-/// ```
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:129-136
-/// ```c
-///     if(m_IsDbScan) {
-/// 	int num_seqs=0;
-///         int total_length=0;
-/// 	if (!is_remote_search)
-///         {
-///                 BlastSeqSrc* seqsrc = db_adapter.MakeSeqSrc();
-///                 num_seqs=BlastSeqSrcGetNumSeqs(seqsrc);
-///                 total_length=static_cast<int>(BlastSeqSrcGetTotLen(seqsrc));
-/// ```
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:773-789
-/// ```c
-///         catch(CBlastException & e ) {
-///         	// Skip bad subject sequence
-///         	if(e.GetErrCode() == CBlastException::eInvalidArgument) {
-///         		seqblk_vec->push_back(subj);
-///         ...
-///         		warning += "Subject sequence contains no data";
-///         		ERR_POST(Warning << warning);
-///         		continue;
-/// ```
-/// NCBI's gapped tblastn never stops for the average subject length, also when every
-/// subject is without letters: its shortest subject is raised to `BLAST_SEQSRC_MINLENGTH`
-/// before the division by 3 (`run_local_search_with_pool` ports blast_setup.c:969-973 and
-/// seqsrc_multiseq.cpp:226-240; LOSAT rejects `-ungapped` and `OLD_FSC`, the two ways to a
-/// search without `sbp->gbp`).
-fn before_prolog(
-    subjects: &[FastaRecord],
-    x_subject_stores: Option<&[crate::sequence::packed_subject::PackedNucleotide]>,
-    diagnostics: &mut dyn Write,
-) -> Result<u32> {
-    let batch_size = crate::blastinput::app::query_batch_size("TBLASTN", 20000)?;
-    // EXPERIMENT (LOSAT_X_TBNSTORE): a packed subject's length is its store's.
-    crate::blastinput::input_files::write_empty_subject_warnings_by_length(
-        subjects,
-        |index| x_subject_stores.map_or(subjects[index].seq().len(), |stores| stores[index].len()),
+/// `protein_options_check::check_identity_compressed_lookup` of a TBLASTN search.
+pub(super) fn check_identity_compressed_lookup_of(args: &ResolvedTblastnArgs) -> Result<()> {
+    crate::blastinput::protein_options_check::check_identity_compressed_lookup(
+        &args.matrix_name,
+        args.compressed_lookup,
+        args.word_size,
         "tblastn",
-        diagnostics,
-    )?;
-    Ok(batch_size)
+        "TBLASTN",
+    )
 }
 
 // NCBI reference: c++/src/algo/blast/api/tblastn_options.cpp:54-58
@@ -1140,598 +1101,13 @@ fn before_prolog(
 // The options handle keeps the composition mode and the scoring choices that the
 // search reads; these are the ones the Stage D port uses.
 /// The search settings that the options select.
-struct SearchSettings {
-    composition_mode2: bool,
-    scoring: LocalStageDScoring,
-}
-
-// NCBI c++/src/app/blast/tblastn_app.cpp:288-301:
-// results = lcl_blast.Run();
-// formatter.PrintOneResultSet(**result, query);
-// NCBI c++/src/app/blast/blast_formatter.cpp:429-467:
-// CRef<CSearchResultSet> results = m_RmtBlast->GetResultSet();
-// formatter.PrintProlog();
-// ...
-// ITERATE(CSearchResultSet, result, *results) {
-//     ...
-//         formatter.PrintOneResultSet(**result, queries);
-//     ...
-// }
-// NCBI formats one result set without searching again; several requested formats
-// are several CBlastFormat printers over the same result set.
-/// Runs one TBLASTN search over already parsed records and writes every requested
-/// output format from the same result (the shared entry of the CLI and web ABI v2).
-///
-/// Each requested `-outfmt` is read as on the command line, and NCBI's checks of the
-/// options and of the subjects come before the search. The `-query` and `-subject` values
-/// of `args` are used only as display names.
-///
-/// The records are those of NCBI's reader (`fasta_reader`): the subjects as NCBI's
-/// nucleotide reader reads them, the queries as its protein reader reads them. Queries
-/// without a record are NCBI's `Query is Empty!`.
-pub fn run_local(
-    args: TblastnArgs,
-    query_records: &[FastaRecord],
-    subject_records: &[FastaRecord],
-    outputs: &mut ReportOutputs<'_>,
-) -> Result<()> {
-    use crate::blastinput::app;
-    use crate::blastinput::seq_range;
-    // The host has no database files; LOSAT Web searches the records it gives.
-    if args.db.is_some() {
-        anyhow::bail!("-db (a database search) is not supported by LOSAT Web yet");
-    }
-    for format in &outputs.formats {
-        let choice = app::parse_formatting_string(format.outfmt)?;
-        if app::report_format(&choice, "TBLASTN", false, None, false)?.is_none() {
-            app::formatting_handler_check(&choice, false)?;
-            app::xinclude_check(&choice)?;
-        }
-    }
-    // The subject range and its record checks come where NCBI reads the subjects (`run`):
-    // the messages of each record read, up to a record whose range starts past its end.
-    let subject_range = seq_range::parse_optional_range(
-        args.subject_loc.as_deref(),
-        seq_range::RangeRole::Subject,
-        "TBLASTN",
-    )?;
-    for record in
-        &subject_records[..seq_range::subjects_read(subject_records, subject_range.as_ref())]
-    {
-        outputs.diagnostics.write_all(&record.warnings)?;
-    }
-    let ranged_subjects = seq_range::cut_subjects(subject_records, subject_range.as_ref())?;
-    if subject_records.is_empty() {
-        return Err(app::empty_subjects_error());
-    }
-    let resolved = args.check_options(outputs.diagnostics)?;
-    if query_records.is_empty() {
-        outputs
-            .diagnostics
-            .write_all(b"Warning: [tblastn] Query is Empty!\n")?;
-        return Ok(());
-    }
-    let whole_subjects = seq_range::Placements::default();
-    let (searched_subjects, subject_placements) = match &ranged_subjects {
-        Some((cut, placements)) => (cut.as_slice(), placements),
-        None => (subject_records, &whole_subjects),
-    };
-    // The caller owns the records: their letters are read in place.
-    let batch_size = before_prolog(searched_subjects, None, outputs.diagnostics)?;
-    search(
-        &args,
-        resolved,
-        batch_size,
-        query_records,
-        QueryReading::Records,
-        searched_subjects,
-        subject_placements,
-        None,
-        None,
-        outputs,
-    )
-}
-
-/// The outfmt 0 prologs of a run that fails in its first query batch: NCBI writes the prolog
-/// (`formatter.PrintProlog()`) before it reads the first batch. `subject_path` names a
-/// FASTA subject set of `num_subjects` records (`subject_letters`); a database search shows
-/// its `Database:` lines (`database`).
-fn write_first_batch_prologs(
-    outputs: &mut ReportOutputs<'_>,
-    subject_path: Option<&std::path::Path>,
-    num_subjects: usize,
-    subject_letters: SubjectLetters<'_>,
-    database: Option<&crate::report::pairwise::PairwiseDatabase>,
-) -> Result<()> {
-    let name = subject_path.map_or_else(String::new, |path| {
-        format!("User specified sequence set (Input: {})", path.display())
-    });
-    let total = match database {
-        Some(_) => 0,
-        None => subject_letters.lengths().sum(),
-    };
-    for format in outputs.formats.iter_mut() {
-        if crate::blastinput::app::parse_formatting_string(format.outfmt)?.number == 0 {
-            let mut writer = format.sink.open()?;
-            crate::report::pairwise::write_tblastn_pairwise_prolog(
-                &mut writer,
-                "2.17.0+",
-                &name,
-                num_subjects,
-                total,
-                database,
-            )?;
-            writer.flush()?;
-        }
-    }
-    Ok(())
-}
-
-/// The search of `run_local` and of the CLI, after NCBI's checks of the options, the
-/// reading of the subjects and the steps before the prolog (`before_prolog`): LOSAT's
-/// limits and the environment, then the query batches (`read_query_batches`), the search of
-/// the batches that NCBI searches and their reports.
-#[allow(clippy::too_many_arguments)]
-fn search(
-    args: &TblastnArgs,
-    resolved: ResolvedTblastnArgs,
-    batch_size: u32,
-    query_records: &[FastaRecord],
-    reading: QueryReading,
-    subject_records: &[FastaRecord],
-    subject_placements: &crate::blastinput::seq_range::Placements,
-    // EXPERIMENT (LOSAT_X_TBNSTORE): the subjects' letters, packed (the records keep none).
-    x_subject_stores: Option<&[crate::sequence::packed_subject::PackedNucleotide]>,
-    // `-db`: the database (the subject records are then none).
-    database: Option<&TblastnDatabase>,
-    outputs: &mut ReportOutputs<'_>,
-) -> Result<()> {
-    use crate::blastinput::app;
-    use crate::blastinput::seq_range;
-    // The records are NCBI's reader's records: the subjects of its nucleotide reader (a
-    // subject without letters stays in the database, its warning written before the prolog,
-    // `before_prolog`) and the queries of its protein reader. The query range applies to
-    // every query record as NCBI's batch reader reads it (`seq_range::cut_queries`): a record
-    // is searched cut, and one whose interval starts just past its end is a query without
-    // data (`Sequence contains no data`, as a record without residues).
-    let input_records = query_records;
-    let (searched_queries, query_input) = match resolved.query_range.as_ref() {
-        Some(range) => {
-            let ranged = seq_range::cut_queries(query_records, range);
-            (std::borrow::Cow::Owned(ranged.records), ranged.input)
-        }
-        None => (
-            std::borrow::Cow::Borrowed(query_records),
-            seq_range::QueryInput::whole(query_records),
-        ),
-    };
-    let SearchSettings {
-        composition_mode2,
-        scoring,
-    } = search_settings(&resolved)?;
-    app::check_unsupported_environment("TBLASTN")?;
-    app::check_old_fsc("TBLASTN")?;
-    app::check_query_split_environment("TBLASTN", false)??;
-    let subjects = subject_records;
-    // The search reads the residues of the subject records in place (NCBI's subjects stay in the
-    // reader's records, `CBlastQueryVector`); they are not copied for it. EXPERIMENT
-    // (LOSAT_X_TBNSTORE): or from their packed form.
-    let subject_seqs: Vec<&[u8]> = match x_subject_stores {
-        Some(_) => Vec::new(),
-        None => subjects.iter().map(FastaRecord::seq).collect(),
-    };
-    let subject_letters = match x_subject_stores {
-        Some(stores) => SubjectLetters::Packed(stores),
-        None => SubjectLetters::Records(&subject_seqs),
-    };
-    // A database's numbers and `-dbsize` (`SubjectSetNumbers`), and the `Database:` lines of
-    // a database search.
-    let subject_set = SubjectSetNumbers {
-        database: database.map(TblastnDatabase::numbers),
-        dbsize: args.dbsize,
-    };
-    let pairwise_database = database.map(TblastnDatabase::pairwise_database);
-    let subject_path = match database {
-        Some(_) => None,
-        None => Some(
-            args.subject
-                .as_ref()
-                .context("TBLASTN subject file missing")?,
-        ),
-    };
-    // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:275-278
-    // ```c++
-    //             for (; !input->End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
-    //
-    //                 query =  input->GetNextSeqBatch(*scope);
-    //                 query_factory.Reset(new CObjMgr_QueryFactory(*query));
-    // ```
-    // NCBI reads the query batches one at a time after the outfmt 0 prolog. The run stops at
-    // the first batch that NCBI fails (a reader error, a batch without a query, a batch of
-    // queries without letters), after the reports of the batches before (without the
-    // epilog) and the messages of that batch's records (`read_query_batches`).
-    let batches = crate::blastinput::query_batch::read_query_batches(
-        input_records,
-        &searched_queries,
-        &query_input,
-        reading,
-        batch_size,
-    );
-    if batches.searched_done == 0 && batches.stop.is_some() {
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
-        // ```c
-        // CObjMgr_QueryFactory::CObjMgr_QueryFactory(CBlastQueryVector & queries)
-        //     : m_QueryVector(& queries)
-        // {
-        //     if (queries.Empty()) {
-        //         NCBI_THROW(CBlastException, eInvalidArgument, "Empty CBlastQueryVector");
-        //     }
-        // ```
-        // The first batch fails after the outfmt 0 prolog (`formatter.PrintProlog()`).
-        write_first_batch_prologs(
-            outputs,
-            subject_path.map(|path| path.as_path()),
-            subjects.len(),
-            subject_letters,
-            pairwise_database.as_ref(),
-        )?;
-    } else {
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1407-1426
-        // ```c
-        //     db_length = BlastSeqSrcGetTotLen(seq_src);
-        //
-        //     itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
-        //
-        //     /* iterate over all subject sequences */
-        //     while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-        //            != BLAST_SEQSRC_EOF) {
-        //        ...
-        //        if (BlastSeqSrcGetSequence(seq_src, &seq_arg) < 0) {
-        // ```
-        // `-db`: the database's sequences, read once for every batch (`database::read_stores`)
-        // where NCBI reads them first, in the preliminary search of the first batch with a
-        // valid context (a batch without one is not searched, `CheckInternalData`). A database
-        // without sequences (BLASTN's `Database memory map file error`,
-        // blastn/blast_engine/run.rs) or a sequence file that cannot be read fails that batch,
-        // after the reports of the batches before, which are searched without sequences; a run
-        // without such a batch never reads the file.
-        let (database_stores, mut stores_error) = match database {
-            Some(database) => {
-                let read = if database.numbers().num_seqs == 0 {
-                    Err(PreliminaryReadError("Database memory map file error").into())
-                } else {
-                    database.read_stores()
-                };
-                match read {
-                    Ok(stores) => (stores, None),
-                    Err(error) => (Vec::new(), Some(error)),
-                }
-            }
-            None => (Vec::new(), None),
-        };
-        let search_letters = match database {
-            Some(_) => SubjectLetters::Packed(&database_stores),
-            None => subject_letters,
-        };
-        // The batches before the stop are searched and reported; a reader at the end of its
-        // input reads no batch (`!input->End()`), and the reports have no query (an empty
-        // pipe, or `-query -` after `-subject -`).
-        let searched_done = batches.searched_done;
-        let queries = &searched_queries[..searched_done];
-        let query_offsets: Vec<usize> = (0..queries.len())
-            .map(|index| query_input.placements.offset(index))
-            .collect();
-        let query_seqs: Vec<_> = queries.iter().map(|record| record.seq().to_vec()).collect();
-        let seg = resolved.seg.params();
-        // NCBI c++/src/algo/blast/api/prelim_stage.cpp:172-188:
-        // (*thread)->Run(); (*thread)->Join(&result);
-        // NCBI c++/src/algo/blast/format/blast_format.cpp:1411-1417:
-        // CBlastFormat::PrintOneResultSet(const blast::CSearchResults& results,
-        //                         CConstRef<blast::CBlastQueryVector> queries,
-        // NCBI c++/src/app/blast/tblastn_app.cpp:251-252,275-301:
-        // input.Reset(new CBlastInput(&*fasta, GetQueryBatchSize()));
-        // for (; !input->End(); ...) {
-        //     query = input->GetNextSeqBatch(*scope);
-        //     CLocalBlast lcl_blast(query_factory, ..., db_adapter);
-        //     results = lcl_blast.Run();
-        // }
-        // NCBI c++/src/algo/blast/blastinput/blast_input_aux.cpp:70-127:
-        // case eTblastn: retval = 20000;
-        // Search each accumulated batch independently; preliminary linking
-        // and sum-statistics depend on its concatenated query contexts.
-        let mut results = Vec::with_capacity(queries.len());
-        let mut lengths: Option<LocalSubjectParameters> = None;
-        let mut ungapped_karlin = Vec::with_capacity(queries.len());
-        let mut query_validity = Vec::with_capacity(queries.len());
-        let mut query_batch_skipped = Vec::with_capacity(queries.len());
-        // `-db`: the stored titles read so far, and the batch that a header file or the
-        // sequence file failed with its error.
-        let mut titles = super::database::DatabaseTitles::new();
-        let mut failed: Option<(std::ops::Range<usize>, anyhow::Error)> = None;
-        // EXPERIMENT (LOSAT_X_TBNPAR, LOSAT_X_TBNSSIDE, LOSAT_X_TBNBATCH): the batches of the
-        // loop below searched ahead (`x_search_batches`), each with its range; `None` when
-        // the switches are off. A batch whose range does not match is searched by the loop.
-        // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:275-291
-        // ```c
-        //             for (; !input->End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
-        // ...
-        //                 query =  input->GetNextSeqBatch(*scope);
-        //                 query_factory.Reset(new CObjMgr_QueryFactory(*query));
-        // ...
-        //                     CLocalBlast lcl_blast(query_factory, m_OptsHndl, db_adapter);
-        //                     lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
-        //                     results = lcl_blast.Run();
-        // ```
-        // Dispatch point: NCBI searches the query batches one after another (one CLocalBlast per
-        // batch). With the switches on, x_search_batches searches them ahead (on one shared pool,
-        // or side by side) and returns the reports in batch order; with them off it returns None
-        // and the loop below runs as before.
-        // A database whose sequences could not be read searches its batches one by one below.
-        let x_batches = match stores_error {
-            Some(_) => Vec::new(),
-            None => query_input
-                .batches(batch_size)
-                .into_iter()
-                .map(|batch| batch.searched)
-                .filter(|searched| !searched.is_empty() && searched.end <= searched_done)
-                .collect(),
-        };
-        let mut x_searched = super::stage_d_pipeline::x_search_batches(
-            &query_seqs,
-            search_letters,
-            x_batches,
-            |range| LocalStageDProfile {
-                seg: seg.as_ref(),
-                soft_masking: resolved.soft_masking,
-                mask_lowercase: resolved.lcase_masking,
-                genetic_code: resolved.db_gencode,
-                expect_value: resolved.evalue,
-                max_target_seqs: resolved.hitlist_size,
-                query_offsets: &query_offsets[range],
-                subject_set,
-            },
-            composition_mode2,
-            resolved.sum_stats,
-            scoring,
-            resolved.num_threads,
-        )?
-        .map(Vec::into_iter);
-        for range in query_input
-            .batches(batch_size)
-            .into_iter()
-            .map(|batch| batch.searched)
-            .filter(|searched| !searched.is_empty() && searched.end <= searched_done)
-        {
-            let (mut batch_results, batch_lengths, batch_karlin, batch_validity) =
-                // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:277-291
-                // ```c
-                //                 query =  input->GetNextSeqBatch(*scope);
-                //                 query_factory.Reset(new CObjMgr_QueryFactory(*query));
-                // ...
-                //                     CLocalBlast lcl_blast(query_factory, m_OptsHndl, db_adapter);
-                //                     lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
-                //                     results = lcl_blast.Run();
-                // ```
-                // Dispatch point: a report searched ahead for this very range is used; otherwise
-                // run_local_for_report_threads searches the batch here, which is the port of
-                // CLocalBlast::Run for one batch.
-                match x_searched.as_mut().and_then(Iterator::next) {
-                    Some((x_range, report)) if x_range == range => report,
-                    _ => run_local_for_report_threads(
-                        &query_seqs[range.clone()],
-                        search_letters,
-                        LocalStageDProfile {
-                            seg: seg.as_ref(),
-                            soft_masking: resolved.soft_masking,
-                            mask_lowercase: resolved.lcase_masking,
-                            genetic_code: resolved.db_gencode,
-                            expect_value: resolved.evalue,
-                            max_target_seqs: resolved.hitlist_size,
-                            query_offsets: &query_offsets[range.clone()],
-                            subject_set,
-                        },
-                        composition_mode2,
-                        resolved.sum_stats,
-                        scoring,
-                        resolved.num_threads,
-                    )?,
-                };
-            // `-db`: the first batch with a valid context reads the sequences (above); a
-            // reader error of NCBI's own fails it, LOSAT's refusal stops the run.
-            if batch_validity.iter().any(|&valid| valid) {
-                if let Some(error) = stores_error.take() {
-                    match error.downcast::<PreliminaryReadError>() {
-                        Ok(read_error) => {
-                            failed = Some((range, app::engine_error(read_error.0)));
-                            break;
-                        }
-                        Err(error) => return Err(error),
-                    }
-                }
-            }
-            // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:283-293
-            // ```c++
-            //     m_TbackSearch.Reset(new CBlastTracebackSearch(m_QueryFactory,
-            //                                                   m_InternalData,
-            //                                                   m_Opts,
-            //                                                   seqinfo_src,
-            //                                                   search_msgs));
-            // ```
-            // `-db`: the definition lines of the batch's final hit lists are read where NCBI
-            // makes the batch's Seq-aligns (`database::read_titles`); a header file that NCBI
-            // cannot read fails this batch, after the reports of the batches before.
-            if let Some(database) = database {
-                if let Err(error) =
-                    super::database::read_titles(database, &batch_results, range.start, &mut titles)
-                {
-                    match error.downcast::<HeaderReadError>() {
-                        Ok(failure) => {
-                            failed = Some((range, failure.error));
-                            break;
-                        }
-                        Err(error) => return Err(error),
-                    }
-                }
-            }
-            results.append(&mut batch_results);
-            if let Some(all_lengths) = &mut lengths {
-                // NCBI tblastn_app.cpp:288-301 formats each batch's own
-                // query-context lengths; retain those values in input order.
-                all_lengths.lengths.extend(batch_lengths.lengths);
-                all_lengths.cutoffs.extend(batch_lengths.cutoffs);
-            } else {
-                lengths = Some(batch_lengths);
-            }
-            ungapped_karlin.extend(batch_karlin);
-            // NCBI c++/src/algo/blast/api/local_blast.cpp:177-224:
-            // if (CheckInternalData() != 0) each result in this Run() batch
-            // receives an unsearched ancillary state and null align set.
-            let skipped = batch_validity.iter().all(|&valid| !valid);
-            query_batch_skipped.extend(std::iter::repeat(skipped).take(batch_validity.len()));
-            query_validity.extend(batch_validity);
-        }
-        // A run without a searched query has no parameters of a query set.
-        let mut lengths = lengths.unwrap_or(LocalSubjectParameters {
-            lengths: Vec::new(),
-            cutoffs: Vec::new(),
-            link: None,
-            hit_cutoff_min: 0,
-            word_cutoff_min: 0,
-            prelim_evalue: 0.0,
-        });
-        // A batch that a database file failed is not reported, nor are the batches after it.
-        let queries = match &failed {
-            Some((range, _)) => {
-                results.truncate(range.start);
-                lengths.lengths.truncate(range.start);
-                lengths.cutoffs.truncate(range.start);
-                ungapped_karlin.truncate(range.start);
-                query_validity.truncate(range.start);
-                query_batch_skipped.truncate(range.start);
-                &queries[..range.start]
-            }
-            None => queries,
-        };
-        // NCBI c++/src/algo/blast/format/blast_format.cpp:1443-1451:
-        // if (results.HasWarnings()) ERR_POST(Warning << results.GetWarningStrings());
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:632-640
-        // ```c
-        //         } catch (const CException& e) {
-        //             ...
-        //             CRef<CSearchMessage> m
-        //                 (new CSearchMessage(eBlastSevWarning, index, e.GetMsg()));
-        //             messages[index].push_back(m);
-        //             s_InvalidateQueryContexts(qinfo, index);
-        //         }
-        // ```
-        // The warnings of each query are written before its report, once (`QueryWarnings`):
-        // the reader's messages of the query's batch (before its first query,
-        // `read_query_batches`), then the query's own, on one line in NCBI's order
-        // (`query_warning`): the O characters read as X, and the message of its set-up (a
-        // query without letters) or of its Karlin-Altschul parameters (an invalid query
-        // with letters).
-        let query_warning_lines: Vec<Vec<u8>> = queries
-            .iter()
-            .zip(&query_validity)
-            .enumerate()
-            .map(|(index, (query, valid))| {
-                let mut messages = Vec::new();
-                messages.extend(crate::report::query_warnings::replaced_o_message(
-                    query.seq(),
-                ));
-                if query.seq().is_empty() {
-                    messages.push(NO_DATA_MESSAGE.to_string());
-                } else if !valid {
-                    messages.push(crate::report::query_warnings::INVALID_QUERY_MESSAGE.to_string());
-                }
-                let mut lines = batches.warnings[index].clone();
-                lines.extend(crate::report::query_warnings::query_warning(
-                    "tblastn",
-                    query_input.ordinal(index),
-                    query,
-                    &messages,
-                ));
-                lines
-            })
-            .collect();
-        // `-db`: the reported sequences by rank, with their records and packed subjects; the
-        // database's other sequences are dropped before the reports.
-        let reported = match database {
-            Some(_) => Some(super::database::reported_subjects(
-                &titles,
-                &mut results,
-                &database_stores,
-            )?),
-            None => None,
-        };
-        drop(database_stores);
-        let (report_records, report_letters, shown) = match (&reported, database) {
-            (Some(reported), Some(database)) => (
-                reported.records.as_slice(),
-                SubjectLetters::Packed(&reported.stores),
-                ShownSubjects::Database {
-                    name: database.name(),
-                    pairwise: pairwise_database
-                        .as_ref()
-                        .expect("a database search has its Database: lines"),
-                    reported,
-                },
-            ),
-            _ => (
-                subjects,
-                subject_letters,
-                ShownSubjects::Fasta {
-                    path: subject_path.expect("a search of -subject has its path"),
-                },
-            ),
-        };
-        // Diagnostic (LOSAT_TIMING): the report for the common line (utils/xtiming.rs); it is
-        // written after all batches are searched. No NCBI counterpart.
-        let t_output = crate::utils::xtiming::clock();
-        render(
-            outputs,
-            queries,
-            report_records,
-            report_letters,
-            &shown,
-            subject_set,
-            &mut results,
-            &lengths,
-            &ungapped_karlin,
-            &query_validity,
-            &query_batch_skipped,
-            scoring,
-            &resolved.matrix_name,
-            resolved.max_target_seqs_given,
-            resolved.db_gencode,
-            seg.as_ref(),
-            resolved.lcase_masking,
-            &query_warning_lines,
-            &super::stage_e_report::ReportRanges {
-                queries: &query_input.placements,
-                subjects: subject_placements,
-                // NCBI reference: c++/src/app/blast/tblastn_app.cpp:342
-                // ```c++
-                //         formatter.PrintEpilog(opt);
-                // ```
-                // A run that stops at a query batch writes no epilog.
-                epilog: batches.stop.is_none() && failed.is_none(),
-            },
-        )?;
-        crate::utils::xtiming::add(crate::utils::xtiming::Phase::Output, t_output);
-        // The failed batch's reading messages, then its error.
-        if let Some((range, error)) = failed {
-            for warnings in &batches.warnings[range] {
-                outputs.diagnostics.write_all(warnings)?;
-            }
-            return Err(error);
-        }
-    }
-    if let Some((warnings, error)) = batches.stop {
-        outputs.diagnostics.write_all(&warnings)?;
-        return Err(error);
-    }
-    Ok(())
+pub(super) struct SearchSettings {
+    /// The composition mode of the search (mode 0 for IDENTITY, `identity_cbs_reset`).
+    pub(super) compo_adjust_mode: BlastCompoAdjustMode,
+    /// IDENTITY with a composition mode above 0, which NCBI searches in mode 0 with a warning
+    /// for each query of the first query batch (`IDENTITY_CBS_RESET_MESSAGE`).
+    pub(super) identity_cbs_reset: bool,
+    pub(super) scoring: LocalStageDScoring,
 }
 
 #[cfg(test)]
@@ -1739,6 +1115,37 @@ mod tests {
     use super::*;
 
     use crate::cli::{try_parse_from, Cli, Commands};
+
+    // TBLASTN's `-query_gencode` and `-db_gencode`: `genetic_code_number`, then the codes LOSAT
+    // builds (32 included, Stage A); "invalid genetic code ID" for what is not a number of 0 to
+    // 255 written without a minus sign.
+    #[test]
+    fn tblastn_genetic_codes_are_read_as_ncbi_reads_them() {
+        for value in [
+            "-0",
+            "-5",
+            "256",
+            "2147483648",
+            "",
+            " 5",
+            "5 ",
+            "5.0",
+            "0x",
+            "0x5",
+        ] {
+            assert_eq!(
+                tblastn_genetic_code(value),
+                Err("invalid genetic code ID".to_string()),
+                "{value:?}"
+            );
+        }
+        for (value, expected) in [("+5", 5), ("005", 5), ("11", 11), ("33", 33)] {
+            assert_eq!(tblastn_genetic_code(value), Ok(expected), "{value}");
+        }
+        for value in ["0", "7", "8", "255"] {
+            assert!(tblastn_genetic_code(value).is_err(), "{value}");
+        }
+    }
 
     // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:1938-1942
     // arg_desc.AddFlag(kArgUseLCaseMasking,
@@ -1767,6 +1174,28 @@ mod tests {
         check_options(&parse(extra).unwrap())
             .unwrap_err()
             .to_string()
+    }
+
+    // NCBI blast_args.cpp:2894-2973 (`blastinput::report_counts`).
+    #[test]
+    fn num_descriptions_and_num_alignments_set_the_counts() {
+        let counts = |extra: &[&str]| {
+            let resolved = parse(extra).unwrap().resolve().unwrap();
+            (
+                resolved.hitlist_size,
+                resolved.num_descriptions,
+                resolved.num_alignments,
+            )
+        };
+        assert_eq!(counts(&[]), (500, 500, 250));
+        assert_eq!(counts(&["-num_descriptions", "3"]), (250, 3, 250));
+        assert_eq!(counts(&["-num_alignments", "2"]), (500, 500, 2));
+        assert_eq!(counts(&["-max_target_seqs", "7"]), (7, 7, 7));
+        assert_eq!(counts(&["-outfmt", "6", "-num_alignments", "2"]), (2, 2, 2));
+        assert_eq!(
+            error(&["-num_descriptions", "0", "-num_alignments", "0"]),
+            "BLAST query/options error: No hits are being saved\nPlease refer to the BLAST+ user manual.\n"
+        );
     }
 
     // NCBI tblastn_options.cpp:54-85 and blast_prot_options.cpp:85-141:
@@ -1843,19 +1272,21 @@ mod tests {
         assert!(error(&["-ungapped"]).contains("Composition-adjusted searched"));
         assert!(error(&["-seg", "12 2.2"]).contains("Invalid number of arguments"));
         assert!(parse(&["-word_size", "1"]).is_err());
-        // PAM30 with its best gap costs is an NCBI search that LOSAT does not implement.
+        // NCBI blast_args.cpp:255-275 and blast_options.c:1174-1235: a matrix without gap costs
+        // takes its best pair, and its suggested threshold (+2) and window.
         let resolved = parse(&["-matrix", "PAM30"]).unwrap().resolve().unwrap();
-        assert_eq!((resolved.gap_open, resolved.gap_extend), (9, 1));
+        assert_eq!(
+            (
+                resolved.gap_open,
+                resolved.gap_extend,
+                resolved.threshold,
+                resolved.window_size
+            ),
+            (9, 1, 18.0, 15)
+        );
         for extra in [
-            &["-matrix", "PAM30"][..],
-            &["-word_size", "5"],
-            &["-task", "tblastn-fast"],
-            &["-ungapped", "-comp_based_stats", "F"],
-            &["-max_intron_length", "100"],
-            &["-comp_based_stats", "1"],
-            &["-comp_based_stats", "3"],
-            &["-window_size", "0"],
-            &["-threshold", "13.5"],
+            &["-ungapped", "-comp_based_stats", "F"][..],
+            &["-max_intron_length", "100", "-sum_stats", "true"],
             &["-max_target_seqs", "1073741799"],
             &["-comp_based_stats", "0", "-max_target_seqs", "2147483598"],
         ] {
@@ -1864,11 +1295,166 @@ mod tests {
                 "{extra:?}"
             );
         }
-        let resolved = parse(&["-task", "tblastn-fast"])
-            .unwrap()
-            .resolve()
+        // NCBI's tblastn crashes with IDENTITY's compressed lookup table.
+        for extra in [
+            &["-task", "tblastn-fast", "-matrix", "IDENTITY"][..],
+            &["-matrix", "identity", "-word_size", "5"],
+        ] {
+            assert!(
+                limit(extra).contains("with which NCBI BLAST+'s tblastn crashes"),
+                "{extra:?}"
+            );
+        }
+        // Every matrix of NCBI's tables with every gap cost pair of its table, word sizes 2 to 4,
+        // and composition modes 0 and 2 (series SC, SC1) and 1 and 3 (SC5).
+        for extra in [
+            &["-matrix", "PAM30"][..],
+            &["-comp_based_stats", "1"],
+            &["-comp_based_stats", "3"],
+            &["-matrix", "PAM30", "-comp_based_stats", "1"],
+            &[
+                "-task",
+                "tblastn-fast",
+                "-matrix",
+                "BLOSUM45",
+                "-comp_based_stats",
+                "3",
+            ],
+            &["-matrix", "pam250", "-comp_based_stats", "0"],
+            &["-matrix", "BLOSUM45", "-gapopen", "13", "-gapextend", "3"],
+            &["-matrix", "BLOSUM45", "-word_size", "3"],
+            &["-matrix", "BLOSUM80", "-gapopen", "25", "-gapextend", "2"],
+            &["-gapopen", "13", "-gapextend", "1"],
+            &["-word_size", "2"],
+            &["-word_size", "4", "-matrix", "PAM70"],
+            &[
+                "-matrix",
+                "BLOSUM90",
+                "-threshold",
+                "11",
+                "-window_size",
+                "60",
+            ],
+            // The compressed lookup table with every matrix but IDENTITY (series SC, SC11).
+            &["-task", "tblastn-fast", "-matrix", "BLOSUM80"],
+            &[
+                "-matrix",
+                "pam30",
+                "-word_size",
+                "5",
+                "-comp_based_stats",
+                "0",
+            ],
+            &["-matrix", "BLOSUM45", "-word_size", "6", "-threshold", "15"],
+            &[
+                "-task",
+                "tblastn-fast",
+                "-matrix",
+                "PAM250",
+                "-word_size",
+                "7",
+            ],
+            // The one-hit word finder (line RG, X2; aa_ungapped.c:214-224).
+            &["-window_size", "0"],
+            &["-word_size", "5", "-window_size", "0"],
+            &["-task", "tblastn-fast", "-window_size", "0"],
+        ] {
+            check_options(&parse(extra).unwrap()).unwrap();
+        }
+        // NCBI blast_args.cpp:606-620: the matrix's suggested threshold replaces tblastn's 13
+        // only, not the compressed table's 19.3, 21 or 20.25 (nor tblastn-fast's 20); the
+        // window is the matrix's (BLOSUM45's 60).
+        let settings = search_settings(
+            &parse(&["-matrix", "BLOSUM45", "-word_size", "6"])
+                .unwrap()
+                .resolve()
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            (
+                settings.scoring.word_size,
+                settings.scoring.threshold,
+                settings.scoring.window
+            ),
+            (6, 21.0, 60)
+        );
+        // NCBI blast_args.cpp:836-879: the typed mode is the search's (`compo_adjust_mode`).
+        for (value, mode) in [
+            ("0", BlastCompoAdjustMode::NoCompositionBasedStats),
+            ("F", BlastCompoAdjustMode::NoCompositionBasedStats),
+            ("1", BlastCompoAdjustMode::CompositionBasedStats),
+            ("2", BlastCompoAdjustMode::CompositionMatrixAdjust),
+            ("T", BlastCompoAdjustMode::CompositionMatrixAdjust),
+            ("3", BlastCompoAdjustMode::ForceFullMatrixAdjust),
+        ] {
+            let settings = search_settings(
+                &parse(&["-comp_based_stats", value])
+                    .unwrap()
+                    .resolve()
+                    .unwrap(),
+            )
             .unwrap();
-        assert_eq!((resolved.word_size, resolved.threshold), (5, 20.0));
+            assert_eq!(settings.compo_adjust_mode, mode, "{value}");
+        }
+        // NCBI setup_factory.cpp:143-155: IDENTITY is searched in mode 0 with a warning (for the
+        // first query batch), whatever mode is asked.
+        for (extra, reset) in [
+            (&["-matrix", "IDENTITY"][..], true),
+            (&["-matrix", "identity", "-comp_based_stats", "1"], true),
+            (&["-matrix", "IDENTITY", "-comp_based_stats", "3"], true),
+            (&["-matrix", "IDENTITY", "-comp_based_stats", "0"], false),
+            (&["-matrix", "BLOSUM62"], false),
+        ] {
+            let settings = search_settings(&parse(extra).unwrap().resolve().unwrap()).unwrap();
+            assert_eq!(
+                (
+                    settings.identity_cbs_reset,
+                    settings.compo_adjust_mode.is_enabled()
+                ),
+                (reset, !reset && extra.len() == 2),
+                "{extra:?}"
+            );
+        }
+        // NCBI api/blast_options_handle.cpp:436-447: tblastn-fast sets word size 5, the
+        // compressed lookup table and BLAST_WORD_THRESHOLD_BLASTP_FAST (20); with BLOSUM62 11/1
+        // the table of word size 3, 5, 6 or 7 takes any threshold and window size.
+        let fast = parse(&["-task", "tblastn-fast"]).unwrap();
+        let resolved = fast.resolve().unwrap();
+        assert_eq!(
+            (
+                resolved.word_size,
+                resolved.compressed_lookup,
+                resolved.threshold
+            ),
+            (5, true, 20.0)
+        );
+        check_options(&fast).unwrap();
+        for extra in [
+            &[
+                "-task",
+                "tblastn-fast",
+                "-word_size",
+                "5",
+                "-window_size",
+                "15",
+                "-threshold",
+                "100",
+            ][..],
+            &["-word_size", "6"],
+            &["-word_size", "7", "-threshold", "15"],
+            &["-task", "tblastn-fast", "-word_size", "3"],
+            &["-word_size", "3", "-window_size", "15", "-threshold", "100"],
+            &["-threshold", "13.5", "-window_size", "1"],
+        ] {
+            check_options(&parse(extra).unwrap()).unwrap();
+        }
+        let settings =
+            search_settings(&parse(&["-word_size", "7"]).unwrap().resolve().unwrap()).unwrap();
+        assert_eq!(
+            (settings.scoring.word_size, settings.scoring.threshold),
+            (7, 20.25)
+        );
         // NCBI blast_args.cpp:834-892: the first character chooses the mode (any other is
         // mode 0); a `u` asks for unified P-values only for blastp.
         for value in ["bogus", "0", "F", "2u", "D", "t"] {
@@ -1880,13 +1466,25 @@ mod tests {
             &parse(&["-comp_based_stats", "0", "-max_target_seqs", "1073741824"]).unwrap(),
         )
         .unwrap();
+        // NCBI blast_args.cpp:313-319: -qcov_hsp_perc and -max_hsps.
+        let resolved = parse(&["-max_hsps", "2", "-qcov_hsp_perc", "50.5"])
+            .unwrap()
+            .resolve()
+            .unwrap();
+        assert_eq!((resolved.max_hsps, resolved.query_cov_hsp_perc), (2, 50.5));
+        let resolved = parse(&[]).unwrap().resolve().unwrap();
+        assert_eq!((resolved.max_hsps, resolved.query_cov_hsp_perc), (0, 0.0));
         for extra in [
-            &["-max_hsps", "2"][..],
-            &["-db_soft_mask", "1"],
+            &["-max_hsps", "0"][..],
+            &["-qcov_hsp_perc", "100.5"],
+            &["-qcov_hsp_perc", "nan"],
+        ] {
+            assert!(parse(extra).is_err(), "{extra:?}");
+        }
+        for extra in [
+            &["-db_soft_mask", "1"][..],
             &["-remote"],
-            &["-in_pssm", "p.asn"],
             &["-use_sw_tback"],
-            &["-xdrop_ungap", "7"],
         ] {
             let error = crate::cli::render_message(&parse(extra).unwrap_err());
             assert!(
@@ -1895,4 +1493,193 @@ mod tests {
             );
         }
     }
+
+    /// The tblastn arguments `-in_pssm <psiblast's frozen PSSM> -subject s.fna <extra>`.
+    fn parse_pssm(extra: &[&str]) -> std::result::Result<TblastnArgs, clap::Error> {
+        let pssm = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/db_search/db.ps.asn.rnd.6.asn"
+        );
+        let mut argv = vec!["losat", "tblastn", "-in_pssm", pssm, "-subject", "s.fna"];
+        argv.extend_from_slice(extra);
+        let cli: Cli = try_parse_from(argv)?;
+        let Commands::Tblastn(args) = cli.command else {
+            unreachable!()
+        };
+        Ok(args)
+    }
+
+    // NCBI tblastn_args.cpp:138-149, psiblast_options.cpp:69-75 and blast_args.cpp:866-868,
+    // 1050-1055: PSI-TBLASTN is psiblast's handle with tblastn's threshold and genetic code 1, no
+    // sum statistics, composition-based statistics 0 whatever `-comp_based_stats` says, and
+    // `-task tblastn-fast` without effect (line PS, DECISIONS 35).
+    #[test]
+    fn in_pssm_takes_psi_tblastns_options() {
+        let resolved = parse_pssm(&[]).unwrap().resolve().unwrap();
+        assert!(resolved.pssm.is_some());
+        assert!(!resolved.sum_stats && !resolved.compressed_lookup);
+        assert_eq!((resolved.word_size, resolved.threshold), (3, 13.0));
+        assert_eq!(resolved.db_gencode, 1);
+        assert_eq!(
+            resolved.composition_mode,
+            crate::blastinput::app::CompositionMode::NoCompositionBasedStats
+        );
+        for value in ["0", "1", "2", "3", "D", "t", "x", "", "2u"] {
+            let resolved = parse_pssm(&["-comp_based_stats", value])
+                .unwrap()
+                .resolve()
+                .unwrap();
+            assert_eq!(
+                resolved.composition_mode,
+                crate::blastinput::app::CompositionMode::NoCompositionBasedStats,
+                "{value:?}"
+            );
+        }
+        let fast = parse_pssm(&["-task", "tblastn-fast"])
+            .unwrap()
+            .resolve()
+            .unwrap();
+        assert_eq!(
+            (fast.word_size, fast.threshold, fast.compressed_lookup),
+            (3, 13.0, false)
+        );
+        let resolved = parse_pssm(&["-db_gencode", "4", "-sum_stats", "true"])
+            .unwrap()
+            .resolve()
+            .unwrap();
+        assert_eq!((resolved.db_gencode, resolved.sum_stats), (1, true));
+        // The matrix's suggestion replaces the default threshold 13 (+2 for a translated subject).
+        let resolved = parse_pssm(&["-matrix", "BLOSUM45"])
+            .unwrap()
+            .resolve()
+            .unwrap();
+        assert_eq!((resolved.threshold, resolved.window_size), (16.0, 60));
+        // A matrix query keeps tblastn's handle.
+        assert!(parse(&[]).unwrap().resolve().unwrap().pssm.is_none());
+    }
+
+    // NCBI blast_options.c:910-936 (`std_matrix_only` for a program that is neither blastp nor
+    // tblastn) and 1358-1363 (the word size of PSI-TBLASTN); the code 32 is not NCBI's
+    // (blast_args.cpp:1011-1015); `-query` and `-query_loc` exclude `-in_pssm`
+    // (blast_args.cpp:1241-1247).
+    #[test]
+    fn in_pssm_errors_are_ncbis_and_losats() {
+        let error = |extra: &[&str]| {
+            parse_pssm(extra)
+                .unwrap()
+                .resolve()
+                .unwrap_err()
+                .to_string()
+        };
+        for size in ["5", "6", "7", "8"] {
+            assert_eq!(
+                error(&["-word_size", size]),
+                "BLAST query/options error: Word-size must be less than 6 for protein comparison\nPlease refer to the BLAST+ user manual.\n",
+                "{size}"
+            );
+        }
+        assert!(error(&["-task", "tblastn-fast", "-word_size", "6"])
+            .contains("Word-size must be less than 6 for protein comparison"));
+        let identity = error(&["-matrix", "IDENTITY"]);
+        assert!(
+            identity.starts_with(
+                "BLAST query/options error: IDENTITY is not a supported matrix, supported matrices are:\nBLOSUM80 \n"
+            ),
+            "{identity}"
+        );
+        assert!(!identity[40..].contains("IDENTITY"), "{identity}");
+        assert!(error(&["-db_gencode", "32"]).contains("-db_gencode 32 with -in_pssm"));
+        assert!(error(&["-threshold", "0"]).contains("Non-zero threshold required"));
+        let pssm = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/db_search/db.ps.asn.rnd.6.asn"
+        );
+        for extra in [&["-query", "q.faa"][..], &["-query_loc", "1-10"]] {
+            let mut argv = vec!["losat", "tblastn", "-in_pssm", pssm, "-subject", "s.fna"];
+            argv.extend_from_slice(extra);
+            assert!(try_parse_from::<Cli, _, _>(argv).is_err(), "{extra:?}");
+        }
+    }
+
+    // NCBI blast_parameters.c:781-787: the largest intron is read by the linking only (DECISIONS
+    // 35 Q3 of line PS: accepted without `-sum_stats true`, refused with it as before).
+    #[test]
+    fn the_largest_intron_is_refused_with_sum_statistics_only() {
+        let settings = |args: TblastnArgs| check_search_limits(&args.resolve().unwrap());
+        assert!(settings(parse_pssm(&["-max_intron_length", "100"]).unwrap()).is_ok());
+        assert!(
+            settings(parse(&["-max_intron_length", "100", "-sum_stats", "false"]).unwrap()).is_ok()
+        );
+        for args in [
+            parse_pssm(&["-max_intron_length", "100", "-sum_stats", "true"]).unwrap(),
+            parse(&["-max_intron_length", "100"]).unwrap(),
+        ] {
+            assert!(settings(args)
+                .unwrap_err()
+                .to_string()
+                .contains("-max_intron_length 100 (uneven gap linking) is not supported"));
+        }
+    }
+
+    // blast_args.cpp:276-278 and blast_options.c:608-618: `-xdrop_ungap` reaches the search's
+    // options (7 bits by default), one of 0 or below is NCBI's options error, and a gapped X-drop
+    // whose raw score NCBI's kernels cannot size is refused (`core::x_drop`).
+    #[test]
+    fn the_x_drops_reach_the_search_or_ncbis_errors() {
+        let resolved = parse(&[]).unwrap().resolve().unwrap();
+        assert_eq!(
+            (
+                resolved.xdrop_ungap,
+                resolved.xdrop_gap,
+                resolved.xdrop_gap_final
+            ),
+            (7.0, 15.0, 25.0)
+        );
+        let resolved = parse(&["-xdrop_ungap", "3.5", "-xdrop_gap", "1e300"])
+            .unwrap()
+            .resolve()
+            .unwrap();
+        assert_eq!((resolved.xdrop_ungap, resolved.xdrop_gap), (3.5, 1e300));
+        assert_eq!(
+            search_settings(&resolved).unwrap().scoring.word_xdrop_bits,
+            3.5
+        );
+        for value in ["0", "-1", "-0.0", "-inf"] {
+            let error = parse(&["-xdrop_ungap", value])
+                .unwrap()
+                .resolve()
+                .unwrap_err();
+            assert!(
+                format!("{error:#}").contains("x_dropoff must be greater than zero"),
+                "{value}: {error:#}"
+            );
+        }
+        // 4.2e8 bits are 1.09e9 raw at BLOSUM62 11/1's Lambda, past the kernels' 2^30 - 103: the
+        // preliminary X-drop at every mode, the final one only without the redo (mode 0, or
+        // IDENTITY's reset). LOSAT refuses them where the search starts (`check_search_limits`),
+        // which a run that NCBI stops before its first batch never reaches.
+        for extra in [
+            &["-xdrop_gap", "4.2e8"][..],
+            &["-xdrop_gap_final", "4.2e8", "-comp_based_stats", "0"],
+        ] {
+            let resolved = parse(extra).unwrap().resolve().unwrap();
+            assert!(search_settings(&resolved).is_ok());
+            let error = check_search_limits(&resolved).unwrap_err();
+            assert!(
+                format!("{error:#}").starts_with(&format!("an {} of 420000000.0 bits", extra[0])),
+                "{extra:?}: {error:#}"
+            );
+        }
+        for cbs in ["1", "2", "3"] {
+            let resolved = parse(&["-xdrop_gap_final", "4.2e8", "-comp_based_stats", cbs])
+                .unwrap()
+                .resolve()
+                .unwrap();
+            assert!(check_search_limits(&resolved).is_ok());
+        }
+    }
 }
+
+#[cfg(test)]
+#[path = "tblastn_culling_tests.rs"]
+mod tblastn_culling_tests;

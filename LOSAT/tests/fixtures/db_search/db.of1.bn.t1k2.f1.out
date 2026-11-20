@@ -1,0 +1,389 @@
+BLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/t1_bn_s.fna).
+           9 sequences; 5,420 total letters
+
+
+
+Query= mq1 query matching several subjects
+
+Length=600
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+dup9 second copy                                                      1060    0.0   
+dup1 copy of msA close homolog of base (1% divergence)                1060    0.0   
+msA close homolog of base (1% divergence)                             1060    0.0   
+dup2 copy of msB medium homolog of base (6% divergence), reverse ...  930     0.0   
+msB medium homolog of base (6% divergence), reverse complemented      930     0.0   
+msC distant homolog of base (12% divergence)                          528     4e-153
+msD two copies of a base fragment, one on each strand                 343     9e-98 
+msF contains the second query region                                  19.3    4.7   
+msE unrelated random sequence                                         18.4    16    
+
+
+
+Query_1    1    TTCCCCCAGTATCTCGTCCTCGAATGTAGATCGATCTAGCCCTCCAAACTTATACGATGC  60
+Subject_9  51   ..........................A.................................  110
+Subject_9  504                                           ..G.........         493
+Subject_9  88                             ...........                         78
+Subject_9  385                                    .......                     391
+Subject_9  452                                            .......             458
+Subject_9  474                                             .......            468
+Subject_7  51   ..........................A.................................  110
+Subject_7  504                                           ..G.........         493
+Subject_7  88                             ...........                         78
+Subject_7  385                                    .......                     391
+Subject_7  452                                            .......             458
+Subject_7  474                                             .......            468
+Subject_1  51   ..........................A.................................  110
+Subject_1  504                                           ..G.........         493
+Subject_1  88                             ...........                         78
+Subject_1  385                                    .......                     391
+Subject_1  452                                            .......             458
+Subject_1  474                                             .......            468
+
+Query_1    61   TCACTGTCGTACCTAAACGCCTCCGTCGAGCAGAAGCTTGTTTGACAGTTCGCGAGCCTG  120
+Subject_9  111  ............................................................  170
+Subject_9  490                 ..G........                                    480
+Subject_9  300                         .......                                306
+Subject_9  624                                                  .......       618
+Subject_9  617                                                  ...........   628
+                                                                      \     
+                                                                      |     
+                                                                      A
+Subject_7  111  ............................................................  170
+Subject_7  490                 ..G........                                    480
+Subject_7  300                         .......                                306
+Subject_7  624                                                  .......       618
+Subject_7  617                                                  ...........   628
+                                                                      \     
+                                                                      |     
+                                                                      A
+Subject_1  111  ............................................................  170
+Subject_1  490                 ..G........                                    480
+Subject_1  300                         .......                                306
+Subject_1  624                                                  .......       618
+Subject_1  617                                                  ...........   628
+                                                                      \     
+                                                                      |     
+                                                                      A
+
+Query_1    121  TATTGAGGTCGTGTCGTTCTGCGAGGCCGTCTGTAACAGCTCGTTGCAAGAAATGGGCAT  180
+Subject_9  171  ............................................................  230
+Subject_9  29                          .......                                23
+Subject_9  664                                                            ..  665
+Subject_7  171  ............................................................  230
+Subject_7  29                          .......                                23
+Subject_7  664                                                            ..  665
+Subject_1  171  ............................................................  230
+Subject_1  29                          .......                                23
+Subject_1  664                                                            ..  665
+
+Query_1    181  TCGTGCCTTTCGGCGTTCTTCACTAAGTAGAGAGTGCCATAAGCGCTATCCATCGGGACC  240
+Subject_9  231  ...G........................................................  290
+Subject_9  689                                                          ....  686
+Subject_9  331                                              .......           325
+Subject_9  666  .....                                                         670
+Subject_7  231  ...G........................................................  290
+Subject_7  689                                                          ....  686
+Subject_7  331                                              .......           325
+Subject_7  666  .....                                                         670
+Subject_1  231  ...G........................................................  290
+Subject_1  689                                                          ....  686
+Subject_1  331                                              .......           325
+Subject_1  666  .....                                                         670
+
+Query_1    241  GAACCCAATCGCCGAGTCGCACTACTACTACCTGGGATAGCCAGGGATTAAGCGGGATGC  300
+Subject_9  291  ...........T................................................  350
+Subject_9  440            ............CG..G...                                420
+                               \                                            
+                               |                                            
+                               C
+Subject_9  685  ....                                                          682
+Subject_9  281                                    .......                     275
+Subject_7  291  ...........T................................................  350
+Subject_7  440            ............CG..G...                                420
+                               \                                            
+                               |                                            
+                               C
+Subject_7  685  ....                                                          682
+Subject_7  281                                    .......                     275
+Subject_1  291  ...........T................................................  350
+Subject_1  440            ............CG..G...                                420
+                               \                                            
+                               |                                            
+                               C
+Subject_1  685  ....                                                          682
+Subject_1  281                                    .......                     275
+
+Query_1    301  CAGTTCCTACCGCATAACCCGAGCTCAATTACCGTCTAGCCTCATCCCTCCGCACCCTTA  360
+Subject_9  351  ............................................................  410
+Subject_9  85                                     .......                     91
+Subject_7  351  ............................................................  410
+Subject_7  85                                     .......                     91
+Subject_1  351  ............................................................  410
+Subject_1  85                                     .......                     91
+
+Query_1    361  CGGGTCAAATAGCAGCGGAGCGACGTCGGCTAAGCCATAGGTCCAAACCCGGAATATAGT  420
+Subject_9  411  ..................T.........................................  470
+Subject_9  438                      ........                                  431
+Subject_9  93                                            .......              99
+Subject_9  100                                                           ...  98
+Subject_7  411  ..................T.........................................  470
+Subject_7  438                      ........                                  431
+Subject_7  93                                            .......              99
+Subject_7  100                                                           ...  98
+Subject_1  411  ..................T.........................................  470
+Subject_1  438                      ........                                  431
+Subject_1  93                                            .......              99
+Subject_1  100                                                           ...  98
+
+Query_1    421  TTGGGAGCAACGGAGGCCTTAGATAAGTTTGCAGTCAGTTGAAAACTCTAAAGCCAATGC  480
+Subject_9  471  ....................G.......................................  530
+Subject_9  103                        .........G..                            92
+Subject_9  136           ........G..                                          126
+Subject_9  97   ....                                                          94
+Subject_7  471  ....................G.......................................  530
+Subject_7  103                        .........G..                            92
+Subject_7  136           ........G..                                          126
+Subject_7  97   ....                                                          94
+Subject_1  471  ....................G.......................................  530
+Subject_1  103                        .........G..                            92
+Subject_1  136           ........G..                                          126
+Subject_1  97   ....                                                          94
+
+Query_1    481  CGCTAGCTTAAGGGCGAAAGTTCGTCGTGGCTGCCGCCGACTCAGTAATATTAAACACGC  540
+Subject_9  531  ............................................................  590
+Subject_9  624      ...C.........G...                                         640
+Subject_9  21                                        ........                 14
+Subject_9  583                                               ........         576
+Subject_7  531  ............................................................  590
+Subject_7  624      ...C.........G...                                         640
+Subject_7  21                                        ........                 14
+Subject_7  583                                               ........         576
+Subject_1  531  ............................................................  590
+Subject_1  624      ...C.........G...                                         640
+Subject_1  21                                        ........                 14
+Subject_1  583                                               ........         576
+
+Query_1    541  ACGGCCAAGACGTGATGTGCGCAGCCTTCGCGAAGCCTAAGGGCGAGAGTCCACATTTTG  600
+Subject_9  591  ............................................................  650
+Subject_9  535                                   ...T.........A...            551
+Subject_9  628                        ..G..........G..                        613
+Subject_9  165                             .......                            159
+Subject_9  159                            ......-.....                        169
+Subject_7  591  ............................................................  650
+Subject_7  535                                   ...T.........A...            551
+Subject_7  628                        ..G..........G..                        613
+Subject_7  165                             .......                            159
+Subject_7  159                            ......-.....                        169
+Subject_1  591  ............................................................  650
+Subject_1  535                                   ...T.........A...            551
+Subject_1  628                        ..G..........G..                        613
+Subject_1  165                             .......                            159
+Subject_1  159                            ......-.....                        169
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 3091725
+
+
+Query= mq2 query with no significant hit
+
+Length=300
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+msF contains the second query region                                  23.8    0.19 
+dup9 second copy                                                      19.3    2.3  
+dup2 copy of msB medium homolog of base (6% divergence), reverse ...  19.3    2.3  
+dup1 copy of msA close homolog of base (1% divergence)                19.3    2.3  
+msB medium homolog of base (6% divergence), reverse complemented      19.3    2.3  
+msA close homolog of base (1% divergence)                             19.3    2.3  
+msC distant homolog of base (12% divergence)                          17.5    8.0  
+msD two copies of a base fragment, one on each strand                 16.6    28   
+msE unrelated random sequence                                         15.7    28   
+
+
+
+Query_2    29   GAGCCTGGTTGTAGATATGAAGGTGGTTTTCATGAAGCCACGCTTTGTCCTCGGGAGATC  88
+Subject_6  102  ..........-.....                                              116
+Subject_6  104                                                   .......      98
+Subject_6  232                                             .......            226
+Subject_9  66                                                 .......         72
+Subject_9  164  .......                                                       170
+Subject_9  516                           .......                              510
+Subject_9  562                                     .......                    556
+Subject_8  517  .......                                                       511
+Subject_8  606           .......                                              600
+
+Query_2    89   CTATCCTCTATGAGCAGTGGAGACTGGTGGGGAATCTTCTAGCACGCCCCCCTCATAATC  148
+Subject_6  339                                             ........G....T...  323
+Subject_6  306                      .......                                   312
+Subject_9  664                                                      ..C.....  657
+Subject_9  56                               ........                          49
+Subject_8  597                                      .......C....              586
+Subject_8  202                                              .......           208
+
+Query_2    149  AATGTCACCTGCACAGGCATCGGGACCAAGTCAAGGTTCGAGCAATCACCACGGTGCGGA  208
+Subject_6  322  T..                                                           320
+Subject_6  108               .....-........                                   96
+Subject_6  68                                               ........          61
+Subject_6  98         ........                                                91
+Subject_6  226                                                           ...  228
+Subject_9  281                   ..........                                   290
+Subject_9  656  ..                                                            655
+Subject_9  406                                                      ........  399
+Subject_9  136                                       .......                  142
+Subject_9  426                                                     .......    432
+Subject_8  400                   ..........                                   391
+Subject_8  275                                                      ........  282
+Subject_8  87                                                      .......    93
+Subject_8  180                                           .......              174
+Subject_8  634                                  .......                       628
+
+Query_2    209  CAAATCTTTGTTTTGTCTGGTTCGCAATTACCAATTTGGGATGCACATGCGTCTACTTTT  268
+Subject_6  87                                                  .......T...    77
+Subject_6  229  .....                                                         233
+Subject_6  177                              .......                           171
+Subject_9  376                          ........                              383
+Subject_9  261                                                     .......    255
+Subject_9  344                                       .......                  350
+Subject_9  470                                    .......                     476
+Subject_8  283  .                                                             283
+Subject_8  305                          ........                              298
+Subject_8  337                                       .......                  331
+
+Query_2    269  GCTAAATGAGCGTATAACGCAG  290
+Subject_6  252                 .......  246
+Subject_9  106            .......       100
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 1506225
+
+
+Query= mq3 query matching msF on the minus strand
+
+Length=300
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+msF contains the second query region                                  471     4e-136
+dup9 second copy                                                      18.4    8.0   
+dup1 copy of msA close homolog of base (1% divergence)                18.4    8.0   
+msA close homolog of base (1% divergence)                             18.4    8.0   
+msE unrelated random sequence                                         17.5    8.0   
+msC distant homolog of base (12% divergence)                          17.5    8.0   
+dup2 copy of msB medium homolog of base (6% divergence), reverse ...  16.6    28    
+msB medium homolog of base (6% divergence), reverse complemented      16.6    28    
+msD two copies of a base fragment, one on each strand                 15.7    28    
+
+
+
+Query_3    3    TTGTGTTTACGTGTTGACGTCGAGACAAGGGCAACGTGTTACGTGCGCCCGTGACCTGTT  62
+Subject_6  428  .................................G..........................  369
+Subject_9  134                   .......                                      140
+Subject_9  300                   .......                                      306
+Subject_9  437                 .......                                        431
+Subject_9  432                 .......                                        438
+Subject_9  588    .......                                                     582
+Subject_7  134                   .......                                      140
+Subject_7  300                   .......                                      306
+Subject_7  437                 .......                                        431
+Subject_7  432                 .......                                        438
+Subject_7  588    .......                                                     582
+
+Query_3    63   GGACAGCCTGACGTGGCACTGTTATTCGGAcccccccGTCATTCTCTATAACCAGCCCAG  122
+Subject_6  368  .......T...............T.......G...........A................  309
+Subject_6  167     .......C..                                                 158
+Subject_6  39                                                       .......   33
+Subject_9  269               .......                                          263
+Subject_7  269               .......                                          263
+
+Query_3    123  TGTATCGCCCCACAGTGGGGTGTTCTCGGGGTTATGGTCAATACTGATATAACAAGAAAG  182
+Subject_6  308  .C....................C...................................C.  249
+Subject_6  425                                                     .........  433
+Subject_6  25                         .......                                 19
+Subject_9  370                              ........                          363
+Subject_9  176                                       .......                  170
+Subject_9  217                                                      .......   223
+Subject_7  370                              ........                          363
+Subject_7  176                                       .......                  170
+Subject_7  217                                                      .......   223
+
+Query_3    183  CAGGCCAAGTCACGAATTTGTCGAGGAGGTTGCCACATGAGATGCGCACAAGTGCCGACA  242
+Subject_6  248  ..........AC..........C............AG.........T.............  189
+Subject_6  147                         .......                                141
+Subject_6  492                                          .......               486
+Subject_9  672          .........                                             664
+Subject_9  613                                            ........            606
+Subject_9  35                                                        .......  29
+Subject_9  73                       .......                                   67
+Subject_9  593    .......                                                     599
+Subject_7  672          .........                                             664
+Subject_7  613                                            ........            606
+Subject_7  35                                                        .......  29
+Subject_7  73                       .......                                   67
+Subject_7  593    .......                                                     599
+
+Query_3    243  CCCGGTGGCTGTACCAATACGCAGCCTGCCGACAGTTCTTCAGGAGGTGTAAGATGTT  300
+Subject_6  188  ...................G......................................  131
+Subject_6  226                                          ........            219
+Subject_6  35         .......                                               41
+Subject_9  39                          ...G........                         28
+Subject_9  154                                ........                      161
+Subject_9  245                                    ........                  252
+Subject_9  610                     ........                                 617
+Subject_9  119                               .......                        113
+Subject_9  557      .......                                                 563
+Subject_7  39                          ...G........                         28
+Subject_7  154                                ........                      161
+Subject_7  245                                    ........                  252
+Subject_7  610                     ........                                 617
+Subject_7  119                               .......                        113
+Subject_7  557      .......                                                 563
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 1506225
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt0/t1_bn_s.fna).
+    Posted date:  Unknown
+  Number of letters in database: 5,420
+  Number of sequences in database:  9
+
+
+
+Matrix: blastn matrix 2 -3
+Gap Penalties: Existence: 5, Extension: 2

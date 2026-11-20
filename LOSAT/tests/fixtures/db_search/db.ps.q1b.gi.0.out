@@ -1,0 +1,395 @@
+PSIBLAST 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for compositional score matrix adjustment: Stephen F.
+Altschul, John C. Wootton, E. Michael Gertz, Richa Agarwala,
+Aleksandr Morgulis, Alejandro A. Schaffer, and Yi-Kuo Yu (2005)
+"Protein database searches using compositionally adjusted
+substitution matrices", FEBS J. 272:5101-5109.
+
+
+Reference for composition-based statistics starting in round 2:
+Alejandro A. Schaffer, L. Aravind, Thomas L. Madden, Sergei
+Shavirin, John L. Spouge, Yuri I. Wolf, Eugene V. Koonin, and
+Stephen F. Altschul (2001), "Improving the accuracy of PSI-BLAST
+protein database searches with composition-based statistics and
+other refinements", Nucleic Acids Res. 29:2994-3005.
+
+
+
+Database: tfp
+           23 sequences; 3,263 total letters
+
+Results from round 1
+
+
+Query= gi|4504347 hemoglobin subunit alpha [Homo sapiens]
+
+Length=30
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+P63107.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  60.8    5e-18
+P07405.1 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  59.7    2e-17
+P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  59.3    2e-17
+Q9TS35.2 RecName: Full=Hemoglobin subunit alpha-1; AltName: Full=...  58.5    4e-17
+P01999.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  57.7    8e-17
+P01966.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  57.0    2e-16
+P67818.1 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  57.0    2e-16
+P01935.1 RecName: Full=Hemoglobin subunit alpha-3; AltName: Full=...  57.0    2e-16
+P01942.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  55.8    5e-16
+P01923.1 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  55.4    6e-16
+P60529.1 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  55.0    1e-15
+P83135.2 RecName: Full=Hemoglobin subunit alpha-A; AltName: Full=...  55.0    1e-15
+P01994.2 RecName: Full=Hemoglobin subunit alpha-A; AltName: Full=...  53.9    3e-15
+Q90487.3 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  50.4    6e-14
+P02018.1 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  48.9    2e-13
+P11251.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  48.1    5e-13
+P06638.2 RecName: Full=Hemoglobin subunit alpha-5; AltName: Full=...  48.1    5e-13
+P09105.2 RecName: Full=Hemoglobin subunit theta-1; AltName: Full=...  47.7    7e-13
+Q9PRL9.1 RecName: Full=Hemoglobin subunit alpha-1; AltName: Full=...  46.2    3e-12
+P11748.1 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  44.6    1e-11
+P02008.2 RecName: Full=Hemoglobin subunit zeta; AltName: Full=HBA...  43.5    3e-11
+P01946.3 RecName: Full=Hemoglobin subunit alpha-1/2; AltName: Ful...  36.5    1e-08
+P06467.2 RecName: Full=Hemoglobin subunit zeta; AltName: Full=Alp...  36.5    1e-08
+
+
+>P63107.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain; Contains: RecName: 
+Full=Hemopressin [Macaca fuscata fuscata] >sp|P63108.2| 
+RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain; Contains: RecName: 
+Full=Hemopressin [Macaca mulatta]
+ P01986.2 RecName: Full=Hemoglobin subunit alpha-A; AltName: Full=Alpha-A-globin; 
+AltName: Full=Hemoglobin alpha-A chain [Anas platyrhynchos]
+Length=142
+
+ Score = 60.8 bits (146),  Expect = 5e-18, Method: Composition-based stats.
+ Identities = 28/30 (93%), Positives = 29/30 (97%), Gaps = 0/30 (0%)
+
+Query  1   MVLSPADKTNVKAAWGKVGAHAGEYGAEAL  30
+           MVLSPADK+NVKAAWGKVG HAGEYGAEAL
+Sbjct  1   MVLSPADKSNVKAAWGKVGGHAGEYGAEAL  30
+
+
+>P07405.1 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain; Contains: RecName: 
+Full=Hemopressin [Felis catus]
+Length=141
+
+ Score = 59.7 bits (143),  Expect = 2e-17, Method: Composition-based stats.
+ Identities = 24/29 (83%), Positives = 27/29 (93%), Gaps = 0/29 (0%)
+
+Query  2   VLSPADKTNVKAAWGKVGAHAGEYGAEAL  30
+           VLS ADK+NVKA WGK+G+HAGEYGAEAL
+Sbjct  1   VLSAADKSNVKACWGKIGSHAGEYGAEAL  29
+
+
+>P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain; Contains: RecName: 
+Full=Hemopressin [Homo sapiens] >sp|P69906.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: 
+Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan paniscus] >sp|P69907.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin 
+alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan troglodytes]
+ P01972.1 RecName: Full=Hemoglobin subunit alpha-1/2; AltName: Full=Alpha-1/2-globin; 
+AltName: Full=Hemoglobin alpha-1/2 chain [Odocoileus 
+virginianus virginianus]
+Length=142
+
+ Score = 59.3 bits (142),  Expect = 2e-17, Method: Composition-based stats.
+ Identities = 30/30 (100%), Positives = 30/30 (100%), Gaps = 0/30 (0%)
+
+Query  1   MVLSPADKTNVKAAWGKVGAHAGEYGAEAL  30
+           MVLSPADKTNVKAAWGKVGAHAGEYGAEAL
+Sbjct  1   MVLSPADKTNVKAAWGKVGAHAGEYGAEAL  30
+
+
+>Q9TS35.2 RecName: Full=Hemoglobin subunit alpha-1; AltName: Full=Alpha-1-globin; 
+AltName: Full=Hemoglobin alpha-1 chain; Contains: 
+RecName: Full=Hemopressin [Hylobates lar]
+ Q7LZC3.1 RecName: Full=Hemoglobin subunit alpha-A; AltName: Full=Alpha-A-globin; 
+AltName: Full=Hemoglobin alpha-A chain [Streptopelia 
+orientalis]
+Length=142
+
+ Score = 58.5 bits (140),  Expect = 4e-17, Method: Composition-based stats.
+ Identities = 29/30 (97%), Positives = 30/30 (100%), Gaps = 0/30 (0%)
+
+Query  1   MVLSPADKTNVKAAWGKVGAHAGEYGAEAL  30
+           MVLSPADKTNVKAAWGKVGAHAG+YGAEAL
+Sbjct  1   MVLSPADKTNVKAAWGKVGAHAGDYGAEAL  30
+
+
+>P01999.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain [Alligator mississippiensis]
+Length=142
+
+ Score = 57.7 bits (138),  Expect = 8e-17, Method: Composition-based stats.
+ Identities = 21/30 (70%), Positives = 22/30 (73%), Gaps = 0/30 (0%)
+
+Query  1   MVLSPADKTNVKAAWGKVGAHAGEYGAEAL  30
+           MVLS  DK+NVKA WGK   H  EYGAEAL
+Sbjct  1   MVLSMEDKSNVKAIWGKASGHLEEYGAEAL  30
+
+
+>P01966.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain; Contains: RecName: 
+Full=Hemopressin [Bos taurus]
+Length=142
+
+ Score = 57.0 bits (136),  Expect = 2e-16, Method: Composition-based stats.
+ Identities = 26/30 (87%), Positives = 26/30 (87%), Gaps = 0/30 (0%)
+
+Query  1   MVLSPADKTNVKAAWGKVGAHAGEYGAEAL  30
+           MVLS ADK NVKAAWGKVG HA EYGAEAL
+Sbjct  1   MVLSAADKGNVKAAWGKVGGHAAEYGAEAL  30
+
+
+>P67818.1 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain; Contains: RecName: 
+Full=Hemopressin [Saguinus oedipus]
+Length=141
+
+ Score = 57.0 bits (136),  Expect = 2e-16, Method: Composition-based stats.
+ Identities = 26/29 (90%), Positives = 28/29 (97%), Gaps = 0/29 (0%)
+
+Query  2   VLSPADKTNVKAAWGKVGAHAGEYGAEAL  30
+           VLSPADK+NVKAAWGKVG HAG+YGAEAL
+Sbjct  1   VLSPADKSNVKAAWGKVGGHAGDYGAEAL  29
+
+
+>P01935.1 RecName: Full=Hemoglobin subunit alpha-3; AltName: Full=Alpha-3-globin; 
+AltName: Full=Hemoglobin alpha-2 chain [Pan troglodytes]
+Length=141
+
+ Score = 57.0 bits (136),  Expect = 2e-16, Method: Composition-based stats.
+ Identities = 28/29 (97%), Positives = 29/29 (100%), Gaps = 0/29 (0%)
+
+Query  2   VLSPADKTNVKAAWGKVGAHAGEYGAEAL  30
+           VLSPADKTNVKAAWGKVGAHAG+YGAEAL
+Sbjct  1   VLSPADKTNVKAAWGKVGAHAGZYGAEAL  29
+
+
+>P01942.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain; Contains: RecName: 
+Full=Hemopressin [Mus musculus]
+Length=142
+
+ Score = 55.8 bits (133),  Expect = 5e-16, Method: Composition-based stats.
+ Identities = 22/30 (73%), Positives = 25/30 (83%), Gaps = 0/30 (0%)
+
+Query  1   MVLSPADKTNVKAAWGKVGAHAGEYGAEAL  30
+           MVLS  DK+N+KAAWGK+G H  EYGAEAL
+Sbjct  1   MVLSGEDKSNIKAAWGKIGGHGAEYGAEAL  30
+
+
+>P01923.1 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain; Contains: RecName: 
+Full=Hemopressin [Gorilla gorilla gorilla]
+ P01979.1 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain; Contains: RecName: 
+Full=Hemopressin [Ornithorhynchus anatinus]
+Length=141
+
+ Score = 55.4 bits (132),  Expect = 6e-16, Method: Composition-based stats.
+ Identities = 28/29 (97%), Positives = 29/29 (100%), Gaps = 0/29 (0%)
+
+Query  2   VLSPADKTNVKAAWGKVGAHAGEYGAEAL  30
+           VLSPADKTNVKAAWGKVGAHAG+YGAEAL
+Sbjct  1   VLSPADKTNVKAAWGKVGAHAGDYGAEAL  29
+
+
+>P60529.1 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain; Contains: RecName: 
+Full=Hemopressin [Canis lupus familiaris]
+Length=141
+
+ Score = 55.0 bits (131),  Expect = 1e-15, Method: Composition-based stats.
+ Identities = 21/29 (72%), Positives = 25/29 (86%), Gaps = 0/29 (0%)
+
+Query  2   VLSPADKTNVKAAWGKVGAHAGEYGAEAL  30
+           VLSPADKTN+K+ W K+G HAG+YG EAL
+Sbjct  1   VLSPADKTNIKSTWDKIGGHAGDYGGEAL  29
+
+
+>P83135.2 RecName: Full=Hemoglobin subunit alpha-A; AltName: Full=Alpha-A-globin; 
+AltName: Full=Hemoglobin alpha-A chain [Chelonoidis 
+niger]
+Length=142
+
+ Score = 55.0 bits (131),  Expect = 1e-15, Method: Composition-based stats.
+ Identities = 18/30 (60%), Positives = 21/30 (70%), Gaps = 0/30 (0%)
+
+Query  1   MVLSPADKTNVKAAWGKVGAHAGEYGAEAL  30
+           MVL+  DK NVK  W KVG+H  EYG+E L
+Sbjct  1   MVLTAGDKANVKTVWSKVGSHLEEYGSETL  30
+
+
+>P01994.2 RecName: Full=Hemoglobin subunit alpha-A; AltName: Full=Alpha-A-globin; 
+AltName: Full=Hemoglobin alpha-A chain [Gallus gallus]
+Length=142
+
+ Score = 53.9 bits (128),  Expect = 3e-15, Method: Composition-based stats.
+ Identities = 19/30 (63%), Positives = 21/30 (70%), Gaps = 0/30 (0%)
+
+Query  1   MVLSPADKTNVKAAWGKVGAHAGEYGAEAL  30
+           MVLS ADK NVK  + K+  HA EYGAE L
+Sbjct  1   MVLSAADKNNVKGIFTKIAGHAEEYGAETL  30
+
+
+>Q90487.3 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin 
+aa1; AltName: Full=Hemoglobin alpha chain [Danio rerio]
+Length=143
+
+ Score = 50.4 bits (119),  Expect = 6e-14, Method: Composition-based stats.
+ Identities = 17/30 (57%), Positives = 18/30 (60%), Gaps = 0/30 (0%)
+
+Query  1   MVLSPADKTNVKAAWGKVGAHAGEYGAEAL  30
+           M LS  DK  VKA W K+   A E GAEAL
+Sbjct  1   MSLSDTDKAVVKAIWAKISPKADEIGAEAL  30
+
+
+>P02018.1 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain [Carassius auratus]
+Length=142
+
+ Score = 48.9 bits (115),  Expect = 2e-13, Method: Composition-based stats.
+ Identities = 17/29 (59%), Positives = 19/29 (66%), Gaps = 0/29 (0%)
+
+Query  2   VLSPADKTNVKAAWGKVGAHAGEYGAEAL  30
+            LS  DK  VKA W K+G+ A E GAEAL
+Sbjct  1   SLSDKDKAVVKALWAKIGSRADEIGAEAL  29
+
+
+>P11251.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain [Salmo salar]
+Length=143
+
+ Score = 48.1 bits (113),  Expect = 5e-13, Method: Composition-based stats.
+ Identities = 15/30 (50%), Positives = 18/30 (60%), Gaps = 0/30 (0%)
+
+Query  1   MVLSPADKTNVKAAWGKVGAHAGEYGAEAL  30
+           M L+  DK+ V A WGK+   A   GAEAL
+Sbjct  1   MSLTARDKSVVNAFWGKIKGKADVVGAEAL  30
+
+
+>P06638.2 RecName: Full=Hemoglobin subunit alpha-5; AltName: Full=Alpha-5-globin; 
+AltName: Full=Alpha-T5; AltName: Full=Hemoglobin 
+alpha-5 chain [Xenopus laevis]
+Length=142
+
+ Score = 48.1 bits (113),  Expect = 5e-13, Method: Composition-based stats.
+ Identities = 15/30 (50%), Positives = 18/30 (60%), Gaps = 0/30 (0%)
+
+Query  1   MVLSPADKTNVKAAWGKVGAHAGEYGAEAL  30
+           M  S A+K  + + WGKV  H  E GAEAL
+Sbjct  1   MTFSSAEKAAIASLWGKVSGHTDEIGAEAL  30
+
+
+>P09105.2 RecName: Full=Hemoglobin subunit theta-1; AltName: Full=Hemoglobin 
+theta-1 chain; AltName: Full=Theta-1-globin [Homo sapiens]
+Length=142
+
+ Score = 47.7 bits (112),  Expect = 7e-13, Method: Composition-based stats.
+ Identities = 14/30 (47%), Positives = 19/30 (63%), Gaps = 0/30 (0%)
+
+Query  1   MVLSPADKTNVKAAWGKVGAHAGEYGAEAL  30
+           M LS  D+  V+A W K+G++ G Y  EAL
+Sbjct  1   MALSAEDRALVRALWKKLGSNVGVYTTEAL  30
+
+
+>Q9PRL9.1 RecName: Full=Hemoglobin subunit alpha-1; AltName: Full=Alpha-1-globin; 
+AltName: Full=Hemoglobin alpha-1 chain; AltName: 
+Full=Hemoglobin alpha-I chain [Naja naja]
+Length=141
+
+ Score = 46.2 bits (108),  Expect = 3e-12, Method: Composition-based stats.
+ Identities = 14/29 (48%), Positives = 19/29 (66%), Gaps = 0/29 (0%)
+
+Query  2   VLSPADKTNVKAAWGKVGAHAGEYGAEAL  30
+           VL+  DK  V+A+W  VG +A  YG+E L
+Sbjct  1   VLTDEDKARVRASWVPVGKNAELYGSETL  29
+
+
+>P11748.1 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain [Thunnus thynnus]
+Length=143
+
+ Score = 44.6 bits (104),  Expect = 1e-11, Method: Composition-based stats.
+ Identities = 15/29 (52%), Positives = 18/29 (62%), Gaps = 0/29 (0%)
+
+Query  2   VLSPADKTNVKAAWGKVGAHAGEYGAEAL  30
+            LS  DK+ VKA WGK+   A   GA+AL
+Sbjct  2   TLSDKDKSTVKALWGKISKSADAIGADAL  30
+
+
+>P02008.2 RecName: Full=Hemoglobin subunit zeta; AltName: Full=HBAZ; AltName: 
+Full=Hemoglobin zeta chain; AltName: Full=Zeta-globin 
+[Homo sapiens]
+Length=142
+
+ Score = 43.5 bits (101),  Expect = 3e-11, Method: Composition-based stats.
+ Identities = 9/30 (30%), Positives = 15/30 (50%), Gaps = 0/30 (0%)
+
+Query  1   MVLSPADKTNVKAAWGKVGAHAGEYGAEAL  30
+           M L+  ++T + + W K+   A   G E L
+Sbjct  1   MSLTKTERTIIVSMWAKISTQADTIGTETL  30
+
+
+>P01946.3 RecName: Full=Hemoglobin subunit alpha-1/2; AltName: Full=Alpha-1/2-globin; 
+AltName: Full=Hemoglobin alpha-1/2 chain; Contains: 
+RecName: Full=Hemopressin [Rattus norvegicus]
+Length=142
+
+ Score = 36.5 bits (83),  Expect = 1e-08, Method: Composition-based stats.
+ Identities = 21/30 (70%), Positives = 23/30 (77%), Gaps = 0/30 (0%)
+
+Query  1   MVLSPADKTNVKAAWGKVGAHAGEYGAEAL  30
+           MVLS  DKTN+K  WGK+G H GEYG EAL
+Sbjct  1   MVLSADDKTNIKNCWGKIGGHGGEYGEEAL  30
+
+
+>P06467.2 RecName: Full=Hemoglobin subunit zeta; AltName: Full=Alpha-like 
+embryonic globin chain x; AltName: Full=Hemoglobin zeta chain; 
+AltName: Full=Zeta-globin [Mus musculus]
+Length=142
+
+ Score = 36.5 bits (83),  Expect = 1e-08, Method: Composition-based stats.
+ Identities = 9/30 (30%), Positives = 14/30 (47%), Gaps = 0/30 (0%)
+
+Query  1   MVLSPADKTNVKAAWGKVGAHAGEYGAEAL  30
+           M L   ++  + + W K+ A A   G E L
+Sbjct  1   MSLMKNERAIIMSMWEKMAAQAEPIGTETL  30
+
+
+
+Lambda      K        H        a         alpha
+   0.320    0.140    0.399    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0429    0.140     1.90     42.6     43.6 
+
+Effective search space used: 82446
+
+
+  Database: tfp
+    Posted date:  Oct 30, 2026  12:55 PM
+  Number of letters in database: 3,263
+  Number of sequences in database:  23
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

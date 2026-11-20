@@ -1,0 +1,6 @@
+a_l6k	9606
+a_mut_8pct	9606
+b_p6k	9606
+c_amb	9606
+d_mut_15pct	9606
+e_p2k	9606

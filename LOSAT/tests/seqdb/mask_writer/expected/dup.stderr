@@ -1,0 +1,4 @@
+BLAST Database creation error: Duplicate masking algorithm found.
+Error: [makeblastdb] No sequences matched any of the masks provided.
+Please ensure that the -parse_seqids option is used in the
+filtering program as well as makeblastdb.

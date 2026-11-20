@@ -1,0 +1,213 @@
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastn",
+      service "megablast",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_1"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">qn1 ambiguous codons"
+                  }
+                }
+              },
+              title "qn1 ambiguous codons"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 480,
+              seq-data ncbi4na '1121421218122424118848814822811848441844112128
+224842811114211188884224842882481114841844124122241111512444184442221844284811
+841144428444141128188428442A242411818414284411148228818411481841488882282241F1
+822122288421188818441888428441822281144141844211223214418448441141244181248842
+181844214111844482848441842181148182221148481848484811844841418821214182118282
+822442188441111881122184124281128884141112881141828822128121844844482184441411
+21421828414442112112118148222481442444411812'H
+            }
+          },
+          seq {
+            id {
+              local str "Query_2"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">qn2 unrelated nucleotide (no hits expected)"
+                  }
+                }
+              },
+              title "qn2 unrelated nucleotide (no hits expected)"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 90,
+              seq-data ncbi2na 'D39CDCE9103A13CFFE82B6F2ED62ADD32352FC197E8F80
+'H
+            }
+          }
+        }
+      },
+      subject sequences {
+        {
+          id {
+            local str "Subject_1"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">sn1 ambiguous codons"
+                }
+              }
+            },
+            title "sn1 ambiguous codons"
+          },
+          inst {
+            repr raw,
+            mol na,
+            length 488,
+            seq-data ncbi4na '848884284884824214418882214284218824811114418184
+844184411212822484281411421188888422484288248111484154412412224111181244418444
+2221844284211841144428444A411281884284422242411818114284411148228818411488F414
+888822822418182212228842118881842188842842281144C81844211122214418848241141244
+181248842181448214691844482848441442181142182821144481848484811248448414118212
+141821182828224421884211122811221841242811284241411188811418288221211218448444
+82184441411214218284144421124844841244288841148142'H
+          }
+        }
+      },
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, 1 }
+        },
+        {
+          name "MaskAtHash",
+          value boolean TRUE
+        },
+        {
+          name "UngappedMode",
+          value boolean FALSE
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 223713
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 307
+          },
+          {
+            id str "blast_score",
+            value int 307
+          },
+          {
+            id str "e_value",
+            value real { 224951785558534, 10, -180 }
+          },
+          {
+            id str "bit_score",
+            value real { 568041737501445, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 385
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 88625, 10, -3 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 5,
+          ids {
+            local str "Query_1",
+            local str "Subject_1"
+          },
+          starts {
+            30,
+            45,
+            230,
+            -1,
+            234,
+            245,
+            -1,
+            345,
+            334,
+            347
+          },
+          lens {
+            200,
+            4,
+            100,
+            2,
+            119
+          },
+          strands {
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus,
+            plus
+          }
+        }
+      }
+    },
+    masks {
+    },
+    ka-blocks {
+      {
+        lambda { 133891541880502, 10, -14 },
+        k { 622820681733007, 10, -15 },
+        h { 113015030485733, 10, -14 },
+        gapped FALSE
+      },
+      {
+        lambda { 128, 10, -2 },
+        k { 46, 10, -2 },
+        h { 85, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 223713",
+      "Effective search space used: 223713",
+      "Length adjustment: 11"
+    }
+  }
+}

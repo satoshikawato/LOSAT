@@ -1,0 +1,34 @@
+#Post-RPSBLAST Processing Utility
+
+#Input data file:	arch/bad/evalue_rawscore.asn
+#Output data file:	log.txt
+#Annotation data at:	data
+#E-Value cutoff:	0.01
+#Redundancy:	Concise
+#Data requested:	Domain hits and site annotations
+#Output format -- tab-delimited table
+#Show superfamilies: NO
+#DATA
+#SESSION	<session-ordinal>	<program>	<database>	<score-matrix>	<evalue-threshold>
+#QUERY	<query-id>	<seq-type>	<seq-length>	<definition-line>
+#DOMAINS
+#<session-ordinal>	<query-id[readingframe]>	<hit-type>	<PSSM-ID>	<from>	<to>	<E-Value>	<bitscore>	<accession>	<short-name>	<incomplete>	<superfamily PSSM-ID>
+#more such lines......
+#ENDDOMAINS
+#SITES
+#<session-ordinal>	<query-id[readingframe]>	<annot-type>	<title>	<residue(coordinates)>	<complete-size>	<mapped-size>	<source-domain>
+#more such lines......
+#ENDSITES
+#MOTIFS
+#<session-ordinal>	<query-id[readingframe]>	<title>	<from>	<to>	<source-domain>
+#more such lines......
+#ENDMOTIFS
+#ENDQUERY	<query-id>
+#more query sections..
+#ENDSESSION	<session-ordinal>
+#more session sections..
+#ENDDATA
+#=====================================================================
+DATA
+SESSION	1	blastp	2.17.0+	Cdd	BLOSUM62	) CBlast4_cutoff::GetE_value(): Invalid choice selection: NCBI-Blast4::Blast4-cutoff.raw-score
+Error: (106.16) Application's execution failed (CInvalidChoiceSelection::eFail) CBlast4_cutoff::GetE_value(): Invalid choice selection: NCBI-Blast4::Blast4-cutoff.raw-score

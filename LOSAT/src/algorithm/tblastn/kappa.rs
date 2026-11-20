@@ -11,18 +11,20 @@ use crate::algorithm::blastp::gapalign::{
     blast_gapped_alignment_with_traceback_with_scratch, protein_identities_from_edit_ops,
     stats_from_edit_ops_protein, GapAlignScratch,
 };
+use crate::common::GapEditOp;
 use crate::config::ScoringMatrix;
 use crate::core::composition_adjustment::adjust_scores::{
     AdjustedProteinMatrix, BlastCompositionWorkspace,
 };
 use crate::core::composition_adjustment::redo_alignment::{
-    blast_compo_alignment_new, blast_redo_one_match_with_workspace_queries, redo_calc_lambda,
-    translated_subject_get_range, BlastCompoAdjustMode, BlastCompoAlignment,
+    blast_compo_alignment_new, blast_redo_one_match_with_workspace_queries_and_matrix,
+    redo_calc_lambda, translated_subject_get_range, BlastCompoAdjustMode, BlastCompoAlignment,
     BlastCompoAlignmentContext, BlastCompoMatchingSequence, BlastCompoQueryInfo,
     BlastCompoSequenceData, BlastCompoSequenceRange, BlastRedoAlignCallbacks, BlastRedoAlignParams,
     BlastRedoOneMatchResult, EMatrixAdjustRule,
 };
-use crate::utils::genetic_code::GeneticCode;
+
+mod x_reap_index;
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1738-1773,1896-1957
 // ```c
@@ -132,6 +134,29 @@ pub(super) fn reap_contained_postredo_hsps(hsps: &mut Vec<(usize, GappedHsp)>) -
     if hsps.len() < 2 {
         return (0..hsps.len()).collect();
     }
+    // No NCBI counterpart: LOSAT_X_TBNREAPIDX gives the same answers from an index by subject start
+    // for a list of `X_REAP_INDEX_FROM` HSPs or more (`kappa/x_reap_index.rs`).
+    let keep = if x_reap_index::x_indexed(hsps.len()) {
+        x_reap_index::x_reap_keep(hsps)
+    } else {
+        reap_keep(hsps)
+    };
+    let retained_indices = keep
+        .iter()
+        .enumerate()
+        .filter_map(|(index, &selected)| selected.then_some(index))
+        .collect();
+    let mut index = 0;
+    hsps.retain(|_| {
+        let selected = keep[index];
+        index += 1;
+        selected
+    });
+    retained_indices
+}
+
+/// Whether each HSP of `hsps` is kept: NCBI's loop of `s_HitlistReapContained` (above).
+fn reap_keep(hsps: &[(usize, GappedHsp)]) -> Vec<bool> {
     let mut keep = vec![true; hsps.len()];
     for read in 1..hsps.len() {
         let (query_context, inner) = hsps[read];
@@ -157,18 +182,7 @@ pub(super) fn reap_contained_postredo_hsps(hsps: &mut Vec<(usize, GappedHsp)>) -
             }
         }
     }
-    let retained_indices = keep
-        .iter()
-        .enumerate()
-        .filter_map(|(index, &selected)| selected.then_some(index))
-        .collect();
-    let mut index = 0;
-    hsps.retain(|_| {
-        let selected = keep[index];
-        index += 1;
-        selected
-    });
-    retained_indices
+    keep
 }
 
 // NCBI c++/src/algo/blast/core/blast_kappa.c:305-358:
@@ -263,6 +277,7 @@ pub(super) fn postredo_num_ident(
 // align_length += esp->num[index];
 // if (*q == *s) num_ident++; else if (matrix[*q][*s] > 0) num_pos++;
 // *num_pos_ptr = num_pos + num_ident;
+#[cfg(test)]
 pub(super) fn postredo_converted_stats(
     converted: &ConvertedKappaHsp,
     query_sequence: &[u8],
@@ -305,6 +320,99 @@ pub(super) fn postredo_converted_stats_with_matrix(
         gap_opens,
         gap_letters,
     ))
+}
+
+/// NCBI's engine positives of an HSP of a redone match (`BlastHSP::num_positives`, which the
+/// Seq-aligns show): `s_ComputeNumIdentities` counts them on the working (masked) query and
+/// the target translation with the score block whose matrix the match's composition
+/// adjustments have overwritten (`Blast_AdjustScores` writes its `matrix` argument, the
+/// thread-local `sbp->matrix->data`), so a pair is positive by `adjusted`, the matrix of the
+/// match's last adjustment. `postredo_converted_stats` counts them with BLOSUM62 for the other
+/// reports. With the Seq-aligns only (`LocalStageDProfile::engine_positives`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3500-3502,3625-3635
+/// ```c
+///                 sbp                  = sbp_tld[tid];
+///                 redo_align_params    = redo_align_params_tld[tid];
+///                 matrix               = matrix_tld[tid];
+/// ...
+///                                 Blast_RedoOneMatch(
+///                                         alignments,             // thread-local
+///                                         ...
+///                                         matrix,                 // thread-local
+/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3360-3362
+/// ```c
+///             matrix_tld[i] = sbp_tld[i]->psi_matrix->pssm->data;
+///         } else {
+///             matrix_tld[i] = sbp_tld[i]->matrix->data;
+/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1232-1241
+/// ```c
+///                 if (compo_adjust_mode != eNoCompositionBasedStats &&
+///                         (subject_is_translated || hsp_index == 0
+///                                 || (nearIdenticalStatus != oldNearIdenticalStatus))) {
+///                     Blast_AminoAcidComposition subject_composition;
+///                     s_GetComposition(&subject_composition,
+///                             alphsize, &subject,
+///                             &window->subject_range,
+///                             in_align, FALSE, subject_is_translated);
+///                     adjust_search_failed =
+///                             Blast_AdjustScores(matrix, query_composition,
+/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:525-528
+/// ```c
+///         /* Translate subject if needed. */
+///         if (program_number == eBlastTypeTblastn) {
+///             const Uint1* target_sequence = Blast_HSPGetTargetTranslation(target_t, hsp, NULL);
+///             status = Blast_HSPGetNumIdentitiesAndPositives(query, target_sequence, hsp, scoring_options, 0, sbp);
+///         }
+/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:800-812
+/// ```c
+///          case eGapAlignSub:
+///             for (i=0; i<esp->num[index]; i++) {
+///                if (*q == *s) {
+///                   num_ident++;
+///                }
+///                else if (NULL != matrix) {
+///             	   if (matrix[*q][*s] > 0)
+///             		   num_pos ++;
+///                }
+///                q++;
+///                s++;
+///             }
+///             break;
+/// ```
+pub(super) fn postredo_engine_positives(
+    converted: &ConvertedKappaHsp,
+    query_sequence: &[u8],
+    target: &mut TargetTranslation<'_>,
+    adjusted: &AdjustedProteinMatrix,
+) -> Result<usize> {
+    let hsp = &converted.hsp;
+    let (subject, _, subject_base) = target.get(hsp.frame, hsp.s_start, hsp.s_end)?;
+    let mut s_index = super::search_gapped::window_index(hsp.s_start, subject_base)
+        .context("TBLASTN positive subject offset before translation range")?;
+    let mut q_index = usize::try_from(hsp.q_start)?;
+    let mut positives = 0usize;
+    for op in &converted.edit_script {
+        match *op {
+            GapEditOp::Sub(n) => {
+                for _ in 0..n {
+                    let (q, s) = (query_sequence[q_index], subject[s_index]);
+                    if q == s || adjusted.is_positive(q, s) {
+                        positives += 1;
+                    }
+                    q_index += 1;
+                    s_index += 1;
+                }
+            }
+            GapEditOp::Del(n) => s_index += n as usize,
+            GapEditOp::Ins(n) => q_index += n as usize,
+        }
+    }
+    Ok(positives)
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:102-114;
@@ -414,8 +522,6 @@ const TBLASTN_REDO_CALLBACKS: BlastRedoAlignCallbacks = BlastRedoAlignCallbacks 
     calc_lambda: Some(redo_calc_lambda),
     get_range: translated_subject_get_range,
     redo_one_alignment: tblastn_redo_one_alignment_callback,
-    new_xdrop_align: None,
-    free_align_traceback: None,
 };
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:770-803,3577-3639
@@ -440,6 +546,10 @@ pub(super) fn redo_preliminary_match<'s>(
     matrix: ScoringMatrix,
     scratch: &mut GapAlignScratch,
     composition_workspace: &mut BlastCompositionWorkspace,
+    // The matrix that the match's adjustments leave (NCBI's thread-local `sbp->matrix->data`,
+    // which `Blast_AdjustScores` overwrites); the caller passes `None` (no adjustment yet) and
+    // reads it after the redo (`postredo_engine_positives`).
+    matrix_state: &mut Option<AdjustedProteinMatrix>,
 ) -> Result<BlastRedoOneMatchResult> {
     if params.compo_adjust_mode == BlastCompoAdjustMode::NoCompositionBasedStats {
         bail!("TBLASTN Kappa redo requires composition mode");
@@ -475,7 +585,7 @@ pub(super) fn redo_preliminary_match<'s>(
         .gapping_params
         .context
         .replace(Some(NonNull::from(&context).cast::<c_void>()));
-    let result = blast_redo_one_match_with_workspace_queries(
+    let result = blast_redo_one_match_with_workspace_queries_and_matrix(
         &incoming,
         params,
         &matching_seq,
@@ -483,6 +593,7 @@ pub(super) fn redo_preliminary_match<'s>(
         lambda,
         &TBLASTN_REDO_CALLBACKS,
         composition_workspace,
+        matrix_state,
     );
     params.gapping_params.context.set(previous);
     result
@@ -491,6 +602,7 @@ pub(super) fn redo_preliminary_match<'s>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::utils::glibc_fma_libm::GlibcLibm;
 
     // NCBI c++/src/algo/blast/core/blast_kappa.c:321-357:
     // GapEditScript * editScript = align->context; align->context = NULL;
@@ -540,6 +652,7 @@ mod tests {
         local_extension_final_xdrop, local_kappa_redo_params,
     };
     use crate::common::GapEditOp;
+    use crate::utils::genetic_code::GeneticCode;
     use crate::utils::matrix::BLASTAA_SIZE;
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:770-803,1896-1957,3577-3689
@@ -551,14 +664,9 @@ mod tests {
     // ```
     #[test]
     fn hard_seg_preliminary_hsp_redoes_to_ncbi_alignment() {
-        use crate::core::composition_adjustment::adjust_scores::{
-            build_matrix_info, read_aa_composition,
-        };
-        use crate::core::composition_adjustment::redo_alignment::{
-            build_query_word_hashes, BlastCompoGappingParams,
-        };
+        use crate::core::composition_adjustment::adjust_scores::read_aa_composition;
+        use crate::core::composition_adjustment::redo_alignment::build_query_word_hashes;
         use crate::utils::matrix::aa_char_to_ncbistdaa;
-        use std::cell::Cell;
         let root = format!(
             "{}/../docs/evidence/tlosan_stage_d",
             env!("CARGO_MANIFEST_DIR")
@@ -647,7 +755,7 @@ mod tests {
         //     localMatch->hsp_array, localMatch->hspcnt, ...);
         // ```
         use crate::algorithm::tblastn::search_gapped::{
-            preliminary_protein_hsps_in_ncbi_order, PreliminaryProfile,
+            preliminary_hsps_of_letters, PreliminaryProfile,
         };
         use crate::algorithm::tblastn::stage_d_linking::{link_preliminary_hsps, reap_by_evalue};
         use crate::algorithm::tblastn::stage_d_stats::{
@@ -673,7 +781,7 @@ mod tests {
         // BLAST_ComputeLengthAdjustment(..., db_length, db_num_seqs, ...);
         let parameters = local_parameters_for_call(
             &[(160, true)],
-            subject_nt.len(),
+            subject_nt.len() as i64,
             1,
             &[gapped],
             &[ungapped],
@@ -691,7 +799,8 @@ mod tests {
                 min_subject_length: (subject_nt.len() / 3) as i32,
                 composition_based_stats: 2,
             },
-        );
+        )
+        .unwrap();
         assert_eq!(parameters.lengths[0].eff_searchsp, 15225);
         let seg = SegParams::default();
         let search_query: Vec<_> = query_fasta
@@ -718,9 +827,8 @@ mod tests {
             gapped_cutoff: &hit_cutoff,
             hsp_num_max: i32::MAX as usize,
         };
-        let (stage_c_hsps, _) =
-            preliminary_protein_hsps_in_ncbi_order(&[&search_query], &subject_nt, 1, profile)
-                .unwrap();
+        let stage_c_hsps =
+            preliminary_hsps_of_letters(&[&search_query], &subject_nt, 1, profile).unwrap();
         assert_eq!(stage_c_hsps, vec![(0, hsp)]);
         let mut preliminary_linked = link_preliminary_hsps(
             &stage_c_hsps,
@@ -728,7 +836,7 @@ mod tests {
             &parameters.lengths,
             subject_nt.len() as i32,
             &[gapped],
-            &gumbel,
+            Some(&gumbel),
             parameters.link.as_ref().unwrap(),
         )
         .unwrap();
@@ -766,7 +874,6 @@ mod tests {
             160,
             BlastCompoAdjustMode::CompositionMatrixAdjust,
             false,
-            10.0,
             true,
             25.0,
             local_extension_final_xdrop(15.0, 25.0, gapped.lambda).unwrap(),
@@ -793,6 +900,7 @@ mod tests {
             ScoringMatrix::Blosum62,
             &mut scratch,
             &mut workspace,
+            &mut None,
         )
         .unwrap();
         let align = redone.alignments_by_query[0].as_ref().unwrap();
@@ -830,17 +938,14 @@ mod tests {
         };
         use crate::config::ProteinScoringSpec;
         use crate::core::composition_adjustment::adjust_scores::{
-            blast_adjust_scores, build_matrix_info, read_aa_composition,
+            blast_adjust_scores, read_aa_composition,
         };
-        use crate::core::composition_adjustment::redo_alignment::{
-            build_query_word_hashes, BlastCompoGappingParams,
-        };
+        use crate::core::composition_adjustment::redo_alignment::build_query_word_hashes;
         use crate::stats::spouge::lookup_protein_gumbel_params;
         use crate::stats::tables::{
             lookup_protein_params_gapped, lookup_protein_params_ungapped, KarlinParams,
         };
         use crate::utils::matrix::aa_char_to_ncbistdaa;
-        use std::cell::Cell;
 
         let root = concat!(
             env!("CARGO_MANIFEST_DIR"),
@@ -946,7 +1051,7 @@ mod tests {
         // BLAST_ComputeLengthAdjustment(..., db_length, db_num_seqs, ...);
         let parameters = local_parameters_for_call(
             &[(query.len(), true)],
-            subject_nt.len(),
+            subject_nt.len() as i64,
             1,
             &[gapped],
             &[ungapped],
@@ -964,7 +1069,8 @@ mod tests {
                 min_subject_length: 120,
                 composition_based_stats: 2,
             },
-        );
+        )
+        .unwrap();
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:870-899;
         // ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3577-3595
         // ```c
@@ -974,7 +1080,7 @@ mod tests {
         //     localMatch->hsp_array, localMatch->hspcnt, ...);
         // ```
         use crate::algorithm::tblastn::search_gapped::{
-            preliminary_protein_hsps_in_ncbi_order, PreliminaryProfile,
+            preliminary_hsps_of_letters, PreliminaryProfile,
         };
         use crate::utils::seg::SegParams;
         let search_query: Vec<_> = query_fasta
@@ -1002,9 +1108,8 @@ mod tests {
             gapped_cutoff: &hit_cutoff,
             hsp_num_max: i32::MAX as usize,
         };
-        let (stage_c_hsps, _) =
-            preliminary_protein_hsps_in_ncbi_order(&[&search_query], &subject_nt, 32, profile)
-                .unwrap();
+        let stage_c_hsps =
+            preliminary_hsps_of_letters(&[&search_query], &subject_nt, 32, profile).unwrap();
         assert_eq!(
             stage_c_hsps,
             ncbi_preliminary
@@ -1019,7 +1124,7 @@ mod tests {
             &parameters.lengths,
             subject_nt.len() as i32,
             &[gapped],
-            &gumbel,
+            Some(&gumbel),
             parameters.link.as_ref().unwrap(),
         )
         .unwrap();
@@ -1065,7 +1170,6 @@ mod tests {
             query.len() as i32,
             BlastCompoAdjustMode::CompositionMatrixAdjust,
             false,
-            10.0,
             true,
             25.0,
             local_extension_final_xdrop(15.0, 25.0, gapped.lambda).unwrap(),
@@ -1164,6 +1268,7 @@ mod tests {
             ScoringMatrix::Blosum62,
             &mut scratch,
             &mut workspace,
+            &mut None,
         )
         .unwrap();
         let alignment = redone.alignments_by_query[0].as_deref().unwrap();
@@ -1208,7 +1313,7 @@ mod tests {
             &parameters.lengths,
             subject_nt.len() as i32,
             &[scaled],
-            &gumbel,
+            Some(&gumbel),
             &link_params,
         )
         .unwrap();
@@ -1226,7 +1331,8 @@ mod tests {
             would[2].parse::<f64>().unwrap().to_bits()
         );
         let bit =
-            normalize_postredo_scores(&mut linked, gapped.lambda / 32.0, gapped.k.ln(), 32.0)[0];
+            normalize_postredo_scores(&mut linked, gapped.lambda / 32.0, gapped.k.glibc_ln(), 32.0)
+                [0];
         assert_eq!(linked.hsps[0].hsp.score, heap[3].parse().unwrap());
         assert_eq!(bit.to_bits(), heap[4].parse::<f64>().unwrap().to_bits());
         assert_eq!(
@@ -1249,14 +1355,9 @@ mod tests {
     // ```
     #[test]
     fn multi_query_preliminary_hsps_redo_to_ncbi_alignment_order() {
-        use crate::core::composition_adjustment::adjust_scores::{
-            build_matrix_info, read_aa_composition,
-        };
-        use crate::core::composition_adjustment::redo_alignment::{
-            build_query_word_hashes, BlastCompoGappingParams,
-        };
+        use crate::core::composition_adjustment::adjust_scores::read_aa_composition;
+        use crate::core::composition_adjustment::redo_alignment::build_query_word_hashes;
         use crate::utils::matrix::aa_char_to_ncbistdaa;
-        use std::cell::Cell;
         let root = format!(
             "{}/../docs/evidence/tlosan_stage_d",
             env!("CARGO_MANIFEST_DIR")
@@ -1366,7 +1467,8 @@ mod tests {
                 min_subject_length: 2_125,
                 composition_based_stats: 2,
             },
-        );
+        )
+        .unwrap();
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:870-899;
         // ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3577-3595
         // ```c
@@ -1379,7 +1481,7 @@ mod tests {
         // Exercise the natural Stage C output through the same preliminary
         // link/reap before passing its retained HSPs to Kappa.
         use crate::algorithm::tblastn::search_gapped::{
-            preliminary_protein_hsps_in_ncbi_order, PreliminaryProfile,
+            preliminary_hsps_of_letters, PreliminaryProfile,
         };
         use crate::utils::seg::SegParams;
         let word_xdrop: Vec<_> = parameters.cutoffs.iter().map(|p| p.word_xdrop).collect();
@@ -1419,8 +1521,8 @@ mod tests {
             }
         }
         let query_refs: Vec<_> = search_queries.iter().map(Vec::as_slice).collect();
-        let (stage_c_hsps, _) =
-            preliminary_protein_hsps_in_ncbi_order(&query_refs, &subject_nt, 1, profile).unwrap();
+        let stage_c_hsps =
+            preliminary_hsps_of_letters(&query_refs, &subject_nt, 1, profile).unwrap();
         assert_eq!(stage_c_hsps.len(), 21);
         let mut preliminary_linked = link_preliminary_hsps(
             &stage_c_hsps,
@@ -1428,7 +1530,7 @@ mod tests {
             &parameters.lengths,
             subject_nt.len() as i32,
             &[gapped; 3],
-            &gumbel,
+            Some(&gumbel),
             parameters.link.as_ref().unwrap(),
         )
         .unwrap();
@@ -1506,7 +1608,6 @@ mod tests {
                 120,
                 BlastCompoAdjustMode::CompositionMatrixAdjust,
                 false,
-                10.0,
                 true,
                 25.0,
                 local_extension_final_xdrop(15.0, 25.0, gapped.lambda).unwrap(),
@@ -1533,6 +1634,7 @@ mod tests {
                 ScoringMatrix::Blosum62,
                 &mut scratch,
                 &mut workspace,
+                &mut None,
             )
             .unwrap();
             let expected: Vec<_> = mode
@@ -1661,7 +1763,7 @@ mod tests {
                 &parameters.lengths,
                 6_377,
                 &[scaled; 3],
-                &gumbel,
+                Some(&gumbel),
                 &post_link,
             )
             .unwrap();
@@ -1738,8 +1840,12 @@ mod tests {
             );
             assert_eq!(linked.hsps[0].hsp.score, would[3].parse().unwrap());
             assert_eq!(would[9], "1");
-            let bits =
-                normalize_postredo_scores(&mut linked, gapped.lambda / 32.0, gapped.k.ln(), 32.0);
+            let bits = normalize_postredo_scores(
+                &mut linked,
+                gapped.lambda / 32.0,
+                gapped.k.glibc_ln(),
+                32.0,
+            );
             let heap_rows: Vec<_> = heap_trace
                 .lines()
                 .filter(|line| line.starts_with("K_TRACE_HEAP_HSP\t"))
@@ -2047,7 +2153,7 @@ mod tests {
     #[test]
     fn multi_subject_stage_c_lists_enter_kappa_in_ncbi_stream_order() {
         use crate::algorithm::tblastn::search_gapped::{
-            preliminary_protein_hsps_in_ncbi_order, PreliminaryProfile,
+            preliminary_hsps_of_letters, PreliminaryProfile,
         };
         use crate::algorithm::tblastn::stage_d_linking::{
             compare_preliminary_lists_for_kappa, link_preliminary_hsps, reap_by_evalue,
@@ -2129,7 +2235,7 @@ mod tests {
         // BLAST_ComputeLengthAdjustment(..., db_length, db_num_seqs, ...);
         let parameters = local_parameters_for_call(
             &[(query.len(), true)],
-            total_nt_length,
+            total_nt_length as i64,
             1,
             &[gapped],
             &[ungapped],
@@ -2147,7 +2253,8 @@ mod tests {
                 min_subject_length: 120,
                 composition_based_stats: 2,
             },
-        );
+        )
+        .unwrap();
         assert_eq!(parameters.cutoffs[0].word_cutoff, 18);
         assert_eq!(parameters.cutoffs[0].hit_cutoff, 18);
         assert_eq!(parameters.cutoffs[0].word_xdrop, 16);
@@ -2173,8 +2280,7 @@ mod tests {
         };
         let mut retained: Vec<(usize, LinkedHspList)> = Vec::new();
         for (oid, (_, subject)) in subjects.iter().enumerate() {
-            let (preliminary, _) =
-                preliminary_protein_hsps_in_ncbi_order(&[&query], subject, 1, profile).unwrap();
+            let preliminary = preliminary_hsps_of_letters(&[&query], subject, 1, profile).unwrap();
             let expected = before.get(&oid).map(Vec::as_slice).unwrap_or(&[]);
             assert_eq!(preliminary.len(), expected.len(), "OID {oid} prelink count");
             for ((context, hsp), row) in preliminary.iter().zip(expected) {
@@ -2200,7 +2306,7 @@ mod tests {
                 &parameters.lengths,
                 subject.len() as i32,
                 &[gapped],
-                &gumbel,
+                Some(&gumbel),
                 parameters.link.as_ref().unwrap(),
             )
             .unwrap();
@@ -2277,15 +2383,10 @@ mod tests {
         use crate::algorithm::tblastn::stage_d_results::{
             KappaHspPayload, KappaResultHitList, KappaResultList,
         };
-        use crate::core::composition_adjustment::adjust_scores::{
-            build_matrix_info, read_aa_composition,
-        };
-        use crate::core::composition_adjustment::redo_alignment::{
-            build_query_word_hashes, BlastCompoGappingParams,
-        };
+        use crate::core::composition_adjustment::adjust_scores::read_aa_composition;
+        use crate::core::composition_adjustment::redo_alignment::build_query_word_hashes;
         use crate::stats::tables::KarlinParams;
         use crate::utils::matrix::aa_char_to_ncbistdaa;
-        use std::cell::Cell;
         let mode_trace = std::fs::read_to_string(format!(
             "{root}/tlosan_stage_d/kappa_mode2_20260924/run_20260923_default.tsv"
         ))
@@ -2358,7 +2459,6 @@ mod tests {
                 query.len() as i32,
                 BlastCompoAdjustMode::CompositionMatrixAdjust,
                 false,
-                10.0,
                 true,
                 25.0,
                 local_extension_final_xdrop(15.0, 25.0, gapped.lambda).unwrap(),
@@ -2386,6 +2486,7 @@ mod tests {
                 ScoringMatrix::Blosum62,
                 &mut scratch,
                 &mut workspace,
+                &mut None,
             )
             .unwrap();
             let align = redone.alignments_by_query[0].as_deref().unwrap();
@@ -2432,7 +2533,7 @@ mod tests {
                 &parameters.lengths,
                 subject.len() as i32,
                 &[scaled],
-                &gumbel,
+                Some(&gumbel),
                 &post_link,
             )
             .unwrap();
@@ -2457,7 +2558,8 @@ mod tests {
                 would[8].parse::<f64>().unwrap().to_bits()
             );
             assert_eq!(heap.would_insert(candidate), would[9] == "1");
-            let bits = normalize_postredo_scores(&mut postredo, scaled.lambda, gapped.k.ln(), 32.0);
+            let bits =
+                normalize_postredo_scores(&mut postredo, scaled.lambda, gapped.k.glibc_ln(), 32.0);
             let mut target = TargetTranslation::new(subject, &code);
             let identities = postredo_num_ident(align, &query_aa, &mut target).unwrap();
             let heap_hsp: Vec<_> = heap_hsp_rows[redo_index].split('\t').collect();

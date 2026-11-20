@@ -1,0 +1,51 @@
+qn1	ref|XP_000001.1|	XP_000001	XP_000001.1	alpha protein [Homo sapiens]	9.88e-93	255
+qn1	gi|9002|emb|CAA90002.1|	CAA90002	CAA90002.1	first defline without a gi	3.13e-91	251
+qn1	gi|123456|ref|NP_000002.1|	NP_000002	NP_000002.1	gi plus ref protein	3.13e-91	251
+qn1	ref|XP_910001.1|	XP_910001	XP_910001.1	long title number 01 with many words so that it is longer than sixty characters in total	2.07e-89	247
+qn1	sp|Q00003|ABC_MOUSE	Q00003	Q00003	swissprot without version	2.07e-89	247
+qn1	emb|CAA00005.1|	CAA00005	CAA00005.1	emb protein	3.18e-87	241
+qn1	ref|XP_920001.1|	XP_920001	XP_920001.1	has a title	8.46e-87	240
+qn1	tr|A0A000|A0A000_YEAST	A0A000	A0A000	trembl entry	8.46e-87	240
+qn1	pdb|1ABC|A	1ABC_A	1ABC_A	Chain A, test structure	1.47e-85	237
+qn1	dbj|BAA00006.1|	BAA00006	BAA00006.1	dbj protein	7.52e-84	233
+qn1	pir||S00007	S00007	S00007	pir protein	3.70e-80	223
+qn1	prf||0008123A	0008123A	0008123A	prf protein	1.63e-77	217
+qn1	myprot9	myprot9	myprot9	local id protein	3.87e-76	213
+qn1	gnl|mydb|prot10	mydb:prot10	mydb:prot10	general id protein	1.94e-74	209
+qn1	ref|XP_000011.2|	XP_000011	XP_000011.2	bare refseq accession	1.12e-72	204
+qn1	sp|P00012|	P00012	P00012	bare uniprot-like accession	3.65e-71	201
+qn1	myprot_13	myprot_13	myprot_13	bare non-accession word	5.07e-69	195
+qn1	gb|AAA00017.1|LOCUS17	AAA00017	AAA00017.1	gb with a locus name	5.18e-69	195
+qn1	gi|1818|gb|AAA00018.1|	AAA00018	AAA00018.1	N/A	1.99e-65	186
+qn1	tpg|DAA00016.1|	DAA00016	DAA00016.1	third-party protein	1.81e-64	184
+qn1	sp|P00019.3|NAME_HUMAN	P00019	P00019.3	with taxid	3.14e-60	173
+qn1	unnamed	unnamed	unnamed	N/A	1.45e-40	121
+qn1	pdb|5ABC|D	5ABC_D	5ABC_D	N/A	1.45e-40	121
+qn1	ref|WP_100014.1|	WP_100014	WP_100014.1	N/A	1.45e-40	121
+qn1	ref|NC_100013.1|	NC_100013	NC_100013.1	N/A	1.45e-40	121
+qn1	tpe|BK100012.1|	BK100012	BK100012.1	tpe titled	1.45e-40	121
+qn1	pdb|4ABC| 	4ABC	4ABC	no chain four	1.45e-40	121
+qn1	unnamed	unnamed	unnamed	N/A	1.45e-40	121
+qn1	pdb|3ABC|C	3ABC_C	3ABC_C	N/A	1.45e-40	121
+qn1	tpg|DAA10008.1|	DAA10008	DAA10008.1	tpa with subject	1.45e-40	121
+qn1	subject	subject	subject	subject seven title	1.45e-40	121
+qn1	ref|NP_100006.1|	NP_100006	NP_100006.1	N/A	1.45e-40	121
+qn1	pat|US|7654321|3	US7654321_3	US7654321_3	N/A	1.45e-40	121
+qn1	pdb|2XYY| 	2XYY	2XYY	N/A	1.45e-40	121
+qn1	pdb|2XYZ|B	2XYZ_B	2XYZ_B	N/A	1.45e-40	121
+qn1	tpg|DAA10002.1|	DAA10002	DAA10002.1	N/A	1.45e-40	121
+qn1	tpg|DAA10001.1|	DAA10001	DAA10001.1	tpa titled protein	1.45e-40	121
+qn1	sp|P11111.1|ONE_HUMAN	P11111	P11111.1	titled first	1.45e-40	121
+qn1	unnamed	unnamed	unnamed	N/A	1.45e-40	121
+qn1	subject	subject	subject	subject seven	1.45e-40	121
+qn1	pat|EP|0238993|7	EP0238993_7	EP0238993_7	pre-grant patent	1.45e-40	121
+qn1	prf|ABC|DEF	ABC	ABC	prf two fields	1.45e-40	121
+qn1	pat|EP|0123456A1|7	EP0123456A1_7	EP0123456A1_7	patent with letters	1.45e-40	121
+qn1	pat|US|RE33188|1	USRE33188_1	USRE33188_1	patent reissue	1.45e-40	121
+qn1	gnl|ti|123	ti:123	ti:123	trace id	1.45e-40	121
+qn1	long1	long1	long1	long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word 	1.45e-40	121
+qn1	gi|3000000000|gb|AAA00100.1|	AAA00100	AAA00100.1	big gi	1.45e-40	121
+qn1	bbm|123	123	123	gibbmt	1.45e-40	121
+qn1	gpp|GPP123|	GPP123	GPP123	genome pipeline	1.45e-40	121
+qn1	tpd|BK000013.1|	BK000013	BK000013.1	third party ddbj	1.45e-40	121
+qn1	tpe|BK000012.1|	BK000012	BK000012.1	third party embl	1.45e-40	121

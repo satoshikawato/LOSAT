@@ -1,0 +1,2 @@
+Error: (CSeqDBException::eInvalid) No alias or index file found for nucleotide database [db/prot] in search path [@CWD@::]. Please verify the spelling of the BLAST database and its molecule type.
+Error: (106.16) Application's execution failed (CSeqDBException::eInvalid) No alias or index file found for nucleotide database [db/prot] in search path [@CWD@::]. Please verify the spelling of the BLAST database and its molecule type.

@@ -3,10 +3,12 @@ use super::{
     args::ResolvedOptions, parameters::ContextParameters, query_setup::PreparedQueryBatch,
     seed::InitHsp,
 };
-use crate::algorithm::blastn::interval_tree::{BlastIntervalTree, IndexMethod, TreeHsp};
+use crate::algorithm::blastn::interval_tree::{
+    x_grid_cells, BlastIntervalTree, IndexMethod, TreeHsp,
+};
 use crate::algorithm::blastp::gapalign::{
     blastp_get_start_for_gapped_alignment, blastp_score_only_gapped_alignment_with_scratch,
-    BlastpGappedAlignmentMode, GapAlignScratch,
+    gapped_start_int4, gapped_start_window, BlastpGappedAlignmentMode, GapAlignScratch,
 };
 use crate::config::ScoringMatrix;
 use anyhow::Result;
@@ -357,24 +359,6 @@ fn save_hsp(hits: &mut Vec<PreliminaryHsp>, h: PreliminaryHsp, max: usize, heap:
 //                  break;
 //              status = BlastIntervalTreeAddHSP(new_hsp, tree, query_info,
 // ```
-pub fn gapped(
-    batch: &PreparedQueryBatch,
-    parameters: &[ContextParameters],
-    options: &ResolvedOptions,
-    subject: &[u8],
-    initial: &[InitHsp],
-    xdrop: i32,
-) -> Result<Vec<PreliminaryHsp>> {
-    gapped_observed(
-        batch,
-        parameters,
-        options,
-        subject,
-        initial,
-        xdrop,
-        &mut |_, _| {},
-    )
-}
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3909-3921
 // ```c++
 //       tmp_hsp.context = context;
@@ -400,27 +384,66 @@ pub(crate) fn gapped_observed(
     xdrop: i32,
     observe: &mut dyn FnMut(&PreliminaryHsp, bool),
 ) -> Result<Vec<PreliminaryHsp>> {
+    gapped_observed_with(
+        super::seed::Blosum62Bx,
+        batch,
+        parameters,
+        options,
+        subject,
+        initial,
+        xdrop,
+        observe,
+    )
+}
+
+/// [`gapped_observed`] with another matrix than BLOSUM62 (item SC6 of line NP). Not inlined, so that
+/// BLOSUM62's keeps its code.
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn gapped_observed_of<S: super::seed::BxScoring>(
+    scoring: S,
+    batch: &PreparedQueryBatch,
+    parameters: &[ContextParameters],
+    options: &ResolvedOptions,
+    subject: &[u8],
+    initial: &[InitHsp],
+    xdrop: i32,
+    observe: &mut dyn FnMut(&PreliminaryHsp, bool),
+) -> Result<Vec<PreliminaryHsp>> {
+    gapped_observed_with(
+        scoring, batch, parameters, options, subject, initial, xdrop, observe,
+    )
+}
+
+/// The body of [`gapped_observed`], with the matrix of `scoring`.
+#[inline(always)]
+#[allow(clippy::too_many_arguments)]
+fn gapped_observed_with<S: super::seed::BxScoring>(
+    scoring: S,
+    batch: &PreparedQueryBatch,
+    parameters: &[ContextParameters],
+    options: &ResolvedOptions,
+    subject: &[u8],
+    initial: &[InitHsp],
+    xdrop: i32,
+    observe: &mut dyn FnMut(&PreliminaryHsp, bool),
+) -> Result<Vec<PreliminaryHsp>> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3707-3708
     // ```c
     //    if (init_hitlist->total == 0)
     //       return 0;
     // ```
     // NCBI returns at once when the initial hit list is empty (and the engine skips the gapped
-    // stage, blast_engine.c:500). With the switch on this port returns the empty list before it
-    // builds the interval tree and the DP scratch; the loop below would have done nothing.
-    // EXPERIMENT (LOSAT_X_BXLEAN): most (chunk, subject) pairs have no initial
-    // HSP; the loop below then does nothing, so the tree and the DP scratch
-    // need not be built.
-    if initial.is_empty() && super::runtime::x_bx_lean() {
+    // stage, blast_engine.c:500). This port returns the empty list before it builds the interval
+    // tree and the DP scratch; the loop below would have done nothing. Most (chunk, subject)
+    // pairs have no initial HSP.
+    if initial.is_empty() {
         return Ok(Vec::new());
     }
     let last = batch.contexts.last().expect("BLASTX contexts");
-    let mut tree = BlastIntervalTree::new(
-        0,
-        (last.offset + last.length + 1) as i32,
-        0,
-        subject.len() as i32,
-    );
+    let (q_max, s_max) = ((last.offset + last.length + 1) as i32, subject.len() as i32);
+    let mut tree = BlastIntervalTree::new(0, q_max, 0, s_max);
+    tree.reset_with_bounds_cells(0, q_max, 0, s_max, x_grid_cells(initial.len()));
     let mut scratch = GapAlignScratch::new();
     let mut hits = Vec::new();
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:213-227
@@ -484,15 +507,38 @@ pub(crate) fn gapped_observed(
             continue;
         }
         let query = &batch.sequence_start[1 + c.offset..1 + c.offset + c.length];
-        let start = blastp_get_start_for_gapped_alignment(
-            query,
-            &subject[..subject.len() - 1],
-            h.q_start as usize,
-            init.length as usize,
-            h.s_start as usize,
-            init.length as usize,
-            ScoringMatrix::Blosum62,
-        );
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3935-3942
+        // ```c
+        //          if(is_prot && !score_params->options->is_ooframe) {
+        //             max_offset =
+        //                BlastGetStartForGappedAlignment(query_tmp.sequence,
+        //                   subject->sequence, gap_align->sbp,
+        //                   init_hsp->ungapped_data->q_start,
+        //                   init_hsp->ungapped_data->length,
+        //                   init_hsp->ungapped_data->s_start,
+        //                   init_hsp->ungapped_data->length);
+        // ```
+        // A negative length comes only from the one-hit extension (`-window_size 0`,
+        // aa_ungapped.c:1054,1083), which NCBI passes as `Uint4` (`gapped_start_negative`).
+        let start = if init.length < 0 {
+            gapped_start_negative(
+                query,
+                &subject[..subject.len() - 1],
+                h.q_start as usize,
+                h.s_start as usize,
+                scoring.matrix(),
+            )
+        } else {
+            blastp_get_start_for_gapped_alignment(
+                query,
+                &subject[..subject.len() - 1],
+                h.q_start as usize,
+                init.length as usize,
+                h.s_start as usize,
+                init.length as usize,
+                scoring.matrix(),
+            )
+        };
         h.s_gapped_start += start as i32 - h.q_gapped_start;
         h.q_gapped_start = start as i32;
         let a = blastp_score_only_gapped_alignment_with_scratch(
@@ -500,7 +546,7 @@ pub(crate) fn gapped_observed(
             &subject[..subject.len() - 1],
             start,
             h.s_gapped_start as usize,
-            ScoringMatrix::Blosum62,
+            scoring.matrix(),
             options.gap_open,
             options.gap_extend,
             xdrop,
@@ -524,6 +570,68 @@ pub(crate) fn gapped_observed(
         );
     }
     Ok(hits)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1054,1083 and
+// c++/src/algo/blast/core/blast_gapalign.c:3394,3401,3405-3413,3419-3420
+// ```c
+//     init_hit_width = q_right_off - q_left_off + 1;
+//     *hsp_len = left_disp + right_disp + init_hit_width;
+// ...
+//    const BlastScoreBlk* sbp, Uint4 q_start, Uint4 q_length,
+//     if (q_length <= HSP_MAX_WINDOW) {
+//     hsp_end = q_start + HSP_MAX_WINDOW;
+//     query_var = query + q_start;
+//     subject_var = subject + s_start;
+// ...
+//     hsp_end = q_start + MIN(q_length, s_length);
+//     for (index1=q_start + HSP_MAX_WINDOW; index1<hsp_end; index1++) {
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:500-501,885-893,
+// c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1802 and seqdbatlas.cpp:114-127
+// ```c++
+//     int buflen = QueryInfo_GetSeqBufLen(qinfo);
+//     TAutoUint1Ptr buf((Uint1*) calloc(buflen+1, sizeof(Uint1)));
+// ...
+//     buflen = CalculateSeqBufferLength(sv.size(), eBlastEncodingProtein);
+//     _ASSERT(buflen != 0);
+//     buf = buf_var = (Uint1*) malloc(sizeof(Uint1)*buflen);
+// ...
+//     *buf_var++ = GetSentinelByte(eBlastEncodingProtein);
+// ...
+//         *buffer = m_Seq->GetFileDataPtr(start_offset-1) + 1;
+// ...
+// CMemoryFile* CSeqDBAtlas::GetMemoryFile(const string& fileName)
+// ...
+//     CAtlasMappedFile* file(new CAtlasMappedFile(fileName));
+// ```
+/// The gapped start of a one-hit HSP of negative length at `q_start` of its context's letters
+/// (`query`) and at `s_start` of the subject's (`subject`). NCBI reads the length as `Uint4`, so it
+/// scores only the first window of `HSP_MAX_WINDOW` letters (`gapped_start_int4`). A window that
+/// passes the end of its context or of the subject holds the NULLB after it (`BLAST_SCORE_MIN`), so
+/// its sum is below 0 and the start is `q_start` whatever bytes follow: inside NCBI's buffers the
+/// next contexts' letters, the next database sequences or the zeros of the mapped file's last page.
+/// Past those buffers NCBI reads memory that is not its own (the byte after the query batch's
+/// `calloc(buflen + 1)`, after a `-subject` protein's `malloc(len + 2)`, after the last memory page
+/// of a database volume's sequence file) and can crash; LOSAT reads every letter past the sequence
+/// as the sentinel (`gapped_start_window`; PD-LOSAT-NCBI-DEFECTS exception 3, which version 1.48
+/// extends from BLASTP to BLASTX). Out of line, so that the gapped stage of the other HSPs keeps its
+/// code.
+#[cold]
+#[inline(never)]
+fn gapped_start_negative(
+    query: &[u8],
+    subject: &[u8],
+    q_start: usize,
+    s_start: usize,
+    matrix: ScoringMatrix,
+) -> usize {
+    gapped_start_int4(
+        &gapped_start_window(query, q_start),
+        &gapped_start_window(subject, s_start),
+        q_start,
+        matrix,
+    )
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4745-4777
@@ -955,5 +1063,50 @@ mod tests {
         }
         sort_by_score(&mut hits);
         assert_eq!(hits, vec![h(30, 1), h(30, 5)]);
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3405-3437 (quoted at
+    // `gapped_start_negative`)
+    /// The gapped start of a one-hit HSP of negative length: `q_start + 5` for a window inside both
+    /// sequences that sums above 0, `q_start` for one that sums to 0 or less or holds a sequence's
+    /// NULLB, whatever follows it, and so also for a window that reads past NCBI's buffers, whose
+    /// letters past the sequence read as the sentinel (PD-LOSAT-NCBI-DEFECTS exception 3).
+    #[test]
+    fn a_one_hit_gapped_start_of_negative_length_scores_its_first_window() {
+        use crate::utils::matrix::aa_char_to_ncbistdaa;
+        let start = |query: &[u8], subject: &[u8], q_start: usize, s_start: usize| {
+            gapped_start_negative(query, subject, q_start, s_start, ScoringMatrix::Blosum62)
+        };
+        let code = |letters: &[u8]| -> Vec<u8> {
+            letters.iter().map(|&l| aa_char_to_ncbistdaa(l)).collect()
+        };
+        // BLOSUM62: W/W 11, W/G -2.
+        let query = code(b"MKWWWWWWWWWWWK");
+        let subject = code(b"WWWWWWWWWWWWW");
+        assert_eq!(start(&query, &subject, 2, 0), 2 + 5);
+        // The subject ends one letter before the window's end: its NULLB is in the window.
+        assert_eq!(start(&query, &subject[..10], 2, 0), 2);
+        // The window passes the query's end (its context's NULLB).
+        assert_eq!(start(&query, &subject, 4, 0), 4);
+        // Inside both, sums of -22, -9 (one W/W) and 4 (two).
+        assert_eq!(start(&query, &code(b"GGGGGGGGGGGG"), 2, 0), 2);
+        assert_eq!(start(&query, &code(b"WGGGGGGGGGGG"), 2, 0), 2);
+        assert_eq!(start(&query, &code(b"WWGGGGGGGGGG"), 2, 0), 2 + 5);
+        // From s_start on the subject side.
+        assert_eq!(start(&query, &code(b"GGWWGGGGGGGGGG"), 2, 2), 2 + 5);
+        // Windows whose letters lie past NCBI's buffers (the query batch's last context near its
+        // end, a `-subject` protein near its end, every matrix): the letters past the sequence read
+        // as NULLBs, as the first one past it does, and the start is the HSP's.
+        for matrix in ScoringMatrix::ALL {
+            let wide = code(b"WWWWWWWWWWWWWWWWWWWW");
+            for (q_start, s_start) in [(19, 0), (0, 19), (13, 9), (19, 19)] {
+                assert_eq!(
+                    gapped_start_negative(&wide, &wide, q_start, s_start, matrix),
+                    q_start,
+                    "{matrix:?} {q_start} {s_start}"
+                );
+            }
+            assert_eq!(gapped_start_negative(&wide, &wide, 9, 9, matrix), 9 + 5);
+        }
     }
 }

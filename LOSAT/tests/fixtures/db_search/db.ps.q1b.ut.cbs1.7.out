@@ -1,0 +1,9 @@
+# PSIBLAST 2.17.0+
+# Iteration: 1
+# Query: P01013 Gene X protein (Ovalbumin-related)
+# Database: tests/db_search/paja
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 2 hits found
+P01013	BDT63520.1	18.919	37	30	0	104	140	6	42	2.1	21.8
+P01013	BDT63570.1	20.000	20	16	0	30	49	345	364	2.9	21.8
+# BLAST processed 1 queries

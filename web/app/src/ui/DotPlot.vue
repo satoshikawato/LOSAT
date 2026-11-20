@@ -8,11 +8,14 @@
 // computes nothing else: no comparison of the two sequences runs behind it.
 //
 // Zoom (Ctrl or ⌘ and the wheel, buttons, + and -), pan (drag, arrow keys) and selection (click,
-// n and p) act on the same selection as the tables. The wheel alone and a finger moving up or down
-// scroll the page (S13 screen review L4). The grid and the HSPs are drawn on a base canvas, the
-// HSPs by colour and opacity class, one stroke each; hover and selection on a canvas above it, so
-// that they redraw cheaply. Input is gathered and drawn once per animation frame. A TBLASTN or
-// BLASTX plot counts 3 nt per aa for its proportions (S13b decision 26).
+// n and p) act on the same selection as the tables. The subject is chosen in the tool band (the
+// Owner, 2026-11-02: chosen only by a Descriptions row, the plotted pair was a riddle) or by a
+// Descriptions row: one selection. The wheel alone, a finger moving up or down and two fingers
+// are left to the page (S13 screen review L4, WA2-AX-10); a finger moving sideways moves the
+// plot. The grid and the HSPs are drawn on a base canvas, the HSPs by colour and opacity class,
+// one stroke each; hover and selection on a canvas above it, so that they redraw cheaply. Input is
+// gathered and drawn once per animation frame. A TBLASTN or BLASTX plot counts 3 nt per aa for its
+// proportions (S13b decision 26).
 import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef, useId, watch } from 'vue';
 import type { HspEntry, HspId, ResultsBrowser, ResultsState } from '../application/results';
 import {
@@ -25,7 +28,6 @@ import {
   lineNearView,
   panView,
   pickLine,
-  placeBeside,
   plotSize,
   toPixelX,
   toPixelY,
@@ -34,7 +36,8 @@ import {
   type View,
 } from '../domain/plot-geometry';
 import { axisTicks, axisUnit, identityClass, IDENTITY_CLASSES, tickLabel, type AxisTicks } from '../domain/plot-scale';
-import { formatCount, framesLabel, framesPhrase, framesText } from './format';
+import { withUnit } from '../domain/units';
+import { formatCount, formatCounted, framesLabel, framesPhrase, framesText } from './format';
 import './plots.css';
 
 const props = defineProps<{ results: ResultsBrowser; state: ResultsState }>();
@@ -52,9 +55,18 @@ const HALO = 'rgba(255, 196, 0, 0.75)';
 /** Tick labels: at least 12 px (S13 screen review L4). */
 const FONT = '12px system-ui, sans-serif';
 const TITLE_FONT = '600 13px system-ui, sans-serif';
+/** How far from a line a press picks it: a mouse's, and a finger's (WA2-AX-11: a short line was hard to hit). */
 const PICK_PX = 8;
-/** Below this width of the plot's stage (phones), the HSP popup is shown under the plot, not over it (W4b screen review L10). */
-const POPUP_BESIDE_MIN_PX = 600;
+const TOUCH_PICK_PX = 16;
+/**
+ * How far a press moves before it is a drag, not a click: a mouse's, and a finger's, which wobbles
+ * more and, moving, may be the page's (onPointerMove).
+ */
+const DRAG_PX = 3;
+const TOUCH_DRAG_PX = 8;
+/** The HSP popup's largest width (its CSS max-width, in rem) and its gap from the plot: it goes right of the plot where the stage has this room. */
+const POPUP_MAX_REM = 20;
+const POPUP_GAP_PX = 12;
 /** How far a line's stroke reaches beyond the line: half the 3 px dash of a short HSP (the 2 px line reaches 1 px). */
 const STROKE_REACH_PX = 1.5;
 // Each axis's band, from the outside in: its title, the tick labels, the ticks.
@@ -90,7 +102,7 @@ const size = computed(() => plotSize(extent.value, stageWidth.value - MARGIN.lef
 const box = computed<Box>(() => ({ left: MARGIN.left, top: MARGIN.top, width: size.value.width, height: size.value.height }));
 
 /** What a protein axis's title adds against a nucleotide axis while the axes are to scale (S13b decision 26). */
-const scaleNote = (weight: number): string => (weight !== 1 && size.value.toScale ? `; drawn at ${weight} nt per aa` : '');
+const scaleNote = (weight: number): string => (weight !== 1 && size.value.toScale ? `; drawn at ${withUnit(weight, 'nt')} per aa` : '');
 /** A context that measures the query's axis title (in its font) before the canvas is sized. */
 const measuring = document.createElement('canvas').getContext('2d');
 if (measuring !== null) measuring.font = TITLE_FONT;
@@ -144,6 +156,19 @@ const selectedIndex = computed(() => {
   return id === undefined ? -1 : segments.value.list.findIndex((hsp) => hsp.id.qIdx === id.qIdx && hsp.id.rank === id.rank);
 });
 const selected = computed(() => (selectedIndex.value < 0 ? undefined : segments.value.list[selectedIndex.value]));
+/** The line under the plot that names the selected HSP. */
+const selectedText = computed(() => {
+  const hsp = selected.value;
+  if (hsp === undefined) return '';
+  const { qstart, qend, sstart, send } = hsp.fields;
+  const frames = framesPhrase(hsp);
+  return `Selected: HSP ${hsp.id.rank + 1}, query ${withUnit(`${qstart}–${qend}`, units.value.query)}, subject ${withUnit(`${sstart}–${send}`, units.value.subject)}${frames ? `, ${frames}` : ''}.`;
+});
+/**
+ * n and p on the plot select an HSP: with the popup closed, which tells its HSP itself, the line
+ * is told to a screen reader (WA2-AX-06), as the Graphic Summary tells its arrow keys.
+ */
+const stepped = ref(false);
 const hasUnknown = computed(() => hsps.value.some((hsp) => hsp.orientation === 'unknown'));
 
 // --- the view and the frame loop ---------------------------------------------------------------
@@ -154,7 +179,8 @@ let pendingView: View | undefined;
 const current = (): View => pendingView ?? view.value;
 let hovered = -1;
 let pointer: { x: number; y: number } | undefined;
-let drag: { x: number; y: number; moved: boolean; id: number } | undefined;
+/** The press in progress: where it last was, whether it moves the plot, its pointer, and whether it is a finger. */
+let drag: { x: number; y: number; moved: boolean; id: number; touch: boolean } | undefined;
 let frame = 0;
 /** Frames drawn (`data-drawn`). */
 let drawn = 0;
@@ -319,12 +345,13 @@ function drawBase(): void {
   context.textAlign = 'center';
   context.textBaseline = 'bottom';
   const labelEdge = b.top - 1 - MAJOR_PX - GAP;
-  for (const t of labelled(context, xTicks, sx)) {
+  const [xLabels, yLabels] = [labelled(context, xTicks, sx), labelled(context, yTicks, sy)];
+  for (const t of xLabels) {
     const text = tickLabel(t, xTicks.unit);
     // End labels stay inside the canvas (S13 screen review L7); all sit above the ticks, off the frame.
     context.fillText(text, within(toPixelX(t, v, b), context.measureText(text).width, W), labelEdge);
   }
-  for (const t of labelled(context, yTicks, sy)) {
+  for (const t of yLabels) {
     const text = tickLabel(t, yTicks.unit);
     context.save();
     context.translate(labelEdge, within(toPixelY(t, v, b), context.measureText(text).width, H));
@@ -343,18 +370,25 @@ function drawBase(): void {
   context.rotate(-Math.PI / 2);
   context.fillText(yTitle, 0, 0);
   context.restore();
-  // The titles as drawn, for the tests.
-  if (base.value !== undefined) base.value.dataset['titles'] = JSON.stringify([xTitle, yTitle]);
+  // The titles and the tick labels as drawn, for the tests.
+  if (base.value !== undefined) {
+    base.value.dataset['titles'] = JSON.stringify([xTitle, yTitle]);
+    base.value.dataset['ticks'] = JSON.stringify([xLabels.map((t) => tickLabel(t, xTicks.unit)), yLabels.map((t) => tickLabel(t, yTicks.unit))]);
+  }
 }
 
 /**
  * An axis title, "Query <ID> (<unit>)". A protein axis against a nucleotide one says that it is
  * drawn at 3 nt per aa (S13b decision 26), unless the 120 px minimum changed its scale (the note
  * under the plot then says so). Where the room is short, the ID is cut and the unit kept (W4b
- * screen review M3: a phone lost the "(kbp)" of a long subject ID).
+ * screen review M3: a phone lost the "(kbp)" of a long subject ID), and where even the cut ID
+ * leaves no room for the note, the note is dropped and the unit kept (BLASTX: a short protein
+ * subject against a long query has a short vertical axis).
  */
 function axisTitle(context: CanvasRenderingContext2D, role: string, id: string, unit: string, weight: number, room: number): string {
-  return fitId(context, `${role} `, id, ` (${unit}${scaleNote(weight)})`, room);
+  const noted = ` (${unit}${scaleNote(weight)})`;
+  const tail = context.measureText(`${role} …${noted}`).width <= room ? noted : ` (${unit})`;
+  return fitId(context, `${role} `, id, tail, room);
 }
 
 /** The hovered HSP drawn thicker, and the selected one wider on its halo. */
@@ -444,9 +478,9 @@ function ends(i: number, v = view.value): [number, number, number, number] {
   return [toPixelX(s.x0[i]!, v, b), toPixelY(s.y0[i]!, v, b), toPixelX(s.x1[i]!, v, b), toPixelY(s.y1[i]!, v, b)];
 }
 
-/** The HSP whose line, as the frame shows it, is nearest to a point of the plot, within PICK_PX, or -1. */
-function pick(x: number, y: number): number {
-  return pickLine(x, y, segments.value.list.length, (i) => ends(i), box.value, PICK_PX);
+/** The HSP whose line, as the frame shows it, is nearest to a point of the plot, within `reach` px, or -1. */
+function pick(x: number, y: number, reach = PICK_PX): number {
+  return pickLine(x, y, segments.value.list.length, (i) => ends(i), box.value, reach);
 }
 
 // --- zoom, pan and selection ---------------------------------------------------------------------
@@ -492,17 +526,34 @@ function canvasPoint(event: MouseEvent): { x: number; y: number } {
   return { x: event.clientX - rect.left, y: event.clientY - rect.top };
 }
 function onPointerDown(event: PointerEvent): void {
-  drag = { x: event.clientX, y: event.clientY, moved: false, id: event.pointerId };
+  // A line chosen with the pointer is not told as n and p's (its popup shows it).
+  stepped.value = false;
+  const touch = event.pointerType === 'touch';
+  // A second finger makes a pinch, the page's (touch-action): the first finger neither moves the plot nor taps.
+  if (touch && drag !== undefined && drag.id !== event.pointerId) {
+    drag = undefined;
+    return;
+  }
+  drag = { x: event.clientX, y: event.clientY, moved: false, id: event.pointerId, touch };
   base.value?.setPointerCapture(event.pointerId);
 }
+/**
+ * A press that moves drags the plot. A finger moves it only when it first moves more sideways than
+ * up or down: one moving up or down scrolls the page (touch-action: pan-y), and the plot leaves it
+ * from its first move, before the browser takes the finger with a pointercancel (WA2-AX-10: the
+ * plot moved with the page by 7 to 10 % of its view).
+ */
 function onPointerMove(event: PointerEvent): void {
   pointer = canvasPoint(event);
   hoverDirty = true;
   if (drag !== undefined && drag.id === event.pointerId) {
     const dx = event.clientX - drag.x;
     const dy = event.clientY - drag.y;
-    if (drag.moved || Math.hypot(dx, dy) >= 3) {
-      drag.moved = true;
+    if (!drag.moved && Math.hypot(dx, dy) >= (drag.touch ? TOUCH_DRAG_PX : DRAG_PX)) {
+      if (drag.touch && Math.abs(dx) <= Math.abs(dy)) drag = undefined;
+      else drag.moved = true;
+    }
+    if (drag?.moved) {
       pan(dx, dy);
       drag.x = event.clientX;
       drag.y = event.clientY;
@@ -514,21 +565,20 @@ function onPointerMove(event: PointerEvent): void {
 /** A press that did not move clicks: on a line it selects the HSP and opens its popup, elsewhere it closes the popup. */
 function onPointerUp(event: PointerEvent): void {
   if (drag === undefined || drag.id !== event.pointerId) return;
-  const moved = drag.moved;
+  const { moved, touch } = drag;
   drag = undefined;
   hoverDirty = true;
   schedule(false);
   if (moved) return;
   const { x, y } = canvasPoint(event);
-  const i = pick(x, y);
+  const i = pick(x, y, touch ? TOUCH_PICK_PX : PICK_PX);
   if (i < 0) {
     popupOpen.value = false;
     return;
   }
   props.results.selectHsp(segments.value.list[i]!.id);
   popupOpen.value = true;
-  // Under the plot (phones), the popup may open below the screen's edge.
-  if (popupBelow.value) void nextTick(() => popup.value?.scrollIntoView({ block: 'nearest' }));
+  revealPopup = true;
 }
 function onPointerLeave(): void {
   pointer = undefined;
@@ -554,8 +604,14 @@ function onKey(event: KeyboardEvent): void {
     ArrowRight: () => pan(-40, 0),
     ArrowUp: () => pan(0, 40),
     ArrowDown: () => pan(0, -40),
-    n: () => step(1),
-    p: () => step(-1),
+    n: () => {
+      stepped.value = true;
+      step(1);
+    },
+    p: () => {
+      stepped.value = true;
+      step(-1);
+    },
     Enter: () => openPopup(true),
   };
   if (event.key === 'Escape' && popupOpen.value) actions.Escape = () => closePopup(false);
@@ -568,18 +624,34 @@ function onKey(event: KeyboardEvent): void {
 // --- the HSP popup -------------------------------------------------------------------------------
 
 const popupOpen = ref(false);
-const popupAt = ref({ left: 0, top: 0 });
-/** No room beside the selected HSP's line that leaves its midpoint uncovered (placePopup). */
-const noRoomBeside = ref(false);
-/** The popup is shown under the plot, in the page's flow: on phones, or where it has no room beside the line. */
-const popupBelow = computed(() => stageWidth.value < POPUP_BESIDE_MIN_PX || noRoomBeside.value);
+/** The popup's top right of the plot (placePopup); its left is always past the canvas. */
+const popupTop = ref(0);
+/**
+ * The popup's height when it was last placed right of the plot, for the pair shown: kept, so that a
+ * popup taller than the canvas stays under the plot whatever the scroll bar that this makes or ends
+ * does to the stage's width.
+ */
+const popupHeight = ref(0);
+const rootFontPx = Number.parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+/**
+ * The popup is never over the plot, where it covered other lines and took their clicks (WA-RS-02):
+ * it is right of the plot where the stage has room for it and the canvas is as tall as it, else under
+ * the plot in the page's flow (phones, plots as wide as the stage, and short plots).
+ */
+const popupBelow = computed(
+  () => popupHeight.value > canvasHeight.value || stageWidth.value - canvasWidth.value < POPUP_GAP_PX + POPUP_MAX_REM * rootFontPx,
+);
+/** The popup just opened: once placed, it is scrolled into view (a long plot may put it past the screen's edge). */
+let revealPopup = false;
 
 /** Opens the popup of the selected HSP; opened from the keyboard, the focus moves into it. */
 function openPopup(byKeyboard: boolean): void {
   if (selected.value === undefined) return;
+  stepped.value = false;
   popupOpen.value = true;
+  revealPopup = true;
   schedule(false);
-  if (byKeyboard) void nextTick(() => popup.value?.focus());
+  if (byKeyboard) void nextTick(() => popup.value?.focus({ preventScroll: true }));
 }
 
 /** Closes the popup; closed from inside it, the focus goes back to the plot. */
@@ -608,22 +680,31 @@ function showAlignment(): void {
 }
 
 /**
- * Puts the popup beside the selected line as the frame shows it, off one of its ends, leaving its
- * midpoint uncovered, within the canvas's height and the stage's width (W4b screen review L10);
- * under the plot where there is no such place. On phones it is always under the plot.
+ * Puts the popup right of the plot level with the middle of the selected line's part in the frame
+ * (a line out of view counts as the point of the frame nearest to its middle), within the canvas's
+ * height; a popup taller than the canvas goes under the plot (popupBelow). A popup that just opened
+ * is then scrolled into view.
  */
 function placePopup(): void {
   const element = popup.value;
   const i = selectedIndex.value;
-  if (!popupOpen.value || element === undefined || i < 0 || stageWidth.value < POPUP_BESIDE_MIN_PX) return;
-  const [ax, ay, bx, by] = ends(i);
-  const b = box.value;
-  // The line's part in the frame; a line out of view counts as the point of the frame nearest to its middle.
-  const [cx, cy] = [Math.max(b.left, Math.min(b.left + b.width, (ax + bx) / 2)), Math.max(b.top, Math.min(b.top + b.height, (ay + by) / 2))];
-  const seen = clipToBox(ax, ay, bx, by, b) ?? [cx, cy, cx, cy];
-  const next = placeBeside(seen, { width: element.offsetWidth, height: element.offsetHeight }, { width: stageWidth.value, height: canvasHeight.value });
-  if (noRoomBeside.value !== (next === undefined)) noRoomBeside.value = next === undefined;
-  if (next !== undefined && (next.left !== popupAt.value.left || next.top !== popupAt.value.top)) popupAt.value = next;
+  if (!popupOpen.value || element === undefined || i < 0) return;
+  if (!popupBelow.value) {
+    const height = element.offsetHeight;
+    if (height !== popupHeight.value) popupHeight.value = height;
+    // Under the plot from the next frame on, which then scrolls it into view.
+    if (height > canvasHeight.value) return schedule(false);
+    const [ax, ay, bx, by] = ends(i);
+    const b = box.value;
+    const seen = clipToBox(ax, ay, bx, by, b);
+    const middle = seen === undefined ? Math.max(b.top, Math.min(b.top + b.height, (ay + by) / 2)) : (seen[1] + seen[3]) / 2;
+    const top = Math.round(Math.max(0, Math.min(canvasHeight.value - height, middle - height / 2)));
+    if (top !== popupTop.value) popupTop.value = top;
+  }
+  if (revealPopup) {
+    revealPopup = false;
+    element.scrollIntoView({ block: 'nearest' });
+  }
 }
 
 // --- life cycle ----------------------------------------------------------------------------------
@@ -654,7 +735,7 @@ watch(pair, () => {
   view.value = fullView(extent.value);
   pendingView = undefined;
   popupOpen.value = false;
-  noRoomBeside.value = false;
+  popupHeight.value = 0;
   schedule(true);
 });
 watch([segments, box, canvasWidth, units, queryId, subjectId], () => {
@@ -685,11 +766,23 @@ const targets = computed(() => {
   return JSON.stringify(out);
 });
 const viewText = computed(() => [view.value.x0, view.value.x1, view.value.y0, view.value.y1].map((n) => Math.round(n)).join(','));
+
+function pickSubject(event: Event): void {
+  props.results.selectSubject(Number((event.target as HTMLSelectElement).value));
+}
 </script>
 
 <template>
   <figure class="dot-plot" data-testid="dotplot">
     <div class="plot-tools tool-band">
+      <label class="plot-subject">
+        <span>Subject</span>
+        <select data-testid="dotplot-subject" @change="pickSubject">
+          <option v-for="s in state.subjects" :key="s.sIdx" :value="s.sIdx" :selected="s.sIdx === state.sIdx">
+            {{ s.first.sseqid }} · {{ withUnit(formatCount(s.length), units.subject) }} · {{ formatCounted(s.hspCount, 'HSP') }}
+          </option>
+        </select>
+      </label>
       <button type="button" data-testid="dotplot-zoom-in" @click="zoom(1.5)">Zoom in</button>
       <button type="button" data-testid="dotplot-zoom-out" @click="zoom(1 / 1.5)">Zoom out</button>
       <button type="button" data-testid="dotplot-zoom-hsp" :disabled="!selected" @click="zoomToSelected">Zoom to HSP</button>
@@ -698,14 +791,9 @@ const viewText = computed(() => [view.value.x0, view.value.x1, view.value.y0, vi
     <figcaption class="plot-caption">
       <span class="plot-title" data-testid="dotplot-title">Plot of {{ queryId }} vs {{ subjectId }}</span>
       <span class="muted small"
-        >Query {{ queryId }} ({{ formatCount(queryLength) }} {{ units.query }}) against subject {{ subjectId }} ({{ formatCount(subjectLength) }}
-        {{ units.subject }}). Each line is an HSP from its start to its end.</span
+        >Query {{ queryId }} ({{ withUnit(formatCount(queryLength), units.query) }}) against subject {{ subjectId }} ({{ withUnit(formatCount(subjectLength), units.subject) }}).</span
       >
     </figcaption>
-    <div class="plot-help muted small" data-testid="dotplot-help">
-      <p>Mouse: hold Ctrl (⌘ on a Mac) and turn the wheel to zoom; drag to move; click a line to show its HSP.</p>
-      <p>Touch: use the Zoom buttons; slide a finger sideways to move (up and down scrolls the page); tap a line to show its HSP.</p>
-    </div>
     <div ref="stage" class="plot-stage">
       <!-- As tall as the canvas, and the popup when it is under the plot. -->
       <div class="plot-layers" :style="{ width: `${canvasWidth}px` }">
@@ -728,6 +816,7 @@ const viewText = computed(() => [view.value.x0, view.value.x1, view.value.y0, vi
           @pointercancel="drag = undefined"
           @pointerleave="onPointerLeave"
           @keydown="onKey"
+          @blur="stepped = false"
         />
         <canvas ref="overlay" class="plot-overlay" aria-hidden="true" :style="{ width: `${canvasWidth}px`, height: `${canvasHeight}px` }" />
         <dialog
@@ -735,13 +824,13 @@ const viewText = computed(() => [view.value.x0, view.value.x1, view.value.y0, vi
           ref="popup"
           open
           class="plot-popup"
-          :class="{ below: popupBelow }"
+          :class="popupBelow ? 'below' : 'right'"
           tabindex="-1"
           :aria-labelledby="popupTitle"
           data-testid="dotplot-popup"
           :data-hsp="`${selected.id.qIdx}:${selected.id.rank}`"
-          :data-place="popupBelow ? 'below' : 'beside'"
-          :style="popupBelow ? undefined : { left: `${popupAt.left}px`, top: `${popupAt.top}px` }"
+          :data-place="popupBelow ? 'below' : 'right'"
+          :style="popupBelow ? undefined : { left: `${canvasWidth + POPUP_GAP_PX}px`, top: `${popupTop}px` }"
           @keydown="onPopupKey"
         >
           <div aria-live="polite">
@@ -754,9 +843,9 @@ const viewText = computed(() => [view.value.x0, view.value.x1, view.value.y0, vi
               <dt>Identity (%)</dt>
               <dd data-field="pident">{{ selected.fields.pident }}</dd>
               <dt>Query</dt>
-              <dd data-field="query">{{ selected.fields.qstart }}–{{ selected.fields.qend }} {{ units.query }}</dd>
+              <dd data-field="query">{{ withUnit(`${selected.fields.qstart}–${selected.fields.qend}`, units.query) }}</dd>
               <dt>Subject</dt>
-              <dd data-field="subject">{{ selected.fields.sstart }}–{{ selected.fields.send }} {{ units.subject }}</dd>
+              <dd data-field="subject">{{ withUnit(`${selected.fields.sstart}–${selected.fields.send}`, units.subject) }}</dd>
               <template v-if="framesLabel(selected)">
                 <dt>{{ framesLabel(selected) }}</dt>
                 <dd data-field="frames">{{ framesText(selected, ' / ') }}</dd>
@@ -789,11 +878,7 @@ const viewText = computed(() => [view.value.x0, view.value.x1, view.value.y0, vi
       </li>
       <li v-if="selected" data-testid="dotplot-legend-selected"><span class="plot-swatch plot-swatch-selected" />Yellow halo: the selected HSP</li>
     </ul>
-    <p v-if="selected" class="muted small" data-testid="dotplot-selected">
-      Selected: HSP {{ selected.id.rank + 1 }}, query {{ selected.fields.qstart }}–{{ selected.fields.qend }} {{ units.query }}, subject
-      {{ selected.fields.sstart }}–{{ selected.fields.send }} {{ units.subject }}<template v-if="framesPhrase(selected)"
-        >, {{ framesPhrase(selected) }}</template
-      >.
-    </p>
+    <p v-if="selected" class="muted small" data-testid="dotplot-selected">{{ selectedText }}</p>
+    <p class="visually-hidden" aria-live="polite" data-testid="dotplot-spoken">{{ stepped && !popupOpen ? selectedText : '' }}</p>
   </figure>
 </template>

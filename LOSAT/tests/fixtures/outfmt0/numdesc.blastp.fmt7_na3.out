@@ -1,0 +1,9 @@
+# BLASTP 2.17.0+
+# Query: q1
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/e2e_many_subject.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 3 hits found
+q1	s183	64.500	200	71	0	1	200	1	200	6.47e-74	215
+q1	s26	69.000	200	62	0	1	200	1	200	1.16e-71	209
+q1	s297	68.000	200	64	0	1	200	1	200	8.46e-71	207
+# BLAST processed 1 queries

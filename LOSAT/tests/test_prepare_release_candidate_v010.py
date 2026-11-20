@@ -175,7 +175,7 @@ class ReleaseCandidateTests(unittest.TestCase):
             return subprocess.CompletedProcess(command, 0, "", "")
 
         with mock.patch.object(release, "run_capture", side_effect=fake_run_capture):
-            release.run_smoke(["node", "runner.js", "LOSAT.wasm"], REPO_ROOT, contract)
+            release.run_smoke(["node", "runner.js", "losat.wasm"], REPO_ROOT, contract)
 
         query = observed_command[observed_command.index("-query") + 1]
         subject = observed_command[observed_command.index("-subject") + 1]
@@ -236,7 +236,7 @@ class ReleaseCandidateTests(unittest.TestCase):
                     "LOSAT-0.1.0/Cargo.lock",
                     "LOSAT-0.1.0/LICENSE",
                     "LOSAT-0.1.0/README.md",
-                    "LOSAT-0.1.0/target/debug/LOSAT",
+                    "LOSAT-0.1.0/target/debug/losat",
                 ):
                     data = (
                         b'[package]\nname = "LOSAT"\nversion = "0.1.0"\nlicense = "MIT"\n'

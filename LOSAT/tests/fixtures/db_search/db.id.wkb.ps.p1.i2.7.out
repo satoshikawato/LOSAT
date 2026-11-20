@@ -1,0 +1,19 @@
+# PSIBLAST 2.17.0+
+# Iteration: 1
+# Query: qy
+# Database: tests/db_search/ids/wkb_p1_v5
+# Fields: query id, subject id, subject acc.ver, % identity, bit score, evalue, subject title
+# 4 hits found
+qy	gb|FFF00043.1|	FFF00043.1	100.000	463	3.44e-173	y_title
+qy	gb|ZZZ00001.1|	ZZZ00001.1	91.818	420	4.60e-156	z_title
+# PSIBLAST 2.17.0+
+# Iteration: 2
+# Query: qy
+# Database: tests/db_search/ids/wkb_p1_v5
+# Fields: query id, subject id, subject acc.ver, % identity, bit score, evalue, subject title
+# 5 hits found
+qy	gb|FFF00043.1|	FFF00043.1	100.000	396	1.03e-146	y_title
+qy	gb|ZZZ00001.1|	ZZZ00001.1	91.818	396	1.25e-146	z_title
+
+Search has CONVERGED!
+# BLAST processed 2 queries

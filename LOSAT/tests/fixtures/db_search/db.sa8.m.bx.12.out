@@ -1,0 +1,3205 @@
+{
+  "Seq_annot": {
+    "desc": [
+      {
+        "user": {
+          "type": {
+            "str": "Hist Seqalign"
+          },
+          "data": [
+            {
+              "label": {
+                "str": "Hist Seqalign"
+              },
+              "data": {
+                "bool": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "user": {
+          "type": {
+            "str": "Blast Type"
+          },
+          "data": [
+            {
+              "label": {
+                "str": "blastx"
+              },
+              "data": {
+                "int": 3
+              }
+            }
+          ]
+        }
+      },
+      {
+        "user": {
+          "type": {
+            "str": "Blast Database Title"
+          },
+          "data": [
+            {
+              "label": {
+                "str": "p5m"
+              },
+              "data": {
+                "bool": false
+              }
+            }
+          ]
+        }
+      }
+    ],
+    "data": {
+      "align": [
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 726
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 726
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 1.64572215506895e-103
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 284.263124396042
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 141
+              }
+            },
+            {
+              "id": {
+                "str": "comp_adjustment_method"
+              },
+              "value": {
+                "int": 2
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 141
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 74.4583333333333
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "gi": 889
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 37,
+                      "to": 462,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 0,
+                      "to": 141,
+                      "strand": "unknown",
+                      "id": {
+                        "gi": 889
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "ext": [
+            {
+              "type": {
+                "str": "use_this_seqid"
+              },
+              "data": [
+                {
+                  "label": {
+                    "str": "SEQIDS"
+                  },
+                  "num": 2,
+                  "data": {
+                    "strs": [
+                      "gi:889",
+                      "gi:890"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 26
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 26
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 9.78718853538043
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 14.6234212538952
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 6
+              }
+            },
+            {
+              "id": {
+                "str": "comp_adjustment_method"
+              },
+              "value": {
+                "int": 2
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 6
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 3.625
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "gi": 889
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 432,
+                      "to": 449,
+                      "strand": "minus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 132,
+                      "to": 137,
+                      "strand": "unknown",
+                      "id": {
+                        "gi": 889
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "ext": [
+            {
+              "type": {
+                "str": "use_this_seqid"
+              },
+              "data": [
+                {
+                  "label": {
+                    "str": "SEQIDS"
+                  },
+                  "num": 2,
+                  "data": {
+                    "strs": [
+                      "gi:889",
+                      "gi:890"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 725
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 725
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 2.11786135170866e-103
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 283.877924820125
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 141
+              }
+            },
+            {
+              "id": {
+                "str": "comp_adjustment_method"
+              },
+              "value": {
+                "int": 2
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 141
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 74.4583333333333
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "gi": 891
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 37,
+                      "to": 462,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 0,
+                      "to": 141,
+                      "strand": "unknown",
+                      "id": {
+                        "gi": 891
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "ext": [
+            {
+              "type": {
+                "str": "use_this_seqid"
+              },
+              "data": [
+                {
+                  "label": {
+                    "str": "SEQIDS"
+                  },
+                  "num": 1,
+                  "data": {
+                    "strs": [
+                      "gi:891"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 26
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 26
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 9.60906804219602
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 14.6234212538952
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 6
+              }
+            },
+            {
+              "id": {
+                "str": "comp_adjustment_method"
+              },
+              "value": {
+                "int": 2
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 6
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 3.625
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "gi": 891
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 432,
+                      "to": 449,
+                      "strand": "minus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 132,
+                      "to": 137,
+                      "strand": "unknown",
+                      "id": {
+                        "gi": 891
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "ext": [
+            {
+              "type": {
+                "str": "use_this_seqid"
+              },
+              "data": [
+                {
+                  "label": {
+                    "str": "SEQIDS"
+                  },
+                  "num": 1,
+                  "data": {
+                    "strs": [
+                      "gi:891"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 725
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 725
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 2.11786135170866e-103
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 283.877924820125
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 141
+              }
+            },
+            {
+              "id": {
+                "str": "comp_adjustment_method"
+              },
+              "value": {
+                "int": 2
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 141
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 74.4583333333333
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "pdb": {
+                      "mol": "2XYZ",
+                      "chain": 32,
+                      "chain_id": "AA"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 37,
+                      "to": 462,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 0,
+                      "to": 141,
+                      "strand": "unknown",
+                      "id": {
+                        "pdb": {
+                          "mol": "2XYZ",
+                          "chain": 32,
+                          "chain_id": "AA"
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "ext": [
+            {
+              "type": {
+                "str": "use_this_seqid"
+              },
+              "data": [
+                {
+                  "label": {
+                    "str": "SEQIDS"
+                  },
+                  "num": 1,
+                  "data": {
+                    "strs": [
+                      "seqid:2XYZ_AA"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 26
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 26
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 9.60906804219602
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 14.6234212538952
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 6
+              }
+            },
+            {
+              "id": {
+                "str": "comp_adjustment_method"
+              },
+              "value": {
+                "int": 2
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 6
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 3.625
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "pdb": {
+                      "mol": "2XYZ",
+                      "chain": 32,
+                      "chain_id": "AA"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 432,
+                      "to": 449,
+                      "strand": "minus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 132,
+                      "to": 137,
+                      "strand": "unknown",
+                      "id": {
+                        "pdb": {
+                          "mol": "2XYZ",
+                          "chain": 32,
+                          "chain_id": "AA"
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "ext": [
+            {
+              "type": {
+                "str": "use_this_seqid"
+              },
+              "data": [
+                {
+                  "label": {
+                    "str": "SEQIDS"
+                  },
+                  "num": 1,
+                  "data": {
+                    "strs": [
+                      "seqid:2XYZ_AA"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 724
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 724
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 3.74587764271988e-103
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 283.492725244208
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 141
+              }
+            },
+            {
+              "id": {
+                "str": "comp_adjustment_method"
+              },
+              "value": {
+                "int": 2
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 141
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 74.4583333333333
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "tpg": {
+                      "accession": "TP000001",
+                      "version": 1
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 37,
+                      "to": 462,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 0,
+                      "to": 141,
+                      "strand": "unknown",
+                      "id": {
+                        "tpg": {
+                          "accession": "TP000001",
+                          "version": 1
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "ext": [
+            {
+              "type": {
+                "str": "use_this_seqid"
+              },
+              "data": [
+                {
+                  "label": {
+                    "str": "SEQIDS"
+                  },
+                  "num": 1,
+                  "data": {
+                    "strs": [
+                      "seqid:TP000001.1"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 26
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 26
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 9.87747784931336
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 14.6234212538952
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 6
+              }
+            },
+            {
+              "id": {
+                "str": "comp_adjustment_method"
+              },
+              "value": {
+                "int": 2
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 6
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 3.625
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "tpg": {
+                      "accession": "TP000001",
+                      "version": 1
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 432,
+                      "to": 449,
+                      "strand": "minus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 132,
+                      "to": 137,
+                      "strand": "unknown",
+                      "id": {
+                        "tpg": {
+                          "accession": "TP000001",
+                          "version": 1
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "ext": [
+            {
+              "type": {
+                "str": "use_this_seqid"
+              },
+              "data": [
+                {
+                  "label": {
+                    "str": "SEQIDS"
+                  },
+                  "num": 1,
+                  "data": {
+                    "strs": [
+                      "seqid:TP000001.1"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 724
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 724
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 3.74587764271988e-103
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 283.492725244208
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 141
+              }
+            },
+            {
+              "id": {
+                "str": "comp_adjustment_method"
+              },
+              "value": {
+                "int": 2
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 141
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 74.4583333333333
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "genbank": {
+                      "accession": "MM000001",
+                      "version": 1
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 37,
+                      "to": 462,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 0,
+                      "to": 141,
+                      "strand": "unknown",
+                      "id": {
+                        "genbank": {
+                          "accession": "MM000001",
+                          "version": 1
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "ext": [
+            {
+              "type": {
+                "str": "use_this_seqid"
+              },
+              "data": [
+                {
+                  "label": {
+                    "str": "SEQIDS"
+                  },
+                  "num": 1,
+                  "data": {
+                    "strs": [
+                      "seqid:MM000001.1"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 26
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 26
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 9.87747784931336
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 14.6234212538952
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 6
+              }
+            },
+            {
+              "id": {
+                "str": "comp_adjustment_method"
+              },
+              "value": {
+                "int": 2
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 6
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 3.625
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "genbank": {
+                      "accession": "MM000001",
+                      "version": 1
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 432,
+                      "to": 449,
+                      "strand": "minus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 132,
+                      "to": 137,
+                      "strand": "unknown",
+                      "id": {
+                        "genbank": {
+                          "accession": "MM000001",
+                          "version": 1
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "ext": [
+            {
+              "type": {
+                "str": "use_this_seqid"
+              },
+              "data": [
+                {
+                  "label": {
+                    "str": "SEQIDS"
+                  },
+                  "num": 1,
+                  "data": {
+                    "strs": [
+                      "seqid:MM000001.1"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 723
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 723
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 4.08935005682212e-103
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 283.10752566829
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 141
+              }
+            },
+            {
+              "id": {
+                "str": "comp_adjustment_method"
+              },
+              "value": {
+                "int": 2
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 141
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 74.4583333333333
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "swissprot": {
+                      "name": "NM_HUMAN",
+                      "accession": "Q99999",
+                      "release": "reviewed",
+                      "version": 3
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 37,
+                      "to": 462,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 0,
+                      "to": 141,
+                      "strand": "unknown",
+                      "id": {
+                        "swissprot": {
+                          "name": "NM_HUMAN",
+                          "accession": "Q99999",
+                          "release": "reviewed",
+                          "version": 3
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "ext": [
+            {
+              "type": {
+                "str": "use_this_seqid"
+              },
+              "data": [
+                {
+                  "label": {
+                    "str": "SEQIDS"
+                  },
+                  "num": 2,
+                  "data": {
+                    "strs": [
+                      "seqid:Q99999.3",
+                      "seqid:3DEF_B"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 26
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 26
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 9.60906804219602
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 14.6234212538952
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 6
+              }
+            },
+            {
+              "id": {
+                "str": "comp_adjustment_method"
+              },
+              "value": {
+                "int": 2
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 6
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 3.625
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "swissprot": {
+                      "name": "NM_HUMAN",
+                      "accession": "Q99999",
+                      "release": "reviewed",
+                      "version": 3
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 432,
+                      "to": 449,
+                      "strand": "minus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 132,
+                      "to": 137,
+                      "strand": "unknown",
+                      "id": {
+                        "swissprot": {
+                          "name": "NM_HUMAN",
+                          "accession": "Q99999",
+                          "release": "reviewed",
+                          "version": 3
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "ext": [
+            {
+              "type": {
+                "str": "use_this_seqid"
+              },
+              "data": [
+                {
+                  "label": {
+                    "str": "SEQIDS"
+                  },
+                  "num": 2,
+                  "data": {
+                    "strs": [
+                      "seqid:Q99999.3",
+                      "seqid:3DEF_B"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 723
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 723
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 4.08935005682212e-103
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 283.10752566829
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 141
+              }
+            },
+            {
+              "id": {
+                "str": "comp_adjustment_method"
+              },
+              "value": {
+                "int": 2
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 141
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 74.4583333333333
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "gi": 888
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 37,
+                      "to": 462,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 0,
+                      "to": 141,
+                      "strand": "unknown",
+                      "id": {
+                        "gi": 888
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "ext": [
+            {
+              "type": {
+                "str": "use_this_seqid"
+              },
+              "data": [
+                {
+                  "label": {
+                    "str": "SEQIDS"
+                  },
+                  "num": 1,
+                  "data": {
+                    "strs": [
+                      "gi:888"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 26
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 26
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 9.60906804219602
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 14.6234212538952
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 6
+              }
+            },
+            {
+              "id": {
+                "str": "comp_adjustment_method"
+              },
+              "value": {
+                "int": 2
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 6
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 3.625
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "gi": 888
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 432,
+                      "to": 449,
+                      "strand": "minus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 132,
+                      "to": 137,
+                      "strand": "unknown",
+                      "id": {
+                        "gi": 888
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "ext": [
+            {
+              "type": {
+                "str": "use_this_seqid"
+              },
+              "data": [
+                {
+                  "label": {
+                    "str": "SEQIDS"
+                  },
+                  "num": 1,
+                  "data": {
+                    "strs": [
+                      "gi:888"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 723
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 723
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 4.08935005682212e-103
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 283.10752566829
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 141
+              }
+            },
+            {
+              "id": {
+                "str": "comp_adjustment_method"
+              },
+              "value": {
+                "int": 2
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 141
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 74.4583333333333
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "onlylocal"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 37,
+                      "to": 462,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 0,
+                      "to": 141,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "onlylocal"
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 26
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 26
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 9.60906804219602
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 14.6234212538952
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 6
+              }
+            },
+            {
+              "id": {
+                "str": "comp_adjustment_method"
+              },
+              "value": {
+                "int": 2
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 6
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 3.625
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "onlylocal"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 432,
+                      "to": 449,
+                      "strand": "minus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 132,
+                      "to": 137,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "onlylocal"
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 723
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 723
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 4.319835365666e-103
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 283.10752566829
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 141
+              }
+            },
+            {
+              "id": {
+                "str": "comp_adjustment_method"
+              },
+              "value": {
+                "int": 2
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 141
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 74.4583333333333
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "prf": {
+                      "name": "NAMEONLY"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 37,
+                      "to": 462,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 0,
+                      "to": 141,
+                      "strand": "unknown",
+                      "id": {
+                        "prf": {
+                          "name": "NAMEONLY"
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 26
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 26
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 9.43417571673939
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 14.6234212538952
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 6
+              }
+            },
+            {
+              "id": {
+                "str": "comp_adjustment_method"
+              },
+              "value": {
+                "int": 2
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 6
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 3.625
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "prf": {
+                      "name": "NAMEONLY"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 432,
+                      "to": 449,
+                      "strand": "minus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 132,
+                      "to": 137,
+                      "strand": "unknown",
+                      "id": {
+                        "prf": {
+                          "name": "NAMEONLY"
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 722
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 722
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 5.93719863378523e-103
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 282.722326092373
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 141
+              }
+            },
+            {
+              "id": {
+                "str": "comp_adjustment_method"
+              },
+              "value": {
+                "int": 2
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 141
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 74.4583333333333
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "mydb",
+                      "tag": {
+                        "str": "tag2"
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 37,
+                      "to": 462,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 0,
+                      "to": 141,
+                      "strand": "unknown",
+                      "id": {
+                        "general": {
+                          "db": "mydb",
+                          "tag": {
+                            "str": "tag2"
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 26
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 26
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 9.60906804219602
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 14.6234212538952
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 6
+              }
+            },
+            {
+              "id": {
+                "str": "comp_adjustment_method"
+              },
+              "value": {
+                "int": 2
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 6
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 3.625
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "mydb",
+                      "tag": {
+                        "str": "tag2"
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 432,
+                      "to": 449,
+                      "strand": "minus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 132,
+                      "to": 137,
+                      "strand": "unknown",
+                      "id": {
+                        "general": {
+                          "db": "mydb",
+                          "tag": {
+                            "str": "tag2"
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 722
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 722
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 6.99873795060191e-103
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 282.722326092373
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 141
+              }
+            },
+            {
+              "id": {
+                "str": "comp_adjustment_method"
+              },
+              "value": {
+                "int": 2
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 141
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 74.4583333333333
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "pir": {
+                      "name": "PIRNAME",
+                      "accession": "A00001"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 37,
+                      "to": 462,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 0,
+                      "to": 141,
+                      "strand": "unknown",
+                      "id": {
+                        "pir": {
+                          "name": "PIRNAME",
+                          "accession": "A00001"
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "ext": [
+            {
+              "type": {
+                "str": "use_this_seqid"
+              },
+              "data": [
+                {
+                  "label": {
+                    "str": "SEQIDS"
+                  },
+                  "num": 1,
+                  "data": {
+                    "strs": [
+                      "seqid:A00001"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 26
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 26
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 9.96859654566452
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 14.6234212538952
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 6
+              }
+            },
+            {
+              "id": {
+                "str": "comp_adjustment_method"
+              },
+              "value": {
+                "int": 2
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 6
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 3.625
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "pir": {
+                      "name": "PIRNAME",
+                      "accession": "A00001"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 432,
+                      "to": 449,
+                      "strand": "minus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 132,
+                      "to": 137,
+                      "strand": "unknown",
+                      "id": {
+                        "pir": {
+                          "name": "PIRNAME",
+                          "accession": "A00001"
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "ext": [
+            {
+              "type": {
+                "str": "use_this_seqid"
+              },
+              "data": [
+                {
+                  "label": {
+                    "str": "SEQIDS"
+                  },
+                  "num": 1,
+                  "data": {
+                    "strs": [
+                      "seqid:A00001"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 722
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 722
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 7.15393192949253e-103
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 282.722326092373
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 141
+              }
+            },
+            {
+              "id": {
+                "str": "comp_adjustment_method"
+              },
+              "value": {
+                "int": 2
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 141
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 74.4583333333333
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "locfirst"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 37,
+                      "to": 462,
+                      "strand": "plus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 0,
+                      "to": 141,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "locfirst"
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "ext": [
+            {
+              "type": {
+                "str": "use_this_seqid"
+              },
+              "data": [
+                {
+                  "label": {
+                    "str": "SEQIDS"
+                  },
+                  "num": 1,
+                  "data": {
+                    "strs": [
+                      "seqid:AF000001.1"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 26
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 26
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 9.60906804219602
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 14.6234212538952
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 6
+              }
+            },
+            {
+              "id": {
+                "str": "comp_adjustment_method"
+              },
+              "value": {
+                "int": 2
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 6
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 3.625
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "local": {
+                      "str": "locfirst"
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 432,
+                      "to": 449,
+                      "strand": "minus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 132,
+                      "to": 137,
+                      "strand": "unknown",
+                      "id": {
+                        "local": {
+                          "str": "locfirst"
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "ext": [
+            {
+              "type": {
+                "str": "use_this_seqid"
+              },
+              "data": [
+                {
+                  "label": {
+                    "str": "SEQIDS"
+                  },
+                  "num": 1,
+                  "data": {
+                    "strs": [
+                      "seqid:AF000001.1"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

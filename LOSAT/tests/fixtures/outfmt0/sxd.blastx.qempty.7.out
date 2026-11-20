@@ -1,0 +1,18 @@
+# BLASTX 2.17.0+
+# Query: m_fam MelaMJNV 26001-31000
+# Database: User specified sequence set (Input: tests/db_search/bslice.faa)
+# 0 hits found
+# BLASTX 2.17.0+
+# Query: m_mix MelaMJNV 56001-61600
+# Database: User specified sequence set (Input: tests/db_search/bslice.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 8 hits found
+m_mix	BDT61866.1	67.045	176	56	2	5525	5001	19	193	1.60e-70	219
+m_mix	BDT61877.1	42.105	19	11	0	5333	5277	38	56	0.043	24.6
+m_mix	BDT61963.1	27.273	66	37	2	5474	5310	223	288	0.63	21.6
+m_mix	BDT61963.1	44.444	18	10	0	5112	5059	651	668	1.8	20.4
+m_mix	BDT61956.1	50.000	12	6	0	5448	5483	192	203	3.8	19.2
+m_mix	BDT61950.1	38.710	31	18	1	5119	5211	195	224	4.3	18.9
+m_mix	BDT61954.1	35.897	39	22	1	5141	5025	6	41	6.2	18.5
+m_mix	BDT61930.1	24.528	53	23	3	5283	5131	378	415	7.4	18.5
+# BLAST processed 2 queries

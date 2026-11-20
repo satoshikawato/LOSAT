@@ -1,6 +1,9 @@
-//! EXPERIMENT (LOSAT_X_QDUSTPAR, shadow LOSAT_X_QDUSTPARSHADOW): the DUST masks of a query batch
-//! made on the search pool, the per-query map split over the pool's threads and collected in
-//! query order.
+//! EXPERIMENT (LOSAT_X_QPREPPAR): the DUST masks of a query batch made on the search pool, the
+//! per-query map split over the pool's threads and collected in query order. Until 2026-11-01 this
+//! map had a switch of its own (LOSAT_X_QDUSTPAR) with the same rule as LOSAT_X_QPREPPAR's maps
+//! of the same batch (a pool of two or more threads, two or more queries); it was folded into
+//! LOSAT_X_QPREPPAR then (line SF S3, family bn-query-read), which makes a batch's setup on the
+//! pool: these masks, the encoding and the Karlin blocks (`blast_engine/x_query_prep_par.rs`).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/api/dust_filter.cpp:92-102,171-180
 //! ```c++
@@ -25,21 +28,17 @@
 //! `DustMasker::new(level, window, linker).mask_sequence(seq)` is an ordered parallel map
 //! (`par_iter().map().collect()`, which returns the results in the order of the input; rayon
 //! splits the queries into ranges, so the masks are per query but the jobs are not) run with
-//! `SearchPool::install`, so on the pool of the search that calls it: the whole search pool, or
-//! the private pool of a LOSAT_X_QBATCHPAR slot with two or more threads. Rayon's global pool is
-//! never used. A search without a pool (one thread, a slot of one thread, a build without the
-//! `parallel` feature, WebAssembly without `wasm-threads`), and a batch of fewer than two
-//! queries, run the serial map. With `-dust no` there is no map at all (`apply_dust_masking`
+//! `SearchPool::install`, so on the pool of the search that calls it. Rayon's global pool is never
+//! used. A search without a pool (one thread, a build without the `parallel` feature, WebAssembly
+//! without `wasm-threads`), and a batch of fewer than two queries, run the serial map. With `-dust no` there is no map at all (`apply_dust_masking`
 //! makes no masks).
 //!
 //! Why the masks are the same: the mask of a query is a function of that query's letters and of
 //! the three DUST parameters only. `DustMasker::new` builds `level`, `window`, `linker`, `low_k`
 //! and a threshold table from the three parameters and keeps no other state; every call of
-//! `mask_subsequence` makes its own `NcbiLfgRandom` (the random numbers that resolve `N`),
+//! `mask_sequence` makes its own `NcbiLfgRandom` (the random numbers that resolve `N`),
 //! windows and perfect-interval lists as locals, which is the reset of NCBI's fresh
-//! `CSymDustMasker` for each query. The statics of `utils/dust.rs` are the switches
-//! `LOSAT_X_DUSTFAST`, `LOSAT_X_DUSTRING` and `LOSAT_X_DUSTSHADOW`, which are read once and never
-//! written again. So no query's mask depends on another query or on the order in which they are
+//! `CSymDustMasker` for each query. `utils/dust.rs` has no statics that a call writes. So no query's mask depends on another query or on the order in which they are
 //! masked, and the results are collected in query order. The verbose lines, the totals and the
 //! empty case stay in `apply_dust_masking`, in the same order. No floating-point operation
 //! changes order.
@@ -50,21 +49,15 @@
 //! functions, so it is reached too. BLASTP, BLASTX, TBLASTN and TBLASTX do not call
 //! `apply_dust_masking`; they mask with SEG.
 //!
-//! The shadow also makes the masks serially and compares them element for element. On a
-//! difference it prints `[X_SHADOW] QDUSTPAR ... DIFFERENT` and panics; otherwise `main` prints
-//! `[X_SHADOW] QDUSTPAR batches= queries= intervals= diffs=0 identical` at exit (`diffs=` counts the
-//! differences found, also in a batch that a `LOSAT_X_QBATCHPAR` slot made and the loop discarded;
-//! the line ends in `identical` only when it is 0, else in `DIFFERENT`). With `LOSAT_TIMING`,
-//! `main` prints `[TIMING] query_dust: <seconds>s`, and with `LOSAT_X_STATS` `[X_STATS] QDUSTPAR
-//! dust_s=<seconds>`, only when at least one batch was masked (so not for BLASTP, BLASTX, TBLASTN,
-//! TBLASTX or `-dust no`), with or without the switch. The seconds are the sum of the wall times
-//! of every DUST call of the process, not the wall time of the step: with `LOSAT_X_QBATCHPAR`
-//! they include the slots' batches, which run concurrently, and those that the loop discards;
-//! with the shadow of this switch they include the serial reference pass.
+//! With `LOSAT_TIMING`, `main` prints `[TIMING] query_dust: <seconds>s`, and with `LOSAT_X_STATS`
+//! `[X_STATS] QDUSTPAR dust_s=<seconds>`, only when at least one batch was masked (so not for
+//! BLASTP, BLASTX, TBLASTN, TBLASTX or `-dust no`), with or without the switch. The seconds are
+//! the sum of the wall times of every DUST call of the process (every batch's).
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
+use super::coordination::QueryLetters;
 use crate::utils::dust::{DustMasker, MaskedInterval};
 use crate::utils::threading::SearchPool;
 
@@ -74,34 +67,28 @@ use crate::utils::threading::SearchPool;
 ))]
 use rayon::prelude::*;
 
-// No NCBI counterpart: reads the switches once (LOSAT_X_QDUSTPAR is a strict-set switch since
-// 2026-10-17: on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set; the shadow, off
-// unless set to any value, implies the switch). They choose between two LOSAT code paths with
-// the same result and change no value NCBI computes.
-/// 0 = off, 1 = LOSAT_X_QDUSTPAR, 2 = LOSAT_X_QDUSTPARSHADOW.
-fn mode() -> u8 {
-    static MODE: OnceLock<u8> = OnceLock::new();
-    *MODE.get_or_init(|| {
-        if std::env::var_os("LOSAT_X_QDUSTPARSHADOW").is_some() {
-            2
-        } else if crate::utils::xswitch::on("LOSAT_X_QDUSTPAR") {
-            1
-        } else {
-            0
-        }
-    })
+// No NCBI counterpart: reads the switch once (LOSAT_X_QPREPPAR is a strict-set switch since
+// 2026-10-17: on unless it is `0`). It chooses between two LOSAT code paths with the same result
+// and changes no value NCBI computes.
+/// Whether LOSAT_X_QPREPPAR is on.
+fn on() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_QPREPPAR"))
 }
 
-// No NCBI counterpart: counters of the shadow's summary line.
-static BATCHES: AtomicU64 = AtomicU64::new(0);
-static QUERIES: AtomicU64 = AtomicU64::new(0);
-static INTERVALS: AtomicU64 = AtomicU64::new(0);
-static DIFFS: AtomicU64 = AtomicU64::new(0);
-
 /// The DUST masks of `seqs`, one list per sequence, in order: the serial map of NCBI's loop.
-fn serial(seqs: &[&[u8]], level: u32, window: usize, linker: usize) -> Vec<Vec<MaskedInterval>> {
-    seqs.iter()
-        .map(|seq| DustMasker::new(level, window, linker).mask_sequence(seq))
+fn serial<L: QueryLetters + ?Sized>(
+    seqs: &L,
+    level: u32,
+    window: usize,
+    linker: usize,
+) -> Vec<Vec<MaskedInterval>> {
+    (0..seqs.count())
+        .map(|index| {
+            seqs.read(index, |seq| {
+                DustMasker::new(level, window, linker).mask_sequence(seq)
+            })
+        })
         .collect()
 }
 
@@ -118,8 +105,8 @@ fn on_pool(pool: &SearchPool<'_>, seq_count: usize) -> bool {
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
-fn parallel<P: Fn() + Sync>(
-    seqs: &[&[u8]],
+fn parallel<L: QueryLetters + ?Sized, P: Fn() + Sync>(
+    seqs: &L,
     level: u32,
     window: usize,
     linker: usize,
@@ -127,10 +114,13 @@ fn parallel<P: Fn() + Sync>(
     probe: &P,
 ) -> Vec<Vec<MaskedInterval>> {
     pool.install(|| {
-        seqs.par_iter()
-            .map(|seq| {
+        (0..seqs.count())
+            .into_par_iter()
+            .map(|index| {
                 probe();
-                DustMasker::new(level, window, linker).mask_sequence(seq)
+                seqs.read(index, |seq| {
+                    DustMasker::new(level, window, linker).mask_sequence(seq)
+                })
             })
             .collect()
     })
@@ -140,8 +130,8 @@ fn parallel<P: Fn() + Sync>(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 )))]
-fn parallel<P: Fn() + Sync>(
-    seqs: &[&[u8]],
+fn parallel<L: QueryLetters + ?Sized, P: Fn() + Sync>(
+    seqs: &L,
     level: u32,
     window: usize,
     linker: usize,
@@ -151,59 +141,37 @@ fn parallel<P: Fn() + Sync>(
     serial(seqs, level, window, linker)
 }
 
-/// The masks of `seqs` as the switch `mode` makes them (0 = off, 1 = on, 2 = on and compared with
-/// the serial map). Separate from the environment so that tests choose the mode.
-pub(crate) fn masks_with_mode(
-    seqs: &[&[u8]],
+/// The masks of `seqs` as the switch `on` makes them. Separate from the environment so that tests
+/// choose the switch.
+pub(crate) fn masks_with_mode<L: QueryLetters + ?Sized>(
+    seqs: &L,
     level: u32,
     window: usize,
     linker: usize,
     pool: &SearchPool<'_>,
-    mode: u8,
+    on: bool,
 ) -> Vec<Vec<MaskedInterval>> {
-    masks_with_probe(seqs, level, window, linker, pool, mode, &|| {})
+    masks_with_probe(seqs, level, window, linker, pool, on, &|| {})
 }
 
 /// `masks_with_mode` with a `probe` that the parallel map calls once per query (see `parallel`).
-fn masks_with_probe<P: Fn() + Sync>(
-    seqs: &[&[u8]],
+fn masks_with_probe<L: QueryLetters + ?Sized, P: Fn() + Sync>(
+    seqs: &L,
     level: u32,
     window: usize,
     linker: usize,
     pool: &SearchPool<'_>,
-    mode: u8,
+    on: bool,
     probe: &P,
 ) -> Vec<Vec<MaskedInterval>> {
-    if mode == 0 || !on_pool(pool, seqs.len()) {
+    if on {
+        crate::utils::xreach::x_reach!("LOSAT_X_QPREPPAR", on_pool(pool, seqs.count()));
+    }
+    if !on || !on_pool(pool, seqs.count()) {
         return serial(seqs, level, window, linker);
     }
-    let masks = parallel(seqs, level, window, linker, pool, probe);
-    if mode == 2 {
-        let reference = serial(seqs, level, window, linker);
-        let intervals: usize = masks.iter().map(Vec::len).sum();
-        BATCHES.fetch_add(1, Ordering::Relaxed);
-        QUERIES.fetch_add(seqs.len() as u64, Ordering::Relaxed);
-        INTERVALS.fetch_add(intervals as u64, Ordering::Relaxed);
-        if masks != reference {
-            DIFFS.fetch_add(1, Ordering::Relaxed);
-            let first = masks
-                .iter()
-                .zip(&reference)
-                .position(|(fast, slow)| fast != slow);
-            eprintln!(
-                "[X_SHADOW] QDUSTPAR batches={} queries={} intervals={} diffs={} DIFFERENT (first query {:?}: {:?} / {:?})",
-                BATCHES.load(Ordering::Relaxed),
-                QUERIES.load(Ordering::Relaxed),
-                INTERVALS.load(Ordering::Relaxed),
-                DIFFS.load(Ordering::Relaxed),
-                first,
-                first.map(|i| &masks[i]),
-                first.map(|i| &reference[i])
-            );
-            panic!("LOSAT_X_QDUSTPARSHADOW: the DUST masks made on the pool differ from the serial ones");
-        }
-    }
-    masks
+    DUST_POOL_CALLS.fetch_add(1, Ordering::Relaxed);
+    parallel(seqs, level, window, linker, pool, probe)
 }
 
 // No NCBI counterpart: the summed wall time of the DUST calls and their number, for LOSAT_TIMING
@@ -211,6 +179,9 @@ fn masks_with_probe<P: Fn() + Sync>(
 // no value NCBI computes.
 static DUST_NANOS: AtomicU64 = AtomicU64::new(0);
 static DUST_CALLS: AtomicU64 = AtomicU64::new(0);
+// No NCBI counterpart: the DUST calls whose masks were made on the pool (the `pool=` of the
+// `[X_STATS]` line); it changes no value NCBI computes.
+static DUST_POOL_CALLS: AtomicU64 = AtomicU64::new(0);
 
 /// Whether the DUST step is timed: with LOSAT_TIMING (the `[TIMING]` line) or LOSAT_X_STATS (the
 /// `[X_STATS]` line, which costs no more than two clock reads per batch; LOSAT_TIMING also times
@@ -223,15 +194,15 @@ fn timing_on() -> bool {
 }
 
 /// The masks of `seqs` as `apply_dust_masking` makes them: the environment's switch decides.
-pub(crate) fn masks(
-    seqs: &[&[u8]],
+pub(crate) fn masks<L: QueryLetters + ?Sized>(
+    seqs: &L,
     level: u32,
     window: usize,
     linker: usize,
     pool: &SearchPool<'_>,
 ) -> Vec<Vec<MaskedInterval>> {
     let start = timing_on().then(std::time::Instant::now);
-    let masks = masks_with_mode(seqs, level, window, linker, pool, mode());
+    let masks = masks_with_mode(seqs, level, window, linker, pool, on());
     if let Some(start) = start {
         DUST_NANOS.fetch_add(start.elapsed().as_nanos() as u64, Ordering::Relaxed);
         DUST_CALLS.fetch_add(1, Ordering::Relaxed);
@@ -239,9 +210,9 @@ pub(crate) fn masks(
     masks
 }
 
-/// The shadow's summary line (printed by `main` at exit), only with LOSAT_X_QDUSTPARSHADOW, and
-/// with LOSAT_TIMING / LOSAT_X_STATS the summed wall time of every DUST call (not the wall time
-/// of the step: see the module doc), only when at least one batch was masked.
+/// With LOSAT_TIMING / LOSAT_X_STATS the summed wall time of every DUST call (not the wall time of
+/// the step: see the module doc), printed by `main` at exit, only when at least one batch was
+/// masked.
 // No NCBI counterpart: prints counters; it does not change any value NCBI computes.
 pub fn print_summary() {
     if timing_on() && DUST_CALLS.load(Ordering::Relaxed) > 0 {
@@ -250,27 +221,24 @@ pub fn print_summary() {
             eprintln!("[TIMING] query_dust: {seconds:.3}s");
         }
         if std::env::var_os("LOSAT_X_STATS").is_some() {
-            eprintln!("[X_STATS] QDUSTPAR dust_s={seconds:.3}");
+            eprintln!(
+                "[X_STATS] QDUSTPAR dust_s={seconds:.3} pool={}",
+                DUST_POOL_CALLS.load(Ordering::Relaxed)
+            );
         }
-    }
-    if mode() == 2 {
-        let diffs = DIFFS.load(Ordering::Relaxed);
-        eprintln!(
-            "[X_SHADOW] QDUSTPAR batches={} queries={} intervals={} diffs={diffs} {}",
-            BATCHES.load(Ordering::Relaxed),
-            QUERIES.load(Ordering::Relaxed),
-            INTERVALS.load(Ordering::Relaxed),
-            if diffs == 0 { "identical" } else { "DIFFERENT" }
-        );
     }
 }
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "parallel")]
     use super::*;
+    #[cfg(feature = "parallel")]
     use crate::utils::threading::with_search_pool;
 
+    #[cfg(feature = "parallel")]
     struct Rng(u64);
+    #[cfg(feature = "parallel")]
     impl Rng {
         fn next(&mut self) -> u64 {
             self.0 ^= self.0 << 13;
@@ -284,6 +252,7 @@ mod tests {
     }
 
     /// A random sequence with low-complexity runs, `N`s, lower case and other IUPAC letters.
+    #[cfg(feature = "parallel")]
     fn sequence(rng: &mut Rng) -> Vec<u8> {
         let len = match rng.below(6) {
             0 => rng.below(4) as usize,
@@ -331,18 +300,16 @@ mod tests {
         );
         let refs: Vec<&[u8]> = seqs.iter().map(Vec::as_slice).collect();
         for (level, window, linker) in [(20, 64, 1), (10, 32, 2), (30, 16, 1)] {
-            let expect = serial(&refs, level, window, linker);
+            let expect = serial(&refs[..], level, window, linker);
             for threads in [1usize, 2, 3, 7] {
                 with_search_pool(threads, "blastn", |pool| {
                     for take in [refs.len(), 2, 1, 0] {
                         let part = &refs[..take];
                         let want = serial(part, level, window, linker);
-                        for mode in [1u8, 2] {
-                            let got = masks_with_mode(part, level, window, linker, pool, mode);
-                            assert_eq!(got, want, "threads {threads} take {take} mode {mode}");
-                        }
+                        let got = masks_with_mode(part, level, window, linker, pool, true);
+                        assert_eq!(got, want, "threads {threads} take {take}");
                     }
-                    let got = masks_with_mode(&refs, level, window, linker, pool, 1);
+                    let got = masks_with_mode(&refs[..], level, window, linker, pool, true);
                     assert_eq!(got, expect, "threads {threads}");
                     Ok(())
                 })
@@ -386,7 +353,7 @@ mod tests {
 
         let seqs: Vec<Vec<u8>> = (0..30).map(|i| vec![b"ACGT"[i % 4]; 200]).collect();
         let refs: Vec<&[u8]> = seqs.iter().map(Vec::as_slice).collect();
-        let want = serial(&refs, 20, 64, 1);
+        let want = serial(&refs[..], 20, 64, 1);
         with_search_pool(3, "blastn", |pool| {
             let calls = AtomicUsize::new(0);
             let workers = Mutex::new(BTreeSet::new());
@@ -408,30 +375,33 @@ mod tests {
                     std::thread::yield_now();
                 }
             };
-            for mode in [1u8, 2] {
-                calls.store(0, Ordering::SeqCst);
-                in_pool_of_three.store(0, Ordering::SeqCst);
-                workers.lock().unwrap().clear();
-                gave_up.store(false, Ordering::SeqCst);
-                let got = masks_with_probe(&refs, 20, 64, 1, pool, mode, &probe);
-                assert_eq!(got, want, "mode {mode}");
-                assert_eq!(calls.load(Ordering::SeqCst), refs.len(), "mode {mode}");
-                assert_eq!(
-                    in_pool_of_three.load(Ordering::SeqCst),
-                    refs.len(),
-                    "mode {mode}: every query is masked by a worker of the 3-thread pool"
-                );
+            calls.store(0, Ordering::SeqCst);
+            in_pool_of_three.store(0, Ordering::SeqCst);
+            workers.lock().unwrap().clear();
+            gave_up.store(false, Ordering::SeqCst);
+            let got = masks_with_probe(&refs[..], 20, 64, 1, pool, true, &probe);
+            assert_eq!(got, want);
+            assert_eq!(calls.load(Ordering::SeqCst), refs.len());
+            assert_eq!(
+                in_pool_of_three.load(Ordering::SeqCst),
+                refs.len(),
+                "every query is masked by a worker of the 3-thread pool"
+            );
+            {
                 let workers = workers.lock().unwrap();
                 assert!(
                     workers.len() >= 2 && workers.iter().all(|&index| index < 3),
-                    "mode {mode}: workers {workers:?}"
+                    "workers {workers:?}"
                 );
             }
             // Not acted on: switch off, one query.
             calls.store(0, Ordering::SeqCst);
-            assert_eq!(masks_with_probe(&refs, 20, 64, 1, pool, 0, &probe), want);
             assert_eq!(
-                masks_with_probe(&refs[..1], 20, 64, 1, pool, 1, &probe),
+                masks_with_probe(&refs[..], 20, 64, 1, pool, false, &probe),
+                want
+            );
+            assert_eq!(
+                masks_with_probe(&refs[..1], 20, 64, 1, pool, true, &probe),
                 want[..1]
             );
             assert_eq!(calls.load(Ordering::SeqCst), 0);
@@ -443,7 +413,10 @@ mod tests {
             let probe = || {
                 calls.fetch_add(1, Ordering::SeqCst);
             };
-            assert_eq!(masks_with_probe(&refs, 20, 64, 1, pool, 1, &probe), want);
+            assert_eq!(
+                masks_with_probe(&refs[..], 20, 64, 1, pool, true, &probe),
+                want
+            );
             assert_eq!(calls.load(Ordering::SeqCst), 0);
             Ok(())
         })

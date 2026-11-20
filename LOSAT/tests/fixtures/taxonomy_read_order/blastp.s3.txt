@@ -1,0 +1,114 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: txr_s (parsed Seq-ids)
+           3 sequences; 545 total letters
+
+
+
+Query= q
+
+Length=250
+                                                                      Score   Total  Query    E      Max
+Sequences producing significant alignments:                          (Bits)   Score  cover   Value   Ident
+
+Error: [blastp] Error: Tax database file has wrong magic number.
+FFF00001.1 f_frag                                                     98.6     98.6   18%    2e-31   100%      
+AAA00001.1 a_title                                                    461      461    100%   2e-171  90%       
+DDD00001.1 decoy                                                      14.2     28.1   17%    6.5     24%       
+
+
+>FFF00001.1 f_frag
+Length=45
+
+ Score = 98.6 bits (244),  Expect = 2e-31, Method: Compositional matrix adjust.
+ Identities = 45/45 (100%), Positives = 45/45 (100%), Gaps = 0/45 (0%)
+
+Query  1   RKNGRMWEGDCSSKFLNEYKVHDHDCSMDENQIKLSRRFHGGQNG  45
+           RKNGRMWEGDCSSKFLNEYKVHDHDCSMDENQIKLSRRFHGGQNG
+Sbjct  1   RKNGRMWEGDCSSKFLNEYKVHDHDCSMDENQIKLSRRFHGGQNG  45
+
+
+>AAA00001.1 a_title
+Length=250
+
+ Score = 461 bits (1186),  Expect = 2e-171, Method: Compositional matrix adjust.
+ Identities = 225/250 (90%), Positives = 227/250 (91%), Gaps = 0/250 (0%)
+
+Query  1    RKNGRMWEGDCSSKFLNEYKVHDHDCSMDENQIKLSRRFHGGQNGSSHQLCFYKRPFEKA  60
+            RKNGRMWEGD SSKFLNEYKVHDHDCSMDENQ KLSR FHGGQNGSSH LCFYKRPFEK 
+Sbjct  1    RKNGRMWEGDQSSKFLNEYKVHDHDCSMDENQDKLSRNFHGGQNGSSHFLCFYKRPFEKT  60
+
+Query  61   PPDMVHSHRNSQLIAINVSKAHWGPGTWLEPVKLSQCDENTAEKEGRGTKDRGPVKLKEQ  120
+            PPDMVH+HRNSQLIAI VSKAHWGPGTWLEPVKLS CD NT EKEGRGTKDRGPVKLKEQ
+Sbjct  61   PPDMVHAHRNSQLIAIKVSKAHWGPGTWLEPVKLSDCDANTPEKEGRGTKDRGPVKLKEQ  120
+
+Query  121  TWWPGKMKITWIHMCNVCGIQTYALGWSTDPLKIAYTAIYIDMWRIWHVIMFSNSNWTNG  180
+            TWWPG MKITWIHM NVCGIQTYA GWSTDPLKIAYTAIYIDMWR W VIMFSN NWTNG
+Sbjct  121  TWWPGTMKITWIHMHNVCGIQTYAPGWSTDPLKIAYTAIYIDMWRQWGVIMFSNLNWTNG  180
+
+Query  181  TGRAPLRYAKIAIIKVLCMTAWNGIVPFGEMSIGHRHKDVKGPCICHNNHVPCRRKMTCD  240
+            TGRAPLRYAKIAIIKVLC+TA NGIV FGEMSIGHRHKDVK P ICHNN  P R KMTCD
+Sbjct  181  TGRAPLRYAKIAIIKVLCITASNGIVYFGEMSIGHRHKDVKSPPICHNNECPKRHKMTCD  240
+
+Query  241  WMHDTMHKWG  250
+            WMHDTMHKWG
+Sbjct  241  WMHDTMHKWG  250
+
+
+>DDD00001.1 decoy
+Length=250
+
+ Score = 13.9 bits (24),  Expect = 8.3, Method: Compositional matrix adjust.
+ Identities = 4/5 (80%), Positives = 4/5 (80%), Gaps = 0/5 (0%)
+
+Query  94  LSQCD  98
+            SQCD
+Sbjct  84  FSQCD  88
+
+
+ Score = 14.2 bits (25),  Expect = 6.5, Method: Compositional matrix adjust.
+ Identities = 11/45 (24%), Positives = 19/45 (42%), Gaps = 7/45 (16%)
+
+Query  32   QIKLSRRFHGGQNGS----SHQLCFYKRPFEKAPP---DMVHSHR  69
+            Q+K +  F G    S    + Q+ ++   + + PP      H HR
+Sbjct  132  QVKQNPIFDGFIIASWGKLAFQVNYWMFTYCRVPPPPESPCHDHR  176
+
+
+
+Lambda      K        H        a         alpha
+   0.322    0.136    0.482    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 101218
+
+
+  Database: txr_s (parsed Seq-ids)
+    Posted date:  Nov 13, 2026  9:29 PM
+  Number of letters in database: 545
+  Number of sequences in database:  3
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

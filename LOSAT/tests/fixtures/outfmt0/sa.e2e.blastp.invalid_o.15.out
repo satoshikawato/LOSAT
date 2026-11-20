@@ -1,0 +1,377 @@
+{
+"BlastOutput2": [
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1",
+          "Subject_2",
+          "Subject_3",
+          "Subject_4",
+          "Subject_5",
+          "Subject_6",
+          "Subject_7",
+          "Subject_8",
+          "Subject_9",
+          "Subject_10",
+          "Subject_11",
+          "Subject_12",
+          "Subject_13"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_1",
+            "query_title": "q1 allx",
+            "query_len": 30,
+            "hits": [
+            ],
+            "stat": {
+              "hsp_len": 0,
+              "eff_space": 0,
+              "kappa": -1,
+              "lambda": -1,
+              "entropy": -1
+            },
+            "message": "Query_1 q1 allx:  Query_1 q1 allx: Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options  No hits found"
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1",
+          "Subject_2",
+          "Subject_3",
+          "Subject_4",
+          "Subject_5",
+          "Subject_6",
+          "Subject_7",
+          "Subject_8",
+          "Subject_9",
+          "Subject_10",
+          "Subject_11",
+          "Subject_12",
+          "Subject_13"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_2",
+            "query_title": "q2 withO",
+            "query_len": 60,
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "BDT62167.1",
+                    "title": "BDT62167.1 wsv343-like protein [Litopenaeus vannamei majanivirus Nimav-1_LVa]"
+                  }
+                ],
+                "len": 4337,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 20.7866,
+                    "score": 42,
+                    "evalue": 0.105364,
+                    "identity": 9,
+                    "positive": 11,
+                    "query_from": 28,
+                    "query_to": 46,
+                    "hit_from": 2062,
+                    "hit_to": 2080,
+                    "align_len": 19,
+                    "gaps": 0,
+                    "qseq": "NNNKDDRDDVDDDDDDDDD",
+                    "hseq": "NNKKRKRSTVDDDNEDQSK",
+                    "midline": "NN K  R  VDDD++D   "
+                  },
+                  {
+                    "num": 2,
+                    "bit_score": 20.4014,
+                    "score": 41,
+                    "evalue": 0.126231,
+                    "identity": 14,
+                    "positive": 26,
+                    "query_from": 5,
+                    "query_to": 55,
+                    "hit_from": 1923,
+                    "hit_to": 1972,
+                    "align_len": 51,
+                    "gaps": 1,
+                    "qseq": "DNDDDYMSISSGDNDDEVKDTILNNNKDDRDDVDDDDDDDDDSDIEFDIDT",
+                    "hseq": "ETDDDY-KIFSKEDKEEIKRAIANWNKIVEDTANSIVNEYVVENVHYPLFT",
+                    "midline": "+ DDDY  I S ++ +E+K  I N NK   D  +   ++    ++ + + T"
+                  },
+                  {
+                    "num": 3,
+                    "bit_score": 18.8606,
+                    "score": 37,
+                    "evalue": 0.526252,
+                    "identity": 12,
+                    "positive": 17,
+                    "query_from": 13,
+                    "query_to": 46,
+                    "hit_from": 2000,
+                    "hit_to": 2033,
+                    "align_len": 34,
+                    "gaps": 0,
+                    "qseq": "ISSGDNDDEVKDTILNNNKDDRDDVDDDDDDDDD",
+                    "hseq": "ISSKKNTEDVKRTKRRITKRKRDENAQLDNDEQQ",
+                    "midline": "ISS  N ++VK T     K  RD+    D+D+  "
+                  },
+                  {
+                    "num": 4,
+                    "bit_score": 16.1642,
+                    "score": 30,
+                    "evalue": 4.06385,
+                    "identity": 7,
+                    "positive": 8,
+                    "query_from": 29,
+                    "query_to": 42,
+                    "hit_from": 1262,
+                    "hit_to": 1275,
+                    "align_len": 14,
+                    "gaps": 0,
+                    "qseq": "NNKDDRDDVDDDDD",
+                    "hseq": "NRKKKRSEYDGDDD",
+                    "midline": "N K  R + D DDD"
+                  }
+                ]
+              },
+              {
+                "num": 2,
+                "description": [
+                  {
+                    "id": "BDT62149.1",
+                    "title": "BDT62149.1 dUTPase [Litopenaeus vannamei majanivirus Nimav-1_LVa]"
+                  }
+                ],
+                "len": 462,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 15.3938,
+                    "score": 28,
+                    "evalue": 8.96607,
+                    "identity": 6,
+                    "positive": 9,
+                    "query_from": 4,
+                    "query_to": 22,
+                    "hit_from": 7,
+                    "hit_to": 25,
+                    "align_len": 19,
+                    "gaps": 0,
+                    "qseq": "SDNDDDYMSISSGDNDDEV",
+                    "hseq": "AKNNDYYMGFYKVHNDAFI",
+                    "midline": "+ N+D YM      ND  +"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 34,
+              "eff_space": 280280,
+              "kappa": 0.041,
+              "lambda": 0.267,
+              "entropy": 0.14
+            },
+            "message": "Query_2 q2 withO:  Query_2 q2 withO: One or more O characters replaced by X for alignment score calculations at positions 58 "
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1",
+          "Subject_2",
+          "Subject_3",
+          "Subject_4",
+          "Subject_5",
+          "Subject_6",
+          "Subject_7",
+          "Subject_8",
+          "Subject_9",
+          "Subject_10",
+          "Subject_11",
+          "Subject_12",
+          "Subject_13"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_3",
+            "query_title": "q3 manyO",
+            "query_len": 60,
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "BDT62167.1",
+                    "title": "BDT62167.1 wsv343-like protein [Litopenaeus vannamei majanivirus Nimav-1_LVa]"
+                  }
+                ],
+                "len": 4337,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 20.7866,
+                    "score": 42,
+                    "evalue": 0.0828136,
+                    "identity": 14,
+                    "positive": 26,
+                    "query_from": 5,
+                    "query_to": 55,
+                    "hit_from": 1923,
+                    "hit_to": 1972,
+                    "align_len": 51,
+                    "gaps": 1,
+                    "qseq": "DNDDDYMSISSGDNDDEVKDTIONNNKDDRDDVDDDDDDDDDSDIEFDIDT",
+                    "hseq": "ETDDDY-KIFSKEDKEEIKRAIANWNKIVEDTANSIVNEYVVENVHYPLFT",
+                    "midline": "+ DDDY  I S ++ +E+K  I N NK   D  +   ++    ++ + + T"
+                  },
+                  {
+                    "num": 2,
+                    "bit_score": 20.4014,
+                    "score": 41,
+                    "evalue": 0.117664,
+                    "identity": 9,
+                    "positive": 11,
+                    "query_from": 28,
+                    "query_to": 45,
+                    "hit_from": 2062,
+                    "hit_to": 2079,
+                    "align_len": 18,
+                    "gaps": 0,
+                    "qseq": "NNNKDDRDDVDDDDDDDD",
+                    "hseq": "NNKKRKRSTVDDDNEDQS",
+                    "midline": "NN K  R  VDDD++D  "
+                  },
+                  {
+                    "num": 3,
+                    "bit_score": 19.2458,
+                    "score": 38,
+                    "evalue": 0.311859,
+                    "identity": 12,
+                    "positive": 17,
+                    "query_from": 13,
+                    "query_to": 46,
+                    "hit_from": 2000,
+                    "hit_to": 2033,
+                    "align_len": 34,
+                    "gaps": 0,
+                    "qseq": "ISSGDNDDEVKDTIONNNKDDRDDVDDDDDDDDD",
+                    "hseq": "ISSKKNTEDVKRTKRRITKRKRDENAQLDNDEQQ",
+                    "midline": "ISS  N ++VK T     K  RD+    D+D+  "
+                  },
+                  {
+                    "num": 4,
+                    "bit_score": 16.1642,
+                    "score": 30,
+                    "evalue": 4.58487,
+                    "identity": 7,
+                    "positive": 8,
+                    "query_from": 29,
+                    "query_to": 42,
+                    "hit_from": 1262,
+                    "hit_to": 1275,
+                    "align_len": 14,
+                    "gaps": 0,
+                    "qseq": "NNKDDRDDVDDDDD",
+                    "hseq": "NRKKKRSEYDGDDD",
+                    "midline": "N K  R + D DDD"
+                  }
+                ]
+              },
+              {
+                "num": 2,
+                "description": [
+                  {
+                    "id": "BDT62149.1",
+                    "title": "BDT62149.1 dUTPase [Litopenaeus vannamei majanivirus Nimav-1_LVa]"
+                  }
+                ],
+                "len": 462,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 15.3938,
+                    "score": 28,
+                    "evalue": 9.43223,
+                    "identity": 6,
+                    "positive": 9,
+                    "query_from": 4,
+                    "query_to": 22,
+                    "hit_from": 7,
+                    "hit_to": 25,
+                    "align_len": 19,
+                    "gaps": 0,
+                    "qseq": "SDNDDDYMSISSGDNDDEV",
+                    "hseq": "AKNNDYYMGFYKVHNDAFI",
+                    "midline": "+ N+D YM      ND  +"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 34,
+              "eff_space": 280280,
+              "kappa": 0.041,
+              "lambda": 0.267,
+              "entropy": 0.14
+            },
+            "message": "Query_3 q3 manyO:  Query_3 q3 manyO: One or more O characters replaced by X for alignment score calculations at positions 26, 58 "
+          }
+        ]
+      }
+    }
+  }
+]
+}

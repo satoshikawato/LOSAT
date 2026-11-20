@@ -33,7 +33,8 @@
 //!
 //! `units` and `merge` are the calls whose insides `[TIMING] x_pairpar` already times, and
 //! `link2` is the call `[TIMING] sum_stats_linking` times; `reevaluate` is the whole list pass,
-//! of which `[TIMING] reevaluate` times the per-HSP calls. The old lines are unchanged.
+//! of which `[TIMING] reevaluate` times the per-HSP calls. The old lines are unchanged, but for
+//! `[TIMING] identity_calc`, which was always 0 (nothing wrote its counters) and is no longer printed.
 
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 use std::time::{Duration, Instant};
@@ -57,7 +58,7 @@ pub(super) enum XStage {
     Merge,
     /// The reference frame loop (scan, two-hit extension, per-frame append and sort).
     FrameLoop,
-    /// The shadow comparison and the end of the lookup stage (frees the lookup table and the
+    /// The end of the lookup stage (frees the lookup table and the
     /// worker's diagonal table at the batch's last subject).
     SeedRelease,
     /// The first linking call, on every HSP the seed stage saved.
@@ -256,6 +257,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        target_os = "wasi",
+        ignore = "the Node WASI host can sleep less than asked: a 1 ms sleep timed under 1 ms in 1 run of 6"
+    )]
     fn the_stages_of_a_subject_add_up_to_its_time() {
         let times = XSearchTimes::new(true);
         for _ in 0..3 {

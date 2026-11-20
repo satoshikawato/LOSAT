@@ -1,7 +1,7 @@
 # CLI v2 migration and local qualification
 
-CLI v2 uses NCBI single-dash, snake_case options under `LOSAT blastn`,
-`LOSAT blastp`, and `LOSAT tblastx`. Legacy search aliases are rejected.
+CLI v2 uses NCBI single-dash, snake_case options under `losat blastn`,
+`losat blastp`, and `losat tblastx`. Legacy search aliases are rejected.
 The active, unreleased v0.1.0 RC contract and invocation-producing certification
 scripts now emit this interface. Historical recorded argv remains readable in
 the PR 5 evidence identity reader; it is never accepted by the public parser.
@@ -103,8 +103,9 @@ Machine-readable final fields: [`acceptance.json`](../artifacts/cli-v2-20260911/
 
 ## Configuration boundary
 
-Both `-query` and `-subject` require file paths. Stdin (`-`) and `-db` are not
-implemented. Values are consumed as values, including negative numbers and
+At v0.1.0, `-query` and `-subject` required file paths, and stdin (`-`) and `-db` were not
+implemented. Since v0.2.0 every search program reads its query from the standard input (`-query -`)
+and searches BLAST databases (`-db`); README.md lists what each program takes. Values are consumed as values, including negative numbers and
 paths beginning with a dash. `-help`/`--help` display canonical names; top-level
 `--version` remains available.
 
@@ -114,6 +115,7 @@ paths beginning with a dash. `-help`/`--help` display canonical names; top-level
 | `-evalue` | Finite, nonnegative; ordinary default 10 |
 | BLASTP task and omitted E-value | Only `blastp`; parser retains `None`; resolve gives 10 |
 | `-max_target_seqs` | Positive integer; default 500 |
+| `-num_descriptions`, `-num_alignments` | Integers of 0 or more (NCBI's sign and hexadecimal forms); defaults 500 and 250 for outfmt 0; each excludes `-max_target_seqs`; they set the hit list size as NCBI's `ExtractAlgorithmOptions` does (`blastinput/report_counts.rs`) |
 | `-max_hsps` | BLASTN/BLASTP optional positive integer; omission becomes internal unlimited sentinel 0 |
 | `-seg` | BLASTP/TBLASTX shared `no`, `yes`, or one quoted `WINDOW LOCUT HICUT` value |
 | SEG defaults | BLASTP no; TBLASTX 12/2.2/2.5; finite cutoffs retain NCBI normalization |
@@ -121,7 +123,7 @@ paths beginning with a dash. `-help`/`--help` display canonical names; top-level
 | `-comp_based_stats` | Entire-token grammar 0/1/2/3/F/f/D/d/T/t; lowercase `u` only with enabled modes |
 | BLASTN tasks | megablast, blastn; engine task-specific scoring resolution preserved |
 | BLASTN word size | 4..100 |
-| TBLASTX word size | 3 only; other sizes were never implemented by this engine |
+| TBLASTX word size | 2..4, as NCBI (2 and 4 since line NP SC10) |
 | Genetic codes | NCBI valid IDs; query_gencode and db_gencode default 1 |
 
 BLASTN `hitlist_size`, `scan_step`, and `min_diag_separation` are internal fields,
@@ -183,9 +185,9 @@ From `LOSAT/`:
 ```sh
 cargo test --locked --offline
 cargo clippy --locked --offline --all-targets
-cargo build --release --locked --offline --bin LOSAT
-cargo build --release --locked --offline --bin LOSAT --target wasm32-wasip1 --no-default-features
-cargo build --release --locked --offline --bin LOSAT --target wasm32-wasip1-threads --features wasm-threads
+cargo build --release --locked --offline --bin losat
+cargo build --release --locked --offline --bin losat --target wasm32-wasip1 --no-default-features
+cargo build --release --locked --offline --bin losat --target wasm32-wasip1-threads --features wasm-threads
 ```
 
 From the repository root, after building:
@@ -295,8 +297,8 @@ Generated qualification files are listed individually in the final evidence
 initial manifest in `artifacts/cli-v2-20260911/evidence-files.json` and the final
 restriction manifest in `artifacts/cli-v2-v010-surface-20260911/evidence-files.json`;
 build outputs are
-`LOSAT/target/release/LOSAT`, `LOSAT/target/wasm32-wasip1/release/LOSAT.wasm`, and
-`LOSAT/target/wasm32-wasip1-threads/release/LOSAT.wasm`.
+`LOSAT/target/release/losat`, `LOSAT/target/wasm32-wasip1/release/losat.wasm`, and
+`LOSAT/target/wasm32-wasip1-threads/release/losat.wasm`.
 
 Unrelated modified LOSAT paths are separately enumerated in
 `artifacts/cli-v2-20260911/preexisting-losat-paths.txt`; the gbdraw counterpart is

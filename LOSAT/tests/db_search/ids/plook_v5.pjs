@@ -1,0 +1,24 @@
+{
+  "version": "1.2",
+  "dbname": "plook_v5",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "plook_v5 (parsed Seq-ids)",
+  "number-of-letters": 3300,
+  "number-of-sequences": 15,
+  "last-updated": "2026-11-02T22:50:00",
+  "number-of-volumes": 1,
+  "bytes-total": 54813,
+  "bytes-to-cache": 3548,
+  "files": [
+    "plook_v5.pdb",
+    "plook_v5.phr",
+    "plook_v5.pin",
+    "plook_v5.pog",
+    "plook_v5.pos",
+    "plook_v5.pot",
+    "plook_v5.psq",
+    "plook_v5.ptf",
+    "plook_v5.pto"
+  ]
+}

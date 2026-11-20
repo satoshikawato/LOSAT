@@ -1,0 +1,27 @@
+{
+  "version": "1.2",
+  "dbname": "refuse_v5",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "refuse_v5 (parsed Seq-ids)",
+  "number-of-letters": 720,
+  "number-of-sequences": 6,
+  "last-updated": "2026-10-26T22:30:00",
+  "number-of-volumes": 1,
+  "number-of-taxids": 4,
+  "bytes-total": 51243,
+  "bytes-to-cache": 887,
+  "files": [
+    "refuse_v5.pdb",
+    "refuse_v5.phr",
+    "refuse_v5.pin",
+    "refuse_v5.pnd",
+    "refuse_v5.pni",
+    "refuse_v5.pog",
+    "refuse_v5.pos",
+    "refuse_v5.pot",
+    "refuse_v5.psq",
+    "refuse_v5.ptf",
+    "refuse_v5.pto"
+  ]
+}

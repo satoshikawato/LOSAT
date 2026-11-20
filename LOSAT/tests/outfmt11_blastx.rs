@@ -1,0 +1,957 @@
+//! `blastx -outfmt 11` (the BLAST archive) against the bytes that NCBI BLAST+ 2.17.0 `blastx
+//! -num_threads 1` writes, for the cases that need an environment variable or a failing run (the
+//! searches without them are the `sa.arch.bx.*` rows of `outfmt0_manifest.tsv` and the
+//! `db.sa.arch.bx.*` rows of `db_search_manifest/blastx.tsv`): `BATCH_SIZE` (one archive per query
+//! batch, `EffectiveSearchSpace` per batch, an unsearched batch repeating the last value, a batch
+//! above the default size not split, a batch whose last query crosses the limit), a reader error
+//! in the second batch (the archive of the first batch, then an error archive, rc 1),
+//! `ARCHIVE_FORMAT` (`bin...` in any case: ASN.1 binary; `xml`: NCBI's XML archive; any other value
+//! that is not empty: nothing is written, rc 0), `-outfmt "11 qseqid"` (the specification is ignored), the errors NCBI turns
+//! into an error archive (a `-subject` or `-query` file that does not exist, with `-subject` and
+//! with `-db`; an option error inside `Run`: `-ungapped` with composition-based statistics; a
+//! subject file with no letters), a query file with no letters (rc 3), an empty query file
+//! (`Query is Empty!`, nothing written, rc 0), and `BATCH_SIZE` with the other formats (0, 5, 6, 7
+//! and 8: the same batches as NCBI's, which `BATCH_SIZE` did not reach before outfmt 11).
+//!
+//! Frozen bytes: `tests/fixtures/outfmt11/bx_<case>.out` and `.err`, written by NCBI's `blastx
+//! -num_threads 1 <args> -outfmt N` run from `LOSAT/` with the case's environment
+//! (S/of8/scripts/freeze_outfmt11_bx_tests.sh of the line OF8 records). Every case runs at 1 and 4
+//! threads, and the multi-batch cases also with the batches searched in waves instead of the flow
+//! (`LOSAT_X_BXFLOW=0`). A database that does not exist (rc 2) carries the search path in its
+//! message, which depends on where the test runs: only the structure is compared.
+
+use std::path::PathBuf;
+use std::process::{Command, Output};
+
+const BIN: &str = env!("CARGO_BIN_EXE_losat");
+const INPUTS: &str = "tests/fasta/outfmt11";
+
+fn engine() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+}
+
+fn frozen(name: &str, ext: &str) -> Vec<u8> {
+    std::fs::read(
+        engine()
+            .join("tests/fixtures/outfmt11")
+            .join(format!("bx_{name}.{ext}")),
+    )
+    .unwrap_or_default()
+}
+
+fn input(name: &str) -> String {
+    format!("{INPUTS}/{name}")
+}
+
+/// One run of `losat blastx` from `LOSAT/` in a clean environment plus `env`.
+fn run(env: &[(&str, &str)], args: &[&str], threads: &str) -> Output {
+    let mut command = Command::new(BIN);
+    command.current_dir(engine()).arg("blastx").args(args);
+    command.args(["-num_threads", threads]);
+    for (name, _) in std::env::vars() {
+        if name.starts_with("LOSAT_X_")
+            || matches!(
+                name.as_str(),
+                "ARCHIVE_FORMAT" | "BATCH_SIZE" | "CHUNK_SIZE"
+            )
+        {
+            command.env_remove(name);
+        }
+    }
+    for (name, value) in env {
+        command.env(name, value);
+    }
+    command.output().expect("run losat")
+}
+
+/// A case: the frozen NCBI bytes of `name`, the run's environment and arguments, the exit status.
+struct Case {
+    name: String,
+    env: &'static [(&'static str, &'static str)],
+    /// Files by name in `tests/fasta/outfmt11`; `subject` may be a name that does not exist.
+    query: &'static str,
+    subject: &'static str,
+    /// Arguments after `-query` and the subject (or `-db`).
+    extra: &'static [&'static str],
+    outfmt: String,
+    rc: i32,
+    /// `-db tests/db_search/<db_name>` in place of `-subject`.
+    db: bool,
+    db_name: &'static str,
+}
+
+const BATCH: (&str, &str) = ("BATCH_SIZE", "200");
+const BIN_FORMAT: (&str, &str) = ("ARCHIVE_FORMAT", "bin");
+const XML_FORMAT: (&str, &str) = ("ARCHIVE_FORMAT", "xml");
+
+fn case(
+    name: &str,
+    env: &'static [(&'static str, &'static str)],
+    query: &'static str,
+    extra: &'static [&'static str],
+    rc: i32,
+) -> Case {
+    Case {
+        name: name.to_string(),
+        env,
+        query,
+        subject: "arch_bx_s.faa",
+        extra,
+        outfmt: "11".to_string(),
+        rc,
+        db: false,
+        db_name: "arch_sprot",
+    }
+}
+
+fn cases() -> Vec<Case> {
+    let mut cases = vec![
+        case("default_sub_xml", &[XML_FORMAT], "arch_bx_q.fna", &[], 0),
+        case("batches_sub", &[BATCH], "arch_bx_batches.fna", &[], 0),
+        case(
+            "batches_sub_bin",
+            &[BIN_FORMAT, BATCH],
+            "arch_bx_batches.fna",
+            &[],
+            0,
+        ),
+        case(
+            "batch1_sub",
+            &[("BATCH_SIZE", "1")],
+            "arch_bx_batches.fna",
+            &[],
+            0,
+        ),
+        case(
+            "batchbig_sub",
+            &[("BATCH_SIZE", "30000")],
+            "arch_bx_batches.fna",
+            &[],
+            0,
+        ),
+        case(
+            "batchmix_sub",
+            &[("BATCH_SIZE", "400")],
+            "arch_bx_mix.fna",
+            &[],
+            0,
+        ),
+        case(
+            "batchmix_minus_sub",
+            &[("BATCH_SIZE", "400")],
+            "arch_bx_mix.fna",
+            &["-strand", "minus"],
+            0,
+        ),
+        case(
+            "warn_sub",
+            &[("BATCH_SIZE", "60")],
+            "arch_bx_warn.fna",
+            &["-max_target_seqs", "2"],
+            0,
+        ),
+        case(
+            "bad_sub",
+            &[("BATCH_SIZE", "60")],
+            "arch_bx_bad.fna",
+            &[],
+            1,
+        ),
+        case(
+            "bad_sub_bin",
+            &[BIN_FORMAT, ("BATCH_SIZE", "60")],
+            "arch_bx_bad.fna",
+            &[],
+            1,
+        ),
+        case(
+            "bad_first_sub",
+            &[("BATCH_SIZE", "15000")],
+            "arch_bx_bad.fna",
+            &[],
+            1,
+        ),
+        case(
+            "invbatch_sub",
+            &[("BATCH_SIZE", "40")],
+            "arch_bx_inv.fna",
+            &[],
+            0,
+        ),
+        case(
+            "invafter_sub",
+            &[("BATCH_SIZE", "40")],
+            "arch_bx_invafter.fna",
+            &[],
+            0,
+        ),
+        case(
+            "invfirst_sub",
+            &[("BATCH_SIZE", "1")],
+            "arch_bx_invfirst.fna",
+            &[],
+            0,
+        ),
+        case(
+            "invonly_sub",
+            &[("BATCH_SIZE", "1")],
+            "arch_bx_invonly.fna",
+            &[],
+            0,
+        ),
+        case(
+            "lcbatch_sub",
+            &[("BATCH_SIZE", "300")],
+            "arch_bx_lc.fna",
+            &["-lcase_masking"],
+            0,
+        ),
+        case(
+            "segbatch_sub",
+            &[("BATCH_SIZE", "100")],
+            "arch_bx_seg.fna",
+            &[],
+            0,
+        ),
+        case(
+            "zero_sub",
+            &[("BATCH_SIZE", "0")],
+            "arch_bx_batches.fna",
+            &[],
+            3,
+        ),
+        case(
+            "env_bin_upper",
+            &[("ARCHIVE_FORMAT", "BIN")],
+            "arch_bx_q.fna",
+            &[],
+            0,
+        ),
+        case(
+            "env_binary",
+            &[("ARCHIVE_FORMAT", "binary")],
+            "arch_bx_q.fna",
+            &[],
+            0,
+        ),
+        case(
+            "env_empty",
+            &[("ARCHIVE_FORMAT", "")],
+            "arch_bx_q.fna",
+            &[],
+            0,
+        ),
+        case(
+            "env_foo",
+            &[("ARCHIVE_FORMAT", "foo")],
+            "arch_bx_q.fna",
+            &[],
+            0,
+        ),
+        case(
+            "env_spbin",
+            &[("ARCHIVE_FORMAT", " bin")],
+            "arch_bx_q.fna",
+            &[],
+            0,
+        ),
+        case(
+            "env_asn",
+            &[("ARCHIVE_FORMAT", "asn")],
+            "arch_bx_q.fna",
+            &[],
+            0,
+        ),
+        case(
+            "env_text",
+            &[("ARCHIVE_FORMAT", "text")],
+            "arch_bx_q.fna",
+            &[],
+            0,
+        ),
+        Case {
+            outfmt: "11 qseqid".to_string(),
+            ..case("spec", &[], "arch_bx_q.fna", &[], 0)
+        },
+        Case {
+            subject: "does_not_exist.fa",
+            ..case("nosubject", &[], "arch_bx_q.fna", &[], 1)
+        },
+        case("noquery_sub", &[], "no_such_query.fna", &[], 1),
+        case("empty_query", &[], "arch_bx_empty.fna", &[], 0),
+        case("emptyonly", &[], "arch_bx_emptyonly.fna", &[], 3),
+        Case {
+            subject: "arch_bx_emptyonly.fna",
+            ..case("emptysubjfile", &[], "arch_bx_q.fna", &[], 0)
+        },
+        case(
+            "errcbs",
+            &[],
+            "arch_bx_q.fna",
+            &["-ungapped", "-num_descriptions", "5"],
+            1,
+        ),
+        Case {
+            db: true,
+            ..case("noquery_db", &[], "no_such_query.fna", &[], 1)
+        },
+        Case {
+            db: true,
+            ..case("errcbs_db", &[], "arch_bx_q.fna", &["-ungapped"], 1)
+        },
+    ];
+    // `BATCH_SIZE` with the other formats: NCBI's batches in 0, 5, 6, 7 and 8 too.
+    for format in ["0", "5", "6", "7", "8"] {
+        for (stem, size, query) in [
+            ("batches", "200", "arch_bx_batches.fna"),
+            ("batchmix", "400", "arch_bx_mix.fna"),
+            ("invbatch", "40", "arch_bx_inv.fna"),
+            ("invafter", "40", "arch_bx_invafter.fna"),
+        ] {
+            let env: &'static [(&str, &str)] = Box::leak(Box::new([("BATCH_SIZE", size)]));
+            cases.push(Case {
+                outfmt: format.to_string(),
+                ..case(&format!("{stem}_sub_fmt{format}"), env, query, &[], 0)
+            });
+        }
+    }
+    cases.push(Case {
+        outfmt: "6".to_string(),
+        ..case(
+            "bad_sub_fmt6",
+            &[("BATCH_SIZE", "60")],
+            "arch_bx_bad.fna",
+            &[],
+            1,
+        )
+    });
+    cases.push(Case {
+        outfmt: "6".to_string(),
+        ..case(
+            "zero_sub_fmt6",
+            &[("BATCH_SIZE", "0")],
+            "arch_bx_batches.fna",
+            &[],
+            3,
+        )
+    });
+    cases.push(Case {
+        outfmt: "6".to_string(),
+        db: true,
+        ..case("batches_db_fmt6", &[BATCH], "arch_bx_batches.fna", &[], 0)
+    });
+    // A reader batch that spans several search units: `arch_bx_units.fna` is 89 queries and
+    // 36,608 letters; with `BATCH_SIZE=30000` the first reader batch holds three units (the
+    // second is a single query of 10,100 `N`, which has no valid context) and the second batch
+    // one. The search keeps units of 10,002 letters, the reports are NCBI's batches'.
+    for format in ["11", "6", "5"] {
+        let name = if format == "11" {
+            "units_sub".to_string()
+        } else {
+            format!("units_sub_fmt{format}")
+        };
+        cases.push(Case {
+            outfmt: format.to_string(),
+            ..case(
+                &name,
+                &[("BATCH_SIZE", "30000")],
+                "arch_bx_units.fna",
+                &[],
+                0,
+            )
+        });
+    }
+    // The values NCBI takes of the whole query batch, with a reader batch of several units (the
+    // reader batch is 100,000 letters, the search units 10,002). `m1_split`: two queries of
+    // 19,500 letters; NCBI does not split a batch of two queries, however long they are.
+    // `m1_avg`: a 20,100-letter run of `N` and 24 fragments of 1,000 letters, `-ungapped`:
+    // the link cutoffs use the batch's average query length. Each differs from NCBI when the
+    // values are taken of the unit.
+    cases.push(Case {
+        outfmt: "6".to_string(),
+        db: true,
+        db_name: "bslice",
+        ..case(
+            "m1_split",
+            &[("BATCH_SIZE", "100000")],
+            "arch_bx_m1_split.fna",
+            &[],
+            0,
+        )
+    });
+    cases.push(Case {
+        outfmt: "6".to_string(),
+        db: true,
+        db_name: "bslice",
+        ..case(
+            "m1_avg",
+            &[("BATCH_SIZE", "100000")],
+            "arch_bx_m1_avg.fna",
+            &["-ungapped", "-comp_based_stats", "F"],
+            0,
+        )
+    });
+    cases
+}
+
+/// The cases with more than one batch to a searched end.
+const MULTI_BATCH: &[&str] = &[
+    "batches_sub",
+    "batches_sub_bin",
+    "batch1_sub",
+    "batchmix_sub",
+    "batchmix_minus_sub",
+    "warn_sub",
+    "invbatch_sub",
+    "invafter_sub",
+    "invfirst_sub",
+    "lcbatch_sub",
+    "segbatch_sub",
+    "batches_sub_fmt6",
+    "batches_sub_fmt5",
+    "units_sub",
+    "units_sub_fmt6",
+    "m1_split",
+    "m1_avg",
+];
+
+/// What the panic of a stdout mismatch says: how many bytes differ, where the first difference is,
+/// and about 100 bytes of both sides around it (control bytes escaped), so that a difference seen
+/// only on one platform can be read from its log. Empty when the bytes are equal.
+pub(crate) fn first_difference(got: &[u8], want: &[u8]) -> String {
+    let offset = got
+        .iter()
+        .zip(want)
+        .position(|(a, b)| a != b)
+        .unwrap_or(got.len().min(want.len()));
+    let differing =
+        got.iter().zip(want).filter(|(a, b)| a != b).count() + got.len().abs_diff(want.len());
+    let context = |bytes: &[u8]| {
+        let from = offset.saturating_sub(50).min(bytes.len());
+        let to = (offset + 50).min(bytes.len());
+        String::from_utf8_lossy(&bytes[from..to])
+            .escape_debug()
+            .to_string()
+    };
+    format!(
+        "{differing} bytes differ, first at offset {offset}\n  LOSAT (bytes {}..{}): {}\n  NCBI  (bytes {}..{}): {}",
+        offset.saturating_sub(50).min(got.len()),
+        (offset + 50).min(got.len()),
+        context(got),
+        offset.saturating_sub(50).min(want.len()),
+        (offset + 50).min(want.len()),
+        context(want),
+    )
+}
+
+/// A `real { M, 10, E }` token: its mantissa and exponent digits.
+type Real<'a> = (&'a [u8], &'a [u8]);
+
+/// The `real { M, 10, E }` tokens of an ASN.1 text archive (`CObjectOStreamAsn::WriteDouble`, 15
+/// digits): the bytes outside the tokens in order, and for each token its mantissa and exponent.
+fn split_reals(bytes: &[u8]) -> (Vec<u8>, Vec<Real<'_>>) {
+    const HEAD: &[u8] = b"real { ";
+    const MIDDLE: &[u8] = b", 10, ";
+    let digits = |from: usize| {
+        let sign = usize::from(bytes.get(from) == Some(&b'-'));
+        let run = bytes[from + sign..]
+            .iter()
+            .take_while(|b| b.is_ascii_digit())
+            .count();
+        (run > 0).then_some(from + sign + run)
+    };
+    let token = |at: usize| -> Option<(usize, &[u8], &[u8])> {
+        let m_from = at + HEAD.len();
+        let m_to = digits(m_from)?;
+        bytes[m_to..].starts_with(MIDDLE).then_some(())?;
+        let e_from = m_to + MIDDLE.len();
+        let e_to = digits(e_from)?;
+        bytes[e_to..].starts_with(b" }").then_some(())?;
+        Some((e_to + 2, &bytes[m_from..m_to], &bytes[e_from..e_to]))
+    };
+    let (mut rest, mut reals) = (Vec::new(), Vec::new());
+    let mut at = 0;
+    while at < bytes.len() {
+        match bytes[at..].starts_with(HEAD).then(|| token(at)).flatten() {
+            Some((end, mantissa, exponent)) => {
+                rest.extend_from_slice(b"real {}");
+                reals.push((mantissa, exponent));
+                at = end;
+            }
+            None => {
+                rest.push(bytes[at]);
+                at += 1;
+            }
+        }
+    }
+    (rest, reals)
+}
+
+/// Whether `got` is the archive `want`. Always: the same bytes. With `libm_last_digit` (the call
+/// sites pass `cfg!(target_os = "macos")`): also an archive that differs only in `real { M, 10, E }`
+/// tokens whose exponents are equal and whose mantissas have 15 digits and differ by exactly 1.
+/// Apple's libm `exp` and `log` differ from glibc's by 1 ULP in some E values, which moves the last
+/// of the 15 digits (`PD-LOSAT-PLATFORM-LIBM`); NCBI built on macOS has the same property. A shorter
+/// mantissa (NCBI drops its trailing zeros) 1 away is not that. WASI has no such rule: its output
+/// is compared byte for byte.
+pub(crate) fn archives_match_allowing_libm_last_digit(
+    got: &[u8],
+    want: &[u8],
+    libm_last_digit: bool,
+) -> bool {
+    if got == want {
+        return true;
+    }
+    if !libm_last_digit {
+        return false;
+    }
+    let ((got_rest, got_reals), (want_rest, want_reals)) = (split_reals(got), split_reals(want));
+    got_rest == want_rest
+        && got_reals.len() == want_reals.len()
+        && got_reals
+            .iter()
+            .zip(&want_reals)
+            .all(|((got_m, got_e), (want_m, want_e))| {
+                if (got_m, got_e) == (want_m, want_e) {
+                    return true;
+                }
+                let value = |m: &[u8]| std::str::from_utf8(m).ok()?.parse::<i128>().ok();
+                let digits = |m: &[u8]| m.iter().filter(|b| b.is_ascii_digit()).count();
+                got_e == want_e
+                    && digits(got_m) == 15
+                    && digits(want_m) == 15
+                    && matches!(
+                        (value(got_m), value(want_m)),
+                        (Some(a), Some(b)) if a.abs_diff(b) == 1
+                    )
+            })
+}
+
+fn check(case: &Case, extra_env: &[(&str, &str)], threads: &str) {
+    let mut env: Vec<(&str, &str)> = case.env.to_vec();
+    env.extend_from_slice(extra_env);
+    let query = input(case.query);
+    let subject = input(case.subject);
+    let db = format!("tests/db_search/{}", case.db_name);
+    let mut args = vec!["-query", &query];
+    if case.db {
+        args.extend_from_slice(&["-db", &db]);
+    } else {
+        args.extend_from_slice(&["-subject", &subject]);
+    }
+    args.extend_from_slice(case.extra);
+    args.extend_from_slice(&["-outfmt", &case.outfmt]);
+    let output = run(&env, &args, threads);
+    let label = format!("{} threads {threads} {extra_env:?}", case.name);
+    assert_eq!(output.status.code(), Some(case.rc), "{label}: exit status");
+    let want = frozen(&case.name, "out");
+    assert!(
+        archives_match_allowing_libm_last_digit(&output.stdout, &want, cfg!(target_os = "macos")),
+        "{label}: stdout differs ({} bytes, NCBI wrote {}): {}",
+        output.stdout.len(),
+        want.len(),
+        first_difference(&output.stdout, &want)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stderr),
+        String::from_utf8_lossy(&frozen(&case.name, "err")),
+        "{label}: stderr"
+    );
+}
+
+/// The message of a mismatch: the count of differing bytes, the first offset, and both sides around it.
+#[test]
+fn a_difference_is_described_by_its_first_offset_and_the_bytes_around_it() {
+    let message = first_difference(b"ab\ncdef", b"ab\ncXeY");
+    assert!(
+        message.starts_with("2 bytes differ, first at offset 4"),
+        "{message}"
+    );
+    assert!(
+        message.contains("ab\\ncdef") && message.contains("ab\\ncXeY"),
+        "{message}"
+    );
+    assert!(first_difference(b"abc", b"abcd").starts_with("1 bytes differ, first at offset 3"));
+}
+
+/// The macOS rule accepts a mantissa that is 1 away in a `real {}` token (and the tokens alone),
+/// and nothing else; on every other OS the comparison is exact.
+#[test]
+fn the_libm_rule_accepts_only_a_last_digit_of_a_real() {
+    let archive = |m: &str, e: &str, tail: &str| {
+        format!("evalue real {{ {m}, 10, {e} }},\nscore 7{tail}").into_bytes()
+    };
+    let want = archive("693693758698357", "-80", "");
+    let same = |got: &[u8], rule: bool| archives_match_allowing_libm_last_digit(got, &want, rule);
+    assert!(same(&want, false) && same(&want, true));
+    for m in ["693693758698358", "693693758698356"] {
+        let got = archive(m, "-80", "");
+        assert!(!same(&got, false), "{m}");
+        assert!(same(&got, true), "{m}");
+    }
+    for got in [
+        archive("693693758698359", "-80", ""),
+        archive("693693758698355", "-80", ""),
+        archive("693693758698358", "-79", ""),
+        archive("69369375869836", "-80", ""),
+        archive("693693758698357", "-80", " "),
+        b"evalue real { 693693758698358, 10, -80 },\nscore 8".to_vec(),
+        b"evalue real { 693693758698358, 10, -80 },\nscore".to_vec(),
+        b"evalue 693693758698358,\nscore 7".to_vec(),
+    ] {
+        assert!(!same(&got, true), "{}", String::from_utf8_lossy(&got));
+    }
+    // Every token is judged on its own; a second, different token fails the whole archive.
+    let two =
+        |a: &str, b: &str| format!("real {{ {a}, 10, -3 }} real {{ {b}, 10, -4 }}").into_bytes();
+    let want_two = two("100000000000001", "200000000000002");
+    let accepts = |got: &[u8]| archives_match_allowing_libm_last_digit(got, &want_two, true);
+    assert!(accepts(&two("100000000000002", "200000000000001")));
+    assert!(!accepts(&two("100000000000002", "200000000000004")));
+    // A mantissa of fewer than 15 digits (its trailing zeros dropped) 1 away is not a last digit.
+    let short = |m: &str| format!("evalue real {{ {m}, 10, -1 }}").into_bytes();
+    let rule = |got: &str, want: &str| {
+        archives_match_allowing_libm_last_digit(&short(got), &short(want), true)
+    };
+    assert!(!rule("6", "5") && !rule("0", "1"));
+}
+
+#[test]
+fn archives_equal_ncbis_at_one_and_four_threads() {
+    for case in &cases() {
+        for threads in ["1", "4"] {
+            check(case, &[], threads);
+        }
+    }
+}
+
+/// The flow of batches (`LOSAT_X_BXFLOW`, in the strict set) writes the archives the waves write:
+/// the multi-batch cases are compared with `LOSAT_X_BXFLOW=0`. At one thread there is no pool and
+/// the switch is never read, so that run would be the one of the test above.
+#[test]
+fn the_flow_does_not_change_the_archives() {
+    for case in cases()
+        .iter()
+        .filter(|case| MULTI_BATCH.contains(&case.name.as_str()))
+    {
+        check(case, &[("LOSAT_X_BXFLOW", "0")], "4");
+    }
+}
+
+/// `-out FILE` receives the bytes of the standard output; `ARCHIVE_FORMAT` that NCBI does not
+/// write still creates the (empty) file.
+#[test]
+fn the_out_file_receives_the_archive() {
+    let dir = std::env::temp_dir().join(format!("losat_outfmt11_bx_out_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let query = input("arch_bx_q.fna");
+    let subject = input("arch_bx_s.faa");
+    for (format, want) in [
+        ("", frozen("env_empty", "out")),
+        ("foo", Vec::new()),
+        ("bin", frozen("env_bin_upper", "out")),
+    ] {
+        let file = dir.join(format!("out_{format}.asn"));
+        let _ = std::fs::remove_file(&file);
+        let output = run(
+            &[("ARCHIVE_FORMAT", format)],
+            &[
+                "-query",
+                &query,
+                "-subject",
+                &subject,
+                "-outfmt",
+                "11",
+                "-out",
+                file.to_str().unwrap(),
+            ],
+            "1",
+        );
+        assert_eq!(output.status.code(), Some(0), "{format}");
+        assert!(
+            output.stdout.is_empty(),
+            "{format}: nothing on standard output"
+        );
+        assert_eq!(
+            std::fs::read(&file).unwrap(),
+            want,
+            "-out file with ARCHIVE_FORMAT={format:?}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// In the text and binary archives a title with a byte outside `0x20..=0x7E` (0x80 and above,
+/// and 0x7F) is written as `#` by NCBI, with a diagnostic per byte (in XML NCBI writes the byte,
+/// and so does LOSAT), query and `-subject`; a `-db` name names a database that does not exist.
+/// NCBI's bytes are frozen in `tests/archive_replaced/`.
+#[test]
+fn non_ascii_titles_and_database_names_are_written_as_ncbi_writes_them() {
+    let dir = std::env::temp_dir().join(format!("losat_outfmt11_bx_title_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let plain = engine().join(input("arch_bx_s.faa"));
+    let plain = plain.to_str().unwrap();
+    for (bytes, name) in [
+        (
+            &b">t caf\xc3\xa9\nATGAAAGTGCTGGCGGCGGGCATTGTGGCGCTGCTG\n"[..],
+            "utf8",
+        ),
+        (
+            &b">t ti\x7ftle\nATGAAAGTGCTGGCGGCGGGCATTGTGGCGCTGCTG\n"[..],
+            "del",
+        ),
+    ] {
+        let titled = dir.join(format!("titled_{name}.fna"));
+        std::fs::write(&titled, bytes).unwrap();
+        let titled = titled.to_str().unwrap();
+        for (args, role) in [
+            (vec!["-query", titled, "-subject", plain], "query"),
+            (vec!["-query", plain, "-subject", titled], "subject"),
+        ] {
+            let mut full = args.clone();
+            full.extend_from_slice(&["-outfmt", "11"]);
+            let output = run(&[], &full, "1");
+            assert_eq!(output.status.code(), Some(0), "{name} {role}");
+            crate::outfmt11_titles::assert_replaced(name, &output, &format!("{name} {role}"));
+        }
+        // The same title is plain text in outfmt 8.
+        let output = run(
+            &[],
+            &["-query", titled, "-subject", plain, "-outfmt", "8"],
+            "1",
+        );
+        assert_eq!(output.status.code(), Some(0), "{name}");
+    }
+    for database in ["caf\u{e9}", "d\u{7f}b"] {
+        let output = run(
+            &[],
+            &["-query", plain, "-db", database, "-outfmt", "11"],
+            "1",
+        );
+        crate::outfmt11_titles::assert_missing_database(&output, database);
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A title that NCBI's stream replaces bytes of, in a batch that NCBI completes before a reader
+/// error: the archive of that batch is written before the error, with `caf##` and the two
+/// `Bad char` reports. The bad record is in the second batch (`BATCH_SIZE=60`), or after the first
+/// 10,002 letters (the default).
+#[test]
+fn a_non_ascii_title_before_a_reader_error_is_written_before_the_error() {
+    let dir = std::env::temp_dir().join(format!(
+        "losat_outfmt11_bx_batchtitle_{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let subject = engine().join(input("arch_bx_s.faa"));
+    let subject = subject.to_str().unwrap();
+    let short = dir.join("utf_bad.fna");
+    std::fs::write(
+        &short,
+        b">bq1 caf\xc3\xa9 title\nATGTGGATGGAACACTCGGTGTTGAAAGCAGTATTTGCGGTACGCAGA\n\
+          >bq2 ok\nAGTGTATTGAAGGCAGACCAACTCCAGCTAAGAAAAGTCATGGATGAT\n>bq3 bad\nAC1GT%\n",
+    )
+    .unwrap();
+    let long = dir.join("utf_bad_default.fna");
+    let mut bytes = b">bq1 caf\xc3\xa9 title\n".to_vec();
+    for _ in 0..842 {
+        bytes.extend_from_slice(b"ATGAAAGTGCTG");
+    }
+    bytes.extend_from_slice(
+        b"\n>bq2 ok\nAGTGTATTGAAGGCAGACCAACTCCAGCTAAGAAAAGTCATGGATGAT\n>bq3 bad\nAC1GT%\n",
+    );
+    std::fs::write(&long, bytes).unwrap();
+    for (file, batch_size) in [(&short, Some("60")), (&long, None)] {
+        let env: Vec<(&str, &str)> = batch_size
+            .map(|size| ("BATCH_SIZE", size))
+            .into_iter()
+            .collect();
+        let output = run(
+            &env,
+            &[
+                "-query",
+                file.to_str().unwrap(),
+                "-subject",
+                subject,
+                "-outfmt",
+                "11",
+            ],
+            "1",
+        );
+        let label = format!("{file:?} {batch_size:?}");
+        assert_eq!(output.status.code(), Some(1), "{label}");
+        crate::outfmt11_titles::assert_replaced("utf8", &output, &label);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("CFastaReader"), "{label}: {stderr}");
+        // Without outfmt 11 the run reaches the reader error alone.
+        let output = run(
+            &env,
+            &[
+                "-query",
+                file.to_str().unwrap(),
+                "-subject",
+                subject,
+                "-outfmt",
+                "8",
+            ],
+            "1",
+        );
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("CFastaReader"),
+            "{label}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A named FIFO as `-query` with outfmt 11 is read once, at once, and gives the bytes of the regular
+/// file with the same content (no second open waits for a writer that never comes).
+#[cfg(unix)]
+#[test]
+fn a_fifo_query_gives_the_regular_files_bytes() {
+    use std::time::{Duration, Instant};
+    let dir = std::env::temp_dir().join(format!("losat_outfmt11_bx_fifo_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let fifo = dir.join("query_fifo");
+    let _ = std::fs::remove_file(&fifo);
+    let made = Command::new("mkfifo").arg(&fifo).status().expect("mkfifo");
+    assert!(made.success());
+    let writer = {
+        let fifo = fifo.clone();
+        let bytes = std::fs::read(engine().join(input("arch_bx_q.fna"))).unwrap();
+        std::thread::spawn(move || {
+            use std::io::Write;
+            // Opens when the run opens the FIFO, writes, and closes: later opens find no writer.
+            let mut file = std::fs::OpenOptions::new().write(true).open(&fifo).unwrap();
+            let _ = file.write_all(&bytes);
+        })
+    };
+    let subject = engine().join(input("arch_bx_s.faa"));
+    let mut command = Command::new(BIN);
+    command
+        .current_dir(engine())
+        .args(["blastx", "-query", fifo.to_str().unwrap(), "-subject"])
+        .arg(&subject)
+        .args(["-outfmt", "11", "-num_threads", "1"])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    for (name, _) in std::env::vars() {
+        if name.starts_with("LOSAT_X_") || matches!(name.as_str(), "ARCHIVE_FORMAT" | "BATCH_SIZE")
+        {
+            command.env_remove(name);
+        }
+    }
+    let mut child = command.spawn().expect("spawn losat");
+    let started = Instant::now();
+    let status = loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            break Some(status);
+        }
+        if started.elapsed() > Duration::from_secs(30) {
+            let _ = child.kill();
+            let _ = child.wait();
+            break None;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    // The writer finished when the run opened the FIFO; it is not joined when the run never did.
+    if writer.is_finished() {
+        let _ = writer.join();
+    }
+    let output = child.wait_with_output().unwrap();
+    let status = status.expect("the run must read the FIFO once, not wait on it");
+    let file = run(
+        &[],
+        &[
+            "-query",
+            &input("arch_bx_q.fna"),
+            "-subject",
+            subject.to_str().unwrap(),
+            "-outfmt",
+            "11",
+        ],
+        "1",
+    );
+    assert_eq!(status.code(), file.status.code());
+    assert!(output.stdout == file.stdout, "standard output");
+    assert_eq!(output.stderr, file.stderr, "standard error");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A database that does not exist: rc 2 and an error archive whose message is the line on
+/// standard error (the message wraps at 78 columns, so the comparison joins the lines).
+#[test]
+fn a_missing_database_gives_an_error_archive() {
+    let query = input("arch_bx_q.fna");
+    let output = run(
+        &[],
+        &[
+            "-query",
+            &query,
+            "-db",
+            "tests/fasta/outfmt11/no_such_db",
+            "-outfmt",
+            "11",
+        ],
+        "1",
+    );
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    let line = stderr.trim_end();
+    assert!(
+        line.starts_with(
+            "BLAST Database error: No alias or index file found for protein database ["
+        ),
+        "{line}"
+    );
+    let text = String::from_utf8(output.stdout).unwrap();
+    let head = "Blast4-archive ::= {\n  request {\n    body get-request-info {\n      request-id \"Error\"\n    }\n  },\n  results {\n  },\n  messages {\n    {\n      code 2,\n      message \"";
+    assert!(text.starts_with(head), "{text}");
+    let rest = &text[head.len()..];
+    let end = rest
+        .find("\"\n    }\n  }\n}\n")
+        .expect("end of the message");
+    assert_eq!(rest[..end].replace('\n', ""), line);
+    assert_eq!(&rest[end..], "\"\n    }\n  }\n}\n");
+    // Every line of the message but the first starts with a space (the wrap goes before the blank).
+    assert!(rest[..end]
+        .lines()
+        .skip(1)
+        .all(|line| line.starts_with(' ')));
+}
+
+/// NCBI's `PrintErrorArchive` converts the trimmed `-outfmt` text to an integer and writes
+/// nothing when that throws (`11 qseqid`); `11` with white space around it converts. NCBI 2.17.0
+/// with a missing `-query`: rc 1 and no bytes for `11 qseqid` and ` 11 qseqid`, the error
+/// archive of `noquery_sub` for ` 11 `.
+#[test]
+fn an_outfmt_spec_gets_no_error_archive() {
+    for threads in ["1", "4", "8", "16"] {
+        for (outfmt, written) in [("11 qseqid", false), (" 11 qseqid", false), (" 11 ", true)] {
+            let output = run(
+                &[],
+                &[
+                    "-query",
+                    &input("no_such_query.fna"),
+                    "-subject",
+                    &input("arch_bx_s.faa"),
+                    "-outfmt",
+                    outfmt,
+                ],
+                threads,
+            );
+            assert_eq!(output.status.code(), Some(1), "{outfmt:?}");
+            if written {
+                assert_eq!(output.stdout, frozen("noquery_sub", "out"), "{outfmt:?}");
+            } else {
+                assert!(
+                    output.stdout.is_empty(),
+                    "{outfmt:?}: {} bytes",
+                    output.stdout.len()
+                );
+            }
+            assert_eq!(output.stderr, frozen("noquery_sub", "err"), "{outfmt:?}");
+        }
+    }
+}

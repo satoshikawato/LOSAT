@@ -1,0 +1,573 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: pq.faa
+           5 sequences; 1,845 total letters
+
+
+
+Query= BDV02158.1 serine hydroxymethyltransferase [Candidatus Hepatoplasma
+vulgare]
+
+Length=409
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDV02158.1 serine hydroxymethyltransferase [Candidatus Hepatoplas...  828     0.0  
+BDV02702.1 peptide chain release factor 1 [Candidatus Hepatoplasm...  20.8    0.33 
+BDV02441.1 aspartyl/glutamyl-tRNA amidotransferase subunit A [Can...  19.2    1.1  
+BDV02443.1 tRNA-specific 2-thiouridylase MnmA [Candidatus Hepatop...  18.1    2.1  
+
+
+>BDV02158.1 serine hydroxymethyltransferase [Candidatus Hepatoplasma 
+vulgare]
+Length=409
+
+ Score = 828 bits (2139),  Expect = 0.0, Method: Compositional matrix adjust.
+ Identities = 409/409 (100%), Positives = 409/409 (100%), Gaps = 0/409 (0%)
+
+Query  1    MEDKKVEKLINNEEKRQMDFVQLIASENFVSKDVMKATGSVFTNKYAEGYPNARYYGGCE  60
+            MEDKKVEKLINNEEKRQMDFVQLIASENFVSKDVMKATGSVFTNKYAEGYPNARYYGGCE
+Sbjct  1    MEDKKVEKLINNEEKRQMDFVQLIASENFVSKDVMKATGSVFTNKYAEGYPNARYYGGCE  60
+
+Query  61   NVDKLEELAIERLKKIFNAKFANVQPHSGAQANIAAYNAILKPGDKILSMSLNSGGHLTH  120
+            NVDKLEELAIERLKKIFNAKFANVQPHSGAQANIAAYNAILKPGDKILSMSLNSGGHLTH
+Sbjct  61   NVDKLEELAIERLKKIFNAKFANVQPHSGAQANIAAYNAILKPGDKILSMSLNSGGHLTH  120
+
+Query  121  GHFVSIVGKFYKIFSYEVNKETEQLDYEEIRKIAKEVKPNLIICGASAYSRIIDFKKFVA  180
+            GHFVSIVGKFYKIFSYEVNKETEQLDYEEIRKIAKEVKPNLIICGASAYSRIIDFKKFVA
+Sbjct  121  GHFVSIVGKFYKIFSYEVNKETEQLDYEEIRKIAKEVKPNLIICGASAYSRIIDFKKFVA  180
+
+Query  181  IAKEVNAYLLADIAHIAGLIVADLHPNPLNDGVDIVTSTTHKTLRGARGGIILTNNPELA  240
+            IAKEVNAYLLADIAHIAGLIVADLHPNPLNDGVDIVTSTTHKTLRGARGGIILTNNPELA
+Sbjct  181  IAKEVNAYLLADIAHIAGLIVADLHPNPLNDGVDIVTSTTHKTLRGARGGIILTNNPELA  240
+
+Query  241  ILLDKSVFPGTQGGPLMNVIAGKTVSFYEASLPSFKEYQKNIISNANVMANFFIQKGVKI  300
+            ILLDKSVFPGTQGGPLMNVIAGKTVSFYEASLPSFKEYQKNIISNANVMANFFIQKGVKI
+Sbjct  241  ILLDKSVFPGTQGGPLMNVIAGKTVSFYEASLPSFKEYQKNIISNANVMANFFIQKGVKI  300
+
+Query  301  ISGGTDNHLLMINTKKSFNKTGKEAEEILYKVNIIVNKNAIPFDEERPIVTSGIRIGTPA  360
+            ISGGTDNHLLMINTKKSFNKTGKEAEEILYKVNIIVNKNAIPFDEERPIVTSGIRIGTPA
+Sbjct  301  ISGGTDNHLLMINTKKSFNKTGKEAEEILYKVNIIVNKNAIPFDEERPIVTSGIRIGTPA  360
+
+Query  361  MTTLGWRNKEFLKIAEVIYNVLKNDDNISIKKNKQIVIDLLKEGKNEKY  409
+            MTTLGWRNKEFLKIAEVIYNVLKNDDNISIKKNKQIVIDLLKEGKNEKY
+Sbjct  361  MTTLGWRNKEFLKIAEVIYNVLKNDDNISIKKNKQIVIDLLKEGKNEKY  409
+
+
+>BDV02702.1 peptide chain release factor 1 [Candidatus Hepatoplasma 
+vulgare]
+Length=354
+
+ Score = 20.8 bits (42),  Expect = 0.33, Method: Compositional matrix adjust.
+ Identities = 11/38 (29%), Positives = 21/38 (55%), Gaps = 2/38 (5%)
+
+Query  175  FKKFVAIAKEVNAY--LLADIAHIAGLIVADLHPNPLN  210
+            FKK+  I +E N Y  L  DI  +  +I ++ + + ++
+Sbjct  42   FKKYKPIYEEYNKYKSLTKDINDLHSIIKSETNKDSID  79
+
+
+ Score = 19.2 bits (38),  Expect = 1.1, Method: Compositional matrix adjust.
+ Identities = 14/48 (29%), Positives = 28/48 (58%), Gaps = 4/48 (8%)
+
+Query  312  INTKKSFNKTGKEAEEILYK--VNIIVNKNAIPFDEERPIVTSGIRIG  357
+            I++ ++  K   E EE +Y+  ++++V K+  P DE+  I+    R+G
+Sbjct  78   IDSYRNLLKENFEKEEEIYQNILDLLVEKD--PNDEKNAIIEIKGRVG  123
+
+
+>BDV02441.1 aspartyl/glutamyl-tRNA amidotransferase subunit A 
+[Candidatus Hepatoplasma vulgare]
+Length=430
+
+ Score = 19.2 bits (38),  Expect = 1.1, Method: Compositional matrix adjust.
+ Identities = 30/113 (27%), Positives = 49/113 (43%), Gaps = 24/113 (21%)
+
+Query  297  GVKIISGGTDNHLLMINTKKSFNKTGKEAEEILYKVNIIVNKNAIPFDEERPIVTS-GIR  355
+            G KII G +     +I  K+     G +  + + K    V   A  F     IV+  G+ 
+Sbjct  100  GSKIIGGSSSGSAYLIANKEVDFSIGSDTGDSVRKPAWYVGITA--FKPTWGIVSRYGLF  157
+
+Query  356  IGTPAMTTLGWRNKEFLKIAEVIYNVLKNDDNISIKKNKQIVIDLLKEGKNEK  408
+              +P+  T+GW +K          NV   DD+        +++D+L +GK+EK
+Sbjct  158  DFSPSWDTVGWFSK----------NV---DDS-------ALLLDVL-QGKDEK  189
+
+
+>BDV02443.1 tRNA-specific 2-thiouridylase MnmA [Candidatus Hepatoplasma 
+vulgare]
+Length=442
+
+ Score = 18.1 bits (35),  Expect = 2.1, Method: Compositional matrix adjust.
+ Identities = 11/26 (42%), Positives = 14/26 (54%), Gaps = 1/26 (4%)
+
+Query  21   VQLIASE-NFVSKDVMKATGSVFTNK  45
+            V+ IA E N  +KD   +TG  F  K
+Sbjct  257  VRSIAKEANLYTKDKKDSTGICFIGK  282
+
+
+ Score = 16.5 bits (31),  Expect = 6.5, Method: Compositional matrix adjust.
+ Identities = 6/20 (30%), Positives = 13/20 (65%), Gaps = 0/20 (0%)
+
+Query  143  EQLDYEEIRKIAKEVKPNLI  162
+            ++ DY + +K+A ++   LI
+Sbjct  129  QEKDYNDAKKVADQLGIELI  148
+
+
+ Score = 16.2 bits (30),  Expect = 9.2, Method: Compositional matrix adjust.
+ Identities = 6/9 (67%), Positives = 7/9 (78%), Gaps = 0/9 (0%)
+
+Query  180  AIAKEVNAY  188
+            +IAKE N Y
+Sbjct  259  SIAKEANLY  267
+
+
+
+Lambda      K        H        a         alpha
+   0.316    0.135    0.377    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 603520
+
+
+Query= BDV02159.1 uracil phosphoribosyltransferase [Candidatus Hepatoplasma
+vulgare]
+
+Length=210
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDV02159.1 uracil phosphoribosyltransferase [Candidatus Hepatopla...  412     5e-153
+BDV02441.1 aspartyl/glutamyl-tRNA amidotransferase subunit A [Can...  15.4    8.3   
+
+
+>BDV02159.1 uracil phosphoribosyltransferase [Candidatus Hepatoplasma 
+vulgare]
+Length=210
+
+ Score = 412 bits (1060),  Expect = 5e-153, Method: Compositional matrix adjust.
+ Identities = 210/210 (100%), Positives = 210/210 (100%), Gaps = 0/210 (0%)
+
+Query  1    MKNINLIEHPLAQDKLASLRSEETSSKEFREYLEELSVLIAYEVFKDLKVKEEKIITPLS  60
+            MKNINLIEHPLAQDKLASLRSEETSSKEFREYLEELSVLIAYEVFKDLKVKEEKIITPLS
+Sbjct  1    MKNINLIEHPLAQDKLASLRSEETSSKEFREYLEELSVLIAYEVFKDLKVKEEKIITPLS  60
+
+Query  61   KTTGKKINEEINLFPILRAGQGFVSGFLNVVPKARVGHIGLYRDEKTLKPVQYLFKYPKN  120
+            KTTGKKINEEINLFPILRAGQGFVSGFLNVVPKARVGHIGLYRDEKTLKPVQYLFKYPKN
+Sbjct  61   KTTGKKINEEINLFPILRAGQGFVSGFLNVVPKARVGHIGLYRDEKTLKPVQYLFKYPKN  120
+
+Query  121  KNIEKTYNILLDPIIATGGSIRAALKILENINLKNIKVVAIISVKDTIEKLAKDYPNINF  180
+            KNIEKTYNILLDPIIATGGSIRAALKILENINLKNIKVVAIISVKDTIEKLAKDYPNINF
+Sbjct  121  KNIEKTYNILLDPIIATGGSIRAALKILENINLKNIKVVAIISVKDTIEKLAKDYPNINF  180
+
+Query  181  YLIAIDKKLDKKGYIIPGLGDAGDRIYGTK  210
+            YLIAIDKKLDKKGYIIPGLGDAGDRIYGTK
+Sbjct  181  YLIAIDKKLDKKGYIIPGLGDAGDRIYGTK  210
+
+
+>BDV02441.1 aspartyl/glutamyl-tRNA amidotransferase subunit A 
+[Candidatus Hepatoplasma vulgare]
+Length=430
+
+ Score = 15.4 bits (28),  Expect = 8.3, Method: Compositional matrix adjust.
+ Identities = 8/31 (26%), Positives = 13/31 (42%), Gaps = 0/31 (0%)
+
+Query  23   ETSSKEFREYLEELSVLIAYEVFKDLKVKEE  53
+            E  + EF+  +  +     YEV K   +  E
+Sbjct  289  ELENDEFKNEITRIRSNFVYEVKKRFLLSSE  319
+
+
+
+Lambda      K        H        a         alpha
+   0.317    0.139    0.382    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 289710
+
+
+Query= BDV02443.1 tRNA-specific 2-thiouridylase MnmA [Candidatus
+Hepatoplasma vulgare]
+
+Length=442
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDV02443.1 tRNA-specific 2-thiouridylase MnmA [Candidatus Hepatop...  878     0.0  
+BDV02158.1 serine hydroxymethyltransferase [Candidatus Hepatoplas...  18.1    2.6  
+BDV02441.1 aspartyl/glutamyl-tRNA amidotransferase subunit A [Can...  16.9    5.3  
+BDV02702.1 peptide chain release factor 1 [Candidatus Hepatoplasm...  16.9    5.9  
+BDV02159.1 uracil phosphoribosyltransferase [Candidatus Hepatopla...  16.2    8.6  
+
+
+>BDV02443.1 tRNA-specific 2-thiouridylase MnmA [Candidatus Hepatoplasma 
+vulgare]
+Length=442
+
+ Score = 878 bits (2268),  Expect = 0.0, Method: Compositional matrix adjust.
+ Identities = 442/442 (100%), Positives = 442/442 (100%), Gaps = 0/442 (0%)
+
+Query  1    MKKWKIIFLAFLLFFSYLFLFFYDWGIYLSLILLIIFLIFPFIKIGGKINLNYLNNFKEK  60
+            MKKWKIIFLAFLLFFSYLFLFFYDWGIYLSLILLIIFLIFPFIKIGGKINLNYLNNFKEK
+Sbjct  1    MKKWKIIFLAFLLFFSYLFLFFYDWGIYLSLILLIIFLIFPFIKIGGKINLNYLNNFKEK  60
+
+Query  61   QKMKKYKNFVPEKDATIAICLSGGVDSSVSAYLLKKQGYKLKAFFMRNWDSTLNNEENLN  120
+            QKMKKYKNFVPEKDATIAICLSGGVDSSVSAYLLKKQGYKLKAFFMRNWDSTLNNEENLN
+Sbjct  61   QKMKKYKNFVPEKDATIAICLSGGVDSSVSAYLLKKQGYKLKAFFMRNWDSTLNNEENLN  120
+
+Query  121  LNENEICEQEKDYNDAKKVADQLGIELIKLNFVNEYWDFVFKRFLNELEEGLTPNPDIFC  180
+            LNENEICEQEKDYNDAKKVADQLGIELIKLNFVNEYWDFVFKRFLNELEEGLTPNPDIFC
+Sbjct  121  LNENEICEQEKDYNDAKKVADQLGIELIKLNFVNEYWDFVFKRFLNELEEGLTPNPDIFC  180
+
+Query  181  NKYIKFDHFVKYISKNFPEIDYIATGHYAKIKIKEGKAYLFKAKDEIKDQTYFLSEINKD  240
+            NKYIKFDHFVKYISKNFPEIDYIATGHYAKIKIKEGKAYLFKAKDEIKDQTYFLSEINKD
+Sbjct  181  NKYIKFDHFVKYISKNFPEIDYIATGHYAKIKIKEGKAYLFKAKDEIKDQTYFLSEINKD  240
+
+Query  241  VLNKLFFPLANKMKSEVRSIAKEANLYTKDKKDSTGICFIGKRNFSSFIENYFKKEEGNI  300
+            VLNKLFFPLANKMKSEVRSIAKEANLYTKDKKDSTGICFIGKRNFSSFIENYFKKEEGNI
+Sbjct  241  VLNKLFFPLANKMKSEVRSIAKEANLYTKDKKDSTGICFIGKRNFSSFIENYFKKEEGNI  300
+
+Query  301  IDEKSNKIIGKHQGVKFYTIGQRRGLGLSGFNEPYFVSNKNIKNNILYVSYDTEKYLYKN  360
+            IDEKSNKIIGKHQGVKFYTIGQRRGLGLSGFNEPYFVSNKNIKNNILYVSYDTEKYLYKN
+Sbjct  301  IDEKSNKIIGKHQGVKFYTIGQRRGLGLSGFNEPYFVSNKNIKNNILYVSYDTEKYLYKN  360
+
+Query  361  KLKTNNFKFLTEEDILSKNKQVRIKTRHSEIIYNGIIKSIEKKDDLFMINLETKEKIKAI  420
+            KLKTNNFKFLTEEDILSKNKQVRIKTRHSEIIYNGIIKSIEKKDDLFMINLETKEKIKAI
+Sbjct  361  KLKTNNFKFLTEEDILSKNKQVRIKTRHSEIIYNGIIKSIEKKDDLFMINLETKEKIKAI  420
+
+Query  421  TPGQEVVIYDHELCVGGGQIAN  442
+            TPGQEVVIYDHELCVGGGQIAN
+Sbjct  421  TPGQEVVIYDHELCVGGGQIAN  442
+
+
+>BDV02158.1 serine hydroxymethyltransferase [Candidatus Hepatoplasma 
+vulgare]
+Length=409
+
+ Score = 18.1 bits (35),  Expect = 2.6, Method: Compositional matrix adjust.
+ Identities = 11/26 (42%), Positives = 14/26 (54%), Gaps = 1/26 (4%)
+
+Query  257  VRSIAKEANLYTKDKKDSTGICFIGK  282
+            V+ IA E N  +KD   +TG  F  K
+Sbjct  21   VQLIASE-NFVSKDVMKATGSVFTNK  45
+
+
+ Score = 16.5 bits (31),  Expect = 8.2, Method: Compositional matrix adjust.
+ Identities = 6/20 (30%), Positives = 13/20 (65%), Gaps = 0/20 (0%)
+
+Query  129  QEKDYNDAKKVADQLGIELI  148
+            ++ DY + +K+A ++   LI
+Sbjct  143  EQLDYEEIRKIAKEVKPNLI  162
+
+
+ Score = 16.2 bits (30),  Expect = 9.4, Method: Compositional matrix adjust.
+ Identities = 6/9 (67%), Positives = 7/9 (78%), Gaps = 0/9 (0%)
+
+Query  259  SIAKEANLY  267
+            +IAKE N Y
+Sbjct  180  AIAKEVNAY  188
+
+
+>BDV02441.1 aspartyl/glutamyl-tRNA amidotransferase subunit A 
+[Candidatus Hepatoplasma vulgare]
+Length=430
+
+ Score = 16.9 bits (32),  Expect = 5.3, Method: Compositional matrix adjust.
+ Identities = 25/110 (23%), Positives = 45/110 (41%), Gaps = 14/110 (13%)
+
+Query  342  IKNNILYVSYDTEKYLYKNKLKT-NNFKFLTEEDILSKNKQVRIKTR--------HSEII  392
+            +KNN      + +  + KNK++   N  F  +++   +N      T+        ++  +
+Sbjct  1    MKNNPRLSPLNIDNKIKKNKVQPLKNMTFALKDNFAVRNIPTTGGTKLLENFKITYNSTV  60
+
+Query  393  YNGIIKSIEKKDDLFMINL-ETKEKIKAITPGQEVVI--YDHELCVGGGQ  439
+            Y  +IK+  K   +   NL E       +T G  VV+  YD    +GG  
+Sbjct  61   YEKLIKAGAKP--ITKANLDELAMGFSGLTSGFGVVLNPYDGSKIIGGSS  108
+
+
+ Score = 16.2 bits (30),  Expect = 9.5, Method: Compositional matrix adjust.
+ Identities = 8/13 (62%), Positives = 11/13 (85%), Gaps = 1/13 (8%)
+
+Query  233  FLSEI-NKDVLNK  244
+            FL +I +KD+LNK
+Sbjct  221  FLDDIKDKDILNK  233
+
+
+>BDV02702.1 peptide chain release factor 1 [Candidatus Hepatoplasma 
+vulgare]
+Length=354
+
+ Score = 16.9 bits (32),  Expect = 5.9, Method: Compositional matrix adjust.
+ Identities = 5/12 (42%), Positives = 8/12 (67%), Gaps = 0/12 (0%)
+
+Query  186  FDHFVKYISKNF  197
+             D F+  +SKN+
+Sbjct  339  LDEFIDALSKNY  350
+
+
+>BDV02159.1 uracil phosphoribosyltransferase [Candidatus Hepatoplasma 
+vulgare]
+Length=210
+
+ Score = 16.2 bits (30),  Expect = 8.6, Method: Compositional matrix adjust.
+ Identities = 6/13 (46%), Positives = 7/13 (54%), Gaps = 0/13 (0%)
+
+Query  37   FLIFPFIKIGGKI  49
+             L+ P I  GG I
+Sbjct  129  ILLDPIIATGGSI  141
+
+
+
+Lambda      K        H        a         alpha
+   0.321    0.140    0.409    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 654000
+
+
+Query= BDV02702.1 peptide chain release factor 1 [Candidatus Hepatoplasma
+vulgare]
+
+Length=354
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDV02702.1 peptide chain release factor 1 [Candidatus Hepatoplasm...  706     0.0  
+BDV02158.1 serine hydroxymethyltransferase [Candidatus Hepatoplas...  21.2    0.22 
+BDV02441.1 aspartyl/glutamyl-tRNA amidotransferase subunit A [Can...  16.9    3.9  
+BDV02443.1 tRNA-specific 2-thiouridylase MnmA [Candidatus Hepatop...  16.9    4.0  
+
+
+>BDV02702.1 peptide chain release factor 1 [Candidatus Hepatoplasma 
+vulgare]
+Length=354
+
+ Score = 706 bits (1823),  Expect = 0.0, Method: Compositional matrix adjust.
+ Identities = 354/354 (100%), Positives = 354/354 (100%), Gaps = 0/354 (0%)
+
+Query  1    MEKQILDKLIQIENEYLEIERKINDPNIFSNIEKLKLLNSLFKKYKPIYEEYNKYKSLTK  60
+            MEKQILDKLIQIENEYLEIERKINDPNIFSNIEKLKLLNSLFKKYKPIYEEYNKYKSLTK
+Sbjct  1    MEKQILDKLIQIENEYLEIERKINDPNIFSNIEKLKLLNSLFKKYKPIYEEYNKYKSLTK  60
+
+Query  61   DINDLHSIIKSETNKDSIDSYRNLLKENFEKEEEIYQNILDLLVEKDPNDEKNAIIEIKG  120
+            DINDLHSIIKSETNKDSIDSYRNLLKENFEKEEEIYQNILDLLVEKDPNDEKNAIIEIKG
+Sbjct  61   DINDLHSIIKSETNKDSIDSYRNLLKENFEKEEEIYQNILDLLVEKDPNDEKNAIIEIKG  120
+
+Query  121  RVGGEEANLFAANIFEMYKKYALKQNYELEVIDSNVSEQGGYSSITFFAIGRDAYGKFKY  180
+            RVGGEEANLFAANIFEMYKKYALKQNYELEVIDSNVSEQGGYSSITFFAIGRDAYGKFKY
+Sbjct  121  RVGGEEANLFAANIFEMYKKYALKQNYELEVIDSNVSEQGGYSSITFFAIGRDAYGKFKY  180
+
+Query  181  ESGTHRVQRVPKTESQDKLQTSTVSVYVIPENDELNIEINPNDLRIDTYRSSGAGGQHVN  240
+            ESGTHRVQRVPKTESQDKLQTSTVSVYVIPENDELNIEINPNDLRIDTYRSSGAGGQHVN
+Sbjct  181  ESGTHRVQRVPKTESQDKLQTSTVSVYVIPENDELNIEINPNDLRIDTYRSSGAGGQHVN  240
+
+Query  241  KTDSAVRITHIPTGLSVSSQDGRSQHDNKDKAMKTLISKINNLQLEEEREKETETKRKIL  300
+            KTDSAVRITHIPTGLSVSSQDGRSQHDNKDKAMKTLISKINNLQLEEEREKETETKRKIL
+Sbjct  241  KTDSAVRITHIPTGLSVSSQDGRSQHDNKDKAMKTLISKINNLQLEEEREKETETKRKIL  300
+
+Query  301  SSSERSEKIRTYNYPENRVTDHRINLKLKKLDQVLNGNLDEFIDALSKNYNDEI  354
+            SSSERSEKIRTYNYPENRVTDHRINLKLKKLDQVLNGNLDEFIDALSKNYNDEI
+Sbjct  301  SSSERSEKIRTYNYPENRVTDHRINLKLKKLDQVLNGNLDEFIDALSKNYNDEI  354
+
+
+>BDV02158.1 serine hydroxymethyltransferase [Candidatus Hepatoplasma 
+vulgare]
+Length=409
+
+ Score = 21.2 bits (43),  Expect = 0.22, Method: Compositional matrix adjust.
+ Identities = 11/38 (29%), Positives = 21/38 (55%), Gaps = 2/38 (5%)
+
+Query  42   FKKYKPIYEEYNKYKSLTKDINDLHSIIKSETNKDSID  79
+            FKK+  I +E N Y  L  DI  +  +I ++ + + ++
+Sbjct  175  FKKFVAIAKEVNAY--LLADIAHIAGLIVADLHPNPLN  210
+
+
+ Score = 18.9 bits (37),  Expect = 1.1, Method: Compositional matrix adjust.
+ Identities = 14/48 (29%), Positives = 28/48 (58%), Gaps = 4/48 (8%)
+
+Query  78   IDSYRNLLKENFEKEEEIYQNILDLLVEKD--PNDEKNAIIEIKGRVG  123
+            I++ ++  K   E EE +Y+  ++++V K+  P DE+  I+    R+G
+Sbjct  312  INTKKSFNKTGKEAEEILYK--VNIIVNKNAIPFDEERPIVTSGIRIG  357
+
+
+>BDV02441.1 aspartyl/glutamyl-tRNA amidotransferase subunit A 
+[Candidatus Hepatoplasma vulgare]
+Length=430
+
+ Score = 16.9 bits (32),  Expect = 3.9, Method: Compositional matrix adjust.
+ Identities = 7/21 (33%), Positives = 11/21 (52%), Gaps = 4/21 (19%)
+
+Query  141  YALKQNYELEVIDSNVSEQGG  161
+            +ALK N+ +     N+   GG
+Sbjct  29   FALKDNFAVR----NIPTTGG  45
+
+
+>BDV02443.1 tRNA-specific 2-thiouridylase MnmA [Candidatus Hepatoplasma 
+vulgare]
+Length=442
+
+ Score = 16.9 bits (32),  Expect = 4.0, Method: Compositional matrix adjust.
+ Identities = 5/12 (42%), Positives = 8/12 (67%), Gaps = 0/12 (0%)
+
+Query  339  LDEFIDALSKNY  350
+             D F+  +SKN+
+Sbjct  186  FDHFVKYISKNF  197
+
+
+
+Lambda      K        H        a         alpha
+   0.310    0.131    0.348    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 516530
+
+
+Query= BDV02441.1 aspartyl/glutamyl-tRNA amidotransferase subunit A
+[Candidatus Hepatoplasma vulgare]
+
+Length=430
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDV02441.1 aspartyl/glutamyl-tRNA amidotransferase subunit A [Can...  851     0.0  
+BDV02158.1 serine hydroxymethyltransferase [Candidatus Hepatoplas...  19.2    1.1  
+BDV02702.1 peptide chain release factor 1 [Candidatus Hepatoplasm...  16.9    5.2  
+BDV02443.1 tRNA-specific 2-thiouridylase MnmA [Candidatus Hepatop...  16.5    8.1  
+
+
+>BDV02441.1 aspartyl/glutamyl-tRNA amidotransferase subunit A 
+[Candidatus Hepatoplasma vulgare]
+Length=430
+
+ Score = 851 bits (2198),  Expect = 0.0, Method: Compositional matrix adjust.
+ Identities = 430/430 (100%), Positives = 430/430 (100%), Gaps = 0/430 (0%)
+
+Query  1    MKNNPRLSPLNIDNKIKKNKVQPLKNMTFALKDNFAVRNIPTTGGTKLLENFKITYNSTV  60
+            MKNNPRLSPLNIDNKIKKNKVQPLKNMTFALKDNFAVRNIPTTGGTKLLENFKITYNSTV
+Sbjct  1    MKNNPRLSPLNIDNKIKKNKVQPLKNMTFALKDNFAVRNIPTTGGTKLLENFKITYNSTV  60
+
+Query  61   YEKLIKAGAKPITKANLDELAMGFSGLTSGFGVVLNPYDGSKIIGGSSSGSAYLIANKEV  120
+            YEKLIKAGAKPITKANLDELAMGFSGLTSGFGVVLNPYDGSKIIGGSSSGSAYLIANKEV
+Sbjct  61   YEKLIKAGAKPITKANLDELAMGFSGLTSGFGVVLNPYDGSKIIGGSSSGSAYLIANKEV  120
+
+Query  121  DFSIGSDTGDSVRKPAWYVGITAFKPTWGIVSRYGLFDFSPSWDTVGWFSKNVDDSALLL  180
+            DFSIGSDTGDSVRKPAWYVGITAFKPTWGIVSRYGLFDFSPSWDTVGWFSKNVDDSALLL
+Sbjct  121  DFSIGSDTGDSVRKPAWYVGITAFKPTWGIVSRYGLFDFSPSWDTVGWFSKNVDDSALLL  180
+
+Query  181  DVLQGKDEKDFTSLNSREKDFLKDINNIKKEDVKLGYIKSFLDDIKDKDILNKFNDLILK  240
+            DVLQGKDEKDFTSLNSREKDFLKDINNIKKEDVKLGYIKSFLDDIKDKDILNKFNDLILK
+Sbjct  181  DVLQGKDEKDFTSLNSREKDFLKDINNIKKEDVKLGYIKSFLDDIKDKDILNKFNDLILK  240
+
+Query  241  LKKDGFNIVEIDLDLKLFKTILTVYRIISSVNGFSSNSNLTSFLFGNFELENDEFKNEIT  300
+            LKKDGFNIVEIDLDLKLFKTILTVYRIISSVNGFSSNSNLTSFLFGNFELENDEFKNEIT
+Sbjct  241  LKKDGFNIVEIDLDLKLFKTILTVYRIISSVNGFSSNSNLTSFLFGNFELENDEFKNEIT  300
+
+Query  301  RIRSNFVYEVKKRFLLSSEVFLNKKNLYNKARKIRHLYINALSDLFAKIDAIIMPPAGNY  360
+            RIRSNFVYEVKKRFLLSSEVFLNKKNLYNKARKIRHLYINALSDLFAKIDAIIMPPAGNY
+Sbjct  301  RIRSNFVYEVKKRFLLSSEVFLNKKNLYNKARKIRHLYINALSDLFAKIDAIIMPPAGNY  360
+
+Query  361  APSIKDAFNAVKYNSIMDEYLGIFNANGSPSLNIPILKNIEKPFSVNIATAPFNDKKCLQ  420
+            APSIKDAFNAVKYNSIMDEYLGIFNANGSPSLNIPILKNIEKPFSVNIATAPFNDKKCLQ
+Sbjct  361  APSIKDAFNAVKYNSIMDEYLGIFNANGSPSLNIPILKNIEKPFSVNIATAPFNDKKCLQ  420
+
+Query  421  IGKLLEKYER  430
+            IGKLLEKYER
+Sbjct  421  IGKLLEKYER  430
+
+
+>BDV02158.1 serine hydroxymethyltransferase [Candidatus Hepatoplasma 
+vulgare]
+Length=409
+
+ Score = 19.2 bits (38),  Expect = 1.1, Method: Compositional matrix adjust.
+ Identities = 30/113 (27%), Positives = 49/113 (43%), Gaps = 24/113 (21%)
+
+Query  100  GSKIIGGSSSGSAYLIANKEVDFSIGSDTGDSVRKPAWYVGITA--FKPTWGIVSRYGLF  157
+            G KII G +     +I  K+     G +  + + K    V   A  F     IV+  G+ 
+Sbjct  297  GVKIISGGTDNHLLMINTKKSFNKTGKEAEEILYKVNIIVNKNAIPFDEERPIVTS-GIR  355
+
+Query  158  DFSPSWDTVGWFSK----------NV---DDS-------ALLLDVL-QGKDEK  189
+              +P+  T+GW +K          NV   DD+        +++D+L +GK+EK
+Sbjct  356  IGTPAMTTLGWRNKEFLKIAEVIYNVLKNDDNISIKKNKQIVIDLLKEGKNEK  408
+
+
+>BDV02702.1 peptide chain release factor 1 [Candidatus Hepatoplasma 
+vulgare]
+Length=354
+
+ Score = 16.9 bits (32),  Expect = 5.2, Method: Compositional matrix adjust.
+ Identities = 7/21 (33%), Positives = 11/21 (52%), Gaps = 4/21 (19%)
+
+Query  29   FALKDNFAVR----NIPTTGG  45
+            +ALK N+ +     N+   GG
+Sbjct  141  YALKQNYELEVIDSNVSEQGG  161
+
+
+>BDV02443.1 tRNA-specific 2-thiouridylase MnmA [Candidatus Hepatoplasma 
+vulgare]
+Length=442
+
+ Score = 16.5 bits (31),  Expect = 8.1, Method: Compositional matrix adjust.
+ Identities = 25/110 (23%), Positives = 44/110 (40%), Gaps = 14/110 (13%)
+
+Query  1    MKNNPRLSPLNIDNKIKKNKVQPLKNMTFALKDNFAVRNIPTTGGTKLLENFKITYNSTV  60
+            +KNN      + +  + KNK++   N  F  +++   +N             K  ++  +
+Sbjct  342  IKNNILYVSYDTEKYLYKNKLKT-NNFKFLTEEDILSKNKQV--------RIKTRHSEII  392
+
+Query  61   YEKLIKAGAKP--ITKANLDELAMGFSGLTSGFGVVLNPYDGSKIIGGSS  108
+            Y  +IK+  K   +   NL E       +T G  VV+  YD    +GG  
+Sbjct  393  YNGIIKSIEKKDDLFMINL-ETKEKIKAITPGQEVVI--YDHELCVGGGQ  439
+
+
+ Score = 16.2 bits (30),  Expect = 9.1, Method: Compositional matrix adjust.
+ Identities = 8/13 (62%), Positives = 11/13 (85%), Gaps = 1/13 (8%)
+
+Query  221  FLDDIKDKDILNK  233
+            FL +I +KD+LNK
+Sbjct  233  FLSEI-NKDVLNK  244
+
+
+
+Lambda      K        H        a         alpha
+   0.317    0.137    0.392    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 634380
+
+
+  Database: pq.faa
+    Posted date:  Oct 29, 2026  6:29 PM
+  Number of letters in database: 1,845
+  Number of sequences in database:  5
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

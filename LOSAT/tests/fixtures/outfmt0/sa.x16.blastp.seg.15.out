@@ -1,0 +1,117 @@
+{
+"BlastOutput2": [
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_1",
+            "query_title": "qs1 low-complexity run inside the alignment",
+            "query_len": 119,
+            "query_masking": [
+              {
+                "from": 33,
+                "to": 53
+              }
+            ],
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "ss1",
+                    "title": "ss1 subject with the same run"
+                  }
+                ],
+                "len": 116,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 172.555,
+                    "score": 436,
+                    "evalue": 3.73435e-62,
+                    "identity": 110,
+                    "positive": 111,
+                    "query_from": 1,
+                    "query_to": 119,
+                    "hit_from": 1,
+                    "hit_to": 116,
+                    "align_len": 119,
+                    "gaps": 3,
+                    "qseq": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKqqqqqqqqqqqqqqqqqqqqqGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKC",
+                    "hseq": "MWMEHSVLKAVFAVRRKVMDDPKIRDGPMAVMKQQQQQQQQQQQQQQQQQQQQQGWENYCWPANMSWKVLMKYEFSSDIHP---WICWIPKEQQTPGWWKTDTLHMAEMGLWMHKYPKC",
+                    "midline": "MWMEHSVLKA FAV RKVMDDPKIRDGPMAVMKQQQQQQQQQQQQQQQQQQQQQGWENYCWPANMSWKVLMKYEFSSDIHP   WICWIPKE  TPGWW TDTLHM+EMGLWMHKYPKC"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 13,
+              "eff_space": 10918,
+              "kappa": 0.041,
+              "lambda": 0.267,
+              "entropy": 0.14
+            }
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_2",
+            "query_title": "qs2 no hits expected",
+            "query_len": 73,
+            "hits": [
+            ],
+            "stat": {
+              "hsp_len": 0,
+              "eff_space": 0,
+              "kappa": -1,
+              "lambda": -1,
+              "entropy": -1
+            },
+            "message": "Query_2 qs2 no hits expected:  Query_2 qs2 no hits expected: Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options  No hits found"
+          }
+        ]
+      }
+    }
+  }
+]
+}

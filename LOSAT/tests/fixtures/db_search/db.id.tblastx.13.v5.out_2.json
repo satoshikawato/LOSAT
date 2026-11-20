@@ -1,0 +1,38 @@
+{
+  "BlastOutput2": {
+    "report": {
+      "program": "tblastx",
+      "version": "TBLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/ids/nucl_v5"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "filter": "L;",
+        "query_gencode": 1,
+        "db_gencode": 1
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_2",
+          "query_title": "qn2 unrelated nucleotide (no hits expected)",
+          "query_len": 90,
+          "hits": [
+          ],
+          "stat": {
+            "db_num": 24,
+            "db_len": 11712,
+            "hsp_len": 18,
+            "eff_space": 41664,
+            "kappa": 0.133956144488482,
+            "lambda": 0.317605957635731,
+            "entropy": 0.401214524497119
+          },
+          "message": "No hits found"
+        }
+      }
+    }
+  }
+}

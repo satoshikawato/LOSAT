@@ -1,0 +1,16 @@
+Blast4-archive ::= {
+  request {
+    body get-request-info {
+      request-id "Error"
+    }
+  },
+  results {
+  },
+  messages {
+    {
+      code 2,
+      message "BLAST query error: CFastaReader: Input doesn't start with a
+ defline or comment around line 1"
+    }
+  }
+}

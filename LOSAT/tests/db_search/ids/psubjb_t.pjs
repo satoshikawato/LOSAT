@@ -1,0 +1,25 @@
+{
+  "version": "1.2",
+  "dbname": "psubjb_t",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "psubjb_t",
+  "number-of-letters": 220,
+  "number-of-sequences": 1,
+  "last-updated": "2026-11-04T00:45:00",
+  "number-of-volumes": 1,
+  "number-of-taxids": 1,
+  "bytes-total": 49646,
+  "bytes-to-cache": 326,
+  "files": [
+    "psubjb_t.pdb",
+    "psubjb_t.phr",
+    "psubjb_t.pin",
+    "psubjb_t.pog",
+    "psubjb_t.pos",
+    "psubjb_t.pot",
+    "psubjb_t.psq",
+    "psubjb_t.ptf",
+    "psubjb_t.pto"
+  ]
+}

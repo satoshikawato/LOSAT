@@ -41,18 +41,20 @@
 /// them (one letter per residue for the text codings, 4 bases per byte for
 /// ncbi2na, 2 bases per byte for ncbi4na; the last byte is padded with zero
 /// bits).
+///
+/// CWriteDB also writes iupacna, iupacaa and ncbistdaa; LOSAT's FASTA reader never
+/// produces them, so they are not variants.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SeqData {
-    Iupacna(Vec<u8>),
-    Iupacaa(Vec<u8>),
     Ncbi2na(Vec<u8>),
     Ncbi4na(Vec<u8>),
     Ncbieaa(Vec<u8>),
-    Ncbistdaa(Vec<u8>),
     /// Any other choice (ncbi8na, ncbipna, ncbi8aa, ncbipaa, gap): CWriteDB
-    /// stops with "Unable to process sequence for entry [id].".
+    /// stops with "Unable to process sequence for entry \[id\].".
     Other,
 }
+
+use crate::seqid::ParsedSeqId;
 
 /// One sequence of the input as `CBuildDatabase::AddSequences` sees it after
 /// `s_FixBioseqDeltas`.
@@ -61,7 +63,7 @@ pub struct Bioseq {
     /// The content of the first Seq-id, a local id: `lcl|<local_id>` is
     /// `AsFastaString()` (the "Ignoring sequence 'lcl|2' ..." log line) and
     /// `<local_id>` is `GetSeqIdString(false)` ("Unable to process sequence
-    /// for entry [6]."). Without `-parse_seqids` CFastaReader numbers the
+    /// for entry \[6\]."). Without `-parse_seqids` CFastaReader numbers the
     /// records of the input from 1.
     pub local_id: String,
     /// The title that `CWriteDB::ExtractBioseqDeflines` puts into the
@@ -75,4 +77,71 @@ pub struct Bioseq {
     /// `Seq-inst.seq-data` after `s_FixBioseqDeltas`; `None` when the
     /// Seq-inst has no `seq-data` (`!CanGetSeq_data()`).
     pub seq_data: Option<SeqData>,
+    /// With `-parse_seqids`: the parsed ids and what `ExtractBioseqDeflines` reads; the
+    /// definition lines are built from them (`deflines`), and `local_id` and `title` are
+    /// not used.
+    pub parsed: Option<ParsedIds>,
+    /// What `s_FixBioseqDeltas` meets in a record whose length NCBI counts past 32 bits
+    /// (`fasta_source::reader::SeqInst::PastSeqPos`), whose data LOSAT does not build; `None`
+    /// for every other record (and for one whose delta starts with a gap of unknown length,
+    /// which NCBI leaves without data: `seq_data` is `None`).
+    pub past_seq_pos: Option<PastSeqPos>,
+}
+
+/// See `Bioseq::past_seq_pos`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PastSeqPos {
+    /// A protein whose gaps stayed a delta: NCBI throws "Protein delta sequences are not
+    /// supported." (`CMultisourceException`).
+    ProteinDelta,
+    /// A sequence whose data NCBI builds from more letters than its length says (the
+    /// residues, a gap or a run of `X` of 4,294,967,296 letters or more): LOSAT refuses it.
+    /// `length` is the record's, counted on.
+    Refused { length: u64 },
+}
+
+/// The parts of a Bioseq of `CFastaReader` with `fRequireID | fParseRawID` that the
+/// writer reads.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParsedIds {
+    /// `CBioseq::GetId()`: the ids of the first parse (`CFastaDeflineReader`), or the
+    /// generated `lcl|N` of an id with a range; `CBuildDatabase::AddSequences` edits them.
+    pub ids: Vec<ParsedSeqId>,
+    /// The id that a range replaced: the other row of the Seq-hist alignment
+    /// (`CFastaReader::xCreateAlignment`), which `CBioseq::GetNonLocalId` reads.
+    pub hist_old_id: Option<ParsedSeqId>,
+    /// The `DefLine` field of the `CFastaReader` user object.
+    pub defline_field: Vec<u8>,
+    /// The title descriptor (`x_ApplyMods`).
+    pub title_descr: Option<Vec<u8>>,
+}
+
+impl Bioseq {
+    /// `GetId().front()->GetSeqIdString(false)`.
+    pub fn first_id_string(&self) -> String {
+        match self.parsed.as_ref().and_then(|parsed| parsed.ids.first()) {
+            Some(id) => {
+                let mut out = Vec::new();
+                crate::seqid::label::content(id, false, &mut out);
+                String::from_utf8_lossy(&out).into_owned()
+            }
+            None => self.local_id.clone(),
+        }
+    }
+
+    /// `GetId().front()->AsFastaString()` ("Unknown" for none), as
+    /// `CBuildDatabase::AddSequences` names the sequence in its messages.
+    pub fn first_id_fasta(&self) -> String {
+        match &self.parsed {
+            Some(parsed) => match parsed.ids.first() {
+                Some(id) => {
+                    let mut out = Vec::new();
+                    crate::seqid::label::fasta(id, &mut out);
+                    String::from_utf8_lossy(&out).into_owned()
+                }
+                None => "Unknown".to_string(),
+            },
+            None => format!("lcl|{}", self.local_id),
+        }
+    }
 }

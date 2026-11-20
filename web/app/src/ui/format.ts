@@ -1,7 +1,9 @@
 // Display helpers of the UI. They format application values only, never BLAST values.
+import { withUnit } from '../domain/units';
+
 const UNITS = ['bytes', 'kB', 'MB', 'GB', 'TB'] as const;
 
-/** A byte count in SI units, for example "1.5 MB". */
+/** A byte count in SI units, for example "1.5 MB" (the number and the unit joined by a no-break space: line WQA's sweep, D9, 2026-11-19). */
 export function formatBytes(bytes: number): string {
   let value = bytes;
   let unit = 0;
@@ -10,7 +12,7 @@ export function formatBytes(bytes: number): string {
     unit++;
   }
   const digits = unit === 0 ? 0 : 1;
-  return `${value.toFixed(digits)} ${UNITS[unit]}`;
+  return withUnit(value.toFixed(digits), UNITS[unit]!);
 }
 
 /** A count with thousands separators, for example "12,345". */
@@ -27,6 +29,11 @@ export function formatDuration(ms: number): string {
   return hours > 0 ? `${hours}:${String(minutes).padStart(2, '0')}:${seconds}` : `${minutes}:${seconds}`;
 }
 
+/** A short time span with its unit, for example "420 ms" or "2.6 s" (a step of a run, which `formatDuration` rounds down to the second). */
+export function formatMillis(ms: number): string {
+  return ms < 1000 ? withUnit(Math.round(ms), 'ms') : withUnit((ms / 1000).toFixed(1), 's');
+}
+
 /**
  * A time in ISO 8601 form in local time, date and time of day with a space between them, for
  * example "2026-10-09 21:49:30" (S13 screen review L5).
@@ -38,9 +45,49 @@ export function formatDateTime(ms: number): string {
   return `${date} ${two(time.getHours())}:${two(time.getMinutes())}:${two(time.getSeconds())}`;
 }
 
+/**
+ * The first paragraph of an option's help (`describe`). The engine's help names no NCBI sources
+ * (`LOSAT/tests/entry_names.rs`, `help_has_no_source_references_and_a_true_footer`).
+ */
+export function optionHelp(raw: string | undefined): string {
+  return ((raw ?? '').split(/\n\s*\n/)[0] ?? '').trim();
+}
+
 /** A count and its noun, singular for one: "1 subject", "3 subjects", "1 HSP", "5 HSPs" (W4b screen review L12). */
 export function formatCounted(count: number, noun: string): string {
   return `${formatCount(count)} ${count === 1 ? noun : `${noun}s`}`;
+}
+
+/**
+ * Run numbers as words, in order: "run 2", "runs 1 and 3", "runs 1–4", "runs 1, 3 and 5–7". Three or more
+ * runs in a row are written as a range, so that hundreds of runs stay short.
+ */
+export function formatRuns(numbers: readonly number[]): string {
+  const sorted = [...new Set(numbers)].sort((a, b) => a - b);
+  const parts: string[] = [];
+  for (let first = 0; first < sorted.length; ) {
+    let last = first;
+    while (last + 1 < sorted.length && sorted[last + 1] === sorted[last]! + 1) last++;
+    if (last - first >= 2) parts.push(`${sorted[first]}–${sorted[last]}`);
+    else parts.push(...sorted.slice(first, last + 1).map(String));
+    first = last + 1;
+  }
+  const list = parts.length < 2 ? (parts[0] ?? '') : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
+  return `${sorted.length === 1 ? 'run' : 'runs'} ${list}`;
+}
+
+/**
+ * What the notice after a hidden tab says of the completed runs whose stored results could not be read back
+ * (WA2-SC-05): the runs the browser removed them of, then those that failed to read otherwise, and that they can be
+ * run again. Empty when there are none.
+ */
+export function lostResultsText(removed: readonly number[], unreadable: readonly number[]): string {
+  const sentences = [
+    ...(removed.length > 0 ? [`The browser removed the stored results of ${formatRuns(removed)}.`] : []),
+    ...(unreadable.length > 0 ? [`The stored results of ${formatRuns(unreadable)} could not be read.`] : []),
+  ];
+  if (sentences.length === 0) return '';
+  return `${sentences.join(' ')} Run ${removed.length + unreadable.length === 1 ? 'it' : 'them'} again.`;
 }
 
 /** The frames of an HSP of a translated search: the translated sequences' only (results.ts hspEntry). */

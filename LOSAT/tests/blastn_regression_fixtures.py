@@ -10,14 +10,16 @@ batch, IUPAC ambiguity, lowercase masking and non-default scores.
   (deterministic; the files are committed, so later runs never regenerate them).
 - freeze --oracle BLASTN: runs NCBI BLAST+ (comparison oracle only) from LOSAT/ and
   writes <case>.out, <case>.err and the hash columns of manifest.tsv.
-- check --losat LOSAT: runs `LOSAT blastn <argv> <losat_extra>` from LOSAT/ and
+- check --losat LOSAT: runs `losat blastn <argv> <losat_extra>` from LOSAT/ and
   compares stdout, stderr and the exit status with the frozen files.
 
 A case may set environment variables (`env`, space-separated KEY=VALUE) for both
 programs; every other variable that changes NCBI's batches or report is unset. A case of
 an approved exception (docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md), where NCBI fails
 with `env`, also sets `oracle_env`: `freeze` runs NCBI with it instead, a configuration
-whose output LOSAT's result with `env` was shown to equal. A case whose id ends in
+whose output LOSAT's result with `env` was shown to equal. An approved exception that is
+an argument (an `Int4` that overflows in NCBI) has its NCBI arguments in `ORACLE_ARGV`
+instead, the nearest value that does not overflow; the manifest keeps LOSAT's. A case whose id ends in
 `.merged` runs with standard error merged into standard output (`2>&1`), which records
 the order of the warnings and the report.
 
@@ -26,8 +28,8 @@ LOSAT/target/blastn_regression/ (outfmt 6 prints no file names).
 
 Usage:
   blastn_regression_fixtures.py generate
-  blastn_regression_fixtures.py freeze --oracle /path/to/blastn
-  blastn_regression_fixtures.py check --losat BIN [--jobs N] [--out TSV]
+  blastn_regression_fixtures.py freeze --oracle /path/to/blastn [--only PREFIX]
+  blastn_regression_fixtures.py check --losat BIN [--jobs N] [--out TSV] [--threads N] [--only PREFIX]
 """
 from __future__ import annotations
 
@@ -63,11 +65,36 @@ B = f"-query {I}/mq.fa -subject {I}/s60k.fa"
 S = f"-query {R}/edl933_2m.fa -subject {I}/sakai_60k.fa"
 A = f"-query {I}/ambiguity_query_c.fa -subject {I}/ambiguity_subject.fa"
 O = "tests/fasta/outfmt0"
+C = "tests/fixtures/tblastx_regression/inputs"
+CT = f"-query {C}/culling_ties_query.fa -subject {C}/culling_ties_subject.fa"
+CM = f"-query {C}/culling_multi_query.fa -subject {C}/culling_multi_subject.fa"
+CTR = f"-query {C}/culling_ties_query.fa -subject {I}/culling_ties_subject_rev.fa"
+CMR = f"-query {C}/culling_multi_query.fa -subject {I}/culling_multi_subject_rev.fa"
+RP = f"-query {I}/rep_query.fa -subject {I}/rep_subject.fa"
+PL = f"-query {I}/pal_query.fa -subject {I}/pal_subject.fa"
+WM = f"-query {I}/wm_query.fa -subject {I}/s60k.fa"
+WM3 = f"-query {I}/wm_query3.fa -subject {I}/s60k.fa"
+KE = f"-query {I}/kaempty_query.fa -subject {I}/s60k.fa"
+KEB = f"-query {I}/kaempty_batch_query.fa -subject {I}/s60k.fa"
+WMC = "tests/winmask/counts/mg1655_u9.obinary"
+WMB = "tests/winmask/counts/dm2L_u9.binary"
+AB = f"-query {I}/culling_abricate_query.fa -subject {I}/culling_abricate_genes.fa -task blastn -dust no" \
+     " -perc_identity 80 -evalue 1E-20 -max_target_seqs 10000"
+# O4a (blastn -ungapped): the inputs of generate_ungapped_inputs (the t2 pair, rep, B and A are the ones above).
+T2 = f"-query {I}/t2_query.fa -subject {I}/t2_subject.fa"
+AMB = f"-query {I}/ambrun_q.fa -subject {I}/ambrun_s.fa"
+RE = f"-query {I}/re_q.fa -subject {I}/re_s.fa"
+EDLU = f"-query {R}/edl_ungapped_q.fa -subject tests/fasta/EDL933.fna"
+MX = f"-query {I}/mix_q.fa -subject {I}/mix_s.fa"
+SM = f"-query {I}/strand_mixed_query.fa -subject {I}/s60k.fa"
+MLST = f"-query {I}/culling_abricate_query.fa -subject {I}/culling_abricate_genes.fa -ungapped -dust no" \
+       " -word_size 32 -max_target_seqs 100000 -perc_identity 95 -evalue 1E-20"
 DCQ = f"-query {O}/dc_query.fasta -subject {O}/dc_subject.fasta"
 DC = f"{DCQ} -task dc-megablast"
 DVQ = f"-query {O}/dc_div_query.fasta -subject {O}/dc_div_subject.fasta"
 DV = f"{DVQ} -task dc-megablast"
 SH = f"-query {O}/short_query.fasta -subject {O}/short_subject.fasta -task blastn-short"
+MW = f"-query {O}/multi_query.fasta -subject {O}/multi_subject.fasta -task blastn -word_size 7 -evalue 1000"
 # (case_id, NCBI argv after `blastn`, extra LOSAT-only arguments[, environment[, NCBI environment]])
 _CASES = [
     ("prelim.default", f"{P} -outfmt 6", ""),
@@ -90,6 +117,16 @@ _CASES = [
     ("batches.task_blastn", f"{B} -task blastn -outfmt 6", ""),
     ("batches.word7", f"{B} -task blastn -word_size 7 -outfmt 6", ""),
     ("batches.besthit", f"{B} -subject_besthit -outfmt 6", ""),
+    # -qcov_hsp_perc (blast_traceback.c:837-867): after -max_hsps and before -subject_besthit,
+    # each HSP's query extent over its context's length (the -query_loc range); a subject left
+    # without HSPs is removed and the hit list is sorted by best e-value again.
+    ("qcov.multi30", f"{MW} -qcov_hsp_perc 30 -outfmt 6", ""),
+    ("qcov.multi100_fmt7", f"{MW} -qcov_hsp_perc 100 -outfmt 7", ""),
+    ("qcov.multi_maxhsps1_besthit", f"{MW} -max_hsps 1 -qcov_hsp_perc 30 -subject_besthit -outfmt 6", ""),
+    ("qcov.megablast50_fmt0", f"-query {O}/multi_query.fasta -subject {O}/multi_subject.fasta -qcov_hsp_perc 50"
+                              " -outfmt 0", ""),
+    ("qcov.loc10", f"{P} -task blastn -query_loc 1001-2000 -qcov_hsp_perc 10 -outfmt 6", ""),
+    ("qcov.none_fmt7", f"{P} -task blastn -qcov_hsp_perc 10 -outfmt 7", ""),
     ("batches.fmt7", f"{B} -task blastn -outfmt 7", ""),
     ("batches.fmt0", f"{B} -outfmt 0", ""),
     ("batches.threads4", f"{B} -task blastn -outfmt 6", "-num_threads 4"),
@@ -362,8 +399,198 @@ _CASES = [
     # A query longer than 8000 at four threads: the search pool's seed stage (x_pair_seed.rs).
     ("qctx.pairpar", f"-query {I}/qctx_pairpar_query.fa -subject tests/fasta/LC738868.fasta -task blastn -outfmt 6",
      "-num_threads 4"),
+    # O3a (blastn -culling_limit; hspfilter_culling.c): the preliminary writer culls each subject's HSP
+    # list, the culling pipe culls again after the traceback. culling_ties_* / culling_multi_* are the
+    # inputs of tblastx_regression's culling.* cases (tests/fixtures/tblastx_regression/inputs).
+    # Limits 1, 2 and 5 on overlapping HSPs (rep_*); the lowest OID wins among identical subjects, so the
+    # record order decides the kept copy (culling_*_subject_rev.fa are the subjects in reverse order, made
+    # by `generate`); a palindromic query folds both strands into one tree.
+    ("culling.rep_megablast_cl1", f"{RP} -culling_limit 1 -outfmt 6", ""),
+    ("culling.rep_blastn_cl2_fmt0", f"{RP} -task blastn -culling_limit 2 -outfmt 0", ""),
+    ("culling.rep_blastn_cl5", f"{RP} -task blastn -culling_limit 5 -outfmt 6", ""),
+    ("culling.ties_megablast_cl1_fmt7", f"{CT} -culling_limit 1 -outfmt 7", ""),
+    ("culling.ties_rev_megablast_cl1", f"{CTR} -culling_limit 1 -outfmt 6", ""),
+    ("culling.multi_blastn_cl1", f"{CM} -task blastn -culling_limit 1 -outfmt 6", ""),
+    ("culling.multi_rev_blastn_cl1", f"{CMR} -task blastn -culling_limit 1 -outfmt 6", ""),
+    ("culling.pal_blastn_cl1", f"{PL} -task blastn -culling_limit 1 -outfmt 6", ""),
+    # A split query: the 40 queries of mq.fa are cut into chunks of 2000 (the chunks' HSPs are
+    # joined at the edges as without culling; each chunk is culled by itself).
+    ("culling.split_mq_blastn_cl2_c2000", f"{B} -task blastn -culling_limit 2 -outfmt 6", "", "CHUNK_SIZE=2000"),
+    ("culling.split_mq_megablast_cl1_c2000", f"{B} -culling_limit 1 -outfmt 6", "", "CHUNK_SIZE=2000"),
+    # NCBI adds 3 to a limit above 1 in an Int4 (setup_factory.cpp:338-340), which overflows
+    # from 2147483645 on: its binary wraps 2147483645 to INT_MIN (culls nothing) and
+    # 2147483646 and 2147483647 to negative merits (a limit of 1 in the preliminary stage).
+    # LOSAT adds in i64 (approved exception, PD-LOSAT-NCBI-DEFECTS 1.4), so these limits cull
+    # nothing, as 2147483644 does: the oracle of the last two runs 2147483644 (ORACLE_ARGV).
+    # 0x2 is limit 2 (CArg_Int8 reads C-style bases).
+    ("culling.near_int4_max_2147483645", f"{CT} -culling_limit 2147483645 -outfmt 6", ""),
+    ("culling.near_int4_max_2147483646", f"{CT} -culling_limit 2147483646 -outfmt 6", ""),
+    ("culling.near_int4_max_2147483647", f"{CT} -culling_limit 2147483647 -outfmt 6", ""),
+    ("culling.hex_0x2", f"{CT} -culling_limit 0x2 -outfmt 6", ""),
+    # -max_target_seqs cuts the traceback hit list before the culling pipe: the preliminary cull
+    # removes the other copies first, so -max_target_seqs 1 keeps the first; with 3 and limit 2
+    # the pipe culls what the cut left.
+    ("culling.ties_mts1_cl1", f"{CT} -max_target_seqs 1 -culling_limit 1 -outfmt 6", ""),
+    ("culling.ties_mts3_cl2", f"{CT} -max_target_seqs 3 -culling_limit 2 -outfmt 6", ""),
+    # ABRicate's search (2 subsets of the O3a probe inputs: 4 windows of 50 kb of Sakai with the most
+    # hits of the 340 records of its genes database, and the 33 records they hit; copied from the
+    # probe inputs, not made by `generate`), also with a query split at 20000.
+    ("culling.abricate_cl1", f"{AB} -culling_limit 1 -outfmt 6", ""),
+    ("culling.abricate_cl1_c20000", f"{AB} -culling_limit 1 -outfmt 6", "", "CHUNK_SIZE=20000"),
+    # O2a (blastn -strand): a query split into chunks searches one strand's contexts in every chunk;
+    # DUST of -strand minus is that of the reverse complement; an invalid query warns once.
+    # strand_dust_*.fa (a query whose low-complexity region lies on one strand only) and
+    # strand_mixed_query.fa (all-N and empty records around strand_query.fasta) are copied from the
+    # O2a probe inputs, not made by `generate`.
+    ("strand.split_plus_c2000", f"{B} -task blastn -strand plus -outfmt 6", "", "CHUNK_SIZE=2000"),
+    ("strand.split_minus_c2000", f"{B} -task blastn -strand minus -outfmt 6", "", "CHUNK_SIZE=2000"),
+    ("strand.split_minus_c1500o50_fmt0", f"{B} -task blastn -strand minus -outfmt 0", "",
+     "CHUNK_SIZE=1500 OVERLAP_CHUNK_SIZE=50"),
+    ("strand.dust_blastn_minus_fmt0", f"-query {I}/strand_dust_query.fa -subject {I}/strand_dust_subject.fa"
+                                      " -task blastn -strand minus -outfmt 0", ""),
+    ("strand.dust_megablast_minus_fmt0", f"-query {I}/strand_dust_query.fa -subject {I}/strand_dust_subject.fa"
+                                         " -strand minus -outfmt 0", ""),
+    ("strand.invalid_mixed_minus_fmt0", f"-query {I}/strand_mixed_query.fa -subject {O}/strand_subject.fasta"
+                                        " -task blastn -strand minus -outfmt 0", ""),
+    ("strand.lcase_qloc_plus_fmt0", f"-query {I}/strand_dust_query.fa -subject {I}/strand_dust_subject.fa"
+                                    " -task blastn -strand plus -lcase_masking -query_loc 20-700 -outfmt 0", ""),
+    # NP M2 (blastn -window_masker_db, counts tests/winmask/counts/; wm_*.fa made by `generate_wm_inputs`):
+    # WindowMasker's masks replace those of DUST and -lcase_masking (the .lc_dust rows equal the rows
+    # without them), in the four tasks and with the binary counts; -strand minus masks with the intervals
+    # of the reverse complement; -query_loc masks the range's letters; each query chunk and batch masks
+    # its own letters; the reports show the masks (outfmt 0 lower case, XML filter `W -d <file>;`, the
+    # archive's WindowMaskerDatabase and LCaseMask).
+    ("wm.megablast_lc_dust", f"{WM} -window_masker_db {WMC} -lcase_masking -dust yes -outfmt 6", ""),
+    ("wm.blastn", f"{WM} -task blastn -window_masker_db {WMC} -outfmt 6", ""),
+    ("wm.blastn_lc_dust", f"{WM} -task blastn -window_masker_db {WMC} -lcase_masking -dust yes -outfmt 6", ""),
+    ("wm.blastn_nodust", f"{WM} -task blastn -window_masker_db {WMC} -dust no -outfmt 6", ""),
+    ("wm.dc", f"{WM} -task dc-megablast -window_masker_db {WMC} -outfmt 6", ""),
+    ("wm.short", f"{WM3} -task blastn-short -window_masker_db {WMC} -evalue 1 -outfmt 6", ""),
+    ("wm.binary", f"{WM} -task blastn -window_masker_db {WMB} -outfmt 6", ""),
+    ("wm.blastn_lc_fmt0", f"{WM} -task blastn -window_masker_db {WMC} -lcase_masking -max_hsps 2 -outfmt 0", ""),
+    ("wm.plus", f"{WM} -task blastn -window_masker_db {WMC} -strand plus -outfmt 6", ""),
+    ("wm.minus", f"{WM} -task blastn -window_masker_db {WMC} -strand minus -outfmt 6", ""),
+    ("wm.minus_fmt0", f"{WM} -task blastn -window_masker_db {WMC} -strand minus -max_hsps 2 -outfmt 0", ""),
+    ("wm.qloc", f"{P} -task blastn -window_masker_db {WMC} -query_loc 101-2500 -outfmt 6", ""),
+    ("wm.qloc_fmt0", f"{P} -task blastn -window_masker_db {WMC} -query_loc 101-2500 -max_target_seqs 5 -outfmt 0", ""),
+    ("wm.qloc_minus", f"{P} -task blastn -window_masker_db {WMC} -query_loc 101-2500 -strand minus -outfmt 6", ""),
+    # (Chunks of 600 and 400: with the chunks' own masks the hits are NCBI's, with the whole queries'
+    # masks cut to the chunks they are not.)
+    ("wm.split_c600", f"{WM} -task blastn -window_masker_db {WMC} -outfmt 6", "", "CHUNK_SIZE=600"),
+    ("wm.split_minus_c400", f"{WM} -task blastn -window_masker_db {WMC} -strand minus -outfmt 6", "",
+     "CHUNK_SIZE=400"),
+    ("wm.split_c1500o50", f"{WM} -task blastn -window_masker_db {WMC} -outfmt 6", "",
+     "CHUNK_SIZE=1500 OVERLAP_CHUNK_SIZE=50"),
+    ("wm.batch3000", f"{WM} -task blastn -window_masker_db {WMC} -outfmt 6", "", "BATCH_SIZE=3000"),
+    ("wm.mixed", f"-query {I}/wm_mixed_query.fa -subject {I}/s60k.fa -task blastn -window_masker_db {WMC} -outfmt 6", ""),
+    ("wm.fmt11", f"{WM3} -task blastn -window_masker_db {WMC} -outfmt 11", ""),
+    ("wm.minus_fmt11", f"{WM3} -task blastn -window_masker_db {WMC} -strand minus -outfmt 11", ""),
+    ("wm.plus_lc_fmt11", f"{WM3} -task blastn -window_masker_db {WMC} -strand plus -lcase_masking -outfmt 11", ""),
+    ("wm.fmt5", f"{WM3} -task blastn -window_masker_db {WMC} -outfmt 5", ""),
+    ("wm.fmt16", f"{WM3} -task blastn -window_masker_db {WMC} -outfmt 16", ""),
+    ("wm.fmt15", f"{WM3} -task blastn -window_masker_db {WMC} -outfmt 15", ""),
+    # Line NP, SM-3: -soft_masking false writes the masks of WindowMasker into the searched query, as those of
+    # DUST and of the lower case (blast_setup.c:621-624).
+    ("wm.hard_megablast", f"{WM} -window_masker_db {WMC} -soft_masking false -outfmt 6", ""),
+    ("wm.hard_blastn", f"{WM} -task blastn -window_masker_db {WMC} -soft_masking false -outfmt 6", ""),
+    ("wm.hard_soft", f"{WM} -task blastn -window_masker_db {WMC} -soft_masking true -outfmt 6", ""),
+    ("wm.hard_dc", f"{WM} -task dc-megablast -window_masker_db {WMC} -soft_masking false -outfmt 6", ""),
+    ("wm.hard_short", f"{WM3} -task blastn-short -window_masker_db {WMC} -soft_masking false -evalue 1 -outfmt 6", ""),
+    ("wm.hard_lc_dust", f"{WM} -task blastn -window_masker_db {WMC} -lcase_masking -dust yes -soft_masking false -outfmt 6", ""),
+    ("wm.hard_fmt0", f"{WM} -task blastn -window_masker_db {WMC} -soft_masking false -max_hsps 2 -outfmt 0", ""),
+    ("wm.hard_minus", f"{WM} -task blastn -window_masker_db {WMC} -strand minus -soft_masking false -outfmt 6", ""),
+    ("wm.hard_plus", f"{WM} -task blastn -window_masker_db {WMC} -strand plus -soft_masking false -outfmt 6", ""),
+    ("wm.hard_qloc", f"{P} -task blastn -window_masker_db {WMC} -query_loc 101-2500 -soft_masking false -outfmt 6", ""),
+    ("wm.hard_fmt5", f"{WM3} -task blastn -window_masker_db {WMC} -soft_masking false -outfmt 5", ""),
+    ("wm.hard_fmt11", f"{WM3} -task blastn -window_masker_db {WMC} -soft_masking false -outfmt 11", ""),
+    ("wm.hard_fmt15", f"{WM3} -task blastn -window_masker_db {WMC} -soft_masking false -outfmt 15", ""),
+    # Line NP, series SM: in the Karlin-Altschul table error of a batch, a query without letters keeps its
+    # set-up warning after the error ("Error: ... Warning: Sequence contains no data "), first, in the middle
+    # and last; in a first batch and in a later one (BATCH_SIZE=1 gives the query of N only its own batch).
+    ("kaempty.first_batch", f"{KE} -reward 1 -penalty -6 -outfmt 6", ""),
+    ("kaempty.first_batch_fmt0", f"{KE} -reward 1 -penalty -6 -outfmt 0", ""),
+    ("kaempty.gaps_fmt11", f"{KE} -no_greedy -gapopen 5 -gapextend 2 -reward 4 -penalty -5 -outfmt 11", ""),
+    # (ka_a has 159 letters: its -query_loc interval holds none, as the records without letters.)
+    ("kaempty.qloc", f"{KE} -query_loc 160-200 -reward 1 -penalty -6 -outfmt 6", ""),
+    ("kaempty.later_batch", f"{KEB} -reward 1 -penalty -6 -outfmt 6", "", "BATCH_SIZE=1"),
+    ("kaempty.later_batch_fmt0", f"{KEB} -reward 1 -penalty -6 -outfmt 0", "", "BATCH_SIZE=1"),
 ]
+
+
+def _ungapped_cases():
+    """Line NP O4a: `-ungapped` (NCBI blast_args.cpp:917,929) in the four tasks, with the options that
+    change the preliminary stage's result list (culling, -max_hsps, -qcov_hsp_perc, -strand, -perc_identity,
+    -subject_besthit), scores without Karlin tables, gap costs, the query split (CHUNK_SIZE), the
+    ambiguity re-evaluation, and the formats that O4a-1 writes (0, 6, 7)."""
+    tasks = (("mb", ""), ("bn", "-task blastn "), ("dc", "-task dc-megablast "), ("short", "-task blastn-short "))
+    cases = []
+    for key, task in tasks:
+        for name, inputs in (("t2", T2), ("p", P), ("mq", B), ("amb", A), ("ambrun", AMB), ("reeval", RE)):
+            # blastn-short with the 60 kb subject and many queries has hundreds of thousands of HSPs at the
+            # default E-value (2 MB of output); 1e-3 keeps the batch and the many hits of a short query.
+            small = " -evalue 1e-3" if (key, name) == ("short", "mq") else ""
+            cases.append((f"ungapped.{key}.{name}", f"{inputs} {task}-ungapped{small} -outfmt 6", ""))
+    for key, task in tasks[:2]:
+        for name, option in (("cl1", "-culling_limit 1"), ("cl2", "-culling_limit 2"), ("mh1", "-max_hsps 1"),
+                             ("qcov50", "-qcov_hsp_perc 50"), ("plus", "-strand plus"), ("minus", "-strand minus"),
+                             ("pid95", "-perc_identity 95"), ("sbh", "-subject_besthit"),
+                             ("mts1", "-max_target_seqs 1")):
+            cases.append((f"ungapped.{key}.rep_{name}", f"{RP} {task}-ungapped {option} -outfmt 6", ""))
+        for name, option in (("cl1", "-culling_limit 1"), ("mh1", "-max_hsps 1"), ("qcov20", "-qcov_hsp_perc 20"),
+                             ("minus", "-strand minus"), ("sbh", "-subject_besthit")):
+            cases.append((f"ungapped.{key}.mix_{name}", f"{MX} {task}-ungapped {option} -outfmt 6", ""))
+        cases.append((f"ungapped.{key}.t2_fmt0", f"{T2} {task}-ungapped -outfmt 0", ""))
+        cases.append((f"ungapped.{key}.mq_fmt7", f"{B} {task}-ungapped -outfmt 7", ""))
+        cases.append((f"ungapped.{key}.mq_c2000", f"{B} {task}-ungapped -outfmt 6", "", "CHUNK_SIZE=2000"))
+    # Ties (review M1): a query X + revcomp(X) has plus and minus HSPs of the same score and range; the
+    # order of those comes from the initial hits' sort by score (na_ungapped.c:1691-1692).
+    cases.append(("ungapped.mb.pal", f"{PL} -ungapped -outfmt 6", ""))
+    cases.append(("ungapped.dc.pal", f"{PL} -task dc-megablast -ungapped -outfmt 6", ""))
+    # A subject above 5 Mb is searched in chunks that are joined without a gap (review S3): a 600 bp piece of
+    # EDL933 at 4,999,701 with a one base deletion and a mismatch, against the whole EDL933 (5,528,445 bp);
+    # the HSP crosses the chunk border at 5,000,000 (made at run time, prepare_runtime_inputs).
+    for key, task in (("mb", ""), ("bn", "-task blastn "), ("dc", "-task dc-megablast ")):
+        cases.append((f"ungapped.{key}.edl", f"{EDLU} {task}-ungapped -outfmt 6", ""))
+    cases.append(("ungapped.mb.mix_qloc", f"{MX} -ungapped -query_loc 150-750 -outfmt 6", ""))
+    cases.append(("ungapped.mb.mix_sloc", f"{MX} -ungapped -subject_loc 50-700 -outfmt 6", ""))
+    for name, reward, penalty in (("1_6", 1, -6), ("3_1", 3, -1), ("2_7", 2, -7), ("5_4", 5, -4),
+                                  ("1_1", 1, -1), ("2_2", 2, -2)):
+        cases.append((f"ungapped.bn.t2_rp{name}",
+                      f"{T2} -task blastn -ungapped -reward {reward} -penalty {penalty} -outfmt 6", ""))
+    cases.append(("ungapped.bn.t2_go5ge0", f"{T2} -task blastn -ungapped -gapopen 5 -gapextend 0 -outfmt 6", ""))
+    cases.append(("ungapped.mb.t2_go40000",
+                  f"{T2} -task megablast -ungapped -gapopen 40000 -gapextend 40000 -outfmt 6", ""))
+    cases.append(("ungapped.bn.t2_go0ge0", f"{T2} -task blastn -ungapped -gapopen 0 -gapextend 0 -outfmt 6", ""))
+    cases.append(("ungapped.bn.inval_fmt7", f"{SM} -task blastn -ungapped -outfmt 7", ""))
+    cases.append(("ungapped.bn.alln_fmt0", f"-query {I}/ungapped_alln_query.fa -subject {I}/s60k.fa -task blastn"
+                                           " -ungapped -outfmt 0", ""))
+    cases.append(("ungapped.mlst", f"{MLST} -outfmt 6", ""))
+    cases.append(("ungapped.mlst_fmt0", f"{MLST} -outfmt 0", ""))
+    # The custom tabular reports (line CLI, C2) of an ungapped search: mlst's real call, and the columns whose values an
+    # ungapped alignment may set differently from a gapped one (an HSP without an edit script is one run of
+    # substitutions: gapopen 0, gaps 0, btop and the identity counts from the re-evaluated alignment).
+    cases.append(("ungapped.mlst_tab", f"{MLST} -outfmt '6 sseqid slen length nident qseqid qstart qend qseq sstrand'",
+                  ""))
+    tab_cols = "qseqid sseqid qstart qend sstart send gapopen gaps btop qcovhsp qcovs nident positive ppos pident" \
+               " length mismatch qseq sseq"
+    cases.append(("ungapped.tab_cols_t2", f"{T2} -ungapped -outfmt '6 {tab_cols}'", ""))
+    cases.append(("ungapped.tab_cols_mix", f"{MX} -task blastn -ungapped -outfmt '7 {tab_cols}'", ""))
+    cases.append(("ungapped.tab_cols_ambrun", f"{AMB} -task blastn -ungapped -outfmt '6 {tab_cols}'", ""))
+    cases.append(("ungapped.tab_csv20", f"{MX} -task blastn -ungapped -outfmt 20", ""))
+    cases.append(("ungapped.tab_csv10", f"{MX} -task blastn -ungapped -outfmt '10 qseqid sseqid btop gaps nident'", ""))
+    for name, argv in (("mb.t2", f"{T2} -ungapped -outfmt 6"), ("bn.p", f"{P} -task blastn -ungapped -outfmt 6"),
+                       ("mb.mq", f"{B} -ungapped -outfmt 6"), ("dc.mq", f"{B} -task dc-megablast -ungapped -outfmt 6")):
+        cases.append((f"ungapped.{name}_threads4", argv, "-num_threads 4"))
+    return cases
+
+
+_CASES += _ungapped_cases()
 CASES = [(*case, *[""] * (5 - len(case))) for case in _CASES]
+# NCBI's arguments of the cases of an approved exception that is an argument (see above).
+ORACLE_ARGV = {
+    "culling.near_int4_max_2147483646": f"{CT} -culling_limit 2147483644 -outfmt 6",
+    "culling.near_int4_max_2147483647": f"{CT} -culling_limit 2147483644 -outfmt 6",
+}
 
 
 def genome(name: str) -> str:
@@ -395,6 +622,7 @@ def revcomp(seq: str) -> str:
 
 def command_generate(_args) -> int:
     INPUTS.mkdir(parents=True, exist_ok=True)
+    generate_culling_inputs()
     rng = random.Random(20261002)
     edl, sakai = genome("EDL933.fna"), genome("Sakai.fna")
     q3k = edl[1_000_000:1_003_000]
@@ -433,6 +661,9 @@ def command_generate(_args) -> int:
         (INPUTS / name).write_bytes((E2C_INPUTS / name).read_bytes())
     generate_e2g_inputs(edl, sakai)
     generate_qctx_inputs()
+    generate_wm_inputs()
+    generate_ungapped_inputs()
+    generate_kaempty_inputs()
     return 0
 
 
@@ -497,19 +728,107 @@ def generate_e2g_inputs(edl: str, sakai: str) -> None:
     write_fasta(INPUTS / "warn_subject.fa", [("s Sakai window", window)])
 
 
+def generate_ungapped_inputs() -> None:
+    """Inputs added for line NP O4a (the ungapped.* cases): the probes of O/O4a/probe/d/gen_inputs.py with the same
+    seed. ambrun: a subject with 30 N and one R inside a matching stretch, which the ungapped re-evaluation
+    splits into two HSPs; mix: a query with plus and minus HSPs on two subjects; alln: a query of N only."""
+    rng = random.Random(4242)
+
+    def random_seq(n: int) -> str:
+        return "".join(rng.choice("ACGT") for _ in range(n))
+
+    core = random_seq(600)
+    s = random_seq(200) + core[:290] + "N" * 30 + core[320:450] + "R" + core[451:] + random_seq(200)
+    q = random_seq(50) + core + random_seq(50)
+    write_fasta(INPUTS / "ambrun_q.fa", [("qamb", q)])
+    write_fasta(INPUTS / "ambrun_s.fa", [("samb", s)])
+    q2 = random_seq(1000)
+    s2 = (random_seq(100) + q2[100:400] + random_seq(100) + revcomp(q2[500:700]) + random_seq(100) + q2[750:900]
+          + random_seq(50) + q2[120:260] + random_seq(100))
+    write_fasta(INPUTS / "mix_q.fa", [("qmix", q2)])
+    write_fasta(INPUTS / "mix_s.fa", [("smix first", s2),
+                                      ("smix2 second", revcomp(q2[300:600]) + random_seq(80) + q2[600:800])])
+    write_fasta(INPUTS / "ungapped_alln_query.fa", [("alln1 all N", "N" * 24), ("alln2 all N", "N" * 40)])
+
+
+def generate_kaempty_inputs() -> None:
+    """Inputs added for line NP series SM (the kaempty.* cases): two records of mq.fa between records without
+    letters; and, after a query of N only, a record without letters and one of mq.fa."""
+    records = {}
+    for line in (INPUTS / "mq.fa").read_text().splitlines():
+        if line.startswith(">"):
+            name = line[1:]
+            records[name] = ""
+        else:
+            records[name] += line
+    a, b = records["mq01 len159"], records["mq08 len524"]
+    (INPUTS / "kaempty_query.fa").write_text(
+        f">ka_e1 no letters\n>ka_a mq01\n{a}\n>ka_e2 no letters\n>ka_b mq08\n{b}\n>ka_e3 no letters\n")
+    (INPUTS / "kaempty_batch_query.fa").write_text(
+        ">ka_alln only N\n" + "N" * 50 + f"\n>ka_e1 no letters\n>ka_a mq01\n{a}\n")
+
+
+def generate_culling_inputs() -> None:
+    """The subjects of tblastx_regression's culling_ties and culling_multi inputs in reverse record order
+    (O3a: the order of the subjects decides which of equal HSPs a culling limit keeps)."""
+    for name in ("ties", "multi"):
+        lines = (ENGINE / "tests/fixtures/tblastx_regression/inputs" / f"culling_{name}_subject.fa").read_text().splitlines()
+        starts = [index for index, line in enumerate(lines) if line.startswith(">")] + [len(lines)]
+        records = [lines[a:b] for a, b in zip(starts, starts[1:])]
+        (INPUTS / f"culling_{name}_subject_rev.fa").write_text(
+            "".join(line + "\n" for record in records[::-1] for line in record))
+
+
 def generate_qctx_inputs() -> None:
     """Inputs added for M-32 (the qctx.* cases): ends of the pieces of LC738874 that
-    LOSAT/tests/blastn_qbatchpar.rs searches (piece k starts at 8000 k, 1500 + 373 k % 2400 long)."""
+    LOSAT/tests/blastn_qbatchpar.rs searched (removed on 2026-10-28 with the QBATCHPAR slots;
+    piece k starts at 8000 k, 1500 + 373 k % 2400 long)."""
     lc738874 = genome("LC738874.fasta")
     for name, start, end in (("qctx_assert", 82_530, 82_830), ("qctx_rerun", 82_770, 82_830),
                              ("qctx_piece8", 64_000, 66_084), ("qctx_pairpar", 72_530, 82_830)):
         write_fasta(INPUTS / f"{name}_query.fa", [(f"{name} LC738874 {start + 1}-{end}", lc738874[start:end])])
 
 
+def generate_wm_inputs() -> None:
+    """Inputs added for line NP M2 (the wm.* cases, blastn -window_masker_db): records of mq.fa with a run of
+    lowercase letters, a DUST region (AT repeated) and, in one record, N and R letters, so the masks of
+    WindowMasker (counts LOSAT/tests/winmask/counts/), DUST and -lcase_masking lie in different places."""
+    records = []
+    for line in (INPUTS / "mq.fa").read_text().splitlines():
+        if line.startswith(">"):
+            records.append([line[1:], ""])
+        else:
+            records[-1][1] += line
+    out = []
+    for index in (0, 3, 4, 9, 13, 2, 5, 22, 35):
+        name, seq = records[index]
+        n = len(seq)
+        if n >= 600:
+            seq = seq[:n // 3] + seq[n // 3:n // 3 + 150].lower() + seq[n // 3 + 150:2 * n // 3] + "AT" * 32 + seq[2 * n // 3:]
+        if index == 9:
+            seq = seq[:n // 4] + "N" * 30 + seq[n // 4:n // 4 + 40] + "R" + seq[n // 4 + 40:]
+        out.append((f"wm_{name}", seq))
+    write_fasta(INPUTS / "wm_query.fa", out)
+    # Three of them and the record of 77 letters, for the reports that write every query and alignment;
+    # and a record without letters and one of N only around the first (a batch of every kind of query).
+    write_fasta(INPUTS / "wm_query3.fa", [out[0], out[1], out[2], out[5]])
+    (INPUTS / "wm_mixed_query.fa").write_text(
+        ">wm_empty no letters\n>wm_alln only N\n" + "N" * 50 + "\n" + f">{out[0][0]}\n{out[0][1]}\n")
+
+
 def prepare_runtime_inputs() -> None:
     RUNTIME.mkdir(parents=True, exist_ok=True)
     path = RUNTIME / "edl933_2m.fa"
     expected = ">edl933_2m EDL933 1-2000000\n" + genome("EDL933.fna")[:2_000_000] + "\n"
+    if not path.exists() or path.read_text() != expected:
+        path.write_text(expected)
+    # The query of the ungapped.*.edl cases: EDL933 4,999,701-5,000,300 without the base at 4,999,821 and
+    # with a transition at the 401st base of what is left.
+    window = genome("EDL933.fna")[4_999_700:5_000_300]
+    piece = window[:120] + window[121:]
+    piece = piece[:400] + {"A": "G", "G": "A", "C": "T", "T": "C"}[piece[400]] + piece[401:]
+    path = RUNTIME / "edl_ungapped_q.fa"
+    expected = ">edlq EDL933 4999701-5000300 with a deletion and a mismatch\n" + piece + "\n"
     if not path.exists() or path.read_text() != expected:
         path.write_text(expected)
 
@@ -519,9 +838,9 @@ def sha256(data: bytes) -> str:
 
 
 def clean_env(case_env: str = "") -> dict[str, str]:
-    # LOSAT_X_DEFAULT is kept (LOSAT/src/utils/xswitch.rs): with 0 the fixtures run on the reference paths.
+    # LOSAT_X_REACH is kept (LOSAT/src/utils/xreach.rs): it records the switch paths and changes no output.
     env = {key: value for key, value in os.environ.items()
-           if key == "LOSAT_X_DEFAULT"
+           if key == "LOSAT_X_REACH"
            or (key not in REPORT_ENV and not key.startswith(("LOSAT_", "RAYON_")))}
     for item in shlex.split(case_env):
         key, _, value = item.partition("=")
@@ -541,8 +860,17 @@ def command_freeze(args) -> int:
     oracle = str(Path(args.oracle).resolve())
     version = subprocess.run([oracle, "-version"], capture_output=True, text=True).stdout.strip().replace("\n", "; ")
     rows = []
+    kept = {}
+    if args.only:
+        # Only the cases whose id starts with the prefix (or one of the comma-separated prefixes) are run again;
+        # the other rows and files stay.
+        kept = {row["case_id"]: row for row in read_manifest()}
     for case_id, argv, extra, case_env, oracle_env in CASES:
-        result = run_case(oracle, [], case_id, argv, oracle_env or case_env)
+        if args.only and not case_id.startswith(tuple(args.only.split(","))):
+            if case_id in kept:
+                rows.append(kept[case_id])
+            continue
+        result = run_case(oracle, [], case_id, ORACLE_ARGV.get(case_id, argv), oracle_env or case_env)
         (FIXTURES / f"{case_id}.out").write_bytes(result.stdout)
         err = FIXTURES / f"{case_id}.err"
         if result.stderr:
@@ -556,25 +884,34 @@ def command_freeze(args) -> int:
         print(f"{case_id}\texit {result.returncode}\t{result.stdout.count(b'\n')} lines\t{len(result.stderr)} stderr bytes", flush=True)
     with open(MANIFEST, "w", newline="") as handle:
         handle.write(f"# Frozen BLASTN outputs of {version} (comparison oracle only; see blastn_regression_fixtures.py).\n")
-        handle.write("# Run from LOSAT/: env <env> blastn <argv> (LOSAT: LOSAT blastn <argv> <losat_extra>). Written by `freeze`; do not edit.\n")
+        handle.write("# Run from LOSAT/: env <env> blastn <argv> (LOSAT: losat blastn <argv> <losat_extra>). Written by `freeze`; do not edit.\n")
         writer = csv.DictWriter(handle, fieldnames=FIELDS, delimiter="\t", lineterminator="\n")
         writer.writeheader()
         writer.writerows(rows)
     return 0
 
 
-def run_case(program: str, prefix: list[str], case_id: str, argv: str, case_env: str, extra: str = ""):
+def run_case(program: str, prefix: list[str], case_id: str, argv: str, case_env: str, extra: str = "",
+             env_of=None):
+    """The run of a case; `env_of` (when given) turns the cleaned environment into the run's
+    (range_regression_fixtures' NCBI runs: db_search_fixtures.ncbi_env)."""
     command = [program, *prefix, *shlex.split(argv), *shlex.split(extra)]
+    env = clean_env(case_env)
+    if env_of is not None:
+        env = env_of(env)
     if case_id.endswith(".merged"):
         result = subprocess.run(command, cwd=ENGINE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                env=clean_env(case_env))
+                                env=env)
         result.stderr = b""
         return result
-    return subprocess.run(command, cwd=ENGINE, capture_output=True, env=clean_env(case_env))
+    return subprocess.run(command, cwd=ENGINE, capture_output=True, env=env)
 
 
-def check_one(losat: str, row: dict[str, str]) -> tuple[str, str]:
-    result = run_case(losat, ["blastn"], row["case_id"], row["argv"], row.get("env") or "", row["losat_extra"])
+def check_one(losat: str, row: dict[str, str], threads: int | None = None) -> tuple[str, str]:
+    extra = row["losat_extra"]
+    if threads and "-num_threads" not in extra:
+        extra = f"{extra} -num_threads {threads}".strip()
+    result = run_case(losat, ["blastn"], row["case_id"], row["argv"], row.get("env") or "", extra)
     expected_out = (FIXTURES / f"{row['case_id']}.out").read_bytes()
     err_path = FIXTURES / f"{row['case_id']}.err"
     expected_err = err_path.read_bytes() if err_path.exists() else b""
@@ -596,9 +933,9 @@ def check_one(losat: str, row: dict[str, str]) -> tuple[str, str]:
 def command_check(args) -> int:
     prepare_runtime_inputs()
     losat = str(Path(args.losat).resolve())
-    rows = read_manifest()
+    rows = [row for row in read_manifest() if not args.only or row["case_id"].startswith(tuple(args.only.split(",")))]
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
-        results = list(pool.map(lambda row: check_one(losat, row), rows))
+        results = list(pool.map(lambda row: check_one(losat, row, args.threads), rows))
     lines = [f"{case_id}\t{verdict}" for case_id, verdict in results]
     if args.out:
         Path(args.out).write_text("case_id\tresult\n" + "\n".join(lines) + "\n")
@@ -614,10 +951,13 @@ def main() -> int:
     sub.add_parser("generate")
     freeze = sub.add_parser("freeze")
     freeze.add_argument("--oracle", required=True)
+    freeze.add_argument("--only", help="run only the cases whose id starts with this prefix (new cases)")
     check = sub.add_parser("check")
     check.add_argument("--losat", required=True)
     check.add_argument("--jobs", type=int, default=os.cpu_count() or 4)
     check.add_argument("--out")
+    check.add_argument("--threads", type=int, help="LOSAT's -num_threads for the cases that give none")
+    check.add_argument("--only", help="check only the cases whose id starts with this prefix")
     args = parser.parse_args()
     return {"generate": command_generate, "freeze": command_freeze, "check": command_check}[args.action](args)
 

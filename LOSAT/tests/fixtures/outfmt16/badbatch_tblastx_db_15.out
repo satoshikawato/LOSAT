@@ -1,0 +1,149 @@
+{
+"BlastOutput2": [
+{
+    "report": {
+      "program": "tblastx",
+      "version": "TBLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "db/snucl"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 1e-20,
+        "filter": "L;",
+        "query_gencode": 1,
+        "db_gencode": 1
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_1",
+          "query_title": "qn1 query nucleotide one",
+          "query_len": 480,
+          "query_masking": [
+            {
+              "from": 373,
+              "to": 415
+            },
+            {
+              "from": 437,
+              "to": 476
+            }
+          ],
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|0",
+                  "accession": "0",
+                  "title": "sn1 subject nucleotide alpha"
+                }
+              ],
+              "len": 488,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 153.651,
+                  "score": 329,
+                  "evalue": 5.89119e-77,
+                  "identity": 61,
+                  "positive": 62,
+                  "query_from": 31,
+                  "query_to": 228,
+                  "query_frame": -1,
+                  "hit_from": 46,
+                  "hit_to": 243,
+                  "hit_frame": -3,
+                  "align_len": 66,
+                  "gaps": 0,
+                  "qseq": "ANP*IARVDIGGKLILHKDFPAHIRGPAIVLPALHYSHGPIPYFRVVHHFTKHGKICF*HGVFHPH",
+                  "hseq": "ANA*IARVDIGGKLKLHKDFPAYIRGPAIVLPALHCSHGPIPYFRVVHHFTKHGKNCF*HGVFHPH",
+                  "midline": "AN *IARVDIGGKL LHKDFPA+IRGPAIVLPALH SHGPIPYFRVVHHFTKHGK CF*HGVFHPH"
+                },
+                {
+                  "num": 2,
+                  "bit_score": 160.524,
+                  "score": 344,
+                  "evalue": 3.57255e-75,
+                  "identity": 60,
+                  "positive": 63,
+                  "query_from": 31,
+                  "query_to": 228,
+                  "query_frame": 1,
+                  "hit_from": 46,
+                  "hit_to": 243,
+                  "hit_frame": 1,
+                  "align_len": 66,
+                  "gaps": 0,
+                  "qseq": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWIC",
+                  "hseq": "MWMEHSVLEAIFAVLRKVMDDPKIRDGPMAAMKGWENYCWPANISWKVLMKFEFSSDIHPCNLCIC",
+                  "midline": "MWMEHSVL+A FAVLRKVMDDPKIRDGPMA MKGWENYCWPAN+SWKVLMK+EFSSDIHPCNL IC"
+                }
+              ]
+            },
+            {
+              "num": 2,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|1",
+                  "accession": "1",
+                  "title": "sn2 subject nucleotide beta reverse"
+                }
+              ],
+              "len": 477,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 114.703,
+                  "score": 244,
+                  "evalue": 6.20982e-63,
+                  "identity": 45,
+                  "positive": 49,
+                  "query_from": 289,
+                  "query_to": 453,
+                  "query_frame": -1,
+                  "hit_from": 38,
+                  "hit_to": 202,
+                  "hit_frame": 2,
+                  "align_len": 55,
+                  "gaps": 0,
+                  "qseq": "VALRCCSPMTHHVVEDLKFLKVSVMVNFPMPERLICESHHYTHTLGILMHPQTHF",
+                  "hseq": "LALSCCSPMTHHVVEDLKFLTVSVMANFPLPERVICESHLYTLTLGILMHPRTVF",
+                  "midline": "+AL CCSPMTHHVVEDLKFL VSVM NFP+PER+ICESH YT TLGILMHP+T F"
+                },
+                {
+                  "num": 2,
+                  "bit_score": 107.372,
+                  "score": 228,
+                  "evalue": 4.99613e-61,
+                  "identity": 41,
+                  "positive": 45,
+                  "query_from": 286,
+                  "query_to": 450,
+                  "query_frame": 1,
+                  "hit_from": 41,
+                  "hit_to": 205,
+                  "hit_frame": -3,
+                  "align_len": 55,
+                  "gaps": 0,
+                  "qseq": "AEMGLWMHKYPKCMCVMVRFTDQSLRHWKINHDANFEKLKIFHYMVGHGRTASEG",
+                  "hseq": "SENGPWMHKYPKCKCVQV*FTNYSLWQWKISHDANCEKLKILHYMVGHGRTAAEG",
+                  "midline": "+E G WMHKYPKC CV V FT+ SL  WKI+HDAN EKLKI HYMVGHGRTA+EG"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 2,
+            "db_len": 965,
+            "hsp_len": 18,
+            "eff_space": 40470,
+            "kappa": 0.133956144488482,
+            "lambda": 0.317605957635731,
+            "entropy": 0.401214524497119
+          }
+        }
+      }
+    }
+  }

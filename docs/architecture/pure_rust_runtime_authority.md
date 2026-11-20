@@ -16,6 +16,46 @@ without changing BLAST behavior. Line numbers below describe `BASE_SHA`; the
 checker identity is the exact rule/path/symbol tuple and therefore does not
 depend on line numbers.
 
+## Status on 2026-11-05
+
+This file is the record of the 2026-08-30 audit and is kept as it was written.
+Two of its statements no longer describe `dev` (checked at `8a5656f7f`,
+2026-11-05); the sections below are not rewritten.
+
+- The `qsort` adapters are gone. The four groups that the inventory lists were
+  replaced by stable Rust sorts: both BLASTN groups in `0a3cf9ad7`
+  (2026-08-30), the shared output group in `0652593f1` (2026-08-30) and the
+  TBLASTX group in `d92905569` (2026-08-31), the "PR 2" to "PR 4" rows of the
+  migration table. `LOSAT/src` declares no imported C function, the allowlist
+  `LOSAT/tests/pure_rust_runtime_allowlist.tsv` holds no finding, and
+  `.github/workflows/ci.yml` runs the checker on every pull request. The Rust
+  functions that keep NCBI's `qsort_*` names (for example
+  `qsort_blastn_hsps_by`) call Rust's `sort_by`.
+- `LOSAT/build.rs` exists since `c0e123d77` (2026-09-13), against the
+  "Build-time native-code dependency" row below. For the WASI targets
+  (`wasm32-wasip1`, `wasm32-wasip1-threads`) it links the reactor start file of
+  Rust's own toolchain into the library and sets the cfg `losat_wasi_threads`;
+  it adds no native algorithm or NCBI code. The checker accepts that file only with its reviewed
+  SHA-256 (`_is_reviewed_wasi_crt` in
+  `LOSAT/tests/check_pure_rust_runtime_boundary.py`).
+
+A design document of the engine as a whole does not exist yet; it is planned
+for this directory.
+
+## Pinned source
+
+The NCBI source quoted throughout the repository (`AGENTS.md`, source comments, and these
+documents) is commit `598d8ae6a72b923127ba2fbfaffd48e4c83bfbf4` of
+`https://github.com/satoshikawato/ncbi-blast` (commit subject `ncbi-blast-2.17.0+-src`,
+2025-12-21). That commit is an import of NCBI's official BLAST+ 2.17.0 source tarball
+`ncbi-blast-2.17.0+-src.tar.gz`
+(`https://ftp.ncbi.nlm.nih.gov/blast/executables/blast+/2.17.0/ncbi-blast-2.17.0+-src.tar.gz`),
+so quoted paths such as `c++/src/algo/blast/core/...` use the tarball's layout. It is not a
+commit of NCBI's `ncbi-cxx-toolkit-public` repository, whose `master` differs from the 2.17.0
+tarball (in line numbers and other later changes), so a commit hash from that repository does
+not locate these quotes. The `satoshikawato/ncbi-blast` mirror is private; quoted line numbers
+are reproducible from the 2.17.0 source tarball.
+
 ## Audited surfaces
 
 The live audit covered:

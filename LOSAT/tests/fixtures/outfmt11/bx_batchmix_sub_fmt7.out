@@ -1,0 +1,38 @@
+# BLASTX 2.17.0+
+# Query: m1
+# Database: User specified sequence set (Input: tests/fasta/outfmt11/arch_bx_s.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 2 hits found
+m1	sp1	90.741	108	10	0	37	360	1	108	5.07e-74	204
+m1	sp2	61.404	114	35	3	40	360	2	113	6.98e-41	120
+# BLASTX 2.17.0+
+# Query: m2
+# Database: User specified sequence set (Input: tests/fasta/outfmt11/arch_bx_s.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 4 hits found
+m2	sp2	96.522	115	4	0	370	26	6	120	7.72e-85	232
+m2	sp2	66.667	6	2	0	67	84	79	84	7.8	11.9
+m2	sp1	64.602	113	31	3	364	32	8	113	2.23e-45	132
+m2	sp1	28.571	21	15	0	222	160	113	133	1.1	14.6
+# BLASTX 2.17.0+
+# Query: m3
+# Database: User specified sequence set (Input: tests/fasta/outfmt11/arch_bx_s.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+m3	sp1	20.000	80	37	3	268	29	11	63	1.2	14.2
+# BLASTX 2.17.0+
+# Query: m4
+# Database: User specified sequence set (Input: tests/fasta/outfmt11/arch_bx_s.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 3 hits found
+m4	sp1	92.593	54	4	0	37	198	1	54	2.96e-36	106
+m4	sp1	33.333	6	4	0	119	102	27	32	9.5	11.2
+m4	sp2	66.667	57	15	1	40	198	2	58	1.51e-21	68.9
+# BLASTX 2.17.0+
+# Query: m5
+# Database: User specified sequence set (Input: tests/fasta/outfmt11/arch_bx_s.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 2 hits found
+m5	sp2	93.333	45	3	0	15	149	8	52	1.43e-28	86.3
+m5	sp1	76.471	34	4	1	39	140	16	45	3.70e-15	51.6
+# BLAST processed 5 queries

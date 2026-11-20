@@ -15,10 +15,9 @@
 //! records, a BOM, Seq-id first lines, implausible first data lines, and records longer
 //! than the checkpoint spacing.
 
+use losat::api::FastaRecord;
+use losat::web_adapter::{FastaInputSource, ParseErrorCode, ReadError, ReaderConfig};
 use losat_web_adapter::scan::{scan_ncbi, LineLayout, NcbiScanner, ScanRecord, CHECKPOINT_EVERY};
-use LOSAT::blastinput::fasta_reader::{
-    FastaInputSource, FastaRecord, ParseErrorCode, ReadError, ReaderConfig,
-};
 
 /// A small deterministic generator (xorshift64*).
 struct Random(u64);
@@ -823,12 +822,12 @@ fn check(input: &[u8], random: &mut Random, context: &str, coverage: &mut Covera
             }
             (Expected::SeqId, Err(error)) => assert!(
                 error.contains("may be a sequence identifier")
-                    && error.contains("not supported by LOSAT Web"),
+                    && error.contains("not supported in the browser"),
                 "{context}: {error}"
             ),
             (Expected::Gap(line), Err(error)) => assert!(
                 error.starts_with(&format!("line {line} is a gap line"))
-                    && error.contains("not supported by LOSAT Web"),
+                    && error.contains("not supported in the browser"),
                 "{context}: {error}"
             ),
             (Expected::Parse(message), Err(error)) => {
@@ -837,7 +836,7 @@ fn check(input: &[u8], random: &mut Random, context: &str, coverage: &mut Covera
             (Expected::NotReadable(index), Err(error)) => assert!(
                 error.starts_with(&format!("record {} ", index + 1))
                     && error.contains("reads two of its lines as one")
-                    && error.contains("not supported by LOSAT Web"),
+                    && error.contains("not supported in the browser"),
                 "{context}: {error}"
             ),
             _ => panic!("{context}: expected {want:?}, scanned {scanned:?}"),

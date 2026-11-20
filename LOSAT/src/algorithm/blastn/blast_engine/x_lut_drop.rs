@@ -1,0 +1,85 @@
+//! LOSAT_X_BNLUTDROP (graduated 2026-10-27, always on; in the strict set since 2026-10-24): a
+//! query batch's lookup tables dropped when its preliminary stage ends, before its traceback,
+//! instead of at the end of the batch.
+//!
+//! NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:201-211
+//! ```c++
+//!     if (is_phi) {
+//!         _ASSERT(m_InternalData->m_LookupTable);
+//!     ...
+//!     }
+//!     else
+//!     {
+//!         m_InternalData->m_LookupTable.Reset(NULL);
+//!     }
+//! ```
+//!
+//! What it changes. `search_query_batch` builds the batch's tables (`build_lookup_tables`: the
+//! megablast table, the direct or the small table of the blastn tasks, the discontiguous tables),
+//! scans the subjects with them (the preliminary stage) and then runs the traceback of the HSPs
+//! that the preliminary stage kept. Before the switch graduated the tables lived until the batch returned, so
+//! the traceback's own memory (the subjects' letters, the gapped alignments, the HSP lists) comes
+//! on top of them; for megablast of a 5.5 Mb query (E. coli Sakai x MG1655, `-subject` and `-db`)
+//! the batch's peak was in the traceback: the 64 MiB hashtable, the chains (`next_pos`, 4 bytes a
+//! position of both strands, 42 MiB) and the traceback's 21 MiB (plan v4 line MF, `REPORT.md`
+//! §2.3). Now the batch drops them where NCBI's traceback stage drops its table: the
+//! `-subject` and `-db` traceback reads the kept HSPs (`search_subject` with the preliminary
+//! hits, which goes past the scan), and the lookup tables are passed to `search_subject` by the
+//! preliminary stage's calls only (`None` in the traceback's), so the compiler proves that no
+//! traceback reads them. A LOSAT_X_MBLUTKEEP table goes back to the batch loop's keep when the
+//! tables drop (`x_mb_lut_keep.rs`), as at the end of the batch before: the keep is zeroed and
+//! taken by the next build as before; what the traceback no longer holds is the rest (the chains,
+//! the PV array, and every table that is not kept). In the loop's last batch no build is left to
+//! take the kept table, so the keep frees it here too (`Keep::release`), and the last traceback
+//! holds no table, as NCBI's. A batch split into query chunks has no table (its chunks' calls stop
+//! after their preliminary stage and drop theirs when they return, before the batch reaches this
+//! point).
+//!
+//! Why the reports are the same. The tables are read only by the scan of the preliminary stage
+//! (`prelim_subject::prelim_chunk_hits`); the batch's values derived from them before the scan (the
+//! offset array size, the shape of the subject search) are plain numbers kept in their own
+//! variables. Dropping memory changes no value that the search computes. No floating-point
+//! operation is involved.
+//!
+//! Memory: the peak of a batch whose traceback held the tables on top of its own memory moves to
+//! the scan (megablast of Sakai x MG1655, one thread: 135.7 -> 131.3 MiB of `RssAnon`).
+//! Where glibc's dynamic mmap threshold rises when the chains are freed (a mapped block of up to 32
+//! MiB), it now rises one traceback earlier, whose medium buffers then come from the heap: megablast
+//! of 31,168 cDNAs at one thread reads 2.2 MiB more (none with the threshold fixed).
+//!
+//! Timing: with LOSAT_TIMING, `[TIMING] x_bn_lut_drop: batches=` gives the number of batches whose
+//! tables were dropped before their traceback.
+
+use std::sync::atomic::{AtomicU64, Ordering};
+
+use crate::algorithm::blastn::coordination::LookupTables;
+use crate::algorithm::blastn::lookup::x_mb_lut_keep::Keep;
+
+// No NCBI counterpart: the batches whose tables were dropped before their traceback.
+static DROPPED: AtomicU64 = AtomicU64::new(0);
+
+/// The end of a batch's preliminary stage: the batch's tables are dropped here, where NCBI's
+/// traceback stage drops its table, and the keep of the loop's last batch (`last_keep`: no build
+/// follows) frees its table.
+pub(super) fn after_prelim(tables: LookupTables, last_keep: Option<&Keep>) {
+    if tables.two_stage_lookup.is_some()
+        || tables.pv_direct_lookup.is_some()
+        || tables.na_lookup.is_some()
+    {
+        DROPPED.fetch_add(1, Ordering::Relaxed);
+    }
+    // The tables first: a kept table goes back to the keep when its table drops.
+    drop(tables);
+    if let Some(keep) = last_keep {
+        keep.release();
+    }
+}
+
+/// No NCBI counterpart: with LOSAT_TIMING, the `[TIMING] x_bn_lut_drop` line `main` prints at
+/// exit (when a batch dropped its tables).
+pub(super) fn print_summary() {
+    let dropped = DROPPED.load(Ordering::Relaxed);
+    if crate::utils::xtiming::on() && dropped > 0 {
+        eprintln!("[TIMING] x_bn_lut_drop: batches={dropped}");
+    }
+}

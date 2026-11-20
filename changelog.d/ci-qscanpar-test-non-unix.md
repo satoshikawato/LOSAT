@@ -1,0 +1,1 @@
+- Test hygiene: `blastn_query_scan_par` expects the default of `LOSAT_X_QSCANPAR` to take the parallel reading only where it exists (unix with the `parallel` feature), so `cargo test` passes on Windows; no change to the engine.

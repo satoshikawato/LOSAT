@@ -1,0 +1,7 @@
+# of Tax IDs in Database: 5
+Error: [blastdbcmd] Error: Tax database file has wrong magic number.
+0 N/A
+150 N/A
+9606 N/A
+77777 N/A
+99990 N/A

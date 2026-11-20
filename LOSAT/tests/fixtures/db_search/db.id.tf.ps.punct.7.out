@@ -1,0 +1,15 @@
+# PSIBLAST 2.17.0+
+# Iteration: 1
+# Query: qo other first
+# Database: tests/db_search/ids/ppunct_np
+# Fields: query id, s. start, s. end, evalue
+# 1 hits found
+qo	1	220	1.09e-172
+# PSIBLAST 2.17.0+
+# Iteration: 1
+# Query: qp punct second
+# Database: tests/db_search/ids/ppunct_np
+# Fields: query id, s. start, s. end, evalue
+# 1 hits found
+qp	1	120	5.05e-93
+# BLAST processed 2 queries

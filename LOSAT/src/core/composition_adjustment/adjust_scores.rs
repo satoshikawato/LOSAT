@@ -6,12 +6,14 @@
 //! Reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/unified_pvalues.c
 //! Reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/matrix_frequency_data.c
 
+use crate::utils::glibc_fma_libm::GlibcLibm;
 use anyhow::{bail, Result};
 use std::sync::OnceLock;
 
 use crate::config::ScoringMatrix;
 use crate::utils::matrix::{protein_score_direct, BLASTAA_SIZE};
 
+use super::matrix_tables::{self, CompoMatrixData, COMPO_MATRIX_DATA};
 use super::redo_alignment::{BlastCompoAdjustMode, EMatrixAdjustRule};
 
 // NCBI reference: ncbi-blast/c++/include/algo/blast/composition_adjustment/composition_constants.h:39-44
@@ -75,14 +77,22 @@ const E_JCHAR: usize = 27;
 // ```
 const LAMBDA_RATIO_LOWER_BOUND: f64 = 0.5;
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/compo_mode_condition.c:36-42
+// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/compo_mode_condition.c:38-47
 // ```c
+// /** 180 degrees in half a circle */
+// #define HALF_CIRCLE_DEGREES 180
+// /** some digits of PI */
+// #define PI 3.1415926543
 // #define QUERY_MATCH_DISTANCE_THRESHOLD 0.16
 // #define LENGTH_RATIO_THRESHOLD 3.0
 // #define ANGLE_DEGREE_THRESHOLD 70.0
 // #define HIGH_PAIR_THRESHOLD 0.4
 // #define LENGTH_LOWER_THRESHOLD 50
 // ```
+const HALF_CIRCLE_DEGREES: f64 = 180.0;
+// NCBI's digits, not `std::f64::consts::PI` (3.14159265358979...): the rule's angle must be NCBI's
+// to the last bit at the 70-degree threshold.
+const PI: f64 = 3.1415926543;
 const QUERY_MATCH_DISTANCE_THRESHOLD: f64 = 0.16;
 const LENGTH_RATIO_THRESHOLD: f64 = 3.0;
 const ANGLE_DEGREE_THRESHOLD: f64 = 70.0;
@@ -118,486 +128,68 @@ const ALPHA_CONVERT: [i32; COMPO_LARGEST_ALPHABET] = [
     -1, -1,
 ];
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/matrix_frequency_data.c:383-540
+// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/matrix_frequency_data.c:383-537
 // ```c
 // static const double BLOSUM62_JOINT_PROBS[COMPO_NUM_TRUE_AA][COMPO_NUM_TRUE_AA] = { ... };
 // static const double BLOSUM62_bg[COMPO_NUM_TRUE_AA] = { ... };
 // ```
-const BLOSUM62_JOINT_PROBS: [[f64; COMPO_NUM_TRUE_AA]; COMPO_NUM_TRUE_AA] = [
-    [
-        2.1497573378347484e-02,
-        2.3470224274721213e-03,
-        1.9493235258876179e-03,
-        2.1674844853066858e-03,
-        1.5903351423026848e-03,
-        1.9242657898716525e-03,
-        2.9879059292799641e-03,
-        5.8158526388051033e-03,
-        1.1076584657559144e-03,
-        3.1880644746334580e-03,
-        4.4186245468471547e-03,
-        3.3466571942021082e-03,
-        1.3412107617355408e-03,
-        1.6360627863999076e-03,
-        2.1568959784943114e-03,
-        6.2524987419815400e-03,
-        3.7180506975672363e-03,
-        4.0281679108936688e-04,
-        1.2999956675626666e-03,
-        5.0679056444508912e-03,
-    ],
-    [
-        2.3470224274721213e-03,
-        1.7757465118386322e-02,
-        1.9786027128591904e-03,
-        1.5865480081162602e-03,
-        3.9365984789376245e-04,
-        2.4858611089731411e-03,
-        2.6933867548771758e-03,
-        1.7221140903704937e-03,
-        1.2407382229440791e-03,
-        1.2435878276496955e-03,
-        2.4193952633248727e-03,
-        6.2339060289407083e-03,
-        8.0309461712520876e-04,
-        9.3181986323789834e-04,
-        9.5783034332718700e-04,
-        2.2660898636037261e-03,
-        1.7802796534180537e-03,
-        2.6571979312581875e-04,
-        9.2634607111251918e-04,
-        1.5810185245264004e-03,
-    ],
-    [
-        1.9493235258876179e-03,
-        1.9786027128591904e-03,
-        1.4140291972553610e-02,
-        3.7201973506001745e-03,
-        4.3845466068066216e-04,
-        1.5304436972610567e-03,
-        2.2097156829738759e-03,
-        2.8591871815612977e-03,
-        1.4301072616183181e-03,
-        9.9437221166923172e-04,
-        1.3690958423974782e-03,
-        2.4402105140841090e-03,
-        5.2943633069226512e-04,
-        7.5004227978192801e-04,
-        8.6016459857770028e-04,
-        3.1466019144814608e-03,
-        2.2360795375444384e-03,
-        1.6159545671597605e-04,
-        7.0048422794024819e-04,
-        1.2014015528772706e-03,
-    ],
-    [
-        2.1674844853066858e-03,
-        1.5865480081162602e-03,
-        3.7201973506001745e-03,
-        2.1274574617480089e-02,
-        3.9909227141697264e-04,
-        1.6481246723433428e-03,
-        4.9158017471929655e-03,
-        2.5221102126636373e-03,
-        9.5384849402143984e-04,
-        1.2347404942429857e-03,
-        1.5202051791453383e-03,
-        2.4453087721980561e-03,
-        4.6429229320514104e-04,
-        7.6023722413111566e-04,
-        1.2373315413524663e-03,
-        2.8035127901697272e-03,
-        1.8961512776990257e-03,
-        1.6218020183662784e-04,
-        5.9842263937853702e-04,
-        1.3158365660538270e-03,
-    ],
-    [
-        1.5903351423026848e-03,
-        3.9365984789376245e-04,
-        4.3845466068066216e-04,
-        3.9909227141697264e-04,
-        1.1931352277704348e-02,
-        3.0937204045913537e-04,
-        3.8338775043186374e-04,
-        7.6951976030099293e-04,
-        2.2976387481074697e-04,
-        1.0956590131781735e-03,
-        1.5682982157153873e-03,
-        5.0124929379033781e-04,
-        3.7717165634097634e-04,
-        5.1389991547056834e-04,
-        3.6111795849154795e-04,
-        1.0432626586831986e-03,
-        9.3041313726939057e-04,
-        1.4474923964368156e-04,
-        3.4603772624580643e-04,
-        1.3606607271146112e-03,
-    ],
-    [
-        1.9242657898716525e-03,
-        2.4858611089731411e-03,
-        1.5304436972610567e-03,
-        1.6481246723433428e-03,
-        3.0937204045913537e-04,
-        7.3292255467189687e-03,
-        3.5385780499965817e-03,
-        1.3683038039160171e-03,
-        1.0489026828741754e-03,
-        8.9102936026571569e-04,
-        1.6174411456311808e-03,
-        3.0968229715707327e-03,
-        7.3993258722701268e-04,
-        5.4255147972143906e-04,
-        8.4668181752066874e-04,
-        1.8931125300036275e-03,
-        1.3796838284921874e-03,
-        2.2737931366728891e-04,
-        6.7584155312457842e-04,
-        1.1660966117775285e-03,
-    ],
-    [
-        2.9879059292799641e-03,
-        2.6933867548771758e-03,
-        2.2097156829738759e-03,
-        4.9158017471929655e-03,
-        3.8338775043186374e-04,
-        3.5385780499965817e-03,
-        1.6133927472163669e-02,
-        1.9380952488713059e-03,
-        1.3667885452189439e-03,
-        1.2192061706431622e-03,
-        2.0030316026648431e-03,
-        4.1322603720305197e-03,
-        6.7909745467514783e-04,
-        8.5179405867513139e-04,
-        1.4216207127018586e-03,
-        2.9539180653600089e-03,
-        2.0493063257644955e-03,
-        2.6488552587183780e-04,
-        8.7044186256788659e-04,
-        1.6987763526262680e-03,
-    ],
-    [
-        5.8158526388051033e-03,
-        1.7221140903704937e-03,
-        2.8591871815612977e-03,
-        2.5221102126636373e-03,
-        7.6951976030099293e-04,
-        1.3683038039160171e-03,
-        1.9380952488713059e-03,
-        3.7804346453413303e-02,
-        9.5813607255887238e-04,
-        1.3849118546156933e-03,
-        2.0864716056392773e-03,
-        2.5392537741810947e-03,
-        7.3281559749652399e-04,
-        1.1976708695723554e-03,
-        1.3641171883713547e-03,
-        3.8342830901664762e-03,
-        2.1858459940987062e-03,
-        4.0740829083805248e-04,
-        8.3467413018106177e-04,
-        1.8218235950233687e-03,
-    ],
-    [
-        1.1076584657559144e-03,
-        1.2407382229440791e-03,
-        1.4301072616183181e-03,
-        9.5384849402143984e-04,
-        2.2976387481074697e-04,
-        1.0489026828741754e-03,
-        1.3667885452189439e-03,
-        9.5813607255887238e-04,
-        9.2802502369336622e-03,
-        5.8089627083019206e-04,
-        9.8696608463236094e-04,
-        1.1873625842258938e-03,
-        3.8264639620910225e-04,
-        8.1041076335565583e-04,
-        4.7770135861914477e-04,
-        1.1052034635193162e-03,
-        7.4371746073077327e-04,
-        1.5168037757411286e-04,
-        1.5213771111755425e-03,
-        6.4882907765797669e-04,
-    ],
-    [
-        3.1880644746334580e-03,
-        1.2435878276496955e-03,
-        9.9437221166923172e-04,
-        1.2347404942429857e-03,
-        1.0956590131781735e-03,
-        8.9102936026571569e-04,
-        1.2192061706431622e-03,
-        1.3849118546156933e-03,
-        5.8089627083019206e-04,
-        1.8441526588740136e-02,
-        1.1382470627796603e-02,
-        1.5655862274689192e-03,
-        2.5081290988482057e-03,
-        3.0458868657559346e-03,
-        1.0068164685944146e-03,
-        1.7225081689171561e-03,
-        2.6953622613315018e-03,
-        3.6183761166072852e-04,
-        1.3821121844492116e-03,
-        1.1972663837662637e-02,
-    ],
-    [
-        4.4186245468471547e-03,
-        2.4193952633248727e-03,
-        1.3690958423974782e-03,
-        1.5202051791453383e-03,
-        1.5682982157153873e-03,
-        1.6174411456311808e-03,
-        2.0030316026648431e-03,
-        2.0864716056392773e-03,
-        9.8696608463236094e-04,
-        1.1382470627796603e-02,
-        3.7141460156350926e-02,
-        2.4634345023228079e-03,
-        4.9293545515183088e-03,
-        5.4151301166464015e-03,
-        1.4146090399381900e-03,
-        2.4277107072013821e-03,
-        3.3238031308707055e-03,
-        7.3206640617832933e-04,
-        2.2096734692836624e-03,
-        9.4786263030457313e-03,
-    ],
-    [
-        3.3466571942021082e-03,
-        6.2339060289407083e-03,
-        2.4402105140841090e-03,
-        2.4453087721980561e-03,
-        5.0124929379033781e-04,
-        3.0968229715707327e-03,
-        4.1322603720305197e-03,
-        2.5392537741810947e-03,
-        1.1873625842258938e-03,
-        1.5655862274689192e-03,
-        2.4634345023228079e-03,
-        1.6113385590544604e-02,
-        9.0876633395557617e-04,
-        9.4875149773685364e-04,
-        1.5773020912564391e-03,
-        3.1016069999481111e-03,
-        2.3467014804084987e-03,
-        2.7198500003555514e-04,
-        9.9908866586876396e-04,
-        1.9360424083099779e-03,
-    ],
-    [
-        1.3412107617355408e-03,
-        8.0309461712520876e-04,
-        5.2943633069226512e-04,
-        4.6429229320514104e-04,
-        3.7717165634097634e-04,
-        7.3993258722701268e-04,
-        6.7909745467514783e-04,
-        7.3281559749652399e-04,
-        3.8264639620910225e-04,
-        2.5081290988482057e-03,
-        4.9293545515183088e-03,
-        9.0876633395557617e-04,
-        4.0477309321969848e-03,
-        1.1901770463553603e-03,
-        4.0824445213456919e-04,
-        8.5603787638552766e-04,
-        1.0095451907679563e-03,
-        1.9872537223131380e-04,
-        5.7145288352831449e-04,
-        2.3123361470140736e-03,
-    ],
-    [
-        1.6360627863999076e-03,
-        9.3181986323789834e-04,
-        7.5004227978192801e-04,
-        7.6023722413111566e-04,
-        5.1389991547056834e-04,
-        5.4255147972143906e-04,
-        8.5179405867513139e-04,
-        1.1976708695723554e-03,
-        8.1041076335565583e-04,
-        3.0458868657559346e-03,
-        5.4151301166464015e-03,
-        9.4875149773685364e-04,
-        1.1901770463553603e-03,
-        1.8277684015431908e-02,
-        5.2528021756783813e-04,
-        1.1939618185901600e-03,
-        1.1624184369750680e-03,
-        8.4917468952377874e-04,
-        4.2392005745634370e-03,
-        2.5763052227920180e-03,
-    ],
-    [
-        2.1568959784943114e-03,
-        9.5783034332718700e-04,
-        8.6016459857770028e-04,
-        1.2373315413524663e-03,
-        3.6111795849154795e-04,
-        8.4668181752066874e-04,
-        1.4216207127018586e-03,
-        1.3641171883713547e-03,
-        4.7770135861914477e-04,
-        1.0068164685944146e-03,
-        1.4146090399381900e-03,
-        1.5773020912564391e-03,
-        4.0824445213456919e-04,
-        5.2528021756783813e-04,
-        1.9066033679132538e-02,
-        1.6662567934883051e-03,
-        1.3511005665728870e-03,
-        1.4152209821874487e-04,
-        4.5224391125285910e-04,
-        1.2451325046931832e-03,
-    ],
-    [
-        6.2524987419815400e-03,
-        2.2660898636037261e-03,
-        3.1466019144814608e-03,
-        2.8035127901697272e-03,
-        1.0432626586831986e-03,
-        1.8931125300036275e-03,
-        2.9539180653600089e-03,
-        3.8342830901664762e-03,
-        1.1052034635193162e-03,
-        1.7225081689171561e-03,
-        2.4277107072013821e-03,
-        3.1016069999481111e-03,
-        8.5603787638552766e-04,
-        1.1939618185901600e-03,
-        1.6662567934883051e-03,
-        1.2585947097159817e-02,
-        4.7004857686835334e-03,
-        2.8731729176487776e-04,
-        1.0299846310599138e-03,
-        2.3587292053265561e-03,
-    ],
-    [
-        3.7180506975672363e-03,
-        1.7802796534180537e-03,
-        2.2360795375444384e-03,
-        1.8961512776990257e-03,
-        9.3041313726939057e-04,
-        1.3796838284921874e-03,
-        2.0493063257644955e-03,
-        2.1858459940987062e-03,
-        7.4371746073077327e-04,
-        2.6953622613315018e-03,
-        3.3238031308707055e-03,
-        2.3467014804084987e-03,
-        1.0095451907679563e-03,
-        1.1624184369750680e-03,
-        1.3511005665728870e-03,
-        4.7004857686835334e-03,
-        1.2514818886617953e-02,
-        2.8575770858467209e-04,
-        9.4161039895612720e-04,
-        3.6402328079338207e-03,
-    ],
-    [
-        4.0281679108936688e-04,
-        2.6571979312581875e-04,
-        1.6159545671597605e-04,
-        1.6218020183662784e-04,
-        1.4474923964368156e-04,
-        2.2737931366728891e-04,
-        2.6488552587183780e-04,
-        4.0740829083805248e-04,
-        1.5168037757411286e-04,
-        3.6183761166072852e-04,
-        7.3206640617832933e-04,
-        2.7198500003555514e-04,
-        1.9872537223131380e-04,
-        8.4917468952377874e-04,
-        1.4152209821874487e-04,
-        2.8731729176487776e-04,
-        2.8575770858467209e-04,
-        6.4699301717154852e-03,
-        8.8744160259272527e-04,
-        3.5578318710317554e-04,
-    ],
-    [
-        1.2999956675626666e-03,
-        9.2634607111251918e-04,
-        7.0048422794024819e-04,
-        5.9842263937853702e-04,
-        3.4603772624580643e-04,
-        6.7584155312457842e-04,
-        8.7044186256788659e-04,
-        8.3467413018106177e-04,
-        1.5213771111755425e-03,
-        1.3821121844492116e-03,
-        2.2096734692836624e-03,
-        9.9908866586876396e-04,
-        5.7145288352831449e-04,
-        4.2392005745634370e-03,
-        4.5224391125285910e-04,
-        1.0299846310599138e-03,
-        9.4161039895612720e-04,
-        8.8744160259272527e-04,
-        1.0246100213822419e-02,
-        1.5489827890922993e-03,
-    ],
-    [
-        5.0679056444508912e-03,
-        1.5810185245264004e-03,
-        1.2014015528772706e-03,
-        1.3158365660538270e-03,
-        1.3606607271146112e-03,
-        1.1660966117775285e-03,
-        1.6987763526262680e-03,
-        1.8218235950233687e-03,
-        6.4882907765797669e-04,
-        1.1972663837662637e-02,
-        9.4786263030457313e-03,
-        1.9360424083099779e-03,
-        2.3123361470140736e-03,
-        2.5763052227920180e-03,
-        1.2451325046931832e-03,
-        2.3587292053265561e-03,
-        3.6402328079338207e-03,
-        3.5578318710317554e-04,
-        1.5489827890922993e-03,
-        1.9631915140537640e-02,
-    ],
-];
+// The values are in the generated `matrix_tables.rs`.
+const BLOSUM62_JOINT_PROBS: [[f64; COMPO_NUM_TRUE_AA]; COMPO_NUM_TRUE_AA] =
+    matrix_tables::BLOSUM62_JOINT_PROBS;
 
-const BLOSUM62_BG: [f64; COMPO_NUM_TRUE_AA] = [
-    7.4216205067993410e-02,
-    5.1614486141284638e-02,
-    4.4645808512757915e-02,
-    5.3626000838554413e-02,
-    2.4687457167944848e-02,
-    3.4259650591416023e-02,
-    5.4311925684587502e-02,
-    7.4146941452644999e-02,
-    2.6212984805266227e-02,
-    6.7917367618953756e-02,
-    9.8907868497150955e-02,
-    5.8155682303079680e-02,
-    2.4990197579643110e-02,
-    4.7418459742284751e-02,
-    3.8538003320306206e-02,
-    5.7229029476494421e-02,
-    5.0891364550287033e-02,
-    1.3029956129972148e-02,
-    3.2281512313758580e-02,
-    7.2919098205619245e-02,
-];
+const BLOSUM62_BG: [f64; COMPO_NUM_TRUE_AA] = matrix_tables::BLOSUM62_BG;
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/matrix_freq_ratios.c:438-466
+// The composition-based statistics data of `matrix`: its frequency ratios and its joint and
+// background probabilities.
+//
+// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/matrix_frequency_data.c:1359-1369
 // ```c
-// static const double BLOSUM62_FREQRATIOS[BLASTAA_SIZE][BLASTAA_SIZE] =
-// {{0.00000000e+00, 0.00000000e+00, ...},
-//  {0.00000000e+00, 3.90294070e+00, ...},
-//  ...};
+// static Compo_FrequencyData *
+// s_LocateFrequencyData(const char * matrix)
+// {
+//     int i;
+//     for (i = 0;  i < NUM_SUPPORTED_MATRICES;  i++) {
+//         if (0 == strcasecmp(s_FrequencyData[i].name, matrix)) {
+//             return &s_FrequencyData[i];
+//         }
+//     }
+//     return NULL;
+// }
 // ```
-const BLOSUM62_START_FREQ_RATIOS: [[f64; COMPO_LARGEST_ALPHABET]; COMPO_LARGEST_ALPHABET] =
-    include!("blosum62_start_freq_ratios.inc.rs");
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/matrix_freq_ratios.c:1734-1736
+// ```c
+//     } else {
+//         retval = _PSIMatrixFrequencyRatiosFree(retval);
+//     }
+// ```
+// `_PSIMatrixFrequencyRatiosNew` has the frequency ratios of the same eight matrices, and of
+// BLOSUM62_20, 20A and 20B, which the 2.17.0 build has no Karlin table for (`blast_stat.c:435`,
+// `BLOSUM62_20_ENABLE`), so NCBI's option validation refuses them. IDENTITY has none of the data:
+// NCBI turns composition-based statistics off for it before the search.
+// NCBI reference: ncbi-blast/c++/src/algo/blast/api/setup_factory.cpp:144-150
+// ```c
+//     // reset composition based statistics for the identity scoring matrix
+//     // (we do not have all necessary data to compute CBS)
+//     if (opts_memento->m_ScoringOpts->matrix &&
+//         strcasecmp("identity", opts_memento->m_ScoringOpts->matrix) == 0 &&
+//         opts_memento->m_ExtnOpts->compositionBasedStats > 0) {
+//
+//         opts_memento->m_ExtnOpts->compositionBasedStats = 0;
+// ```
+pub(crate) fn compo_matrix_data(matrix: ScoringMatrix) -> Option<&'static CompoMatrixData> {
+    let index = match matrix {
+        ScoringMatrix::Blosum62 => 0,
+        ScoringMatrix::Blosum80 => 1,
+        ScoringMatrix::Blosum50 => 2,
+        ScoringMatrix::Blosum90 => 3,
+        ScoringMatrix::Blosum45 => 4,
+        ScoringMatrix::Pam30 => 5,
+        ScoringMatrix::Pam70 => 6,
+        ScoringMatrix::Pam250 => 7,
+        ScoringMatrix::Identity => return None,
+    };
+    Some(&COMPO_MATRIX_DATA[index])
+}
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/unified_pvalues.c:52-205
 // ```c
@@ -1247,6 +839,8 @@ impl BlastCompositionWorkspace {
     //     }
     // }
     // ```
+    // BLOSUM62's row and column sums of the joint probabilities equal its background
+    // frequencies bit for bit, so this is `new(ScoringMatrix::Blosum62)` (test).
     pub(crate) fn new_blosum62() -> Self {
         Self {
             mat_b: BLOSUM62_JOINT_PROBS,
@@ -1254,6 +848,64 @@ impl BlastCompositionWorkspace {
             first_standard_freq: BLOSUM62_BG,
             second_standard_freq: BLOSUM62_BG,
         }
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:1316-1331
+    // ```c
+    // int
+    // Blast_CompositionWorkspaceInit(Blast_CompositionWorkspace * NRrecord,
+    //                                const char *matrixName)
+    // {
+    //     if (0 == Blast_GetJointProbsForMatrix(NRrecord->mat_b,
+    //                                           NRrecord->first_standard_freq,
+    //                                           NRrecord->second_standard_freq,
+    //                                           matrixName)) {
+    //         return 0;
+    //     } else {
+    //         fprintf(stderr,
+    //                 "Matrix %s not currently supported for RE based adjustment\n",
+    //                 matrixName);
+    //         return -1;
+    //     }
+    // }
+    // ```
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/matrix_frequency_data.c:1406-1416
+    // ```c
+    //     for (j = 0;  j < COMPO_NUM_TRUE_AA;  j++) {
+    //         col_sums[j] = 0.0;
+    //     }
+    //     for (i = 0;  i < COMPO_NUM_TRUE_AA;  i++) {
+    //         row_sums[i] = 0.0;
+    //         for (j = 0;  j < COMPO_NUM_TRUE_AA;  j++) {
+    //             probs[i][j] = data->joint_probs[i][j];
+    //             row_sums[i] += probs[i][j];
+    //             col_sums[j] += probs[i][j];
+    //         }
+    //     }
+    // ```
+    // The standard frequencies are the sums, not the background frequencies: the two differ in
+    // the last bits for PAM30, PAM70 and PAM250.
+    pub(crate) fn new(matrix: ScoringMatrix) -> Result<Self> {
+        let Some(data) = compo_matrix_data(matrix) else {
+            bail!(
+                "Matrix {} not currently supported for RE based adjustment",
+                matrix.ncbi_name()
+            );
+        };
+        let mut first_standard_freq = [0.0; COMPO_NUM_TRUE_AA];
+        let mut second_standard_freq = [0.0; COMPO_NUM_TRUE_AA];
+        for i in 0..COMPO_NUM_TRUE_AA {
+            for j in 0..COMPO_NUM_TRUE_AA {
+                first_standard_freq[i] += data.joint_probs[i][j];
+                second_standard_freq[j] += data.joint_probs[i][j];
+            }
+        }
+        Ok(Self {
+            mat_b: *data.joint_probs,
+            mat_final: [[0.0; COMPO_NUM_TRUE_AA]; COMPO_NUM_TRUE_AA],
+            first_standard_freq,
+            second_standard_freq,
+        })
     }
 }
 
@@ -1301,7 +953,6 @@ pub struct BlastAdjustScoresResult {
 //     if (subject_data[i] == eStopChar)
 //     { if (i - kCompositionMargin > right) right = i - kCompositionMargin; break; }
 // if (i == length) right = length;
-#[allow(dead_code)] // TBLASTN calls this after its translated-range callback is ported.
 pub(crate) fn blast_get_composition_range(
     subject_data: &[u8],
     start: usize,
@@ -1372,12 +1023,22 @@ pub fn read_aa_composition(sequence: &[u8]) -> BlastAminoAcidComposition {
 // Blast_Int4MatrixFromFreq(self->startMatrix, self->cols,
 //                          self->startFreqRatios, self->ungappedLambda);
 // ```
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:657-660
+// ```c
+//     stdFreqRatios = _PSIMatrixFrequencyRatiosNew(matrixName);
+//     if (stdFreqRatios == NULL) {
+//         return -1;
+//     }
+// ```
 pub fn build_matrix_info(matrix: ScoringMatrix, ungapped_lambda: f64) -> Result<BlastMatrixInfo> {
-    if matrix != ScoringMatrix::Blosum62 {
-        bail!("composition adjustment matrix info is only ported for BLOSUM62");
-    }
+    let Some(data) = compo_matrix_data(matrix) else {
+        bail!(
+            "composition adjustment has no frequency ratios for the {} matrix",
+            matrix.ncbi_name()
+        );
+    };
 
-    let start_freq_ratios = BLOSUM62_START_FREQ_RATIOS;
+    let start_freq_ratios = *data.freq_ratios;
     let mut start_matrix = [[0i32; COMPO_LARGEST_ALPHABET]; COMPO_LARGEST_ALPHABET];
     int4_matrix_from_freq(
         &mut start_matrix,
@@ -1412,44 +1073,6 @@ fn ltriang_matrix_new(n: usize) -> Vec<Vec<f64>> {
     (0..n).map(|row| vec![0.0; row + 1]).collect()
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:120-143
-// ```c
-// void Nlm_FactorLtriangPosDef(double ** A, int n)
-// ```
-fn factor_ltriang_pos_def(a: &mut [Vec<f64>], n: usize) {
-    for i in 0..n {
-        for j in 0..i {
-            let mut temp = a[i][j];
-            for k in 0..j {
-                temp -= a[i][k] * a[j][k];
-            }
-            a[i][j] = temp / a[j][j];
-        }
-        let mut temp = a[i][i];
-        for k in 0..i {
-            temp -= a[i][k] * a[i][k];
-        }
-        a[i][i] = temp.sqrt();
-    }
-}
-
-// EXPERIMENT (LOSAT_X_COMPFAST / LOSAT_X_COMPSHADOW): 0 = original loops, 1 = reordered loops,
-// 2 = reordered loops checked bit-for-bit against the original on every call.
-// No NCBI counterpart: reads LOSAT_X_COMPFAST and LOSAT_X_COMPSHADOW once. It chooses, for each function below that has a reordered variant, between the original loops, the reordered loops, or both with a bitwise comparison; it does not change any value NCBI computes.
-pub(crate) fn x_comp_mode() -> u8 {
-    use std::sync::OnceLock;
-    static MODE: OnceLock<u8> = OnceLock::new();
-    *MODE.get_or_init(|| {
-        if std::env::var_os("LOSAT_X_COMPSHADOW").is_some() {
-            2
-        } else if crate::utils::xswitch::on("LOSAT_X_COMPFAST") {
-            1
-        } else {
-            0
-        }
-    })
-}
-
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:725-727
 // ```c
 //     n  = alphsize * alphsize;
@@ -1460,10 +1083,12 @@ pub(crate) fn x_comp_mode() -> u8 {
 /// Column stride of the column-major copy of the Newton matrix.
 const X_WC_STRIDE: usize = 2 * COMPO_NUM_TRUE_AA;
 
-// EXPERIMENT: `Nlm_FactorLtriangPosDef` with the loops interchanged.
+// `Nlm_FactorLtriangPosDef` with the loops interchanged.
 //
 // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:120-143
 // ```c
+// void Nlm_FactorLtriangPosDef(double ** A, int n)
+// ...
 // for (i = 0;  i < n;  i++) {
 //     for (j = 0;  j < i;  j++) {
 //         temp = A[i][j];
@@ -1509,7 +1134,7 @@ const X_WC_STRIDE: usize = 2 * COMPO_NUM_TRUE_AA;
 // or square root.
 fn x_factor_ltriang_pos_def_cols(a: &mut [Vec<f64>], n: usize, wc: &mut [f64]) {
     let s = X_WC_STRIDE;
-    debug_assert!(n <= s && wc.len() >= s * s && s % 2 == 0);
+    debug_assert!(n <= s && wc.len() >= s * s && s.is_multiple_of(2));
     // Column-major copy. Slots above a column's diagonal and below row n are
     // scratch: they are written by the padded loops below but never read as
     // matrix elements.
@@ -1637,10 +1262,12 @@ fn x_factor_ltriang_pos_def_cols(a: &mut [Vec<f64>], n: usize, wc: &mut [f64]) {
     }
 }
 
-// EXPERIMENT: `Nlm_SolveLtriangPosDef`, forward substitution by columns.
+// `Nlm_SolveLtriangPosDef`, forward substitution by columns.
 //
 // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:147-171
 // ```c
+// void Nlm_SolveLtriangPosDef(double x[], int n, double ** L)
+// ...
 // for (i = 0;  i < n;  i++) {
 //     temp = x[i];
 //     for (j = 0;  j < i;  j++) {
@@ -1691,26 +1318,6 @@ fn x_solve_ltriang_pos_def_cols(x: &mut [f64], n: usize, l: &[Vec<f64>], wc: &[f
         let xj = x[j];
         for (xi, &lji) in x[..j].iter_mut().zip(&row[..j]) {
             *xi -= lji * xj;
-        }
-    }
-}
-
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:147-171
-// ```c
-// void Nlm_SolveLtriangPosDef(double x[], int n, double ** L)
-// ```
-fn solve_ltriang_pos_def(x: &mut [f64], n: usize, l: &[Vec<f64>]) {
-    for i in 0..n {
-        let mut temp = x[i];
-        for (j, &xj) in x.iter().enumerate().take(i) {
-            temp -= l[i][j] * xj;
-        }
-        x[i] = temp / l[i][i];
-    }
-    for j in (0..n).rev() {
-        x[j] /= l[j][j];
-        for i in 0..j {
-            x[i] -= l[j][i] * x[j];
         }
     }
 }
@@ -1767,21 +1374,10 @@ fn step_bound(x: &[f64], step_x: &[f64], max: f64) -> f64 {
     //     }
     //     return alpha;
     // ```
-    // Dispatch point of LOSAT_X_COMPFAST / LOSAT_X_COMPSHADOW: the reference path is
-    // `step_bound_reference`, the port of this function.
-    let mode = x_comp_mode();
-    if mode != 0 && x.len() <= 400 && x.len() == step_x.len() {
-        let fast = x_step_bound(x, step_x, max);
-        if mode == 2 {
-            let reference = step_bound_reference(x, step_x, max);
-            assert!(
-                fast.to_bits() == reference.to_bits(),
-                "x_step_bound differs from the reference"
-            );
-        }
-        return fast;
-    }
-    step_bound_reference(x, step_x, max)
+    // The quotients first, then the scan (`x_step_bound`), for the 400 values of the Newton
+    // iteration (`n = alphsize * alphsize` with `alphsize == COMPO_NUM_TRUE_AA`).
+    debug_assert!(x.len() <= 400 && x.len() == step_x.len());
+    x_step_bound(x, step_x, max)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:230-238
@@ -1796,7 +1392,7 @@ fn step_bound(x: &[f64], step_x: &[f64], max: f64) -> f64 {
 //     return alpha;
 // ```
 // The quotients are computed first and then scanned in the original order with the same test.
-// EXPERIMENT: `Nlm_StepBound`. The quotients do not depend on each other;
+// `Nlm_StepBound`. The quotients do not depend on each other;
 // compute them first, then scan them in the original order.
 fn x_step_bound(x: &[f64], step_x: &[f64], max: f64) -> f64 {
     let mut ratio = [0.0f64; 400];
@@ -1810,116 +1406,6 @@ fn x_step_bound(x: &[f64], step_x: &[f64], max: f64) -> f64 {
         }
     }
     alpha
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:224-238
-// ```c
-// double
-// Nlm_StepBound(const double x[], int n, const double step_x[], double max)
-// {
-//     int i;                 /* iteration index */
-//     double alpha = max;    /* current largest permitted step */
-//     for (i = 0; i < n; i++) {
-//         double alpha_i;    /* a step to the boundary for the current i */
-//         alpha_i = -x[i] / step_x[i];
-//         if (alpha_i >= 0 && alpha_i < alpha) {
-//             alpha = alpha_i;
-//         }
-//     }
-//     return alpha;
-// ```
-// The original `step_bound`, renamed; it is the port of this function.
-fn step_bound_reference(x: &[f64], step_x: &[f64], max: f64) -> f64 {
-    let mut alpha = max;
-    for (&x_i, &step_i) in x.iter().zip(step_x.iter()) {
-        let alpha_i = -x_i / step_i;
-        if alpha_i >= 0.0 && alpha_i < alpha {
-            alpha = alpha_i;
-        }
-    }
-    alpha
-}
-
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:329-337
-// ```c
-// double Blast_MatrixEntropy(double ** matrix, int alphsize, const double row_prob[],
-//                            const double col_prob[], double Lambda)
-// ```
-fn matrix_entropy(
-    matrix: &[Vec<f64>],
-    alphsize: usize,
-    row_prob: &[f64; COMPO_NUM_TRUE_AA],
-    col_prob: &[f64; COMPO_NUM_TRUE_AA],
-    lambda: f64,
-) -> f64 {
-    let mut entropy = 0.0;
-    for i in 0..alphsize {
-        for j in 0..alphsize {
-            let nat_score = lambda * matrix[i][j];
-            entropy += nat_score.exp() * nat_score * row_prob[i] * col_prob[j];
-        }
-    }
-    entropy
-}
-
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:358-376
-// ```c
-// double Blast_TargetFreqEntropy(double ** target_freq)
-// ```
-fn target_freq_entropy(target_freq: &[[f64; COMPO_NUM_TRUE_AA]; COMPO_NUM_TRUE_AA]) -> f64 {
-    let mut row_prob = [0.0; COMPO_NUM_TRUE_AA];
-    let mut col_prob = [0.0; COMPO_NUM_TRUE_AA];
-    for (i, row) in target_freq.iter().enumerate() {
-        for (j, &freq) in row.iter().enumerate() {
-            row_prob[i] += freq;
-            col_prob[j] += freq;
-        }
-    }
-    let mut entropy = 0.0;
-    for (i, row) in target_freq.iter().enumerate() {
-        for (j, &freq) in row.iter().enumerate() {
-            entropy += freq * (freq / row_prob[i] / col_prob[j]).ln();
-        }
-    }
-    entropy
-}
-
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:385-397
-// ```c
-// void Blast_CalcFreqRatios(double ** ratios, int alphsize,
-//                           double row_prob[], double col_prob[])
-// ```
-fn calc_freq_ratios_dense(
-    ratios: &mut [Vec<f64>],
-    alphsize: usize,
-    row_prob: &[f64],
-    col_prob: &[f64],
-) {
-    for i in 0..alphsize {
-        if row_prob[i] > 0.0 {
-            for j in 0..alphsize {
-                if col_prob[j] > 0.0 {
-                    ratios[i][j] /= row_prob[i] * col_prob[j];
-                }
-            }
-        }
-    }
-}
-
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:401-415
-// ```c
-// void Blast_FreqRatioToScore(double ** matrix, int rows, int cols, double Lambda)
-// ```
-fn freq_ratio_to_score_dense(matrix: &mut [Vec<f64>], rows: usize, cols: usize, lambda: f64) {
-    for row in matrix.iter_mut().take(rows) {
-        for value in row.iter_mut().take(cols) {
-            if *value == 0.0 {
-                *value = COMPO_SCORE_MIN as f64;
-            } else {
-                *value = value.ln() / lambda;
-            }
-        }
-    }
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:401-415
@@ -1937,13 +1423,13 @@ fn freq_ratio_to_score_square(
             if *value == 0.0 {
                 *value = COMPO_SCORE_MIN as f64;
             } else {
-                *value = value.ln() / lambda;
+                *value = value.glibc_ln() / lambda;
             }
         }
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:117-240
+// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:220-334
 // ```c
 // void Blast_CalcLambdaFullPrecision(double * plambda, int *piterations,
 //                                    double **score, int alphsize,
@@ -1987,12 +1473,18 @@ fn calc_lambda_full_precision_from_scores(
 
     let mut k = 0usize;
     while k < K_LAMBDA_ITERATION_LIMIT {
-        let lambda = -x.ln();
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:266
+        // ```c
+        // double fold = f;            /* previous value of f */
+        // ```
+        // `fold` takes f before f is evaluated again, so the Newton test
+        // below compares this iteration's f with the previous iteration's f.
+        let fold = f;
+        let lambda = -x.glibc_ln();
         let was_newton = is_newton;
-        let x_pow_max_score = (-max_score * lambda).exp();
+        let x_pow_max_score = (-max_score * lambda).glibc_exp();
         f = -x_pow_max_score;
         let mut slope = max_score * f / x;
-        let fold = f;
 
         for i in 0..alphsize {
             if row_prob[i] == 0.0 {
@@ -2004,7 +1496,7 @@ fn calc_lambda_full_precision_from_scores(
                 }
                 let ff = if max_score != score[i][j] {
                     let diff_score = max_score - score[i][j];
-                    let ff = row_prob[i] * col_p * (-lambda * diff_score).exp();
+                    let ff = row_prob[i] * col_p * (-lambda * diff_score).glibc_exp();
                     slope += diff_score * ff / x;
                     ff
                 } else {
@@ -2027,7 +1519,7 @@ fn calc_lambda_full_precision_from_scores(
             x = (left + right) / 2.0;
             break;
         }
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:290-320
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:311-330
         // ```c
         // if ((was_newton && fabs(f) > .9 * fabs(fold)) || slope >= 0) {
         //     x = (left + right)/2;
@@ -2062,7 +1554,7 @@ fn calc_lambda_full_precision_from_scores(
     }
 
     if k < K_LAMBDA_ITERATION_LIMIT {
-        (-x.ln(), k)
+        (-x.glibc_ln(), k)
     } else {
         (-1.0, k)
     }
@@ -2085,10 +1577,10 @@ pub fn blast_get_relative_entropy(
         let temp = (a[i] + b[i]) / 2.0;
         if temp > 0.0 {
             if a[i] > 0.0 {
-                value += a[i] * (a[i] / temp).ln() / 2.0;
+                value += a[i] * (a[i] / temp).glibc_ln() / 2.0;
             }
             if b[i] > 0.0 {
-                value += b[i] * (b[i] / temp).ln() / 2.0;
+                value += b[i] * (b[i] / temp).glibc_ln() / 2.0;
             }
         }
     }
@@ -2164,42 +1656,6 @@ fn set_pair_ambig_probs_to_sum(probs: &mut [f64; COMPO_LARGEST_ALPHABET]) {
     probs[E_BCHAR] = probs[E_DCHAR] + probs[E_NCHAR];
     probs[E_ZCHAR] = probs[E_ECHAR] + probs[E_QCHAR];
     probs[E_JCHAR] = probs[E_ICHAR] + probs[E_LCHAR];
-}
-
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:485-536
-// ```c
-// int Blast_EntropyOldFreqNewContext(...)
-// ```
-fn entropy_old_freq_new_context(
-    target_freq: &[[f64; COMPO_NUM_TRUE_AA]; COMPO_NUM_TRUE_AA],
-    row_prob: &[f64; COMPO_NUM_TRUE_AA],
-    col_prob: &[f64; COMPO_NUM_TRUE_AA],
-) -> Result<Option<f64>> {
-    let mut scores = dense_matrix_new(COMPO_NUM_TRUE_AA, COMPO_NUM_TRUE_AA);
-    let mut old_col_prob = [0.0; COMPO_NUM_TRUE_AA];
-    let mut old_row_prob = [0.0; COMPO_NUM_TRUE_AA];
-    for i in 0..COMPO_NUM_TRUE_AA {
-        for j in 0..COMPO_NUM_TRUE_AA {
-            old_row_prob[i] += target_freq[i][j];
-            old_col_prob[j] += target_freq[i][j];
-            scores[i][j] = target_freq[i][j];
-        }
-    }
-    calc_freq_ratios_dense(&mut scores, COMPO_NUM_TRUE_AA, &old_row_prob, &old_col_prob);
-    freq_ratio_to_score_dense(&mut scores, COMPO_NUM_TRUE_AA, COMPO_NUM_TRUE_AA, 1.0);
-    let (lambda, iter_count) =
-        calc_lambda_full_precision_from_scores(&scores, COMPO_NUM_TRUE_AA, row_prob, col_prob);
-    if iter_count < K_LAMBDA_ITERATION_LIMIT && lambda > 0.0 {
-        Ok(Some(matrix_entropy(
-            &scores,
-            COMPO_NUM_TRUE_AA,
-            row_prob,
-            col_prob,
-            lambda,
-        )))
-    } else {
-        Ok(None)
-    }
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:538-604
@@ -2481,8 +1937,11 @@ fn scores_std_alphabet_round(
 
 // No NCBI counterpart: reads LOSAT_X_ADJMEMO_STATS once; it does not change any value NCBI computes.
 fn x_adjmemo_enabled() -> bool {
+    if !crate::utils::xdiag::ON {
+        return false;
+    }
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("LOSAT_X_ADJMEMO_STATS").is_some())
+    *ON.get_or_init(|| crate::utils::xdiag::var_os("LOSAT_X_ADJMEMO_STATS").is_some())
 }
 // No NCBI counterpart: call counter and set of hashed inputs for the LOSAT_X_ADJMEMO_STATS report; it does not change any value NCBI computes.
 static X_ADJMEMO: std::sync::Mutex<Option<(u64, std::collections::HashSet<u64>)>> =
@@ -2513,22 +1972,10 @@ fn x_adjmemo_record(
     entry.0 += 1;
     entry.1.insert(key);
 }
-// No NCBI counterpart: counter of the shadow comparisons; it does not change any value NCBI computes.
-/// Calls compared with the reference by LOSAT_X_NEWTONEXACTSHADOW.
-pub(crate) static X_NEWTONEXACT_SHADOWED: std::sync::atomic::AtomicU64 =
-    std::sync::atomic::AtomicU64::new(0);
-
-// No NCBI counterpart: prints the shadow counter; it does not change any value NCBI computes.
-/// Shadow-mode summary (printed by `main` at exit).
+// No NCBI counterpart: prints the LOSAT_X_STATS counters of the Newton lanes; it does not change any
+// value NCBI computes.
+/// Counter summary of the Newton lanes (printed by `main` at exit).
 pub fn x_newtonexact_print_stats() {
-    if super::x_newton_exact::mode() == 2 {
-        eprintln!(
-            "[X_SHADOW] NEWTONEXACT calls_compared={} (status and all 400 target frequencies bit-identical)",
-            X_NEWTONEXACT_SHADOWED.load(std::sync::atomic::Ordering::Relaxed)
-        );
-    }
-    // No NCBI counterpart: LOSAT_X_NEWTONLANES shadow and LOSAT_X_STATS counters; it does not change any
-    // value NCBI computes.
     super::x_newton_lanes::print_stats();
 }
 
@@ -2565,33 +2012,13 @@ fn scaled_symmetric_product_a(w: &mut [Vec<f64>], diagonal: &[f64], alphsize: us
     //             }
     //         }
     // ```
-    // Dispatch point of LOSAT_X_COMPFAST / LOSAT_X_COMPSHADOW: the reference path is
-    // `scaled_symmetric_product_a_reference`, the port of this function.
-    match x_comp_mode() {
-        1 if alphsize <= COMPO_NUM_TRUE_AA => {
-            return x_scaled_symmetric_product_a(w, diagonal, alphsize)
-        }
-        2 if alphsize <= COMPO_NUM_TRUE_AA => {
-            let mut check: Vec<Vec<f64>> = w.to_vec();
-            x_scaled_symmetric_product_a(&mut check, diagonal, alphsize);
-            scaled_symmetric_product_a_reference(w, diagonal, alphsize);
-            let m = 2 * alphsize - 1;
-            for i in 0..m {
-                for k in 0..=i {
-                    assert!(
-                        check[i][k].to_bits() == w[i][k].to_bits(),
-                        "x_scaled_symmetric_product_a differs at ({i},{k})"
-                    );
-                }
-            }
-            return;
-        }
-        _ => {}
-    }
-    scaled_symmetric_product_a_reference(w, diagonal, alphsize)
+    // The register-accumulator form (`x_scaled_symmetric_product_a`) for `alphsize` up to 20
+    // (`optimize_target_frequencies` asserts `alphsize == COMPO_NUM_TRUE_AA`).
+    debug_assert!(alphsize <= COMPO_NUM_TRUE_AA);
+    x_scaled_symmetric_product_a(w, diagonal, alphsize)
 }
 
-// EXPERIMENT: `ScaledSymmetricProductA` with register accumulators.
+// `ScaledSymmetricProductA` with register accumulators.
 //
 // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:108-125
 // ```c
@@ -2624,6 +2051,18 @@ fn scaled_symmetric_product_a(w: &mut [Vec<f64>], diagonal: &[f64], alphsize: us
 //         }
 // ```
 // (The line numbers in the older comment above are for a different revision; these are the pinned ones.)
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:112-113,121-125
+// ```c
+// static void
+// ScaledSymmetricProductA(double ** W, const double diagonal[], int alphsize)
+// ...
+//     for (rowW = 0;  rowW < m;  rowW++) {
+//         for (colW = 0;  colW <= rowW;  colW++) {
+//             W[rowW][colW] = 0.0;
+//         }
+//     }
+// ```
+// The lower triangle of the first `m` rows is zeroed first, as here.
 fn x_scaled_symmetric_product_a(w: &mut [Vec<f64>], diagonal: &[f64], alphsize: usize) {
     let n = alphsize;
     let m = 2 * n - 1;
@@ -2654,39 +2093,12 @@ fn x_scaled_symmetric_product_a(w: &mut [Vec<f64>], diagonal: &[f64], alphsize: 
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:112-113,121-125
+// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:138-165
 // ```c
-// static void
-// ScaledSymmetricProductA(double ** W, const double diagonal[], int alphsize)
-// ...
-//     for (rowW = 0;  rowW < m;  rowW++) {
-//         for (colW = 0;  colW <= rowW;  colW++) {
-//             W[rowW][colW] = 0.0;
-//         }
-//     }
+// static void MultiplyByA(double beta, double y[], int alphsize, double alpha, const double x[])
 // ```
-// The original `scaled_symmetric_product_a`, renamed; it is the port of this function.
-fn scaled_symmetric_product_a_reference(w: &mut [Vec<f64>], diagonal: &[f64], alphsize: usize) {
-    let m = 2 * alphsize - 1;
-    for (row_idx, row) in w.iter_mut().enumerate().take(m) {
-        for value in row.iter_mut().take(row_idx + 1) {
-            *value = 0.0;
-        }
-    }
-    for i in 0..alphsize {
-        for j in 0..alphsize {
-            let dd = diagonal[i * alphsize + j];
-            w[j][j] += dd;
-            if i > 0 {
-                w[i + alphsize - 1][j] += dd;
-                w[i + alphsize - 1][i + alphsize - 1] += dd;
-            }
-        }
-    }
-}
-
-// EXPERIMENT: `MultiplyByA` with the same additions per element in the same
-// order, arranged so that independent elements advance together.
+// The same additions per element in the same order, arranged so that independent elements
+// advance together.
 //
 // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:155-164
 // ```c
@@ -2715,7 +2127,7 @@ fn scaled_symmetric_product_a_reference(w: &mut [Vec<f64>], diagonal: &[f64], al
 //     }
 // ```
 // (The line numbers in the older comment above are for a different revision; these are the pinned ones.)
-fn x_multiply_by_a(beta: f64, y: &mut [f64], alphsize: usize, alpha: f64, x: &[f64]) {
+fn multiply_by_a(beta: f64, y: &mut [f64], alphsize: usize, alpha: f64, x: &[f64]) {
     if beta == 0.0 {
         for value in y.iter_mut() {
             *value = 0.0;
@@ -2767,7 +2179,12 @@ fn x_multiply_by_a(beta: f64, y: &mut [f64], alphsize: usize, alpha: f64, x: &[f
     }
 }
 
-// EXPERIMENT: `MultiplyByAtranspose`, same two additions per element.
+// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:176-205
+// ```c
+// static void MultiplyByAtranspose(double beta, double y[], int alphsize,
+//                                  double alpha, const double x[])
+// ```
+// The same two additions per element.
 //
 // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:195-204
 // ```c
@@ -2794,7 +2211,7 @@ fn x_multiply_by_a(beta: f64, y: &mut [f64], alphsize: usize, alpha: f64, x: &[f
 //     }
 // ```
 // (The line numbers in the older comment above are for a different revision; these are the pinned ones.)
-fn x_multiply_by_at(beta: f64, y: &mut [f64], alphsize: usize, alpha: f64, x: &[f64]) {
+fn multiply_by_at(beta: f64, y: &mut [f64], alphsize: usize, alpha: f64, x: &[f64]) {
     if beta == 0.0 {
         for value in y.iter_mut() {
             *value = 0.0;
@@ -2817,165 +2234,6 @@ fn x_multiply_by_at(beta: f64, y: &mut [f64], alphsize: usize, alpha: f64, x: &[
         } else {
             for (yk, &xj) in row.iter_mut().zip(head) {
                 *yk += alpha * xj;
-            }
-        }
-    }
-}
-
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:138-165
-// ```c
-// static void MultiplyByA(double beta, double y[], int alphsize, double alpha, const double x[])
-// ```
-fn multiply_by_a(beta: f64, y: &mut [f64], alphsize: usize, alpha: f64, x: &[f64]) {
-    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:170-179
-    // ```c
-    //     for (i = 0;  i < alphsize;  i++) {
-    //         for (j = 0;  j < alphsize;  j++) {
-    //             y[j] += alpha * x[i * alphsize + j];
-    //         }
-    //     }
-    //     for (i = 1;  i < alphsize;  i++) {
-    //         for (j = 0;  j < alphsize;  j++) {
-    //             y[i + alphsize - 1] += alpha * x[i * alphsize + j];
-    //         }
-    //     }
-    // ```
-    // Dispatch point of LOSAT_X_COMPFAST / LOSAT_X_COMPSHADOW: the reference path is
-    // `multiply_by_a_reference`, the port of this function.
-    match x_comp_mode() {
-        1 => return x_multiply_by_a(beta, y, alphsize, alpha, x),
-        2 => {
-            let mut check = y.to_vec();
-            x_multiply_by_a(beta, &mut check, alphsize, alpha, x);
-            multiply_by_a_reference(beta, y, alphsize, alpha, x);
-            assert!(
-                check
-                    .iter()
-                    .zip(y.iter())
-                    .all(|(a, b)| a.to_bits() == b.to_bits()),
-                "x_multiply_by_a differs from the reference"
-            );
-            return;
-        }
-        _ => {}
-    }
-    multiply_by_a_reference(beta, y, alphsize, alpha, x)
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:154-157,170-179
-// ```c
-// static void
-// MultiplyByA(double beta, double y[], int alphsize,
-//             double alpha, const double x[])
-// {
-// ...
-//     for (i = 0;  i < alphsize;  i++) {
-//         for (j = 0;  j < alphsize;  j++) {
-//             y[j] += alpha * x[i * alphsize + j];
-//         }
-//     }
-//     for (i = 1;  i < alphsize;  i++) {
-//         for (j = 0;  j < alphsize;  j++) {
-//             y[i + alphsize - 1] += alpha * x[i * alphsize + j];
-//         }
-//     }
-// ```
-// The original `multiply_by_a`, renamed; it is the port of this function.
-fn multiply_by_a_reference(beta: f64, y: &mut [f64], alphsize: usize, alpha: f64, x: &[f64]) {
-    if beta == 0.0 {
-        for value in y.iter_mut() {
-            *value = 0.0;
-        }
-    } else if beta != 1.0 {
-        for value in y.iter_mut() {
-            *value *= beta;
-        }
-    }
-    for i in 0..alphsize {
-        for j in 0..alphsize {
-            y[j] += alpha * x[i * alphsize + j];
-        }
-    }
-    for i in 1..alphsize {
-        for j in 0..alphsize {
-            y[i + alphsize - 1] += alpha * x[i * alphsize + j];
-        }
-    }
-}
-
-// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:176-205
-// ```c
-// static void MultiplyByAtranspose(double beta, double y[], int alphsize,
-//                                  double alpha, const double x[])
-// ```
-fn multiply_by_at(beta: f64, y: &mut [f64], alphsize: usize, alpha: f64, x: &[f64]) {
-    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:214-223
-    // ```c
-    //     for (i = 0;  i < alphsize;  i++) {
-    //         for (j = 0;  j < alphsize;  j++) {
-    //             k = i * alphsize + j;
-    //             y[k] += alpha * x[j];
-    //             if (i > 0) {
-    //                 y[k] += alpha * x[i + alphsize - 1];
-    //             }
-    //         }
-    //     }
-    // ```
-    // Dispatch point of LOSAT_X_COMPFAST / LOSAT_X_COMPSHADOW: the reference path is
-    // `multiply_by_at_reference`, the port of this function.
-    match x_comp_mode() {
-        1 => return x_multiply_by_at(beta, y, alphsize, alpha, x),
-        2 => {
-            let mut check = y.to_vec();
-            x_multiply_by_at(beta, &mut check, alphsize, alpha, x);
-            multiply_by_at_reference(beta, y, alphsize, alpha, x);
-            assert!(
-                check
-                    .iter()
-                    .zip(y.iter())
-                    .all(|(a, b)| a.to_bits() == b.to_bits()),
-                "x_multiply_by_at differs from the reference"
-            );
-            return;
-        }
-        _ => {}
-    }
-    multiply_by_at_reference(beta, y, alphsize, alpha, x)
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:195-197,214-223
-// ```c
-// static void
-// MultiplyByAtranspose(double beta, double y[], int alphsize,
-//                      double alpha, const double x[])
-// ...
-//     for (i = 0;  i < alphsize;  i++) {
-//         for (j = 0;  j < alphsize;  j++) {
-//             k = i * alphsize + j;
-//             y[k] += alpha * x[j];
-//             if (i > 0) {
-//                 y[k] += alpha * x[i + alphsize - 1];
-//             }
-//         }
-//     }
-// ```
-// The original `multiply_by_at`, renamed; it is the port of this function.
-fn multiply_by_at_reference(beta: f64, y: &mut [f64], alphsize: usize, alpha: f64, x: &[f64]) {
-    if beta == 0.0 {
-        for value in y.iter_mut() {
-            *value = 0.0;
-        }
-    } else if beta != 1.0 {
-        for value in y.iter_mut() {
-            *value *= beta;
-        }
-    }
-    for i in 0..alphsize {
-        for j in 0..alphsize {
-            let k = i * alphsize + j;
-            y[k] += alpha * x[j];
-            if i > 0 {
-                y[k] += alpha * x[i + alphsize - 1];
             }
         }
     }
@@ -3062,10 +2320,9 @@ fn calculate_residuals(
 struct ReNewtonSystem {
     alphsize: usize,
     constrain_rel_entropy: bool,
-    // EXPERIMENT: column-major copy of the factor (see x_factor_ltriang_pos_def_cols).
-    // No NCBI counterpart: a column-major copy of the lower triangle of `W` after the factorisation, and a flag that says whether it is current; it does not change any value NCBI computes.
+    // Column-major copy of the factor (see x_factor_ltriang_pos_def_cols).
+    // No NCBI counterpart: a column-major copy of the lower triangle of `W` after the factorisation; it does not change any value NCBI computes.
     x_wc: Vec<f64>,
-    x_wc_valid: bool,
     w: Vec<Vec<f64>>,
     dinv: Vec<f64>,
     grad_re: Vec<f64>,
@@ -3079,13 +2336,8 @@ fn re_newton_system_new(alphsize: usize) -> ReNewtonSystem {
     ReNewtonSystem {
         alphsize,
         constrain_rel_entropy: true,
-        // No NCBI counterpart: the copy is allocated only when LOSAT_X_COMPFAST or LOSAT_X_COMPSHADOW is set; it does not change any value NCBI computes.
-        x_wc: if x_comp_mode() != 0 {
-            vec![0.0; X_WC_STRIDE * X_WC_STRIDE]
-        } else {
-            Vec::new()
-        },
-        x_wc_valid: false,
+        // No NCBI counterpart: the column-major copy of the factor; it does not change any value NCBI computes.
+        x_wc: vec![0.0; X_WC_STRIDE * X_WC_STRIDE],
         w: ltriang_matrix_new(2 * alphsize),
         dinv: vec![0.0; alphsize * alphsize],
         grad_re: vec![0.0; alphsize * alphsize],
@@ -3122,18 +2374,11 @@ fn factor_re_newton_system(
         //             Dinv[i] = x[i] / (1 - eta);
         //         }
         // ```
-        // Dispatch point of LOSAT_X_COMPFAST: the reference path is the loop in the `else` branch. The
-        // divisor `1 - eta` is the same value for every element, so computing it once gives the same quotients.
-        if x_comp_mode() == 1 {
-            // Same quotient per element; the divisor is the same value each time.
-            let divisor = 1.0 - eta;
-            for (out, &xi) in newton_system.dinv[..n].iter_mut().zip(&x[..n]) {
-                *out = xi / divisor;
-            }
-        } else {
-            for i in 0..n {
-                newton_system.dinv[i] = x[i] / (1.0 - eta);
-            }
+        // The divisor `1 - eta` is the same value for every element, so computing it once gives the
+        // same quotients.
+        let divisor = 1.0 - eta;
+        for (out, &xi) in newton_system.dinv[..n].iter_mut().zip(&x[..n]) {
+            *out = xi / divisor;
         }
     } else {
         newton_system.dinv.copy_from_slice(x);
@@ -3159,8 +2404,8 @@ fn factor_re_newton_system(
     // ```c
     //     Nlm_FactorLtriangPosDef(W, m);
     // ```
-    // Dispatch point of LOSAT_X_COMPFAST / LOSAT_X_COMPSHADOW: the reference path is the
-    // `factor_ltriang_pos_def` call at the end of this function.
+    // The column-major form (`x_factor_ltriang_pos_def_cols`) for `m` up to `X_WC_STRIDE`
+    // (`m <= 2 * COMPO_NUM_TRUE_AA` as `alphsize == COMPO_NUM_TRUE_AA`).
     // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:143-149
     // ```c
     //     for (i = 0;  i < n;  i++) {
@@ -3171,33 +2416,8 @@ fn factor_re_newton_system(
     //             }
     //             A[i][j] = temp/A[j][j];
     // ```
-    newton_system.x_wc_valid = false;
-    if m <= X_WC_STRIDE {
-        match x_comp_mode() {
-            1 => {
-                x_factor_ltriang_pos_def_cols(&mut newton_system.w, m, &mut newton_system.x_wc);
-                newton_system.x_wc_valid = true;
-                return;
-            }
-            2 => {
-                let mut check = newton_system.w.clone();
-                x_factor_ltriang_pos_def_cols(&mut check, m, &mut newton_system.x_wc);
-                factor_ltriang_pos_def(&mut newton_system.w, m);
-                for i in 0..m {
-                    for k in 0..=i {
-                        assert!(
-                            check[i][k].to_bits() == newton_system.w[i][k].to_bits(),
-                            "x_factor_ltriang_pos_def_cols differs at ({i},{k})"
-                        );
-                    }
-                }
-                newton_system.x_wc_valid = true;
-                return;
-            }
-            _ => {}
-        }
-    }
-    factor_ltriang_pos_def(&mut newton_system.w, m);
+    debug_assert!(m <= X_WC_STRIDE);
+    x_factor_ltriang_pos_def_cols(&mut newton_system.w, m, &mut newton_system.x_wc);
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:480-524
@@ -3233,8 +2453,8 @@ fn solve_re_newton_system(
     // ```c
     //     Nlm_SolveLtriangPosDef(z, m, W);
     // ```
-    // Dispatch point of LOSAT_X_COMPFAST / LOSAT_X_COMPSHADOW: the reference path is the
-    // `solve_ltriang_pos_def` call in the `else` branch.
+    // The column-major form (`x_solve_ltriang_pos_def_cols`), which reads the column-major copy
+    // that the factorisation made.
     // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:171-177
     // ```c
     //     for (i = 0;  i < n;  i++) {
@@ -3245,24 +2465,8 @@ fn solve_re_newton_system(
     //         x[i] = temp/L[i][i];
     //     }
     // ```
-    if newton_system.x_wc_valid {
-        if x_comp_mode() == 2 {
-            let mut check = z[..m].to_vec();
-            x_solve_ltriang_pos_def_cols(&mut check, m, &newton_system.w, &newton_system.x_wc);
-            solve_ltriang_pos_def(z, m, &newton_system.w);
-            assert!(
-                check
-                    .iter()
-                    .zip(z.iter())
-                    .all(|(a, b)| a.to_bits() == b.to_bits()),
-                "x_solve_ltriang_pos_def_cols differs from the reference"
-            );
-        } else {
-            x_solve_ltriang_pos_def_cols(z, m, &newton_system.w, &newton_system.x_wc);
-        }
-    } else {
-        solve_ltriang_pos_def(z, m, &newton_system.w);
-    }
+    debug_assert!(m <= X_WC_STRIDE);
+    x_solve_ltriang_pos_def_cols(z, m, &newton_system.w, &newton_system.x_wc);
     if newton_system.constrain_rel_entropy {
         for i in 0..n {
             x[i] += newton_system.grad_re[i] * z[m - 1];
@@ -3290,7 +2494,7 @@ fn evaluate_re_functions(
     values[0] = 0.0;
     values[1] = 0.0;
     for k in 0..alphsize * alphsize {
-        let mut temp = (x[k] / q[k]).ln();
+        let mut temp = (x[k] / q[k]).glibc_ln();
         values[0] += x[k] * temp;
         grads[0][k] = temp + 1.0;
         if constrain_rel_entropy {
@@ -3315,7 +2519,7 @@ fn compute_scores_from_probs(
     for i in 0..alphsize {
         for j in 0..alphsize {
             let k = i * alphsize + j;
-            scores[k] = (target_freqs[k] / (row_freqs[i] * col_freqs[j])).ln();
+            scores[k] = (target_freqs[k] / (row_freqs[i] * col_freqs[j])).glibc_ln();
         }
     }
 }
@@ -3333,8 +2537,19 @@ fn optimize_target_frequencies(
     constrain_rel_entropy: bool,
     relative_entropy: f64,
 ) -> i32 {
-    // EXPERIMENT (LOSAT_X_NEWTONEXACT): the same iteration, bit for bit, in
-    // fixed-size storage (see x_newton_exact.rs).
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:1390-1392
+    // ```c
+    //     status =
+    //         Blast_OptimizeTargetFrequencies(&NRrecord->mat_final[0][0],
+    //                                         COMPO_NUM_TRUE_AA,
+    // ```
+    // No NCBI counterpart: the assert. NCBI's only caller (above) and LOSAT's
+    // (`composition_matrix_adjust`) pass `COMPO_NUM_TRUE_AA`; the reordered forms (`x_step_bound`,
+    // `x_scaled_symmetric_product_a`, `x_factor_ltriang_pos_def_cols`, `x_solve_ltriang_pos_def_cols`)
+    // assume it (fixed-size storage for `n = 400` values and `m <= X_WC_STRIDE` rows). It does not
+    // change any value NCBI computes.
+    assert_eq!(alphsize, COMPO_NUM_TRUE_AA);
+    // The same iteration, bit for bit, in fixed-size storage (see x_newton_exact.rs).
     // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:686-687,693-696
     // ```c
     // int
@@ -3345,12 +2560,11 @@ fn optimize_target_frequencies(
     //                                 double tol,
     //                                 int maxits)
     // ```
-    // Dispatch point of LOSAT_X_NEWTONEXACT / LOSAT_X_NEWTONEXACTSHADOW: the reference path is
-    // `optimize_target_frequencies_reference`, the port of this function. The exact module handles only
-    // `alphsize == 20` with `constrain_rel_entropy`.
-    if constrain_rel_entropy && alphsize == COMPO_NUM_TRUE_AA {
-        // EXPERIMENT (LOSAT_X_NEWTONLANES / LOSAT_X_NEWTONLANESSHADOW): a result computed ahead
-        // (four problems per vector, x_newton_lanes.rs) for exactly this input.
+    // The port of this function is `optimize_target_frequencies_reference`. The exact module handles
+    // only the problem with `constrain_rel_entropy`; the port runs the other problems.
+    if constrain_rel_entropy {
+        // A result computed ahead (four problems per vector, eight on aarch64, x_newton_lanes.rs)
+        // for exactly this input.
         // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:686-687,693-696
         // ```c
         // int
@@ -3362,102 +2576,26 @@ fn optimize_target_frequencies(
         //                                 int maxits)
         // ```
         // No NCBI counterpart: the stored result was computed by the operations of this function on an
-        // input with the same bits (q, row and column sums, relative entropy); the shadow mode runs the
-        // port of this function as well and compares status and all 400 values by bits. It does not
-        // change any value NCBI computes.
-        let x_lanes_mode = super::x_newton_lanes::mode();
-        if x_lanes_mode != 0 {
-            if let Some(status) =
-                super::x_newton_lanes::take(x, q, row_sums, col_sums, relative_entropy)
-            {
-                if x_lanes_mode == 2 {
-                    let mut x_reference = vec![0.0f64; x.len()];
-                    let status_reference = optimize_target_frequencies_reference(
-                        &mut x_reference,
-                        alphsize,
-                        q,
-                        row_sums,
-                        col_sums,
-                        constrain_rel_entropy,
-                        relative_entropy,
-                    );
-                    assert_eq!(
-                        status, status_reference,
-                        "LOSAT_X_NEWTONLANESSHADOW: convergence status differs"
-                    );
-                    for (k, (a, b)) in x.iter().zip(x_reference.iter()).enumerate() {
-                        assert!(
-                            a.to_bits() == b.to_bits(),
-                            "LOSAT_X_NEWTONLANESSHADOW: x[{k}] differs: {a:e} vs {b:e}"
-                        );
-                    }
-                    super::x_newton_lanes::SHADOWED
-                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                }
-                return status;
-            }
+        // input with the same bits (q, row and column sums, relative entropy). It does not change any
+        // value NCBI computes.
+        if let Some(status) =
+            super::x_newton_lanes::take(x, q, row_sums, col_sums, relative_entropy)
+        {
+            return status;
         }
-        match super::x_newton_exact::mode() {
-            1 => {
-                // No NCBI counterpart: call counter and timer of the xstats report; it does not change any value NCBI computes.
-                let x_t0 = crate::utils::xstats::now();
-                crate::utils::xstats::add(&crate::utils::xstats::COMPO_ADJ_CALLS, 1);
-                let status = super::x_newton_exact::optimize_target_frequencies_exact(
-                    x,
-                    q,
-                    row_sums,
-                    col_sums,
-                    relative_entropy,
-                );
-                // No NCBI counterpart: timer of the xstats report; it does not change any value NCBI computes.
-                crate::utils::xstats::add_ns(&crate::utils::xstats::COMPO_NS, x_t0);
-                return status;
-            }
-            2 => {
-                // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:686-687,693-696
-                // ```c
-                // int
-                // Blast_OptimizeTargetFrequencies(double x[],
-                // ...
-                //                                 int constrain_rel_entropy,
-                //                                 double relative_entropy,
-                //                                 double tol,
-                //                                 int maxits)
-                // ```
-                // Shadow mode runs the exact module and the reference port on the same input and compares status
-                // and every target frequency by bits.
-                X_NEWTONEXACT_SHADOWED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                let mut x_fast = vec![0.0f64; x.len()];
-                let status_fast = super::x_newton_exact::optimize_target_frequencies_exact(
-                    &mut x_fast,
-                    q,
-                    row_sums,
-                    col_sums,
-                    relative_entropy,
-                );
-                let status = optimize_target_frequencies_reference(
-                    x,
-                    alphsize,
-                    q,
-                    row_sums,
-                    col_sums,
-                    constrain_rel_entropy,
-                    relative_entropy,
-                );
-                assert_eq!(
-                    status_fast, status,
-                    "LOSAT_X_NEWTONEXACTSHADOW: convergence status differs"
-                );
-                for (k, (a, b)) in x_fast.iter().zip(x.iter()).enumerate() {
-                    assert!(
-                        a.to_bits() == b.to_bits(),
-                        "LOSAT_X_NEWTONEXACTSHADOW: x[{k}] differs: {a:e} vs {b:e}"
-                    );
-                }
-                return status;
-            }
-            _ => {}
-        }
+        // No NCBI counterpart: call counter and timer of the xstats report; it does not change any value NCBI computes.
+        let x_t0 = crate::utils::xstats::now();
+        crate::utils::xstats::add(&crate::utils::xstats::COMPO_ADJ_CALLS, 1);
+        let status = super::x_newton_exact::optimize_target_frequencies_exact(
+            x,
+            q,
+            row_sums,
+            col_sums,
+            relative_entropy,
+        );
+        // No NCBI counterpart: timer of the xstats report; it does not change any value NCBI computes.
+        crate::utils::xstats::add_ns(&crate::utils::xstats::COMPO_NS, x_t0);
+        return status;
     }
     optimize_target_frequencies_reference(
         x,
@@ -3516,7 +2654,8 @@ pub(super) fn x_optimize_reference_for_test(
 //     /* Use q as the initial value for x */
 //     memcpy(x, q, n * sizeof(double));
 // ```
-// The original `optimize_target_frequencies`, renamed; it is the port of this function.
+// The port of this function, for the problems the exact module does not take (no relative-entropy
+// constraint) and the reference of the bitwise tests of `x_newton_lanes`.
 fn optimize_target_frequencies_reference(
     x: &mut [f64],
     alphsize: usize,
@@ -3569,6 +2708,10 @@ fn optimize_target_frequencies_reference(
             constrain_rel_entropy,
             relative_entropy,
         );
+        #[expect(
+            clippy::neg_cmp_op_on_partial_ord,
+            reason = "NCBI's convergence test `!(rnorm > tol)` stops on a NaN rnorm (optimize_target_freq.c:760-762); `<=` would not"
+        )]
         if !(rnorm > K_COMPO_ADJUST_ERR_TOLERANCE) {
             break;
         }
@@ -3637,27 +2780,13 @@ fn composition_matrix_adjust(
     gather_letter_probs(&mut row_probs, query_prob_std);
     gather_letter_probs(&mut col_probs, subject_prob_std);
 
-    let mut desired_re = 0.0;
-    match matrix_adjust_rule {
-        EMatrixAdjustRule::UnconstrainedRelEntropy => {}
-        EMatrixAdjustRule::RelEntropyOldMatrixNewContext => {
-            if let Some(value) =
-                entropy_old_freq_new_context(&workspace.mat_b, &row_probs, &col_probs)?
-            {
-                desired_re = value;
-            }
-        }
-        EMatrixAdjustRule::RelEntropyOldMatrixOldContext => {
-            desired_re = target_freq_entropy(&workspace.mat_b);
-        }
-        EMatrixAdjustRule::UserSpecifiedRelEntropy => {
-            desired_re = specified_re;
-        }
+    let desired_re = match matrix_adjust_rule {
+        EMatrixAdjustRule::UserSpecifiedRelEntropy => specified_re,
         _ => bail!(
             "unsupported matrix-adjust rule {:?} for composition matrix adjustment",
             matrix_adjust_rule
         ),
-    }
+    };
 
     apply_pseudocounts(
         &mut row_probs,
@@ -3728,7 +2857,7 @@ pub fn blast_composition_pvalue(lambda: f64) -> f64 {
 pub fn blast_overall_p_value(p_comp: f64, p_alignment: f64) -> f64 {
     let product = p_comp * p_alignment;
     if product > 0.0 {
-        product * (1.0 - product.ln())
+        product * (1.0 - product.glibc_ln())
     } else {
         product
     }
@@ -3895,7 +3024,7 @@ pub(crate) fn blast_adjust_scores(
 //                                         (desired_re > 0.0),
 //                                         desired_re,
 // ```
-// EXPERIMENT (LOSAT_X_NEWTONLANES): the prefix of `blast_adjust_scores` and `composition_matrix_adjust`
+// Newton lanes: the prefix of `blast_adjust_scores` and `composition_matrix_adjust`
 // up to the `optimize_target_frequencies` call, with the same helpers, arguments and order, returning
 // that call's input. `None` where the call would not reach the relative-entropy-constrained Newton
 // iteration (a composition without true amino acids, position-based or `CompositionBasedStats`,
@@ -3904,7 +3033,10 @@ pub(crate) fn blast_adjust_scores(
 // No NCBI counterpart: the input is used only to compute a result ahead of the real call, which uses
 // it only when its own input has the same bits; it does not change any value NCBI computes.
 /// The Newton input that `blast_adjust_scores` with these arguments would pass to
-/// `optimize_target_frequencies`, if it reaches the constrained iteration.
+/// `optimize_target_frequencies`, if it reaches the constrained iteration. Its `q` (the
+/// workspace's `mat_b`) is `shared_q`, made by the first call that returns an input: a caller
+/// passes one `shared_q` per workspace, so the inputs of a batch share one copy.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn x_newton_input(
     matrix_info: &BlastMatrixInfo,
     query_composition: &BlastAminoAcidComposition,
@@ -3913,6 +3045,7 @@ pub(crate) fn x_newton_input(
     subject_length: i32,
     composition_adjust_mode: BlastCompoAdjustMode,
     workspace: &BlastCompositionWorkspace,
+    shared_q: &mut Option<super::x_newton_lanes::NewtonQ>,
 ) -> Option<super::x_newton_lanes::NewtonInput> {
     if query_composition.num_true_amino_acids == 0 || subject_composition.num_true_amino_acids == 0
     {
@@ -3945,24 +3078,14 @@ pub(crate) fn x_newton_input(
     let mut col_probs = [0.0; COMPO_NUM_TRUE_AA];
     gather_letter_probs(&mut row_probs, &query_composition.prob);
     gather_letter_probs(&mut col_probs, &subject_composition.prob);
-    let mut desired_re = 0.0;
-    match matrix_adjust_rule {
-        EMatrixAdjustRule::UnconstrainedRelEntropy => {}
-        EMatrixAdjustRule::RelEntropyOldMatrixNewContext => {
-            if let Some(value) =
-                entropy_old_freq_new_context(&workspace.mat_b, &row_probs, &col_probs).ok()?
-            {
-                desired_re = value;
-            }
-        }
-        EMatrixAdjustRule::RelEntropyOldMatrixOldContext => {
-            desired_re = target_freq_entropy(&workspace.mat_b);
-        }
-        EMatrixAdjustRule::UserSpecifiedRelEntropy => {
-            desired_re = K_FIXED_RE_BLOSUM62;
-        }
+    let desired_re = match matrix_adjust_rule {
+        EMatrixAdjustRule::UserSpecifiedRelEntropy => K_FIXED_RE_BLOSUM62,
         _ => return None,
-    }
+    };
+    #[expect(
+        clippy::neg_cmp_op_on_partial_ord,
+        reason = "NCBI constrains the relative entropy only when desired_re > 0.0 (composition_adjustment.c:1396); `desired_re <= 0.0` would let NaN through"
+    )]
     if !(desired_re > 0.0) {
         return None;
     }
@@ -3978,14 +3101,17 @@ pub(crate) fn x_newton_input(
         &workspace.second_standard_freq,
         20,
     );
-    let mut q = [0.0; COMPO_NUM_TRUE_AA * COMPO_NUM_TRUE_AA];
-    for i in 0..COMPO_NUM_TRUE_AA {
-        for j in 0..COMPO_NUM_TRUE_AA {
-            q[i * COMPO_NUM_TRUE_AA + j] = workspace.mat_b[i][j];
+    let q = shared_q.get_or_insert_with(|| {
+        let mut q = [0.0; COMPO_NUM_TRUE_AA * COMPO_NUM_TRUE_AA];
+        for i in 0..COMPO_NUM_TRUE_AA {
+            for j in 0..COMPO_NUM_TRUE_AA {
+                q[i * COMPO_NUM_TRUE_AA + j] = workspace.mat_b[i][j];
+            }
         }
-    }
+        std::rc::Rc::new(q)
+    });
     Some(super::x_newton_lanes::NewtonInput {
-        q,
+        q: std::rc::Rc::clone(q),
         row: row_probs,
         col: col_probs,
         relative_entropy: desired_re,
@@ -4159,6 +3285,35 @@ fn high_pair_either_seq(
         || high_pair_frequencies(match_prob, match_length)
 }
 
+// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/compo_mode_condition.c:200-204
+// ```c
+//     angle =
+//         acos((D_m_mat * D_m_mat + D_q_mat * D_q_mat -
+//               D_m_q * D_m_q) / 2.0 / D_m_mat / D_q_mat);
+//     /* convert from radians to degrees */
+//     angle = angle * HALF_CIRCLE_DEGREES / PI;
+// ```
+// `angle > ANGLE_DEGREE_THRESHOLD` (compo_mode_condition.c:221) for this angle, decided from the
+// cosine without a libm: glibc's `acos(cosine) * HALF_CIRCLE_DEGREES / PI` (on x86-64 with FMA,
+// where NCBI wrote the tests' bytes) is above 70 exactly when the cosine is in
+// [-1, ANGLE_COSINE_LIMIT). `acos` decreases; at the limit the expression is 70.0 and one double
+// below it 70.00000000000001. Every double within 2^24 steps of the limit and 10^7 random cosines
+// in [-1, 1] give the same decision with glibc 2.35 and 2.39 (with and without their FMA
+// variants) and with musl (WASI), which also all put the limit at this double; another platform's
+// `acos` could move it by a step (`utils::glibc_fma_libm`).
+// No clamp and no zero guard: a cosine rounded below -1 or above 1, or a zero distance (NaN), is
+// outside the range, where NCBI's `acos` gives NaN and `angle > ANGLE_DEGREE_THRESHOLD` is false
+// (the relative-entropy rule).
+const ANGLE_COSINE_LIMIT: f64 = f64::from_bits(0x3fd5_e3a8_7442_b4c9); // 0.34202014306613343
+                                                                       // The limit is for these constants.
+const _: () =
+    assert!(HALF_CIRCLE_DEGREES == 180.0 && PI == 3.1415926543 && ANGLE_DEGREE_THRESHOLD == 70.0);
+
+fn matrix_adjust_rule_angle_above_threshold(d_m_mat: f64, d_q_mat: f64, d_m_q: f64) -> bool {
+    let cosine = (d_m_mat * d_m_mat + d_q_mat * d_q_mat - d_m_q * d_m_q) / 2.0 / d_m_mat / d_q_mat;
+    (-1.0..ANGLE_COSINE_LIMIT).contains(&cosine)
+}
+
 fn blast_choose_matrix_adjust_rule(
     length1: i32,
     length2: i32,
@@ -4174,36 +3329,56 @@ fn blast_choose_matrix_adjust_rule(
             Ok(EMatrixAdjustRule::UserSpecifiedRelEntropy)
         }
         BlastCompoAdjustMode::CompositionMatrixAdjust => {
-            if matrix != ScoringMatrix::Blosum62 {
-                bail!("matrix-adjust rule selection is only ported for BLOSUM62");
-            }
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/compo_mode_condition.c:188
+            // ```c
+            //     p_matrix = Blast_GetMatrixBackgroundFreq(matrix_name);
+            // ```
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/matrix_frequency_data.c:1386-1390
+            // ```c
+            //     } else {
+            //         fprintf(stderr, "matrix %s is not supported "
+            //                 "for RE based adjustment\n", matrix_name);
+            //         return NULL;
+            //     }
+            // ```
+            let Some(data) = compo_matrix_data(matrix) else {
+                bail!(
+                    "matrix {} is not supported for RE based adjustment",
+                    matrix.ncbi_name()
+                );
+            };
+            let p_matrix = data.background;
 
             let mut corr_factor = 0.0;
             for i in 0..COMPO_NUM_TRUE_AA {
-                corr_factor +=
-                    (prob_array1[i] - BLOSUM62_BG[i]) * (prob_array2[i] - BLOSUM62_BG[i]);
+                corr_factor += (prob_array1[i] - p_matrix[i]) * (prob_array2[i] - p_matrix[i]);
             }
-            let d_m_mat = blast_get_relative_entropy(prob_array2, &BLOSUM62_BG);
-            let d_q_mat = blast_get_relative_entropy(prob_array1, &BLOSUM62_BG);
+            let d_m_mat = blast_get_relative_entropy(prob_array2, p_matrix);
+            let d_q_mat = blast_get_relative_entropy(prob_array1, p_matrix);
             let d_m_q = blast_get_relative_entropy(prob_array2, prob_array1);
 
-            let angle = if d_m_mat > 0.0 && d_q_mat > 0.0 {
-                let cos_angle = ((d_m_mat * d_m_mat) + (d_q_mat * d_q_mat) - (d_m_q * d_m_q))
-                    / (2.0 * d_m_mat * d_q_mat);
-                cos_angle.clamp(-1.0, 1.0).acos().to_degrees()
-            } else {
-                0.0
-            };
+            let angle_above_threshold =
+                matrix_adjust_rule_angle_above_threshold(d_m_mat, d_q_mat, d_m_q);
 
             let len_large = (length1.max(length2)) as f64;
             let len_small = (length1.min(length2)) as f64;
             let _ = corr_factor;
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/compo_mode_condition.c:215-225
+            // ```c
+            //     if (s_HighPairEitherSeq(P_query, Len_query, P_match, Len_match)) {
+            //         which_rule = eUserSpecifiedRelEntropy;
+            //     } else {
+            //       if ((D_m_q > QUERY_MATCH_DISTANCE_THRESHOLD) &&
+            //         (len_large / len_small > LENGTH_RATIO_THRESHOLD) &&
+            //         (angle > ANGLE_DEGREE_THRESHOLD)) {
+            // ```
+            // The length ratio is not guarded either: a zero length divides to inf or NaN as in C
+            // (and `blast_adjust_scores` returns before a sequence without true amino acids).
             if high_pair_either_seq(prob_array1, length1, prob_array2, length2) {
                 Ok(EMatrixAdjustRule::UserSpecifiedRelEntropy)
             } else if d_m_q > QUERY_MATCH_DISTANCE_THRESHOLD
-                && len_small > 0.0
                 && len_large / len_small > LENGTH_RATIO_THRESHOLD
-                && angle > ANGLE_DEGREE_THRESHOLD
+                && angle_above_threshold
             {
                 Ok(EMatrixAdjustRule::CompoScaleOldMatrix)
             } else {
@@ -4216,24 +3391,7 @@ fn blast_choose_matrix_adjust_rule(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::blast_stat::composition::compute_lambda_from_score_probs;
-
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:551-572
-    // ```c
-    // s_CalcLambda(double probs[], int min_score, int max_score, double lambda0)
-    // {
-    //     return Blast_KarlinLambdaNR(&freq, lambda0);
-    // }
-    // ```
-    fn test_compute_lambda_from_score_probs(
-        score_probs: &[f64],
-        min_score: i32,
-        max_score: i32,
-        lambda0: f64,
-    ) -> Result<f64> {
-        compute_lambda_from_score_probs(score_probs, min_score, max_score, lambda0)
-            .map_err(anyhow::Error::msg)
-    }
+    use crate::core::composition_adjustment::redo_alignment::redo_calc_lambda;
 
     // NCBI composition_adjustment/composition_adjustment.c:1204-1248:
     // if (i + kCompositionMargin < left) left = i + kCompositionMargin;
@@ -4338,7 +3496,7 @@ mod tests {
                     BlastCompoAdjustMode::CompositionMatrixAdjust,
                     call[6].parse().unwrap(),
                     &mut workspace,
-                    test_compute_lambda_from_score_probs,
+                    redo_calc_lambda,
                 )
                 .unwrap()
                 .unwrap();
@@ -4398,6 +3556,291 @@ mod tests {
         assert!(info.start_freq_ratios[1][1] > 0.0);
     }
 
+    // The literals this file held before the generated tables (SC0b): BLOSUM62's joint
+    // probabilities and background frequencies (matrix_frequency_data.c:383-537) and its
+    // frequency ratios (matrix_freq_ratios.c:438-634).
+    const LITERAL_BLOSUM62_JOINT_PROBS: [[f64; COMPO_NUM_TRUE_AA]; COMPO_NUM_TRUE_AA] =
+        include!("blosum62_joint_probs.inc.rs");
+    const LITERAL_BLOSUM62_BG: [f64; COMPO_NUM_TRUE_AA] = [
+        7.4216205067993410e-02,
+        5.1614486141284638e-02,
+        4.4645808512757915e-02,
+        5.3626000838554413e-02,
+        2.4687457167944848e-02,
+        3.4259650591416023e-02,
+        5.4311925684587502e-02,
+        7.4146941452644999e-02,
+        2.6212984805266227e-02,
+        6.7917367618953756e-02,
+        9.8907868497150955e-02,
+        5.8155682303079680e-02,
+        2.4990197579643110e-02,
+        4.7418459742284751e-02,
+        3.8538003320306206e-02,
+        5.7229029476494421e-02,
+        5.0891364550287033e-02,
+        1.3029956129972148e-02,
+        3.2281512313758580e-02,
+        7.2919098205619245e-02,
+    ];
+    const LITERAL_BLOSUM62_START_FREQ_RATIOS: [[f64; COMPO_LARGEST_ALPHABET];
+        COMPO_LARGEST_ALPHABET] = include!("blosum62_start_freq_ratios.inc.rs");
+
+    fn bits<const N: usize>(values: &[f64; N]) -> [u64; N] {
+        values.map(f64::to_bits)
+    }
+
+    #[test]
+    fn generated_blosum62_data_equal_the_former_literals_bit_for_bit() {
+        let data = compo_matrix_data(ScoringMatrix::Blosum62).unwrap();
+        for i in 0..COMPO_NUM_TRUE_AA {
+            let literal = bits(&LITERAL_BLOSUM62_JOINT_PROBS[i]);
+            assert_eq!(bits(&data.joint_probs[i]), literal, "row {i}");
+            assert_eq!(bits(&BLOSUM62_JOINT_PROBS[i]), literal, "row {i}");
+        }
+        assert_eq!(bits(data.background), bits(&LITERAL_BLOSUM62_BG));
+        assert_eq!(bits(&BLOSUM62_BG), bits(&LITERAL_BLOSUM62_BG));
+        let info = build_matrix_info(ScoringMatrix::Blosum62, 0.3176).unwrap();
+        for i in 0..COMPO_LARGEST_ALPHABET {
+            let literal = bits(&LITERAL_BLOSUM62_START_FREQ_RATIOS[i]);
+            assert_eq!(bits(&data.freq_ratios[i]), literal, "row {i}");
+            assert_eq!(bits(&info.start_freq_ratios[i]), literal, "row {i}");
+        }
+    }
+
+    #[test]
+    fn eight_matrices_have_composition_data_and_identity_has_none() {
+        assert_eq!(COMPO_MATRIX_DATA.len(), 8);
+        for matrix in ScoringMatrix::ALL {
+            match compo_matrix_data(matrix) {
+                Some(data) => assert_eq!(data.name, matrix.ncbi_name()),
+                None => assert_eq!(matrix, ScoringMatrix::Identity),
+            }
+        }
+        for data in &COMPO_MATRIX_DATA {
+            let matrix = data.name.parse().unwrap();
+            assert!(build_matrix_info(matrix, 0.3).is_ok(), "{}", data.name);
+            assert!(
+                BlastCompositionWorkspace::new(matrix).is_ok(),
+                "{}",
+                data.name
+            );
+        }
+        // blast_kappa.c:657-660 and composition_adjustment.c:1316-1331 return -1.
+        assert_eq!(
+            build_matrix_info(ScoringMatrix::Identity, 0.3)
+                .unwrap_err()
+                .to_string(),
+            "composition adjustment has no frequency ratios for the IDENTITY matrix"
+        );
+        assert_eq!(
+            BlastCompositionWorkspace::new(ScoringMatrix::Identity)
+                .unwrap_err()
+                .to_string(),
+            "Matrix IDENTITY not currently supported for RE based adjustment"
+        );
+    }
+
+    #[test]
+    fn workspace_standard_frequencies_are_the_sums_of_the_joint_probabilities() {
+        let generic = BlastCompositionWorkspace::new(ScoringMatrix::Blosum62).unwrap();
+        let blosum62 = BlastCompositionWorkspace::new_blosum62();
+        for i in 0..COMPO_NUM_TRUE_AA {
+            assert_eq!(bits(&generic.mat_b[i]), bits(&blosum62.mat_b[i]));
+            assert_eq!(bits(&generic.mat_final[i]), bits(&blosum62.mat_final[i]));
+        }
+        assert_eq!(
+            bits(&generic.first_standard_freq),
+            bits(&blosum62.first_standard_freq)
+        );
+        assert_eq!(
+            bits(&generic.second_standard_freq),
+            bits(&blosum62.second_standard_freq)
+        );
+        // matrix_frequency_data.c:1406-1416 sums the joint probabilities. The matrices are
+        // symmetric, so the row and column sums are the same; they equal the background
+        // frequencies of the BLOSUM matrices and differ in the last bits for the PAM ones.
+        for data in &COMPO_MATRIX_DATA {
+            let matrix = data.name.parse().unwrap();
+            let workspace = BlastCompositionWorkspace::new(matrix).unwrap();
+            assert_eq!(
+                bits(&workspace.first_standard_freq),
+                bits(&workspace.second_standard_freq),
+                "{}",
+                data.name
+            );
+            let equal = (0..COMPO_NUM_TRUE_AA)
+                .filter(|&i| {
+                    workspace.first_standard_freq[i].to_bits() == data.background[i].to_bits()
+                })
+                .count();
+            let expected = match matrix {
+                ScoringMatrix::Pam30 | ScoringMatrix::Pam70 => 1,
+                ScoringMatrix::Pam250 => 0,
+                _ => COMPO_NUM_TRUE_AA,
+            };
+            assert_eq!(equal, expected, "{}", data.name);
+            for i in 0..COMPO_NUM_TRUE_AA {
+                assert!((workspace.first_standard_freq[i] - data.background[i]).abs() < 1.0e-15);
+            }
+        }
+    }
+
+    #[test]
+    fn matrix_adjust_rule_measures_against_the_matrix_background() {
+        // compo_mode_condition.c:188: the distances are to the matrix's background. A query
+        // with BLOSUM62's background is at distance 0 from it (no angle: the relative-entropy
+        // rule), but not from PAM30's, where the distant, four times longer match is at 87
+        // degrees (the scaling rule).
+        let mut subject = [0.8 / 19.0; COMPO_NUM_TRUE_AA];
+        subject[11] = 0.2;
+        let rule = |matrix| {
+            blast_choose_matrix_adjust_rule(
+                100,
+                400,
+                &BLOSUM62_BG,
+                &subject,
+                matrix,
+                BlastCompoAdjustMode::CompositionMatrixAdjust,
+            )
+        };
+        assert_eq!(
+            rule(ScoringMatrix::Blosum62).unwrap(),
+            EMatrixAdjustRule::UserSpecifiedRelEntropy
+        );
+        assert_eq!(
+            rule(ScoringMatrix::Pam30).unwrap(),
+            EMatrixAdjustRule::CompoScaleOldMatrix
+        );
+        assert_eq!(
+            rule(ScoringMatrix::Identity).unwrap_err().to_string(),
+            "matrix IDENTITY is not supported for RE based adjustment"
+        );
+    }
+
+    #[test]
+    fn matrix_adjust_rule_angle_follows_the_ncbi_expression() {
+        // compo_mode_condition.c:200-204. A right angle (cosine 0) and a straight one (cosine -1)
+        // are above 70 degrees.
+        assert!(matrix_adjust_rule_angle_above_threshold(0.3, 0.4, 0.5));
+        assert!(matrix_adjust_rule_angle_above_threshold(0.3, 0.2, 0.5));
+        // A cosine below -1 (a collapsed triangle) and a zero distance give NaN, not 180 or 0.
+        assert!(!matrix_adjust_rule_angle_above_threshold(
+            0.3,
+            0.2,
+            0.5000000001
+        ));
+        assert!(!matrix_adjust_rule_angle_above_threshold(0.3, 0.0, 0.3));
+        assert!(!matrix_adjust_rule_angle_above_threshold(0.0, 0.0, 0.0));
+        // Around the limit: 70.0 degrees at it, 70.00000000000001 one double below.
+        let below = f64::from_bits(ANGLE_COSINE_LIMIT.to_bits() - 1);
+        assert!((-1.0..ANGLE_COSINE_LIMIT).contains(&below));
+        assert!(!(-1.0..ANGLE_COSINE_LIMIT).contains(&ANGLE_COSINE_LIMIT));
+    }
+
+    #[cfg(all(target_os = "linux", target_env = "gnu", target_arch = "x86_64"))]
+    #[test]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "checks the limit against glibc's own acos, NCBI's"
+    )]
+    fn matrix_adjust_rule_limit_is_glibcs() {
+        // NCBI's expression with glibc's acos against the limit, for every double within 2^16
+        // steps of it and for cosines across [-1.25, 1.25].
+        let ncbi = |cosine: f64| cosine.acos() * HALF_CIRCLE_DEGREES / PI > ANGLE_DEGREE_THRESHOLD;
+        let limit = ANGLE_COSINE_LIMIT.to_bits();
+        for bits in limit - (1 << 16)..limit + (1 << 16) {
+            let cosine = f64::from_bits(bits);
+            assert_eq!(
+                ncbi(cosine),
+                (-1.0..ANGLE_COSINE_LIMIT).contains(&cosine),
+                "{cosine}"
+            );
+        }
+        for i in -125_000..=125_000 {
+            let cosine = f64::from(i) * 1e-5;
+            assert_eq!(
+                ncbi(cosine),
+                (-1.0..ANGLE_COSINE_LIMIT).contains(&cosine),
+                "{cosine}"
+            );
+        }
+    }
+
+    // The query and match distances of the rule, and the cosine of its angle.
+    fn matrix_adjust_rule_cosine(
+        query: &[f64; COMPO_NUM_TRUE_AA],
+        subject: &[f64; COMPO_NUM_TRUE_AA],
+    ) -> f64 {
+        let d_m_mat = blast_get_relative_entropy(subject, &BLOSUM62_BG);
+        let d_q_mat = blast_get_relative_entropy(query, &BLOSUM62_BG);
+        let d_m_q = blast_get_relative_entropy(subject, query);
+        (d_m_mat * d_m_mat + d_q_mat * d_q_mat - d_m_q * d_m_q) / 2.0 / d_m_mat / d_q_mat
+    }
+
+    #[test]
+    fn matrix_adjust_rule_takes_ncbi_degrees_at_the_threshold() {
+        // A query shifted from BLOSUM62's background (letter 11 up, letter 2 down) against the
+        // distant, four times longer match of the test above. At the first shift the angle is
+        // 70.0000000079 degrees with the true pi (the cosine is below cos 70 degrees,
+        // 0.3420201433256688) but 69.9999999921 with NCBI's PI (not below the limit), so NCBI
+        // takes the relative-entropy rule; past NCBI's crossing it takes the scaling rule.
+        let mut subject = [0.8 / 19.0; COMPO_NUM_TRUE_AA];
+        subject[11] = 0.2;
+        let at = |shift: f64| {
+            let mut query = BLOSUM62_BG;
+            query[11] += shift;
+            query[2] -= shift;
+            let cosine = matrix_adjust_rule_cosine(&query, &subject);
+            let rule = blast_choose_matrix_adjust_rule(
+                100,
+                400,
+                &query,
+                &subject,
+                ScoringMatrix::Blosum62,
+                BlastCompoAdjustMode::CompositionMatrixAdjust,
+            )
+            .unwrap();
+            (cosine, rule)
+        };
+        let (cosine, rule) = at(0.03708335181724542);
+        assert!(
+            (ANGLE_COSINE_LIMIT..0.3420201433256688).contains(&cosine),
+            "{cosine}"
+        );
+        assert_eq!(rule, EMatrixAdjustRule::UserSpecifiedRelEntropy);
+        let (_, rule) = at(0.03708335187554269);
+        assert_eq!(rule, EMatrixAdjustRule::CompoScaleOldMatrix);
+    }
+
+    #[test]
+    fn matrix_adjust_rule_collapsed_triangle_takes_relative_entropy() {
+        // The query lies just past BLOSUM62's background on the line from the match, so the
+        // background is between the two and the triangle of distances collapses: the cosine
+        // rounds to -1.6. NCBI's acos is then NaN (the relative-entropy rule); a clamp to -1
+        // (180 degrees) would take the scaling rule. The -1.6 is the rounding of `a / temp` in
+        // the 2e-9 query distance (IEEE division, the same on every platform); a libm's log
+        // error there is about 1e-24, six orders below the squared distance.
+        let mut subject = [0.8 / 19.0; COMPO_NUM_TRUE_AA];
+        subject[11] = 0.2;
+        let query: [f64; COMPO_NUM_TRUE_AA] =
+            std::array::from_fn(|i| BLOSUM62_BG[i] - 1.4e-8 * (subject[i] - BLOSUM62_BG[i]));
+        let cosine = matrix_adjust_rule_cosine(&query, &subject);
+        assert!(cosine < -1.0, "{cosine}");
+        assert_eq!(
+            blast_choose_matrix_adjust_rule(
+                100,
+                400,
+                &query,
+                &subject,
+                ScoringMatrix::Blosum62,
+                BlastCompoAdjustMode::CompositionMatrixAdjust,
+            )
+            .unwrap(),
+            EMatrixAdjustRule::UserSpecifiedRelEntropy
+        );
+    }
+
     #[test]
     fn test_blast_composition_pvalue_clamps_left_tail() {
         assert_eq!(
@@ -4410,7 +3853,7 @@ mod tests {
     fn test_blast_overall_p_value_matches_fisher_style_formula() {
         let combined = blast_overall_p_value(0.2, 0.3);
         let product = 0.06f64;
-        assert!((combined - (product * (1.0 - product.ln()))).abs() < 1.0e-12);
+        assert!((combined - (product * (1.0 - product.glibc_ln()))).abs() < 1.0e-12);
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:686-687,693-696
@@ -4426,7 +3869,7 @@ mod tests {
     // The ignored test times the port of this function against `optimize_target_frequencies_exact`
     // and checks the last result bit for bit.
     /// Timing of the Newton kernels on realistic inputs (run with --ignored --nocapture;
-    /// LOSAT_X_COMPFAST selects the reference variant, LOSAT_X_NEWTONEXACT_LEVEL the exact one).
+    /// LOSAT_X_NEWTONEXACT_LEVEL selects the vector width of the exact one).
     #[test]
     #[ignore]
     fn x_bench_newton_kernels() {
@@ -4523,7 +3966,7 @@ mod tests {
             BlastCompoAdjustMode::CompositionMatrixAdjust,
             0,
             &mut workspace,
-            test_compute_lambda_from_score_probs,
+            redo_calc_lambda,
         )
         .unwrap()
         .expect("adjusted matrix result");
@@ -4553,7 +3996,7 @@ mod tests {
             BlastCompoAdjustMode::CompositionMatrixAdjust,
             0,
             &mut workspace,
-            test_compute_lambda_from_score_probs,
+            redo_calc_lambda,
         )
         .unwrap();
         assert!(adjusted.is_none());
@@ -4585,5 +4028,158 @@ mod tests {
 
         assert!((scores[E_BCHAR][E_XCHAR] - (-15.0)).abs() < 1.0e-12);
         assert!((scores[E_XCHAR][E_BCHAR] - (-10.0)).abs() < 1.0e-12);
+    }
+
+    /// NCBI's `Blast_CalcLambdaFullPrecision`, statement by statement. The
+    /// third value counts the Newton steps it refused because f did not fall
+    /// below 0.9 of the previous iteration's f (`fold`).
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:220-334
+    // ```c
+    // for (k = 0;  k < max_iterations;  k++) {
+    //     double fold = f;            /* previous value of f */
+    //     ...
+    //     if ((was_newton && fabs(f) > .9 * fabs(fold)) || slope >= 0) {
+    //         x = (left + right)/2;  /* bisect */
+    // ```
+    fn ncbi_calc_lambda_full_precision(
+        score: &[Vec<f64>],
+        alphsize: usize,
+        row_prob: &[f64],
+        col_prob: &[f64],
+    ) -> (f64, usize, usize) {
+        let mut f = 4.0;
+        let mut left = 0.0;
+        let mut right = 1.0;
+        let mut x = 0.367879441171f64;
+        let mut is_newton = false;
+        let mut max_score = COMPO_SCORE_MIN as f64;
+        let mut avg_score = 0.0;
+        for i in 0..alphsize {
+            for j in 0..alphsize {
+                if row_prob[i] == 0.0 || col_prob[j] == 0.0 {
+                    continue;
+                }
+                if max_score < score[i][j] {
+                    max_score = score[i][j];
+                }
+                avg_score += row_prob[i] * col_prob[j] * score[i][j];
+            }
+        }
+        assert!(max_score > 0.0 && avg_score < 0.0, "lambda must exist");
+        let mut fold_refusals = 0;
+        let mut k = 0;
+        while k < K_LAMBDA_ITERATION_LIMIT {
+            let fold = f;
+            let lambda = -x.glibc_ln();
+            let was_newton = is_newton;
+            let x_pow_max_score = (-max_score * lambda).glibc_exp();
+            f = -x_pow_max_score;
+            let mut slope = max_score * f / x;
+            for i in 0..alphsize {
+                for j in 0..alphsize {
+                    if row_prob[i] == 0.0 || col_prob[j] == 0.0 {
+                        continue;
+                    }
+                    let ff = if max_score != score[i][j] {
+                        let diff_score = max_score - score[i][j];
+                        let ff = row_prob[i] * col_prob[j] * (-lambda * diff_score).glibc_exp();
+                        slope += diff_score * ff / x;
+                        ff
+                    } else {
+                        row_prob[i] * col_prob[j]
+                    };
+                    f += ff;
+                }
+            }
+            if f > 0.0 {
+                left = x;
+            } else if f < 0.0 {
+                right = x;
+            } else {
+                break;
+            }
+            if right - left <= 2.0 * left * (1.0 - right) * K_LAMBDA_ERROR_TOLERANCE
+                && (f / x_pow_max_score).abs() <= K_LAMBDA_FUNCTION_TOLERANCE
+            {
+                x = (left + right) / 2.0;
+                break;
+            }
+            let f_fell_too_little = was_newton && f.abs() > 0.9 * fold.abs();
+            if f_fell_too_little || slope >= 0.0 {
+                if f_fell_too_little && slope < 0.0 {
+                    fold_refusals += 1;
+                }
+                x = (left + right) / 2.0;
+            } else {
+                let p = -f / slope;
+                let y = x + p;
+                if y <= left || y >= right {
+                    x = (left + right) / 2.0;
+                } else {
+                    is_newton = true;
+                    x = y;
+                    if p.abs() <= K_LAMBDA_ERROR_TOLERANCE * x * (1.0 - x)
+                        && (f / x_pow_max_score).abs() <= K_LAMBDA_FUNCTION_TOLERANCE
+                    {
+                        break;
+                    }
+                }
+            }
+            k += 1;
+        }
+        let lambda = if k < K_LAMBDA_ITERATION_LIMIT {
+            -x.glibc_ln()
+        } else {
+            -1.0
+        };
+        (lambda, k, fold_refusals)
+    }
+
+    // The two matrices make NCBI refuse one Newton step because f did not
+    // fall below 0.9 of the previous f. Comparing with -x^max_score instead
+    // (the order LOSAT had before) takes 6 and 5 iterations, and the first
+    // lambda differs in its last bits.
+    #[test]
+    fn calc_lambda_full_precision_compares_f_with_the_previous_iteration_like_ncbi() {
+        let cases = [
+            (
+                "a",
+                [[-2.0, -6.0], [-2.0, 4.0]],
+                [5.0 / 7.0, 2.0 / 7.0],
+                [2.0 / 3.0, 1.0 / 3.0],
+                3,
+            ),
+            ("b", [[-4.0, -5.0], [-4.0, 4.0]], [0.8, 0.2], [0.5, 0.5], 4),
+        ];
+        for (name, matrix, rows, cols, iterations) in cases {
+            let score: Vec<Vec<f64>> = matrix.iter().map(|row| row.to_vec()).collect();
+            let mut row_prob = [0.0; COMPO_NUM_TRUE_AA];
+            let mut col_prob = [0.0; COMPO_NUM_TRUE_AA];
+            row_prob[..2].copy_from_slice(&rows);
+            col_prob[..2].copy_from_slice(&cols);
+
+            let (ncbi_lambda, ncbi_iterations, fold_refusals) =
+                ncbi_calc_lambda_full_precision(&score, 2, &row_prob, &col_prob);
+            assert_eq!(fold_refusals, 1, "case {name} reaches the refusal");
+            assert_eq!(ncbi_iterations, iterations, "case {name}");
+
+            let (lambda, iter_count) =
+                calc_lambda_full_precision_from_scores(&score, 2, &row_prob, &col_prob);
+            assert_eq!(iter_count, ncbi_iterations, "case {name} iterations");
+            assert_eq!(
+                lambda.to_bits(),
+                ncbi_lambda.to_bits(),
+                "case {name}: lambda {lambda} vs NCBI {ncbi_lambda}"
+            );
+
+            // lambda solves sum_ij p_i q_j exp(lambda s_ij) = 1.
+            let mut phi = -1.0;
+            for i in 0..2 {
+                for j in 0..2 {
+                    phi += rows[i] * cols[j] * (lambda * matrix[i][j]).glibc_exp();
+                }
+            }
+            assert!(phi.abs() <= 1.0e-12, "case {name}: phi {phi}");
+        }
     }
 }

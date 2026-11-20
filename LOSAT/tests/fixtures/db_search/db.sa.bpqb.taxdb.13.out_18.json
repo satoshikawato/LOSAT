@@ -1,0 +1,70 @@
+{
+  "BlastOutput2": {
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/paja_taxid"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 0.1,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_18",
+          "query_title": "BDT62575.1 wsv137-like protein [Metapenaeus ensis majanivirus]",
+          "query_len": 421,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|16",
+                  "accession": "16",
+                  "title": "BDT63514.1 wsv137-like protein [Pasiphaea japonica whispovirus]",
+                  "taxid": 10090,
+                  "sciname": "Mus musculus"
+                }
+              ],
+              "len": 309,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 48.521,
+                  "score": 114,
+                  "evalue": 1.62936e-08,
+                  "identity": 41,
+                  "positive": 57,
+                  "query_from": 297,
+                  "query_to": 402,
+                  "hit_from": 181,
+                  "hit_to": 296,
+                  "align_len": 119,
+                  "gaps": 16,
+                  "qseq": "KINGNPINIYEYDRNDIIAIHNFFSS----------STFHKVHCCNPKHNDRNPSMHLYLKKNVW-YSLIDKWLLTRDEIDRLQMEEDQAINSNMTRFRNFNIILFILSAHCFA--CNY",
+                  "hseq": "KIAGENLQDLKYDDQAINKVRDLFSILGSAMPSEDIKTYRR--CINPKHNDNNPSMKLTLRPYYWKYSKIIKSKLTDEQNATLEDKYNEGYVQNYT-IAGKDIILFCVHATCFSNNCRY",
+                  "midline": "KI G  +   +YD   I  + + FS            T+ +  C NPKHND NPSM L L+   W YS I K  LT ++   L+ + ++    N T     +IILF + A CF+  C Y"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 86,
+            "db_len": 66738,
+            "hsp_len": 67,
+            "eff_space": 21585504,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          }
+        }
+      }
+    }
+  }
+}

@@ -910,8 +910,8 @@ fn generated_line(rng: &mut Rng, out: &mut Vec<u8>) {
     ];
     const RESIDUES: &[u8] = b"ACGTACGTACGTNacgtnURYE*-;  1x\t";
     match rng.below(10) {
-        0 | 1 => out.extend_from_slice(*rng.pick(&DEFLINES)),
-        2 | 3 => out.extend_from_slice(*rng.pick(&OTHER)),
+        0 | 1 => out.extend_from_slice(rng.pick::<&[u8]>(&DEFLINES)),
+        2 | 3 => out.extend_from_slice(rng.pick::<&[u8]>(&OTHER)),
         _ => {
             for _ in 0..rng.below(90) {
                 out.push(*rng.pick(RESIDUES));
@@ -941,7 +941,7 @@ fn generated_input(rng: &mut Rng, large: bool) -> Vec<u8> {
         }
         if rng.below(if large { 60 } else { 8 }) == 0 {
             // An embedded line end of another style inside the line.
-            text.extend_from_slice(*rng.pick(&LINE_ENDS));
+            text.extend_from_slice(rng.pick::<&[u8]>(&LINE_ENDS));
             for _ in 0..rng.below(40) {
                 text.push(*rng.pick(b"ACGT-"));
             }
@@ -987,16 +987,16 @@ fn window_boundary_input(window: usize, offset: usize, tail: usize, end: &[u8]) 
 // the reader with its bulk paths off (one byte at a time).
 #[test]
 fn bytes_read_as_a_file_with_the_same_bytes() {
-    let path = std::env::temp_dir().join(format!(
+    let path = crate::utils::test_dir::temp_dir().join(format!(
         "losat-fasta-reader-bytes-vs-file-{}",
-        std::process::id()
+        crate::utils::test_dir::process_id()
     ));
     let configs = [
         ReaderConfig::query("BLASTN", false, false),
         ReaderConfig::subject("BLASTP", true, false),
         ReaderConfig::query("TBLASTX", false, true),
     ];
-    let mut check = |bytes: &[u8], what: &str| {
+    let check = |bytes: &[u8], what: &str| {
         std::fs::write(&path, bytes).unwrap();
         for config in configs {
             let from_bytes = outcome(FastaInputSource::from_bytes(bytes, config));
@@ -1030,53 +1030,6 @@ fn bytes_read_as_a_file_with_the_same_bytes() {
         check(&generated_input(&mut rng, true), &format!("large {case}"));
     }
     std::fs::remove_file(&path).unwrap();
-}
-
-/// Reader-only speed against `bio::io::fasta` (port plan R1), median of three runs per
-/// file. Run with `LOSAT_FASTA_READER_BENCH=<file>[,<file>...] cargo test --release --lib
-/// fasta_reader::tests::reader_speed -- --ignored --nocapture`.
-#[test]
-#[ignore]
-fn reader_speed_against_bio() {
-    let Ok(files) = std::env::var("LOSAT_FASTA_READER_BENCH") else {
-        return;
-    };
-    let median = |mut times: Vec<f64>| {
-        times.sort_by(f64::total_cmp);
-        times[times.len() / 2]
-    };
-    for path in files.split(',') {
-        let (mut reader_times, mut bio_times) = (Vec::new(), Vec::new());
-        for _ in 0..3 {
-            let start = std::time::Instant::now();
-            let mut source = FastaInputSource::from_file(
-                std::fs::File::open(path).unwrap(),
-                ReaderConfig::subject("BLASTN", false, false),
-            );
-            let records = read_all(&mut source, &mut |_| Ok(())).unwrap();
-            reader_times.push(start.elapsed().as_secs_f64());
-            let reader_letters: usize = records.iter().map(|record| record.sequence.len()).sum();
-            let reader_records = records.len();
-            drop(records);
-            let start = std::time::Instant::now();
-            let records: Vec<bio::io::fasta::Record> = bio::io::fasta::Reader::from_file(path)
-                .unwrap()
-                .records()
-                .map(Result::unwrap)
-                .collect();
-            bio_times.push(start.elapsed().as_secs_f64());
-            let bio_letters: usize = records.iter().map(|record| record.seq().len()).sum();
-            assert_eq!(
-                (reader_records, reader_letters),
-                (records.len(), bio_letters)
-            );
-        }
-        let (reader, bio) = (median(reader_times), median(bio_times));
-        println!(
-            "reader_speed\t{path}\treader {reader:.3} s\tbio {bio:.3} s\tratio {:.2}",
-            reader / bio
-        );
-    }
 }
 
 /// The exit code and message of a program error (`crate::cli::NativeError`).
@@ -1155,6 +1108,85 @@ fn read_subjects_writes_messages_per_record_and_stops_at_a_range_past_the_end() 
     assert_eq!(without_range, records);
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:209-214 and
+// c++/src/app/blast/blast_app_util.hpp:172-176 (`GetAllSeqs` turns the reader's `eNoDefline`
+// into a `CInputException`: `BLAST query/options error: ... line N`, the NUL of `ends`, then the
+// manual's line, exit 1); c++/src/objtools/readers/fasta.cpp:391-396 (N is the reader's line).
+// A query read keeps the reader's own error (`GetNextSeqBatch` rethrows it).
+#[test]
+fn subjects_without_a_first_defline_end_with_the_input_error_of_get_all_seqs() {
+    for (input, line) in [
+        (&b"ACGT\n>s1\nACGT\n"[..], 1),
+        (b"ACGT", 1),
+        (b";c\n\n#x\nACGT\n>s1\nACGT\n", 4),
+        (b"   \nACGT\n>s1\nACGT\n", 2),
+        (b"  ACGT\r\n>s1\r\nACGT\r\n", 1),
+        (b">?5\nACGT\n>s1\nACGT\n", 1),
+        (b";c\n>?5\nACGT\n", 2),
+    ] {
+        let text = String::from_utf8_lossy(input);
+        for data_loaders in [false, true] {
+            let subject =
+                ReaderConfig::subject("BLASTN", false, data_loaders).with_parse_deflines(true);
+            let error = read_subjects(
+                &mut FastaInputSource::from_bytes(input, subject),
+                None,
+                &mut |_| Ok(()),
+            )
+            .unwrap_err();
+            assert_eq!(
+                native(&error),
+                (
+                    1,
+                    format!(
+                        "BLAST query/options error: Query input doesn't start with a defline or \
+                         comment, line {line}\0\nPlease refer to the BLAST+ user manual.\n"
+                    )
+                ),
+                "{text:?}"
+            );
+            let query =
+                ReaderConfig::query("BLASTN", false, data_loaders).with_parse_deflines(true);
+            let error = FastaInputSource::from_bytes(input, query)
+                .next_sequence(&mut |_| Ok(()))
+                .unwrap_err();
+            assert!(
+                matches!(
+                    &error,
+                    ReadError::Parse {
+                        code: ParseErrorCode::NoDefline,
+                        line: at,
+                        ..
+                    } if *at == line
+                ),
+                "{text:?} {error:?}"
+            );
+            assert_eq!(
+                native(&error.into_app_error()),
+                (
+                    1,
+                    format!(
+                        "BLAST query error: CFastaReader: Input doesn't start with a defline or \
+                         comment around line {line}\n"
+                    )
+                ),
+                "{text:?}"
+            );
+        }
+    }
+    // Without -parse_deflines the first letters are a record without a defline.
+    let records = read_subjects(
+        &mut FastaInputSource::from_bytes(
+            b"ACGT\n>s1\nACGT\n",
+            ReaderConfig::subject("BLASTN", false, false),
+        ),
+        None,
+        &mut |_| Ok(()),
+    )
+    .unwrap();
+    assert_eq!(records.len(), 2);
+}
+
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:181-184 (a reader
 // exception while the subjects are read is `BLAST query error: <msg>`, exit 1; the
 // messages of the records before it were written).
@@ -1225,9 +1257,9 @@ fn read_subjects_reader_errors_end_the_program() {
 // either fails (empty) or the position is restored).
 #[test]
 fn stream_is_empty_reads_files_and_never_pipes() {
-    let path = std::env::temp_dir().join(format!(
+    let path = crate::utils::test_dir::temp_dir().join(format!(
         "losat-fasta-reader-stream-is-empty-{}",
-        std::process::id()
+        crate::utils::test_dir::process_id()
     ));
     let config = ReaderConfig::query("BLASTN", false, false);
     for (bytes, empty) in [
@@ -1274,13 +1306,13 @@ fn stream_is_empty_reads_files_and_never_pipes() {
 fn standard_input_refills_one_byte_and_keeps_the_tail() {
     let text = b">first\r\nTC-TTGGCTCAATCCTAGGTGGGCATGTTTCCTAATGCCC\rTT-TTTAACGTGAGGGTTCGCGTTTTTATCCCACCTAGC\r\r\nACGTACGT\n-ACGTACGTACGTACGTACGTAC";
     let kept = b"TCTTGGCTCAATCCTAGGTGGGCATGTTTCCTAATGCCCTTTTTAACGTGAGGGTTCGCGTTTTTATCCCACCTAGCACGTACGTACGTACGTACGTACGTACGTAC";
-    let path = std::env::temp_dir().join(format!(
+    let path = crate::utils::test_dir::temp_dir().join(format!(
         "losat-fasta-reader-standard-input-{}",
-        std::process::id()
+        crate::utils::test_dir::process_id()
     ));
     std::fs::write(&path, text).unwrap();
     let config = ReaderConfig::query("BLASTN", false, false);
-    let read_source = |mut source: FastaInputSource<std::fs::File>| {
+    let read_source = |mut source: FastaInputSource<crate::blastinput::input_files::InputFile>| {
         let mut messages = Vec::new();
         let records = read_all(&mut source, &mut |message: &[u8]| {
             messages.extend_from_slice(message);
@@ -1295,8 +1327,10 @@ fn standard_input_refills_one_byte_and_keeps_the_tail() {
     ));
     assert_eq!(records[0].sequence.len(), 85);
     assert_eq!(hyphen_lines(&messages), vec![2, 3]);
-    let (records, messages) = read_source(FastaInputSource::from_standard_input(
-        std::fs::File::open(&path).unwrap(),
+    let (records, messages) = read_source(FastaInputSource::from_file(
+        crate::blastinput::input_files::InputFile::as_standard_input(
+            std::fs::File::open(&path).unwrap(),
+        ),
         config,
     ));
     assert_eq!(records[0].sequence, kept);
@@ -1309,7 +1343,10 @@ fn standard_input_refills_one_byte_and_keeps_the_tail() {
         std::io::Write::write_all(&mut writer, text).unwrap();
         drop(writer);
         let file = std::fs::File::from(std::os::fd::OwnedFd::from(reader));
-        let (records, _) = read_source(FastaInputSource::from_standard_input(file, config));
+        let (records, _) = read_source(FastaInputSource::from_file(
+            crate::blastinput::input_files::InputFile::as_standard_input(file),
+            config,
+        ));
         assert_eq!(records[0].sequence, kept);
     }
 }
@@ -1323,4 +1360,53 @@ fn cut_keeps_ncbis_record() {
     let cut = record.cut(2, 6);
     assert_eq!(cut, FastaRecord::new("Query_2", b"q2 title", b"GTac"));
     assert_eq!(InputRecord::cut(&record, 2, 6), cut);
+}
+
+#[test]
+fn cut_in_place_keeps_the_whole_letters_of_a_kept_source_as_cut_does() {
+    let mut record = FastaRecord::new("Subject_1", b"t", b"ACGTACGTAA");
+    record.source = Some(Box::new(RecordSource {
+        defline: b">t".to_vec(),
+        uncut: None,
+        ..RecordSource::default()
+    }));
+    let cut = record.cut(2, 7);
+    let mut in_place = record.clone();
+    in_place.cut_in_place(2, 7);
+    assert_eq!(in_place, cut);
+    assert_eq!(in_place.archive_letters(), b"ACGTACGTAA");
+    // A second cut keeps the letters of the first record, not those of the cut one.
+    in_place.cut_in_place(1, 3);
+    assert_eq!(in_place, cut.cut(1, 3));
+    assert_eq!(in_place.archive_letters(), b"ACGTACGTAA");
+    // Without a source nothing is kept.
+    let mut plain = FastaRecord::new("Subject_2", b"t", b"ACGTACGTAA");
+    plain.cut_in_place(2, 7);
+    assert!(plain.source.is_none());
+    assert_eq!(plain.sequence, b"GTACG");
+}
+
+// psiblast `-in_pssm -parse_deflines` (line RG Q1): NCBI BLAST+ 2.17.0 shows the PSSM query's local
+// id as the ids `-parse_deflines` reads (`Query= Query_1 a title`, `qseqid` `Query_1`, the
+// warnings' label `Query_1`); an integer local id shows as its digits.
+#[test]
+fn a_local_id_is_believed_as_parse_deflines_reads_one() {
+    use crate::seqid::model::{ObjectId, ParsedSeqId};
+    for local in ["Query_1", "5"] {
+        let id = match local.parse() {
+            Ok(number) => ObjectId::Id(number),
+            Err(_) => ObjectId::Str(local.as_bytes().to_vec()),
+        };
+        let record =
+            FastaRecord::new(local, b"a title", b"MKV").believing(vec![ParsedSeqId::Local(id)]);
+        assert_eq!(record.local_id, local);
+        assert_eq!(&*record.query_line(), format!("{local} a title").as_bytes());
+        assert_eq!(record.shown_id(), local.as_bytes());
+        assert_eq!(record.warning_id(), local.as_bytes());
+        assert!(record.believed().is_some());
+        assert_eq!(record.seq(), b"MKV");
+    }
+    let plain = FastaRecord::new("Query_1", b"a title", b"MKV");
+    assert_eq!(&*plain.query_line(), b"a title");
+    assert!(plain.believed().is_none());
 }

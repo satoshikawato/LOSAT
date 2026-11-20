@@ -1,0 +1,45 @@
+>tpg|DAA00001.1| TPA: third party
+ACGTACGTACGTACGTaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+CGT
+>gb|AAAA01000001.1|
+ACGTACGTACGTACGTaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+CGT
+>pdb|1ABC|B
+ACGTACGTACGTACGTaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+CGT
+>ref|NC_000002.1|
+ACGTACGTACGTACGTaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+CGT
+>ref|NM_000001.1|
+ACGTACGTACGTACGTaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+CGT
+>lcl|amp a & b <x> &#65
+ACGTACGTACGTACGTaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+CGT
+>lcl|lowfirst lower first letter
+ACGTACGTACGTACGTaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+CGT
+>lcl|tildes title
+ACGTACGTACGTACGTaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+CGT
+>lcl|range:5-20 ranged
+ACGTACGTACGTACGTaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+CGT
+>gi|77|emb|Z11.2|ZNAME| two ids
+ACGTACGTACGTACGTaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+CGT
+>gb|AY000001.1| TSA: tsa prefix
+ACGTACGTACGTACGTaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+CGT
+>lcl|ctrla first
+ACGTACGTACGTACGTaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+CGT
+>lcl|xm PREDICTED: something
+ACGTACGTACGTACGTaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+CGT
+>ref|XM_000001.1| model
+ACGTACGTACGTACGTaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+CGT
+>gnl|SRA|SRR1.1 read
+ACGTACGTACGTACGTaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+CGT

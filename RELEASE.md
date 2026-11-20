@@ -3,16 +3,23 @@
 This file is the short entry point for publishing LOSAT releases. The detailed
 v0.1.0 gate lives in:
 
-- [docs/v0.1.0_release_readiness_plan.md](docs/v0.1.0_release_readiness_plan.md)
+- [docs/archive/v0.1.0_release_readiness_plan.md](docs/archive/v0.1.0_release_readiness_plan.md)
 - [docs/release/v0.1.0.md](docs/release/v0.1.0.md)
-- [docs/v0.1.0_scope.md](docs/v0.1.0_scope.md)
+- [docs/archive/v0.1.0_scope.md](docs/archive/v0.1.0_scope.md)
 - [BLASTN v0.1.0 certification](docs/release/blastn_v0.1.0_certification.md)
 - [BLASTP v0.1.0 certification](docs/release/blastp_v0.1.0_certification.md)
 - [TBLASTX v0.1.0 certification](docs/release/tblastx_v0.1.0_certification.md)
 
-## v0.2.0 TLOSAN preparation
+## CHANGELOG entries
 
-The [v0.2.0 readiness record](docs/release/v0.2.0.md) defines the declared local TBLASTN scope, candidate checks, current distribution blockers, and reproducible commands. The v0.1.0 workflow and exact-SHA contract below are historical and must not be presented as a v0.2.0 artifact handoff.
+Pull requests leave their entries in [`changelog.d/`](changelog.d/README.md), one file each, not in
+`CHANGELOG.md`. Before a release names its version in `CHANGELOG.md`, run
+`python3 scripts/changelog_fragments.py collect` (it moves the entries under `## [Unreleased]`,
+newest first, and deletes the files) and commit both.
+
+## v0.2.0
+
+The [v0.2.0 release record](docs/release/v0.2.0.md) holds the scope, the platform status and the items still open. The [release test plan](docs/release/v0.2.0_certification_plan.md) lists the runs on the candidate commit and their order (section 7); v0.2.0 has its own contract (`docs/release/v0.2.0_rc_contract.json`), assembler (`LOSAT/tests/prepare_release_candidate_v020.py`) and workflow (`.github/workflows/release-readiness-v020.yml`). The v0.1.0 workflow and exact-SHA contract below are historical and must not be presented as a v0.2.0 artifact handoff.
 
 ## v0.1.0 Release Candidate Gate
 
@@ -70,7 +77,7 @@ python3 tests/compare_blastn_parity.py \
   --manifest tests/blastn_parity_manifest.tsv \
   --fresh-paired \
   --paired-output-dir /tmp/losat-blastn-v010-certification/paired-base \
-  --losat-bin target/release/LOSAT \
+  --losat-bin target/release/losat \
   --ncbi-bin /home/kawato/tools/ncbi-blast-oracle/ncbi-blast-2.17.0+/bin/blastn
 python3 tests/certify_blastn_v010.py \
   --manifest tests/blastn_parity_manifest.tsv \
@@ -86,8 +93,10 @@ python LOSAT/tests/audit_tblastx_v010.py \
 
 ## Artifact Gate
 
-Run `.github/workflows/release-readiness.yml` manually with the exact committed
-candidate SHA. Leave `run_integrated_certification` false unless the post-merge
+Run `.github/workflows/release-readiness.yml` manually on the branch whose head is
+the exact committed candidate SHA (`--ref <branch> -f candidate_sha=<SHA>`; the
+workflow checks out the dispatched commit and fails early when it is not the
+candidate). Leave `run_integrated_certification` false unless the post-merge
 gate identifies an output-affecting runtime/build/contract change after the
 certified lineage.
 

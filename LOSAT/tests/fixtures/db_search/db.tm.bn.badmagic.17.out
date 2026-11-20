@@ -1,0 +1,7 @@
+@HD	VN:1.2	SO:coordinate	GO:reference
+@SQ	SN:Query_1	LN:480
+@SQ	SN:Query_3	LN:230
+@PG	ID:0	VN:2.17.0+	CL:/home/kawato/micromamba/bin/blastn -db tests/db_search/x16_ntaxid -query tests/db_search/x16_ntaxid_qwarn.fna -outfmt 17 -num_threads 1 	PN:blastn
+BL_ORD_ID:0	0	Query_1	31	255	45H200M4D100M2I119M22H	*	0	0	*	*	AS:i:329	EV:f:2.60916e-178	NM:i:6	PI:f:94.03	BS:f:608.668
+BL_ORD_ID:1	16	Query_1	36	255	25H146M2I4M1I94M2D1M4D164M40H	*	0	0	*	*	AS:i:242	EV:f:6.01914e-130	NM:i:9	PI:f:88.26	BS:f:448.01
+BL_ORD_ID:0	0	Query_3	1	255	115H130M4D96M147H	*	0	0	*	*	AS:i:171	EV:f:8.30496e-91	NM:i:4	PI:f:93.36	BS:f:316.897

@@ -1,17 +1,18 @@
-//! blastp's redone HSP lists with `LOSAT_X_BPREDOFIT` (`src/algorithm/blastp/x_redo_fit.rs`) on
-//! whole searches.
+//! blastp's redone HSP lists (`src/algorithm/blastp/x_redo_fit.rs`) on whole searches.
 //!
-//! The switch is in the strict set (`src/utils/xswitch.rs`): it is on by default, unless its
-//! variable is `0`, or `LOSAT_X_DEFAULT=0` and its variable is not set. With it on, the
-//! composition-based redo builds each redone HSP list with room for exactly its alignments. Every
-//! test states the default it runs with: the reference is `LOSAT_X_DEFAULT=0` (every switch off)
-//! and the searches with the switch on are the default (with `LOSAT_X_BPQBLOCK=0` where one line
-//! per search is counted) and `LOSAT_X_DEFAULT=0` with `LOSAT_X_BPREDOFIT=1`, the run the
-//! variable gave before it joined the set; `LOSAT_X_BPREDOFIT=0` gives no line. These tests
-//! compare the reports, alone and with the block search of `LOSAT_X_BPQBLOCK`, at one and four
-//! threads, and check from the
+//! The composition-based redo builds each redone HSP list with room for exactly its alignments.
+//! Every test states the default it runs with: the reference is the one-thread search of all
+//! queries (`LOSAT_X_BPQBLOCK=0`, where one line per search is counted). These tests compare the
+//! reports, alone and with the block search of `LOSAT_X_BPQBLOCK`, at one, four, eight and sixteen
+//! threads, with the reference (that the reports equal NCBI's is the business of the frozen
+//! fixtures), and check from the
 //! `[TIMING] x_bpredofit: lists=<n> hsps=<m>` lines that lists were built that way, not only that
 //! the report is equal.
+//! The switch acts on each query's lists, so three queries of the fixture are enough (`queries`),
+//! each its own query batch (`BATCH`); the block test sets the blocks' letters so that there are
+//! two and three blocks. `blastp_redo_par.rs` runs all the fixture's queries (batches of 3,000
+//! letters) at one and four threads: a query without a preliminary list and batches of many
+//! queries.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:321-356
 //! ```c
@@ -25,27 +26,54 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+mod temp_support;
+use temp_support::TempFile;
+
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fasta")
         .join(name)
 }
 
-const DEFAULT_OFF: (&str, &str) = ("LOSAT_X_DEFAULT", "0");
-const SWITCH_OFF: (&str, &str) = ("LOSAT_X_BPREDOFIT", "0");
 const BLOCKS_OFF: (&str, &str) = ("LOSAT_X_BPQBLOCK", "0");
+/// Each query its own batch: the three queries of `queries` have 629, 944 and 918 letters.
+const BATCH: (&str, &str) = ("BATCH_SIZE", "500");
 
-/// One blastp run of the fixture pair (two related nimavirus proteomes) with the given variables
-/// as its only `LOSAT_*` variables that choose a code path, and `extra` arguments.
-/// `LOSAT_X_DEFAULT` of the test's own environment is dropped as well: every test states the
-/// default it runs with.
+/// Three records of the fixture's query proteome (`MeenMJNV.faa`) from BDT62583.1 on, written to a
+/// directory of the test `tag` (removed with the file when the value is dropped): BDT62583.1 (629
+/// letters), which has preliminary matches but none within the E-value after the redo (no hits),
+/// then BDT62584.1 (944) and BDT62585.1 (918), which have hits.
+fn queries(tag: &str) -> TempFile {
+    let text = std::fs::read_to_string(fixture("MeenMJNV.faa")).unwrap();
+    let start = text
+        .find(">BDT62583.1 ")
+        .expect("the record is in the fixture");
+    let mut end = start;
+    for _ in 0..3 {
+        end = text[end + 1..]
+            .find("\n>")
+            .map_or(text.len(), |at| end + 1 + at + 1);
+    }
+    let path = TempFile::new(&format!("losat-bpredofit-{tag}"), "queries.faa");
+    std::fs::write(&path, &text[start..end]).unwrap();
+    path
+}
+
+/// One blastp run of `query` against the fixture's subject proteome (`MejoMJNV.faa`, a nimavirus
+/// related to the queries') with the given variables as its only `LOSAT_*` variables that choose
+/// a code path, and `extra` arguments.
 /// `LOSAT_BLASTX_WORKER_LOG` stays: a binary built with the `blastx-worker-probe` feature
 /// (`cargo test --all-features`, as in CI) needs that file name as soon as a search has more than
 /// one thread, and it selects nothing; without the caller's value a file of the tests is named.
 /// `BATCH_SIZE` is the test's own. The run must exit with 0. Returns the standard output and the
 /// (lists, HSPs) that the `[TIMING] x_bpredofit` lines report, one per search of a query set.
-fn blastp(threads: u32, vars: &[(&str, &str)], extra: &[&str]) -> (Vec<u8>, Vec<(usize, usize)>) {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
+fn blastp(
+    query: &Path,
+    threads: u32,
+    vars: &[(&str, &str)],
+    extra: &[&str],
+) -> (Vec<u8>, Vec<(usize, usize)>, Option<TempFile>) {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
         if (text.starts_with("LOSAT_") && name != "LOSAT_BLASTX_WORKER_LOG")
@@ -56,16 +84,19 @@ fn blastp(threads: u32, vars: &[(&str, &str)], extra: &[&str]) -> (Vec<u8>, Vec<
             command.env_remove(name);
         }
     }
-    if std::env::var_os("LOSAT_BLASTX_WORKER_LOG").is_none() {
-        command.env(
-            "LOSAT_BLASTX_WORKER_LOG",
-            std::env::temp_dir().join("losat-bpredofit-worker.log"),
-        );
-    }
+    // A worker log of this run when the environment names none: returned with the result, removed
+    // when the caller drops it, and kept when the test panics.
+    let log = std::env::var_os("LOSAT_BLASTX_WORKER_LOG")
+        .is_none()
+        .then(|| {
+            let log = TempFile::keep_on_failure("losat-bpredofit-worker", "worker.log");
+            command.env("LOSAT_BLASTX_WORKER_LOG", &log);
+            log
+        });
     let output = command
         .arg("blastp")
         .arg("-query")
-        .arg(fixture("MeenMJNV.faa"))
+        .arg(query)
         .arg("-subject")
         .arg(fixture("MejoMJNV.faa"))
         .args(["-evalue", "0.001"])
@@ -91,73 +122,52 @@ fn blastp(threads: u32, vars: &[(&str, &str)], extra: &[&str]) -> (Vec<u8>, Vec<
             )
         })
         .collect();
-    (output.stdout, fitted)
+    (output.stdout, fitted, log)
 }
 
 #[test]
-fn fitted_redone_lists_give_the_reports_of_pushed_lists() {
-    let batch = ("BATCH_SIZE", "3000");
+fn fitted_redone_lists_give_the_reports_of_the_one_thread_search() {
+    let query = queries("reports");
     for outfmt in ["6", "0"] {
-        for threads in [1, 4] {
-            let (reference, reference_fitted) =
-                blastp(threads, &[batch, DEFAULT_OFF], &["-outfmt", outfmt]);
-            assert!(!reference.is_empty(), "the fixture pair has a report");
+        let (reference, _, _log) = blastp(&query, 1, &[BATCH, BLOCKS_OFF], &["-outfmt", outfmt]);
+        assert!(!reference.is_empty(), "the queries have a report");
+        for threads in [1, 4, 8, 16] {
+            let vars = &[BATCH, BLOCKS_OFF][..];
+            let (report, fitted, _log) = blastp(&query, threads, vars, &["-outfmt", outfmt]);
             assert!(
-                reference_fitted.is_empty(),
-                "no line with LOSAT_X_DEFAULT=0"
+                report == reference,
+                "{vars:?} outfmt {outfmt} threads {threads}: the report differs"
             );
-            let (report, fitted) = blastp(
-                threads,
-                &[batch, BLOCKS_OFF, SWITCH_OFF],
-                &["-outfmt", outfmt],
+            assert_eq!(
+                fitted.len(),
+                1,
+                "{vars:?} outfmt {outfmt} threads {threads}: {fitted:?}"
             );
-            assert!(report == reference, "the switch off: the report differs");
-            assert!(fitted.is_empty(), "no line with the switch off: {fitted:?}");
-            for vars in [
-                &[batch, BLOCKS_OFF][..],
-                &[batch, DEFAULT_OFF, ("LOSAT_X_BPREDOFIT", "1")][..],
-            ] {
-                let (report, fitted) = blastp(threads, vars, &["-outfmt", outfmt]);
-                assert!(
-                    report == reference,
-                    "{vars:?} outfmt {outfmt} threads {threads}: the report differs"
-                );
-                assert_eq!(
-                    fitted.len(),
-                    1,
-                    "{vars:?} outfmt {outfmt} threads {threads}: {fitted:?}"
-                );
-                let (lists, hsps) = fitted[0];
-                assert!(
-                    lists > 0 && hsps >= lists,
-                    "{vars:?} outfmt {outfmt} threads {threads}: {fitted:?}"
-                );
-            }
+            let (lists, hsps) = fitted[0];
+            assert!(
+                lists > 0 && hsps >= lists,
+                "{vars:?} outfmt {outfmt} threads {threads}: {fitted:?}"
+            );
         }
     }
 }
 
 #[test]
 fn fitted_redone_lists_in_query_blocks_give_the_rows_of_the_search_of_all_queries() {
-    let batch = ("BATCH_SIZE", "3000");
-    for threads in [1, 4] {
-        let (reference, _) = blastp(threads, &[batch, DEFAULT_OFF], &["-outfmt", "6"]);
-        // The default blocks (50,000 letters; the fixture's queries have 77,448), one batch per
-        // block, and the run the two variables gave before they joined the set.
-        for vars in [
-            &[batch][..],
-            &[batch, ("LOSAT_X_BPQBLOCK", "1")][..],
-            &[
-                batch,
-                DEFAULT_OFF,
-                ("LOSAT_X_BPQBLOCK", "1"),
-                ("LOSAT_X_BPREDOFIT", "1"),
-            ][..],
+    let query = queries("blocks");
+    let (reference, _, _log) = blastp(&query, 1, &[BATCH, BLOCKS_OFF], &["-outfmt", "6"]);
+    for threads in [1, 4, 8, 16] {
+        // Blocks of 1,500 letters (BDT62583.1 and BDT62584.1, two batches, then BDT62585.1), as the
+        // default blocks of 50,000 letters hold several batches; and one batch per block.
+        for (vars, blocks) in [
+            (&[BATCH, ("LOSAT_X_BPQBLOCK", "1500")][..], 2),
+            (&[BATCH, ("LOSAT_X_BPQBLOCK", "1")][..], 3),
         ] {
-            let (rows, fitted) = blastp(threads, vars, &["-outfmt", "6"]);
+            let (rows, fitted, _log) = blastp(&query, threads, vars, &["-outfmt", "6"]);
             assert!(rows == reference, "threads {threads} {vars:?}: rows differ");
-            assert!(
-                fitted.len() > 1,
+            assert_eq!(
+                fitted.len(),
+                blocks,
                 "threads {threads} {vars:?}: one line per block, {fitted:?}"
             );
             assert!(

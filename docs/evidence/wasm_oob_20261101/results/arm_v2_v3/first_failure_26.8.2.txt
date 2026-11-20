@@ -1,0 +1,9 @@
+RuntimeError: memory access out of bounds
+    at losat-00404be369eef48d.wasm.dlmalloc (wasm://wasm/losat-00404be369eef48d.wasm-0311fa0a:wasm-function[9147]:0x9ced15)
+    at losat-00404be369eef48d.wasm.malloc (wasm://wasm/losat-00404be369eef48d.wasm-0311fa0a:wasm-function[9146]:0x9ce450)
+    at losat-00404be369eef48d.wasm._ZN5alloc7raw_vec20RawVecInner$LT$A$GT$11finish_grow17h3791bcbff9ff1fddE (wasm://wasm/losat-00404be369eef48d.wasm-0311fa0a:wasm-function[274]:0x46f7b)
+    at losat-00404be369eef48d.wasm._ZN5alloc7raw_vec20RawVecInner$LT$A$GT$7reserve21do_reserve_and_handle17hd4cf831ef6f07062E (wasm://wasm/losat-00404be369eef48d.wasm-0311fa0a:wasm-function[68]:0x1b7fa)
+    at losat-00404be369eef48d.wasm._ZN5LOSAT9algorithm6blastp12blast_engine20run_resolved_in_pool28_$u7b$$u7b$closure$u7d$$u7d$17h3e36c1e78b62f07fE (wasm://wasm/losat-00404be369eef48d.wasm-0311fa0a:wasm-function[5460]:0x6357dc)
+    at losat-00404be369eef48d.wasm._ZN77_$LT$rayon_core..job..HeapJob$LT$BODY$GT$$u20$as$u20$rayon_core..job..Job$GT$7execute17h9e158bc81bbdf9abE (wasm://wasm/losat-00404be369eef48d.wasm-0311fa0a:wasm-function[5848]:0x6a0f79)
+    at losat-00404be369eef48d.wasm._ZN10rayon_core8registry12WorkerThread15wait_until_cold17hb9798b5b657dcb55E (wasm://wasm/losat-00404be369eef48d.wasm-0311fa0a:wasm-function[923]:0xf5382)
+    at losat-00404be369eef48d.wasm._ZN10rayon_core5scope5scope28_$u7b$$u7b$closure$u7d$$u7d$17ha153bb2147290b22E (wasm://wasm/losat-00404be369eef48d.wasm-0311fa0a:wasm-function[584

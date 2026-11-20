@@ -1,0 +1,150 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: PajaWSV proteins
+           86 sequences; 66,738 total letters
+
+
+
+Query= YP_009220551.1 ICP11/P9 [White spot syndrome virus]
+
+Length=82
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT63579.1 wsv343-like protein [Pasiphaea japonica whispovirus]       19.6    3.2  
+BDT63568.1 hypothetical protein [Pasiphaea japonica whispovirus]      18.5    7.7  
+
+
+>BDT63579.1 wsv343-like protein [Pasiphaea japonica whispovirus]
+Length=4023
+
+ Score = 19.6 bits (39),  Expect = 3.2, Method: Composition-based stats.
+ Identities = 11/31 (35%), Positives = 15/31 (48%), Gaps = 6/31 (19%)
+
+Query  19    RYEEVMKTFDTVEAVRKSDLDDRVYMVCLKQ  49
+             + +EV  T   + AVRK       YM C+ Q
+Sbjct  2753  KNKEVDTTLTALHAVRK------CYMCCVDQ  2777
+
+
+>BDT63568.1 hypothetical protein [Pasiphaea japonica whispovirus]
+Length=578
+
+ Score = 18.5 bits (36),  Expect = 7.7, Method: Composition-based stats.
+ Identities = 6/7 (86%), Positives = 7/7 (100%), Gaps = 0/7 (0%)
+
+Query  3    TFQTDAD  9
+            +FQTDAD
+Sbjct  137  SFQTDAD  143
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.136    0.374    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 1998016
+
+
+Query= YP_009220614.1 envelope protein [White spot syndrome virus]
+
+Length=204
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT63571.1 wsv269-like protein [Pasiphaea japonica whispovirus]       22.7    1.3  
+BDT63507.1 wsv526-like protein [Pasiphaea japonica whispovirus]       20.0    8.3  
+BDT63503.1 wsv514-like protein [Pasiphaea japonica whispovirus]       20.0    8.7  
+
+
+>BDT63571.1 wsv269-like protein [Pasiphaea japonica whispovirus]
+Length=507
+
+ Score = 22.7 bits (47),  Expect = 1.3, Method: Compositional matrix adjust.
+ Identities = 10/30 (33%), Positives = 16/30 (53%), Gaps = 0/30 (0%)
+
+Query  43  NIETNMDENLRIPVTAEVGSGYFKMTDVSF  72
+           NI+    E  +  + AE+G G  ++ DV F
+Sbjct  30  NIQQQQGEKKKGSINAELGYGGARLMDVRF  59
+
+
+>BDT63507.1 wsv526-like protein [Pasiphaea japonica whispovirus]
+Length=449
+
+ Score = 20.0 bits (40),  Expect = 8.3, Method: Compositional matrix adjust.
+ Identities = 23/91 (25%), Positives = 37/91 (41%), Gaps = 17/91 (19%)
+
+Query  38   ETHTDNIETNMDENLRIPVTAEVGSGYFKMTDVSFDSDTLGKIKIRNGKSDAQMKEEDAD  97
+            +T  D+I+ N   N  IPVT          T+ +      GK+ +R  +   + K   A 
+Sbjct  70   KTSIDDIQHN--NNKTIPVTD---------TNFTIRPGEYGKLPLRLRRIAIRDKNRVAA  118
+
+Query  98   LVITPVEGRALE------VTVGQNLTFEGTF  122
+            +V+T   GR+        + +  N  F G F
+Sbjct  119  IVMTTGSGRSQTSYSHDGLVISPNCNFVGEF  149
+
+
+>BDT63503.1 wsv514-like protein [Pasiphaea japonica whispovirus]
+Length=2342
+
+ Score = 20.0 bits (40),  Expect = 8.7, Method: Compositional matrix adjust.
+ Identities = 13/49 (27%), Positives = 24/49 (49%), Gaps = 6/49 (12%)
+
+Query  101   TPVEGRALEVTVGQNLTFE---GTFKVWNNTS---RKINITGMQMVPKI  143
+             +P++   LE  +G N T     G+   W+N +    K+ + G+   P+I
+Sbjct  1173  SPIDTTRLERKLGINFTKNNNCGSEDDWSNNTPPNTKVTVAGLDYFPEI  1221
+
+
+
+Lambda      K        H        a         alpha
+   0.314    0.130    0.368    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 8793356
+
+
+Query= nohit a query without hits
+
+Length=72
+
+
+***** No hits found *****
+
+
+
+
+
+Effective search space used: 0
+
+
+  Database: PajaWSV proteins
+    Posted date:  Oct 13, 2026  1:44 PM
+  Number of letters in database: 66,738
+  Number of sequences in database:  86
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

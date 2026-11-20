@@ -30,7 +30,7 @@ SPEC.loader.exec_module(boundary)
 
 def empty_metadata() -> dict[str, object]:
     return {
-        "packages": [{"id": "losat", "name": "LOSAT", "version": "0.1.0", "links": None}],
+        "packages": [{"id": "losat", "name": "losat", "version": "0.1.0", "links": None}],
         "resolve": {"root": "losat", "nodes": [{"id": "losat", "deps": []}]},
     }
 
@@ -43,7 +43,7 @@ def write_fixture(root: Path, production: str, oracle: str = "") -> None:
     (source_dir / "lib.rs").write_text(production, encoding="utf-8")
     (tests_dir / "oracle.rs").write_text(oracle, encoding="utf-8")
     (root / "LOSAT" / "Cargo.toml").write_text(
-        '[package]\nname = "LOSAT"\nversion = "0.1.0"\nedition = "2021"\n',
+        '[package]\nname = "losat"\nversion = "0.1.0"\nedition = "2021"\n',
         encoding="utf-8",
     )
 
@@ -190,7 +190,7 @@ pub fn program_name() -> &'static str { "blastn" }
             )
             (root / "LOSAT" / "Cargo.toml").write_text(
                 """[package]
-name = "LOSAT"
+name = "losat"
 version = "0.1.0"
 edition = "2021"
 
@@ -273,7 +273,7 @@ host_c = { package = "libc", version = "0.2" }
     def test_cargo_links_metadata_uses_separate_exact_review_inventory(self) -> None:
         metadata = {
             "packages": [
-                {"id": "losat", "name": "LOSAT", "version": "0.1.0", "links": None},
+                {"id": "losat", "name": "losat", "version": "0.1.0", "links": None},
                 {
                     "id": "native-sys",
                     "name": "native-sys",

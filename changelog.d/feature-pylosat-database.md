@@ -1,0 +1,1 @@
+- `pylosat` searches a BLAST database (`Database`), writes reports to files with their side files (`Search.run_to_file`, also outfmt 13 and 14), runs `psiblast`, and has `makeblastdb` and `blastdbcmd`.

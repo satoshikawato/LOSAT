@@ -1,0 +1,172 @@
+FASTA-Reader: Ignoring invalid residues at position(s): On line 46: 3
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xC3] in string at line 71
+q3 aÃ©b z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xA9] in string at line 71
+q3 aÃ©b z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xE2] in string at line 95
+q4 aâ‚¬b z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0x82] in string at line 95
+q4 aâ‚¬b z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xAC] in string at line 95
+q4 aâ‚¬b z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xF0] in string at line 119
+q5 ağŸ˜€b z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0x9F] in string at line 119
+q5 ağŸ˜€b z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0x98] in string at line 119
+q5 ağŸ˜€b z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0x80] in string at line 119
+q5 ağŸ˜€b z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xE9] in string at line 143
+q6 aéb z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xA9] in string at line 167
+q7 a©b z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0x80] in string at line 191
+q8 a€b z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0x81] in string at line 215
+q9 ab z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xC1] in string at line 239
+q10 aÁb z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0x81] in string at line 239
+q10 aÁb z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xC0] in string at line 263
+q11 aÀ€b z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0x80] in string at line 263
+q11 aÀ€b z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xE0] in string at line 287
+q12 aàb z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0x81] in string at line 287
+q12 aàb z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0x81] in string at line 287
+q12 aàb z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xE0] in string at line 311
+q13 aà€¼b z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0x80] in string at line 311
+q13 aà€¼b z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xBC] in string at line 311
+q13 aà€¼b z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xE0] in string at line 335
+q14 aà€b z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0x80] in string at line 335
+q14 aà€b z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0x81] in string at line 335
+q14 aà€b z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xED] in string at line 359
+q15 aí €b z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xA0] in string at line 359
+q15 aí €b z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0x80] in string at line 359
+q15 aí €b z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xF4] in string at line 383
+q16 aô€€b z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0x90] in string at line 383
+q16 aô€€b z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0x80] in string at line 383
+q16 aô€€b z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0x80] in string at line 383
+q16 aô€€b z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xF5] in string at line 407
+q17 aõ€€€b z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0x80] in string at line 407
+q17 aõ€€€b z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0x80] in string at line 407
+q17 aõ€€€b z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0x80] in string at line 407
+q17 aõ€€€b z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xFF] in string at line 431
+q18 aÿb z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0x7F] in string at line 503
+q21 ab z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xC3] in string at line 792
+q33 oneÃ©
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xA9] in string at line 792
+q33 oneÃ©
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xE2] in string at line 816
+q34 oneâ‚¬
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0x82] in string at line 816
+q34 oneâ‚¬
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xAC] in string at line 816
+q34 oneâ‚¬
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xE9] in string at line 840
+q35 oneé
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xA9] in string at line 864
+q36 one©
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xF0] in string at line 888
+q37 oneğŸ˜€
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0x9F] in string at line 888
+q37 oneğŸ˜€
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0x98] in string at line 888
+q37 oneğŸ˜€
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0x80] in string at line 888
+q37 oneğŸ˜€
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0x1] in string at line 912
+q38 ab z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0x1B] in string at line 936
+q39 ab z
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xC3] in string at line 960
+q40Ã© rest
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xA9] in string at line 960
+q40Ã© rest
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xE9] in string at line 984
+q41é rest
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0x81] in string at line 1008
+q42 rest
+Error: (803.7) [blastx] Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xFF] in string at line 1056
+q44ÿ rest

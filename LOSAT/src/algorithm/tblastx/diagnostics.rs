@@ -3,9 +3,7 @@
 //! This module re-exports diagnostic functionality from the common module
 //! for backward compatibility.
 
-pub use crate::algorithm::common::diagnostics::{
-    diagnostics_enabled, DiagnosticCounters, ProteinDiagnosticCounters,
-};
+pub use crate::algorithm::common::diagnostics::{diagnostics_enabled, DiagnosticCounters};
 
 use super::constants::MIN_UNGAPPED_SCORE;
 

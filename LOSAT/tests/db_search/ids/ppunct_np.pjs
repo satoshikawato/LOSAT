@@ -1,0 +1,18 @@
+{
+  "version": "1.2",
+  "dbname": "ppunct_np",
+  "dbtype": "Protein",
+  "db-version": 4,
+  "description": "ppunct_np",
+  "number-of-letters": 340,
+  "number-of-sequences": 2,
+  "last-updated": "2026-11-07T10:43:00",
+  "number-of-volumes": 1,
+  "bytes-total": 577,
+  "bytes-to-cache": 431,
+  "files": [
+    "ppunct_np.phr",
+    "ppunct_np.pin",
+    "ppunct_np.psq"
+  ]
+}

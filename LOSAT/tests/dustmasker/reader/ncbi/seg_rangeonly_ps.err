@@ -1,0 +1,3 @@
+NCBI C++ Exception:
+    T0 "/opt/conda/conda-bld/blast_1787399212531/work/c++/src/objtools/readers/fasta_reader_utils.cpp", line 195: Error: (CObjReaderParseException::eFormat) ncbi::objects::CFastaDeflineReader::ParseDefline() - Unable to locate sequence id in definition line (m_Pos = 0)
+

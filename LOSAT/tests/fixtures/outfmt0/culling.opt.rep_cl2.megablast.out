@@ -1,0 +1,17 @@
+# BLASTN 2.17.0+
+# Query: rep Sakai 4000001 with a repeated unit
+# Database: User specified sequence set (Input: tests/fixtures/blastn_regression/inputs/rep_subject.fa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 11 hits found
+rep	reps	97.841	602	11	2	301	900	785	1386	0.0	1038
+rep	reps	97.521	605	7	8	901	1500	2646	2045	0.0	1027
+rep	reps	97.171	601	15	2	1501	2100	3317	3916	0.0	1014
+rep	reps	97.167	600	14	3	2701	3300	6396	5800	0.0	1011
+rep	reps	97.010	602	14	4	2101	2702	4701	5298	0.0	1009
+rep	reps	98.406	251	4	0	1278	1528	1021	1271	1.66e-126	442
+rep	reps	98.406	251	4	0	534	784	1436	1686	1.66e-126	442
+rep	reps	98.406	251	4	0	2196	2446	1437	1687	1.66e-126	442
+rep	reps	97.561	246	6	0	3855	4100	1020	1265	2.16e-120	422
+rep	reps	97.561	246	6	0	3855	4100	1436	1681	2.16e-120	422
+rep	reps	96.047	253	9	1	3105	3356	2869	3121	4.67e-117	411
+# BLAST processed 1 queries

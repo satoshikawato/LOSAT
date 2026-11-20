@@ -11,6 +11,7 @@ import argparse
 import csv
 import hashlib
 import math
+import os
 import shlex
 import subprocess
 import sys
@@ -19,6 +20,9 @@ from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from db_search_fixtures import ncbi_env  # noqa: E402  (NCBI's runs: the usage report off)
 
 
 # NCBI reference: ncbi-blast/c++/src/objtools/align_format/format_flags.cpp:38-40
@@ -515,8 +519,8 @@ def validate_manifest_row(row: dict[str, str]) -> None:
     )
     require_manifest_condition(
         row,
-        row["strand"] == "both",
-        "paired/refresh execution currently supports only strand=both",
+        row["strand"] in ("both", "plus", "minus"),
+        "paired/refresh execution supports only strand=both, plus or minus",
     )
     require_manifest_condition(
         row,
@@ -607,6 +611,12 @@ def build_losat_command(
     if int(row["max_hsps_per_subject"]) > 0:
         command.extend(["-max_hsps", row["max_hsps_per_subject"]])
     command.extend(["-dust", "yes" if manifest_bool(row, "dust") else "no"])
+    # NCBI blast_args.cpp:1953-1955 (kArgStrand, default "both"): the strand of the row, as in
+    # build_ncbi_command. Only a one-strand row passes it: `both` is LOSAT's default, and the
+    # commands of the default rows are frozen in the S02 baseline (ci_fast_regressions.py), the
+    # V-ABI cases and the certification catalogs.
+    if row["strand"] != "both":
+        command.extend(["-strand", row["strand"]])
     return command
 
 
@@ -735,7 +745,8 @@ def run_fresh_paired(
         ncbi_command = build_ncbi_command(row, ncbi_bin, ncbi_out)
         losat_command = build_losat_command(row, losat_bin, losat_out)
         print("paired_ncbi:", shlex.join(ncbi_command))
-        subprocess.run(ncbi_command, cwd=root, check=True)
+        # NCBI's run gets BLAST_USAGE_REPORT=false (db_search_fixtures.ncbi_env); LOSAT's keeps the environment.
+        subprocess.run(ncbi_command, cwd=root, check=True, env=ncbi_env(dict(os.environ)))
         print("paired_losat:", shlex.join(losat_command))
         subprocess.run(losat_command, cwd=root, check=True)
         cases.append((case_id, ncbi_out, losat_out))
@@ -852,7 +863,7 @@ def main() -> int:
     parser.add_argument(
         "--losat-bin",
         type=Path,
-        default=Path("target/release/LOSAT"),
+        default=Path("target/release/losat"),
         help="LOSAT executable for --refresh-losat/--fresh-paired, relative to cwd unless absolute.",
     )
     parser.add_argument("--print-refresh-commands", action="store_true")

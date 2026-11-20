@@ -1,0 +1,38 @@
+
+                                          Tax BLAST report                                          
+
+Query= nq1 query nucleotide one
+
+Length=900
+
+                                           Organism Report                                           
+Accession                                 Description                                Score E-value 
+
+                                   Homo sapiens (human) [primates]                                   
+ 0         s1 subject one two HSPs                                                     368   7e-171  
+ 2         s3 subject three with a title that is longer than the description column... 288   3e-72   
+ 10        s11 subject eleven strong then planted weak HSP                             245   3e-62   
+ 8         s9 subject nine                                                             199   2e-45   
+ 1         s2 subject two                                                              185   2e-41   
+ 7         s8 subject eight                                                            176   2e-38   
+ 5         s6 subject six                                                              170   1e-36   
+ 6         s7 subject seven taxid not in taxdb                                         167   6e-36   
+ 3         s4 subject four                                                             165   4e-35   
+ 4         s5 subject five 156    s 2e-32    e Accession  a <@descr_text@> d <... 156   2e-32   
+ 9         s10 subject ten                                                             115   4e-20   
+
+                                          Tax BLAST report                                          
+
+Query= nq2 unrelated query (no hits)
+
+Length=120
+
+                                           Organism Report                                           
+Accession                                Description                               Score E-value    
+
+                                   Homo sapiens (human) [primates]                                   
+ 0         s1 subject one two HSPs                                                  21.2  813976829  
+ 3         s4 subject four                                                          20.8  1118269698 
+ 1         s2 subject two                                                           16.6  2147483647 
+ 2         s3 subject three with a title that is longer than the description col... 13.9  2147483647 
+ 10        s11 subject eleven strong then planted weak HSP                          10.2  2147483647 

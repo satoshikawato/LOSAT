@@ -3,7 +3,7 @@
 Status: open shared-runtime investigation, separated from the search performance
 remediation by explicit user instruction on 2026-09-14. The original memory
 failures remain failures under their original criteria. See the
-[scope decision](evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/runtime-memory-scope-decision.json).
+scope decision `docs/evidence/megablast_wasm_np_remediation_20260913/run-20260913-01/runtime-memory-scope-decision.json` (moved to a release asset on 2026-10-23: [ARCHIVED.md](evidence/megablast_wasm_np_remediation_20260913/ARCHIVED.md)).
 
 The fixed observation window ran four N/P inputs for 16 calls each, in two
 baseline/candidate sessions (256 untimed jobs). Six of sixteen per-version

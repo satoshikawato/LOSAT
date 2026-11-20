@@ -1,0 +1,28 @@
+# TBLASTX 2.17.0+
+# Query: nq1 query nucleotide one
+# Database: User specified sequence set (Input: tests/db_search/t7/bg.fna)
+# Fields: query id, subject id, evalue
+# 22 hits found
+nq1	Unknown	0.0
+nq1	Unknown	0.0
+nq1	Unknown	1.41e-177
+nq1	Unknown	1.41e-177
+nq1	Unknown	4.57e-161
+nq1	Unknown	4.57e-161
+nq1	Unknown	3.25e-157
+nq1	Unknown	3.25e-157
+nq1	Unknown	2.74e-155
+nq1	Unknown	2.74e-155
+nq1	Unknown	8.31e-142
+nq1	Unknown	8.31e-142
+nq1	Unknown	8.31e-142
+nq1	Unknown	7.4
+nq1	s2	3.63e-51
+nq1	s2	6.86e-47
+nq1	s2	1.93e-43
+nq1	s2	2.65e-35
+nq1	s2	6.34e-34
+nq1	s2	4.26e-33
+nq1	s2	3.9
+nq1	s2	5.4
+# BLAST processed 1 queries

@@ -1,0 +1,117 @@
+{
+  "BlastOutput2": {
+    "report": {
+      "program": "tblastn",
+      "version": "TBLASTN 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1",
+          "Subject_2",
+          "Subject_3",
+          "Subject_4",
+          "Subject_5"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "db_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_7",
+            "query_title": "BDT63274.1 hypothetical protein [Armadillidium vulgare clopovirus]",
+            "query_len": 1046,
+            "query_masking": [
+              {
+                "from": 1,
+                "to": 27
+              },
+              {
+                "from": 40,
+                "to": 63
+              },
+              {
+                "from": 269,
+                "to": 278
+              },
+              {
+                "from": 446,
+                "to": 460
+              },
+              {
+                "from": 538,
+                "to": 580
+              },
+              {
+                "from": 644,
+                "to": 659
+              },
+              {
+                "from": 771,
+                "to": 791
+              },
+              {
+                "from": 804,
+                "to": 859
+              },
+              {
+                "from": 867,
+                "to": 886
+              },
+              {
+                "from": 1031,
+                "to": 1045
+              }
+            ],
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "LvMJNV_199001_206000",
+                    "title": "LvMJNV_199001_206000 window 4 of LvMJNV"
+                  }
+                ],
+                "len": 7000,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 17.705,
+                    "score": 34,
+                    "evalue": 3.25254,
+                    "identity": 7,
+                    "positive": 14,
+                    "query_from": 371,
+                    "query_to": 392,
+                    "hit_from": 51,
+                    "hit_to": 116,
+                    "hit_frame": 3,
+                    "align_len": 22,
+                    "gaps": 0,
+                    "qseq": "DRKRYLNNLLGWLKATTLSPNT",
+                    "hseq": "NKSQYSSFIISLSKVITLSPST",
+                    "midline": "++ +Y + ++   K  TLSP+T"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 41,
+              "eff_space": 578880,
+              "kappa": 0.041,
+              "lambda": 0.267,
+              "entropy": 0.14
+            }
+          }
+        ]
+      }
+    }
+  }
+}

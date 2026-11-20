@@ -1,0 +1,53 @@
+Blast4-archive ::= {
+  request {
+    body get-request-info {
+      request-id "Error"
+    }
+  },
+  results {
+  },
+  messages {
+    {
+      code 2,
+      message "BLAST engine error: Warning: NCBI C++ Exception: T0 ""/home/cor
+emake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18
+.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src
+/algo/winmask/seq_masker_istat_factory.cpp"", line 171: Error:
+ (Exception::open failed) ncbi::CSeqMaskerIstatFactory::DiscoverStatType() -
+ could not open T0 ""/home/coremake/release_build/build/PrepareRelease_Linux64
+-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_175137454
+8/c++/compilers/unix/../../src/algo/winmask/seq_masker_istat_factory.cpp"",
+ line 358: Error: (Exception::creation failure)
+ ncbi::CSeqMaskerIstatFactory::create() - could not create a unit counts
+ container Warning: NCBI C++ Exception: T0 ""/home/coremake/release_build/buil
+d/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareReleas
+e_Linux64-Alma_1751374548/c++/compilers/unix/../../src/algo/winmask/seq_masker
+_istat_factory.cpp"", line 171: Error: (Exception::open failed)
+ ncbi::CSeqMaskerIstatFactory::DiscoverStatType() - could not open T0 ""/home/
+coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14
+.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../
+src/algo/winmask/seq_masker_istat_factory.cpp"", line 358: Error:
+ (Exception::creation failure) ncbi::CSeqMaskerIstatFactory::create() - could
+ not create a unit counts container Warning: NCBI C++ Exception: T0 ""/home/co
+remake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.1
+8.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../sr
+c/algo/winmask/seq_masker_istat_factory.cpp"", line 171: Error:
+ (Exception::open failed) ncbi::CSeqMaskerIstatFactory::DiscoverStatType() -
+ could not open T0 ""/home/coremake/release_build/build/PrepareRelease_Linux64
+-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_175137454
+8/c++/compilers/unix/../../src/algo/winmask/seq_masker_istat_factory.cpp"",
+ line 358: Error: (Exception::creation failure)
+ ncbi::CSeqMaskerIstatFactory::create() - could not create a unit counts
+ container Warning: NCBI C++ Exception: T0 ""/home/coremake/release_build/buil
+d/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareReleas
+e_Linux64-Alma_1751374548/c++/compilers/unix/../../src/algo/winmask/seq_masker
+_istat_factory.cpp"", line 171: Error: (Exception::open failed)
+ ncbi::CSeqMaskerIstatFactory::DiscoverStatType() - could not open T0 ""/home/
+coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14
+.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../
+src/algo/winmask/seq_masker_istat_factory.cpp"", line 358: Error:
+ (Exception::creation failure) ncbi::CSeqMaskerIstatFactory::create() - could
+ not create a unit counts container"
+    }
+  }
+}

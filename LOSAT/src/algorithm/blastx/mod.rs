@@ -44,6 +44,7 @@ pub mod input;
 //                                          & buf.get()[offset], gc);
 // ```
 pub mod query_setup;
+pub(crate) mod reader_batch;
 pub use args::BlastxArgs;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:960-985
@@ -335,11 +336,19 @@ pub mod kappa;
 //                 status = s_DoSegSequenceData(seqData, eBlastTypeBlastp,
 //                                              subject_maybe_biased);
 // ```
-// EXPERIMENT (LOSAT_X_BXSEGMEMO): the redo-stage subject SEG memoised per subject.
+// The redo-stage subject SEG memoised per subject.
 mod x_seg_memo;
+
+// `-lcase_masking`: the word scan of a `-subject` with lower-case letters over its scan ranges,
+// and its lower case in the outfmt 0 rows.
+mod x_soft_subject;
 
 // Diagnostic (LOSAT_TIMING): the stage times of a BLASTX run. No NCBI counterpart.
 mod x_timing;
+
+// `-db` read in blocks where it is searched, instead of a copy of
+// the whole database.
+pub(crate) mod x_db_stream;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1486-1508
 // ```c++
@@ -418,7 +427,6 @@ mod culling;
 //         /* The HSP's may be in a different order than they were before,
 //            but hsp contains the first one. */
 // ```
-mod even_gap;
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:279-297
 // ```c++
@@ -443,6 +451,20 @@ mod even_gap;
 //         formatter.PrintEpilog(opt);
 // ```
 pub mod report;
+// NCBI c++/src/algo/blast/api/blast_seqalign.cpp:1549-1649 (BlastHitList2SeqAlign_OMF): the
+// Seq-aligns of each query's final hit list (outfmt 8, 12).
+mod anchored;
+mod archive;
+// The streams of a library call's hold, which the report streams of `cli::NcbiOstream` name.
+pub(crate) use blast_xml::HeldFormatWriter;
+mod blast_xml;
+// The reports of the ungapped HSPs of length 0 that `-window_size 0` finds (NCBI's formatters'
+// exceptions, the Seq-loc mapper's rows of `-subject`).
+mod empty_rows;
+mod seqalign;
+// NCBI c++/src/objtools/align_format/tabular.cpp (CBlastTabularInfo): the tabular reports with a
+// field list or a delimiter, and outfmt 10 and 20, through the shared writer (`report::tabular`).
+mod tabular;
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:254-254
 // ```c++
@@ -465,6 +487,11 @@ pub mod report;
 //         formatter.PrintEpilog(opt);
 // ```
 pub mod native;
+// LOSAT Web's entry (web ABI v2): one search, every requested output format.
+mod local;
+pub use local::{check_options, run_local, run_local_database};
+/// The default size of a query batch, in letters (`GetQueryBatchSize`).
+pub(crate) use query_setup::BATCH_SIZE as QUERY_BATCH_SIZE;
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:277-279
 // ```c++
@@ -472,6 +499,7 @@ pub mod native;
 //                 lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
 //                 results = lcl_blast.Run();
 // ```
+#[cfg(any(target_arch = "wasm32", test))]
 pub(crate) mod web;
 // The subjects of a search by oid: `-subject` records or the stored sequences of `-db`.
 pub(crate) mod subjects;

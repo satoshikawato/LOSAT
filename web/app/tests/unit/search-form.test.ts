@@ -1,28 +1,47 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { toProgramDescription } from 'losat';
+import { REGION_FLAG, type ProgramId } from 'losat/domain';
 import { duplicateIds } from '../../src/domain/dataset';
 import { geneticCodeLabel } from '../../src/domain/genetic-codes';
 import {
+  changedFields,
   describedSections,
   effectiveValue,
   fieldChoices,
+  fieldList,
   fieldRows,
   formParameters,
+  knownDefault,
+  pairEntries,
+  pairList,
+  pairRows,
+  pairValue,
   placementFlags,
   sectionShown,
   sectionsAt,
   setField,
+  setFields,
   writtenValue,
   type EngineOption,
   type FormValues,
 } from '../../src/domain/parameters';
-import { PROGRAMS, programById, residueUnit, searchSummary, sequenceKind, type ParameterField } from '../../src/domain/programs';
 import {
-  REGION_FLAG,
-  regionFromPositions,
-  regionProblem,
-  regionRange,
-  regionValue,
-} from '../../src/domain/region';
+  COMPOSITION_MODES,
+  fastaParser,
+  MATRICES,
+  programById,
+  PROGRAMS,
+  PROTEIN_GAP_COSTS,
+  PROTEIN_WORD_SIZES,
+  residueUnit,
+  searchSummary,
+  searchSummaryParts,
+  sequenceKind,
+  type ParameterField,
+} from '../../src/domain/programs';
+import { regionFromPositions, regionProblem, regionProblemFields, regionRange, regionValue, swappedRegion } from '../../src/domain/region';
 import { estimateKind, looksLikeOtherKind } from '../../src/domain/sequence-kind';
 
 const valueOption = (flag: string, defaultValue?: string, choices?: readonly string[]): EngineOption => ({
@@ -82,11 +101,11 @@ describe('formParameters', () => {
   });
 
   it('follows the order of the descriptor, not of the values or the options', () => {
-    const values: FormValues = { '-lcase_masking': true, '-word_size': '11', '-evalue': '1', '-task': 'blastn' };
+    const values: FormValues = { '-lcase_masking': true, '-word_size': '15', '-evalue': '1', '-task': 'blastn' };
     expect(formParameters(blastn, values, options)).toEqual([
       ['-task', 'blastn'],
       ['-evalue', '1'],
-      ['-word_size', '11'],
+      ['-word_size', '15'],
       ['-lcase_masking', true],
     ]);
   });
@@ -103,13 +122,23 @@ describe('formParameters', () => {
 
   it('works for TBLASTX with its sections in the order of the page: the genetic codes, then the algorithm parameters', () => {
     const tblastx = programById('tblastx');
-    const values: FormValues = { '-db_gencode': '11', '-query_gencode': '4', '-seg': 'yes', '-culling_limit': '2', '-evalue': '1' };
+    const values: FormValues = {
+      '-db_gencode': '11',
+      '-query_gencode': '4',
+      '-seg': 'yes',
+      '-soft_masking': 'true',
+      '-matrix': 'PAM30',
+      '-culling_limit': '2',
+      '-evalue': '1',
+    };
     expect(formParameters(tblastx, values, undefined)).toEqual([
       ['-query_gencode', '4'],
       ['-db_gencode', '11'],
       ['-evalue', '1'],
       ['-culling_limit', '2'],
+      ['-matrix', 'PAM30'],
       ['-seg', 'yes'],
+      ['-soft_masking', 'true'],
     ]);
   });
 
@@ -124,6 +153,74 @@ describe('formParameters', () => {
     expect(formParameters(blastn, { '-task': 'blastn', '-evalue': '1' }, options, 'program')).toEqual([['-task', 'blastn']]);
   });
 
+  it('has NCBI\'s "Max matches in a query range" (-culling_limit) last in General Parameters of every program, which the engine describes', () => {
+    const described = JSON.parse(readFileSync(resolve(import.meta.dirname, '../../src/infra/fake/describe.json'), 'utf8')) as Record<string, unknown>;
+    for (const program of PROGRAMS) {
+      const general = describedSections(program, toProgramDescription(described[program.id]).parameters).find(
+        (section) => section.title === 'General Parameters',
+      );
+      expect(general?.fields.at(-1), program.id).toMatchObject({ flag: '-culling_limit', label: 'Max matches in a query range', kind: 'text' });
+      expect(formParameters(program, { '-culling_limit': '2' }, undefined, 'algorithm'), program.id).toEqual([['-culling_limit', '2']]);
+    }
+  });
+
+  it('has "Number of descriptions" and "Number of alignments" in Other Parameters of the four programs, writing -num_descriptions N and -num_alignments N', () => {
+    for (const id of ['blastn', 'blastp', 'tblastn', 'tblastx'] as const) {
+      const program = programById(id);
+      const other = program.sections.find((section) => section.title === 'Other Parameters');
+      const fields = other?.fields.filter((field) => field.flag === '-num_descriptions' || field.flag === '-num_alignments');
+      expect(fields?.map((field) => [field.flag, field.label]), id).toEqual([
+        ['-num_descriptions', 'Number of descriptions'],
+        ['-num_alignments', 'Number of alignments'],
+      ]);
+      expect(other?.placement, id).toBe('algorithm');
+      expect(
+        formParameters(program, { '-num_descriptions': '7', '-num_alignments': '3' }, undefined, 'algorithm'),
+        id,
+      ).toEqual([
+        ['-num_descriptions', '7'],
+        ['-num_alignments', '3'],
+      ]);
+    }
+  });
+
+  it('has the pairwise report options -line_length, -sorthits and -sorthsps after "Number of alignments" in Other Parameters of the five programs, with the sort orders in the words of the engine\'s help', () => {
+    const described = JSON.parse(readFileSync(resolve(import.meta.dirname, '../../src/infra/fake/describe.json'), 'utf8')) as Record<string, unknown>;
+    const report = ['-line_length', '-sorthits', '-sorthsps'];
+    for (const program of PROGRAMS) {
+      const options = toProgramDescription(described[program.id]).parameters;
+      const other = describedSections(program, options).find((section) => section.title === 'Other Parameters');
+      const flags = other?.fields.map((field) => field.flag) ?? [];
+      const at = flags.indexOf('-num_alignments');
+      expect(flags.slice(at + 1, at + 4), program.id).toEqual(report);
+      const fields = other!.fields.slice(at + 1, at + 4);
+      expect(fields.map((field) => [field.label, field.kind]), program.id).toEqual([
+        ['Alignment line length', 'text'],
+        ['Sort hits by', 'choice'],
+        ['Sort HSPs by', 'choice'],
+      ]);
+      for (const field of fields.slice(1)) {
+        const option = options.find((o) => o.flag === field.flag)!;
+        expect(fieldChoices(field, option), `${program.id} ${field.flag}`).toEqual(['0', '1', '2', '3', '4']);
+        // Each name is the engine's "N = <words>" of its help (NCBI BLAST+'s), shown as "N: <words>".
+        for (const choice of ['0', '1', '2', '3', '4']) {
+          const words = field.choiceLabels?.[choice]?.replace(/^\d: /, '');
+          expect(option.help, `${program.id} ${field.flag} ${choice}`).toContain(`${choice} = ${words}`);
+        }
+      }
+      // Without a value the form writes nothing: no -sorthits is not -sorthits 0 (outfmt 0's table has five columns with any value).
+      expect(formParameters(program, {}, options, 'algorithm'), program.id).toEqual([]);
+      expect(
+        formParameters(program, { '-line_length': '80', '-sorthits': '1', '-sorthsps': '3' }, options, 'algorithm'),
+        program.id,
+      ).toEqual([
+        ['-line_length', '80'],
+        ['-sorthits', '1'],
+        ['-sorthsps', '3'],
+      ]);
+    }
+  });
+
   it('omits a TBLASTX value equal to the engine default', () => {
     const tblastx = programById('tblastx');
     const opts: EngineOption[] = [valueOption('-query_gencode', '1'), valueOption('-db_gencode', '1')];
@@ -133,31 +230,33 @@ describe('formParameters', () => {
 
 describe('setField', () => {
   const templates: FormValues = { '-task': 'dc-megablast', '-template_type': 'coding', '-template_length': '18', '-evalue': '1' };
+  const blastn = programById('blastn');
+  const setField3 = (values: FormValues, flag: string, value: string | boolean) => setField(blastn, values, flag, value, undefined);
 
   it.each(['blastn', 'blastn-short'])('removes the template fields when the task is %s', (task) => {
-    const next = setField(templates, '-task', task);
+    const next = setField3(templates, '-task', task);
     expect(next).toEqual({ '-task': task, '-evalue': '1' });
     expect('-template_type' in next).toBe(false);
     expect('-template_length' in next).toBe(false);
   });
 
   it.each(['dc-megablast', 'megablast'])('keeps the template fields when the task is %s', (task) => {
-    expect(setField(templates, '-task', task)).toEqual({ ...templates, '-task': task });
+    expect(setField3(templates, '-task', task)).toEqual({ ...templates, '-task': task });
   });
 
   it('does not clear the templates when another field is set', () => {
-    expect(setField(templates, '-evalue', '5')).toEqual({ ...templates, '-evalue': '5' });
+    expect(setField3(templates, '-evalue', '5')).toEqual({ ...templates, '-evalue': '5' });
   });
 
   it('returns a frozen object and leaves the input unchanged', () => {
     const before = { ...templates };
-    expect(Object.isFrozen(setField(templates, '-evalue', '5'))).toBe(true);
-    expect(Object.isFrozen(setField(templates, '-task', 'blastn'))).toBe(true);
+    expect(Object.isFrozen(setField3(templates, '-evalue', '5'))).toBe(true);
+    expect(Object.isFrozen(setField3(templates, '-task', 'blastn'))).toBe(true);
     expect(templates).toEqual(before);
   });
 
   it('sets a flag value', () => {
-    expect(setField({}, '-lcase_masking', true)).toEqual({ '-lcase_masking': true });
+    expect(setField3({}, '-lcase_masking', true)).toEqual({ '-lcase_masking': true });
   });
 });
 
@@ -230,6 +329,192 @@ describe('writtenValue', () => {
   });
 });
 
+describe("knownDefault: the defaults that the engine resolves (describe's defaults)", () => {
+  // describe.json is the reactor's describe; its `defaults` come from the engine's resolution
+  // (web/adapter/src/defaults.rs, whose tests check each value against the CLI's help).
+  const described = JSON.parse(readFileSync(resolve(import.meta.dirname, '../../src/infra/fake/describe.json'), 'utf8')) as Record<string, unknown>;
+  const optionsOf = (id: ProgramId) => toProgramDescription(described[id]).parameters;
+  const blastn = programById('blastn');
+  const blastp = programById('blastp');
+  const tblastx = programById('tblastx');
+  const bn = optionsOf('blastn');
+  const bp = optionsOf('blastp');
+  const tx = optionsOf('tblastx');
+
+  it('follows the task the search uses, set or the engine default', () => {
+    expect(knownDefault(blastn, '-word_size', {}, bn)).toEqual({ defaultValue: '28' });
+    expect(knownDefault(blastn, '-word_size', { '-task': 'blastn' }, bn)).toEqual({ defaultValue: '11' });
+    expect(knownDefault(blastn, '-evalue', { '-task': 'blastn-short' }, bn)).toEqual({ defaultValue: '1000' });
+    expect(knownDefault(blastn, '-dust', { '-task': 'blastn-short' }, bn)).toEqual({ defaultValue: 'no' });
+    // No default is known before `describe` comes.
+    expect(knownDefault(blastn, '-word_size', {}, undefined)).toBeUndefined();
+  });
+
+  it("takes a set matrix's values from the engine's table", () => {
+    expect(knownDefault(blastp, '-gapopen', {}, bp)).toEqual({ defaultValue: '11' });
+    expect(knownDefault(blastp, '-gapopen', { '-matrix': 'BLOSUM62' }, bp)).toEqual({ defaultValue: '11' });
+    expect(knownDefault(blastp, '-gapopen', { '-matrix': 'PAM30' }, bp)).toEqual({ defaultValue: '9' });
+    expect(knownDefault(blastp, '-window_size', { '-matrix': 'PAM30' }, bp)).toEqual({ defaultValue: '15' });
+    expect(knownDefault(blastp, '-threshold', { '-matrix': 'PAM30', '-task': 'blastp-fast' }, bp)).toEqual({ defaultValue: '20' });
+    // A matrix that the engine does not hold: the values that it would decide are unknown.
+    expect(knownDefault(blastp, '-gapopen', { '-matrix': 'NOSUCH' }, bp)).toBeUndefined();
+    expect(knownDefault(blastp, '-evalue', { '-matrix': 'PAM30' }, bp)).toEqual({ defaultValue: '10' });
+    expect(knownDefault(tblastx, '-window_size', { '-matrix': 'BLOSUM45' }, tx)).toEqual({ defaultValue: '60' });
+    // BLASTX (series SC, SC6): the matrix's gap costs, window and threshold + 1 (a translated query); blastx-fast keeps 20.
+    const blastx = programById('blastx');
+    const bx = optionsOf('blastx');
+    expect(knownDefault(blastx, '-gapopen', { '-matrix': 'PAM30' }, bx)).toEqual({ defaultValue: '9' });
+    expect(knownDefault(blastx, '-window_size', { '-matrix': 'PAM30' }, bx)).toEqual({ defaultValue: '15' });
+    expect(knownDefault(blastx, '-threshold', { '-matrix': 'PAM30' }, bx)).toEqual({ defaultValue: '17' });
+    expect(knownDefault(blastx, '-threshold', { '-matrix': 'PAM30', '-task': 'blastx-fast' }, bx)).toEqual({ defaultValue: '20' });
+  });
+
+  it("takes a given word size's threshold from the engine's table, and none for two such options set", () => {
+    expect(knownDefault(blastp, '-threshold', { '-task': 'blastp-fast' }, bp)).toEqual({ defaultValue: '20' });
+    expect(knownDefault(blastp, '-threshold', { '-task': 'blastp-fast', '-word_size': '5' }, bp)).toEqual({ defaultValue: '19.3' });
+    expect(knownDefault(blastp, '-threshold', { '-word_size': '6' }, bp)).toEqual({ defaultValue: '21' });
+    expect(knownDefault(blastp, '-threshold', { '-word_size': '6', '-matrix': 'PAM30' }, bp)).toBeUndefined();
+    // Told given only for the task where giving it changes the search.
+    expect(knownDefault(blastp, '-word_size', {}, bp)).toEqual({ defaultValue: '3' });
+    expect(knownDefault(blastp, '-word_size', { '-task': 'blastp-fast' }, bp)).toEqual({ defaultValue: '5', given: true });
+  });
+
+  it('marks the hit list options given, and shows no default for one while another is set', () => {
+    expect(knownDefault(tblastx, '-max_target_seqs', {}, tx)).toEqual({ defaultValue: '500', given: true });
+    expect(knownDefault(tblastx, '-max_target_seqs', { '-num_alignments': '3' }, tx)).toEqual({ given: true });
+    expect(knownDefault(tblastx, '-num_alignments', { '-max_target_seqs': '500' }, tx)).toEqual({ given: true });
+    expect(knownDefault(tblastx, '-num_descriptions', {}, tx)).toEqual({ defaultValue: '500', given: true });
+  });
+
+  it("writes BLASTX's word size even at the fast task's default: a word size given sets its own threshold", () => {
+    const blastx = programById('blastx');
+    const bx = optionsOf('blastx');
+    expect(knownDefault(blastx, '-word_size', { '-task': 'blastx-fast' }, bx)).toEqual({ defaultValue: '5', given: true });
+    expect(formParameters(blastx, { '-task': 'blastx-fast', '-word_size': '5' }, bx)).toEqual([
+      ['-task', 'blastx-fast'],
+      ['-word_size', '5'],
+    ]);
+    expect(knownDefault(blastx, '-threshold', { '-task': 'blastx-fast' }, bx)).toEqual({ defaultValue: '20' });
+    expect(knownDefault(blastx, '-threshold', { '-task': 'blastx-fast', '-word_size': '5' }, bx)).toEqual({ defaultValue: '19.3' });
+  });
+
+  it("is the clap default where the engine resolves none", () => {
+    expect(knownDefault(blastp, '-comp_based_stats', {}, bp)).toEqual({ defaultValue: '2' });
+    expect(knownDefault(tblastx, '-evalue', {}, [valueOption('-evalue', '10')])).toEqual({ defaultValue: '10' });
+    expect(knownDefault(tblastx, '-evalue', {}, undefined)).toBeUndefined();
+  });
+
+  it('omits a value equal to a resolved default from the argv, and writes a given option at its default', () => {
+    expect(formParameters(blastn, { '-task': 'blastn', '-word_size': '11', '-reward': '2', '-gapopen': '5' }, bn)).toEqual([
+      ['-task', 'blastn'],
+    ]);
+    expect(formParameters(blastn, { '-word_size': '11' }, bn)).toEqual([['-word_size', '11']]);
+    expect(formParameters(blastp, { '-matrix': 'PAM30', '-gapopen': '9', '-gapextend': '1' }, bp)).toEqual([['-matrix', 'PAM30']]);
+    expect(formParameters(blastp, { '-matrix': 'PAM30', '-gapopen': '11', '-gapextend': '1' }, bp)).toEqual([
+      ['-matrix', 'PAM30'],
+      ['-gapopen', '11'],
+    ]);
+    expect(formParameters(blastp, { '-task': 'blastp-fast', '-word_size': '5' }, bp)).toEqual([
+      ['-task', 'blastp-fast'],
+      ['-word_size', '5'],
+    ]);
+    expect(formParameters(blastp, { '-word_size': '3' }, bp)).toEqual([]);
+    expect(formParameters(tblastx, { '-max_target_seqs': '500', '-soft_masking': 'false' }, tx)).toEqual([['-max_target_seqs', '500']]);
+  });
+});
+
+describe('fieldList', () => {
+  const blastn = programById('blastn');
+  const wordSize = blastn.sections.flatMap((section) => section.fields).find((field) => field.flag === '-word_size')!;
+  const task = [valueOption('-task', 'megablast')];
+
+  it("gives NCBI's list of the task the search uses", () => {
+    expect(fieldList(wordSize, {}, task)).toEqual(['16', '20', '24', '28', '32', '48', '64']);
+    expect(fieldList(wordSize, { '-task': 'blastn' }, task)).toEqual(['7', '11', '15']);
+    expect(fieldList(wordSize, {}, undefined)).toEqual([]);
+    expect(fieldList({ flag: '-x', label: 'X', kind: 'text' }, {}, task)).toEqual([]);
+  });
+});
+
+// WA-FM-02: a select offers NCBI's values that LOSAT's engine reads; "Other" still takes the
+// rest, which the engine refuses with its message (the engine's e2e checks both sides).
+describe("the selects of the protein modes: NCBI's values that LOSAT reads", () => {
+  const described = JSON.parse(readFileSync(resolve(import.meta.dirname, '../../src/infra/fake/describe.json'), 'utf8')) as Record<string, unknown>;
+  const optionsOf = (id: ProgramId) => toProgramDescription(described[id]).parameters;
+  const field = (id: ProgramId, flag: string) => programById(id).sections.flatMap((section) => section.fields).find((f) => f.flag === flag)!;
+  const list = (id: ProgramId, flag: string, values: FormValues = {}) => fieldList(field(id, flag), values, optionsOf(id));
+
+  it("gives BLASTP NCBI's matrices, word sizes 2, 3, 5 and 6, and every mode, in each task", () => {
+    for (const values of [{}, { '-task': 'blastp-fast' }, { '-task': 'blastp-short' }]) {
+      expect(list('blastp', '-matrix', values)).toEqual(MATRICES);
+      expect(list('blastp', '-word_size', values)).toEqual(['2', '3', '5', '6']);
+    }
+    // BLASTP, BLASTX and TBLASTN offer NCBI's four (series SC, SC5 and SC6): their engines read every mode.
+    expect(fieldChoices(field('blastp', '-comp_based_stats'), optionsOf('blastp').find((o) => o.flag === '-comp_based_stats'))).toEqual(COMPOSITION_MODES);
+    expect(fieldChoices(field('blastx', '-comp_based_stats'), optionsOf('blastx').find((o) => o.flag === '-comp_based_stats'))).toEqual(COMPOSITION_MODES);
+    expect(fieldChoices(field('tblastn', '-comp_based_stats'), optionsOf('tblastn').find((o) => o.flag === '-comp_based_stats'))).toEqual(COMPOSITION_MODES);
+  });
+
+  it("gives BLASTX NCBI's matrices and word sizes 2, 3, 5 and 6 in either task", () => {
+    for (const values of [{}, { '-task': 'blastx-fast' }, { '-word_size': '5' }]) {
+      expect(list('blastx', '-matrix', values)).toEqual(MATRICES);
+      expect(list('blastx', '-word_size', values)).toEqual(['2', '3', '5', '6']);
+    }
+  });
+
+  it("gives TBLASTX NCBI's word sizes 2 and 3", () => {
+    expect(list('tblastx', '-word_size')).toEqual(['2', '3']);
+    expect(list('tblastx', '-matrix')).toEqual(MATRICES);
+  });
+
+  it("gives TBLASTN NCBI's matrices with either lookup table (the compressed one of word sizes 5 to 7 too)", () => {
+    expect(list('tblastn', '-matrix')).toEqual(MATRICES);
+    expect(list('tblastn', '-matrix', { '-task': 'tblastn-fast' })).toEqual(MATRICES);
+    expect(list('tblastn', '-matrix', { '-task': 'tblastn-fast', '-word_size': '3' })).toEqual(MATRICES);
+    for (const size of ['4', '5', '6', '7']) expect(list('tblastn', '-matrix', { '-word_size': ` ${size} ` })).toEqual(MATRICES);
+    expect(list('tblastn', '-word_size')).toEqual(PROTEIN_WORD_SIZES);
+  });
+});
+
+// WA-FM-03: BLAST+ reads -template_length and -template_type only together.
+describe('the Discontiguous Word Options, read together', () => {
+  const described = JSON.parse(readFileSync(resolve(import.meta.dirname, '../../src/infra/fake/describe.json'), 'utf8')) as Record<string, unknown>;
+  const blastn = programById('blastn');
+  const bn = toProgramDescription(described.blastn).parameters;
+  const dc = { '-task': 'dc-megablast' };
+
+  it("show NCBI's values, dc-megablast's template, while they are not set", () => {
+    expect(knownDefault(blastn, '-template_length', dc, bn)).toEqual({ defaultValue: '18' });
+    expect(knownDefault(blastn, '-template_type', dc, bn)).toEqual({ defaultValue: 'coding' });
+    expect(formParameters(blastn, dc, bn)).toEqual([['-task', 'dc-megablast']]);
+    expect(formParameters(blastn, { ...dc, '-template_length': '18', '-template_type': 'coding' }, bn)).toEqual([['-task', 'dc-megablast']]);
+  });
+
+  it('write the other at the value it shows when one is changed, so that the argv never holds one alone', () => {
+    expect(formParameters(blastn, { ...dc, '-template_length': '21' }, bn)).toEqual([
+      ['-task', 'dc-megablast'],
+      ['-template_length', '21'],
+      ['-template_type', 'coding'],
+    ]);
+    expect(formParameters(blastn, { ...dc, '-template_type': 'optimal', '-template_length': ' 18 ' }, bn)).toEqual([
+      ['-task', 'dc-megablast'],
+      ['-template_length', '18'],
+      ['-template_type', 'optimal'],
+    ]);
+    // Kept with the megablast task (the default, not written), where the engine refuses its word size.
+    expect(formParameters(blastn, { '-template_length': '16' }, bn)).toEqual([
+      ['-template_length', '16'],
+      ['-template_type', 'coding'],
+    ]);
+  });
+
+  it('count as changed only where they differ from the values shown', () => {
+    expect(changedFields(blastn, { ...dc, '-template_length': '21' }, bn, 'algorithm')).toBe(1);
+    expect(changedFields(blastn, { ...dc, '-template_length': '21', '-template_type': 'optimal', '-evalue': '1' }, bn, 'algorithm')).toBe(3);
+    expect(changedFields(blastn, dc, bn, 'algorithm')).toBe(0);
+  });
+});
+
 describe('effectiveValue', () => {
   const options = [valueOption('-task', 'megablast')];
 
@@ -277,7 +562,178 @@ describe('sections by place, and the Discontiguous Word Options', () => {
     expect(placementFlags(programById('tblastn'), 'algorithm')).not.toContain('-db_gencode');
     expect(placementFlags(programById('tblastn'), 'algorithm')).not.toContain('-task');
     expect(placementFlags(programById('tblastn'), 'algorithm')).toContain('-evalue');
-    expect(placementFlags(programById('blastx'), 'algorithm')).toEqual([]);
+    expect(sectionsAt(programById('blastx'), undefined, 'query').flatMap((s) => s.fields.map((f) => f.flag))).toEqual(['-query_gencode']);
+    expect(sectionsAt(programById('blastx'), undefined, 'subject')).toEqual([]);
+  });
+});
+
+describe("NCBI's pair selects: Match/Mismatch Scores and Gap Costs", () => {
+  const described = JSON.parse(readFileSync(resolve(import.meta.dirname, '../../src/infra/fake/describe.json'), 'utf8')) as Record<string, unknown>;
+  const optionsOf = (id: ProgramId) => toProgramDescription(described[id]).parameters;
+  const blastn = programById('blastn');
+  const blastp = programById('blastp');
+  const bn = optionsOf('blastn');
+  const bp = optionsOf('blastp');
+  const [scores, gaps] = pairRows(blastn);
+  const proteinGaps = pairRows(blastp)[0]!;
+  // BLASTP and TBLASTN read NCBI's gap costs of every matrix (WA-FM-02).
+  const tblastn = programById('tblastn');
+  const tn = optionsOf('tblastn');
+  const tblastnGaps = pairRows(tblastn)[0]!;
+
+  it('are the rows of two fields that NCBI shows as one select', () => {
+    expect(pairRows(blastn).map((pair) => [pair.row, pair.select.id, pair.flags])).toEqual([
+      ['Match/Mismatch Scores', 'matchscores', ['-reward', '-penalty']],
+      ['Gap Costs', 'gapcosts', ['-gapopen', '-gapextend']],
+    ]);
+    for (const id of ['blastp', 'blastx', 'tblastn'] as const) {
+      expect(pairRows(programById(id)).map((pair) => [pair.row, pair.flags])).toEqual([['Gap Costs', ['-gapopen', '-gapextend']]]);
+    }
+    expect(pairRows(programById('tblastx'))).toEqual([]);
+  });
+
+  it("show the pair that the search uses, from the task's defaults", () => {
+    expect(pairValue(blastn, scores!, {}, bn)).toBe('1,-2');
+    expect(pairValue(blastn, gaps!, {}, bn)).toBe('0 0');
+    expect(pairValue(blastn, scores!, { '-task': 'blastn' }, bn)).toBe('2,-3');
+    expect(pairValue(blastn, gaps!, { '-task': 'blastn' }, bn)).toBe('5 2');
+    expect(pairValue(blastn, gaps!, { '-task': 'blastn', '-gapopen': ' 4 ' }, bn)).toBe('4 2');
+    expect(pairValue(blastp, proteinGaps, { '-matrix': 'PAM30' }, bp)).toBe('9 1');
+    expect(pairValue(blastn, gaps!, {}, undefined)).toBe('');
+  });
+
+  it("list NCBI's gap costs of the scores, with megablast's Linear for megablast only", () => {
+    expect(pairList(blastn, scores!, {}, bn)).toEqual(['1,-2', '1,-3', '1,-4', '2,-3', '4,-5', '1,-1']);
+    expect(pairList(blastn, gaps!, {}, bn)).toEqual(['0 0', '5 2', '2 2', '1 2', '0 2', '3 1', '2 1', '1 1']);
+    expect(pairList(blastn, gaps!, { '-task': 'dc-megablast' }, bn)).toEqual(['4 4', '2 4', '0 4', '3 3', '6 2', '5 2', '4 2', '2 2']);
+    expect(pairList(blastn, gaps!, { '-reward': '1', '-penalty': '-1' }, bn)).not.toContain('0 0');
+    // Scores outside NCBI's list have no list of gap costs: the two fields show.
+    expect(pairList(blastn, gaps!, { '-reward': '3', '-penalty': '-3' }, bn)).toEqual([]);
+    expect(pairList(tblastn, tblastnGaps, { '-matrix': 'BLOSUM45' }, tn)).toContain('14 2');
+    expect(pairList(tblastn, tblastnGaps, { '-matrix': 'IDENTITY' }, tn)).toEqual([]);
+    expect(pairList(tblastn, tblastnGaps, { '-matrix': 'constructor' }, tn)).toEqual([]);
+    expect(setField(tblastn, {}, '-matrix', '__proto__', tn)).toEqual({ '-matrix': '__proto__' });
+    // BLASTP's and BLASTX's lists are NCBI's of each matrix, all of which their engines read.
+    expect(pairList(blastp, proteinGaps, {}, bp)).toEqual(PROTEIN_GAP_COSTS.lists.BLOSUM62);
+    expect(pairList(blastp, proteinGaps, { '-matrix': 'BLOSUM45' }, bp)).toEqual(PROTEIN_GAP_COSTS.lists.BLOSUM45);
+    expect(pairList(blastp, proteinGaps, { '-matrix': 'IDENTITY' }, bp)).toEqual([]);
+    const blastxGaps = pairRows(programById('blastx'))[0]!;
+    expect(pairList(programById('blastx'), blastxGaps, {}, optionsOf('blastx'))).toEqual(PROTEIN_GAP_COSTS.lists.BLOSUM62);
+    expect(pairList(programById('blastx'), blastxGaps, { '-matrix': 'PAM30' }, optionsOf('blastx'))).toEqual(PROTEIN_GAP_COSTS.lists.PAM30);
+    expect(pairList(programById('blastx'), blastxGaps, { '-matrix': 'IDENTITY' }, optionsOf('blastx'))).toEqual([]);
+  });
+
+  it("give each matrix's list NCBI's default, which is the engine's default for that matrix", () => {
+    for (const id of ['tblastn', 'blastp', 'blastx'] as const) {
+      const program = programById(id);
+      const pair = pairRows(program)[0]!;
+      for (const [matrix, value] of Object.entries(pair.select.defaults ?? {})) {
+        expect(pairValue(program, pair, { '-matrix': matrix }, optionsOf(id)), `${id} ${matrix}`).toBe(value);
+        expect(pair.select.lists[matrix], `${id} ${matrix}`).toContain(value);
+      }
+    }
+  });
+
+  it('write both values of a pair chosen, and neither for the default pair', () => {
+    expect(pairEntries(blastn, scores!, '1,-2', {}, bn)).toEqual([
+      ['-reward', ''],
+      ['-penalty', ''],
+    ]);
+    // Both, so that the pair stays 1,-3 under a task whose default reward is 2 (the argv still omits -reward 1 here).
+    expect(pairEntries(blastn, scores!, '1,-3', {}, bn)).toEqual([
+      ['-reward', '1'],
+      ['-penalty', '-3'],
+    ]);
+    expect(formParameters(blastn, setFields(blastn, {}, pairEntries(blastn, scores!, '1,-3', {}, bn), bn), bn)).toEqual([['-penalty', '-3']]);
+    expect(pairEntries(blastp, proteinGaps, '10 1', {}, bp)).toEqual([
+      ['-gapopen', '10'],
+      ['-gapextend', '1'],
+    ]);
+  });
+
+  it('keep the pair chosen when the task changes the defaults (review of SURVEY #13, 1)', () => {
+    const oneFour = setFields(blastn, {}, pairEntries(blastn, scores!, '1,-4', {}, bn), bn);
+    const blastnTask = setField(blastn, oneFour, '-task', 'blastn', bn);
+    expect(pairValue(blastn, scores!, blastnTask, bn)).toBe('1,-4');
+    expect(formParameters(blastn, blastnTask, bn)).toEqual([
+      ['-task', 'blastn'],
+      ['-reward', '1'],
+      ['-penalty', '-4'],
+    ]);
+  });
+
+  it("give the gap costs the list's default when the pair in use leaves an unchanged list (review of SURVEY #13, 2)", () => {
+    // 1,-1 has the same list for every task; megablast's default 0 0 is not in it (BLAST stops).
+    const oneOne = setFields(blastn, { '-task': 'blastn' }, pairEntries(blastn, scores!, '1,-1', { '-task': 'blastn' }, bn), bn);
+    expect(formParameters(blastn, oneOne, bn)).toEqual([
+      ['-task', 'blastn'],
+      ['-reward', '1'],
+      ['-penalty', '-1'],
+    ]);
+    const megablast = setField(blastn, oneOne, '-task', 'megablast', bn);
+    expect(pairValue(blastn, gaps!, megablast, bn)).toBe('5 2');
+    expect(formParameters(blastn, megablast, bn).slice(-2)).toEqual([
+      ['-gapopen', '5'],
+      ['-gapextend', '2'],
+    ]);
+  });
+
+  it("give the gap costs the new list's default when the scores change it, as NCBI's page does", () => {
+    const choose = (values: FormValues, pair: string) => setFields(blastn, values, pairEntries(blastn, scores!, pair, values, bn), bn);
+    // 4,-5 does not take BLASTN's 5 2 (BLAST stops: "Gap existence and extension values 5 and 2 are not supported").
+    expect(formParameters(blastn, choose({ '-task': 'blastn' }, '4,-5'), bn)).toEqual([
+      ['-task', 'blastn'],
+      ['-reward', '4'],
+      ['-penalty', '-5'],
+      ['-gapopen', '12'],
+      ['-gapextend', '8'],
+    ]);
+    // Megablast's Linear is the default of the lists that hold it; 1,-1 has none (BLAST refuses 0 0 there).
+    expect(formParameters(blastn, choose({}, '4,-5'), bn)).toEqual([
+      ['-reward', '4'],
+      ['-penalty', '-5'],
+    ]);
+    expect(formParameters(blastn, choose({ '-gapopen': '2', '-gapextend': '1' }, '1,-3'), bn)).toEqual([['-penalty', '-3']]);
+    expect(formParameters(blastn, choose({}, '1,-1'), bn)).toEqual([
+      ['-penalty', '-1'],
+      ['-gapopen', '5'],
+      ['-gapextend', '2'],
+    ]);
+  });
+
+  it('give the gap costs the new default when the task or the matrix changes their list, and keep them otherwise', () => {
+    const fourFive = setFields(blastn, {}, pairEntries(blastn, scores!, '4,-5', {}, bn), bn);
+    const blastnTask = setField(blastn, fourFive, '-task', 'blastn', bn);
+    expect(formParameters(blastn, blastnTask, bn).slice(-2)).toEqual([
+      ['-gapopen', '12'],
+      ['-gapextend', '8'],
+    ]);
+    // Back to megablast (the default task, not written): Linear again.
+    expect(formParameters(blastn, setField(blastn, blastnTask, '-task', 'megablast', bn), bn)).toEqual([
+      ['-reward', '4'],
+      ['-penalty', '-5'],
+    ]);
+    const set: FormValues = { '-gapopen': '10', '-gapextend': '2' };
+    expect(formParameters(tblastn, setField(tblastn, set, '-matrix', 'PAM30', tn), tn)).toEqual([['-matrix', 'PAM30']]);
+    // The same list: the costs set stay (tblastn-fast scores as tblastn does).
+    expect(setField(tblastn, set, '-task', 'tblastn-fast', tn)).toEqual({ ...set, '-task': 'tblastn-fast' });
+    // A matrix that NCBI does not list (typed after "Other"): no list, the costs stay.
+    expect(setField(tblastn, set, '-matrix', 'IDENTITY', tn)).toEqual({ ...set, '-matrix': 'IDENTITY' });
+    // BLASTP's lists are per matrix as TBLASTN's: the new matrix's list gives its default; a
+    // matrix that NCBI does not list leaves the costs.
+    expect(setField(blastp, set, '-matrix', 'PAM30', bp)).toEqual({ '-matrix': 'PAM30' });
+    expect(setField(blastp, set, '-matrix', 'IDENTITY', bp)).toEqual({ ...set, '-matrix': 'IDENTITY' });
+    // The row's own fields set here are kept.
+    expect(setFields(tblastn, {}, [['-matrix', 'PAM30'], ['-gapopen', '8']], tn)).toEqual({ '-matrix': 'PAM30', '-gapopen': '8' });
+    // Scores typed in the two fields: a pair without a list leaves the costs.
+    expect(setField(blastn, { '-gapopen': '2', '-gapextend': '1' }, '-reward', '3', bn)).toEqual({ '-gapopen': '2', '-gapextend': '1', '-reward': '3' });
+  });
+
+  it("put the low complexity filters in NCBI's Filter row as checkboxes", () => {
+    for (const program of PROGRAMS) {
+      const filter = program.sections.flatMap((section) => section.fields).find((field) => field.flag === '-dust' || field.flag === '-seg');
+      expect(filter, program.id).toMatchObject({ label: 'Low complexity regions', kind: 'filter', row: 'Filter' });
+    }
   });
 });
 
@@ -298,25 +754,53 @@ describe('fieldRows', () => {
 });
 
 describe('searchSummary', () => {
-  it('says what is searched, with which program and task, and where', () => {
+  it('says what is searched, with which program and task', () => {
     expect(searchSummary(programById('blastn'), 'megablast')).toBe(
-      'Search nucleotide subjects with BLASTN, task megablast (optimized for highly similar sequences). Runs in this browser.',
+      'Search nucleotide subjects with BLASTN, task megablast (optimized for highly similar sequences).',
     );
     expect(searchSummary(programById('blastn'), 'dc-megablast')).toContain('task dc-megablast (optimized for more dissimilar sequences)');
     expect(searchSummary(programById('blastp'), 'blastp')).toBe(
-      'Search protein subjects with BLASTP, task blastp (protein-protein BLAST). Runs in this browser.',
+      'Search protein subjects with BLASTP, task blastp (protein-protein BLAST).',
     );
     expect(searchSummary(programById('tblastn'), 'tblastn')).toBe(
-      'Search translated nucleotide subjects with TBLASTN (protein query), task tblastn. Runs in this browser.',
+      'Search translated nucleotide subjects with TBLASTN (protein query), task tblastn.',
     );
     expect(searchSummary(programById('tblastx'), undefined)).toBe(
-      'Search translated nucleotide subjects with TBLASTX (translated nucleotide query). Runs in this browser.',
+      'Search translated nucleotide subjects with TBLASTX (translated nucleotide query).',
     );
   });
 
+  it('sets off what is searched and the program with its task', () => {
+    expect(searchSummaryParts(programById('blastn'), 'megablast').filter((part) => part.strong).map((part) => part.text)).toEqual([
+      'nucleotide subjects',
+      'BLASTN, task megablast (optimized for highly similar sequences)',
+    ]);
+  });
+
   it('names a task without a note, and leaves the task out while it is unknown', () => {
-    expect(searchSummary(programById('blastp'), 'other')).toBe('Search protein subjects with BLASTP, task other. Runs in this browser.');
-    expect(searchSummary(programById('blastn'), undefined)).toBe('Search nucleotide subjects with BLASTN. Runs in this browser.');
+    expect(searchSummary(programById('blastp'), 'other')).toBe('Search protein subjects with BLASTP, task other.');
+    expect(searchSummary(programById('blastn'), undefined)).toBe('Search nucleotide subjects with BLASTN.');
+  });
+});
+
+describe('regionProblemFields', () => {
+  const fields = (start: string, stop: string, length = 100) => regionProblemFields({ start, stop }, length);
+
+  it('marks neither field without a problem', () => {
+    expect(fields('5', '10')).toEqual({ start: false, stop: false });
+  });
+  it('marks the field that is empty, not a whole number, or outside the record', () => {
+    expect(fields('', '10')).toEqual({ start: true, stop: false });
+    expect(fields('5', '  ')).toEqual({ start: false, stop: true });
+    expect(fields('1.5', '10')).toEqual({ start: true, stop: false });
+    expect(fields('5', 'abc')).toEqual({ start: false, stop: true });
+    expect(fields('0', '10')).toEqual({ start: true, stop: false });
+    expect(fields('5', '101')).toEqual({ start: false, stop: true });
+    expect(fields('', '')).toEqual({ start: true, stop: true });
+  });
+  it('marks both when the start is after the stop or equal to it', () => {
+    expect(fields('10', '5')).toEqual({ start: true, stop: true });
+    expect(fields('7', '7')).toEqual({ start: true, stop: true });
   });
 });
 
@@ -353,15 +837,49 @@ describe('regionProblem', () => {
     expect(problem('1', '8', 7)).toBe('The stop must be between 1 and 7, the length of the record.');
   });
 
-  it('accepts positions within the record, including start == stop and start > stop', () => {
+  it('accepts positions within the record with the start before the stop', () => {
     expect(problem('1', '100')).toBeUndefined();
-    expect(problem('50', '50')).toBeUndefined();
-    expect(problem('80', '20')).toBeUndefined();
+    expect(problem('50', '51')).toBeUndefined();
     expect(problem('007', '0100')).toBeUndefined();
+  });
+
+  // The engine refuses both, as NCBI does (WA-IN-07): `-query_loc 300-100` "start cannot be
+  // larger than stop", `-query_loc 100-100` "range cannot be empty", in every mode and role.
+  it('refuses a start after the stop, and a range of one letter, as the engine does', () => {
+    expect(problem('80', '20')).toBe('The start cannot be larger than the stop.');
+    expect(problem('0100', '99')).toBe('The start cannot be larger than the stop.');
+    expect(problem('50', '50')).toBe('The stop must be larger than the start.');
+    expect(problem('007', '7')).toBe('The stop must be larger than the start.');
+  });
+
+  it('names a position outside the record before the order', () => {
+    expect(problem('300', '100')).toBe('The start must be between 1 and 100, the length of the record.');
   });
 
   it('accepts surrounding white space', () => {
     expect(problem(' 5 ', '\t10\n')).toBeUndefined();
+  });
+});
+
+describe('swappedRegion', () => {
+  const swap = (start: string, stop: string, length = 400) => swappedRegion({ start, stop }, length);
+
+  it('swaps a start after the stop when both are within the record', () => {
+    expect(swap('300', '100')).toEqual({ start: '100', stop: '300' });
+    expect(swap(' 0300 ', '100\n')).toEqual({ start: '100', stop: '300' });
+    expect(swap('400', '1')).toEqual({ start: '1', stop: '400' });
+  });
+
+  it('offers nothing for a region that the swap would not make one', () => {
+    expect(swap('100', '300')).toBeUndefined();
+    expect(swap('100', '100')).toBeUndefined();
+    expect(swap('500', '100')).toBeUndefined();
+    expect(swap('300', '0')).toBeUndefined();
+    expect(swap('3a', '1')).toBeUndefined();
+    // Not whole numbers: the problem says so, and a swap would not mend it.
+    expect(swap('300.0', '100')).toBeUndefined();
+    expect(swap('1e3', '100')).toBeUndefined();
+    expect(swap('', '1')).toBeUndefined();
   });
 });
 
@@ -377,13 +895,15 @@ describe('region value, range and positions', () => {
 
   it('gives the range of a valid region', () => {
     expect(regionRange({ start: ' 05', stop: '10 ' }, 20)).toEqual({ start: 5, stop: 10 });
-    expect(regionRange({ start: '20', stop: '5' }, 20)).toEqual({ start: 20, stop: 5 });
+    expect(regionRange({ start: '5', stop: '20' }, 20)).toEqual({ start: 5, stop: 20 });
   });
 
   it('gives no range while the region is incomplete or outside the record', () => {
     expect(regionRange({ start: '', stop: '5' }, 20)).toBeUndefined();
     expect(regionRange({ start: '1', stop: '21' }, 20)).toBeUndefined();
     expect(regionRange({ start: 'a', stop: '5' }, 20)).toBeUndefined();
+    expect(regionRange({ start: '20', stop: '5' }, 20)).toBeUndefined();
+    expect(regionRange({ start: '5', stop: '5' }, 20)).toBeUndefined();
   });
 
   it('orders, rounds and limits positions', () => {
@@ -458,19 +978,23 @@ describe('duplicateIds', () => {
 
 describe('program descriptors', () => {
   const RESERVED = ['-query', '-subject', '-out', '-outfmt', '-num_threads', '-query_loc', '-subject_loc'];
-  const available = PROGRAMS.filter((p) => p.unavailable === undefined);
 
   it('lists each program once', () => {
     expect(new Set(PROGRAMS.map((p) => p.id)).size).toBe(PROGRAMS.length);
     for (const program of PROGRAMS) expect(programById(program.id)).toBe(program);
   });
 
-  it('marks BLASTX as unavailable', () => {
-    expect(programById('blastx').unavailable).toBeTypeOf('string');
-    expect(available.map((p) => p.id)).not.toContain('blastx');
+  it("reads each input with NCBI's reader kind of its sequence kind (DW-38)", () => {
+    expect(Object.fromEntries(PROGRAMS.map((p) => [p.id, [fastaParser(p, 'query'), fastaParser(p, 'subject')]]))).toEqual({
+      blastn: [1, 1],
+      blastp: [2, 2],
+      tblastn: [2, 1],
+      tblastx: [1, 1],
+      blastx: [1, 2],
+    });
   });
 
-  it.each(available.map((p) => [p.id, p] as const))('%s has a form with unique flags', (_id, program) => {
+  it.each(PROGRAMS.map((p) => [p.id, p] as const))('%s has a form with unique flags', (_id, program) => {
     expect(program.sections.length).toBeGreaterThan(0);
     for (const section of program.sections) expect(section.fields.length).toBeGreaterThan(0);
     const flags = program.sections.flatMap((s) => s.fields.map((f) => f.flag));
@@ -483,12 +1007,12 @@ describe('program descriptors', () => {
     for (const flag of flags) expect(RESERVED).not.toContain(flag);
   });
 
-  it.each(available.map((p) => [p.id, p] as const))("%s has NCBI's sections in NCBI's order under Algorithm parameters", (_id, program) => {
+  it.each(PROGRAMS.map((p) => [p.id, p] as const))("%s has NCBI's sections in NCBI's order under Algorithm parameters", (_id, program) => {
     const order = ['General Parameters', 'Scoring Parameters', 'Filters and Masking', 'Discontiguous Word Options', 'Other Parameters'];
     const titles = program.sections.filter((s) => s.placement === 'algorithm').map((s) => s.title);
     expect(titles.map((title) => order.indexOf(title))).toEqual([...titles.map((title) => order.indexOf(title))].sort((a, b) => a - b));
     expect(titles.every((title) => order.includes(title))).toBe(true);
-    // The task is chosen with radio buttons in Program Selection, before every other option.
+    // The task is chosen with radio buttons in Task Selection, before every other option.
     const task = program.sections.flatMap((s) => s.fields).find((f) => f.flag === '-task');
     if (task !== undefined) {
       expect(task.kind).toBe('radio');

@@ -1,0 +1,2 @@
+Warning: [blastx] Query_1 m_fam MelaMJNV 26001-31000: Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options 
+Warning: [blastx] Query_2 m_mix MelaMJNV 56001-61600: Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options 

@@ -1,0 +1,413 @@
+BLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/x16n_lcase_s.fna).
+           2 sequences; 965 total letters
+
+
+
+Query= qn1 lcase
+
+Length=480
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+sn1 subject nucleotide alpha                                          278     9e-79
+sn2 subject nucleotide beta reverse                                   186     3e-51
+
+
+> sn1 subject nucleotide alpha
+Length=488
+
+ Score = 278 bits (140),  Expect = 9e-79
+ Identities = 155/160 (97%), Gaps = 0/160 (0%)
+ Strand=Plus/Plus
+
+Query  41   AACACTCCGTGCTAAAAGCAAATTTTGCCGTGCTTCGTAAAGTGATGGACGACCCGAAAA  100
+            |||||||||||||| |||||| ||||||||||||||||||||||||||||||||||||||
+Sbjct  56   AACACTCCGTGCTAGAAGCAATTTTTGCCGTGCTTCGTAAAGTGATGGACGACCCGAAAA  115
+
+Query  101  TACGGGATGGGCCCATGGCTGTAATGAAGGGCTGGGAGAACTATTGCTGGCCCGCGAATA  160
+            ||||||||||||||||||||| ||||||||||||||||||||||||||||||||||||||
+Sbjct  116  TACGGGATGGGCCCATGGCTGCAATGAAGGGCTGGGAGAACTATTGCTGGCCCGCGAATA  175
+
+Query  161  TGAGCTGGAAAGTCCTTATGAAGTATGAGTTTTCCTCCGA  200
+            | |||||||||||||||||||||| |||||||||||||||
+Sbjct  176  TAAGCTGGAAAGTCCTTATGAAGTTTGAGTTTTCCTCCGA  215
+
+
+ Score = 240 bits (121),  Expect = 2e-67
+ Identities = 187/208 (90%), Gaps = 2/208 (1%)
+ Strand=Plus/Plus
+
+Query  235  CCTAAGGAGATGGCAACCCCAGGATGGTGGAAGACGGATACGTTGCATATGGCAGAAATG  294
+            |||||||| ||||||| |||||||| || |||||||||||||||||||| | ||| ||||
+Sbjct  246  CCTAAGGATATGGCAAACCCAGGATTGTCGAAGACGGATACGTTGCATAGGTCAGCAATG  305
+
+Query  295  GGTCTGTGGATGCATAAGTATCCCAAGTGTATGTGTGTAA--TGGTGAGATTCACAGATC  352
+            |||||||||| ||||||| ||| |||| ||||||||||||  |||||||| |||||||||
+Sbjct  306  GGTCTGTGGAGGCATAAGCATCTCAAGGGTATGTGTGTAACGTGGTGAGAATCACAGATC  365
+
+Query  353  AATCTCTCCGGCATTGGAAAATTAACCATGACGCTAACTTTGAGAAACTTAAGATCTTCC  412
+            |||||||||||||||| |||  |||||||||||||||||  |||||| ||||||||||||
+Sbjct  366  AATCTCTCCGGCATTGCAAACCTAACCATGACGCTAACTGCGAGAAATTTAAGATCTTCC  425
+
+Query  413  ACTACATGGTGGGTCATGGGAGAACAGC  440
+            || |||||||||||||||||||||||||
+Sbjct  426  ACAACATGGTGGGTCATGGGAGAACAGC  453
+
+
+ Score = 20.3 bits (10),  Expect = 0.34
+ Identities = 10/10 (100%), Gaps = 0/10 (0%)
+ Strand=Plus/Minus
+
+Query  107  ATGGGCCCAT  116
+            ||||||||||
+Sbjct  131  ATGGGCCCAT  122
+
+
+ Score = 18.3 bits (9),  Expect = 1.3
+ Identities = 9/9 (100%), Gaps = 0/9 (0%)
+ Strand=Plus/Minus
+
+Query  163  AGCTGGAAA  171
+            |||||||||
+Sbjct  29   AGCTGGAAA  21
+
+
+ Score = 18.3 bits (9),  Expect = 1.3
+ Identities = 9/9 (100%), Gaps = 0/9 (0%)
+ Strand=Plus/Plus
+
+Query  429  TGGGAGAAC  437
+            |||||||||
+Sbjct  148  TGGGAGAAC  156
+
+
+ Score = 18.3 bits (9),  Expect = 1.3
+ Identities = 9/9 (100%), Gaps = 0/9 (0%)
+ Strand=Plus/Plus
+
+Query  133  TGGGAGAAC  141
+            |||||||||
+Sbjct  442  TGGGAGAAC  450
+
+
+ Score = 16.4 bits (8),  Expect = 5.3
+ Identities = 8/8 (100%), Gaps = 0/8 (0%)
+ Strand=Plus/Plus
+
+Query  74  TTCGTAAA  81
+           ||||||||
+Sbjct  33  TTCGTAAA  40
+
+
+ Score = 16.4 bits (8),  Expect = 5.3
+ Identities = 8/8 (100%), Gaps = 0/8 (0%)
+ Strand=Plus/Plus
+
+Query  299  TGTGGATG  306
+            ||||||||
+Sbjct  47   TGTGGATG  54
+
+
+ Score = 16.4 bits (8),  Expect = 5.3
+ Identities = 8/8 (100%), Gaps = 0/8 (0%)
+ Strand=Plus/Plus
+
+Query  12   CCGCGAAT  19
+            ||||||||
+Sbjct  167  CCGCGAAT  174
+
+
+ Score = 16.4 bits (8),  Expect = 5.3
+ Identities = 8/8 (100%), Gaps = 0/8 (0%)
+ Strand=Plus/Minus
+
+Query  304  ATGCATAA  311
+            ||||||||
+Sbjct  239  ATGCATAA  232
+
+
+ Score = 16.4 bits (8),  Expect = 5.3
+ Identities = 8/8 (100%), Gaps = 0/8 (0%)
+ Strand=Plus/Minus
+
+Query  6    CACATACC  13
+            ||||||||
+Sbjct  340  CACATACC  333
+
+
+ Score = 16.4 bits (8),  Expect = 5.3
+ Identities = 8/8 (100%), Gaps = 0/8 (0%)
+ Strand=Plus/Minus
+
+Query  403  AAGATCTT  410
+            ||||||||
+Sbjct  423  AAGATCTT  416
+
+
+ Score = 16.4 bits (8),  Expect = 5.3
+ Identities = 8/8 (100%), Gaps = 0/8 (0%)
+ Strand=Plus/Minus
+
+Query  261  GTGGAAGA  268
+            ||||||||
+Sbjct  427  GTGGAAGA  420
+
+
+ Score = 14.4 bits (7),  Expect = 21
+ Identities = 7/7 (100%), Gaps = 0/7 (0%)
+ Strand=Plus/Minus
+
+Query  1   AACAGCA  7
+           |||||||
+Sbjct  11  AACAGCA  5
+
+
+ Score = 14.4 bits (7),  Expect = 21
+ Identities = 7/7 (100%), Gaps = 0/7 (0%)
+ Strand=Plus/Minus
+
+Query  57   AGCAAAT  63
+            |||||||
+Sbjct  244  AGCAAAT  238
+
+
+ Score = 14.4 bits (7),  Expect = 21
+ Identities = 7/7 (100%), Gaps = 0/7 (0%)
+ Strand=Plus/Minus
+
+Query  143  ATTGCTG  149
+            |||||||
+Sbjct  304  ATTGCTG  298
+
+
+ Score = 14.4 bits (7),  Expect = 21
+ Identities = 7/7 (100%), Gaps = 0/7 (0%)
+ Strand=Plus/Minus
+
+Query  425  GTCATGG  431
+            |||||||
+Sbjct  397  GTCATGG  391
+
+
+ Score = 14.4 bits (7),  Expect = 21
+ Identities = 7/7 (100%), Gaps = 0/7 (0%)
+ Strand=Plus/Plus
+
+Query  258  ATGGTGG  264
+            |||||||
+Sbjct  431  ATGGTGG  437
+
+
+ Score = 14.4 bits (7),  Expect = 21
+ Identities = 7/7 (100%), Gaps = 0/7 (0%)
+ Strand=Plus/Minus
+
+Query  378  CCATGAC  384
+            |||||||
+Sbjct  444  CCATGAC  438
+
+
+ Score = 14.4 bits (7),  Expect = 21
+ Identities = 7/7 (100%), Gaps = 0/7 (0%)
+ Strand=Plus/Plus
+
+Query  1    AACAGCA  7
+            |||||||
+Sbjct  448  AACAGCA  454
+
+
+ Score = 14.4 bits (7),  Expect = 21
+ Identities = 7/7 (100%), Gaps = 0/7 (0%)
+ Strand=Plus/Minus
+
+Query  274  ACGTTGC  280
+            |||||||
+Sbjct  468  ACGTTGC  462
+
+
+ Score = 14.4 bits (7),  Expect = 21
+ Identities = 7/7 (100%), Gaps = 0/7 (0%)
+ Strand=Plus/Plus
+
+Query  179  TGAAGTA  185
+            |||||||
+Sbjct  480  TGAAGTA  486
+
+
+> sn2 subject nucleotide beta reverse
+Length=477
+
+ Score = 186 bits (94),  Expect = 3e-51
+ Identities = 133/146 (91%), Gaps = 0/146 (0%)
+ Strand=Plus/Minus
+
+Query  295  GGTCTGTGGATGCATAAGTATCCCAAGTGTATGTGTGTAATGGTGAGATTCACAGATCAA  354
+            |||| |||||||||||||||||||||||||| |||||||  |||| |||||||| || | 
+Sbjct  196  GGTCCGTGGATGCATAAGTATCCCAAGTGTAAGTGTGTACAGGTGTGATTCACAAATTAC  137
+
+Query  355  TCTCTCCGGCATTGGAAAATTAACCATGACGCTAACTTTGAGAAACTTAAGATCTTCCAC  414
+            |||||| |||| |||||||||| |||||||||||||| |||||||||||||||| |||||
+Sbjct  136  TCTCTCTGGCAATGGAAAATTAGCCATGACGCTAACTGTGAGAAACTTAAGATCCTCCAC  77
+
+Query  415  TACATGGTGGGTCATGGGAGAACAGC  440
+            ||||||||||||||||||||||||||
+Sbjct  76   TACATGGTGGGTCATGGGAGAACAGC  51
+
+
+ Score = 151 bits (76),  Expect = 1e-40
+ Identities = 124/140 (89%), Gaps = 0/140 (0%)
+ Strand=Plus/Minus
+
+Query  41   AACACTCCGTGCTAAAAGCAAATTTTGCCGTGCTTCGTAAAGTGATGGACGACCCGAAAA  100
+            |||||||||||||||||||||||||||||| |||| || ||||||||||||| || ||||
+Sbjct  447  AACACTCCGTGCTAAAAGCAAATTTTGCCGGGCTTAGTGAAGTGATGGACGATCCCAAAA  388
+
+Query  101  TACGGGATGGGCCCATGGCTGTAATGAAGGGCTGGGAGAACTATTGCTGGCCCGCGAATA  160
+            ||| | ||||||| ||||||||||||||||||  |||| ||||||||  |||||| ||| 
+Sbjct  387  TACAGTATGGGCCAATGGCTGTAATGAAGGGCATGGAGCACTATTGCCCGCCCGCTAATC  328
+
+Query  161  TGAGCTGGAAAGTCCTTATG  180
+            ||||||||||||||| ||||
+Sbjct  327  TGAGCTGGAAAGTCCGTATG  308
+
+
+ Score = 38.2 bits (19),  Expect = 1e-06
+ Identities = 40/47 (85%), Gaps = 0/47 (0%)
+ Strand=Plus/Minus
+
+Query  231  GATCCCTAAGGAGATGGCAACCCCAGGATGGTGGAAGACGGATACGT  277
+            |||||||||| ||||||||  |||||||| | ||||| || ||||||
+Sbjct  254  GATCCCTAAGTAGATGGCACTCCCAGGATTGGGGAAGTCGAATACGT  208
+
+
+ Score = 18.3 bits (9),  Expect = 1.3
+ Identities = 9/9 (100%), Gaps = 0/9 (0%)
+ Strand=Plus/Minus
+
+Query  133  TGGGAGAAC  141
+            |||||||||
+Sbjct  62   TGGGAGAAC  54
+
+
+ Score = 16.4 bits (8),  Expect = 5.3
+ Identities = 8/8 (100%), Gaps = 0/8 (0%)
+ Strand=Plus/Plus
+
+Query  271  GATACGTT  278
+            ||||||||
+Sbjct  453  GATACGTT  460
+
+
+ Score = 14.4 bits (7),  Expect = 21
+ Identities = 7/7 (100%), Gaps = 0/7 (0%)
+ Strand=Plus/Minus
+
+Query  1   AACAGCA  7
+           |||||||
+Sbjct  56  AACAGCA  50
+
+
+ Score = 14.4 bits (7),  Expect = 21
+ Identities = 7/7 (100%), Gaps = 0/7 (0%)
+ Strand=Plus/Plus
+
+Query  378  CCATGAC  384
+            |||||||
+Sbjct  60   CCATGAC  66
+
+
+ Score = 14.4 bits (7),  Expect = 21
+ Identities = 7/7 (100%), Gaps = 0/7 (0%)
+ Strand=Plus/Minus
+
+Query  258  ATGGTGG  264
+            |||||||
+Sbjct  73   ATGGTGG  67
+
+
+ Score = 14.4 bits (7),  Expect = 21
+ Identities = 7/7 (100%), Gaps = 0/7 (0%)
+ Strand=Plus/Plus
+
+Query  425  GTCATGG  431
+            |||||||
+Sbjct  107  GTCATGG  113
+
+
+ Score = 14.4 bits (7),  Expect = 21
+ Identities = 7/7 (100%), Gaps = 0/7 (0%)
+ Strand=Plus/Plus
+
+Query  114  CATGGCT  120
+            |||||||
+Sbjct  109  CATGGCT  115
+
+
+ Score = 14.4 bits (7),  Expect = 21
+ Identities = 7/7 (100%), Gaps = 0/7 (0%)
+ Strand=Plus/Plus
+
+Query  132  CTGGGAG  138
+            |||||||
+Sbjct  229  CTGGGAG  235
+
+
+ Score = 14.4 bits (7),  Expect = 21
+ Identities = 7/7 (100%), Gaps = 0/7 (0%)
+ Strand=Plus/Minus
+
+Query  330  TGTAATG  336
+            |||||||
+Sbjct  368  TGTAATG  362
+
+
+ Score = 14.4 bits (7),  Expect = 21
+ Identities = 7/7 (100%), Gaps = 0/7 (0%)
+ Strand=Plus/Plus
+
+Query  110  GGCCCAT  116
+            |||||||
+Sbjct  375  GGCCCAT  381
+
+
+ Score = 14.4 bits (7),  Expect = 21
+ Identities = 7/7 (100%), Gaps = 0/7 (0%)
+ Strand=Plus/Minus
+
+Query  314  ATCCCAA  320
+            |||||||
+Sbjct  396  ATCCCAA  390
+
+
+
+Lambda      K        H
+    1.37    0.711     1.31 
+
+Gapped
+Lambda      K        H
+    1.37    0.711     1.31 
+
+Effective search space used: 446037
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt0/x16n_lcase_s.fna).
+    Posted date:  Unknown
+  Number of letters in database: 965
+  Number of sequences in database:  2
+
+
+
+Matrix: blastn matrix 1 -3
+Gap Penalties: Existence: 5, Extension: 2

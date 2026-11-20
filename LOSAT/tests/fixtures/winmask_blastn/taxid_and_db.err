@@ -1,0 +1,2 @@
+BLAST query/options error: Please specify at most one of filtering_db, window_masker_taxid, or window_masker_db.
+Please refer to the BLAST+ user manual.

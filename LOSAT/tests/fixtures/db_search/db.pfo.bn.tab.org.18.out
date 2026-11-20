@@ -1,0 +1,28 @@
+
+                                          Tax BLAST report                                          
+
+Query= mix2_u glob1 of multidb/nnp (no accession table)
+
+Length=1043
+
+                                           Organism Report                                           
+Accession                                 Description                                Score E-value 
+
+                                   Homo sapiens (human) [primates]                                   
+ 13        FBtr0083245 cdna primary_assembly:BDGP6.54:3R:15896926:15902584:-1 gene:... 1927  0.0     
+
+                                          Tax BLAST report                                          
+
+Query= ENST00000320868.9 cdna chromosome:GRCh38:16:176680:177522:1
+gene:ENSG00000206172.10 gene_biotype:protein_coding
+transcript_biotype:protein_coding gene_symbol:HBA1
+description:hemoglobin subunit alpha 1 [Source:HGNC
+Symbol;Acc:HGNC:4823]
+
+Length=577
+
+                                           Organism Report                                           
+Accession                                 Description                                Score E-value 
+
+                                   Homo sapiens (human) [primates]                                   
+ 16        ENSTTEST0001.1 copy of record 1                                             1066  0.0     

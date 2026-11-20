@@ -1,0 +1,1390 @@
+{
+"BlastOutput2": [
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/paja_taxid"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 0.1,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_1",
+          "query_title": "BDT62524.1 hypothetical protein [Metapenaeus ensis majanivirus]",
+          "query_len": 370,
+          "hits": [
+          ],
+          "stat": {
+            "db_num": 86,
+            "db_len": 66738,
+            "hsp_len": 66,
+            "eff_space": 18562848,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          },
+          "message": "No hits found"
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/paja_taxid"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 0.1,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_2",
+          "query_title": "BDT62525.1 wsv465-like protein [Metapenaeus ensis majanivirus]",
+          "query_len": 377,
+          "hits": [
+          ],
+          "stat": {
+            "db_num": 86,
+            "db_len": 66738,
+            "hsp_len": 66,
+            "eff_space": 18990282,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          },
+          "message": "No hits found"
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/paja_taxid"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 0.1,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_3",
+          "query_title": "BDT62529.1 innexin [Metapenaeus ensis majanivirus]",
+          "query_len": 386,
+          "hits": [
+          ],
+          "stat": {
+            "db_num": 86,
+            "db_len": 66738,
+            "hsp_len": 66,
+            "eff_space": 19539840,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          },
+          "message": "No hits found"
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/paja_taxid"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 0.1,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_4",
+          "query_title": "BDT62536.1 hypothetical protein [Metapenaeus ensis majanivirus]",
+          "query_len": 295,
+          "hits": [
+          ],
+          "stat": {
+            "db_num": 86,
+            "db_len": 66738,
+            "hsp_len": 64,
+            "eff_space": 14145054,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          },
+          "message": "No hits found"
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/paja_taxid"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 0.1,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_5",
+          "query_title": "BDT62539.1 hypothetical protein [Metapenaeus ensis majanivirus]",
+          "query_len": 341,
+          "hits": [
+          ],
+          "stat": {
+            "db_num": 86,
+            "db_len": 66738,
+            "hsp_len": 65,
+            "eff_space": 16876848,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          },
+          "message": "No hits found"
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/paja_taxid"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 0.1,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_6",
+          "query_title": "BDT62541.1 hypothetical protein [Metapenaeus ensis majanivirus]",
+          "query_len": 534,
+          "hits": [
+          ],
+          "stat": {
+            "db_num": 86,
+            "db_len": 66738,
+            "hsp_len": 69,
+            "eff_space": 28273860,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          },
+          "message": "No hits found"
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/paja_taxid"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 0.1,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_7",
+          "query_title": "BDT62542.1 hypothetical protein [Metapenaeus ensis majanivirus]",
+          "query_len": 516,
+          "hits": [
+          ],
+          "stat": {
+            "db_num": 86,
+            "db_len": 66738,
+            "hsp_len": 69,
+            "eff_space": 27179388,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          },
+          "message": "No hits found"
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/paja_taxid"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 0.1,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_8",
+          "query_title": "BDT62543.1 hypothetical protein [Metapenaeus ensis majanivirus]",
+          "query_len": 543,
+          "hits": [
+          ],
+          "stat": {
+            "db_num": 86,
+            "db_len": 66738,
+            "hsp_len": 69,
+            "eff_space": 28821096,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          },
+          "message": "No hits found"
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/paja_taxid"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 0.1,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_9",
+          "query_title": "BDT62544.1 wsv192-like protein [Metapenaeus ensis majanivirus]",
+          "query_len": 351,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|30"
+                }
+              ],
+              "len": 1039,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 89.3521,
+                  "score": 220,
+                  "evalue": 1.20544e-21,
+                  "identity": 97,
+                  "positive": 173,
+                  "query_from": 8,
+                  "query_to": 348,
+                  "hit_from": 629,
+                  "hit_to": 1031,
+                  "align_len": 428,
+                  "gaps": 112,
+                  "qseq": "ILIETQQLKERKTFLEREWASKVNWYNLIHFLFPNLSCVK---------NKLLNLSRARIMRISQFLVHYEYFKPVLSNIEFKFNSDMLPLGCKENIFMRLKIGLDIIAHATKCWNWACLQRGWISETIENPT-----------------------PDWVIQLAQQCFQECNIKCEDIEKDCSYIKSPCLLAYRNVVPLIKKDIQ--------FIQDDRL-----------------SSFEFWVELSLNSLVDALRMKKIITENEKDLSNLETLINVKT---PDTFEKLLCLMKIKCEKMNKAFVSKKGDTVDISRWSKKNNGINGKRCIEIKTNSLIEIQ------NVT------------------LDG-KEFSLYMVESQNEVRKQNVEFVE--IKKCKSKIYVKAPCISPLYQRCIKPVSLIIR",
+                  "hseq": "FLVSQQLLKHRQIYSQRETAAATNWYRMLQFLFPKDKAADYIPYTEFAWERLGGLSRYFVSIVSKVLKKSLPCERVFDDIMAKFNTNMLPLGCKPGKFIRTKAGIEIKKHAKQALETAVIR--FFCHEIDNITFAGNNNKKNINNIIKEKLKDKKLNDLAIKLAHQCV----------------TAKPFSDSYNHIRPFLPRDDEEKFVPIPMFGIDDPIFPENDSYIDQTATKCNDTKSNFLIEEHSDVLIEAMVSRGILSEPILSHNNMRKIIASEQNICSNIYQQLRNV-------NHRKLLTNKPRKCDPTPWSSKNTGQSGRSTTEFAPNSVIILSENSNGVNVSDEEYEDKPILCNDGKMMKLDGMSDIFLAAVETQRAMAQTDIIYPKKVIHPKTGKQLIQAPDISPIYRHGGKPAAILLK",
+                  "midline": " L+  Q LK R+ + +RE A+  NWY ++ FLFP                +L  LSR  +  +S+ L      + V  +I  KFN++MLPLGCK   F+R K G++I  HA +    A ++  +    I+N T                        D  I+LA QC                    P   +Y ++ P + +D +        F  DD +                 +   F +E   + L++A+  + I++E     +N+  +I  +     + +++L  +        ++  ++ K    D + WS KN G +G+   E   NS+I +       NV+                  LDG  +  L  VE+Q  + + ++ + +  I     K  ++AP ISP+Y+   KP +++++"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 86,
+            "db_len": 66738,
+            "hsp_len": 65,
+            "eff_space": 17488328,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          }
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/paja_taxid"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 0.1,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_10",
+          "query_title": "BDT62555.1 baculoviral IAP repeat-containing protein [Metapenaeus ensis majanivirus]",
+          "query_len": 432,
+          "hits": [
+          ],
+          "stat": {
+            "db_num": 86,
+            "db_len": 66738,
+            "hsp_len": 67,
+            "eff_space": 22256240,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          },
+          "message": "No hits found"
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/paja_taxid"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 0.1,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_11",
+          "query_title": "BDT62556.1 baculoviral IAP repeat-containing protein [Metapenaeus ensis majanivirus]",
+          "query_len": 465,
+          "hits": [
+          ],
+          "stat": {
+            "db_num": 86,
+            "db_len": 66738,
+            "hsp_len": 68,
+            "eff_space": 24173330,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          },
+          "message": "No hits found"
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/paja_taxid"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 0.1,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_12",
+          "query_title": "BDT62557.1 baculoviral IAP repeat-containing protein [Metapenaeus ensis majanivirus]",
+          "query_len": 438,
+          "hits": [
+          ],
+          "stat": {
+            "db_num": 86,
+            "db_len": 66738,
+            "hsp_len": 67,
+            "eff_space": 22622096,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          },
+          "message": "No hits found"
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/paja_taxid"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 0.1,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_13",
+          "query_title": "BDT62560.1 hypothetical protein [Metapenaeus ensis majanivirus]",
+          "query_len": 343,
+          "hits": [
+          ],
+          "stat": {
+            "db_num": 86,
+            "db_len": 66738,
+            "hsp_len": 65,
+            "eff_space": 16999144,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          },
+          "message": "No hits found"
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/paja_taxid"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 0.1,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_14",
+          "query_title": "BDT62561.1 hypothetical protein [Metapenaeus ensis majanivirus]",
+          "query_len": 329,
+          "hits": [
+          ],
+          "stat": {
+            "db_num": 86,
+            "db_len": 66738,
+            "hsp_len": 65,
+            "eff_space": 16143072,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          },
+          "message": "No hits found"
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/paja_taxid"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 0.1,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_15",
+          "query_title": "BDT62562.1 wsv306-like protein [Metapenaeus ensis majanivirus]",
+          "query_len": 408,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|41"
+                }
+              ],
+              "len": 153,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 86.2705,
+                  "score": 212,
+                  "evalue": 2.43863e-22,
+                  "identity": 42,
+                  "positive": 73,
+                  "query_from": 259,
+                  "query_to": 383,
+                  "hit_from": 6,
+                  "hit_to": 137,
+                  "align_len": 132,
+                  "gaps": 7,
+                  "qseq": "LQFHCNEEMNAGIMMAAYQD-NDGNILPICVCTYPYYLTGPTCKHRTYNRVVDYELWEKTGYADFLTDPFNDYKKANRICKSKTINTTAVFDERDGCFYCQP------LAAHFAQSLQMRGPYEPALILDKD",
+                  "hseq": "MKYLCDKEMHAGKAKAIYKNLVSGKYISKCTCLYPKYHTGPTCKQKTYCYVIYHDKWQTTSHPNFLHDPIQHFQIAEDVCRELKNNTRAIYNPKRGHIVCPPILKLVKIALTHRVALTHRGFHKPCFIIKRN",
+                  "midline": "+++ C++EM+AG   A Y++   G  +  C C YP Y TGPTCK +TY  V+ ++ W+ T + +FL DP   ++ A  +C+    NT A+++ + G   C P      +A     +L  RG ++P  I+ ++"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 86,
+            "db_len": 66738,
+            "hsp_len": 67,
+            "eff_space": 20792816,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          }
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/paja_taxid"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 0.1,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_16",
+          "query_title": "BDT62564.1 wsv310-like protein [Metapenaeus ensis majanivirus]",
+          "query_len": 371,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|63"
+                }
+              ],
+              "len": 763,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 28.1054,
+                  "score": 61,
+                  "evalue": 0.0621552,
+                  "identity": 18,
+                  "positive": 25,
+                  "query_from": 136,
+                  "query_to": 186,
+                  "hit_from": 414,
+                  "hit_to": 464,
+                  "align_len": 51,
+                  "gaps": 0,
+                  "qseq": "KNEKAEDKFKKSSSSSSSLLDKDKIINSDNDESTNLNLLLLEKKVLDGKKR",
+                  "hseq": "KNDKPSATFLQLLQYSKQLLANDIVKYCDNDNLTDTNGLLIPNPIHRGQKR",
+                  "midline": "KN+K    F +    S  LL  D +   DND  T+ N LL+   +  G+KR"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 86,
+            "db_len": 66738,
+            "hsp_len": 66,
+            "eff_space": 18623910,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          }
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/paja_taxid"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 0.1,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_17",
+          "query_title": "BDT62569.1 wsv282-like protein [Metapenaeus ensis majanivirus]",
+          "query_len": 480,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|33"
+                }
+              ],
+              "len": 586,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 146.362,
+                  "score": 368,
+                  "evalue": 2.56833e-40,
+                  "identity": 89,
+                  "positive": 151,
+                  "query_from": 200,
+                  "query_to": 473,
+                  "hit_from": 301,
+                  "hit_to": 578,
+                  "align_len": 279,
+                  "gaps": 6,
+                  "qseq": "FRKEIILILQLYANLRCRQQLLGSFNTNSVNYSDEMIKKMIDIILRIDRNSMSFDKYKNVVREALYVYYLVVTKMTGPKHLKRLRTPELHFEYCVVIALLAHNVDIFKKISFPKYRTTNLIQFVSALDCPWYLSVIPNILSVLNRTRSICQTLDFSISDHAKINITLCLLSE----IAEKKPNNLILATILYLFPRSLKLIKEKGLVRDENTIVLLAKKISEYLKNQWINCNDIACASNLLEGDW-VKDECTLKLFKKQCCDTKFAAISLLVQQQMKKQ",
+                  "hseq": "FYREIHSVISLYLSLVYVQRAMNNDNTNSSGYTEGMVTKILNIIGKIPYNEMSREKYISVGRDALYLYQNIITDMTGPKHYKRLRTPQQQADFCYIIAMLVNDVPIMSDLTLSG-KATNLVQFASATVDPAYHLAVHKMACVFNSSYSVYKILMLDRRTLIRANMILTILSARNKYLSERKPRTVTQSVFLYLQPSLRDRLRASGLTSEESSLGTAVKLVSQQLLYDGIMRQTIEDGCSIMSGGYEGEDGVTLKCLGAGVKDIKTVGLSALFTDRLRKR",
+                  "midline": "F +EI  ++ LY +L   Q+ + + NTNS  Y++ M+ K+++II +I  N MS +KY +V R+ALY+Y  ++T MTGPKH KRLRTP+   ++C +IA+L ++V I   ++    + TNL+QF SA   P Y   +  +  V N + S+ + L        + N+ L +LS     ++E+KP  +  +  LYL P     ++  GL  +E+++    K +S+ L    I    I    +++ G +  +D  TLK       D K   +S L   +++K+"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 86,
+            "db_len": 66738,
+            "hsp_len": 68,
+            "eff_space": 25086680,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          }
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/paja_taxid"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 0.1,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_18",
+          "query_title": "BDT62575.1 wsv137-like protein [Metapenaeus ensis majanivirus]",
+          "query_len": 421,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|16"
+                }
+              ],
+              "len": 309,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 48.521,
+                  "score": 114,
+                  "evalue": 1.62936e-08,
+                  "identity": 41,
+                  "positive": 57,
+                  "query_from": 297,
+                  "query_to": 402,
+                  "hit_from": 181,
+                  "hit_to": 296,
+                  "align_len": 119,
+                  "gaps": 16,
+                  "qseq": "KINGNPINIYEYDRNDIIAIHNFFSS----------STFHKVHCCNPKHNDRNPSMHLYLKKNVW-YSLIDKWLLTRDEIDRLQMEEDQAINSNMTRFRNFNIILFILSAHCFA--CNY",
+                  "hseq": "KIAGENLQDLKYDDQAINKVRDLFSILGSAMPSEDIKTYRR--CINPKHNDNNPSMKLTLRPYYWKYSKIIKSKLTDEQNATLEDKYNEGYVQNYT-IAGKDIILFCVHATCFSNNCRY",
+                  "midline": "KI G  +   +YD   I  + + FS            T+ +  C NPKHND NPSM L L+   W YS I K  LT ++   L+ + ++    N T     +IILF + A CF+  C Y"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 86,
+            "db_len": 66738,
+            "hsp_len": 67,
+            "eff_space": 21585504,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          }
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/paja_taxid"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 0.1,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_19",
+          "query_title": "BDT62587.1 hypothetical protein [Metapenaeus ensis majanivirus]",
+          "query_len": 282,
+          "hits": [
+          ],
+          "stat": {
+            "db_num": 86,
+            "db_len": 66738,
+            "hsp_len": 64,
+            "eff_space": 13349012,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          },
+          "message": "No hits found"
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/paja_taxid"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 0.1,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_20",
+          "query_title": "BDT62588.1 wsv267-like protein [Metapenaeus ensis majanivirus]",
+          "query_len": 320,
+          "hits": [
+          ],
+          "stat": {
+            "db_num": 86,
+            "db_len": 66738,
+            "hsp_len": 65,
+            "eff_space": 15592740,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          },
+          "message": "No hits found"
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/paja_taxid"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 0.1,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_21",
+          "query_title": "BDT62589.1 hypothetical protein [Metapenaeus ensis majanivirus]",
+          "query_len": 292,
+          "hits": [
+          ],
+          "stat": {
+            "db_num": 86,
+            "db_len": 66738,
+            "hsp_len": 64,
+            "eff_space": 13961352,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          },
+          "message": "No hits found"
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/paja_taxid"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 0.1,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_22",
+          "query_title": "BDT62590.1 hypothetical protein [Metapenaeus ensis majanivirus]",
+          "query_len": 324,
+          "hits": [
+          ],
+          "stat": {
+            "db_num": 86,
+            "db_len": 66738,
+            "hsp_len": 65,
+            "eff_space": 15837332,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          },
+          "message": "No hits found"
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/paja_taxid"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 0.1,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_23",
+          "query_title": "BDT62593.1 SARAF-like protein [Metapenaeus ensis majanivirus]",
+          "query_len": 355,
+          "hits": [
+          ],
+          "stat": {
+            "db_num": 86,
+            "db_len": 66738,
+            "hsp_len": 66,
+            "eff_space": 17646918,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          },
+          "message": "No hits found"
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/paja_taxid"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 0.1,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_24",
+          "query_title": "BDT62596.1 wsv161-like protein [Metapenaeus ensis majanivirus]",
+          "query_len": 430,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|25"
+                }
+              ],
+              "len": 1243,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 31.187,
+                  "score": 69,
+                  "evalue": 0.00891728,
+                  "identity": 16,
+                  "positive": 26,
+                  "query_from": 248,
+                  "query_to": 294,
+                  "hit_from": 1196,
+                  "hit_to": 1241,
+                  "align_len": 47,
+                  "gaps": 1,
+                  "qseq": "NLYVKQLSFNEYKEKLFFPIWRNMSQSIDNIIGVSNDEFKKCLDAIL",
+                  "hseq": "NQYIREFPGHTILRPVFYPATTNYSRAA-NIIGIENKTFEKCYKQIL",
+                  "midline": "N Y+++   +     +F+P   N S++  NIIG+ N  F+KC   IL"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 86,
+            "db_len": 66738,
+            "hsp_len": 67,
+            "eff_space": 22134288,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          }
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/paja_taxid"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 0.1,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_25",
+          "query_title": "BDT62597.1 hypothetical protein [Metapenaeus ensis majanivirus]",
+          "query_len": 339,
+          "hits": [
+          ],
+          "stat": {
+            "db_num": 86,
+            "db_len": 66738,
+            "hsp_len": 65,
+            "eff_space": 16754552,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          },
+          "message": "No hits found"
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/paja_taxid"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 0.1,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_26",
+          "query_title": "BDT62598.1 hypothetical protein [Metapenaeus ensis majanivirus]",
+          "query_len": 335,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|30"
+                }
+              ],
+              "len": 1039,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 27.7202,
+                  "score": 60,
+                  "evalue": 0.0626887,
+                  "identity": 10,
+                  "positive": 13,
+                  "query_from": 284,
+                  "query_to": 301,
+                  "hit_from": 506,
+                  "hit_to": 523,
+                  "align_len": 18,
+                  "gaps": 0,
+                  "qseq": "KQNCIHCIYNVFERLVSC",
+                  "hseq": "KKYAIHCIVNVVKRLIDC",
+                  "midline": "K+  IHCI NV +RL+ C"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 86,
+            "db_len": 66738,
+            "hsp_len": 65,
+            "eff_space": 16509960,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          }
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/paja_taxid"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 0.1,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_27",
+          "query_title": "BDT62599.1 hypothetical protein [Metapenaeus ensis majanivirus]",
+          "query_len": 424,
+          "hits": [
+          ],
+          "stat": {
+            "db_num": 86,
+            "db_len": 66738,
+            "hsp_len": 67,
+            "eff_space": 21768432,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          },
+          "message": "No hits found"
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/paja_taxid"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 0.1,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_28",
+          "query_title": "BDT62606.1 wsv131-like protein [Metapenaeus ensis majanivirus]",
+          "query_len": 480,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|14"
+                }
+              ],
+              "len": 488,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 41.9726,
+                  "score": 97,
+                  "evalue": 3.57033e-06,
+                  "identity": 76,
+                  "positive": 118,
+                  "query_from": 51,
+                  "query_to": 335,
+                  "hit_from": 49,
+                  "hit_to": 305,
+                  "align_len": 288,
+                  "gaps": 34,
+                  "qseq": "INNTQASTTTENIISLQD--KRVSCFPKIFNILTLCMCINQYHLPKLIKKSENVLYFDLSKHNSQIPARNVYNVKNVNFSPQNVNDDKLDNDDDDKSLDYFLFGFSPETEILKNLISVINVLASLFLSSFTILERDLSKRKDL-LCNEGNEVEYINLLKGIKNLNSMSTSILNYLKNQTTTTITTTTTTNNNNNTSTIATRKKKCSCCGSNKKNHHMSPLVDRFIHEISSHHHHDVSVSLEKREKDVMVPPKFIFKKKLTKRRMGKKEKGCNKNKINDRIETILSFIQ",
+                  "hseq": "ITQTQDYLTVENIIGDPDTGERVSPF-LFFDII--LQSINIKH-PSVLNDKQKVLKDII--YAMAVPAIDNLSLPNYGGS--------LGKDTLDSFRSQLKFGFDPLTEVLKNCCASQTVMHSFLKSNLLTLYEKVKKWASVNLEKDGQE---IALCKTIQVI------------GQICTIIEAAKEATSTTSTTFSFNSEKINGCNGCTKKTCKDGGIVAPFLKHVNSNDNHN-SAQAAAALQVPKVPSEFITKSSVPFKRQ-KLDKINNRDVYNKKINSSLSITE",
+                  "midline": "I  TQ   T ENII   D  +RVS F   F+I+     IN  H P ++   + VL   +  +   +PA +  ++ N   S        L  D  D       FGF P TE+LKN  +   V+ S   S+   L   + K   + L  +G E   I L K I+ +             Q  T I       +  +T+     +K   C G  KK      +V  F+  ++S+ +H+ S       +   VP +FI K  +  +R  K +K  N++  N +I + LS  +"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 86,
+            "db_len": 66738,
+            "hsp_len": 68,
+            "eff_space": 25086680,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          }
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/paja_taxid"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 0.1,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_29",
+          "query_title": "BDT62609.1 wsv415-like protein [Metapenaeus ensis majanivirus]",
+          "query_len": 518,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|49",
+                  "accession": "49",
+                  "title": "BDT63547.1 wsv415-like protein [Pasiphaea japonica whispovirus]",
+                  "taxid": 9606,
+                  "sciname": "Homo sapiens"
+                }
+              ],
+              "len": 478,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 57.3806,
+                  "score": 137,
+                  "evalue": 5.4483e-11,
+                  "identity": 78,
+                  "positive": 134,
+                  "query_from": 235,
+                  "query_to": 515,
+                  "hit_from": 139,
+                  "hit_to": 445,
+                  "align_len": 320,
+                  "gaps": 52,
+                  "qseq": "LSKLCEIIQKFLFN------ASLKKEHIITSLFSINRQDYIDIVHDFFAFDTYSKCILFLLYIQLLLECVPSSSIKFYIVDVYTNELVKIKRKCHVTQLSKENNKNQWFLEQNYNKKQNVIDRILKYIVEPVVDPPPPSSSSSSSFENSNVSIVDNSLLHD-----IIRNARVANYIATREKKEEKENEMDLI--------------GIENMTLTCTNNHNNYTNIILRIRKEPRLINSNKQILFPTFIGQ---QNQLQFLKLSDEAKTILLLPHFFQNYSSLSSCLYGHSTLLNNQ-----------TCTFLMADFLPI",
+                  "hseq": "LSSGCVVSKKHLFNLLFDIPWEIKGAVNVTGIANRSRFTVESMIEWFFNFDTYSKCILFLEIINRHLQC-QASPLSILLDDVYCSVFSKIIRQSYITKVNSDANAPESTLSATSDIKLLRIDECVKNFITTNLD------ITQLMFTNSRMS---SALYGDQQNQLLTKNESTTTNIESVKKILKRKNADSSCVYRSQFTKTPQKNSGITTYSTIKGYNNGKLSPIHVYIRNQPIVPNAHNHLLFPVFSAESPGADILFYLNLKPVTAAYLLLPGIFRHPHQF---LTGDCKWLGNKDKPVSSTKYYPMWKYTLADYCPL",
+                  "midline": "LS  C + +K LFN        +K    +T + + +R     ++  FF FDTYSKCILFL  I   L+C  +S +   + DVY +   KI R+ ++T+++ + N  +  L    + K   ID  +K  +   +D       +   F NS +S   ++L  D     + +N      I + +K  +++N                   GI   +     N+   + I + IR +P + N++  +LFP F  +    + L +L L       LLLP  F++       L G    L N+              + +AD+ P+"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 86,
+            "db_len": 66738,
+            "hsp_len": 69,
+            "eff_space": 27300996,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          }
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/paja_taxid"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 0.1,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_30",
+          "query_title": "BDT62611.1 hypothetical protein [Metapenaeus ensis majanivirus]",
+          "query_len": 441,
+          "hits": [
+          ],
+          "stat": {
+            "db_num": 86,
+            "db_len": 66738,
+            "hsp_len": 67,
+            "eff_space": 22805024,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          },
+          "message": "No hits found"
+        }
+      }
+    }
+  }
+]
+}

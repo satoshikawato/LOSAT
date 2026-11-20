@@ -1,0 +1,53 @@
+name: Bug report or output difference
+description: LOSAT fails, or its output differs from NCBI BLAST+ for the same command.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use small public or synthetic sequences. Do not upload confidential, restricted or proprietary data.
+        A security vulnerability goes to private reporting instead (SECURITY.md), not to an issue.
+  - type: textarea
+    id: losat
+    attributes:
+      label: LOSAT command and version
+      description: The exact command line, and the output of `losat --version` (or the commit).
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: ncbi
+    attributes:
+      label: NCBI BLAST+ command and version
+      description: The matching NCBI command line (`blastn`, `blastp`, `blastx`, `tblastn`, `tblastx`, `psiblast`, `makeblastdb` or `blastdbcmd`), and the output of `<program> -version`. Write "not run" if you did not run NCBI BLAST+.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: input
+    attributes:
+      label: Input
+      description: The query and subject FASTA (or how to make the database), as small as still shows the problem. Attach files if they are long.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected output
+      description: NCBI BLAST+'s output for the same input, or what you expected and why.
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual output
+      description: LOSAT's output or error message. For a difference, the lines that differ (coordinates, scores, E-values).
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Platform
+      description: Operating system and architecture, or the Wasm host (browser, Node.js, wasmtime).
+    validations:
+      required: false

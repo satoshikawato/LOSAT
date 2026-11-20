@@ -1,23 +1,37 @@
 //! TBLASTN CLI, genetic-code, and internal seed-search boundary.
 mod args;
+// tblastn -in_pssm (PSI-TBLASTN, line PS item PS7): the PSSM query and its refusals.
+mod in_pssm;
+// The score source of the stages: the matrix or a PSSM query (`TbnScore`).
+mod score;
+mod tblastn_app;
 // NCBI c++/src/algo/blast/core/blast_engine.c:804-844:
 // for (context=first_context; context<=last_context; context++) {
 //     status = s_BlastSearchEngineOneContext(...);
 // }
-mod search_seed;
-// EXPERIMENT (LOSAT_X_TBNSCANBF): the lookup scan without a branch on the presence vector.
-pub(crate) mod x_scan_bf;
+pub(crate) mod search_seed;
+// EXPERIMENT (LOSAT_X_TBNSCANBYTE): the lookup scan on presence bytes, a block of indexes at once
+// (blastx's direct loop takes it too, LOSAT_X_BXSCANBYTE).
+// Tests of the branch-free scan, which lives in `tblastx/x_aascan_bf.rs` (they use tblastn's query
+// encoder).
+#[cfg(test)]
+mod x_scan_bf_tests;
 // NCBI c++/src/algo/blast/core/blast_util.c:1072,1084-1086:
 // translation_table = s_BlastGetTranslationTable(genetic_code, FALSE);
 // length = BLAST_TranslateCompressedSequence(translation_table, nucl_length, nucl_seq, frame, ...);
-// EXPERIMENT (LOSAT_X_TBNXLATE / LOSAT_X_TBNXLATESHADOW): the subject frames read from tables.
+// The subject frames read from tables.
 mod x_subject_translate;
 // EXPERIMENT (LOSAT_X_TBNSTORE): the subjects held packed, their letters made when read.
 mod x_subject_store;
+// The stages over the `-db` stream (`common/x_db_stream.rs`).
+mod x_db_stream;
 // NCBI c++/src/algo/blast/core/aa_ungapped.c:200-234:
 // status = s_BlastAaWordFinder_TwoHit(..., init_hitlist, ...);
 // Blast_InitHitListSortByScore(init_hitlist);
 mod search_init;
+// NCBI c++/src/algo/blast/core/aa_ungapped.c:516-552: the two-hit tests of every hit.
+// Too far and overlap without a branch.
+mod x_tbn_hitbf;
 // NCBI c++/src/algo/blast/core/blast_engine.c:522-552:
 // aux_struct->GetGappedScore(..., init_hitlist, &hsp_list, ...);
 // Blast_HSPListPurgeHSPsWithCommonEndpoints(...);
@@ -46,25 +60,51 @@ mod stage_d_results;
 mod stage_d_pipeline;
 // NCBI c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:333-344: each search thread takes the
 // next chunk of subjects when it is free.
-// EXPERIMENT (LOSAT_X_TBNOIDNEXT): the chunks handed out without a wait between entries.
+// Graduated 2026-10-22 (was LOSAT_X_TBNOIDNEXT): the chunks of subjects are handed to threads
+// when they are free.
 #[cfg(feature = "parallel")]
 mod x_oid_flow;
 // NCBI c++/src/algo/blast/format/blast_format.cpp:1411-1458:
 // PrintOneResultSet dispatches the retained search result to its output format.
 mod stage_e_report;
+// The sequences of the query-anchored reports (outfmt 1 to 4).
+mod anchored;
+// TBLASTN's BLAST XML (outfmt 5), once per run, from the final hit lists.
+mod blast_xml;
+// NCBI c++/src/algo/blast/format/blast_format.cpp:770-834 (`CBlastTabularInfo`): the tabular
+// reports with a field list or a delimiter and outfmt 10 and 20, once per run, from the final hit
+// lists (`report::tabular`).
+mod tabular;
+// NCBI c++/src/app/blast/tblastn_app.cpp:295 (`WriteArchive`): TBLASTN's BLAST archive (outfmt 11),
+// one Blast4-archive per query batch.
+pub(crate) mod archive;
+// NCBI c++/src/algo/blast/api/blast_seqalign.cpp:1549-1649 (BlastHitList2SeqAlign_OMF): the
+// Seq-aligns of each query's final hit list (outfmt 8, 12).
+mod seqalign;
 // NCBI c++/src/app/blast/tblastn_app.cpp:188-194 and seqsrc_seqdb.cpp: the search of a BLAST
 // nucleotide database (`-db`): its sequences, numbers and titles.
 mod database;
-pub use args::{check_options, run_local, ResolvedTblastnArgs, TblastnArgs};
-// EXPERIMENT (LOSAT_X_TBNXLATE / LOSAT_X_TBNXLATESHADOW): the summary lines `main` prints at
-// exit. No NCBI counterpart: it prints counters and changes no value NCBI computes.
+// Web ABI v1's TBLASTN (`web_api::run_pair`): the CLI's parser and run over the call's bytes.
+#[cfg(any(target_arch = "wasm32", test))]
+pub(crate) mod web;
+pub use args::{check_options, refuse_browser_pssm_query, TblastnArgs};
+pub use tblastn_app::{run_local, run_local_database};
+// The summary lines `main` prints at exit (`LOSAT_X_TBNXLATESIMD`, `LOSAT_X_TBNUNITXLATE`).
+// No NCBI counterpart: it prints counters and changes no value NCBI computes.
 pub use x_subject_translate::print_summary as x_subject_translate_print_summary;
 // EXPERIMENT (LOSAT_X_TBNSTORE): the summary line `main` prints at exit. No NCBI counterpart: it
 // prints counters and changes no value NCBI computes.
 pub use x_subject_store::print_summary as x_subject_store_print_summary;
-// EXPERIMENT (LOSAT_X_TBNSCANBF): the summary line `main` prints at exit. No NCBI counterpart: it
+// The summary line of the branch-free scan that `main` prints at exit. No NCBI counterpart: it
 // prints counters and changes no value NCBI computes.
-pub use x_scan_bf::print_summary as x_scan_bf_print_summary;
-// EXPERIMENT (LOSAT_X_TBNLINKWIN): the summary line `main` prints at exit. No NCBI counterpart: it
+pub use crate::algorithm::tblastx::x_aascan_bf::print_summary as x_scan_bf_print_summary;
+// EXPERIMENT (LOSAT_X_TBNSCANBYTE): the summary line `main` prints at exit. No NCBI counterpart: it
 // prints counters and changes no value NCBI computes.
+pub use crate::algorithm::tblastx::x_scan_byte::print_summary as x_scan_byte_print_summary;
+// LOSAT_X_TBNLUTLEAN: the summary line `main` prints at exit (the tables TBLASTN built lean or with
+// chains). No NCBI counterpart: it prints counters and changes no value NCBI computes.
+pub use crate::algorithm::tblastx::lookup::x_tbn_lut_print_summary as x_lut_lean_print_summary;
+// The summary line of the linking lookup that `main` prints at exit. No NCBI counterpart: it
+// prints counters and changes no value NCBI computes.
+pub use stage_d_linking::x_link_ctx_print_summary;
 pub use stage_d_linking::x_link_window_print_summary;

@@ -1,0 +1,15 @@
+USAGE
+  convert2blastmask [-h] [-help] [-in input_file_name] [-out output_file_name]
+    [-outfmt output_format] [-parse_seqids]
+    -masking_algorithm mask_program_name -masking_options mask_program_options
+    [-version]
+
+DESCRIPTION
+   Convert masking information in lower-case masked FASTA input to file
+   formats suitable for makeblastdb
+
+Use '-help' to print detailed descriptions of command line arguments
+========================================================================
+
+Error: Too many positional arguments (1), the offending value: extra
+Error:  (CArgException::eSynopsis) Too many positional arguments (1), the offending value: extra

@@ -16,9 +16,10 @@ import {
 } from '../../src/domain/plot-scale';
 
 describe('tickSteps', () => {
-  it('is the tick_size table of blast2dotplot.py, its bounds inclusive', () => {
+  it('is the tick_size table of blast2dotplot.py above 100 letters, its bounds inclusive', () => {
     const table: [number, number, number][] = [
-      [1, 100, 10],
+      [100.5, 100, 10],
+      [101, 100, 10],
       [1000, 100, 10],
       [1001, 500, 100],
       [5000, 500, 100],
@@ -38,6 +39,30 @@ describe('tickSteps', () => {
       [3e9, 1000000, 500000],
     ];
     for (const [span, major, minor] of table) expect(tickSteps(span), `span ${span}`).toEqual({ major, minor });
+  });
+
+  it('has steps of 10, 5 and 2 letters for 100 letters or fewer, 1 between them (WA2-OP-02)', () => {
+    const table: [number, number, number][] = [
+      [1, 2, 1],
+      [4, 2, 1],
+      [10, 2, 1],
+      [10.4, 5, 1],
+      [20, 5, 1],
+      [20.5, 10, 1],
+      [79, 10, 1],
+      [100, 10, 1],
+    ];
+    for (const [span, major, minor] of table) expect(tickSteps(span), `span ${span}`).toEqual({ major, minor });
+  });
+
+  it('numbers an axis of 4 to 100 letters at least twice, wherever it starts', () => {
+    for (let span = 4; span <= 100; span += 0.25) {
+      for (const from of [0, 0.3, 1.7, 3.999, 123.4, 99999.9]) {
+        expect(axisTicks(from, from + span, 'nt', 3).major.length, `${from} + ${span}`).toBeGreaterThanOrEqual(2);
+      }
+    }
+    // Above 100 letters, blast2dotplot.py's 100 a major tick may number a span under 200 letters once.
+    expect(axisTicks(150, 260, 'nt', 3).major).toEqual([200]);
   });
 });
 
@@ -143,7 +168,7 @@ describe('identityClass', () => {
 describe('scoreBin', () => {
   it('uses NCBI\'s half-open bins and colours', () => {
     expect([0, 39.99, 40, 49.9, 50, 79.9, 80, 199.9, 200, 1e6].map(scoreBin)).toEqual([0, 0, 1, 1, 2, 2, 3, 3, 4, 4]);
-    expect(SCORE_BINS.map((bin) => bin.color)).toEqual(['#000000', '#0020e9', '#75ea4c', '#db3de9', '#db3324']);
+    expect(SCORE_BINS.map((bin) => bin.color)).toEqual(['#000000', '#0072b2', '#009e73', '#cc79a7', '#d55e00']);
     expect(SCORE_BINS.map((bin) => bin.label)).toEqual(['< 40', '40 - 50', '50 - 80', '80 - 200', '>= 200']);
     expect(scoreBin(Number.NaN)).toBe(0);
   });

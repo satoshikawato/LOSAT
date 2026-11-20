@@ -8,17 +8,14 @@ use crate::{
         blast_gapped_alignment_with_traceback_with_scratch, GapAlignScratch,
     },
     config::{ProteinScoringSpec, ScoringMatrix},
-    core::{
-        blast_stat::compute_blosum62_ideal_karlin_params,
-        composition_adjustment::{
-            adjust_scores::{
-                build_matrix_info, AdjustedProteinMatrix, BlastAminoAcidComposition,
-                BlastCompositionWorkspace,
-            },
-            redo_alignment::*,
+    core::composition_adjustment::{
+        adjust_scores::{
+            build_matrix_info, AdjustedProteinMatrix, BlastAminoAcidComposition,
+            BlastCompositionWorkspace,
         },
+        redo_alignment::*,
     },
-    stats::lookup_protein_params,
+    stats::{compute_blosum62_ideal_karlin_params, lookup_protein_params},
     utils::{
         matrix::BLASTAA_SIZE,
         seg::{SegMasker, SegParams},
@@ -80,7 +77,8 @@ pub fn query_infos(
                 // ```
                 composition: BlastAminoAcidComposition::empty(),
                 eff_search_space: p.search_space as f64,
-                words: Some(build_query_word_hashes(query)),
+                // EXPERIMENT (LOSAT_X_BXENDMEM): no table; `get_range` reads the context's words.
+                words: (!x_end_mem()).then(|| build_query_word_hashes(query)),
             }
         })
         .collect()
@@ -143,56 +141,95 @@ pub fn query_infos(
 //                                      do_link_hsps, &redo_align_callbacks,
 //                                      near_identical_cutoff);
 // ```
+/// The composition mode of `-comp_based_stats` (`args.rs` `composition_mode`, 1 to 3 here).
+fn compo_adjust_mode(composition: u8) -> BlastCompoAdjustMode {
+    match composition {
+        1 => BlastCompoAdjustMode::CompositionBasedStats,
+        3 => BlastCompoAdjustMode::ForceFullMatrixAdjust,
+        _ => BlastCompoAdjustMode::CompositionMatrixAdjust,
+    }
+}
+
+/// The composition workspace of the search's matrix (`NRrecord`, `Blast_CompositionWorkspaceInit`
+/// with `scoringParams->options->matrix`): BLOSUM62's as before, another matrix's made from its
+/// frequency data (`BlastCompositionWorkspace::new`, cold, as TBLASTN's `use_matrix_workspace`).
+fn composition_workspace(matrix: ScoringMatrix) -> Result<BlastCompositionWorkspace> {
+    if matrix == ScoringMatrix::Blosum62 {
+        Ok(BlastCompositionWorkspace::new_blosum62())
+    } else {
+        other_matrix_workspace(matrix)
+    }
+}
+
+#[cold]
+#[inline(never)]
+fn other_matrix_workspace(matrix: ScoringMatrix) -> Result<BlastCompositionWorkspace> {
+    BlastCompositionWorkspace::new(matrix)
+}
+
 pub fn redo_params(
     batch: &PreparedQueryBatch,
     parameters: &[ContextParameters],
     options: &ResolvedOptions,
 ) -> Result<BlastRedoAlignParams> {
     ensure!(
-        options.composition == 2 && options.gapped,
-        "BLASTX Kappa requires gapped composition 2"
+        options.composition != 0 && options.gapped,
+        "BLASTX Kappa requires a gapped composition mode"
     );
     let scale = 32.0;
+    let matrix = options.scoring;
     let ka = lookup_protein_params(&ProteinScoringSpec {
-        matrix: ScoringMatrix::Blosum62,
+        matrix,
         gap_open: options.gap_open,
         gap_extend: options.gap_extend,
     });
     let scaled_lambda = ka.lambda / scale;
-    let ideal = compute_blosum62_ideal_karlin_params().map_err(anyhow::Error::msg)?;
+    // The ideal block of the matrix: BLOSUM62's as before, another matrix's as TBLASTN's redo
+    // takes it (`stage_d_kappa_params.rs` `local_kappa_redo_params`).
+    let ideal = if matrix == ScoringMatrix::Blosum62 {
+        compute_blosum62_ideal_karlin_params().map_err(anyhow::Error::msg)?
+    } else {
+        crate::algorithm::tblastx::lookup::ideal_karlin_params_of(matrix)
+    };
     let do_link = link_parameters(options).is_some();
-    let cutoff = parameters
-        .iter()
-        .filter(|p| p.valid)
-        .map(|p| p.hit_cutoff)
-        .min()
-        .context("BLASTX Kappa requires a valid context")?;
-    let extension_final = (options.gap_x_dropoff_final * std::f64::consts::LN_2 / ka.lambda)
-        .max(options.gap_x_dropoff * std::f64::consts::LN_2 / ka.lambda)
-        as i32;
+    // `hit_params->cutoff_score_min` is that of the query batch: the reader batch when the unit
+    // is a part of one (`reader_batch.rs`).
+    let cutoff = match batch
+        .reader_shape
+        .as_deref()
+        .and_then(|shape| shape.redo_cutoff_min)
+    {
+        Some(batch_min) => batch_min,
+        None => parameters
+            .iter()
+            .filter(|p| p.valid)
+            .map(|p| p.hit_cutoff)
+            .min()
+            .context("BLASTX Kappa requires a valid context")?,
+    };
+    // blast_parameters.c:454-463: the search's final X-drop (`parameters::gapped_x_drops`).
+    let extension_final = super::parameters::gapped_x_drops(options, &ka).1;
     Ok(BlastRedoAlignParams {
-        matrix_info: build_matrix_info(ScoringMatrix::Blosum62, ideal.lambda / scale)?,
+        matrix_info: build_matrix_info(matrix, ideal.lambda / scale)?,
         gapping_params: BlastCompoGappingParams {
             gap_open: options.gap_open * 32,
             gap_extend: options.gap_extend * 32,
-            decline_align: 0,
-            x_dropoff: ((options.gap_x_dropoff_final * std::f64::consts::LN_2 / scaled_lambda)
-                as i32)
-                .max(extension_final),
+            // blast_kappa.c:2374-2382 (`core::x_drop::redo_x_dropoff`).
+            x_dropoff: crate::core::x_drop::redo_x_dropoff(
+                options.gap_x_dropoff_final,
+                scaled_lambda,
+                extension_final,
+            ),
             context: Cell::new(None),
         },
-        compo_adjust_mode: BlastCompoAdjustMode::CompositionMatrixAdjust,
+        compo_adjust_mode: compo_adjust_mode(options.composition),
         alphsize: BLASTAA_SIZE as i32,
         composition_test_index: 0,
-        unified_p: false,
         log_k: 0.0,
         score_divisor: scale,
-        restricted_alignment: false,
         smith_waterman: false,
-        is_same_adjustment: false,
         near_identical_cutoff: 1.74 * std::f64::consts::LN_2 / scaled_lambda,
         position_based: false,
-        re_matrix_adjustment_pseudocounts: 20,
         ccat_query_length: batch
             .contexts
             .iter()
@@ -206,7 +243,6 @@ pub fn redo_params(
         } else {
             1
         },
-        cutoff_evalue: options.evalue,
         do_link_hsps: do_link,
     })
 }
@@ -313,28 +349,30 @@ fn get_range<'a>(
     if params.uses_composition_based_stats()
         && biased
         && (!should_test
-            || !test_near_identical(&subject, 0, &query, query_range.begin, words, align))
+            || !match words {
+                Some(_) => {
+                    test_near_identical(&subject, 0, &query, query_range.begin, words, align)
+                }
+                None => x_test_near_identical_on_residues(
+                    &subject,
+                    0,
+                    &query,
+                    query_range.begin,
+                    orig_query.data(),
+                    align,
+                ),
+            })
     {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1635-1636
         // ```c
         //                 status = s_DoSegSequenceData(seqData, eBlastTypeBlastp,
         //                                              subject_maybe_biased);
         // ```
-        // Dispatch point of LOSAT_X_BXSEGMEMO / LOSAT_X_BXSEGMEMOSHADOW: with the switch the
-        // intervals come from a per-thread memo of the last subject's SEG (byte-equal input, the
-        // same masker call on a miss; x_seg_memo.rs); without it the masker runs here.
-        let intervals = if super::x_seg_memo::x_bxsegmemo_mode() != 0 {
-            super::x_seg_memo::x_subject_seg(subject.data(), |data| {
-                SegMasker::with_params(&SegParams::new(10, 1.8, 2.1))
-                    .keeping_all_left_segments()
-                    .mask_sequence(data)
-            })
-        } else {
-            // BLASTX keeps LOSAT's former SEG until SX (plan DW-10).
-            SegMasker::with_params(&SegParams::new(10, 1.8, 2.1))
-                .keeping_all_left_segments()
-                .mask_sequence(subject.data())
-        };
+        // The intervals come from a per-thread memo of the last subject's SEG (byte-equal input,
+        // the same masker call on a miss; x_seg_memo.rs).
+        let intervals = super::x_seg_memo::x_subject_seg(subject.data(), |data| {
+            SegMasker::with_params(&SegParams::new(10, 1.8, 2.1)).mask_sequence(data)
+        });
         biased = !intervals.is_empty();
         for interval in intervals {
             for residue in &mut subject.buffer[1 + interval.start..1 + interval.end] {
@@ -347,6 +385,7 @@ fn get_range<'a>(
         query,
         subject,
         subject_maybe_biased: biased,
+        x_subject_composition: None,
     })
 }
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1896-1957
@@ -446,7 +485,7 @@ fn redo_alignment(
         subject.data(),
         usize::try_from(h.q_gapped_start - qrange.begin)?,
         usize::try_from(h.s_gapped_start - srange.begin)?,
-        ScoringMatrix::Blosum62,
+        params.matrix_info.matrix,
         adjusted,
         params.gapping_params.gap_open,
         params.gapping_params.gap_extend,
@@ -492,8 +531,6 @@ const CALLBACKS: BlastRedoAlignCallbacks = BlastRedoAlignCallbacks {
     calc_lambda: Some(redo_calc_lambda),
     get_range,
     redo_one_alignment: redo_alignment,
-    new_xdrop_align: None,
-    free_align_traceback: None,
 };
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:770-803
 // ```c++
@@ -587,30 +624,6 @@ const CALLBACKS: BlastRedoAlignCallbacks = BlastRedoAlignCallbacks {
 //                                         &LambdaRatio            // local
 //                                 );
 // ```
-pub(crate) fn redo_context(
-    input: &[PreliminaryHsp],
-    context_index: usize,
-    infos: &[BlastCompoQueryInfo],
-    subject: &[u8],
-    params: &BlastRedoAlignParams,
-    lambda: f64,
-    scratch: &mut GapAlignScratch,
-    workspace: &mut BlastCompositionWorkspace,
-    matrix_state: &mut Option<AdjustedProteinMatrix>,
-) -> Result<BlastRedoOneMatchResult> {
-    redo_context_observed(
-        input,
-        context_index,
-        infos,
-        subject,
-        params,
-        lambda,
-        scratch,
-        workspace,
-        matrix_state,
-        &mut |_| {},
-    )
-}
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3625-3641
 // ```c++
 //                                 Blast_RedoOneMatch(
@@ -641,7 +654,6 @@ pub(crate) fn redo_context_observed(
     scratch: &mut GapAlignScratch,
     workspace: &mut BlastCompositionWorkspace,
     matrix_state: &mut Option<AdjustedProteinMatrix>,
-    trace: &mut dyn for<'a> FnMut(BlastRedoTraceEvent<'a>),
 ) -> Result<BlastRedoOneMatchResult> {
     let mut incoming = None;
     let mut tail = &mut incoming;
@@ -693,12 +705,7 @@ pub(crate) fn redo_context_observed(
     //                                         &LambdaRatio            // local
     //                                 );
     // ```
-    trace(BlastRedoTraceEvent::MatchStart {
-        context: context_index,
-        count: input.iter().filter(|h| h.context == context_index).count(),
-        matrix: matrix_state.as_ref(),
-    });
-    let result = blast_redo_one_match_with_workspace_queries_and_matrix_observed(
+    let result = blast_redo_one_match_with_workspace_queries_and_matrix(
         &incoming,
         params,
         &matching,
@@ -707,7 +714,6 @@ pub(crate) fn redo_context_observed(
         &CALLBACKS,
         workspace,
         matrix_state,
-        trace,
     );
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3641-3647
     // ```c++
@@ -719,10 +725,6 @@ pub(crate) fn redo_context_observed(
     //                     }
     //
     // ```
-    trace(BlastRedoTraceEvent::MatchEnd {
-        context: context_index,
-        matrix: matrix_state.as_ref(),
-    });
     params.gapping_params.context.set(old);
     result
 }
@@ -850,29 +852,12 @@ pub struct RedoneHsp {
 // ```
 // BLASTX's untranslated protein subject has frame 0 throughout this owner;
 // the NCBI subject-frame equality predicate is therefore always true here.
-fn reap_contained_hsps(
-    output: Vec<RedoneHsp>,
-    trace: &mut dyn for<'a> FnMut(BlastRedoTraceEvent<'a>),
-) -> Vec<RedoneHsp> {
+fn reap_contained_hsps(output: Vec<RedoneHsp>) -> Vec<RedoneHsp> {
     let mut slots: Vec<Option<RedoneHsp>> = output.into_iter().map(Some).collect();
-    for (index, candidate) in slots.iter().enumerate() {
-        let h = &candidate.as_ref().expect("live input HSP").hsp;
-        trace(BlastRedoTraceEvent::ReapList {
-            phase: "IN",
-            index,
-            context: h.context,
-            frame: h.frame,
-            score: h.score,
-            q_start: h.q_start,
-            q_end: h.q_end,
-            s_start: h.s_start,
-            s_end: h.s_end,
-        });
-    }
     for index in 1..slots.len() {
         let h = &slots[index].as_ref().expect("live candidate HSP").hsp;
         let mut contained = false;
-        for (previous_index, other) in slots[..index].iter().enumerate() {
+        for other in &slots[..index] {
             let Some(other) = other else { continue };
             let p = &other.hsp;
             let result = p.frame == h.frame
@@ -885,145 +870,16 @@ fn reap_contained_hsps(
                 && p.s_start <= h.s_end
                 && h.s_end <= p.s_end
                 && h.score <= p.score;
-            trace(BlastRedoTraceEvent::ReapCompare {
-                index,
-                previous_index,
-                result,
-            });
             if result {
                 contained = true;
                 break;
             }
         }
-        trace(BlastRedoTraceEvent::ReapContained {
-            frame: h.frame,
-            score: h.score,
-            q_start: h.q_start,
-            q_end: h.q_end,
-            s_start: h.s_start,
-            s_end: h.s_end,
-            result: contained,
-        });
         if contained {
             slots[index] = None;
         }
     }
-    let retained: Vec<RedoneHsp> = slots.into_iter().flatten().collect();
-    for (index, candidate) in retained.iter().enumerate() {
-        let h = &candidate.hsp;
-        trace(BlastRedoTraceEvent::ReapList {
-            phase: "OUT",
-            index,
-            context: h.context,
-            frame: h.frame,
-            score: h.score,
-            q_start: h.q_start,
-            q_end: h.q_end,
-            s_start: h.s_start,
-            s_end: h.s_end,
-        });
-    }
-    retained
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3590-3675
-// ```c++
-//                 hsp_list = Blast_HSPListNew(0);
-//                 for (frame_index = 0;
-//                         frame_index < numFrames;
-//                         frame_index++, context_index++) {
-//                     incoming_aligns = incoming_align_set[frame_index];
-//                     if (!incoming_aligns) {
-//                         continue;
-//                     }
-//                     /*
-//                      * All alignments in thisMatch should be to the same query
-//                      */
-//                     kbp = sbp->kbp_gap[context_index];
-//                     if (smithWaterman) {
-//                         *pStatusCode =
-//                                 Blast_RedoOneMatchSmithWaterman(
-//                                         alignments,
-//                                         redo_align_params,
-//                                         incoming_aligns,
-//                                         numAligns[frame_index],
-//                                         kbp->Lambda,
-//                                         kbp->logK,
-//                                         &matchingSeq,
-//                                         query_info,
-//                                         numQueries,
-//                                         matrix,
-//                                         BLASTAA_SIZE,
-//                                         NRrecord,
-//                                         forbidden,
-//                                         redoneMatches,
-//                                         &pvalueForThisPair,
-//                                         compositionTestIndex,
-//                                         &LambdaRatio
-//                                 );
-//                     } else {
-//                         *pStatusCode =
-//                                 Blast_RedoOneMatch(
-//                                         alignments,             // thread-local
-//                                         redo_align_params,      // thread-local
-//                                         incoming_aligns,        // thread-local
-//                                         numAligns[frame_index], // local
-//                                         kbp->Lambda,            // thread-local
-//                                         &matchingSeq,           // thread-local
-//                                         -1,                     // const
-//                                         query_info,             // thread-local
-//                                         numContexts,            // thread-local
-//                                         matrix,                 // thread-local
-//                                         BLASTAA_SIZE,           // const
-//                                         NRrecord,               // thread-local
-//                                         &pvalueForThisPair,     // local
-//                                         compositionTestIndex,   // thread-local
-//                                         &LambdaRatio            // local
-//                                 );
-//                     }
-//
-//                     if (*pStatusCode != 0) {
-//                         goto match_loop_cleanup;
-//                     }
-//
-//                     if (alignments[context_index] != NULL) {
-//                         Int2 qframe = frame_index;
-//                         if (program_number == eBlastTypeBlastx) {
-//                             if (qframe < 3) {
-//                                 qframe++;
-//                             } else {
-//                                 qframe = 2 - qframe;
-//                             }
-//                         }
-//                         *pStatusCode =
-//                                 s_HSPListFromDistinctAlignments(hsp_list,
-//                                         &alignments[context_index],
-//                                         matchingSeq.index,
-//                                         queryInfo, qframe);
-//                         if (*pStatusCode) {
-//                             goto match_loop_cleanup;
-//                         }
-//                     }
-//                     BlastCompo_AlignmentsFree(&incoming_aligns, NULL);
-//                     incoming_align_set[frame_index] = NULL;
-//                 }
-//
-//                 if (hsp_list->hspcnt > 1) {
-//                     s_HitlistReapContained(hsp_list->hsp_array,
-//                             &hsp_list->hspcnt);
-//                 }
-//                 *pStatusCode =
-//                         s_HitlistEvaluateAndPurge(&best_score, &best_evalue,
-// ```
-pub fn redo_list(
-    input: &[PreliminaryHsp],
-    batch: &PreparedQueryBatch,
-    parameters: &[ContextParameters],
-    options: &ResolvedOptions,
-    subject: &[u8],
-) -> Result<Vec<RedoneHsp>> {
-    let mut state = KappaState::new(batch, parameters, options)?;
-    state.redo_list(input, batch, subject)
+    slots.into_iter().flatten().collect()
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3244-3248
@@ -1073,7 +929,7 @@ pub struct KappaState {
     // ```
     // NCBI builds one query_info per thread (query_info_tld). Here the query information is never
     // written during the redo, so the per-thread states share one copy. Placement only.
-    // EXPERIMENT (LOSAT_X_BXPAR): read-only, shared with the per-thread copies.
+    // Read-only, shared with the per-thread copies.
     infos: std::sync::Arc<Vec<BlastCompoQueryInfo>>,
     lambda: f64,
     scratch: GapAlignScratch,
@@ -1128,7 +984,7 @@ impl KappaState {
         let params = redo_params(batch, parameters, options)?;
         let infos = query_infos(batch, parameters);
         let ka = lookup_protein_params(&ProteinScoringSpec {
-            matrix: ScoringMatrix::Blosum62,
+            matrix: options.scoring,
             gap_open: options.gap_open,
             gap_extend: options.gap_extend,
         });
@@ -1137,7 +993,7 @@ impl KappaState {
             infos: std::sync::Arc::new(infos),
             lambda: ka.lambda / 32.0,
             scratch: GapAlignScratch::new(),
-            workspace: BlastCompositionWorkspace::new_blosum62(),
+            workspace: composition_workspace(options.scoring)?,
             matrix: None,
         })
     }
@@ -1161,10 +1017,10 @@ impl KappaState {
     // Each NCBI thread owns an NRrecord (composition workspace), a redo_align_params and a matrix.
     // This builds the same per-thread objects for one more Rust thread; the query information is
     // shared because it is read-only.
-    /// EXPERIMENT (LOSAT_X_BXPAR): a second state for another thread, as NCBI
-    /// c++/src/algo/blast/core/blast_kappa.c:3244-3340 allocates per thread
-    /// (`redo_align_params_tld`, `gap_align_tld`, `NRrecord_tld`); the query
+    /// A second state for another thread, as NCBI c++/src/algo/blast/core/blast_kappa.c:3244-3340
+    /// allocates per thread (`redo_align_params_tld`, `gap_align_tld`, `NRrecord_tld`); the query
     /// information is read-only and shared.
+    #[cfg(feature = "parallel")]
     pub(crate) fn x_for_thread(
         &self,
         batch: &PreparedQueryBatch,
@@ -1176,72 +1032,9 @@ impl KappaState {
             infos: std::sync::Arc::clone(&self.infos),
             lambda: self.lambda,
             scratch: GapAlignScratch::new(),
-            workspace: BlastCompositionWorkspace::new_blosum62(),
+            workspace: composition_workspace(options.scoring)?,
             matrix: None,
         })
-    }
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3590-3641
-    // ```c++
-    //                 hsp_list = Blast_HSPListNew(0);
-    //                 for (frame_index = 0;
-    //                         frame_index < numFrames;
-    //                         frame_index++, context_index++) {
-    //                     incoming_aligns = incoming_align_set[frame_index];
-    //                     if (!incoming_aligns) {
-    //                         continue;
-    //                     }
-    //                     /*
-    //                      * All alignments in thisMatch should be to the same query
-    //                      */
-    //                     kbp = sbp->kbp_gap[context_index];
-    //                     if (smithWaterman) {
-    //                         *pStatusCode =
-    //                                 Blast_RedoOneMatchSmithWaterman(
-    //                                         alignments,
-    //                                         redo_align_params,
-    //                                         incoming_aligns,
-    //                                         numAligns[frame_index],
-    //                                         kbp->Lambda,
-    //                                         kbp->logK,
-    //                                         &matchingSeq,
-    //                                         query_info,
-    //                                         numQueries,
-    //                                         matrix,
-    //                                         BLASTAA_SIZE,
-    //                                         NRrecord,
-    //                                         forbidden,
-    //                                         redoneMatches,
-    //                                         &pvalueForThisPair,
-    //                                         compositionTestIndex,
-    //                                         &LambdaRatio
-    //                                 );
-    //                     } else {
-    //                         *pStatusCode =
-    //                                 Blast_RedoOneMatch(
-    //                                         alignments,             // thread-local
-    //                                         redo_align_params,      // thread-local
-    //                                         incoming_aligns,        // thread-local
-    //                                         numAligns[frame_index], // local
-    //                                         kbp->Lambda,            // thread-local
-    //                                         &matchingSeq,           // thread-local
-    //                                         -1,                     // const
-    //                                         query_info,             // thread-local
-    //                                         numContexts,            // thread-local
-    //                                         matrix,                 // thread-local
-    //                                         BLASTAA_SIZE,           // const
-    //                                         NRrecord,               // thread-local
-    //                                         &pvalueForThisPair,     // local
-    //                                         compositionTestIndex,   // thread-local
-    //                                         &LambdaRatio            // local
-    //                                 );
-    // ```
-    pub fn redo_list(
-        &mut self,
-        input: &[PreliminaryHsp],
-        batch: &PreparedQueryBatch,
-        subject: &[u8],
-    ) -> Result<Vec<RedoneHsp>> {
-        self.redo_list_observed(input, batch, subject, &mut |_| {})
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3502,3625-3641
     // ```c
@@ -1269,13 +1062,14 @@ impl KappaState {
     // Blast_RedoOneMatch call to the next on that thread. x_take_matrix and x_set_matrix move it
     // between Rust states so that a match redone out of order sees the matrix it would have seen in
     // stream order.
-    /// EXPERIMENT (LOSAT_X_BXPAR): the matrix a match leaves for the next one.
+    /// The matrix a match leaves for the next one.
+    #[cfg(feature = "parallel")]
     pub(crate) fn x_take_matrix(&mut self) -> Option<AdjustedProteinMatrix> {
         self.matrix.take()
     }
     // No NCBI counterpart: see x_take_matrix above (the matrix hand-over is a placement of the same
     // value); it does not change any value NCBI computes.
-    /// EXPERIMENT (LOSAT_X_BXPAR): hand a match the matrix of its predecessor.
+    /// Hand a match the matrix of its predecessor.
     pub(crate) fn x_set_matrix(&mut self, matrix: Option<AdjustedProteinMatrix>) {
         self.matrix = matrix;
     }
@@ -1310,7 +1104,6 @@ impl KappaState {
         input: &[PreliminaryHsp],
         batch: &PreparedQueryBatch,
         subject: &[u8],
-        trace: &mut dyn for<'a> FnMut(BlastRedoTraceEvent<'a>),
     ) -> Result<Vec<RedoneHsp>> {
         let query_index = input.first().map(|h| h.context / 6);
         ensure!(
@@ -1333,7 +1126,6 @@ impl KappaState {
                 &mut self.scratch,
                 &mut self.workspace,
                 &mut self.matrix,
-                trace,
             )?;
             for (context, alignments) in result.alignments_by_query.into_iter().enumerate() {
                 let mut current = alignments;
@@ -1432,7 +1224,7 @@ impl KappaState {
         // }
         // ```
         if output.len() > 1 {
-            Ok(reap_contained_hsps(output, trace))
+            Ok(reap_contained_hsps(output))
         } else {
             Ok(output)
         }
@@ -1466,6 +1258,15 @@ impl KappaState {
 //     for ( ;  iwrite < old_hspcnt;  iwrite++) {
 //         hsp_array[iwrite] = NULL;
 // ```
+// No NCBI counterpart: reads the switch; it changes no value NCBI computes (`x_bx_mem.rs`, whose
+// module is compiled only with threads, has the switch's comment).
+/// EXPERIMENT (LOSAT_X_BXENDMEM): whether a batch's end makes no word-hash table and no copy of the
+/// residues.
+pub(crate) fn x_end_mem() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXENDMEM"))
+}
+
 #[cfg(test)]
 mod contained_reap_tests {
     use super::*;
@@ -1519,7 +1320,7 @@ mod contained_reap_tests {
                 .collect();
             expected.sort_by_key(|(slot, _)| *slot);
             let input = entries.into_iter().map(|(h, _)| h).collect();
-            let actual = reap_contained_hsps(input, &mut |_| {});
+            let actual = reap_contained_hsps(input);
             let actual_hsps: Vec<PreliminaryHsp> = actual.into_iter().map(|h| h.hsp).collect();
             let expected_hsps: Vec<PreliminaryHsp> = expected.into_iter().map(|(_, h)| h).collect();
             assert_eq!(actual_hsps, expected_hsps, "direct C boundary case {name}");

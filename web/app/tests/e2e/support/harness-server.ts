@@ -9,8 +9,9 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import type { AddressInfo } from 'node:net';
 import type { BrowserContext, Page } from '@playwright/test';
 import { fileURLToPath } from 'node:url';
-import { siteHeaders } from '../../../build/headers';
+import { HEADERS_FILE, parseHeadersFile, pathHeaders, siteHeaders } from '../../../build/headers';
 import type { HarnessFiles } from './browser';
+import { navigate } from './navigate';
 
 /** The repository root; /__files/<path> serves <root>/<path> (inputs of the searches). */
 export const REPOSITORY = fileURLToPath(new URL('../../../../../', import.meta.url));
@@ -26,25 +27,35 @@ export interface HarnessServerOptions {
   readonly isolated?: boolean;
   /** Generated files, served under /__extra/<name> (inputs of measurements). */
   readonly extra?: ReadonlyMap<string, Uint8Array>;
+  /**
+   * Serves every response `Cache-Control: no-store`. Chromium fails a fetch
+   * (net::ERR_CACHE_WRITE_FAILURE) when workers that run at the same time write the same
+   * engine module into its HTTP cache.
+   */
+  readonly noStore?: boolean;
 }
 
 /** Starts a server for the harness files under /__harness/ and repository files under /__files/. */
 export async function startHarnessServer(files: HarnessFiles, options: HarnessServerOptions = {}): Promise<HarnessServer> {
   const site = siteHeaders();
+  // The other rules of _headers (the engine modules' caching), for the files' paths in the site.
+  const rules = parseHeadersFile(readFileSync(HEADERS_FILE, 'utf8'));
+  rules.delete('/*');
   const headers =
     options.isolated === false
       ? Object.fromEntries(Object.entries(site).filter(([name]) => !/^cross-origin-(opener|embedder)-policy$/i.test(name)))
       : site;
   const server = createServer((request: IncomingMessage, response: ServerResponse) => {
     const path = decodeURIComponent(new URL(request.url ?? '/', 'http://localhost').pathname);
-    const send = (status: number, type: string, body: string | Uint8Array) => {
-      response.writeHead(status, { ...headers, 'Content-Type': type });
+    const send = (status: number, type: string, body: string | Uint8Array, extra: Record<string, string> = {}) => {
+      response.writeHead(status, { ...headers, ...extra, ...(options.noStore === true ? { 'Cache-Control': 'no-store' } : {}), 'Content-Type': type });
       response.end(body);
     };
     if (path.startsWith('/__harness/')) {
-      const file = files.get(path.slice('/__harness/'.length) || 'index.html');
+      const name = path.slice('/__harness/'.length) || 'index.html';
+      const file = files.get(name);
       if (file === undefined) send(404, 'text/plain', `not in the harness: ${path}`);
-      else send(200, file.type, file.body);
+      else send(200, file.type, file.body, pathHeaders(`/${name}`, rules));
       return;
     }
     if (path.startsWith('/__extra/')) {
@@ -85,7 +96,7 @@ export async function openHarness(context: BrowserContext, server: HarnessServer
   const page = await context.newPage();
   // The harness logs each case and search as it finishes.
   page.on('console', (message) => console.log(message.text()));
-  await page.goto(`${server.origin}/__harness/index.html`);
+  await navigate(page, `${server.origin}/__harness/index.html`);
   await page.waitForFunction(() => window.losatHarness !== undefined);
   return page;
 }

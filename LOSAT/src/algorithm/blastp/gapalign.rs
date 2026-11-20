@@ -3,15 +3,16 @@
 //! Reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c
 //! Reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c
 
-use crate::common::{GapEditOp, Hit};
+use crate::common::GapEditOp;
+#[cfg(test)]
+use crate::common::Hit;
 use crate::config::ScoringMatrix;
 use crate::core::composition_adjustment::adjust_scores::AdjustedProteinMatrix;
-use crate::stats::karlin::{bit_score as calc_bit_score, evalue_from_raw_score};
-use crate::stats::KarlinParams;
 use crate::utils::matrix::{
-    blosum62_ncbistdaa_score_row, blosum62_score_ncbistdaa_direct, protein_score,
+    blosum62_ncbistdaa_score_row, blosum62_score_ncbistdaa_direct, protein_score, standard_score,
 };
 
+#[cfg(test)]
 use super::alignment::build_alignment_view_with_matrix;
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:363-371
@@ -67,12 +68,12 @@ const RESTRICT_SIZE: usize = 10;
 //                                    gap_align, score_params,
 //                                    init_hsp->offsets.qs_offsets.q_off, TRUE);
 // ```
-// EXPERIMENT (LOSAT_X_BPGAP / LOSAT_X_BPGAPSHADOW): `s_RestrictedGappedAlign` on separate row
+// EXPERIMENT (LOSAT_X_BPGAP): `s_RestrictedGappedAlign` on separate row
 // arrays, eight cells at a time with AVX2. A child module, so that it calls the reference
 // function and its helpers without changing them.
 #[path = "x_restricted_gap.rs"]
 mod x_restricted_gap;
-// No NCBI counterpart: the summary lines `main` prints at exit; they change no value NCBI computes.
+// No NCBI counterpart: the summary line `main` prints at exit; it changes no value NCBI computes.
 pub use x_restricted_gap::print_summary as x_restricted_gap_print_summary;
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:399-414
@@ -101,19 +102,6 @@ enum BlastpScoreMatrix<'a> {
     Blosum62,
     Standard(ScoringMatrix),
     Adjusted(&'a AdjustedProteinMatrix),
-}
-
-#[inline(always)]
-fn blastp_standard_score(matrix: ScoringMatrix, query_residue: u8, subject_residue: u8) -> i32 {
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:737-957
-    // ```c
-    // next_score = score_array[b_index].best + matrix_row[*b_ptr];
-    // ```
-    if matrix == ScoringMatrix::Blosum62 {
-        blosum62_score_ncbistdaa_direct(query_residue, subject_residue)
-    } else {
-        protein_score(matrix, query_residue, subject_residue)
-    }
 }
 
 #[inline(always)]
@@ -175,7 +163,7 @@ impl BlastpScoreMatrix<'_> {
         // ```
         match self {
             Self::Blosum62 => blosum62_score_ncbistdaa_direct(query_residue, subject_residue),
-            Self::Standard(matrix) => blastp_standard_score(matrix, query_residue, subject_residue),
+            Self::Standard(matrix) => standard_score(matrix, query_residue, subject_residue),
             Self::Adjusted(matrix) => matrix.score(query_residue, subject_residue),
         }
     }
@@ -436,11 +424,6 @@ pub(crate) struct BlastpGapAlignResult {
     pub subject_stop: i32,
     pub score: i32,
     pub edit_script: Vec<GapEditOp>,
-    pub num_ident: usize,
-    pub num_positives: usize,
-    pub mismatches: usize,
-    pub gap_opens: usize,
-    pub gap_letters: usize,
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4077-4091
@@ -769,6 +752,90 @@ fn blastp_get_start_for_gapped_alignment_impl<const BLOSUM62: bool>(
 
     if max_score > 0 {
         max_offset - HSP_MAX_WINDOW / 2
+    } else {
+        q_start
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign_priv.h:120
+// ```c
+// #define HSP_MAX_WINDOW 11
+// ```
+/// `HSP_MAX_WINDOW`, the letters of a window of `BlastGetStartForGappedAlignment`.
+pub(crate) const GAPPED_START_WINDOW: usize = 11;
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3405-3413
+// ```c
+//     hsp_end = q_start + HSP_MAX_WINDOW;
+//     query_var = query + q_start;
+//     subject_var = subject + s_start;
+//     score=0;
+//     for (index1=q_start; index1<hsp_end; index1++) {
+//         if (!(positionBased))
+//             score += sbp->matrix->data[*query_var][*subject_var];
+// ```
+/// The `HSP_MAX_WINDOW` letters of `sequence` from `start` that the first window of
+/// `BlastGetStartForGappedAlignment` reads, a letter past the end of `sequence` read as the
+/// sentinel byte (NULLB, 0). NCBI's buffers hold a NULLB right after each context of the query and
+/// after the subject, whose score is `BLAST_SCORE_MIN` (blast_stat.c:1559-1579): once a window holds
+/// it, its sum is below 0 whatever letters follow, as it is when they read as NULLBs.
+#[inline]
+pub(crate) fn gapped_start_window(sequence: &[u8], start: usize) -> [u8; GAPPED_START_WINDOW] {
+    let mut window = [0u8; GAPPED_START_WINDOW];
+    for (index, letter) in window.iter_mut().enumerate() {
+        *letter = sequence
+            .get(start.saturating_add(index))
+            .copied()
+            .unwrap_or(0);
+    }
+    window
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1054,1083 and
+// c++/src/algo/blast/core/blast_gapalign.c:3394,3401,3405-3413,3418-3420,3434-3437
+// ```c
+//     init_hit_width = q_right_off - q_left_off + 1;
+//     *hsp_len = left_disp + right_disp + init_hit_width;
+// ...
+//    const BlastScoreBlk* sbp, Uint4 q_start, Uint4 q_length,
+//     if (q_length <= HSP_MAX_WINDOW) {
+//     hsp_end = q_start + HSP_MAX_WINDOW;
+// ...
+//             score += sbp->matrix->data[*query_var][*subject_var];
+// ...
+//     max_offset = hsp_end - 1;
+//     hsp_end = q_start + MIN(q_length, s_length);
+//     for (index1=q_start + HSP_MAX_WINDOW; index1<hsp_end; index1++) {
+// ...
+//     if (max_score > 0)
+//        max_offset -= HSP_MAX_WINDOW/2;
+//     else
+//        max_offset = q_start;
+// ```
+/// `BlastGetStartForGappedAlignment` of a one-hit HSP of negative `Int4` length (`-window_size 0`
+/// with a low `-threshold`: the one-hit extension's best part ends before the last reset of its
+/// running sum), from the bytes of its first window (`query_window`, `subject_window`). NCBI reads
+/// the length as `Uint4`, above `HSP_MAX_WINDOW`, and `q_start + MIN(q_length, s_length)` wraps
+/// back to `q_start + length`, so only the first window is scored: the gapped start is
+/// `q_start + 5` when its sum is above 0, else `q_start`. TBLASTN and BLASTX take it from here;
+/// BLASTP keeps its own copy inline in its gapped stage
+/// (`blastp::blast_engine::blastp_get_start_for_gapped_alignment_int4_length`, out of line it
+/// cost BLASTP's default search 0.6 %).
+#[cold]
+#[inline(never)]
+pub(crate) fn gapped_start_int4(
+    query_window: &[u8; GAPPED_START_WINDOW],
+    subject_window: &[u8; GAPPED_START_WINDOW],
+    q_start: usize,
+    matrix: ScoringMatrix,
+) -> usize {
+    let score: i32 = query_window
+        .iter()
+        .zip(subject_window)
+        .map(|(&q, &s)| standard_score(matrix, q, s))
+        .sum();
+    if score > 0 {
+        q_start + GAPPED_START_WINDOW - 1 - GAPPED_START_WINDOW / 2
     } else {
         q_start
     }
@@ -1143,8 +1210,8 @@ fn align_ex_protein_score_only(
     // ...
     // next_score = score_array[b_index].best + matrix_row[ *b_ptr ];
     // ```
-    // EXPERIMENT: SIMD kernel (LOSAT_X_DPFAST) with optional cross-check
-    // against the scalar kernel on every call (LOSAT_X_DPSHADOW).
+    // No NCBI counterpart: the SIMD kernel (`utils/xdrop_simd.rs`) runs this X-drop; the scalar
+    // port below answers the calls it declines.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:862-912
     // ```c
     //         for (b_index = first_b_index; b_index < b_size; b_index++) {
@@ -1173,14 +1240,13 @@ fn align_ex_protein_score_only(
     //                 score_gap_row = MAX(score - gap_open_extend, score_gap_row);
     //                 score_array[b_index].best = score;
     // ```
-    // Dispatch point: with LOSAT_X_DPFAST on, the SIMD kernel runs this score-only X-drop
+    // Dispatch point: the SIMD kernel runs this score-only X-drop
     // recurrence of Blast_SemiGappedAlign
     // (same max/gap updates, same X-drop test, same best-cell choice) in vector lanes and returns
     // (a_offset, b_offset, score).
-    // If the problem does not fit the 8/16-bit lanes it returns None and the scalar port below
-    // runs. LOSAT_X_DPSHADOW=1 runs both and asserts equality.
-    let x_mode = crate::utils::xdrop_simd::mode();
-    if x_mode != 0 {
+    // If the problem does not fit the 8/16/32-bit lanes (or the target has no vector kernel) it
+    // returns None and the scalar port below runs.
+    if crate::utils::xdrop_simd::KERNEL_COMPILED {
         use crate::utils::xdrop_simd::{xdrop_align, ColSeq, RowSeq};
         let q = if reverse {
             RowSeq::Bytes {
@@ -1226,29 +1292,8 @@ fn align_ex_protein_score_only(
             )
         });
         if let Some(r) = fast {
-            let out = (r.a_offset, r.b_offset, r.score);
-            if x_mode == 2 {
-                let reference = align_ex_protein_score_only_scalar(
-                    query,
-                    query_base,
-                    subject,
-                    subject_base,
-                    len1,
-                    len2,
-                    score_matrix,
-                    gap_open,
-                    gap_extend,
-                    x_drop,
-                    reverse,
-                    scratch,
-                );
-                assert_eq!(
-                    out, reference,
-                    "SIMD score-only kernel differs: len1={len1} len2={len2} go={gap_open} ge={gap_extend} x={x_drop} rev={reverse}"
-                );
-            }
             crate::utils::xstats::add(&crate::utils::xstats::DP_FAST_CALLS, 1);
-            return out;
+            return (r.a_offset, r.b_offset, r.score);
         }
         crate::utils::xstats::add(&crate::utils::xstats::DP_FALLBACK_CALLS, 1);
     }
@@ -1288,6 +1333,31 @@ fn x_blosum62_tables() -> &'static crate::utils::xdrop_simd::StaticTables {
     })
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:543,578
+// ```c
+//                 matrix_row = matrix[ A[ M - a_index ] ];
+// ...
+//             next_score = score_array[b_index].best + matrix_row[ *b_ptr ];
+// ```
+// The tables hold the scores that matrix[A[a]][B[b]] reads for a matrix other than BLOSUM62
+// (`standard_score`, built as `x_blosum62_tables` is); they only change how the row is
+// looked up, and give the kernel the matrix's largest score (its 8-bit lanes need it).
+/// The lookup tables of the SIMD kernel for `matrix`, built at the first call for the matrix;
+/// `None` if a score is outside the 16-bit tables (the kernel then builds each row as before).
+fn x_standard_tables(
+    matrix: ScoringMatrix,
+) -> Option<&'static crate::utils::xdrop_simd::StaticTables> {
+    use std::sync::OnceLock;
+    static T: [OnceLock<Option<Box<crate::utils::xdrop_simd::StaticTables>>>;
+        ScoringMatrix::ALL.len()] = [const { OnceLock::new() }; ScoringMatrix::ALL.len()];
+    T[matrix as usize]
+        .get_or_init(|| {
+            let f = move |q: u8, s: u8| standard_score(matrix, q, s);
+            crate::utils::xdrop_simd::build_tables(&f, 28)
+        })
+        .as_deref()
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:839-850
 // ```c
 //         if (!(gap_align->positionBased)) {
@@ -1312,8 +1382,11 @@ fn with_x_scores<R>(
         }),
         BlastpScoreMatrix::Adjusted(m) => run(&Scores::Rows28(&m.scores)),
         BlastpScoreMatrix::Standard(matrix) => {
-            let f = move |q: u8, s: u8| blastp_standard_score(matrix, q, s);
-            run(&Scores::Func { f: &f, n: 28 })
+            let f = move |q: u8, s: u8| standard_score(matrix, q, s);
+            run(&match x_standard_tables(matrix) {
+                Some(t) => Scores::Tables { t, n: 28 },
+                None => Scores::Func { f: &f, n: 28 },
+            })
         }
     }
 }
@@ -1338,8 +1411,8 @@ fn with_x_scores<R>(
 //                 score_gap_row = MAX(score - gap_open_extend, score_gap_row);
 //                 score_array[b_index].best = score;
 // ```
-// Reference path: the original port of the Blast_SemiGappedAlign score-only recurrence, moved
-// unchanged into its own function so the dispatch above can call it.
+// The scalar port of the Blast_SemiGappedAlign score-only recurrence, in its own function: the
+// dispatch above calls it for the calls the SIMD kernel does not take.
 fn align_ex_protein_score_only_scalar(
     query: &[u8],
     query_base: usize,
@@ -1516,6 +1589,10 @@ fn align_ex_protein_score_only_impl<const BLOSUM62: bool, const REVERSE: bool>(
             (b_size - first_b_index) as u64,
         );
 
+        #[expect(
+            clippy::mut_range_bound,
+            reason = "NCBI's loop reads its start once and moves first_b_index past a first column that fails X-drop (blast_gapalign.c:862,886-887)"
+        )]
         for b_index in first_b_index..b_size {
             let sc = blastp_subject_residue::<REVERSE>(subject, subject_base, len2, b_index);
             let score_gap_col = scratch.dp_mem[b_index].best_gap;
@@ -1761,6 +1838,10 @@ fn restricted_gapped_align_protein_impl<const BLOSUM62: bool, const REVERSE: boo
         let mut last_b_index = first_b_index;
 
         if a_index % RESTRICT_SIZE != 0 {
+            #[expect(
+                clippy::mut_range_bound,
+                reason = "NCBI's loop reads its start once and moves first_b_index past a first column that fails X-drop (blast_gapalign.c:1112,1124-1125)"
+            )]
             for b_index in first_b_index..b_size {
                 let sc = blastp_subject_residue::<REVERSE>(subject, subject_base, len2, b_index);
                 let next_score = dp_mem[b_index].best
@@ -1815,6 +1896,10 @@ fn restricted_gapped_align_protein_impl<const BLOSUM62: bool, const REVERSE: boo
             }
             score_gap_row = score_val;
         } else {
+            #[expect(
+                clippy::mut_range_bound,
+                reason = "NCBI's loop reads its start once and moves first_b_index past a first column that fails X-drop (blast_gapalign.c:1177,1192-1193)"
+            )]
             for b_index in first_b_index..b_size {
                 let sc = blastp_subject_residue::<REVERSE>(subject, subject_base, len2, b_index);
                 let next_score = dp_mem[b_index].best
@@ -1945,8 +2030,8 @@ fn align_ex_protein(
     // ...
     // next_score = score_array[b_index].best + matrix_row[ *b_ptr ];
     // ```
-    // EXPERIMENT: SIMD kernel (LOSAT_X_DPFAST) with optional cross-check
-    // against the scalar kernel on every call (LOSAT_X_DPSHADOW).
+    // No NCBI counterpart: the SIMD kernel (`utils/xdrop_simd.rs`) runs this X-drop; the scalar
+    // port below answers the calls it declines.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:563-635
     // ```c
     //         for (b_index = first_b_index; b_index < b_size; b_index++) {
@@ -1996,14 +2081,13 @@ fn align_ex_protein(
     //
     //                 score_array[b_index].best = score;
     // ```
-    // Dispatch point: with LOSAT_X_DPFAST on, the SIMD kernel runs this traceback recurrence of
+    // Dispatch point: the SIMD kernel runs this traceback recurrence of
     // ALIGN_EX in vector lanes
     // (same per-cell script bits, same fence test, same X-drop test) and returns offsets, score,
     // edit script and fence_hit.
-    // A call that does not fit the lanes, or has fence_hit already set, runs the scalar port below.
-    // LOSAT_X_DPSHADOW=1 runs both and asserts equality.
-    let x_mode = crate::utils::xdrop_simd::mode();
-    if x_mode != 0 && !*fence_hit {
+    // A call that does not fit the lanes, has fence_hit already set, or is on a target without a
+    // vector kernel runs the scalar port below.
+    if crate::utils::xdrop_simd::KERNEL_COMPILED && !*fence_hit {
         use crate::utils::xdrop_simd::{
             xdrop_align, ColSeq, RowSeq, SCRIPT_GAP_IN_A as X_GAP_A, SCRIPT_GAP_IN_B as X_GAP_B,
         };
@@ -2050,6 +2134,9 @@ fn align_ex_protein(
                 &mut scratch.fast,
             )
         });
+        // the chunks of the traceback rows past the scratch's own go back to the pool (`ops` holds
+        // the script; `XTrace`)
+        scratch.fast.x_trace_release();
         if let Some(r) = fast {
             let ops: Vec<GapEditOp> = scratch
                 .fast
@@ -2061,31 +2148,6 @@ fn align_ex_protein(
                     _ => GapEditOp::Sub(n),
                 })
                 .collect();
-            if x_mode == 2 {
-                let mut ref_fence = false;
-                let reference = align_ex_protein_scalar(
-                    q_seq,
-                    s_seq,
-                    len1,
-                    len2,
-                    score_matrix,
-                    gap_open,
-                    gap_extend,
-                    x_drop,
-                    reverse,
-                    scratch,
-                    &mut ref_fence,
-                    read_end_sentinel,
-                );
-                assert!(
-                    (r.a_offset, r.b_offset, r.score) == (reference.0, reference.1, reference.2)
-                        && ops == reference.3
-                        && r.fence_hit == ref_fence,
-                    "SIMD traceback kernel differs: fast=({},{},{},{}) ref=({},{},{},{}) len1={len1} len2={len2} go={gap_open} ge={gap_extend} x={x_drop} rev={reverse}",
-                    r.a_offset, r.b_offset, r.score, r.fence_hit,
-                    reference.0, reference.1, reference.2, ref_fence
-                );
-            }
             if r.fence_hit {
                 *fence_hit = true;
             }
@@ -2137,8 +2199,8 @@ fn align_ex_protein(
 // ...
 //             edit_script_row[b_index] = script;
 // ```
-// Reference path: the original port of ALIGN_EX, moved unchanged into its own function so the
-// dispatch above can call it.
+// The scalar port of ALIGN_EX, in its own function: the dispatch above calls it for the calls the
+// SIMD kernel does not take.
 fn align_ex_protein_scalar(
     q_seq: &[u8],
     s_seq: &[u8],
@@ -2616,20 +2678,12 @@ fn align_ex_protein_impl<const BLOSUM62: bool, const REVERSE: bool>(
 
         let op_type = script & SCRIPT_OP_MASK;
         if op_type == SCRIPT_GAP_IN_A {
-            if b_index > 0 {
-                b_index -= 1;
-            }
+            b_index = b_index.saturating_sub(1);
         } else if op_type == SCRIPT_GAP_IN_B {
-            if a_index > 0 {
-                a_index -= 1;
-            }
+            a_index = a_index.saturating_sub(1);
         } else {
-            if a_index > 0 {
-                a_index -= 1;
-            }
-            if b_index > 0 {
-                b_index -= 1;
-            }
+            a_index = a_index.saturating_sub(1);
+            b_index = b_index.saturating_sub(1);
         }
         push_trace_op(&mut scratch.trace_ops_reversed, op_type);
     }
@@ -2670,6 +2724,7 @@ fn align_ex_protein_impl<const BLOSUM62: bool, const REVERSE: bool>(
 // ```c
 // Int2 BLAST_GappedAlignmentWithTraceback(...);
 // ```
+#[cfg(test)]
 pub(crate) fn blast_gapped_alignment_with_traceback(
     query: &[u8],
     subject: &[u8],
@@ -2809,7 +2864,7 @@ fn gapped_alignment_with_traceback(
     gap_extend: i32,
     x_drop: i32,
     scratch: &mut GapAlignScratch,
-    mut fence_hit_out: Option<&mut bool>,
+    fence_hit_out: Option<&mut bool>,
 ) -> Option<BlastpGapAlignResult> {
     let subject_length = window_length.unwrap_or(subject.len());
     if q_start >= query.len() || s_start >= subject_length {
@@ -2933,7 +2988,7 @@ fn gapped_alignment_with_traceback(
     // NCBI c++/src/algo/blast/core/blast_gapalign.c:4620-4643:
     // if ((! (fence_hit && *fence_hit)) && ...) { /* right extension */ }
     // The caller must see the fence flag before deciding whether to retry.
-    if let Some(out) = fence_hit_out.as_deref_mut() {
+    if let Some(out) = fence_hit_out {
         *out = fence_hit;
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4714-4718
@@ -2949,18 +3004,6 @@ fn gapped_alignment_with_traceback(
     // cutoff/reap decisions; preserve that payload here.
     let score = score_left + score_right;
 
-    let (num_ident, num_positives, mismatches, gap_opens, gap_letters) =
-        stats_from_edit_ops_protein(
-            query,
-            subject,
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:764-765: q = (Uint1*) &query[q_off]; s = (Uint1*) &subject[s_off];
-            // ALIGN_EX's consumed left extents never exceed start+1; starts remain valid array offsets.
-            usize::try_from(query_start).expect("NCBI traceback query start is non-negative"),
-            usize::try_from(subject_start).expect("NCBI traceback subject start is non-negative"),
-            &edit_script,
-            matrix,
-        );
-
     Some(BlastpGapAlignResult {
         query_start,
         query_stop,
@@ -2968,11 +3011,6 @@ fn gapped_alignment_with_traceback(
         subject_stop,
         score,
         edit_script,
-        num_ident,
-        num_positives,
-        mismatches,
-        gap_opens,
-        gap_letters,
     })
 }
 
@@ -3068,8 +3106,8 @@ pub(crate) fn blastp_score_only_gapped_alignment_with_scratch(
             true,
             scratch,
         ),
-        // EXPERIMENT (LOSAT_X_BPGAP / LOSAT_X_BPGAPSHADOW): the reference function unless a
-        // variable is set (x_restricted_gap.rs).
+        // EXPERIMENT (LOSAT_X_BPGAP): the reference function unless the switch is on
+        // (x_restricted_gap.rs).
         BlastpGappedAlignmentMode::Restricted => {
             x_restricted_gap::restricted_gapped_align_protein_x(
                 query,
@@ -3122,7 +3160,7 @@ pub(crate) fn blastp_score_only_gapped_alignment_with_scratch(
                     false,
                     scratch,
                 ),
-                // EXPERIMENT (LOSAT_X_BPGAP / LOSAT_X_BPGAPSHADOW): as for the left extension.
+                // EXPERIMENT (LOSAT_X_BPGAP): as for the left extension.
                 BlastpGappedAlignmentMode::Restricted => {
                     x_restricted_gap::restricted_gapped_align_protein_x(
                         query,
@@ -3178,6 +3216,7 @@ pub(crate) fn blastp_score_only_gapped_alignment_with_scratch(
 // BlastGapDP* dp_mem; /**< scratch structures for dynamic programming */
 // Int4 dp_mem_alloc;  /**< current number of structures allocated */
 // ```
+#[cfg(test)]
 pub(crate) fn blastp_score_only_gapped_alignment(
     query: &[u8],
     subject: &[u8],
@@ -3204,108 +3243,6 @@ pub(crate) fn blastp_score_only_gapped_alignment(
     )
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1935-1948
-// ```c
-// BLAST_GappedAlignmentWithTraceback(context->prog_number,
-//                                    query_data->data,
-//                                    subject_data->data, gapAlign,
-//                                    context->scoringParams,
-//                                    q_start, s_start,
-//                                    query_data->length,
-//                                    subject_data->length,
-//                                    &fence_hit);
-// ```
-pub(crate) fn traceback_preliminary_blastp_hsp(
-    preliminary_hsp: &BlastpPreliminaryHsp,
-    query: &[u8],
-    subject: &[u8],
-    matrix: ScoringMatrix,
-    gap_open: i32,
-    gap_extend: i32,
-    x_drop: i32,
-    params: &KarlinParams,
-    effective_space: f64,
-) -> Hit {
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1924-1946
-    // ```c
-    // q_start = hsp->query.gapped_start - query_range->begin;
-    // s_start = hsp->subject.gapped_start - subject_range->begin;
-    // status = BLAST_GappedAlignmentWithTraceback(..., q_start, s_start, ...);
-    // ```
-    let q_start = usize::try_from(preliminary_hsp.gapped_query_start)
-        .expect("NCBI BLAST traceback requires non-negative preliminary gapped query start");
-    let s_start = usize::try_from(preliminary_hsp.gapped_subject_start)
-        .expect("NCBI BLAST traceback requires non-negative preliminary gapped subject start");
-    let aligned = blast_gapped_alignment_with_traceback(
-        query, subject, q_start, s_start, matrix, None, gap_open, gap_extend, x_drop,
-    )
-    .expect("NCBI BLAST traceback helper must produce a gapped alignment");
-
-    let alignment_len = aligned
-        .edit_script
-        .iter()
-        .map(|op| op.num() as usize)
-        .sum::<usize>();
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:151-182
-    // ```c
-    // Blast_HSPInit(Int4 query_start, Int4 query_end, Int4 subject_start,
-    //               Int4 subject_end, ...)
-    // {
-    //    new_hsp->query.offset = query_start;
-    //    new_hsp->query.end = query_end;
-    //    new_hsp->subject.offset = subject_start;
-    //    new_hsp->subject.end = subject_end;
-    // }
-    // ```
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:151-178
-    // ```c
-    // new_hsp->query.offset = query_start;
-    // new_hsp->subject.offset = subject_start;
-    // new_hsp->query.end = query_end;
-    // new_hsp->subject.end = subject_end;
-    // ```
-    assert!(
-        alignment_len > 0,
-        "NCBI BLAST traceback helper must not discard zero-length alignments as None"
-    );
-
-    let identity = 100.0 * (aligned.num_ident as f64) / (alignment_len as f64);
-    Hit {
-        identity,
-        length: alignment_len,
-        mismatch: aligned.mismatches,
-        gapopen: aligned.gap_opens,
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:509-520,583: fence_error is handled before Blast_HSPUpdateWithTraceback.
-        // This full-sequence BLASTP caller has no translation fence and converts only report coordinates.
-        q_start: usize::try_from(aligned.query_start + 1).expect("BLASTP report query start"),
-        q_end: usize::try_from(aligned.query_stop).expect("BLASTP report query end"),
-        s_start: usize::try_from(aligned.subject_start + 1).expect("BLASTP report subject start"),
-        s_end: usize::try_from(aligned.subject_stop).expect("BLASTP report subject end"),
-        e_value: evalue_from_raw_score(aligned.score, params, effective_space),
-        bit_score: calc_bit_score(aligned.score, params),
-        num_ident: aligned.num_ident,
-        query_frame: preliminary_hsp.query_frame,
-        query_length: preliminary_hsp.query_length,
-        q_idx: preliminary_hsp.q_idx,
-        s_idx: preliminary_hsp.s_idx,
-        raw_score: aligned.score,
-        // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:125-143
-        // ```c
-        // typedef struct BlastHSP {
-        //    BlastSeg query;
-        //    BlastSeg subject;
-        // } BlastHSP;
-        // ```
-        sort_query_offset: 0,
-        sort_query_end: 0,
-        sort_subject_offset: 0,
-        sort_subject_end: 0,
-        has_sort_offsets: false,
-        gap_info: Some(aligned.edit_script),
-        num_positives: aligned.num_positives,
-    }
-}
-
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:647-662
 // ```c
 // for (index=extra_start; index < hsp_list->hspcnt; index++) {
@@ -3325,6 +3262,7 @@ pub(crate) fn traceback_preliminary_blastp_hsp(
 // ...
 // Blast_HSPListGetBitScores(hsp_list, kGapped, sbp);
 // ```
+#[cfg(test)]
 fn refresh_blastp_hit_statistics(
     hit: &mut Hit,
     query_nomask: &[u8],
@@ -3340,7 +3278,7 @@ fn refresh_blastp_hit_statistics(
     hit.gapopen = view.gap_opens;
     hit.mismatch = view
         .alignment_len
-        .saturating_sub(view.num_ident.saturating_add(view.gap_letters));
+        .saturating_sub(view.num_ident.saturating_add(view.gap_letters)) as i64;
     hit.identity = if view.alignment_len > 0 {
         (view.num_ident as f64 * 100.0) / view.alignment_len as f64
     } else {
@@ -3374,6 +3312,7 @@ fn refresh_blastp_hit_statistics(
 // ```c
 // matrix = gap_align->sbp->matrix->data;
 // ```
+#[cfg(test)]
 pub(crate) fn reevaluate_blastp_hit_with_traceback(
     hit: &mut Hit,
     query: &[u8],
@@ -3427,6 +3366,7 @@ pub(crate) fn reevaluate_blastp_hit_with_traceback(
 //     op_index++;
 // }
 // ```
+#[cfg(test)]
 fn reevaluate_blastp_hit_with_traceback_impl<const BLOSUM62: bool>(
     hit: &mut Hit,
     query: &[u8],
@@ -3466,8 +3406,9 @@ fn reevaluate_blastp_hit_with_traceback_impl<const BLOSUM62: bool>(
     // ```
     //
     // For blastp, `BlastScoringOptionsNew` leaves `reward` at zero, and
-    // `BlastScoringParametersNew` copies that zero into `score_params->reward`.
-    let blastp_reward = 0i32;
+    // `BlastScoringParametersNew` copies that zero into `score_params->reward`, so the
+    // `score += ext * score_params->reward` of the end extension below adds 0 and the score
+    // stored before it is NCBI's.
     let gap_ops = match hit.gap_info.as_mut() {
         Some(info) if !info.is_empty() => info,
         _ => return true,
@@ -3636,7 +3577,7 @@ fn reevaluate_blastp_hit_with_traceback_impl<const BLOSUM62: bool>(
         if best_end_esp_index == best_start_esp_index {
             best_end_esp_num += ext;
         }
-        score += ext as i32 * blastp_reward;
+        // `score += ext * score_params->reward` adds 0 for blastp (reward is 0, above).
 
         let mut qp = best_q_end;
         let mut sp = best_s_end;
@@ -3655,7 +3596,7 @@ fn reevaluate_blastp_hit_with_traceback_impl<const BLOSUM62: bool>(
             *num += ext as u32;
         }
         best_end_esp_num += ext;
-        score += ext as i32 * blastp_reward;
+        // `score += ext * score_params->reward` adds 0 for blastp (reward is 0, above).
     }
 
     hit.q_start = best_q_start + 1;
@@ -3694,30 +3635,21 @@ fn reevaluate_blastp_hit_with_traceback_impl<const BLOSUM62: bool>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::blast_stat::composition::compute_lambda_from_score_probs;
     use crate::core::composition_adjustment::adjust_scores::{
         blast_adjust_scores, build_matrix_info, read_aa_composition, BlastCompositionWorkspace,
     };
+    use crate::core::composition_adjustment::redo_alignment::redo_calc_lambda;
     use crate::core::composition_adjustment::redo_alignment::BlastCompoAdjustMode;
     use crate::utils::matrix::{aa_char_to_ncbistdaa, ncbistdaa};
     use crate::utils::seg::{SegMasker, SegParams};
     use std::fs;
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:551-572
-    // ```c
-    // s_CalcLambda(double probs[], int min_score, int max_score, double lambda0)
-    // {
-    //     return Blast_KarlinLambdaNR(&freq, lambda0);
-    // }
-    // ```
-    fn test_compute_lambda_from_score_probs(
-        score_probs: &[f64],
-        min_score: i32,
-        max_score: i32,
-        lambda0: f64,
-    ) -> anyhow::Result<f64> {
-        compute_lambda_from_score_probs(score_probs, min_score, max_score, lambda0)
-            .map_err(anyhow::Error::msg)
+    /// A file of `tests/fasta`, from the crate directory and not the working directory: a WASI
+    /// module has no working directory (the runner preopens "/").
+    fn fixture(name: &str) -> std::path::PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fasta")
+            .join(name)
     }
 
     fn fasta_sequence_by_id(contents: &str, wanted_id: &str) -> Vec<u8> {
@@ -4333,8 +4265,8 @@ mod tests {
     // ```
     #[test]
     fn test_traceback_score_matches_rescored_edit_script_wssv_537() {
-        let query_fasta = fs::read_to_string("tests/fasta/WSSV.faa").expect("query fasta");
-        let subject_fasta = fs::read_to_string("tests/fasta/PajaWSV.faa").expect("subject fasta");
+        let query_fasta = fs::read_to_string(fixture("WSSV.faa")).expect("query fasta");
+        let subject_fasta = fs::read_to_string(fixture("PajaWSV.faa")).expect("subject fasta");
         let query = mask_query_sequence(&fasta_sequence_by_id(&query_fasta, "YP_009220537.1"));
         let subject = mask_subject_sequence(&fasta_sequence_by_id(&subject_fasta, "BDT63528.1"));
 
@@ -4351,7 +4283,7 @@ mod tests {
             BlastCompoAdjustMode::CompositionMatrixAdjust,
             0,
             &mut composition_workspace,
-            test_compute_lambda_from_score_probs,
+            redo_calc_lambda,
         )
         .unwrap()
         .expect("adjusted matrix");
@@ -4429,8 +4361,8 @@ mod tests {
             edit_script
         }
 
-        let query_fasta = fs::read_to_string("tests/fasta/WSSV.faa").expect("query fasta");
-        let subject_fasta = fs::read_to_string("tests/fasta/PajaWSV.faa").expect("subject fasta");
+        let query_fasta = fs::read_to_string(fixture("WSSV.faa")).expect("query fasta");
+        let subject_fasta = fs::read_to_string(fixture("PajaWSV.faa")).expect("subject fasta");
         let query = fasta_sequence_by_id(&query_fasta, "YP_009220488.1");
         let subject = mask_subject_sequence(&fasta_sequence_by_id(&subject_fasta, "BDT63510.1"));
 
@@ -4447,7 +4379,7 @@ mod tests {
             BlastCompoAdjustMode::CompositionMatrixAdjust,
             0,
             &mut composition_workspace,
-            test_compute_lambda_from_score_probs,
+            redo_calc_lambda,
         )
         .unwrap()
         .expect("adjusted matrix");
@@ -4659,13 +4591,8 @@ mod tests {
     // not only the resulting score or final tabular output.
     #[test]
     fn test_traceback_contiguous_rows_reused_scratch_matches_fresh() {
-        // No NCBI counterpart: test guard; the test reads scalar-kernel scratch rows, so it is
-        // skipped when the SIMD kernel is on.
-        // EXPERIMENT (LOSAT_X_DPFAST): the rows inspected below are written by
-        // the scalar kernel, which the SIMD kernel replaces under the switch.
-        if crate::utils::xdrop_simd::mode() != 0 {
-            return;
-        }
+        // No NCBI counterpart: the test reads scalar-kernel scratch rows, so it calls the scalar
+        // port (`align_ex_protein_scalar`) directly; the SIMD kernel writes no such rows.
         let mut adjusted = AdjustedProteinMatrix {
             scores: [[-3; 28]; 28],
         };
@@ -4698,7 +4625,7 @@ mod tests {
                             }
                             let run = |scratch: &mut GapAlignScratch| {
                                 let mut fence = false;
-                                let result = align_ex_protein(
+                                let result = align_ex_protein_scalar(
                                     &query,
                                     &subject,
                                     len,
@@ -4738,6 +4665,173 @@ mod tests {
         }
         assert!(saw_offset && saw_gap && saw_fence);
     }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:543,578
+    // ```c
+    //                 matrix_row = matrix[ A[ M - a_index ] ];
+    // ...
+    //             next_score = score_array[b_index].best + matrix_row[ *b_ptr ];
+    // ```
+    // The SIMD kernel with each matrix's tables (`x_standard_tables`) gives the scalar port's
+    // result, score-only and with traceback, in both directions: on 8-bit lanes (the largest
+    // X-drop they take, x + goe + 2M + 1 = 127 in `fits_8bit`), on 16-bit lanes (one more), and
+    // with a sentinel (code 0) in either sequence or NCBI's fence in the subject.
+    #[test]
+    fn x_standard_tables_give_the_scalar_port_for_every_matrix() {
+        use crate::utils::xdrop_simd::{xdrop_align, ColSeq, RowSeq};
+        let mut state = 0x9E37_79B9_7F4A_7C15u64;
+        let mut below = move |n: u64| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state % n
+        };
+        let mut scratch = GapAlignScratch::new();
+        for matrix in ScoringMatrix::ALL {
+            assert!(x_standard_tables(matrix).is_some(), "{matrix:?}");
+            let top = (1..28u8)
+                .flat_map(|q| (1..28u8).map(move |s| standard_score(matrix, q, s)))
+                .max()
+                .unwrap();
+            let score_matrix = BlastpScoreMatrix::Standard(matrix);
+            let mut fast_runs = 0;
+            for (gap_open, gap_extend) in [(11, 1), (14, 2), (5, 2)] {
+                let goe = gap_open + gap_extend;
+                let x8 = 126 - goe - 2 * top;
+                assert!(x8 >= goe, "{matrix:?}: x8 {x8}");
+                for x_drop in [10, 38, x8, x8 + 1] {
+                    for variant in 0..4 {
+                        let len1 = 20 + below(120) as usize;
+                        let mut query: Vec<u8> = (0..=len1).map(|_| 1 + below(27) as u8).collect();
+                        // the subject: the query with substitutions, insertions and deletions
+                        let mut subject = vec![1 + below(27) as u8];
+                        for &r in &query[1..] {
+                            match below(20) {
+                                0 => {}
+                                1 => subject.extend([r, 1 + below(27) as u8]),
+                                2..=4 => subject.push(1 + below(27) as u8),
+                                _ => subject.push(r),
+                            }
+                        }
+                        let len2 = subject.len() - 1;
+                        match variant {
+                            1 => subject[1 + below(len2 as u64) as usize] = 0,
+                            2 => query[1 + below(len1 as u64) as usize] = 0,
+                            3 => subject[1 + below(len2 as u64) as usize] = FENCE_SENTRY,
+                            _ => {}
+                        }
+                        for reverse in [false, true] {
+                            let at = format!(
+                                "{matrix:?} {gap_open}/{gap_extend} x {x_drop} variant {variant} \
+                                 reverse {reverse}"
+                            );
+                            let mut fence = (false, false);
+                            let traceback = align_ex_protein(
+                                &query,
+                                &subject,
+                                len1,
+                                len2,
+                                score_matrix,
+                                gap_open,
+                                gap_extend,
+                                x_drop,
+                                reverse,
+                                &mut scratch,
+                                &mut fence.0,
+                                false,
+                            );
+                            let expect = align_ex_protein_scalar(
+                                &query,
+                                &subject,
+                                len1,
+                                len2,
+                                score_matrix,
+                                gap_open,
+                                gap_extend,
+                                x_drop,
+                                reverse,
+                                &mut GapAlignScratch::new(),
+                                &mut fence.1,
+                                false,
+                            );
+                            assert_eq!(traceback, expect, "{at}: traceback");
+                            assert_eq!(fence.0, fence.1, "{at}: fence");
+                            if variant == 3 {
+                                // the fence is read by the traceback only
+                                continue;
+                            }
+                            let score_only = align_ex_protein_score_only(
+                                &query,
+                                0,
+                                &subject,
+                                0,
+                                len1,
+                                len2,
+                                score_matrix,
+                                gap_open,
+                                gap_extend,
+                                x_drop,
+                                reverse,
+                                &mut scratch,
+                            );
+                            let expect = align_ex_protein_score_only_scalar(
+                                &query,
+                                0,
+                                &subject,
+                                0,
+                                len1,
+                                len2,
+                                score_matrix,
+                                gap_open,
+                                gap_extend,
+                                x_drop,
+                                reverse,
+                                &mut GapAlignScratch::new(),
+                            );
+                            assert_eq!(score_only, expect, "{at}: score only");
+                        }
+                        // the kernel itself takes the problem at the widest X-drops, so the
+                        // calls above compared it with the scalar port
+                        if crate::utils::xdrop_simd::KERNEL_COMPILED && variant == 0 && x_drop >= x8
+                        {
+                            let q = RowSeq::Bytes {
+                                data: &query,
+                                base: 0,
+                                step: 1,
+                            };
+                            let s = ColSeq {
+                                data: &subject,
+                                base: 1,
+                                step: 1,
+                                zero_from: usize::MAX,
+                            };
+                            let taken = with_x_scores(score_matrix, |scores| {
+                                xdrop_align(
+                                    &q,
+                                    &s,
+                                    scores,
+                                    len1,
+                                    len2,
+                                    gap_open,
+                                    gap_extend,
+                                    x_drop,
+                                    false,
+                                    false,
+                                    &mut scratch.fast,
+                                )
+                            });
+                            assert!(taken.is_some(), "{matrix:?} x {x_drop}: kernel declined");
+                            fast_runs += 1;
+                        }
+                    }
+                }
+            }
+            assert!(
+                fast_runs == 6 || !crate::utils::xdrop_simd::KERNEL_COMPILED,
+                "{matrix:?}: {fast_runs}"
+            );
+        }
+    }
     // NCBI reference: c++/src/algo/blast/core/blast_gapalign.c:563-575,634-639
     // for (b_index = first_b_index; b_index < b_size; b_index++) {
     //     if (matrix_index == FENCE_SENTRY) { ... break; }
@@ -4747,13 +4841,8 @@ mod tests {
     // may become visible when leaving the first main-band row.
     #[test]
     fn test_traceback_fence_exposes_only_initialized_prefix() {
-        // No NCBI counterpart: test guard; the test reads scalar-kernel scratch rows, so it is
-        // skipped when the SIMD kernel is on.
-        // EXPERIMENT (LOSAT_X_DPFAST): the rows inspected below are written by
-        // the scalar kernel, which the SIMD kernel replaces under the switch.
-        if crate::utils::xdrop_simd::mode() != 0 {
-            return;
-        }
+        // No NCBI counterpart: the test reads scalar-kernel scratch rows, so it calls the scalar
+        // port (`align_ex_protein_scalar`) directly; the SIMD kernel writes no such rows.
         for (reverse, capacity, gap_extend) in
             [(false, 48, 1), (true, 48, 1), (false, 8, 0), (true, 8, 0)]
         {
@@ -4770,7 +4859,7 @@ mod tests {
                 scratch.trace_rows = vec![vec![u8::MAX; capacity]; 2];
                 scratch.trace_offsets = vec![0; 2];
                 let mut fence = false;
-                let result = align_ex_protein(
+                let result = align_ex_protein_scalar(
                     &query,
                     &subject,
                     8,
@@ -4927,11 +5016,74 @@ mod tests {
                 scratch.dp_mem_alloc,
             )
         };
-        let (bounded, bounded_cells, _) = run_traceback(100_000);
+        // the comparison side: an X-drop the 16-bit lanes hold as it is (no clamp) and that the
+        // extension never reaches (it drops at most about 900 here), so a clamp to a wrong `R`
+        // on the huge side would show
+        let (bounded, bounded_cells, _) = run_traceback(20_000);
         let (unbounded, cells, alloc) = run_traceback(huge);
         assert_eq!(unbounded, bounded);
         // `GapAlignScratch::new` holds NCBI's first 1000 cells, more than `N + 1`.
         assert_eq!(bounded_cells, 1000);
+        assert_eq!(cells, 1000);
+        // No NCBI counterpart: the vector kernels run a huge X-drop as the clamp's `R`
+        // (`xdrop_simd::x_drop_for_lanes`, `LOSAT_X_DP32`) and do not touch `dp_mem_alloc`; the
+        // scalar port, which answers without them (other targets, `LOSAT_X_DP32=0`) and for the
+        // calls they decline, keeps NCBI's count (below).
+        let vector =
+            crate::utils::xdrop_simd::x_kernels_run() && crate::utils::xdrop_simd::x_dp32();
+        if vector {
+            assert_eq!(alloc, 1000);
+        } else {
+            assert!(alloc >= huge as usize + 3, "{alloc}");
+        }
+        // The scalar ports themselves with the huge X-drop (the left extensions of the traceback
+        // and of the score-only alignment): NCBI's count, only the cells up to `N`, and the
+        // results of the X-drop the extension never reaches.
+        let scalar_traceback = |x_drop: i32| {
+            let mut scratch = GapAlignScratch::new();
+            let mut fence_hit = false;
+            let result = align_ex_protein_scalar(
+                &query,
+                &subject,
+                21,
+                21,
+                BlastpScoreMatrix::Standard(ScoringMatrix::Blosum62),
+                11,
+                1,
+                x_drop,
+                true,
+                &mut scratch,
+                &mut fence_hit,
+                false,
+            );
+            (result, scratch.dp_mem.len(), scratch.dp_mem_alloc)
+        };
+        let (bounded, _, _) = scalar_traceback(100_000);
+        let (unbounded, cells, alloc) = scalar_traceback(huge);
+        assert_eq!(unbounded, bounded);
+        assert_eq!(cells, 1000);
+        assert!(alloc >= huge as usize + 3, "{alloc}");
+        let scalar_score_only = |x_drop: i32| {
+            let mut scratch = GapAlignScratch::new();
+            let result = align_ex_protein_score_only_scalar(
+                &query,
+                0,
+                &subject,
+                0,
+                21,
+                21,
+                BlastpScoreMatrix::Standard(ScoringMatrix::Blosum62),
+                11,
+                1,
+                x_drop,
+                true,
+                &mut scratch,
+            );
+            (result, scratch.dp_mem.len(), scratch.dp_mem_alloc)
+        };
+        let (bounded, _, _) = scalar_score_only(100_000);
+        let (unbounded, cells, alloc) = scalar_score_only(huge);
+        assert_eq!(unbounded, bounded);
         assert_eq!(cells, 1000);
         assert!(alloc >= huge as usize + 3, "{alloc}");
         for mode in [
@@ -4952,7 +5104,13 @@ mod tests {
                 &mut scratch,
             );
             assert_eq!(scratch.dp_mem.len(), 1000);
-            assert!(scratch.dp_mem_alloc >= huge as usize + 3);
+            // the vector kernels (the exact mode's dispatch, `xdrop_align`) leave the count as
+            // it was, as above
+            if vector && matches!(mode, BlastpGappedAlignmentMode::Exact) {
+                assert_eq!(scratch.dp_mem_alloc, 1000);
+            } else {
+                assert!(scratch.dp_mem_alloc >= huge as usize + 3);
+            }
             let bounded = blastp_score_only_gapped_alignment(
                 &query,
                 &subject,
@@ -4961,10 +5119,127 @@ mod tests {
                 ScoringMatrix::Blosum62,
                 11,
                 1,
-                100_000,
+                20_000,
                 mode,
             );
             assert_eq!(unbounded, bounded);
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:736-741,766-770
+    // ```c
+    // Blast_SemiGappedAlign(const Uint1* A, const Uint1* B, Int4 M, Int4 N,
+    //    Int4* a_offset, Int4* b_offset, Boolean score_only,
+    // ...
+    //     if (!score_only) {
+    //         return ALIGN_EX(A, B, M, N, a_offset, b_offset, edit_block, gap_align,
+    // ```
+    // Both sides of `LOSAT_X_DP32` in one process: with X-drops past the 16-bit lanes (50,000, 1e6
+    // and 2^31 - 300) on a composition-adjusted matrix (BLOSUM62 x 150, the scale of the redo's
+    // matrices), the dispatched traceback and score-only extensions (`align_ex_protein`,
+    // `align_ex_protein_score_only`: the 32-bit lanes) give what the scalar ports give
+    // (`align_ex_protein_scalar`, `align_ex_protein_score_only_scalar`: what `LOSAT_X_DP32=0`
+    // runs), left and right of the seed as the extension wrappers call them: offsets, score, edit
+    // script and fence flag.
+    #[test]
+    fn wide_lanes_give_the_scalar_ports_results() {
+        let mut scores = [[0i32; 28]; 28];
+        for (q, row) in scores.iter_mut().enumerate() {
+            for (s, v) in row.iter_mut().enumerate() {
+                let b = blosum62_score_ncbistdaa_direct(q as u8, s as u8);
+                // the gap letter keeps BLAST_SCORE_MIN, as the adjusted matrices do
+                *v = if b > -100 { 150 * b } else { b };
+            }
+        }
+        let adjusted = AdjustedProteinMatrix { scores };
+        let matrix = BlastpScoreMatrix::Adjusted(&adjusted);
+        let (gap_open, gap_extend) = (11 * 150, 150);
+        let mut state = 0x2545_F491u32;
+        let mut next = move |n: u32| {
+            state = state.wrapping_mul(1_103_515_245).wrapping_add(12_345);
+            (state >> 8) % n
+        };
+        let runs = crate::utils::xdrop_simd::X32_RUNS.with(|n| n.get());
+        for case in 0..10 {
+            let len = 60 + next(240) as usize;
+            // letters 1..=24 (no gap letter, whose -32768 entries the 32-bit lanes decline)
+            let query: Vec<u8> = (0..len).map(|_| 1 + next(24) as u8).collect();
+            let mut subject = Vec::with_capacity(len + 8);
+            for (i, &c) in query.iter().enumerate() {
+                match next(40) {
+                    0 => subject.extend([c, 1 + next(24) as u8]),
+                    1 if i > 0 => {}
+                    2..=6 => subject.push(1 + next(24) as u8),
+                    _ => subject.push(c),
+                }
+            }
+            let (q_start, s_start) = (len / 2, (len / 2).min(subject.len() - 2));
+            for x_drop in [50_000, 1_000_000, i32::MAX - 300] {
+                for reverse in [true, false] {
+                    let (q, s, len1, len2) = if reverse {
+                        (&query[..], &subject[..], q_start + 1, s_start + 1)
+                    } else {
+                        (
+                            &query[q_start..],
+                            &subject[s_start..],
+                            query.len() - q_start - 1,
+                            subject.len() - s_start - 1,
+                        )
+                    };
+                    let (mut a, mut b) = (GapAlignScratch::new(), GapAlignScratch::new());
+                    let (mut fence_a, mut fence_b) = (false, false);
+                    let got = align_ex_protein(
+                        q,
+                        s,
+                        len1,
+                        len2,
+                        matrix,
+                        gap_open,
+                        gap_extend,
+                        x_drop,
+                        reverse,
+                        &mut a,
+                        &mut fence_a,
+                        false,
+                    );
+                    let want = align_ex_protein_scalar(
+                        q,
+                        s,
+                        len1,
+                        len2,
+                        matrix,
+                        gap_open,
+                        gap_extend,
+                        x_drop,
+                        reverse,
+                        &mut b,
+                        &mut fence_b,
+                        false,
+                    );
+                    assert_eq!(
+                        (got, fence_a),
+                        (want, fence_b),
+                        "case {case} x {x_drop} reverse {reverse}: traceback"
+                    );
+                    let (q_base, s_base) = if reverse { (0, 0) } else { (q_start, s_start) };
+                    let got = align_ex_protein_score_only(
+                        &query, q_base, &subject, s_base, len1, len2, matrix, gap_open, gap_extend,
+                        x_drop, reverse, &mut a,
+                    );
+                    let want = align_ex_protein_score_only_scalar(
+                        &query, q_base, &subject, s_base, len1, len2, matrix, gap_open, gap_extend,
+                        x_drop, reverse, &mut b,
+                    );
+                    assert_eq!(
+                        got, want,
+                        "case {case} x {x_drop} reverse {reverse}: score only"
+                    );
+                }
+            }
+        }
+        if crate::utils::xdrop_simd::x_kernels_run() && crate::utils::xdrop_simd::x_dp32() {
+            let runs = crate::utils::xdrop_simd::X32_RUNS.with(|n| n.get()) - runs;
+            assert!(runs > 100, "the 32-bit lanes ran {runs} times");
         }
     }
 }

@@ -30,7 +30,7 @@ CASES = [
 def main():
     root = Path(__file__).resolve().parents[2]
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--losat-bin", type=Path, default=root / "LOSAT/target/release/LOSAT")
+    parser.add_argument("--losat-bin", type=Path, default=root / "LOSAT/target/release/losat")
     parser.add_argument("--ncbi-dir", type=Path, help="Otherwise use NCBI programs on PATH")
     parser.add_argument("--output-dir", type=Path, required=True)
     args = parser.parse_args()

@@ -104,7 +104,8 @@ def validate_thread_evidence(logtext, requested, kind):
         raise GateFailure("requested/pool/caller diagnostic mismatch")
     stages = [dict(program=p, stage=stage, work_items=int(items), parallel_selected=parallel == "true", measured_activity=None)
               for p, stage, items, parallel in re.findall(r"\[losat-thread-stage\] program=(\w+) stage=([\w-]+) work_items=(\d+) parallel_selected=(true|false)", logtext)]
-    if any(stage["program"] != program or (stage["parallel_selected"] and (pool <= 1 or stage["work_items"] <= 1)) for stage in stages):
+    # BLASTX names its pool BLASTX (the with_search_pool label) but its stage lines say blastx.
+    if any(stage["program"].lower() != program.lower() or (stage["parallel_selected"] and (pool <= 1 or stage["work_items"] <= 1)) for stage in stages):
         raise GateFailure("stage/pool diagnostic mismatch")
     counts = None
     if kind == "threaded":
@@ -177,7 +178,7 @@ def freeze(args):
             "threaded": "wasm32-wasip1-threads",
         }[kind]
         target_dir = Path(artifact["path"]).parents[1 if kind == "native" else 2]
-        build_argv = ["cargo", "build", "--locked", "--release", "--bin", "LOSAT"]
+        build_argv = ["cargo", "build", "--locked", "--release", "--bin", "losat"]
         if kind != "native":
             build_argv += ["--target", target]
             build_argv += (
@@ -336,10 +337,10 @@ def freeze(args):
             "runners": runners,
             # NCBI reference: c++/src/objtools/align_format/tabular.cpp:1098-1108
             # x_PrintField(*iter); ... m_Ostream << "\n";
-            # Freeze the memory adapter too: it affects the executed module.
+            # Freeze the memory adapter and the table of files too: they affect the executed module.
             "runner_hashes": {
                 p: digest(p)
-                for p in [*runners.values(), str(TESTS / "wasi_shared_memory.js")]
+                for p in [*runners.values(), str(TESTS / "wasi_thread_worker.js"), str(TESTS / "wasi_shared_memory.js"), str(TESTS / "wasi_files.js")]
             },
         },
         "hardware": {
@@ -405,7 +406,6 @@ def environment(manifest, diagnostic=False):
         {
             "NODE_NO_WARNINGS": "1",
             "LOSAT_WASI_THREAD_CAP": str(manifest["measurement"]["host_cap"]),
-            "LOSAT_WASM_MEMORY_MAXIMUM_PAGES": "16384",
         }
     )
     if diagnostic:

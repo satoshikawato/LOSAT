@@ -1,0 +1,26 @@
+>tpg|DAA00001.1| TPA: third party
+>gb|AAAA01000001.1| unnamed protein product
+3 - 10
+>pdb|1ABC|B Chain B
+52 - 62
+>ref|NC_000002.1| 
+0 - 8
+>ref|NM_000001.1| 
+11 - 21
+>lcl|amp a & b <x> &#65
+0 - 11
+>lcl|lowfirst lower first letter
+>lcl|tildes title
+>lcl|range:5-20 ranged
+25 - 32
+>gi|77|emb|Z11.2|ZNAME two ids
+19 - 27
+36 - 52
+>gb|AY000001.1| TSA: tsa prefix
+3 - 13
+>lcl|ctrla first >lcl|second
+3 - 9
+>lcl|xm PREDICTED: something
+>ref|XM_000001.1| model
+>gnl|SRA|SRR1.1 read
+2 - 13

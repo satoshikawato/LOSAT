@@ -1,0 +1,15 @@
+USAGE
+  dustmasker [-h] [-help] [-xmlhelp] [-in input_file_name]
+    [-out output_file_name] [-window window_size] [-level level]
+    [-linker linker] [-infmt input_format] [-outfmt output_format]
+    [-parse_seqids] [-hard_masking] [-version-full] [-version-full-xml]
+    [-version-full-json]
+
+DESCRIPTION
+   Low complexity region masker based on Symmetric DUST algorithm
+
+Use '-help' to print detailed descriptions of command line arguments
+========================================================================
+
+Error: Argument "outfmt". Illegal value, expected `acclist', `fasta', `interval', `maskinfo_asn1_bin', `maskinfo_asn1_text', `maskinfo_xml', `seqloc_asn1_bin', `seqloc_asn1_text', `seqloc_xml':  `FASTA'
+Error:  (CArgException::eConstraint) Argument "outfmt". Illegal value, expected `acclist', `fasta', `interval', `maskinfo_asn1_bin', `maskinfo_asn1_text', `maskinfo_xml', `seqloc_asn1_bin', `seqloc_asn1_text', `seqloc_xml':  `FASTA'

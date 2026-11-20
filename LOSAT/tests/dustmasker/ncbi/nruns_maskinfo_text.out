@@ -1,0 +1,169 @@
+Blast-db-mask-info ::= {
+  algo-id 2,
+  algo-program dust,
+  algo-options "window=64; level=20; linker=1",
+  masks {
+    masks {
+      packed-int {
+        {
+          from 0,
+          to 9,
+          id local id 1
+        },
+        {
+          from 209,
+          to 289,
+          id local id 1
+        },
+        {
+          from 440,
+          to 490,
+          id local id 1
+        },
+        {
+          from 588,
+          to 680,
+          id local id 1
+        }
+      },
+      packed-int {
+        {
+          from 199,
+          to 279,
+          id local id 2
+        },
+        {
+          from 430,
+          to 480,
+          id local id 2
+        },
+        {
+          from 578,
+          to 670,
+          id local id 2
+        },
+        {
+          from 750,
+          to 759,
+          id local id 2
+        }
+      },
+      packed-int {
+        {
+          from 199,
+          to 279,
+          id local id 3
+        },
+        {
+          from 450,
+          to 500,
+          id local id 3
+        },
+        {
+          from 598,
+          to 690,
+          id local id 3
+        }
+      },
+      packed-int {
+        {
+          from 199,
+          to 279,
+          id local id 4
+        },
+        {
+          from 494,
+          to 544,
+          id local id 4
+        },
+        {
+          from 642,
+          to 734,
+          id local id 4
+        }
+      },
+      packed-int {
+        {
+          from 199,
+          to 279,
+          id local id 5
+        },
+        {
+          from 300,
+          to 364,
+          id local id 5
+        },
+        {
+          from 495,
+          to 545,
+          id local id 5
+        },
+        {
+          from 643,
+          to 735,
+          id local id 5
+        }
+      },
+      packed-int {
+        {
+          from 199,
+          to 279,
+          id local id 6
+        },
+        {
+          from 300,
+          to 499,
+          id local id 6
+        },
+        {
+          from 630,
+          to 680,
+          id local id 6
+        },
+        {
+          from 778,
+          to 870,
+          id local id 6
+        },
+        {
+          from 950,
+          to 1109,
+          id local id 6
+        }
+      },
+      int {
+        from 0,
+        to 149,
+        id local id 7
+      },
+      int {
+        from 0,
+        to 239,
+        id local id 8
+      },
+      int {
+        from 0,
+        to 189,
+        id local id 9
+      },
+      packed-int {
+        {
+          from 199,
+          to 279,
+          id local id 10
+        },
+        {
+          from 432,
+          to 480,
+          id local id 10
+        },
+        {
+          from 578,
+          to 670,
+          id local id 10
+        }
+      }
+    },
+    more FALSE
+  }
+}

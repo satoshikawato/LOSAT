@@ -1,0 +1,61 @@
+# PSIBLAST 2.17.0+
+# Iteration: 1
+# Query: P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin [Homo sapiens] >P69906.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin [Pan paniscus] >P69907.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin [Pan troglodytes]
+# Database: tests/db_search/taxfilter/tfp
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 23 hits found
+P69905.2	P69905.2	100.000	142	0	0	1	142	1	142	1.28e-81	286
+P69905.2	P01923.1	99.291	141	1	0	2	142	1	141	2.72e-80	282
+P69905.2	Q9TS35.2	98.592	142	2	0	1	142	1	142	4.87e-80	281
+P69905.2	P63107.2	97.183	142	4	0	1	142	1	142	3.61e-79	278
+P69905.2	P67818.1	96.454	141	5	0	2	142	1	141	4.91e-78	275
+P69905.2	P01935.1	88.652	141	16	0	2	142	1	141	2.44e-75	266
+P69905.2	P01942.2	85.915	142	20	0	1	142	1	142	2.07e-71	253
+P69905.2	P01966.2	88.028	142	17	0	1	142	1	142	3.16e-71	252
+P69905.2	P07405.1	85.106	141	21	0	2	142	1	141	6.82e-71	251
+P69905.2	P60529.1	83.688	141	23	0	2	142	1	141	1.92e-68	243
+P69905.2	P01946.3	78.169	142	31	0	1	142	1	142	3.34e-58	209
+P69905.2	P01994.2	70.423	142	42	0	1	142	1	142	6.67e-58	207
+P69905.2	P01999.2	66.901	142	47	0	1	142	1	142	4.18e-57	205
+P69905.2	P83135.2	64.085	142	51	0	1	142	1	142	3.76e-54	195
+P69905.2	P06638.2	63.380	142	52	0	1	142	1	142	3.86e-51	185
+P69905.2	P09105.2	61.972	142	54	0	1	142	1	142	4.75e-50	182
+P69905.2	P02008.2	59.859	142	57	0	1	142	1	142	2.56e-48	176
+P69905.2	Q9PRL9.1	61.702	141	54	0	2	142	1	141	1.70e-47	173
+P69905.2	P06467.2	54.930	142	64	0	1	142	1	142	1.88e-47	173
+P69905.2	P11748.1	55.319	141	62	1	3	142	3	143	2.84e-42	155
+P69905.2	P02018.1	53.191	141	65	1	3	142	2	142	1.21e-41	154
+P69905.2	Q90487.3	53.147	143	66	1	1	142	1	143	2.91e-41	152
+P69905.2	P11251.2	57.343	143	60	1	1	142	1	143	1.29e-40	150
+# PSIBLAST 2.17.0+
+# Iteration: 2
+# Query: P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin [Homo sapiens] >P69906.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin [Pan paniscus] >P69907.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin [Pan troglodytes]
+# Database: tests/db_search/taxfilter/tfp
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 23 hits found
+P69905.2	P63107.2	97.183	142	4	0	1	142	1	142	2.92e-68	242
+P69905.2	P07405.1	85.106	141	21	0	2	142	1	141	4.94e-68	241
+P69905.2	P69905.2	100.000	142	0	0	1	142	1	142	6.72e-68	241
+P69905.2	Q9TS35.2	98.592	142	2	0	1	142	1	142	1.33e-67	240
+P69905.2	P67818.1	96.454	141	5	0	2	142	1	141	2.60e-67	239
+P69905.2	P01942.2	85.915	142	20	0	1	142	1	142	3.28e-67	239
+P69905.2	P60529.1	83.688	141	23	0	2	142	1	141	8.08e-67	237
+P69905.2	P01923.1	99.291	141	1	0	2	142	1	141	1.21e-66	237
+P69905.2	P01999.2	66.901	142	47	0	1	142	1	142	2.73e-66	235
+P69905.2	P01966.2	88.028	142	17	0	1	142	1	142	1.66e-65	233
+P69905.2	P01935.1	88.652	141	16	0	2	142	1	141	4.86e-65	231
+P69905.2	P01994.2	70.423	142	42	0	1	142	1	142	6.24e-65	231
+P69905.2	P83135.2	64.085	142	51	0	1	142	1	142	2.62e-64	229
+P69905.2	P06467.2	54.930	142	64	0	1	142	1	142	2.95e-64	229
+P69905.2	P02008.2	59.859	142	57	0	1	142	1	142	4.33e-63	225
+P69905.2	P02018.1	52.817	142	66	1	2	142	1	142	4.15e-62	222
+P69905.2	Q90487.3	53.147	143	66	1	1	142	1	143	7.32e-62	221
+P69905.2	P01946.3	78.169	142	31	0	1	142	1	142	8.95e-61	217
+P69905.2	Q9PRL9.1	61.702	141	54	0	2	142	1	141	9.89e-61	217
+P69905.2	P06638.2	63.380	142	52	0	1	142	1	142	6.97e-60	214
+P69905.2	P11251.2	57.343	143	60	1	1	142	1	143	2.65e-59	212
+P69905.2	P11748.1	54.930	142	63	1	2	142	2	143	6.80e-59	211
+P69905.2	P09105.2	61.972	142	54	0	1	142	1	142	9.41e-59	210
+
+Search has CONVERGED!
+# BLAST processed 2 queries

@@ -1,0 +1,27 @@
+{
+  "version": "1.2",
+  "dbname": "p5mt",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "p5mt",
+  "number-of-letters": 1704,
+  "number-of-sequences": 12,
+  "last-updated": "2026-10-31T21:13:00",
+  "number-of-volumes": 1,
+  "number-of-taxids": 3,
+  "bytes-total": 52942,
+  "bytes-to-cache": 1901,
+  "files": [
+    "p5mt.pdb",
+    "p5mt.phr",
+    "p5mt.pin",
+    "p5mt.pnd",
+    "p5mt.pni",
+    "p5mt.pog",
+    "p5mt.pos",
+    "p5mt.pot",
+    "p5mt.psq",
+    "p5mt.ptf",
+    "p5mt.pto"
+  ]
+}

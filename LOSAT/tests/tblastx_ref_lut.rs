@@ -1,5 +1,4 @@
-//! `LOSAT_X_TBXLUT` (in the strict set: on unless `=0`, or `LOSAT_X_DEFAULT=0` and it is not set)
-//! on whole runs of the binary: the full
+//! `LOSAT_X_TBXLUT` (in the strict set: on unless `=0`) on whole runs of the binary: the full
 //! lookup table of a TBLASTX query batch, the table of the reference frame loop, filled in place
 //! from per-cell counts (`x_tbx_build_ncbi_lookup` in `src/algorithm/tblastx/lookup/backbone.rs`,
 //! `x_build_direct` in `x_lut_direct.rs`) instead of being copied out of one chain per cell.
@@ -12,15 +11,18 @@
 //!             sfree(lookup->thin_backbone[i]);
 //! ```
 //! The table must be the same, so the report must be: the tests run the reference frame loop
-//! (`LOSAT_X_PAIRPAR=0`) and compare the report with the switch (the default), and with its shadow
-//! (`LOSAT_X_TBXLUTSHADOW`, which builds both tables and compares them field by field), against
-//! the report with `LOSAT_X_TBXLUT=0`, at the default threshold (13), at 11 and at `+inf` (NCBI's
-//! INT_MIN: every word enters every cell it can), at one and four threads; and on the default path,
-//! where the unit path builds its own tables and the switch acts only on a batch the guard or
-//! `LOSAT_X_PAIRPARGATE` sends back.
+//! (`LOSAT_TBLASTX_SERIAL_SCAN_CHUNKS=1`, whose gate sends every batch to the frame loop at any
+//! threshold and thread count) and compare the report with the switch (the default), whose in-place
+//! build the run's reach file shows (`LOSAT_X_REACH`, `tests/reach_support`), against the report
+//! with `LOSAT_X_TBXLUT=0`, at the default threshold (13) and at 11 at one, four, eight and sixteen
+//! threads, and at `+inf` (NCBI's INT_MIN: every word enters every cell it can) at one thread; and
+//! on the default path, where the unit path builds its own tables and the switch acts only on a
+//! batch the guard or `LOSAT_X_PAIRPARGATE` sends back.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+mod reach_support;
 
 fn fasta(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -33,7 +35,7 @@ fn fasta(name: &str) -> PathBuf {
 /// (`cargo test --all-features`, as in CI) needs that file name as soon as a search has more than
 /// one thread, and it selects nothing.
 fn losat(switches: &[(&str, &str)]) -> Command {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         if name.to_string_lossy().starts_with("LOSAT_") && name != "LOSAT_BLASTX_WORKER_LOG" {
             command.env_remove(name);
@@ -88,6 +90,21 @@ fn tblastx(
     threads: u32,
     switches: &[(&str, &str)],
 ) -> (Vec<u8>, String) {
+    let options: &[&str] = match threshold {
+        Some(threshold) => &["-threshold", threshold],
+        None => &[],
+    };
+    tblastx_with(query, subject, options, threads, switches)
+}
+
+/// [`tblastx`] with the search options `options`.
+fn tblastx_with(
+    query: &Path,
+    subject: &Path,
+    options: &[&str],
+    threads: u32,
+    switches: &[(&str, &str)],
+) -> (Vec<u8>, String) {
     let mut command = losat(switches);
     command
         .arg("tblastx")
@@ -95,42 +112,53 @@ fn tblastx(
         .arg(query)
         .arg("-subject")
         .arg(subject)
-        .args(["-outfmt", "6", "-num_threads", &threads.to_string()]);
-    if let Some(threshold) = threshold {
-        command.args(["-threshold", threshold]);
-    }
+        .args(["-outfmt", "6", "-num_threads", &threads.to_string()])
+        .args(options);
+    command.env("LOSAT_X_STATS", "1");
     let output = command.output().expect("run LOSAT");
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
     assert!(
         output.status.success(),
-        "{switches:?} threshold {threshold:?} threads {threads}: {}",
-        String::from_utf8_lossy(&output.stderr)
+        "{switches:?} {options:?} threads {threads}: {stderr}"
     );
-    (
-        output.stdout,
-        String::from_utf8_lossy(&output.stderr).into_owned(),
-    )
+    if switches.contains(&REFERENCE) {
+        // The chunk-switch gate sends every batch to the reference frame loop: no unit runs.
+        let [units, fallback_gate] = pair_par(&stderr);
+        assert_eq!(
+            (units, fallback_gate >= 1),
+            (0, true),
+            "{switches:?} {options:?} threads {threads}: the frame loop:\n{stderr}"
+        );
+    }
+    (output.stdout, stderr)
 }
 
-const REFERENCE: (&str, &str) = ("LOSAT_X_PAIRPAR", "0");
-const SWITCH_OFF: (&str, &str) = ("LOSAT_X_TBXLUT", "0");
-const SHADOW: (&str, &str) = ("LOSAT_X_TBXLUTSHADOW", "1");
-
-/// The number in the shadow's exit line.
-fn tables_compared(stderr: &str) -> u64 {
+/// `[X_STATS] PAIRPAR`: units, fallback_gate.
+fn pair_par(stderr: &str) -> [u64; 2] {
     let line = stderr
         .lines()
-        .find(|line| line.starts_with("[X_SHADOW] TBXLUT tables_compared="))
-        .unwrap_or_else(|| panic!("no TBXLUT shadow line in: {stderr}"));
-    line["[X_SHADOW] TBXLUT tables_compared=".len()..]
-        .split_whitespace()
-        .next()
-        .unwrap()
-        .parse()
-        .unwrap()
+        .find(|line| line.starts_with("[X_STATS] PAIRPAR "))
+        .unwrap_or_else(|| panic!("no [X_STATS] PAIRPAR line in: {stderr}"));
+    ["units", "fallback_gate"].map(|name| {
+        let key = format!("{name}=");
+        line.split_whitespace()
+            .find_map(|field| field.strip_prefix(key.as_str()))
+            .unwrap_or_else(|| panic!("no {name} in {line}"))
+            .parse()
+            .expect("counter")
+    })
+}
+
+const REFERENCE: (&str, &str) = ("LOSAT_TBLASTX_SERIAL_SCAN_CHUNKS", "1");
+const SWITCH_OFF: (&str, &str) = ("LOSAT_X_TBXLUT", "0");
+
+/// Whether the run of `reach` built the full table in place (`LOSAT_X_TBXLUT` took its new side).
+fn built_in_place(reach: &reach_support::Reach) -> bool {
+    reach.sides("LOSAT_X_TBXLUT").0
 }
 
 /// Two queries in one batch (1,500 and 2,000 bases of MjeNMV) against two subjects (40 kb of
-/// MelaMJNV, 30 kb of PemoMJNVA), threshold 13 and 11, one and four threads.
+/// MelaMJNV, 30 kb of PemoMJNVA), threshold 13 and 11, one, four, eight and sixteen threads.
 #[test]
 fn the_reference_loop_reports_the_same_with_the_table_filled_in_place() {
     let dir = temp_dir("thresholds");
@@ -149,7 +177,7 @@ fn the_reference_loop_reports_the_same_with_the_table_filled_in_place() {
         ],
     );
     for threshold in [None, Some("11")] {
-        for threads in [1, 4] {
+        for threads in [1, 4, 8, 16] {
             let (base, _) = tblastx(
                 &query,
                 &subject,
@@ -161,18 +189,22 @@ fn the_reference_loop_reports_the_same_with_the_table_filled_in_place() {
                 !base.is_empty(),
                 "threshold {threshold:?}: no hits to compare"
             );
-            let (with, _) = tblastx(&query, &subject, threshold, threads, &[REFERENCE]);
+            let reach = reach_support::Reach::new("tbxlut-thresholds");
+            let (with, _) = tblastx(
+                &query,
+                &subject,
+                threshold,
+                threads,
+                &[REFERENCE, reach.var()],
+            );
             assert_eq!(
                 base, with,
                 "LOSAT_X_TBXLUT, threshold {threshold:?}, threads {threads}"
             );
-            let (shadow, stderr) =
-                tblastx(&query, &subject, threshold, threads, &[REFERENCE, SHADOW]);
-            assert_eq!(
-                base, shadow,
-                "shadow, threshold {threshold:?}, threads {threads}"
+            assert!(
+                built_in_place(&reach),
+                "threshold {threshold:?}, threads {threads}: the table was not built in place"
             );
-            assert!(tables_compared(&stderr) >= 1, "{stderr}");
         }
     }
     std::fs::remove_dir_all(&dir).ok();
@@ -189,11 +221,48 @@ fn every_word_threshold_gives_the_same_report() {
         &[("mela", &letters("MelaMJNV.fasta")[..3_000])],
     );
     let (base, _) = tblastx(&query, &subject, Some("+inf"), 1, &[REFERENCE, SWITCH_OFF]);
-    let (with, _) = tblastx(&query, &subject, Some("+inf"), 1, &[REFERENCE]);
+    let reach = reach_support::Reach::new("tbxlut-inf");
+    let (with, _) = tblastx(&query, &subject, Some("+inf"), 1, &[REFERENCE, reach.var()]);
     assert_eq!(base, with, "LOSAT_X_TBXLUT at -threshold +inf");
-    let (shadow, stderr) = tblastx(&query, &subject, Some("+inf"), 1, &[REFERENCE, SHADOW]);
-    assert_eq!(base, shadow, "shadow at -threshold +inf");
-    assert_eq!(tables_compared(&stderr), 1, "{stderr}");
+    assert!(
+        built_in_place(&reach),
+        "-threshold +inf: the table was not built in place"
+    );
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// The one-hit word finder (`-window_size 0`, which runs in the reference frame loop) with words of
+/// 4 and 2 letters and another matrix than BLOSUM62 (item X2e of line RG: the table of 4-letter
+/// words from the joint builder, the others from the direct builder; before, the chain builder,
+/// which held 1.3x NCBI's memory at `-word_size 4 -threshold 1`): the report is the chain
+/// builder's (`=0`) and the table was built in place, at one and four threads. A 450-base query
+/// against 3 kb.
+#[test]
+fn the_one_hit_loop_reports_the_same_at_other_word_sizes_and_matrices() {
+    let dir = temp_dir("one-hit");
+    let query = write(&dir, "q.fna", &[("mje", &letters("MjeNMV.fasta")[..450])]);
+    let subject = write(
+        &dir,
+        "s.fna",
+        &[("mela", &letters("MelaMJNV.fasta")[..3_000])],
+    );
+    for options in [
+        &["-window_size", "0", "-word_size", "4", "-threshold", "7"][..],
+        &["-window_size", "0", "-word_size", "2", "-threshold", "9"][..],
+        &["-window_size", "0", "-matrix", "BLOSUM45"][..],
+    ] {
+        for threads in [1, 4] {
+            let (base, _) = tblastx_with(&query, &subject, options, threads, &[SWITCH_OFF]);
+            assert!(!base.is_empty(), "{options:?}: no hits to compare");
+            let reach = reach_support::Reach::new("tbxlut-one-hit");
+            let (with, _) = tblastx_with(&query, &subject, options, threads, &[reach.var()]);
+            assert_eq!(base, with, "LOSAT_X_TBXLUT, {options:?}, threads {threads}");
+            assert!(
+                built_in_place(&reach),
+                "{options:?}, threads {threads}: the table was not built in place"
+            );
+        }
+    }
     std::fs::remove_dir_all(&dir).ok();
 }
 
@@ -209,7 +278,7 @@ fn the_default_path_reports_the_same_with_the_switch() {
         "s.fna",
         &[("mela", &letters("MelaMJNV.fasta")[..40_000])],
     );
-    for threads in [1, 4] {
+    for threads in [1, 4, 8, 16] {
         let (base, _) = tblastx(&query, &subject, None, threads, &[SWITCH_OFF]);
         let (with, _) = tblastx(&query, &subject, None, threads, &[]);
         assert_eq!(base, with, "default path, threads {threads}");

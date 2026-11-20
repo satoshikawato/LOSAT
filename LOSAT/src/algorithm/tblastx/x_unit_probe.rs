@@ -8,7 +8,7 @@
 //!   run without the two variables is the scan without probes.
 //! - `XTimeProbe` (LOSAT_TIMING) splits the units' time into the seed stage (the table's reset,
 //!   the scan, the two-hit test, the saving of init HSPs) and the two-hit extensions (the calls
-//!   of `extend_hit_two_hit`), and counts the hits and extensions:
+//!   of `extend_hit_two_hit_fitting`), and counts the hits and extensions:
 //!
 //!   `[TIMING] x_unit: unit_sum ..s seed ..s extend ..s (units=N hits=N extends=N
 //!   seed_ns_per_hit .. extend_ns_per_call .. clock_overhead ..s table_kib_mean .. table_kib_max ..)`
@@ -21,7 +21,8 @@
 //!   taken out of `extend` and one out of `seed`, and `clock_overhead` is the time taken out.
 //!   The split is an estimate: the counter is not serializing.
 //! - `XStatsProbe` (LOSAT_X_STATS; it takes the place of the timer when both are set) counts, per
-//!   cell of the unit's diagonal table (one cell is one diagonal of the concatenated query):
+//!   cell of the unit's diagonal table (one cell is one diagonal of the concatenated query; with
+//!   LOSAT_X_TBXUNITMASK's masked tables, the diagonals that share the cell):
 //!   the hits per cell over the unit and over each `scansub` batch (`h̄` and its histogram,
 //!   1 / 2 / 3 / 4-7 / 8+, by cells and by hits), the isolated hits (no other hit on the cell
 //!   less than `window` subject positions before or after it), the runs of consecutive
@@ -38,6 +39,7 @@
 
 use super::{XHit, XScratch};
 use crate::algorithm::tblastx::extension::x_two_hit_cells;
+use crate::algorithm::tblastx::scoring::TbxScore;
 use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
 
@@ -71,11 +73,13 @@ pub(super) trait XProbe {
     fn batch_end(&mut self);
     /// An extension starts.
     fn ext_begin(&mut self) -> Self::Mark;
-    /// The extension `extend_hit_two_hit(q, s, s_left, s_right, q_right, x_drop, false)` ended.
+    /// The extension `extend_hit_two_hit_reference(sc, q, qb, s, s_left, s_right, q_right, x_drop,
+    /// false)` (the search's scores and word length) ended.
     #[allow(clippy::too_many_arguments)]
-    fn ext_end(
+    fn ext_end<M: TbxScore>(
         &mut self,
         mark: Self::Mark,
+        sc: M,
         q: &[u8],
         s: &[u8],
         s_left: usize,
@@ -106,9 +110,10 @@ impl XProbe for XNoProbe {
     #[inline(always)]
     fn ext_begin(&mut self) {}
     #[inline(always)]
-    fn ext_end(
+    fn ext_end<M: TbxScore>(
         &mut self,
         _mark: (),
+        _sc: M,
         _q: &[u8],
         _s: &[u8],
         _s_left: usize,
@@ -222,9 +227,10 @@ impl XProbe for XTimeProbe {
         ticks()
     }
     #[inline(always)]
-    fn ext_end(
+    fn ext_end<M: TbxScore>(
         &mut self,
         mark: u64,
+        _sc: M,
         _q: &[u8],
         _s: &[u8],
         _s_left: usize,
@@ -521,9 +527,10 @@ impl XProbe for XStatsProbe {
         self.batch_touched.clear();
     }
     fn ext_begin(&mut self) {}
-    fn ext_end(
+    fn ext_end<M: TbxScore>(
         &mut self,
         _mark: (),
+        sc: M,
         q: &[u8],
         s: &[u8],
         s_left: usize,
@@ -531,12 +538,12 @@ impl XProbe for XStatsProbe {
         q_right: usize,
         x_drop: i32,
     ) {
-        let cells = x_two_hit_cells(q, s, s_left, s_right, q_right, x_drop);
+        let cells = x_two_hit_cells(sc, q, s, s_left, s_right, q_right, x_drop);
         let t = &mut self.t;
         t.ext_calls += 1;
         t.ext_left += cells.left as u64;
         t.ext_right += cells.right as u64;
-        t.ext_cells += 3 + (cells.left + cells.right) as u64;
+        t.ext_cells += (sc.word() + cells.left + cells.right) as u64;
         let c = &mut self.cells[self.cur];
         let (lo, hi) = (cells.s_lo as u32, cells.s_hi as u32);
         t.ext_distinct += hi.saturating_sub(lo.max(c.ext_hi)) as u64;

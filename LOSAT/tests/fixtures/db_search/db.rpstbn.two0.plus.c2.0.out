@@ -1,0 +1,66 @@
+RPSTBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: rps_mini
+           3 sequences; 560 total letters
+
+
+
+Query= two0
+
+Length=1117
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [W...  260     3e-94
+
+
+>CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [White 
+spot syndrome virus] residues 1-190
+Length=190
+
+ Score = 260 bits (666),  Expect = 3e-94, Method: Composition-based stats.
+ Identities = 11/159 (7%), Positives = 24/159 (15%), Gaps = 0/159 (0%)
+ Frame = +3
+
+Query  3    CN*FCPII*LWQDALN**LDPCSQGRALT*KTSTSKRTEVISTVSL*SILSRPAMDAVLA  182
+                          +     P   G++   K    +                        
+Sbjct  1    MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG  60
+
+Query  183  PLSHMRGKLLRGAPQLVRLKN*YLCCLR*WMSY*SMRDSSSQTWFW*TV*PTKENVS**P  362
+             +    G+++ G   +  +K                                K       
+Sbjct  61   TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA  120
+
+Query  363  PLMEHLINRCFHQFISFCRIPTL*SSLPRSA*SVRLIPK  479
+             L      + F               L       ++  K
+Sbjct  121  ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTK  159
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0500    0.140     1.90     42.6     43.6 
+
+Effective search space used: 157760
+
+
+  Database: rps_mini
+    Posted date:  Nov 7, 2026  10:01 PM
+  Number of letters in database: 560
+  Number of sequences in database:  3
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Window for multiple hits: 40

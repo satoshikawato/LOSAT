@@ -2,15 +2,17 @@
 // sorting and filtering with engine values, the limits and the orientation, the
 // verification badge, and the ResultsBrowser's selection by HSP identity.
 import { describe, expect, it } from 'vitest';
+import type { HspRecord, ProgramDescription } from 'losat/ports';
 import type { AppState, RunView } from '../../src/application/coordinator';
-import { ResultsBrowser, type ResultsDeps } from '../../src/application/results';
+import { noHspReason, ResultsBrowser, type ResultsDeps } from '../../src/application/results';
 import { Store } from '../../src/application/store';
 import { hspTable, out0Range, out6Range, frame, subjectSpan } from '../../src/domain/hsp-table';
 import { headingTitle } from '../../src/domain/outfmt0';
-import { splitOutfmt6Row } from '../../src/domain/outfmt6';
+import { shownScores, splitOutfmt6Row } from '../../src/domain/outfmt6';
 import {
   buildResultIndex,
   filterQuery,
+  flagGiven,
   hitLimits,
   orientation,
   sortHsps,
@@ -26,8 +28,8 @@ import {
   type BadgeInput,
   type VerificationTable,
 } from '../../src/domain/verification';
-import type { RunSnapshot } from '../../src/domain/run';
-import type { HspRecord, ProgramDescription } from '../../src/ports/engine';
+import type { RunRecord, RunSnapshot } from '../../src/domain/run';
+import { NO_HSP_TEXT } from '../../src/ui/no-hsp-text';
 
 // --- a small run: two queries (the second without hits), three subjects ----------------------
 
@@ -39,6 +41,8 @@ interface Spec {
   readonly coords: readonly [number, number, number, number];
   readonly shown?: boolean;
   readonly frames?: readonly [number | null, number | null];
+  /** The outfmt 6 texts of the E value and the bit score, where they are not the numbers as JavaScript writes them. */
+  readonly text?: { readonly e?: string; readonly bits?: string };
 }
 
 const SPECS: readonly Spec[] = [
@@ -56,7 +60,7 @@ function makeRun(specs: readonly Spec[] = SPECS) {
   const headings = new Map<string, [number, number]>();
   specs.forEach((spec, index) => {
     const [qs, qe, ss, se] = spec.coords;
-    const row = [`q${spec.q}`, `s${spec.s}`, '99.000', '50', '0', '0', qs, qe, ss, se, String(spec.e), String(spec.bits)].join('\t') + '\n';
+    const row = [`q${spec.q}`, `s${spec.s}`, '99.000', '50', '0', '0', qs, qe, ss, se, spec.text?.e ?? String(spec.e), spec.text?.bits ?? String(spec.bits)].join('\t') + '\n';
     const out6Start = out6.length;
     out6 += row;
     const shown = spec.shown ?? true;
@@ -100,6 +104,31 @@ describe('outfmt 6 rows and outfmt 0 headings', () => {
     const row = splitOutfmt6Row('q1\ts1\t98.684\t76\t1\t0\t1\t76\t1\t76\t2.37e-38\t138\n');
     expect(row).toMatchObject({ qseqid: 'q1', sseqid: 's1', pident: '98.684', evalue: '2.37e-38', bitscore: '138', send: '76' });
     expect(() => splitOutfmt6Row('q1\ts1\t1\n')).toThrow(/12 fields, this one 3/);
+  });
+
+  it('reads the E value and bit score that each row shows, and keeps the record value where there is no row', () => {
+    const rows = ['q\ts\t100.000\t9\t0\t0\t1\t9\t1\t9\t0.0\t400\n', 'q\ts\t99.0\t9\t0\t0\t1\t9\t1\t9\t2e-50\t 45.4\r\n'];
+    const out6 = new TextEncoder().encode(rows.join(''));
+    const record = (index: number, e: number, bits: number, range: readonly [number, number] | null): HspRecord => ({
+      ...{ index, q_idx: 0, s_idx: 0, rank: index, raw_score: 1, bit_score: bits, e_value: e },
+      ...{ q_start: 1, q_end: 9, s_start: 1, s_end: 9, query_frame: null, subject_frame: null, subject_length: 9 },
+      ...{ query_aligned: null, subject_aligned: null, out6: range, out0: null, out0_subject: null },
+    });
+    const table = hspTable([
+      record(0, 3e-200, 400.4, [0, rows[0]!.length]),
+      // A range that ends past the stored output reads what there is.
+      record(1, 2.4e-50, 45.42, [rows[0]!.length, out6.length + 10]),
+      record(2, 0.5, 20.1, null),
+    ]);
+    const scores = shownScores(table, out6);
+    expect([...scores.eValue]).toEqual([0, 2e-50, 0.5]);
+    expect([...scores.bitScore]).toEqual([400, 45.4, 20.1]);
+    // A field that is empty or not a number (the FakeEngine writes FAKE) keeps the record value.
+    const odd = new TextEncoder().encode('q\ts\t1\t9\t0\t0\t1\t9\t1\t9\tFAKE\t\n');
+    const kept = shownScores(hspTable([record(0, 1e-5, 33.3, [0, odd.length])]), odd);
+    expect([...kept.eValue, ...kept.bitScore]).toEqual([1e-5, 33.3]);
+    // The record's values stay as they are.
+    expect([...table.eValue]).toEqual([3e-200, 2.4e-50, 0.5]);
   });
 
   it('takes the title of a subject heading as written', () => {
@@ -201,6 +230,50 @@ describe('hitLimits', () => {
     expect(hitLimits(['blastp'], [{ flag: '-max_target_seqs', help: 'x', defaultValue: '100' }])).toEqual({ maxTargetSeqs: 100 });
   });
 
+  // The tabular formats keep -max_target_seqs, else -num_alignments, else the default of -max_target_seqs;
+  // outfmt 0 the larger of -num_descriptions (500) and -num_alignments (250) where either is given
+  // (BLAST+ blast_args.cpp:2894-2973), and the run searches twice when the sizes differ (abi_v2.md §7).
+  it('reads the hit list sizes of -num_descriptions and -num_alignments', () => {
+    const sized = [
+      ...described,
+      { flag: '-num_descriptions', help: 'Number of descriptions [default: 500]' },
+      { flag: '-num_alignments', help: 'Number of alignments [default: 250]' },
+    ];
+    const limits = (...words: string[]) => hitLimits(['blastp', '-query', 'q', '-subject', 's', ...words], sized);
+    // -num_alignments is the tabular formats' hit list; outfmt 0 keeps 500 (the larger of 500 and 3).
+    expect(limits('-num_alignments', '3')).toEqual({
+      maxTargetSeqs: 3,
+      subjectFlag: '-num_alignments',
+      outfmt0: { alignments: 3, hitList: 500, separate: true },
+    });
+    // -num_descriptions 3 alone: outfmt 0 keeps 250 and the tabular formats 500.
+    expect(limits('-num_descriptions', '3')).toEqual({ maxTargetSeqs: 500, outfmt0: { alignments: 250, hitList: 250, separate: true } });
+    // The numbers that make the sizes equal are one search.
+    expect(limits('-num_descriptions', '2', '-num_alignments', '4')).toEqual({
+      maxTargetSeqs: 4,
+      subjectFlag: '-num_alignments',
+      outfmt0: { alignments: 4, hitList: 4, separate: false },
+    });
+    expect(limits('-num_descriptions', '500').outfmt0).toEqual({ alignments: 250, hitList: 500, separate: false });
+    expect(limits('-num_alignments', '600').outfmt0).toEqual({ alignments: 600, hitList: 600, separate: false });
+    expect(limits('-num_descriptions', '4', '-num_alignments', '2').outfmt0).toEqual({ alignments: 2, hitList: 4, separate: true });
+    // The adapter accepts `-flag=value` as the CLI does: the same limits as the two words, and flagGiven sees it.
+    expect(limits('-num_alignments=3')).toEqual(limits('-num_alignments', '3'));
+    expect(limits('-num_descriptions=4', '-num_alignments=2').outfmt0).toEqual({ alignments: 2, hitList: 4, separate: true });
+    expect(limits('-max_target_seqs=7')).toEqual({ maxTargetSeqs: 7 });
+    // -sorthits (any value, also 0) orders outfmt 0's hit list by its key, in either spelling.
+    expect(limits('-sorthits', '3')).toEqual({ maxTargetSeqs: 500, sorted: true });
+    expect(limits('-sorthits=0', '-num_alignments', '3').sorted).toBe(true);
+    expect(limits('-sorthsps', '1').sorted).toBeUndefined();
+    expect(flagGiven(['blastp', '-num_alignments=3'], '-num_alignments')).toBe(true);
+    expect(flagGiven(['blastp', '-num_alignments=3'], '-num_descriptions')).toBe(false);
+    expect(flagGiven(['blastp', '-num_alignments', '3'], '-num_alignments')).toBe(true);
+    // -max_target_seqs excludes both options: the same hit list in every format, no outfmt 0 entry.
+    expect(limits('-max_target_seqs', '7')).toEqual({ maxTargetSeqs: 7 });
+    // Without the described defaults, outfmt 0's size is not claimed (and a separate search is assumed).
+    expect(hitLimits(['blastp', '-num_descriptions', '3'], described).outfmt0).toEqual({ separate: true });
+  });
+
   it('claims no limit that it cannot read', () => {
     expect(hitLimits(['blastp'], [{ flag: '-max_target_seqs', help: 'Maximum number' }])).toEqual({});
     expect(hitLimits(['blastp', '-max_target_seqs', '1e3'], [])).toEqual({});
@@ -232,6 +305,17 @@ describe('optionKey', () => {
     expect(optionKey(['-evalue'], grammar)).toBeUndefined();
     expect(optionKey(['-lcase_masking', 'stray'], grammar)).toBeUndefined();
   });
+
+  // Line RG E1w-3b: -logfile names a file of the run's messages, as -out names its output; the
+  // outputs do not change with it. -conffile and -dryrun change the run: they stay options, which no
+  // record compares (the engine's describe does not list them).
+  it('leaves -logfile out of the options, as -out, and keeps -conffile and -dryrun', () => {
+    const plain = optionKey(['blastn', '-query', 'q.fa', '-subject', 's.fa', '-evalue', '1e-5'], grammar);
+    expect(optionKey(['blastn', '-query', 'q.fa', '-subject', 's.fa', '-evalue', '1e-5', '-logfile', 'run.log'], grammar)).toBe(plain);
+    expect(optionKey(['blastn', '-logfile=run.log', '-evalue', '1e-5'], grammar)).toBe(plain);
+    expect(optionKey(['blastn', '-evalue', '1e-5', '-dryrun'], grammar)).not.toBe(plain);
+    expect(optionKey(['blastn', '-evalue', '1e-5', '-conffile', 'settings.ini'], grammar)).toBeUndefined();
+  });
 });
 
 describe('verificationBadge', () => {
@@ -255,21 +339,62 @@ describe('verificationBadge', () => {
     grammar,
   };
 
-  it('certifies a run inside a profile, and says what that means', () => {
+  it('supports a run inside a profile, and says what that means', () => {
     const badge = verificationBadge(input, table);
     expect(badge.level).toBe('certified');
-    expect(badge.label).toBe('Certified profile');
+    expect(badge.label).toBe('Supported');
     expect(badge.details.join(' ')).toMatch(/not a comparison of your inputs with NCBI/);
+    // No word of a certification or a verification (DW-36; the maintainer, 2026-11-04): the
+    // badge says that the run is supported.
+    expect(`${badge.label} ${badge.details.join(' ')}`).not.toMatch(/verif|certif/i);
   });
 
-  it('says why a run is outside the certified profiles', () => {
+  it('says why a run is not supported', () => {
     const reasons = (change: Partial<BadgeInput>) => verificationBadge({ ...input, ...change }, table);
     expect(reasons({ argv: ['blastn', '-evalue', '1'] }).details.join(' ')).toMatch(/for outfmt 0 and 6, not for outfmt 7/);
     expect(reasons({ argv: ['blastn', '-evalue', '2'] }).details.join(' ')).toMatch(/were not compared with NCBI BLAST\+ 2\.17\.0/);
     expect(reasons({ threads: 3 }).details.join(' ')).toMatch(/used 3 threads; the browser runtime was checked with 1, 2 and 4 threads/);
     expect(reasons({ program: 'tblastx', argv: ['tblastx'] }).details.join(' ')).toMatch(/browser runtime of tblastx was not checked/);
-    expect(reasons({ threads: 3 }).label).toBe('Engine-supported, outside certified profile');
+    expect(reasons({ threads: 3 }).label).toBe('Not yet supported');
+    for (const badge of [reasons({ argv: ['blastn', '-evalue', '1'] }), reasons({ argv: ['blastn', '-evalue', '2'] }), reasons({ threads: 3 }), reasons({ runtimePath: 'fake' })]) {
+      expect(`${badge.label} ${badge.details.join(' ')}`).not.toMatch(/verif|certif/i);
+    }
     expect(reasons({ runtimePath: 'fake' }).level).toBe('development');
+  });
+
+  // The records compare the formats that every run writes; the output of the run's own -outfmt
+  // with fields is not among them, so such a run is not yet supported, and the reasons say so (W10).
+  it("does not support a run with the output of its -outfmt, and names that output", () => {
+    const badge = verificationBadge({ ...input, argv: [...input.argv, '-outfmt', '6 qseqid sseqid'], custom: '6 qseqid sseqid' }, table);
+    expect(badge.level).toBe('outside');
+    expect(badge.label).toBe('Not yet supported');
+    expect(badge.details).toEqual([
+      'These options were compared with NCBI BLAST+ 2.17.0 for outfmt 0, 6 and 7, not for outfmt 6 qseqid sseqid.',
+      'The browser runtime was not checked for outfmt 6 qseqid sseqid.',
+    ]);
+    // -outfmt itself is not an option of the profile: the same options without it are supported, in either form.
+    expect(verificationBadge({ ...input, argv: [...input.argv, '-outfmt', '7'] }, table).level).toBe('certified');
+    expect(verificationBadge({ ...input, argv: [...input.argv, '-outfmt=7'] }, table).level).toBe('certified');
+  });
+
+  it('supports a thread count only when it was checked in the browser (WA-RS-03)', () => {
+    // Auto picks a count from the user's processors; a count that V-BR did not run is not supported.
+    const level = (change: Partial<BadgeInput>) => verificationBadge({ ...input, ...change }, table).level;
+    expect(level({ threads: 2 })).toBe('certified');
+    expect(level({ runtimePath: 'serial', threads: 1 })).toBe('certified');
+    expect(level({ threads: 3 })).toBe('outside');
+    expect(level({ threads: 8 })).toBe('outside');
+    expect(level({ threads: undefined })).toBe('outside');
+  });
+
+  it('says the thread counts checked as ranges, for the path of the run', () => {
+    const every = Array.from({ length: 32 }, (_, i) => i + 1);
+    const wide: VerificationTable = { ...table, programs: { blastn: { ...table.programs.blastn!, browser: { ...table.programs.blastn!.browser!, threads: every } } } };
+    const details = (change: Partial<BadgeInput>) => verificationBadge({ ...input, ...change }, wide).details.join(' ');
+    expect(details({ threads: 6 })).toMatch(/threaded runtime in the browser was checked against the native engine with 2 to 32 threads in/);
+    expect(details({ runtimePath: 'serial', threads: 1 })).toMatch(/serial runtime in the browser was checked against the native engine with 1 thread in/);
+    expect(details({ threads: 40 })).toMatch(/used 40 threads; the browser runtime was checked with 1 to 32 threads\./);
+    expect(details({ threads: 4 })).not.toMatch(/\b3, 4\b/);
   });
 
   it('names the approved exceptions of a non-default subject genetic code', () => {
@@ -277,6 +402,7 @@ describe('verificationBadge', () => {
     expect(approvedExceptions('tblastx', ['tblastx', '-db_gencode', '11'])).toHaveLength(1);
     expect(approvedExceptions('tblastx', ['tblastx', '-db_gencode', '1'])).toEqual([]);
     expect(approvedExceptions('blastn', ['blastn', '-db_gencode', '4'])).toEqual([]);
+    expect(approvedExceptions('tblastn', ['tblastn', '-db_gencode', '4']).join(' ')).not.toMatch(/verif|certif/i);
   });
 });
 
@@ -303,12 +429,22 @@ function snapshot(runId: string, argv: readonly string[] = ['blastn', '-query', 
   return { runId, number: 1, program: 'blastn', argv, query: input(['q0', 'q1']), subject: input(['s0', 's1', 's2']), requestedThreads: 1, queuedAt: 0 };
 }
 
-function setup(options: { status?: RunView['status']; specs?: readonly Spec[]; argv?: readonly string[]; unreadable?: boolean } = {}) {
+function setup(
+  options: {
+    status?: RunView['status'];
+    specs?: readonly Spec[];
+    argv?: readonly string[];
+    unreadable?: boolean;
+    error?: string;
+    snapshot?: Partial<RunSnapshot>;
+    record?: Partial<RunRecord>;
+  } = {},
+) {
   const run = makeRun(options.specs);
   const view: RunView = {
-    snapshot: snapshot('r1', options.argv),
+    snapshot: { ...snapshot('r1', options.argv), ...options.snapshot },
     status: options.status ?? 'completed',
-    record: { runtimePath: 'serial', threads: 1, ...(options.status === 'failed' ? { error: 'boom' } : {}) },
+    record: { runtimePath: 'serial', threads: 1, ...(options.status === 'failed' ? { error: options.error ?? 'boom' } : {}), ...options.record },
   };
   const runs = new Store<AppState>({ runs: [view] });
   const pending: Array<() => void> = [];
@@ -419,6 +555,33 @@ describe('ResultsBrowser', () => {
     expect(detail!.section).toBe(' Score = 70 bits\n\nQuery  5  ACGT  45\n');
   });
 
+  it('filters by the E value and bit score that the lists show: 0.0 is 0, 123 is 123 (WA-RS-01)', async () => {
+    // NCBI writes an E value below 1e-180 as 0.0, and a bit score of 100 or more without decimals.
+    const specs: readonly Spec[] = [
+      { q: 0, s: 0, bits: 400.4, e: 3e-200, coords: [1, 50, 1, 50], text: { e: '0.0', bits: '400' } },
+      { q: 0, s: 1, bits: 122.6, e: 2.4e-50, coords: [1, 50, 1, 50], text: { e: '2e-50', bits: '123' } },
+      { q: 0, s: 2, bits: 40.2, e: 1e-5, coords: [1, 50, 1, 50], text: { e: '1e-05', bits: '40.2' } },
+    ];
+    const { results } = setup({ specs });
+    await results.open('r1');
+    const shown = () => results.state.get().subjects.map((s) => [s.sIdx, s.first.evalue, s.first.bitscore]);
+    results.setFilters({ maxEValue: 0 });
+    expect(shown()).toEqual([[0, '0.0', '400']]);
+    results.setFilters({ maxEValue: 2e-50 });
+    expect(shown()).toEqual([
+      [0, '0.0', '400'],
+      [1, '2e-50', '123'],
+    ]);
+    results.setFilters({ minBitScore: 123 });
+    expect(shown()).toEqual([
+      [0, '0.0', '400'],
+      [1, '2e-50', '123'],
+    ]);
+    results.setFilters({ minBitScore: 400.4 });
+    expect(shown()).toEqual([]);
+    expect(results.state.get().hidden).toEqual({ subjects: 3, hsps: 3 });
+  });
+
   it('keeps the selected HSP through a filter that shows it, and moves off one that hides it', async () => {
     const { results } = setup();
     await results.open('r1');
@@ -490,6 +653,26 @@ describe('ResultsBrowser', () => {
     await failed.results.open('r1');
     expect(failed.results.state.get()).toMatchObject({ phase: 'unavailable', message: 'Run 1 failed: boom. A failed run keeps no results.' });
 
+    // One full stop at the end of the reason, whatever it ends with (WA-RN-02).
+    for (const [error, said] of [
+      ['Earlier results are kept.', 'Earlier results are kept.'],
+      ['BLAST engine error: Warning: Sequence contains no data \n', 'BLAST engine error: Warning: Sequence contains no data.'],
+      ['Is it full?', 'Is it full?'],
+      ['The file (see the log.)', 'The file (see the log.)'],
+      ['', 'no reason was recorded.'],
+    ] as const) {
+      const run = setup({ status: 'failed', error });
+      await run.results.open('r1');
+      expect(run.results.state.get().message).toBe(`Run 1 failed: ${said} A failed run keeps no results.`);
+    }
+
+    // A failed run that made the file of its -logfile keeps it (line RG E1w-3b).
+    const logged = setup({ status: 'failed', error: 'BLAST engine error: The average subject length is too short', record: { runFiles: [{ name: 'run.log', bytes: new Uint8Array([65]) }] } });
+    await logged.results.open('r1');
+    expect(logged.results.state.get().message).toBe(
+      'Run 1 failed: BLAST engine error: The average subject length is too short. A failed run keeps no results. It keeps the file of its -logfile, run.log.',
+    );
+
     const running = setup({ status: 'running' });
     await running.results.open('r1');
     expect(running.results.state.get().phase).toBe('unavailable');
@@ -497,6 +680,30 @@ describe('ResultsBrowser', () => {
     await settle();
     await settle();
     expect(running.results.state.get().phase).toBe('ready');
+  });
+
+  // A dry run (-dryrun; line RG E1w-3b) completes without a search: its notice says so in place of "no hits".
+  it('says that a completed dry run searched nothing', async () => {
+    const { results } = setup({ specs: [], snapshot: { dryRun: true } });
+    await results.open('r1');
+    expect(results.state.get().phase).toBe('ready');
+    expect(noHspReason(results.state.get())).toBe('dry-run');
+    expect(NO_HSP_TEXT['dry-run']).toBe('This run was a dry run (-dryrun): LOSAT read the arguments and the settings and ran no search.');
+    const searched = setup({ specs: [] });
+    await searched.results.open('r1');
+    expect(noHspReason(searched.results.state.get())).toBe('no-hits');
+  });
+
+  // WA-FM-07: the command of a run without results is read with the grammar too.
+  it("gives the grammar of the run's mode, for its command, also for a run without results", async () => {
+    for (const options of [{ status: 'failed' }, { status: 'completed' }, { unreadable: true }] as const) {
+      const { results } = setup(options);
+      await results.open('r1');
+      await settle();
+      const grammar = results.state.get().grammar;
+      expect(grammar?.takesValue('-max_hsps'), JSON.stringify(options)).toBe(true);
+      expect(grammar?.takesValue('-lcase_masking'), JSON.stringify(options)).toBe(false);
+    }
   });
 
   it('reads a run whose results could not be read once, not at each change of the runs', async () => {

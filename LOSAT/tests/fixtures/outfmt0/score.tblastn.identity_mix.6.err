@@ -1,0 +1,4 @@
+Warning: [tblastn] Query_1 empty1 no residues: Composition-based statistics cannot be used with the IDENTITY matrix, resetting the composition-based statistics option to 0 Sequence contains no data 
+Warning: [tblastn] Query_2 withO has O letters: Composition-based statistics cannot be used with the IDENTITY matrix, resetting the composition-based statistics option to 0 One or more O characters replaced by X for alignment score calculations at positions 77, 97 
+Warning: [tblastn] Query_3 BDT62569.1 wsv282.. : Composition-based statistics cannot be used with the IDENTITY matrix, resetting the composition-based statistics option to 0 
+Warning: [tblastn] Query_4 xxxx all X: Composition-based statistics cannot be used with the IDENTITY matrix, resetting the composition-based statistics option to 0 Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options 

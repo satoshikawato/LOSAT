@@ -1,0 +1,87 @@
+<?xml version="1.0"?>
+<ncbi_application xmlns="ncbi:application"
+ xmlns:xs="http://www.w3.org/2001/XMLSchema-instance"
+ xs:schemaLocation="ncbi:application ncbi_application.xsd"
+>
+<program type="regular">
+<name>dustmasker</name>
+<version>1.0.0</version>
+<description>Low complexity region masker based on Symmetric DUST algorithm</description>
+<detailed_description></detailed_description>
+</program>
+<arguments>
+<key name="in" type="File_In" optional="true">
+<description>input file name</description>
+<synopsis>input_file_name</synopsis>
+<default>-</default>
+</key>
+<key name="infmt" type="String" optional="true">
+<description>input format (possible values: fasta, blastdb)</description>
+<synopsis>input_format</synopsis>
+<default>fasta</default>
+</key>
+<key name="level" type="Integer" optional="true">
+<description>DUST level (score threshold for subwindows)</description>
+<synopsis>level</synopsis>
+<default>20</default>
+</key>
+<key name="linker" type="Integer" optional="true">
+<description>DUST linker (how close masked intervals should be to get merged together).</description>
+<synopsis>linker</synopsis>
+<default>1</default>
+</key>
+<key name="out" type="File_Out" optional="true">
+<description>output file name</description>
+<synopsis>output_file_name</synopsis>
+<default>-</default>
+</key>
+<key name="outfmt" type="String" optional="true">
+<description>output format</description>
+<synopsis>output_format</synopsis>
+<constraint>
+<description>`acclist&apos;, `fasta&apos;, `interval&apos;, `maskinfo_asn1_bin&apos;, `maskinfo_asn1_text&apos;, `maskinfo_xml&apos;, `seqloc_asn1_bin&apos;, `seqloc_asn1_text&apos;, `seqloc_xml&apos;</description>
+<Strings case_sensitive="true">
+<value>acclist</value>
+<value>fasta</value>
+<value>interval</value>
+<value>maskinfo_asn1_bin</value>
+<value>maskinfo_asn1_text</value>
+<value>maskinfo_xml</value>
+<value>seqloc_asn1_bin</value>
+<value>seqloc_asn1_text</value>
+<value>seqloc_xml</value>
+</Strings>
+</constraint>
+<default>interval</default>
+</key>
+<key name="window" type="Integer" optional="true">
+<description>DUST window length</description>
+<synopsis>window_size</synopsis>
+<default>64</default>
+</key>
+<flag name="h" optional="true">
+<description>Print USAGE and DESCRIPTION;  ignore all other parameters</description>
+</flag>
+<flag name="hard_masking" optional="true">
+<description>Use hard masking for fasta outfmt</description>
+</flag>
+<flag name="help" optional="true">
+<description>Print USAGE, DESCRIPTION and ARGUMENTS; ignore all other parameters</description>
+</flag>
+<flag name="parse_seqids" optional="true">
+<description>Parse Seq-ids in FASTA input</description>
+</flag>
+<flag name="version-full" optional="true">
+<description>Print extended version data;  ignore other arguments</description>
+</flag>
+<flag name="version-full-json" optional="true">
+<description>Print extended version data in JSON format;  ignore other arguments</description>
+</flag>
+<flag name="version-full-xml" optional="true">
+<description>Print extended version data in XML format;  ignore other arguments</description>
+</flag>
+<flag name="xmlhelp" optional="true">
+<description>Print USAGE, DESCRIPTION and ARGUMENTS in XML format; ignore all other parameters</description>
+</flag>
+</arguments>
+</ncbi_application>

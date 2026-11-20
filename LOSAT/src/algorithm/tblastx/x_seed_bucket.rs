@@ -1,4 +1,4 @@
-//! EXPERIMENT (LOSAT_X_SEEDBUCKET / LOSAT_X_SEEDBUCKETSHADOW): the two-hit
+//! EXPERIMENT (SEEDBUCKET, graduated on 2026-10-22: no variable): the two-hit
 //! stage of the TBLASTX word finder with the hits grouped by diagonal range.
 //!
 //! NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:492-614
@@ -55,7 +55,8 @@
 //! code runs the same statements on a hit in the same way; only the order across diagonals
 //! (which cell is visited next) differs. Within one diagonal the hits arrive in scan order, so
 //! each cell goes through the same states and starts the same extensions. This is by
-//! construction (integer operations only); LOSAT_X_SEEDBUCKETSHADOW checks it on real runs.
+//! construction (integer operations only); `tests/tblastx_seed_bucket.rs` compares real runs with
+//! NCBI's output.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:306-309
 //! ```c
@@ -68,57 +69,29 @@
 //! occur, and the order of the result among them follows the order of the input, so the saved HSPs
 //! must be in scan order before the sort. `restore_flush_order` puts them back, flush by flush.
 //!
-//! `LOSAT_X_SEEDBUCKETSHADOW=1` runs both orders on every subject chunk (the
-//! bucketed one on a copy of the diagonal table) and aborts when the HSP
-//! lists or the diagonal tables differ.
-//!
-//! `LOSAT_X_SEEDBUCKET` is a switch of the strict set (`utils/xswitch.rs`): on
-//! unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set.  The reordering
+//! SEEDBUCKET is a rule without a variable (graduated on 2026-10-22; `utils/xswitch.rs`
+//! `GRADUATED`).  The reordering
 //! only pays when the table is large (see `min_cells`): it is used for tables
 //! of at least `LOSAT_X_SEEDBUCKET_MIN_CELLS` cells (default 2^21, 8 MiB), and
-//! in BLASTX only with `LOSAT_X_BXSEEDBUCKET=1` as well (see `blastx_mode`).
-//! With the set on, TBLASTX reaches the scan loop this module acts in only
-//! where the unit path of `LOSAT_X_PAIRPAR` does not take the batch (its gates
+//! never for a traced or debugged run, which keeps the scan order (`scan_chunk_plain`).
+//! TBLASTX reaches the scan loop this module acts in only
+//! where the unit path (PAIRPAR) does not take the batch (its gates
 //! and exactness guards, `x_pair_par.rs` `decide`).
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
-/// Subject chunks (TBLASTX) / subjects (BLASTX) compared in shadow mode, and
-/// the HSPs they produced.
-pub(crate) static SHADOW_CHUNKS: AtomicU64 = AtomicU64::new(0);
-pub(crate) static SHADOW_HITS: AtomicU64 = AtomicU64::new(0);
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:507
-// ```c
-// totalhits += hits;
-// ```
-// NCBI adds up the lookup hits of one subject scan (an Int4, used for its statistics only). No
-// NCBI counterpart for the maximum over scans kept here: it is printed by the shadow mode and
-// does not change any value NCBI computes.
-/// Shadow mode: the most lookup hits one bucketed scan (a subject chunk of one
-/// frame in TBLASTX, a subject in BLASTX) went through.
-pub(crate) static SHADOW_MAX_SCAN_HITS: AtomicU64 = AtomicU64::new(0);
-
 // No NCBI counterpart: counters for LOSAT_X_STATS that tell which order ran; they do not change
 // any value NCBI computes.
-/// Scans run in the bucketed order (a subject chunk of one frame in TBLASTX, a subject in
-/// BLASTX; in shadow mode the bucketed half of each comparison), counted where their buckets
+/// Scans run in the bucketed order (a subject chunk of one frame), counted where their buckets
 /// are made, and the flushes of those scans.
 static BUCKETED_SCANS: AtomicU64 = AtomicU64::new(0);
 static BUCKET_FLUSHES: AtomicU64 = AtomicU64::new(0);
 
-/// The summary lines (printed by `main` at exit): the shadow summary, and with LOSAT_X_STATS
-/// the number of scans that ran in the bucketed order and of their flushes.
+/// The summary line (printed by `main` at exit): with LOSAT_X_STATS the number of scans that ran
+/// in the bucketed order and of their flushes.
 // No NCBI counterpart: prints the counters above; it does not change any value NCBI computes.
-pub fn print_shadow_stats() {
-    if mode() == 2 {
-        eprintln!(
-            "[X_SHADOW] SEEDBUCKET chunks_compared={} hsps_compared={} max_scan_hits={} (HSP lists and diagonal tables identical)",
-            SHADOW_CHUNKS.load(Ordering::Relaxed),
-            SHADOW_HITS.load(Ordering::Relaxed),
-            SHADOW_MAX_SCAN_HITS.load(Ordering::Relaxed)
-        );
-    }
+pub fn print_summary() {
     if std::env::var_os("LOSAT_X_STATS").is_some() {
         eprintln!(
             "[X_STATS] SEEDBUCKET bucketed_scans={} flushes={}",
@@ -128,36 +101,10 @@ pub fn print_shadow_stats() {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:502-516
-// ```c
-// while (scan_range[1] <= scan_range[2]) {
-// ...
-//     for (i = 0; i < hits; ++i) {
-//         Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
-//         Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
-// ...
-//         diag_coord = (query_offset - subject_offset) & diag_mask;
-// ```
-// Dispatch point: mode 0 runs the scan-order loop (the port of the C loop above), mode 1 the
-// bucketed order, mode 2 both, compared.
-/// 0 = scan order (reference), 1 = bucketed, 2 = both, compared.
-pub(crate) fn mode() -> u8 {
-    static MODE: OnceLock<u8> = OnceLock::new();
-    *MODE.get_or_init(|| {
-        if std::env::var_os("LOSAT_X_SEEDBUCKETSHADOW").is_some() {
-            2
-        } else if crate::utils::xswitch::on("LOSAT_X_SEEDBUCKET") {
-            1
-        } else {
-            0
-        }
-    })
-}
-
 // No NCBI counterpart: a size threshold for choosing the order. It changes speed only; it does
 // not change any value NCBI computes.
 /// Smallest diagonal table, in cells, for which the bucketed order is used
-/// while `LOSAT_X_SEEDBUCKET` is on (LOSAT_X_SEEDBUCKET_MIN_CELLS, default 2^21:
+/// (LOSAT_X_SEEDBUCKET_MIN_CELLS, default 2^21:
 /// an 8 MiB table of 4-byte cells).  Below that the table is served well
 /// enough by the cache hierarchy that the extra pass over the hits costs more
 /// than it saves (measured on this VM: a 4 MiB table, tblastx p03, is 50 %
@@ -185,39 +132,12 @@ pub(crate) fn min_cells() -> usize {
 // ```
 // Dispatch point: chooses between the scan-order loop (the port of the C loop above) and the
 // bucketed order, by table size.
-/// The order to use for a diagonal table of `cells` cells: the shadow mode
-/// compares whatever the size, the plain bucketed mode applies only from
-/// `min_cells()` up.
+/// Whether a diagonal table of `cells` cells takes the bucketed order: from `min_cells()` up.
 #[inline]
-pub(crate) fn mode_for(cells: usize) -> u8 {
-    match mode() {
-        1 if cells < min_cells() => 0,
-        m => m,
-    }
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:502-516
-// ```c
-// while (scan_range[1] <= scan_range[2]) {
-// ...
-//     for (i = 0; i < hits; ++i) {
-//         Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
-//         Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
-// ...
-//         diag_coord = (query_offset - subject_offset) & diag_mask;
-// ```
-// Dispatch point for BLASTX: the same choice between the scan-order loop and the bucketed order.
-/// BLASTX: the bucketed order needs `LOSAT_X_BXSEEDBUCKET=1` as well (not a
-/// switch of the strict set: off unless set to any value).  The
-/// subjects are single proteins, so a subject's hits are far fewer than the
-/// rows of the (query-sized) table and the grouping buys nothing; measured
-/// slightly slower (blastx_ap 8.4 → 8.7 s).  The shadow mode still compares.
-pub(crate) fn blastx_mode() -> u8 {
-    static MODE: OnceLock<u8> = OnceLock::new();
-    *MODE.get_or_init(|| match mode() {
-        1 if std::env::var_os("LOSAT_X_BXSEEDBUCKET").is_none() => 0,
-        m => m,
-    })
+pub(crate) fn bucketed(cells: usize) -> bool {
+    let bucketed = cells >= min_cells();
+    crate::utils::xreach::x_reach!("LOSAT_X_SEEDBUCKET", bucketed);
+    bucketed
 }
 
 // No NCBI counterpart: how many hits are buffered before they are processed. Buffering changes

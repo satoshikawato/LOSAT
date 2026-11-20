@@ -1,4 +1,4 @@
-//! EXPERIMENT (LOSAT_X_DPAVX2): 256-bit AVX2 kernels for the X-drop dynamic programming of
+//! EXPERIMENT: 256-bit AVX2 kernels for the X-drop dynamic programming of
 //! `xdrop_simd.rs`: 16 lanes of 16 bits and 32 lanes of 8 bits, with (`TB`) and without the
 //! traceback. x86_64 only, chosen at run time when the CPU has AVX2. They run the recurrence of
 //! NCBI `ALIGN_EX` / `Blast_SemiGappedAlign` row by row, with the value representation of the
@@ -90,7 +90,8 @@
 //! saturated values, minus infinity plus a score) is `< thr` in both computations, so it cannot
 //! win the `max` of a surviving cell, change which cells are dropped, or change a script bit the
 //! traceback walk reads (the walk only visits surviving cells). Each lane here holds exactly the
-//! value the 128-bit kernel holds for the same cell:
+//! value the 128-bit kernel holds for the same cell, except the values below the threshold that
+//! the last item changes:
 //!
 //! - Same stored values (`score - base + bias`, 0 = minus infinity), the same `bias`, rebase
 //!   limit and acceptance tests, and lookup tables with the bytes of `build_row_table`.
@@ -110,10 +111,26 @@
 //!   the next block is below the threshold, or at the end of `B` (or the fence). A 32-lane step
 //!   is taken while more than 16 lanes of the band are left, so a row may run up to 16 lanes past
 //!   the point where the 128-bit kernel stops. Those lanes lie past the band with a row gap below
-//!   the threshold and nothing above it from the previous row, so they are dropped (H = 0, E
-//!   cleared right of the last survivor) and change nothing. The first and last survivors, hence
-//!   the band of the next row, the cell count, the best cell and the traceback rows the walk
-//!   reads are those of the 128-bit kernel. The traceback walk is the 128-bit kernels' `finish`.
+//!   the threshold and nothing above it from the previous row, so they are dropped (H = 0; E 0
+//!   from the clearing at the row end, or from the block itself in the 8-bit `EM` instances) and
+//!   change nothing. The first and last survivors, hence the band of the next row, the cell
+//!   count, the best cell and the traceback rows the walk reads are those of the 128-bit kernel.
+//!   The traceback walk is the 128-bit kernels' `finish`.
+//! - Row end of the 8-bit lanes (`LOSAT_X_DPEMASK`, the `EM` instances of `align8`; on by
+//!   default): each block stores the E of a dropped cell as 0 (minus infinity) instead of
+//!   `max(H - gap_open_extend, E - gap_extend)`, and the row no longer clears E right of its last
+//!   survivor (it also keeps the high-water mark `dirty8` as a max, the same value). A dropped
+//!   cell has `H < thr` and `E <= H`, so the E it passes down is below the threshold in both
+//!   forms. What differs downstream is gap states below the threshold, and the gap-extension
+//!   script bits that only such gap states decide; the walk reads such a bit only where it enters
+//!   a cell through a gap whose state is at least the threshold, so no surviving cell's score,
+//!   drop decision or script bit the walk reads changes (the argument above). Every lane right of
+//!   the last survivor was dropped in the row that last wrote it (a lane the next row reads but
+//!   this row did not write lies right of the band of the row after the one that wrote it), so it
+//!   holds 0 without the clearing. Without the clearing the next row's E loads no longer overlap
+//!   a store whose address the end of the row decides, which made them wait until that store was
+//!   written (line R, R1). The 16-bit lanes keep the clearing: there the store-forward blocks
+//!   were 0.1-0.2 per row and the change gained nothing.
 //!
 //! Less work per row and per call than the 128-bit kernels: wider steps, first and last
 //! survivor tracked while the row runs (no survivor bitmap), the first lane's missing diagonal
@@ -125,8 +142,8 @@
 
 use super::kernel::finish;
 use super::{
-    build_row_table, fits_8bit, ColSeq, RowSeq, Scores, XdropResult, XdropScratch, FENCE_SENTRY,
-    MAX_M, PAD, SCRIPT_EXTEND_GAP_A, SCRIPT_EXTEND_GAP_B, SCRIPT_GAP_IN_A, SCRIPT_SUB, TAB, VMAX,
+    build_row_table, fits_8bit, script_codes, ColSeq, RowSeq, Scores, XdropResult, XdropScratch,
+    FENCE_SENTRY, MAX_M, PAD, TAB, VMAX,
 };
 use core::arch::x86_64::*;
 
@@ -162,9 +179,10 @@ static KSPLIT: [u8; 32] = [
     11, 13, 15,
 ];
 
-/// No NCBI counterpart: LOSAT_X_DPAVX2 on (`utils/xswitch.rs`) and a CPU that runs these kernels.
-pub(super) fn switch_on() -> bool {
-    crate::utils::xswitch::on("LOSAT_X_DPAVX2") && available()
+/// No NCBI counterpart: LOSAT_X_DPEMASK on (`utils/xswitch.rs`): the `EM` instances of `align8`
+/// (E of dropped cells stored as minus infinity, no E clearing at the row end).
+pub(super) fn emask_on() -> bool {
+    crate::utils::xswitch::on("LOSAT_X_DPEMASK")
 }
 
 /// No NCBI counterpart: AVX2 and the features of the 128-bit AVX build (LOSAT_X_DPNOAVX, which
@@ -180,8 +198,8 @@ pub(super) fn available() -> bool {
 /// ```
 /// Dispatch point of the 256-bit kernels: `tb == false` is the score-only recurrence
 /// (`Blast_SemiGappedAlign`, `s_BlastAlignPackedNucl`), `tb == true` is `ALIGN_EX`. The lane width
-/// is the one the 128-bit dispatch would choose (`fits_8bit`). None: not handled here; the caller
-/// runs the 128-bit dispatch.
+/// is the one the 128-bit dispatch would choose (`fits_8bit`). `em`: the `EM` instances of
+/// `align8` (LOSAT_X_DPEMASK). None: not handled here; the caller runs the 128-bit dispatch.
 ///
 /// # Safety
 /// `available()` must be true.
@@ -196,11 +214,61 @@ pub(super) unsafe fn align(
     x_drop: i32,
     tb: bool,
     check_fence: bool,
+    em: bool,
+    sc: &mut XdropScratch,
+) -> Option<XdropResult> {
+    if em {
+        dispatch::<true>(
+            q,
+            s,
+            scores,
+            len1,
+            len2,
+            gap_open,
+            gap_extend,
+            x_drop,
+            tb,
+            check_fence,
+            sc,
+        )
+    } else {
+        dispatch::<false>(
+            q,
+            s,
+            scores,
+            len1,
+            len2,
+            gap_open,
+            gap_extend,
+            x_drop,
+            tb,
+            check_fence,
+            sc,
+        )
+    }
+}
+
+/// No NCBI counterpart: `align` for one choice of `EM`.
+///
+/// # Safety
+/// `available()` must be true.
+#[inline(always)]
+unsafe fn dispatch<const EM: bool>(
+    q: &RowSeq<'_>,
+    s: &ColSeq<'_>,
+    scores: &Scores<'_>,
+    len1: usize,
+    len2: usize,
+    gap_open: i32,
+    gap_extend: i32,
+    x_drop: i32,
+    tb: bool,
+    check_fence: bool,
     sc: &mut XdropScratch,
 ) -> Option<XdropResult> {
     let m8 = fits_8bit(scores, gap_open, gap_extend, x_drop);
     match (tb, m8) {
-        (true, Some(m)) => align8::<true>(
+        (true, Some(m)) if sc.x_nib => align8::<true, EM, true>(
             q,
             s,
             scores,
@@ -213,7 +281,7 @@ pub(super) unsafe fn align(
             check_fence,
             sc,
         ),
-        (false, Some(m)) => align8::<false>(
+        (true, Some(m)) => align8::<true, EM, false>(
             q,
             s,
             scores,
@@ -226,7 +294,20 @@ pub(super) unsafe fn align(
             check_fence,
             sc,
         ),
-        (true, None) => align16::<true>(
+        (false, Some(m)) => align8::<false, EM, false>(
+            q,
+            s,
+            scores,
+            m,
+            len1,
+            len2,
+            gap_open,
+            gap_extend,
+            x_drop,
+            check_fence,
+            sc,
+        ),
+        (true, None) if sc.x_nib => align16::<true, true>(
             q,
             s,
             scores,
@@ -238,7 +319,19 @@ pub(super) unsafe fn align(
             check_fence,
             sc,
         ),
-        (false, None) => align16::<false>(
+        (true, None) => align16::<true, false>(
+            q,
+            s,
+            scores,
+            len1,
+            len2,
+            gap_open,
+            gap_extend,
+            x_drop,
+            check_fence,
+            sc,
+        ),
+        (false, None) => align16::<false, false>(
             q,
             s,
             scores,
@@ -272,6 +365,24 @@ unsafe fn ldx<T>(p: *const T) -> X {
 #[inline(always)]
 unsafe fn stx<T>(p: *mut T, v: X) {
     _mm_storeu_si128(p as *mut X, v)
+}
+/// The low 8 bytes of `v`.
+#[inline(always)]
+unsafe fn stl<T>(p: *mut T, v: X) {
+    _mm_storel_epi64(p as *mut X, v)
+}
+/// 32 four-bit codes (bytes <= 15) to 16 bytes, byte k = code 2k | code 2k+1 << 4
+/// (`LOSAT_X_DPNIBBLE`).
+#[inline(always)]
+unsafe fn nibs32(v: W) -> X {
+    let m = _mm256_maddubs_epi16(v, _mm256_set1_epi16(0x1001));
+    _mm_packus_epi16(_mm256_castsi256_si128(m), _mm256_extracti128_si256::<1>(m))
+}
+/// 16 four-bit codes to 8 bytes in the low half (`nibs32`).
+#[inline(always)]
+unsafe fn nibs16(v: X) -> X {
+    let m = _mm_maddubs_epi16(v, _mm_set1_epi16(0x1001));
+    _mm_packus_epi16(m, m)
 }
 /// 16 bytes to both 128-bit halves.
 #[inline(always)]
@@ -423,6 +534,8 @@ unsafe fn fill_cols(
     ncols: usize,
     check_fence: bool,
 ) {
+    // `sb` lane k + 1 holds column k + sh (rows over the band, `XdropScratch::x_room`)
+    let sh = sc.x_sh;
     let mut k = sc.sb_filled;
     if ncols > 0 && (s.step == 1 || s.step == -1) {
         let lim = _mm256_set1_epi8((ncols - 1) as i8);
@@ -431,17 +544,17 @@ unsafe fn fill_cols(
             6, 5, 4, 3, 2, 1, 0,
         );
         let dl = s.data.len() as isize;
-        while k + 32 <= to && k + 32 <= s.zero_from {
+        while k + 32 <= to && k + sh + 32 <= s.zero_from {
             let v = if s.step == 1 {
                 // columns k..k+32 are s.data[i..i + 32]
-                let i = s.base + k as isize;
+                let i = s.base + (k + sh) as isize;
                 if i < 0 || i + 32 > dl {
                     break;
                 }
                 ld(s.data.as_ptr().offset(i))
             } else {
                 // columns k..k+32 are s.data[i], s.data[i - 1], ..., s.data[i - 31]
-                let i = s.base - k as isize;
+                let i = s.base - (k + sh) as isize;
                 if i - 31 < 0 || i >= dl {
                     break;
                 }
@@ -458,7 +571,7 @@ unsafe fn fill_cols(
         }
     }
     for k in k..to {
-        let ch = s.get(k);
+        let ch = s.get(k + sh);
         if ch as usize >= ncols {
             if check_fence && ch == FENCE_SENTRY {
                 if sc.fence_k == usize::MAX {
@@ -619,7 +732,7 @@ unsafe fn block16<const TB: bool>(
 // then per row: column residues, fence, row table, rebase, blocks, band update). None for a
 // problem the lanes do not hold (the caller then runs the 128-bit dispatch).
 #[target_feature(enable = "avx2,bmi1,lzcnt,popcnt")]
-unsafe fn align16<const TB: bool>(
+unsafe fn align16<const TB: bool, const NIB: bool>(
     q: &RowSeq<'_>,
     s: &ColSeq<'_>,
     scores: &Scores<'_>,
@@ -631,6 +744,8 @@ unsafe fn align16<const TB: bool>(
     check_fence: bool,
     sc: &mut XdropScratch,
 ) -> Option<XdropResult> {
+    // No NCBI counterpart (memory placement only): see `x_frame_align`.
+    crate::utils::x_frame::x_frame_align();
     sc.ops.clear();
     if len1 == 0 || len2 == 0 {
         return Some(XdropResult {
@@ -687,8 +802,7 @@ unsafe fn align16<const TB: bool>(
     }
     sc.dirty = b_size;
     if TB {
-        sc.trace.resize(b_size, SCRIPT_GAP_IN_A);
-        sc.rows.push((0, 0, b_size as u32));
+        sc.trace.x_row_zero(NIB, b_size);
     }
 
     let mut ramp = [0i16; 16];
@@ -702,9 +816,9 @@ unsafe fn align16<const TB: bool>(
         ramp: ld(ramp.as_ptr()),
         xv: _mm256_set1_epi16(x as i16),
         kb7: ld(KB7X2.as_ptr()),
-        c3: _mm256_set1_epi16(SCRIPT_SUB as i16),
-        c10: _mm256_set1_epi16(SCRIPT_EXTEND_GAP_A as i16),
-        c40: _mm256_set1_epi16(SCRIPT_EXTEND_GAP_B as i16),
+        c3: _mm256_set1_epi16(const { script_codes(NIB).0 } as i16),
+        c10: _mm256_set1_epi16(const { script_codes(NIB).1 } as i16),
+        c40: _mm256_set1_epi16(const { script_codes(NIB).2 } as i16),
     };
     let zero = _mm256_setzero_si256();
     let lane0 = _mm256_setr_epi16(-1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
@@ -727,8 +841,17 @@ unsafe fn align16<const TB: bool>(
     let mut wend = [b_size, 0usize];
     let mut cur = 0usize; // buffer holding the previous row
 
+    // the rows over the band (`XdropScratch::x_room`): columns below are relative to `sc.x_sh`
+    let mut len2 = len2;
     for a in 1..=len1 {
-        sc.ensure(b_size + num_extra + 64);
+        if !sc.fits(b_size + num_extra + 64) {
+            let d = sc.x_room(first, b_size + num_extra + 64, true);
+            first -= d;
+            b_size -= d;
+            len2 -= d;
+            wend[0] = wend[0].saturating_sub(d);
+            wend[1] = wend[1].saturating_sub(d);
+        }
         if sc.sb_filled < b_size {
             fill_cols(s, sc, (b_size + 64).min(len2 + 1), ncols, check_fence);
         }
@@ -790,11 +913,12 @@ unsafe fn align16<const TB: bool>(
         // a store of 0 into the H row would sit right under the first block's load
         let mut hpm = lane0;
 
-        let row_off = sc.trace.len();
-        if TB {
-            sc.trace.reserve(bend - first + num_extra + 96);
-        }
-        let tr = sc.trace.as_mut_ptr().add(row_off);
+        let tr = if TB {
+            // SAFETY: room for every byte of the row loop (see `XTrace::x_row`)
+            sc.trace.x_row(bend - first + num_extra + 96)
+        } else {
+            core::ptr::null_mut()
+        };
 
         let bestv0 = _mm256_set1_epi16((bias + best_rel) as i16);
         let mut rs = Row {
@@ -850,10 +974,12 @@ unsafe fn align16<const TB: bool>(
                 zero,
             );
             if TB {
-                st(
-                    tr.add(b0 - first),
-                    _mm256_permute4x64_epi64::<0xD8>(_mm256_packus_epi16(r0, r1)),
-                );
+                let v = _mm256_permute4x64_epi64::<0xD8>(_mm256_packus_epi16(r0, r1));
+                if NIB {
+                    stx(tr.add((b0 - first) >> 1), nibs32(v));
+                } else {
+                    st(tr.add(b0 - first), v);
+                }
             }
             // 2 bits per lane
             let live = !((_mm256_movemask_epi8(d0) as u32 as u64)
@@ -899,12 +1025,14 @@ unsafe fn align16<const TB: bool>(
             );
             hpm = zero;
             if TB {
-                stx(
-                    tr.add(b0 - first),
-                    _mm256_castsi256_si128(_mm256_permute4x64_epi64::<0xD8>(_mm256_packus_epi16(
-                        r0, r0,
-                    ))),
-                );
+                let v = _mm256_castsi256_si128(_mm256_permute4x64_epi64::<0xD8>(
+                    _mm256_packus_epi16(r0, r0),
+                ));
+                if NIB {
+                    stl(tr.add((b0 - first) >> 1), nibs16(v));
+                } else {
+                    stx(tr.add(b0 - first), v);
+                }
             }
             let live = !(_mm256_movemask_epi8(d0) as u32);
             if live != 0 {
@@ -928,15 +1056,19 @@ unsafe fn align16<const TB: bool>(
         }
         wend[wi] = proc_end;
         cur = wi;
+        let rec = if TB {
+            sc.trace.x_row_done(NIB, first + sc.x_sh, proc_end - first)
+        } else {
+            core::ptr::null()
+        };
         if rs.slow {
-            b_off = rs.rec_b;
+            b_off = rs.rec_b + sc.x_sh;
             a_off = a;
             best_rel = (_mm256_cvtsi256_si32(rs.bestv) as i16 as i32) - bias;
-        }
-        if TB {
-            sc.trace.set_len(row_off + proc_end - first);
-            sc.rows
-                .push((row_off as u32, first as u32, (proc_end - first) as u32));
+            if TB {
+                // No NCBI counterpart: the walk starts at this row's record (`XTrace::x_best`)
+                sc.trace.x_best(rec);
+            }
         }
         if fence_row {
             fence_hit = true;
@@ -960,7 +1092,7 @@ unsafe fn align16<const TB: bool>(
     }
 
     let best = base + best_rel;
-    finish::<TB>(sc, a_off, b_off, best, fence_hit, cells)
+    finish::<TB, NIB>(sc, a_off, b_off, best, fence_hit, cells)
 }
 
 // ---------------------------------------------------------------------------
@@ -1000,9 +1132,9 @@ struct C8 {
 ///                 score_array[b_index].best = score;
 /// ```
 /// One block of 32 cells on 8-bit lanes: the lane operations of the 128-bit `block8`, row gap as
-/// at the head of this file. Returns (drop mask, script).
+/// at the head of this file. `EM`: E of a dropped cell stored as 0. Returns (drop mask, script).
 #[inline(always)]
-unsafe fn block8<const TB: bool>(
+unsafe fn block8<const TB: bool, const EM: bool>(
     c: &C8,
     rs: &mut Row,
     hr: *const u8,
@@ -1045,6 +1177,12 @@ unsafe fn block8<const TB: bool>(
     }
     let drop = _mm256_cmpgt_epi8(thr, hh);
     st(hw.add(b), _mm256_andnot_si256(drop, hh));
+    // LOSAT_X_DPEMASK: the E of a dropped cell as minus infinity
+    let en = if EM {
+        _mm256_andnot_si256(drop, en)
+    } else {
+        en
+    };
     st(e.add(b), en);
     let scr = if TB {
         let me = _mm256_cmpgt_epi8(ep, d);
@@ -1076,7 +1214,7 @@ struct RowX {
 /// ```
 /// `block8` on 16 lanes (the tail of a row and the row-gap extension), with the same values.
 #[inline(always)]
-unsafe fn block8x<const TB: bool>(
+unsafe fn block8x<const TB: bool, const EM: bool>(
     c: &C8,
     rs: &mut RowX,
     rec_b: &mut usize,
@@ -1126,6 +1264,8 @@ unsafe fn block8x<const TB: bool>(
     }
     let drop = _mm_cmpgt_epi8(thr, hh);
     stx(hw.add(b), _mm_andnot_si128(drop, hh));
+    // LOSAT_X_DPEMASK: the E of a dropped cell as minus infinity
+    let en = if EM { _mm_andnot_si128(drop, en) } else { en };
     stx(e.add(b), en);
     let scr = if TB {
         let c3 = _mm256_castsi256_si128(c.c3);
@@ -1160,7 +1300,7 @@ unsafe fn block8x<const TB: bool>(
 // The whole DP on 8-bit lanes, the steps of the 128-bit `align_body8` in the same order. `max_m`
 // is the largest score of the matrix (`fits_8bit`). None for a problem the lanes do not hold.
 #[target_feature(enable = "avx2,bmi1,lzcnt,popcnt")]
-unsafe fn align8<const TB: bool>(
+unsafe fn align8<const TB: bool, const EM: bool, const NIB: bool>(
     q: &RowSeq<'_>,
     s: &ColSeq<'_>,
     scores: &Scores<'_>,
@@ -1173,6 +1313,8 @@ unsafe fn align8<const TB: bool>(
     check_fence: bool,
     sc: &mut XdropScratch,
 ) -> Option<XdropResult> {
+    // No NCBI counterpart (memory placement only): see `x_frame_align`.
+    crate::utils::x_frame::x_frame_align();
     sc.ops.clear();
     if len1 == 0 || len2 == 0 {
         return Some(XdropResult {
@@ -1229,8 +1371,7 @@ unsafe fn align8<const TB: bool>(
     }
     sc.dirty8 = b_size;
     if TB {
-        sc.trace.resize(b_size, SCRIPT_GAP_IN_A);
-        sc.rows.push((0, 0, b_size as u32));
+        sc.trace.x_row_zero(NIB, b_size);
     }
 
     let sat = |v: i32| v.min(255) as u8 as i8;
@@ -1246,9 +1387,9 @@ unsafe fn align8<const TB: bool>(
         ramp: ld(ramp.as_ptr()),
         xv: _mm256_set1_epi8(sat(x)),
         kb15: _mm256_set1_epi8(15),
-        c3: _mm256_set1_epi8(SCRIPT_SUB as i8),
-        c10: _mm256_set1_epi8(SCRIPT_EXTEND_GAP_A as i8),
-        c40: _mm256_set1_epi8(SCRIPT_EXTEND_GAP_B as i8),
+        c3: _mm256_set1_epi8(const { script_codes(NIB).0 } as i8),
+        c10: _mm256_set1_epi8(const { script_codes(NIB).1 } as i8),
+        c40: _mm256_set1_epi8(const { script_codes(NIB).2 } as i8),
     };
     let zero = _mm256_setzero_si256();
     let lane0 = _mm256_setr_epi8(
@@ -1273,8 +1414,17 @@ unsafe fn align8<const TB: bool>(
     let mut wend = [b_size, 0usize];
     let mut cur = 0usize;
 
+    // the rows over the band (`XdropScratch::x_room`): columns below are relative to `sc.x_sh`
+    let mut len2 = len2;
     for a in 1..=len1 {
-        sc.ensure(b_size + num_extra + 64);
+        if !sc.fits(b_size + num_extra + 64) {
+            let d = sc.x_room(first, b_size + num_extra + 64, false);
+            first -= d;
+            b_size -= d;
+            len2 -= d;
+            wend[0] = wend[0].saturating_sub(d);
+            wend[1] = wend[1].saturating_sub(d);
+        }
         if sc.sb_filled < b_size {
             fill_cols(s, sc, (b_size + 64).min(len2 + 1), ncols, check_fence);
         }
@@ -1332,11 +1482,12 @@ unsafe fn align8<const TB: bool>(
         }
         let mut hpm = lane0;
 
-        let row_off = sc.trace.len();
-        if TB {
-            sc.trace.reserve(bend - first + num_extra + 96);
-        }
-        let tr = sc.trace.as_mut_ptr().add(row_off);
+        let tr = if TB {
+            // SAFETY: room for every byte of the row loop (see `XTrace::x_row`)
+            sc.trace.x_row(bend - first + num_extra + 96)
+        } else {
+            core::ptr::null_mut()
+        };
 
         let bestv0 = _mm256_set1_epi8((bias + best_rel) as u8 as i8);
         let mut rs = Row {
@@ -1363,9 +1514,11 @@ unsafe fn align8<const TB: bool>(
             } else {
                 Some(ld(LANE_MASK8.as_ptr().add(32 - (limit - b0))))
             };
-            let (d0, r0) = block8::<TB>(&c, &mut rs, hr, hw, e, b0, sv, mask, hpm);
+            let (d0, r0) = block8::<TB, EM>(&c, &mut rs, hr, hw, e, b0, sv, mask, hpm);
             hpm = zero;
-            if TB {
+            if TB && NIB {
+                stx(tr.add((b0 - first) >> 1), nibs32(r0));
+            } else if TB {
                 st(tr.add(b0 - first), r0);
             }
             let live = !(_mm256_movemask_epi8(d0) as u32);
@@ -1405,7 +1558,7 @@ unsafe fn align8<const TB: bool>(
             } else {
                 Some(ldx(LANE_MASK8X.as_ptr().add(16 - (limit - b0))))
             };
-            let (d0, r0) = block8x::<TB>(
+            let (d0, r0) = block8x::<TB, EM>(
                 &c,
                 &mut rx,
                 &mut rec_b,
@@ -1419,7 +1572,9 @@ unsafe fn align8<const TB: bool>(
                 _mm256_castsi256_si128(hpm),
             );
             hpm = zero;
-            if TB {
+            if TB && NIB {
+                stl(tr.add((b0 - first) >> 1), nibs16(r0));
+            } else if TB {
                 stx(tr.add(b0 - first), r0);
             }
             let live = (!(_mm_movemask_epi8(d0) as u32)) & 0xFFFF;
@@ -1432,7 +1587,10 @@ unsafe fn align8<const TB: bool>(
             b0 += 16;
         }
         let proc_end = b0;
-        if proc_end > sc.dirty8 {
+        if EM {
+            // the high-water mark without a branch (its mispredictions were half of the row's)
+            sc.dirty8 = sc.dirty8.max(proc_end);
+        } else if proc_end > sc.dirty8 {
             sc.dirty8 = proc_end;
         }
         let wi = 1 - cur;
@@ -1443,15 +1601,19 @@ unsafe fn align8<const TB: bool>(
         }
         wend[wi] = proc_end;
         cur = wi;
+        let rec = if TB {
+            sc.trace.x_row_done(NIB, first + sc.x_sh, proc_end - first)
+        } else {
+            core::ptr::null()
+        };
         if slow {
-            b_off = rec_b;
+            b_off = rec_b + sc.x_sh;
             a_off = a;
             best_rel = (_mm_cvtsi128_si32(rx.bestv) & 0xFF) - bias;
-        }
-        if TB {
-            sc.trace.set_len(row_off + proc_end - first);
-            sc.rows
-                .push((row_off as u32, first as u32, (proc_end - first) as u32));
+            if TB {
+                // No NCBI counterpart: the walk starts at this row's record (`XTrace::x_best`)
+                sc.trace.x_best(rec);
+            }
         }
         if fence_row {
             fence_hit = true;
@@ -1461,10 +1623,13 @@ unsafe fn align8<const TB: bool>(
             break;
         }
         let last = hi_surv;
-        let mut b = last + 1;
-        while b < proc_end {
-            st(e.add(b), zero);
-            b += 32;
+        if !EM {
+            // columns right of the last survivor leave the band: E = -inf
+            let mut b = last + 1;
+            while b < proc_end {
+                st(e.add(b), zero);
+                b += 32;
+            }
         }
         first = lo_surv;
         b_size = last + 1;
@@ -1474,7 +1639,7 @@ unsafe fn align8<const TB: bool>(
     }
 
     let best = base + best_rel;
-    finish::<TB>(sc, a_off, b_off, best, fence_hit, cells)
+    finish::<TB, NIB>(sc, a_off, b_off, best, fence_hit, cells)
 }
 
 #[cfg(test)]
@@ -1486,7 +1651,7 @@ mod tests {
     use super::super::kernel;
     use super::super::tests::{random_problem, reference, Problem, Rng};
     use super::super::x_capture::load_dir;
-    // EXPERIMENT (LOSAT_X_DPW128): the 128-bit kernels with per-row savings, compared and timed in
+    // EXPERIMENT: the 128-bit kernels with per-row savings (`x_xdrop_w128.rs`), compared and timed in
     // the replay next to the 128-bit and the 256-bit kernels.
     use super::super::x_w128 as w128;
     use super::*;
@@ -1494,7 +1659,10 @@ mod tests {
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
     enum Kern {
         V128,
+        /// the default instances (`EM` of the 8-bit lanes, LOSAT_X_DPEMASK)
         V256,
+        /// LOSAT_X_DPEMASK=0: the 8-bit lanes' row end of before (16-bit lanes: the same kernel)
+        V256Z,
         W128,
     }
 
@@ -1531,16 +1699,34 @@ mod tests {
                 kernel::align_avx::<false>(q, s, scores, len1, len2, go, ge, x, cf, sc)
             }
             (Kern::V256, true, Some(m)) => {
-                align8::<true>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
+                if sc.x_nib {
+                    align8::<true, true, true>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
+                } else {
+                    align8::<true, true, false>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
+                }
             }
             (Kern::V256, false, Some(m)) => {
-                align8::<false>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
+                align8::<false, true, false>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
             }
-            (Kern::V256, true, None) => {
-                align16::<true>(q, s, scores, len1, len2, go, ge, x, cf, sc)
+            (Kern::V256 | Kern::V256Z, true, None) => {
+                if sc.x_nib {
+                    align16::<true, true>(q, s, scores, len1, len2, go, ge, x, cf, sc)
+                } else {
+                    align16::<true, false>(q, s, scores, len1, len2, go, ge, x, cf, sc)
+                }
             }
-            (Kern::V256, false, None) => {
-                align16::<false>(q, s, scores, len1, len2, go, ge, x, cf, sc)
+            (Kern::V256 | Kern::V256Z, false, None) => {
+                align16::<false, false>(q, s, scores, len1, len2, go, ge, x, cf, sc)
+            }
+            (Kern::V256Z, true, Some(m)) => {
+                if sc.x_nib {
+                    align8::<true, false, true>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
+                } else {
+                    align8::<true, false, false>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
+                }
+            }
+            (Kern::V256Z, false, Some(m)) => {
+                align8::<false, false, false>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
             }
             (Kern::W128, true, Some(m)) => {
                 w128::run8::<true>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
@@ -1590,7 +1776,7 @@ mod tests {
         let mut accepted = 0usize;
         for _ in 0..3000 {
             let rare = rng.below(8) == 0;
-            let mut pick = |rng: &mut Rng| {
+            let pick = |rng: &mut Rng| {
                 if rare && rng.below(50) == 0 {
                     special[rng.below(special.len() as u64) as usize]
                 } else if rng.below(10) == 0 {
@@ -1690,11 +1876,25 @@ mod tests {
             .and_then(|v| v.parse().ok())
             .unwrap_or(600);
         let mut rng = Rng(0xD1B5_4A32_D192_ED03);
-        let (mut sc128, mut sc256) = (XdropScratch::new(), XdropScratch::new());
+        let (mut sc128, mut sc256, mut sc256z) = (
+            XdropScratch::new(),
+            XdropScratch::new(),
+            XdropScratch::new(),
+        );
         // [width 8 / 16][tb][reverse]
         let mut handled = [[[0usize; 2]; 2]; 2];
         let (mut fences, mut ops_total, mut declined, mut wide) = (0usize, 0usize, 0usize, 0usize);
+        // calls whose rows were moved: [width 8 / 16][128-bit / 256-bit / 256-bit without EM]
+        let mut moved = [[0usize; 3]; 2];
         for case in 0..cases {
+            // rows over the band (`x_room`): 128 or 320 lanes to start with, or every column
+            let lanes = [Some(128), Some(320), None][case % 3];
+            sc128.x_test_rows(lanes);
+            sc256.x_test_rows(lanes);
+            sc256z.x_test_rows(lanes);
+            // trace layout (LOSAT_X_DPNIBBLE): four-bit codes or one byte per cell
+            let nib = case % 2 == 0;
+            (sc128.x_nib, sc256.x_nib, sc256z.x_nib) = (nib, nib, nib);
             let n = if rng.below(2) == 0 { 16 } else { 28 };
             let scale = if rng.below(3) == 0 { 32 } else { 1 };
             let long = rng.below(6) == 0;
@@ -1859,6 +2059,33 @@ mod tests {
                                 &mut sc256,
                             )
                         };
+                        // on 16-bit lanes V256Z is the same `align16` call
+                        let r256z = if !wide8 {
+                            r256
+                        } else {
+                            // SAFETY: AVX2 detected above.
+                            unsafe {
+                                run(
+                                    Kern::V256Z,
+                                    m,
+                                    tb,
+                                    &rows,
+                                    &cols,
+                                    &scores,
+                                    len1,
+                                    len2,
+                                    go,
+                                    ge,
+                                    x,
+                                    tb,
+                                    &mut sc256z,
+                                )
+                            }
+                        };
+                        assert_eq!(r256, r256z, "{tag}: 256 vs 256 with the E clearing");
+                        if wide8 && r256.is_some() {
+                            assert_eq!(sc256.ops, sc256z.ops, "{tag}: 256 vs 256z ops");
+                        }
                         match (r128, r256) {
                             (Some(a), Some(b)) => {
                                 assert_eq!(a, b, "{tag}: 128 vs 256");
@@ -1883,6 +2110,11 @@ mod tests {
                             assert_eq!(r.cells, expected.5, "{tag}: cells");
                         }
                         handled[usize::from(!wide8)][usize::from(tb)][usize::from(reverse)] += 1;
+                        moved[usize::from(!wide8)][0] += usize::from(sc128.x_sh > 0);
+                        moved[usize::from(!wide8)][1] += usize::from(sc256.x_sh > 0);
+                        // on 16-bit lanes V256Z is the `align16` call of `sc256`
+                        let z = if wide8 { &sc256z } else { &sc256 };
+                        moved[usize::from(!wide8)][2] += usize::from(z.x_sh > 0);
                         fences += usize::from(r.fence_hit);
                         ops_total += sc256.ops.len();
                         if !wide8 && r.cells > 256 * len1.min(len2) as u64 && len1.min(len2) > 500 {
@@ -1894,7 +2126,7 @@ mod tests {
         }
         eprintln!(
             "avx2 fuzz: cases={cases} handled[w8/w16][so/tb][fwd/rev]={handled:?} fences={fences} \
-             wide={wide} declined={declined}"
+             wide={wide} declined={declined} moved[w8/w16][128/256/256z]={moved:?}"
         );
         if cases >= 200 {
             for (w, by_tb) in handled.iter().enumerate() {
@@ -1908,6 +2140,10 @@ mod tests {
                 }
             }
             assert!(fences > 0 && ops_total > 0 && wide > 0);
+            assert!(
+                moved.iter().flatten().all(|&n| n > 0),
+                "moved rows {moved:?}"
+            );
         }
     }
 
@@ -2015,8 +2251,9 @@ mod tests {
             .is_some()
             {
                 let sh = &mut shape[usize::from(p.tb)][usize::from(m8.is_some())];
-                sh.0 += sd.rows.len().saturating_sub(1) as u64;
-                sh.1 += (sd.trace.len() - sd.rows.first().map_or(0, |r| r.2 as usize)) as u64;
+                let rows = sd.trace.x_test_layout(sd.x_nib);
+                sh.0 += rows.len().saturating_sub(1) as u64;
+                sh.1 += rows.iter().skip(1).map(|r| r.3 as u64).sum::<u64>();
             }
             match r256 {
                 Some(r) => {
@@ -2024,6 +2261,34 @@ mod tests {
                     assert_eq!(sb.ops, p.ops, "problem {i}: 256-bit ops vs recorded");
                 }
                 None => declined += 1,
+            }
+            // SAFETY: AVX2 checked above.
+            let r256z = unsafe {
+                run(
+                    Kern::V256Z,
+                    m8,
+                    p.tb,
+                    &q,
+                    &s,
+                    &scores,
+                    args.0,
+                    args.1,
+                    args.2,
+                    args.3,
+                    args.4,
+                    p.check_fence,
+                    &mut sb,
+                )
+            };
+            assert_eq!(
+                r256z, r256,
+                "problem {i}: 256-bit with the E clearing vs without"
+            );
+            if r256z.is_some() {
+                assert_eq!(
+                    sb.ops, p.ops,
+                    "problem {i}: 256-bit (E clearing) ops vs recorded"
+                );
             }
             // SAFETY: AVX2 checked above (the 128-bit kernels need a subset of its features).
             let rw = unsafe {
@@ -2184,7 +2449,7 @@ mod tests {
                             let sc = match k {
                                 Kern::V128 => &mut sa,
                                 Kern::W128 => &mut sw,
-                                Kern::V256 => &mut sb,
+                                Kern::V256 | Kern::V256Z => &mut sb,
                             };
                             let total = if warm {
                                 let mut ns = 0f64;

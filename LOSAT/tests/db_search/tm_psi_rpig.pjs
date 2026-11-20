@@ -1,0 +1,25 @@
+{
+  "version": "1.2",
+  "dbname": "tm_psi_rpig",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "tm_psi_rpig",
+  "number-of-letters": 180,
+  "number-of-sequences": 1,
+  "last-updated": "2026-11-04T16:44:00",
+  "number-of-volumes": 1,
+  "number-of-taxids": 1,
+  "bytes-total": 49606,
+  "bytes-to-cache": 286,
+  "files": [
+    "tm_psi_rpig.pdb",
+    "tm_psi_rpig.phr",
+    "tm_psi_rpig.pin",
+    "tm_psi_rpig.pog",
+    "tm_psi_rpig.pos",
+    "tm_psi_rpig.pot",
+    "tm_psi_rpig.psq",
+    "tm_psi_rpig.ptf",
+    "tm_psi_rpig.pto"
+  ]
+}

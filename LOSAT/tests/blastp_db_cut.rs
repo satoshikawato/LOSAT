@@ -1,16 +1,19 @@
 //! blastp's `-db` blocks cut by the database size and the thread count with `LOSAT_X_BPDBCUT`
 //! (`src/algorithm/blastp/blast_engine/database/x_db_cut.rs`) on whole searches.
 //!
-//! The switch is not in the strict set (`src/utils/xswitch.rs`): it is off unless its variable is
-//! set, and it acts only where a `-db` search runs its rounds of blocks on the pool (more than one
-//! thread). With it on, the blocks of the preliminary stage hold about a quarter of the database's
-//! sequence bytes per thread (at least 4 KiB, at most the 1 MiB of the search without it), each
-//! starting at the one-thread order's diagonal offset of its first sequence, and the results are
-//! merged in ordinal order. These tests compare the reports with the switch off and on (blastp and
-//! blastp-fast, one search of all queries and the block search of `LOSAT_X_BPQBLOCK`, tabular and
-//! pairwise) and run its shadow mode (`LOSAT_X_BPDBCUTSHADOW`), which searches the database again
-//! with blocks of 1 MiB and compares every hit list; its line at exit shows that the path ran. A
-//! difference stops the run.
+//! The switch is in the strict set (`src/utils/xswitch.rs`, on by default since 2026-10-17; the
+//! searches here set it to `0` unless they name it, `PREVIOUS_DEFAULT`), and it acts only where a
+//! `-db` search runs its rounds of blocks on the pool (more than one thread). With it on, the
+//! blocks of the preliminary stage hold about a quarter of the database's sequence bytes per
+//! thread (at least 4 KiB, at most the 1 MiB of the search without it), each starting at the
+//! one-thread order's diagonal offset of its first sequence, and the results are merged in ordinal
+//! order. These tests compare the reports with the switch off and on (blastp and blastp-fast, one
+//! search of all queries and the block search of `LOSAT_X_BPQBLOCK`); the reach rows of the run
+//! with the switch on (`LOSAT_X_REACH`, `tests/reach_support`) show that the cut ran (and, at one
+//! thread, that the blocks keep 1 MiB). Each task and case runs at one thread count: the thread
+//! count sets only the number of blocks (counted in the crate, see `FIXTURE_PSQ_BYTES`), the
+//! blocks per round and the number of workers, and the report is written from the merged hit
+//! lists whatever the outfmt.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1411-1413,1553-1554
 //! ```c
@@ -22,11 +25,13 @@
 //!          status = BlastHSPStreamWrite(hsp_stream, &hsp_list);
 //! ```
 
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use LOSAT::seqdb::{SeqDb, SeqType};
+mod temp_support;
+use temp_support::{worker_log_if_unset, TempFile};
+
+mod reach_support;
 
 /// The switches that joined the default set on 2026-10-17 (perf/perfmb-default-bundle), each
 /// `0`, the default before, unless the search sets it: every search here runs as it was written,
@@ -36,12 +41,9 @@ const PREVIOUS_DEFAULT: &[(&str, &str)] = &[
     ("LOSAT_X_BPLKPAHEAD", "0"),
     ("LOSAT_X_BPREDOLPT", "0"),
     ("LOSAT_X_BPREDOPAR", "0"),
-    ("LOSAT_X_BPSUBJMETA", "0"),
     ("LOSAT_X_DIAGLV", "0"),
     ("LOSAT_X_PAIRPARDISC", "0"),
     ("LOSAT_X_PAIRPARFOLD", "0"),
-    ("LOSAT_X_QBATCHPAR", "0"),
-    ("LOSAT_X_QDUSTPAR", "0"),
     ("LOSAT_X_QPREPPAR", "0"),
     ("LOSAT_X_RPTSTREAM", "0"),
 ];
@@ -54,55 +56,29 @@ fn fixture(name: &str) -> PathBuf {
 
 /// What one run printed: the report and standard error.
 struct Run {
+    /// The run\'s worker log, when the test made one: kept until the caller drops the run.
+    _log: Option<TempFile>,
     code: Option<i32>,
     stdout: Vec<u8>,
     stderr: String,
 }
 
-const SHADOW_PREFIX: &str = "[X_SHADOW] BPDBCUT ";
-
-impl Run {
-    /// The counters of the `[X_SHADOW] BPDBCUT` line, which must end with `identical`.
-    fn shadow(&self) -> HashMap<String, u64> {
-        let line = self
-            .stderr
-            .lines()
-            .find(|line| line.starts_with(SHADOW_PREFIX))
-            .unwrap_or_else(|| panic!("no {SHADOW_PREFIX}line in {}", self.stderr));
-        assert!(line.ends_with(" identical"), "{line}");
-        line[SHADOW_PREFIX.len()..]
-            .split(' ')
-            .filter_map(|field| field.split_once('='))
-            .map(|(key, value)| (key.to_string(), value.parse().expect("a count")))
-            .collect()
-    }
-
-    /// Standard error without the shadow's line.
-    fn stderr_without_shadow(&self) -> String {
-        self.stderr
-            .lines()
-            .filter(|line| !line.starts_with(SHADOW_PREFIX))
-            .map(|line| format!("{line}\n"))
-            .collect()
-    }
-}
-
 /// A protein database of the fixture's subject proteome (`MejoMJNV.faa`, 124 sequences, about 90 KB
 /// of sequence: one block of 1 MiB, about 4 x threads blocks of the cut: 9 at 2 threads, 19 at 4), made with
-/// `LOSAT makedb` in a directory of the test (`label`, which no other test uses); returns the
+/// `losat makeblastdb` in a directory of the test (`label`, which no other test uses); returns the
 /// database name.
 fn subject_database(label: &str) -> PathBuf {
     subject_database_with(label, &[])
 }
 
-/// `subject_database` with `extra` arguments for `LOSAT makedb` (`-max_file_sz` for volumes).
+/// `subject_database` with `extra` arguments for `losat makeblastdb` (`-max_file_sz` for volumes).
 fn subject_database_with(label: &str, extra: &[&str]) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("losat-bpdbcut-{label}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let name = dir.join("MejoMJNV");
-    let output = Command::new(env!("CARGO_BIN_EXE_LOSAT"))
-        .arg("makedb")
+    let output = Command::new(env!("CARGO_BIN_EXE_losat"))
+        .arg("makeblastdb")
         .arg("-in")
         .arg(fixture("MejoMJNV.faa"))
         .args(["-dbtype", "prot"])
@@ -110,10 +86,10 @@ fn subject_database_with(label: &str, extra: &[&str]) -> PathBuf {
         .arg(&name)
         .args(extra)
         .output()
-        .expect("run LOSAT makedb");
+        .expect("run losat makeblastdb");
     assert!(
         output.status.success(),
-        "makedb: {}",
+        "makeblastdb: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     name
@@ -135,7 +111,7 @@ fn blastp_any_exit(
     extra: &[&str],
     outfmt: &str,
 ) -> Run {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
         if (text.starts_with("LOSAT_") && name != "LOSAT_BLASTX_WORKER_LOG")
@@ -146,12 +122,7 @@ fn blastp_any_exit(
             command.env_remove(name);
         }
     }
-    if std::env::var_os("LOSAT_BLASTX_WORKER_LOG").is_none() {
-        command.env(
-            "LOSAT_BLASTX_WORKER_LOG",
-            std::env::temp_dir().join("losat-bpdbcut-worker.log"),
-        );
-    }
+    let log = worker_log_if_unset(&mut command, "blastp_db_cut_worker");
     let output = command
         .arg("blastp")
         .args(["-task", task])
@@ -169,6 +140,7 @@ fn blastp_any_exit(
         .output()
         .expect("run LOSAT");
     Run {
+        _log: log,
         code: output.status.code(),
         stdout: output.stdout,
         stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
@@ -200,11 +172,11 @@ fn with<'a>(base: &[(&'a str, &'a str)], extra: &[(&'a str, &'a str)]) -> Vec<(&
 }
 
 const ON: (&str, &str) = ("LOSAT_X_BPDBCUT", "1");
-const SHADOW: (&str, &str) = ("LOSAT_X_BPDBCUTSHADOW", "1");
 
-/// The switch off, on and in its shadow mode give the same report and standard error, the report
-/// of `one_thread` (the same search at one thread without the switch); returns the shadow's
-/// counters.
+/// The switch off and on give the same report and standard error, the report of `one_thread` (the
+/// same search at one thread without the switch). Returns the reach sides of the run with the
+/// switch on (`LOSAT_X_BPDBCUT`: `(the cut ran, the blocks of 1 MiB ran)`) and of
+/// `LOSAT_X_BPQBLOCK`.
 fn same_reports(
     task: &str,
     db: &Path,
@@ -213,7 +185,7 @@ fn same_reports(
     extra: &[&str],
     outfmt: &str,
     one_thread: &Run,
-) -> HashMap<String, u64> {
+) -> ((bool, bool), (bool, bool)) {
     let what = format!("{task} {base:?} {extra:?} threads {threads} outfmt {outfmt}");
     assert!(
         !one_thread.stdout.is_empty(),
@@ -224,126 +196,91 @@ fn same_reports(
         off.stdout == one_thread.stdout,
         "{what}: the report differs from one thread's without the switch"
     );
-    let on = blastp(task, db, threads, &with(base, &[ON]), extra, outfmt);
+    let reach = reach_support::Reach::new("dbcut");
+    let on = blastp(
+        task,
+        db,
+        threads,
+        &with(base, &[ON, reach.var()]),
+        extra,
+        outfmt,
+    );
     assert!(
         on.stdout == one_thread.stdout,
         "{what}: the report differs with the switch"
     );
     assert_eq!(on.stderr, off.stderr, "{what}: standard error differs");
-    let shadow = blastp(task, db, threads, &with(base, &[SHADOW]), extra, outfmt);
-    assert!(
-        shadow.stdout == one_thread.stdout,
-        "{what}: the report differs in the shadow mode"
-    );
-    assert_eq!(
-        shadow.stderr_without_shadow(),
-        off.stderr,
-        "{what}: standard error differs in the shadow mode"
-    );
-    shadow.shadow()
+    (
+        reach.sides("LOSAT_X_BPDBCUT"),
+        reach.sides("LOSAT_X_BPQBLOCK"),
+    )
 }
 
-/// The counters of a shadow run where the cut acted in `searches` searches: more blocks than with
-/// 1 MiB (one per search: the database is smaller), `blocks_per_search` per search, and hit lists
-/// compared.
-fn assert_engaged(
-    counts: &HashMap<String, u64>,
-    searches: u64,
-    blocks_per_search: u64,
-    what: &str,
-) {
-    assert_eq!(counts["searches"], searches, "{what}: {counts:?}");
-    assert_eq!(counts["blocks_ref"], searches, "{what}: {counts:?}");
-    assert_eq!(
-        counts["blocks"],
-        blocks_per_search * searches,
-        "{what}: {counts:?}"
-    );
-    assert!(counts["lists_compared"] > 0, "{what}: {counts:?}");
-}
+/// The size of the sequence file (`.psq`) of the fixture database. The in-crate test
+/// `fixture_tests` of `src/algorithm/blastp/blast_engine/database/x_db_cut.rs` makes the same
+/// database in process and counts the blocks of the cut (several at 2 and 4 threads) on a file
+/// of this size.
+const FIXTURE_PSQ_BYTES: u64 = 89_564;
 
-/// The blocks of the cut of the fixture database at `threads` threads: its sequence bytes
-/// (letters, one sentinel per sequence and one more: its `.psq` file) over 4 x threads, at least
-/// 4 KiB, as `SeqDb::next_block` cuts the sequences.
-fn blocks_of_the_cut(db: &Path, threads: u64) -> u64 {
-    let seqdb = SeqDb::open(db.to_str().unwrap(), SeqType::Protein).unwrap();
-    let bytes = seqdb.total_length() + u64::from(seqdb.num_seqs()) + 1;
-    assert_eq!(
-        bytes,
-        std::fs::metadata(db.with_extension("psq")).unwrap().len()
-    );
-    let cut = (bytes / (4 * threads)).clamp(4096, 1 << 20);
-    let (mut blocks, mut next) = (0, 0);
-    while let Some(range) = seqdb.next_block(next, cut) {
-        blocks += 1;
-        next = range.end_ordinal();
-    }
-    blocks
-}
-
-// blastp and blastp-fast at 2 and 4 threads, one search of all queries.
+// blastp at 2 threads and blastp-fast at 4, one search of all queries.
 #[test]
 fn search_of_all_queries_reports_with_the_cut_are_the_reports_without_it() {
     let db = subject_database("all");
-    for threads in [2u64, 4] {
-        let blocks = blocks_of_the_cut(&db, threads);
-        assert!(blocks > 2 * threads, "{threads} threads: {blocks} blocks");
-    }
-    for task in ["blastp", "blastp-fast"] {
+    assert_eq!(
+        std::fs::metadata(db.with_extension("psq")).unwrap().len(),
+        FIXTURE_PSQ_BYTES,
+        "the cut is several blocks at 2 and 4 threads"
+    );
+    for (task, threads) in [("blastp", 2u64), ("blastp-fast", 4)] {
         let one_thread = blastp(task, &db, 1, &[], &[], "6");
-        for threads in [2u64, 4] {
-            let counts = same_reports(task, &db, threads as u32, &[], &[], "6", &one_thread);
-            assert_engaged(
-                &counts,
-                1,
-                blocks_of_the_cut(&db, threads),
-                &format!("{task} threads {threads}"),
-            );
-        }
+        let (cut, _) = same_reports(task, &db, threads as u32, &[], &[], "6", &one_thread);
+        assert!(
+            cut.0,
+            "{task} threads {threads}: the cut did not run: {cut:?}"
+        );
     }
     let _ = std::fs::remove_dir_all(db.parent().unwrap());
 }
 
-// The block search (`LOSAT_X_BPQBLOCK`, every block of queries a search of the database) and the
-// pairwise report.
+// The block search (`LOSAT_X_BPQBLOCK`, every block of queries a search of the database). Every
+// outfmt's search reaches the cut through `database::search_blocks`; outfmt 0 with the cut on runs
+// in `pairwise_par.rs`.
 #[test]
-fn block_search_and_pairwise_reports_with_the_cut_are_the_reports_without_it() {
+fn block_search_reports_with_the_cut_are_the_reports_without_it() {
     let db = subject_database("blocks");
     let base = [("LOSAT_X_BPQBLOCK", "1")];
     let one_thread = blastp("blastp-fast", &db, 1, &base, &[], "6");
-    let counts = same_reports("blastp-fast", &db, 4, &base, &[], "6", &one_thread);
-    assert!(counts["searches"] > 1, "{counts:?}");
-    assert_engaged(
-        &counts,
-        counts["searches"],
-        blocks_of_the_cut(&db, 4),
-        "block search",
+    let (cut, blocks) = same_reports("blastp-fast", &db, 4, &base, &[], "6", &one_thread);
+    assert!(cut.0, "block search: the cut did not run: {cut:?}");
+    assert!(
+        blocks.0,
+        "block search: the block search did not run: {blocks:?}"
     );
-    let one_thread = blastp("blastp", &db, 1, &[], &[], "0");
-    let counts = same_reports("blastp", &db, 2, &[], &[], "0", &one_thread);
-    assert_engaged(&counts, 1, blocks_of_the_cut(&db, 2), "pairwise report");
     let _ = std::fs::remove_dir_all(db.parent().unwrap());
 }
 
-// At one thread the blocks keep 1 MiB: the shadow compares the same blocks.
+// At one thread the blocks keep 1 MiB: the run with the switch on takes the reference side (the
+// cut's rule does not hold) and writes the report of the run without it.
 #[test]
 fn the_cut_does_not_act_at_one_thread() {
     let db = subject_database("one");
-    let run = blastp("blastp", &db, 1, &[SHADOW], &[], "6");
-    let counts = run.shadow();
-    assert_eq!(counts["searches"], 1, "{counts:?}");
-    assert_eq!(counts["blocks"], 1, "{counts:?}");
-    assert_eq!(counts["blocks_ref"], 1, "{counts:?}");
+    let off = blastp("blastp", &db, 1, &[], &[], "6");
+    assert!(!off.stdout.is_empty(), "the fixture pair has rows");
+    let reach = reach_support::Reach::new("dbcut-one");
+    let on = blastp("blastp", &db, 1, &[ON, reach.var()], &[], "6");
     assert!(
-        run.stdout == blastp("blastp", &db, 1, &[], &[], "6").stdout,
-        "the report differs"
+        on.stdout == off.stdout,
+        "the report differs with the switch"
     );
+    assert_eq!(on.stderr, off.stderr, "standard error differs");
+    let sides = reach.sides("LOSAT_X_BPDBCUT");
+    assert_eq!(sides, (false, true), "{sides:?}");
     let _ = std::fs::remove_dir_all(db.parent().unwrap());
 }
 
 // A damaged database (its `.psq` cut short by 500 bytes) through the command line: the search fails
 // with the error of the one-thread order, so standard error and the exit code are the same at one
-// thread and, with the switch off, on and in its shadow mode, at 4 threads. The unit test compares
+// thread and, with the switch off and on, at 4 threads. The unit test compares
 // the texts of the errors; this one also pins their type, which the message of the error maps to.
 #[test]
 fn a_damaged_database_fails_with_the_same_error_with_the_cut() {
@@ -359,12 +296,11 @@ fn a_damaged_database_fails_with_the_same_error_with_the_cut() {
         one_thread.stderr
     );
     assert!(!one_thread.stderr.is_empty());
-    for (what, vars) in [("off", vec![]), ("on", vec![ON]), ("shadow", vec![SHADOW])] {
+    for (what, vars) in [("off", vec![]), ("on", vec![ON])] {
         let run = blastp_any_exit("blastp", &db, 4, &vars, &[], "6");
         assert_eq!(run.code, one_thread.code, "{what}: exit code differs");
         assert_eq!(
-            run.stderr_without_shadow(),
-            one_thread.stderr_without_shadow(),
+            run.stderr, one_thread.stderr,
             "{what}: standard error differs from one thread's"
         );
         assert!(run.stdout == one_thread.stdout, "{what}: report differs");
@@ -373,7 +309,7 @@ fn a_damaged_database_fails_with_the_same_error_with_the_cut() {
 }
 
 // A database of several volumes (`-max_file_sz 20000`) with the real kernel: the cut ends blocks at
-// volume ends, and 4 threads with the switch on and in its shadow mode give one thread's report.
+// volume ends, and 4 threads with the switch on give one thread's report.
 #[test]
 fn a_database_of_volumes_reports_with_the_cut_are_the_reports_without_it() {
     let db = subject_database_with("volumes", &["-max_file_sz", "20000"]);
@@ -386,20 +322,13 @@ fn a_database_of_volumes_reports_with_the_cut_are_the_reports_without_it() {
     assert!(volumes >= 3, "{volumes} volumes");
     let one_thread = blastp("blastp", &db, 1, &[], &[], "6");
     assert!(!one_thread.stdout.is_empty());
-    let on = blastp("blastp", &db, 4, &[ON], &[], "6");
+    let reach = reach_support::Reach::new("dbcut-volumes");
+    let on = blastp("blastp", &db, 4, &[ON, reach.var()], &[], "6");
     assert!(
         on.stdout == one_thread.stdout,
         "the report differs with the switch"
     );
-    let shadow = blastp("blastp", &db, 4, &[SHADOW], &[], "6");
-    assert!(
-        shadow.stdout == one_thread.stdout,
-        "the report differs in the shadow mode"
-    );
-    let counts = shadow.shadow();
-    assert_eq!(counts["searches"], 1, "{counts:?}");
-    assert!(counts["blocks_ref"] >= volumes as u64, "{counts:?}");
-    assert!(counts["blocks"] >= counts["blocks_ref"], "{counts:?}");
-    assert!(counts["lists_compared"] > 0, "{counts:?}");
+    let sides = reach.sides("LOSAT_X_BPDBCUT");
+    assert!(sides.0, "the cut did not run: {sides:?}");
     let _ = std::fs::remove_dir_all(db.parent().unwrap());
 }

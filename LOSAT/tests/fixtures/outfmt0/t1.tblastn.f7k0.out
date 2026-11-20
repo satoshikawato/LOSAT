@@ -1,0 +1,76 @@
+# TBLASTN 2.17.0+
+# Query: blaTEM-116_NG_050162.1 blaTEM-116 (translation of NG_050162.1)
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/t1_tn_s.fna)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 17 hits found
+blaTEM-116_NG_050162.1	dup9	99.301	286	2	0	1	286	574	1431	0.0	557
+blaTEM-116_NG_050162.1	dup9	44.737	228	124	2	35	261	2786	2106	7.16e-57	188
+blaTEM-116_NG_050162.1	dup9	38.697	261	156	3	18	276	3603	4379	4.84e-52	174
+blaTEM-116_NG_050162.1	dup9	24.138	58	33	1	18	64	3448	3275	1.7	20.8
+blaTEM-116_NG_050162.1	dup9	31.818	22	15	0	41	62	5625	5560	4.4	19.6
+blaTEM-116_NG_050162.1	dup1	99.301	286	2	0	1	286	574	1431	0.0	557
+blaTEM-116_NG_050162.1	dup1	44.737	228	124	2	35	261	2786	2106	7.16e-57	188
+blaTEM-116_NG_050162.1	dup1	38.697	261	156	3	18	276	3603	4379	4.84e-52	174
+blaTEM-116_NG_050162.1	dup1	24.138	58	33	1	18	64	3448	3275	1.7	20.8
+blaTEM-116_NG_050162.1	dup1	31.818	22	15	0	41	62	5625	5560	4.4	19.6
+blaTEM-116_NG_050162.1	contig_1	99.301	286	2	0	1	286	574	1431	0.0	557
+blaTEM-116_NG_050162.1	contig_1	44.737	228	124	2	35	261	2786	2106	7.16e-57	188
+blaTEM-116_NG_050162.1	contig_1	38.697	261	156	3	18	276	3603	4379	4.84e-52	174
+blaTEM-116_NG_050162.1	contig_1	24.138	58	33	1	18	64	3448	3275	1.7	20.8
+blaTEM-116_NG_050162.1	contig_1	31.818	22	15	0	41	62	5625	5560	4.4	19.6
+blaTEM-116_NG_050162.1	dup2	34.615	26	17	0	136	161	3922	3999	5.1	19.2
+blaTEM-116_NG_050162.1	contig_2	34.615	26	17	0	136	161	3922	3999	5.1	19.2
+# TBLASTN 2.17.0+
+# Query: blaCTX-M-14_NG_048929.1 blaCTX-M-14 (translation of NG_048929.1)
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/t1_tn_s.fna)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 15 hits found
+blaCTX-M-14_NG_048929.1	dup9	79.725	291	59	0	1	291	3537	4409	3.38e-159	482
+blaCTX-M-14_NG_048929.1	dup9	52.158	278	132	1	15	291	2864	2031	2.06e-86	273
+blaCTX-M-14_NG_048929.1	dup9	38.214	280	162	3	5	282	592	1404	4.21e-58	192
+blaCTX-M-14_NG_048929.1	dup9	36.364	22	14	0	194	215	8339	8274	2.9	20.0
+blaCTX-M-14_NG_048929.1	dup9	53.333	15	7	0	8	22	3137	3093	8.5	18.5
+blaCTX-M-14_NG_048929.1	dup1	79.725	291	59	0	1	291	3537	4409	3.38e-159	482
+blaCTX-M-14_NG_048929.1	dup1	52.158	278	132	1	15	291	2864	2031	2.06e-86	273
+blaCTX-M-14_NG_048929.1	dup1	38.214	280	162	3	5	282	592	1404	4.21e-58	192
+blaCTX-M-14_NG_048929.1	dup1	36.364	22	14	0	194	215	8339	8274	2.9	20.0
+blaCTX-M-14_NG_048929.1	dup1	53.333	15	7	0	8	22	3137	3093	8.5	18.5
+blaCTX-M-14_NG_048929.1	contig_1	79.725	291	59	0	1	291	3537	4409	3.38e-159	482
+blaCTX-M-14_NG_048929.1	contig_1	52.158	278	132	1	15	291	2864	2031	2.06e-86	273
+blaCTX-M-14_NG_048929.1	contig_1	38.214	280	162	3	5	282	592	1404	4.21e-58	192
+blaCTX-M-14_NG_048929.1	contig_1	36.364	22	14	0	194	215	8339	8274	2.9	20.0
+blaCTX-M-14_NG_048929.1	contig_1	53.333	15	7	0	8	22	3137	3093	8.5	18.5
+# TBLASTN 2.17.0+
+# Query: blaOXA-48_NG_049762.1 blaOXA-48 (translation of NG_049762.1)
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/t1_tn_s.fna)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 8 hits found
+blaOXA-48_NG_049762.1	dup9	91.288	264	23	0	2	265	4897	5688	1.66e-165	499
+blaOXA-48_NG_049762.1	dup9	37.931	29	13	1	227	250	8435	8349	7.1	18.9
+blaOXA-48_NG_049762.1	dup1	91.288	264	23	0	2	265	4897	5688	1.66e-165	499
+blaOXA-48_NG_049762.1	dup1	37.931	29	13	1	227	250	8435	8349	7.1	18.9
+blaOXA-48_NG_049762.1	contig_1	91.288	264	23	0	2	265	4897	5688	1.66e-165	499
+blaOXA-48_NG_049762.1	contig_1	37.931	29	13	1	227	250	8435	8349	7.1	18.9
+blaOXA-48_NG_049762.1	dup2	27.500	80	57	1	177	255	3951	3712	0.014	27.3
+blaOXA-48_NG_049762.1	contig_2	27.500	80	57	1	177	255	3951	3712	0.014	27.3
+# TBLASTN 2.17.0+
+# Query: blaKPC-2_NG_049253.1 blaKPC-2 (translation of NG_049253.1)
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/t1_tn_s.fna)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 15 hits found
+blaKPC-2_NG_049253.1	dup9	100.000	293	0	0	1	293	2894	2016	0.0	557
+blaKPC-2_NG_049253.1	dup9	52.521	238	112	1	29	266	3633	4343	1.35e-80	256
+blaKPC-2_NG_049253.1	dup9	44.737	228	124	2	37	263	676	1356	5.84e-61	200
+blaKPC-2_NG_049253.1	dup9	23.810	63	45	1	152	211	8462	8274	1.2	21.6
+blaKPC-2_NG_049253.1	dup9	36.111	36	19	1	104	139	8461	8556	2.4	20.4
+blaKPC-2_NG_049253.1	dup1	100.000	293	0	0	1	293	2894	2016	0.0	557
+blaKPC-2_NG_049253.1	dup1	52.521	238	112	1	29	266	3633	4343	1.35e-80	256
+blaKPC-2_NG_049253.1	dup1	44.737	228	124	2	37	263	676	1356	5.84e-61	200
+blaKPC-2_NG_049253.1	dup1	23.810	63	45	1	152	211	8462	8274	1.2	21.6
+blaKPC-2_NG_049253.1	dup1	36.111	36	19	1	104	139	8461	8556	2.4	20.4
+blaKPC-2_NG_049253.1	contig_1	100.000	293	0	0	1	293	2894	2016	0.0	557
+blaKPC-2_NG_049253.1	contig_1	52.521	238	112	1	29	266	3633	4343	1.35e-80	256
+blaKPC-2_NG_049253.1	contig_1	44.737	228	124	2	37	263	676	1356	5.84e-61	200
+blaKPC-2_NG_049253.1	contig_1	23.810	63	45	1	152	211	8462	8274	1.2	21.6
+blaKPC-2_NG_049253.1	contig_1	36.111	36	19	1	104	139	8461	8556	2.4	20.4
+# BLAST processed 4 queries

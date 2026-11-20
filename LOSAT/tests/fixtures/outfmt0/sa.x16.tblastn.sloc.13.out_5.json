@@ -1,0 +1,135 @@
+{
+  "BlastOutput2": {
+    "report": {
+      "program": "tblastn",
+      "version": "TBLASTN 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1",
+          "Subject_2",
+          "Subject_3",
+          "Subject_4",
+          "Subject_5"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "db_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_5",
+            "query_title": "BDT62567.1 wsv332-like protein [Metapenaeus ensis majanivirus]",
+            "query_len": 849,
+            "query_masking": [
+              {
+                "from": 3,
+                "to": 30
+              },
+              {
+                "from": 46,
+                "to": 62
+              },
+              {
+                "from": 105,
+                "to": 129
+              },
+              {
+                "from": 151,
+                "to": 162
+              },
+              {
+                "from": 190,
+                "to": 205
+              },
+              {
+                "from": 800,
+                "to": 821
+              },
+              {
+                "from": 829,
+                "to": 847
+              }
+            ],
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "LvMJNV_93001_98000",
+                    "title": "LvMJNV_93001_98000 window 1 of LvMJNV"
+                  }
+                ],
+                "len": 5000,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 21.557,
+                    "score": 44,
+                    "evalue": 0.156629,
+                    "identity": 9,
+                    "positive": 14,
+                    "query_from": 306,
+                    "query_to": 335,
+                    "hit_from": 49,
+                    "hit_to": 138,
+                    "hit_frame": -3,
+                    "align_len": 30,
+                    "gaps": 0,
+                    "qseq": "ILLTYCALLFFPFCRNAQTFKLINLYIETI",
+                    "hseq": "IQVTYADKVLLPIPNETNNMKIIDPGIETM",
+                    "midline": "I +TY   +  P        K+I+  IET+"
+                  }
+                ]
+              },
+              {
+                "num": 2,
+                "description": [
+                  {
+                    "id": "LvMJNV_199001_206000",
+                    "title": "LvMJNV_199001_206000 window 4 of LvMJNV"
+                  }
+                ],
+                "len": 7000,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 16.5494,
+                    "score": 31,
+                    "evalue": 6.31719,
+                    "identity": 6,
+                    "positive": 8,
+                    "query_from": 751,
+                    "query_to": 761,
+                    "hit_from": 74,
+                    "hit_to": 106,
+                    "hit_frame": -1,
+                    "align_len": 11,
+                    "gaps": 0,
+                    "qseq": "DKIYDILRDII",
+                    "hseq": "DKVMTLLNDII",
+                    "midline": "DK+  +L DII"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 40,
+              "eff_space": 470029,
+              "kappa": 0.041,
+              "lambda": 0.267,
+              "entropy": 0.14
+            }
+          }
+        ]
+      }
+    }
+  }
+}

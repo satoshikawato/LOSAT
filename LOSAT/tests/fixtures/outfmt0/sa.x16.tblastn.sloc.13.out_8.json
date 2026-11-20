@@ -1,0 +1,46 @@
+{
+  "BlastOutput2": {
+    "report": {
+      "program": "tblastn",
+      "version": "TBLASTN 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1",
+          "Subject_2",
+          "Subject_3",
+          "Subject_4",
+          "Subject_5"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "db_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_8",
+            "query_title": "BDT62533.1 dUTPase [Metapenaeus ensis majanivirus]",
+            "query_len": 154,
+            "hits": [
+            ],
+            "stat": {
+              "hsp_len": 27,
+              "eff_space": 82042,
+              "kappa": 0.041,
+              "lambda": 0.267,
+              "entropy": 0.14
+            },
+            "message": "No hits found"
+          }
+        ]
+      }
+    }
+  }
+}

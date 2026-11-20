@@ -1,0 +1,41 @@
+# PSIBLAST 2.17.0+
+# Iteration: 1
+# Query: q1o query one with O
+# Database: tests/db_search/tm_psi
+# Fields: query id, subject tax ids, subject sci names
+# 7 hits found
+q1o	9606	N/A
+q1o	10090	N/A
+q1o	99990	N/A
+q1o	562	N/A
+q1o	7777	N/A
+q1o	0	N/A
+q1o	9606	N/A
+# PSIBLAST 2.17.0+
+# Iteration: 1
+# Query: q2 query two
+# Database: tests/db_search/tm_psi
+# Fields: query id, subject tax ids, subject sci names
+# 8 hits found
+q2	99990	N/A
+q2	9606	N/A
+q2	99990	N/A
+q2	99990	N/A
+q2	7777	N/A
+q2	7777	N/A
+q2	10090	N/A
+q2	10090	N/A
+# PSIBLAST 2.17.0+
+# Iteration: 1
+# Query: q1b again
+# Database: tests/db_search/tm_psi
+# Fields: query id, subject tax ids, subject sci names
+# 7 hits found
+q1b	9606	N/A
+q1b	10090	N/A
+q1b	99990	N/A
+q1b	562	N/A
+q1b	7777	N/A
+q1b	0	N/A
+q1b	9606	N/A
+# BLAST processed 3 queries

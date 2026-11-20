@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="US-ASCII"?>
+<BlastXML2
+    xmlns="http://www.ncbi.nlm.nih.gov"
+    xmlns:xs="http://www.w3.org/2001/XMLSchema-instance"
+    xs:schemaLocation="http://www.ncbi.nlm.nih.gov http://www.ncbi.nlm.nih.gov/data_specs/schema_alt/NCBI_BlastOutput2.xsd"
+>
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>blastp</program>
+      <version>BLASTP 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <db>tests/db_search/multidb/pa tests/db_search/multidb/pxm</db>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>BLOSUM62</matrix>
+          <expect>10</expect>
+          <gap-open>11</gap-open>
+          <gap-extend>1</gap-extend>
+          <filter>F</filter>
+          <cbs>2</cbs>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <search>
+            <Search>
+              <query-id>Query_1</query-id>
+              <query-title>P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin [Homo sapiens] &gt;P69906.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin [Pan paniscus] &gt;P69907.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin [Pan troglodytes]</query-title>
+              <query-len>142</query-len>
+              <hits>
+                <Hit>
+                  <num>1</num>
+                  <description>
+                    <HitDescr>
+                      <id>ref|NP_900003.1|</id>
+                      <accession>NP_900003</accession>
+                      <title>two-line t3a</title>
+                    </HitDescr>
+                  </description>
+                  <len>142</len>
+                  <hsps>
+                    <Hsp>
+                      <num>1</num>
+                      <bit-score>205.297</bit-score>
+                      <score>521</score>
+                      <evalue>2.57143e-74</evalue>
+                      <identity>95</identity>
+                      <positive>110</positive>
+                      <query-from>1</query-from>
+                      <query-to>142</query-to>
+                      <hit-from>1</hit-from>
+                      <hit-to>142</hit-to>
+                      <align-len>142</align-len>
+                      <gaps>0</gaps>
+                      <qseq>MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHGKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTPAVHASLDKFLASVSTVLTSKYR</qseq>
+                      <hseq>MVLSMEDKSNVKAIWGKASGHLEEYGAEALERMFCAYPQTKIYFPHFDMSHNSAQIRAHGKKVFSALHEAVNHIDDLPGALCRLSELHAHSLRVDPVNFKFLAHCVLVVFAIHHPSALSPEIHASLDKFLCAVSAVLTSKYR</hseq>
+                      <midline>MVLS  DK+NVKA WGK   H  EYGAEALERMF ++P TK YFPHFD+SH SAQ++ HGKKV  AL  AV H+DD+P AL  LS+LHAH LRVDPVNFK L+HC+LV  A H P+  +P +HASLDKFL +VS VLTSKYR</midline>
+                    </Hsp>
+                  </hsps>
+                </Hit>
+              </hits>
+              <stat>
+                <Statistics>
+                  <db-num>14</db-num>
+                  <db-len>1961</db-len>
+                  <hsp-len>16</hsp-len>
+                  <eff-space>15876</eff-space>
+                  <kappa>0.041</kappa>
+                  <lambda>0.267</lambda>
+                  <entropy>0.14</entropy>
+                </Statistics>
+              </stat>
+            </Search>
+          </search>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+</BlastXML2>

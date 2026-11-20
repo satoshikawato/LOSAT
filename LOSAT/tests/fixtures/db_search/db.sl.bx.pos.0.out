@@ -1,0 +1,226 @@
+BLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: tfp
+           23 sequences; 3,263 total letters
+
+
+
+Query= ENST00000320868.9 cdna chromosome:GRCh38:16:176680:177522:1
+gene:ENSG00000206172.10 gene_biotype:protein_coding
+transcript_biotype:protein_coding gene_symbol:HBA1
+description:hemoglobin subunit alpha 1 [Source:HGNC
+Symbol;Acc:HGNC:4823]
+
+Length=577
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  286     9e-105
+Q9TS35.2 RecName: Full=Hemoglobin subunit alpha-1; AltName: Full=...  281     6e-103
+P63107.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  278     1e-101
+P01935.1 RecName: Full=Hemoglobin subunit alpha-3; AltName: Full=...  265     1e-96 
+P01942.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  253     1e-91 
+
+
+>P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain; Contains: RecName: 
+Full=Hemopressin [Homo sapiens] >sp|P69906.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: 
+Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan paniscus] >sp|P69907.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin 
+alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan troglodytes]
+Length=142
+
+ Score = 286 bits (732),  Expect = 9e-105, Method: Compositional matrix adjust.
+ Identities = 142/142 (100%), Positives = 142/142 (100%), Gaps = 0/142 (0%)
+ Frame = +2
+
+Query  38   MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  217
+            MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG
+Sbjct  1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+
+Query  218  KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  397
+            KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP
+Sbjct  61   KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+
+Query  398  AVHASLDKFLASVSTVLTSKYR  463
+            AVHASLDKFLASVSTVLTSKYR
+Sbjct  121  AVHASLDKFLASVSTVLTSKYR  142
+
+
+ Score = 15.0 bits (27),  Expect = 3.8, Method: Compositional matrix adjust.
+ Identities = 6/6 (100%), Positives = 6/6 (100%), Gaps = 0/6 (0%)
+ Frame = -2
+
+Query  450  VSTVLT  433
+            VSTVLT
+Sbjct  133  VSTVLT  138
+
+
+>Q9TS35.2 RecName: Full=Hemoglobin subunit alpha-1; AltName: Full=Alpha-1-globin; 
+AltName: Full=Hemoglobin alpha-1 chain; Contains: 
+RecName: Full=Hemopressin [Hylobates lar]
+Length=142
+
+ Score = 281 bits (720),  Expect = 6e-103, Method: Compositional matrix adjust.
+ Identities = 140/142 (99%), Positives = 141/142 (99%), Gaps = 0/142 (0%)
+ Frame = +2
+
+Query  38   MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  217
+            MVLSPADKTNVKAAWGKVGAHAG+YGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG
+Sbjct  1    MVLSPADKTNVKAAWGKVGAHAGDYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+
+Query  218  KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  397
+            KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAH PAEFTP
+Sbjct  61   KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHHPAEFTP  120
+
+Query  398  AVHASLDKFLASVSTVLTSKYR  463
+            AVHASLDKFLASVSTVLTSKYR
+Sbjct  121  AVHASLDKFLASVSTVLTSKYR  142
+
+
+ Score = 15.0 bits (27),  Expect = 3.6, Method: Compositional matrix adjust.
+ Identities = 6/6 (100%), Positives = 6/6 (100%), Gaps = 0/6 (0%)
+ Frame = -2
+
+Query  450  VSTVLT  433
+            VSTVLT
+Sbjct  133  VSTVLT  138
+
+
+>P63107.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain; Contains: RecName: 
+Full=Hemopressin [Macaca fuscata fuscata] >sp|P63108.2| 
+RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain; Contains: RecName: 
+Full=Hemopressin [Macaca mulatta]
+Length=142
+
+ Score = 278 bits (712),  Expect = 1e-101, Method: Compositional matrix adjust.
+ Identities = 138/142 (97%), Positives = 139/142 (98%), Gaps = 0/142 (0%)
+ Frame = +2
+
+Query  38   MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  217
+            MVLSPADK+NVKAAWGKVG HAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG
+Sbjct  1    MVLSPADKSNVKAAWGKVGGHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+
+Query  218  KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  397
+            KKVADALT AV HVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP
+Sbjct  61   KKVADALTLAVGHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+
+Query  398  AVHASLDKFLASVSTVLTSKYR  463
+            AVHASLDKFLASVSTVLTSKYR
+Sbjct  121  AVHASLDKFLASVSTVLTSKYR  142
+
+
+ Score = 15.0 bits (27),  Expect = 3.8, Method: Compositional matrix adjust.
+ Identities = 6/6 (100%), Positives = 6/6 (100%), Gaps = 0/6 (0%)
+ Frame = -2
+
+Query  450  VSTVLT  433
+            VSTVLT
+Sbjct  133  VSTVLT  138
+
+
+ Score = 14.2 bits (25),  Expect = 6.7, Method: Compositional matrix adjust.
+ Identities = 5/13 (38%), Positives = 8/13 (62%), Gaps = 1/13 (8%)
+ Frame = +1
+
+Query  454  QIPLSW-SLGGHA  489
+             +  +W  +GGHA
+Sbjct  10   NVKAAWGKVGGHA  22
+
+
+>P01935.1 RecName: Full=Hemoglobin subunit alpha-3; AltName: Full=Alpha-3-globin; 
+AltName: Full=Hemoglobin alpha-2 chain [Pan troglodytes]
+Length=141
+
+ Score = 265 bits (678),  Expect = 1e-96, Method: Compositional matrix adjust.
+ Identities = 125/141 (89%), Positives = 137/141 (97%), Gaps = 0/141 (0%)
+ Frame = +2
+
+Query  41   VLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHGK  220
+            VLSPADKTNVKAAWGKVGAHAG+YGAEALERMFLSFPTTKTYFPHFDLSHGSA+VKGHGK
+Sbjct  1    VLSPADKTNVKAAWGKVGAHAGZYGAEALERMFLSFPTTKTYFPHFDLSHGSAZVKGHGK  60
+
+Query  221  KVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTPA  400
+            KVA AL++AV H+DDMPNALSALS+LHAHKLRV+PV+FKLL+HCLLVTLAA  P++FTPA
+Sbjct  61   KVAKALSBAVZHLDDMPNALSALSBLHAHKLRVBPVBFKLLNHCLLVTLAABFPSZFTPA  120
+
+Query  401  VHASLDKFLASVSTVLTSKYR  463
+            VHAS+DKFLASVSTVLTSKYR
+Sbjct  121  VHASVDKFLASVSTVLTSKYR  141
+
+
+ Score = 14.6 bits (26),  Expect = 4.0, Method: Compositional matrix adjust.
+ Identities = 6/6 (100%), Positives = 6/6 (100%), Gaps = 0/6 (0%)
+ Frame = -2
+
+Query  450  VSTVLT  433
+            VSTVLT
+Sbjct  132  VSTVLT  137
+
+
+>P01942.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain; Contains: RecName: 
+Full=Hemopressin [Mus musculus]
+Length=142
+
+ Score = 253 bits (646),  Expect = 1e-91, Method: Compositional matrix adjust.
+ Identities = 122/142 (86%), Positives = 131/142 (92%), Gaps = 0/142 (0%)
+ Frame = +2
+
+Query  38   MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  217
+            MVLS  DK+N+KAAWGK+G H  EYGAEALERMF SFPTTKTYFPHFD+SHGSAQVKGHG
+Sbjct  1    MVLSGEDKSNIKAAWGKIGGHGAEYGAEALERMFASFPTTKTYFPHFDVSHGSAQVKGHG  60
+
+Query  218  KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  397
+            KKVADAL +A  H+DD+P ALSALSDLHAHKLRVDPVNFKLLSHCLLVTLA+H PA+FTP
+Sbjct  61   KKVADALASAAGHLDDLPGALSALSDLHAHKLRVDPVNFKLLSHCLLVTLASHHPADFTP  120
+
+Query  398  AVHASLDKFLASVSTVLTSKYR  463
+            AVHASLDKFLASVSTVLTSKYR
+Sbjct  121  AVHASLDKFLASVSTVLTSKYR  142
+
+
+ Score = 15.0 bits (27),  Expect = 3.4, Method: Compositional matrix adjust.
+ Identities = 6/6 (100%), Positives = 6/6 (100%), Gaps = 0/6 (0%)
+ Frame = -2
+
+Query  450  VSTVLT  433
+            VSTVLT
+Sbjct  133  VSTVLT  138
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 93316
+
+
+  Database: tfp
+    Posted date:  Oct 30, 2026  12:55 PM
+  Number of letters in database: 3,263
+  Number of sequences in database:  23
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 12
+Window for multiple hits: 40

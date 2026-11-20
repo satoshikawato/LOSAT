@@ -1,0 +1,37 @@
+<?xml version="1.0"?>
+<BlastXML2
+xmlns="http://www.ncbi.nlm.nih.gov"
+xmlns:xi="http://www.w3.org/2003/XInclude"
+xmlns:xs="http://www.w3.org/2001/XMLSchema-instance"
+xs:schemaLocation="http://www.ncbi.nlm.nih.gov http://www.ncbi.nlm.nih.gov/data_specs/schema_alt/NCBI_BlastOutput2.xsd">
+	<xi:include href="db.sa.bpqb.14.out_1.xml"/>
+	<xi:include href="db.sa.bpqb.14.out_2.xml"/>
+	<xi:include href="db.sa.bpqb.14.out_3.xml"/>
+	<xi:include href="db.sa.bpqb.14.out_4.xml"/>
+	<xi:include href="db.sa.bpqb.14.out_5.xml"/>
+	<xi:include href="db.sa.bpqb.14.out_6.xml"/>
+	<xi:include href="db.sa.bpqb.14.out_7.xml"/>
+	<xi:include href="db.sa.bpqb.14.out_8.xml"/>
+	<xi:include href="db.sa.bpqb.14.out_9.xml"/>
+	<xi:include href="db.sa.bpqb.14.out_10.xml"/>
+	<xi:include href="db.sa.bpqb.14.out_11.xml"/>
+	<xi:include href="db.sa.bpqb.14.out_12.xml"/>
+	<xi:include href="db.sa.bpqb.14.out_13.xml"/>
+	<xi:include href="db.sa.bpqb.14.out_14.xml"/>
+	<xi:include href="db.sa.bpqb.14.out_15.xml"/>
+	<xi:include href="db.sa.bpqb.14.out_16.xml"/>
+	<xi:include href="db.sa.bpqb.14.out_17.xml"/>
+	<xi:include href="db.sa.bpqb.14.out_18.xml"/>
+	<xi:include href="db.sa.bpqb.14.out_19.xml"/>
+	<xi:include href="db.sa.bpqb.14.out_20.xml"/>
+	<xi:include href="db.sa.bpqb.14.out_21.xml"/>
+	<xi:include href="db.sa.bpqb.14.out_22.xml"/>
+	<xi:include href="db.sa.bpqb.14.out_23.xml"/>
+	<xi:include href="db.sa.bpqb.14.out_24.xml"/>
+	<xi:include href="db.sa.bpqb.14.out_25.xml"/>
+	<xi:include href="db.sa.bpqb.14.out_26.xml"/>
+	<xi:include href="db.sa.bpqb.14.out_27.xml"/>
+	<xi:include href="db.sa.bpqb.14.out_28.xml"/>
+	<xi:include href="db.sa.bpqb.14.out_29.xml"/>
+	<xi:include href="db.sa.bpqb.14.out_30.xml"/>
+</BlastXML2>

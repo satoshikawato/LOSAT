@@ -1,5 +1,9 @@
 name: WASI threading integration
 
+# Runs the commit of the dispatch (or of the calling workflow). A non-blank candidate_sha is only checked
+# against that commit (a dispatch of another commit's SHA fails before any build step); to run a
+# candidate, dispatch on the branch whose head is the candidate.
+
 on:
   workflow_call:
     inputs:
@@ -12,7 +16,7 @@ on:
   workflow_dispatch:
     inputs:
       candidate_sha:
-        description: Candidate commit (blank uses the selected branch)
+        description: Candidate commit to assert (blank = no check; the run is the selected branch's head, which must equal it)
         type: string
         default: ''
       include_serial_compatibility:
@@ -29,15 +33,22 @@ jobs:
     timeout-minutes: 360
     env:
       INCLUDE_SERIAL_COMPATIBILITY: ${{ inputs.include_serial_compatibility }}
+      CANDIDATE_SHA: ${{ inputs.candidate_sha }}
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.candidate_sha || github.sha }}
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # A blank candidate_sha asserts nothing; a given one must be the commit that runs (the caller's
+      # commit in a workflow_call).
+      - name: Verify exact committed candidate SHA
+        run: |
+          if [[ -n "$CANDIDATE_SHA" && "$GITHUB_SHA" != "$CANDIDATE_SHA" ]]; then
+            echo "::error::candidate_sha is checked, not checked out: dispatch on the branch whose head is the candidate ($CANDIDATE_SHA); $GITHUB_REF is at $GITHUB_SHA"
+            exit 1
+          fi
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: 1.92.0
           targets: wasm32-wasip1-threads
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: LOSAT -> target
       # NCBI reference: c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
@@ -45,10 +56,10 @@ jobs:
       - name: Install optional serial compatibility target
         if: ${{ inputs.include_serial_compatibility }}
         run: rustup target add wasm32-wasip1
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24.21.0
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.12'
       - name: Install comparison test dependencies
@@ -64,10 +75,10 @@ jobs:
       - name: Build separate artifacts in both orders
         run: |
           cd LOSAT
-          cargo build --release --locked --bin LOSAT
+          cargo build --release --locked --bin losat
           compat_args=()
           if [[ "$INCLUDE_SERIAL_COMPATIBILITY" == true ]]; then
-            cargo build --release --locked --bin LOSAT --no-default-features --target-dir target/native-serial
+            cargo build --release --locked --bin losat --no-default-features --target-dir target/native-serial
             compat_args=(--include-serial)
           fi
           cd ..
@@ -76,6 +87,7 @@ jobs:
       # NCBI is a comparison oracle only. Verify the frozen official executable
       # identities before running searches; no production build invokes BLAST.
       - name: Install fixed comparison oracle
+        id: oracle
         run: |
           mkdir -p .tmp/threading/oracle
           cd .tmp/threading/oracle
@@ -86,6 +98,8 @@ jobs:
           33b64bc67d3149cee2459b2f7766b363323df632cf12c099546de00aea9698b5  ncbi-blast-2.17.0+/bin/blastn
           5ce267c04e4988c265357bfbedc64e809545b6fcfae7ff6775266fabbee8ba0e  ncbi-blast-2.17.0+/bin/blastp
           583e5d60bbd444ac455d20e0956c5aa0aeef675da8daee8204d8f9376ddb8804  ncbi-blast-2.17.0+/bin/tblastx
+          fea14b77d4452a524a003196824f414812126bd3fb64d950feec8bacccf4976c  ncbi-blast-2.17.0+/bin/tblastn
+          0dac09bed17043dfdf93ad71d50e6e177f273d5311897b9e653e45142bb3ef80  ncbi-blast-2.17.0+/bin/blastx
           CHECKSUMS
           sha256sum --check executables.sha256
       - name: Real command and reactor matrix
@@ -94,12 +108,12 @@ jobs:
           # (*thread)->Run(); (*thread)->Join(&result);
           compat_args=()
           if [[ "$INCLUDE_SERIAL_COMPATIBILITY" == true ]]; then
-            compat_args=(--native-serial LOSAT/target/native-serial/release/LOSAT
+            compat_args=(--native-serial LOSAT/target/native-serial/release/losat
               --serial .tmp/threading/artifacts/losat-serial-command.wasm
               --serial-reactor .tmp/threading/artifacts/losat-serial-reactor.wasm)
           fi
           python3 LOSAT/tests/check_wasm_threading.py \
-            --native LOSAT/target/release/LOSAT \
+            --native LOSAT/target/release/losat \
             --threaded .tmp/threading/artifacts/losat-threaded-command.wasm \
             --reactor .tmp/threading/artifacts/losat-threaded-reactor.wasm \
             --oracle-dir .tmp/threading/oracle/ncbi-blast-2.17.0+/bin \
@@ -117,7 +131,7 @@ jobs:
             compat_args=(--serial .tmp/threading/artifacts/losat-serial-command.wasm)
           fi
           python3 LOSAT/tests/check_wasm_threading_regressions.py \
-            --native LOSAT/target/release/LOSAT \
+            --native LOSAT/target/release/losat \
             --threaded .tmp/threading/artifacts/losat-threaded-command.wasm \
             --oracle-dir .tmp/threading/oracle/ncbi-blast-2.17.0+/bin \
             --jobs 3 --timeout-seconds 7200 \
@@ -131,11 +145,23 @@ jobs:
             compat_args=(--serial .tmp/threading/artifacts/losat-serial-command.wasm)
           fi
           python3 LOSAT/tests/check_tblastx_thread_thresholds.py \
-            --native LOSAT/target/release/LOSAT \
+            --native LOSAT/target/release/losat \
             --threaded .tmp/threading/artifacts/losat-threaded-command.wasm \
             --oracle .tmp/threading/oracle/ncbi-blast-2.17.0+/bin/tblastx \
             --output-dir .tmp/threading/threshold-regressions "${compat_args[@]}"
-      - uses: actions/upload-artifact@v4
+      # No NCBI counterpart: guards the benchmark runner's evidence rules (a run whose bytes do
+      # not match is PARITY_FAIL, a bad command is FAIL, a stale output file is refused), so a
+      # mismatching run is never timed. It runs last, so a failure of this test of a manual tool
+      # cannot skip that night's engine gates.
+      - name: Benchmark runner evidence test
+        if: ${{ !cancelled() && steps.oracle.outcome == 'success' }}
+        run: |
+          export BLASTN_BIN="$PWD/.tmp/threading/oracle/ncbi-blast-2.17.0+/bin/blastn"
+          node LOSAT/tests/test_benchmark_wasi_reuse.js .tmp/threading/artifacts/losat-threaded-command.wasm threaded-command
+          if [[ "$INCLUDE_SERIAL_COMPATIBILITY" == true ]]; then
+            node LOSAT/tests/test_benchmark_wasi_reuse.js .tmp/threading/artifacts/losat-serial-command.wasm serial-command
+          fi
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: wasi-threading-evidence

@@ -8,7 +8,7 @@
 //! coordinates by the interval's start (`RemapToQueryLoc`, `s_RemapToSubjectLoc`) and
 //! print the record's length.
 
-use anyhow::{bail, Result};
+use anyhow::Result;
 
 use crate::blastinput::app;
 use crate::blastinput::fasta_reader::InputRecord;
@@ -21,13 +21,6 @@ pub enum RangeRole {
 }
 
 impl RangeRole {
-    fn option(self) -> &'static str {
-        match self {
-            Self::Query => "-query_loc",
-            Self::Subject => "-subject_loc",
-        }
-    }
-
     // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:1996-1998
     // ```c++
     //         m_Range = ParseSequenceRange(args[kArgQueryLocation].AsString(),
@@ -107,12 +100,19 @@ impl SequenceRange {
 ///             LOG_POST(Error << "BLAST engine error: " << e.GetMsg());        \
 ///             exit_code = BLAST_ENGINE_ERROR;                                 \
 /// ```
+/// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:248-251
+/// ```c++
+///     catch (const CException& e) {                                           \
+///         LOG_POST(Error << "Error: " << e.what());                           \
+///         exit_code = BLAST_UNKNOWN_ERROR;                                    \
+///     }                                                                       \
+/// ```
 /// `NStr::Split` keeps empty tokens (`1--5` has three, `-10` an empty first one).
-/// `NStr::StringToInt` converts the start, then the stop, before the other checks; a part
-/// that it cannot convert stops NCBI with a `CStringException`, whose text names the
-/// source files of the build (exit 255): LOSAT rejects that value explicitly, as it does
-/// the environment variables that NCBI converts the same way (plan TD-15).
-pub fn parse_sequence_range(value: &str, role: RangeRole, program: &str) -> Result<SequenceRange> {
+/// `NStr::StringToInt` (flags 0, `ncbi_str::string_to_int`) converts the start, then the stop,
+/// before the other checks; a part that it cannot convert (`a`, `1.5`, ` 5`) throws its
+/// `CStringException`, which ends the program with `CATCH_ALL`'s report (`NativeError::exception`,
+/// exit status 255) where the range is read, before anything is written.
+pub fn parse_sequence_range(value: &str, role: RangeRole) -> Result<SequenceRange> {
     let prefix = role.error_prefix();
     let tokens: Vec<&str> = value.split('-').collect();
     if tokens.len() != 2 || tokens[0].is_empty() || tokens[1].is_empty() {
@@ -120,13 +120,8 @@ pub fn parse_sequence_range(value: &str, role: RangeRole, program: &str) -> Resu
     }
     let mut numbers = [0i32; 2];
     for (number, token) in numbers.iter_mut().zip(&tokens) {
-        match crate::blastinput::query_batch::ncbi_string_to_int(std::ffi::OsStr::new(token)) {
-            Some(value) => *number = value,
-            None => bail!(
-                "the {} value {value:?} has a part {token:?} that NCBI BLAST+ cannot convert to an int (it stops with a CStringException that names its build's source files); this is not supported by LOSAT's {program}",
-                role.option()
-            ),
-        }
+        *number = crate::ncbi_str::string_to_int(token.as_bytes(), 0)
+            .map_err(|e| crate::cli::NativeError::exception(&e))?;
     }
     let [from, to] = numbers;
     if from <= 0 || to <= 0 {
@@ -151,13 +146,9 @@ pub fn parse_sequence_range(value: &str, role: RangeRole, program: &str) -> Resu
 }
 
 /// Parses the range of a role when it was given (`args.Exist(...) && args[...]`).
-pub fn parse_optional_range(
-    value: Option<&str>,
-    role: RangeRole,
-    program: &str,
-) -> Result<Option<SequenceRange>> {
+pub fn parse_optional_range(value: Option<&str>, role: RangeRole) -> Result<Option<SequenceRange>> {
     value
-        .map(|value| parse_sequence_range(value, role, program))
+        .map(|value| parse_sequence_range(value, role))
         .transpose()
 }
 
@@ -254,6 +245,11 @@ impl Placements {
     pub fn ranged(&self) -> bool {
         !self.0.is_empty()
     }
+
+    /// Where record `index`'s letters lie in the record, `None` without a range.
+    pub fn get(&self, index: usize) -> Option<RecordPlacement> {
+        self.0.get(index).copied()
+    }
 }
 
 /// The subjects as NCBI searches them with `-subject_loc`: every record cut to its interval
@@ -301,23 +297,27 @@ pub fn cut_subjects<R: InputRecord>(
     let mut cut_records = Vec::with_capacity(records.len());
     let mut placements = Vec::with_capacity(records.len());
     for record in records {
-        let length = record.seq().len();
-        let (from, to_exclusive) = match record_interval(range, length) {
-            RecordInterval::Letters { from, to } => (from, to + 1),
-            RecordInterval::Empty => (length, length),
-            RecordInterval::PastEnd => {
-                return Err(app::options_error(
-                    "Invalid from coordinate (greater than sequence length)",
-                ))
-            }
-        };
+        let (from, to_exclusive) = record_cut(range, record.seq().len())?;
         cut_records.push(record.cut(from, to_exclusive));
         placements.push(RecordPlacement {
             offset: from,
-            length,
+            length: record.seq().len(),
         });
     }
     Ok(Some((cut_records, Placements(placements))))
+}
+
+/// The letters `[from, to_exclusive)` of a record of `length` letters that `cut_subjects` keeps
+/// (`from == to_exclusive == length` for an interval without letters), or the error of an interval
+/// that starts past the end.
+pub fn record_cut(range: &SequenceRange, length: usize) -> Result<(usize, usize)> {
+    match record_interval(range, length) {
+        RecordInterval::Letters { from, to } => Ok((from, to + 1)),
+        RecordInterval::Empty => Ok((length, length)),
+        RecordInterval::PastEnd => Err(app::options_error(
+            "Invalid from coordinate (greater than sequence length)",
+        )),
+    }
 }
 
 /// How many subject records NCBI's reader reads (and writes the title warnings of) before
@@ -332,44 +332,6 @@ pub fn subjects_read<R: InputRecord>(records: &[R], range: Option<&SequenceRange
         .iter()
         .position(|record| record_interval(range, record.seq().len()) == RecordInterval::PastEnd)
         .map_or(records.len(), |index| index + 1)
-}
-
-/// The explicit rejection of an interval without letters (a range that starts just past
-/// a record's end), which NCBI searches as a sequence without data ("Sequence contains no
-/// data"); LOSAT does not search records without letters either.
-/// `ordinals` are the input positions of the records (empty: their indexes).
-pub fn check_no_empty_interval<R: InputRecord>(
-    records: &[R],
-    placements: &Placements,
-    ordinals: &[usize],
-    role: RangeRole,
-    program: &str,
-) -> Result<()> {
-    for (index, (record, placement)) in records.iter().zip(&placements.0).enumerate() {
-        let index = ordinals.get(index).copied().unwrap_or(index);
-        if record.seq().is_empty() && placement.length > 0 {
-            let (role_name, option) = match role {
-                RangeRole::Query => ("query", "-query_loc"),
-                RangeRole::Subject => ("subject", "-subject_loc"),
-            };
-            bail!(
-                "{role_name} record {} ({}) has no letters in the {option} range (the range starts just past its end); NCBI BLAST+ searches it as a sequence without data, which is not supported by LOSAT's {program}",
-                index + 1,
-                first_word(&record.title_bytes())
-            );
-        }
-    }
-    Ok(())
-}
-
-/// The title of a record up to its first space, as text (the `bio` ID of a `bio` record),
-/// for LOSAT's messages.
-fn first_word(title: &[u8]) -> String {
-    let end = title
-        .iter()
-        .position(|&byte| byte == b' ')
-        .unwrap_or(title.len());
-    String::from_utf8_lossy(&title[..end]).into_owned()
 }
 
 /// The query input as NCBI reads it, one record at a time: where each searched query lies
@@ -415,6 +377,40 @@ impl QueryInput {
             .ordinals
             .partition_point(|&ordinal| ordinal < input.end);
         first..last
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:138-146
+    // ```c++
+    //     TSeqPos size_read = 0;
+    //
+    //     while (size_read < GetBatchSize()) {
+    //
+    //         if (End())
+    //             break;
+    // ```
+    // No NCBI counterpart for the slice itself: a batch is counted from its first record alone, so
+    // the input records from the start of a batch have the batches of the whole input from there.
+    /// The input records `input` as an input of their own: their lengths and skips, and the
+    /// searched queries among them (`searched_in`) with their placements, numbered from
+    /// `input.start`. EXPERIMENT (LOSAT_X_BPQBLOCK): a block of whole query batches of the search
+    /// of all queries (`blast_engine.rs`: `x_prelim_block_plan`, and `run_preliminary`'s loop over
+    /// its blocks, `blast_engine/prelim_run.rs`), whose `batches` are the whole input's batches of those records.
+    pub fn slice(&self, input: std::ops::Range<usize>) -> Self {
+        let searched = self.searched_in(input.clone());
+        Self {
+            placements: Placements(if self.placements.0.is_empty() {
+                Vec::new()
+            } else {
+                self.placements.0[searched.clone()].to_vec()
+            }),
+            ordinals: self.ordinals[searched]
+                .iter()
+                .map(|&ordinal| ordinal - input.start)
+                .collect(),
+            input_lengths: self.input_lengths[input.clone()].to_vec(),
+            skipped: self.skipped[input].to_vec(),
+            range_length: self.range_length,
+        }
     }
 
     /// The query batches of the input with a fixed batch size: NCBI reads batches while
@@ -530,8 +526,8 @@ pub struct RangedBatch {
 ///         retval->AddQuery(q);
 ///     }
 /// ```
-/// `size_read` and the batch size are `TSeqPos` (32-bit unsigned), as in
-/// `query_batch::next_query_batch_end`; without skipped records the two agree.
+/// `size_read` and the batch size are `TSeqPos` (32-bit unsigned): an `Int4` batch size
+/// converts to it (a negative one becomes 2^32 plus the value).
 pub fn next_ranged_batch_end(
     input_lengths: &[usize],
     skipped: &[bool],
@@ -605,6 +601,45 @@ pub fn record_frame(plus: bool, start: usize, record_length: usize) -> i32 {
     }
 }
 
+/// A mask of the searched letters `[from, to]` (0-based) as the reports show it: moved into the
+/// record by the start of the interval (`offset`, 0 without a range) and cut at the interval's end
+/// (`length` letters searched); `None` for an empty mask, one past the interval, or one that
+/// covers the whole interval.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:825-843
+/// ```c++
+/// template <class Position>
+/// CRange<Position> Map(const CRange<Position>& target,
+///                      const CRange<Position>& range)
+/// {
+///     ...
+///     if (range.Empty() ||
+///         (range.GetFrom() > target.GetTo()) ||
+///         ((range.GetFrom() + target.GetFrom()) > target.GetTo())) {
+///         return target;
+///     }
+///
+///     CRange<Position> retval;
+///     retval.SetFrom(max(target.GetFrom() + range.GetFrom(), target.GetFrom()));
+///     retval.SetTo(min(target.GetFrom() + range.GetTo(), target.GetTo()));
+///     return retval;
+/// }
+/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:936-938
+/// ```c++
+///                 TSeqRange masked_range(loc->ssr->left, loc->ssr->right);
+///                 TSeqRange range(Map(kTarget, masked_range));
+///                 if (range.NotEmpty() && range != kTarget) {
+/// ```
+pub fn record_mask(from: i32, to: i32, length: usize, offset: usize) -> Option<(i32, i32)> {
+    let target = (offset as i32, (offset + length) as i32 - 1);
+    if from > to || from > target.1 || from + target.0 > target.1 {
+        return None;
+    }
+    let mapped = (target.0 + from, (target.0 + to).min(target.1));
+    (mapped != target).then_some(mapped)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -613,9 +648,15 @@ mod tests {
         format!("{error:#}")
     }
 
+    // NCBI unit test (598d8ae6): c++/src/algo/blast/blastinput/unit_test/blastinput_unit_test.cpp:2760-2763 ParseSequenceRange_EmptyRange
+    // NCBI unit test (598d8ae6): c++/src/algo/blast/blastinput/unit_test/blastinput_unit_test.cpp:2767-2770 ParseSequenceRange_0BasedRange
+    // NCBI unit test (598d8ae6): c++/src/algo/blast/blastinput/unit_test/blastinput_unit_test.cpp:2774-2777 ParseSequenceRange_InvalidDelimiter
+    // NCBI unit test (598d8ae6): c++/src/algo/blast/blastinput/unit_test/blastinput_unit_test.cpp:2781-2788 ParseSequenceRange_IncompleteRange
+    // NCBI unit test (598d8ae6): c++/src/algo/blast/blastinput/unit_test/blastinput_unit_test.cpp:2792-2798 ParseSequenceRange_InvalidRange
+    // NCBI unit test (598d8ae6): c++/src/algo/blast/blastinput/unit_test/blastinput_unit_test.cpp:2802-2805 ParseSequenceRange_1BasedRange
     #[test]
     fn spellings_follow_ncbis_parser() {
-        let parse = |text: &str| parse_sequence_range(text, RangeRole::Query, "BLASTN");
+        let parse = |text: &str| parse_sequence_range(text, RangeRole::Query);
         assert_eq!(parse("10-20").unwrap(), SequenceRange { from: 9, to: 19 });
         assert_eq!(parse("+1-5").unwrap(), SequenceRange { from: 0, to: 4 });
         assert_eq!(parse("01-05").unwrap(), SequenceRange { from: 0, to: 4 });
@@ -627,7 +668,9 @@ mod tests {
                 to: 2147483646
             }
         );
-        for text in ["", "-", "--", "-10", "10-", "10", "1--5", "1-2-3", "-5-10"] {
+        for text in [
+            "", "-", "--", "-10", "10-", "10", "1--5", "1-2-3", "-5-10", "3,4",
+        ] {
             assert_eq!(
                 message(parse(text).unwrap_err()),
                 "BLAST engine error: Invalid specification of query location (Format: start-stop)\n",
@@ -642,24 +685,50 @@ mod tests {
             assert!(message(parse(text).unwrap_err()).contains("(range cannot be empty)"));
         }
         assert!(message(parse("20-10").unwrap_err()).contains("(start cannot be larger than stop)"));
-        for text in [
-            " 1-5",
-            "1-5 ",
-            "a-5",
-            "1-5a",
-            "1.0-5",
-            "0x10-0x20",
-            "1-2147483648",
-            "0-a",
+        // NCBI BLAST+ 2.17.0 blastn and blastp `-query_loc` / `-subject_loc` (env parity probe
+        // h_probe of 2026-11-12, cases `LOC.*`: `a-10`, `1-b`, `1-1.5`): the part that
+        // `NStr::StringToInt` cannot convert stops the program with its `CStringException`, the
+        // start before the stop.
+        let root = crate::ncbi_exception::NCBI_BUILD_ROOT;
+        for (text, part, line, kind, pos) in [
+            ("a-10", "a", 861, "Int8", 0),
+            ("1-b", "b", 861, "Int8", 0),
+            ("1-1.5", "1.5", 870, "Int8", 1),
+            (" 1-5", " 1", 861, "Int8", 0),
+            ("1-5 ", "5 ", 870, "Int8", 1),
+            ("1-5a", "5a", 870, "Int8", 1),
+            ("1.0-5", "1.0", 870, "Int8", 1),
+            ("0x10-0x20", "0x10", 870, "Int8", 1),
+            ("0-a", "a", 861, "Int8", 0),
+            ("1-2147483648", "2147483648", 640, "int, overflow", 0),
+            (
+                "1-99999999999999999999",
+                "99999999999999999999",
+                852,
+                "Int8, overflow",
+                18,
+            ),
         ] {
-            let error = message(parse(text).unwrap_err());
-            assert!(
-                error.contains("cannot convert to an int") && error.contains("LOSAT's BLASTN"),
-                "{text:?}: {error}"
+            let function = if line == 640 {
+                "StringToInt"
+            } else {
+                "StringToInt8"
+            };
+            let error = parse(text).unwrap_err();
+            let native = error
+                .downcast_ref::<crate::cli::NativeError>()
+                .expect("NCBI's exception");
+            assert_eq!(native.exit, 255, "{text:?}");
+            assert_eq!(
+                native.message,
+                format!(
+                    "Error: NCBI C++ Exception:\n    T0 \"{root}/src/corelib/ncbistr.cpp\", line {line}: Error: (CStringException::eConvert) ncbi::NStr::{function}() - Cannot convert string '{part}' to {kind} (m_Pos = {pos})\n\n"
+                ),
+                "{text:?}"
             );
         }
         assert!(
-            message(parse_sequence_range("5-3", RangeRole::Subject, "TBLASTN").unwrap_err())
+            message(parse_sequence_range("5-3", RangeRole::Subject).unwrap_err())
                 .starts_with("BLAST engine error: Invalid specification of subject location")
         );
     }
@@ -739,11 +808,85 @@ mod tests {
         );
     }
 
+    // EXPERIMENT (LOSAT_X_BPQBLOCK): the input records from the start of a batch to the end of a
+    // later one have the whole input's batches of those records (each moved by the slice's first
+    // record and first searched query), with their placements and positions; with `-query_loc`
+    // (skipped records inside a batch) and without it.
+    #[test]
+    fn a_slice_of_whole_batches_has_the_batches_of_the_input() {
+        let lengths = [
+            8000usize, 400, 3000, 200, 7000, 50, 9000, 600, 600, 1200, 300,
+        ];
+        let records: Vec<crate::blastinput::fasta_reader::FastaRecord> = lengths
+            .iter()
+            .enumerate()
+            .map(|(index, &length)| {
+                crate::blastinput::fasta_reader::FastaRecord::new(
+                    format!("Query_{}", index + 1),
+                    format!("q{index}").as_bytes(),
+                    &vec![b'A'; length],
+                )
+            })
+            .collect();
+        let ranged = cut_queries(&records, &SequenceRange { from: 500, to: 999 });
+        assert!(ranged.input.skipped.iter().any(|&skipped| skipped));
+        for input in [QueryInput::whole(&records), ranged.input] {
+            for batch_size in [1u32, 700, 3000, 5000, 10000] {
+                let batches = input.batches(batch_size);
+                for first in 0..batches.len() {
+                    for last in first..batches.len() {
+                        let records = batches[first].input.start..batches[last].input.end;
+                        let searched = batches[first].searched.start..batches[last].searched.end;
+                        let slice = input.slice(records.clone());
+                        let expected: Vec<RangedBatch> = batches[first..=last]
+                            .iter()
+                            .map(|batch| RangedBatch {
+                                input: batch.input.start - records.start
+                                    ..batch.input.end - records.start,
+                                searched: batch.searched.start - searched.start
+                                    ..batch.searched.end - searched.start,
+                            })
+                            .collect();
+                        let what = format!("batch size {batch_size}, records {records:?}");
+                        assert_eq!(slice.batches(batch_size), expected, "{what}");
+                        assert_eq!(slice.ordinals.len(), searched.len(), "{what}");
+                        for (index, query) in searched.clone().enumerate() {
+                            assert_eq!(
+                                slice.ordinal(index) + records.start,
+                                input.ordinal(query),
+                                "{what}"
+                            );
+                            assert_eq!(
+                                slice.placements.get(index),
+                                input.placements.get(query),
+                                "{what}"
+                            );
+                        }
+                        assert_eq!(slice.range_length, input.range_length);
+                    }
+                }
+            }
+        }
+    }
+
     #[test]
     fn frames_are_those_of_the_whole_record() {
         assert_eq!(record_frame(true, 0, 100), 1);
         assert_eq!(record_frame(true, 4, 100), 2);
         assert_eq!(record_frame(false, 99, 100), -1);
         assert_eq!(record_frame(false, 97, 100), -3);
+    }
+
+    #[test]
+    fn masks_move_into_the_record_and_stop_at_the_interval() {
+        // Without a range: as found, other than the whole record.
+        assert_eq!(record_mask(10, 20, 100, 0), Some((10, 20)));
+        assert_eq!(record_mask(0, 99, 100, 0), None);
+        assert_eq!(record_mask(5, 4, 100, 0), None);
+        // The interval 501-600 of a record: moved by its start, cut at its end.
+        assert_eq!(record_mask(10, 20, 100, 500), Some((510, 520)));
+        assert_eq!(record_mask(90, 150, 100, 500), Some((590, 599)));
+        assert_eq!(record_mask(0, 99, 100, 500), None);
+        assert_eq!(record_mask(100, 120, 100, 500), None);
     }
 }

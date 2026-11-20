@@ -1,0 +1,1267 @@
+Seq-annot ::= {
+  desc {
+    user {
+      type str "Hist Seqalign",
+      data {
+        {
+          label str "Hist Seqalign",
+          data bool TRUE
+        }
+      }
+    },
+    user {
+      type str "Blast Type",
+      data {
+        {
+          label str "blastp",
+          data int 2
+        }
+      }
+    },
+    user {
+      type str "Blast Database Title",
+      data {
+        {
+          label str "PajaWSV proteins",
+          data bool FALSE
+        }
+      }
+    }
+  },
+  data align {
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 220
+        },
+        {
+          id str "blast_score",
+          value int 220
+        },
+        {
+          id str "e_value",
+          value real { 12054441037579, 10, -34 }
+        },
+        {
+          id str "bit_score",
+          value real { 893521389818617, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 97
+        },
+        {
+          id str "comp_adjustment_method",
+          value int 2
+        },
+        {
+          id str "num_positives",
+          value int 193
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 976509971509972, 10, -13 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 25,
+        ids {
+          local str "Query_9",
+          general {
+            db "BL_ORD_ID",
+            tag id 30
+          }
+        },
+        starts {
+          7,
+          628,
+          -1,
+          668,
+          47,
+          677,
+          119,
+          -1,
+          121,
+          749,
+          -1,
+          759,
+          131,
+          782,
+          143,
+          -1,
+          159,
+          794,
+          -1,
+          815,
+          180,
+          823,
+          -1,
+          830,
+          187,
+          847,
+          -1,
+          889,
+          229,
+          892,
+          239,
+          -1,
+          246,
+          902,
+          -1,
+          944,
+          288,
+          950,
+          -1,
+          953,
+          291,
+          971,
+          -1,
+          974,
+          294,
+          975,
+          -1,
+          998,
+          317,
+          1000
+        },
+        lens {
+          40,
+          9,
+          72,
+          2,
+          10,
+          23,
+          12,
+          16,
+          21,
+          8,
+          7,
+          17,
+          42,
+          3,
+          10,
+          7,
+          42,
+          6,
+          3,
+          18,
+          3,
+          1,
+          23,
+          2,
+          31
+        },
+        strands {
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown
+        }
+      }
+    }
+  }
+}
+Seq-annot ::= {
+  desc {
+    user {
+      type str "Hist Seqalign",
+      data {
+        {
+          label str "Hist Seqalign",
+          data bool TRUE
+        }
+      }
+    },
+    user {
+      type str "Blast Type",
+      data {
+        {
+          label str "blastp",
+          data int 2
+        }
+      }
+    },
+    user {
+      type str "Blast Database Title",
+      data {
+        {
+          label str "PajaWSV proteins",
+          data bool FALSE
+        }
+      }
+    }
+  },
+  data align {
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 212
+        },
+        {
+          id str "blast_score",
+          value int 212
+        },
+        {
+          id str "e_value",
+          value real { 243863240923808, 10, -36 }
+        },
+        {
+          id str "bit_score",
+          value real { 862705423745229, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 42
+        },
+        {
+          id str "comp_adjustment_method",
+          value int 2
+        },
+        {
+          id str "num_positives",
+          value int 79
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 311372549019608, 10, -13 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 5,
+        ids {
+          local str "Query_15",
+          general {
+            db "BL_ORD_ID",
+            tag id 41
+          }
+        },
+        starts {
+          258,
+          5,
+          -1,
+          25,
+          278,
+          26,
+          -1,
+          107,
+          359,
+          113
+        },
+        lens {
+          20,
+          1,
+          81,
+          6,
+          24
+        },
+        strands {
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown
+        }
+      }
+    }
+  }
+}
+Seq-annot ::= {
+  desc {
+    user {
+      type str "Hist Seqalign",
+      data {
+        {
+          label str "Hist Seqalign",
+          data bool TRUE
+        }
+      }
+    },
+    user {
+      type str "Blast Type",
+      data {
+        {
+          label str "blastp",
+          data int 2
+        }
+      }
+    },
+    user {
+      type str "Blast Database Title",
+      data {
+        {
+          label str "PajaWSV proteins",
+          data bool FALSE
+        }
+      }
+    }
+  },
+  data align {
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 61
+        },
+        {
+          id str "blast_score",
+          value int 61
+        },
+        {
+          id str "e_value",
+          value real { 62155185911315, 10, -15 }
+        },
+        {
+          id str "bit_score",
+          value real { 281054064110026, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 18
+        },
+        {
+          id str "comp_adjustment_method",
+          value int 2
+        },
+        {
+          id str "num_positives",
+          value int 27
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 142466307277628, 10, -13 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_16",
+          general {
+            db "BL_ORD_ID",
+            tag id 63
+          }
+        },
+        starts {
+          135,
+          413
+        },
+        lens {
+          51
+        },
+        strands {
+          unknown,
+          unknown
+        }
+      }
+    }
+  }
+}
+Seq-annot ::= {
+  desc {
+    user {
+      type str "Hist Seqalign",
+      data {
+        {
+          label str "Hist Seqalign",
+          data bool TRUE
+        }
+      }
+    },
+    user {
+      type str "Blast Type",
+      data {
+        {
+          label str "blastp",
+          data int 2
+        }
+      }
+    },
+    user {
+      type str "Blast Database Title",
+      data {
+        {
+          label str "PajaWSV proteins",
+          data bool FALSE
+        }
+      }
+    }
+  },
+  data align {
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 368
+        },
+        {
+          id str "blast_score",
+          value int 368
+        },
+        {
+          id str "e_value",
+          value real { 25683266792191, 10, -53 }
+        },
+        {
+          id str "bit_score",
+          value real { 14636167621763, 10, -11 }
+        },
+        {
+          id str "num_ident",
+          value int 89
+        },
+        {
+          id str "comp_adjustment_method",
+          value int 2
+        },
+        {
+          id str "num_positives",
+          value int 162
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 575833333333333, 10, -13 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 7,
+        ids {
+          local str "Query_17",
+          general {
+            db "BL_ORD_ID",
+            tag id 33
+          }
+        },
+        starts {
+          199,
+          300,
+          313,
+          -1,
+          314,
+          414,
+          -1,
+          471,
+          371,
+          475,
+          -1,
+          544,
+          440,
+          545
+        },
+        lens {
+          114,
+          1,
+          57,
+          4,
+          69,
+          1,
+          33
+        },
+        strands {
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown
+        }
+      }
+    }
+  }
+}
+Seq-annot ::= {
+  desc {
+    user {
+      type str "Hist Seqalign",
+      data {
+        {
+          label str "Hist Seqalign",
+          data bool TRUE
+        }
+      }
+    },
+    user {
+      type str "Blast Type",
+      data {
+        {
+          label str "blastp",
+          data int 2
+        }
+      }
+    },
+    user {
+      type str "Blast Database Title",
+      data {
+        {
+          label str "PajaWSV proteins",
+          data bool FALSE
+        }
+      }
+    }
+  },
+  data align {
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 114
+        },
+        {
+          id str "blast_score",
+          value int 114
+        },
+        {
+          id str "e_value",
+          value real { 162935736350639, 10, -22 }
+        },
+        {
+          id str "bit_score",
+          value real { 485209839346223, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 41
+        },
+        {
+          id str "comp_adjustment_method",
+          value int 2
+        },
+        {
+          id str "num_positives",
+          value int 62
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 256781472684086, 10, -13 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 11,
+        ids {
+          local str "Query_18",
+          general {
+            db "BL_ORD_ID",
+            tag id 16
+          }
+        },
+        starts {
+          296,
+          180,
+          -1,
+          206,
+          322,
+          216,
+          327,
+          -1,
+          329,
+          221,
+          -1,
+          243,
+          351,
+          244,
+          381,
+          -1,
+          382,
+          274,
+          -1,
+          291,
+          399,
+          293
+        },
+        lens {
+          26,
+          10,
+          5,
+          2,
+          22,
+          1,
+          30,
+          1,
+          17,
+          2,
+          3
+        },
+        strands {
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown
+        }
+      }
+    }
+  }
+}
+Seq-annot ::= {
+  desc {
+    user {
+      type str "Hist Seqalign",
+      data {
+        {
+          label str "Hist Seqalign",
+          data bool TRUE
+        }
+      }
+    },
+    user {
+      type str "Blast Type",
+      data {
+        {
+          label str "blastp",
+          data int 2
+        }
+      }
+    },
+    user {
+      type str "Blast Database Title",
+      data {
+        {
+          label str "PajaWSV proteins",
+          data bool FALSE
+        }
+      }
+    }
+  },
+  data align {
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 69
+        },
+        {
+          id str "blast_score",
+          value int 69
+        },
+        {
+          id str "e_value",
+          value real { 891727758592466, 10, -17 }
+        },
+        {
+          id str "bit_score",
+          value real { 311870030183414, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 16
+        },
+        {
+          id str "comp_adjustment_method",
+          value int 2
+        },
+        {
+          id str "num_positives",
+          value int 27
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 114302325581395, 10, -13 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 3,
+        ids {
+          local str "Query_24",
+          general {
+            db "BL_ORD_ID",
+            tag id 25
+          }
+        },
+        starts {
+          247,
+          1195,
+          275,
+          -1,
+          276,
+          1223
+        },
+        lens {
+          28,
+          1,
+          18
+        },
+        strands {
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown
+        }
+      }
+    }
+  }
+}
+Seq-annot ::= {
+  desc {
+    user {
+      type str "Hist Seqalign",
+      data {
+        {
+          label str "Hist Seqalign",
+          data bool TRUE
+        }
+      }
+    },
+    user {
+      type str "Blast Type",
+      data {
+        {
+          label str "blastp",
+          data int 2
+        }
+      }
+    },
+    user {
+      type str "Blast Database Title",
+      data {
+        {
+          label str "PajaWSV proteins",
+          data bool FALSE
+        }
+      }
+    }
+  },
+  data align {
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 60
+        },
+        {
+          id str "blast_score",
+          value int 60
+        },
+        {
+          id str "e_value",
+          value real { 62688662772683, 10, -15 }
+        },
+        {
+          id str "bit_score",
+          value real { 277202068350852, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 10
+        },
+        {
+          id str "comp_adjustment_method",
+          value int 2
+        },
+        {
+          id str "num_positives",
+          value int 12
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 587313432835821, 10, -14 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_26",
+          general {
+            db "BL_ORD_ID",
+            tag id 30
+          }
+        },
+        starts {
+          283,
+          505
+        },
+        lens {
+          18
+        },
+        strands {
+          unknown,
+          unknown
+        }
+      }
+    }
+  }
+}
+Seq-annot ::= {
+  desc {
+    user {
+      type str "Hist Seqalign",
+      data {
+        {
+          label str "Hist Seqalign",
+          data bool TRUE
+        }
+      }
+    },
+    user {
+      type str "Blast Type",
+      data {
+        {
+          label str "blastp",
+          data int 2
+        }
+      }
+    },
+    user {
+      type str "Blast Database Title",
+      data {
+        {
+          label str "PajaWSV proteins",
+          data bool FALSE
+        }
+      }
+    }
+  },
+  data align {
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 97
+        },
+        {
+          id str "blast_score",
+          value int 97
+        },
+        {
+          id str "e_value",
+          value real { 357033021441931, 10, -20 }
+        },
+        {
+          id str "bit_score",
+          value real { 419725911440273, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 76
+        },
+        {
+          id str "comp_adjustment_method",
+          value int 2
+        },
+        {
+          id str "num_positives",
+          value int 130
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 59875, 10, -3 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 23,
+        ids {
+          local str "Query_28",
+          general {
+            db "BL_ORD_ID",
+            tag id 14
+          }
+        },
+        starts {
+          50,
+          48,
+          -1,
+          66,
+          68,
+          68,
+          74,
+          -1,
+          75,
+          74,
+          81,
+          -1,
+          83,
+          80,
+          91,
+          -1,
+          92,
+          88,
+          107,
+          -1,
+          109,
+          103,
+          128,
+          -1,
+          136,
+          122,
+          -1,
+          177,
+          191,
+          178,
+          198,
+          -1,
+          201,
+          185,
+          211,
+          -1,
+          223,
+          195,
+          282,
+          -1,
+          283,
+          254,
+          311,
+          -1,
+          312,
+          282
+        },
+        lens {
+          18,
+          2,
+          6,
+          1,
+          6,
+          2,
+          8,
+          1,
+          15,
+          2,
+          19,
+          8,
+          55,
+          1,
+          7,
+          3,
+          10,
+          12,
+          59,
+          1,
+          28,
+          1,
+          23
+        },
+        strands {
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown
+        }
+      }
+    }
+  }
+}
+Seq-annot ::= {
+  desc {
+    user {
+      type str "Hist Seqalign",
+      data {
+        {
+          label str "Hist Seqalign",
+          data bool TRUE
+        }
+      }
+    },
+    user {
+      type str "Blast Type",
+      data {
+        {
+          label str "blastp",
+          data int 2
+        }
+      }
+    },
+    user {
+      type str "Blast Database Title",
+      data {
+        {
+          label str "PajaWSV proteins",
+          data bool FALSE
+        }
+      }
+    }
+  },
+  data align {
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 137
+        },
+        {
+          id str "blast_score",
+          value int 137
+        },
+        {
+          id str "e_value",
+          value real { 544830453696767, 10, -25 }
+        },
+        {
+          id str "bit_score",
+          value real { 573805741807214, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 78
+        },
+        {
+          id str "comp_adjustment_method",
+          value int 2
+        },
+        {
+          id str "num_positives",
+          value int 143
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 547471042471042, 10, -13 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 19,
+        ids {
+          local str "Query_29",
+          general {
+            db "BL_ORD_ID",
+            tag id 49
+          }
+        },
+        starts {
+          234,
+          138,
+          -1,
+          152,
+          248,
+          158,
+          297,
+          -1,
+          298,
+          207,
+          362,
+          -1,
+          368,
+          271,
+          380,
+          -1,
+          383,
+          283,
+          -1,
+          289,
+          389,
+          294,
+          -1,
+          321,
+          416,
+          335,
+          -1,
+          379,
+          460,
+          382,
+          489,
+          -1,
+          492,
+          411,
+          -1,
+          422,
+          503,
+          433
+        },
+        lens {
+          14,
+          6,
+          49,
+          1,
+          64,
+          6,
+          12,
+          3,
+          6,
+          5,
+          27,
+          14,
+          44,
+          3,
+          29,
+          3,
+          11,
+          11,
+          12
+        },
+        strands {
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown,
+          unknown
+        }
+      }
+    }
+  }
+}

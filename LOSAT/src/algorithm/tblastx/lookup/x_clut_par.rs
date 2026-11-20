@@ -1,6 +1,7 @@
 //! EXPERIMENT (LOSAT_X_BPCLUT at more than one thread): the flat compressed lookup table of
 //! `x_clut_direct.rs` built by the search's thread pool. The table is the serial builder's
-//! (`x_try_build_flat_with_capacity`), slot for slot, at every thread count.
+//! (`x_try_build_flat_with_capacity`; for another matrix than BLOSUM62, `x_try_build_flat_of` with
+//! the matrix's words, item SC2b), slot for slot, at every thread count.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1168-1175
 //! ```c
@@ -22,25 +23,37 @@
 //! ```
 //!
 //! The serial builder makes the reference's appends (a query offset's cells, in the order of
-//! `add_word_hits`) for the query offsets of its count ranges (`x_count_ranges`) in order. Here:
+//! `add_word_hits`, or of `LOSAT_X_CLUTPAIRS`' pair rows within an offset: `x_clut_direct.rs` header)
+//! for the query offsets of its count ranges (`x_count_ranges`) in order. Here:
 //! - chunks (`x_chunks`): each count range's query offsets, in order, cut into contiguous runs, a run
-//!   given as pieces of segments (a piece `(a, b + word_length - 1)` holds the offsets a..=b of its
-//!   segment, which `x_for_each_offset` visits as it visits them in the segment, with the same
-//!   `end <= query.len()` guard). The chunks in order hold the count ranges' offsets in order, so the
+//!   given as ranges of lookup segments (`XChunk::pieces`: a range `(a, b + word_length - 1)` holds
+//!   the offsets a..=b of its lookup segment, which `x_for_each_offset` visits as it visits them in
+//!   the lookup segment, with the same `end <= query.len()` guard; not the pieces of appends below). The chunks in order hold the count ranges' offsets in order, so the
 //!   chunks' appends one after the other are the serial count pass's appends in its order.
 //! - stripes: the backbone cut into ranges of 2^shift cells. Each chunk sorts its appends by stripe,
 //!   stably (counting sort), so a stripe's part of a chunk holds the chunk's appends to the stripe's
 //!   cells in the chunk's order. A cell lies in one stripe; reading the stripe's parts of the chunks in
 //!   chunk order gives the cell's appends in the serial order: its offsets o_0, ..., o_{n-1}, the
 //!   append of rank k being the k-th one read.
+//! - pieces (item SC2d-2): a chunk sorts its appends in pieces (`x_chunk_appends`: the appends of a
+//!   run of its offsets, at most `X_PIECE_APPENDS` past the run's last offset's), each piece sorted
+//!   by stripe as above; the pieces of a chunk in order hold the chunk's offsets in order, so reading
+//!   a stripe's parts of the pieces in order (chunk by chunk) reads the stripe's part of each chunk in
+//!   the chunk's order, and the above holds with pieces in place of chunks.
 //! - each stripe's hits: the sum of the chunks' parts for it; a stripe's first hit is the hits of the
 //!   stripes before it, so the stripes' slices of the hits are disjoint and in the serial layout's
 //!   order (cells in index order).
 //! - count (per stripe): each cell's count n (the serial count), and per count range the overflow
 //!   cells of the reference's table of all batches that its appends take: an append that finds the
 //!   count c takes one when `x_takes_overflow_cell(c)`, the serial count pass's statement, with c its
-//!   rank, the count before it in the serial order. Summed over the stripes, a range's cells are
-//!   those the serial pass counts for it (`st.cells - cells_before` at the range's end).
+//!   rank, the count before it in the serial order. So the appends to a cell that holds n offsets at
+//!   some point of the serial order have taken `x_overflow_cells_of(n)` cells by then (item SC9i of
+//!   line NP: read from the counts, not counted append by append): a stripe's parts are read in
+//!   chunk order, which holds the count ranges in order, and where they pass from one range to the
+//!   next (`x_next_count_range`) the cells of the counts so far less those at the range before's
+//!   start are that range's; the last range's are those of the final counts (at the layout) less
+//!   those at its start. Summed over the stripes, a range's cells are those the serial pass counts
+//!   for it (`st.cells - cells_before` at the range's end).
 //! - layout (per stripe): the cells' starts are the counts' prefix sums from the stripe's first hit,
 //!   so the serial starts; the longest chain and the count of non-empty cells are functions of the
 //!   counts. The PV shift (`finalize`: `PV_ARRAY_BTS`, or more when at most 1 % of the cells are not
@@ -63,7 +76,12 @@
 //!   first offset (a chunk's offsets lie within 2^16 of it): nothing is lost.
 //! - `TooLarge` (the reference builder runs) when the appends pass `x_max_appends`, as the serial
 //!   builder's bound; the reference then decides the table or the refusal.
-//! The cuts (chunks, stripes) depend on the thread count; by the above the table does not.
+//!
+//! The cuts (chunks, stripes) depend on the thread count; by the above the table does not. The chunks'
+//! sizes are guided (item SC2d-2, `XChunkSizes::Guided`): a chunk takes the offsets left over
+//! `X_GUIDED_SHARE` times the threads, at least `X_MIN_CHUNK_OFFSETS`, so that there are few chunks
+//! (each chunk's sort and each of its stripes' parts costs a fixed amount) and the last ones are small
+//! (the tasks end together); by the above any sizes give the same table.
 //!
 //! With `LOSAT_X_BPLKPFLAT` the same passes are scheduled otherwise and the table's vectors may come
 //! from an earlier table (`XParallelCuts::passes`, `XParallelCuts::spare`); the table is the same:
@@ -85,14 +103,33 @@
 //!   only slots the fill wrote. `pv` is zeroed as before (the stripes OR their bits into it). The
 //!   build takes and sizes the vectors itself, before the stripes pass, never in a pass's tasks; a
 //!   build that ends `TooLarge` drops the spare's vectors (the reference builder makes that table,
-//!   and they are not kept beside it). In the shadow mode the vectors are filled with `u32::MAX` /
-//!   `i32::MIN` first, so that an entry no stripe writes always differs from the fresh build's.
+//!   and they are not kept beside it). The unit tests fill the spare's vectors with `u32::MAX` /
+//!   `i32::MIN` first (a spare of garbage first gets room for a word-size-5 table), so that an
+//!   entry no stripe writes differs from the fresh build's where the spare has the room.
+//! - lent vectors (line NP, SC9d: `XParallelCuts::lent`, BLASTX's builds in parts with
+//!   LOSAT_X_BXCLUTPOOL): `starts` and `hits` are those of a set the pool of BLASTX's tables lends,
+//!   taken as the spare's above (no entry is read before the stripes write it), and `pv` that set's,
+//!   cleared and zero-filled. The hits are of the table's offset type `H` (`u16` for BLASTX's query
+//!   batches of at most `X_U16_LETTERS` letters, whose offsets are below 2^16): each stripe writes
+//!   `H::from_offset` of the offset it wrote as `i32`, the same number.
+//! - kept segments (item SC2d-2, `XSegmentPool`, the block search's): the appends pass takes a kept
+//!   segment before it makes a new one, and the stripes pass keeps at most as many segments as threads
+//!   for the next build, in place of what the pool still holds. A segment's values are not read: each piece writes every entry of its range
+//!   before the stripes pass reads it.
 //! - extra tasks (`XExtraTasks`: the contexts' Karlin blocks of a blastp block,
 //!   `blastp/x_query_blocks.rs`): the one-latch appends pass runs them after its chunks (the indices
 //!   past the chunks), each once, also when the build then ends `TooLarge` or refused. They read
 //!   nothing the build writes and the build reads nothing they write.
-//! - builds ahead (LOSAT_X_BPLKPAHEAD, `XFlatArgs::x_ahead`: the next query block's table, built by a
-//!   pool task during the block before it, `blastp/blast_engine/x_lookup_ahead.rs`): the same build,
+//! - the two passes apart (item SC2d): the appends pass (`x_flat_appends_on`) hands the stripes pass
+//!   (`x_flat_stripes_on`) owned values (`XFlatAppends`: the header, the count ranges, the chunks,
+//!   the shift, the chunks' appends, each stripe's hits), which the stripes pass reads as it reads
+//!   them when it follows at once (`x_flat_parallel_on`); a build ahead of its block runs them apart,
+//!   possibly on other threads and later (`x_flat_ahead_appends_in_pool`,
+//!   `x_flat_ahead_stripes_in_pool`), with the same values. The words of the appends pass (`XWords`,
+//!   a function of the header, the threshold and the matrix) are made again for the capacity test.
+//! - builds ahead (LOSAT_X_BPLKPAHEAD, `XFlatArgs::x_ahead`: the next query block's table, built by
+//!   pool tasks during the block before it, its two passes apart (item SC2d),
+//!   `blastp/blast_engine/x_lookup_ahead.rs`): the same build,
 //!   whose `starts`, `hits` and `pv` all come from the spare that the block search's thread made ready
 //!   (`XFlatSpare::x_make_room`), so that no vector of the table is allocated by a pool thread (a
 //!   pool thread's allocations stay in its own glibc arena). `starts` and `hits` are sized and written
@@ -101,31 +138,154 @@
 //!   after the appends pass and makes no table (`None`, the spare keeps the vectors); the block then
 //!   builds its table itself.
 //!
-//! On with `LOSAT_X_BPCLUT` (a strict-set switch: on unless `=0`, or `LOSAT_X_DEFAULT=0` and it is not
-//! set) where the search's pool has more than one thread; at one thread the serial builder runs. `LOSAT_X_BPCLUTSHADOW` builds this table too (with more than one thread)
-//! and compares it with the serial one. `LOSAT_X_BPLKPFLATSHADOW` builds the table of
-//! `LOSAT_X_BPLKPFLAT` (one-latch passes, recycled vectors, extra tasks) and then again with the
-//! `par_iter` passes on fresh vectors, and compares the outcomes and the tables slot for slot.
+//! With `LOSAT_X_BPSTRIPEFILL` (a strict-set switch: on unless `=0`) the one-latch stripes pass
+//! makes each stripe's part another way (`x_stripe_fill`, `XParallelCuts::stripe_fill`); the table
+//! is the same: the stripe reads its parts of the chunks once, in chunk order, into a copy while it
+//! counts the cells (the copy holds the cells' appends in the serial order, chunk by chunk, each
+//! packed as in its chunk), then lays out and fills from the copy as `x_stripe_build` does, the
+//! copy's part of chunk c taking chunk c's first offset.
+//!
+//! Waves (item SC9i of line NP): the backbone's cells are cut by their last letter (the index's
+//! most significant digit, weight `A^(word_length - 1)`) into waves of `x_wave_letters` letters
+//! each (`x_wave`: about `X_WAVE_CELLS` cells; one wave for a build ahead of its block, whose
+//! passes run apart), and the build makes the appends to one wave's cells, sorts them by stripe
+//! (the wave's stripes, 2^shift cells each from its first cell) and runs the wave's stripes before
+//! it makes the next wave's appends, so that the packed appends held at once are one wave's instead
+//! of the table's (4 bytes per hit; for `-word_size 7` they were twice the table's hits, 182 MB of a
+//! 50-cDNA query batch at its end). The table is the same:
+//! - a wave's appends are the chunks' appends to its cells, in order (`XWords::for_each_word_in`
+//!   gives the cells of `for_each_word` whose last letter is in a range, each once, less the wave's
+//!   first cell; the offsets of a chunk in order). The first of more than one wave keeps what it
+//!   reads of each offset's word before the last letter's loop (`XWords::word_start`: the bound of
+//!   the positions before the last, the word's own cell, the last residue; 16 bytes per offset),
+//!   and the later waves read it (`XStarts`) instead of the query's letters, the same values. They
+//!   differ from the one-wave build's only in their order within one query
+//!   offset, and an offset appends each cell at most once (`for_each_word_in`), so each cell's
+//!   appends, read by stripe as above, are its offsets in the serial order: the count, layout, fill
+//!   and scan order of each stripe are those above.
+//! - the waves' cells are the backbone's in order and their stripes partition them, each stripe in
+//!   one wave; a wave's hits follow the waves' before it (its first stripe's first hit is their
+//!   hits), so the stripes' slices of the hits are in the serial layout's order as above, and each
+//!   cell's start is the serial start. A packed append's cell is its index less its stripe's first
+//!   cell (below 2^shift).
+//! - `TooLarge` when the appends of the waves so far pass the bound (`appended` across the waves):
+//!   the build's appends pass it exactly when the serial build's do. The overflow cells of each count
+//!   range are summed over every wave's stripes (each cell in one wave, its appends counted in their
+//!   order), counted in every wave where there is more than one (a range's appends are known only at
+//!   the end), and tested once at the end as above. With one wave they are summed only when a
+//!   table's appends pass the capacity (`need_cells`; an append takes at most one cell).
+//! - with more than one wave the passes after the first (each wave's stripes and the next wave's
+//!   appends) run on one gang of the pool's threads per build (`XGang`): helpers spawned once take
+//!   each pass's items and wait between passes, so that a pass does not wake the pool's idle threads
+//!   again (scheduling only: each item is made once, by the same call). A build of one wave has one
+//!   pass after its first (its stripes), a one-latch pass of its own (`XPasses::latched`).
+//! - the PV array is set by the stripes only with one wave (its stripes are whole PV words from cell
+//!   0); otherwise it is made from the starts as above.
+//!
+//! The stripes write the hits in place (`MaybeUninit`, each slot once; the length is set after each
+//! wave), so no page of the hits is touched before its stripe writes it; with more than one wave the
+//! vector is a block glibc maps (`x_mapped_entries`) and grows by each wave's hits (`mremap`); the
+//! segments of packed appends go from one wave to the next (`XSegmentPool`).
+//!
+//! On with `LOSAT_X_BPCLUT` (a strict-set switch: on unless `=0`)
+//! where the search's pool has more than one thread; at one thread the serial builder runs.
 
 use super::*;
 use crate::utils::threading::SearchPool;
 use rayon::prelude::*;
+use std::mem::MaybeUninit;
 use std::sync::atomic::{AtomicBool, AtomicUsize};
-use std::sync::{Mutex, OnceLock, PoisonError};
+use std::sync::{Condvar, Mutex, OnceLock, PoisonError};
 
 // No NCBI counterpart: how the build is divided among the pool's threads. Scheduling only.
-/// Chunks per thread, and the fewest stripes per thread.
-const X_PARTS_PER_THREAD: usize = 8;
-/// The fewest query offsets of a chunk (about 65 appends each with blastp-fast's threshold).
+/// The fewest stripes per thread: many small stripes, so that the tasks of the stripes pass end
+/// together and the stripe fill's copy (`x_stripe_fill`: a task's copy of one stripe's appends)
+/// stays small; the copies of all tasks hold about `1 / X_PARTS_PER_THREAD` of the table's hits
+/// (item SC2d-2).
+const X_PARTS_PER_THREAD: usize = 64;
+/// Guided chunk sizes (`XChunkSizes::Guided`, item SC2d-2): a chunk takes the offsets left over
+/// `X_GUIDED_SHARE` times the threads, so that the first chunks are large (few chunks and parts: each
+/// chunk's sort and each (chunk, stripe) part costs a fixed amount) and the last ones small (the tasks
+/// of the appends pass end together).
+const X_GUIDED_SHARE: usize = 2;
+// No NCBI counterpart: where the chunks' packed appends are stored. Memory placement only.
+/// The fewest entries of a segment of packed appends (`XSegmentOut`): 40 MiB, above glibc's largest
+/// mmap threshold (32 MiB), so that each segment is a mapping of its own, returned whole when it is
+/// dropped, whichever thread made it (a pool thread's smaller blocks stay in its arena). The pages
+/// past the entries written are not touched.
+#[cfg(not(target_arch = "wasm32"))]
+const X_APPENDS_SEGMENT: usize = 10 << 20;
+/// The fewest entries of a segment on wasm32: a piece's. There is no mapping to return there (the
+/// linear memory only grows, and the allocator clears what it hands out), so a segment holds about
+/// what its task writes.
+#[cfg(target_arch = "wasm32")]
+const X_APPENDS_SEGMENT: usize = X_PIECE_APPENDS;
+/// The fewest query offsets of a chunk (about 65 appends each with blastp-fast's threshold; about
+/// 12,800 with BLOSUM45 at word size 7).
 const X_MIN_CHUNK_OFFSETS: usize = 256;
-/// The most (chunk, stripe) parts: a stripe reads its part of every chunk.
-const X_MAX_PARTS: usize = 1 << 16;
+/// The most query offsets of a guided chunk (item SC2d-2): a task's scratch holds at most the appends
+/// of this many offsets or a piece (`X_PIECE_APPENDS`), whichever is fewer (about 66,000 appends,
+/// 260 KiB, with blastp-fast's threshold).
+const X_MAX_GUIDED_OFFSETS: usize = 4 * X_MIN_CHUNK_OFFSETS;
+// No NCBI counterpart: how a task's scratch is bounded (item SC2d-2). Memory only.
+/// The appends of a piece (`x_chunk_appends`): a chunk's appends are sorted into the task's segment
+/// in pieces of this many (the last one fewer), so that a task's scratch holds at most a piece and
+/// the appends of the offset that passes it (512 KiB of targets, in a vector of 1 MiB once an offset
+/// passes it) whatever a chunk's offsets add (about 380 appends per offset with BLOSUM45 and
+/// blastp-fast's threshold, 12,800 at word size 7).
+/// A task's scratch stays in its pool thread's malloc arena after the pass, so that the threads keep
+/// a piece each between builds: 2^20 appends (4 MiB) per thread raised the peak RSS of BLOSUM45
+/// blastp-fast at 8 threads by about 10 % (SC2d-2).
+const X_PIECE_APPENDS: usize = 1 << 17;
+/// The most (chunk, stripe) parts the stripe count allows: a stripe reads its part of every piece of
+/// every chunk, so the (piece, stripe) parts are this many times the pieces per chunk (one for
+/// blastp-fast's chunks; tens with BLOSUM45 at word size 7).
+const X_MAX_PARTS: usize = 1 << 20;
 // No NCBI counterpart: the 16 bits of a packed append that hold the offset less the chunk's first.
 /// A chunk's offsets lie in `base..base + X_OFFSET_SPAN`.
 const X_OFFSET_SPAN: i64 = 1 << 16;
 // No NCBI counterpart: the 16 bits of a packed append that hold the cell's index in its stripe.
 /// The widest stripe: 2^16 cells.
 const X_MAX_STRIPE_SHIFT: usize = 16;
+
+// No NCBI counterpart: the order of the build's work (item SC9i of line NP, module header).
+/// The cells of a wave, about: a backbone's waves are the most of `ceil(backbone_size /
+/// X_WAVE_CELLS)` with as many last letters each (`x_wave_letters`): one wave for word size 5's
+/// 15^5 + 1 cells, 8 waves of 2 letters (1,518,750 cells) for word size 6's 15^6 + 1, 10 of one
+/// letter (10^6 cells) for word size 7's 10^7 + 1.
+const X_WAVE_CELLS: usize = 1 << 20;
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:800-806,825-836
+// (`x_takes_overflow_cell`)
+// ```c
+//     case 5:
+//         ...
+//         CompressedOverflowCell * new_cell = s_CompressedListGetNewCell(lookup);
+//     ...
+//         Int4 cell_index = (num_entries -3) & COMPRESSED_HITS_CELL_MASK ;
+//
+//         if (cell_index == 0 ) { /* can't be empty => it's full  */
+// ```
+/// The overflow cells that the appends to a cell take in the reference's table when the cell ends
+/// with `n` offsets: the appends that find the counts 0..n, of which the one that finds 5 and each
+/// that finds 3 more than a multiple of 4 past it take one (`x_takes_overflow_cell`): none for at
+/// most 5 offsets, else n / 4.
+#[inline(always)]
+fn x_overflow_cells_of(n: u32) -> usize {
+    const _: () = assert!(COMPRESSED_HITS_PER_BACKBONE_CELL == 4 && COMPRESSED_HITS_CELL_MASK == 3);
+    if n > COMPRESSED_HITS_PER_BACKBONE_CELL as u32 + 1 {
+        n as usize / (COMPRESSED_HITS_CELL_MASK + 1)
+    } else {
+        0
+    }
+}
+
+// No NCBI counterpart: the overflow cells of the counts so far (`x_overflow_cells_of`), read where a
+// stripe's appends pass from one count range to the next (module header).
+/// The overflow cells that the appends counted in `counts` take.
+fn x_overflow_cells_in(counts: &[u32]) -> usize {
+    counts.iter().map(|&n| x_overflow_cells_of(n)).sum()
+}
 
 /// A contiguous run of the query offsets of one count range.
 struct XChunk {
@@ -137,11 +297,146 @@ struct XChunk {
     base: i32,
 }
 
-/// A chunk's appends sorted by stripe, stably: stripe j's are `packed[stripe_starts[j]..
-/// stripe_starts[j + 1]]`, each `(index - (j << shift)) << 16 | (query_offset - base)`.
+/// A piece of a chunk's appends to the cells of a wave (`XWave`; the appends of a run of its offsets,
+/// in order) sorted by stripe, stably: its packed appends `packed` are
+/// `segments[segment][at..at + len]` of the pass's `XAppends`; the wave's stripe j's (`local` j,
+/// first cell `first = wave.cells.start + (j << shift)`) are
+/// `packed[stripe_starts[j]..stripe_starts[j + 1]]`, each `(index - first) << 16 | (query_offset -
+/// base)` with the chunk's `base`.
 struct XChunkAppends {
-    packed: Vec<u32>,
+    /// The chunk (index into the pass's chunks).
+    chunk: usize,
+    segment: usize,
+    at: usize,
+    len: usize,
     stripe_starts: Vec<u32>,
+}
+
+// No NCBI counterpart: the order of the build's work (item SC9i of line NP, module header).
+/// A wave of the build: the cells of a run of last letters (the index's most significant digit),
+/// whose appends the build makes, sorts by stripe and lays out and fills before it makes those of
+/// the next wave.
+struct XWave {
+    /// The last letters of the wave's cells.
+    letters: std::ops::Range<u32>,
+    /// The wave's cells: those of its last letters (in the last wave, the backbone's last cell too,
+    /// which no word takes).
+    cells: std::ops::Range<u32>,
+    /// The wave's stripes: its cells from its first, 2^shift each (the last one fewer).
+    stripes: usize,
+}
+
+/// The appends pass's result: the pieces of the chunks' appends (in chunk order, each chunk's in the
+/// order of its offsets), their packed appends in the segments that the pass's tasks filled.
+struct XAppends {
+    segments: Vec<Vec<u32>>,
+    pieces: Vec<XChunkAppends>,
+}
+
+impl XAppends {
+    /// A piece's packed appends.
+    fn packed(&self, piece: &XChunkAppends) -> &[u32] {
+        if piece.len == 0 {
+            return &[];
+        }
+        &self.segments[piece.segment][piece.at..piece.at + piece.len]
+    }
+
+    /// The pieces and their packed appends, in order.
+    fn iter(&self) -> impl Iterator<Item = (&XChunkAppends, &[u32])> {
+        self.pieces.iter().map(|piece| (piece, self.packed(piece)))
+    }
+}
+
+// No NCBI counterpart: memory placement of the packed appends (`X_APPENDS_SEGMENT`).
+/// A task's segment of packed appends: chunks take ranges of it in turn; a full segment (and the
+/// last one, when the task ends) goes to its slot of `registry`, whose index the chunks keep.
+struct XSegmentOut<'r> {
+    registry: &'r Mutex<Vec<Vec<u32>>>,
+    /// The fewest entries of a segment (`XParallelCuts::appends_segment`).
+    size: usize,
+    /// Item SC2d-2: the block search's kept segments, taken before a new one is made.
+    pool: Option<&'r XSegmentPool>,
+    segment: Vec<u32>,
+    /// The segment's slot in `registry` (`usize::MAX`: none yet).
+    index: usize,
+    used: usize,
+}
+
+impl<'r> XSegmentOut<'r> {
+    fn new(
+        registry: &'r Mutex<Vec<Vec<u32>>>,
+        size: usize,
+        pool: Option<&'r XSegmentPool>,
+    ) -> Self {
+        Self {
+            registry,
+            size,
+            pool,
+            segment: Vec::new(),
+            index: usize::MAX,
+            used: 0,
+        }
+    }
+
+    /// `n` entries for one piece (each range is taken once; the piece writes every entry of it
+    /// before any is read): the segment's slot, the range's start, the range.
+    fn take(&mut self, n: usize) -> (usize, usize, &mut [u32]) {
+        if self.segment.len() - self.used < n {
+            self.finish();
+            let mut registry = self.registry.lock().unwrap_or_else(PoisonError::into_inner);
+            self.index = registry.len();
+            registry.push(Vec::new());
+            drop(registry);
+            // A kept segment's values are not read: the range is written before it is read.
+            self.segment = self
+                .pool
+                .and_then(|pool| pool.take(n))
+                .unwrap_or_else(|| vec![0u32; n.max(self.size)]);
+            self.used = 0;
+        }
+        let at = self.used;
+        self.used += n;
+        (self.index, at, &mut self.segment[at..at + n])
+    }
+
+    /// Moves the segment to its slot, cut to the entries the chunks took (item SC2d-2: a kept
+    /// segment holds no more than they wrote, `XSegmentPool::keep`).
+    fn finish(&mut self) {
+        if self.index != usize::MAX {
+            self.segment.truncate(self.used);
+            self.registry.lock().unwrap_or_else(PoisonError::into_inner)[self.index] =
+                std::mem::take(&mut self.segment);
+        }
+    }
+}
+
+impl Drop for XSegmentOut<'_> {
+    fn drop(&mut self) {
+        self.finish();
+    }
+}
+
+/// A task's scratch in the appends pass: a chunk's targets and appends per offset, and the task's
+/// segment of packed appends.
+struct XAppendsScratch<'r> {
+    targets: Vec<u32>,
+    per_offset: Vec<(i32, u32)>,
+    out: XSegmentOut<'r>,
+}
+
+impl<'r> XAppendsScratch<'r> {
+    fn new(
+        registry: &'r Mutex<Vec<Vec<u32>>>,
+        segment: usize,
+        pool: Option<&'r XSegmentPool>,
+    ) -> Self {
+        Self {
+            targets: Vec::new(),
+            per_offset: Vec::new(),
+            out: XSegmentOut::new(registry, segment, pool),
+        }
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1352-1354
@@ -155,8 +450,7 @@ struct XChunkAppends {
 // will search builds it, the same table (module header).
 /// EXPERIMENT (LOSAT_X_BPCLUT): `x_try_build_flat_compressed_lookup` on `pool`'s threads; `pool` has
 /// more than one thread. With LOSAT_X_BPLKPFLAT (`x_flat_args.mode`) the one-latch passes on the
-/// spare's vectors, with the extra tasks (module header); its shadow then builds the table again
-/// with the `par_iter` passes on fresh vectors and compares the outcomes and the tables.
+/// spare's vectors, with the extra tasks (module header).
 pub(super) fn x_try_build_flat_in_pool(
     word_size: usize,
     scaled_threshold: i32,
@@ -167,7 +461,7 @@ pub(super) fn x_try_build_flat_in_pool(
     x_flat_args: XFlatArgs<'_>,
 ) -> Option<XFlatBuild> {
     let threads = pool.threads();
-    let build = |passes, spare, poison, x_ahead| {
+    let build = |passes, spare, segments, x_ahead, stripe_fill| {
         pool.install(|| {
             x_try_build_flat_parallel_with(
                 word_size,
@@ -181,10 +475,15 @@ pub(super) fn x_try_build_flat_in_pool(
                     threads,
                     chunk_sizes: &[],
                     stripe_shift: None,
+                    wave_cells: None,
+                    appends_segment: X_APPENDS_SEGMENT,
+                    piece_appends: X_PIECE_APPENDS,
+                    segments,
                     passes,
                     spare,
-                    poison,
+                    lent: None,
                     x_ahead,
+                    stripe_fill,
                 },
             )
         })
@@ -194,53 +493,285 @@ pub(super) fn x_try_build_flat_in_pool(
         if x_flat_args.x_ahead {
             return None;
         }
-        return build(XPasses::Rayon, None, false, false);
+        return build(XPasses::Rayon, None, None, false, false);
     }
-    let shadow = x_flat_args.mode == XLkpFlat::Shadow;
     let built = build(
         XPasses::OneLatch(x_flat_args.extra),
         x_flat_args.spare,
-        shadow,
+        x_flat_args.segments,
         x_flat_args.x_ahead,
+        x_bpstripefill_on(),
     );
-    // LOSAT_X_BPLKPAHEAD: a build ahead of its block that makes no table is dropped, and its block
-    // builds the table itself, whose outcome the shadow then compares (`XFlatArgs::x_ahead`).
-    let x_dropped = x_flat_args.x_ahead && !matches!(built, Some(XFlatBuild::Table(_)));
-    if shadow && !x_dropped {
-        x_lkpflat_shadow(
-            built.as_ref(),
-            build(XPasses::Rayon, None, false, false).as_ref(),
-        );
+    if matches!(built, Some(XFlatBuild::Table(_))) {
+        X_LKPFLAT_TABLES.fetch_add(1, Ordering::Relaxed);
     }
     built
 }
 
-// No NCBI counterpart: the check of LOSAT_X_BPLKPFLATSHADOW; it changes no value NCBI computes.
-/// EXPERIMENT (LOSAT_X_BPLKPFLATSHADOW): panics unless `built` (the one-latch build) and `reference`
-/// (the `par_iter` build on fresh vectors) have the same outcome and, for a table, the same table.
-fn x_lkpflat_shadow(built: Option<&XFlatBuild>, reference: Option<&XFlatBuild>) {
-    let outcome = |build: Option<&XFlatBuild>| match build {
-        None => "none",
-        Some(XFlatBuild::Table(_)) => "table",
-        Some(XFlatBuild::Refused) => "refused",
-        Some(XFlatBuild::TooLarge) => "too large",
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1352-1354 (see
+// `x_try_build_flat_in_pool`)
+// ```c
+//     s_CompressedAddNeighboringWords(lookup, new_alphabet->matrix->data,
+//                                     query, locations);
+//     s_CompressedLookupFinalize(lookup);
+// ```
+/// `x_try_build_flat_in_pool` with the words of the search matrix `matrix`, any but BLOSUM62 (items
+/// SC2b, SC2d-2): the same passes, spare vectors and build ahead (`x_flat_args`; another matrix's
+/// build has no extra tasks, its contexts' Karlin blocks are computed before it); `pool` has more
+/// than one thread.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn x_try_build_flat_in_pool_of(
+    matrix: ScoringMatrix,
+    word_size: usize,
+    scaled_threshold: i32,
+    query: &[u8],
+    locations: &[(i32, i32)],
+    tables: &[std::ops::Range<usize>],
+    pool: &SearchPool<'_>,
+    x_flat_args: XFlatArgs<'_>,
+) -> Option<XFlatBuild> {
+    let threads = pool.threads();
+    let build = |passes, spare, segments, x_ahead, stripe_fill| {
+        pool.install(|| {
+            x_try_build_flat_parallel_of(
+                matrix,
+                word_size,
+                scaled_threshold,
+                query,
+                locations,
+                tables,
+                XParallelCuts {
+                    overflow_cell_capacity: NCBI_OVERFLOW_CELL_CAPACITY,
+                    max_appends: None,
+                    threads,
+                    chunk_sizes: &[],
+                    stripe_shift: None,
+                    wave_cells: None,
+                    appends_segment: X_APPENDS_SEGMENT,
+                    piece_appends: X_PIECE_APPENDS,
+                    segments,
+                    passes,
+                    spare,
+                    lent: None,
+                    x_ahead,
+                    stripe_fill,
+                },
+            )
+        })
     };
-    match (built, reference) {
-        (Some(XFlatBuild::Table(built)), Some(XFlatBuild::Table(reference))) => {
-            x_assert_same_flat_tables_as("LOSAT_X_BPLKPFLATSHADOW:", built, reference);
-            X_LKPFLAT_TABLES.fetch_add(1, Ordering::Relaxed);
+    if x_flat_args.mode == XLkpFlat::Off {
+        // LOSAT_X_BPLKPAHEAD: a build ahead of its block takes only the switch's passes.
+        if x_flat_args.x_ahead {
+            return None;
         }
-        (None, None)
-        | (Some(XFlatBuild::Refused), Some(XFlatBuild::Refused))
-        | (Some(XFlatBuild::TooLarge), Some(XFlatBuild::TooLarge)) => {
-            X_LKPFLAT_OUTCOMES.fetch_add(1, Ordering::Relaxed);
-        }
-        _ => panic!(
-            "LOSAT_X_BPLKPFLATSHADOW: outcome differs ({} vs {})",
-            outcome(built),
-            outcome(reference)
-        ),
+        return build(XPasses::Rayon, None, None, false, false);
     }
+    let built = build(
+        XPasses::OneLatch(x_flat_args.extra),
+        x_flat_args.spare,
+        x_flat_args.segments,
+        x_flat_args.x_ahead,
+        x_bpstripefill_on(),
+    );
+    if matches!(built, Some(XFlatBuild::Table(_))) {
+        X_LKPFLAT_TABLES.fetch_add(1, Ordering::Relaxed);
+    }
+    built
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1352-1354 (see
+// `x_try_build_flat_in_pool`)
+// ```c
+//     s_CompressedAddNeighboringWords(lookup, new_alphabet->matrix->data,
+//                                     query, locations);
+//     s_CompressedLookupFinalize(lookup);
+// ```
+// NCBI builds a query chunk's table on one thread before the search threads start
+// (c++/src/algo/blast/api/prelim_stage.cpp:145-188 starts them for the search); here a BLASTX unit
+// builds it on the threads the unit cap leaves it, the same table (module header).
+/// Item SC9b (2) of line NP: BLASTX's flat table of a query batch with the words of `matrix`, where
+/// the bucket fill declines (`x_clut_direct.rs` `x_flat_in_parts`), built by `parts` tasks of the pool
+/// the build runs on (`LOSAT_X_BXBUILDPAR`, `blastx/x_bx_mem.rs`): the one-latch passes
+/// (`x_one_latch_pass`, the stripes by `x_stripe_fill` as LOSAT_X_BPSTRIPEFILL chooses), without
+/// spare vectors, kept segments or extra tasks, the table's vectors `lent` by BLASTX's pool
+/// (`LOSAT_X_BXCLUTPOOL`; else fresh ones), its hits of offset type `H` written by the stripes.
+/// `parts` is above 1.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn x_try_build_flat_in_parts<H: XQueryOffset>(
+    matrix: ScoringMatrix,
+    word_size: usize,
+    scaled_threshold: i32,
+    query: &[u8],
+    locations: &[(i32, i32)],
+    tables: &[std::ops::Range<usize>],
+    parts: usize,
+    lent: Option<XFlatTableVectors<H>>,
+) -> Option<XFlatBuild<H>> {
+    let cuts = XParallelCuts {
+        overflow_cell_capacity: NCBI_OVERFLOW_CELL_CAPACITY,
+        max_appends: None,
+        threads: parts,
+        chunk_sizes: &[],
+        stripe_shift: None,
+        wave_cells: None,
+        appends_segment: X_APPENDS_SEGMENT,
+        piece_appends: X_PIECE_APPENDS,
+        segments: None,
+        passes: XPasses::OneLatch(None),
+        spare: None,
+        lent,
+        x_ahead: false,
+        stripe_fill: x_bpstripefill_on(),
+    };
+    if matrix == ScoringMatrix::Blosum62 {
+        x_try_build_flat_parallel_with(word_size, scaled_threshold, query, locations, tables, cuts)
+    } else {
+        x_try_build_flat_parallel_of(
+            matrix,
+            word_size,
+            scaled_threshold,
+            query,
+            locations,
+            tables,
+            cuts,
+        )
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1352-1354 (see
+// `x_try_build_flat_in_pool`)
+// ```c
+//     s_CompressedAddNeighboringWords(lookup, new_alphabet->matrix->data,
+//                                     query, locations);
+//     s_CompressedLookupFinalize(lookup);
+// ```
+/// Item SC2d (LOSAT_X_BPLKPAHEAD): the first part of `x_try_build_flat_in_pool` (of
+/// `x_try_build_flat_in_pool_of` for another search matrix `matrix`, item SC2d-2) for a build ahead
+/// of its block (`x_flat_args.x_ahead`, the switch's mode on): the one-latch appends pass with the
+/// extra tasks, on `pool`'s threads; the second part (`x_flat_ahead_stripes_in_pool`) runs once the
+/// block search's thread has made the table's vectors ready (module header). `None` where the build
+/// ends at the appends pass (`TooLarge`, or a backbone past the stripes, whose serial builder a build
+/// ahead does not run: it would allocate the table on a pool thread) or the mode is `Off`: the block
+/// then builds its table itself. `pool` has more than one thread.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn x_flat_ahead_appends_in_pool(
+    matrix: ScoringMatrix,
+    word_size: usize,
+    scaled_threshold: i32,
+    query: &[u8],
+    locations: &[(i32, i32)],
+    tables: &[std::ops::Range<usize>],
+    pool: &SearchPool<'_>,
+    x_flat_args: XFlatArgs<'_>,
+) -> Option<XFlatAppends> {
+    if x_flat_args.mode == XLkpFlat::Off || !x_flat_args.x_ahead {
+        return None;
+    }
+    let cuts = XParallelCuts::<i32> {
+        overflow_cell_capacity: NCBI_OVERFLOW_CELL_CAPACITY,
+        max_appends: None,
+        threads: pool.threads(),
+        chunk_sizes: &[],
+        stripe_shift: None,
+        wave_cells: None,
+        appends_segment: X_APPENDS_SEGMENT,
+        piece_appends: X_PIECE_APPENDS,
+        segments: x_flat_args.segments,
+        passes: XPasses::OneLatch(x_flat_args.extra),
+        // The spare's vectors are the second part's.
+        spare: None,
+        lent: None,
+        x_ahead: true,
+        stripe_fill: x_bpstripefill_on(),
+    };
+    let stage = pool.install(|| {
+        if matrix == ScoringMatrix::Blosum62 {
+            x_flat_appends_on(
+                Blosum62Compressed,
+                word_size,
+                scaled_threshold,
+                query,
+                locations,
+                tables,
+                cuts,
+                |_| None,
+            )
+        } else {
+            x_flat_appends_on(
+                matrix,
+                word_size,
+                scaled_threshold,
+                query,
+                locations,
+                tables,
+                cuts,
+                |_| None,
+            )
+        }
+    });
+    match stage {
+        XFlatStage::Appends(appends) => Some(appends),
+        XFlatStage::Built(_) => None,
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1352-1354 (see
+// `x_try_build_flat_in_pool`)
+// ```c
+//     s_CompressedLookupFinalize(lookup);
+// ```
+/// Item SC2d (LOSAT_X_BPLKPAHEAD): the second part of a build ahead of its block, after
+/// `x_flat_ahead_appends_in_pool` gave `appends` (of `matrix`, `query` and `locations`): the stripes
+/// pass on `pool`'s threads, on the vectors that `spare` holds, all of them (without their room no
+/// table is made and the spare keeps them, `XFlatArgs::x_ahead`).
+pub(super) fn x_flat_ahead_stripes_in_pool(
+    matrix: ScoringMatrix,
+    appends: XFlatAppends,
+    query: &[u8],
+    locations: &[(i32, i32)],
+    pool: &SearchPool<'_>,
+    spare: &XFlatSpare,
+    segments: Option<&XSegmentPool>,
+) -> Option<XFlatBuild> {
+    let built = pool.install(|| {
+        if matrix == ScoringMatrix::Blosum62 {
+            x_flat_stripes_on(
+                Blosum62Compressed,
+                appends,
+                query,
+                locations,
+                Some(spare),
+                None,
+                true,
+                segments,
+            )
+        } else {
+            x_flat_stripes_on(
+                matrix,
+                appends,
+                query,
+                locations,
+                Some(spare),
+                None,
+                true,
+                segments,
+            )
+        }
+    });
+    if matches!(built, Some(XFlatBuild::Table(_))) {
+        X_LKPFLAT_TABLES.fetch_add(1, Ordering::Relaxed);
+    }
+    built
+}
+
+// No NCBI counterpart: reads the LOSAT_X_BPSTRIPEFILL switch once; it does not change any value NCBI
+// computes.
+/// EXPERIMENT (LOSAT_X_BPSTRIPEFILL): a strict-set switch, on unless it is `0`: the one-latch
+/// stripes pass reads each stripe's parts once and fills from the copy (`x_stripe_fill`, module
+/// header).
+fn x_bpstripefill_on() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPSTRIPEFILL"))
 }
 
 /// EXPERIMENT (LOSAT_X_BPLKPFLAT): how the build's two passes reach the pool's threads.
@@ -251,12 +782,37 @@ enum XPasses<'a> {
     /// One-latch passes (`x_one_latch_pass`), the extra tasks (if any) in the appends pass after the
     /// chunks.
     OneLatch(Option<&'a dyn XExtraTasks>),
+    /// Item SC9i of line NP: one-latch passes on a gang's helpers (`XGang::pass`), without extra
+    /// tasks (the later waves' appends).
+    Gang(&'a XGang),
 }
 
-impl XFlatSpare {
+impl XPasses<'_> {
+    // No NCBI counterpart: scheduling only (item SC9i of line NP).
+    /// A pass of `items` without extra tasks, the results of `item(scratch, i)` in order: on the gang's
+    /// helpers (`XGang::pass`, `last`: the gang's last pass), else a one-latch pass of its own
+    /// (`x_one_latch_pass`; the Rayon passes' stripes are `par_iter`'s, their callers').
+    fn latched<S, R: Send + Sync>(
+        self,
+        threads: usize,
+        items: usize,
+        last: bool,
+        init: impl Fn() -> S + Sync,
+        item: impl Fn(&mut S, usize) -> R + Sync,
+    ) -> Vec<R> {
+        match self {
+            XPasses::Gang(gang) => gang.pass(items, last, init, item),
+            XPasses::OneLatch(_) | XPasses::Rayon => {
+                x_one_latch_pass(threads, items, 0, init, item, |_| {})
+            }
+        }
+    }
+}
+
+impl<H> XFlatSpare<H> {
     // No NCBI counterpart: buffer reuse only (`XFlatSpare`).
     /// The vectors kept (empty ones when none are); the spare then keeps none.
-    fn take(&self) -> (Vec<u32>, Vec<i32>) {
+    fn take(&self) -> (Vec<u32>, Vec<H>) {
         std::mem::take(&mut *self.0.lock().unwrap_or_else(PoisonError::into_inner))
     }
 
@@ -304,10 +860,19 @@ fn x_reuse<T: Copy + Default>(spare: Vec<T>, len: usize) -> (Vec<T>, bool) {
 
 // No NCBI counterpart: how a pass's items reach the pool's threads (LOSAT_X_BPLKPFLAT). Scheduling
 // only: each item is made once, by the same call, and its result is stored at its index.
-/// The results of `item(scratch, i)` for i in 0..items, in order, made by `threads` tasks (at most
-/// one per item or extra task) spawned in one `rayon::scope` of the current pool: each task keeps one
-/// `scratch` (`init`) and takes the next index from one counter until none is left; the indices past
-/// the items run `extra(i - items)`, `extras` of them.
+/// The results of `item(scratch, i)` for i in 0..items, in order, made by up to `threads` tasks (at
+/// most one per item or extra task) in one `rayon::scope` of the current pool: the calling thread and
+/// the tasks it spawns each keep one `scratch` (`init`) and take the next index from one counter
+/// until none is left; the indices past the items run `extra(i - items)`, `extras` of them.
+///
+/// The calling thread then waits for the items the spawned tasks took (item SC9i of line NP), not in
+/// the scope's wait, which runs other jobs of the pool meanwhile: a job taken there (a subject of
+/// another search) held the pass's end, by a few milliseconds each time, until it was done. It spins
+/// a little (`X_PASS_END_SPINS`; an item left is short) and then sleeps until the task that ends the
+/// last item wakes it, so that a pool of more threads than cores does not spin. The wait cannot
+/// deadlock: an item runs no job of the pool (no nested parallel work) and depends on nothing but its
+/// inputs, so every item taken ends; a task spawned and not yet started takes no item (the counter
+/// is spent) and the scope's wait runs it at once.
 fn x_one_latch_pass<S, R: Send + Sync>(
     threads: usize,
     items: usize,
@@ -320,25 +885,41 @@ fn x_one_latch_pass<S, R: Send + Sync>(
     let results: Vec<OnceLock<R>> = (0..items).map(|_| OnceLock::new()).collect();
     if total > 0 {
         let next = AtomicUsize::new(0);
-        let (results, next, init, item, extra) = (&results, &next, &init, &item, &extra);
-        rayon::scope(|scope| {
-            for _ in 0..threads.clamp(1, total) {
-                scope.spawn(move |_| {
-                    let mut scratch = init();
-                    loop {
-                        let index = next.fetch_add(1, Ordering::Relaxed);
-                        if index >= total {
-                            break;
-                        }
-                        if index < items {
-                            let stored = results[index].set(item(&mut scratch, index)).is_ok();
-                            assert!(stored, "item {index} taken twice");
-                        } else {
-                            extra(index - items);
-                        }
-                    }
-                });
+        let ended = XPassEnd {
+            items: AtomicUsize::new(0),
+            total,
+            sleeping: Mutex::new(()),
+            woken: Condvar::new(),
+        };
+        let (results, next, ended, init, item, extra) =
+            (&results, &next, &ended, &init, &item, &extra);
+        let take_items = move || {
+            if next.load(Ordering::Relaxed) >= total {
+                return;
             }
+            let mut scratch = init();
+            loop {
+                let index = next.fetch_add(1, Ordering::Relaxed);
+                if index >= total {
+                    break;
+                }
+                // Counts the item as ended also when it unwinds, so that the calling thread's wait
+                // ends and the scope passes the panic on.
+                let _ended = XItemEnded(ended);
+                if index < items {
+                    let stored = results[index].set(item(&mut scratch, index)).is_ok();
+                    assert!(stored, "item {index} taken twice");
+                } else {
+                    extra(index - items);
+                }
+            }
+        };
+        rayon::scope(|scope| {
+            for _ in 1..threads.clamp(1, total) {
+                scope.spawn(move |_| take_items());
+            }
+            take_items();
+            ended.wait();
         });
     }
     results
@@ -347,30 +928,363 @@ fn x_one_latch_pass<S, R: Send + Sync>(
         .collect()
 }
 
+// No NCBI counterpart: scheduling only (item SC9i of line NP, `x_one_latch_pass`).
+/// How long the caller of a one-latch pass spins for the items left before it sleeps.
+const X_PASS_END_SPINS: u32 = 1 << 12;
+
+// No NCBI counterpart: scheduling only (item SC9i of line NP, `x_one_latch_pass`).
+/// The end of a one-latch pass: the items ended, of `total`; the caller sleeps on `woken` (under
+/// `sleeping`) until the task that ends the last one wakes it.
+struct XPassEnd {
+    items: AtomicUsize,
+    total: usize,
+    sleeping: Mutex<()>,
+    woken: Condvar,
+}
+
+impl XPassEnd {
+    /// Counts one more item as ended; the last one wakes the caller (under the lock, so that the
+    /// caller, which tests the count under it before it sleeps, cannot miss it).
+    fn end_one(&self) {
+        if self.items.fetch_add(1, Ordering::AcqRel) + 1 == self.total {
+            let _sleeping = self.sleeping.lock().unwrap_or_else(PoisonError::into_inner);
+            self.woken.notify_all();
+        }
+    }
+
+    /// Returns once every item has ended.
+    fn wait(&self) {
+        for _ in 0..X_PASS_END_SPINS {
+            if self.items.load(Ordering::Acquire) >= self.total {
+                return;
+            }
+            std::hint::spin_loop();
+        }
+        let mut sleeping = self.sleeping.lock().unwrap_or_else(PoisonError::into_inner);
+        while self.items.load(Ordering::Acquire) < self.total {
+            sleeping = self
+                .woken
+                .wait(sleeping)
+                .unwrap_or_else(PoisonError::into_inner);
+        }
+    }
+}
+
+/// Counts one item of a one-latch pass as ended when dropped.
+struct XItemEnded<'a>(&'a XPassEnd);
+
+impl Drop for XItemEnded<'_> {
+    fn drop(&mut self) {
+        self.0.end_one();
+    }
+}
+
+// No NCBI counterpart: scheduling only (item SC9i of line NP, `XGang`).
+/// How long a helper of a gang spins for the next pass, and the caller for the helpers to leave a
+/// pass or the gang, before they sleep.
+const X_GANG_SPINS: u32 = 1 << 10;
+
+// No NCBI counterpart: scheduling only (item SC9i of line NP). Each item is made once, by the same
+// call, and its result stored at its index, as in `x_one_latch_pass`.
+/// The helpers of a build's passes after its first (`x_flat_stripes_on`: each wave's stripes and the
+/// next wave's appends): `threads - 1` tasks of the current pool spawned once, in one `rayon::scope`
+/// (`x_with_gang`), that take the items of each pass the calling thread posts (`XGang::pass`) and
+/// between passes wait for the next one (a short spin, then `posted`) until the build closes the
+/// gang. A pass in a scope of its own (`x_one_latch_pass`) woke the pool's idle threads each time
+/// (rayon's spawn), each of which then searched every thread's queue for jobs: with two passes per
+/// wave, 8 or 10 waves and 32 threads, 1.4 to 1.6 G more cycles in rayon's steal and 5 % more user
+/// time than one wave (ws node 1, 800 cDNAs).
+///
+/// A helper joins a pass only while it is open (`XGangSlot::take`), and is counted in `inside`
+/// until it leaves the pass's item loop; once its own item loop ends (every item is taken), the
+/// caller closes the pass to new helpers and waits for those inside, so that the loop, on the
+/// caller's stack, outlives every call of it. The waits cannot deadlock: an item runs no job of the
+/// pool and depends only on its inputs, and a helper waits for nothing but the caller's next pass or
+/// the end; a helper that starts after the end does nothing.
+struct XGang {
+    threads: usize,
+    slot: Mutex<XGangSlot>,
+    /// The helpers sleep on it for a pass or the end.
+    posted: Condvar,
+    /// The caller sleeps on it for the helpers to leave a pass, or to end.
+    left: Condvar,
+    /// `XGangSlot::generation`, for the helpers' spin.
+    generation: AtomicUsize,
+    /// The helpers in the item loop of the open or closing pass (raised under `slot`, while the pass
+    /// is open).
+    inside: AtomicUsize,
+    /// The helpers that have started and not yet ended (raised under `slot`, before the end).
+    alive: AtomicUsize,
+}
+
+/// The pass a gang's helpers may join.
+struct XGangSlot {
+    /// Raised by each pass posted and by the end.
+    generation: usize,
+    /// The open pass's item loop; `None` between passes.
+    take: Option<XTake>,
+    closed: bool,
+}
+
+/// A pass's item loop with its lifetime erased: `XGang::pass` keeps the loop alive while a helper
+/// can call it.
+#[derive(Clone, Copy)]
+struct XTake(*const (dyn Fn() + Sync));
+
+// SAFETY: the loop is `Sync` (several threads call it at once), and the pointer is dereferenced only
+// by a helper that joined the pass while it was open (`XGang::serve`), which `XGang::pass` waits for.
+unsafe impl Send for XTake {}
+
+impl XGang {
+    fn new(threads: usize) -> Self {
+        Self {
+            threads: threads.max(1),
+            slot: Mutex::new(XGangSlot {
+                generation: 0,
+                take: None,
+                closed: false,
+            }),
+            posted: Condvar::new(),
+            left: Condvar::new(),
+            generation: AtomicUsize::new(0),
+            inside: AtomicUsize::new(0),
+            alive: AtomicUsize::new(0),
+        }
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, XGangSlot> {
+        self.slot.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Waits (a short spin, then `left`) until `count` is 0.
+    fn wait_for_none(&self, count: &AtomicUsize) {
+        for _ in 0..X_GANG_SPINS {
+            if count.load(Ordering::Acquire) == 0 {
+                return;
+            }
+            std::hint::spin_loop();
+        }
+        let mut slot = self.lock();
+        while count.load(Ordering::Acquire) != 0 {
+            slot = self.left.wait(slot).unwrap_or_else(PoisonError::into_inner);
+        }
+    }
+
+    /// Lowers `count` by one; the last wakes the caller (under the lock, so that the caller, which
+    /// tests the count under it before it sleeps, cannot miss it).
+    fn leave(&self, count: &AtomicUsize) {
+        if count.fetch_sub(1, Ordering::AcqRel) == 1 {
+            let _slot = self.lock();
+            self.left.notify_all();
+        }
+    }
+
+    /// A helper: joins each pass posted until the gang is closed.
+    fn serve(&self) {
+        {
+            // After the end, or after the last pass has closed; a helper that comes while the last
+            // pass is open joins it.
+            let slot = self.lock();
+            if slot.closed && slot.take.is_none() {
+                return;
+            }
+            self.alive.fetch_add(1, Ordering::AcqRel);
+        }
+        let _ended = XGangLeave(self, &self.alive);
+        let mut seen = 0usize;
+        loop {
+            for _ in 0..X_GANG_SPINS {
+                if self.generation.load(Ordering::Acquire) != seen {
+                    break;
+                }
+                std::hint::spin_loop();
+            }
+            let take = {
+                let mut slot = self.lock();
+                while slot.generation == seen && !slot.closed {
+                    slot = self
+                        .posted
+                        .wait(slot)
+                        .unwrap_or_else(PoisonError::into_inner);
+                }
+                seen = slot.generation;
+                match slot.take {
+                    Some(take) => {
+                        self.inside.fetch_add(1, Ordering::AcqRel);
+                        (take, slot.closed)
+                    }
+                    // The pass closed before this helper came.
+                    None if slot.closed => return,
+                    None => continue,
+                }
+            };
+            let (take, last) = take;
+            {
+                // Leaves the pass also when an item unwinds, so that the caller's wait ends and the
+                // scope passes the panic on.
+                let _left = XGangLeave(self, &self.inside);
+                // SAFETY: the helper joined the pass while it was open (above, under the lock), and
+                // `XGang::pass` keeps the loop alive until `inside` is 0.
+                unsafe { (*take.0)() };
+            }
+            if last {
+                return;
+            }
+        }
+    }
+
+    /// `x_one_latch_pass` without its extra tasks, on the caller and the gang's helpers: the
+    /// results of `item(scratch, i)` for i in 0..items, in order, each task with its own `scratch`
+    /// (`init`). After the `last` pass the helpers end at once (they wait for no next pass, and the
+    /// end does not wake them).
+    fn pass<S, R: Send + Sync>(
+        &self,
+        items: usize,
+        last: bool,
+        init: impl Fn() -> S + Sync,
+        item: impl Fn(&mut S, usize) -> R + Sync,
+    ) -> Vec<R> {
+        let results: Vec<OnceLock<R>> = (0..items).map(|_| OnceLock::new()).collect();
+        if items > 0 {
+            let next = AtomicUsize::new(0);
+            let take_items = || {
+                if next.load(Ordering::Relaxed) >= items {
+                    return;
+                }
+                let mut scratch = init();
+                loop {
+                    let index = next.fetch_add(1, Ordering::Relaxed);
+                    if index >= items {
+                        break;
+                    }
+                    let stored = results[index].set(item(&mut scratch, index)).is_ok();
+                    assert!(stored, "item {index} taken twice");
+                }
+            };
+            let take: *const (dyn Fn() + Sync + '_) = &take_items;
+            // SAFETY: only the lifetime is erased; `_open` (also when the caller's items unwind)
+            // closes the pass and waits for every helper in it before `take_items` is dropped.
+            let take = XTake(unsafe {
+                std::mem::transmute::<*const (dyn Fn() + Sync + '_), *const (dyn Fn() + Sync)>(take)
+            });
+            {
+                let mut slot = self.lock();
+                slot.generation += 1;
+                slot.take = Some(take);
+                slot.closed |= last;
+                self.generation.store(slot.generation, Ordering::Release);
+            }
+            let _open = XGangPassOpen(self);
+            self.posted.notify_all();
+            take_items();
+        }
+        results
+            .into_iter()
+            .map(|result| result.into_inner().expect("every item taken"))
+            .collect()
+    }
+}
+
+/// Lowers a count of a gang when dropped (`XGang::leave`).
+struct XGangLeave<'g>(&'g XGang, &'g AtomicUsize);
+
+impl Drop for XGangLeave<'_> {
+    fn drop(&mut self) {
+        self.0.leave(self.1);
+    }
+}
+
+/// An open pass of a gang: closes it to new helpers and waits for those in it when dropped.
+struct XGangPassOpen<'g>(&'g XGang);
+
+impl Drop for XGangPassOpen<'_> {
+    fn drop(&mut self) {
+        self.0.lock().take = None;
+        self.0.wait_for_none(&self.0.inside);
+    }
+}
+
+/// Closes a gang when dropped: its helpers end, and the caller waits for those that started.
+struct XGangClose<'g>(&'g XGang);
+
+impl Drop for XGangClose<'_> {
+    fn drop(&mut self) {
+        {
+            let mut slot = self.0.lock();
+            slot.closed = true;
+            slot.generation += 1;
+            self.0.generation.store(slot.generation, Ordering::Release);
+        }
+        self.0.posted.notify_all();
+        self.0.wait_for_none(&self.0.alive);
+    }
+}
+
+// No NCBI counterpart: scheduling only (item SC9i of line NP, `XGang`).
+/// `body` with a gang of `threads - 1` helpers of the current pool, closed when `body` returns or
+/// unwinds.
+fn x_with_gang<R: Send>(threads: usize, body: impl FnOnce(&XGang) -> R + Send) -> R {
+    let gang = XGang::new(threads);
+    let gang = &gang;
+    rayon::scope(move |scope| {
+        for _ in 1..gang.threads {
+            scope.spawn(move |_| gang.serve());
+        }
+        let _close = XGangClose(gang);
+        body(gang)
+    })
+}
+
+// No NCBI counterpart: scheduling only (line NP, SC9e).
+/// `items` on `threads` tasks of the current pool (the one-latch pass), each task with its own
+/// scratch from `init`: the passes of BLASTX's bucket fill in parts (`x_clut_direct.rs`
+/// `x_bx_buckets_with`). The results in item order.
+pub(super) fn x_items_in_parts<S, R: Send + Sync>(
+    threads: usize,
+    items: usize,
+    init: impl Fn() -> S + Sync,
+    item: impl Fn(&mut S, usize) -> R + Sync,
+) -> Vec<R> {
+    x_one_latch_pass(threads, items, 0, init, item, |_| {})
+}
+
 /// The parameters of `x_try_build_flat_parallel_with` that the module header's argument leaves free
 /// (and the capacity and the bound of the serial builder, for the tests).
-struct XParallelCuts<'a> {
+struct XParallelCuts<'a, H = i32> {
     overflow_cell_capacity: usize,
     /// `None`: `x_max_appends`, the serial builder's bound.
     max_appends: Option<usize>,
     threads: usize,
-    /// The chunks' sizes in query offsets, in turn; empty: the offsets over `X_PARTS_PER_THREAD`
-    /// chunks per thread, at least `X_MIN_CHUNK_OFFSETS` each.
+    /// The chunks' sizes in query offsets, in turn; empty: guided sizes (`XChunkSizes::Guided`).
     chunk_sizes: &'a [usize],
     /// The stripes' width 2^shift; `None`: the widest that makes `X_PARTS_PER_THREAD` stripes per
     /// thread, or fewer so that the chunks' parts are at most `X_MAX_PARTS`.
     stripe_shift: Option<usize>,
+    /// Item SC9i of line NP: the cells of a wave (`x_wave`); `None`: `X_WAVE_CELLS` (smaller in the
+    /// tests).
+    wave_cells: Option<usize>,
+    /// The fewest entries of a segment of packed appends (`XSegmentOut`): `X_APPENDS_SEGMENT`
+    /// (smaller in the tests).
+    appends_segment: usize,
+    /// The appends of a piece (`x_chunk_appends`): `X_PIECE_APPENDS` (smaller in the tests).
+    piece_appends: usize,
+    /// Item SC2d-2: the block search's kept segments of packed appends (`XSegmentPool`): the appends
+    /// pass takes them before it makes new ones, the stripes pass keeps the build's.
+    segments: Option<&'a XSegmentPool>,
     /// LOSAT_X_BPLKPFLAT: how the passes are scheduled, and the extra tasks.
     passes: XPasses<'a>,
     /// LOSAT_X_BPLKPFLAT: the vectors of an earlier table for `starts` and `hits` (else fresh ones).
-    spare: Option<&'a XFlatSpare>,
-    /// LOSAT_X_BPLKPFLATSHADOW: `starts` and `hits` filled with `u32::MAX` / `i32::MIN` before the
-    /// stripes write them.
-    poison: bool,
+    spare: Option<&'a XFlatSpare<H>>,
+    /// LOSAT_X_BXCLUTPOOL: the vectors BLASTX's pool lent for `starts`, `hits` and `pv` (else fresh
+    /// ones; not with `spare`).
+    lent: Option<XFlatTableVectors<H>>,
     /// LOSAT_X_BPLKPAHEAD: `starts`, `hits` and `pv` all come from `spare`, and without their room
     /// the build makes no table (`None`); nothing of the table is allocated here
     /// (`XFlatArgs::x_ahead`).
     x_ahead: bool,
+    /// LOSAT_X_BPSTRIPEFILL: with one-latch passes, the stripes made by `x_stripe_fill` (else by
+    /// `x_stripe_build`).
+    stripe_fill: bool,
 }
 
 // No NCBI counterpart: the largest PV shift that `finalize` (blast_aalookup.c:1219-1222, below)
@@ -402,30 +1316,54 @@ fn x_stripe_shift(backbone_size: usize, stripes: usize, smallest: usize) -> usiz
 //
 //         for (offset = from; offset <= to; offset++){
 // ```
-/// The count ranges' offsets cut into chunks (module header) of `sizes[i % sizes.len()]` offsets
-/// (chunk i), fewer at a range's end and where the offsets would pass `X_OFFSET_SPAN`.
+// No NCBI counterpart: how the appends pass is divided among the pool's threads. Scheduling only.
+/// The chunks' sizes in query offsets (`x_chunks`).
+#[derive(Clone, Copy)]
+enum XChunkSizes<'a> {
+    /// Chunk i takes `sizes[i % sizes.len()]` (the tests' cuts).
+    List(&'a [usize]),
+    /// Guided (item SC2d-2): a chunk takes the offsets not yet in a chunk (of `offsets`) over
+    /// `X_GUIDED_SHARE * threads`, from `X_MIN_CHUNK_OFFSETS` to `X_MAX_GUIDED_OFFSETS`.
+    Guided { threads: usize, offsets: usize },
+}
+
+impl XChunkSizes<'_> {
+    /// The size of chunk `chunk`, opened when `placed` offsets are in the chunks before it.
+    fn size(self, chunk: usize, placed: usize) -> usize {
+        match self {
+            Self::List(sizes) => sizes[chunk % sizes.len()].max(1),
+            Self::Guided { threads, offsets } => (offsets.saturating_sub(placed)
+                / (X_GUIDED_SHARE * threads.max(1)))
+            .clamp(X_MIN_CHUNK_OFFSETS, X_MAX_GUIDED_OFFSETS),
+        }
+    }
+}
+
+/// The count ranges' offsets cut into chunks (module header) of the sizes of `sizes`, fewer at a
+/// range's end and where the offsets would pass `X_OFFSET_SPAN`.
 fn x_chunks(
     word_size: usize,
     ranges: &[(std::ops::Range<usize>, bool)],
     locations: &[(i32, i32)],
-    sizes: &[usize],
+    sizes: XChunkSizes<'_>,
 ) -> Vec<XChunk> {
     let word = word_size as i64;
     let mut chunks: Vec<XChunk> = Vec::new();
+    // The offsets in the chunks so far (the open one's included).
+    let mut placed = 0usize;
     for (range_index, (range, _)) in ranges.iter().enumerate() {
-        // The chunk being filled (it is chunk `chunks.len()`) and its offsets.
-        let mut open: Option<(XChunk, usize)> = None;
+        // The chunk being filled (it is chunk `chunks.len()`), its offsets and its size.
+        let mut open: Option<(XChunk, usize, usize)> = None;
         for &(left, right) in &locations[range.clone()] {
             let to = i64::from(right) - word + 1;
             let mut from = i64::from(left);
             while from <= to {
-                let size = sizes[chunks.len() % sizes.len()].max(1);
-                let joins = matches!(&open, Some((chunk, count))
-                    if *count < size
+                let joins = matches!(&open, Some((chunk, count, size))
+                    if *count < *size
                         && from >= i64::from(chunk.base)
                         && from < i64::from(chunk.base) + X_OFFSET_SPAN);
                 if !joins {
-                    if let Some((chunk, _)) = open.take() {
+                    if let Some((chunk, _, _)) = open.take() {
                         chunks.push(chunk);
                     }
                     open = Some((
@@ -435,10 +1373,11 @@ fn x_chunks(
                             base: from as i32,
                         },
                         0,
+                        sizes.size(chunks.len(), placed),
                     ));
                 }
-                let size = sizes[chunks.len() % sizes.len()].max(1);
-                let (chunk, count) = open.as_mut().expect("an open chunk");
+                let (chunk, count, size) = open.as_mut().expect("an open chunk");
+                let size = *size;
                 // `size - count` is at least 1 (`joins`); past `X_OFFSET_SPAN` it does not matter.
                 let take = ((size - *count).min(X_OFFSET_SPAN as usize) as i64)
                     .min(to - from + 1)
@@ -448,10 +1387,11 @@ fn x_chunks(
                     .pieces
                     .push((from as i32, (from + take - 1 + word - 1) as i32));
                 *count += take as usize;
+                placed += take as usize;
                 from += take;
             }
         }
-        if let Some((chunk, _)) = open.take() {
+        if let Some((chunk, _, _)) = open.take() {
             chunks.push(chunk);
         }
     }
@@ -465,32 +1405,43 @@ fn x_chunks(
 //             s_CompressedAddWordHits(&info, query->sequence, offset);
 //         }
 // ```
-/// A chunk's appends (the serial count pass's statements), sorted by stripe; empty when the appends
-/// of all chunks pass `max_appends` (then `too_large`).
+/// A chunk's appends (the serial count pass's statements) in pieces of `piece_appends` appends (the
+/// last one fewer; none for a chunk of no appends), each sorted by stripe into the task's segment as
+/// soon as it is full, so that the scratch holds at most a piece (item SC2d-2); the pieces in order
+/// hold the chunk's appends in order. None when the appends of all chunks pass `max_appends` (then
+/// `too_large`). The pieces' `chunk` is left 0 (the pass sets it).
+///
+/// Item SC9i of line NP: the words' starts (`XWords::word_start`) are read from `starts` where the
+/// chunk's are kept (the later waves), else made from the query; with `XStarts::Keep` (the first of
+/// more than one wave) they are also returned, those of the chunk's offsets in order.
 #[allow(clippy::too_many_arguments)]
 fn x_chunk_appends(
     words: &XWords<'_>,
     query: &[u8],
     chunk: &XChunk,
+    wave: &XWave,
     shift: usize,
-    stripes: usize,
     max_appends: usize,
+    piece_appends: usize,
     appended: &AtomicUsize,
     too_large: &AtomicBool,
-    targets: &mut Vec<u32>,
-    per_offset: &mut Vec<(i32, u32)>,
-) -> XChunkAppends {
-    let empty = || XChunkAppends {
-        packed: Vec::new(),
-        stripe_starts: vec![0; stripes + 1],
-    };
+    starts: XStarts<'_>,
+    scratch: &mut XAppendsScratch<'_>,
+) -> (Vec<XChunkAppends>, Vec<XWordStart>) {
+    let XAppendsScratch {
+        targets,
+        per_offset,
+        out,
+    } = scratch;
     targets.clear();
     per_offset.clear();
+    let mut pieces = Vec::new();
+    let mut kept = Vec::new();
     if too_large.load(Ordering::Relaxed) {
-        return empty();
+        return (pieces, kept);
     }
     // The appends not yet added to `appended`.
-    let mut reported = 0usize;
+    let mut unreported = 0usize;
     let report = |appends: usize| {
         let total = appended.fetch_add(appends, Ordering::Relaxed) + appends;
         if total > max_appends {
@@ -498,63 +1449,160 @@ fn x_chunk_appends(
         }
         !too_large.load(Ordering::Relaxed)
     };
-    x_for_each_offset(words.word_length, query, &chunk.pieces, |offset, word| {
-        let before = targets.len();
-        words.for_each_word(word, targets);
+    // The bookkeeping after an offset's appends (`targets[before..]`); `false` past `max_appends`.
+    let mut after = |offset: i32, before: usize, targets: &mut Vec<u32>| {
         let appends = targets.len() - before;
         if appends != 0 {
             per_offset.push((offset, appends as u32));
         }
-        if targets.len() - reported < X_COUNT_CHUNK {
-            return true;
+        unreported += appends;
+        if unreported >= X_COUNT_CHUNK && !report(std::mem::take(&mut unreported)) {
+            return false;
         }
-        let new = targets.len() - reported;
-        reported = targets.len();
-        report(new)
-    });
-    if !report(targets.len() - reported) {
-        return empty();
+        if targets.len() >= piece_appends {
+            pieces.push(x_sorted_piece(
+                targets, per_offset, chunk.base, shift, wave, out,
+            ));
+            targets.clear();
+            per_offset.clear();
+        }
+        true
+    };
+    match starts {
+        // One wave: every cell, as `XWords::for_each_word` gives them.
+        XStarts::Make => {
+            x_for_each_offset(words.word_length, query, &chunk.pieces, |offset, word| {
+                let before = targets.len();
+                words.for_each_word(word, targets);
+                after(offset, before, targets)
+            });
+        }
+        XStarts::Keep => {
+            x_for_each_offset(words.word_length, query, &chunk.pieces, |offset, word| {
+                let Some(start) = words.word_start(word, offset) else {
+                    return true;
+                };
+                kept.push(start);
+                let before = targets.len();
+                words.for_each_word_from(&start, word, &wave.letters, targets);
+                after(offset, before, targets)
+            });
+        }
+        XStarts::Kept(kept_starts) => {
+            for start in kept_starts {
+                let at = start.offset as usize;
+                let before = targets.len();
+                words.for_each_word_from(
+                    start,
+                    &query[at..at + words.word_length],
+                    &wave.letters,
+                    targets,
+                );
+                if !after(start.offset, before, targets) {
+                    break;
+                }
+            }
+        }
     }
+    if !report(unreported) {
+        return (Vec::new(), Vec::new());
+    }
+    if !targets.is_empty() {
+        pieces.push(x_sorted_piece(
+            targets, per_offset, chunk.base, shift, wave, out,
+        ));
+    }
+    (pieces, kept)
+}
 
-    // Counting sort by stripe, stable.
+// No NCBI counterpart: the order of the build's work (item SC9i of line NP).
+/// Where `x_chunk_appends` takes the words' starts (`XWords::word_start`) of a chunk's offsets.
+#[derive(Clone, Copy)]
+enum XStarts<'a> {
+    /// None: a build of one wave, whose appends are `XWords::for_each_word`'s (every cell of an
+    /// offset, as it gives them: a wave of fewer letters chooses its last letter first, and
+    /// testing each of the alphabet's letters against the bound one by one missed the branch
+    /// predictor's guess often: blastp-fast +4.7 % of the wall time at 8 threads with +0.4 % of the
+    /// instructions).
+    Make,
+    /// From the query, and kept for the later waves (the first of more than one wave).
+    Keep,
+    /// The chunk's kept starts (the later waves).
+    Kept(&'a [XWordStart]),
+}
+
+// No NCBI counterpart: the layout of a piece of a chunk's appends (module header); it changes no
+// value NCBI computes.
+/// The appends `targets` of the offsets `per_offset` (each offset with its number of appends, in
+/// order; offsets of a chunk whose first offset is `base`), sorted by stripe, stably (counting sort),
+/// into a range of the task's segment `out`. A target is its cell less the wave's first cell
+/// (`XWords::for_each_word_in`).
+fn x_sorted_piece(
+    targets: &[u32],
+    per_offset: &[(i32, u32)],
+    base: i32,
+    shift: usize,
+    wave: &XWave,
+    out: &mut XSegmentOut<'_>,
+) -> XChunkAppends {
+    // The wave's stripes, from its first cell (the targets lie in its cells, from it).
+    let stripes = wave.stripes;
     let mut stripe_starts = vec![0u32; stripes + 1];
-    for &index in targets.iter() {
-        stripe_starts[(index as usize >> shift) + 1] += 1;
+    for &index in targets {
+        stripe_starts[(index >> shift) as usize + 1] += 1;
     }
     for j in 0..stripes {
         stripe_starts[j + 1] += stripe_starts[j];
     }
     let mut cursors = stripe_starts[..stripes].to_vec();
-    let mut packed = vec![0u32; targets.len()];
+    let len = targets.len();
+    let (segment, at_segment, packed) = out.take(len);
     let mask = (1u32 << shift) - 1;
     let mut at = 0usize;
-    for &(query_offset, appends) in per_offset.iter() {
+    for &(query_offset, appends) in per_offset {
         // Below X_OFFSET_SPAN (`x_chunks`).
-        let delta = (query_offset - chunk.base) as u32;
+        let delta = (query_offset - base) as u32;
         let end = at + appends as usize;
         for &index in &targets[at..end] {
-            let cursor = &mut cursors[index as usize >> shift];
+            let cursor = &mut cursors[(index >> shift) as usize];
             packed[*cursor as usize] = (index & mask) << 16 | delta;
             *cursor += 1;
         }
         at = end;
     }
     XChunkAppends {
-        packed,
+        chunk: 0,
+        segment,
+        at: at_segment,
+        len,
         stripe_starts,
     }
 }
 
 /// One stripe's part of the table.
-struct XStripe<'t> {
-    stripe: usize,
+struct XStripe<'t, H> {
+    /// The stripe's first cell.
+    first: usize,
+    /// The stripe's index among its wave's (`XChunkAppends::stripe_starts`).
+    local: usize,
     /// The stripe's first hit.
     base: u32,
     starts: &'t mut [u32],
-    hits: &'t mut [i32],
+    /// The stripe's slots of the hits, each written once by the fill.
+    hits: &'t mut [MaybeUninit<H>],
     /// The stripe's PV words when the PV shift is known before the counts (`x_largest_pv_shift` is
     /// `PV_ARRAY_BTS`), else empty.
     pv: &'t mut [u32],
+}
+
+// No NCBI counterpart: memory handling only (the hits written in place, item SC9i of line NP).
+/// `slots` as the values written in them.
+///
+/// # Safety
+/// Every slot of `slots` has been written.
+unsafe fn x_written<H>(slots: &mut [MaybeUninit<H>]) -> &mut [H] {
+    // SAFETY: `MaybeUninit<H>` has the layout of `H`, and the caller wrote every slot.
+    unsafe { &mut *(slots as *mut [MaybeUninit<H>] as *mut [H]) }
 }
 
 /// What a stripe's counts give the whole table.
@@ -585,52 +1633,60 @@ struct XStripeCounts {
 // ```
 /// The count, layout and fill of one stripe (module header).
 #[allow(clippy::too_many_arguments)]
-fn x_stripe_build(
-    part: XStripe<'_>,
-    shift: usize,
-    backbone_size: usize,
+fn x_stripe_build<H: XQueryOffset>(
+    part: XStripe<'_, H>,
     ranges: usize,
     chunks: &[XChunk],
-    appends: &[XChunkAppends],
+    appends: &XAppends,
+    need_cells: bool,
 ) -> XStripeCounts {
     let XStripe {
-        stripe,
+        first,
+        local,
         base,
         starts,
         hits,
         pv,
     } = part;
-    let first = stripe << shift;
     let parts = || {
-        chunks
-            .iter()
-            .zip(appends)
-            .map(move |(chunk, chunk_appends)| {
-                (
-                    chunk,
-                    &chunk_appends.packed[chunk_appends.stripe_starts[stripe] as usize
-                        ..chunk_appends.stripe_starts[stripe + 1] as usize],
-                )
-            })
+        appends.iter().map(move |(piece, packed)| {
+            (
+                &chunks[piece.chunk],
+                &packed
+                    [piece.stripe_starts[local] as usize..piece.stripe_starts[local + 1] as usize],
+            )
+        })
     };
 
-    // Count: each cell's appends in the serial order; the overflow cells they take.
-    let mut counts = vec![0u32; (backbone_size - first).min(1 << shift)];
+    // Count: each cell's appends in the serial order; with `need_cells`, the overflow cells of the
+    // count ranges before the last (module header).
+    let mut counts = vec![0u32; starts.len()];
     let mut cells = vec![0usize; ranges];
+    let mut range = None;
+    let mut cells_before = 0usize;
     for (chunk, part) in parts() {
-        let mut taken = 0usize;
-        for &packed in part {
-            let count = &mut counts[(packed >> 16) as usize];
-            taken += usize::from(x_takes_overflow_cell(*count));
-            *count += 1;
+        if part.is_empty() {
+            continue;
         }
-        cells[chunk.range] += taken;
+        if need_cells {
+            x_next_count_range(
+                &mut range,
+                chunk.range,
+                &counts,
+                &mut cells,
+                &mut cells_before,
+            );
+        }
+        for &packed in part {
+            counts[(packed >> 16) as usize] += 1;
+        }
     }
 
     // Layout: the starts (from the stripe's first hit) and the PV bits; each count becomes its
-    // cell's cursor, the cell's first slot in the stripe's hits.
+    // cell's cursor, the cell's first slot in the stripe's hits. The overflow cells of the counts.
     let mut nonempty = 0usize;
     let mut longest = 0u32;
+    let mut taken = 0usize;
     let mut total = base;
     let mut slot = 0u32;
     for (cell, (start, cursor)) in starts.iter_mut().zip(counts.iter_mut()).enumerate() {
@@ -639,6 +1695,7 @@ fn x_stripe_build(
         if count > 0 {
             nonempty += 1;
             longest = longest.max(count);
+            taken += x_overflow_cells_of(count);
             if !pv.is_empty() {
                 // `compressed_pv_set` on the stripe's words (PV shift `PV_ARRAY_BTS`; the stripe
                 // starts a word).
@@ -649,31 +1706,182 @@ fn x_stripe_build(
         total += count;
         slot += count;
     }
+    if let (true, Some(range)) = (need_cells, range) {
+        cells[range] += taken - cells_before;
+    }
 
     // Fill: the serial fill on the stripe's cells, the appends in order, each at its cell's cursor.
     for (chunk, part) in parts() {
         for &packed in part {
             let cursor = &mut counts[(packed >> 16) as usize];
-            hits[*cursor as usize] = chunk.base + (packed & 0xffff) as i32;
+            hits[*cursor as usize].write(H::from_offset(
+                (chunk.base + (packed & 0xffff) as i32) as u32,
+            ));
             *cursor += 1;
         }
     }
+    // SAFETY: the cursors start at the cells' first slots in the stripe (the counts' prefix sums,
+    // from 0) and each moves on once per append to its cell, which the count counted: every slot
+    // of the stripe's hits, whose number is the stripe's appends, is written once above.
+    let hits = unsafe { x_written(hits) };
     // A cursor ends at the next cell's first slot; the cells of more than 5 offsets put o_k at
     // `x_emission_position(k, n)` (the serial builder's statements).
-    let mut appended: Vec<i32> = Vec::new();
     let mut begin = 0usize;
     for &end in &counts {
         let end = end as usize;
-        let n = (end - begin) as u32;
-        if n > COMPRESSED_HITS_PER_BACKBONE_CELL as u32 + 1 {
-            let cell = &mut hits[begin..end];
-            appended.clear();
-            appended.extend_from_slice(cell);
-            for (k, &query_offset) in appended.iter().enumerate() {
-                cell[x_emission_position(k as u32, n) as usize] = query_offset;
-            }
+        if end - begin > COMPRESSED_HITS_PER_BACKBONE_CELL + 1 {
+            x_to_scan_order(&mut hits[begin..end]);
         }
         begin = end;
+    }
+    XStripeCounts {
+        nonempty,
+        longest,
+        cells,
+    }
+}
+
+// No NCBI counterpart: where the overflow cells of the serial count pass are summed per count range
+// (module header).
+/// A stripe's count passes from the appends of `range` (`None`: none yet) to those of `next`, a
+/// count range not before it: the overflow cells that the counts so far take, less those of the
+/// ranges before (`cells_before`), are `range`'s.
+fn x_next_count_range(
+    range: &mut Option<usize>,
+    next: usize,
+    counts: &[u32],
+    cells: &mut [usize],
+    cells_before: &mut usize,
+) {
+    match *range {
+        Some(current) if current != next => {
+            let so_far = x_overflow_cells_in(counts);
+            cells[current] += so_far - *cells_before;
+            *cells_before = so_far;
+        }
+        _ => {}
+    }
+    *range = Some(next);
+}
+
+/// LOSAT_X_BPSTRIPEFILL: a thread's scratch for `x_stripe_fill`: the copy of the stripe's parts,
+/// the cells' counts (then cursors), the cells of more than 5 offsets.
+type XFillScratch = (Vec<u32>, Vec<u32>, Vec<u32>);
+
+// NCBI reference (598d8ae6): as `x_stripe_build` (blast_aalookup.c:787-849, :1197-1235)
+// ```c
+//     Int4 num_entries = backbone_cell->num_used;
+//     ...
+//     backbone_cell->num_used++;
+// ```
+/// LOSAT_X_BPSTRIPEFILL: `x_stripe_build` with the stripe's parts of the chunks read once, in chunk
+/// order, into a copy while the cells are counted; the layout and the fill from the copy (module
+/// header).
+#[allow(clippy::too_many_arguments)]
+fn x_stripe_fill<H: XQueryOffset>(
+    part: XStripe<'_, H>,
+    ranges: usize,
+    chunks: &[XChunk],
+    appends: &XAppends,
+    need_cells: bool,
+    scratch: &mut XFillScratch,
+) -> XStripeCounts {
+    let XStripe {
+        first,
+        local,
+        base,
+        starts,
+        hits,
+        pv,
+    } = part;
+    let (copy, counts, overflowed) = scratch;
+    counts.clear();
+    counts.resize(starts.len(), 0);
+    copy.clear();
+    copy.reserve(hits.len());
+    let part_of = |piece: &XChunkAppends| {
+        piece.stripe_starts[local] as usize..piece.stripe_starts[local + 1] as usize
+    };
+
+    // Count: each cell's appends in the serial order; with `need_cells`, the overflow cells of the
+    // count ranges before the last, as `x_stripe_build`'s.
+    let mut cells = vec![0usize; ranges];
+    let mut range = None;
+    let mut cells_before = 0usize;
+    for (piece, packed) in appends.iter() {
+        let chunk = &chunks[piece.chunk];
+        let part = &packed[part_of(piece)];
+        if part.is_empty() {
+            continue;
+        }
+        if need_cells {
+            x_next_count_range(
+                &mut range,
+                chunk.range,
+                counts,
+                &mut cells,
+                &mut cells_before,
+            );
+        }
+        copy.extend(part.iter().map(|&packed| {
+            counts[(packed >> 16) as usize] += 1;
+            packed
+        }));
+    }
+
+    // Layout, as `x_stripe_build`'s; the cells of more than 5 offsets (those that take overflow
+    // cells) noted.
+    let mut nonempty = 0usize;
+    let mut longest = 0u32;
+    let mut taken = 0usize;
+    let mut slot = 0u32;
+    overflowed.clear();
+    for (cell, (start, cursor)) in starts.iter_mut().zip(counts.iter_mut()).enumerate() {
+        let count = *cursor;
+        *start = base + slot;
+        if count > 0 {
+            nonempty += 1;
+            longest = longest.max(count);
+            if !pv.is_empty() {
+                pv[cell >> PV_ARRAY_BTS] |= 1u32 << ((first + cell) & PV_ARRAY_MASK);
+            }
+            if count > COMPRESSED_HITS_PER_BACKBONE_CELL as u32 + 1 {
+                overflowed.push(cell as u32);
+                taken += x_overflow_cells_of(count);
+            }
+        }
+        *cursor = slot;
+        slot += count;
+    }
+    if let (true, Some(range)) = (need_cells, range) {
+        cells[range] += taken - cells_before;
+    }
+
+    // Fill: the serial fill on the stripe's cells, the appends in order, each at its cell's cursor;
+    // the copy holds the chunks' parts one after the other.
+    let mut at = 0usize;
+    for piece in &appends.pieces {
+        let chunk = &chunks[piece.chunk];
+        let end = at + part_of(piece).len();
+        for &packed in &copy[at..end] {
+            let cursor = &mut counts[(packed >> 16) as usize];
+            hits[*cursor as usize].write(H::from_offset(
+                (chunk.base + (packed & 0xffff) as i32) as u32,
+            ));
+            *cursor += 1;
+        }
+        at = end;
+    }
+    // SAFETY: as `x_stripe_build`'s: the copy holds the stripe's appends, each written once at its
+    // cell's cursor, so every slot of the stripe's hits is written.
+    let hits = unsafe { x_written(hits) };
+    // A cursor ends at its cell's end; the cells of more than 5 offsets put o_k at
+    // `x_emission_position(k, n)`.
+    for &cell in overflowed.iter() {
+        let cell = cell as usize;
+        let begin = (starts[cell] - base) as usize;
+        let end = counts[cell] as usize;
+        x_to_scan_order(&mut hits[begin..end]);
     }
     XStripeCounts {
         nonempty,
@@ -690,15 +1898,182 @@ fn x_stripe_build(
 //     s_CompressedLookupFinalize(lookup);
 // ```
 /// The parallel build (module header) in the current rayon pool, with the cuts of `cuts`.
-fn x_try_build_flat_parallel_with(
+fn x_try_build_flat_parallel_with<H: XQueryOffset>(
     word_size: usize,
     scaled_threshold: i32,
     query: &[u8],
     locations: &[(i32, i32)],
     tables: &[std::ops::Range<usize>],
-    cuts: XParallelCuts<'_>,
-) -> Option<XFlatBuild> {
-    let header = XHeader::new(word_size)?;
+    cuts: XParallelCuts<'_, H>,
+) -> Option<XFlatBuild<H>> {
+    x_flat_parallel_on(
+        Blosum62Compressed,
+        word_size,
+        scaled_threshold,
+        query,
+        locations,
+        tables,
+        cuts,
+        |capacity| {
+            x_try_build_flat_with_capacity(
+                word_size,
+                scaled_threshold,
+                query,
+                locations,
+                tables,
+                capacity,
+                X_COUNT_CHUNK,
+                0,
+            )
+            .map(XFlatBuild::x_offsets)
+        },
+    )
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1303-1310 (see
+// `x_clut_direct::x_tbn_build_compressed_lookup_of`)
+// ```c
+//     new_alphabet = SCompressedAlphabetNew(sbp,
+//                                 lookup->compressed_alphabet_size,
+//                                 kMatrixScale);
+// ```
+/// `x_try_build_flat_parallel_with` with the words of the search matrix `matrix`, any but BLOSUM62
+/// (`build_compressed_score_matrix`, item SC2b): the same passes, and the serial builder of the
+/// matrix's words (`x_try_build_flat_of`) where the parallel build takes the serial one.
+fn x_try_build_flat_parallel_of<H: XQueryOffset>(
+    matrix: ScoringMatrix,
+    word_size: usize,
+    scaled_threshold: i32,
+    query: &[u8],
+    locations: &[(i32, i32)],
+    tables: &[std::ops::Range<usize>],
+    cuts: XParallelCuts<'_, H>,
+) -> Option<XFlatBuild<H>> {
+    x_flat_parallel_on(
+        matrix,
+        word_size,
+        scaled_threshold,
+        query,
+        locations,
+        tables,
+        cuts,
+        |capacity| {
+            x_try_build_flat_of(
+                matrix,
+                word_size,
+                scaled_threshold,
+                query,
+                locations,
+                tables,
+                capacity,
+                X_COUNT_CHUNK,
+            )
+            .map(XFlatBuild::x_offsets)
+        },
+    )
+}
+
+// The body of both builders above, so that BLOSUM62's keeps its constant matrix (as
+// `x_flat_with_capacity_of`); `serial` is the serial builder of the same words, with the capacity.
+// The appends pass (`x_flat_appends_on`) and then the stripes pass (`x_flat_stripes_on`), one after
+// the other here; a build ahead of its block may run them apart (item SC2d, module header).
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+fn x_flat_parallel_on<S: CompressedScores, H: XQueryOffset>(
+    scores: S,
+    word_size: usize,
+    scaled_threshold: i32,
+    query: &[u8],
+    locations: &[(i32, i32)],
+    tables: &[std::ops::Range<usize>],
+    mut cuts: XParallelCuts<'_, H>,
+    serial: impl FnOnce(usize) -> Option<XFlatBuild<H>>,
+) -> Option<XFlatBuild<H>> {
+    let (spare, x_ahead, segments) = (cuts.spare, cuts.x_ahead, cuts.segments);
+    let lent = cuts.lent.take();
+    match x_flat_appends_on(
+        scores,
+        word_size,
+        scaled_threshold,
+        query,
+        locations,
+        tables,
+        cuts,
+        serial,
+    ) {
+        XFlatStage::Built(built) => built,
+        XFlatStage::Appends(appends) => x_flat_stripes_on(
+            scores, appends, query, locations, spare, lent, x_ahead, segments,
+        ),
+    }
+}
+
+/// What the appends pass of the parallel build gave (`x_flat_appends_on`).
+#[expect(
+    clippy::large_enum_variant,
+    reason = "a value moved once per build, as `XFlatBuild`; boxing a variant adds an allocation"
+)]
+enum XFlatStage<H: XQueryOffset = i32> {
+    /// The build's outcome without a stripes pass: the serial builder's (a backbone past the
+    /// stripes), `TooLarge`, or none (no score matrix for the alphabet).
+    Built(Option<XFlatBuild<H>>),
+    /// The appends, for the stripes pass.
+    Appends(XFlatAppends),
+}
+
+// No NCBI counterpart: the values the build's first pass hands to its second (module header, item
+// SC2d); it changes no value NCBI computes.
+/// The parallel build after its appends pass (`x_flat_appends_on`), all owned, so that the stripes
+/// pass (`x_flat_stripes_on`) can run later, on another thread: the table's header and cuts, the
+/// first wave's appends and each of its stripes' hits. The words (`XWords`) are not kept: the stripes
+/// pass needs them only for the later waves' appends and the capacity test of a table that passes
+/// the capacity, and makes them again there.
+pub(crate) struct XFlatAppends {
+    header: XHeader,
+    largest_pv_shift: usize,
+    ranges: Vec<(std::ops::Range<usize>, bool)>,
+    chunks: Vec<XChunk>,
+    /// Item SC9i of line NP: with more than one wave, each chunk's words' starts
+    /// (`XWords::word_start`), which the later waves read (else none).
+    word_starts: Vec<Vec<XWordStart>>,
+    appends: XAppends,
+    shift: usize,
+    /// The first wave's stripes' hits.
+    stripe_hits: Vec<usize>,
+    /// Item SC9i of line NP: the waves (`x_wave`) and the last letters of each, and the appends of
+    /// the first.
+    waves: usize,
+    wave_letters: usize,
+    appended: usize,
+    max_appends: usize,
+    piece_appends: usize,
+    appends_segment: usize,
+    scaled_threshold: i32,
+    threads: usize,
+    overflow_cell_capacity: usize,
+    /// The one-latch passes (else rayon's).
+    one_latch: bool,
+    /// LOSAT_X_BPSTRIPEFILL with the one-latch passes.
+    fill: bool,
+}
+
+// The first pass of `x_flat_parallel_on` (module header): the chunks' appends, sorted by stripe,
+// with the extra tasks of the one-latch passes; `XFlatStage::Built` where the build ends here.
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+fn x_flat_appends_on<S: CompressedScores, H: XQueryOffset>(
+    scores: S,
+    word_size: usize,
+    scaled_threshold: i32,
+    query: &[u8],
+    locations: &[(i32, i32)],
+    tables: &[std::ops::Range<usize>],
+    cuts: XParallelCuts<'_, H>,
+    serial: impl FnOnce(usize) -> Option<XFlatBuild<H>>,
+) -> XFlatStage<H> {
+    let Some(header) = XHeader::new(word_size) else {
+        return XFlatStage::Built(None);
+    };
     let backbone_size = header.backbone_size;
     let largest_pv_shift = x_largest_pv_shift(backbone_size);
     if largest_pv_shift > X_MAX_STRIPE_SHIFT {
@@ -706,17 +2081,11 @@ fn x_try_build_flat_parallel_with(
         // spare's vectors): a build ahead would allocate its table here, on the pool thread. This
         // is unreachable for blastp-fast's compressed backbones (759,375 cells for word size 5,
         // far below 2^32), and the table would have the same values.
-        return x_try_build_flat_with_capacity(
-            word_size,
-            scaled_threshold,
-            query,
-            locations,
-            tables,
-            cuts.overflow_cell_capacity,
-            X_COUNT_CHUNK,
-        );
+        return XFlatStage::Built(serial(cuts.overflow_cell_capacity));
     }
-    let matrix = build_blosum62_compressed_score_matrix(header.alphabet)?;
+    let Some(matrix) = scores.score_matrix(header.alphabet) else {
+        return XFlatStage::Built(None);
+    };
     let info = CompressedNeighborInfo::new(&matrix, header.alphabet);
     let words = XWords::new(&header, scaled_threshold, &matrix, &info);
     let threads = cuts.threads.max(1);
@@ -725,7 +2094,6 @@ fn x_try_build_flat_parallel_with(
         .unwrap_or_else(|| x_max_appends(backbone_size));
 
     let ranges = x_count_ranges(tables, locations.len());
-    let default_size;
     let sizes = if cuts.chunk_sizes.is_empty() {
         let word = word_size as i64;
         let offsets: i64 = ranges
@@ -733,46 +2101,180 @@ fn x_try_build_flat_parallel_with(
             .flat_map(|(range, _)| &locations[range.clone()])
             .map(|&(left, right)| (i64::from(right) - word + 2 - i64::from(left)).max(0))
             .sum();
-        default_size = [(offsets as usize)
-            .div_ceil(X_PARTS_PER_THREAD * threads)
-            .max(X_MIN_CHUNK_OFFSETS)];
-        &default_size[..]
+        XChunkSizes::Guided {
+            threads,
+            offsets: offsets as usize,
+        }
     } else {
-        cuts.chunk_sizes
+        XChunkSizes::List(cuts.chunk_sizes)
     };
     let chunks = x_chunks(word_size, &ranges, locations, sizes);
+    // LOSAT_X_BPSTRIPEFILL (module header).
+    let fill = cuts.stripe_fill && matches!(cuts.passes, XPasses::OneLatch(_));
+    // Item SC9i of line NP: the waves (module header); one for a build ahead of its block, whose two
+    // passes run apart.
+    let wave_letters = if cuts.x_ahead {
+        header.alphabet
+    } else {
+        x_wave_letters(&header, cuts.wave_cells.unwrap_or(X_WAVE_CELLS))
+    };
+    let waves = header.alphabet.div_ceil(wave_letters);
+    // The stripes of a wave of `wave_letters` letters (the backbone with one wave): as many per wave
+    // as the one-wave build has (wider ones, a share per wave, left the threads waiting at each
+    // wave's end: x1.07 of the wall time at 32 threads, item SC9i).
+    let wave_size = if waves == 1 {
+        backbone_size
+    } else {
+        wave_letters * x_top_cells(&header)
+    };
     let shift = cuts.stripe_shift.unwrap_or_else(|| {
-        let stripes = (X_PARTS_PER_THREAD * threads).min(X_MAX_PARTS / chunks.len().max(1));
-        x_stripe_shift(backbone_size, stripes, largest_pv_shift)
+        let per_wave = (X_PARTS_PER_THREAD * threads).min(X_MAX_PARTS / chunks.len().max(1));
+        x_stripe_shift(wave_size, per_wave, largest_pv_shift)
     });
     assert!(
         (largest_pv_shift..=X_MAX_STRIPE_SHIFT).contains(&shift),
         "stripe shift {shift} outside {largest_pv_shift}..={X_MAX_STRIPE_SHIFT}"
     );
-    let stripes = backbone_size.div_ceil(1 << shift);
 
-    // The chunks' appends, sorted by stripe.
+    // The first wave's appends, sorted by stripe.
     let appended = AtomicUsize::new(0);
+    let wave = x_wave(0, wave_letters, &header, shift);
+    let Some((appends, stripe_hits, word_starts)) = x_wave_appends(
+        &words,
+        query,
+        &chunks,
+        &wave,
+        shift,
+        threads,
+        max_appends,
+        &appended,
+        cuts.piece_appends,
+        cuts.appends_segment,
+        cuts.segments,
+        cuts.passes,
+        waves > 1,
+        None,
+    ) else {
+        // LOSAT_X_BPLKPFLAT: the reference builder makes this table; the spare's vectors are not
+        // kept beside it (module header).
+        if let Some(spare) = cuts.spare {
+            drop(spare.take());
+        }
+        return XFlatStage::Built(Some(XFlatBuild::TooLarge));
+    };
+    XFlatStage::Appends(XFlatAppends {
+        header,
+        largest_pv_shift,
+        ranges,
+        chunks,
+        word_starts,
+        appends,
+        shift,
+        stripe_hits,
+        waves,
+        wave_letters,
+        appended: appended.into_inner(),
+        max_appends,
+        piece_appends: cuts.piece_appends,
+        appends_segment: cuts.appends_segment,
+        scaled_threshold,
+        threads,
+        overflow_cell_capacity: cuts.overflow_cell_capacity,
+        one_latch: matches!(cuts.passes, XPasses::OneLatch(_)),
+        fill,
+    })
+}
+
+// No NCBI counterpart: the order of the build's work (item SC9i of line NP, module header).
+/// The cells of one last letter: `A^(word_length - 1)`.
+fn x_top_cells(header: &XHeader) -> usize {
+    (header.backbone_size - 1) / header.alphabet
+}
+
+// No NCBI counterpart: the order of the build's work (item SC9i of line NP, module header).
+/// The last letters of a wave: as many as make `ceil(backbone_size / wave_cells)` waves, or the
+/// fewest waves with that many letters each.
+fn x_wave_letters(header: &XHeader, wave_cells: usize) -> usize {
+    header
+        .alphabet
+        .div_ceil(header.backbone_size.div_ceil(wave_cells.max(1)))
+}
+
+// No NCBI counterpart: the order of the build's work (item SC9i of line NP, module header).
+/// Wave `wave` of the waves of `letters` last letters each (the last wave fewer), its stripes
+/// 2^shift cells from its first.
+fn x_wave(wave: usize, letters: usize, header: &XHeader, shift: usize) -> XWave {
+    let first = wave * letters;
+    let end = (first + letters).min(header.alphabet);
+    let top = x_top_cells(header);
+    let cells_end = if end == header.alphabet {
+        header.backbone_size
+    } else {
+        end * top
+    };
+    XWave {
+        letters: first as u32..end as u32,
+        cells: (first * top) as u32..cells_end as u32,
+        stripes: (cells_end - first * top).div_ceil(1 << shift),
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1168-1175 (`x_chunks`)
+// ```c
+//         for (offset = from; offset <= to; offset++){
+//             s_CompressedAddWordHits(&info, query->sequence, offset);
+//         }
+// ```
+/// The appends pass of one wave: the chunks' appends to the wave's cells (`x_chunk_appends`), sorted
+/// by stripe, on `threads` tasks (`passes`: the extra tasks of the one-latch passes run in the first
+/// wave's pass), and each of the wave's stripes' hits. `None` when the appends of all chunks of all
+/// waves so far (`appended`) pass `max_appends`. The chunks' words' starts as `x_chunk_appends`
+/// takes them: from `kept` (each chunk's) where given, else from the query, and with `keep` returned
+/// (each chunk's; else none).
+#[allow(clippy::too_many_arguments)]
+fn x_wave_appends(
+    words: &XWords<'_>,
+    query: &[u8],
+    chunks: &[XChunk],
+    wave: &XWave,
+    shift: usize,
+    threads: usize,
+    max_appends: usize,
+    appended: &AtomicUsize,
+    piece_appends: usize,
+    appends_segment: usize,
+    segments: Option<&XSegmentPool>,
+    passes: XPasses<'_>,
+    keep: bool,
+    kept: Option<&[Vec<XWordStart>]>,
+) -> Option<(XAppends, Vec<usize>, Vec<Vec<XWordStart>>)> {
     let too_large = AtomicBool::new(false);
-    let chunk_appends = |(targets, per_offset): &mut (Vec<u32>, Vec<(i32, u32)>), chunk| {
+    let registry: Mutex<Vec<Vec<u32>>> = Mutex::new(Vec::new());
+    let chunk_appends = |scratch: &mut XAppendsScratch<'_>, index: usize| {
+        let starts = match (kept, keep) {
+            (Some(kept), _) => XStarts::Kept(&kept[index]),
+            (None, true) => XStarts::Keep,
+            (None, false) => XStarts::Make,
+        };
         x_chunk_appends(
-            &words,
+            words,
             query,
-            chunk,
+            &chunks[index],
+            wave,
             shift,
-            stripes,
             max_appends,
-            &appended,
+            piece_appends,
+            appended,
             &too_large,
-            targets,
-            per_offset,
+            starts,
+            scratch,
         )
     };
-    let appends: Vec<XChunkAppends> = match cuts.passes {
-        XPasses::Rayon => chunks
-            .par_iter()
+    let chunk_list: Vec<(Vec<XChunkAppends>, Vec<XWordStart>)> = match passes {
+        XPasses::Rayon => (0..chunks.len())
+            .into_par_iter()
             .map_init(
-                || (Vec::<u32>::new(), Vec::<(i32, u32)>::new()),
+                || XAppendsScratch::new(&registry, appends_segment, segments),
                 chunk_appends,
             )
             .collect(),
@@ -781,134 +2283,352 @@ fn x_try_build_flat_parallel_with(
             threads,
             chunks.len(),
             extra.map_or(0, |extra| extra.count()),
-            || (Vec::<u32>::new(), Vec::<(i32, u32)>::new()),
-            |scratch, index| chunk_appends(scratch, &chunks[index]),
+            || XAppendsScratch::new(&registry, appends_segment, segments),
+            chunk_appends,
             |index| {
                 if let Some(extra) = extra {
                     extra.run(index);
                 }
             },
         ),
+        XPasses::Gang(gang) => gang.pass(
+            chunks.len(),
+            false,
+            || XAppendsScratch::new(&registry, appends_segment, segments),
+            chunk_appends,
+        ),
     };
     if too_large.load(Ordering::Relaxed) {
-        // LOSAT_X_BPLKPFLAT: the reference builder makes this table; the spare's vectors are not
-        // kept beside it (module header).
-        if let Some(spare) = cuts.spare {
-            drop(spare.take());
-        }
-        return Some(XFlatBuild::TooLarge);
+        return None;
     }
 
     // Each stripe's hits: its appends in all chunks.
-    let mut stripe_hits = vec![0usize; stripes];
-    for chunk_appends in &appends {
-        for (hits, bounds) in stripe_hits
-            .iter_mut()
-            .zip(chunk_appends.stripe_starts.windows(2))
-        {
+    // Every task has ended: its segments are in their slots.
+    let mut starts_kept = Vec::with_capacity(if keep { chunks.len() } else { 0 });
+    let mut pieces = Vec::new();
+    for (index, (chunk_pieces, chunk_starts)) in chunk_list.into_iter().enumerate() {
+        pieces.extend(chunk_pieces.into_iter().map(|mut piece| {
+            piece.chunk = index;
+            piece
+        }));
+        if keep {
+            starts_kept.push(chunk_starts);
+        }
+    }
+    let appends = XAppends {
+        segments: registry
+            .into_inner()
+            .unwrap_or_else(PoisonError::into_inner),
+        pieces,
+    };
+    let mut stripe_hits = vec![0usize; wave.stripes];
+    for piece in &appends.pieces {
+        for (hits, bounds) in stripe_hits.iter_mut().zip(piece.stripe_starts.windows(2)) {
             *hits += (bounds[1] - bounds[0]) as usize;
         }
     }
-    let total: usize = stripe_hits.iter().sum();
+    Some((appends, stripe_hits, starts_kept))
+}
+
+// The second pass of `x_flat_parallel_on` (module header): the stripes (count, layout and fill) of
+// the appends that `x_flat_appends_on` made, on `spare`'s vectors (with `x_ahead`, a build ahead of
+// its block: all of them, and no table without their room), then each later wave's appends and
+// stripes (item SC9i of line NP), the capacity test and the PV array. The words of `scores` are
+// those of the appends pass (`XWords`, made again for the later waves and the capacity test).
+#[inline(always)]
+#[allow(clippy::too_many_arguments)]
+fn x_flat_stripes_on<S: CompressedScores, H: XQueryOffset>(
+    scores: S,
+    appends: XFlatAppends,
+    query: &[u8],
+    locations: &[(i32, i32)],
+    spare: Option<&XFlatSpare<H>>,
+    lent: Option<XFlatTableVectors<H>>,
+    x_ahead: bool,
+    segments: Option<&XSegmentPool>,
+) -> Option<XFlatBuild<H>> {
+    let XFlatAppends {
+        header,
+        largest_pv_shift,
+        ranges,
+        chunks,
+        word_starts,
+        appends,
+        shift,
+        stripe_hits,
+        waves,
+        wave_letters,
+        appended,
+        max_appends,
+        piece_appends,
+        appends_segment,
+        scaled_threshold,
+        threads,
+        overflow_cell_capacity,
+        one_latch,
+        fill,
+    } = appends;
+    let backbone_size = header.backbone_size;
+    let first_total: usize = stripe_hits.iter().sum();
     // The PV shift is `PV_ARRAY_BTS` whatever the counts when `x_largest_pv_shift` is (`finalize`,
-    // below): the stripes set their PV words; else the PV array is made from the starts below.
-    let pv_in_stripes = largest_pv_shift == PV_ARRAY_BTS;
+    // below): with one wave (whose stripes are whole PV words from cell 0) the stripes set their PV
+    // words; else the PV array is made from the starts below.
+    let pv_in_stripes = largest_pv_shift == PV_ARRAY_BTS && waves == 1;
     // LOSAT_X_BPLKPAHEAD: a build ahead of its block takes every vector of its table from the spare
     // (its PV array's here) and allocates none; without their room it makes no table and leaves them
     // in the spare (module header). The PV array has at most `(backbone_size >> PV_ARRAY_BTS) + 1`
-    // words at any PV shift.
+    // words at any PV shift. Such a build has one wave (`x_flat_appends_on`).
     let mut x_ahead_pv = None;
-    if cuts.x_ahead {
+    if x_ahead {
+        assert_eq!(waves, 1, "a build ahead of its block has one wave");
         let pv_words = (backbone_size >> PV_ARRAY_BTS) + 1;
-        x_ahead_pv = cuts
-            .spare
-            .and_then(|spare| spare.x_room_for(backbone_size + 1, total, pv_words));
-        if x_ahead_pv.is_none() {
-            return None;
-        }
+        x_ahead_pv =
+            spare.and_then(|spare| spare.x_room_for(backbone_size + 1, first_total, pv_words));
+        x_ahead_pv.as_ref()?;
     }
+    // LOSAT_X_BXCLUTPOOL: the vectors BLASTX's pool lent (buffer reuse only, as the spare's).
+    let (lent_kept, mut lent_pv) = match lent {
+        Some(lent) => (Some((lent.starts, lent.hits)), lent.pv),
+        None => (None, Vec::new()),
+    };
     let mut pv = if pv_in_stripes {
         match x_ahead_pv.take() {
             Some(buffer) => x_zeroed_in(buffer, (backbone_size >> PV_ARRAY_BTS) + 1),
-            None => vec![0u32; (backbone_size >> PV_ARRAY_BTS) + 1],
+            None => x_zeroed_on(
+                std::mem::take(&mut lent_pv),
+                (backbone_size >> PV_ARRAY_BTS) + 1,
+            ),
         }
     } else {
         Vec::new()
     };
     // LOSAT_X_BPLKPFLAT: an earlier table's vectors when the spare holds them (module header).
-    let (spare_starts, spare_hits) = cuts.spare.map(XFlatSpare::take).unwrap_or_default();
+    let (spare_starts, spare_hits) = lent_kept
+        .or_else(|| spare.map(XFlatSpare::take))
+        .unwrap_or_default();
     let (mut starts, starts_reused) = x_reuse(spare_starts, backbone_size + 1);
-    let (mut hits, hits_reused) = x_reuse(spare_hits, total);
+    // The hits, written by the stripes in the vector's room past its length (each wave's slots once,
+    // the length set after them): no slot is zeroed or read before its stripe writes it, and the
+    // stripes, on the pool's threads, touch the pages first. A spare's vector is used when it has
+    // the first wave's room (its values are not read). With more than one wave a fresh vector has
+    // room for a block that glibc maps whatever its dynamic mmap threshold (`x_mapped_entries`), so
+    // that each wave's growth moves the block's pages (`mremap`) instead of copying the hits so far
+    // (a block in an arena is copied when the block after it is taken; the threshold rises to
+    // 32 MiB once a mapped block is freed).
+    let hits_reused = spare_hits.capacity() != 0 && spare_hits.capacity() >= first_total;
+    let mut hits = if hits_reused {
+        let mut reused = spare_hits;
+        reused.clear();
+        reused
+    } else {
+        drop(spare_hits);
+        Vec::with_capacity(if waves > 1 {
+            first_total.max(x_mapped_entries::<H>())
+        } else {
+            first_total
+        })
+    };
     X_LKPFLAT_RECYCLED.fetch_add(u64::from(starts_reused), Ordering::Relaxed);
     X_LKPFLAT_RECYCLED_HITS.fetch_add(u64::from(hits_reused), Ordering::Relaxed);
-    if cuts.poison {
-        // LOSAT_X_BPLKPFLATSHADOW: an entry that no stripe writes keeps a value no build makes.
-        starts.fill(u32::MAX);
-        hits.fill(i32::MIN);
-    }
-    starts[backbone_size] = total as u32;
 
-    // The stripes: count, layout and fill.
-    let mut parts = Vec::with_capacity(stripes);
-    let mut starts_rest = &mut starts[..backbone_size];
-    let mut hits_rest = &mut hits[..];
-    let mut pv_rest = &mut pv[..];
-    let mut base = 0u32;
-    for (stripe, &stripe_total) in stripe_hits.iter().enumerate() {
-        let first = stripe << shift;
-        let (starts_part, rest) = starts_rest.split_at_mut((backbone_size - first).min(1 << shift));
-        starts_rest = rest;
-        let (hits_part, rest) = hits_rest.split_at_mut(stripe_total);
-        hits_rest = rest;
-        // A stripe's PV words; the last stripe takes the words that are left (the `+ 1` word among
-        // them).
-        let words = if !pv_in_stripes {
-            0
-        } else if stripe + 1 < stripes {
-            1usize << (shift - PV_ARRAY_BTS)
-        } else {
-            pv_rest.len()
-        };
-        let (pv_part, rest) = pv_rest.split_at_mut(words);
-        pv_rest = rest;
-        parts.push(XStripe {
-            stripe,
-            base,
-            starts: starts_part,
-            hits: hits_part,
-            pv: pv_part,
-        });
-        base += stripe_total as u32;
-    }
-    let stripe_counts: Vec<XStripeCounts> = match cuts.passes {
-        XPasses::Rayon => parts
-            .into_par_iter()
-            .map(|part| x_stripe_build(part, shift, backbone_size, ranges.len(), &chunks, &appends))
-            .collect(),
-        XPasses::OneLatch(_) => {
-            // Each stripe's part, taken by the task that takes its index.
-            let parts: Vec<Mutex<Option<XStripe<'_>>>> = parts
-                .into_iter()
-                .map(|part| Mutex::new(Some(part)))
-                .collect();
-            x_one_latch_pass(
-                threads,
-                parts.len(),
-                0,
-                || (),
-                |_, stripe| {
-                    let part = parts[stripe]
-                        .lock()
-                        .unwrap_or_else(PoisonError::into_inner)
-                        .take()
-                        .expect("each stripe taken once");
-                    x_stripe_build(part, shift, backbone_size, ranges.len(), &chunks, &appends)
-                },
-                |_| {},
-            )
-        }
+    // Item SC9i of line NP: the later waves' words (the appends pass's) and the segments of packed
+    // appends kept from one wave to the next where the build has no pool of them.
+    let words_of_later_waves = if waves > 1 {
+        let matrix = scores.score_matrix(header.alphabet)?;
+        Some((
+            matrix,
+            CompressedNeighborInfo::new(&matrix, header.alphabet),
+        ))
+    } else {
+        None
     };
-    drop(appends);
+    let words = words_of_later_waves
+        .as_ref()
+        .map(|(matrix, info)| XWords::new(&header, scaled_threshold, matrix, info));
+    let between_waves = XSegmentPool::default();
+    let wave_segments = segments.or((waves > 1).then_some(&between_waves));
+    let appended = AtomicUsize::new(appended);
+
+    // No NCBI counterpart: whether the stripes sum the overflow cells per count range, which only the
+    // capacity test after the waves reads (module header); it changes no value NCBI computes. An
+    // append takes at most one cell, so a table of at most `overflow_cell_capacity` appends cannot
+    // pass the capacity. With one wave the tables' appends are the appends pass's; with more, a
+    // table's appends are known only after the last wave, so the stripes of every wave sum them.
+    let need_cells = waves > 1 || {
+        let mut range_appends = vec![0usize; ranges.len()];
+        for piece in &appends.pieces {
+            range_appends[chunks[piece.chunk].range] += piece.len;
+        }
+        ranges
+            .iter()
+            .zip(&range_appends)
+            .any(|((_, is_table), &total)| *is_table && total > overflow_cell_capacity)
+    };
+    let mut stripe_counts: Vec<XStripeCounts> = Vec::new();
+    let mut first_wave = Some((appends, stripe_hits));
+    // The hits of the waves before.
+    let mut hits_base = 0usize;
+    // The waves' stripes and later appends (`passes`: with more than one wave the one-latch passes are
+    // on a gang of the pool's threads, `XGang`, item SC9i of line NP); `false` when the appends pass
+    // `max_appends`.
+    let mut wave_passes = |passes: XPasses<'_>| -> bool {
+        for wave_index in 0..waves {
+            let wave = x_wave(wave_index, wave_letters, &header, shift);
+            let (appends, stripe_hits) = match first_wave.take() {
+                Some(first) => first,
+                None => {
+                    let words = words.as_ref().expect("the words of the later waves");
+                    // The extra tasks (if any) ran in the first wave's appends pass.
+                    let passes = match passes {
+                        XPasses::OneLatch(_) => XPasses::OneLatch(None),
+                        passes => passes,
+                    };
+                    let Some((made, made_hits, _)) = x_wave_appends(
+                        words,
+                        query,
+                        &chunks,
+                        &wave,
+                        shift,
+                        threads,
+                        max_appends,
+                        &appended,
+                        piece_appends,
+                        appends_segment,
+                        wave_segments,
+                        passes,
+                        false,
+                        Some(&word_starts),
+                    ) else {
+                        return false;
+                    };
+                    // The room for the wave's hits after those of the waves before (the vector grown in
+                    // place where the allocator can: glibc moves a mapped block's pages, `mremap`).
+                    hits.reserve_exact(made_hits.iter().sum());
+                    (made, made_hits)
+                }
+            };
+            let wave_total: usize = stripe_hits.iter().sum();
+            debug_assert_eq!(hits.len(), hits_base);
+
+            // The stripes: count, layout and fill.
+            let mut parts = Vec::with_capacity(stripe_hits.len());
+            let mut starts_rest = &mut starts[wave.cells.start as usize..wave.cells.end as usize];
+            let mut hits_rest = &mut hits.spare_capacity_mut()[..wave_total];
+            let mut pv_rest = &mut pv[..];
+            let mut base = hits_base as u32;
+            for (local, &stripe_total) in stripe_hits.iter().enumerate() {
+                let first = wave.cells.start as usize + (local << shift);
+                let (starts_part, rest) =
+                    starts_rest.split_at_mut((wave.cells.end as usize - first).min(1 << shift));
+                starts_rest = rest;
+                let (hits_part, rest) = hits_rest.split_at_mut(stripe_total);
+                hits_rest = rest;
+                // A stripe's PV words (one wave: its stripes from cell 0); the last stripe takes the
+                // words that are left (the `+ 1` word among them).
+                let words = if !pv_in_stripes {
+                    0
+                } else if local + 1 < wave.stripes {
+                    1usize << (shift - PV_ARRAY_BTS)
+                } else {
+                    pv_rest.len()
+                };
+                let (pv_part, rest) = pv_rest.split_at_mut(words);
+                pv_rest = rest;
+                parts.push(XStripe {
+                    first,
+                    local,
+                    base,
+                    starts: starts_part,
+                    hits: hits_part,
+                    pv: pv_part,
+                });
+                base += stripe_total as u32;
+            }
+            // The last pass of the gang (its helpers end after it).
+            let last = wave_index + 1 == waves;
+            let wave_counts: Vec<XStripeCounts> = match (passes, fill) {
+                (XPasses::Rayon, _) => parts
+                    .into_par_iter()
+                    .map(|part| x_stripe_build(part, ranges.len(), &chunks, &appends, need_cells))
+                    .collect(),
+                (latched, true) => {
+                    let parts: Vec<Mutex<Option<XStripe<'_, H>>>> = parts
+                        .into_iter()
+                        .map(|part| Mutex::new(Some(part)))
+                        .collect();
+                    latched.latched(
+                        threads,
+                        parts.len(),
+                        last,
+                        XFillScratch::default,
+                        |scratch, stripe| {
+                            let part = parts[stripe]
+                                .lock()
+                                .unwrap_or_else(PoisonError::into_inner)
+                                .take()
+                                .expect("each stripe taken once");
+                            x_stripe_fill(
+                                part,
+                                ranges.len(),
+                                &chunks,
+                                &appends,
+                                need_cells,
+                                scratch,
+                            )
+                        },
+                    )
+                }
+                (latched, false) => {
+                    // Each stripe's part, taken by the task that takes its index.
+                    let parts: Vec<Mutex<Option<XStripe<'_, H>>>> = parts
+                        .into_iter()
+                        .map(|part| Mutex::new(Some(part)))
+                        .collect();
+                    latched.latched(
+                        threads,
+                        parts.len(),
+                        last,
+                        || (),
+                        |_, stripe| {
+                            let part = parts[stripe]
+                                .lock()
+                                .unwrap_or_else(PoisonError::into_inner)
+                                .take()
+                                .expect("each stripe taken once");
+                            x_stripe_build(part, ranges.len(), &chunks, &appends, need_cells)
+                        },
+                    )
+                }
+            };
+            stripe_counts.extend(wave_counts);
+            // SAFETY: the wave's stripes split its slots (their lengths are the stripes' hits, which sum
+            // to `wave_total`) and each wrote every slot of its own (`x_stripe_build`, `x_stripe_fill`).
+            unsafe { hits.set_len(hits_base + wave_total) };
+            // Item SC2d-2: at most as many segments as threads kept for the next build
+            // (`XSegmentPool`); item SC9i: and whole for the next wave (`XSegmentPool::keep_whole`).
+            match wave_segments {
+                Some(pool) if wave_index + 1 < waves => pool.keep_whole(appends.segments, threads),
+                Some(pool) => pool.keep(appends.segments, threads),
+                None => drop(appends),
+            }
+            hits_base += wave_total;
+        }
+        true
+    };
+    // The gang serves a run of passes (its helpers wait between them). A build of one wave has one pass
+    // after its first (its stripes), a one-latch pass of its own as each single pass is: a gang around
+    // it held the pool's threads across the build (blastp-fast's maximum RssAnon at 8 threads +3.4 MB
+    // over 30 rounds, item SC9i of line NP).
+    let fits = match (one_latch, waves > 1) {
+        (true, true) => x_with_gang(threads, |gang| wave_passes(XPasses::Gang(gang))),
+        (true, false) => wave_passes(XPasses::OneLatch(None)),
+        (false, _) => wave_passes(XPasses::Rayon),
+    };
+    if !fits {
+        return Some(XFlatBuild::TooLarge);
+    }
+    drop(between_waves);
+    starts[backbone_size] = hits_base as u32;
 
     // NCBI's tables (`x_try_build_flat_with_capacity`'s test, at each table's end).
     for (range_index, (range, is_table)) in ranges.iter().enumerate() {
@@ -919,16 +2639,21 @@ fn x_try_build_flat_parallel_with(
             .iter()
             .map(|count| count.cells[range_index])
             .sum();
-        if cells > cuts.overflow_cell_capacity {
+        if cells > overflow_cell_capacity {
             let words_before = range.start > 0;
-            let refused = !(words_before
-                && !x_table_fills_banks(
+            // The appends pass's words (made from the same matrix, which had the alphabet's).
+            let refused = !words_before || {
+                let matrix = scores.score_matrix(header.alphabet)?;
+                let info = CompressedNeighborInfo::new(&matrix, header.alphabet);
+                let words = XWords::new(&header, scaled_threshold, &matrix, &info);
+                x_table_fills_banks(
                     &words,
                     backbone_size,
                     query,
                     &locations[range.clone()],
-                    cuts.overflow_cell_capacity,
-                ));
+                    overflow_cell_capacity,
+                )
+            };
             if refused {
                 return Some(XFlatBuild::Refused);
             }
@@ -972,7 +2697,7 @@ fn x_try_build_flat_parallel_with(
         // LOSAT_X_BPLKPAHEAD: in the spare's buffer for a build ahead of its block (above).
         pv = match x_ahead_pv.take() {
             Some(buffer) => x_zeroed_in(buffer, (backbone_size >> pv_array_bts) + 1),
-            None => vec![0u32; (backbone_size >> pv_array_bts) + 1],
+            None => x_zeroed_on(lent_pv, (backbone_size >> pv_array_bts) + 1),
         };
         for (index, bounds) in starts.windows(2).enumerate() {
             if bounds[1] > bounds[0] {
@@ -1000,6 +2725,177 @@ mod tests {
     use super::super::tests::{queries, XorShift, FEW_LETTERS, LETTERS};
     use super::*;
 
+    // Item SC9i of line NP: a one-latch pass makes every item once, in order, at any thread count,
+    // and an item that panics on a spawned task or on the calling thread ends the pass with its
+    // panic instead of leaving the caller waiting.
+    #[test]
+    fn one_latch_pass_makes_each_item_once_and_passes_a_panic_on() {
+        for threads in [1usize, 2, 3, 8] {
+            for (items, extras) in [(0usize, 0usize), (1, 0), (5, 3), (200, 17)] {
+                let extra_runs: Vec<AtomicUsize> =
+                    (0..extras).map(|_| AtomicUsize::new(0)).collect();
+                let made = in_pool(threads, || {
+                    x_one_latch_pass(
+                        threads,
+                        items,
+                        extras,
+                        || 0usize,
+                        |taken, index| {
+                            *taken += 1;
+                            index * 3
+                        },
+                        |index| {
+                            extra_runs[index].fetch_add(1, Ordering::Relaxed);
+                        },
+                    )
+                });
+                assert_eq!(made, (0..items).map(|index| index * 3).collect::<Vec<_>>());
+                assert!(extra_runs
+                    .iter()
+                    .all(|runs| runs.load(Ordering::Relaxed) == 1));
+            }
+            for bad in [0usize, 7, 63] {
+                let outcome = std::panic::catch_unwind(|| {
+                    in_pool(threads, || {
+                        x_one_latch_pass(
+                            threads,
+                            64,
+                            0,
+                            || (),
+                            |_, index| {
+                                assert_ne!(index, bad, "item {bad} fails");
+                                index
+                            },
+                            |_| {},
+                        )
+                    })
+                });
+                assert!(
+                    outcome.is_err(),
+                    "threads {threads}: item {bad}'s panic passed on"
+                );
+            }
+        }
+    }
+
+    // Item SC9i of line NP: a gang's passes make every item of each pass once, in order, at any
+    // thread count, one pass after another on the same helpers; an item that panics on a helper or
+    // on the calling thread ends the build with its panic instead of leaving a thread waiting.
+    #[test]
+    fn gang_passes_make_each_item_once_and_pass_a_panic_on() {
+        for threads in [1usize, 2, 3, 8] {
+            let made = in_pool(threads, || {
+                x_with_gang(threads, |gang| {
+                    [0usize, 1, 5, 200, 0, 64, 3]
+                        .iter()
+                        .enumerate()
+                        .map(|(pass, &items)| {
+                            let runs: Vec<AtomicUsize> =
+                                (0..items).map(|_| AtomicUsize::new(0)).collect();
+                            let results = gang.pass(
+                                items,
+                                pass == 6,
+                                || 0usize,
+                                |taken, index| {
+                                    *taken += 1;
+                                    runs[index].fetch_add(1, Ordering::Relaxed);
+                                    index * 3 + pass
+                                },
+                            );
+                            assert!(runs.iter().all(|runs| runs.load(Ordering::Relaxed) == 1));
+                            results
+                        })
+                        .collect::<Vec<_>>()
+                })
+            });
+            for (pass, (results, items)) in
+                made.iter().zip([0usize, 1, 5, 200, 0, 64, 3]).enumerate()
+            {
+                assert_eq!(
+                    *results,
+                    (0..items).map(|index| index * 3 + pass).collect::<Vec<_>>(),
+                    "threads {threads}, pass {pass}"
+                );
+            }
+            for bad in [0usize, 7, 63] {
+                let outcome = std::panic::catch_unwind(|| {
+                    in_pool(threads, || {
+                        x_with_gang(threads, |gang| {
+                            let first = gang.pass(64, false, || (), |_, index| index);
+                            let second = gang.pass(
+                                64,
+                                bad != 7,
+                                || (),
+                                |_, index| {
+                                    assert_ne!(index, bad, "item {bad} fails");
+                                    index
+                                },
+                            );
+                            (first, second)
+                        })
+                    })
+                });
+                assert!(
+                    outcome.is_err(),
+                    "threads {threads}: item {bad}'s panic passed on"
+                );
+            }
+        }
+    }
+
+    // Item SC9i of line NP: helpers that start after a gang's last pass is posted join it while it
+    // is open (a build of one wave has only that pass): the caller's first item waits until another
+    // thread has made one (a minute at most).
+    #[test]
+    fn helpers_join_a_gangs_last_pass_while_it_is_open() {
+        for threads in [2usize, 4] {
+            let others = AtomicUsize::new(0);
+            let joined = in_pool(threads, || {
+                let caller = std::thread::current().id();
+                x_with_gang(threads, |gang| {
+                    let made = gang.pass(
+                        64,
+                        true,
+                        || (),
+                        |_, index| {
+                            if std::thread::current().id() != caller {
+                                others.fetch_add(1, Ordering::AcqRel);
+                            } else if index == 0 {
+                                let deadline =
+                                    std::time::Instant::now() + std::time::Duration::from_secs(60);
+                                while others.load(Ordering::Acquire) == 0
+                                    && std::time::Instant::now() < deadline
+                                {
+                                    std::thread::yield_now();
+                                }
+                            }
+                            index
+                        },
+                    );
+                    assert_eq!(made, (0..64).collect::<Vec<_>>());
+                    others.load(Ordering::Acquire) > 0
+                })
+            });
+            assert!(
+                joined,
+                "threads {threads}: no helper made an item of the last pass"
+            );
+        }
+    }
+
+    // Item SC9i of line NP: the overflow cells read from a cell's count are those its appends take
+    // one by one (the serial count pass's statement).
+    #[test]
+    fn overflow_cells_of_a_count_are_those_its_appends_take() {
+        let mut taken = 0usize;
+        for n in 0..10_000u32 {
+            assert_eq!(x_overflow_cells_of(n), taken, "n {n}");
+            taken += usize::from(x_takes_overflow_cell(n));
+        }
+        let counts = [0u32, 1, 5, 6, 7, 8, 11, 12, 40];
+        assert_eq!(x_overflow_cells_in(&counts), 1 + 1 + 2 + 2 + 3 + 10);
+    }
+
     fn in_pool<R: Send>(threads: usize, work: impl FnOnce() -> R + Send) -> R {
         rayon::ThreadPoolBuilder::new()
             .num_threads(threads)
@@ -1020,8 +2916,12 @@ mod tests {
         chunk_sizes: &[usize],
         stripe_shift: Option<usize>,
         passes: XPasses<'_>,
+        stripe_fill: bool,
         spare: Option<(&XFlatSpare, bool)>,
     ) -> XFlatBuild {
+        if let Some((spare, true)) = spare {
+            poison(spare);
+        }
         in_pool(threads, || {
             x_try_build_flat_parallel_with(
                 5,
@@ -1035,18 +2935,43 @@ mod tests {
                     threads,
                     chunk_sizes,
                     stripe_shift,
+                    // Item SC9i of line NP: one wave, or many (word size 5's 759,376 cells in
+                    // waves of 2^12 to 2^16 cells; at most one per stripe).
+                    wave_cells: [None, Some(1 << 12), Some(5003), Some(1 << 16)]
+                        [(threads + chunk_sizes.len() + threshold as usize) % 4],
+                    appends_segment: X_APPENDS_SEGMENT,
+                    piece_appends: X_PIECE_APPENDS,
+                    segments: None,
                     passes,
                     spare: spare.map(|(spare, _)| spare),
-                    poison: spare.is_some_and(|(_, poison)| poison),
+                    lent: None,
                     x_ahead: false,
+                    stripe_fill,
                 },
             )
         })
         .expect("word size 5")
     }
 
-    // The two pass implementations (LOSAT_X_BPLKPFLAT): `par_iter` and one-latch passes.
-    const PASSES: [XPasses<'static>; 2] = [XPasses::Rayon, XPasses::OneLatch(None)];
+    /// Fills `spare`'s vectors, to their whole capacity, with `u32::MAX` / `i32::MIN`: an entry
+    /// that no stripe writes then keeps a value that no build makes (the build takes the vectors'
+    /// values as they are, module header).
+    fn poison(spare: &XFlatSpare) {
+        let mut kept = spare.0.lock().unwrap();
+        let (starts, hits) = &mut *kept;
+        starts.resize(starts.capacity(), u32::MAX);
+        starts.fill(u32::MAX);
+        hits.resize(hits.capacity(), i32::MIN);
+        hits.fill(i32::MIN);
+    }
+
+    // The pass implementations (LOSAT_X_BPLKPFLAT): `par_iter`, and one-latch passes with the stripes
+    // of `x_stripe_build` or (LOSAT_X_BPSTRIPEFILL) of `x_stripe_fill`.
+    const FORMS: [(XPasses<'static>, bool); 3] = [
+        (XPasses::Rayon, false),
+        (XPasses::OneLatch(None), false),
+        (XPasses::OneLatch(None), true),
+    ];
 
     /// Extra tasks that count how often each one ran.
     struct Counted(Vec<AtomicUsize>);
@@ -1086,6 +3011,16 @@ mod tests {
             vec![i32::MIN + 1; rng.below(4000)],
         );
         spare
+    }
+
+    /// Reserves room in a spare of garbage for a word-size-5 table's `starts` and for 65,536 hits,
+    /// so that `poison` fills whole vectors and the build never allocates a fresh (zeroed) vector
+    /// where a spare is poisoned.
+    fn give_room(spare: &XFlatSpare) {
+        let mut kept = spare.0.lock().unwrap();
+        let (starts, hits) = &mut *kept;
+        starts.reserve(759_377);
+        hits.reserve(1 << 16);
     }
 
     /// The capacities of the spare's vectors.
@@ -1143,12 +3078,12 @@ mod tests {
                     .expect("not refused");
             x_assert_same_compressed_table(&serial, &reference);
             overflow_seen |= serial.longest_chain > 5;
-            // Every thread count with every chunk size and both pass implementations; the stripe
+            // Every thread count with every chunk size and every form (`FORMS`); the stripe
             // widths in turn.
             for (i, threads) in THREADS.into_iter().enumerate() {
                 for (j, chunk_sizes) in CHUNK_SIZES.into_iter().enumerate() {
                     let stripe_shift = SHIFTS[(i + j + round) % SHIFTS.len()];
-                    for passes in PASSES {
+                    for (passes, stripe_fill) in FORMS {
                         let built = flat(Some(parallel(
                             threads,
                             threshold,
@@ -1160,6 +3095,7 @@ mod tests {
                             chunk_sizes,
                             stripe_shift,
                             passes,
+                            stripe_fill,
                             None,
                         )));
                         x_assert_same_flat_tables(&built, &serial);
@@ -1168,6 +3104,394 @@ mod tests {
             }
         }
         assert!(overflow_seen, "cells with overflow lists");
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1303-1310
+    // ```c
+    //     new_alphabet = SCompressedAlphabetNew(sbp,
+    //                                 lookup->compressed_alphabet_size,
+    //                                 kMatrixScale);
+    // ```
+    // Every search matrix but BLOSUM62 and IDENTITY (item SC2b): random queries of few letters, NCBI's
+    // tables of several batches and split batches, word size 5 with capacities around each table's
+    // overflow cells, at 2, 3 and 7 threads with even and uneven chunks. The pool's build of the
+    // matrix's words gives the serial builder's table of those words (`x_try_build_flat_of`) slot
+    // for slot, which is the reference's cell by cell, or refuses where both refuse; a table of the
+    // matrix's words is not BLOSUM62's. BLOSUM45 and PAM30 also at word size 6.
+    #[test]
+    fn parallel_tables_of_each_matrix_equal_its_serial_tables() {
+        let mut rng = XorShift(0x1f83_d9ab_fb41_bd6b);
+        let (mut built_seen, mut refused_seen) = (0usize, 0usize);
+        let (mut overflow_seen, mut differs_seen) = (false, false);
+        let cuts = |threads, capacity, chunk_sizes| XParallelCuts {
+            overflow_cell_capacity: capacity,
+            max_appends: None,
+            threads,
+            chunk_sizes,
+            stripe_shift: None,
+            wave_cells: None,
+            appends_segment: X_APPENDS_SEGMENT,
+            piece_appends: X_PIECE_APPENDS,
+            segments: None,
+            passes: XPasses::Rayon,
+            spare: None,
+            lent: None,
+            x_ahead: false,
+            stripe_fill: false,
+        };
+        for matrix in ScoringMatrix::ALL {
+            if matches!(matrix, ScoringMatrix::Blosum62 | ScoringMatrix::Identity) {
+                continue;
+            }
+            let compressed = CompressedScores::score_matrix(matrix, 15).expect("compressed matrix");
+            for round in 0..3 {
+                let threshold = [1100, 1600, 2000][round];
+                let lengths: Vec<usize> =
+                    (0..2 + rng.below(4)).map(|_| 5 + rng.below(250)).collect();
+                let (query, locations, first) =
+                    queries(&mut rng, &lengths, &FEW_LETTERS, round % 2);
+                let mut tables = Vec::new();
+                let mut q = 0;
+                while q < lengths.len() {
+                    let end = (q + 1 + rng.below(3)).min(lengths.len());
+                    if rng.below(4) != 0 {
+                        tables.push(first[q]..first[end]);
+                    }
+                    q = end;
+                }
+                let mut capacities = vec![1usize, NCBI_OVERFLOW_CELL_CAPACITY];
+                for table in &tables {
+                    let mut own =
+                        BlastCompressedAaLookupTable::new(5, 0.0).expect("compressed lookup");
+                    own.threshold = threshold;
+                    own.overflow_cell_capacity = usize::MAX;
+                    own.add_neighboring_words(&compressed, &query, &locations[table.clone()]);
+                    let cells = own.overflow_cells.len();
+                    capacities.extend([cells.saturating_sub(1), cells, cells + 1]);
+                }
+                capacities.retain(|&capacity| capacity > 0);
+                capacities.sort_unstable();
+                capacities.dedup();
+                for capacity in capacities {
+                    let what = format!("{matrix:?} threshold {threshold} capacity {capacity}");
+                    let reference = try_build_compressed_lookup_with_capacity(
+                        matrix, 5, threshold, &query, &locations, &tables, capacity,
+                    )
+                    .expect("word size 5");
+                    let serial = x_try_build_flat_of(
+                        matrix,
+                        5,
+                        threshold,
+                        &query,
+                        &locations,
+                        &tables,
+                        capacity,
+                        X_COUNT_CHUNK,
+                    )
+                    .expect("word size 5");
+                    match (&reference, &serial) {
+                        (Ok(reference), XFlatBuild::Table(serial)) => {
+                            x_assert_same_compressed_table(serial, reference);
+                            overflow_seen |= serial.longest_chain > 5;
+                            built_seen += 1;
+                        }
+                        (Err(()), XFlatBuild::Refused) => refused_seen += 1,
+                        _ => panic!("{what}: the serial outcome is not the reference's"),
+                    }
+                    for (threads, chunk_sizes) in
+                        [(2, &[][..]), (3, &[7, 1, 50][..]), (7, &[1][..])]
+                    {
+                        let built = in_pool(threads, || {
+                            x_try_build_flat_parallel_of(
+                                matrix,
+                                5,
+                                threshold,
+                                &query,
+                                &locations,
+                                &tables,
+                                cuts(threads, capacity, chunk_sizes),
+                            )
+                        });
+                        match (&serial, built) {
+                            (XFlatBuild::Table(serial), Some(XFlatBuild::Table(built))) => {
+                                x_assert_same_flat_tables(&built, serial)
+                            }
+                            (XFlatBuild::Refused, Some(XFlatBuild::Refused)) => {}
+                            _ => panic!(
+                                "{what} n{threads}: the pool's outcome is not the serial one"
+                            ),
+                        }
+                    }
+                }
+                // The matrix's words, not BLOSUM62's, on the same query.
+                if let (Some(XFlatBuild::Table(ours)), Some(XFlatBuild::Table(blosum62))) = (
+                    x_try_build_flat_of(
+                        matrix,
+                        5,
+                        threshold,
+                        &query,
+                        &locations,
+                        &[],
+                        NCBI_OVERFLOW_CELL_CAPACITY,
+                        X_COUNT_CHUNK,
+                    ),
+                    x_try_build_flat_compressed_lookup(5, threshold, &query, &locations, &[]),
+                ) {
+                    differs_seen |= ours.hits != blosum62.hits;
+                }
+            }
+        }
+        // Word size 6 (a backbone of 15^6 cells) with two matrices, NCBI's capacity.
+        for matrix in [ScoringMatrix::Blosum45, ScoringMatrix::Pam30] {
+            let lengths: Vec<usize> = (0..2 + rng.below(3)).map(|_| 1 + rng.below(200)).collect();
+            let (query, locations, first) = queries(&mut rng, &lengths, &LETTERS[..], 1);
+            let tables = vec![first[0]..first[lengths.len()]];
+            let Some(XFlatBuild::Table(serial)) = x_try_build_flat_of(
+                matrix,
+                6,
+                2100,
+                &query,
+                &locations,
+                &tables,
+                NCBI_OVERFLOW_CELL_CAPACITY,
+                X_COUNT_CHUNK,
+            ) else {
+                panic!("{matrix:?} word size 6: no serial table")
+            };
+            for (threads, chunk_sizes) in [(2, &[][..]), (3, &[7, 50][..]), (7, &[1][..])] {
+                let built = in_pool(threads, || {
+                    x_try_build_flat_parallel_of(
+                        matrix,
+                        6,
+                        2100,
+                        &query,
+                        &locations,
+                        &tables,
+                        cuts(threads, NCBI_OVERFLOW_CELL_CAPACITY, chunk_sizes),
+                    )
+                });
+                let Some(XFlatBuild::Table(built)) = built else {
+                    panic!("{matrix:?} word size 6 n{threads}: no parallel table")
+                };
+                x_assert_same_flat_tables(&built, &serial);
+            }
+        }
+        assert!(
+            built_seen > 0 && refused_seen > 0 && overflow_seen && differs_seen,
+            "built {built_seen} refused {refused_seen} overflow {overflow_seen} differs {differs_seen}"
+        );
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1352-1354 (see
+    // `x_try_build_flat_in_pool`)
+    // ```c
+    //     s_CompressedAddNeighboringWords(lookup, new_alphabet->matrix->data,
+    //                                     query, locations);
+    //     s_CompressedLookupFinalize(lookup);
+    // ```
+    // The entry of blastp-fast with another matrix (`x_bp_build_compressed_lookup_of`, items SC2b,
+    // SC2d-2): the serial builders at one thread and the pool's build at 3 threads give the matrix's
+    // serial table, with rayon's passes and with the one-latch passes (LOSAT_X_BPLKPFLAT) on a spare
+    // of garbage, with the stripe fill's switch as it is set; a build ahead of its block
+    // (LOSAT_X_BPLKPAHEAD) gives it at once and in its two parts (`x_bp_flat_ahead_appends`,
+    // `x_bp_flat_ahead_table`) on the vectors `x_make_room` made ready, holding them, and gives
+    // nothing without a spare. The two passes apart refuse with the matrix's words as the build at
+    // once does (a capacity of one cell).
+    #[test]
+    fn the_entry_of_another_matrix_builds_its_serial_table_at_any_thread_count() {
+        let mut rng = XorShift(0x6a09_e667_f3bc_c908);
+        for matrix in [ScoringMatrix::Blosum45, ScoringMatrix::Pam250] {
+            let lengths: Vec<usize> = (0..3).map(|_| 20 + rng.below(200)).collect();
+            let (query, locations, first) = queries(&mut rng, &lengths, &LETTERS[..], 1);
+            let tables = vec![first[0]..first[lengths.len()]];
+            let Some(XFlatBuild::Table(serial)) = x_try_build_flat_of(
+                matrix,
+                5,
+                1100,
+                &query,
+                &locations,
+                &tables,
+                NCBI_OVERFLOW_CELL_CAPACITY,
+                X_COUNT_CHUNK,
+            ) else {
+                panic!("{matrix:?}: no serial table")
+            };
+            for threads in [1, 3] {
+                let built = crate::utils::threading::with_search_pool(threads, "blastp", |pool| {
+                    Ok(super::super::x_bp_build_compressed_lookup_of(
+                        matrix,
+                        5,
+                        1100,
+                        &query,
+                        &locations,
+                        &tables,
+                        pool,
+                        XFlatArgs::default(),
+                    ))
+                })
+                .expect("pool");
+                let Some(Ok(XCompressedLookup::Flat(built))) = built else {
+                    panic!("{matrix:?} n{threads}: no flat table")
+                };
+                x_assert_same_flat_tables(&built, &serial);
+            }
+            let backbone_size = serial.starts.len() - 1;
+            let total = serial.hits.len();
+            let pv_words = (backbone_size >> PV_ARRAY_BTS) + 1;
+            let build = |args: XFlatArgs<'_>| {
+                crate::utils::threading::with_search_pool(3, "blastp", |pool| {
+                    Ok(super::super::x_bp_build_compressed_lookup_of(
+                        matrix, 5, 1100, &query, &locations, &tables, pool, args,
+                    ))
+                })
+                .expect("pool")
+            };
+            // The one-latch passes on a spare of garbage.
+            let spare = garbage_spare(&mut rng);
+            let Some(Ok(XCompressedLookup::Flat(built))) = build(XFlatArgs {
+                mode: XLkpFlat::On,
+                spare: Some(&spare),
+                extra: None,
+                segments: None,
+                x_ahead: false,
+                appends: 0,
+            }) else {
+                panic!("{matrix:?}: no flat table on the spare")
+            };
+            x_assert_same_flat_tables(&built, &serial);
+            // A build ahead of its block, at once and in its two parts: every vector from the spare
+            // made ready.
+            let ready = |rng: &mut XorShift| {
+                let spare = XFlatSpare::default();
+                let mut hits = Vec::with_capacity(total + 5);
+                hits.extend((0..total / 2).map(|_| rng.below(1 << 20) as i32));
+                *spare.0.lock().unwrap() = (vec![u32::MAX - 3; backbone_size + 1], hits);
+                *spare.1.lock().unwrap() = vec![u32::MAX; pv_words];
+                let block = XFlatSpare::default();
+                assert_eq!(spare.x_make_room(&block, backbone_size, total, total), 0);
+                spare
+            };
+            let held = |built: &XFlatCompressedLookup| {
+                [
+                    built.starts.as_ptr() as usize,
+                    built.hits.as_ptr() as usize,
+                    built.pv.as_ptr() as usize,
+                ]
+            };
+            let spare = ready(&mut rng);
+            let given = spare_addresses(&spare);
+            let Some(Ok(XCompressedLookup::Flat(built))) = build(XFlatArgs {
+                mode: XLkpFlat::On,
+                spare: Some(&spare),
+                extra: None,
+                segments: None,
+                x_ahead: true,
+                appends: 0,
+            }) else {
+                panic!("{matrix:?}: no flat table built ahead")
+            };
+            x_assert_same_flat_tables(&built, &serial);
+            assert_eq!(held(&built), given, "{matrix:?}: the spare's vectors");
+            let spare = ready(&mut rng);
+            let given = spare_addresses(&spare);
+            let built = crate::utils::threading::with_search_pool(3, "blastp", |pool| {
+                let appends = super::super::x_bp_flat_ahead_appends(
+                    matrix,
+                    5,
+                    1100,
+                    &query,
+                    &locations,
+                    &tables,
+                    pool,
+                    XFlatArgs {
+                        mode: XLkpFlat::On,
+                        spare: None,
+                        extra: None,
+                        segments: None,
+                        x_ahead: true,
+                        appends: 0,
+                    },
+                )
+                .expect("the appends pass");
+                Ok(super::super::x_bp_flat_ahead_table(
+                    matrix, appends, &query, &locations, pool, &spare, None,
+                ))
+            })
+            .expect("pool")
+            .expect("a table built ahead in two parts");
+            x_assert_same_flat_tables(&built, &serial);
+            assert_eq!(
+                held(&built),
+                given,
+                "{matrix:?}: the spare's vectors, two parts"
+            );
+            // Without a spare a build ahead makes no table.
+            assert!(
+                build(XFlatArgs {
+                    mode: XLkpFlat::On,
+                    spare: None,
+                    extra: None,
+                    segments: None,
+                    x_ahead: true,
+                    appends: 0,
+                })
+                .is_none(),
+                "{matrix:?}: a table built ahead without a spare"
+            );
+            // The two passes apart at a capacity of one cell: the matrix's words make the same
+            // outcome as its serial builder (the capacity test makes them again).
+            let serial_one = x_try_build_flat_of(
+                matrix,
+                5,
+                1100,
+                &query,
+                &locations,
+                &tables,
+                1,
+                X_COUNT_CHUNK,
+            );
+            let cuts = |threads| XParallelCuts::<i32> {
+                overflow_cell_capacity: 1,
+                max_appends: None,
+                threads,
+                chunk_sizes: &[],
+                stripe_shift: None,
+                wave_cells: None,
+                appends_segment: X_APPENDS_SEGMENT,
+                piece_appends: X_PIECE_APPENDS,
+                segments: None,
+                passes: XPasses::OneLatch(None),
+                spare: None,
+                lent: None,
+                x_ahead: false,
+                stripe_fill: true,
+            };
+            let stage = in_pool(3, || {
+                x_flat_appends_on(
+                    matrix,
+                    5,
+                    1100,
+                    &query,
+                    &locations,
+                    &tables,
+                    cuts(3),
+                    |_| None,
+                )
+            });
+            let XFlatStage::Appends(appends) = stage else {
+                panic!("{matrix:?}: the appends pass ended the build")
+            };
+            let apart = in_pool(2, || {
+                x_flat_stripes_on(matrix, appends, &query, &locations, None, None, false, None)
+            });
+            match (&serial_one, &apart) {
+                (Some(XFlatBuild::Refused), Some(XFlatBuild::Refused)) => {}
+                (Some(XFlatBuild::Table(want)), Some(XFlatBuild::Table(got))) => {
+                    x_assert_same_flat_tables(got, want)
+                }
+                _ => panic!("{matrix:?}: capacity 1, the outcomes differ"),
+            }
+        }
     }
 
     fn flat(build: Option<XFlatBuild>) -> XFlatCompressedLookup {
@@ -1191,7 +3515,7 @@ mod tests {
             ));
             for (threads, chunk_sizes) in [(2, &[usize::MAX][..]), (3, &[][..]), (7, &[40_000][..])]
             {
-                for passes in PASSES {
+                for (passes, stripe_fill) in FORMS {
                     let built = flat(Some(parallel(
                         threads,
                         2000,
@@ -1203,6 +3527,7 @@ mod tests {
                         chunk_sizes,
                         None,
                         passes,
+                        stripe_fill,
                         None,
                     )));
                     x_assert_same_flat_tables(&built, &serial);
@@ -1223,7 +3548,7 @@ mod tests {
     // parallel builder refuses exactly when the reference does, and otherwise builds its table.
     // The bound on the appends: `TooLarge` exactly when the appends pass it. Both pass
     // implementations; the one-latch passes with extra tasks, each of which runs exactly once, also
-    // when the build is refused or `TooLarge`, and on a spare of garbage (filled with the shadow's
+    // when the build is refused or `TooLarge`, and on a spare of garbage (filled with `poison`'s
     // pattern or not), which a refused build consumes and a `TooLarge` build drops; the next build on
     // a spare of garbage is still exact.
     #[test]
@@ -1256,12 +3581,18 @@ mod tests {
             }
             capacities.retain(|&capacity| capacity > 0);
             for capacity in capacities {
-                let reference = try_build_blosum62_compressed_lookup_with_capacity(
-                    5, threshold, &query, &locations, &tables, capacity,
+                let reference = try_build_compressed_lookup_with_capacity(
+                    Blosum62Compressed,
+                    5,
+                    threshold,
+                    &query,
+                    &locations,
+                    &tables,
+                    capacity,
                 )
                 .expect("word size 5");
                 for (threads, chunk_sizes) in [(2, &[][..]), (3, &[7, 1, 50][..]), (7, &[1][..])] {
-                    for one_latch in [false, true] {
+                    for (one_latch, stripe_fill) in [(false, false), (true, false), (true, true)] {
                         let extra = Counted::new(1 + rng.below(40));
                         let passes = if one_latch {
                             XPasses::OneLatch(Some(&extra))
@@ -1270,6 +3601,9 @@ mod tests {
                         };
                         let spare = garbage_spare(&mut rng);
                         let poison = rng.below(2) == 0;
+                        if poison {
+                            give_room(&spare);
+                        }
                         match (
                             &reference,
                             parallel(
@@ -1283,6 +3617,7 @@ mod tests {
                                 chunk_sizes,
                                 None,
                                 passes,
+                                stripe_fill,
                                 one_latch.then_some((&spare, poison)),
                             ),
                         ) {
@@ -1314,7 +3649,7 @@ mod tests {
                 (appends, false),
                 (appends + 1, false),
             ] {
-                for one_latch in [false, true] {
+                for (one_latch, stripe_fill) in [(false, false), (true, false), (true, true)] {
                     let extra = Counted::new(1 + rng.below(40));
                     let passes = if one_latch {
                         XPasses::OneLatch(Some(&extra))
@@ -1323,6 +3658,9 @@ mod tests {
                     };
                     let spare = garbage_spare(&mut rng);
                     let poison = rng.below(2) == 0;
+                    if poison {
+                        give_room(&spare);
+                    }
                     let built = parallel(
                         3,
                         threshold,
@@ -1334,6 +3672,7 @@ mod tests {
                         &[5],
                         None,
                         passes,
+                        stripe_fill,
                         one_latch.then_some((&spare, poison)),
                     );
                     assert_eq!(
@@ -1358,7 +3697,7 @@ mod tests {
 
     // LOSAT_X_BPLKPFLAT: a build on vectors of garbage (`u32::MAX`, `i32::MIN`, random values) longer
     // or shorter than the table's, with and without the room for it, and then on the vectors that
-    // build gives back, is the fresh build slot for slot, with both pass implementations and at 1, 2,
+    // build gives back, is the fresh build slot for slot, with every form and at 1, 2,
     // 3 and 7 threads; where the spare's `hits` has the room, the table holds that buffer.
     #[test]
     fn builds_on_recycled_vectors_equal_fresh_builds() {
@@ -1381,7 +3720,7 @@ mod tests {
             let total = serial.hits.len();
             for case in 0..3 {
                 for threads in THREADS {
-                    for passes in PASSES {
+                    for (passes, stripe_fill) in FORMS {
                         let mut random = |len: usize| -> Vec<u32> {
                             (0..len)
                                 .map(|_| rng.below(u32::MAX as usize) as u32)
@@ -1420,6 +3759,7 @@ mod tests {
                                 &[],
                                 None,
                                 passes,
+                                stripe_fill,
                                 Some((&spare, build == 1)),
                             )));
                             x_assert_same_flat_tables(&built, &serial);
@@ -1460,7 +3800,10 @@ mod tests {
         ));
         for threads in THREADS {
             for chunk_sizes in CHUNK_SIZES {
-                for count in [0, 1, 3, 64] {
+                for (count, stripe_fill) in [0, 1, 3, 64]
+                    .into_iter()
+                    .flat_map(|count| [(count, false), (count, true)])
+                {
                     let extra = Counted::new(count);
                     let built = flat(Some(parallel(
                         threads,
@@ -1473,6 +3816,7 @@ mod tests {
                         chunk_sizes,
                         None,
                         XPasses::OneLatch(Some(&extra)),
+                        stripe_fill,
                         None,
                     )));
                     x_assert_same_flat_tables(&built, &serial);
@@ -1481,28 +3825,30 @@ mod tests {
             }
         }
         // No offsets: no chunk, the tasks still run once.
-        let extra = Counted::new(5);
-        let none = flat(Some(parallel(
-            3,
-            1100,
-            &query,
-            &[],
-            &[],
-            NCBI_OVERFLOW_CELL_CAPACITY,
-            None,
-            &[],
-            None,
-            XPasses::OneLatch(Some(&extra)),
-            None,
-        )));
-        assert!(none.hits.is_empty());
-        extra.assert_each_ran(1, "no chunks");
+        for stripe_fill in [false, true] {
+            let extra = Counted::new(5);
+            let none = flat(Some(parallel(
+                3,
+                1100,
+                &query,
+                &[],
+                &[],
+                NCBI_OVERFLOW_CELL_CAPACITY,
+                None,
+                &[],
+                None,
+                XPasses::OneLatch(Some(&extra)),
+                stripe_fill,
+                None,
+            )));
+            assert!(none.hits.is_empty());
+            extra.assert_each_ran(1, "no chunks");
+        }
         // The entry of the search: the pool's build at 3 threads, the serial builder at one thread
         // (no task runs; the caller runs them), and nothing with the switch off.
         for (threads, mode, runs) in [
             (1, XLkpFlat::On, 0),
             (3, XLkpFlat::On, 1),
-            (3, XLkpFlat::Shadow, 1),
             (3, XLkpFlat::Off, 0),
         ] {
             let extra = Counted::new(9);
@@ -1518,7 +3864,9 @@ mod tests {
                         mode,
                         spare: None,
                         extra: Some(&extra),
+                        segments: None,
                         x_ahead: false,
+                        appends: 0,
                     },
                 ))
             })
@@ -1537,8 +3885,12 @@ mod tests {
         locations: &[(i32, i32)],
         tables: &[std::ops::Range<usize>],
         spare: Option<&XFlatSpare>,
-        poison: bool,
+        poisoned: bool,
+        stripe_fill: bool,
     ) -> Option<XFlatBuild> {
+        if let (Some(spare), true) = (spare, poisoned) {
+            poison(spare);
+        }
         in_pool(threads, || {
             x_try_build_flat_parallel_with(
                 5,
@@ -1552,9 +3904,14 @@ mod tests {
                     threads,
                     chunk_sizes: &[],
                     stripe_shift: None,
+                    wave_cells: None,
+                    appends_segment: X_APPENDS_SEGMENT,
+                    piece_appends: X_PIECE_APPENDS,
+                    segments: None,
                     passes: XPasses::OneLatch(None),
+                    stripe_fill,
                     spare,
-                    poison,
+                    lent: None,
                     x_ahead: true,
                 },
             )
@@ -1570,6 +3927,244 @@ mod tests {
             kept.1.as_ptr() as usize,
             pv.as_ptr() as usize,
         ]
+    }
+
+    /// Item SC2d: the parallel build's two passes run apart: the appends pass on a pool of
+    /// `threads.0` threads (`spare_a`: the spare it drops on `TooLarge`), its values moved to a pool of
+    /// `threads.1` threads for the stripes pass on `spare_b` (`x_ahead`: all of its vectors from
+    /// there).
+    #[allow(clippy::too_many_arguments)]
+    fn apart(
+        threads: (usize, usize),
+        threshold: i32,
+        query: &[u8],
+        locations: &[(i32, i32)],
+        tables: &[std::ops::Range<usize>],
+        capacity: usize,
+        max_appends: Option<usize>,
+        passes: XPasses<'_>,
+        stripe_fill: bool,
+        spare_a: Option<&XFlatSpare>,
+        spare_b: Option<&XFlatSpare>,
+        x_ahead: bool,
+    ) -> Option<XFlatBuild> {
+        let stage = in_pool(threads.0, || {
+            x_flat_appends_on(
+                Blosum62Compressed,
+                5,
+                threshold,
+                query,
+                locations,
+                tables,
+                XParallelCuts {
+                    overflow_cell_capacity: capacity,
+                    max_appends,
+                    threads: threads.0,
+                    chunk_sizes: &[],
+                    stripe_shift: None,
+                    wave_cells: None,
+                    appends_segment: X_APPENDS_SEGMENT,
+                    piece_appends: X_PIECE_APPENDS,
+                    segments: None,
+                    passes,
+                    spare: spare_a,
+                    lent: None,
+                    x_ahead,
+                    stripe_fill,
+                },
+                |capacity| {
+                    x_try_build_flat_with_capacity(
+                        5,
+                        threshold,
+                        query,
+                        locations,
+                        tables,
+                        capacity,
+                        X_COUNT_CHUNK,
+                        0,
+                    )
+                },
+            )
+        });
+        match stage {
+            XFlatStage::Built(built) => built,
+            XFlatStage::Appends(appends) => in_pool(threads.1, || {
+                x_flat_stripes_on(
+                    Blosum62Compressed,
+                    appends,
+                    query,
+                    locations,
+                    spare_b,
+                    None,
+                    x_ahead,
+                    None,
+                )
+            }),
+        }
+    }
+
+    // Item SC2d: the appends pass and the stripes pass run apart (on pools of other sizes, the
+    // appends' values moved between them) give what the build gives at once: the table slot for slot,
+    // the refusal (the capacity test makes the words again) and `TooLarge`, with each pass form, the
+    // extra tasks run once in the appends pass, on fresh vectors, on a spare of garbage and (a build
+    // ahead of its block) on all of a spare's vectors. A spare of a build ahead without the room gives
+    // no table and keeps its vectors; a `TooLarge` build drops the appends pass's spare.
+    #[test]
+    fn the_two_passes_apart_build_what_the_build_at_once_builds() {
+        let mut rng = XorShift(0x9b05_688c_2b3e_6c1f);
+        let (mut refused_seen, mut built_seen, mut too_large_seen) = (0usize, 0usize, 0usize);
+        for round in 0..6 {
+            let threshold = [1100, 1600, 2000][round % 3];
+            let letters: &[u8] = if round % 2 == 0 {
+                &FEW_LETTERS
+            } else {
+                &LETTERS
+            };
+            let lengths: Vec<usize> = (0..2 + rng.below(5)).map(|_| 5 + rng.below(350)).collect();
+            let (query, locations, first) = queries(&mut rng, &lengths, letters, round % 2);
+            // Two tables, or one after segments of no table (its capacity test then reads the words).
+            let half = first[lengths.len() / 2];
+            let tables = if round % 3 == 0 {
+                vec![first[0]..half, half..first[lengths.len()]]
+            } else {
+                vec![half..first[lengths.len()]]
+            };
+            let serial = flat(x_try_build_flat_compressed_lookup(
+                5, threshold, &query, &locations, &tables,
+            ));
+            let total = serial.hits.len();
+            let backbone_size = serial.starts.len() - 1;
+            // The capacities: NCBI's, one cell (refusals where cells overflow); the bound: none, and
+            // one below the appends.
+            for (capacity, max_appends) in [
+                (NCBI_OVERFLOW_CELL_CAPACITY, None),
+                (1, None),
+                (NCBI_OVERFLOW_CELL_CAPACITY, Some(total.saturating_sub(1))),
+            ] {
+                for (threads, (one_latch, stripe_fill)) in [
+                    ((2, 7), (false, false)),
+                    ((3, 2), (true, false)),
+                    ((7, 3), (true, true)),
+                ] {
+                    let at_once = parallel(
+                        threads.0,
+                        threshold,
+                        &query,
+                        &locations,
+                        &tables,
+                        capacity,
+                        max_appends,
+                        &[],
+                        None,
+                        if one_latch {
+                            XPasses::OneLatch(None)
+                        } else {
+                            XPasses::Rayon
+                        },
+                        stripe_fill,
+                        None,
+                    );
+                    let extra = Counted::new(1 + rng.below(30));
+                    let passes = if one_latch {
+                        XPasses::OneLatch(Some(&extra))
+                    } else {
+                        XPasses::Rayon
+                    };
+                    // On a spare of garbage, given to the stripes pass.
+                    let spare = garbage_spare(&mut rng);
+                    give_room(&spare);
+                    poison(&spare);
+                    let built = apart(
+                        threads,
+                        threshold,
+                        &query,
+                        &locations,
+                        &tables,
+                        capacity,
+                        max_appends,
+                        passes,
+                        stripe_fill,
+                        Some(&spare),
+                        Some(&spare),
+                        false,
+                    )
+                    .expect("word size 5");
+                    let what = format!("round {round}, capacity {capacity}, bound {max_appends:?}, threads {threads:?}");
+                    match (&at_once, &built) {
+                        (XFlatBuild::Table(want), XFlatBuild::Table(got)) => {
+                            x_assert_same_flat_tables_as(&what, got, want);
+                            built_seen += 1;
+                        }
+                        (XFlatBuild::Refused, XFlatBuild::Refused) => refused_seen += 1,
+                        (XFlatBuild::TooLarge, XFlatBuild::TooLarge) => {
+                            assert_eq!(spare_capacities(&spare), (0, 0), "{what}: dropped");
+                            too_large_seen += 1;
+                        }
+                        _ => panic!("{what}: the outcomes differ"),
+                    }
+                    extra.assert_each_ran(usize::from(one_latch), &what);
+                    // A build ahead: all of the stripes pass's vectors from its spare (with garbage),
+                    // none dropped by the appends pass.
+                    if one_latch && capacity == NCBI_OVERFLOW_CELL_CAPACITY && max_appends.is_none()
+                    {
+                        let pv_words = (backbone_size >> PV_ARRAY_BTS) + 1;
+                        let ahead_spare = XFlatSpare::default();
+                        *ahead_spare.0.lock().unwrap() =
+                            (vec![u32::MAX - 3; backbone_size + 1], vec![i32::MIN; total]);
+                        *ahead_spare.1.lock().unwrap() = vec![u32::MAX; pv_words];
+                        let given = spare_addresses(&ahead_spare);
+                        let built = flat(apart(
+                            threads,
+                            threshold,
+                            &query,
+                            &locations,
+                            &tables,
+                            capacity,
+                            None,
+                            XPasses::OneLatch(None),
+                            stripe_fill,
+                            None,
+                            Some(&ahead_spare),
+                            true,
+                        ));
+                        x_assert_same_flat_tables_as(&what, &built, &serial);
+                        let held = [
+                            built.starts.as_ptr() as usize,
+                            built.hits.as_ptr() as usize,
+                            built.pv.as_ptr() as usize,
+                        ];
+                        assert_eq!(held, given, "{what}: the spare's vectors");
+                        // One hit short of the room: no table, the spare keeps its vectors.
+                        if total > 0 {
+                            let short = XFlatSpare::default();
+                            *short.0.lock().unwrap() = (
+                                Vec::with_capacity(backbone_size + 1),
+                                Vec::with_capacity(total - 1),
+                            );
+                            *short.1.lock().unwrap() = Vec::with_capacity(pv_words);
+                            let kept = spare_addresses(&short);
+                            let none = apart(
+                                threads,
+                                threshold,
+                                &query,
+                                &locations,
+                                &tables,
+                                capacity,
+                                None,
+                                XPasses::OneLatch(None),
+                                stripe_fill,
+                                None,
+                                Some(&short),
+                                true,
+                            );
+                            assert!(none.is_none(), "{what}: no table without the room");
+                            assert_eq!(spare_addresses(&short), kept, "{what}: kept");
+                        }
+                    }
+                }
+            }
+        }
+        assert!(refused_seen > 0 && built_seen > 0 && too_large_seen > 0);
     }
 
     // LOSAT_X_BPLKPAHEAD: a build ahead of its block takes `starts`, `hits` and the PV array from the
@@ -1596,7 +4191,9 @@ mod tests {
             let total = serial.hits.len();
             let pv_words = (backbone_size >> PV_ARRAY_BTS) + 1;
             for threads in THREADS {
-                for poison in [false, true] {
+                for (poison, stripe_fill) in
+                    [(false, false), (false, true), (true, false), (true, true)]
+                {
                     // The room, with garbage in it.
                     let spare = XFlatSpare::default();
                     let mut hits = Vec::with_capacity(total + 5);
@@ -1614,6 +4211,7 @@ mod tests {
                         &tables,
                         Some(&spare),
                         poison,
+                        stripe_fill,
                     ));
                     x_assert_same_flat_tables(&built, &serial);
                     let held = [
@@ -1646,12 +4244,20 @@ mod tests {
                             &tables,
                             Some(&spare),
                             poison,
+                            stripe_fill,
                         );
                         assert!(none.is_none(), "round {round}, short {short}: no table");
                         assert_eq!(spare_addresses(&spare), kept, "the spare keeps them");
                     }
                     let none = ahead(
-                        threads, threshold, &query, &locations, &tables, None, poison,
+                        threads,
+                        threshold,
+                        &query,
+                        &locations,
+                        &tables,
+                        None,
+                        poison,
+                        stripe_fill,
                     );
                     assert!(none.is_none());
                 }
@@ -1661,8 +4267,9 @@ mod tests {
     }
 
     // LOSAT_X_BPLKPAHEAD: `x_make_room` keeps the spare's own vectors when they have the room, else
-    // moves the block spare's (the same buffers), and replaces each vector short of its room by an
-    // empty one of the asked capacity; it writes nothing into them.
+    // moves the block spare's (the same buffers), replaces `starts` or the PV array short of its room
+    // by an empty one of the asked capacity and grows `hits` short of its room in place (item SC2d);
+    // it writes nothing into them.
     #[test]
     fn make_room_keeps_or_moves_the_vectors_and_allocates_only_what_is_short() {
         let backbone_size = 759_375;
@@ -1676,7 +4283,7 @@ mod tests {
         );
         {
             let kept = ahead_spare.0.lock().unwrap();
-            assert!(kept.0.is_empty() && kept.0.capacity() >= backbone_size + 1);
+            assert!(kept.0.is_empty() && kept.0.capacity() > backbone_size);
             assert!(kept.1.is_empty() && kept.1.capacity() >= 1500);
             assert!(ahead_spare.1.lock().unwrap().capacity() >= pv_words);
         }
@@ -1704,5 +4311,372 @@ mod tests {
         assert_eq!([taken[0], taken[1]], [moved[0], moved[1]]);
         assert_eq!(spare_capacities(&block), (0, 0));
         assert_eq!(empty.0.lock().unwrap().1.len(), 5000);
+    }
+
+    // Item SC2d-2: the chunks' packed appends in the tasks' segments (`XSegmentOut`) of any size and
+    // in pieces of any size (`x_chunk_appends`): a task's pieces fill a segment and go on in a new one
+    // (a piece never straddles two), a piece of more appends than a segment holds gets one of its
+    // own, a chunk of more appends than a piece is cut into pieces, and the table is the serial one
+    // slot for slot, with rayon's passes and the one-latch passes (with and without the stripe fill),
+    // at 2, 3 and 7 threads, for BLOSUM62's words and another matrix's.
+    #[test]
+    fn the_appends_in_segments_and_pieces_of_any_size_build_the_serial_table() {
+        let mut rng = XorShift(0x510e_527f_ade6_82d1);
+        let (mut many_seen, mut whole_seen, mut cut_seen) = (0usize, 0usize, 0usize);
+        for round in 0..4 {
+            let matrix = [ScoringMatrix::Blosum62, ScoringMatrix::Blosum45][round % 2];
+            let letters: &[u8] = if round < 2 { &FEW_LETTERS } else { &LETTERS };
+            let lengths: Vec<usize> = (0..2 + rng.below(4)).map(|_| 20 + rng.below(300)).collect();
+            let (query, locations, first) = queries(&mut rng, &lengths, letters, round % 2);
+            let tables = vec![first[0]..first[lengths.len()]];
+            let serial = flat(x_try_build_flat_of(
+                matrix,
+                5,
+                1100,
+                &query,
+                &locations,
+                &tables,
+                NCBI_OVERFLOW_CELL_CAPACITY,
+                X_COUNT_CHUNK,
+            ));
+            for (segment, piece) in [
+                (1, X_PIECE_APPENDS),
+                (7, 1),
+                (64, 5),
+                (1000, 64),
+                (X_APPENDS_SEGMENT, 300),
+                (X_APPENDS_SEGMENT, X_PIECE_APPENDS),
+            ] {
+                for (threads, passes, stripe_fill) in [
+                    (2, XPasses::Rayon, false),
+                    (3, XPasses::OneLatch(None), false),
+                    (7, XPasses::OneLatch(None), true),
+                ] {
+                    let what = format!(
+                        "round {round} {matrix:?} segment {segment} piece {piece} n{threads}"
+                    );
+                    let cuts = XParallelCuts::<i32> {
+                        overflow_cell_capacity: NCBI_OVERFLOW_CELL_CAPACITY,
+                        max_appends: None,
+                        threads,
+                        // Chunks of a few offsets, so that a task fills its segments with many.
+                        chunk_sizes: &[3, 11, 29],
+                        stripe_shift: None,
+                        wave_cells: None,
+                        appends_segment: segment,
+                        piece_appends: piece,
+                        segments: None,
+                        passes,
+                        spare: None,
+                        lent: None,
+                        x_ahead: false,
+                        stripe_fill,
+                    };
+                    let stage = in_pool(threads, || {
+                        x_flat_appends_on(
+                            matrix,
+                            5,
+                            1100,
+                            &query,
+                            &locations,
+                            &tables,
+                            cuts,
+                            |_| None,
+                        )
+                    });
+                    let XFlatStage::Appends(appends) = stage else {
+                        panic!("{what}: the appends pass ended the build")
+                    };
+                    // Each piece's range lies in its segment; a segment holds one piece larger
+                    // than `segment`, or pieces whose appends sum to at most `segment`. A piece
+                    // holds at most `piece` appends past its last offset's; the pieces are in
+                    // chunk order.
+                    let segments = &appends.appends.segments;
+                    let pieces = &appends.appends.pieces;
+                    let mut used = vec![0usize; segments.len()];
+                    for piece_appends in pieces {
+                        assert!(piece_appends.len > 0, "{what}: an empty piece");
+                        assert!(
+                            piece_appends.at + piece_appends.len
+                                <= segments[piece_appends.segment].len(),
+                            "{what}: a piece past its segment"
+                        );
+                        used[piece_appends.segment] += piece_appends.len;
+                        if piece_appends.len > segment {
+                            assert_eq!(
+                                segments[piece_appends.segment].len(),
+                                piece_appends.len,
+                                "{what}: a piece larger than a segment, in one of its own"
+                            );
+                            whole_seen += 1;
+                        }
+                    }
+                    assert!(
+                        pieces.windows(2).all(|w| w[0].chunk <= w[1].chunk),
+                        "{what}: the pieces out of chunk order"
+                    );
+                    if pieces.windows(2).any(|w| w[0].chunk == w[1].chunk) {
+                        cut_seen += 1;
+                    }
+                    for (index, (segment_entries, used)) in
+                        segments.iter().map(Vec::len).zip(&used).enumerate()
+                    {
+                        assert!(
+                            *used <= segment_entries,
+                            "{what}: segment {index} overfilled"
+                        );
+                    }
+                    if segments.len() > threads {
+                        many_seen += 1;
+                    }
+                    let built = in_pool(threads, || {
+                        x_flat_stripes_on(
+                            matrix, appends, &query, &locations, None, None, false, None,
+                        )
+                    });
+                    x_assert_same_flat_tables_as(&what, &flat(built), &serial);
+                }
+            }
+        }
+        assert!(
+            many_seen > 0 && whole_seen > 0 && cut_seen > 0,
+            "{many_seen} {whole_seen} {cut_seen}"
+        );
+    }
+
+    // Item SC2d-2: guided chunk sizes (`XChunkSizes::Guided`): the chunks hold every offset of the
+    // count ranges once, in order, each within its range and `X_OFFSET_SPAN` of its first offset; a
+    // chunk takes the offsets left over `X_GUIDED_SHARE * threads` (at least `X_MIN_CHUNK_OFFSETS`)
+    // unless a range ends first, so the first chunks are the largest.
+    #[test]
+    fn guided_chunks_cover_the_offsets_in_order_and_shrink_to_the_floor() {
+        let mut rng = XorShift(0x9b05_688c_2b3e_6c1e);
+        for round in 0..6 {
+            let lengths: Vec<usize> = (0..1 + rng.below(40))
+                .map(|_| 1 + rng.below(3000))
+                .collect();
+            let (_, locations, first) = queries(&mut rng, &lengths, &LETTERS, round % 2);
+            let half = first[lengths.len() / 2];
+            let tables = if round % 2 == 0 {
+                vec![first[0]..half, half..first[lengths.len()]]
+            } else {
+                vec![first[0]..first[lengths.len()]]
+            };
+            let ranges = x_count_ranges(&tables, locations.len());
+            let word = 5i64;
+            let expected: Vec<(usize, i64)> = ranges
+                .iter()
+                .enumerate()
+                .flat_map(|(index, (range, _))| {
+                    locations[range.clone()]
+                        .iter()
+                        .flat_map(move |&(left, right)| {
+                            (i64::from(left)..=i64::from(right) - word + 1).map(move |o| (index, o))
+                        })
+                })
+                .collect();
+            for threads in [1, 3, 8] {
+                let sizes = XChunkSizes::Guided {
+                    threads,
+                    offsets: expected.len(),
+                };
+                let chunks = x_chunks(5, &ranges, &locations, sizes);
+                let got: Vec<(usize, i64)> = chunks
+                    .iter()
+                    .flat_map(|chunk| {
+                        chunk.pieces.iter().flat_map(move |&(a, b)| {
+                            (i64::from(a)..=i64::from(b) - word + 1).map(move |o| (chunk.range, o))
+                        })
+                    })
+                    .collect();
+                assert_eq!(got, expected, "round {round} n{threads}: the offsets");
+                let mut placed = 0usize;
+                for (index, chunk) in chunks.iter().enumerate() {
+                    let count: usize = chunk
+                        .pieces
+                        .iter()
+                        .map(|&(a, b)| (i64::from(b) - word + 2 - i64::from(a)) as usize)
+                        .sum();
+                    let span = chunk
+                        .pieces
+                        .iter()
+                        .map(|&(_, b)| i64::from(b) - word + 1 - i64::from(chunk.base))
+                        .max()
+                        .unwrap_or(0);
+                    assert!(span < X_OFFSET_SPAN, "round {round} n{threads}: span");
+                    let size = sizes.size(index, placed);
+                    assert!(count <= size, "round {round} n{threads} chunk {index}");
+                    // A chunk short of its size ends at its range's end or where the next offset
+                    // is past its offset span.
+                    let closed_early = chunks.get(index + 1).is_none_or(|next| {
+                        next.range != chunk.range
+                            || i64::from(next.base) >= i64::from(chunk.base) + X_OFFSET_SPAN
+                    });
+                    assert!(
+                        count == size || closed_early,
+                        "round {round} n{threads} chunk {index}: {count} of {size}"
+                    );
+                    placed += count;
+                }
+            }
+        }
+    }
+
+    // Item SC2d-2: the segments a build keeps (`XSegmentPool`, at most as many as threads) may be
+    // the next build's (here filled with garbage first), and every build gives the serial table slot
+    // for slot.
+    #[test]
+    fn kept_segments_of_any_values_leave_the_table_the_serial_one() {
+        let mut rng = XorShift(0x1f83_d9ab_fb41_bd6b);
+        let pool = XSegmentPool::default();
+        for round in 0..4 {
+            let lengths: Vec<usize> = (0..2 + rng.below(4)).map(|_| 20 + rng.below(300)).collect();
+            let (query, locations, first) = queries(&mut rng, &lengths, &LETTERS, round % 2);
+            let tables = vec![first[0]..first[lengths.len()]];
+            let serial = flat(x_try_build_flat_compressed_lookup(
+                5, 1100, &query, &locations, &tables,
+            ));
+            let threads = 3;
+            {
+                let mut kept = pool.0.lock().unwrap();
+                assert!(
+                    kept.len() <= threads,
+                    "round {round}: at most as many as threads"
+                );
+                for segment in kept.iter_mut() {
+                    segment.fill(u32::MAX);
+                }
+            }
+            let stage = in_pool(threads, || {
+                x_flat_appends_on(
+                    Blosum62Compressed,
+                    5,
+                    1100,
+                    &query,
+                    &locations,
+                    &tables,
+                    XParallelCuts::<i32> {
+                        overflow_cell_capacity: NCBI_OVERFLOW_CELL_CAPACITY,
+                        max_appends: None,
+                        threads,
+                        chunk_sizes: &[3, 11, 29],
+                        stripe_shift: None,
+                        wave_cells: None,
+                        appends_segment: 64,
+                        piece_appends: X_PIECE_APPENDS,
+                        segments: Some(&pool),
+                        passes: XPasses::OneLatch(None),
+                        spare: None,
+                        lent: None,
+                        x_ahead: false,
+                        stripe_fill: true,
+                    },
+                    |_| None,
+                )
+            });
+            let XFlatStage::Appends(appends) = stage else {
+                panic!("round {round}: the appends pass ended the build")
+            };
+            // Which kept segments a build takes depends on the tasks' order (and a kept segment
+            // shorter than a piece is not taken): `a_task_writes_into_kept_segments_first` checks
+            // the order on one task. Here the kept ones hold u32::MAX and the table is the serial one.
+            let built = in_pool(threads, || {
+                x_flat_stripes_on(
+                    Blosum62Compressed,
+                    appends,
+                    &query,
+                    &locations,
+                    None,
+                    None,
+                    false,
+                    Some(&pool),
+                )
+            });
+            x_assert_same_flat_tables_as(&format!("round {round}"), &flat(built), &serial);
+            let kept = pool.0.lock().unwrap();
+            assert!(
+                (1..=threads).contains(&kept.len()),
+                "round {round}: {} kept",
+                kept.len()
+            );
+            assert!(
+                kept.iter()
+                    .all(|segment| !segment.is_empty() && segment.capacity() == segment.len()),
+                "round {round}: the kept segments are cut to their entries"
+            );
+        }
+    }
+
+    #[test]
+    fn a_task_writes_into_kept_segments_first() {
+        let lengths = |pool: &XSegmentPool| -> Vec<usize> {
+            pool.0.lock().unwrap().iter().map(Vec::len).collect()
+        };
+        let pool = XSegmentPool::default();
+        // The empty segment is not kept.
+        pool.keep(vec![vec![7u32; 10], Vec::new(), vec![7u32; 4]], 3);
+        assert_eq!(lengths(&pool), [10, 4]);
+        let kept: Vec<usize> = pool
+            .0
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|segment| segment.as_ptr() as usize)
+            .collect();
+        let registry = Mutex::new(Vec::new());
+        {
+            let mut out = XSegmentOut::new(&registry, 64, Some(&pool));
+            let mut take = |n: usize, value: u32| {
+                let (segment, at, range) = out.take(n);
+                assert_eq!(range.len(), n);
+                range.fill(value);
+                (segment, at)
+            };
+            // The first kept segment of at least 6 entries (10), then 3 more in it.
+            assert_eq!(take(6, 1), (0, 0));
+            assert_eq!(take(3, 2), (0, 6));
+            // 2 do not fit in the 1 left: the next kept one of at least 2 (4 entries).
+            assert_eq!(take(2, 3), (1, 0));
+            // 5 do not fit, and the pool is empty: a new segment of at least 64 entries.
+            assert_eq!(take(5, 4), (2, 0));
+        }
+        let segments = registry.into_inner().unwrap();
+        assert_eq!(
+            segments.iter().map(Vec::len).collect::<Vec<_>>(),
+            [9, 2, 5],
+            "each segment cut to the entries taken"
+        );
+        assert_eq!(segments[0], [1, 1, 1, 1, 1, 1, 2, 2, 2]);
+        assert_eq!(segments[1], [3, 3]);
+        assert_eq!(segments[2], [4; 5]);
+        assert_eq!(segments[0].as_ptr() as usize, kept[0]);
+        assert_eq!(segments[1].as_ptr() as usize, kept[1]);
+        assert!(lengths(&pool).is_empty());
+        // At most 2 kept, each cut to its entries.
+        pool.keep(segments, 2);
+        assert_eq!(lengths(&pool), [9, 2]);
+        assert!(pool
+            .0
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|segment| segment.capacity() == segment.len()));
+        // A later build's segments replace the ones it did not take.
+        pool.keep(vec![vec![5u32; 3]], 2);
+        assert_eq!(lengths(&pool), [3]);
+
+        // Item SC9i: between the waves of a build the segments are kept whole (at most 2): each at
+        // the length it was made with, its blocks and entries the same.
+        let mut made = vec![7u32; 12];
+        made[..4].fill(8);
+        made.truncate(4);
+        let whole = (made.as_ptr() as usize, made.capacity());
+        pool.keep_whole(vec![Vec::new(), made, vec![9u32; 5], vec![6u32; 2]], 2);
+        let kept = pool.0.lock().unwrap();
+        assert_eq!(kept.len(), 2);
+        assert_eq!((kept[0].as_ptr() as usize, kept[0].len()), whole);
+        assert_eq!(kept[0][..4], [8; 4]);
+        assert_eq!(kept[0][4..], [7; 8]);
+        assert_eq!(kept[1], [9; 5]);
     }
 }

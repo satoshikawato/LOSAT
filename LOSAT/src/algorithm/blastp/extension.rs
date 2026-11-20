@@ -248,6 +248,29 @@ pub fn extend_one_hit(
 // else
 //     sum += matrix[q[q_off + i]][s[s_off + i]];
 // ```
+/// [`extend_one_hit`] of a matrix other than BLOSUM62 (BLASTP's other matrices, item SC2b): the
+/// reference walk with `protein_score`, without the dispatch, so that BLOSUM62's instance keeps the
+/// one caller (`extend_one_hit_blosum62`'s reference) that inlines it.
+pub(crate) fn extend_one_hit_of(
+    matrix: ScoringMatrix,
+    query: &[u8],
+    subject: &[u8],
+    q_off: usize,
+    s_off: usize,
+    dropoff: i32,
+    word_size: usize,
+) -> Option<BlastpOneHitUngappedResult> {
+    debug_assert_ne!(matrix, ScoringMatrix::Blosum62);
+    extend_one_hit_impl::<false>(matrix, query, subject, q_off, s_off, dropoff, word_size)
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1040-1044
+// ```c
+// if (use_pssm)
+//     sum += matrix[q_off + i][s[s_off + i]];
+// else
+//     sum += matrix[q[q_off + i]][s[s_off + i]];
+// ```
 #[inline]
 pub(crate) fn extend_one_hit_blosum62(
     query: &[u8],
@@ -268,25 +291,43 @@ pub(crate) fn extend_one_hit_blosum62(
             word_size,
         )
     };
-    // LOSAT_X_BPUNGAP / LOSAT_X_BPUNGAPSHADOW (x_ungapped_fast.rs): the same result, the
-    // X-drop walks with a byte score table and no bounds checks; off unless set.
-    match x_ungapped_fast::mode() {
-        0 => reference(),
-        1 => x_ungapped_fast::one_hit(query, subject, q_off, s_off, dropoff, word_size)
-            .unwrap_or_else(reference),
-        _ => {
-            let expected = reference();
-            if let Some(got) =
-                x_ungapped_fast::one_hit(query, subject, q_off, s_off, dropoff, word_size)
-            {
-                assert_eq!(
-                    got, expected,
-                    "[X_SHADOW] BPUNGAP one-hit mismatch: q_off={q_off} s_off={s_off} dropoff={dropoff} word_size={word_size}"
-                );
-                x_ungapped_fast::count_shadow();
-            }
-            expected
-        }
+    // x_ungapped_fast.rs: the same result, the X-drop walks with a byte score table and no bounds
+    // checks; the reference runs where the fast walks do not cover the call.
+    x_ungapped_fast::one_hit(query, subject, q_off, s_off, dropoff, word_size)
+        .unwrap_or_else(reference)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:785-790,1040-1044
+// ```c
+//                 score = s_BlastAaExtendOneHit(matrix, subject, query,
+//                                               subject_offset, query_offset,
+//                                               cutoffs->x_dropoff,
+//                                               &hsp_q, &hsp_s, &hsp_len,
+//                                               wordsize, use_pssm, &s_last_off);
+// ...
+//         if (use_pssm)
+//             sum += matrix[q_off + i][s[s_off + i]];
+//         else
+//             sum += matrix[q[q_off + i]][s[s_off + i]];
+// ```
+/// `s_BlastAaExtendOneHit` with the score matrix `matrix` (not a PSSM), chosen at each call:
+/// BLOSUM62's walks (`extend_one_hit_blosum62`) or the reference walk of another matrix
+/// (`extend_one_hit_of`). TBLASTN's one-hit word finder (`-window_size 0`) calls it with its matrix
+/// (TBLASTX, below BLASTP in the layering, has its own on its two-hit walks).
+#[inline]
+pub(crate) fn extend_one_hit_for(
+    matrix: ScoringMatrix,
+    query: &[u8],
+    subject: &[u8],
+    q_off: usize,
+    s_off: usize,
+    dropoff: i32,
+    word_size: usize,
+) -> Option<BlastpOneHitUngappedResult> {
+    if matrix == ScoringMatrix::Blosum62 {
+        extend_one_hit_blosum62(query, subject, q_off, s_off, dropoff, word_size)
+    } else {
+        extend_one_hit_of(matrix, query, subject, q_off, s_off, dropoff, word_size)
     }
 }
 
@@ -471,23 +512,46 @@ pub(crate) fn extend_two_hit_blosum62(
             word_size,
         )
     };
-    // LOSAT_X_BPUNGAP / LOSAT_X_BPUNGAPSHADOW (x_ungapped_fast.rs): the same result, the
-    // X-drop walks with a byte score table and no bounds checks; off unless set.
-    match x_ungapped_fast::mode() {
-        0 => reference(),
-        1 => x_ungapped_fast::two_hit(
-            query,
-            subject,
-            s_left_off,
-            s_right_off,
-            q_right_off,
-            dropoff,
-            word_size,
-        )
-        .unwrap_or_else(reference),
-        _ => {
-            let expected = reference();
-            if let Some(got) = x_ungapped_fast::two_hit(
+    // x_ungapped_fast.rs: the same result, the X-drop walks with a byte score table and no bounds
+    // checks; the reference runs where the fast walks do not cover the call.
+    x_ungapped_fast::two_hit(
+        query,
+        subject,
+        s_left_off,
+        s_right_off,
+        q_right_off,
+        dropoff,
+        word_size,
+    )
+    .unwrap_or_else(reference)
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1112-1116
+// ```c
+// if (use_pssm)
+//     score += matrix[q_right_off + i][s[s_right_off + i]];
+// else
+//     score += matrix[q[q_right_off + i]][s[s_right_off + i]];
+// ```
+/// [`extend_two_hit`] of a matrix other than BLOSUM62 (item SC2b), with the byte-table walks of
+/// the matrix (`x_ungapped_fast::two_hit_of`; `of.1` is the matrix's `matrix_table`): the same
+/// result. The reference runs where the matrix has no table or the walks do not cover the call.
+#[inline]
+pub(crate) fn extend_two_hit_table(
+    of: (ScoringMatrix, Option<&'static x_ungapped_fast::MatrixTable>),
+    query: &[u8],
+    subject: &[u8],
+    s_left_off: usize,
+    s_right_off: usize,
+    q_right_off: usize,
+    dropoff: i32,
+    word_size: usize,
+) -> Option<BlastpTwoHitUngappedResult> {
+    let (matrix, table) = of;
+    table
+        .and_then(|table| {
+            x_ungapped_fast::two_hit_of(
+                table,
                 query,
                 subject,
                 s_left_off,
@@ -495,16 +559,20 @@ pub(crate) fn extend_two_hit_blosum62(
                 q_right_off,
                 dropoff,
                 word_size,
-            ) {
-                assert_eq!(
-                    got, expected,
-                    "[X_SHADOW] BPUNGAP two-hit mismatch: s_left_off={s_left_off} s_right_off={s_right_off} q_right_off={q_right_off} dropoff={dropoff} word_size={word_size}"
-                );
-                x_ungapped_fast::count_shadow();
-            }
-            expected
-        }
-    }
+            )
+        })
+        .unwrap_or_else(|| {
+            extend_two_hit(
+                matrix,
+                query,
+                subject,
+                s_left_off,
+                s_right_off,
+                q_right_off,
+                dropoff,
+                word_size,
+            )
+        })
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1089-1155
@@ -537,7 +605,7 @@ fn extend_two_hit_impl<const BLOSUM62: bool>(
     let mut s_right_off = s_right_off as i32;
     let word_size = word_size as i32;
 
-    let mut left_d = 0i32;
+    let left_d: i32;
     let mut right_d = 0i32;
     let mut left_score = 0i32;
     let mut right_score = 0i32;

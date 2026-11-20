@@ -1,0 +1,153 @@
+PSIBLAST 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for compositional score matrix adjustment: Stephen F.
+Altschul, John C. Wootton, E. Michael Gertz, Richa Agarwala,
+Aleksandr Morgulis, Alejandro A. Schaffer, and Yi-Kuo Yu (2005)
+"Protein database searches using compositionally adjusted
+substitution matrices", FEBS J. 272:5101-5109.
+
+
+Reference for composition-based statistics starting in round 2:
+Alejandro A. Schaffer, L. Aravind, Thomas L. Madden, Sergei
+Shavirin, John L. Spouge, Yuri I. Wolf, Eugene V. Koonin, and
+Stephen F. Altschul (2001), "Improving the accuracy of PSI-BLAST
+protein database searches with composition-based statistics and
+other refinements", Nucleic Acids Res. 29:2994-3005.
+
+
+
+Database: User specified sequence set.
+           2 sequences; 446 total letters
+
+Results from round 1
+
+
+Query= stq stale probe query
+
+Length=260
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s_good TK copy                                                        225     2e-76
+s_bz BZ only                                                          79.7    3e-24
+
+
+> s_good TK copy
+Length=398
+
+ Score = 225 bits (574),  Expect = 2e-76, Method: Composition-based stats.
+ Identities = 102/105 (97%), Positives = 103/105 (98%), Gaps = 1/105 (1%)
+
+Query  77   DEDEF-TDLVLVNRLADKGKRIVIAALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICK  135
+            DE +F TDLVLVNRLADKGKRIVIAALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICK
+Sbjct  96   DEGQFFTDLVLVNRLADKGKRIVIAALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICK  155
+
+Query  136  IDTKEAPFTVRFGNDNDNNVICVGGAEMYAAACRDCYKKINKKKN  180
+            IDTKEAPFTVRFGNDNDNNVICVGGAEMYAAACRDCYKKINKKKN
+Sbjct  156  IDTKEAPFTVRFGNDNDNNVICVGGAEMYAAACRDCYKKINKKKN  200
+
+
+ Score = 93.2 bits (230),  Expect = 3e-26, Method: Composition-based stats.
+ Identities = 40/42 (95%), Positives = 42/42 (100%), Gaps = 0/42 (0%)
+
+Query  1   MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGDE  42
+           MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGG++
+Sbjct  1   MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNK  42
+
+
+ Score = 70.1 bits (170),  Expect = 3e-18, Method: Composition-based stats.
+ Identities = 40/40 (100%), Positives = 40/40 (100%), Gaps = 0/40 (0%)
+
+Query  221  FSLARGVDTVEWCSASDEGLPQPDLVLLMLLDVEKCSNRD  260
+            FSLARGVDTVEWCSASDEGLPQPDLVLLMLLDVEKCSNRD
+Sbjct  301  FSLARGVDTVEWCSASDEGLPQPDLVLLMLLDVEKCSNRD  340
+
+
+ Score = 15.0 bits (27),  Expect = 2.6, Method: Composition-based stats.
+ Identities = 7/12 (58%), Positives = 8/12 (67%), Gaps = 0/12 (0%)
+
+Query  237  DEGLPQPDLVLL  248
+            DEG    DLVL+
+Sbjct  96   DEGQFFTDLVLV  107
+
+
+> s_bz BZ only
+Length=48
+
+ Score = 79.7 bits (195),  Expect = 3e-24
+ Identities = 0/45 (0%), Positives = 42/45 (93%), Gaps = 0/45 (0%)
+
+Query  36  QENGGDEDEDEDEDEDEDEDEDEDEDEDEDEDEDEDEDEDEDEDE  80
+           ++   ++++++++++++++++++++++++++++++++++++++++
+Sbjct  4   ZBZBZBZBZBZBZBZBZBZBZBZBZBZBZBZBZBZBZBZBZBZBZ  48
+
+
+ Score = 79.4 bits (194),  Expect = 5e-24
+ Identities = 0/43 (0%), Positives = 41/43 (95%), Gaps = 0/43 (0%)
+
+Query  41  DEDEDEDEDEDEDEDEDEDEDEDEDEDEDEDEDEDEDEDEFTD  83
+           ++++++++++++++++++++++++++++++++++++++++  +
+Sbjct  1   BZBZBZBZBZBZBZBZBZBZBZBZBZBZBZBZBZBZBZBZBZB  43
+
+
+ Score = 79.4 bits (194),  Expect = 5e-24
+ Identities = 0/43 (0%), Positives = 41/43 (95%), Gaps = 0/43 (0%)
+
+Query  178  KKNDEDEDEDEDEDEDEDEDEDEDEDEDEDEDEDEDEDEDEDE  220
+            +  ++++++++++++++++++++++++++++++++++++++++
+Sbjct  2    ZBZBZBZBZBZBZBZBZBZBZBZBZBZBZBZBZBZBZBZBZBZ  44
+
+
+ Score = 79.4 bits (194),  Expect = 5e-24
+ Identities = 0/43 (0%), Positives = 41/43 (95%), Gaps = 0/43 (0%)
+
+Query  178  KKNDEDEDEDEDEDEDEDEDEDEDEDEDEDEDEDEDEDEDEDE  220
+            +  ++++++++++++++++++++++++++++++++++++++++
+Sbjct  4    ZBZBZBZBZBZBZBZBZBZBZBZBZBZBZBZBZBZBZBZBZBZ  46
+
+
+ Score = 79.4 bits (194),  Expect = 5e-24
+ Identities = 0/43 (0%), Positives = 41/43 (95%), Gaps = 0/43 (0%)
+
+Query  178  KKNDEDEDEDEDEDEDEDEDEDEDEDEDEDEDEDEDEDEDEDE  220
+            +  ++++++++++++++++++++++++++++++++++++++++
+Sbjct  6    ZBZBZBZBZBZBZBZBZBZBZBZBZBZBZBZBZBZBZBZBZBZ  48
+
+
+ Score = 79.4 bits (194),  Expect = 6e-24
+ Identities = 0/40 (0%), Positives = 40/40 (100%), Gaps = 0/40 (0%)
+
+Query  181  DEDEDEDEDEDEDEDEDEDEDEDEDEDEDEDEDEDEDEDE  220
+            ++++++++++++++++++++++++++++++++++++++++
+Sbjct  1    BZBZBZBZBZBZBZBZBZBZBZBZBZBZBZBZBZBZBZBZ  40
+
+
+
+Lambda      K        H        a         alpha
+   0.310    0.133    0.373    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0407    0.140     1.90     42.6     43.6 
+
+Effective search space used: 90480
+
+
+  Database: User specified sequence set.
+    Posted date:  Unknown
+  Number of letters in database: 446
+  Number of sequences in database:  2
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

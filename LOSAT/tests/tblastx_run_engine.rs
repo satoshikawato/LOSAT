@@ -1,0 +1,442 @@
+//! Engine-level tests for tblastx runs.
+
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+fn temp_path(stem: &str, extension: &str) -> PathBuf {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system time before Unix epoch")
+        .as_nanos();
+    std::env::temp_dir().join(format!(
+        "losat_tblastx_{stem}_{}_{}.{}",
+        std::process::id(),
+        nanos,
+        extension
+    ))
+}
+
+fn losat_binary() -> PathBuf {
+    if let Some(path) = option_env!("CARGO_BIN_EXE_losat") {
+        return PathBuf::from(path);
+    }
+
+    let mut path = std::env::current_exe().expect("current test executable");
+    path.pop();
+    if path.file_name().is_some_and(|name| name == "deps") {
+        path.pop();
+    }
+    path.push(format!("losat{}", std::env::consts::EXE_SUFFIX));
+    path
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3265-3273
+// ```c
+// #if _BLAST_DEBUG
+// arg_desc.AddFlag("verbose", "Produce verbose output (show BLAST options)",
+//                  true);
+// arg_desc.AddFlag("remote_verbose",
+//                  "Produce verbose output for remote searches", true);
+// #endif /* _BLAST_DEBUG */
+// ```
+#[test]
+fn tblastx_output_filter_debug_stderr_is_env_gated() {
+    let query = temp_path("debug_query", "fa");
+    let subject = temp_path("debug_subject", "fa");
+    let out_normal = temp_path("debug_normal", "txt");
+    let out_debug = temp_path("debug_enabled", "txt");
+
+    fs::write(&query, ">q\nATGATGATGATGATGATGATGATGATGATG\n").expect("write query FASTA");
+    fs::write(&subject, ">s\nATGATGATGATGATGATGATGATGATGATG\n").expect("write subject FASTA");
+
+    let base_args = [
+        "tblastx",
+        "-query",
+        query.to_str().expect("query path UTF-8"),
+        "-subject",
+        subject.to_str().expect("subject path UTF-8"),
+        "-seg",
+        "no",
+        "-outfmt",
+        "6",
+        "-num_threads",
+        "1",
+    ];
+
+    let normal = Command::new(losat_binary())
+        .args(base_args)
+        .args([
+            "-out",
+            out_normal.to_str().expect("normal output path UTF-8"),
+        ])
+        .env_remove("LOSAT_DEBUG_OUTPUT_FILTER")
+        .env_remove("LOSAT_DEBUG_HSP_SAVING")
+        .env_remove("LOSAT_DIAGNOSTICS")
+        .env_remove("LOSAT_TIMING")
+        .output()
+        .expect("run normal tblastx");
+    assert!(
+        normal.status.success(),
+        "normal tblastx run failed: {}",
+        String::from_utf8_lossy(&normal.stderr)
+    );
+    let normal_stderr = String::from_utf8_lossy(&normal.stderr);
+    assert!(
+        !normal_stderr.contains("[DEBUG OUTPUT_FILTER]"),
+        "normal run should not emit output-filter debug lines: {normal_stderr}"
+    );
+    assert!(
+        !fs::read_to_string(&out_normal)
+            .expect("read normal output")
+            .is_empty(),
+        "test input should produce at least one hit"
+    );
+
+    let debug = Command::new(losat_binary())
+        .args(base_args)
+        .args(["-out", out_debug.to_str().expect("debug output path UTF-8")])
+        .env("LOSAT_DEBUG_OUTPUT_FILTER", "1")
+        .env_remove("LOSAT_DEBUG_HSP_SAVING")
+        .env_remove("LOSAT_DIAGNOSTICS")
+        .env_remove("LOSAT_TIMING")
+        .output()
+        .expect("run debug tblastx");
+    assert!(
+        debug.status.success(),
+        "debug tblastx run failed: {}",
+        String::from_utf8_lossy(&debug.stderr)
+    );
+    let debug_stderr = String::from_utf8_lossy(&debug.stderr);
+    assert!(
+        debug_stderr.contains("[DEBUG OUTPUT_FILTER]"),
+        "LOSAT_DEBUG_OUTPUT_FILTER=1 should emit output-filter debug lines: {debug_stderr}"
+    );
+
+    let _ = fs::remove_file(query);
+    let _ = fs::remove_file(subject);
+    let _ = fs::remove_file(out_normal);
+    let _ = fs::remove_file(out_debug);
+}
+
+// No NCBI counterpart: LOSAT_DIAGNOSTICS (algorithm/common/diagnostics.rs) prints LOSAT's pipeline
+// counters after the search. The read of the variable is checked here, in child processes: the
+// value check runs in the lib's tests (`diagnostics_tests.rs`), which share one process and so do
+// not set the variable.
+#[test]
+fn tblastx_diagnostics_summary_is_env_gated() {
+    let query = temp_path("diag_query", "fa");
+    let out_normal = temp_path("diag_normal", "txt");
+    let out_diag = temp_path("diag_enabled", "txt");
+
+    fs::write(&query, ">q\nATGATGATGATGATGATGATGATGATGATG\n").expect("write query FASTA");
+
+    let run = |out: &Path, diagnostics: Option<&str>| {
+        let mut command = Command::new(losat_binary());
+        command
+            .args([
+                "tblastx",
+                "-query",
+                query.to_str().expect("query path UTF-8"),
+                "-subject",
+                query.to_str().expect("subject path UTF-8"),
+                "-seg",
+                "no",
+                "-outfmt",
+                "6",
+                "-num_threads",
+                "1",
+                "-out",
+                out.to_str().expect("output path UTF-8"),
+            ])
+            .env_remove("LOSAT_DEBUG_OUTPUT_FILTER")
+            .env_remove("LOSAT_DEBUG_CUTOFFS")
+            .env_remove("LOSAT_TIMING");
+        match diagnostics {
+            Some(value) => command.env("LOSAT_DIAGNOSTICS", value),
+            None => command.env_remove("LOSAT_DIAGNOSTICS"),
+        };
+        let output = command.output().expect("run tblastx");
+        assert!(
+            output.status.success(),
+            "tblastx run failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stderr).into_owned()
+    };
+
+    let normal_stderr = run(&out_normal, None);
+    let diag_stderr = run(&out_diag, Some("1"));
+    let same_output = fs::read_to_string(&out_normal).expect("read normal output")
+        == fs::read_to_string(&out_diag).expect("read diagnostics output");
+
+    let _ = fs::remove_file(query);
+    let _ = fs::remove_file(out_normal);
+    let _ = fs::remove_file(out_diag);
+
+    assert!(
+        !normal_stderr.contains("=== TBLASTX Pipeline Diagnostics ==="),
+        "a run without LOSAT_DIAGNOSTICS should not print the diagnostics: {normal_stderr}"
+    );
+    assert!(
+        diag_stderr.contains("=== TBLASTX Pipeline Diagnostics ==="),
+        "LOSAT_DIAGNOSTICS=1 should print the diagnostics: {diag_stderr}"
+    );
+    assert!(
+        same_output,
+        "LOSAT_DIAGNOSTICS must not change the search output"
+    );
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:452-584
+// ```c
+// status = s_GetNextSubjectChunk(subject, &backup, kNucleotide,
+//                                dbseq_chunk_overlap);
+// BLAST_GetUngappedHSPList(init_hitlist, query_info, subject,
+//         hit_params->options, &hsp_list);
+// Blast_HSPListAdjustOffsets(hsp_list, backup.offset);
+// status = Blast_HSPListsMerge(&hsp_list, &combined_hsp_list, ...);
+// ```
+#[test]
+fn tblastx_parallel_chunks_matches_serial_on_real_chunk_boundaries() {
+    if !cfg!(debug_assertions) {
+        return;
+    }
+
+    let query =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fasta/truncated/AP027133_50k.fasta");
+    let subject = query.clone();
+    let out_serial = temp_path("parallel_chunks_serial", "txt");
+    let out_parallel = temp_path("parallel_chunks_enabled", "txt");
+    let chunk_size_aa = "600";
+
+    let base_args = [
+        "tblastx",
+        "-query",
+        query.to_str().expect("query path UTF-8"),
+        "-subject",
+        subject.to_str().expect("subject path UTF-8"),
+        "-seg",
+        "no",
+        "-outfmt",
+        "6",
+    ];
+
+    let serial = Command::new(losat_binary())
+        .args(base_args)
+        .args([
+            "-num_threads",
+            "1",
+            "-out",
+            out_serial.to_str().expect("serial output path UTF-8"),
+        ])
+        .env("LOSAT_TBLASTX_TEST_CHUNK_SIZE", chunk_size_aa)
+        .env_remove("LOSAT_TBLASTX_PARALLEL_CHUNKS")
+        .env_remove("LOSAT_DIAGNOSTICS")
+        .env_remove("LOSAT_TIMING")
+        .output()
+        .expect("run serial chunked tblastx");
+    assert!(
+        serial.status.success(),
+        "serial chunked tblastx failed: {}",
+        String::from_utf8_lossy(&serial.stderr)
+    );
+
+    let parallel = Command::new(losat_binary())
+        .args(base_args)
+        .args([
+            "-num_threads",
+            "2",
+            "-out",
+            out_parallel.to_str().expect("parallel output path UTF-8"),
+        ])
+        .env("LOSAT_TBLASTX_TEST_CHUNK_SIZE", chunk_size_aa)
+        .env("LOSAT_TBLASTX_PARALLEL_CHUNKS", "1")
+        .env_remove("LOSAT_DIAGNOSTICS")
+        .env_remove("LOSAT_TIMING")
+        .output()
+        .expect("run parallel chunked tblastx");
+    assert!(
+        parallel.status.success(),
+        "parallel chunked tblastx failed: {}",
+        String::from_utf8_lossy(&parallel.stderr)
+    );
+
+    let serial_output = fs::read_to_string(&out_serial).expect("read serial output");
+    let parallel_output = fs::read_to_string(&out_parallel).expect("read parallel output");
+    assert!(
+        !serial_output.is_empty(),
+        "real AP027133 50k self-search should produce tblastx hits"
+    );
+    assert!(
+        output_spans_forced_chunk_boundary(&serial_output, 600),
+        "test output should include a subject hit spanning a forced chunk boundary"
+    );
+    assert_eq!(
+        serial_output, parallel_output,
+        "LOSAT_TBLASTX_PARALLEL_CHUNKS must preserve serial chunked output"
+    );
+
+    let _ = fs::remove_file(out_serial);
+    let _ = fs::remove_file(out_parallel);
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_aascan.c:83-123
+// ```c
+// for (s = s_first; s <= s_last; s++) {
+//     ...
+//     offset_pairs[i + totalhits].qs_offsets.s_off = s_off;
+// }
+// ```
+//
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:614
+// ```c
+// /* increment the offset in the diagonal array */
+// Blast_ExtendWordExit(ewp, subject->length);
+// ```
+#[test]
+fn tblastx_serial_scan_chunks_matches_normal_on_ap027133_50k() {
+    if !cfg!(debug_assertions) {
+        return;
+    }
+
+    let query =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fasta/truncated/AP027133_50k.fasta");
+    let subject = query.clone();
+    assert_serial_scan_chunks_match_normal(
+        &query,
+        &subject,
+        &["-query_gencode", "1", "-db_gencode", "1", "-seg", "no"],
+        true,
+    );
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:452-584
+// ```c
+// aux_struct->WordFinder(..., init_hitlist, ...);
+// BLAST_GetUngappedHSPList(init_hitlist, query_info, subject,
+//         hit_params->options, &hsp_list);
+// Blast_HSPListAdjustOffsets(hsp_list, backup.offset);
+// ```
+#[test]
+fn tblastx_serial_scan_chunks_matches_normal_on_mjenmv() {
+    if !cfg!(debug_assertions) {
+        return;
+    }
+
+    let query = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fasta/MjeNMV.fasta");
+    let subject = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fasta/MelaMJNV.fasta");
+    assert_serial_scan_chunks_match_normal(
+        &query,
+        &subject,
+        &["-query_gencode", "1", "-db_gencode", "1", "-seg", "yes"],
+        false,
+    );
+}
+
+fn assert_serial_scan_chunks_match_normal(
+    query: &Path,
+    subject: &Path,
+    extra_args: &[&str],
+    require_boundary_crossing_hsp: bool,
+) {
+    let out_normal = temp_path("serial_scan_chunks_normal", "txt");
+    let out_scan = temp_path("serial_scan_chunks_enabled", "txt");
+    let chunk_size_aa = "600";
+
+    let mut base_args = vec![
+        "tblastx",
+        "-query",
+        query.to_str().expect("query path UTF-8"),
+        "-subject",
+        subject.to_str().expect("subject path UTF-8"),
+        "-outfmt",
+        "6",
+    ];
+    base_args.extend_from_slice(extra_args);
+
+    let normal = Command::new(losat_binary())
+        .args(&base_args)
+        .args([
+            "-num_threads",
+            "1",
+            "-out",
+            out_normal.to_str().expect("normal output path UTF-8"),
+        ])
+        .env_remove("LOSAT_TBLASTX_SERIAL_SCAN_CHUNKS")
+        .env_remove("LOSAT_TBLASTX_PARALLEL_CHUNKS")
+        .env_remove("LOSAT_TBLASTX_TEST_SCAN_CHUNK_SIZE")
+        .env_remove("LOSAT_TBLASTX_TEST_CHUNK_SIZE")
+        .env_remove("LOSAT_DIAGNOSTICS")
+        .env_remove("LOSAT_TIMING")
+        .output()
+        .expect("run normal tblastx");
+    assert!(
+        normal.status.success(),
+        "normal tblastx failed: {}",
+        String::from_utf8_lossy(&normal.stderr)
+    );
+
+    let scan = Command::new(losat_binary())
+        .args(&base_args)
+        .args([
+            "-num_threads",
+            "2",
+            "-out",
+            out_scan.to_str().expect("scan output path UTF-8"),
+        ])
+        .env("LOSAT_TBLASTX_SERIAL_SCAN_CHUNKS", "1")
+        .env("LOSAT_TBLASTX_TEST_SCAN_CHUNK_SIZE", chunk_size_aa)
+        .env_remove("LOSAT_TBLASTX_PARALLEL_CHUNKS")
+        .env_remove("LOSAT_TBLASTX_TEST_CHUNK_SIZE")
+        .env_remove("LOSAT_DIAGNOSTICS")
+        .env_remove("LOSAT_TIMING")
+        .output()
+        .expect("run scan-chunk tblastx");
+    assert!(
+        scan.status.success(),
+        "scan-chunk tblastx failed: {}",
+        String::from_utf8_lossy(&scan.stderr)
+    );
+
+    let normal_output = fs::read_to_string(&out_normal).expect("read normal output");
+    let scan_output = fs::read_to_string(&out_scan).expect("read scan output");
+    assert!(
+        !normal_output.is_empty(),
+        "test input should produce tblastx hits"
+    );
+    if require_boundary_crossing_hsp {
+        assert!(
+            output_spans_forced_chunk_boundary(&normal_output, 600),
+            "test output should include a subject hit spanning a forced scan boundary"
+        );
+    }
+    assert_eq!(
+        normal_output, scan_output,
+        "LOSAT_TBLASTX_SERIAL_SCAN_CHUNKS must preserve normal LOSAT output"
+    );
+
+    let _ = fs::remove_file(out_normal);
+    let _ = fs::remove_file(out_scan);
+}
+
+fn output_spans_forced_chunk_boundary(output: &str, chunk_size_aa: usize) -> bool {
+    let chunk_size_nt = chunk_size_aa * 3;
+    output.lines().any(|line| {
+        let fields: Vec<_> = line.split('\t').collect();
+        if fields.len() < 10 {
+            return false;
+        }
+        let Ok(s_start) = fields[8].parse::<usize>() else {
+            return false;
+        };
+        let Ok(s_end) = fields[9].parse::<usize>() else {
+            return false;
+        };
+        let lo = s_start.min(s_end);
+        let hi = s_start.max(s_end);
+        let first_boundary = lo.div_ceil(chunk_size_nt) * chunk_size_nt;
+        first_boundary > lo && first_boundary < hi
+    })
+}

@@ -1,0 +1,489 @@
+BLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/t1_bx_s.faa).
+           38 sequences; 16,619 total letters
+
+
+
+Query= m_fam MelaMJNV 26001-31000
+
+Length=5000
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT61962.1 baculoviral IAP repeat-containing protein [Penaeus mon...  288     7e-87
+BDT61961.1 hypothetical protein [Penaeus monodon majanivirus A]       248     7e-78
+BDT61964.1 baculoviral IAP repeat-containing protein [Penaeus mon...  186     1e-51
+BDT61963.1 baculoviral IAP repeat-containing protein [Penaeus mon...  142     2e-37
+BDT61876.1 baculoviral IAP repeat-containing protein [Penaeus mon...  95.9    3e-25
+BDT61959.1 baculoviral IAP repeat-containing protein [Penaeus mon...  85.1    1e-20
+BDT61960.1 hypothetical protein [Penaeus monodon majanivirus A]       62.4    2e-12
+dup2 copy of BDT61858.1 wsv026-like protein [Penaeus monodon maja...  21.9    6.7  
+BDT61858.1 wsv026-like protein [Penaeus monodon majanivirus A]        21.9    6.7  
+BDT61867.1 wsv216-like protein [Penaeus monodon majanivirus A]        21.9    7.0  
+
+
+> BDT61962.1 baculoviral IAP repeat-containing protein [Penaeus 
+monodon majanivirus A]
+Length=577
+
+ Score = 288 bits (736),  Expect = 7e-87, Method: Compositional matrix adjust.
+ Identities = 183/580 (32%), Positives = 272/580 (47%), Gaps = 125/580 (22%)
+ Frame = -2
+
+Query  2707  SSPGCMFAQNLYSLEDLNKYCKPP----QIHKTFIKYARD  2600
+             S P     Q  Y L   +++   P    ++++     + D
+Sbjct  4     SHPNSFLQQEEYRLTTFSEHETSPIDTTRVYRNMPFVSYD  43
+
+Query  2599  TLIYEQHRLETFADWPHDFVSPIELAADGFYFLKKQDHVM  2480
+              L YE+ RL TF DWPH+++ P ELAADGFY+L+K DH  
+Sbjct  44    CLRYEEKRLGTFIDWPHEWLKPSELAADGFYYLRKDDHCA  83
+
+Query  2479  CVFCVGILGLFEMGDIVREKHKHAFPGCAFVRGDKTCNIP  2360
+             C+FC GI+G +E  D  R +H+  FP C F+RG  T N+P
+Sbjct  84    CIFCRGIVGAWEKTDTPRGEHERHFPHCPFIRGQPTGNVP  123
+
+Query  2359  AVKKNIFEKLSHEYKP------------------------  2312
+              V+ NI  +L   +                          
+Sbjct  124   IVQGNILARLPVLHASLDDCGSRRVEADACRFSSRHMAGS  163
+
+Query  2311  -PKQTKSPLLDYIGIFEYNISSVRFKRDTFEKRLASF-KD  2198
+              P+   SP  D  G+++++    R    T + RL S+ + 
+Sbjct  164   YPECRGSP--DETGLYQHS-GPKRSDFTTLDSRLKSYVEG  200
+
+Query  2197  WPEYLVQKPQDLAEAGFYYCGLSDHVACFYCEGGILNWER  2078
+             WP  L    +DLAEAGF+YCGLSDHV CF+C  G+ NW  
+Sbjct  201   WP-ILGLHARDLAEAGFFYCGLSDHVRCFHCGKGLRNWIS  239
+
+Query  2077  NDIPWHEHAKYYPTCNYLYLKKGKNFIDNIQ------LKI  1976
+             +DIPW EHA++YP C ++ L KG+++I+ +Q       + 
+Sbjct  240   SDIPWKEHARWYPKCRFVLLTKGQDYINEVQQEHPPYTRT  279
+
+Query  1975  SENTLYESFD-------------------EMDLLMELDIV  1913
+             +  T+Y   D                   E+DLLM LD+V
+Sbjct  280   ASTTIYSGIDKAASGSSNSPTEVQSVSEQELDLLMSLDVV  319
+
+Query  1912  RCIVSIGYSINDAKCILKKHVTETGWPYLSIEPYV-----  1808
+             +C++ +GY     +  LK  V +TG PY  IEP +     
+Sbjct  320   KCVLEMGYPSCIVRACLKDRVEQTGEPYFVIEPCLEDVIH  359
+
+Query  1807  -------------------------LDINQMILKRPVRII  1763
+                                       DI+  I ++   I 
+Sbjct  360   RMSVTENRVADNCSESTEREPSYGGTDISSSIFQQQAPIF  399
+
+Query  1762  PKPP-------SIIRHLVSERMKsllsisesassSTTVEG  1664
+             P          + I+ L SE  +  + +       + +  
+Sbjct  400   PSTSETMGNRVASIQSLPSESTE--VELLSQQQQVSILPS  437
+
+Query  1663  TDNTISQKT--LPEADNMETLTSQEIVPEADNTETFTSQE  1550
+             T   I Q+    P A    TL+S     E +NTET  +  
+Sbjct  438   TPEIIRQQASIFPTAPLNTTLSSSSSSSERENTETEANHI  477
+
+Query  1549  IYLPEA-------------------------KNAETSTSL  1505
+             + + E                          K+ ++   L
+Sbjct  478   LQIVEEIISQVSEEEKEGYEEKEGYEEKEEFKSRQSYEQL  517
+
+Query  1504  KQSHEHMYEDRICKVCMSNEARVVYFPCTHMIACEDCTLA  1385
+             K+  E M EDR CKVCM +E  +V+ PC+HM+ C  C ++
+Sbjct  518   KEELERMREDRTCKVCMDSEIAIVFLPCSHMVTCVSCAVS  557
+
+Query  1384  LESCPICRKDINYVVRPIIS  1325
+             L  CPICR+DI +V R I+S
+Sbjct  558   LRQCPICRRDIKHVCRAIVS  577
+
+
+ Score = 138 bits (348),  Expect = 2e-36, Method: Compositional matrix adjust.
+ Identities = 74/191 (39%), Positives = 106/191 (55%), Gaps = 11/191 (6%)
+ Frame = -3
+
+Query  4992  RITNNNYGILEHHTSKHEHYLDIEKRLESF-KGWPHWLVQ  4876
+             R + +  G+ +H   K   +  ++ RL+S+ +GWP  L  
+Sbjct  168   RGSPDETGLYQHSGPKRSDFTTLDSRLKSYVEGWP-ILGL  206
+
+Query  4875  KPQDLAEAGFFYEGPNDSVRCFHCSGNIFNWEKEDIPWNM  4756
+               +DLAEAGFFY G +D VRCFHC   + NW   DIPW  
+Sbjct  207   HARDLAEAGFFYCGLSDHVRCFHCGKGLRNWISSDIPWKE  246
+
+Query  4755  HAKWHPNCTYVLLKKGADFIYRNNQE--TYEKN-SEKLYH  4645
+             HA+W+P C +VLL KG D+I    QE   Y +  S  +Y 
+Sbjct  247   HARWYPKCRFVLLTKGQDYINEVQQEHPPYTRTASTTIYS  286
+
+Query  4644  TWQGINSNVSHMSTLILT------EFLMDLDIVKCVVSMG  4543
+                   S  S+  T + +      + LM LD+VKCV+ MG
+Sbjct  287   GIDKAASGSSNSPTEVQSVSEQELDLLMSLDVVKCVLEMG  326
+
+Query  4542  YPISIAKVSLVMHVEEKGWPFLRIDEYIDDM  4450
+             YP  I +  L   VE+ G P+  I+  ++D+
+Sbjct  327   YPSCIVRACLKDRVEQTGEPYFVIEPCLEDV  357
+
+
+ Score = 62.0 bits (149),  Expect = 3e-12, Method: Compositional matrix adjust.
+ Identities = 29/68 (43%), Positives = 38/68 (56%), Gaps = 3/68 (4%)
+ Frame = -3
+
+Query  4923  EKRLESFKGWPH-WLVQKPQDLAEAGFFYEGPNDSVRCFH  4807
+             EKRL +F  WPH WL  KP +LA  GF+Y   +D   C  
+Sbjct  49    EKRLGTFIDWPHEWL--KPSELAADGFYYLRKDDHCACIF  86
+
+Query  4806  CSGNIFNWEKEDIPWNMHAKWHPNCTYV  4723
+             C G +  WEK D P   H +  P+C ++
+Sbjct  87    CRGIVGAWEKTDTPRGEHERHFPHCPFI  114
+
+
+ Score = 42.0 bits (97),  Expect = 5e-06, Method: Compositional matrix adjust.
+ Identities = 57/259 (22%), Positives = 97/259 (37%), Gaps = 59/259 (23%)
+ Frame = -2
+
+Query  2914  IHLEQRRVETFINQFKENIDESLPIHYRLLAKAGFFYMKK  2795
+             +  E++R+ TFI+   E +  S       LA  GF+Y++K
+Sbjct  45    LRYEEKRLGTFIDWPHEWLKPSE------LAADGFYYLRK  78
+
+Query  2794  DVIACFCCKLQIDVKTLRTSDDIIMIHKKSSPGCMFAQNL  2675
+             D   C C   +  V     +D     H++  P C F +  
+Sbjct  79    D-DHCACIFCRGIVGAWEKTDTPRGEHERHFPHCPFIRGQ  117
+
+Query  2674  YS----LEDLNKYCKPPQIHKTF-----------------  2618
+              +    +   N   + P +H +                  
+Sbjct  118   PTGNVPIVQGNILARLPVLHASLDDCGSRRVEADACRFSS  157
+
+Query  2617  ---------IKYARDTLIYEQH-------------RLETF  2564
+                       + + D     QH             RL+++
+Sbjct  158   RHMAGSYPECRGSPDETGLYQHSGPKRSDFTTLDSRLKSY  197
+
+Query  2563  AD-WPHDFVSPIELAADGFYFLKKQDHVMCVFCVGILGLF  2447
+              + WP   +   +LA  GF++    DHV C  C   L  +
+Sbjct  198   VEGWPILGLHARDLAEAGFFYCGLSDHVRCFHCGKGLRNW  237
+
+Query  2446  EMGDIVREKHKHAFPGCAFVRGDKTCNIPAVKKNIFEKLS  2327
+                DI  ++H   +P C FV   K        ++   ++ 
+Sbjct  238   ISSDIPWKEHARWYPKCRFVLLTK-------GQDYINEVQ  270
+
+Query  2326  HEYKPPKQTKSPLLDYIGI  2270
+              E+ P  +T S  + Y GI
+Sbjct  271   QEHPPYTRTASTTI-YSGI  288
+
+
+ Score = 37.0 bits (84),  Expect = 2e-04, Method: Compositional matrix adjust.
+ Identities = 15/39 (38%), Positives = 23/39 (59%), Gaps = 1/39 (3%)
+ Frame = -3
+
+Query  4188  CKKCMITDALVAVFPCRH-VLCEACALVSKDCPKCKKWI  4075
+             CK CM ++  +   PC H V C +CA+  + CP C++ I
+Sbjct  530   CKVCMDSEIAIVFLPCSHMVTCVSCAVSLRQCPICRRDI  568
+
+
+> BDT61961.1 hypothetical protein [Penaeus monodon majanivirus 
+A]
+Length=207
+
+ Score = 248 bits (632),  Expect = 7e-78, Method: Compositional matrix adjust.
+ Identities = 147/207 (71%), Positives = 172/207 (83%), Gaps = 4/207 (2%)
+ Frame = -2
+
+Query  985  MREYGNIYYSSMGGLLNALTEAGYSISKNDLSKRDNIESS  866
+            MREYG IYYSSM GLLNALTEAGY IS +DLS RD I+SS
+Sbjct  1    MREYGKIYYSSMVGLLNALTEAGYPISIHDLSDRDGIKSS  40
+
+Query  865  YGDNGVILSHASEEalcltlycalglLIEKGITVNLSKSN  746
+            Y D+GVI++HASEEALCLTLYCALGLL+EKGITVNL +SN
+Sbjct  41   YRDDGVIITHASEEALCLTLYCALGLLMEKGITVNLKRSN  80
+
+Query  745  -ADYLLNFPAVRIEIRPNRENNTIVRGRVYKKDN-ITIGD  632
+             A+YLL+FP V++E+RPN E NTIVRGR+ + D+ + IG+
+Sbjct  81   AAEYLLHFPTVKVEVRPNCETNTIVRGRIQRNDDRVAIGE  120
+
+Query  631  Y-VNVNDIHNGGKEYPYPSKTQYSYGD-TLRSIIIESKGR  518
+              VN +DI+NGGK Y Y +K  YS+    L+++IIESKGR
+Sbjct  121  EPVNTSDIYNGGKAYVYQNKALYSHSSGHLKTVIIESKGR  160
+
+Query  517  GLKAHDILSTVLYIDSYDRSRLSDIIADIANYPLKFFRAI  398
+            G  A+D LSTVLYIDSYDRSRL DII DIA YPLKFFRAI
+Sbjct  161  GHTANDTLSTVLYIDSYDRSRLPDIIEDIAKYPLKFFRAI  200
+
+Query  397  ILRGKRL  377
+            ILRGK L
+Sbjct  201  ILRGKLL  207
+
+
+ Score = 22.7 bits (47),  Expect = 3.0, Method: Compositional matrix adjust.
+ Identities = 10/12 (83%), Positives = 10/12 (83%), Gaps = 0/12 (0%)
+ Frame = -3
+
+Query  324  FLRAIILRGKRL  289
+            F RAIILRGK L
+Sbjct  196  FFRAIILRGKLL  207
+
+
+ Score = 21.6 bits (44),  Expect = 7.2, Method: Compositional matrix adjust.
+ Identities = 10/12 (83%), Positives = 10/12 (83%), Gaps = 0/12 (0%)
+ Frame = -1
+
+Query  368  FLRAIILRGKRL  333
+            F RAIILRGK L
+Sbjct  196  FFRAIILRGKLL  207
+
+
+> BDT61964.1 baculoviral IAP repeat-containing protein [Penaeus 
+monodon majanivirus A]
+Length=719
+
+ Score = 186 bits (473),  Expect = 1e-51, Method: Compositional matrix adjust.
+ Identities = 118/371 (32%), Positives = 180/371 (49%), Gaps = 41/371 (11%)
+ Frame = -2
+
+Query  2851  SLPIHYRLLAKAGFF---YMKKDVIACFCCKLQIDVKTLR  2741
+             S  I+ ++LAKAGF       K  I C  C L ID+ T+ 
+Sbjct  37    SYVINPKILAKAGFMRCGLSSKQYIVCVDCHLYIDIDTIM  76
+
+Query  2740  TSDDIIMIHKKSSPGCMFAQNLYSLEDLNKYCKPPQIHKT  2621
+               DDI+ IHK  +P C+ A+NL           PP     
+Sbjct  77    PWDDIVKIHKDKNPLCLLARNL-----------PPLPRSK  105
+
+Query  2620  FIKYARD-------TLIYEQHRLETFADWPHDFVSPIELA  2522
+               +   D        L YE  RLETF DWP+  V   +LA
+Sbjct  106   IFENRFDPATGLPADLRYEIKRLETFIDWPNKVVQAKDLA  145
+
+Query  2521  ADGFYFLKKQDHVMCVFCVGILGL-FEMGDIVREKHKHAF  2405
+             A GF++ +     +C  C   +   ++   ++R+ H    
+Sbjct  146   AAGFFYTRDTTCCICFSCHKYMNFSYDKPIVIRDMHLKKS  185
+
+Query  2404  PGCAFVRGDKTCNIPAVKKNIFEKLSHEYKPPKQTKSPLL  2285
+             P C F +G    NIP    NI   + ++ +    + +   
+Sbjct  186   PNCKFAQGKSVGNIPIRMSNILNSIVNQKRVAVTSATATA  225
+
+Query  2284  DYIGIFEY-NISSVRFKR--------DTFEKRLASFKDWP  2192
+                   +  ++   R++          T + RL SF +WP
+Sbjct  226   TATATVDQEDLIKTRYEYAGPLHDYYKTTQSRLESFLNWP  265
+
+Query  2191  EYLVQKPQDLAEAGFYYCGLSDHVACFYCEGGILNWERND  2072
+                 QK + L EAGFYY G+SDHV CF+C   + NWE +D
+Sbjct  266   HRHRQKIEALVEAGFYYLGISDHVQCFHCGACLRNWEEDD  305
+
+Query  2071  IPWHEHAKYYPTCNYLYLKKGKNFIDNIQLKISENTLYE-  1955
+              PW  HA++YP C Y+ LKKGK FID ++L++S   ++  
+Sbjct  306   DPWRVHAEWYPECYYVQLKKGKEFIDKVRLEVSRIPMWRH  345
+
+Query  1954  --------SFDEMDLLMELDIV-RCIVSIGYSINDAKCIL  1862
+                     S  + ++L+ LD   R I+  G+ +   +  L
+Sbjct  346   SSSTSQDTSEHDWNILLGLDYTKRLILVQGFPVVAVRDAL  385
+
+Query  1861  KKHVTETGWPY  1829
+              + + +TG P+
+Sbjct  386   CEQILQTGIPF  396
+
+
+ Score = 114 bits (285),  Expect = 2e-28, Method: Compositional matrix adjust.
+ Identities = 62/176 (35%), Positives = 90/176 (51%), Gaps = 32/176 (18%)
+ Frame = -3
+
+Query  4962  EHHTSKHEHYLDIEKRLESFKGWPHWLVQKPQDLAEAGFF  4843
+             E+    H++Y   + RLESF  WPH   QK + L EAGF+
+Sbjct  242   EYAGPLHDYYKTTQSRLESFLNWPHRHRQKIEALVEAGFY  281
+
+Query  4842  YEGPNDSVRCFHCSGNIFNWEKEDIPWNMHAKWHPNCTYV  4723
+             Y G +D V+CFHC   + NWE++D PW +HA+W+P C YV
+Sbjct  282   YLGISDHVQCFHCGACLRNWEEDDDPWRVHAEWYPECYYV  321
+
+Query  4722  LLKKGADFI------------YRNNQETYEKNSEKLYHTW  4639
+              LKKG +FI            +R++  T +  SE   H W
+Sbjct  322   QLKKGKEFIDKVRLEVSRIPMWRHSSSTSQDTSE---HDW  358
+
+Query  4638  QGINSNVSHMSTLILTEFLMDLDIVK-CVVSMGYPISIAK  4522
+                               L+ LD  K  ++  G+P+   +
+Sbjct  359   N----------------ILLGLDYTKRLILVQGFPVVAVR  382
+
+Query  4521  VSLVMHVEEKGWPFLR  4474
+              +L   + + G PF R
+Sbjct  383   DALCEQILQTGIPFSR  398
+
+
+ Score = 53.5 bits (127),  Expect = 2e-09, Method: Compositional matrix adjust.
+ Identities = 28/67 (42%), Positives = 39/67 (58%), Gaps = 2/67 (3%)
+ Frame = -3
+
+Query  4920  KRLESFKGWPHWLVQKPQDLAEAGFFYEGPNDSVRCFHCS  4801
+             KRLE+F  WP+ +VQ  +DLA AGFFY        CF C 
+Sbjct  126   KRLETFIDWPNKVVQA-KDLAAAGFFYTRDTTCCICFSCH  164
+
+Query  4800  GNI-FNWEKEDIPWNMHAKWHPNCTYV  4723
+               + F+++K  +  +MH K  PNC + 
+Sbjct  165   KYMNFSYDKPIVIRDMHLKKSPNCKFA  191
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 22502727
+
+
+Query= m_mix MelaMJNV 56001-61600
+
+Length=5600
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT61866.1 wsv220-like protein [Penaeus monodon majanivirus A]        747     0.0  
+BDT61861.1 wsv206-like protein [Penaeus monodon majanivirus A]        186     9e-56
+BDT61865.1 hypothetical protein [Penaeus monodon majanivirus A]       25.4    0.51 
+BDT61877.1 hypothetical protein [Penaeus monodon majanivirus A]       24.6    0.63 
+BDT61930.1 semaphorin-1A-like protein [Penaeus monodon majaniviru...  24.6    1.2  
+
+
+> BDT61866.1 wsv220-like protein [Penaeus monodon majanivirus A]
+Length=731
+
+ Score = 747 bits (1928),  Expect = 0.0, Method: Compositional matrix adjust.
+ Identities = 427/712 (60%), Positives = 538/712 (76%), Gaps = 12/712 (2%)
+ Frame = -1
+
+Query  5525  SISVFEEAVKNISIYLLEEAERGSWGDEQSVESKNGLNER  5406
+             SI+ FEEAVKNISIYLLEEAERGSWGD+Q+ + K+  + +
+Sbjct  19    SIAAFEEAVKNISIYLLEEAERGSWGDDQN-KLKDLYDGK  57
+
+Query  5405  PKASDREKDMENKNLGLYVPAEINLDAWRVGDPLQIFKDA  5286
+              +A   E+D ENKNLGLYVPA I++ AWR GD L  +K+A
+Sbjct  58    SEADGLEEDTENKNLGLYVPAGIDMRAWRAGDALGDYKNA  97
+
+Query  5285  YTARLIVNITFHHNKIAEIIYMLISELLLILRTNINE-GK  5169
+             Y ARLIVNITFHHNKIAEI+Y LI+ELLL+L  NIN+ GK
+Sbjct  98    YAARLIVNITFHHNKIAEILYTLIAELLLLLEDNINDDGK  137
+
+Query  5168  KQLQEYGRVEPMSINEIVKSLEGIIKEKKIEVDLQRFREI  5049
+              QLQEYGR++P S+NE VKSLE +I+EK IEVDL+RFREI
+Sbjct  138   TQLQEYGRLKPASVNETVKSLENVIREKNIEVDLKRFREI  177
+
+Query  5048  INQLETELINYDRESRLSDYFLDNIQKSYSTNLSYNSDTT  4929
+             + +LE +  N+DRESRLSD+ LDNIQ+ Y       + TT
+Sbjct  178   VLRLENDSRNFDRESRLSDWLLDNIQERYPAGGG--TTTT  215
+
+Query  4928  KLIPNDGCLHIIDDDIPFSIETISSIFPSTRRKRPLKNII  4809
+                 N+  L  IDD  P S +TI S  PS RR+RP++NI+
+Sbjct  216   TTTSNNEYLCTIDDTTPLSTDTILSTLPSARRERPVRNIV  255
+
+Query  4808  GnppdkndkddPWVKEREQTGYSIDSFHSIWMSEFADYPI  4689
+             G           W  EREQTGYSI SF S+WMSE+ DYPI
+Sbjct  256   GESSSAPPDRP-WEDEREQTGYSIFSFRSVWMSEYGDYPI  294
+
+Query  4688  NLVNKIIEDILSKYIIPLKDVFHICLHIKAHLKCARSIKS  4569
+             NLVN IIE +L +Y++PL+DVFH+C H+KAHL CAR++ +
+Sbjct  295   NLVNAIIERLLLRYVVPLRDVFHVCFHLKAHLTCARNVNA  334
+
+Query  4568  TWYDNVTCVYELPPIYSMQDTWLELENILNIYAYVAKVFL  4449
+             TWY+N T  Y LPP+YSM+DTWLELEN+LN+YA VAK+FL
+Sbjct  335   TWYENATFAYGLPPVYSMRDTWLELENLLNVYACVAKLFL  374
+
+Query  4448  NIYELFSSSNKL--QDDWTHTKEIYINTMELLESIPVFLF  4335
+             N+Y+L SSS+    Q D T TKE YINT+ELLE +P++LF
+Sbjct  375   NMYDLLSSSSHGFHQSDLTRTKEAYINTIELLECMPMYLF  414
+
+Query  4334  DTKWMDEHIYSWPYTKRLIHQLPIKDYLSENYLLKTALIV  4215
+             D+KWMDE+ YSWPYT+R + QLP+++YLSENYLL+T L++
+Sbjct  415   DSKWMDENFYSWPYTRRGVRQLPVRNYLSENYLLRTVLVI  454
+
+Query  4214  PPNTLNPITEIESKDGIIIRLKIKAIERIIQLRTTIHDIF  4095
+             PPN ++PIT+ ++  GI++RLK+KA+E I  LRT + +IF
+Sbjct  455   PPNGIHPITKRKNNSGILMRLKVKAVEYITHLRTDMREIF  494
+
+Query  4094  DDGFVTVVNDTHKttrtsctsdstTKHDTDVndldinili  3975
+             DDGFVT+V D  +   T+ T  S +++   +ND +  IL 
+Sbjct  495   DDGFVTIVKDNLQ-KTTNTTPRSDSRNINGMNDFEARILC  533
+
+Query  3974  DGPLKNNPYIVHPLYNLKVIHQ-DNLSTPGLASLEEWDAR  3858
+             D   +NNPY+VHPLY+LK+ H+  N S  GLAS+EEWDAR
+Sbjct  534   DSTFENNPYVVHPLYHLKIAHRPSNWSGKGLASIEEWDAR  573
+
+Query  3857  YYLSSENGVLsssvt-nknvnnnnnnnnntnSHSPWFWRs  3741
+             Y+L+SE+G LSSSVT   N NNNNNNNNN N+ S WFWRS
+Sbjct  574   YHLASESGTLSSSVTNKNNNNNNNNNNNNNNNRSSWFWRS  613
+
+Query  3740  l-plfkpsllknsssslpcKFWETALCQICNSQ-YDYNQR  3627
+             L       L  +SS SLP KFWE AL  I + Q +D    
+Sbjct  614   LPLFKPSLLKDSSSDSLPYKFWEAALRHIHSHQEFDRPMM  653
+
+Query  3626  SYSKNTEILENMIMKIESTESLKEQNKIKDIETIVIQDKQ  3507
+             +YSKNTE LE MI  +E TE+  E+ K  DIE I++QDKQ
+Sbjct  654   NYSKNTEALEIMIKMVEVTEASTEKKKKSDIEDILVQDKQ  693
+
+Query  3506  LESYEKQEERRSRNVERSIFITILCKNLLTTL  3411
+             LESYEKQEERR RNVERSIF+TILCKN+LTTL
+Sbjct  694   LESYEKQEERRLRNVERSIFLTILCKNMLTTL  725
+
+
+> BDT61861.1 wsv206-like protein [Penaeus monodon majanivirus A]
+Length=234
+
+ Score = 186 bits (471),  Expect = 9e-56, Method: Compositional matrix adjust.
+ Identities = 92/178 (52%), Positives = 121/178 (68%), Gaps = 7/178 (4%)
+ Frame = +2
+
+Query  1370  YQLIDGDIFDLTFRKPNVCICQQCNCVALKTHGLSKDIAD  1489
+             Y +I+GDIF   FRK N+CICQQCNC+ LK HGLS DI  
+Sbjct  20    YHIIEGDIFADRFRKKNICICQQCNCITLKPHGLSADIVK  59
+
+Query  1490  MFGLYANSYARRKGKHT--NIADPQSRGVPGSLEFCKGTP  1603
+              FG YANSY RR+ K    N A  ++R  PG+++FC+GTP
+Sbjct  60    HFGEYANSYGRRRAKPNTINTATLETRAEPGTVDFCEGTP  99
+
+Query  1604  CVANLFSQYMYGKPG--QYNVSVK--DDDLMKGITLDTYD  1711
+             CVANLF+Q+ YG     QY +S K  D  + KG+  DT +
+Sbjct  100   CVANLFAQFFYGSSSNVQY-LSRKYLDPHIRKGVDNDTAE  138
+
+Query  1712  TREEYMRTCLDNLLEILANNHADIDTVVFPYKIGCGLAGG  1831
+              R  Y R+CL+NL+  L N +  IDTVVFP++IGCG+AGG
+Sbjct  139   KRLMYFRSCLNNLMFDLRNKYTYIDTVVFPHRIGCGMAGG  178
+
+Query  1832  NWTRYVEMINNFADKFMK  1885
+             +W  Y  ++  FAD+  +
+Sbjct  179   SWADYQNVLLQFADRLSE  196
+
+
+> BDT61865.1 hypothetical protein [Penaeus monodon majanivirus 
+A]
+Length=215
+
+ Score = 25.4 bits (54),  Expect = 0.51, Method: Compositional matrix adjust.
+ Identities = 14/40 (35%), Positives = 19/40 (48%), Gaps = 0/40 (0%)
+ Frame = -1
+
+Query  2888  IMGLLASLEYRIGNLREKKKEINQYGMSIKCGLGKLEQNL  2769
+             I G+L  LEY +  L  K + I  Y       L KL+ N+
+Sbjct  166   ICGILGKLEYHLSELCPKIRAITTYSNHFSKELEKLKDNM  205
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25234930
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt0/t1_bx_s.faa).
+    Posted date:  Unknown
+  Number of letters in database: 16,619
+  Number of sequences in database:  38
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 12
+Window for multiple hits: 40

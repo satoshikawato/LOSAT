@@ -4,8 +4,6 @@ use super::chaining::UngappedHit;
 use super::sum_stats_linking::x_hsp_inplace;
 use std::cmp::Ordering;
 
-pub(crate) type UngappedHitCompare = fn(&UngappedHit, &UngappedHit) -> Ordering;
-
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1374-1381
 // ```c
 // void Blast_HSPListSortByScore(BlastHSPList* hsp_list)
@@ -33,17 +31,16 @@ pub(crate) type UngappedHitCompare = fn(&UngappedHit, &UngappedHit) -> Ordering;
 // Stable-sort their original indices with the unchanged NCBI comparator, then
 // replay complete original records. Comparator-equal records retain incoming
 // order without adding a LOSAT-only tie-break field.
-pub(crate) fn sort_ungapped_hits_by_index_replay(
-    hits: &mut [UngappedHit],
-    compare: UngappedHitCompare,
-) {
+pub(crate) fn sort_ungapped_hits_by_index_replay<C>(hits: &mut [UngappedHit], compare: C)
+where
+    C: Fn(&UngappedHit, &UngappedHit) -> Ordering + Sync,
+{
     if hits.len() <= 1 {
         return;
     }
 
-    // EXPERIMENT (LOSAT_X_HSPINPLACE / LOSAT_X_HSPINPLACESHADOW), dispatch: the same index sort,
-    // then the records moved into that order inside `hits` instead of copied out and cloned back
-    // (tblastx/x_hsp_inplace.rs, item 1 of its header). With the switch off the body below runs.
+    // The index sort, then the records moved into that order inside `hits` instead of copied out
+    // and cloned back (tblastx/x_hsp_inplace.rs, item 1 of its header).
     //
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1380-1381
     // ```c
@@ -51,17 +48,7 @@ pub(crate) fn sort_ungapped_hits_by_index_replay(
     //               ScoreCompareHSPs);
     // ```
     // NCBI's qsort also moves the entries inside the one array.
-    if x_hsp_inplace::mode() != 0 && x_hsp_inplace::sort_dispatch(hits, compare) {
-        return;
-    }
-
-    let original = hits.to_vec();
-    let mut indices: Vec<usize> = (0..original.len()).collect();
-    indices.sort_by(|&lhs_index, &rhs_index| compare(&original[lhs_index], &original[rhs_index]));
-
-    for (dst, src) in indices.into_iter().enumerate() {
-        hits[dst] = original[src].clone();
-    }
+    x_hsp_inplace::sort_dispatch(hits, compare);
 }
 
 #[cfg(test)]

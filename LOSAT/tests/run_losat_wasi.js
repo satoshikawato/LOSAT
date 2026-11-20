@@ -4,7 +4,8 @@
 
 const fs = require("fs");
 const { WASI } = require("wasi");
-const { prepareArtifact } = require("./wasi_artifact");
+const { prepareArtifact, unsignedWasiImports, blockingStdioWrite } = require("./wasi_artifact");
+const { sharedFileTable, sharedFileImports } = require("./wasi_files");
 
 // NCBI reference:
 // ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-75
@@ -13,7 +14,7 @@ const { prepareArtifact } = require("./wasi_artifact");
 // WASI preview1; it does not rewrite output or implement BLAST behavior.
 const wasmPath = process.argv[2];
 if (!wasmPath) {
-  console.error("usage: node tests/run_losat_wasi.js <LOSAT.wasm> [args...]");
+  console.error("usage: node tests/run_losat_wasi.js <losat.wasm> [args...]");
   process.exit(2);
 }
 
@@ -44,9 +45,26 @@ const wasi = new WASI({
   // CATCH_ALL(status); return status;
   // Module reuse is host preparation only; preserve validation and exit status.
   const { module } = prepareArtifact(bytes, "serial-command");
+  // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:727-729 (see createWasi above)
+  // The files the command opens from "/" are opened by name as the OS opens them, through the
+  // table of files that the threaded host uses too (wasi_files.js, the comment above
+  // SHARED_FD_BASE): uvwasi cannot open /dev/stdin or /dev/stdout when they are pipes. The module
+  // exports its memory, so the table reads it through the instance.
+  let memory = null;
+  const guestMemory = { get buffer() { return memory.buffer; }, grow: (pages) => memory.grow(pages) };
+  // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:68-93
+  // CBlastFormat::CBlastFormat(..., CNcbiOstream& outfile, ...) : ..., m_Outfile(outfile),
+  // The output to standard output and error waits for a full pipe as the native write blocks
+  // (blockingStdioWrite, wasi_artifact.js): require("wasi") above prints Node's ExperimentalWarning
+  // to process.stderr, which can leave a piped descriptor 1 or 2 non-blocking. Descriptors 1 and 2
+  // are not the table's, so the table's fd_write passes them to this one.
+  const unsigned = unsignedWasiImports(wasi.wasiImport);
+  const local = { ...unsigned, fd_write: blockingStdioWrite(unsigned.fd_write) };
   const instance = await WebAssembly.instantiate(module, {
-    wasi_snapshot_preview1: wasi.wasiImport,
+    // The serial memory has no declared maximum, so it can pass 2 GiB.
+    wasi_snapshot_preview1: { ...local, ...sharedFileImports(sharedFileTable(), guestMemory, local) },
   });
+  memory = instance.exports.memory;
   if (typeof instance.exports._start !== "function") {
     throw new Error(
       `${wasmPath} does not export _start; use the LOSAT command-Wasm artifact.`,
@@ -58,5 +76,9 @@ const wasi = new WASI({
   process.exitCode = wasi.start(instance);
 })().catch((error) => {
   console.error(error && error.stack ? error.stack : String(error));
-  process.exit(1);
+  // process.exitCode, not process.exit(): Node's exit handler shuts down V8's worker threads
+  // before it frees the main isolate, so a background compile there that waits for a garbage
+  // collection on this thread waits forever (a threaded runner that called process.exit()
+  // after its command, 2026-10-29: 10 of 300 tblastn runs hung that way).
+  process.exitCode = 1;
 });

@@ -1,0 +1,1093 @@
+<?xml version="1.0" encoding="US-ASCII"?>
+<!DOCTYPE BlastOutput PUBLIC "-//NCBI//NCBI BlastOutput/EN" "http://www.ncbi.nlm.nih.gov/dtd/NCBI_BlastOutput.dtd">
+<BlastOutput>
+  <BlastOutput_program>blastp</BlastOutput_program>
+  <BlastOutput_version>BLASTP 2.17.0+</BlastOutput_version>
+  <BlastOutput_reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</BlastOutput_reference>
+  <BlastOutput_db></BlastOutput_db>
+  <BlastOutput_query-ID>Query_1</BlastOutput_query-ID>
+  <BlastOutput_query-def>BDT62569.1 wsv282-like protein [Metapenaeus ensis majanivirus]</BlastOutput_query-def>
+  <BlastOutput_query-len>480</BlastOutput_query-len>
+  <BlastOutput_param>
+    <Parameters>
+      <Parameters_matrix>BLOSUM62</Parameters_matrix>
+      <Parameters_expect>10</Parameters_expect>
+      <Parameters_gap-open>11</Parameters_gap-open>
+      <Parameters_gap-extend>1</Parameters_gap-extend>
+      <Parameters_filter>S 10 1.8 2.1;</Parameters_filter>
+    </Parameters>
+  </BlastOutput_param>
+<BlastOutput_iterations>
+<Iteration>
+  <Iteration_iter-num>1</Iteration_iter-num>
+  <Iteration_query-ID>Query_1</Iteration_query-ID>
+  <Iteration_query-def>BDT62569.1 wsv282-like protein [Metapenaeus ensis majanivirus]</Iteration_query-def>
+  <Iteration_query-len>480</Iteration_query-len>
+<Iteration_hits>
+<Hit>
+  <Hit_num>1</Hit_num>
+  <Hit_id>BDT62125.1</Hit_id>
+  <Hit_def>BDT62125.1 wsv282-like protein [Litopenaeus vannamei majanivirus Nimav-1_LVa]</Hit_def>
+  <Hit_accession>Subject_1</Hit_accession>
+  <Hit_len>417</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>339.347</Hsp_bit-score>
+      <Hsp_score>869</Hsp_score>
+      <Hsp_evalue>6.68684e-116</Hsp_evalue>
+      <Hsp_query-from>157</Hsp_query-from>
+      <Hsp_query-to>472</Hsp_query-to>
+      <Hsp_hit-from>98</Hsp_hit-from>
+      <Hsp_hit-to>409</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>181</Hsp_identity>
+      <Hsp_positive>235</Hsp_positive>
+      <Hsp_gaps>6</Hsp_gaps>
+      <Hsp_align-len>317</Hsp_align-len>
+      <Hsp_qseq>TNPRIVVDEIMKEEKKTISDG-EYFLYCTSAKSSSNQHLEILNTFRKEIILILQLYANLRCRQQLLGSFNTNSVNYSDEMIKKMIDIILRIDRNSMSFDKYKNVVREALYVYYLVVTKMTGPKHLKRLRTPELHFEYCVVIALLAHNVDIFKKISFPKYRTTNLIQFVSALDCPWYLSVIPNILSVLNRTRSICQTLDFSISDHAKINITLCLLSEIAEKKPNNLILATILYLFPRSLKLIKEKGLVRDENTIVLLAKKISEYLKNQWINCNDIACASNLLEGDWVKDECTLKLFKKQCCDTKFAAISLLVQQQMKK</Hsp_qseq>
+      <Hsp_hseq>TNSEMV--NIISNHEKIVSKGTESFIVYASTKMP-REHVECLIMFKEEITLILREYAQLVRRQQLLRNFNTNSTSYSGEMIKKMINIILKID-NNMPIDKYKDVVREALYIYHLVVSKMTGPKHLKRLRTPELHFDFCTLIALLSHNVEIVKNIS-TKYRVSSIIQFVSALDCQWYLSVVPNILSVFNRSNSICQTLCFSYERHAQVNITLCLTYALTEINTTNLVLGVILYLFPECLEDIKRAELIKDESLIVPLARKIMEHLRSLWIEKSDIANAAHFLLGSCVEGLDTIKVFRKQNYDKKILAVSVMVQQKLKQ</Hsp_hseq>
+      <Hsp_midline>TN  +V   I+   +K +S G E F+   S K    +H+E L  F++EI LIL+ YA L  RQQLL +FNTNS +YS EMIKKMI+IIL+ID N+M  DKYK+VVREALY+Y+LVV+KMTGPKHLKRLRTPELHF++C +IALL+HNV+I K IS  KYR +++IQFVSALDC WYLSV+PNILSV NR+ SICQTL FS   HA++NITLCL   + E    NL+L  ILYLFP  L+ IK   L++DE+ IV LA+KI E+L++ WI  +DIA A++ L G  V+   T+K+F+KQ  D K  A+S++VQQ++K+</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+<Hit>
+  <Hit_num>2</Hit_num>
+  <Hit_id>BDT62133.1</Hit_id>
+  <Hit_def>BDT62133.1 wsv192-like protein [Litopenaeus vannamei majanivirus Nimav-1_LVa]</Hit_def>
+  <Hit_accession>Subject_10</Hit_accession>
+  <Hit_len>993</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>22.3274</Hsp_bit-score>
+      <Hsp_score>46</Hsp_score>
+      <Hsp_evalue>0.841454</Hsp_evalue>
+      <Hsp_query-from>399</Hsp_query-from>
+      <Hsp_query-to>434</Hsp_query-to>
+      <Hsp_hit-from>217</Hsp_hit-from>
+      <Hsp_hit-to>248</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>14</Hsp_identity>
+      <Hsp_positive>18</Hsp_positive>
+      <Hsp_gaps>4</Hsp_gaps>
+      <Hsp_align-len>36</Hsp_align-len>
+      <Hsp_qseq>KGLVRDENTIVLLAKKISEYLKNQWINCNDIACASN</Hsp_qseq>
+      <Hsp_hseq>KSLVYDRNRRI----KIPQYLKPLHVQCVEHACFPN</Hsp_hseq>
+      <Hsp_midline>K LV D N  +    KI +YLK   + C + AC  N</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+<Hit>
+  <Hit_num>3</Hit_num>
+  <Hit_id>BDT62167.1</Hit_id>
+  <Hit_def>BDT62167.1 wsv343-like protein [Litopenaeus vannamei majanivirus Nimav-1_LVa]</Hit_def>
+  <Hit_accession>Subject_12</Hit_accession>
+  <Hit_len>4337</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>21.1718</Hsp_bit-score>
+      <Hsp_score>43</Hsp_score>
+      <Hsp_evalue>2.1706</Hsp_evalue>
+      <Hsp_query-from>3</Hsp_query-from>
+      <Hsp_query-to>31</Hsp_query-to>
+      <Hsp_hit-from>1921</Hsp_hit-from>
+      <Hsp_hit-to>1948</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>12</Hsp_identity>
+      <Hsp_positive>18</Hsp_positive>
+      <Hsp_gaps>1</Hsp_gaps>
+      <Hsp_align-len>29</Hsp_align-len>
+      <Hsp_qseq>VSDNDDDYMSISSGDNDDEVKDTILNNNK</Hsp_qseq>
+      <Hsp_hseq>LDETDDDY-KIFSKEDKEEIKRAIANWNK</Hsp_hseq>
+      <Hsp_midline>+ + DDDY  I S ++ +E+K  I N NK</Hsp_midline>
+    </Hsp>
+    <Hsp>
+      <Hsp_num>2</Hsp_num>
+      <Hsp_bit-score>19.631</Hsp_bit-score>
+      <Hsp_score>39</Hsp_score>
+      <Hsp_evalue>6.54935</Hsp_evalue>
+      <Hsp_query-from>379</Hsp_query-from>
+      <Hsp_query-to>417</Hsp_query-to>
+      <Hsp_hit-from>3680</Hsp_hit-from>
+      <Hsp_hit-to>3718</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>10</Hsp_identity>
+      <Hsp_positive>19</Hsp_positive>
+      <Hsp_gaps>0</Hsp_gaps>
+      <Hsp_align-len>39</Hsp_align-len>
+      <Hsp_qseq>NLILATILYLFPRSLKLIKEKGLVRDENTIVLLAKKISE</Hsp_qseq>
+      <Hsp_hseq>SLFFDPLLYIGSTKLSLSSTKAVKLDRNTVQLVLADVTK</Hsp_hseq>
+      <Hsp_midline>+L    +LY+    L L   K +  D NT+ L+   +++</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+</Iteration_hits>
+  <Iteration_stat>
+    <Statistics>
+      <Statistics_db-num>0</Statistics_db-num>
+      <Statistics_db-len>0</Statistics_db-len>
+      <Statistics_hsp-len>56</Statistics_hsp-len>
+      <Statistics_eff-space>4449456</Statistics_eff-space>
+      <Statistics_kappa>0.041</Statistics_kappa>
+      <Statistics_lambda>0.267</Statistics_lambda>
+      <Statistics_entropy>0.14</Statistics_entropy>
+    </Statistics>
+  </Iteration_stat>
+</Iteration>
+<Iteration>
+  <Iteration_iter-num>2</Iteration_iter-num>
+  <Iteration_query-ID>Query_2</Iteration_query-ID>
+  <Iteration_query-def>BDT62529.1 innexin [Metapenaeus ensis majanivirus]</Iteration_query-def>
+  <Iteration_query-len>386</Iteration_query-len>
+<Iteration_hits>
+<Hit>
+  <Hit_num>1</Hit_num>
+  <Hit_id>BDT62158.1</Hit_id>
+  <Hit_def>BDT62158.1 innexin [Litopenaeus vannamei majanivirus Nimav-1_LVa]</Hit_def>
+  <Hit_accession>Subject_2</Hit_accession>
+  <Hit_len>400</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>294.278</Hsp_bit-score>
+      <Hsp_score>752</Hsp_score>
+      <Hsp_evalue>7.15538e-100</Hsp_evalue>
+      <Hsp_query-from>1</Hsp_query-from>
+      <Hsp_query-to>381</Hsp_query-to>
+      <Hsp_hit-from>1</Hsp_hit-from>
+      <Hsp_hit-to>365</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>162</Hsp_identity>
+      <Hsp_positive>235</Hsp_positive>
+      <Hsp_gaps>56</Hsp_gaps>
+      <Hsp_align-len>401</Hsp_align-len>
+      <Hsp_qseq>MIPISVLANLRSLFKGKNSEVDINSKIFKLQYRTTTTILFCLCLLITTNSLVGNPISCLYDSSISYLKEDTVNTYCWIYSTFTIPRYYSHQYQASVAHPGVGTYNSKTDDVKLYHTYYQWVPFILFFQALMFYSPHWLWKIWEGGKVQSTIAGLSVPIKSNQERQKVTLGLIEYLRASHRHHDYYAKKYLFCEFLSXXXXXXXXXXXXKFLNGMFLDYGNKVLAYYQNDNVTTINPMTIVFPKVTKCSVPLYGASGSKEIKDLLCILALNNFNDKIFLFMWFWLIILSVLNTLNFIYHVLIFVIP---------------HTRKIYLNRIAKDLQTSNFFNQVGDSFFLYLVKKNVDTLTFDYLFSNLFENLHNFSI-----DVIEKPKEKSVFKGMGKRN</Hsp_qseq>
+      <Hsp_hseq>MVLVGLLTGLRGLVKTNHNAADIYSAVFKLHYRFTAMMLFSFCLLVSANSLVGDPIK--------HIDKD-------------------YGRGTGLAYPGVGP--SLPDDTKTHHAYYQWVPFVLFLQGLMFYAPHWLWKTWENGKLESIIMGLATPIMNKEERRDKIQLLVDYLCNSLHHHNFYAIKFFFCELLNIINCLFNMWFMNRFLGGMFLTYGTDVLSFTETNQEERTDPMIVIFPRVTKCSFHTYGPSGTVEIHDLMCVLALNIINEKIYVIMWFWFIVLTVISITAFIYRLLMFYVPVIRSTLLFQKPASMLHYKKVLDQNVSKKL-------QIGDLFLIYLLSKNMEMLSFDSLLEELFLRLNDQHIYLPDHDQSNTYKERDVFEMINSKN</Hsp_hseq>
+      <Hsp_midline>M+ + +L  LR L K  ++  DI S +FKL YR T  +LF  CLL++ NSLVG+PI         ++ +D                   +     +A+PGVG   S  DD K +H YYQWVPF+LF Q LMFY+PHWLWK WE GK++S I GL+ PI + +ER+     L++YL  S  HH++YA K+ FCE L+I+NC+ N+  +N+FL GMFL YG  VL++ + +     +PM ++FP+VTKCS   YG SG+ EI DL+C+LALN  N+KI++ MWFW I+L+V++   FIY +L+F +P               H +K+    ++K L       Q+GD F +YL+ KN++ L+FD L   LF  L++  I     D     KE+ VF+ +  +N</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+<Hit>
+  <Hit_num>2</Hit_num>
+  <Hit_id>BDT62133.1</Hit_id>
+  <Hit_def>BDT62133.1 wsv192-like protein [Litopenaeus vannamei majanivirus Nimav-1_LVa]</Hit_def>
+  <Hit_accession>Subject_10</Hit_accession>
+  <Hit_len>993</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>21.1718</Hsp_bit-score>
+      <Hsp_score>43</Hsp_score>
+      <Hsp_evalue>1.55448</Hsp_evalue>
+      <Hsp_query-from>333</Hsp_query-from>
+      <Hsp_query-to>373</Hsp_query-to>
+      <Hsp_hit-from>468</Hsp_hit-from>
+      <Hsp_hit-to>508</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>10</Hsp_identity>
+      <Hsp_positive>23</Hsp_positive>
+      <Hsp_gaps>0</Hsp_gaps>
+      <Hsp_align-len>41</Hsp_align-len>
+      <Hsp_qseq>FLYLVKKNVDTLTFDYLFSNLFENLHNFSIDVIEKPKEKSV</Hsp_qseq>
+      <Hsp_hseq>ILHLIKDDIEAATAEELLPSSQLSLKEDTSCIIDESKEKRI</Hsp_hseq>
+      <Hsp_midline> L+L+K +++  T + L  +   +L   +  +I++ KEK +</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+<Hit>
+  <Hit_num>3</Hit_num>
+  <Hit_id>BDT62167.1</Hit_id>
+  <Hit_def>BDT62167.1 wsv343-like protein [Litopenaeus vannamei majanivirus Nimav-1_LVa]</Hit_def>
+  <Hit_accession>Subject_12</Hit_accession>
+  <Hit_len>4337</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>19.2458</Hsp_bit-score>
+      <Hsp_score>38</Hsp_score>
+      <Hsp_evalue>6.45736</Hsp_evalue>
+      <Hsp_query-from>75</Hsp_query-from>
+      <Hsp_query-to>114</Hsp_query-to>
+      <Hsp_hit-from>759</Hsp_hit-from>
+      <Hsp_hit-to>799</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>11</Hsp_identity>
+      <Hsp_positive>17</Hsp_positive>
+      <Hsp_gaps>1</Hsp_gaps>
+      <Hsp_align-len>41</Hsp_align-len>
+      <Hsp_qseq>YCWIYSTFTIPRYYSHQYQASVAHPGVG-TYNSKTDDVKLY</Hsp_qseq>
+      <Hsp_hseq>FCAIYNTVSYPSEFYEDAIRDREEGGLGLAYRGLSKDSFLY</Hsp_hseq>
+      <Hsp_midline>+C IY+T + P  +           G+G  Y   + D  LY</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+</Iteration_hits>
+  <Iteration_stat>
+    <Statistics>
+      <Statistics_db-num>0</Statistics_db-num>
+      <Statistics_db-len>0</Statistics_db-len>
+      <Statistics_hsp-len>54</Statistics_hsp-len>
+      <Statistics_eff-space>3492640</Statistics_eff-space>
+      <Statistics_kappa>0.041</Statistics_kappa>
+      <Statistics_lambda>0.267</Statistics_lambda>
+      <Statistics_entropy>0.14</Statistics_entropy>
+    </Statistics>
+  </Iteration_stat>
+</Iteration>
+<Iteration>
+  <Iteration_iter-num>3</Iteration_iter-num>
+  <Iteration_query-ID>Query_3</Iteration_query-ID>
+  <Iteration_query-def>BDT62562.1 wsv306-like protein [Metapenaeus ensis majanivirus]</Iteration_query-def>
+  <Iteration_query-len>408</Iteration_query-len>
+<Iteration_hits>
+<Hit>
+  <Hit_num>1</Hit_num>
+  <Hit_id>BDT62172.1</Hit_id>
+  <Hit_def>BDT62172.1 wsv306-like protein [Litopenaeus vannamei majanivirus Nimav-1_LVa]</Hit_def>
+  <Hit_accession>Subject_3</Hit_accession>
+  <Hit_len>446</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>380.948</Hsp_bit-score>
+      <Hsp_score>977</Hsp_score>
+      <Hsp_evalue>6.55675e-133</Hsp_evalue>
+      <Hsp_query-from>27</Hsp_query-from>
+      <Hsp_query-to>408</Hsp_query-to>
+      <Hsp_hit-from>7</Hsp_hit-from>
+      <Hsp_hit-to>446</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>203</Hsp_identity>
+      <Hsp_positive>270</Hsp_positive>
+      <Hsp_gaps>70</Hsp_gaps>
+      <Hsp_align-len>446</Hsp_align-len>
+      <Hsp_qseq>HYKPNCATVNIFCTSDKDCHLQCSSAVHYANSHDTGIDKEQQDSSTIIINLCNLLTNQCEPNMIQKGYYDMAINDLKKLSQMEKFLPKAMWDYIKINDGKRFIVARARFYENLSFHLKEGTLLDAAIQRIINEHKKNNKRNYSNKLQQIN-------------------------------------------IVDDDNDNISMDLYVKQLFGRTAKPSS--------SQDIILTRDLEHDKKRGEYCTLIXXXXXXXXXXXXXIKSPSKPNDKIVAFN---------NQYPLQFHCNEEMNAGIMMAAYQDNDGNILPICVCTYPYYLTGPTCKHRTYNRVVDYELWEKTGYADFLTDPFNDYKKANRICKSKTINTTAVFDERDGCFYCQPLAAHFAQSLQMRGPYEPALILDKDYIDSLNVN----QSFKINIDYLDLLNKFY</Hsp_qseq>
+      <Hsp_hseq>HVKPNCTAVDVFCTDDRDCHIQCASGALSILSHDASLEKE--DHSVITIHLCNKSTKRCEPNVILRGFYKMAMRDFGRLIEKKTSLTKSLQSYLYAHNGKYFILARARFYEKLSLYLRDDENLEMAIYKIRTEHLRKRKTYLNEKIRYMEREGIITDKREIKKMIDWLPSLPSPNNNNNNNIITTTTNSSLHQMINDDNVAISMGKFKLQVFGPRSTITSLTKVEEEEEEKVVLTRAKEYDEQRGEYIQRIIKQNCKYNI----LKQDEEQVDQRGEYNLLKHDEEYDERRDLQFHCNEEMGAGIMMAAFRDGDGTILPVCVCTHPMYLTGPTCKHRTYNSVVDYELWEESGIPEFLTDPLNDYTKANNICQRTTLNTTAVFEERDGTFKCQPLAAHFAQSLQLRGPYEPALILDRDYVDAVNNNSNHQEGIKINIDYLDLLKKFW</Hsp_hseq>
+      <Hsp_midline>H KPNC  V++FCT D+DCH+QC+S      SHD  ++KE  D S I I+LCN  T +CEPN+I +G+Y MA+ D  +L + +  L K++  Y+  ++GK FI+ARARFYE LS +L++   L+ AI +I  EH +  K   + K++ +                                            +++DDN  ISM  +  Q+FG  +  +S         + ++LTR  E+D++RGEY   I             +K   +  D+   +N          +  LQFHCNEEM AGIMMAA++D DG ILP+CVCT+P YLTGPTCKHRTYN VVDYELWE++G  +FLTDP NDY KAN IC+  T+NTTAVF+ERDG F CQPLAAHFAQSLQ+RGPYEPALILD+DY+D++N N    +  KINIDYLDLL KF+</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+<Hit>
+  <Hit_num>2</Hit_num>
+  <Hit_id>BDT62167.1</Hit_id>
+  <Hit_def>BDT62167.1 wsv343-like protein [Litopenaeus vannamei majanivirus Nimav-1_LVa]</Hit_def>
+  <Hit_accession>Subject_12</Hit_accession>
+  <Hit_len>4337</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>21.1718</Hsp_bit-score>
+      <Hsp_score>43</Hsp_score>
+      <Hsp_evalue>1.48239</Hsp_evalue>
+      <Hsp_query-from>170</Hsp_query-from>
+      <Hsp_query-to>190</Hsp_query-to>
+      <Hsp_hit-from>2063</Hsp_hit-from>
+      <Hsp_hit-to>2083</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>9</Hsp_identity>
+      <Hsp_positive>16</Hsp_positive>
+      <Hsp_gaps>0</Hsp_gaps>
+      <Hsp_align-len>21</Hsp_align-len>
+      <Hsp_qseq>NKLQQINIVDDDNDNISMDLY</Hsp_qseq>
+      <Hsp_hseq>NKKRKRSTVDDDNEDQSKEIY</Hsp_hseq>
+      <Hsp_midline>NK ++ + VDDDN++ S ++Y</Hsp_midline>
+    </Hsp>
+    <Hsp>
+      <Hsp_num>2</Hsp_num>
+      <Hsp_bit-score>19.631</Hsp_bit-score>
+      <Hsp_score>39</Hsp_score>
+      <Hsp_evalue>5.10141</Hsp_evalue>
+      <Hsp_query-from>291</Hsp_query-from>
+      <Hsp_query-to>309</Hsp_query-to>
+      <Hsp_hit-from>1727</Hsp_hit-from>
+      <Hsp_hit-to>1745</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>7</Hsp_identity>
+      <Hsp_positive>10</Hsp_positive>
+      <Hsp_gaps>0</Hsp_gaps>
+      <Hsp_align-len>19</Hsp_align-len>
+      <Hsp_qseq>YPYYLTGPTCKHRTYNRVV</Hsp_qseq>
+      <Hsp_hseq>YQYSFYGNACSNERYDRVL</Hsp_hseq>
+      <Hsp_midline>Y Y   G  C +  Y+RV+</Hsp_midline>
+    </Hsp>
+    <Hsp>
+      <Hsp_num>3</Hsp_num>
+      <Hsp_bit-score>18.8606</Hsp_bit-score>
+      <Hsp_score>37</Hsp_score>
+      <Hsp_evalue>7.74483</Hsp_evalue>
+      <Hsp_query-from>153</Hsp_query-from>
+      <Hsp_query-to>182</Hsp_query-to>
+      <Hsp_hit-from>3407</Hsp_hit-from>
+      <Hsp_hit-to>3448</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>13</Hsp_identity>
+      <Hsp_positive>22</Hsp_positive>
+      <Hsp_gaps>12</Hsp_gaps>
+      <Hsp_align-len>42</Hsp_align-len>
+      <Hsp_qseq>IQRIINEHKKNNKRNYS------------NKLQQINIVDDDN</Hsp_qseq>
+      <Hsp_hseq>MQQMVNDPEKNKEDNATITAIEELCNYQHDDLFYANIVDDDN</Hsp_hseq>
+      <Hsp_midline>+Q+++N+ +KN + N +            + L   NIVDDDN</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+<Hit>
+  <Hit_num>3</Hit_num>
+  <Hit_id>BDT62187.1</Hit_id>
+  <Hit_def>BDT62187.1 wsv303-like protein [Litopenaeus vannamei majanivirus Nimav-1_LVa]</Hit_def>
+  <Hit_accession>Subject_6</Hit_accession>
+  <Hit_len>779</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>20.4014</Hsp_bit-score>
+      <Hsp_score>41</Hsp_score>
+      <Hsp_evalue>2.92651</Hsp_evalue>
+      <Hsp_query-from>154</Hsp_query-from>
+      <Hsp_query-to>175</Hsp_query-to>
+      <Hsp_hit-from>580</Hsp_hit-from>
+      <Hsp_hit-to>601</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>9</Hsp_identity>
+      <Hsp_positive>12</Hsp_positive>
+      <Hsp_gaps>0</Hsp_gaps>
+      <Hsp_align-len>22</Hsp_align-len>
+      <Hsp_qseq>QRIINEHKKNNKRNYSNKLQQI</Hsp_qseq>
+      <Hsp_hseq>QIFFNKHLYNNNKKYGNKTSEI</Hsp_hseq>
+      <Hsp_midline>Q   N+H  NN + Y NK  +I</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+<Hit>
+  <Hit_num>4</Hit_num>
+  <Hit_id>BDT62170.1</Hit_id>
+  <Hit_def>BDT62170.1 wsv332-like protein [Litopenaeus vannamei majanivirus Nimav-1_LVa]</Hit_def>
+  <Hit_accession>Subject_5</Hit_accession>
+  <Hit_len>824</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>19.631</Hsp_bit-score>
+      <Hsp_score>39</Hsp_score>
+      <Hsp_evalue>5.04283</Hsp_evalue>
+      <Hsp_query-from>132</Hsp_query-from>
+      <Hsp_query-to>156</Hsp_query-to>
+      <Hsp_hit-from>668</Hsp_hit-from>
+      <Hsp_hit-to>692</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>8</Hsp_identity>
+      <Hsp_positive>13</Hsp_positive>
+      <Hsp_gaps>0</Hsp_gaps>
+      <Hsp_align-len>25</Hsp_align-len>
+      <Hsp_qseq>RARFYENLSFHLKEGTLLDAAIQRI</Hsp_qseq>
+      <Hsp_hseq>RSRLIEKLPQMFGQGTMSDENVKHI</Hsp_hseq>
+      <Hsp_midline>R+R  E L     +GT+ D  ++ I</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+<Hit>
+  <Hit_num>5</Hit_num>
+  <Hit_id>BDT62158.1</Hit_id>
+  <Hit_def>BDT62158.1 innexin [Litopenaeus vannamei majanivirus Nimav-1_LVa]</Hit_def>
+  <Hit_accession>Subject_2</Hit_accession>
+  <Hit_len>400</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>18.8606</Hsp_bit-score>
+      <Hsp_score>37</Hsp_score>
+      <Hsp_evalue>8.53306</Hsp_evalue>
+      <Hsp_query-from>159</Hsp_query-from>
+      <Hsp_query-to>197</Hsp_query-to>
+      <Hsp_hit-from>292</Hsp_hit-from>
+      <Hsp_hit-to>335</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>13</Hsp_identity>
+      <Hsp_positive>23</Hsp_positive>
+      <Hsp_gaps>5</Hsp_gaps>
+      <Hsp_align-len>44</Hsp_align-len>
+      <Hsp_qseq>EHKKNNKRNYSNKLQ-----QINIVDDDNDNISMDLYVKQLFGR</Hsp_qseq>
+      <Hsp_hseq>HYKKVLDQNVSKKLQIGDLFLIYLLSKNMEMLSFDSLLEELFLR</Hsp_hseq>
+      <Hsp_midline> +KK   +N S KLQ      I ++  + + +S D  +++LF R</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+</Iteration_hits>
+  <Iteration_stat>
+    <Statistics>
+      <Statistics_db-num>0</Statistics_db-num>
+      <Statistics_db-len>0</Statistics_db-len>
+      <Statistics_hsp-len>54</Statistics_hsp-len>
+      <Statistics_eff-space>3724080</Statistics_eff-space>
+      <Statistics_kappa>0.041</Statistics_kappa>
+      <Statistics_lambda>0.267</Statistics_lambda>
+      <Statistics_entropy>0.14</Statistics_entropy>
+    </Statistics>
+  </Iteration_stat>
+</Iteration>
+<Iteration>
+  <Iteration_iter-num>4</Iteration_iter-num>
+  <Iteration_query-ID>Query_4</Iteration_query-ID>
+  <Iteration_query-def>BDT62620.1 wsv325-like protein [Metapenaeus ensis majanivirus]</Iteration_query-def>
+  <Iteration_query-len>436</Iteration_query-len>
+<Iteration_hits>
+<Hit>
+  <Hit_num>1</Hit_num>
+  <Hit_id>BDT62143.1</Hit_id>
+  <Hit_def>BDT62143.1 wsv325-like protein [Litopenaeus vannamei majanivirus Nimav-1_LVa]</Hit_def>
+  <Hit_accession>Subject_4</Hit_accession>
+  <Hit_len>380</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>153.68</Hsp_bit-score>
+      <Hsp_score>387</Hsp_score>
+      <Hsp_evalue>1.51063e-45</Hsp_evalue>
+      <Hsp_query-from>220</Hsp_query-from>
+      <Hsp_query-to>436</Hsp_query-to>
+      <Hsp_hit-from>182</Hsp_hit-from>
+      <Hsp_hit-to>380</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>95</Hsp_identity>
+      <Hsp_positive>119</Hsp_positive>
+      <Hsp_gaps>24</Hsp_gaps>
+      <Hsp_align-len>220</Hsp_align-len>
+      <Hsp_qseq>TVGIDCTRRPPVSSVVLYKYPSNVPYDATETYMCDCSNHYQLLNQSNILYSNTEKEAIKIDSGHVPKLIFPLPGMKPIISNPATTLSSLGQYEPIMGSTLINRPNTLLLDMNGPCTGLPDGSYDVVQGPXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXQGKISNRDLNSFLNTHPKKFYKLWSNNQXXXXXXXXXX---RPNRIVCSSGIISKLE</Hsp_qseq>
+      <Hsp_hseq>TVTINCTTRPPVASVVLYGYQQNVRDDQTEMLMCDCRDHRQLLNIPVPISS----DDIVISTSPTPTLTFPFPGLTPVISEPSTTISASGVKHPIIGSTLINRSDNLLLDLNGPCTGLPDGSYSVVE-----------------RTDDDNQTHNTGAVVTDDASSSILREDLNLYLNTHPVELQNGWKGDDHRNRHGYLVGGNCAPVRIKCVSGTLSNIE</Hsp_hseq>
+      <Hsp_midline>TV I+CT RPPV+SVVLY Y  NV  D TE  MCDC +H QLLN    + S    + I I +   P L FP PG+ P+IS P+TT+S+ G   PI+GSTLINR + LLLD+NGPCTGLPDGSY VV+                  T     T+ T +  T  +   I   DLN +LNTHP +    W  + +             P RI C SG +S +E</Hsp_midline>
+    </Hsp>
+    <Hsp>
+      <Hsp_num>2</Hsp_num>
+      <Hsp_bit-score>85.8853</Hsp_bit-score>
+      <Hsp_score>211</Hsp_score>
+      <Hsp_evalue>2.53103e-21</Hsp_evalue>
+      <Hsp_query-from>88</Hsp_query-from>
+      <Hsp_query-to>155</Hsp_query-to>
+      <Hsp_hit-from>81</Hsp_hit-from>
+      <Hsp_hit-to>158</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>44</Hsp_identity>
+      <Hsp_positive>56</Hsp_positive>
+      <Hsp_gaps>12</Hsp_gaps>
+      <Hsp_align-len>79</Hsp_align-len>
+      <Hsp_qseq>IFTDPFLYFASANCAFFKKYNLLNGNSFNK-----------EIILPQPPKKMTAFTIPFRSLVFNKNYKLTKEEIASYN</Hsp_qseq>
+      <Hsp_hseq>IFEDPFLYFAAVNAKFFKYYNILN-NNFDKGEDKKPHSSSLQLMLPHLPTMMTAFTIPYRSIVFNKNYKLDKSDIAAYS</Hsp_hseq>
+      <Hsp_midline>IF DPFLYFA+ N  FFK YN+LN N+F+K           +++LP  P  MTAFTIP+RS+VFNKNYKL K +IA+Y+</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+<Hit>
+  <Hit_num>2</Hit_num>
+  <Hit_id>BDT62172.1</Hit_id>
+  <Hit_def>BDT62172.1 wsv306-like protein [Litopenaeus vannamei majanivirus Nimav-1_LVa]</Hit_def>
+  <Hit_accession>Subject_3</Hit_accession>
+  <Hit_len>446</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>20.0162</Hsp_bit-score>
+      <Hsp_score>40</Hsp_score>
+      <Hsp_evalue>4.09205</Hsp_evalue>
+      <Hsp_query-from>273</Hsp_query-from>
+      <Hsp_query-to>294</Hsp_query-to>
+      <Hsp_hit-from>154</Hsp_hit-from>
+      <Hsp_hit-to>175</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>8</Hsp_identity>
+      <Hsp_positive>12</Hsp_positive>
+      <Hsp_gaps>0</Hsp_gaps>
+      <Hsp_align-len>22</Hsp_align-len>
+      <Hsp_qseq>EKEAIKIDSGHVPKLIFPLPGM</Hsp_qseq>
+      <Hsp_hseq>EREGIITDKREIKKMIDWLPSL</Hsp_hseq>
+      <Hsp_midline>E+E I  D   + K+I  LP +</Hsp_midline>
+    </Hsp>
+    <Hsp>
+      <Hsp_num>2</Hsp_num>
+      <Hsp_bit-score>19.2458</Hsp_bit-score>
+      <Hsp_score>38</Hsp_score>
+      <Hsp_evalue>5.58407</Hsp_evalue>
+      <Hsp_query-from>295</Hsp_query-from>
+      <Hsp_query-to>315</Hsp_query-to>
+      <Hsp_hit-from>392</Hsp_hit-from>
+      <Hsp_hit-to>412</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>7</Hsp_identity>
+      <Hsp_positive>13</Hsp_positive>
+      <Hsp_gaps>0</Hsp_gaps>
+      <Hsp_align-len>21</Hsp_align-len>
+      <Hsp_qseq>KPIISNPATTLSSLGQYEPIM</Hsp_qseq>
+      <Hsp_hseq>QPLAAHFAQSLQLRGPYEPAL</Hsp_hseq>
+      <Hsp_midline>+P+ ++ A +L   G YEP +</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+<Hit>
+  <Hit_num>3</Hit_num>
+  <Hit_id>BDT62133.1</Hit_id>
+  <Hit_def>BDT62133.1 wsv192-like protein [Litopenaeus vannamei majanivirus Nimav-1_LVa]</Hit_def>
+  <Hit_accession>Subject_10</Hit_accession>
+  <Hit_len>993</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>19.631</Hsp_bit-score>
+      <Hsp_score>39</Hsp_score>
+      <Hsp_evalue>5.62905</Hsp_evalue>
+      <Hsp_query-from>289</Hsp_query-from>
+      <Hsp_query-to>300</Hsp_query-to>
+      <Hsp_hit-from>795</Hsp_hit-from>
+      <Hsp_hit-to>806</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>7</Hsp_identity>
+      <Hsp_positive>8</Hsp_positive>
+      <Hsp_gaps>0</Hsp_gaps>
+      <Hsp_align-len>12</Hsp_align-len>
+      <Hsp_qseq>FPLPGMKPIISN</Hsp_qseq>
+      <Hsp_hseq>FPYRGVDPIIGN</Hsp_hseq>
+      <Hsp_midline>FP  G+ PII N</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+<Hit>
+  <Hit_num>4</Hit_num>
+  <Hit_id>BDT62149.1</Hit_id>
+  <Hit_def>BDT62149.1 dUTPase [Litopenaeus vannamei majanivirus Nimav-1_LVa]</Hit_def>
+  <Hit_accession>Subject_13</Hit_accession>
+  <Hit_len>462</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>19.2458</Hsp_bit-score>
+      <Hsp_score>38</Hsp_score>
+      <Hsp_evalue>7.13749</Hsp_evalue>
+      <Hsp_query-from>105</Hsp_query-from>
+      <Hsp_query-to>143</Hsp_query-to>
+      <Hsp_hit-from>151</Hsp_hit-from>
+      <Hsp_hit-to>189</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>8</Hsp_identity>
+      <Hsp_positive>19</Hsp_positive>
+      <Hsp_gaps>0</Hsp_gaps>
+      <Hsp_align-len>39</Hsp_align-len>
+      <Hsp_qseq>KKYNLLNGNSFNKEIILPQPPKKMTAFTIPFRSLVFNKN</Hsp_qseq>
+      <Hsp_hseq>KEYEMEAGTRFAQAIVHLTTKEKTVGGSVKYKLIGSDKN</Hsp_hseq>
+      <Hsp_midline>K+Y +  G  F + I+     +K    ++ ++ +  +KN</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+<Hit>
+  <Hit_num>5</Hit_num>
+  <Hit_id>BDT62158.1</Hit_id>
+  <Hit_def>BDT62158.1 innexin [Litopenaeus vannamei majanivirus Nimav-1_LVa]</Hit_def>
+  <Hit_accession>Subject_2</Hit_accession>
+  <Hit_len>400</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>18.8606</Hsp_bit-score>
+      <Hsp_score>37</Hsp_score>
+      <Hsp_evalue>8.42322</Hsp_evalue>
+      <Hsp_query-from>297</Hsp_query-from>
+      <Hsp_query-to>327</Hsp_query-to>
+      <Hsp_hit-from>260</Hsp_hit-from>
+      <Hsp_hit-to>291</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>11</Hsp_identity>
+      <Hsp_positive>18</Hsp_positive>
+      <Hsp_gaps>1</Hsp_gaps>
+      <Hsp_align-len>32</Hsp_align-len>
+      <Hsp_qseq>IISNPATTLSSLGQYEPIMGSTLI-NRPNTLL</Hsp_qseq>
+      <Hsp_hseq>VISITAFIYRLLMFYVPVIRSTLLFQKPASML</Hsp_hseq>
+      <Hsp_midline>+IS  A     L  Y P++ STL+  +P ++L</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+</Iteration_hits>
+  <Iteration_stat>
+    <Statistics>
+      <Statistics_db-num>0</Statistics_db-num>
+      <Statistics_db-len>0</Statistics_db-len>
+      <Statistics_hsp-len>55</Statistics_hsp-len>
+      <Statistics_eff-space>4003167</Statistics_eff-space>
+      <Statistics_kappa>0.041</Statistics_kappa>
+      <Statistics_lambda>0.267</Statistics_lambda>
+      <Statistics_entropy>0.14</Statistics_entropy>
+    </Statistics>
+  </Iteration_stat>
+</Iteration>
+<Iteration>
+  <Iteration_iter-num>5</Iteration_iter-num>
+  <Iteration_query-ID>Query_5</Iteration_query-ID>
+  <Iteration_query-def>BDT62567.1 wsv332-like protein [Metapenaeus ensis majanivirus]</Iteration_query-def>
+  <Iteration_query-len>849</Iteration_query-len>
+<Iteration_hits>
+<Hit>
+  <Hit_num>1</Hit_num>
+  <Hit_id>BDT62170.1</Hit_id>
+  <Hit_def>BDT62170.1 wsv332-like protein [Litopenaeus vannamei majanivirus Nimav-1_LVa]</Hit_def>
+  <Hit_accession>Subject_5</Hit_accession>
+  <Hit_len>824</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>678.322</Hsp_bit-score>
+      <Hsp_score>1749</Hsp_score>
+      <Hsp_evalue>0</Hsp_evalue>
+      <Hsp_query-from>26</Hsp_query-from>
+      <Hsp_query-to>797</Hsp_query-to>
+      <Hsp_hit-from>10</Hsp_hit-from>
+      <Hsp_hit-to>777</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>380</Hsp_identity>
+      <Hsp_positive>514</Hsp_positive>
+      <Hsp_gaps>48</Hsp_gaps>
+      <Hsp_align-len>794</Hsp_align-len>
+      <Hsp_qseq>LFTEGGLCLINVESIDQRHKRIKNNSKENEIINKESNNFLSSLITLCHGEESLKMLPCFEQLGKTLIDGVVKNSSQMTYEEXXXXXXXXXXXXXXXXXQQDMNEN---DLNIIQDISIDVIKSAFFSS-GDIKDKMIKPIIKLLAGYNPFRLKENLYFISCD---NDSCPCNSVFKXXXXXXXXXXXXXGMDYNNPMAVLSMALRLFCHKNIDDQVQIQELEKKNNNIAIVPLKHILLSLID-YSSNFHTQIK--IVDFASTEIESFHQSQWQSLLKNKIGNISFEYRGFILLTYCALLFFPFCRNAQTFKLINLYIETILFKICYNAAEVLFCASTNSTREKDNGKFINYVNSYTVSNILSSPIRIEKAIDQVYNNQDLKQITNILTCITGINDEMNNATCRDKILTEMIRLYSPSGFLKSNH----KSEMRNVRNVELFKILGEIQMIDKTSFQVVIGKDLVNRYSKGNNIRANHFHILSMLPRANNLSSDSQAQSYIDNYLEQDDKQTQCVNLRNFAGWWMGIIDGIINEKGNELMMG--NKNIS---MRTILSDTIRQVFKNRYISPFLLSHSFLPPQKTLTNNGRDMFDDKKNKVEVQESQKLCVFSSWQIPNIIGANCSILAPIQIEMALTHPQVWNNFISKIMFFIERFNMDCYRGVFDKIFEPEHNKS---SKFLENIPQLINGNFTAHNDYTKQMSIIFKQVFDTTKQQYIEGANTESLVTTNKISKYTNSEKRLYSFDKIYDILRDIIINNNQNPQVYLQYSHQLLTLFSEIDDFLINALKIKG</Hsp_qseq>
+      <Hsp_hseq>LFIEGGMCIVNTESISQRIKQTTSD-EEREFINTESVKFLSTIVSLCHGREALKLLPSFDALGKTLIQ-IFKHSEFMTVSSGGGGGGGGDEDNDAATASTTRGSNGGSDNCLVREMSLDVIKSMFSSSSAETINNLIRSVIKVLAGYNPFKLKENMYIVMCDAGKKKKCICTKGHIENIVALHVR--------TNPVLVLSQVLQLFCHKTID-----VEKHSKDETLIQIPLKLILLNMIDVYSPNTGSQPRQYIDSFDAHGIHS-HNTGWTDLIQNRIAGMPLEYRFFTMLIYCALLYLPCCRADQTFKLANLYIETILLKMCYNAAETLSCASLNNTSEKDNGNFISYMNSYAVSNVLSSTIRIEKAISNIHNKQYLRDVFRILTNNNHIISEMDNVAIKEKLLKEMERIFTNSTFLKSQYPRVSTSDVRSVRNIELFKILGEINT-KNSNIQVVFNNSIINHHSNGNNIRVNNFHILSMLPRAEKLSSEKNSQCYIENYFDQEDKEK--FSLGNFAGWWMGIIDGAIGENGKTIKARQLDKNSSSNIMRLVLSNTIKEVYKNRYLSFKLLSYSHLPDNKVIANNGQGLIVS-SSRVEAQESQRLCVFSSLQTPDIIGANCSILAPMQIEIALTRPKSWIQFVTKIMYFIERFNVDCYREFLKMMSEPLDEKDENRSRLIEKLPQMF-GQGTMSDENVKHISTLLHKAFDVVKCQYVEGSYASS-----QFPDYKMGEKRLSLFEEVYNILRDIILTHNQNPRAYLTHSRLLLSIYSEIDDFLIDALKIKG</Hsp_hseq>
+      <Hsp_midline>LF EGG+C++N ESI QR K+  ++ +E E IN ES  FLS++++LCHG E+LK+LP F+ LGKTLI  + K+S  MT           + +++          N   D  +++++S+DVIKS F SS  +  + +I+ +IK+LAGYNPF+LKEN+Y + CD      C C                       NP+ VLS  L+LFCHK ID      E   K+  +  +PLK ILL++ID YS N  +Q +  I  F +  I S H + W  L++N+I  +  EYR F +L YCALL+ P CR  QTFKL NLYIETIL K+CYNAAE L CAS N+T EKDNG FI+Y+NSY VSN+LSS IRIEKAI  ++N Q L+ +  ILT    I  EM+N   ++K+L EM R+++ S FLKS +     S++R+VRN+ELFKILGEI     ++ QVV    ++N +S GNNIR N+FHILSMLPRA  LSS+  +Q YI+NY +Q+DK+    +L NFAGWWMGIIDG I E G  +     +KN S   MR +LS+TI++V+KNRY+S  LLS+S LP  K + NNG+ +     ++VE QESQ+LCVFSS Q P+IIGANCSILAP+QIE+ALT P+ W  F++KIM+FIERFN+DCYR     + EP   K    S+ +E +PQ+  G  T  ++  K +S +  + FD  K QY+EG+   S     +   Y   EKRL  F+++Y+ILRDII+ +NQNP+ YL +S  LL+++SEIDDFLI+ALKIKG</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+</Iteration_hits>
+  <Iteration_stat>
+    <Statistics>
+      <Statistics_db-num>0</Statistics_db-num>
+      <Statistics_db-len>0</Statistics_db-len>
+      <Statistics_hsp-len>60</Statistics_hsp-len>
+      <Statistics_eff-space>8238738</Statistics_eff-space>
+      <Statistics_kappa>0.041</Statistics_kappa>
+      <Statistics_lambda>0.267</Statistics_lambda>
+      <Statistics_entropy>0.14</Statistics_entropy>
+    </Statistics>
+  </Iteration_stat>
+</Iteration>
+<Iteration>
+  <Iteration_iter-num>6</Iteration_iter-num>
+  <Iteration_query-ID>Query_6</Iteration_query-ID>
+  <Iteration_query-def>BDT62581.1 wsv303-like protein [Metapenaeus ensis majanivirus]</Iteration_query-def>
+  <Iteration_query-len>698</Iteration_query-len>
+<Iteration_hits>
+<Hit>
+  <Hit_num>1</Hit_num>
+  <Hit_id>BDT62187.1</Hit_id>
+  <Hit_def>BDT62187.1 wsv303-like protein [Litopenaeus vannamei majanivirus Nimav-1_LVa]</Hit_def>
+  <Hit_accession>Subject_6</Hit_accession>
+  <Hit_len>779</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>454.136</Hsp_bit-score>
+      <Hsp_score>1167</Hsp_score>
+      <Hsp_evalue>7.94914e-153</Hsp_evalue>
+      <Hsp_query-from>1</Hsp_query-from>
+      <Hsp_query-to>370</Hsp_query-to>
+      <Hsp_hit-from>1</Hsp_hit-from>
+      <Hsp_hit-to>338</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>228</Hsp_identity>
+      <Hsp_positive>276</Hsp_positive>
+      <Hsp_gaps>44</Hsp_gaps>
+      <Hsp_align-len>376</Hsp_align-len>
+      <Hsp_qseq>MNTNIVKLMNNTYTIDNLCIGISLDFGKNVENTNFLXXXXXXXXXXXXXXXXXXXXXXSKSTLXXXXXXXXXXXXFSIKYHKKPHIIDKTTIIKSLNETSQKQFTAIRLRETYPPCSILIFSMGSVIVVGLKKLGLTRLSVLQAVSAIADTQKHPITISNVEIVNVVSTFNLFKLHFWNLKEFFRKNKIAFTYVPESFPGLFFKILVPVRHLKDGETIGSYYTRVARERENGDQDAIKRNFRGKTVLIFQVGKCTILGSCGGDDIQVAFKMLFGFLWYFIDRSIYLSDDELEEQRKLYHIPPLSWYLMTDFFLRTEPNCKLSSNVVFSTMLASIKSEKVINNRYSIFIKN------AVDRLTFTKSKMLRRIKAEE</Hsp_qseq>
+      <Hsp_hseq>MNRRIEKIAHNRYTRDNLCIGVSLDFGQNQQNVYF--------------------------------------EQKKKKKKQKPFLIDKDIMVKSLNETSQKQFTALRLREEYPPCSILIFSMGSVIIVGLRKLGLTPLSVLQAVSAIADTQEHPITISNVEIVNVVSTFNLFKLNFPSLKEFFREHKIAFTHVPDSFPGLFFKVLVPIRHLKRGETIGGYYTRAARERESGDTEAMKKNFRGKTVLVFQVGKCTILGACGGDDIHVIFKMLFGFFWYFIDNLVHLSDEEFENGKKKYHIPPLSWYLMTDFFLRTVPDYQLKSNVIFADLFPSLASKKTLVDKCTSLYSSPSSLDVATDFLTVIRQRMLRQTWRED</Hsp_hseq>
+      <Hsp_midline>MN  I K+ +N YT DNLCIG+SLDFG+N +N  F                                       +   K  +KP +IDK  ++KSLNETSQKQFTA+RLRE YPPCSILIFSMGSVI+VGL+KLGLT LSVLQAVSAIADTQ+HPITISNVEIVNVVSTFNLFKL+F +LKEFFR++KIAFT+VP+SFPGLFFK+LVP+RHLK GETIG YYTR ARERE+GD +A+K+NFRGKTVL+FQVGKCTILG+CGGDDI V FKMLFGF WYFID  ++LSD+E E  +K YHIPPLSWYLMTDFFLRT P+ +L SNV+F+ +  S+ S+K + ++ +    +      A D LT  + +MLR+   E+</Hsp_midline>
+    </Hsp>
+    <Hsp>
+      <Hsp_num>2</Hsp_num>
+      <Hsp_bit-score>59.6918</Hsp_bit-score>
+      <Hsp_score>143</Hsp_score>
+      <Hsp_evalue>4.27401e-12</Hsp_evalue>
+      <Hsp_query-from>581</Hsp_query-from>
+      <Hsp_query-to>693</Hsp_query-to>
+      <Hsp_hit-from>508</Hsp_hit-from>
+      <Hsp_hit-to>614</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>40</Hsp_identity>
+      <Hsp_positive>65</Hsp_positive>
+      <Hsp_gaps>6</Hsp_gaps>
+      <Hsp_align-len>113</Hsp_align-len>
+      <Hsp_qseq>KKKYELKINRLNQLESIYGLVRDTIEKGRIENIATFLKLDTHKLFSIIEKDSFSSIXXXXXXXXXEHYKMTPGQYFFENGLSSILHRQDKQMLYPPPNIGIKESKRGILDFMI</Hsp_qseq>
+      <Hsp_hseq>RSNHKMKIRQLNQLEEIYDLVNRTTSEGRSDEIADFLGIDSYIISGLLNKDSPIPI-KRSSVFSKDYTHMTPAQIFFNKH----LYNNNKKYGNKTSEI-LNENRRGILDFII</Hsp_hseq>
+      <Hsp_midline>+  +++KI +LNQLE IY LV  T  +GR + IA FL +D++ +  ++ KDS   I   ++  + ++  MTP Q FF       L+  +K+       I + E++RGILDF+I</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+<Hit>
+  <Hit_num>2</Hit_num>
+  <Hit_id>BDT62099.1</Hit_id>
+  <Hit_def>BDT62099.1 wsv026-like protein [Litopenaeus vannamei majanivirus Nimav-1_LVa]</Hit_def>
+  <Hit_accession>Subject_8</Hit_accession>
+  <Hit_len>1339</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>24.2534</Hsp_bit-score>
+      <Hsp_score>51</Hsp_score>
+      <Hsp_evalue>0.301922</Hsp_evalue>
+      <Hsp_query-from>575</Hsp_query-from>
+      <Hsp_query-to>625</Hsp_query-to>
+      <Hsp_hit-from>291</Hsp_hit-from>
+      <Hsp_hit-to>334</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>15</Hsp_identity>
+      <Hsp_positive>24</Hsp_positive>
+      <Hsp_gaps>7</Hsp_gaps>
+      <Hsp_align-len>51</Hsp_align-len>
+      <Hsp_qseq>FAINNKKKKYELKINRLNQLESIYGLVRDTIEKGRIENIATFLKLDTHKLF</Hsp_qseq>
+      <Hsp_hseq>LAINNRNKSG-------NDIRSLYAIMHDTFDRNKKNNRLQLNVADSMKLF</Hsp_hseq>
+      <Hsp_midline> AINN+ K         N + S+Y ++ DT ++ +  N       D+ KLF</Hsp_midline>
+    </Hsp>
+    <Hsp>
+      <Hsp_num>2</Hsp_num>
+      <Hsp_bit-score>21.9422</Hsp_bit-score>
+      <Hsp_score>45</Hsp_score>
+      <Hsp_evalue>1.67503</Hsp_evalue>
+      <Hsp_query-from>248</Hsp_query-from>
+      <Hsp_query-to>267</Hsp_query-to>
+      <Hsp_hit-from>43</Hsp_hit-from>
+      <Hsp_hit-to>62</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>8</Hsp_identity>
+      <Hsp_positive>11</Hsp_positive>
+      <Hsp_gaps>0</Hsp_gaps>
+      <Hsp_align-len>20</Hsp_align-len>
+      <Hsp_qseq>IFQVGKCTILGSCGGDDIQV</Hsp_qseq>
+      <Hsp_hseq>LLEVGRCDTLTKGGMDDCWV</Hsp_hseq>
+      <Hsp_midline>+ +VG+C  L   G DD  V</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+<Hit>
+  <Hit_num>3</Hit_num>
+  <Hit_id>BDT62167.1</Hit_id>
+  <Hit_def>BDT62167.1 wsv343-like protein [Litopenaeus vannamei majanivirus Nimav-1_LVa]</Hit_def>
+  <Hit_accession>Subject_12</Hit_accession>
+  <Hit_len>4337</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>20.4014</Hsp_bit-score>
+      <Hsp_score>41</Hsp_score>
+      <Hsp_evalue>5.58891</Hsp_evalue>
+      <Hsp_query-from>129</Hsp_query-from>
+      <Hsp_query-to>153</Hsp_query-to>
+      <Hsp_hit-from>785</Hsp_hit-from>
+      <Hsp_hit-to>809</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>11</Hsp_identity>
+      <Hsp_positive>14</Hsp_positive>
+      <Hsp_gaps>0</Hsp_gaps>
+      <Hsp_align-len>25</Hsp_align-len>
+      <Hsp_qseq>VGLKKLGLTRLSVLQAVSAIADTQK</Hsp_qseq>
+      <Hsp_hseq>LGLAYRGLSKDSFLYDCSVIKDTIK</Hsp_hseq>
+      <Hsp_midline>+GL   GL++ S L   S I DT K</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+<Hit>
+  <Hit_num>4</Hit_num>
+  <Hit_id>BDT62082.1</Hit_id>
+  <Hit_def>BDT62082.1 baculoviral IAP repeat-containing protein [Litopenaeus vannamei majanivirus Nimav-1_LVa]</Hit_def>
+  <Hit_accession>Subject_7</Hit_accession>
+  <Hit_len>217</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>19.2458</Hsp_bit-score>
+      <Hsp_score>38</Hsp_score>
+      <Hsp_evalue>9.36265</Hsp_evalue>
+      <Hsp_query-from>114</Hsp_query-from>
+      <Hsp_query-to>142</Hsp_query-to>
+      <Hsp_hit-from>182</Hsp_hit-from>
+      <Hsp_hit-to>210</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>8</Hsp_identity>
+      <Hsp_positive>14</Hsp_positive>
+      <Hsp_gaps>0</Hsp_gaps>
+      <Hsp_align-len>29</Hsp_align-len>
+      <Hsp_qseq>PPCSILIFSMGSVIVVGLKKLGLTRLSVL</Hsp_qseq>
+      <Hsp_hseq>PYCSYLRMVKGEEFIMEVHNMNYTRMSTI</Hsp_hseq>
+      <Hsp_midline>P CS L    G   ++ +  +  TR+S +</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+</Iteration_hits>
+  <Iteration_stat>
+    <Statistics>
+      <Statistics_db-num>0</Statistics_db-num>
+      <Statistics_db-len>0</Statistics_db-len>
+      <Statistics_hsp-len>59</Statistics_hsp-len>
+      <Statistics_eff-space>6680745</Statistics_eff-space>
+      <Statistics_kappa>0.041</Statistics_kappa>
+      <Statistics_lambda>0.267</Statistics_lambda>
+      <Statistics_entropy>0.14</Statistics_entropy>
+    </Statistics>
+  </Iteration_stat>
+</Iteration>
+<Iteration>
+  <Iteration_iter-num>7</Iteration_iter-num>
+  <Iteration_query-ID>Query_7</Iteration_query-ID>
+  <Iteration_query-def>BDT63274.1 hypothetical protein [Armadillidium vulgare clopovirus]</Iteration_query-def>
+  <Iteration_query-len>1046</Iteration_query-len>
+<Iteration_hits>
+<Hit>
+  <Hit_num>1</Hit_num>
+  <Hit_id>BDT62167.1</Hit_id>
+  <Hit_def>BDT62167.1 wsv343-like protein [Litopenaeus vannamei majanivirus Nimav-1_LVa]</Hit_def>
+  <Hit_accession>Subject_12</Hit_accession>
+  <Hit_len>4337</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>22.3274</Hsp_bit-score>
+      <Hsp_score>46</Hsp_score>
+      <Hsp_evalue>2.27283</Hsp_evalue>
+      <Hsp_query-from>711</Hsp_query-from>
+      <Hsp_query-to>743</Hsp_query-to>
+      <Hsp_hit-from>3300</Hsp_hit-from>
+      <Hsp_hit-to>3332</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>9</Hsp_identity>
+      <Hsp_positive>16</Hsp_positive>
+      <Hsp_gaps>0</Hsp_gaps>
+      <Hsp_align-len>33</Hsp_align-len>
+      <Hsp_qseq>RKGTTTETAIAQPELRRNVARFMYHHENTAEKY</Hsp_qseq>
+      <Hsp_hseq>RKGKSVNNHRYHHETKRHIIRFLVHNADAILDY</Hsp_hseq>
+      <Hsp_midline>RKG +        E +R++ RF+ H+ +    Y</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+</Iteration_hits>
+  <Iteration_stat>
+    <Statistics>
+      <Statistics_db-num>0</Statistics_db-num>
+      <Statistics_db-len>0</Statistics_db-len>
+      <Statistics_hsp-len>62</Statistics_hsp-len>
+      <Statistics_eff-space>10249344</Statistics_eff-space>
+      <Statistics_kappa>0.041</Statistics_kappa>
+      <Statistics_lambda>0.267</Statistics_lambda>
+      <Statistics_entropy>0.14</Statistics_entropy>
+    </Statistics>
+  </Iteration_stat>
+</Iteration>
+<Iteration>
+  <Iteration_iter-num>8</Iteration_iter-num>
+  <Iteration_query-ID>Query_8</Iteration_query-ID>
+  <Iteration_query-def>BDT62533.1 dUTPase [Metapenaeus ensis majanivirus]</Iteration_query-def>
+  <Iteration_query-len>154</Iteration_query-len>
+<Iteration_hits>
+<Hit>
+  <Hit_num>1</Hit_num>
+  <Hit_id>BDT62149.1</Hit_id>
+  <Hit_def>BDT62149.1 dUTPase [Litopenaeus vannamei majanivirus Nimav-1_LVa]</Hit_def>
+  <Hit_accession>Subject_13</Hit_accession>
+  <Hit_len>462</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>39.6614</Hsp_bit-score>
+      <Hsp_score>91</Hsp_score>
+      <Hsp_evalue>3.11004e-07</Hsp_evalue>
+      <Hsp_query-from>36</Hsp_query-from>
+      <Hsp_query-to>103</Hsp_query-to>
+      <Hsp_hit-from>206</Hsp_hit-from>
+      <Hsp_hit-to>274</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>24</Hsp_identity>
+      <Hsp_positive>35</Hsp_positive>
+      <Hsp_gaps>1</Hsp_gaps>
+      <Hsp_align-len>69</Hsp_align-len>
+      <Hsp_qseq>LYSAYDTIIPAQGKGLVKTDIQIGLPP-NCYGRIAPRSGLALKHHIDVGAGVVDRDYQGNVGVVLFNHA</Hsp_qseq>
+      <Hsp_hseq>FLAAEDCSIPPDSSKLVGTGIAVSLPSMSCYMQLQSPPLSPCYSDINVQAGVIDADYRGEVKVLINNRS</Hsp_hseq>
+      <Hsp_midline>  +A D  IP     LV T I + LP  +CY ++           I+V AGV+D DY+G V V++ N +</Hsp_midline>
+    </Hsp>
+    <Hsp>
+      <Hsp_num>2</Hsp_num>
+      <Hsp_bit-score>37.3502</Hsp_bit-score>
+      <Hsp_score>85</Hsp_score>
+      <Hsp_evalue>1.80196e-06</Hsp_evalue>
+      <Hsp_query-from>16</Hsp_query-from>
+      <Hsp_query-to>119</Hsp_query-to>
+      <Hsp_hit-from>18</Hsp_hit-from>
+      <Hsp_hit-to>165</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>34</Hsp_identity>
+      <Hsp_positive>58</Hsp_positive>
+      <Hsp_gaps>46</Hsp_gaps>
+      <Hsp_align-len>149</Hsp_align-len>
+      <Hsp_qseq>KLTDNAYMPIKGSLQAAGYDLYSAYDTIIPAQGKGLVKTDI-------------------------------------QIGLPPNC--------YGRIAPRSGLALKHHIDVGAGVVDRDYQGNVGVVLFNHAKKEYKVCKGDRIAQLI</Hsp_qseq>
+      <Hsp_hseq>KVHNDAFIPKIGLEFSAGSDLYSLFPCTIPSNHWAEIRTGVALKFVSRVASNSKIHKLKESEERRKKEKEEGKYCVPFQSSCKKSCKILDDASFFLKIRSRSGMALNHNINVVSHHFE-ELNNEIIVTVVNTGSKEYEMEAGTRFAQAI</Hsp_hseq>
+      <Hsp_midline>K+ ++A++P  G   +AG DLYS +   IP+     ++T +                                     Q     +C        + +I  RSG+AL H+I+V +   + +    + V + N   KEY++  G R AQ I</Hsp_midline>
+    </Hsp>
+    <Hsp>
+      <Hsp_num>3</Hsp_num>
+      <Hsp_bit-score>26.9498</Hsp_bit-score>
+      <Hsp_score>58</Hsp_score>
+      <Hsp_evalue>0.00588995</Hsp_evalue>
+      <Hsp_query-from>74</Hsp_query-from>
+      <Hsp_query-to>149</Hsp_query-to>
+      <Hsp_hit-from>386</Hsp_hit-from>
+      <Hsp_hit-to>460</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>25</Hsp_identity>
+      <Hsp_positive>44</Hsp_positive>
+      <Hsp_gaps>5</Hsp_gaps>
+      <Hsp_align-len>78</Hsp_align-len>
+      <Hsp_qseq>LALKHHIDVGAGVVDRDYQGNVGVVLFNHAKKEYKVCKGDRI-AQLICESILYPKIQKVDNIVMDTE-RGQCGFGSTG</Hsp_qseq>
+      <Hsp_hseq>MSIKKGIDVMSWEINSDTEEIVLVFKNDYAWKNI-LKKGERIISVFVVSSLGVACLEKVEE--LDVKGRGCRGFGSTG</Hsp_hseq>
+      <Hsp_midline>+++K  IDV +  ++ D +  V V   ++A K   + KG+RI +  +  S+    ++KV+   +D + RG  GFGSTG</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+<Hit>
+  <Hit_num>2</Hit_num>
+  <Hit_id>BDT62167.1</Hit_id>
+  <Hit_def>BDT62167.1 wsv343-like protein [Litopenaeus vannamei majanivirus Nimav-1_LVa]</Hit_def>
+  <Hit_accession>Subject_12</Hit_accession>
+  <Hit_len>4337</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>18.4754</Hsp_bit-score>
+      <Hsp_score>36</Hsp_score>
+      <Hsp_evalue>3.6783</Hsp_evalue>
+      <Hsp_query-from>43</Hsp_query-from>
+      <Hsp_query-to>51</Hsp_query-to>
+      <Hsp_hit-from>2753</Hsp_hit-from>
+      <Hsp_hit-to>2761</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>6</Hsp_identity>
+      <Hsp_positive>8</Hsp_positive>
+      <Hsp_gaps>0</Hsp_gaps>
+      <Hsp_align-len>9</Hsp_align-len>
+      <Hsp_qseq>IIPAQGKGL</Hsp_qseq>
+      <Hsp_hseq>IIPAGGRGM</Hsp_hseq>
+      <Hsp_midline>IIPA G+G+</Hsp_midline>
+    </Hsp>
+    <Hsp>
+      <Hsp_num>2</Hsp_num>
+      <Hsp_bit-score>17.705</Hsp_bit-score>
+      <Hsp_score>34</Hsp_score>
+      <Hsp_evalue>6.66505</Hsp_evalue>
+      <Hsp_query-from>121</Hsp_query-from>
+      <Hsp_query-to>135</Hsp_query-to>
+      <Hsp_hit-from>715</Hsp_hit-from>
+      <Hsp_hit-to>729</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>5</Hsp_identity>
+      <Hsp_positive>12</Hsp_positive>
+      <Hsp_gaps>0</Hsp_gaps>
+      <Hsp_align-len>15</Hsp_align-len>
+      <Hsp_qseq>ESILYPKIQKVDNIV</Hsp_qseq>
+      <Hsp_hseq>QSLPFPKHKTINNIL</Hsp_hseq>
+      <Hsp_midline>+S+ +PK + ++NI+</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+<Hit>
+  <Hit_num>3</Hit_num>
+  <Hit_id>BDT62170.1</Hit_id>
+  <Hit_def>BDT62170.1 wsv332-like protein [Litopenaeus vannamei majanivirus Nimav-1_LVa]</Hit_def>
+  <Hit_accession>Subject_5</Hit_accession>
+  <Hit_len>824</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>17.3198</Hsp_bit-score>
+      <Hsp_score>33</Hsp_score>
+      <Hsp_evalue>7.17672</Hsp_evalue>
+      <Hsp_query-from>80</Hsp_query-from>
+      <Hsp_query-to>119</Hsp_query-to>
+      <Hsp_hit-from>148</Hsp_hit-from>
+      <Hsp_hit-to>187</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>10</Hsp_identity>
+      <Hsp_positive>19</Hsp_positive>
+      <Hsp_gaps>0</Hsp_gaps>
+      <Hsp_align-len>40</Hsp_align-len>
+      <Hsp_qseq>IDVGAGVVDRDYQGNVGVVLFNHAKKEYKVCKGDRIAQLI</Hsp_qseq>
+      <Hsp_hseq>IKVLAGYNPFKLKENMYIVMCDAGKKKKCICTKGHIENIV</Hsp_hseq>
+      <Hsp_midline>I V AG      + N+ +V+ +  KK+  +C    I  ++</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+<Hit>
+  <Hit_num>4</Hit_num>
+  <Hit_id>BDT62133.1</Hit_id>
+  <Hit_def>BDT62133.1 wsv192-like protein [Litopenaeus vannamei majanivirus Nimav-1_LVa]</Hit_def>
+  <Hit_accession>Subject_10</Hit_accession>
+  <Hit_len>993</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>16.9346</Hsp_bit-score>
+      <Hsp_score>32</Hsp_score>
+      <Hsp_evalue>9.43601</Hsp_evalue>
+      <Hsp_query-from>143</Hsp_query-from>
+      <Hsp_query-to>147</Hsp_query-to>
+      <Hsp_hit-from>434</Hsp_hit-from>
+      <Hsp_hit-to>438</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>5</Hsp_identity>
+      <Hsp_positive>5</Hsp_positive>
+      <Hsp_gaps>0</Hsp_gaps>
+      <Hsp_align-len>5</Hsp_align-len>
+      <Hsp_qseq>CGFGS</Hsp_qseq>
+      <Hsp_hseq>CGFGS</Hsp_hseq>
+      <Hsp_midline>CGFGS</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+</Iteration_hits>
+  <Iteration_stat>
+    <Statistics>
+      <Statistics_db-num>0</Statistics_db-num>
+      <Statistics_db-len>0</Statistics_db-len>
+      <Statistics_hsp-len>46</Statistics_hsp-len>
+      <Statistics_eff-space>1147392</Statistics_eff-space>
+      <Statistics_kappa>0.041</Statistics_kappa>
+      <Statistics_lambda>0.267</Statistics_lambda>
+      <Statistics_entropy>0.14</Statistics_entropy>
+    </Statistics>
+  </Iteration_stat>
+</Iteration>
+</BlastOutput_iterations>
+</BlastOutput>
+

@@ -1,0 +1,278 @@
+{
+"BlastOutput2": [
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1",
+          "Subject_2",
+          "Subject_3",
+          "Subject_4"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_1",
+            "query_title": "qp1 query protein one",
+            "query_len": 140,
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "unnamed",
+                    "title": "unnamed protein product"
+                  }
+                ],
+                "len": 120,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 254.218,
+                    "score": 648,
+                    "evalue": 1.15561e-93,
+                    "identity": 120,
+                    "positive": 120,
+                    "query_from": 21,
+                    "query_to": 140,
+                    "hit_from": 1,
+                    "hit_to": 120,
+                    "align_len": 120,
+                    "gaps": 0,
+                    "qseq": "DPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTASEG",
+                    "hseq": "DPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTASEG",
+                    "midline": "DPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTASEG"
+                  }
+                ]
+              },
+              {
+                "num": 2,
+                "description": [
+                  {
+                    "id": "sa",
+                    "title": "sa first"
+                  }
+                ],
+                "len": 120,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 251.136,
+                    "score": 640,
+                    "evalue": 2.00507e-92,
+                    "identity": 120,
+                    "positive": 120,
+                    "query_from": 1,
+                    "query_to": 120,
+                    "hit_from": 1,
+                    "hit_to": 120,
+                    "align_len": 120,
+                    "gaps": 0,
+                    "qseq": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDAN",
+                    "hseq": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDAN",
+                    "midline": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDAN"
+                  }
+                ]
+              },
+              {
+                "num": 3,
+                "description": [
+                  {
+                    "id": "sd",
+                    "title": "sd last"
+                  }
+                ],
+                "len": 99,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 208.764,
+                    "score": 530,
+                    "evalue": 7.62042e-76,
+                    "identity": 99,
+                    "positive": 99,
+                    "query_from": 2,
+                    "query_to": 100,
+                    "hit_from": 1,
+                    "hit_to": 99,
+                    "align_len": 99,
+                    "gaps": 0,
+                    "qseq": "WMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMC",
+                    "hseq": "WMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMC",
+                    "midline": "WMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMC"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 20,
+              "eff_space": 31080,
+              "kappa": 0.041,
+              "lambda": 0.267,
+              "entropy": 0.14
+            }
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1",
+          "Subject_2",
+          "Subject_3",
+          "Subject_4"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_2",
+            "query_title": "qp2 unrelated protein (no hits expected)",
+            "query_len": 45,
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "sa",
+                    "title": "sa first"
+                  }
+                ],
+                "len": 120,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 12.3122,
+                    "score": 20,
+                    "evalue": 1.93426,
+                    "identity": 3,
+                    "positive": 5,
+                    "query_from": 24,
+                    "query_to": 32,
+                    "hit_from": 1,
+                    "hit_to": 9,
+                    "align_len": 9,
+                    "gaps": 0,
+                    "qseq": "LWKEHLTFQ",
+                    "hseq": "MWMEHSVLK",
+                    "midline": "+W EH   +"
+                  },
+                  {
+                    "num": 2,
+                    "bit_score": 12.3122,
+                    "score": 20,
+                    "evalue": 2.2624,
+                    "identity": 4,
+                    "positive": 4,
+                    "query_from": 33,
+                    "query_to": 39,
+                    "hit_from": 35,
+                    "hit_to": 41,
+                    "align_len": 7,
+                    "gaps": 0,
+                    "qseq": "WCNYFWT",
+                    "hseq": "WENYCWP",
+                    "midline": "W NY W "
+                  }
+                ]
+              },
+              {
+                "num": 2,
+                "description": [
+                  {
+                    "id": "unnamed",
+                    "title": "unnamed protein product"
+                  }
+                ],
+                "len": 120,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 12.3122,
+                    "score": 20,
+                    "evalue": 2.33428,
+                    "identity": 4,
+                    "positive": 4,
+                    "query_from": 33,
+                    "query_to": 39,
+                    "hit_from": 15,
+                    "hit_to": 21,
+                    "align_len": 7,
+                    "gaps": 0,
+                    "qseq": "WCNYFWT",
+                    "hseq": "WENYCWP",
+                    "midline": "W NY W "
+                  }
+                ]
+              },
+              {
+                "num": 3,
+                "description": [
+                  {
+                    "id": "sd",
+                    "title": "sd last"
+                  }
+                ],
+                "len": 99,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 11.927,
+                    "score": 19,
+                    "evalue": 2.63893,
+                    "identity": 4,
+                    "positive": 4,
+                    "query_from": 33,
+                    "query_to": 39,
+                    "hit_from": 34,
+                    "hit_to": 40,
+                    "align_len": 7,
+                    "gaps": 0,
+                    "qseq": "WCNYFWT",
+                    "hseq": "WENYCWP",
+                    "midline": "W NY W "
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 12,
+              "eff_space": 9603,
+              "kappa": 0.041,
+              "lambda": 0.267,
+              "entropy": 0.14
+            }
+          }
+        ]
+      }
+    }
+  }
+]
+}

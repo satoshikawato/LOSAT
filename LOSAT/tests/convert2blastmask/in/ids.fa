@@ -1,0 +1,12 @@
+>NM_000001.1 a
+acgt
+>gi|123|gb|AAA12345.1| b
+acgt
+>ref|NP_000001.1| c
+MKVlll
+>lcl|x:10-20 d
+acgt
+>NP_000001.1 e
+acgtEFacgt
+>ref|NM_000002.1|
+ACGTEFacgtxACGT

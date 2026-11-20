@@ -1,0 +1,105 @@
+PSIBLAST 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for compositional score matrix adjustment: Stephen F.
+Altschul, John C. Wootton, E. Michael Gertz, Richa Agarwala,
+Aleksandr Morgulis, Alejandro A. Schaffer, and Yi-Kuo Yu (2005)
+"Protein database searches using compositionally adjusted
+substitution matrices", FEBS J. 272:5101-5109.
+
+
+Reference for composition-based statistics starting in round 2:
+Alejandro A. Schaffer, L. Aravind, Thomas L. Madden, Sergei
+Shavirin, John L. Spouge, Yuri I. Wolf, Eugene V. Koonin, and
+Stephen F. Altschul (2001), "Improving the accuracy of PSI-BLAST
+protein database searches with composition-based statistics and
+other refinements", Nucleic Acids Res. 29:2994-3005.
+
+
+
+Database: User specified sequence set.
+           86 sequences; 66,738 total letters
+
+Results from round 1
+
+
+Query= rnd random
+
+Length=30
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT63502.1 wsv161-like protein [Pasiphaea japonica whispovirus]       18.1    1.3  
+BDT63504.1 wsv199-like protein [Pasiphaea japonica whispovirus]       17.3    2.7  
+BDT63579.1 wsv343-like protein [Pasiphaea japonica whispovirus]       16.2    6.1  
+
+
+> BDT63502.1 wsv161-like protein [Pasiphaea japonica whispovirus]
+Length=794
+
+ Score = 18.1 bits (35),  Expect = 1.3, Method: Composition-based stats.
+ Identities = 5/9 (56%), Positives = 7/9 (78%), Gaps = 0/9 (0%)
+
+Query  12   NMHFWQCPY  20
+            + HF+Q PY
+Sbjct  599  HQHFYQQPY  607
+
+
+> BDT63504.1 wsv199-like protein [Pasiphaea japonica whispovirus]
+Length=986
+
+ Score = 17.3 bits (33),  Expect = 2.7, Method: Composition-based stats.
+ Identities = 4/5 (80%), Positives = 5/5 (100%), Gaps = 0/5 (0%)
+
+Query  12   NMHFW  16
+            N+HFW
+Sbjct  448  NIHFW  452
+
+
+> BDT63579.1 wsv343-like protein [Pasiphaea japonica whispovirus]
+Length=4023
+
+ Score = 16.2 bits (30),  Expect = 6.1, Method: Composition-based stats.
+ Identities = 5/14 (36%), Positives = 9/14 (64%), Gaps = 0/14 (0%)
+
+Query  10    RWNMHFWQCPYRGW  23
+             R N++ ++C  R W
+Sbjct  2105  RKNLNTFKCLERMW  2118
+
+
+ Score = 15.8 bits (29),  Expect = 8.9, Method: Composition-based stats.
+ Identities = 4/12 (33%), Positives = 6/12 (50%), Gaps = 0/12 (0%)
+
+Query  19    PYRGWTMHKWYQ  30
+             P     +HKW +
+Sbjct  1397  PDEALRLHKWVE  1408
+
+
+
+Lambda      K        H        a         alpha
+   0.332    0.142    0.742    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 1657700
+
+
+  Database: User specified sequence set.
+    Posted date:  Unknown
+  Number of letters in database: 66,738
+  Number of sequences in database:  86
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

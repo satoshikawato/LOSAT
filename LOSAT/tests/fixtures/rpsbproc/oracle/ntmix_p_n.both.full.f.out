@@ -1,0 +1,86 @@
+#Post-RPSBLAST Processing Utility
+
+#Input data file:	arch/ntmix_p_n.asn
+#Output data file:	(stdout)
+#Annotation data at:	nt
+#E-Value cutoff:	0.01
+#Redundancy:	Full
+#Data requested:	Domain hits and site annotations
+#Output format -- tab-delimited table
+#Show superfamilies: YES
+#DATA
+#SESSION	<session-ordinal>	<program>	<database>	<score-matrix>	<evalue-threshold>
+#QUERY	<query-id>	<seq-type>	<seq-length>	<definition-line>
+#DOMAINS
+#<session-ordinal>	<query-id[readingframe]>	<hit-type>	<PSSM-ID>	<from>	<to>	<E-Value>	<bitscore>	<accession>	<short-name>	<incomplete>	<superfamily PSSM-ID>
+#more such lines......
+#ENDDOMAINS
+#SITES
+#<session-ordinal>	<query-id[readingframe]>	<annot-type>	<title>	<residue(coordinates)>	<complete-size>	<mapped-size>	<source-domain>
+#more such lines......
+#ENDSITES
+#MOTIFS
+#<session-ordinal>	<query-id[readingframe]>	<title>	<from>	<to>	<source-domain>
+#more such lines......
+#ENDMOTIFS
+#ENDQUERY	<query-id>
+#more query sections..
+#ENDSESSION	<session-ordinal>
+#more session sections..
+#ENDDATA
+#=====================================================================
+DATA
+SESSION	1	blastp	2.17.0+	Cdd	BLOSUM62	0.01
+QUERY	Query_1	Peptide	185	NP_416542.1 dTDP-4-dehydrorhamnose 3,5-epimerase [Escherichia coli str. K-12 substr. MG1655]
+DOMAINS
+1	Query_1	Specific	273510	2	179	9.32362e-118	330.896	TIGR01221	rmlC	-	532251
+1	Query_1	Specific	441502	1	178	1.22914e-114	323.17	COG1898	RfbC	-	480982
+1	Query_1	Specific	513844	12	176	8.12583e-105	297.768	pfam00908	dTDP_sugar_isom	-	480982
+1	Query_1	Specific	380337	3	172	4.48011e-101	288.552	cd00438	cupin_RmlC	-	532251
+ENDDOMAINS
+SUPERFAMILIES
+1	Query_1	Superfamily	0	2	179	9.32362e-118	330.896	cl40423	cupin_RmlC-like	-	-
+ENDSUPERFAMILIES
+SITES
+1	Query_1	Specific	active site	N49,S51,H62,Q64,K72,H119,Y132,D169	8	8	380337
+1	Query_1	Specific	catalytic site	H62,K72,Y132	3	3	380337
+1	Query_1	Specific	homodimer interface	R23,G24,F25,F26,Y27,E28,S29,F30,N31,S33,Q47,D48,N49,H50,S51,R52,S53,S54,V57,R59,T77,K133,Y137,S166	24	24	380337
+ENDSITES
+ENDQUERY
+ENDSESSION	1
+SESSION	2	tblastn	2.17.0+	Cdd	BLOSUM62	0.01
+QUERY	Query_1	Nucleotide	1060	mg00094_467301-468360
+DOMAINS
+2	Query_1[1]	Specific	510757	121	927	0	566.629	NF011705	PRK15126	-	-
+2	Query_1[1]	Specific	272905	121	885	3.01176e-85	258.352	TIGR00099	Cof-subfamily	-	-
+2	Query_1[1]	Specific	319818	121	891	2.26214e-77	238.264	cd07516	HAD_Pase	-	531137
+2	Query_1[1]	Non-specific	507996	112	885	1.15864e-70	221.461	NF008213	PRK10976	-	-
+2	Query_1[1]	Specific	518158	127	885	6.29343e-59	190.902	pfam08282	Hydrolase_3	-	531137
+2	Query_1[1]	Specific	440327	112	894	3.99806e-55	178.791	COG0561	Cof	-	-
+2	Query_1[1]	Non-specific	273651	121	798	1.82702e-43	149.453	TIGR01484	HAD-SF-IIB	-	-
+2	Query_1[1]	Non-specific	319819	130	825	3.73614e-24	98.4489	cd07517	HAD_HPP	-	531137
+2	Query_1[1]	Non-specific	507600	112	825	1.98362e-20	89.7518	NF007806	PRK10513	-	-
+2	Query_1[1]	Non-specific	507614	115	855	1.44222e-19	87.3867	NF007821	PRK10530	-	-
+2	Query_1[1]	Non-specific	319820	118	873	8.31327e-17	77.6239	cd07518	HAD_YbiV-Like	-	531137
+2	Query_1[1]	Non-specific	215479	133	825	2.85756e-15	76.8366	PLN02887	PLN02887	N	-
+2	Query_1[1]	Non-specific	516633	115	831	4.45761e-15	73.8437	pfam05116	S6PP	-	-
+2	Query_1[1]	Non-specific	319792	121	882	8.10891e-15	73.1522	cd02605	HAD_SPP	-	531137
+2	Query_1[1]	Non-specific	512042	118	885	7.62358e-14	70.6611	NF045966	YcsE_rel_Pase	-	-
+2	Query_1[1]	Non-specific	440326	112	828	5.87026e-07	49.835	COG0560	SerB	-	-
+2	Query_1[1]	Non-specific	442983	112	888	1.03977e-06	49.4407	COG3769	YedP	-	-
+2	Query_1[1]	Non-specific	319763	130	351	3.52971e-06	45.4646	cd01427	HAD_like	C	531137
+2	Query_1[1]	Non-specific	513678	118	783	7.71227e-06	46.0269	pfam00702	Hydrolase	-	-
+2	Query_1[1]	Non-specific	319816	667	822	8.57418e-06	44.8877	cd07514	HAD_Pase	N	531137
+2	Query_1[1]	Non-specific	319810	133	312	0.00193636	39.6542	cd07507	HAD_Pase	C	531137
+2	Query_1[1]	Non-specific	240305	118	360	0.0039224	38.3946	PTZ00174	PTZ00174	C	531137
+2	Query_1[1]	Non-specific	178008	559	822	0.00469823	38.8124	PLN02382	PLN02382	NC	-
+ENDDOMAINS
+SUPERFAMILIES
+2	Query_1	Superfamily	0	121	891	2.26214e-77	238.264	cl21460	HAD_like	-	-
+ENDSUPERFAMILIES
+SITES
+2	Query_1[1]	Specific	active site	D133-135,M136-138,D139-141,G142-144,T145-147,T235-237,G238-240,K676-678,G742-744,D745-747,A748-750,N754-756,D757-759	13	0	319818
+ENDSITES
+ENDQUERY
+ENDSESSION	2
+ENDDATA

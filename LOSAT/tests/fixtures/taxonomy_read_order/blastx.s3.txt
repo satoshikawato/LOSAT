@@ -1,0 +1,137 @@
+BLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: txr_s (parsed Seq-ids)
+           3 sequences; 545 total letters
+
+
+
+Query= qn
+
+Length=750
+                                                                      Score   Total  Query    E      Max
+Sequences producing significant alignments:                          (Bits)   Score  cover   Value   Ident
+
+Error: [blastx] Error: Tax database file has wrong magic number.
+FFF00001.1 f_frag                                                     98.6     98.6   18%    2e-31   100%      
+AAA00001.1 a_title                                                    461      492    100%   2e-171  90%       
+DDD00001.1 decoy                                                      19.6     47.7   16%    0.12    39%       
+
+
+>FFF00001.1 f_frag
+Length=45
+
+ Score = 98.6 bits (244),  Expect = 2e-31, Method: Compositional matrix adjust.
+ Identities = 45/45 (100%), Positives = 45/45 (100%), Gaps = 0/45 (0%)
+ Frame = +1
+
+Query  1    RKNGRMWEGDCSSKFLNEYKVHDHDCSMDENQIKLSRRFHGGQNG  135
+            RKNGRMWEGDCSSKFLNEYKVHDHDCSMDENQIKLSRRFHGGQNG
+Sbjct  1    RKNGRMWEGDCSSKFLNEYKVHDHDCSMDENQIKLSRRFHGGQNG  45
+
+
+>AAA00001.1 a_title
+Length=250
+
+ Score = 461 bits (1186),  Expect = 2e-171, Method: Compositional matrix adjust.
+ Identities = 225/250 (90%), Positives = 227/250 (91%), Gaps = 0/250 (0%)
+ Frame = +1
+
+Query  1    RKNGRMWEGDCSSKFLNEYKVHDHDCSMDENQIKLSRRFHGGQNGSSHQLCFYKRPFEKA  180
+            RKNGRMWEGD SSKFLNEYKVHDHDCSMDENQ KLSR FHGGQNGSSH LCFYKRPFEK 
+Sbjct  1    RKNGRMWEGDQSSKFLNEYKVHDHDCSMDENQDKLSRNFHGGQNGSSHFLCFYKRPFEKT  60
+
+Query  181  PPDMVHSHRNSQLIAINVSKAHWGPGTWLEPVKLSQCDENTAEKEGRGTKDRGPVKLKEQ  360
+            PPDMVH+HRNSQLIAI VSKAHWGPGTWLEPVKLS CD NT EKEGRGTKDRGPVKLKEQ
+Sbjct  61   PPDMVHAHRNSQLIAIKVSKAHWGPGTWLEPVKLSDCDANTPEKEGRGTKDRGPVKLKEQ  120
+
+Query  361  TWWPGKMKITWIHMCNVCGIQTYALGWSTDPLKIAYTAIYIDMWRIWHVIMFSNSNWTNG  540
+            TWWPG MKITWIHM NVCGIQTYA GWSTDPLKIAYTAIYIDMWR W VIMFSN NWTNG
+Sbjct  121  TWWPGTMKITWIHMHNVCGIQTYAPGWSTDPLKIAYTAIYIDMWRQWGVIMFSNLNWTNG  180
+
+Query  541  TGRAPLRYAKIAIIKVLCMTAWNGIVPFGEMSIGHRHKDVKGPCICHNNHVPCRRKMTCD  720
+            TGRAPLRYAKIAIIKVLC+TA NGIV FGEMSIGHRHKDVK P ICHNN  P R KMTCD
+Sbjct  181  TGRAPLRYAKIAIIKVLCITASNGIVYFGEMSIGHRHKDVKSPPICHNNECPKRHKMTCD  240
+
+Query  721  WMHDTMHKWG  750
+            WMHDTMHKWG
+Sbjct  241  WMHDTMHKWG  250
+
+
+ Score = 14.2 bits (25),  Expect = 7.0, Method: Compositional matrix adjust.
+ Identities = 4/9 (44%), Positives = 5/9 (56%), Gaps = 0/9 (0%)
+ Frame = -1
+
+Query  750  TPFMHGIMH  724
+              +MH  MH
+Sbjct  239  CDWMHDTMH  247
+
+
+ Score = 16.5 bits (31),  Expect = 1.1, Method: Compositional matrix adjust.
+ Identities = 6/33 (18%), Positives = 15/33 (45%), Gaps = 2/33 (6%)
+ Frame = -1
+
+Query  585  FNNSNFSITQRSTTGTI--GPIAIAKHNHMPNT  493
+             ++ + +  ++   GT   GP+ + +    P T
+Sbjct  94   LSDCDANTPEKEGRGTKDRGPVKLKEQTWWPGT  126
+
+
+>DDD00001.1 decoy
+Length=250
+
+ Score = 14.2 bits (25),  Expect = 6.1, Method: Compositional matrix adjust.
+ Identities = 5/7 (71%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+ Frame = +3
+
+Query  381  ENYLDSY  401
+            ENY D Y
+Sbjct  187  ENYADHY  193
+
+
+ Score = 13.9 bits (24),  Expect = 9.9, Method: Compositional matrix adjust.
+ Identities = 6/15 (40%), Positives = 8/15 (53%), Gaps = 0/15 (0%)
+ Frame = +3
+
+Query  237  QSSLGSGYLAGTGET  281
+            +SSL     +GT  T
+Sbjct  204  RSSLDFEMKSGTAHT  218
+
+
+ Score = 19.6 bits (39),  Expect = 0.12, Method: Compositional matrix adjust.
+ Identities = 7/18 (39%), Positives = 9/18 (50%), Gaps = 0/18 (0%)
+ Frame = -3
+
+Query  181  ELFQTDVYKNTADGCYHS  128
+            E    + + N  D CYHS
+Sbjct  40   EWLVGEWWHNEVDWCYHS  57
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 101218
+
+
+  Database: txr_s (parsed Seq-ids)
+    Posted date:  Nov 13, 2026  9:29 PM
+  Number of letters in database: 545
+  Number of sequences in database:  3
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 12
+Window for multiple hits: 40

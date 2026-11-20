@@ -1,0 +1,630 @@
+Blast-db-mask-info ::= {
+  algo-id 1,
+  algo-program seg,
+  algo-options "window=12; locut=2.2; hicut=2.5",
+  masks {
+    masks {
+      int {
+        from 66,
+        to 73,
+        id local id 1
+      },
+      packed-int {
+        {
+          from 28,
+          to 47,
+          id gi 123
+        },
+        {
+          from 113,
+          to 123,
+          id gi 123
+        },
+        {
+          from 164,
+          to 176,
+          id gi 123
+        },
+        {
+          from 379,
+          to 386,
+          id gi 123
+        },
+        {
+          from 436,
+          to 444,
+          id gi 123
+        },
+        {
+          from 453,
+          to 469,
+          id gi 123
+        },
+        {
+          from 483,
+          to 493,
+          id gi 123
+        },
+        {
+          from 538,
+          to 552,
+          id gi 123
+        },
+        {
+          from 734,
+          to 745,
+          id gi 123
+        }
+      },
+      packed-int {
+        {
+          from 85,
+          to 96,
+          id local str "myid"
+        },
+        {
+          from 136,
+          to 145,
+          id local str "myid"
+        },
+        {
+          from 246,
+          to 251,
+          id local str "myid"
+        },
+        {
+          from 357,
+          to 370,
+          id local str "myid"
+        },
+        {
+          from 469,
+          to 478,
+          id local str "myid"
+        },
+        {
+          from 577,
+          to 589,
+          id local str "myid"
+        },
+        {
+          from 676,
+          to 695,
+          id local str "myid"
+        },
+        {
+          from 708,
+          to 715,
+          id local str "myid"
+        }
+      },
+      packed-int {
+        {
+          from 21,
+          to 36,
+          id other {
+            accession "NC_000001",
+            version 11
+          }
+        },
+        {
+          from 110,
+          to 122,
+          id other {
+            accession "NC_000001",
+            version 11
+          }
+        },
+        {
+          from 373,
+          to 381,
+          id other {
+            accession "NC_000001",
+            version 11
+          }
+        },
+        {
+          from 411,
+          to 422,
+          id other {
+            accession "NC_000001",
+            version 11
+          }
+        },
+        {
+          from 557,
+          to 567,
+          id other {
+            accession "NC_000001",
+            version 11
+          }
+        },
+        {
+          from 564,
+          to 575,
+          id other {
+            accession "NC_000001",
+            version 11
+          }
+        },
+        {
+          from 734,
+          to 745,
+          id other {
+            accession "NC_000001",
+            version 11
+          }
+        }
+      },
+      packed-int {
+        {
+          from 457,
+          to 471,
+          id swissprot {
+            name "NAME_HUMAN",
+            accession "P12345",
+            release "reviewed"
+          }
+        },
+        {
+          from 607,
+          to 615,
+          id swissprot {
+            name "NAME_HUMAN",
+            accession "P12345",
+            release "reviewed"
+          }
+        },
+        {
+          from 647,
+          to 654,
+          id swissprot {
+            name "NAME_HUMAN",
+            accession "P12345",
+            release "reviewed"
+          }
+        }
+      },
+      packed-int {
+        {
+          from 61,
+          to 73,
+          id local str "plainid"
+        },
+        {
+          from 120,
+          to 134,
+          id local str "plainid"
+        },
+        {
+          from 246,
+          to 252,
+          id local str "plainid"
+        },
+        {
+          from 294,
+          to 306,
+          id local str "plainid"
+        },
+        {
+          from 477,
+          to 487,
+          id local str "plainid"
+        },
+        {
+          from 532,
+          to 541,
+          id local str "plainid"
+        },
+        {
+          from 608,
+          to 618,
+          id local str "plainid"
+        },
+        {
+          from 732,
+          to 742,
+          id local str "plainid"
+        }
+      },
+      packed-int {
+        {
+          from 48,
+          to 67,
+          id local str "id_trailing_period"
+        },
+        {
+          from 283,
+          to 290,
+          id local str "id_trailing_period"
+        },
+        {
+          from 422,
+          to 430,
+          id local str "id_trailing_period"
+        },
+        {
+          from 508,
+          to 527,
+          id local str "id_trailing_period"
+        }
+      },
+      packed-int {
+        {
+          from 81,
+          to 91,
+          id local str "id_tab"
+        },
+        {
+          from 105,
+          to 116,
+          id local str "id_tab"
+        },
+        {
+          from 150,
+          to 156,
+          id local str "id_tab"
+        },
+        {
+          from 336,
+          to 353,
+          id local str "id_tab"
+        },
+        {
+          from 370,
+          to 379,
+          id local str "id_tab"
+        },
+        {
+          from 701,
+          to 712,
+          id local str "id_tab"
+        }
+      },
+      packed-int {
+        {
+          from 7,
+          to 17,
+          id general {
+            db "db",
+            tag id 123
+          }
+        },
+        {
+          from 98,
+          to 105,
+          id general {
+            db "db",
+            tag id 123
+          }
+        },
+        {
+          from 158,
+          to 171,
+          id general {
+            db "db",
+            tag id 123
+          }
+        },
+        {
+          from 294,
+          to 312,
+          id general {
+            db "db",
+            tag id 123
+          }
+        },
+        {
+          from 372,
+          to 387,
+          id general {
+            db "db",
+            tag id 123
+          }
+        },
+        {
+          from 532,
+          to 540,
+          id general {
+            db "db",
+            tag id 123
+          }
+        },
+        {
+          from 567,
+          to 584,
+          id general {
+            db "db",
+            tag id 123
+          }
+        },
+        {
+          from 616,
+          to 631,
+          id general {
+            db "db",
+            tag id 123
+          }
+        },
+        {
+          from 671,
+          to 676,
+          id general {
+            db "db",
+            tag id 123
+          }
+        },
+        {
+          from 733,
+          to 739,
+          id general {
+            db "db",
+            tag id 123
+          }
+        }
+      },
+      packed-int {
+        {
+          from 22,
+          to 33,
+          id local str "id_only"
+        },
+        {
+          from 60,
+          to 75,
+          id local str "id_only"
+        },
+        {
+          from 166,
+          to 177,
+          id local str "id_only"
+        },
+        {
+          from 282,
+          to 292,
+          id local str "id_only"
+        },
+        {
+          from 306,
+          to 311,
+          id local str "id_only"
+        },
+        {
+          from 327,
+          to 331,
+          id local str "id_only"
+        },
+        {
+          from 353,
+          to 361,
+          id local str "id_only"
+        },
+        {
+          from 399,
+          to 409,
+          id local str "id_only"
+        },
+        {
+          from 477,
+          to 489,
+          id local str "id_only"
+        },
+        {
+          from 670,
+          to 678,
+          id local str "id_only"
+        },
+        {
+          from 738,
+          to 749,
+          id local str "id_only"
+        }
+      },
+      packed-int {
+        {
+          from 27,
+          to 33,
+          id pdb {
+            mol "1ABC",
+            chain 65,
+            chain-id "A"
+          }
+        },
+        {
+          from 191,
+          to 198,
+          id pdb {
+            mol "1ABC",
+            chain 65,
+            chain-id "A"
+          }
+        },
+        {
+          from 471,
+          to 478,
+          id pdb {
+            mol "1ABC",
+            chain 65,
+            chain-id "A"
+          }
+        },
+        {
+          from 532,
+          to 547,
+          id pdb {
+            mol "1ABC",
+            chain 65,
+            chain-id "A"
+          }
+        },
+        {
+          from 690,
+          to 697,
+          id pdb {
+            mol "1ABC",
+            chain 65,
+            chain-id "A"
+          }
+        }
+      },
+      packed-int {
+        {
+          from 21,
+          to 28,
+          id embl {
+            name ";",
+            accession "X1234",
+            version 1
+          }
+        },
+        {
+          from 46,
+          to 74,
+          id embl {
+            name ";",
+            accession "X1234",
+            version 1
+          }
+        },
+        {
+          from 156,
+          to 171,
+          id embl {
+            name ";",
+            accession "X1234",
+            version 1
+          }
+        },
+        {
+          from 253,
+          to 260,
+          id embl {
+            name ";",
+            accession "X1234",
+            version 1
+          }
+        },
+        {
+          from 348,
+          to 362,
+          id embl {
+            name ";",
+            accession "X1234",
+            version 1
+          }
+        },
+        {
+          from 496,
+          to 506,
+          id embl {
+            name ";",
+            accession "X1234",
+            version 1
+          }
+        },
+        {
+          from 559,
+          to 571,
+          id embl {
+            name ";",
+            accession "X1234",
+            version 1
+          }
+        },
+        {
+          from 591,
+          to 610,
+          id embl {
+            name ";",
+            accession "X1234",
+            version 1
+          }
+        },
+        {
+          from 692,
+          to 704,
+          id embl {
+            name ";",
+            accession "X1234",
+            version 1
+          }
+        }
+      },
+      packed-int {
+        {
+          from 102,
+          to 110,
+          id local id 123456
+        },
+        {
+          from 136,
+          to 149,
+          id local id 123456
+        },
+        {
+          from 288,
+          to 298,
+          id local id 123456
+        },
+        {
+          from 426,
+          to 431,
+          id local id 123456
+        },
+        {
+          from 561,
+          to 571,
+          id local id 123456
+        },
+        {
+          from 702,
+          to 709,
+          id local id 123456
+        }
+      },
+      packed-int {
+        {
+          from 38,
+          to 43,
+          id local str "id"
+        },
+        {
+          from 94,
+          to 111,
+          id local str "id"
+        },
+        {
+          from 155,
+          to 165,
+          id local str "id"
+        },
+        {
+          from 255,
+          to 266,
+          id local str "id"
+        },
+        {
+          from 420,
+          to 428,
+          id local str "id"
+        },
+        {
+          from 485,
+          to 491,
+          id local str "id"
+        },
+        {
+          from 507,
+          to 535,
+          id local str "id"
+        },
+        {
+          from 635,
+          to 643,
+          id local str "id"
+        }
+      }
+    },
+    more FALSE
+  }
+}

@@ -1,0 +1,246 @@
+BLASTN 2.17.0+
+
+
+Reference: Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb
+Miller (2000), "A greedy algorithm for aligning DNA sequences", J
+Comput Biol 2000; 7(1-2):203-14.
+
+
+
+Database: nucleotide slices of two viruses
+           6 sequences; 27,511 total letters
+
+
+
+Query= dup2 first
+
+Length=400
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+a_l6k exact slice of LC738875                                         739     0.0   
+a_mut_8pct substitutions and indels                                   538     8e-156
+b_p6k slice of AP027202                                               516     4e-149
+
+
+>a_l6k exact slice of LC738875
+Length=6000
+
+ Score = 739 bits (400),  Expect = 0.0
+ Identities = 400/400 (100%), Gaps = 0/400 (0%)
+ Strand=Plus/Plus
+
+Query  1     TATGGGCTTGAACATTGTTAAGTACATATATCACTTATACTGAGGACTTCATGTGAGAAT  60
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  1001  TATGGGCTTGAACATTGTTAAGTACATATATCACTTATACTGAGGACTTCATGTGAGAAT  1060
+
+Query  61    AATCACATTTATATACTTGAACATTTTAAAGTACGTGTATTACACAAACACACACATGGA  120
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  1061  AATCACATTTATATACTTGAACATTTTAAAGTACGTGTATTACACAAACACACACATGGA  1120
+
+Query  121   CTACCACATATAAATAATAATATATACAAAAGTATTCATATGTAGTAATATTCGTGCAAA  180
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  1121  CTACCACATATAAATAATAATATATACAAAAGTATTCATATGTAGTAATATTCGTGCAAA  1180
+
+Query  181   GGTAACTCACTTTTGGGTTGGCTTTCCTAGACGTCTTACTTGTAATCGTATATCGGTCGT  240
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  1181  GGTAACTCACTTTTGGGTTGGCTTTCCTAGACGTCTTACTTGTAATCGTATATCGGTCGT  1240
+
+Query  241   TGAAGTACATCTAGATGGAAAATCGTTATTTGAGTTATGTGAATATGCAGTTTTGGACAC  300
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  1241  TGAAGTACATCTAGATGGAAAATCGTTATTTGAGTTATGTGAATATGCAGTTTTGGACAC  1300
+
+Query  301   TATGAATATTCGAAAATAACTTCGATCATGAATATACCAAAATAAAGAACAAAAACATAA  360
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  1301  TATGAATATTCGAAAATAACTTCGATCATGAATATACCAAAATAAAGAACAAAAACATAA  1360
+
+Query  361   AAGGTCACGAGGGAATGGTATATGATAATTAGAATGTTTC  400
+             ||||||||||||||||||||||||||||||||||||||||
+Sbjct  1361  AAGGTCACGAGGGAATGGTATATGATAATTAGAATGTTTC  1400
+
+
+>a_mut_8pct substitutions and indels
+Length=6011
+
+ Score = 538 bits (291),  Expect = 8e-156
+ Identities = 363/399 (91%), Gaps = 0/399 (0%)
+ Strand=Plus/Plus
+
+Query  2     ATGGGCTTGAACATTGTTAAGTACATATATCACTTATACTGAGGACTTCATGTGAGAATA  61
+             |||||  ||||||||| ||||||| | |||||||||||||||||||||||||||||||||
+Sbjct  1002  ATGGGAATGAACATTGCTAAGTACCTTTATCACTTATACTGAGGACTTCATGTGAGAATA  1061
+
+Query  62    ATCACATTTATATACTTGAACATTTTAAAGTACGTGTATTACACAAACACACACATGGAC  121
+             |||||||||||||||| |  |||| ||||||||||||| ||||||| || ||||||||||
+Sbjct  1062  ATCACATTTATATACTGGCGCATTGTAAAGTACGTGTAATACACAACCAAACACATGGAC  1121
+
+Query  122   TACCACATATAAATAATAATATATACAAAAGTATTCATATGTAGTAATATTCGTGCAAAG  181
+             | ||||||||||||||||||||||||||||||||||||||||| ||| ||||||||||||
+Sbjct  1122  TGCCACATATAAATAATAATATATACAAAAGTATTCATATGTACTAAAATTCGTGCAAAG  1181
+
+Query  182   GTAACTCACTTTTGGGTTGGCTTTCCTAGACGTCTTACTTGTAATCGTATATCGGTCGTT  241
+               |||||| |||||||||||||||||||||||||||||||||||||||| ||   |||||
+Sbjct  1182  CGAACTCATTTTTGGGTTGGCTTTCCTAGACGTCTTACTTGTAATCGTAAATTCTTCGTT  1241
+
+Query  242   GAAGTACATCTAGATGGAAAATCGTTATTTGAGTTATGTGAATATGCAGTTTTGGACACT  301
+             |||||||||||||||||||||||||||||||||||||||||||||||||| |||||||| 
+Sbjct  1242  GAAGTACATCTAGATGGAAAATCGTTATTTGAGTTATGTGAATATGCAGTCTTGGACACG  1301
+
+Query  302   ATGAATATTCGAAAATAACTTCGATCATGAATATACCAAAATAAAGAACAAAAACATAAA  361
+              |||||||| |||||||||||  |||||||||||||||||||| ||||| ||||||||||
+Sbjct  1302  GTGAATATTGGAAAATAACTTTAATCATGAATATACCAAAATATAGAACTAAAACATAAA  1361
+
+Query  362   AGGTCACGAGGGAATGGTATATGATAATTAGAATGTTTC  400
+             |||| |||| ||||||||| |||| ||| ||| ||||||
+Sbjct  1362  AGGTAACGATGGAATGGTACATGAAAATAAGATTGTTTC  1400
+
+
+>b_p6k slice of AP027202
+Length=6000
+
+ Score = 516 bits (279),  Expect = 4e-149
+ Identities = 362/400 (91%), Gaps = 13/400 (3%)
+ Strand=Plus/Plus
+
+Query  1     TATGGGCTTGAACATTGTTAAGTACATATATCACTTATACTGAGGACTTCATGTGAGAAT  60
+             |||| ||||||||||||||||||| ||||||||| |||||||||||||||| ||||||| 
+Sbjct  1062  TATGTGCTTGAACATTGTTAAGTAGATATATCACATATACTGAGGACTTCACGTGAGAAC  1121
+
+Query  61    AATCACATTTATATACTTGAACATTTTAAAGTACGTGTATTACACAAACACACACATGGA  120
+             |||||||||||||| ||||||| || | ||||||||||| |           ||||||||
+Sbjct  1122  AATCACATTTATATGCTTGAACGTTGTTAAGTACGTGTA-T-----------CACATGGA  1169
+
+Query  121   CTACCACATATAAATAATAATATATACAAAAGTATTCATATGTAGTAATATTCGTGCAAA  180
+             |||||||||||||| ||||||||||||||||  || || || ||||||||||||||||||
+Sbjct  1170  CTACCACATATAAACAATAATATATACAAAATCATGCACATATAGTAATATTCGTGCAAA  1229
+
+Query  181   GGTAACTCACTTTTGGGTTGGCTTTCCTAGACGTCTTACTTGTAATCGTATATCGGTCGT  240
+              ||||||||||||||||| |||||||||||||||||| ||||||||||||||||||||||
+Sbjct  1230  CGTAACTCACTTTTGGGTCGGCTTTCCTAGACGTCTTCCTTGTAATCGTATATCGGTCGT  1289
+
+Query  241   TGAAGTACATCTAGATGGAAAATCGTTATTTGAGTTATGTGAATATGCAGTTTTGGACAC  300
+             |||||| ||||||||||||||||||||||||| ||||||||||||||||| |||||||||
+Sbjct  1290  TGAAGTGCATCTAGATGGAAAATCGTTATTTGTGTTATGTGAATATGCAG-TTTGGACAC  1348
+
+Query  301   TATGAATATTCGAAAATAACTTCGATCATGAATATACCAAAATAAAGAACAAAAACATAA  360
+             ||||||||||||||||||||| ||||||||||||| ||||||||||||||||||| ||||
+Sbjct  1349  TATGAATATTCGAAAATAACTACGATCATGAATATCCCAAAATAAAGAACAAAAATATAA  1408
+
+Query  361   AAGGTCACGAGGGAATGGTATATGATAATTAGAATGTTTC  400
+             ||||||||||||||||||| |||||||||| |||||||||
+Sbjct  1409  AAGGTCACGAGGGAATGGTGTATGATAATTTGAATGTTTC  1448
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 10527360
+
+
+Query= dup2 second
+
+Length=400
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+b_p6k slice of AP027202                                               739     0.0   
+a_l6k exact slice of LC738875                                         540     2e-156
+
+
+>b_p6k slice of AP027202
+Length=6000
+
+ Score = 739 bits (400),  Expect = 0.0
+ Identities = 400/400 (100%), Gaps = 0/400 (0%)
+ Strand=Plus/Plus
+
+Query  1     TTAGATGGGTAATTGACTTTATTACCTCTTCCTGAGGACTTCACCTGAAATTTATCACGT  60
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  1001  TTAGATGGGTAATTGACTTTATTACCTCTTCCTGAGGACTTCACCTGAAATTTATCACGT  1060
+
+Query  61    TTATGTGCTTGAACATTGTTAAGTAGATATATCACATATACTGAGGACTTCACGTGAGAA  120
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  1061  TTATGTGCTTGAACATTGTTAAGTAGATATATCACATATACTGAGGACTTCACGTGAGAA  1120
+
+Query  121   CAATCACATTTATATGCTTGAACGTTGTTAAGTACGTGTATCACATGGACTACCACATAT  180
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  1121  CAATCACATTTATATGCTTGAACGTTGTTAAGTACGTGTATCACATGGACTACCACATAT  1180
+
+Query  181   AAACAATAATATATACAAAATCATGCACATATAGTAATATTCGTGCAAACGTAACTCACT  240
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  1181  AAACAATAATATATACAAAATCATGCACATATAGTAATATTCGTGCAAACGTAACTCACT  1240
+
+Query  241   TTTGGGTCGGCTTTCCTAGACGTCTTCCTTGTAATCGTATATCGGTCGTTGAAGTGCATC  300
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  1241  TTTGGGTCGGCTTTCCTAGACGTCTTCCTTGTAATCGTATATCGGTCGTTGAAGTGCATC  1300
+
+Query  301   TAGATGGAAAATCGTTATTTGTGTTATGTGAATATGCAGTTTGGACACTATGAATATTCG  360
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  1301  TAGATGGAAAATCGTTATTTGTGTTATGTGAATATGCAGTTTGGACACTATGAATATTCG  1360
+
+Query  361   AAAATAACTACGATCATGAATATCCCAAAATAAAGAACAA  400
+             ||||||||||||||||||||||||||||||||||||||||
+Sbjct  1361  AAAATAACTACGATCATGAATATCCCAAAATAAAGAACAA  1400
+
+
+>a_l6k exact slice of LC738875
+Length=6000
+
+ Score = 540 bits (292),  Expect = 2e-156
+ Identities = 375/413 (91%), Gaps = 13/413 (3%)
+ Strand=Plus/Plus
+
+Query  1     TTAGATGGGTAATTGACTTTATTACCTCTTCCTGAGGACTTCACCTGAAATTTATCACGT  60
+             |||| ||||||||||| ||||||||||||||||||||||||||||||||||| |||||||
+Sbjct  940   TTAGGTGGGTAATTGAGTTTATTACCTCTTCCTGAGGACTTCACCTGAAATTAATCACGT  999
+
+Query  61    TTATGTGCTTGAACATTGTTAAGTAGATATATCACATATACTGAGGACTTCACGTGAGAA  120
+             ||||| ||||||||||||||||||| ||||||||| |||||||||||||||| |||||||
+Sbjct  1000  TTATGGGCTTGAACATTGTTAAGTACATATATCACTTATACTGAGGACTTCATGTGAGAA  1059
+
+Query  121   CAATCACATTTATATGCTTGAACGTTGTTAAGTACGTGTA-T-----------CACATGG  168
+              |||||||||||||| ||||||| || | ||||||||||| |           |||||||
+Sbjct  1060  TAATCACATTTATATACTTGAACATTTTAAAGTACGTGTATTACACAAACACACACATGG  1119
+
+Query  169   ACTACCACATATAAACAATAATATATACAAAATCATGCACATATAGTAATATTCGTGCAA  228
+             ||||||||||||||| ||||||||||||||||  || || || |||||||||||||||||
+Sbjct  1120  ACTACCACATATAAATAATAATATATACAAAAGTATTCATATGTAGTAATATTCGTGCAA  1179
+
+Query  229   ACGTAACTCACTTTTGGGTCGGCTTTCCTAGACGTCTTCCTTGTAATCGTATATCGGTCG  288
+             | ||||||||||||||||| |||||||||||||||||| |||||||||||||||||||||
+Sbjct  1180  AGGTAACTCACTTTTGGGTTGGCTTTCCTAGACGTCTTACTTGTAATCGTATATCGGTCG  1239
+
+Query  289   TTGAAGTGCATCTAGATGGAAAATCGTTATTTGTGTTATGTGAATATGCAG-TTTGGACA  347
+             ||||||| ||||||||||||||||||||||||| ||||||||||||||||| ||||||||
+Sbjct  1240  TTGAAGTACATCTAGATGGAAAATCGTTATTTGAGTTATGTGAATATGCAGTTTTGGACA  1299
+
+Query  348   CTATGAATATTCGAAAATAACTACGATCATGAATATCCCAAAATAAAGAACAA  400
+             |||||||||||||||||||||| ||||||||||||| ||||||||||||||||
+Sbjct  1300  CTATGAATATTCGAAAATAACTTCGATCATGAATATACCAAAATAAAGAACAA  1352
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 10527360
+
+
+  Database: nucleotide slices of two viruses
+    Posted date:  Oct 15, 2026  2:47 PM
+  Number of letters in database: 27,511
+  Number of sequences in database:  6
+
+
+
+Matrix: blastn matrix 1 -2
+Gap Penalties: Existence: 0, Extension: 2.5

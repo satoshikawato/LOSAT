@@ -1,4 +1,4 @@
-//! EXPERIMENT (LOSAT_X_DPCAPTURE=<dir>, LOSAT_X_DPCAPTURE_EVERY=<n>, default 25): diagnostic
+//! EXPERIMENT (`LOSAT_X_DPCAPTURE=<dir>`, `LOSAT_X_DPCAPTURE_EVERY=<n>`, default 25): diagnostic
 //! capture of the X-drop DP problems that reach `xdrop_align`, for the replay benchmark of the
 //! vector kernels (`LOSAT_X_DPREPLAY`, test `replay_captured_problems` in `x_xdrop_avx2.rs`).
 //!
@@ -44,11 +44,14 @@ struct Config {
 }
 
 fn config() -> Option<&'static Config> {
+    if !crate::utils::xdiag::ON {
+        return None;
+    }
     static CONFIG: OnceLock<Option<Config>> = OnceLock::new();
     CONFIG
         .get_or_init(|| {
-            let dir = std::env::var_os("LOSAT_X_DPCAPTURE")?;
-            let every = std::env::var("LOSAT_X_DPCAPTURE_EVERY")
+            let dir = crate::utils::xdiag::var_os("LOSAT_X_DPCAPTURE")?;
+            let every = crate::utils::xdiag::var("LOSAT_X_DPCAPTURE_EVERY")
                 .ok()
                 .and_then(|v| v.parse::<u64>().ok())
                 .filter(|&n| n >= 1)
@@ -230,10 +233,7 @@ pub(super) fn record(
     FILE.with(|cell| {
         let mut file = cell.borrow_mut();
         if file.is_none() {
-            #[cfg(not(target_family = "wasm"))]
-            let pid = std::process::id();
-            #[cfg(target_family = "wasm")]
-            let pid = 0u32;
+            let pid = crate::utils::process_id::process_id();
             let k = NEXT_FILE.fetch_add(1, Ordering::Relaxed);
             let path = cfg.dir.join(format!("xdp-{pid}-t{k:03}.xdp"));
             let opened = std::fs::create_dir_all(&cfg.dir).and_then(|()| {
@@ -325,6 +325,7 @@ impl Captured {
     }
 
     /// Replays the call through `xdrop_align` with the forward `Bytes` rows and columns.
+    #[cfg(target_arch = "x86_64")]
     pub(super) fn replay(&self, sc: &mut super::XdropScratch) -> Option<XdropResult> {
         super::xdrop_align(
             &self.row_seq(),
@@ -525,7 +526,10 @@ mod tests {
             &ops,
         )
         .unwrap();
-        let dir = std::env::temp_dir().join(format!("losat-xdp-test-{}", std::process::id()));
+        let dir = crate::utils::test_dir::temp_dir().join(format!(
+            "losat-xdp-test-{}",
+            crate::utils::test_dir::process_id()
+        ));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("xdp-test.xdp");
         std::fs::write(&path, [buf.clone(), buf].concat()).unwrap();

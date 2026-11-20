@@ -31,3 +31,19 @@ export function siteHeaders(): Record<string, string> {
   if (headers === undefined) throw new Error('_headers has no "/*" rule');
   return headers;
 }
+
+/**
+ * The headers of one site path: those of every rule that matches it, in file order. A rule
+ * matches its exact path, or every path that starts with it before a final `*`.
+ */
+export function pathHeaders(
+  path: string,
+  rules: Map<string, Record<string, string>> = parseHeadersFile(readFileSync(HEADERS_FILE, 'utf8')),
+): Record<string, string> {
+  const headers: Record<string, string> = {};
+  for (const [pattern, values] of rules) {
+    const matches = pattern.endsWith('*') ? path.startsWith(pattern.slice(0, -1)) : path === pattern;
+    if (matches) Object.assign(headers, values);
+  }
+  return headers;
+}

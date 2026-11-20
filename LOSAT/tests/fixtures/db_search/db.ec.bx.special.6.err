@@ -1,0 +1,4 @@
+Warning: [blastx] To obtain better run time performance, please run blastdb_aliastool -seqid_file_in <INPUT_FILE_NAME> -seqid_file_out <OUT_FILE_NAME> and use <OUT_FILE_NAME> as the argument to -seqidlist
+Warning: [blastx] Query_1 alln only N: Filtering resulted in an empty database. 
+Warning: [blastx] Query_2 nothing: Sequence contains no data Filtering resulted in an empty database. 
+Warning: [blastx] Query_3 valid after them: Filtering resulted in an empty database. 

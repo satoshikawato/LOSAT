@@ -4,7 +4,7 @@
 
 LOSAT の段階 E2c を実行する。BLASTN（LOSATN）の得点のオプション（`-reward`、`-penalty`、`-gapopen`、`-gapextend`）のうち、認証済みの既定の組合せ以外を、NCBI と同じにするか、明示的に拒否するセッションである。先に [セッション README](README.md) の共通規則を読み、特に規則 4（`AGENTS.md`、`verify-ncbi-parity-and-speed`）に従う。完了条件の正本は、総合計画書 §7 の S07+ の行である。
 
-現状（S06 の `docs/evidence/losat_web_e2a/AUTHORITY.md` §D.5）：認証済みの BLASTN の fixture は、各 task の既定の得点（blastn：reward 2、penalty −3、gap 5/2。megablast：reward 1、penalty −2、gap 0/0）だけを使う。`docs/evidence/losat_web_e2a/scoring_sweep.py` で、10 の reward / penalty の組 × 4 の gap の設定 × 2 つの task を outfmt 6 で比べた結果（`docs/evidence/losat_web_e2a/run-20260929T000046Z/scoring-sweep-edf825d36.tsv`）：
+現状（S06 の `docs/evidence/losat_web_e2a/AUTHORITY.md` §D.5）：認証済みの BLASTN の fixture は、各 task の既定の得点（blastn：reward 2、penalty −3、gap 5/2。megablast：reward 1、penalty −2、gap 0/0）だけを使う。`docs/evidence/losat_web_e2a/scoring_sweep.py` で、10 の reward / penalty の組 × 4 の gap の設定 × 2 つの task を outfmt 6 で比べた結果（`docs/evidence/losat_web_e2a/run-20260929T000046Z/scoring-sweep-edf825d36.tsv`。2026-10-23 にリリース資産へ移動：[ARCHIVED.md](../evidence/losat_web_e2a/ARCHIVED.md)）：
 
 - NCBI が拒否する 34 の組合せを、LOSAT は受け付けて実行する。NCBI の文言は `Gap existence and extension values … are not supported for substitution scores …`（`c++/src/algo/blast/core/blast_stat.c:3916-3919`）と `Greedy extension must be used if gap existence and extension options are zero`（`c++/src/algo/blast/core/blast_options.c:1701-1709`）。
 - NCBI が受け付ける 17 の組合せで、HSP か得点が違う。どれも reward 1 で gap が 0 でない。

@@ -1,0 +1,501 @@
+Seq-loc ::= int {
+  from 66,
+  to 73,
+  id local id 1
+}
+Seq-loc ::= packed-int {
+  {
+    from 28,
+    to 47,
+    id local id 2
+  },
+  {
+    from 113,
+    to 123,
+    id local id 2
+  },
+  {
+    from 164,
+    to 176,
+    id local id 2
+  },
+  {
+    from 379,
+    to 386,
+    id local id 2
+  },
+  {
+    from 436,
+    to 444,
+    id local id 2
+  },
+  {
+    from 453,
+    to 469,
+    id local id 2
+  },
+  {
+    from 483,
+    to 493,
+    id local id 2
+  },
+  {
+    from 538,
+    to 552,
+    id local id 2
+  },
+  {
+    from 734,
+    to 745,
+    id local id 2
+  }
+}
+Seq-loc ::= packed-int {
+  {
+    from 85,
+    to 96,
+    id local id 3
+  },
+  {
+    from 136,
+    to 145,
+    id local id 3
+  },
+  {
+    from 246,
+    to 251,
+    id local id 3
+  },
+  {
+    from 357,
+    to 370,
+    id local id 3
+  },
+  {
+    from 469,
+    to 478,
+    id local id 3
+  },
+  {
+    from 577,
+    to 589,
+    id local id 3
+  },
+  {
+    from 676,
+    to 695,
+    id local id 3
+  },
+  {
+    from 708,
+    to 715,
+    id local id 3
+  }
+}
+Seq-loc ::= packed-int {
+  {
+    from 21,
+    to 36,
+    id local id 4
+  },
+  {
+    from 110,
+    to 122,
+    id local id 4
+  },
+  {
+    from 373,
+    to 381,
+    id local id 4
+  },
+  {
+    from 411,
+    to 422,
+    id local id 4
+  },
+  {
+    from 557,
+    to 567,
+    id local id 4
+  },
+  {
+    from 564,
+    to 575,
+    id local id 4
+  },
+  {
+    from 734,
+    to 745,
+    id local id 4
+  }
+}
+Seq-loc ::= packed-int {
+  {
+    from 457,
+    to 471,
+    id local id 5
+  },
+  {
+    from 607,
+    to 615,
+    id local id 5
+  },
+  {
+    from 647,
+    to 654,
+    id local id 5
+  }
+}
+Seq-loc ::= packed-int {
+  {
+    from 61,
+    to 73,
+    id local id 6
+  },
+  {
+    from 120,
+    to 134,
+    id local id 6
+  },
+  {
+    from 246,
+    to 252,
+    id local id 6
+  },
+  {
+    from 294,
+    to 306,
+    id local id 6
+  },
+  {
+    from 477,
+    to 487,
+    id local id 6
+  },
+  {
+    from 532,
+    to 541,
+    id local id 6
+  },
+  {
+    from 608,
+    to 618,
+    id local id 6
+  },
+  {
+    from 732,
+    to 742,
+    id local id 6
+  }
+}
+Seq-loc ::= packed-int {
+  {
+    from 48,
+    to 67,
+    id local id 7
+  },
+  {
+    from 283,
+    to 290,
+    id local id 7
+  },
+  {
+    from 422,
+    to 430,
+    id local id 7
+  },
+  {
+    from 508,
+    to 527,
+    id local id 7
+  }
+}
+Seq-loc ::= packed-int {
+  {
+    from 81,
+    to 91,
+    id local id 8
+  },
+  {
+    from 105,
+    to 116,
+    id local id 8
+  },
+  {
+    from 150,
+    to 156,
+    id local id 8
+  },
+  {
+    from 336,
+    to 353,
+    id local id 8
+  },
+  {
+    from 370,
+    to 379,
+    id local id 8
+  },
+  {
+    from 701,
+    to 712,
+    id local id 8
+  }
+}
+Seq-loc ::= packed-int {
+  {
+    from 7,
+    to 17,
+    id local id 9
+  },
+  {
+    from 98,
+    to 105,
+    id local id 9
+  },
+  {
+    from 158,
+    to 171,
+    id local id 9
+  },
+  {
+    from 294,
+    to 312,
+    id local id 9
+  },
+  {
+    from 372,
+    to 387,
+    id local id 9
+  },
+  {
+    from 532,
+    to 540,
+    id local id 9
+  },
+  {
+    from 567,
+    to 584,
+    id local id 9
+  },
+  {
+    from 616,
+    to 631,
+    id local id 9
+  },
+  {
+    from 671,
+    to 676,
+    id local id 9
+  },
+  {
+    from 733,
+    to 739,
+    id local id 9
+  }
+}
+Seq-loc ::= packed-int {
+  {
+    from 22,
+    to 33,
+    id local id 10
+  },
+  {
+    from 60,
+    to 75,
+    id local id 10
+  },
+  {
+    from 166,
+    to 177,
+    id local id 10
+  },
+  {
+    from 282,
+    to 292,
+    id local id 10
+  },
+  {
+    from 306,
+    to 311,
+    id local id 10
+  },
+  {
+    from 327,
+    to 331,
+    id local id 10
+  },
+  {
+    from 353,
+    to 361,
+    id local id 10
+  },
+  {
+    from 399,
+    to 409,
+    id local id 10
+  },
+  {
+    from 477,
+    to 489,
+    id local id 10
+  },
+  {
+    from 670,
+    to 678,
+    id local id 10
+  },
+  {
+    from 738,
+    to 749,
+    id local id 10
+  }
+}
+Seq-loc ::= packed-int {
+  {
+    from 27,
+    to 33,
+    id local id 11
+  },
+  {
+    from 191,
+    to 198,
+    id local id 11
+  },
+  {
+    from 471,
+    to 478,
+    id local id 11
+  },
+  {
+    from 532,
+    to 547,
+    id local id 11
+  },
+  {
+    from 690,
+    to 697,
+    id local id 11
+  }
+}
+Seq-loc ::= packed-int {
+  {
+    from 21,
+    to 28,
+    id local id 12
+  },
+  {
+    from 46,
+    to 74,
+    id local id 12
+  },
+  {
+    from 156,
+    to 171,
+    id local id 12
+  },
+  {
+    from 253,
+    to 260,
+    id local id 12
+  },
+  {
+    from 348,
+    to 362,
+    id local id 12
+  },
+  {
+    from 496,
+    to 506,
+    id local id 12
+  },
+  {
+    from 559,
+    to 571,
+    id local id 12
+  },
+  {
+    from 591,
+    to 610,
+    id local id 12
+  },
+  {
+    from 692,
+    to 704,
+    id local id 12
+  }
+}
+Seq-loc ::= packed-int {
+  {
+    from 102,
+    to 110,
+    id local id 13
+  },
+  {
+    from 136,
+    to 149,
+    id local id 13
+  },
+  {
+    from 288,
+    to 298,
+    id local id 13
+  },
+  {
+    from 426,
+    to 431,
+    id local id 13
+  },
+  {
+    from 561,
+    to 571,
+    id local id 13
+  },
+  {
+    from 702,
+    to 709,
+    id local id 13
+  }
+}
+Seq-loc ::= packed-int {
+  {
+    from 38,
+    to 43,
+    id local id 14
+  },
+  {
+    from 94,
+    to 111,
+    id local id 14
+  },
+  {
+    from 155,
+    to 165,
+    id local id 14
+  },
+  {
+    from 255,
+    to 266,
+    id local id 14
+  },
+  {
+    from 420,
+    to 428,
+    id local id 14
+  },
+  {
+    from 485,
+    to 491,
+    id local id 14
+  },
+  {
+    from 507,
+    to 535,
+    id local id 14
+  },
+  {
+    from 635,
+    to 643,
+    id local id 14
+  }
+}

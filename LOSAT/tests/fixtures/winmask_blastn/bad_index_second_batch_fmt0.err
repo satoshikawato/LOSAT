@@ -1,0 +1,3 @@
+Warning: [blastn] Query_1 wm_empty no letters: Sequence contains no data 
+Warning: [blastn] Query_2 wm_alln only N: Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options 
+BLAST engine error: Warning: bad index at key 59000 : 14779 

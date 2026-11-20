@@ -1,0 +1,195 @@
+{
+"BlastOutput2": [
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/taxfilter/tfp"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_1",
+          "query_title": "P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin [Homo sapiens] >P69906.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin [Pan paniscus] >P69907.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin [Pan troglodytes]",
+          "query_len": 142,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "sp|P69905.2|",
+                  "accession": "P69905",
+                  "title": "RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin [Homo sapiens] >sp|P69906.2| RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin [Pan paniscus] >sp|P69907.2| RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin [Pan troglodytes]",
+                  "taxid": 9606
+                }
+              ],
+              "len": 142,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 286.96,
+                  "score": 733,
+                  "evalue": 7.5842e-106,
+                  "identity": 142,
+                  "positive": 142,
+                  "query_from": 1,
+                  "query_to": 142,
+                  "hit_from": 1,
+                  "hit_to": 142,
+                  "align_len": 142,
+                  "gaps": 0,
+                  "qseq": "MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHGKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTPAVHASLDKFLASVSTVLTSKYR",
+                  "hseq": "MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHGKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTPAVHASLDKFLASVSTVLTSKYR",
+                  "midline": "MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHGKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTPAVHASLDKFLASVSTVLTSKYR"
+                }
+              ]
+            },
+            {
+              "num": 2,
+              "description": [
+                {
+                  "id": "sp|Q9TS35.2|",
+                  "accession": "Q9TS35",
+                  "title": "RecName: Full=Hemoglobin subunit alpha-1; AltName: Full=Alpha-1-globin; AltName: Full=Hemoglobin alpha-1 chain; Contains: RecName: Full=Hemopressin [Hylobates lar]",
+                  "taxid": 9580
+                }
+              ],
+              "len": 142,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 281.567,
+                  "score": 719,
+                  "evalue": 9.08223e-104,
+                  "identity": 140,
+                  "positive": 141,
+                  "query_from": 1,
+                  "query_to": 142,
+                  "hit_from": 1,
+                  "hit_to": 142,
+                  "align_len": 142,
+                  "gaps": 0,
+                  "qseq": "MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHGKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTPAVHASLDKFLASVSTVLTSKYR",
+                  "hseq": "MVLSPADKTNVKAAWGKVGAHAGDYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHGKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHHPAEFTPAVHASLDKFLASVSTVLTSKYR",
+                  "midline": "MVLSPADKTNVKAAWGKVGAHAG+YGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHGKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAH PAEFTPAVHASLDKFLASVSTVLTSKYR"
+                }
+              ]
+            },
+            {
+              "num": 3,
+              "description": [
+                {
+                  "id": "sp|P63107.2|",
+                  "accession": "P63107",
+                  "title": "RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin [Macaca fuscata fuscata] >sp|P63108.2| RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin [Macaca mulatta]",
+                  "taxid": 9543
+                }
+              ],
+              "len": 142,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 278.87,
+                  "score": 712,
+                  "evalue": 1.26518e-102,
+                  "identity": 138,
+                  "positive": 139,
+                  "query_from": 1,
+                  "query_to": 142,
+                  "hit_from": 1,
+                  "hit_to": 142,
+                  "align_len": 142,
+                  "gaps": 0,
+                  "qseq": "MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHGKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTPAVHASLDKFLASVSTVLTSKYR",
+                  "hseq": "MVLSPADKSNVKAAWGKVGGHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHGKKVADALTLAVGHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTPAVHASLDKFLASVSTVLTSKYR",
+                  "midline": "MVLSPADK+NVKAAWGKVG HAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHGKKVADALT AV HVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTPAVHASLDKFLASVSTVLTSKYR"
+                }
+              ]
+            },
+            {
+              "num": 4,
+              "description": [
+                {
+                  "id": "sp|P01935.1|",
+                  "accession": "P01935",
+                  "title": "RecName: Full=Hemoglobin subunit alpha-3; AltName: Full=Alpha-3-globin; AltName: Full=Hemoglobin alpha-2 chain [Pan troglodytes]",
+                  "taxid": 9598
+                }
+              ],
+              "len": 141,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 266.159,
+                  "score": 679,
+                  "evalue": 1.33408e-97,
+                  "identity": 125,
+                  "positive": 137,
+                  "query_from": 2,
+                  "query_to": 142,
+                  "hit_from": 1,
+                  "hit_to": 141,
+                  "align_len": 141,
+                  "gaps": 0,
+                  "qseq": "VLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHGKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTPAVHASLDKFLASVSTVLTSKYR",
+                  "hseq": "VLSPADKTNVKAAWGKVGAHAGZYGAEALERMFLSFPTTKTYFPHFDLSHGSAZVKGHGKKVAKALSBAVZHLDDMPNALSALSBLHAHKLRVBPVBFKLLNHCLLVTLAABFPSZFTPAVHASVDKFLASVSTVLTSKYR",
+                  "midline": "VLSPADKTNVKAAWGKVGAHAG+YGAEALERMFLSFPTTKTYFPHFDLSHGSA+VKGHGKKVA AL++AV H+DDMPNALSALS+LHAHKLRV+PV+FKLL+HCLLVTLAA  P++FTPAVHAS+DKFLASVSTVLTSKYR"
+                }
+              ]
+            },
+            {
+              "num": 5,
+              "description": [
+                {
+                  "id": "sp|P01942.2|",
+                  "accession": "P01942",
+                  "title": "RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin [Mus musculus]",
+                  "taxid": 10090
+                }
+              ],
+              "len": 142,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 253.062,
+                  "score": 645,
+                  "evalue": 2.02033e-92,
+                  "identity": 122,
+                  "positive": 131,
+                  "query_from": 1,
+                  "query_to": 142,
+                  "hit_from": 1,
+                  "hit_to": 142,
+                  "align_len": 142,
+                  "gaps": 0,
+                  "qseq": "MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHGKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTPAVHASLDKFLASVSTVLTSKYR",
+                  "hseq": "MVLSGEDKSNIKAAWGKIGGHGAEYGAEALERMFASFPTTKTYFPHFDVSHGSAQVKGHGKKVADALASAAGHLDDLPGALSALSDLHAHKLRVDPVNFKLLSHCLLVTLASHHPADFTPAVHASLDKFLASVSTVLTSKYR",
+                  "midline": "MVLS  DK+N+KAAWGK+G H  EYGAEALERMF SFPTTKTYFPHFD+SHGSAQVKGHGKKVADAL +A  H+DD+P ALSALSDLHAHKLRVDPVNFKLLSHCLLVTLA+H PA+FTPAVHASLDKFLASVSTVLTSKYR"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 23,
+            "db_len": 3263,
+            "hsp_len": 26,
+            "eff_space": 67164,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          }
+        }
+      }
+    }
+  }
+]
+}

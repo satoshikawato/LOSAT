@@ -1,0 +1,3 @@
+Warning: [psiblast] The parameter -line_length is not applicable for output formats > 4 .
+Warning: [psiblast] The parameter -sorthits is ignored for output formats > 4.
+Warning: [psiblast] The parameter -sorthsps is ignored for output formats != 0.

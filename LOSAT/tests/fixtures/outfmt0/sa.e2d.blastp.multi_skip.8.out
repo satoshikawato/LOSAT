@@ -1,0 +1,328 @@
+Seq-annot ::= {
+  desc {
+    user {
+      type str "Hist Seqalign",
+      data {
+        {
+          label str "Hist Seqalign",
+          data bool TRUE
+        }
+      }
+    },
+    user {
+      type str "Blast Type",
+      data {
+        {
+          label str "blastp",
+          data int 2
+        }
+      }
+    },
+    user {
+      type str "Blast Database Title",
+      data {
+        {
+          label str "n/a",
+          data bool FALSE
+        }
+      }
+    }
+  },
+  data align {
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 39
+        },
+        {
+          id str "blast_score",
+          value int 39
+        },
+        {
+          id str "e_value",
+          value real { 369312157878763, 10, -15 }
+        },
+        {
+          id str "bit_score",
+          value real { 196310157408208, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 13
+        },
+        {
+          id str "comp_adjustment_method",
+          value int 2
+        },
+        {
+          id str "num_positives",
+          value int 20
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 179129353233831, 10, -13 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 3,
+        ids {
+          local str "Query_1",
+          local str "Subject_1"
+        },
+        starts {
+          709,
+          420,
+          722,
+          -1,
+          724,
+          433
+        },
+        lens {
+          13,
+          2,
+          20
+        },
+        strands {
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus
+        }
+      }
+    },
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 31
+        },
+        {
+          id str "blast_score",
+          value int 31
+        },
+        {
+          id str "e_value",
+          value real { 395865129798182, 10, -14 }
+        },
+        {
+          id str "bit_score",
+          value real { 16549419133482, 10, -12 }
+        },
+        {
+          id str "num_ident",
+          value int 6
+        },
+        {
+          id str "comp_adjustment_method",
+          value int 2
+        },
+        {
+          id str "num_positives",
+          value int 8
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 647014925373134, 10, -14 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_1",
+          local str "Subject_1"
+        },
+        starts {
+          706,
+          172
+        },
+        lens {
+          12
+        },
+        strands {
+          plus,
+          plus
+        }
+      }
+    },
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 31
+        },
+        {
+          id str "blast_score",
+          value int 31
+        },
+        {
+          id str "e_value",
+          value real { 313443537455986, 10, -14 }
+        },
+        {
+          id str "bit_score",
+          value real { 16549419133482, 10, -12 }
+        },
+        {
+          id str "num_ident",
+          value int 8
+        },
+        {
+          id str "comp_adjustment_method",
+          value int 2
+        },
+        {
+          id str "num_positives",
+          value int 10
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 945522388059701, 10, -14 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_1",
+          local str "Subject_3"
+        },
+        starts {
+          705,
+          431
+        },
+        lens {
+          18
+        },
+        strands {
+          plus,
+          plus
+        }
+      }
+    },
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 30
+        },
+        {
+          id str "blast_score",
+          value int 30
+        },
+        {
+          id str "e_value",
+          value real { 411099409818845, 10, -14 }
+        },
+        {
+          id str "bit_score",
+          value real { 161642195575646, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 5
+        },
+        {
+          id str "comp_adjustment_method",
+          value int 2
+        },
+        {
+          id str "num_positives",
+          value int 8
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 547512437810945, 10, -14 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_1",
+          local str "Subject_3"
+        },
+        starts {
+          777,
+          745
+        },
+        lens {
+          10
+        },
+        strands {
+          plus,
+          plus
+        }
+      }
+    },
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 30
+        },
+        {
+          id str "blast_score",
+          value int 30
+        },
+        {
+          id str "e_value",
+          value real { 485416678391016, 10, -14 }
+        },
+        {
+          id str "bit_score",
+          value real { 161642195575646, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 5
+        },
+        {
+          id str "comp_adjustment_method",
+          value int 2
+        },
+        {
+          id str "num_positives",
+          value int 12
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 945522388059701, 10, -14 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_1",
+          local str "Subject_3"
+        },
+        starts {
+          722,
+          534
+        },
+        lens {
+          18
+        },
+        strands {
+          plus,
+          plus
+        }
+      }
+    }
+  }
+}

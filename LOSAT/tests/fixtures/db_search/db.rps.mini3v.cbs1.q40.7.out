@@ -1,0 +1,262 @@
+# RPSBLAST 2.17.0+
+# Query: YP_009220476.1 envelope protein [White spot syndrome virus]
+# Database: rps_mini3v
+# Fields: query id, subject id, evalue, bit score
+# 2 hits found
+YP_009220476.1	gnl|CDD|103	2.9	15.1
+YP_009220476.1	gnl|CDD|101	6.2	13.9
+# RPSBLAST 2.17.0+
+# Query: YP_009220478.1 hypothetical protein [White spot syndrome virus]
+# Database: rps_mini3v
+# Fields: query id, subject id, evalue, bit score
+# 3 hits found
+YP_009220478.1	gnl|CDD|102	3.7	15.1
+YP_009220478.1	gnl|CDD|102	7.7	14.3
+YP_009220478.1	gnl|CDD|103	9.3	14.0
+# RPSBLAST 2.17.0+
+# Query: YP_009220482.1 hypothetical protein [White spot syndrome virus]
+# Database: rps_mini3v
+# Fields: query id, subject id, evalue, bit score
+# 4 hits found
+YP_009220482.1	gnl|CDD|102	0.70	16.6
+YP_009220482.1	gnl|CDD|102	1.6	15.5
+YP_009220482.1	gnl|CDD|102	10.0	13.1
+YP_009220482.1	gnl|CDD|101	0.96	16.3
+# RPSBLAST 2.17.0+
+# Query: YP_009220483.1 hypothetical protein [White spot syndrome virus]
+# Database: rps_mini3v
+# Fields: query id, subject id, evalue, bit score
+# 4 hits found
+YP_009220483.1	gnl|CDD|101	0.55	17.8
+YP_009220483.1	gnl|CDD|101	4.8	14.7
+YP_009220483.1	gnl|CDD|102	5.9	14.3
+YP_009220483.1	gnl|CDD|103	6.0	14.3
+# RPSBLAST 2.17.0+
+# Query: YP_009220649.1 DNA polymerase [White spot syndrome virus]
+# Database: rps_mini3v
+# Fields: query id, subject id, evalue, bit score
+# 6 hits found
+YP_009220649.1	gnl|CDD|103	1.95e-116	354
+YP_009220649.1	gnl|CDD|103	0.28	21.7
+YP_009220649.1	gnl|CDD|103	1.3	19.3
+YP_009220649.1	gnl|CDD|103	5.0	17.8
+YP_009220649.1	gnl|CDD|103	8.3	17.0
+YP_009220649.1	gnl|CDD|102	4.4	17.8
+# RPSBLAST 2.17.0+
+# Query: YP_009220484.1 hypothetical protein [White spot syndrome virus]
+# Database: rps_mini3v
+# 0 hits found
+# RPSBLAST 2.17.0+
+# Query: YP_009220489.1 hypothetical protein [White spot syndrome virus]
+# Database: rps_mini3v
+# Fields: query id, subject id, evalue, bit score
+# 2 hits found
+YP_009220489.1	gnl|CDD|102	1.1	16.2
+YP_009220489.1	gnl|CDD|101	3.8	14.3
+# RPSBLAST 2.17.0+
+# Query: YP_009220491.1 hypothetical protein [White spot syndrome virus]
+# Database: rps_mini3v
+# Fields: query id, subject id, evalue, bit score
+# 3 hits found
+YP_009220491.1	gnl|CDD|101	4.1	14.3
+YP_009220491.1	gnl|CDD|103	6.3	14.0
+YP_009220491.1	gnl|CDD|103	7.1	13.6
+# RPSBLAST 2.17.0+
+# Query: YP_009220493.1 thymidylate synthetase [White spot syndrome virus]
+# Database: rps_mini3v
+# Fields: query id, subject id, evalue, bit score
+# 1 hits found
+YP_009220493.1	gnl|CDD|101	1.7	16.3
+# RPSBLAST 2.17.0+
+# Query: YP_009220496.1 hypothetical protein [White spot syndrome virus]
+# Database: rps_mini3v
+# Fields: query id, subject id, evalue, bit score
+# 2 hits found
+YP_009220496.1	gnl|CDD|102	1.7	15.8
+YP_009220496.1	gnl|CDD|103	7.1	14.0
+# RPSBLAST 2.17.0+
+# Query: YP_009220497.1 hypothetical protein [White spot syndrome virus]
+# Database: rps_mini3v
+# Fields: query id, subject id, evalue, bit score
+# 4 hits found
+YP_009220497.1	gnl|CDD|101	0.89	17.0
+YP_009220497.1	gnl|CDD|102	1.3	16.6
+YP_009220497.1	gnl|CDD|102	1.4	16.6
+YP_009220497.1	gnl|CDD|102	3.9	15.1
+# RPSBLAST 2.17.0+
+# Query: YP_009220507.1 hypothetical protein [White spot syndrome virus]
+# Database: rps_mini3v
+# Fields: query id, subject id, evalue, bit score
+# 2 hits found
+YP_009220507.1	gnl|CDD|102	6.3	13.9
+YP_009220507.1	gnl|CDD|103	8.7	13.6
+# RPSBLAST 2.17.0+
+# Query: YP_009220508.1 hypothetical protein [White spot syndrome virus]
+# Database: rps_mini3v
+# Fields: query id, subject id, evalue, bit score
+# 3 hits found
+YP_009220508.1	gnl|CDD|103	4.0	14.3
+YP_009220508.1	gnl|CDD|103	4.2	14.3
+YP_009220508.1	gnl|CDD|103	6.4	13.6
+# RPSBLAST 2.17.0+
+# Query: YP_009220514.1 hypothetical protein [White spot syndrome virus]
+# Database: rps_mini3v
+# 0 hits found
+# RPSBLAST 2.17.0+
+# Query: YP_009220516.1 hypothetical protein [White spot syndrome virus]
+# Database: rps_mini3v
+# Fields: query id, subject id, evalue, bit score
+# 2 hits found
+YP_009220516.1	gnl|CDD|102	0.11	19.7
+YP_009220516.1	gnl|CDD|103	3.7	15.1
+# RPSBLAST 2.17.0+
+# Query: YP_009220517.1 hypothetical protein [White spot syndrome virus]
+# Database: rps_mini3v
+# Fields: query id, subject id, evalue, bit score
+# 4 hits found
+YP_009220517.1	gnl|CDD|102	1.2	16.2
+YP_009220517.1	gnl|CDD|103	1.4	15.9
+YP_009220517.1	gnl|CDD|101	5.2	14.3
+YP_009220517.1	gnl|CDD|101	9.0	13.6
+# RPSBLAST 2.17.0+
+# Query: YP_009220519.1 hypothetical protein [White spot syndrome virus]
+# Database: rps_mini3v
+# Fields: query id, subject id, evalue, bit score
+# 3 hits found
+YP_009220519.1	gnl|CDD|103	0.82	17.4
+YP_009220519.1	gnl|CDD|103	2.4	15.9
+YP_009220519.1	gnl|CDD|101	9.9	13.9
+# RPSBLAST 2.17.0+
+# Query: YP_009220525.1 hypothetical protein [White spot syndrome virus]
+# Database: rps_mini3v
+# Fields: query id, subject id, evalue, bit score
+# 2 hits found
+YP_009220525.1	gnl|CDD|102	1.5	15.8
+YP_009220525.1	gnl|CDD|103	4.8	14.3
+# RPSBLAST 2.17.0+
+# Query: YP_009220529.1 ribonucleotide reductase large subunit [White spot syndrome virus]
+# Database: rps_mini3v
+# Fields: query id, subject id, evalue, bit score
+# 5 hits found
+YP_009220529.1	gnl|CDD|102	8.60e-122	353
+YP_009220529.1	gnl|CDD|102	2.5	17.0
+YP_009220529.1	gnl|CDD|102	5.5	16.2
+YP_009220529.1	gnl|CDD|101	1.6	17.8
+YP_009220529.1	gnl|CDD|101	3.9	16.6
+# RPSBLAST 2.17.0+
+# Query: YP_009220531.1 immediate-early protein [White spot syndrome virus]
+# Database: rps_mini3v
+# 0 hits found
+# RPSBLAST 2.17.0+
+# Query: YP_009220533.1 hypothetical protein [White spot syndrome virus]
+# Database: rps_mini3v
+# Fields: query id, subject id, evalue, bit score
+# 5 hits found
+YP_009220533.1	gnl|CDD|102	0.51	18.2
+YP_009220533.1	gnl|CDD|102	4.1	15.5
+YP_009220533.1	gnl|CDD|102	7.6	14.3
+YP_009220533.1	gnl|CDD|101	6.1	14.7
+YP_009220533.1	gnl|CDD|101	8.4	14.3
+# RPSBLAST 2.17.0+
+# Query: YP_009220535.1 ribonucleotide reductase small subunit [White spot syndrome virus]
+# Database: rps_mini3v
+# Fields: query id, subject id, evalue, bit score
+# 4 hits found
+YP_009220535.1	gnl|CDD|101	3.5	15.9
+YP_009220535.1	gnl|CDD|101	9.6	14.3
+YP_009220535.1	gnl|CDD|103	4.0	15.5
+YP_009220535.1	gnl|CDD|102	5.5	15.1
+# RPSBLAST 2.17.0+
+# Query: YP_009220536.1 hypothetical protein [White spot syndrome virus]
+# Database: rps_mini3v
+# Fields: query id, subject id, evalue, bit score
+# 3 hits found
+YP_009220536.1	gnl|CDD|103	5.8	14.7
+YP_009220536.1	gnl|CDD|101	8.4	13.9
+YP_009220536.1	gnl|CDD|101	9.8	13.9
+# RPSBLAST 2.17.0+
+# Query: YP_009220538.1 hypothetical protein [White spot syndrome virus]
+# Database: rps_mini3v
+# Fields: query id, subject id, evalue, bit score
+# 4 hits found
+YP_009220538.1	gnl|CDD|103	1.6	15.9
+YP_009220538.1	gnl|CDD|103	4.0	14.7
+YP_009220538.1	gnl|CDD|102	3.4	15.1
+YP_009220538.1	gnl|CDD|102	7.3	13.9
+# RPSBLAST 2.17.0+
+# Query: YP_009220539.1 envelope protein [White spot syndrome virus]
+# Database: rps_mini3v
+# Fields: query id, subject id, evalue, bit score
+# 4 hits found
+YP_009220539.1	gnl|CDD|103	0.67	17.4
+YP_009220539.1	gnl|CDD|101	0.86	17.0
+YP_009220539.1	gnl|CDD|102	4.7	14.7
+YP_009220539.1	gnl|CDD|102	6.7	14.3
+# RPSBLAST 2.17.0+
+# Query: YP_009220541.1 hypothetical protein [White spot syndrome virus]
+# Database: rps_mini3v
+# Fields: query id, subject id, evalue, bit score
+# 5 hits found
+YP_009220541.1	gnl|CDD|103	2.1	15.1
+YP_009220541.1	gnl|CDD|103	2.5	14.7
+YP_009220541.1	gnl|CDD|103	7.7	13.6
+YP_009220541.1	gnl|CDD|101	3.7	14.3
+YP_009220541.1	gnl|CDD|101	7.8	13.6
+# RPSBLAST 2.17.0+
+# Query: YP_009220543.1 hypothetical protein [White spot syndrome virus]
+# Database: rps_mini3v
+# Fields: query id, subject id, evalue, bit score
+# 4 hits found
+YP_009220543.1	gnl|CDD|103	1.5	15.9
+YP_009220543.1	gnl|CDD|103	3.6	14.7
+YP_009220543.1	gnl|CDD|101	1.8	15.5
+YP_009220543.1	gnl|CDD|101	6.4	13.9
+# RPSBLAST 2.17.0+
+# Query: YP_009220544.1 hypothetical protein [White spot syndrome virus]
+# Database: rps_mini3v
+# Fields: query id, subject id, evalue, bit score
+# 1 hits found
+YP_009220544.1	gnl|CDD|102	9.0	13.9
+# RPSBLAST 2.17.0+
+# Query: YP_009220553.1 hypothetical protein [White spot syndrome virus]
+# Database: rps_mini3v
+# Fields: query id, subject id, evalue, bit score
+# 4 hits found
+YP_009220553.1	gnl|CDD|102	1.3	16.6
+YP_009220553.1	gnl|CDD|102	9.5	13.9
+YP_009220553.1	gnl|CDD|103	6.7	14.3
+YP_009220553.1	gnl|CDD|101	8.3	13.9
+# RPSBLAST 2.17.0+
+# Query: YP_009220554.1 envelope protein [White spot syndrome virus]
+# Database: rps_mini3v
+# Fields: query id, subject id, evalue, bit score
+# 2 hits found
+YP_009220554.1	gnl|CDD|102	6.4	14.3
+YP_009220554.1	gnl|CDD|101	7.7	13.9
+# RPSBLAST 2.17.0+
+# Query: YP_009220556.1 envelope protein [White spot syndrome virus]
+# Database: rps_mini3v
+# Fields: query id, subject id, evalue, bit score
+# 4 hits found
+YP_009220556.1	gnl|CDD|101	0.19	18.9
+YP_009220556.1	gnl|CDD|101	0.98	17.0
+YP_009220556.1	gnl|CDD|101	1.4	16.3
+YP_009220556.1	gnl|CDD|102	5.5	14.7
+# RPSBLAST 2.17.0+
+# Query: YP_009220561.1 hypothetical protein [White spot syndrome virus]
+# Database: rps_mini3v
+# Fields: query id, subject id, evalue, bit score
+# 2 hits found
+YP_009220561.1	gnl|CDD|102	0.53	17.8
+YP_009220561.1	gnl|CDD|102	5.9	14.3
+# RPSBLAST 2.17.0+
+# Query: YP_009220601.1 TK-TMK, chimeric thymidine and thymidylate kinase [White spot syndrome virus]
+# Database: rps_mini3v
+# Fields: query id, subject id, evalue, bit score
+# 5 hits found
+YP_009220601.1	gnl|CDD|101	4.60e-113	317
+YP_009220601.1	gnl|CDD|102	0.30	18.9
+YP_009220601.1	gnl|CDD|102	7.2	14.7
+YP_009220601.1	gnl|CDD|102	7.9	14.7
+YP_009220601.1	gnl|CDD|103	8.5	14.3
+# BLAST processed 33 queries

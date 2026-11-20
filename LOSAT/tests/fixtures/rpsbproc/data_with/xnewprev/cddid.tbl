@@ -1,0 +1,192 @@
+177058	CHL00136	rpl31	ribosomal protein L31; V	68
+177082	CHL00180	rbcR	LysR transcriptional reg	305
+214392	CHL00197	carA	carbamoyl-phosphate synt	382
+439830	COG0060	IleS	Isoleucyl-tRNA synthetas	931
+439835	COG0065	LeuC	Homoaconitase/3-isopropy	417
+439889	COG0119	LeuA	Isopropylmalate/homocitr	452
+440024	COG0254	RpmE	Ribosomal protein L31 [T	72
+440027	COG0257	RpmJ	Ribosomal protein L36 [T	38
+440058	COG0289	DapB	4-hydroxy-tetrahydrodipi	257
+440241	COG0473	LeuB	Isocitrate/isopropylmala	346
+440271	COG0505	CarA	Carbamoylphosphate synth	361
+440304	COG0538	Icd	Isocitrate dehydrogenase	409
+440311	COG0545	FkpA	FKBP-type peptidyl-proly	104
+440348	COG0583	LysR	DNA-binding transcriptio	256
+440362	COG0597	LspA	Lipoprotein signal pepti	151
+440524	COG0761	IspH	4-Hydroxy-3-methylbut-2-	289
+440668	COG1047	SlpA	Peptidyl-prolyl cis-tran	138
+440669	COG1048	AcnA	Aconitase A [Energy prod	891
+440903	COG1292	BetT	Choline-glycine betaine 	512
+441560	COG1957	URH1	Inosine-uridine nucleosi	310
+441799	COG2197	CitB	DNA-binding response reg	131
+441802	COG2200	EAL	EAL domain, c-di-GMP-spe	576
+442052	COG2771	CsgD	DNA-binding transcriptio	188
+442660	COG3434	YuxH	c-di-GMP phosphodiestera	407
+443017	COG3804	COG3804	Uncharacterized conserve	338
+443623	COG4566	FixJ	DNA-binding response reg	196
+443970	COG4943	YjcC	Redox-sensing c-di-GMP p	528
+444025	COG5001	COG5001	Cyclic di-GMP metabolism	678
+444607	COG5905	GerE	Spore transcriptional re	76
+502586	NF000612	PRK00019	50S ribosomal protein L3	72
+502667	NF000907	PRK00087	bifunctional 4-hydroxy-3	647
+502965	NF001614	PRK00402	aconitase/3-isopropylmal	415
+503034	NF001809	PRK00528	50S ribosomal protein L3	71
+503166	NF002021	PRK00831	type B 50S ribosomal pro	41
+503205	NF002084	PRK00915.1-1	2-isopropylmalate syntha	521
+503206	NF002085	PRK00915.1-2	2-isopropylmalate syntha	492
+503207	NF002086	PRK00915.1-3	2-isopropylmalate syntha	515
+503208	NF002087	PRK00915.1-4	2-isopropylmalate syntha	512
+503209	NF002088	PRK00915.1-5	2-isopropylmalate syntha	514
+503273	NF002188	PRK01045.1-2	4-hydroxy-3-methylbut-2-	307
+503274	NF002189	PRK01045.1-3	4-hydroxy-3-methylbut-2-	312
+503275	NF002190	PRK01045.1-4	4-hydroxy-3-methylbut-2-	321
+503450	NF002462	PRK01678	type B 50S ribosomal pro	79
+503764	NF002887	PRK03356	L-carnitine/gamma-butyro	497
+503773	NF002898	PRK03437	3-isopropylmalate dehydr	344
+504533	NF004016	PRK05478	3-isopropylmalate dehydr	466
+506614	NF006673	PRK09222	NADP-dependent isocitrat	482
+506674	NF006757	PRK09277	aconitate hydratase AcnA	888
+506937	NF007063	PRK09508	transcriptional regulato	307
+507224	NF007397	PRK09925	leu operon leader peptid	28
+507226	NF007399	PRK09928	choline BCCT transporter	675
+507824	NF008036	PRK10768	ribonucleoside hydrolase	304
+508020	NF008239	PRK11013	LysR family transcriptio	309
+508122	NF008352	PRK11139	transcriptional regulato	297
+508180	NF008416	PRK11242	transcriptional regulato	296
+508224	NF008467	PRK11359	oxygen-sensing cyclic-di	799
+508751	NF009116	PRK12466	3-isopropylmalate dehydr	471
+509059	NF009475	PRK12838	carbamoyl phosphate synt	354
+510151	NF010883	PRK14290	chaperone protein DnaJ. 	365
+510469	NF011356	PRK14774	lipoprotein signal pepti	185
+510470	NF011357	PRK14775	lipoprotein signal pepti	170
+510477	NF011365	PRK14784	lipoprotein signal pepti	160
+510478	NF011366	PRK14785	lipoprotein signal pepti	171
+510482	NF011370	PRK14789	lipoprotein signal pepti	191
+510731	NF011676	PRK15095	FKBP-type peptidyl-proly	156
+468673	NF040709	benzoate_BenM	benzoate utilization tra	299
+468737	NF040786	LysR_Sec_metab	selenium metabolism-asso	298
+468794	NF040855	iso_homocit_dh	isocitrate--homoisocitra	345
+468908	NF040978	Ve_IatC_Nterm	inverse autotransporter 	1065
+511111	NF040981	Ve_YrIlm_NTERM	YrIlm family inverse aut	477
+469362	NF041474	membrane_YkgR	small membrane protein Y	33
+215047	PLN00070	PLN00070	aconitate hydratase	936
+177715	PLN00096	PLN00096	isocitrate dehydrogenase	393
+215062	PLN00118	PLN00118	isocitrate dehydrogenase	372
+215065	PLN00123	PLN00123	isocitrate dehydrogenase	360
+215182	PLN02321	PLN02321	2-isopropylmalate syntha	632
+215188	PLN02329	PLN02329	3-isopropylmalate dehydr	409
+178319	PLN02717	PLN02717	uridine nucleosidase	316
+178347	PLN02746	PLN02746	hydroxymethylglutaryl-Co	347
+178370	PLN02771	PLN02771	carbamoyl-phosphate synt	415
+178374	PLN02775	PLN02775	Probable dihydrodipicoli	286
+215440	PLN02821	PLN02821	1-hydroxy-2-methyl-2-(E)	460
+215452	PLN02843	PLN02843	isoleucyl-tRNA synthetas	974
+178767	PLN03228	PLN03228	methylthioalkylmalate sy	503
+240263	PTZ00092	PTZ00092	aconitate hydratase-like	898
+140334	PTZ00313	PTZ00313	inosine-adenosine-guanos	326
+240417	PTZ00435	PTZ00435	isocitrate dehydrogenase	413
+129147	TIGR00036	dapB	4-hydroxy-tetrahydrodipi	266
+272893	TIGR00077	lspA	lipoprotein signal pepti	166
+272907	TIGR00105	L31	ribosomal protein L31. T	68
+272939	TIGR00169	leuB	3-isopropylmalate dehydr	346
+272940	TIGR00170	leuC	3-isopropylmalate dehydr	465
+272965	TIGR00216	ispH_lytB	(E)-4-hydroxy-3-methyl-b	282
+213565	TIGR00842	bcct	choline/carnitine/betain	452
+130046	TIGR00973	leuA_bact	2-isopropylmalate syntha	494
+273563	TIGR01343	hacA_fam	homoaconitate hydratase 	412
+273580	TIGR01368	CPSaseIIsmall	carbamoyl-phosphate synt	357
+273960	TIGR02086	IPMI_arch	3-isopropylmalate dehydr	413
+273963	TIGR02089	TTC	tartrate dehydrogenase. 	352
+274248	TIGR02660	nifV_homocitr	homocitrate synthase Nif	365
+238257	cd00455	nuc_hydro	nuc_hydro: Nucleoside hy	295
+153129	cd01351	Aconitase	Aconitase catalytic doma	389
+153131	cd01581	AcnB	Aconitate hydratase B ca	436
+153132	cd01582	Homoaconitase	Homoaconitase and other 	363
+153133	cd01583	IPMI	3-isopropylmalate dehydr	382
+153134	cd01584	AcnA_Mitochondrial	Aconitase catalyzes the 	412
+153135	cd01585	AcnA_Bact	Aconitase catalyzes the 	380
+153136	cd01586	AcnA_IRP	Aconitase A catalytic do	404
+238923	cd01948	EAL	EAL domain. This domain 	240
+467611	cd02274	DHDPR_N	N-terminal NAD(P)-bindin	139
+239113	cd02647	nuc_hydro_TvIAG	nuc_hydro_ TvIAG:  Nucle	312
+239114	cd02648	nuc_hydro_1	NH_1: A subgroup of nucl	367
+239115	cd02649	nuc_hydro_CeIAG	nuc_hydro_CeIAG: Nucleos	306
+239116	cd02650	nuc_hydro_CaPnhB	NH_hydro_CaPnhB: A subgr	304
+239117	cd02651	nuc_hydro_IU_UC_XIUA	nuc_hydro_IU_UC_XIUA: in	302
+239118	cd02652	nuc_hydro_2	NH_2: A subgroup of nucl	293
+239119	cd02653	nuc_hydro_3	NH_3: A subgroup of nucl	320
+239120	cd02654	nuc_hydro_CjNH	nuc_hydro_CjNH. Nucleosi	318
+163674	cd03174	DRE_TIM_metallolyase	DRE-TIM metallolyase sup	265
+467613	cd05192	GAPDH-like_N	N-terminal NAD(P)-bindin	109
+176102	cd05466	PBP2_LTTR_substrate	The substrate binding do	197
+99777	cd06170	LuxR_C_like	C-terminal DNA-binding d	57
+163675	cd07937	DRE_TIM_PC_TC_5S	Pyruvate carboxylase and	275
+163676	cd07938	DRE_TIM_HMGL	3-hydroxy-3-methylglutar	274
+163677	cd07939	DRE_TIM_NifV	Streptomyces rubellomuri	259
+163678	cd07940	DRE_TIM_IPMS	2-isopropylmalate syntha	268
+163679	cd07941	DRE_TIM_LeuA3	Desulfobacterium autotro	273
+163680	cd07942	DRE_TIM_LeuA	Mycobacterium tuberculos	284
+163681	cd07943	DRE_TIM_HOA	4-hydroxy-2-oxovalerate 	263
+163682	cd07944	DRE_TIM_HOA_like	4-hydroxy-2-oxovalerate 	266
+163683	cd07945	DRE_TIM_CMS	Leptospira interrogans c	280
+163684	cd07947	DRE_TIM_Re_CS	Clostridium kluyveri Re-	279
+163685	cd07948	DRE_TIM_HCS	Saccharomyces cerevisiae	262
+176109	cd08417	PBP2_Nitroaromatics_like	The C-terminal substrate	200
+176112	cd08420	PBP2_CysL_like	C-terminal substrate bin	201
+176122	cd08431	PBP2_HupR	The C-terminal substrate	195
+176126	cd08435	PBP2_GbpR	The C-terminal substrate	201
+176151	cd08462	PBP2_NodD	The C-terminal substsrat	200
+176155	cd08466	PBP2_LeuO	The C-terminal substrate	200
+199908	cd10719	DnaJ_zf	Zinc finger domain of Dn	65
+260116	cd13944	lytB_ispH	4-hydroxy-3-methylbut-2-	275
+467616	cd24146	nat-AmDH_N_like	N-terminal NAD(P)-bindin	157
+513171	pfam00126	HTH_1	Bacterial regulatory hel	60
+513222	pfam00180	Iso_dh	Isocitrate/isopropylmala	346
+513237	pfam00196	GerE	Bacterial regulatory pro	57
+513290	pfam00254	FKBP_C	FKBP-type peptidyl-proly	94
+513358	pfam00330	Aconitase	Aconitase family (aconit	420
+513456	pfam00444	Ribosomal_L36	Ribosomal protein L36. 	38
+513554	pfam00563	EAL	EAL domain. This domain 	236
+513661	pfam00682	HMGL-like	HMGL-like. This family c	260
+513663	pfam00684	DnaJ_CXXCXGXG	DnaJ central domain. The	66
+513908	pfam00988	CPSase_sm_chain	Carbamoyl-phosphate synt	126
+514008	pfam01113	DapB_N	Dihydrodipicolinate redu	123
+514045	pfam01156	IU_nuc_hydro	Inosine-uridine preferri	255
+514079	pfam01197	Ribosomal_L31	Ribosomal protein L31. 	65
+514127	pfam01252	Peptidase_A8	Signal peptidase (SPase)	140
+514667	pfam02028	BCCT	BCCT, betaine/carnitine/	485
+514910	pfam02401	LYTB	LytB protein. The mevalo	266
+515602	pfam03466	LysR_substrate	LysR substrate binding d	205
+515680	pfam03589	Antiterm	Antitermination protein.	87
+516670	pfam05173	DapB_C	Dihydrodipicolinate redu	132
+488084	pfam06006	DUF905	Bacterial protein of unk	70
+517306	pfam06496	DUF1097	Protein of unknown funct	140
+517437	pfam06827	zf-FPG_IleRS	Zinc finger found in FPG	30
+429805	pfam08054	Leu_leader	Leucine operon leader pe	28
+518300	pfam08502	LeuA_dimer	LeuA allosteric (dimeriz	118
+492229	pfam11924	IAT_beta	Inverse autotransporter,	279
+522332	pfam16449	MatB	Fimbrillin MatB. This is	166
+525026	pfam22617	HCS_D2	Homocitrate synthase pos	81
+214491	smart00052	EAL	Putative diguanylate pho	242
+197715	smart00421	HTH_LUXR	helix_turn_helix, Lux Re	58
+214910	smart00917	LeuA_dimer	LeuA allosteric (dimeris	131
+198165	smart01097	CPSase_sm_chain	Carbamoyl-phosphate synt	130
+528963	cl00226	nuc_hydro	N/A. Inosine-uridine nuc	0
+529010	cl00285	Aconitase	Aconitase catalytic doma	0
+529067	cl00377	RpmE	Ribosomal protein L31 [T	0
+529099	cl00445	Icd	Isocitrate dehydrogenase	0
+529107	cl00458	LspA	Lipoprotein signal pepti	0
+529170	cl00569	BetT	Choline-glycine betaine 	0
+530987	cl19123	lytB_ispH	4-hydroxy-3-methylbut-2-	0
+473184	cl19519	FKBP_C	FKBP-type peptidyl-proly	0
+531135	cl21456	Periplasmic_Binding_Protein_Type_2	Type 2 periplasmic bindi	0
+531136	cl21457	TIM	TIM-like beta/alpha barr	0
+473904	cl21539	DnaJ_zf	Zinc finger domain of Dn	0
+452791	cl27885	Leu_leader	Leucine operon leader pe	0
+421756	cl29215	LeuA_dimer	LeuA allosteric (dimeriz	0
+531754	cl29561	EAL	N/A. Putative diguanylat	0
+477943	cl42082	DapB_C	Dihydrodipicolinate redu	0
+481008	cl46668	Ribosomal_L36	Ribosomal protein L36. R	0
+532797	cl46857	HTH_ARSR	N/A. This is the helical	0
+481199	cl46859	HTH_CRP	N/A. This helix-turn-hel	0
+483953	cl49613	GAPDH-like_N	N-terminal NAD(P)-bindin	0

@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="US-ASCII"?>
+<BlastXML2
+    xmlns="http://www.ncbi.nlm.nih.gov"
+    xmlns:xs="http://www.w3.org/2001/XMLSchema-instance"
+    xs:schemaLocation="http://www.ncbi.nlm.nih.gov http://www.ncbi.nlm.nih.gov/data_specs/schema_alt/NCBI_BlastOutput2.xsd"
+>
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>blastn</program>
+      <version>BLASTN 2.17.0+</version>
+      <reference>Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb Miller (2000), &quot;A greedy algorithm for aligning DNA sequences&quot;, J Comput Biol 2000; 7(1-2):203-14.</reference>
+      <search-target>
+        <Target>
+          <subjects>Subject_1</subjects>
+          <subjects>Subject_2</subjects>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <expect>10</expect>
+          <sc-match>1</sc-match>
+          <sc-mismatch>-2</sc-mismatch>
+          <gap-open>0</gap-open>
+          <gap-extend>0</gap-extend>
+          <filter>L;m;</filter>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <bl2seq>
+            <Search>
+              <query-id>Query_1</query-id>
+              <query-title>qn1 lcase</query-title>
+              <query-len>270</query-len>
+              <query-masking>
+                <Range>
+                  <from>30</from>
+                  <to>39</to>
+                </Range>
+                <Range>
+                  <from>200</from>
+                  <to>229</to>
+                </Range>
+              </query-masking>
+              <hits>
+                <Hit>
+                  <num>1</num>
+                  <description>
+                    <HitDescr>
+                      <id>sn1</id>
+                      <title>sn1 subject nucleotide alpha</title>
+                    </HitDescr>
+                  </description>
+                  <len>488</len>
+                  <hsps>
+                    <Hsp>
+                      <num>1</num>
+                      <bit-score>401.843</bit-score>
+                      <score>217</score>
+                      <evalue>2.63593e-116</evalue>
+                      <identity>253</identity>
+                      <query-from>31</query-from>
+                      <query-to>300</query-to>
+                      <query-strand>Plus</query-strand>
+                      <hit-from>46</hit-from>
+                      <hit-to>311</hit-to>
+                      <hit-strand>Plus</hit-strand>
+                      <align-len>270</align-len>
+                      <gaps>4</gaps>
+                      <qseq>atgtggatggAACACTCCGTGCTAAAAGCAAATTTTGCCGTGCTTCGTAAAGTGATGGACGACCCGAAAATACGGGATGGGCCCATGGCTGTAATGAAGGGCTGGGAGAACTATTGCTGGCCCGCGAATATGAGCTGGAAAGTCCTTATGAAGTATGAGTTTTCCTCCGAtatccacccttgcaatttatggatttgctgGATCCCTAAGGAGATGGCAACCCCAGGATGGTGGAAGACGGATACGTTGCATATGGCAGAAATGGGTCTG</qseq>
+                      <hseq>ATGTGGATGGAACACTCCGTGCTAGAAGCAATTTTTGCCGTGCTTCGTAAAGTGATGGACGACCCGAAAATACGGGATGGGCCCATGGCTGCAATGAAGGGCTGGGAGAACTATTGCTGGCCCGCGAATATAAGCTGGAAAGTCCTTATGAAGTTTGAGTTTTCCTCCGATATCCACCCTTGCAATTTATGCATTTGCTG----CCTAAGGATATGGCAAACCCAGGATTGTCGAAGACGGATACGTTGCATAGGTCAGCAATGGGTCTG</hseq>
+                      <midline>|||||||||||||||||||||||| |||||| ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| ||||||||||||||||||||||||||||||||||||||| |||||||||||||||||||||| |||||||||||||||||||||||||||||||||||| ||||||||    |||||||| ||||||| |||||||| || |||||||||||||||||||| | ||| ||||||||||</midline>
+                    </Hsp>
+                  </hsps>
+                </Hit>
+                <Hit>
+                  <num>2</num>
+                  <description>
+                    <HitDescr>
+                      <id>sn2</id>
+                      <title>sn2 subject nucleotide beta reverse</title>
+                    </HitDescr>
+                  </description>
+                  <len>477</len>
+                  <hsps>
+                    <Hsp>
+                      <num>1</num>
+                      <bit-score>261.498</bit-score>
+                      <score>141</score>
+                      <evalue>4.66768e-74</evalue>
+                      <identity>211</identity>
+                      <query-from>36</query-from>
+                      <query-to>277</query-to>
+                      <query-strand>Plus</query-strand>
+                      <hit-from>452</hit-from>
+                      <hit-to>208</hit-to>
+                      <hit-strand>Minus</hit-strand>
+                      <align-len>245</align-len>
+                      <gaps>3</gaps>
+                      <qseq>GATGGAACACTCCGTGCTAAAAGCAAATTTTGCCGTGCTTCGTAAAGTGATGGACGACCCGAAAATACGGGATGGGCCCATGGCTGTAATGAAGGGCTGGGAGAACTATTGCTGGCCCGCGAATATGAGCTGGAAAGTCCTTATGA--AGTA-TGAGTTTTCCTCCGAtatccacccttgcaatttatggatttgctgGATCCCTAAGGAGATGGCAACCCCAGGATGGTGGAAGACGGATACGT</qseq>
+                      <hseq>GATGGAACACTCCGTGCTAAAAGCAAATTTTGCCGGGCTTAGTGAAGTGATGGACGATCCCAAAATACAGTATGGGCCAATGGCTGTAATGAAGGGCATGGAGCACTATTGCCCGCCCGCTAATCTGAGCTGGAAAGTCCGTATGTTTAGTTTTGGGTTTTCATCCGATATCCACGCTTGCAATTTGTGGCTTTGCTCGATCCCTAAGTAGATGGCACTCCCAGGATTGGGGAAGTCGAATACGT</hseq>
+                      <midline>||||||||||||||||||||||||||||||||||| |||| || ||||||||||||| || ||||||| | ||||||| ||||||||||||||||||  |||| ||||||||  |||||| ||| ||||||||||||||| ||||   |||  || |||||| |||||||||||| |||||||||| ||| |||||| |||||||||| ||||||||  |||||||| | ||||| || ||||||</midline>
+                    </Hsp>
+                  </hsps>
+                </Hit>
+              </hits>
+              <stat>
+                <Statistics>
+                  <hsp-len>11</hsp-len>
+                  <eff-space>244237</eff-space>
+                  <kappa>0.46</kappa>
+                  <lambda>1.28</lambda>
+                  <entropy>0.85</entropy>
+                </Statistics>
+              </stat>
+            </Search>
+          </bl2seq>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+</BlastXML2>

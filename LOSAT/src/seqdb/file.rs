@@ -10,6 +10,23 @@ use std::path::{Path, PathBuf};
 
 use super::SeqDbError;
 
+/// The memory page of NCBI's mapping of a database file: 4 KiB, the page of the oracle platform
+/// (Linux x86-64) and the smallest of the systems NCBI BLAST+ runs on. NCBI maps a file whole
+/// from offset 0, and the system fills the part of the last page after the end of the file with
+/// zeros (POSIX `mmap`), so NCBI reads zero bytes there (`taxdb.btd` past its end). A larger page
+/// only gives NCBI more zeros to read past the file, where LOSAT then refuses or reads none.
+pub(crate) const MAP_PAGE: u64 = 4096;
+
+/// Where `DbFile::read_range_in` puts the bytes it reads.
+enum RangeBuffer<'a> {
+    /// A new buffer (`read_range`).
+    New,
+    /// EXPERIMENT (LOSAT_X_BNMAPPED): `x_read_range_mapped`'s buffer.
+    Mapped,
+    /// EXPERIMENT (LOSAT_X_BPDBKEEP, LOSAT_X_BNMAPPED): the worker's buffer (`x_read_range_into`).
+    Given(&'a mut Vec<u8>),
+}
+
 /// One open database file (`.pin`, `.psq`, `.phr`, ... ) read by offset.
 #[derive(Debug)]
 pub struct DbFile {
@@ -164,6 +181,38 @@ impl DbFile {
 
     /// The bytes of `start..end` as a new buffer.
     pub fn read_range(&self, start: u64, end: u64) -> Result<Vec<u8>, SeqDbError> {
+        self.read_range_in(start, end, RangeBuffer::New)
+    }
+
+    /// EXPERIMENT (LOSAT_X_BNMAPPED): `read_range` into a buffer taken from or sized
+    /// by `utils::x_mapped::X_BYTES.x_filled` (a mapped buffer from 1 MiB on, given back with
+    /// `x_mapped::X_BYTES.give`; a buffer of the pool is zeroed only past the bytes it holds).
+    /// No NCBI counterpart: only where the bytes are kept.
+    pub fn x_read_range_mapped(&self, start: u64, end: u64) -> Result<Vec<u8>, SeqDbError> {
+        self.read_range_in(start, end, RangeBuffer::Mapped)
+    }
+
+    /// EXPERIMENT (LOSAT_X_BPDBKEEP, LOSAT_X_BNMAPPED): `read_range` into the buffer that a
+    /// worker keeps from one read to the next, `kept` (taken, its capacity kept when it holds the
+    /// range; a range of 1 MiB or more that it does not hold goes to a buffer of
+    /// `utils::x_mapped::X_BYTES` instead and `kept` stays): `x_mapped::X_BYTES.x_filled_kept`.
+    /// The buffer goes back with `X_BYTES.x_keep`. No NCBI counterpart: only where the bytes are
+    /// kept.
+    pub fn x_read_range_into(
+        &self,
+        start: u64,
+        end: u64,
+        kept: &mut Vec<u8>,
+    ) -> Result<Vec<u8>, SeqDbError> {
+        self.read_range_in(start, end, RangeBuffer::Given(kept))
+    }
+
+    fn read_range_in(
+        &self,
+        start: u64,
+        end: u64,
+        buffer: RangeBuffer<'_>,
+    ) -> Result<Vec<u8>, SeqDbError> {
         if end < start {
             return Err(SeqDbError::Format {
                 path: self.path.clone(),
@@ -185,9 +234,42 @@ impl DbFile {
             path: self.path.clone(),
             message: format!("byte range {start}..{end} does not fit in memory"),
         })?;
-        let mut buf = vec![0u8; len];
+        // A buffer of the pool or of the worker keeps the bytes its last read left in it, and only
+        // the bytes past them are zeroed before the read writes them all.
+        let mut buf = match buffer {
+            RangeBuffer::New => vec![0u8; len],
+            RangeBuffer::Mapped => crate::utils::x_mapped::X_BYTES.x_filled(len, 0u8),
+            RangeBuffer::Given(kept) => {
+                crate::utils::x_mapped::X_BYTES.x_filled_kept(kept, len, 0u8)
+            }
+        };
         self.read_exact_at(&mut buf, start)?;
         Ok(buf)
+    }
+
+    /// The checks of `read_range(start, end)` before its buffer
+    /// is allocated, with the same errors in the same order, without the read.
+    pub fn x_check_range(&self, start: u64, end: u64) -> Result<(), SeqDbError> {
+        if end < start {
+            return Err(SeqDbError::Format {
+                path: self.path.clone(),
+                message: format!("byte range {start}..{end} ends before it starts"),
+            });
+        }
+        if end > self.len {
+            return Err(SeqDbError::Format {
+                path: self.path.clone(),
+                message: format!(
+                    "byte range {start}..{end} passes the end of the file ({} bytes)",
+                    self.len
+                ),
+            });
+        }
+        usize::try_from(end - start).map_err(|_| SeqDbError::Format {
+            path: self.path.clone(),
+            message: format!("byte range {start}..{end} does not fit in memory"),
+        })?;
+        Ok(())
     }
 
     /// The whole file.

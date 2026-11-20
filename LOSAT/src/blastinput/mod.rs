@@ -4,19 +4,16 @@
 //!
 //! This module provides input handling for BLAST searches
 //! including argument parsing and FASTA input processing.
-//!
-//! # Structure
-//!
-//! - `blast_args` - Common argument handling
-//! - `blastn_args` - BLASTN-specific arguments
-//! - `blastp_args` - BLASTP-specific arguments
-//! - `tblastx_args` - TBLASTX-specific arguments
+//! The arguments of each program are `algorithm::<program>::args`.
 
 // NCBI app/blast/blast_app_util.hpp and blastinput/blast_args.cpp: the application layer.
 pub mod app;
-pub mod blast_args;
-pub mod blastn_args;
-pub mod blastp_args;
+pub mod compressed;
+// NCBI blastinput/blast_args.cpp (s_GetTaxIDList): the taxid options of a database search.
+pub mod db_filter;
+// NCBI blastinput/blast_args.cpp:2342-2356, api/uniform_search.cpp: the database masks of a
+// database search (`-db_soft_mask`, `-db_hard_mask`).
+pub mod db_mask;
 // NCBI blastinput/blast_fasta_input.cpp, objtools/readers/fasta.cpp, util/line_reader.cpp:
 // the FASTA input of BLASTN, TBLASTX, TBLASTN and BLASTP.
 pub mod fasta_reader;
@@ -24,11 +21,26 @@ pub mod fasta_reader;
 pub mod input_files;
 // NCBI corelib/ncbiapp.cpp, metareg.cpp: the application layer's environment and registry.
 pub mod ncbi_environment;
+// NCBI corelib/ncbireg.cpp (IRWRegistry::x_Read): the reader of the registry files.
+pub(crate) mod ncbi_registry;
+// NCBI core/blast_options.c BLAST_ValidateOptions: the protein option checks of blastp, tblastn
+// and psiblast.
+pub mod protein_options_check;
+// NCBI serial/objistrasn.cpp: psiblast's PSSM in ASN.1 text (`-out_pssm`, `-in_pssm`).
+pub mod pssm_text;
 pub mod query_batch;
+// NCBI blastinput/blast_args.cpp:2894-2978: the hit list size and the numbers of descriptions
+// and alignments of a run.
+pub mod report_counts;
 // NCBI blastinput/blast_input_aux.cpp:145-179 and blast_fasta_input.cpp:433-460: the
 // `-query_loc` and `-subject_loc` ranges.
 pub mod seq_range;
-pub mod tblastx_args;
 
 // NCBI blastinput/blast_args.cpp:332-349: shared string-valued filtering arguments.
 pub mod value_parsers;
+// NCBI api/blast_objmgr_tools.cpp:515-520 (`GetCompressedPlusStrand`): EXPERIMENT (LOSAT_X_TBNSTORE,
+// LOSAT_X_TBXSTORE), the records of `-subject` packed as read.
+pub(crate) mod x_packed_subjects;
+
+#[cfg(test)]
+mod damaged_input_tests;

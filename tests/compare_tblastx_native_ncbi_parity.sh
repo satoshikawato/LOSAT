@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Diagnostic comparison for docs/tblastx_native_ncbi_parity_plan.md Phase 0.
+# Diagnostic comparison for docs/archive/tblastx_native_ncbi_parity_plan.md Phase 0.
 # NCBI BLAST+ is used only as a validation oracle here, never by LOSAT runtime
 # code. Reference-only allowance: AGENTS.md "Testing Expectations".
 #
@@ -24,7 +24,7 @@ QUERY="${QUERY:-"$CRATE_DIR/tests/fasta/LC738874.fasta"}"
 SUBJECT="${SUBJECT:-"$CRATE_DIR/tests/fasta/LC738875.fasta"}"
 OUTFMT="${OUTFMT:-6}"
 THREADS="${THREADS:-1}"
-NATIVE_BIN="${NATIVE_BIN:-"$CRATE_DIR/target/release/LOSAT"}"
+NATIVE_BIN="${NATIVE_BIN:-"$CRATE_DIR/target/release/losat"}"
 NCBI_TBLASTX_BIN="${NCBI_TBLASTX:-tblastx}"
 PYTHON_BIN="${PYTHON:-python3}"
 

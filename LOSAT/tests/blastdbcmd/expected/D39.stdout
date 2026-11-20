@@ -1,0 +1,60 @@
+>:1-3 ref|NM_000001.1| alpha mRNA [Homo sapiens] gb|AB000001.1| alpha cDNA emb|X00001.2| alpha clone
+T
+G
+T
+>:1-3 gi|654321|gb|AB000002.3| gi plus gb nucleotide
+T
+G
+T
+>:1-3 emb|AJ000003.1| emb nucleotide
+T
+G
+T
+>:1-3 dbj|AB000004.1| dbj nucleotide
+T
+G
+T
+>:1-3 ref|NC_000005.11| chromosome-like
+T
+G
+T
+>:1-3 lcl|mynuc6 local id nucleotide
+T
+G
+T
+>:1-3 gnl|mydb|nuc7 general id nucleotide
+T
+G
+T
+>:1-3 NM_000008.2 bare refseq accession
+T
+G
+T
+>:1-3 AB000009 bare genbank accession without version
+T
+G
+T
+>:1-3 mynuc_10 bare non-accession word
+T
+G
+T
+>:1-3 gi|1111 gi only
+T
+G
+T
+>:1-3 tpg|BK000012.1| third-party nucleotide
+T
+G
+T
+>:1-3 gb|AB000013.1|LOCUS13 gb with a locus name
+T
+G
+T
+>:1-3 pat|US|1234567|14 patent nucleotide
+T
+G
+T
+>:1-3 gi|1515|gb|AB000015.1| gi|1516|ref|XM_000016.1| second defline
+T
+G
+T

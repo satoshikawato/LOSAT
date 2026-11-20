@@ -644,6 +644,7 @@ pub(crate) fn ncbi2na_to_binary(ncbi2na: &[u8], base_length: u32) -> BinarySeque
 // either case (sequtil_tables.cpp:409-423, the rows of 'A'-'Z' and 'a'-'z'):
 // A 1, B 14, C 2, D 13, G 4, H 11, K 12, M 3, R 5, S 6, T 8, U 8, V 7, W 9,
 // Y 10.
+#[cfg(test)]
 const fn iupacna_to_ncbi4na_table() -> [u8; 256] {
     let mut table = [0xFu8; 256];
     let letters = b"ABCDGHKMRSTUVWY";
@@ -656,6 +657,7 @@ const fn iupacna_to_ncbi4na_table() -> [u8; 256] {
     }
     table
 }
+#[cfg(test)]
 const IUPACNA_TO_NCBI4NA: [u8; 256] = iupacna_to_ncbi4na_table();
 
 // NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:324-339
@@ -679,6 +681,7 @@ const IUPACNA_TO_NCBI4NA: [u8; 256] = iupacna_to_ncbi4na_table();
 // ```
 /// `CSeqConvert::Convert` from iupacna to ncbi4na: two bases per byte, the
 /// first in the high half.
+#[cfg(test)]
 pub(crate) fn iupacna_to_ncbi4na(iupacna: &[u8]) -> Vec<u8> {
     let mut na4 = Vec::with_capacity(iupacna.len().div_ceil(2));
     let mut pairs = iupacna.chunks_exact(2);
@@ -721,28 +724,73 @@ const fn ncbieaa_to_ncbistdaa_table() -> [u8; 256] {
 }
 const NCBIEAA_TO_NCBISTDAA: [u8; 256] = ncbieaa_to_ncbistdaa_table();
 
-// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_tables.cpp:1673-1675
-// ```c++
-// // IUPACaa to NCBIstdaa
-// const Uint1 CIupacaaToStdaa::scm_Table[256] = {
-//     0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-// ```
-// The table is 0xff except the letters, in either case, with the codes of
-// the ncbieaa table (sequtil_tables.cpp:1683-1690).
-const fn iupacaa_to_ncbistdaa_table() -> [u8; 256] {
-    let mut table = [0xFFu8; 256];
-    let mut i = 0;
-    while i < 26 {
-        table[b'A' as usize + i] = STDAA_OF_LETTER[i];
-        table[b'a' as usize + i] = STDAA_OF_LETTER[i];
-        i += 1;
-    }
-    table
-}
-const IUPACAA_TO_NCBISTDAA: [u8; 256] = iupacaa_to_ncbistdaa_table();
-
 fn convert_1_to_1(src: &[u8], table: &[u8; 256]) -> Vec<u8> {
     src.iter().map(|&byte| table[usize::from(byte)]).collect()
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbobj.cpp:47-60
+// ```c++
+// template<class TSource>
+// unsigned SeqDB_ComputeSequenceHash(TSource & src)
+// {
+//     unsigned retval = 0;
+//
+//     while(src.More()) {
+//         unsigned seq_i = unsigned(src.Get()) & 0xFF;
+//
+//         retval *= 1103515245;
+//         retval += seq_i + 12345;
+//     }
+//
+//     return retval;
+// }
+// ```
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbobj.cpp:100-111
+// ```c++
+//     SSeqDB_SVCISource(const CBioseq & bs)
+//         : index(0), size(0)
+//     {
+//         // Note: the CSeqVector API provides eCoding_Ncbi, which is
+//         // labelled as ncbi4na, but op[] provides one residue or base
+//         // per byte, which is what the SeqDB and ASN.1 formats refer
+//         // to as the "ncbi8na" format, which is what we need here.
+//
+//         seqvector = CSeqVector(bs,
+//                                0,
+//                                CBioseq_Handle::eCoding_Ncbi,
+//                                eNa_strand_plus);
+// ```
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1709-1712
+// ```c++
+// void CWriteDB_Impl::x_ComputeHash(const CBioseq & sequence)
+// {
+//     m_Hash = SeqDB_SequenceHash(sequence);
+// }
+// ```
+// `eCoding_Ncbi` gives a protein's NCBIstdaa codes (the bytes of the sequence file) and a
+// nucleotide's NCBI4na code per base (after `s_FixBioseqDeltas`, whose gaps are 0x0f).
+/// `SeqDB_SequenceHash(bioseq)`: the hash of `-hash_index` over `length` residues of
+/// `seq_data`, `None` for a coding the writer cannot write (it stops before the hash is used).
+pub(crate) fn sequence_hash(seq_data: &SeqData, length: u64) -> Option<u32> {
+    fn hash(codes: impl Iterator<Item = u8>) -> u32 {
+        codes.fold(0u32, |h, code| {
+            h.wrapping_mul(1_103_515_245)
+                .wrapping_add(u32::from(code).wrapping_add(12345))
+        })
+    }
+    let length = length as usize;
+    Some(match seq_data {
+        SeqData::Ncbieaa(v) => hash(
+            v.iter()
+                .take(length)
+                .map(|&b| NCBIEAA_TO_NCBISTDAA[usize::from(b)]),
+        ),
+        SeqData::Ncbi2na(v) => {
+            hash((0..length).map(|i| 1u8 << ((v[i / 4] >> (6 - 2 * (i % 4))) & 3)))
+        }
+        SeqData::Ncbi4na(v) => hash((0..length).map(|i| (v[i / 2] >> (4 - 4 * (i % 2))) & 0x0f)),
+        SeqData::Other => return None,
+    })
 }
 
 /// The `Seq-data` choices CWriteDB cannot write.
@@ -823,6 +871,9 @@ pub struct UnprocessableSequence;
 //                          CSeqUtil::e_Ncbistdaa);
 // }
 // ```
+// LOSAT has no counterpart of `WriteDB_StdaaToBinary` and `WriteDB_IupacaaToBinary` (nor of the
+// `e_Ncbistdaa` and `e_Iupacaa` cases of the switch above): LOSAT's FASTA reader never makes these
+// Seq-data choices, so they are not ported (P-V3b).
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_convert.cpp:592-609
 // ```c++
 //     const string & v = si.GetSeq_data().GetIupacna().Get();
@@ -844,6 +895,8 @@ pub struct UnprocessableSequence;
 //                             seq,
 //                             amb);
 // ```
+// LOSAT has no counterpart of `WriteDB_IupacnaToBinary` (nor of the `e_Iupacna` case of the switch
+// above): LOSAT's FASTA reader never makes this Seq-data choice, so it is not ported (P-V3b).
 /// `CWriteDB_Impl::x_CookSequence` for a `CBioseq` with `Seq-data`: the
 /// sequence bytes and the ambiguity data of a sequence of `length` letters.
 pub(crate) fn seq_data_to_binary(
@@ -855,12 +908,9 @@ pub(crate) fn seq_data_to_binary(
         ambig: Vec::new(),
     };
     Ok(match seq_data {
-        SeqData::Ncbistdaa(v) => protein(v.clone()),
         SeqData::Ncbieaa(v) => protein(convert_1_to_1(v, &NCBIEAA_TO_NCBISTDAA)),
-        SeqData::Iupacaa(v) => protein(convert_1_to_1(v, &IUPACAA_TO_NCBISTDAA)),
         SeqData::Ncbi2na(v) => ncbi2na_to_binary(v, length),
         SeqData::Ncbi4na(v) => ncbi4na_to_binary(v, length),
-        SeqData::Iupacna(v) => ncbi4na_to_binary(&iupacna_to_ncbi4na(v), length),
         SeqData::Other => return Err(UnprocessableSequence),
     })
 }
@@ -892,7 +942,11 @@ mod tests {
     use super::*;
 
     fn iupacna(letters: &[u8]) -> BinarySequence {
-        seq_data_to_binary(&SeqData::Iupacna(letters.to_vec()), letters.len() as u32).unwrap()
+        seq_data_to_binary(
+            &SeqData::Ncbi4na(iupacna_to_ncbi4na(letters)),
+            letters.len() as u32,
+        )
+        .unwrap()
     }
 
     fn hex(bytes: &[u8]) -> String {
@@ -1015,8 +1069,6 @@ mod tests {
             hex(&b.seq),
             "0102030405060708091b0a0b0c0d1a0e0f101112181314151617"
         );
-        let b = seq_data_to_binary(&SeqData::Iupacaa(b"mkvLa".to_vec()), 5).unwrap();
-        assert_eq!(hex(&b.seq), "0c0a130b01");
         assert!(b.ambig.is_empty());
     }
 
@@ -1026,5 +1078,42 @@ mod tests {
             seq_data_to_binary(&SeqData::Other, 10),
             Err(UnprocessableSequence)
         );
+    }
+    /// `SeqDB_SequenceHash`: the keys makeblastdb 2.17.0 wrote into `.phd` / `.nhd` for
+    /// makedb-v5 survey B fixtures h01_prot and h02_nucl (`-hash_index`).
+    #[test]
+    fn sequence_hashes_are_makeblastdb_s() {
+        for (letters, expected) in [
+            (&b"ACDEFGHIKLMNPQRSTVWY"[..], 55_887_582u32),
+            (b"XBZUOJ*ACDX", 329_294_776),
+            (b"MKV-LLA--W", 1_592_154_558),
+            (b"M", 12_357),
+        ] {
+            let data = SeqData::Ncbieaa(letters.to_vec());
+            assert_eq!(sequence_hash(&data, letters.len() as u64), Some(expected));
+            // The hash runs over the ncbistdaa codes of the sequence file.
+            let stdaa = seq_data_to_binary(&data, letters.len() as u32).unwrap().seq;
+            let over_codes = stdaa.iter().fold(0u32, |h, &code| {
+                h.wrapping_mul(1_103_515_245)
+                    .wrapping_add(u32::from(code).wrapping_add(12345))
+            });
+            assert_eq!(over_codes, expected);
+        }
+        // Nucleotides: NCBI4na per base, a gap read as N (0x0f, `s_FixBioseqDeltas`).
+        for (letters, expected) in [
+            (&b"ACGTACGTAC"[..], 4_241_009_515u32),
+            (b"ACGTRYKMSWBDHVN", 3_170_882_851),
+            (b"ACGTNACGTN", 2_994_364_842),
+            (b"ACGTNNNNNNNNNNACGT", 3_309_723_638),
+        ] {
+            let na4 = SeqData::Ncbi4na(iupacna_to_ncbi4na(letters));
+            assert_eq!(sequence_hash(&na4, letters.len() as u64), Some(expected));
+        }
+        let gaps = SeqData::Ncbi4na(vec![0x12, 0x48, 0xff, 0x12, 0x48, 0xf1]);
+        assert_eq!(sequence_hash(&gaps, 12), Some(2_633_391_912));
+        // ncbi2na: ACGTACGTAC as 00 01 10 11 ...
+        let na2 = SeqData::Ncbi2na(vec![0x1b, 0x1b, 0x10]);
+        assert_eq!(sequence_hash(&na2, 10), Some(4_241_009_515));
+        assert_eq!(sequence_hash(&SeqData::Other, 3), None);
     }
 }

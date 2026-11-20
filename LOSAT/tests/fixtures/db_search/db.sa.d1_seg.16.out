@@ -1,0 +1,309 @@
+<?xml version="1.0" encoding="US-ASCII"?>
+<BlastXML2
+    xmlns="http://www.ncbi.nlm.nih.gov"
+    xmlns:xs="http://www.w3.org/2001/XMLSchema-instance"
+    xs:schemaLocation="http://www.ncbi.nlm.nih.gov http://www.ncbi.nlm.nih.gov/data_specs/schema_alt/NCBI_BlastOutput2.xsd"
+>
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>blastp</program>
+      <version>BLASTP 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <db>tests/db_search/paja</db>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>BLOSUM62</matrix>
+          <expect>10</expect>
+          <gap-open>11</gap-open>
+          <gap-extend>1</gap-extend>
+          <filter>L;</filter>
+          <cbs>2</cbs>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <search>
+            <Search>
+              <query-id>Query_1</query-id>
+              <query-title>YP_009220551.1 ICP11/P9 [White spot syndrome virus]</query-title>
+              <query-len>82</query-len>
+              <hits>
+                <Hit>
+                  <num>1</num>
+                  <description>
+                    <HitDescr>
+                      <id>gnl|BL_ORD_ID|81</id>
+                      <accession>81</accession>
+                      <title>BDT63579.1 wsv343-like protein [Pasiphaea japonica whispovirus]</title>
+                    </HitDescr>
+                  </description>
+                  <len>4023</len>
+                  <hsps>
+                    <Hsp>
+                      <num>1</num>
+                      <bit-score>19.631</bit-score>
+                      <score>39</score>
+                      <evalue>3.19625</evalue>
+                      <identity>11</identity>
+                      <positive>15</positive>
+                      <query-from>19</query-from>
+                      <query-to>49</query-to>
+                      <hit-from>2753</hit-from>
+                      <hit-to>2777</hit-to>
+                      <align-len>31</align-len>
+                      <gaps>6</gaps>
+                      <qseq>RYEEVMKTFDTVEAVRKSDLDDRVYMVCLKQ</qseq>
+                      <hseq>KNKEVDTTLTALHAVRK------CYMCCVDQ</hseq>
+                      <midline>+ +EV  T   + AVRK       YM C+ Q</midline>
+                    </Hsp>
+                  </hsps>
+                </Hit>
+                <Hit>
+                  <num>2</num>
+                  <description>
+                    <HitDescr>
+                      <id>gnl|BL_ORD_ID|70</id>
+                      <accession>70</accession>
+                      <title>BDT63568.1 hypothetical protein [Pasiphaea japonica whispovirus]</title>
+                    </HitDescr>
+                  </description>
+                  <len>578</len>
+                  <hsps>
+                    <Hsp>
+                      <num>1</num>
+                      <bit-score>18.4754</bit-score>
+                      <score>36</score>
+                      <evalue>7.69336</evalue>
+                      <identity>6</identity>
+                      <positive>7</positive>
+                      <query-from>3</query-from>
+                      <query-to>9</query-to>
+                      <hit-from>137</hit-from>
+                      <hit-to>143</hit-to>
+                      <align-len>7</align-len>
+                      <gaps>0</gaps>
+                      <qseq>TFQTDAD</qseq>
+                      <hseq>SFQTDAD</hseq>
+                      <midline>+FQTDAD</midline>
+                    </Hsp>
+                  </hsps>
+                </Hit>
+              </hits>
+              <stat>
+                <Statistics>
+                  <db-num>86</db-num>
+                  <db-len>66738</db-len>
+                  <hsp-len>50</hsp-len>
+                  <eff-space>1998016</eff-space>
+                  <kappa>0.041</kappa>
+                  <lambda>0.267</lambda>
+                  <entropy>0.14</entropy>
+                </Statistics>
+              </stat>
+            </Search>
+          </search>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>blastp</program>
+      <version>BLASTP 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <db>tests/db_search/paja</db>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>BLOSUM62</matrix>
+          <expect>10</expect>
+          <gap-open>11</gap-open>
+          <gap-extend>1</gap-extend>
+          <filter>L;</filter>
+          <cbs>2</cbs>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <search>
+            <Search>
+              <query-id>Query_2</query-id>
+              <query-title>YP_009220614.1 envelope protein [White spot syndrome virus]</query-title>
+              <query-len>204</query-len>
+              <query-masking>
+                <Range>
+                  <from>8</from>
+                  <to>25</to>
+                </Range>
+              </query-masking>
+              <hits>
+                <Hit>
+                  <num>1</num>
+                  <description>
+                    <HitDescr>
+                      <id>gnl|BL_ORD_ID|73</id>
+                      <accession>73</accession>
+                      <title>BDT63571.1 wsv269-like protein [Pasiphaea japonica whispovirus]</title>
+                    </HitDescr>
+                  </description>
+                  <len>507</len>
+                  <hsps>
+                    <Hsp>
+                      <num>1</num>
+                      <bit-score>22.7126</bit-score>
+                      <score>47</score>
+                      <evalue>1.27927</evalue>
+                      <identity>10</identity>
+                      <positive>16</positive>
+                      <query-from>43</query-from>
+                      <query-to>72</query-to>
+                      <hit-from>30</hit-from>
+                      <hit-to>59</hit-to>
+                      <align-len>30</align-len>
+                      <gaps>0</gaps>
+                      <qseq>NIETNMDENLRIPVTAEVGSGYFKMTDVSF</qseq>
+                      <hseq>NIQQQQGEKKKGSINAELGYGGARLMDVRF</hseq>
+                      <midline>NI+    E  +  + AE+G G  ++ DV F</midline>
+                    </Hsp>
+                  </hsps>
+                </Hit>
+                <Hit>
+                  <num>2</num>
+                  <description>
+                    <HitDescr>
+                      <id>gnl|BL_ORD_ID|9</id>
+                      <accession>9</accession>
+                      <title>BDT63507.1 wsv526-like protein [Pasiphaea japonica whispovirus]</title>
+                    </HitDescr>
+                  </description>
+                  <len>449</len>
+                  <hsps>
+                    <Hsp>
+                      <num>1</num>
+                      <bit-score>20.0162</bit-score>
+                      <score>40</score>
+                      <evalue>8.3203</evalue>
+                      <identity>23</identity>
+                      <positive>37</positive>
+                      <query-from>38</query-from>
+                      <query-to>122</query-to>
+                      <hit-from>70</hit-from>
+                      <hit-to>149</hit-to>
+                      <align-len>91</align-len>
+                      <gaps>17</gaps>
+                      <qseq>ETHTDNIETNMDENLRIPVTAEVGSGYFKMTDVSFDSDTLGKIKIRNGKSDAQMKEEDADLVITPVEGRALE------VTVGQNLTFEGTF</qseq>
+                      <hseq>KTSIDDIQHN--NNKTIPVTD---------TNFTIRPGEYGKLPLRLRRIAIRDKNRVAAIVMTTGSGRSQTSYSHDGLVISPNCNFVGEF</hseq>
+                      <midline>+T  D+I+ N   N  IPVT          T+ +      GK+ +R  +   + K   A +V+T   GR+        + +  N  F G F</midline>
+                    </Hsp>
+                  </hsps>
+                </Hit>
+                <Hit>
+                  <num>3</num>
+                  <description>
+                    <HitDescr>
+                      <id>gnl|BL_ORD_ID|5</id>
+                      <accession>5</accession>
+                      <title>BDT63503.1 wsv514-like protein [Pasiphaea japonica whispovirus]</title>
+                    </HitDescr>
+                  </description>
+                  <len>2342</len>
+                  <hsps>
+                    <Hsp>
+                      <num>1</num>
+                      <bit-score>20.0162</bit-score>
+                      <score>40</score>
+                      <evalue>8.74679</evalue>
+                      <identity>13</identity>
+                      <positive>24</positive>
+                      <query-from>101</query-from>
+                      <query-to>143</query-to>
+                      <hit-from>1173</hit-from>
+                      <hit-to>1221</hit-to>
+                      <align-len>49</align-len>
+                      <gaps>6</gaps>
+                      <qseq>TPVEGRALEVTVGQNLTFE---GTFKVWNNTS---RKINITGMQMVPKI</qseq>
+                      <hseq>SPIDTTRLERKLGINFTKNNNCGSEDDWSNNTPPNTKVTVAGLDYFPEI</hseq>
+                      <midline>+P++   LE  +G N T     G+   W+N +    K+ + G+   P+I</midline>
+                    </Hsp>
+                  </hsps>
+                </Hit>
+              </hits>
+              <stat>
+                <Statistics>
+                  <db-num>86</db-num>
+                  <db-len>66738</db-len>
+                  <hsp-len>61</hsp-len>
+                  <eff-space>8793356</eff-space>
+                  <kappa>0.041</kappa>
+                  <lambda>0.267</lambda>
+                  <entropy>0.14</entropy>
+                </Statistics>
+              </stat>
+            </Search>
+          </search>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>blastp</program>
+      <version>BLASTP 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <db>tests/db_search/paja</db>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>BLOSUM62</matrix>
+          <expect>10</expect>
+          <gap-open>11</gap-open>
+          <gap-extend>1</gap-extend>
+          <filter>L;</filter>
+          <cbs>2</cbs>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <search>
+            <Search>
+              <query-id>Query_3</query-id>
+              <query-title>nohit a query without hits</query-title>
+              <query-len>72</query-len>
+              <hits></hits>
+              <stat>
+                <Statistics>
+                  <db-num>86</db-num>
+                  <db-len>66738</db-len>
+                  <hsp-len>0</hsp-len>
+                  <eff-space>0</eff-space>
+                  <kappa>-1</kappa>
+                  <lambda>-1</lambda>
+                  <entropy>-1</entropy>
+                </Statistics>
+              </stat>
+              <message>Query_3 nohit a query without hits:  Query_3 nohit a query without hits: Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options  No hits found</message>
+            </Search>
+          </search>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+</BlastXML2>

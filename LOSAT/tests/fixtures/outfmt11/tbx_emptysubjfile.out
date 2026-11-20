@@ -1,0 +1,25 @@
+Blast4-archive ::= {
+  request {
+    body get-request-info {
+      request-id "Error"
+    }
+  },
+  results {
+  },
+  messages {
+    {
+      code 1,
+      message "Warning: [tblastx] Subject_1 e1 empty record: Subject sequence
+ contains no data"
+    },
+    {
+      code 1,
+      message "Warning: [tblastx] Subject_2 e2 empty too: Subject sequence
+ contains no data"
+    },
+    {
+      code 2,
+      message "BLAST engine error: The average subject length is too short"
+    }
+  }
+}

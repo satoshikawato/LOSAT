@@ -1,0 +1,2957 @@
+Seq-annot ::= {
+  desc {
+    user {
+      type str "Hist Seqalign",
+      data {
+        {
+          label str "Hist Seqalign",
+          data bool TRUE
+        }
+      }
+    },
+    user {
+      type str "Blast Type",
+      data {
+        {
+          label str "blastx",
+          data int 3
+        }
+      }
+    },
+    user {
+      type str "Blast Database Title",
+      data {
+        {
+          label str "n/a",
+          data bool FALSE
+        }
+      }
+    }
+  },
+  data align {
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 675
+        },
+        {
+          id str "blast_score",
+          value int 675
+        },
+        {
+          id str "e_value",
+          value real { 635565979470464, 10, -95 }
+        },
+        {
+          id str "bit_score",
+          value real { 289487255435552, 10, -12 }
+        },
+        {
+          id str "num_ident",
+          value int 185
+        },
+        {
+          id str "comp_adjustment_method",
+          value int 2
+        },
+        {
+          id str "num_positives",
+          value int 305
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 281710684273709, 10, -13 }
+        }
+      },
+      segs std {
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_33"
+          },
+          loc {
+            int {
+              from 2635,
+              to 2706,
+              strand minus,
+              id local str "Query_1"
+            },
+            int {
+              from 3,
+              to 26,
+              strand unknown,
+              id local str "Subject_33"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_33"
+          },
+          loc {
+            int {
+              from 2632,
+              to 2634,
+              strand minus,
+              id local str "Query_1"
+            },
+            empty local str "Subject_33"
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_33"
+          },
+          loc {
+            int {
+              from 2620,
+              to 2631,
+              strand minus,
+              id local str "Query_1"
+            },
+            int {
+              from 27,
+              to 30,
+              strand unknown,
+              id local str "Subject_33"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_33"
+          },
+          loc {
+            empty local str "Query_1",
+            int {
+              from 31,
+              to 37,
+              strand unknown,
+              id local str "Subject_33"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_33"
+          },
+          loc {
+            int {
+              from 2608,
+              to 2619,
+              strand minus,
+              id local str "Query_1"
+            },
+            int {
+              from 38,
+              to 41,
+              strand unknown,
+              id local str "Subject_33"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_33"
+          },
+          loc {
+            int {
+              from 2602,
+              to 2607,
+              strand minus,
+              id local str "Query_1"
+            },
+            empty local str "Subject_33"
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_33"
+          },
+          loc {
+            int {
+              from 2284,
+              to 2601,
+              strand minus,
+              id local str "Query_1"
+            },
+            int {
+              from 42,
+              to 147,
+              strand unknown,
+              id local str "Subject_33"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_33"
+          },
+          loc {
+            empty local str "Query_1",
+            int {
+              from 148,
+              to 170,
+              strand unknown,
+              id local str "Subject_33"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_33"
+          },
+          loc {
+            int {
+              from 2257,
+              to 2283,
+              strand minus,
+              id local str "Query_1"
+            },
+            int {
+              from 171,
+              to 179,
+              strand unknown,
+              id local str "Subject_33"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_33"
+          },
+          loc {
+            int {
+              from 2254,
+              to 2256,
+              strand minus,
+              id local str "Query_1"
+            },
+            empty local str "Subject_33"
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_33"
+          },
+          loc {
+            int {
+              from 2203,
+              to 2253,
+              strand minus,
+              id local str "Query_1"
+            },
+            int {
+              from 180,
+              to 196,
+              strand unknown,
+              id local str "Subject_33"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_33"
+          },
+          loc {
+            empty local str "Query_1",
+            int {
+              from 197,
+              to 197,
+              strand unknown,
+              id local str "Subject_33"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_33"
+          },
+          loc {
+            int {
+              from 2191,
+              to 2202,
+              strand minus,
+              id local str "Query_1"
+            },
+            int {
+              from 198,
+              to 201,
+              strand unknown,
+              id local str "Subject_33"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_33"
+          },
+          loc {
+            int {
+              from 2188,
+              to 2190,
+              strand minus,
+              id local str "Query_1"
+            },
+            empty local str "Subject_33"
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_33"
+          },
+          loc {
+            int {
+              from 1981,
+              to 2187,
+              strand minus,
+              id local str "Query_1"
+            },
+            int {
+              from 202,
+              to 270,
+              strand unknown,
+              id local str "Subject_33"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_33"
+          },
+          loc {
+            empty local str "Query_1",
+            int {
+              from 271,
+              to 276,
+              strand unknown,
+              id local str "Subject_33"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_33"
+          },
+          loc {
+            int {
+              from 1945,
+              to 1980,
+              strand minus,
+              id local str "Query_1"
+            },
+            int {
+              from 277,
+              to 288,
+              strand unknown,
+              id local str "Subject_33"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_33"
+          },
+          loc {
+            empty local str "Query_1",
+            int {
+              from 289,
+              to 307,
+              strand unknown,
+              id local str "Subject_33"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_33"
+          },
+          loc {
+            int {
+              from 1807,
+              to 1944,
+              strand minus,
+              id local str "Query_1"
+            },
+            int {
+              from 308,
+              to 353,
+              strand unknown,
+              id local str "Subject_33"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_33"
+          },
+          loc {
+            empty local str "Query_1",
+            int {
+              from 354,
+              to 383,
+              strand unknown,
+              id local str "Subject_33"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_33"
+          },
+          loc {
+            int {
+              from 1750,
+              to 1806,
+              strand minus,
+              id local str "Query_1"
+            },
+            int {
+              from 384,
+              to 402,
+              strand unknown,
+              id local str "Subject_33"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_33"
+          },
+          loc {
+            empty local str "Query_1",
+            int {
+              from 403,
+              to 409,
+              strand unknown,
+              id local str "Subject_33"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_33"
+          },
+          loc {
+            int {
+              from 1714,
+              to 1749,
+              strand minus,
+              id local str "Query_1"
+            },
+            int {
+              from 410,
+              to 421,
+              strand unknown,
+              id local str "Subject_33"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_33"
+          },
+          loc {
+            int {
+              from 1708,
+              to 1713,
+              strand minus,
+              id local str "Query_1"
+            },
+            empty local str "Subject_33"
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_33"
+          },
+          loc {
+            int {
+              from 1636,
+              to 1707,
+              strand minus,
+              id local str "Query_1"
+            },
+            int {
+              from 422,
+              to 445,
+              strand unknown,
+              id local str "Subject_33"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_33"
+          },
+          loc {
+            empty local str "Query_1",
+            int {
+              from 446,
+              to 447,
+              strand unknown,
+              id local str "Subject_33"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_33"
+          },
+          loc {
+            int {
+              from 1507,
+              to 1635,
+              strand minus,
+              id local str "Query_1"
+            },
+            int {
+              from 448,
+              to 490,
+              strand unknown,
+              id local str "Subject_33"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_33"
+          },
+          loc {
+            empty local str "Query_1",
+            int {
+              from 491,
+              to 515,
+              strand unknown,
+              id local str "Subject_33"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_33"
+          },
+          loc {
+            int {
+              from 1324,
+              to 1506,
+              strand minus,
+              id local str "Query_1"
+            },
+            int {
+              from 516,
+              to 576,
+              strand unknown,
+              id local str "Subject_33"
+            }
+          }
+        }
+      }
+    },
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 327
+        },
+        {
+          id str "blast_score",
+          value int 327
+        },
+        {
+          id str "e_value",
+          value real { 358150413722378, 10, -50 }
+        },
+        {
+          id str "bit_score",
+          value real { 141882240412121, 10, -12 }
+        },
+        {
+          id str "num_ident",
+          value int 74
+        },
+        {
+          id str "comp_adjustment_method",
+          value int 2
+        },
+        {
+          id str "num_positives",
+          value int 125
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 113643457382953, 10, -13 }
+        }
+      },
+      segs std {
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_33"
+          },
+          loc {
+            int {
+              from 4902,
+              to 4991,
+              strand minus,
+              id local str "Query_1"
+            },
+            int {
+              from 167,
+              to 196,
+              strand unknown,
+              id local str "Subject_33"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_33"
+          },
+          loc {
+            empty local str "Query_1",
+            int {
+              from 197,
+              to 197,
+              strand unknown,
+              id local str "Subject_33"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_33"
+          },
+          loc {
+            int {
+              from 4887,
+              to 4901,
+              strand minus,
+              id local str "Query_1"
+            },
+            int {
+              from 198,
+              to 202,
+              strand unknown,
+              id local str "Subject_33"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_33"
+          },
+          loc {
+            int {
+              from 4884,
+              to 4886,
+              strand minus,
+              id local str "Query_1"
+            },
+            empty local str "Subject_33"
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_33"
+          },
+          loc {
+            int {
+              from 4677,
+              to 4883,
+              strand minus,
+              id local str "Query_1"
+            },
+            int {
+              from 203,
+              to 271,
+              strand unknown,
+              id local str "Subject_33"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_33"
+          },
+          loc {
+            empty local str "Query_1",
+            int {
+              from 272,
+              to 273,
+              strand unknown,
+              id local str "Subject_33"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_33"
+          },
+          loc {
+            int {
+              from 4662,
+              to 4676,
+              strand minus,
+              id local str "Query_1"
+            },
+            int {
+              from 274,
+              to 278,
+              strand unknown,
+              id local str "Subject_33"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_33"
+          },
+          loc {
+            empty local str "Query_1",
+            int {
+              from 279,
+              to 279,
+              strand unknown,
+              id local str "Subject_33"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_33"
+          },
+          loc {
+            int {
+              from 4590,
+              to 4661,
+              strand minus,
+              id local str "Query_1"
+            },
+            int {
+              from 280,
+              to 303,
+              strand unknown,
+              id local str "Subject_33"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_33"
+          },
+          loc {
+            empty local str "Query_1",
+            int {
+              from 304,
+              to 309,
+              strand unknown,
+              id local str "Subject_33"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_33"
+          },
+          loc {
+            int {
+              from 4449,
+              to 4589,
+              strand minus,
+              id local str "Query_1"
+            },
+            int {
+              from 310,
+              to 356,
+              strand unknown,
+              id local str "Subject_33"
+            }
+          }
+        }
+      }
+    },
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 149
+        },
+        {
+          id str "blast_score",
+          value int 149
+        },
+        {
+          id str "e_value",
+          value real { 256101552918852, 10, -27 }
+        },
+        {
+          id str "bit_score",
+          value real { 663831235323194, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 29
+        },
+        {
+          id str "comp_adjustment_method",
+          value int 2
+        },
+        {
+          id str "num_positives",
+          value int 42
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 452160864345738, 10, -14 }
+        }
+      },
+      segs std {
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_33"
+          },
+          loc {
+            int {
+              from 4887,
+              to 4922,
+              strand minus,
+              id local str "Query_1"
+            },
+            int {
+              from 48,
+              to 59,
+              strand unknown,
+              id local str "Subject_33"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_33"
+          },
+          loc {
+            empty local str "Query_1",
+            int {
+              from 60,
+              to 60,
+              strand unknown,
+              id local str "Subject_33"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_33"
+          },
+          loc {
+            int {
+              from 4881,
+              to 4886,
+              strand minus,
+              id local str "Query_1"
+            },
+            int {
+              from 61,
+              to 62,
+              strand unknown,
+              id local str "Subject_33"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_33"
+          },
+          loc {
+            int {
+              from 4875,
+              to 4880,
+              strand minus,
+              id local str "Query_1"
+            },
+            empty local str "Subject_33"
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_33"
+          },
+          loc {
+            int {
+              from 4722,
+              to 4874,
+              strand minus,
+              id local str "Query_1"
+            },
+            int {
+              from 63,
+              to 113,
+              strand unknown,
+              id local str "Subject_33"
+            }
+          }
+        }
+      }
+    },
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 616
+        },
+        {
+          id str "blast_score",
+          value int 616
+        },
+        {
+          id str "e_value",
+          value real { 529550650767468, 10, -90 }
+        },
+        {
+          id str "bit_score",
+          value real { 264462267256292, 10, -12 }
+        },
+        {
+          id str "num_ident",
+          value int 147
+        },
+        {
+          id str "comp_adjustment_method",
+          value int 2
+        },
+        {
+          id str "num_positives",
+          value int 183
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 126848739495798, 10, -13 }
+        }
+      },
+      segs std {
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_32"
+          },
+          loc {
+            int {
+              from 745,
+              to 984,
+              strand minus,
+              id local str "Query_1"
+            },
+            int {
+              from 0,
+              to 79,
+              strand unknown,
+              id local str "Subject_32"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_32"
+          },
+          loc {
+            empty local str "Query_1",
+            int {
+              from 80,
+              to 80,
+              strand unknown,
+              id local str "Subject_32"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_32"
+          },
+          loc {
+            int {
+              from 646,
+              to 744,
+              strand minus,
+              id local str "Query_1"
+            },
+            int {
+              from 81,
+              to 113,
+              strand unknown,
+              id local str "Subject_32"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_32"
+          },
+          loc {
+            empty local str "Query_1",
+            int {
+              from 114,
+              to 114,
+              strand unknown,
+              id local str "Subject_32"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_32"
+          },
+          loc {
+            int {
+              from 628,
+              to 645,
+              strand minus,
+              id local str "Query_1"
+            },
+            int {
+              from 115,
+              to 120,
+              strand unknown,
+              id local str "Subject_32"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_32"
+          },
+          loc {
+            empty local str "Query_1",
+            int {
+              from 121,
+              to 121,
+              strand unknown,
+              id local str "Subject_32"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_32"
+          },
+          loc {
+            int {
+              from 559,
+              to 627,
+              strand minus,
+              id local str "Query_1"
+            },
+            int {
+              from 122,
+              to 144,
+              strand unknown,
+              id local str "Subject_32"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_32"
+          },
+          loc {
+            empty local str "Query_1",
+            int {
+              from 145,
+              to 145,
+              strand unknown,
+              id local str "Subject_32"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_32"
+          },
+          loc {
+            int {
+              from 376,
+              to 558,
+              strand minus,
+              id local str "Query_1"
+            },
+            int {
+              from 146,
+              to 206,
+              strand unknown,
+              id local str "Subject_32"
+            }
+          }
+        }
+      }
+    },
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 46
+        },
+        {
+          id str "blast_score",
+          value int 46
+        },
+        {
+          id str "e_value",
+          value real { 385326416802532, 10, -14 }
+        },
+        {
+          id str "bit_score",
+          value real { 226954323041198, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 10
+        },
+        {
+          id str "comp_adjustment_method",
+          value int 2
+        },
+        {
+          id str "num_positives",
+          value int 10
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 12202881152461, 10, -13 }
+        }
+      },
+      segs std {
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_32"
+          },
+          loc {
+            int {
+              from 288,
+              to 323,
+              strand minus,
+              id local str "Query_1"
+            },
+            int {
+              from 195,
+              to 206,
+              strand unknown,
+              id local str "Subject_32"
+            }
+          }
+        }
+      }
+    },
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 45
+        },
+        {
+          id str "blast_score",
+          value int 45
+        },
+        {
+          id str "e_value",
+          value real { 558403148538638, 10, -14 }
+        },
+        {
+          id str "bit_score",
+          value real { 222712799620984, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 10
+        },
+        {
+          id str "comp_adjustment_method",
+          value int 2
+        },
+        {
+          id str "num_positives",
+          value int 10
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 12202881152461, 10, -13 }
+        }
+      },
+      segs std {
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_32"
+          },
+          loc {
+            int {
+              from 332,
+              to 367,
+              strand minus,
+              id local str "Query_1"
+            },
+            int {
+              from 195,
+              to 206,
+              strand unknown,
+              id local str "Subject_32"
+            }
+          }
+        }
+      }
+    },
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 427
+        },
+        {
+          id str "blast_score",
+          value int 427
+        },
+        {
+          id str "e_value",
+          value real { 568806993965308, 10, -63 }
+        },
+        {
+          id str "bit_score",
+          value real { 184297474614256, 10, -12 }
+        },
+        {
+          id str "num_ident",
+          value int 128
+        },
+        {
+          id str "comp_adjustment_method",
+          value int 2
+        },
+        {
+          id str "num_positives",
+          value int 212
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 226488595438175, 10, -13 }
+        }
+      },
+      segs std {
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_35"
+          },
+          loc {
+            int {
+              from 2887,
+              to 2934,
+              strand minus,
+              id local str "Query_1"
+            },
+            int {
+              from 1,
+              to 16,
+              strand unknown,
+              id local str "Subject_35"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_35"
+          },
+          loc {
+            empty local str "Query_1",
+            int {
+              from 17,
+              to 18,
+              strand unknown,
+              id local str "Subject_35"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_35"
+          },
+          loc {
+            int {
+              from 2866,
+              to 2886,
+              strand minus,
+              id local str "Query_1"
+            },
+            int {
+              from 19,
+              to 25,
+              strand unknown,
+              id local str "Subject_35"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_35"
+          },
+          loc {
+            empty local str "Query_1",
+            int {
+              from 26,
+              to 30,
+              strand unknown,
+              id local str "Subject_35"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_35"
+          },
+          loc {
+            int {
+              from 2806,
+              to 2865,
+              strand minus,
+              id local str "Query_1"
+            },
+            int {
+              from 31,
+              to 50,
+              strand unknown,
+              id local str "Subject_35"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_35"
+          },
+          loc {
+            empty local str "Query_1",
+            int {
+              from 51,
+              to 53,
+              strand unknown,
+              id local str "Subject_35"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_35"
+          },
+          loc {
+            int {
+              from 2674,
+              to 2805,
+              strand minus,
+              id local str "Query_1"
+            },
+            int {
+              from 54,
+              to 97,
+              strand unknown,
+              id local str "Subject_35"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_35"
+          },
+          loc {
+            int {
+              from 2644,
+              to 2673,
+              strand minus,
+              id local str "Query_1"
+            },
+            empty local str "Subject_35"
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_35"
+          },
+          loc {
+            int {
+              from 2617,
+              to 2643,
+              strand minus,
+              id local str "Query_1"
+            },
+            int {
+              from 98,
+              to 106,
+              strand unknown,
+              id local str "Subject_35"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_35"
+          },
+          loc {
+            empty local str "Query_1",
+            int {
+              from 107,
+              to 107,
+              strand unknown,
+              id local str "Subject_35"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_35"
+          },
+          loc {
+            int {
+              from 2596,
+              to 2616,
+              strand minus,
+              id local str "Query_1"
+            },
+            int {
+              from 108,
+              to 114,
+              strand unknown,
+              id local str "Subject_35"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_35"
+          },
+          loc {
+            empty local str "Query_1",
+            int {
+              from 115,
+              to 119,
+              strand unknown,
+              id local str "Subject_35"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_35"
+          },
+          loc {
+            int {
+              from 2449,
+              to 2595,
+              strand minus,
+              id local str "Query_1"
+            },
+            int {
+              from 120,
+              to 168,
+              strand unknown,
+              id local str "Subject_35"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_35"
+          },
+          loc {
+            empty local str "Query_1",
+            int {
+              from 169,
+              to 169,
+              strand unknown,
+              id local str "Subject_35"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_35"
+          },
+          loc {
+            int {
+              from 2320,
+              to 2448,
+              strand minus,
+              id local str "Query_1"
+            },
+            int {
+              from 170,
+              to 212,
+              strand unknown,
+              id local str "Subject_35"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_35"
+          },
+          loc {
+            empty local str "Query_1",
+            int {
+              from 213,
+              to 235,
+              strand unknown,
+              id local str "Subject_35"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_35"
+          },
+          loc {
+            int {
+              from 2278,
+              to 2319,
+              strand minus,
+              id local str "Query_1"
+            },
+            int {
+              from 236,
+              to 249,
+              strand unknown,
+              id local str "Subject_35"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_35"
+          },
+          loc {
+            int {
+              from 2242,
+              to 2277,
+              strand minus,
+              id local str "Query_1"
+            },
+            empty local str "Subject_35"
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_35"
+          },
+          loc {
+            int {
+              from 2236,
+              to 2241,
+              strand minus,
+              id local str "Query_1"
+            },
+            int {
+              from 250,
+              to 251,
+              strand unknown,
+              id local str "Subject_35"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_35"
+          },
+          loc {
+            int {
+              from 2230,
+              to 2235,
+              strand minus,
+              id local str "Query_1"
+            },
+            empty local str "Subject_35"
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_35"
+          },
+          loc {
+            int {
+              from 1957,
+              to 2229,
+              strand minus,
+              id local str "Query_1"
+            },
+            int {
+              from 252,
+              to 342,
+              strand unknown,
+              id local str "Subject_35"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_35"
+          },
+          loc {
+            empty local str "Query_1",
+            int {
+              from 343,
+              to 351,
+              strand unknown,
+              id local str "Subject_35"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_35"
+          },
+          loc {
+            int {
+              from 1894,
+              to 1956,
+              strand minus,
+              id local str "Query_1"
+            },
+            int {
+              from 352,
+              to 372,
+              strand unknown,
+              id local str "Subject_35"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_35"
+          },
+          loc {
+            empty local str "Query_1",
+            int {
+              from 373,
+              to 373,
+              strand unknown,
+              id local str "Subject_35"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_35"
+          },
+          loc {
+            int {
+              from 1828,
+              to 1893,
+              strand minus,
+              id local str "Query_1"
+            },
+            int {
+              from 374,
+              to 395,
+              strand unknown,
+              id local str "Subject_35"
+            }
+          }
+        }
+      }
+    },
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 263
+        },
+        {
+          id str "blast_score",
+          value int 263
+        },
+        {
+          id str "e_value",
+          value real { 652420319117546, 10, -42 }
+        },
+        {
+          id str "bit_score",
+          value real { 114736490522754, 10, -12 }
+        },
+        {
+          id str "num_ident",
+          value int 71
+        },
+        {
+          id str "comp_adjustment_method",
+          value int 2
+        },
+        {
+          id str "num_positives",
+          value int 113
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 120846338535414, 10, -13 }
+        }
+      },
+      segs std {
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_35"
+          },
+          loc {
+            int {
+              from 4695,
+              to 4961,
+              strand minus,
+              id local str "Query_1"
+            },
+            int {
+              from 241,
+              to 329,
+              strand unknown,
+              id local str "Subject_35"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_35"
+          },
+          loc {
+            empty local str "Query_1",
+            int {
+              from 330,
+              to 341,
+              strand unknown,
+              id local str "Subject_35"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_35"
+          },
+          loc {
+            int {
+              from 4656,
+              to 4694,
+              strand minus,
+              id local str "Query_1"
+            },
+            int {
+              from 342,
+              to 354,
+              strand unknown,
+              id local str "Subject_35"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_35"
+          },
+          loc {
+            int {
+              from 4647,
+              to 4655,
+              strand minus,
+              id local str "Query_1"
+            },
+            empty local str "Subject_35"
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_35"
+          },
+          loc {
+            int {
+              from 4638,
+              to 4646,
+              strand minus,
+              id local str "Query_1"
+            },
+            int {
+              from 355,
+              to 357,
+              strand unknown,
+              id local str "Subject_35"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_35"
+          },
+          loc {
+            int {
+              from 4590,
+              to 4637,
+              strand minus,
+              id local str "Query_1"
+            },
+            empty local str "Subject_35"
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_35"
+          },
+          loc {
+            int {
+              from 4545,
+              to 4589,
+              strand minus,
+              id local str "Query_1"
+            },
+            int {
+              from 358,
+              to 372,
+              strand unknown,
+              id local str "Subject_35"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_35"
+          },
+          loc {
+            empty local str "Query_1",
+            int {
+              from 373,
+              to 373,
+              strand unknown,
+              id local str "Subject_35"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_35"
+          },
+          loc {
+            int {
+              from 4473,
+              to 4544,
+              strand minus,
+              id local str "Query_1"
+            },
+            int {
+              from 374,
+              to 397,
+              strand unknown,
+              id local str "Subject_35"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_35"
+          },
+          loc {
+            empty local str "Query_1",
+            int {
+              from 398,
+              to 408,
+              strand unknown,
+              id local str "Subject_35"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_35"
+          },
+          loc {
+            int {
+              from 4455,
+              to 4472,
+              strand minus,
+              id local str "Query_1"
+            },
+            int {
+              from 409,
+              to 414,
+              strand unknown,
+              id local str "Subject_35"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_35"
+          },
+          loc {
+            empty local str "Query_1",
+            int {
+              from 415,
+              to 415,
+              strand unknown,
+              id local str "Subject_35"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_35"
+          },
+          loc {
+            int {
+              from 4383,
+              to 4454,
+              strand minus,
+              id local str "Query_1"
+            },
+            int {
+              from 416,
+              to 439,
+              strand unknown,
+              id local str "Subject_35"
+            }
+          }
+        }
+      }
+    },
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 132
+        },
+        {
+          id str "blast_score",
+          value int 132
+        },
+        {
+          id str "e_value",
+          value real { 377919786850993, 10, -25 }
+        },
+        {
+          id str "bit_score",
+          value real { 591725337179563, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 30
+        },
+        {
+          id str "comp_adjustment_method",
+          value int 2
+        },
+        {
+          id str "num_positives",
+          value int 49
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 51218487394958, 10, -13 }
+        }
+      },
+      segs std {
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_35"
+          },
+          loc {
+            int {
+              from 4875,
+              to 4919,
+              strand minus,
+              id local str "Query_1"
+            },
+            int {
+              from 125,
+              to 139,
+              strand unknown,
+              id local str "Subject_35"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_35"
+          },
+          loc {
+            int {
+              from 4872,
+              to 4874,
+              strand minus,
+              id local str "Query_1"
+            },
+            empty local str "Subject_35"
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_35"
+          },
+          loc {
+            int {
+              from 4791,
+              to 4871,
+              strand minus,
+              id local str "Query_1"
+            },
+            int {
+              from 140,
+              to 166,
+              strand unknown,
+              id local str "Subject_35"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_35"
+          },
+          loc {
+            empty local str "Query_1",
+            int {
+              from 167,
+              to 167,
+              strand unknown,
+              id local str "Subject_35"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            local str "Subject_35"
+          },
+          loc {
+            int {
+              from 4689,
+              to 4790,
+              strand minus,
+              id local str "Query_1"
+            },
+            int {
+              from 168,
+              to 201,
+              strand unknown,
+              id local str "Subject_35"
+            }
+          }
+        }
+      }
+    }
+  }
+}
+Seq-annot ::= {
+  desc {
+    user {
+      type str "Hist Seqalign",
+      data {
+        {
+          label str "Hist Seqalign",
+          data bool TRUE
+        }
+      }
+    },
+    user {
+      type str "Blast Type",
+      data {
+        {
+          label str "blastx",
+          data int 3
+        }
+      }
+    },
+    user {
+      type str "Blast Database Title",
+      data {
+        {
+          label str "n/a",
+          data bool FALSE
+        }
+      }
+    }
+  },
+  data align {
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 1837
+        },
+        {
+          id str "blast_score",
+          value int 1837
+        },
+        {
+          id str "e_value",
+          value real { 0, 10, 0 }
+        },
+        {
+          id str "bit_score",
+          value real { 782352276864367, 10, -12 }
+        },
+        {
+          id str "num_ident",
+          value int 433
+        },
+        {
+          id str "comp_adjustment_method",
+          value int 2
+        },
+        {
+          id str "num_positives",
+          value int 594
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 382813504823151, 10, -13 }
+        }
+      },
+      segs std {
+        {
+          dim 2,
+          ids {
+            local str "Query_2",
+            local str "Subject_6"
+          },
+          loc {
+            int {
+              from 5435,
+              to 5524,
+              strand minus,
+              id local str "Query_2"
+            },
+            int {
+              from 18,
+              to 47,
+              strand unknown,
+              id local str "Subject_6"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_2",
+            local str "Subject_6"
+          },
+          loc {
+            int {
+              from 5432,
+              to 5434,
+              strand minus,
+              id local str "Query_2"
+            },
+            empty local str "Subject_6"
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_2",
+            local str "Subject_6"
+          },
+          loc {
+            int {
+              from 5174,
+              to 5431,
+              strand minus,
+              id local str "Query_2"
+            },
+            int {
+              from 48,
+              to 133,
+              strand unknown,
+              id local str "Subject_6"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_2",
+            local str "Subject_6"
+          },
+          loc {
+            empty local str "Query_2",
+            int {
+              from 134,
+              to 134,
+              strand unknown,
+              id local str "Subject_6"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_2",
+            local str "Subject_6"
+          },
+          loc {
+            int {
+              from 4946,
+              to 5173,
+              strand minus,
+              id local str "Query_2"
+            },
+            int {
+              from 135,
+              to 210,
+              strand unknown,
+              id local str "Subject_6"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_2",
+            local str "Subject_6"
+          },
+          loc {
+            int {
+              from 4940,
+              to 4945,
+              strand minus,
+              id local str "Query_2"
+            },
+            empty local str "Subject_6"
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_2",
+            local str "Subject_6"
+          },
+          loc {
+            int {
+              from 4775,
+              to 4939,
+              strand minus,
+              id local str "Query_2"
+            },
+            int {
+              from 211,
+              to 265,
+              strand unknown,
+              id local str "Subject_6"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_2",
+            local str "Subject_6"
+          },
+          loc {
+            int {
+              from 4772,
+              to 4774,
+              strand minus,
+              id local str "Query_2"
+            },
+            empty local str "Subject_6"
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_2",
+            local str "Subject_6"
+          },
+          loc {
+            int {
+              from 4415,
+              to 4771,
+              strand minus,
+              id local str "Query_2"
+            },
+            int {
+              from 266,
+              to 384,
+              strand unknown,
+              id local str "Subject_6"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_2",
+            local str "Subject_6"
+          },
+          loc {
+            empty local str "Query_2",
+            int {
+              from 385,
+              to 386,
+              strand unknown,
+              id local str "Subject_6"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_2",
+            local str "Subject_6"
+          },
+          loc {
+            int {
+              from 4055,
+              to 4414,
+              strand minus,
+              id local str "Query_2"
+            },
+            int {
+              from 387,
+              to 506,
+              strand unknown,
+              id local str "Subject_6"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_2",
+            local str "Subject_6"
+          },
+          loc {
+            int {
+              from 4052,
+              to 4054,
+              strand minus,
+              id local str "Query_2"
+            },
+            empty local str "Subject_6"
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_2",
+            local str "Subject_6"
+          },
+          loc {
+            int {
+              from 3908,
+              to 4051,
+              strand minus,
+              id local str "Query_2"
+            },
+            int {
+              from 507,
+              to 554,
+              strand unknown,
+              id local str "Subject_6"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_2",
+            local str "Subject_6"
+          },
+          loc {
+            empty local str "Query_2",
+            int {
+              from 555,
+              to 555,
+              strand unknown,
+              id local str "Subject_6"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_2",
+            local str "Subject_6"
+          },
+          loc {
+            int {
+              from 3812,
+              to 3907,
+              strand minus,
+              id local str "Query_2"
+            },
+            int {
+              from 556,
+              to 587,
+              strand unknown,
+              id local str "Subject_6"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_2",
+            local str "Subject_6"
+          },
+          loc {
+            empty local str "Query_2",
+            int {
+              from 588,
+              to 588,
+              strand unknown,
+              id local str "Subject_6"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_2",
+            local str "Subject_6"
+          },
+          loc {
+            int {
+              from 3686,
+              to 3811,
+              strand minus,
+              id local str "Query_2"
+            },
+            int {
+              from 589,
+              to 630,
+              strand unknown,
+              id local str "Subject_6"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_2",
+            local str "Subject_6"
+          },
+          loc {
+            empty local str "Query_2",
+            int {
+              from 631,
+              to 631,
+              strand unknown,
+              id local str "Subject_6"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_2",
+            local str "Subject_6"
+          },
+          loc {
+            int {
+              from 3644,
+              to 3685,
+              strand minus,
+              id local str "Query_2"
+            },
+            int {
+              from 632,
+              to 645,
+              strand unknown,
+              id local str "Subject_6"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_2",
+            local str "Subject_6"
+          },
+          loc {
+            empty local str "Query_2",
+            int {
+              from 646,
+              to 646,
+              strand unknown,
+              id local str "Subject_6"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_2",
+            local str "Subject_6"
+          },
+          loc {
+            int {
+              from 3410,
+              to 3643,
+              strand minus,
+              id local str "Query_2"
+            },
+            int {
+              from 647,
+              to 724,
+              strand unknown,
+              id local str "Subject_6"
+            }
+          }
+        }
+      }
+    },
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 439
+        },
+        {
+          id str "blast_score",
+          value int 439
+        },
+        {
+          id str "e_value",
+          value real { 356822371905884, 10, -65 }
+        },
+        {
+          id str "bit_score",
+          value real { 189387302718512, 10, -12 }
+        },
+        {
+          id str "num_ident",
+          value int 96
+        },
+        {
+          id str "comp_adjustment_method",
+          value int 2
+        },
+        {
+          id str "num_positives",
+          value int 138
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 10414255091104, 10, -12 }
+        }
+      },
+      segs std {
+        {
+          dim 2,
+          ids {
+            local str "Query_2",
+            local str "Subject_3"
+          },
+          loc {
+            int {
+              from 1369,
+              to 1545,
+              strand plus,
+              id local str "Query_2"
+            },
+            int {
+              from 19,
+              to 77,
+              strand unknown,
+              id local str "Subject_3"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_2",
+            local str "Subject_3"
+          },
+          loc {
+            empty local str "Query_2",
+            int {
+              from 78,
+              to 79,
+              strand unknown,
+              id local str "Subject_3"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_2",
+            local str "Subject_3"
+          },
+          loc {
+            int {
+              from 1546,
+              to 1647,
+              strand plus,
+              id local str "Query_2"
+            },
+            int {
+              from 80,
+              to 113,
+              strand unknown,
+              id local str "Subject_3"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_2",
+            local str "Subject_3"
+          },
+          loc {
+            empty local str "Query_2",
+            int {
+              from 114,
+              to 115,
+              strand unknown,
+              id local str "Subject_3"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_2",
+            local str "Subject_3"
+          },
+          loc {
+            int {
+              from 1648,
+              to 1653,
+              strand plus,
+              id local str "Query_2"
+            },
+            int {
+              from 116,
+              to 117,
+              strand unknown,
+              id local str "Subject_3"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_2",
+            local str "Subject_3"
+          },
+          loc {
+            int {
+              from 1654,
+              to 1656,
+              strand plus,
+              id local str "Query_2"
+            },
+            empty local str "Subject_3"
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_2",
+            local str "Subject_3"
+          },
+          loc {
+            int {
+              from 1657,
+              to 1668,
+              strand plus,
+              id local str "Query_2"
+            },
+            int {
+              from 118,
+              to 121,
+              strand unknown,
+              id local str "Subject_3"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_2",
+            local str "Subject_3"
+          },
+          loc {
+            empty local str "Query_2",
+            int {
+              from 122,
+              to 123,
+              strand unknown,
+              id local str "Subject_3"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_2",
+            local str "Subject_3"
+          },
+          loc {
+            int {
+              from 1669,
+              to 1896,
+              strand plus,
+              id local str "Query_2"
+            },
+            int {
+              from 124,
+              to 199,
+              strand unknown,
+              id local str "Subject_3"
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_2",
+            local str "Subject_3"
+          },
+          loc {
+            int {
+              from 1897,
+              to 1902,
+              strand plus,
+              id local str "Query_2"
+            },
+            empty local str "Subject_3"
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_2",
+            local str "Subject_3"
+          },
+          loc {
+            int {
+              from 1903,
+              to 1923,
+              strand plus,
+              id local str "Query_2"
+            },
+            int {
+              from 200,
+              to 206,
+              strand unknown,
+              id local str "Subject_3"
+            }
+          }
+        }
+      }
+    }
+  }
+}

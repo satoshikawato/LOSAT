@@ -1,0 +1,36 @@
+good	sorted, 7 entries; the last entry is taxid 99990
+bad_magic	magic 0x8738
+bad_magic_le	magic written little-endian
+count_larger	count = entries + 1 (room for fewer)
+count_smaller	count = entries - 1 (room for more)
+count_zero	count 0
+index_short	index file 31 bytes (header + 7)
+index_header_only	index file 24 bytes (header, no entry), count 0
+index_one_entry	one entry (index 32 bytes, the smallest valid)
+index_trailing	valid index followed by 7 stray bytes (integer division ignores them)
+index_trailing_8	valid index followed by 8 stray bytes (room for one more: count mismatch)
+no_btd	taxdb.btd absent
+no_bti	taxdb.bti absent
+btd_empty	taxdb.btd exists with 0 bytes
+btd_truncated	taxdb.btd cut inside the record of taxid 9606 (index unchanged)
+empty_kingdom_mid	taxid 9606 record ends with a tab and an empty kingdom
+empty_kingdom_last	last entry (99990) record ends with a tab and an empty kingdom
+empty_fields	taxid 9606: empty scientific, common and blast names, kingdom X
+high_bytes_utf8	taxid 9606 scientific name with UTF-8 bytes (>= 0x80)
+high_bytes_latin1	taxid 10090 common name with a Latin-1 byte 0xE9 and kingdom with 0xFF
+tabs0	taxid 9606 record without tab
+tabs1	taxid 9606 record with 1 tab
+tabs2	taxid 9606 record with 2 tabs (no kingdom, no fourth field)
+tabs4	taxid 9606 record with 4 tabs (kingdom = "Eukaryota\textra")
+tabs0_last	last entry record without tab
+term_nul	every record followed by a NUL byte
+term_nl	every record followed by a newline
+offsets_swapped	offsets of 9606 and 10090 swapped (9606 would end before it begins)
+offsets_equal	taxid 10090 has the offset of 9606 (9606 gets an empty record)
+offset_last_past_end	offset of the last entry is past the end of taxdb.btd
+offset_last_at_end	offset of the last entry equals the size of taxdb.btd (empty record)
+offset_mid_past_end	offset of taxid 9606 is past the end of taxdb.btd
+offset_next_past_end	offset of taxid 10090 is past the end of taxdb.btd (the record of 9606 runs past the end)
+unsorted_adjacent	entries 9606 and 10090 in the wrong order
+dup_taxid	taxid 9606 twice (second copy has other names)
+taxid_high_bit	an entry with taxid 0x80000005 (negative as Int4) after 99990

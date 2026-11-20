@@ -15,7 +15,7 @@ set -euo pipefail
 # };
 # ```
 
-LOSAT_BIN="../target/debug/LOSAT"
+LOSAT_BIN="../target/debug/losat"
 REF_DIR="./blast_out/blastp_custom_fields"
 FASTA_DIR="./fasta"
 OUTFMT="6 std qlen slen positive ppos btop stitle"

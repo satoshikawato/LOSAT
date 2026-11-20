@@ -8,9 +8,10 @@ use crate::algorithm::tblastx::scan::OffsetPair;
 use crate::config::ScoringMatrix;
 use crate::core::composition_adjustment::adjust_scores::build_matrix_info;
 use crate::stats::{compute_std_aa_composition, lookup_protein_params_ungapped};
+use crate::utils::glibc_fma_libm::GlibcLibm;
 use crate::utils::matrix::{aa_char_to_ncbistdaa, BLASTAA_SIZE, BLAST_SCORE_MIN};
 
-// EXPERIMENT (LOSAT_X_BPCLUT / LOSAT_X_BPCLUTSHADOW; BPCLUT is a strict-set switch): this file's table built flat
+// EXPERIMENT (LOSAT_X_BPCLUT; BPCLUT is a strict-set switch): this file's table built flat
 // (count, layout, fill), each cell's hits in one slice in NCBI's scan order; a child module, so that
 // it uses this file's private builder pieces (x_clut_direct.rs, exactness argument in its header).
 //
@@ -137,15 +138,14 @@ pub struct CompressedLookupBackboneCell {
 //     Int4* scaled_compress_table;
 // } BlastCompressedAaLookupTable;
 // ```
+// `alphabet_size` and `backbone_size` are not stored: nothing reads them.
 #[derive(Clone, Debug)]
 pub struct BlastCompressedAaLookupTable {
     pub threshold: i32,
     pub word_length: i32,
-    pub alphabet_size: i32,
     pub compressed_alphabet_size: i32,
     pub reciprocal_alphabet_size: i32,
     pub longest_chain: i32,
-    pub backbone_size: i32,
     pub backbone: Vec<CompressedLookupBackboneCell>,
     pub overflow_cells: Vec<CompressedOverflowCell>,
     pub pv: Vec<u32>,
@@ -219,6 +219,17 @@ pub struct CompressedNeighborInfo {
 //                                   word_size) + 1;
 // lookup->backbone = calloc(lookup->backbone_size, sizeof(...));
 // ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1292
+// ```c
+//     lookup->threshold = (Int4)(kMatrixScale * opt->threshold);
+// ```
+/// The threshold of a compressed table in NCBI's matrix units, for a caller of the builders that
+/// take it converted (BLASTX, `blastx/seed.rs`).
+pub(crate) fn x_compressed_scaled_threshold(threshold: f64) -> i32 {
+    // `(Int4)` as the x86-64 build converts it (`INT_MIN` past `Int4`).
+    crate::core::blast_util::ncbi_int4_from_double(100.0 * threshold)
+}
+
 impl BlastCompressedAaLookupTable {
     pub fn new(word_size: usize, threshold: f64) -> Option<Self> {
         let (compressed_alphabet_size, reciprocal_alphabet_size) =
@@ -232,13 +243,11 @@ impl BlastCompressedAaLookupTable {
             .checked_add(1)?;
 
         Some(Self {
-            threshold: (100.0 * threshold) as i32,
+            threshold: x_compressed_scaled_threshold(threshold),
             word_length: word_size as i32,
-            alphabet_size: BLASTAA_SIZE as i32,
             compressed_alphabet_size: compressed_alphabet_size as i32,
             reciprocal_alphabet_size,
             longest_chain: 0,
-            backbone_size: backbone_size as i32,
             backbone: vec![CompressedLookupBackboneCell::default(); backbone_size],
             overflow_cells: Vec::new(),
             pv: Vec::new(),
@@ -589,6 +598,7 @@ impl BlastCompressedAaLookupTable {
     //     }
     // }
     // ```
+    #[cfg(test)]
     pub fn add_neighboring_words(
         &mut self,
         matrix: &CompressedScoreMatrix,
@@ -656,6 +666,7 @@ impl BlastCompressedAaLookupTable {
     //     while (curr_cell != NULL) { ... }
     // }
     // ```
+    #[cfg(test)]
     pub fn query_offsets_in_scan_order(&self, index: usize) -> Vec<i32> {
         let cell = &self.backbone[index];
         let numhits = cell.num_used;
@@ -1247,6 +1258,8 @@ fn blast_nint(x: f64) -> i32 {
 //     }
 // }
 // ```
+// Always inlined: BLOSUM62's builder keeps the code it had as the only caller.
+#[inline(always)]
 fn compressed_probabilities(compressed_alphabet_size: usize) -> Option<[f64; BLASTAA_SIZE]> {
     let reverse = build_compressed_reverse_lookup(compressed_alphabet_size)?;
     let standard_prob = compute_std_aa_composition();
@@ -1285,10 +1298,29 @@ fn compressed_probabilities(compressed_alphabet_size: usize) -> Option<[f64; BLA
 pub fn build_blosum62_compressed_score_matrix(
     compressed_alphabet_size: usize,
 ) -> Option<CompressedScoreMatrix> {
+    compressed_score_matrix_of(ScoringMatrix::Blosum62, compressed_alphabet_size)
+}
+
+/// `build_blosum62_compressed_score_matrix` for the search matrix `matrix`: its ungapped lambda
+/// (row 0 of NCBI's table, `RPSfindUngappedLambda`) and frequency ratios
+/// (`_PSIMatrixFrequencyRatiosNew`). `None` for IDENTITY, which has no frequency ratios.
+pub fn build_compressed_score_matrix(
+    matrix: ScoringMatrix,
+    compressed_alphabet_size: usize,
+) -> Option<CompressedScoreMatrix> {
+    compressed_score_matrix_of(matrix, compressed_alphabet_size)
+}
+
+// The body of both builders above, so that BLOSUM62's keeps its constant matrix.
+#[inline(always)]
+fn compressed_score_matrix_of(
+    matrix: ScoringMatrix,
+    compressed_alphabet_size: usize,
+) -> Option<CompressedScoreMatrix> {
     let reverse = build_compressed_reverse_lookup(compressed_alphabet_size)?;
     let compressed_prob = compressed_probabilities(compressed_alphabet_size)?;
-    let ungapped = lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
-    let matrix_info = build_matrix_info(ScoringMatrix::Blosum62, ungapped.lambda).ok()?;
+    let ungapped = lookup_protein_params_ungapped(matrix);
+    let matrix_info = build_matrix_info(matrix, ungapped.lambda).ok()?;
     let matrix_scale_factor = 100.0 / ungapped.lambda;
     let min_freq = BLAST_SCORE_MIN as f64 / matrix_scale_factor;
     let mut scores = [[0i32; BLASTAA_SIZE]; BLASTAA_SIZE];
@@ -1299,7 +1331,11 @@ pub fn build_blosum62_compressed_score_matrix(
             for &aa in group {
                 val += matrix_info.start_freq_ratios[q][aa] * compressed_prob[aa];
             }
-            let val = if val < 1.0e-8 { min_freq } else { val.ln() };
+            let val = if val < 1.0e-8 {
+                min_freq
+            } else {
+                val.glibc_ln()
+            };
             scores[q][s] = blast_nint(val * matrix_scale_factor);
         }
     }
@@ -1317,21 +1353,43 @@ pub fn build_blosum62_compressed_score_matrix(
 //                                 query, locations);
 // s_CompressedLookupFinalize(lookup);
 // ```
+// `Some(Err(()))` when the words fill NCBI's overflow banks (`s_CompressedListGetNewCell`),
+// past which NCBI writes beyond `overflow_banks`.
+#[cfg(test)]
 pub fn build_blosum62_compressed_lookup(
     word_size: usize,
     threshold: f64,
     query: &[u8],
     locations: &[(i32, i32)],
-) -> Option<BlastCompressedAaLookupTable> {
+) -> Option<Result<BlastCompressedAaLookupTable, ()>> {
+    build_blosum62_compressed_lookup_with_capacity(
+        word_size,
+        threshold,
+        query,
+        locations,
+        NCBI_OVERFLOW_CELL_CAPACITY,
+    )
+}
+
+// `build_blosum62_compressed_lookup` with `overflow_cell_capacity` overflow cells (a parameter
+// for the tests).
+#[cfg(test)]
+fn build_blosum62_compressed_lookup_with_capacity(
+    word_size: usize,
+    threshold: f64,
+    query: &[u8],
+    locations: &[(i32, i32)],
+    overflow_cell_capacity: usize,
+) -> Option<Result<BlastCompressedAaLookupTable, ()>> {
     let mut lookup = BlastCompressedAaLookupTable::new(word_size, threshold)?;
+    lookup.overflow_cell_capacity = overflow_cell_capacity;
     let matrix = build_blosum62_compressed_score_matrix(lookup.compressed_alphabet_size as usize)?;
     lookup.add_neighboring_words(&matrix, query, locations);
-    assert!(
-        !lookup.overflow_banks_exhausted,
-        "NCBI BLAST compressed overflow bank capacity exceeded"
-    );
+    if lookup.overflow_banks_exhausted {
+        return Some(Err(()));
+    }
     lookup.finalize();
-    Some(lookup)
+    Some(Ok(lookup))
 }
 
 /// The table of `build_blosum62_compressed_lookup` for a threshold already in NCBI's
@@ -1348,7 +1406,8 @@ pub fn try_build_blosum62_compressed_lookup(
     locations: &[(i32, i32)],
     tables: &[std::ops::Range<usize>],
 ) -> Option<Result<BlastCompressedAaLookupTable, ()>> {
-    try_build_blosum62_compressed_lookup_with_capacity(
+    try_build_compressed_lookup_with_capacity(
+        Blosum62Compressed,
         word_size,
         scaled_threshold,
         query,
@@ -1356,6 +1415,51 @@ pub fn try_build_blosum62_compressed_lookup(
         tables,
         NCBI_OVERFLOW_CELL_CAPACITY,
     )
+}
+
+/// `try_build_blosum62_compressed_lookup` with the words of the search matrix `matrix`
+/// (`build_compressed_score_matrix`). `None` also for IDENTITY, whose table NCBI cannot build.
+pub fn try_build_compressed_lookup(
+    matrix: ScoringMatrix,
+    word_size: usize,
+    scaled_threshold: i32,
+    query: &[u8],
+    locations: &[(i32, i32)],
+    tables: &[std::ops::Range<usize>],
+) -> Option<Result<BlastCompressedAaLookupTable, ()>> {
+    try_build_compressed_lookup_with_capacity(
+        matrix,
+        word_size,
+        scaled_threshold,
+        query,
+        locations,
+        tables,
+        NCBI_OVERFLOW_CELL_CAPACITY,
+    )
+}
+
+/// The search matrix whose compressed score matrix scores a table's words: BLOSUM62
+/// (`Blosum62Compressed`, `build_blosum62_compressed_score_matrix`) or another `ScoringMatrix`
+/// (`build_compressed_score_matrix`).
+pub trait CompressedScores: Copy {
+    fn score_matrix(self, compressed_alphabet_size: usize) -> Option<CompressedScoreMatrix>;
+}
+
+/// BLOSUM62, the default matrix, as a type of its own: the builders' BLOSUM62 instances.
+#[derive(Clone, Copy)]
+pub struct Blosum62Compressed;
+
+impl CompressedScores for Blosum62Compressed {
+    #[inline(always)]
+    fn score_matrix(self, compressed_alphabet_size: usize) -> Option<CompressedScoreMatrix> {
+        build_blosum62_compressed_score_matrix(compressed_alphabet_size)
+    }
+}
+
+impl CompressedScores for ScoringMatrix {
+    fn score_matrix(self, compressed_alphabet_size: usize) -> Option<CompressedScoreMatrix> {
+        build_compressed_score_matrix(self, compressed_alphabet_size)
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:206-213
@@ -1399,7 +1503,8 @@ pub fn try_build_blosum62_compressed_lookup(
 // offset. A batch past that is tested exactly once: when no words come before it, this
 // table so far is the batch's own; otherwise the batch's own table is built with NCBI's
 // capacity (`compressed_table_fills_banks`). Either stops as soon as the banks are full.
-fn try_build_blosum62_compressed_lookup_with_capacity(
+fn try_build_compressed_lookup_with_capacity<S: CompressedScores>(
+    scores: S,
     word_size: usize,
     scaled_threshold: i32,
     query: &[u8],
@@ -1410,7 +1515,7 @@ fn try_build_blosum62_compressed_lookup_with_capacity(
     let mut lookup = BlastCompressedAaLookupTable::new(word_size, 0.0)?;
     lookup.threshold = scaled_threshold;
     lookup.overflow_cell_capacity = usize::MAX;
-    let matrix = build_blosum62_compressed_score_matrix(lookup.compressed_alphabet_size as usize)?;
+    let matrix = scores.score_matrix(lookup.compressed_alphabet_size as usize)?;
     let info = CompressedNeighborInfo::new(&matrix, lookup.compressed_alphabet_size as usize);
     let mut next = 0usize;
     for table in tables {
@@ -1457,6 +1562,8 @@ fn try_build_blosum62_compressed_lookup_with_capacity(
 // One of NCBI's tables (a query batch's lookup segments), built with NCBI's capacity only to
 // see whether its words fill the banks; it stops there. Its offsets are those of the whole
 // query, which changes no count of a cell.
+// Always inlined: BLOSUM62's builder keeps the code it had as the only caller.
+#[inline(always)]
 fn compressed_table_fills_banks(
     word_size: usize,
     scaled_threshold: i32,
@@ -1522,8 +1629,8 @@ fn compressed_table_fills_banks(
 //                                     current_pos + 1);
 // ```
 // No NCBI counterpart: counts the words of `add_word_hits` (above) without a table, for LOSAT's
-// choice of a path (EXPERIMENT LOSAT_X_BPQBLOCK, `blastp/blast_engine.rs`
-// `x_block_search_refuses_nothing`); it changes no value NCBI computes.
+// choice of a path and of the blocks' ends (EXPERIMENT LOSAT_X_BPQBLOCK, `blastp/blast_engine.rs`
+// `x_block_search_refuses_nothing` and `x_word_blocks`); it changes no value NCBI computes.
 /// The number of words that `add_word_hits` adds to a table for one query offset: none when a
 /// letter of the word has no compressed letter; otherwise the word itself (`add_unencoded`) when
 /// there is no threshold or its own score is below it, and with a threshold the neighbors that
@@ -1531,8 +1638,10 @@ fn compressed_table_fills_banks(
 /// positions after the current one by their row maxima, which a word reaches, so its neighbors
 /// are exactly the compressed words whose score reaches the threshold. Neither their number nor
 /// the word's own score depends on the order of its letters, so a count is kept per set of
-/// letters (`counts`, keyed by the number of each letter) and the letters of a proteome take a
-/// few tens of thousands of enumerations.
+/// letters (`counts`, at the set's rank among the sets of `word_length` letters that have a
+/// compressed letter) and the letters of a proteome take a few tens of thousands of enumerations.
+/// The kept counts are shared: threads that count words with one counter keep them for each other
+/// (two threads may count a set both; they keep the same count).
 pub(crate) struct CompressedWordCount {
     threshold: i32,
     word_length: usize,
@@ -1540,42 +1649,115 @@ pub(crate) struct CompressedWordCount {
     compress_table: [u8; BLASTAA_SIZE],
     matrix: CompressedScoreMatrix,
     info: CompressedNeighborInfo,
-    counts: rustc_hash::FxHashMap<u128, u64>,
+    /// Each residue's index among the residues that have a compressed letter; `u8::MAX` for the
+    /// others.
+    letter_index: [u8; BLASTAA_SIZE],
+    /// `binomial[n][k]` is C(n, k), for n below the residues with a compressed letter plus
+    /// `word_length` and k up to `word_length`.
+    binomial: Vec<[u32; X_MOST_WORD_LETTERS + 1]>,
+    /// Per rank of a set of letters, its count plus 1; 0 while it is not counted.
+    counts: Box<[std::sync::atomic::AtomicU32]>,
 }
+
+// No NCBI counterpart: the longest word of `compressed_lookup_parameters`.
+const X_MOST_WORD_LETTERS: usize = 7;
 
 impl CompressedWordCount {
     /// The counts of the table of `build_blosum62_compressed_lookup` with a threshold in NCBI's
     /// matrix units (as `try_build_blosum62_compressed_lookup` takes it).
     pub(crate) fn new(word_size: usize, scaled_threshold: i32) -> Option<Self> {
         let (compressed_alphabet_size, _) = compressed_lookup_parameters(word_size)?;
+        if word_size > X_MOST_WORD_LETTERS {
+            return None;
+        }
         let matrix = build_blosum62_compressed_score_matrix(compressed_alphabet_size)?;
+        let compress_table = build_compressed_translation(compressed_alphabet_size)?;
+        let mut letter_index = [u8::MAX; BLASTAA_SIZE];
+        let mut letters = 0usize;
+        for (index, &compressed) in letter_index.iter_mut().zip(&compress_table) {
+            if usize::from(compressed) < compressed_alphabet_size {
+                *index = letters as u8;
+                letters += 1;
+            }
+        }
+        // A set of `word_size` of the `letters` letters, sorted, a_0 <= ... <= a_{w-1}, has the
+        // rank sum C(a_i + i, i + 1) (the combinatorial number system of the increasing a_i + i,
+        // below letters + w - 1), one of C(letters + w - 1, w).
+        let mut binomial = vec![[0u32; X_MOST_WORD_LETTERS + 1]; letters + word_size];
+        for n in 0..binomial.len() {
+            binomial[n][0] = 1;
+            for k in 1..=word_size.min(n) {
+                binomial[n][k] = binomial[n - 1][k - 1] + binomial[n - 1][k];
+            }
+        }
+        let sets = binomial[letters + word_size - 1][word_size] as usize;
         Some(Self {
             threshold: scaled_threshold,
             word_length: word_size,
             compressed_alphabet_size,
-            compress_table: build_compressed_translation(compressed_alphabet_size)?,
+            compress_table,
             info: CompressedNeighborInfo::new(&matrix, compressed_alphabet_size),
             matrix,
-            counts: rustc_hash::FxHashMap::default(),
+            letter_index,
+            binomial,
+            counts: (0..sets)
+                .map(|_| std::sync::atomic::AtomicU32::new(0))
+                .collect(),
         })
     }
 
-    /// The words that `add_word_hits` adds for `word` (NCBISTDAA letters, `word_length` of them).
-    fn words(&mut self, word: &[u8]) -> u64 {
-        let mut letters = 0u128;
-        for &residue in word {
-            let compressed = self.compress_table.get(usize::from(residue));
-            if compressed.is_none_or(|&c| usize::from(c) >= self.compressed_alphabet_size) {
-                return 0;
-            }
-            // 3 bits per letter (BLASTAA_SIZE of them) take the up to 7 letters of a word.
-            letters += 1u128 << (3 * u32::from(residue));
+    /// [`Self::new`] for the table of the search matrix `matrix` (`try_build_compressed_lookup`):
+    /// the compressed scores of another matrix than BLOSUM62 (`build_compressed_score_matrix`) in
+    /// place of BLOSUM62's. BLASTP's block search counts the words of its matrix (item SC2b).
+    pub(crate) fn new_of(
+        matrix: ScoringMatrix,
+        word_size: usize,
+        scaled_threshold: i32,
+    ) -> Option<Self> {
+        let mut count = Self::new(word_size, scaled_threshold)?;
+        if matrix != ScoringMatrix::Blosum62 {
+            count.matrix = build_compressed_score_matrix(matrix, count.compressed_alphabet_size)?;
+            count.info = CompressedNeighborInfo::new(&count.matrix, count.compressed_alphabet_size);
         }
-        if let Some(&words) = self.counts.get(&letters) {
-            return words;
+        Some(count)
+    }
+
+    /// The rank of the set of `word`'s letters; `None` when a letter has no compressed letter.
+    fn rank(&self, word: &[u8]) -> Option<usize> {
+        let mut sorted = [0u8; X_MOST_WORD_LETTERS];
+        for (index, &residue) in sorted.iter_mut().zip(word) {
+            *index = *self.letter_index.get(usize::from(residue))?;
+            if *index == u8::MAX {
+                return None;
+            }
+        }
+        let sorted = &mut sorted[..self.word_length];
+        sorted.sort_unstable();
+        Some(
+            sorted
+                .iter()
+                .enumerate()
+                .map(|(i, &index)| self.binomial[usize::from(index) + i][i + 1] as usize)
+                .sum(),
+        )
+    }
+
+    /// The words that `add_word_hits` adds for `word` (NCBISTDAA letters, `word_length` of them).
+    fn words(&self, word: &[u8]) -> u64 {
+        use std::sync::atomic::Ordering;
+        let Some(rank) = self.rank(word) else {
+            return 0;
+        };
+        let kept = &self.counts[rank];
+        match kept.load(Ordering::Relaxed) {
+            0 => {}
+            words_and_one => return u64::from(words_and_one - 1),
         }
         let words = self.count(word);
-        self.counts.insert(letters, words);
+        // At most 15^6 + 1 words (15 letters at word size 6; 15^5 + 1 at 5, 10^7 + 1 at 7).
+        if let Some(words_and_one) = u32::try_from(words).ok().and_then(|w| w.checked_add(1)) {
+            kept.store(words_and_one, Ordering::Relaxed);
+        }
         words
     }
 
@@ -1616,16 +1798,17 @@ impl CompressedWordCount {
         neighbors
     }
 
-    /// Whether a table whose words are some of the words of `queries`' offsets (each query's
-    /// NCBISTDAA letters) takes at most `overflow_cell_capacity` overflow cells: a backbone cell
-    /// with n offsets takes cells(n) <= n / 4 of them
-    /// (`try_build_blosum62_compressed_lookup_with_capacity`), so such a table takes at most a
-    /// quarter of the queries' words. Stops counting once they are more than that.
-    fn fits(
-        &mut self,
+    /// The words of `queries`' offsets (each query's NCBISTDAA letters), the most that a table
+    /// whose words are some of them holds; `None` once they are more than
+    /// `overflow_cell_capacity` overflow cells can take. A backbone cell with n offsets takes
+    /// cells(n) <= n / 4 of them (`try_build_compressed_lookup_with_capacity`), so such a table
+    /// takes at most a quarter of the queries' words. Stops counting once they are more than four
+    /// times the capacity.
+    fn words_within(
+        &self,
         queries: &mut dyn Iterator<Item = &[u8]>,
         overflow_cell_capacity: usize,
-    ) -> bool {
+    ) -> Option<u64> {
         let limit = (COMPRESSED_HITS_PER_OVERFLOW_CELL as u64)
             .saturating_mul(overflow_cell_capacity as u64);
         let mut words = 0u64;
@@ -1633,19 +1816,26 @@ impl CompressedWordCount {
             for word in query.windows(self.word_length) {
                 words = words.saturating_add(self.words(word));
                 if words > limit {
-                    return false;
+                    return None;
                 }
             }
         }
-        true
+        Some(words)
     }
 
-    /// Whether no table whose words are some of the words of `queries`' offsets can fill NCBI's
+    /// The words of `queries`' offsets when no table whose words are some of them can fill NCBI's
     /// overflow banks: a query batch's table, or the table of one of its query chunks (whose
-    /// parts are pieces of the batch's queries). `false` when their words are more than four
+    /// parts are pieces of the batch's queries). `None` when their words are more than four
     /// times the banks' cells, though the table might still fit.
-    pub(crate) fn fits_banks(&mut self, queries: &mut dyn Iterator<Item = &[u8]>) -> bool {
-        self.fits(queries, NCBI_OVERFLOW_CELL_CAPACITY)
+    pub(crate) fn batch_words(&self, queries: &mut dyn Iterator<Item = &[u8]>) -> Option<u64> {
+        self.words_within(queries, NCBI_OVERFLOW_CELL_CAPACITY)
+    }
+
+    /// The cells of NCBI's backbone of the table that a word's index can reach: the compressed
+    /// alphabet's size to the power of the word length. NCBI's `backbone_size` (blast_aalookup.c
+    /// above) is one more, a last cell that no word's index reaches.
+    pub(crate) fn backbone_cells(&self) -> u64 {
+        (self.compressed_alphabet_size as u64).pow(self.word_length as u32)
     }
 }
 
@@ -1949,7 +2139,8 @@ mod tests {
         assert!(unlimited.overflow_cells.len() > capacity);
         unlimited.finalize();
 
-        let table = try_build_blosum62_compressed_lookup_with_capacity(
+        let table = try_build_compressed_lookup_with_capacity(
+            Blosum62Compressed,
             5,
             LOW_THRESHOLD,
             &query,
@@ -1962,7 +2153,8 @@ mod tests {
         assert_same_table(&table, &unlimited);
 
         // Locations outside NCBI's tables (a split batch) are in the table, untested.
-        let table = try_build_blosum62_compressed_lookup_with_capacity(
+        let table = try_build_compressed_lookup_with_capacity(
+            Blosum62Compressed,
             5,
             LOW_THRESHOLD,
             &query,
@@ -1973,6 +2165,80 @@ mod tests {
         .expect("word size 5")
         .expect("no batch fills the capacity");
         assert_same_table(&table, &unlimited);
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4888-4898
+    // ```c
+    //     lambda = RPSfindUngappedLambda(sbp->name);
+    // ...
+    //     std_freqs = _PSIMatrixFrequencyRatiosNew(sbp->name);
+    //     if (std_freqs == NULL)
+    //         return -2;
+    // ```
+    // The compressed score matrix of each search matrix: BLOSUM62's is the default builder's,
+    // IDENTITY (no frequency ratios) has none, and each other matrix has its own. The table of
+    // BLOSUM62 as a `ScoringMatrix` is the default builder's table.
+    #[test]
+    fn compressed_score_matrix_of_each_search_matrix() {
+        for size in [10, 15] {
+            let blosum62 = build_blosum62_compressed_score_matrix(size).expect("BLOSUM62");
+            assert_eq!(
+                build_compressed_score_matrix(ScoringMatrix::Blosum62, size),
+                Some(blosum62)
+            );
+            assert_eq!(
+                build_compressed_score_matrix(ScoringMatrix::Identity, size),
+                None
+            );
+            for matrix in ScoringMatrix::ALL {
+                if !matches!(matrix, ScoringMatrix::Blosum62 | ScoringMatrix::Identity) {
+                    let scores = build_compressed_score_matrix(matrix, size).expect("ratios");
+                    assert_ne!(scores, blosum62, "{matrix:?}");
+                }
+            }
+        }
+        let mut rng = XorShift(0x2545_f491_4f6c_dd1d);
+        let (query, locations) = concatenated_queries(&mut rng, &[300, 250], &FEW_LETTERS);
+        let tables = [0..2];
+        let want =
+            try_build_blosum62_compressed_lookup(5, LOW_THRESHOLD, &query, &locations, &tables)
+                .expect("word size 5")
+                .expect("no batch fills the banks");
+        let got = try_build_compressed_lookup(
+            ScoringMatrix::Blosum62,
+            5,
+            LOW_THRESHOLD,
+            &query,
+            &locations,
+            &tables,
+        )
+        .expect("word size 5")
+        .expect("no batch fills the banks");
+        assert_same_table(&got, &want);
+        // Another matrix's words fill other cells.
+        let pam30 = try_build_compressed_lookup(
+            ScoringMatrix::Pam30,
+            5,
+            LOW_THRESHOLD,
+            &query,
+            &locations,
+            &tables,
+        )
+        .expect("word size 5")
+        .expect("no batch fills the banks");
+        assert!(
+            pam30.backbone != want.backbone,
+            "PAM30's cells are BLOSUM62's"
+        );
+        assert!(try_build_compressed_lookup(
+            ScoringMatrix::Identity,
+            5,
+            LOW_THRESHOLD,
+            &query,
+            &locations,
+            &tables
+        )
+        .is_none());
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:759-768
@@ -2003,7 +2269,8 @@ mod tests {
             .len();
         assert!(small > 0 && large > small + 1);
         let build = |tables: &[std::ops::Range<usize>], capacity: usize| {
-            try_build_blosum62_compressed_lookup_with_capacity(
+            try_build_compressed_lookup_with_capacity(
+                Blosum62Compressed,
                 5,
                 LOW_THRESHOLD,
                 &query,
@@ -2118,8 +2385,14 @@ mod tests {
                     .iter()
                     .filter(|&&(cells, shortcut)| cells <= capacity && shortcut > capacity)
                     .count();
-                let built = try_build_blosum62_compressed_lookup_with_capacity(
-                    5, threshold, &query, &locations, &tables, capacity,
+                let built = try_build_compressed_lookup_with_capacity(
+                    Blosum62Compressed,
+                    5,
+                    threshold,
+                    &query,
+                    &locations,
+                    &tables,
+                    capacity,
                 )
                 .expect("word size 5");
                 match built {
@@ -2147,49 +2420,119 @@ mod tests {
     // (d) `CompressedWordCount` gives the number of words that `add_word_hits` adds for each
     // offset, on random words of all NCBISTDAA letters (some without a compressed letter), with
     // and without a threshold, and the count of a word does not depend on the order of its
-    // letters (the counts are kept per set of letters).
+    // letters (the counts are kept per set of letters); at each word size of the table (6 and 7
+    // with shorter queries and higher thresholds, whose tables are larger), for BLOSUM62 and two
+    // other matrices (`CompressedWordCount::new_of`, BLASTP's block search with them, SC2b).
     #[test]
     fn compressed_word_count_is_the_words_of_each_offset() {
+        for search_matrix in [
+            ScoringMatrix::Blosum62,
+            ScoringMatrix::Pam30,
+            ScoringMatrix::Blosum45,
+        ] {
+            compressed_word_count_is_the_words_of_each_offset_of(search_matrix);
+        }
+    }
+
+    fn compressed_word_count_is_the_words_of_each_offset_of(search_matrix: ScoringMatrix) {
         let mut rng = XorShift(0x0bad_cafe_1234_5678);
         let standard = (*b"ACDEFGHIKLMNPQRSTVWY").map(aa_char_to_ncbistdaa);
         let mut letters: Vec<u8> = (1..BLASTAA_SIZE as u8).collect();
         for _ in 0..3 {
             letters.extend_from_slice(&standard);
         }
-        let matrix = build_blosum62_compressed_score_matrix(15).expect("compressed matrix");
-        let info = CompressedNeighborInfo::new(&matrix, 15);
-        for threshold in [0, 1100, 1600, 1930, 2000, 2400] {
-            let mut counter = CompressedWordCount::new(5, threshold).expect("word size 5");
-            let mut table = BlastCompressedAaLookupTable::new(5, 0.0).expect("compressed lookup");
-            table.threshold = threshold;
-            table.overflow_cell_capacity = usize::MAX;
-            let query: Vec<u8> = (0..40).map(|_| letters[rng.below(letters.len())]).collect();
-            let mut words_before = 0u64;
-            for offset in 0..=query.len() - 5 {
-                table.add_word_hits(&info, &matrix, &query, offset as i32);
-                let words_after: u64 = table.backbone.iter().map(|cell| cell.num_used as u64).sum();
-                let added = words_after - words_before;
-                words_before = words_after;
-                let word = &query[offset..offset + 5];
-                assert_eq!(
-                    counter.words(word),
-                    added,
-                    "threshold {threshold}, offset {offset}"
-                );
-                if word
-                    .iter()
-                    .all(|&residue| usize::from(table.compress_table[usize::from(residue)]) < 15)
-                {
-                    let mut reversed = word.to_vec();
-                    reversed.reverse();
-                    assert_eq!(counter.count(&reversed), added, "reversed, offset {offset}");
+        for (word_size, query_length, thresholds) in [
+            (5, 40, &[0, 1100, 1600, 1930, 2000, 2400][..]),
+            (6, 16, &[1600, 2100, 2400][..]),
+            (7, 16, &[1600, 2025, 2400][..]),
+        ] {
+            let (alphabet, _) = compressed_lookup_parameters(word_size).expect("word size");
+            let matrix =
+                build_compressed_score_matrix(search_matrix, alphabet).expect("compressed matrix");
+            let info = CompressedNeighborInfo::new(&matrix, alphabet);
+            for &threshold in thresholds {
+                let counter = CompressedWordCount::new_of(search_matrix, word_size, threshold)
+                    .expect("word size");
+                let mut table =
+                    BlastCompressedAaLookupTable::new(word_size, 0.0).expect("compressed lookup");
+                table.threshold = threshold;
+                table.overflow_cell_capacity = usize::MAX;
+                let query: Vec<u8> = (0..query_length)
+                    .map(|_| letters[rng.below(letters.len())])
+                    .collect();
+                let mut words_before = 0u64;
+                for offset in 0..=query.len() - word_size {
+                    table.add_word_hits(&info, &matrix, &query, offset as i32);
+                    let words_after: u64 =
+                        table.backbone.iter().map(|cell| cell.num_used as u64).sum();
+                    let added = words_after - words_before;
+                    words_before = words_after;
+                    let word = &query[offset..offset + word_size];
+                    assert_eq!(
+                        counter.words(word),
+                        added,
+                        "{search_matrix:?} word size {word_size}, threshold {threshold}, offset {offset}"
+                    );
+                    if word.iter().all(|&residue| {
+                        usize::from(table.compress_table[usize::from(residue)]) < alphabet
+                    }) {
+                        let mut reversed = word.to_vec();
+                        reversed.reverse();
+                        assert_eq!(
+                            counter.count(&reversed),
+                            added,
+                            "word size {word_size}, reversed, offset {offset}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    // (d2) Each set of `word_size` letters that have a compressed letter has its own rank
+    // (`CompressedWordCount::rank`), below the kept counts' length, whatever the order of the
+    // word's letters; a word with a letter that has none has no rank; at each word size of the
+    // table.
+    #[test]
+    fn compressed_word_count_ranks_each_set_of_letters_once() {
+        for word_size in 5..=7 {
+            let counter = CompressedWordCount::new(word_size, 1100).expect("word size");
+            let letters: Vec<u8> = (0..BLASTAA_SIZE as u8)
+                .filter(|&residue| counter.letter_index[usize::from(residue)] != u8::MAX)
+                .collect();
+            assert_eq!(letters.len(), 23);
+            let mut ranked = vec![false; counter.counts.len()];
+            // Each multiset of letters as its sorted indices, in lexicographic order.
+            let mut set = vec![0usize; word_size];
+            loop {
+                let word: Vec<u8> = set.iter().map(|&i| letters[i]).collect();
+                let rank = counter.rank(&word).expect("a rank");
+                assert!(!ranked[rank], "word size {word_size}: {word:?}");
+                ranked[rank] = true;
+                let mut reordered = word.clone();
+                reordered.rotate_left(word_size / 2);
+                reordered.swap(0, word_size - 1);
+                assert_eq!(counter.rank(&reordered), Some(rank));
+                let Some(last) = set.iter().rposition(|&i| i + 1 < letters.len()) else {
+                    break;
+                };
+                let next = set[last] + 1;
+                set[last..].fill(next);
+            }
+            assert!(ranked.iter().all(|&r| r), "word size {word_size}");
+            for residue in 0..BLASTAA_SIZE as u8 {
+                if counter.letter_index[usize::from(residue)] == u8::MAX {
+                    let mut word = letters[..word_size].to_vec();
+                    word[1] = residue;
+                    assert_eq!(counter.rank(&word), None);
+                    assert_eq!(counter.words(&word), 0);
                 }
             }
         }
     }
 
     // (e) The count clears a table exactly when a quarter of its words fits the capacity, and a
-    // table it clears is not refused (`try_build_blosum62_compressed_lookup_with_capacity`).
+    // table it clears is not refused (`try_build_compressed_lookup_with_capacity`).
     #[test]
     fn compressed_word_count_clears_only_tables_within_the_capacity() {
         let mut rng = XorShift(0x5851_f42d_4c95_7f2d);
@@ -2198,7 +2541,7 @@ mod tests {
             .iter()
             .map(|&(left, right)| &query[left as usize..=right as usize])
             .collect();
-        let mut counter = CompressedWordCount::new(5, LOW_THRESHOLD).expect("word size 5");
+        let counter = CompressedWordCount::new(5, LOW_THRESHOLD).expect("word size 5");
         let words: u64 = queries
             .iter()
             .flat_map(|query| query.windows(5))
@@ -2210,9 +2553,16 @@ mod tests {
         let cells = table.overflow_cells.len();
         let cleared = words.div_ceil(4) as usize;
         assert!(cells > 0 && cells <= cleared);
-        assert!(counter.fits(&mut queries.iter().copied(), cleared));
-        assert!(!counter.fits(&mut queries.iter().copied(), cleared - 1));
-        let table = try_build_blosum62_compressed_lookup_with_capacity(
+        assert_eq!(
+            counter.words_within(&mut queries.iter().copied(), cleared),
+            Some(words)
+        );
+        assert_eq!(
+            counter.words_within(&mut queries.iter().copied(), cleared - 1),
+            None
+        );
+        let table = try_build_compressed_lookup_with_capacity(
+            Blosum62Compressed,
             5,
             LOW_THRESHOLD,
             &query,
@@ -2222,8 +2572,19 @@ mod tests {
         )
         .expect("word size 5");
         assert!(table.is_ok());
-        // The public test uses NCBI's capacity.
-        assert!(counter.fits_banks(&mut queries.iter().copied()));
+        // The public count uses NCBI's capacity.
+        assert_eq!(
+            counter.batch_words(&mut queries.iter().copied()),
+            Some(words)
+        );
+        // NCBI's backbone of word size 5 (15 letters) and 7 (10 letters).
+        assert_eq!(counter.backbone_cells(), 15u64.pow(5));
+        assert_eq!(
+            CompressedWordCount::new(7, LOW_THRESHOLD)
+                .expect("word size 7")
+                .backbone_cells(),
+            10u64.pow(7)
+        );
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:400-405
@@ -2320,6 +2681,36 @@ mod tests {
     //         backbone_cell->payload.overflow_list.head = new_cell;
     //     }
     // ```
+    // `(Int4)(kMatrixScale * opt->threshold)` past `Int4` is `INT_MIN` (every word is a
+    // neighbor); words past the overflow banks make the table `Err` (NCBI writes past its banks).
+    #[test]
+    fn a_threshold_past_int4_takes_every_word_up_to_the_banks() {
+        assert_eq!(
+            BlastCompressedAaLookupTable::new(5, 19.3)
+                .unwrap()
+                .threshold,
+            1930
+        );
+        for threshold in [21_474_836.48, 1e10, f64::INFINITY] {
+            let lookup = BlastCompressedAaLookupTable::new(5, threshold).unwrap();
+            assert_eq!(lookup.threshold, i32::MIN, "{threshold}");
+        }
+        let query = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 0];
+        let words = 15usize.pow(5);
+        let lookup = build_blosum62_compressed_lookup(5, 1e10, &query, &[(1, 6)])
+            .unwrap()
+            .expect("two offsets take no overflow cell");
+        let offsets: i32 = lookup.backbone.iter().map(|cell| cell.num_used).sum();
+        assert_eq!(offsets as usize, 2 * words);
+        assert!(lookup.overflow_cells.is_empty());
+        // Seven offsets take one overflow cell in each backbone cell.
+        assert!(
+            build_blosum62_compressed_lookup_with_capacity(5, 1e10, &query, &[(1, 11)], 1000)
+                .unwrap()
+                .is_err()
+        );
+    }
+
     #[test]
     fn compressed_word_hit_overflow_matches_ncbi_scan_order() {
         let mut lookup = BlastCompressedAaLookupTable::new(5, 19.3).expect("compressed lookup");
@@ -2522,3 +2913,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "compressed_lookup_tests.rs"]
+mod compressed_lookup_tests;

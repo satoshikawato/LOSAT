@@ -1,0 +1,16 @@
+Blast4-archive ::= {
+  request {
+    body get-request-info {
+      request-id "Error"
+    }
+  },
+  results {
+  },
+  messages {
+    {
+      code 2,
+      message "Command line argument error: Argument ""subject"". File is not
+ accessible: `tests/fasta/outfmt11/does_not_exist.fa'"
+    }
+  }
+}

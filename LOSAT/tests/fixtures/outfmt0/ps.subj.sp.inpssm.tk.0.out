@@ -1,0 +1,86 @@
+PSIBLAST 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for compositional score matrix adjustment: Stephen F.
+Altschul, John C. Wootton, E. Michael Gertz, Richa Agarwala,
+Aleksandr Morgulis, Alejandro A. Schaffer, and Yi-Kuo Yu (2005)
+"Protein database searches using compositionally adjusted
+substitution matrices", FEBS J. 272:5101-5109.
+
+
+Reference for composition-based statistics starting in round 2:
+Alejandro A. Schaffer, L. Aravind, Thomas L. Madden, Sergei
+Shavirin, John L. Spouge, Yuri I. Wolf, Eugene V. Koonin, and
+Stephen F. Altschul (2001), "Improving the accuracy of PSI-BLAST
+protein database searches with composition-based statistics and
+other refinements", Nucleic Acids Res. 29:2994-3005.
+
+
+
+Database: User specified sequence set.
+           86 sequences; 66,738 total letters
+
+Results from round 1
+
+
+Query= YP_009220601.1 TK-TMK, chimeric thymidine and thymidylate kinase
+[White spot syndrome virus]
+
+Length=398
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT63550.1 thymidine kinase [Pasiphaea japonica whispovirus]          290     4e-79
+
+
+> BDT63550.1 thymidine kinase [Pasiphaea japonica whispovirus]
+Length=197
+
+ Score = 290 bits (741),  Expect = 4e-79, Method: Composition-based stats.
+ Identities = 79/188 (42%), Positives = 105/188 (56%), Gaps = 9/188 (5%)
+
+Query  10   TMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGTIVTHAGEV  69
+            T  G++ LV GPMFAGKS+ +  IYQ++    K C+F+KH  + RYGC     VTH+G+ 
+Sbjct  4    TNIGKIHLVIGPMFAGKSSTIIKIYQKKIKMQKRCVFIKHVKDNRYGCELTETVTHSGQT  63
+
+Query  70   IEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDL-VLVNRLADKGKRIVIAALDGTSDQ  128
+            I  C   S    L  V     D I IDEGQFF+DL       A KGKR+ +AALDG  +Q
+Sbjct  64   IRDCVATSV---LSYVDTSNYDYIFIDEGQFFSDLGATCKDWAIKGKRVTVAALDGNYEQ  120
+
+Query  129  QMFSPIHKLLPYTNSIVKLASKCMIC-----KIDTKEAPFTVRFGNDNDNNVICVGGAEM  183
+            Q+F  + KL+P  + I KL++ CMIC      +  K  P+     +D+    +CVGG E 
+Sbjct  121  QLFPSVIKLIPICDKIEKLSAVCMICNKNEASLTKKYLPYNNTGDDDHHKYDMCVGGTET  180
+
+Query  184  YAAACRDC  191
+            Y A C  C
+Sbjct  181  YCAVCIGC  188
+
+
+
+Lambda      K        H
+   0.317    0.139    0.421 
+
+Gapped
+Lambda      K        H
+   0.267   0.0426    0.140 
+
+Effective search space used: 1000000000
+
+
+  Database: User specified sequence set.
+    Posted date:  Unknown
+  Number of letters in database: 66,738
+  Number of sequences in database:  86
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

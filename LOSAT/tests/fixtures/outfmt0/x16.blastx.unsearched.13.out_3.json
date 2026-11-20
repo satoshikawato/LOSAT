@@ -1,0 +1,74 @@
+{
+  "BlastOutput2": {
+    "report": {
+      "program": "blastx",
+      "version": "BLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1",
+          "Subject_2",
+          "Subject_3",
+          "Subject_4",
+          "Subject_5",
+          "Subject_6",
+          "Subject_7",
+          "Subject_8",
+          "Subject_9",
+          "Subject_10",
+          "Subject_11",
+          "Subject_12",
+          "Subject_13",
+          "Subject_14",
+          "Subject_15",
+          "Subject_16",
+          "Subject_17",
+          "Subject_18",
+          "Subject_19",
+          "Subject_20",
+          "Subject_21",
+          "Subject_22",
+          "Subject_23",
+          "Subject_24",
+          "Subject_25",
+          "Subject_26",
+          "Subject_27",
+          "Subject_28",
+          "Subject_29",
+          "Subject_30",
+          "Subject_31",
+          "Subject_32",
+          "Subject_33",
+          "Subject_34",
+          "Subject_35"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 1e-30,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "query_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_3",
+            "query_title": "q_short2 two bases",
+            "query_len": 2,
+            "stat": {
+              "hsp_len": 0,
+              "eff_space": 0,
+              "kappa": -1,
+              "lambda": -1,
+              "entropy": -1
+            },
+            "message": "Query_3 q_short2 two bases:  Query_3 q_short2 two bases: Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options  No hits found \u000ANo hits found"
+          }
+        ]
+      }
+    }
+  }
+}

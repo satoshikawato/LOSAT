@@ -1,0 +1,9 @@
+>DAA10001.1
+# RefSeq and Swiss-Prot without versions
+NP_100006 P00012
+2XYZ_B
+myprot9
+DAA10008.1	mydb:prot10
+XP_000011
+UNKNOWN1
+gi|1414

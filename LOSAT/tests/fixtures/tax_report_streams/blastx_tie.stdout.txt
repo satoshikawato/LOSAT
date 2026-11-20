@@ -1,0 +1,91 @@
+
+                                          Tax BLAST report                                          
+
+Query= q1 abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg
+abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg
+abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg
+abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg
+abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg
+abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg
+abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg
+abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg
+abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg
+abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg
+abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg
+abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg
+abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg
+abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg
+abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg
+abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg
+abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg
+abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg
+abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg
+abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg
+abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg
+abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg
+abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg
+abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg
+abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg
+abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg
+abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg
+abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg
+abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg
+abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg
+abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg
+abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg
+abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg
+abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg
+abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg
+abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg
+abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg
+abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg
+abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg
+abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg
+abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg
+abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg
+abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg
+abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg
+abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg
+abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg
+abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg
+abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg
+abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg
+abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg
+abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg
+abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg
+abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg
+abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg
+abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg
+abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg
+abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg
+abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg
+abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg abcdefg
+abcdefg abcdefg abcdefg
+
+Length=750
+
+                                           Organism Report                                           
+Accession                                 Description                                Score E-value 
+
+                                   Homo sapiens (human) [primates]                                   
+ AAA00001  a_title                                                                     461   3e-171  
+ DDD00001  decoy                                                                       19.6  0.17    
+
+                              Last entry sp. (last common) [lastblast]                              
+ BBB00001  b_title                                                                     369   6e-135  
+
+                                          Tax BLAST report                                          
+
+Query= q2
+
+Length=750
+
+                                           Organism Report                                           
+Accession                                 Description                                Score E-value 
+
+                                   Homo sapiens (human) [primates]                                   
+ AAA00001  a_title                                                                     461   3e-171  
+ DDD00001  decoy                                                                       19.6  0.17    
+
+                              Last entry sp. (last common) [lastblast]                              
+ BBB00001  b_title                                                                     369   6e-135  

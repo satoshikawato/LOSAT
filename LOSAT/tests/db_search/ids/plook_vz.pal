@@ -1,0 +1,5 @@
+#
+# Alias file of line DBID, N2b
+#
+TITLE plook_vz (two databases, parsed Seq-ids)
+DBLIST plook_v5 plook_z

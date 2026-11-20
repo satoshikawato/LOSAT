@@ -1,5 +1,6 @@
 //! TBLASTN gapped uneven-gap linking before preliminary E-value reap.
 
+use crate::utils::glibc_fma_libm::GlibcLibm;
 use std::cmp::Ordering;
 
 use anyhow::{ensure, Result};
@@ -10,8 +11,11 @@ use crate::stats::spouge::{blast_spouge_stoe, BlastGumbelBlk};
 use crate::stats::sum_statistics::{gap_decay_divisor, uneven_gap_sum_e};
 use crate::stats::tables::KarlinParams;
 
-// EXPERIMENT (LOSAT_X_TBNLINKWIN): the candidates of a head chosen by subject position.
+// The candidates of a head chosen by subject position.
 mod x_link_window;
+// Each query context linked on its own (LOSAT_X_TBNLINKCTX).
+mod x_link_ctx;
+pub use x_link_ctx::print_summary as x_link_ctx_print_summary;
 pub use x_link_window::print_summary as x_link_window_print_summary;
 
 // NCBI c++/include/algo/blast/core/blast_hits.h:126-143;
@@ -129,6 +133,10 @@ fn first_end_at_or_after(
     offset: i32,
 ) -> usize {
     let (mut begin, mut end) = (0, order.len());
+    #[expect(
+        clippy::if_same_then_else,
+        reason = "NCBI's binary search sets end = left_index in two branches (link_hsps.c:1291-1299, s_HSPOffsetEndBinarySearch)"
+    )]
     while begin < end {
         let right = (begin + end) / 2;
         let left = end_index[right];
@@ -298,7 +306,32 @@ pub(super) fn link_preliminary_hsps(
     lengths: &[LocalContextLength],
     subject_nt_length: i32,
     gapped_params: &[KarlinParams],
-    gumbel: &BlastGumbelBlk,
+    gumbel: Option<&BlastGumbelBlk>,
+    link: &LocalLinkParameters,
+) -> Result<LinkedHspList> {
+    link_preliminary_hsps_on(
+        None,
+        input,
+        query_lengths,
+        lengths,
+        subject_nt_length,
+        gapped_params,
+        gumbel,
+        link,
+    )
+}
+
+/// `link_preliminary_hsps` for a subject whose units ran on `pool` (if any): with
+/// `LOSAT_X_TBNLINKCTX` the query contexts are linked on that pool side by side.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn link_preliminary_hsps_on(
+    pool: Option<&crate::utils::threading::SearchPool<'_>>,
+    input: &[(usize, GappedHsp)],
+    query_lengths: &[i32],
+    lengths: &[LocalContextLength],
+    subject_nt_length: i32,
+    gapped_params: &[KarlinParams],
+    gumbel: Option<&BlastGumbelBlk>,
     link: &LocalLinkParameters,
 ) -> Result<LinkedHspList> {
     // NCBI c++/src/algo/blast/core/link_hsps.c:1774-1777:
@@ -318,18 +351,57 @@ pub(super) fn link_preliminary_hsps(
         query_lengths.len() == lengths.len() && lengths.len() == gapped_params.len(),
         "one statistical context per query"
     );
+    let link_values = |input: &[(usize, GappedHsp)]| {
+        x_link_values(
+            input,
+            query_lengths,
+            lengths,
+            subject_nt_length,
+            gapped_params,
+            gumbel,
+            link,
+        )
+    };
+    // No NCBI counterpart: LOSAT_X_TBNLINKCTX links each query context's HSPs on their own
+    // (`stage_d_linking/x_link_ctx.rs`); a chain never leaves its context, so the values are the
+    // same.
+    let hsps = if x_link_ctx::x_link_ctx_on() {
+        x_link_ctx::x_link_by_context(pool, input, link_values)
+    } else {
+        link_values(input)
+    };
+    Ok(x_link_list(hsps))
+}
+
+/// The HSPs of `input` linked (`s_BlastUnevenGapLinkHSPs`), with their sum e-values and chain
+/// sizes, in the order of `input` (`source_index` = the position in `input`).
+fn x_link_values(
+    input: &[(usize, GappedHsp)],
+    query_lengths: &[i32],
+    lengths: &[LocalContextLength],
+    subject_nt_length: i32,
+    gapped_params: &[KarlinParams],
+    gumbel: Option<&BlastGumbelBlk>,
+    link: &LocalLinkParameters,
+) -> Vec<LinkedHsp> {
     let mut work: Vec<WorkHsp> = input
         .iter()
         .enumerate()
         .map(|(source_index, &(context, hsp))| {
             let kbp = &gapped_params[context];
-            let evalue = blast_spouge_stoe(
-                hsp.score,
-                kbp,
-                gumbel,
-                query_lengths[context],
-                subject_nt_length / 3,
-            ) / gap_decay_divisor(link.gap_decay_rate, 1);
+            let evalue = match gumbel {
+                Some(gumbel) => blast_spouge_stoe(
+                    hsp.score,
+                    kbp,
+                    gumbel,
+                    query_lengths[context],
+                    subject_nt_length / 3,
+                ),
+                None => {
+                    lengths[context].eff_searchsp as f64
+                        * (-kbp.lambda * hsp.score as f64 + kbp.k.glibc_ln()).glibc_exp()
+                }
+            } / gap_decay_divisor(link.gap_decay_rate, 1);
             WorkHsp {
                 value: LinkedHsp {
                     context,
@@ -340,7 +412,7 @@ pub(super) fn link_preliminary_hsps(
                 },
                 prev: None,
                 next: None,
-                sum_score: kbp.lambda * hsp.score as f64 - kbp.k.ln(),
+                sum_score: kbp.lambda * hsp.score as f64 - kbp.k.glibc_ln(),
             }
         })
         .collect();
@@ -369,9 +441,12 @@ pub(super) fn link_preliminary_hsps(
                 .then(work[a].value.hsp.s_start.cmp(&work[b].value.hsp.s_start))
         });
         let end_index = query_end_prefix_index(&work, &offset_order);
-        // EXPERIMENT (LOSAT_X_TBNLINKWIN): the lookup by subject position.
-        let mut x_window = x_link_window::x_tbn_link_window()
-            .then(|| x_link_window::XLinkWindow::new(&work, &offset_order, link));
+        // The lookup by subject position.
+        let mut x_window = Some(x_link_window::XLinkWindow::new(&work, &offset_order, link));
+        #[cfg(test)]
+        if x_link_window::x_whole_window_forced() {
+            x_window = None;
+        }
         let mut head = None;
         let mut index = 0;
         while index < score_order.len() {
@@ -410,10 +485,11 @@ pub(super) fn link_preliminary_hsps(
             let mut best_evalue = work[current].value.evalue;
             let mut best = None;
             let mut best_sum_score = 0.0;
-            // EXPERIMENT (LOSAT_X_TBNLINKWIN): the candidates of the window that can be
+            // The candidates of the window that can be
             // admissible, in the same order.
             let candidates = match x_window.as_mut() {
-                Some(window) => window.candidates(&work, &offset_order, current, left, right, link),
+                Some(window) => window.candidates(&work, &offset_order, current, left, right),
+                // NCBI's whole window: the reference of the unit test only.
                 None => &offset_order[left..right],
             };
             for &candidate in candidates {
@@ -453,14 +529,19 @@ pub(super) fn link_preliminary_hsps(
             }
         }
     }
-    work.sort_by(|a, b| score_compare(&a.value.hsp, &b.value.hsp));
-    let hsps: Vec<_> = work.into_iter().map(|item| item.value).collect();
+    work.into_iter().map(|item| item.value).collect()
+}
+
+/// The list of linked HSPs `hsps` (in the order of the input): sorted by score
+/// (`Blast_HSPListSortByScore`, stable), with the best e-value.
+fn x_link_list(mut hsps: Vec<LinkedHsp>) -> LinkedHspList {
+    hsps.sort_by(|a, b| score_compare(&a.hsp, &b.hsp));
     let best_evalue = hsps
         .iter()
         .map(|hsp| hsp.evalue)
         .reduce(f64::min)
         .unwrap_or(f64::MAX);
-    Ok(LinkedHspList { hsps, best_evalue })
+    LinkedHspList { hsps, best_evalue }
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1385-1404,3071-3115,3404-3417;
@@ -552,7 +633,7 @@ mod tests {
             longest_intron: 40,
             cutoff_small_gap: 25,
         };
-        let result = link_preliminary_hsps(&[], &[], &[], 360, &[], &gumbel, &link).unwrap();
+        let result = link_preliminary_hsps(&[], &[], &[], 360, &[], Some(&gumbel), &link).unwrap();
         assert!(result.hsps.is_empty());
         assert_eq!(result.best_evalue.to_bits(), 0.0f64.to_bits());
     }
@@ -666,7 +747,7 @@ mod tests {
                     gap_open: 11,
                     gap_extend: 1,
                 },
-                (subject_nt_length / 3) as i64,
+                subject_nt_length / 3,
             )
             .unwrap();
             // NCBI c++/src/algo/blast/core/blast_setup.c:729-847:
@@ -692,7 +773,8 @@ mod tests {
                     min_subject_length: (subject_nt_length / 3) as i32,
                     composition_based_stats: 2,
                 },
-            );
+            )
+            .unwrap();
             let query_lengths: Vec<_> = query_contexts
                 .iter()
                 .map(|&(length, _)| length as i32)
@@ -703,7 +785,7 @@ mod tests {
                 &parameters.lengths,
                 subject_nt_length as i32,
                 &vec![gapped; query_contexts.len()],
-                &gumbel,
+                Some(&gumbel),
                 &parameters.link.unwrap(),
             )
             .unwrap();
@@ -843,7 +925,8 @@ mod tests {
                 min_subject_length: 2_125,
                 composition_based_stats: 2,
             },
-        );
+        )
+        .unwrap();
         let query_lengths = [120, 70, 120];
         for (link_event, reap_event) in [(3, 5), (6, 8)] {
             let before_prefix = format!("D_HSP\t{link_event}\tlink_before\t");
@@ -873,7 +956,7 @@ mod tests {
                 &parameters.lengths,
                 6_377,
                 &[scaled; 3],
-                &gumbel,
+                Some(&gumbel),
                 &parameters.link.unwrap(),
             )
             .unwrap();
@@ -994,7 +1077,7 @@ mod tests {
             compo_early_termination, CompoHeap, CompoHeapRecord,
         };
         use crate::algorithm::tblastn::search_gapped::{
-            preliminary_protein_hsps_in_ncbi_order, PreliminaryProfile, TargetTranslation,
+            preliminary_hsps_of_letters, PreliminaryProfile, TargetTranslation,
         };
         use crate::algorithm::tblastn::stage_d_kappa_params::{
             local_extension_final_xdrop, local_kappa_redo_params,
@@ -1108,7 +1191,7 @@ mod tests {
         // BLAST_ComputeLengthAdjustment(..., db_length, db_num_seqs, ...);
         let parameters = local_parameters_for_call(
             &[(query.len(), true)],
-            total_nt,
+            total_nt as i64,
             1,
             &[gapped],
             &[ungapped],
@@ -1126,7 +1209,8 @@ mod tests {
                 min_subject_length: 120,
                 composition_based_stats: 2,
             },
-        );
+        )
+        .unwrap();
         assert!(params_trace.contains("D_PARAM_CONTEXT\t0\t25\t25\n"));
         assert_eq!(
             (
@@ -1157,8 +1241,7 @@ mod tests {
         };
         let mut retained: Vec<(usize, LinkedHspList)> = Vec::new();
         for (oid, subject) in subjects.iter().enumerate() {
-            let (preliminary, _) =
-                preliminary_protein_hsps_in_ncbi_order(&[&query], subject, 1, profile).unwrap();
+            let preliminary = preliminary_hsps_of_letters(&[&query], subject, 1, profile).unwrap();
             let expected = before.get(&oid).map(Vec::as_slice).unwrap_or(&[]);
             assert_eq!(preliminary.len(), expected.len(), "OID {oid} prelink count");
             for ((context, hsp), row) in preliminary.iter().zip(expected) {
@@ -1184,7 +1267,7 @@ mod tests {
                 &parameters.lengths,
                 subject.len() as i32,
                 &[gapped],
-                &gumbel,
+                Some(&gumbel),
                 parameters.link.as_ref().unwrap(),
             )
             .unwrap();
@@ -1237,7 +1320,7 @@ mod tests {
             .collect();
         assert_eq!(early_decisions.len(), retained.len());
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3383-3427,
-        // 3525-3535; composition_adjustment/redo_alignment.c:64,1560-1582;
+        // 3525-3535; composition_adjustment/redo_alignment.c:64,1560-1580;
         // composition_adjustment/compo_heap.c:252-275,330-391,405-410:
         // if (BlastCompo_EarlyTermination(localMatch->best_evalue,
         //     redoneMatches, numQueries)) { Blast_HSPListFree(localMatch); continue; }
@@ -1318,7 +1401,6 @@ mod tests {
             query.len() as i32,
             BlastCompoAdjustMode::CompositionMatrixAdjust,
             false,
-            10.0,
             true,
             25.0,
             local_extension_final_xdrop(15.0, 25.0, gapped.lambda).unwrap(),
@@ -1435,6 +1517,7 @@ mod tests {
                 ScoringMatrix::Blosum62,
                 &mut scratch,
                 &mut workspace,
+                &mut None,
             )
             .unwrap();
             let mut alignments = Vec::new();
@@ -1585,7 +1668,7 @@ mod tests {
                 &parameters.lengths,
                 subject.len() as i32,
                 &[scaled],
-                &gumbel,
+                Some(&gumbel),
                 &post_link,
             )
             .unwrap();
@@ -1629,7 +1712,8 @@ mod tests {
                 best_score: postredo.hsps[0].hsp.score,
             };
             assert_eq!(candidate.best_score, would[3].parse().unwrap());
-            let bits = normalize_postredo_scores(&mut postredo, scaled.lambda, gapped.k.ln(), 32.0);
+            let bits =
+                normalize_postredo_scores(&mut postredo, scaled.lambda, gapped.k.glibc_ln(), 32.0);
             let mut target = TargetTranslation::new(subject, &code);
             let stats: Vec<_> = postredo
                 .hsps

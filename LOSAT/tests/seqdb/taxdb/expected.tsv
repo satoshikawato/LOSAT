@@ -1,0 +1,396 @@
+good	9606	9606|Homo sapiens|human|primates|Eukaryota	
+good	10090	10090|Mus musculus|house mouse|rodents|Eukaryota	
+good	99990	99990|Last entry sp.|last common|lastblast|Eukaryota	
+good	7777	7777|Quote "x", y; z|a,b|c"d|K;L	
+good	32630	32630|synthetic construct||-|-	
+good	12908	12908|unclassified sequences||unclassified|unclassified	
+good	562	562|Escherichia coli||enterobacteria|Bacteria	
+good	777	N/A	
+good	3	N/A	
+good	100000	N/A	
+good	0	N/A	
+bad_magic	9606	N/A	Error: Tax database file has wrong magic number.
+bad_magic	10090	N/A	Error: Tax database file has wrong magic number.
+bad_magic	99990	N/A	Error: Tax database file has wrong magic number.
+bad_magic	7777	N/A	Error: Tax database file has wrong magic number.
+bad_magic	32630	N/A	Error: Tax database file has wrong magic number.
+bad_magic	12908	N/A	Error: Tax database file has wrong magic number.
+bad_magic	562	N/A	Error: Tax database file has wrong magic number.
+bad_magic	777	N/A	Error: Tax database file has wrong magic number.
+bad_magic	3	N/A	Error: Tax database file has wrong magic number.
+bad_magic	100000	N/A	Error: Tax database file has wrong magic number.
+bad_magic	0	N/A	Error: Tax database file has wrong magic number.
+bad_magic_le	9606	N/A	Error: Tax database file has wrong magic number.
+bad_magic_le	10090	N/A	Error: Tax database file has wrong magic number.
+bad_magic_le	99990	N/A	Error: Tax database file has wrong magic number.
+bad_magic_le	7777	N/A	Error: Tax database file has wrong magic number.
+bad_magic_le	32630	N/A	Error: Tax database file has wrong magic number.
+bad_magic_le	12908	N/A	Error: Tax database file has wrong magic number.
+bad_magic_le	562	N/A	Error: Tax database file has wrong magic number.
+bad_magic_le	777	N/A	Error: Tax database file has wrong magic number.
+bad_magic_le	3	N/A	Error: Tax database file has wrong magic number.
+bad_magic_le	100000	N/A	Error: Tax database file has wrong magic number.
+bad_magic_le	0	N/A	Error: Tax database file has wrong magic number.
+count_larger	9606	N/A	SeqDB: Taxid metadata indicates (8) entries but file has room for (7).
+count_larger	10090	N/A	SeqDB: Taxid metadata indicates (8) entries but file has room for (7).
+count_larger	99990	N/A	SeqDB: Taxid metadata indicates (8) entries but file has room for (7).
+count_larger	7777	N/A	SeqDB: Taxid metadata indicates (8) entries but file has room for (7).
+count_larger	32630	N/A	SeqDB: Taxid metadata indicates (8) entries but file has room for (7).
+count_larger	12908	N/A	SeqDB: Taxid metadata indicates (8) entries but file has room for (7).
+count_larger	562	N/A	SeqDB: Taxid metadata indicates (8) entries but file has room for (7).
+count_larger	777	N/A	SeqDB: Taxid metadata indicates (8) entries but file has room for (7).
+count_larger	3	N/A	SeqDB: Taxid metadata indicates (8) entries but file has room for (7).
+count_larger	100000	N/A	SeqDB: Taxid metadata indicates (8) entries but file has room for (7).
+count_larger	0	N/A	SeqDB: Taxid metadata indicates (8) entries but file has room for (7).
+count_smaller	9606	N/A	SeqDB: Taxid metadata indicates (6) entries but file has room for (7).
+count_smaller	10090	N/A	SeqDB: Taxid metadata indicates (6) entries but file has room for (7).
+count_smaller	99990	N/A	SeqDB: Taxid metadata indicates (6) entries but file has room for (7).
+count_smaller	7777	N/A	SeqDB: Taxid metadata indicates (6) entries but file has room for (7).
+count_smaller	32630	N/A	SeqDB: Taxid metadata indicates (6) entries but file has room for (7).
+count_smaller	12908	N/A	SeqDB: Taxid metadata indicates (6) entries but file has room for (7).
+count_smaller	562	N/A	SeqDB: Taxid metadata indicates (6) entries but file has room for (7).
+count_smaller	777	N/A	SeqDB: Taxid metadata indicates (6) entries but file has room for (7).
+count_smaller	3	N/A	SeqDB: Taxid metadata indicates (6) entries but file has room for (7).
+count_smaller	100000	N/A	SeqDB: Taxid metadata indicates (6) entries but file has room for (7).
+count_smaller	0	N/A	SeqDB: Taxid metadata indicates (6) entries but file has room for (7).
+count_zero	9606	N/A	SeqDB: Taxid metadata indicates (0) entries but file has room for (7).
+count_zero	10090	N/A	SeqDB: Taxid metadata indicates (0) entries but file has room for (7).
+count_zero	99990	N/A	SeqDB: Taxid metadata indicates (0) entries but file has room for (7).
+count_zero	7777	N/A	SeqDB: Taxid metadata indicates (0) entries but file has room for (7).
+count_zero	32630	N/A	SeqDB: Taxid metadata indicates (0) entries but file has room for (7).
+count_zero	12908	N/A	SeqDB: Taxid metadata indicates (0) entries but file has room for (7).
+count_zero	562	N/A	SeqDB: Taxid metadata indicates (0) entries but file has room for (7).
+count_zero	777	N/A	SeqDB: Taxid metadata indicates (0) entries but file has room for (7).
+count_zero	3	N/A	SeqDB: Taxid metadata indicates (0) entries but file has room for (7).
+count_zero	100000	N/A	SeqDB: Taxid metadata indicates (0) entries but file has room for (7).
+count_zero	0	N/A	SeqDB: Taxid metadata indicates (0) entries but file has room for (7).
+index_short	9606	N/A	
+index_short	10090	N/A	
+index_short	99990	N/A	
+index_short	7777	N/A	
+index_short	32630	N/A	
+index_short	12908	N/A	
+index_short	562	N/A	
+index_short	777	N/A	
+index_short	3	N/A	
+index_short	100000	N/A	
+index_short	0	N/A	
+index_header_only	9606	N/A	
+index_header_only	10090	N/A	
+index_header_only	99990	N/A	
+index_header_only	7777	N/A	
+index_header_only	32630	N/A	
+index_header_only	12908	N/A	
+index_header_only	562	N/A	
+index_header_only	777	N/A	
+index_header_only	3	N/A	
+index_header_only	100000	N/A	
+index_header_only	0	N/A	
+index_one_entry	9606	9606|Homo sapiens|human|primates|Eukaryota	
+index_one_entry	10090	N/A	
+index_one_entry	99990	N/A	
+index_one_entry	7777	N/A	
+index_one_entry	32630	N/A	
+index_one_entry	12908	N/A	
+index_one_entry	562	N/A	
+index_one_entry	777	N/A	
+index_one_entry	3	N/A	
+index_one_entry	100000	N/A	
+index_one_entry	0	N/A	
+index_trailing	9606	9606|Homo sapiens|human|primates|Eukaryota	
+index_trailing	10090	10090|Mus musculus|house mouse|rodents|Eukaryota	
+index_trailing	99990	99990|Last entry sp.|last common|lastblast|Eukaryota	
+index_trailing	7777	7777|Quote "x", y; z|a,b|c"d|K;L	
+index_trailing	32630	32630|synthetic construct||-|-	
+index_trailing	12908	12908|unclassified sequences||unclassified|unclassified	
+index_trailing	562	562|Escherichia coli||enterobacteria|Bacteria	
+index_trailing	777	N/A	
+index_trailing	3	N/A	
+index_trailing	100000	N/A	
+index_trailing	0	N/A	
+index_trailing_8	9606	N/A	SeqDB: Taxid metadata indicates (7) entries but file has room for (8).
+index_trailing_8	10090	N/A	SeqDB: Taxid metadata indicates (7) entries but file has room for (8).
+index_trailing_8	99990	N/A	SeqDB: Taxid metadata indicates (7) entries but file has room for (8).
+index_trailing_8	7777	N/A	SeqDB: Taxid metadata indicates (7) entries but file has room for (8).
+index_trailing_8	32630	N/A	SeqDB: Taxid metadata indicates (7) entries but file has room for (8).
+index_trailing_8	12908	N/A	SeqDB: Taxid metadata indicates (7) entries but file has room for (8).
+index_trailing_8	562	N/A	SeqDB: Taxid metadata indicates (7) entries but file has room for (8).
+index_trailing_8	777	N/A	SeqDB: Taxid metadata indicates (7) entries but file has room for (8).
+index_trailing_8	3	N/A	SeqDB: Taxid metadata indicates (7) entries but file has room for (8).
+index_trailing_8	100000	N/A	SeqDB: Taxid metadata indicates (7) entries but file has room for (8).
+index_trailing_8	0	N/A	SeqDB: Taxid metadata indicates (7) entries but file has room for (8).
+no_btd	9606	N/A	
+no_btd	10090	N/A	
+no_btd	99990	N/A	
+no_btd	7777	N/A	
+no_btd	32630	N/A	
+no_btd	12908	N/A	
+no_btd	562	N/A	
+no_btd	777	N/A	
+no_btd	3	N/A	
+no_btd	100000	N/A	
+no_btd	0	N/A	
+no_bti	9606	N/A	
+no_bti	10090	N/A	
+no_bti	99990	N/A	
+no_bti	7777	N/A	
+no_bti	32630	N/A	
+no_bti	12908	N/A	
+no_bti	562	N/A	
+no_bti	777	N/A	
+no_bti	3	N/A	
+no_bti	100000	N/A	
+no_bti	0	N/A	
+btd_empty	9606	CRASH	timeout: the monitored command dumped core
+btd_empty	10090	CRASH	timeout: the monitored command dumped core
+btd_empty	99990	N/A	Error: Offset error at end of taxdb file.
+btd_empty	7777	CRASH	timeout: the monitored command dumped core
+btd_empty	32630	CRASH	timeout: the monitored command dumped core
+btd_empty	12908	CRASH	timeout: the monitored command dumped core
+btd_empty	562	CRASH	timeout: the monitored command dumped core
+btd_empty	777	N/A	
+btd_empty	3	N/A	
+btd_empty	100000	N/A	
+btd_empty	0	N/A	
+btd_truncated	9606	N/A	
+btd_truncated	10090	N/A	
+btd_truncated	99990	N/A	Error: Offset error at end of taxdb file.
+btd_truncated	7777	7777|Quote "x", y; z|a,b|c"d|K;L	
+btd_truncated	32630	N/A	
+btd_truncated	12908	N/A	
+btd_truncated	562	562|Escherichia coli||enterobacteria|Bacteria	
+btd_truncated	777	N/A	
+btd_truncated	3	N/A	
+btd_truncated	100000	N/A	
+btd_truncated	0	N/A	
+empty_kingdom_mid	9606	N/A	
+empty_kingdom_mid	10090	10090|Mus musculus|house mouse|rodents|Eukaryota	
+empty_kingdom_mid	99990	99990|Last entry sp.|last common|lastblast|Eukaryota	
+empty_kingdom_mid	7777	7777|Quote "x", y; z|a,b|c"d|K;L	
+empty_kingdom_mid	32630	32630|synthetic construct||-|-	
+empty_kingdom_mid	12908	12908|unclassified sequences||unclassified|unclassified	
+empty_kingdom_mid	562	562|Escherichia coli||enterobacteria|Bacteria	
+empty_kingdom_mid	777	N/A	
+empty_kingdom_mid	3	N/A	
+empty_kingdom_mid	100000	N/A	
+empty_kingdom_mid	0	N/A	
+empty_kingdom_last	9606	9606|Homo sapiens|human|primates|Eukaryota	
+empty_kingdom_last	10090	10090|Mus musculus|house mouse|rodents|Eukaryota	
+empty_kingdom_last	99990	N/A	
+empty_kingdom_last	7777	7777|Quote "x", y; z|a,b|c"d|K;L	
+empty_kingdom_last	32630	32630|synthetic construct||-|-	
+empty_kingdom_last	12908	12908|unclassified sequences||unclassified|unclassified	
+empty_kingdom_last	562	562|Escherichia coli||enterobacteria|Bacteria	
+empty_kingdom_last	777	N/A	
+empty_kingdom_last	3	N/A	
+empty_kingdom_last	100000	N/A	
+empty_kingdom_last	0	N/A	
+empty_fields	9606	9606||||X	
+empty_fields	10090	10090|Mus musculus|house mouse|rodents|Eukaryota	
+empty_fields	99990	99990|Last entry sp.|last common|lastblast|Eukaryota	
+empty_fields	7777	7777|Quote "x", y; z|a,b|c"d|K;L	
+empty_fields	32630	32630|synthetic construct||-|-	
+empty_fields	12908	12908|unclassified sequences||unclassified|unclassified	
+empty_fields	562	562|Escherichia coli||enterobacteria|Bacteria	
+empty_fields	777	N/A	
+empty_fields	3	N/A	
+empty_fields	100000	N/A	
+empty_fields	0	N/A	
+high_bytes_utf8	9606	9606|Caf\xc3\xa9 sapiens|human|primates|Eukaryota	
+high_bytes_utf8	10090	10090|Mus musculus|house mouse|rodents|Eukaryota	
+high_bytes_utf8	99990	99990|Last entry sp.|last common|lastblast|Eukaryota	
+high_bytes_utf8	7777	7777|Quote "x", y; z|a,b|c"d|K;L	
+high_bytes_utf8	32630	32630|synthetic construct||-|-	
+high_bytes_utf8	12908	12908|unclassified sequences||unclassified|unclassified	
+high_bytes_utf8	562	562|Escherichia coli||enterobacteria|Bacteria	
+high_bytes_utf8	777	N/A	
+high_bytes_utf8	3	N/A	
+high_bytes_utf8	100000	N/A	
+high_bytes_utf8	0	N/A	
+high_bytes_latin1	9606	9606|Homo sapiens|human|primates|Eukaryota	
+high_bytes_latin1	10090	10090|Mus musculus|mus\xe9|rodents|Euk\xffaryota	
+high_bytes_latin1	99990	99990|Last entry sp.|last common|lastblast|Eukaryota	
+high_bytes_latin1	7777	7777|Quote "x", y; z|a,b|c"d|K;L	
+high_bytes_latin1	32630	32630|synthetic construct||-|-	
+high_bytes_latin1	12908	12908|unclassified sequences||unclassified|unclassified	
+high_bytes_latin1	562	562|Escherichia coli||enterobacteria|Bacteria	
+high_bytes_latin1	777	N/A	
+high_bytes_latin1	3	N/A	
+high_bytes_latin1	100000	N/A	
+high_bytes_latin1	0	N/A	
+tabs0	9606	N/A	
+tabs0	10090	10090|Mus musculus|house mouse|rodents|Eukaryota	
+tabs0	99990	99990|Last entry sp.|last common|lastblast|Eukaryota	
+tabs0	7777	7777|Quote "x", y; z|a,b|c"d|K;L	
+tabs0	32630	32630|synthetic construct||-|-	
+tabs0	12908	12908|unclassified sequences||unclassified|unclassified	
+tabs0	562	562|Escherichia coli||enterobacteria|Bacteria	
+tabs0	777	N/A	
+tabs0	3	N/A	
+tabs0	100000	N/A	
+tabs0	0	N/A	
+tabs1	9606	N/A	
+tabs1	10090	10090|Mus musculus|house mouse|rodents|Eukaryota	
+tabs1	99990	99990|Last entry sp.|last common|lastblast|Eukaryota	
+tabs1	7777	7777|Quote "x", y; z|a,b|c"d|K;L	
+tabs1	32630	32630|synthetic construct||-|-	
+tabs1	12908	12908|unclassified sequences||unclassified|unclassified	
+tabs1	562	562|Escherichia coli||enterobacteria|Bacteria	
+tabs1	777	N/A	
+tabs1	3	N/A	
+tabs1	100000	N/A	
+tabs1	0	N/A	
+tabs2	9606	N/A	
+tabs2	10090	10090|Mus musculus|house mouse|rodents|Eukaryota	
+tabs2	99990	99990|Last entry sp.|last common|lastblast|Eukaryota	
+tabs2	7777	7777|Quote "x", y; z|a,b|c"d|K;L	
+tabs2	32630	32630|synthetic construct||-|-	
+tabs2	12908	12908|unclassified sequences||unclassified|unclassified	
+tabs2	562	562|Escherichia coli||enterobacteria|Bacteria	
+tabs2	777	N/A	
+tabs2	3	N/A	
+tabs2	100000	N/A	
+tabs2	0	N/A	
+tabs4	9606	9606|Homo sapiens|human|primates|Eukaryota\x09extra	
+tabs4	10090	10090|Mus musculus|house mouse|rodents|Eukaryota	
+tabs4	99990	99990|Last entry sp.|last common|lastblast|Eukaryota	
+tabs4	7777	7777|Quote "x", y; z|a,b|c"d|K;L	
+tabs4	32630	32630|synthetic construct||-|-	
+tabs4	12908	12908|unclassified sequences||unclassified|unclassified	
+tabs4	562	562|Escherichia coli||enterobacteria|Bacteria	
+tabs4	777	N/A	
+tabs4	3	N/A	
+tabs4	100000	N/A	
+tabs4	0	N/A	
+tabs0_last	9606	9606|Homo sapiens|human|primates|Eukaryota	
+tabs0_last	10090	10090|Mus musculus|house mouse|rodents|Eukaryota	
+tabs0_last	99990	N/A	
+tabs0_last	7777	7777|Quote "x", y; z|a,b|c"d|K;L	
+tabs0_last	32630	32630|synthetic construct||-|-	
+tabs0_last	12908	12908|unclassified sequences||unclassified|unclassified	
+tabs0_last	562	562|Escherichia coli||enterobacteria|Bacteria	
+tabs0_last	777	N/A	
+tabs0_last	3	N/A	
+tabs0_last	100000	N/A	
+tabs0_last	0	N/A	
+term_nul	9606	9606|Homo sapiens|human|primates|Eukaryota\x00	
+term_nul	10090	10090|Mus musculus|house mouse|rodents|Eukaryota\x00	
+term_nul	99990	99990|Last entry sp.|last common|lastblast|Eukaryota\x00	
+term_nul	7777	7777|Quote "x", y; z|a,b|c"d|K;L\x00	
+term_nul	32630	32630|synthetic construct||-|-\x00	
+term_nul	12908	12908|unclassified sequences||unclassified|unclassified\x00	
+term_nul	562	562|Escherichia coli||enterobacteria|Bacteria\x00	
+term_nul	777	N/A	
+term_nul	3	N/A	
+term_nul	100000	N/A	
+term_nul	0	N/A	
+term_nl	9606	9606|Homo sapiens|human|primates|Eukaryota\x0a	
+term_nl	10090	10090|Mus musculus|house mouse|rodents|Eukaryota\x0a	
+term_nl	99990	99990|Last entry sp.|last common|lastblast|Eukaryota\x0a	
+term_nl	7777	7777|Quote "x", y; z|a,b|c"d|K;L\x0a	
+term_nl	32630	32630|synthetic construct||-|-\x0a	
+term_nl	12908	12908|unclassified sequences||unclassified|unclassified\x0a	
+term_nl	562	562|Escherichia coli||enterobacteria|Bacteria\x0a	
+term_nl	777	N/A	
+term_nl	3	N/A	
+term_nl	100000	N/A	
+term_nl	0	N/A	
+offsets_swapped	9606	N/A	
+offsets_swapped	10090	10090|Homo sapiens|human|primates|EukaryotaMus musculus\x09house mouse\x09rodents\x09Eukaryota	
+offsets_swapped	99990	99990|Last entry sp.|last common|lastblast|Eukaryota	
+offsets_swapped	7777	7777|Quote "x", y; z|a,b|c"d|K;LHomo sapiens\x09human\x09primates\x09Eukaryota	
+offsets_swapped	32630	32630|synthetic construct||-|-	
+offsets_swapped	12908	12908|unclassified sequences||unclassified|unclassified	
+offsets_swapped	562	562|Escherichia coli||enterobacteria|Bacteria	
+offsets_swapped	777	N/A	
+offsets_swapped	3	N/A	
+offsets_swapped	100000	N/A	
+offsets_swapped	0	N/A	
+offsets_equal	9606	N/A	
+offsets_equal	10090	10090|Homo sapiens|human|primates|EukaryotaMus musculus\x09house mouse\x09rodents\x09Eukaryota	
+offsets_equal	99990	99990|Last entry sp.|last common|lastblast|Eukaryota	
+offsets_equal	7777	7777|Quote "x", y; z|a,b|c"d|K;L	
+offsets_equal	32630	32630|synthetic construct||-|-	
+offsets_equal	12908	12908|unclassified sequences||unclassified|unclassified	
+offsets_equal	562	562|Escherichia coli||enterobacteria|Bacteria	
+offsets_equal	777	N/A	
+offsets_equal	3	N/A	
+offsets_equal	100000	N/A	
+offsets_equal	0	N/A	
+offset_last_past_end	9606	9606|Homo sapiens|human|primates|Eukaryota	
+offset_last_past_end	10090	10090|Mus musculus|house mouse|rodents|Eukaryota	
+offset_last_past_end	99990	N/A	Error: Offset error at end of taxdb file.
+offset_last_past_end	7777	7777|Quote "x", y; z|a,b|c"d|K;L	
+offset_last_past_end	32630	32630|synthetic construct||-|-Last entry sp.\x09last common\x09lastblast\x09Eukaryota\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00	
+offset_last_past_end	12908	12908|unclassified sequences||unclassified|unclassified	
+offset_last_past_end	562	562|Escherichia coli||enterobacteria|Bacteria	
+offset_last_past_end	777	N/A	
+offset_last_past_end	3	N/A	
+offset_last_past_end	100000	N/A	
+offset_last_past_end	0	N/A	
+offset_last_at_end	9606	9606|Homo sapiens|human|primates|Eukaryota	
+offset_last_at_end	10090	10090|Mus musculus|house mouse|rodents|Eukaryota	
+offset_last_at_end	99990	N/A	
+offset_last_at_end	7777	7777|Quote "x", y; z|a,b|c"d|K;L	
+offset_last_at_end	32630	32630|synthetic construct||-|-Last entry sp.\x09last common\x09lastblast\x09Eukaryota	
+offset_last_at_end	12908	12908|unclassified sequences||unclassified|unclassified	
+offset_last_at_end	562	562|Escherichia coli||enterobacteria|Bacteria	
+offset_last_at_end	777	N/A	
+offset_last_at_end	3	N/A	
+offset_last_at_end	100000	N/A	
+offset_last_at_end	0	N/A	
+offset_mid_past_end	9606	N/A	
+offset_mid_past_end	10090	10090|Mus musculus|house mouse|rodents|Eukaryota	
+offset_mid_past_end	99990	99990|Last entry sp.|last common|lastblast|Eukaryota	
+offset_mid_past_end	7777	7777|Quote "x", y; z|a,b|c"d|K;LHomo sapiens\x09human\x09primates\x09EukaryotaMus musculus\x09house mouse\x09rodents\x09Eukaryotaunclassified sequences\x09\x09unclassified\x09unclassifiedsynthetic construct\x09\x09-\x09-Last entry sp.\x09last common\x09lastblast\x09Eukaryota\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00	
+offset_mid_past_end	32630	32630|synthetic construct||-|-	
+offset_mid_past_end	12908	12908|unclassified sequences||unclassified|unclassified	
+offset_mid_past_end	562	562|Escherichia coli||enterobacteria|Bacteria	
+offset_mid_past_end	777	N/A	
+offset_mid_past_end	3	N/A	
+offset_mid_past_end	100000	N/A	
+offset_mid_past_end	0	N/A	
+offset_next_past_end	9606	9606|Homo sapiens|human|primates|EukaryotaMus musculus\x09house mouse\x09rodents\x09Eukaryotaunclassified sequences\x09\x09unclassified\x09unclassifiedsynthetic construct\x09\x09-\x09-Last entry sp.\x09last common\x09lastblast\x09Eukaryota\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00	
+offset_next_past_end	10090	N/A	
+offset_next_past_end	99990	99990|Last entry sp.|last common|lastblast|Eukaryota	
+offset_next_past_end	7777	7777|Quote "x", y; z|a,b|c"d|K;L	
+offset_next_past_end	32630	32630|synthetic construct||-|-	
+offset_next_past_end	12908	12908|unclassified sequences||unclassified|unclassified	
+offset_next_past_end	562	562|Escherichia coli||enterobacteria|Bacteria	
+offset_next_past_end	777	N/A	
+offset_next_past_end	3	N/A	
+offset_next_past_end	100000	N/A	
+offset_next_past_end	0	N/A	
+unsorted_adjacent	9606	9606|Homo sapiens|human|primates|Eukaryota	
+unsorted_adjacent	10090	N/A	
+unsorted_adjacent	99990	99990|Last entry sp.|last common|lastblast|Eukaryota	
+unsorted_adjacent	7777	7777|Quote "x", y; z|a,b|c"d|K;L	
+unsorted_adjacent	32630	32630|synthetic construct||-|-	
+unsorted_adjacent	12908	12908|unclassified sequences||unclassified|unclassified	
+unsorted_adjacent	562	562|Escherichia coli||enterobacteria|Bacteria	
+unsorted_adjacent	777	N/A	
+unsorted_adjacent	3	N/A	
+unsorted_adjacent	100000	N/A	
+unsorted_adjacent	0	N/A	
+dup_taxid	9606	9606|Homo duplicatus|dup|dupblast|DupK	
+dup_taxid	10090	10090|Mus musculus|house mouse|rodents|Eukaryota	
+dup_taxid	99990	99990|Last entry sp.|last common|lastblast|Eukaryota	
+dup_taxid	7777	7777|Quote "x", y; z|a,b|c"d|K;L	
+dup_taxid	32630	32630|synthetic construct||-|-	
+dup_taxid	12908	12908|unclassified sequences||unclassified|unclassified	
+dup_taxid	562	562|Escherichia coli||enterobacteria|Bacteria	
+dup_taxid	777	N/A	
+dup_taxid	3	N/A	
+dup_taxid	100000	N/A	
+dup_taxid	0	N/A	
+taxid_high_bit	9606	N/A	
+taxid_high_bit	10090	N/A	
+taxid_high_bit	99990	N/A	
+taxid_high_bit	7777	N/A	
+taxid_high_bit	32630	N/A	
+taxid_high_bit	12908	N/A	
+taxid_high_bit	562	N/A	
+taxid_high_bit	777	N/A	
+taxid_high_bit	3	N/A	
+taxid_high_bit	100000	N/A	
+taxid_high_bit	0	N/A	

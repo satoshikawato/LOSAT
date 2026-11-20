@@ -89,7 +89,11 @@ const SUBJECT: &str = concat!(
 fn inputs() -> &'static (PathBuf, PathBuf) {
     static FILES: OnceLock<(PathBuf, PathBuf)> = OnceLock::new();
     FILES.get_or_init(|| {
-        let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("blastp_hsp_tie_order");
+        // One directory per process: nextest runs each test in a process of its own, and a
+        // process that wrote these files again while another one's search read them cut its input.
+        let dir = Path::new(env!("CARGO_TARGET_TMPDIR"))
+            .join("blastp_hsp_tie_order")
+            .join(std::process::id().to_string());
         std::fs::create_dir_all(&dir).expect("work directory");
         let files = (dir.join("query.faa"), dir.join("subject.faa"));
         std::fs::write(&files.0, QUERY).expect("query file");
@@ -104,7 +108,7 @@ fn inputs() -> &'static (PathBuf, PathBuf) {
 fn blastp(threads: usize) -> String {
     const WORKER_LOG: &str = "LOSAT_BLASTX_WORKER_LOG";
     let (query, subject) = inputs();
-    let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let name_text = name.to_string_lossy();
         if name_text.starts_with("LOSAT_") && name_text != WORKER_LOG {
@@ -134,7 +138,7 @@ fn blastp(threads: usize) -> String {
 
 #[test]
 fn hsps_with_rounded_score_ties_below_the_evalue_epsilon_are_in_ncbi_order() {
-    for threads in [1, 4] {
+    for threads in [1, 4, 8, 16] {
         assert_eq!(blastp(threads), NCBI_ROWS, "{threads} threads");
     }
 }

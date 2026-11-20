@@ -1,9 +1,9 @@
 //! Internal BLASTX HSP ownership, collector, stream and result reduction.
 use super::{
     args::ResolvedOptions,
-    linking::{LinkedHsp, LinkedHspList},
+    linking::LinkedHspList,
     preliminary::{compare_score, PreliminaryHsp},
-    split::{QueryChunk, OVERLAP_AA},
+    split::QueryChunk,
 };
 use crate::common::GapEditOp;
 use anyhow::{ensure, Result};
@@ -329,50 +329,13 @@ pub trait ResultsObserver {
     //              } else {
     // ```
     fn cull_compare(&mut self, _ao: usize, _a: &Hsp, _bo: usize, _b: &Hsp, _result: bool) {}
-    fn cull_delete(&mut self, _oid: usize, _hsp: &Hsp, _merit: i32) {}
+    fn cull_delete(&mut self, _oid: usize, _hsp: &Hsp, _merit: i64) {}
     fn cull_save(&mut self, _oid: usize, _hsp: &Hsp) {}
     fn cull_saved(&mut self, _result: bool) {}
     fn cull_fork(&mut self, _begin: i32, _end: i32) {}
     fn cull_final(&mut self, _num_queries: usize) {}
     fn preliminary_call(&mut self, _oid: usize) {}
     fn numeric(&mut self, _stage: &str, _oid: usize, _hsps: &[PreliminaryHsp]) {}
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1976-2008
-    // ```c++
-    // Int2 Blast_HSPListReapByEvalue(BlastHSPList* hsp_list,
-    //         const BlastHitSavingOptions* hit_options)
-    // {
-    //    BlastHSP* hsp;
-    //    BlastHSP** hsp_array;
-    //    Int4 hsp_cnt = 0;
-    //    Int4 index;
-    //    double cutoff;
-    //
-    //    if (hsp_list == NULL)
-    //       return 0;
-    //
-    //    cutoff = hit_options->expect_value;
-    //
-    //    hsp_array = hsp_list->hsp_array;
-    //    for (index = 0; index < hsp_list->hspcnt; index++) {
-    //       hsp = hsp_array[index];
-    //
-    //       ASSERT(hsp != NULL);
-    //
-    //       if (hsp->evalue > cutoff) {
-    //          hsp_array[index] = Blast_HSPFree(hsp_array[index]);
-    //       } else {
-    //          if (index > hsp_cnt)
-    //             hsp_array[hsp_cnt] = hsp_array[index];
-    //          hsp_cnt++;
-    //       }
-    //    }
-    //
-    //    hsp_list->hspcnt = hsp_cnt;
-    //
-    //    return 0;
-    // }
-    // ```
-    fn linked(&mut self, _stage: &str, _oid: usize, _hsps: &LinkedHspList) {}
     fn hsps(&mut self, _stage: &str, _oid: usize, _hsps: &[Hsp]) {}
     fn hitlist(
         &mut self,
@@ -384,8 +347,6 @@ pub trait ResultsObserver {
     ) {
     }
 }
-struct NoopResults;
-impl ResultsObserver for NoopResults {}
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1917-1934
 // ```c++
 //
@@ -417,6 +378,47 @@ pub struct Hsp {
     pub positive: usize,
     pub edit_script: Vec<GapEditOp>,
     pub composition_method: i32,
+}
+
+impl Hsp {
+    /// The ends of the HSP's Seq-align, which every report prints: the 0-based starts plus the
+    /// letters of the edit script (`Sub` and `Ins` on the query, `Sub` and `Del` on the
+    /// subject), or the HSP's ends without one. They are the HSP's own ends except where NCBI's
+    /// gapped traceback had no right extension (`found_end` FALSE: rpstblastn's window copy of a
+    /// frame shorter than the HSP's gapped start, `-strand plus` or `minus` with
+    /// composition-based statistics). There the HSP keeps NCBI's ends for every step on the HSP,
+    /// the sort before the Seq-aligns (`compare_hsp`) among them.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4650-4653
+    /// ```c
+    ///     if (found_end == FALSE) {
+    ///         gap_align->query_stop = q_start - 1;
+    ///         gap_align->subject_stop = s_start - 1;
+    ///     }
+    /// ```
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:181-182 (the
+    /// Seq-align runs the edit script from the starts)
+    /// ```c++
+    ///     int start1 = hsp->query.offset;   // start of alignment on master sequence
+    ///     int start2 = hsp->subject.offset; // start of alignment on slave sequence
+    /// ```
+    pub(crate) fn seqalign_ends(&self) -> (i32, i32) {
+        if self.edit_script.is_empty() {
+            return (self.hsp.q_end, self.hsp.s_end);
+        }
+        let (mut q, mut s) = (self.hsp.q_start, self.hsp.s_start);
+        for op in &self.edit_script {
+            match *op {
+                GapEditOp::Sub(n) => {
+                    q += n as i32;
+                    s += n as i32;
+                }
+                GapEditOp::Ins(n) => q += n as i32,
+                GapEditOp::Del(n) => s += n as i32,
+            }
+        }
+        (q, s)
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1390-1435
@@ -544,21 +546,13 @@ impl HspList {
     pub(crate) fn sort_evalue(&mut self) {
         self.hsps.sort_by(compare_hsp);
     }
-    pub(crate) fn linked(&self) -> LinkedHspList {
-        LinkedHspList {
-            hsps: self
-                .hsps
-                .iter()
-                .enumerate()
-                .map(|(source_index, h)| LinkedHsp {
-                    hsp: h.hsp.clone(),
-                    num: h.num,
-                    evalue: h.evalue,
-                    source_index,
-                })
-                .collect(),
-            best_evalue: self.best_evalue,
-        }
+
+    /// The HSPs in the order `sort_evalue` puts them (the reports' order, `report::sort_lists`),
+    /// without moving them: the same stable sort by `compare_hsp`.
+    pub(crate) fn evalue_order(&self) -> Vec<&Hsp> {
+        let mut hsps: Vec<&Hsp> = self.hsps.iter().collect();
+        hsps.sort_by(|a, b| compare_hsp(a, b));
+        hsps
     }
 }
 pub(crate) fn compare_list(a: &HspList, b: &HspList) -> Ordering {
@@ -642,6 +636,51 @@ impl HitList {
             lists: Vec::new(),
             max,
             heapified: false,
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:3331-3337
+    // ```c++
+    // Int2 Blast_HitListSortByEvalue(BlastHitList* hit_list)
+    // {
+    //       if (hit_list && hit_list->hsplist_count > 1) {
+    //          qsort(hit_list->hsplist_array, hit_list->hsplist_count,
+    //                   sizeof(BlastHSPList*), s_EvalueCompareHSPLists);
+    //       }
+    //       s_BlastHitListPurge(hit_list);
+    //    return 0;
+    // }
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:827-857
+    // (`core::blast_hspstream`)
+    // ```c++
+    //     	  if (MIN_BUF_SZ + 100 < hit_list->hsplist_count) {
+    //         	  int max_index = hit_list->hsplist_count -1;
+    // ...
+    //         	  Blast_HitListSortByEvalue(hit_list);
+    // ...
+    //         			  s_TrimHitList(hit_list, i);
+    // ```
+    /// `BlastHSPCBSStreamClose`'s trim of this query's preliminary hit list (`ADAPTIVE_CBS`):
+    /// sorted by E-value (the order is total, `compare_list`; the lists left without HSPs, last,
+    /// removed) and cut where the E-values pass the limit, when it holds enough lists.
+    fn cbs_close_trim(&mut self, hitlist_size: usize) {
+        use crate::core::blast_hspstream::{cbs_trim_count, cbs_trim_sorts};
+        let count = self.lists.len();
+        if !cbs_trim_sorts(count, hitlist_size) {
+            return;
+        }
+        self.lists.sort_unstable_by(compare_list);
+        let sorted = self
+            .lists
+            .iter()
+            .position(|list| list.hsps.is_empty())
+            .unwrap_or(count);
+        self.lists.truncate(sorted);
+        self.heapified = false;
+        let lists = &self.lists;
+        if let Some(keep) = cbs_trim_count(count, sorted, hitlist_size, |i| lists[i].best_evalue) {
+            self.lists.truncate(keep);
         }
     }
     fn down(&mut self, mut i: usize) {
@@ -787,19 +826,17 @@ impl HitList {
 //     }
 //     return prelim_hitlist_size;
 // ```
+/// The size in NCBI's `int` (`blastn/hsp.rs` `get_prelim_hitlist_size`, with `ADAPTIVE_CBS`):
+/// a `-max_target_seqs` from 2^31 - 24 wraps to 2..48 with composition-based statistics, from
+/// 2^30 to 10 without; a size that is not positive (NCBI crashes) was refused with the options
+/// (`args.rs`).
 pub(crate) fn prelim_hitlist_size(o: &ResolvedOptions) -> usize {
-    let n = o.hitlist_size as usize;
-    if o.composition > 0 {
-        if n <= 500 {
-            1050
-        } else {
-            n * 2 + 50
-        }
-    } else if o.gapped {
-        (2 * n).max(10).min(n + 50)
-    } else {
-        n
-    }
+    let size = crate::algorithm::blastn::hsp::get_prelim_hitlist_size(
+        o.hitlist_size as usize,
+        o.composition > 0,
+        o.gapped,
+    );
+    usize::try_from(size).unwrap_or(0)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2538-2588
@@ -885,7 +922,13 @@ pub(crate) fn subject_besthit(hsps: &mut Vec<Hsp>) -> Vec<Hsp> {
         }
         let a = &hsps[i].hsp;
         let begin = (a.q_start - 3).max(0);
-        let end = a.q_end + 3;
+        // `if (e < 0) e = hsp_array[i]->query.end;` (blast_hits.c:2569): only the end of an
+        // HSP of length -4 or less near the start of its context (the one-hit word finder with
+        // `-window_size 0`, aa_ungapped.c:1054,1083) lies below -3.
+        let mut end = a.q_end + 3;
+        if end < 0 {
+            end = a.q_end;
+        }
         for j in i + 1..hsps.len() {
             let b = &hsps[j].hsp;
             if !removed[j] && a.context == b.context && b.q_start >= begin && b.q_end <= end {
@@ -1026,8 +1069,11 @@ impl HspStream {
     //             writer_info = BlastHSPCullingInfoNew(params);
     //         }
     // ```
+    // NCBI's sum is an `Int4` that overflows for a limit of 2147483645 or more; LOSAT adds in
+    // `i64` (NCBI parity DECISIONS 17), as `core::hspfilter_culling::CullingForest::prelim_max`.
     pub fn with_culling(lengths: Vec<i32>, limit: i32, max: usize) -> Self {
         let mut stream = Self::new(lengths.len() / 6, max);
+        let limit = i64::from(limit);
         stream.culling = Some(super::culling::Culling::new(
             lengths,
             if limit > 1 { limit + 3 } else { limit },
@@ -1081,9 +1127,6 @@ impl HspStream {
     // /** Free the writer
     //  * @param writer The writer to free [in]
     // ```
-    pub fn write(&mut self, oid: usize, hsps: Vec<Hsp>) -> Result<Vec<HspList>> {
-        self.write_observed(oid, hsps, &mut NoopResults)
-    }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_collector.c:105-161
     // ```c++
     //    /* Rearrange HSPs into multiple hit lists if more than one query */
@@ -1215,9 +1258,6 @@ impl HspStream {
     // /** Prohibit any future writing to the HSP stream when all results are written.
     //  * Also perform sorting of results here to prepare them for reading.
     // ```
-    pub fn finalize(&mut self) {
-        self.finalize_observed(&mut NoopResults);
-    }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:105-130
     // ```c++
     //       return;
@@ -1344,9 +1384,6 @@ impl HspStream {
     //        for (j = 0; j < hitlist->hsplist_count; j++)
     //            Blast_HSPListSortByScore(hitlist->hsplist_array[j]);
     // ```
-    pub fn merge(&mut self, chunk_stream: Self, chunk: &QueryChunk) -> Result<Vec<HspList>> {
-        self.merge_observed(chunk_stream, chunk, &mut NoopResults)
-    }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:419-421
     // ```c++
     //
@@ -1408,8 +1445,7 @@ impl HspStream {
             let mut points = [-1; 6];
             for local in local_query * 6..local_query * 6 + 6 {
                 if chunk.absolute_contexts[local] >= 0 {
-                    points[chunk.absolute_contexts[local] as usize % 6] =
-                        chunk.corrections[local] as i32;
+                    points[chunk.absolute_contexts[local] as usize % 6] = chunk.corrections[local];
                 }
             }
             for list in &mut incoming_hitlist.lists {
@@ -1421,7 +1457,7 @@ impl HspStream {
                         "HSP in invalid split context"
                     );
                     h.hsp.context = chunk.absolute_contexts[local] as usize;
-                    let offset = chunk.corrections[local] as i32;
+                    let offset = chunk.corrections[local];
                     h.hsp.q_start += offset;
                     h.hsp.q_end += offset;
                     h.hsp.q_gapped_start += offset;
@@ -1477,7 +1513,7 @@ impl HspStream {
                         if points.iter().any(|p| *p > 0) {
                             trace.hsps("OVERLAP_OLD", a.oid, &a.hsps);
                             trace.hsps("OVERLAP_NEW", b.oid, &b.hsps);
-                            merge_hsps(&mut a.hsps, b.hsps, &points);
+                            merge_hsps(&mut a.hsps, b.hsps, &points, chunk.overlap);
                             trace.hsps("OVERLAP_OUT", a.oid, &a.hsps);
                         } else {
                             a.hsps.extend(b.hsps);
@@ -1557,9 +1593,6 @@ impl HspStream {
     //       qsort(hsp_stream->sorted_hsplists, num_hsplists,
     //                     sizeof(BlastHSPList *), s_SortHSPListByOid);
     // ```
-    pub fn close(&mut self) {
-        self.close_observed(&mut NoopResults);
-    }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:145-164
     // ```c++
     //        if (hsp_stream->sort_by_score->sort_on_read) {
@@ -1583,6 +1616,54 @@ impl HspStream {
     //
     //        BlastHitList *hitlist = results->hitlist_array[i];
     // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:816-864
+    // ```c++
+    // void BlastHSPCBSStreamClose(BlastHSPStream* hsp_stream, int hitlist_size)
+    // {
+    //    BlastHitList* hit_list;
+    //    BlastHSPResults * results;
+    //    int index =0;
+    //
+    //    if (!hsp_stream || !hsp_stream->results || hsp_stream->results_sorted)
+    //       return;
+    //
+    //    s_FinalizeWriter(hsp_stream);
+    //
+    //    results = hsp_stream->results;
+    //
+    //    for (index = 0; index < results->num_queries; index++) {
+    //       hit_list = results->hitlist_array[index];
+    //       if (hit_list) {
+    // ...
+    //    }
+    //
+    //    BlastHSPStreamClose(hsp_stream);
+    // ```
+    /// The close with `ADAPTIVE_CBS` (`core::blast_hspstream::adaptive_cbs_close`): each query's
+    /// hit list trimmed after the writer's final step, then `close_observed`.
+    pub fn close_cbs_observed(&mut self, trace: &mut dyn ResultsObserver, hitlist_size: usize) {
+        if self.sorted.is_some() {
+            return;
+        }
+        self.finalize_observed(trace);
+        for query in &mut self.queries {
+            query.cbs_close_trim(hitlist_size);
+        }
+        self.close_observed(trace);
+    }
+
+    /// The lists of the closed stream, in their order, as `cut` leaves them (`Runtime::batch_end`:
+    /// without the subjects that the fetches of the redo or the traceback exclude).
+    pub fn retain_closed<E>(
+        &mut self,
+        cut: impl FnOnce(&mut Vec<HspList>) -> Result<(), E>,
+    ) -> Result<(), E> {
+        match self.sorted.as_mut() {
+            Some(sorted) => cut(sorted),
+            None => Ok(()),
+        }
+    }
+
     pub fn close_observed(&mut self, trace: &mut dyn ResultsObserver) {
         if self.sorted.is_some() {
             return;
@@ -1612,9 +1693,6 @@ impl HspStream {
     //
     //    }
     // ```
-    pub fn read(&mut self) -> Option<HspList> {
-        self.read_observed(&mut NoopResults)
-    }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:145-164
     // ```c++
     //        if (hsp_stream->sort_by_score->sort_on_read) {
@@ -1680,9 +1758,6 @@ impl HspStream {
     //
     //    return kBlastHSPStream_Success;
     // ```
-    pub fn batch_read(&mut self) -> Vec<HspList> {
-        self.batch_read_observed(&mut NoopResults)
-    }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:145-164
     // ```c++
     //        if (hsp_stream->sort_by_score->sort_on_read) {
@@ -1831,7 +1906,7 @@ impl HspStream {
 //    }
 //
 // ```
-fn merge_hsps(combined: &mut Vec<Hsp>, mut incoming: Vec<Hsp>, points: &[i32; 6]) {
+fn merge_hsps(combined: &mut Vec<Hsp>, mut incoming: Vec<Hsp>, points: &[i32; 6], overlap: i32) {
     let mut nold = 0;
     for i in 0..combined.len() {
         let h = &combined[i].hsp;
@@ -1840,7 +1915,7 @@ fn merge_hsps(combined: &mut Vec<Hsp>, mut incoming: Vec<Hsp>, points: &[i32; 6]
             && if h.frame >= 0 {
                 h.q_end > p
             } else {
-                h.q_start < p + OVERLAP_AA
+                h.q_start < p + overlap
             }
         {
             combined.swap(nold, i);
@@ -1855,7 +1930,7 @@ fn merge_hsps(combined: &mut Vec<Hsp>, mut incoming: Vec<Hsp>, points: &[i32; 6]
             && if h.frame < 0 {
                 h.q_end > p
             } else {
-                h.q_start < p + OVERLAP_AA
+                h.q_start < p + overlap
             }
         {
             incoming.swap(nnew, i);
@@ -2257,7 +2332,7 @@ impl CompoHeap {
         Some(entry)
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1560-1582
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1560-1580
     // ```c++
     // BlastCompo_EarlyTermination(double evalue,
     //                             BlastCompo_Heap significantMatches[],
@@ -2523,5 +2598,60 @@ mod boundary_tests {
             }
         }
         assert_eq!(actual, expected);
+    }
+}
+
+#[cfg(test)]
+mod negative_length_tests {
+    use super::*;
+
+    fn hsp(context: usize, score: i32, q_start: i32, length: i32) -> Hsp {
+        Hsp {
+            hsp: PreliminaryHsp {
+                context,
+                frame: 1,
+                score,
+                q_start,
+                q_end: q_start + length,
+                q_gapped_start: q_start,
+                s_start: 5,
+                s_end: 5 + length,
+                s_gapped_start: 5,
+            },
+            num: 1,
+            evalue: 1.0,
+            bit_score: 0.0,
+            identity: 0,
+            positive: 0,
+            edit_script: Vec::new(),
+            composition_method: 0,
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2566-2569
+    // ```c
+    //       o = hsp_array[i]->query.offset - range_diff;
+    //       e = hsp_array[i]->query.end + range_diff;
+    //       if (o < 0) o = 0;
+    //       if (e < 0) e = hsp_array[i]->query.end;
+    // ```
+    /// An HSP of length -4 at the start of its context ends at -4: its end + 3 is below 0, so
+    /// NCBI's range ends at -4 itself and keeps a weaker HSP ending at -2 (an end + 3 of -1
+    /// would remove it), and removes one that ends at -4 or before.
+    #[test]
+    fn subject_besthit_keeps_the_end_below_minus_three() {
+        let mut hsps = vec![hsp(0, 9, 0, -4), hsp(0, 5, 1, -3), hsp(0, 4, 0, -5)];
+        let removed = subject_besthit(&mut hsps);
+        assert_eq!(removed.len(), 1);
+        assert_eq!((removed[0].hsp.q_start, removed[0].hsp.q_end), (0, -5));
+        assert_eq!(
+            hsps.iter()
+                .map(|h| (h.hsp.q_start, h.hsp.q_end))
+                .collect::<Vec<_>>(),
+            vec![(0, -4), (1, -2)]
+        );
+        // An end + 3 of 0 or more is the range's end, as before.
+        let mut hsps = vec![hsp(0, 9, 0, -3), hsp(0, 5, 1, -2)];
+        assert_eq!(subject_besthit(&mut hsps).len(), 1);
     }
 }

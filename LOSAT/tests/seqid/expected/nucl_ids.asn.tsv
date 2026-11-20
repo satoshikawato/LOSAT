@@ -1,0 +1,23 @@
+0	0	0	other { accession "NM_000001", version 1 }
+0	1	0	genbank { accession "AB000001", version 1 }
+0	2	0	embl { accession "X00001", version 2 }
+1	0	0	gi 654321
+1	0	1	genbank { accession "AB000002", version 3 }
+2	0	0	embl { accession "AJ000003", version 1 }
+3	0	0	ddbj { accession "AB000004", version 1 }
+4	0	0	other { accession "NC_000005", version 11 }
+5	0	0	local str "mynuc6"
+6	0	0	general { db "mydb", tag str "nuc7" }
+7	0	0	other { accession "NM_000008", version 2 }
+8	0	0	ddbj { accession "AB000009" }
+9	0	0	local str "mynuc_10"
+10	0	0	gi 1111
+11	0	0	tpg { accession "BK000012", version 1 }
+12	0	0	genbank { name "LOCUS13", accession "AB000013", version 1 }
+13	0	0	patent { seqid 14, cit { country "US", id number "1234567" } }
+14	0	0	gi 1515
+14	0	1	genbank { accession "AB000015", version 1 }
+14	1	0	gi 1516
+14	1	1	other { accession "XM_000016", version 1 }
+15	0	0	local str "Subject_30"
+16	0	0	local str "Subject_31"

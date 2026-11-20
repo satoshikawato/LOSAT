@@ -1,0 +1,280 @@
+{
+"BlastOutput2": [
+{
+    "report": {
+      "program": "blastn",
+      "version": "BLASTN 2.17.0+",
+      "reference": "Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb Miller (2000), \"A greedy algorithm for aligning DNA sequences\", J Comput Biol 2000; 7(1-2):203-14.",
+      "search_target": {
+        "subjects": [
+          "Subject_1",
+          "Subject_2",
+          "Subject_3",
+          "Subject_4",
+          "Subject_5",
+          "Subject_6"
+        ]
+      },
+      "params": {
+        "expect": 10,
+        "sc_match": 1,
+        "sc_mismatch": -2,
+        "gap_open": 0,
+        "gap_extend": 0,
+        "filter": "L;m;"
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_1",
+            "query_title": "mq1 query matching several subjects",
+            "query_len": 600,
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "msA",
+                    "title": "msA close homolog of base (1% divergence)"
+                  }
+                ],
+                "len": 700,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 1081.41,
+                    "score": 585,
+                    "evalue": 0,
+                    "identity": 595,
+                    "query_from": 1,
+                    "query_to": 600,
+                    "query_strand": "Plus",
+                    "hit_from": 51,
+                    "hit_to": 650,
+                    "hit_strand": "Plus",
+                    "align_len": 600,
+                    "gaps": 0,
+                    "qseq": "TTCCCCCAGTATCTCGTCCTCGAATGTAGATCGATCTAGCCCTCCAAACTTATACGATGCTCACTGTCGTACCTAAACGCCTCCGTCGAGCAGAAGCTTGTTTGACAGTTCGCGAGCCTGTATTGAGGTCGTGTCGTTCTGCGAGGCCGTCTGTAACAGCTCGTTGCAAGAAATGGGCATTCGTGCCTTTCGGCGTTCTTCACTAAGTAGAGAGTGCCATAAGCGCTATCCATCGGGACCGAACCCAATCGCCGAGTCGCACTACTACTACCTGGGATAGCCAGGGATTAAGCGGGATGCCAGTTCCTACCGCATAACCCGAGCTCAATTACCGTCTAGCCTCATCCCTCCGCACCCTTACGGGTCAAATAGCAGCGGAGCGACGTCGGCTAAGCCATAGGTCCAAACCCGGAATATAGTTTGGGAGCAACGGAGGCCTTAGATAAGTTTGCAGTCAGTTGAAAACTCTAAAGCCAATGCCGCTAGCTTAAGGGCGAAAGTTCGTCGTGGCTGCCGCCGACTCAGTAATATTAAACACGCACGGCCAAGACGTGATGTGCGCAGCCTTCGCGAAGCCTAAGGGCGAGAGTCCACATTTTG",
+                    "hseq": "TTCCCCCAGTATCTCGTCCTCGAATGAAGATCGATCTAGCCCTCCAAACTTATACGATGCTCACTGTCGTACCTAAACGCCTCCGTCGAGCAGAAGCTTGTTTGACAGTTCGCGAGCCTGTATTGAGGTCGTGTCGTTCTGCGAGGCCGTCTGTAACAGCTCGTTGCAAGAAATGGGCATTCGGGCCTTTCGGCGTTCTTCACTAAGTAGAGAGTGCCATAAGCGCTATCCATCGGGACCGAACCCAATCGTCGAGTCGCACTACTACTACCTGGGATAGCCAGGGATTAAGCGGGATGCCAGTTCCTACCGCATAACCCGAGCTCAATTACCGTCTAGCCTCATCCCTCCGCACCCTTACGGGTCAAATAGCAGCGGTGCGACGTCGGCTAAGCCATAGGTCCAAACCCGGAATATAGTTTGGGAGCAACGGAGGCCTTGGATAAGTTTGCAGTCAGTTGAAAACTCTAAAGCCAATGCCGCTAGCTTAAGGGCGAAAGTTCGTCGTGGCTGCCGCCGACTCAGTAATATTAAACACGCACGGCCAAGACGTGATGTGCGCAGCCTTCGCGAAGCCTAAGGGCGAGAGTCCACATTTTG",
+                    "midline": "|||||||||||||||||||||||||| |||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| |||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| |||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||"
+                  }
+                ]
+              },
+              {
+                "num": 2,
+                "description": [
+                  {
+                    "id": "msB",
+                    "title": "msB medium homolog of base (6% divergence), reverse complemented"
+                  }
+                ],
+                "len": 660,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 920.752,
+                    "score": 498,
+                    "evalue": 0,
+                    "identity": 566,
+                    "query_from": 1,
+                    "query_to": 600,
+                    "query_strand": "Plus",
+                    "hit_from": 630,
+                    "hit_to": 31,
+                    "hit_strand": "Minus",
+                    "align_len": 600,
+                    "gaps": 0,
+                    "qseq": "TTCCCCCAGTATCTCGTCCTCGAATGTAGATCGATCTAGCCCTCCAAACTTATACGATGCTCACTGTCGTACCTAAACGCCTCCGTCGAGCAGAAGCTTGTTTGACAGTTCGCGAGCCTGTATTGAGGTCGTGTCGTTCTGCGAGGCCGTCTGTAACAGCTCGTTGCAAGAAATGGGCATTCGTGCCTTTCGGCGTTCTTCACTAAGTAGAGAGTGCCATAAGCGCTATCCATCGGGACCGAACCCAATCGCCGAGTCGCACTACTACTACCTGGGATAGCCAGGGATTAAGCGGGATGCCAGTTCCTACCGCATAACCCGAGCTCAATTACCGTCTAGCCTCATCCCTCCGCACCCTTACGGGTCAAATAGCAGCGGAGCGACGTCGGCTAAGCCATAGGTCCAAACCCGGAATATAGTTTGGGAGCAACGGAGGCCTTAGATAAGTTTGCAGTCAGTTGAAAACTCTAAAGCCAATGCCGCTAGCTTAAGGGCGAAAGTTCGTCGTGGCTGCCGCCGACTCAGTAATATTAAACACGCACGGCCAAGACGTGATGTGCGCAGCCTTCGCGAAGCCTAAGGGCGAGAGTCCACATTTTG",
+                    "hseq": "TTCCCCCAGTATCGCGTACACGAATGTAGATCGTTCTAGCCCGCCAAACTTACACGATGCTCCATGTCGTACCTAAACGCCTCCGTCGAACAGAAGCTTGTTTGACAGTTCGCGAGCCTGTATTGAGGTCGTGTCGTTCTGCGAGGCCGTCTGTAACAGCTCGTTGCAAGAAATGGGCATTCGTGCCTTTCGGCGCTCTTCACTAAGTAAAGAGTGCCATAAGCGCTATCCATCGGGACCGAACCCCATCGCCGAGTCGCACTACTACTACCTGGGATAGCCAGGGATTAAACGGGATGCCAGTCCCTACCACATAACCCGAGCTCAATTACCGTCTAGCCTCATCCGTCCGCACCCTTCCGGGTCAAAAAGCAGCGGAGCGACGTCGGCTAAGCCATAGGCCCAAACCCGGAATATTGTTTGGGGGCGACGGAGGCCTTAGATAAGTTTGCAATCAGTTGAATACTCTAAAGCCAATGCCGCTAGCTTAAGGGTGCAAGCTCGTCGCGGCTGCCGCCGACTCAGTAATATTAAACGCGCACCGCCAAGACGTGATGTGCGCAGGCTTCGCGAAGCCTAAGGGAGGGAGTCCACATCTTG",
+                    "midline": "||||||||||||| ||| | ||||||||||||| |||||||| ||||||||| |||||||||  ||||||||||||||||||||||||| ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| ||||||||||||| |||||||||||||||||||||||||||||||||||| |||||||||||||||||||||||||||||||||||||||||||| |||||||||||| |||||| ||||||||||||||||||||||||||||||||||| ||||||||||| ||||||||| ||||||||||||||||||||||||||||||| ||||||||||||||| ||||||| || |||||||||||||||||||||||| ||||||||| |||||||||||||||||||||||||||||| | ||| |||||| |||||||||||||||||||||||||||| ||||| ||||||||||||||||||||| |||||||||||||||||| | |||||||||| |||"
+                  }
+                ]
+              },
+              {
+                "num": 3,
+                "description": [
+                  {
+                    "id": "msD",
+                    "title": "msD two copies of a base fragment, one on each strand"
+                  }
+                ],
+                "len": 540,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 348.29,
+                    "score": 188,
+                    "evalue": 2.73763e-99,
+                    "identity": 196,
+                    "query_from": 1,
+                    "query_to": 200,
+                    "query_strand": "Plus",
+                    "hit_from": 41,
+                    "hit_to": 240,
+                    "hit_strand": "Plus",
+                    "align_len": 200,
+                    "gaps": 0,
+                    "qseq": "TTCCCCCAGTATCTCGTCCTCGAATGTAGATCGATCTAGCCCTCCAAACTTATACGATGCTCACTGTCGTACCTAAACGCCTCCGTCGAGCAGAAGCTTGTTTGACAGTTCGCGAGCCTGTATTGAGGTCGTGTCGTTCTGCGAGGCCGTCTGTAACAGCTCGTTGCAAGAAATGGGCATTCGTGCCTTTCGGCGTTCTT",
+                    "hseq": "TTCCCCCAGTATCTCGTCCTCGAATGTAGATCGATCTAGCACTCCAAACTTATACGATGCTCACTGTCGTACCTTAACGCCTCCGTCGAGCAGAAGCTTGTTTGACAGTTCGCGAGCCTGTATTGAGGTCGAGTCGTTCTGCGAGGCCGTCTGTAACAGCTCGTTGCAAGAAATGGGCATTCATGCCTTTCGGCGTTCTT",
+                    "midline": "|||||||||||||||||||||||||||||||||||||||| ||||||||||||||||||||||||||||||||| |||||||||||||||||||||||||||||||||||||||||||||||||||||||| |||||||||||||||||||||||||||||||||||||||||||||||||| |||||||||||||||||"
+                  },
+                  {
+                    "num": 2,
+                    "bit_score": 342.75,
+                    "score": 185,
+                    "evalue": 1.2737e-97,
+                    "identity": 195,
+                    "query_from": 301,
+                    "query_to": 500,
+                    "query_strand": "Plus",
+                    "hit_from": 500,
+                    "hit_to": 301,
+                    "hit_strand": "Minus",
+                    "align_len": 200,
+                    "gaps": 0,
+                    "qseq": "CAGTTCCTACCGCATAACCCGAGCTCAATTACCGTCTAGCCTCATCCCTCCGCACCCTTACGGGTCAAATAGCAGCGGAGCGACGTCGGCTAAGCCATAGGTCCAAACCCGGAATATAGTTTGGGAGCAACGGAGGCCTTAGATAAGTTTGCAGTCAGTTGAAAACTCTAAAGCCAATGCCGCTAGCTTAAGGGCGAAAG",
+                    "hseq": "CAGTTCCTACTGCATAACCCGAGCTCAATTACCGTCTAGCCTCATCCCTCCGCACCCTTACGGGTCAAATAGAAGCGGAGCGACGTCGGCTAAGCCATAGGTCCAAACCCGGAGTATAGTTTGGGAGCAACGGAGGCCTTAGATAAGTTTGCAGTCAGTTGAAAACTCTAAAGCCAATGCAGCTAGCTTAAGTGCGAAAG",
+                    "midline": "|||||||||| ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| |||||||||||||||||||||||||||||||||||||||| |||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| ||||||||||| |||||||"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 14,
+              "eff_space": 1919736,
+              "kappa": 0.46,
+              "lambda": 1.28,
+              "entropy": 0.85
+            }
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastn",
+      "version": "BLASTN 2.17.0+",
+      "reference": "Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb Miller (2000), \"A greedy algorithm for aligning DNA sequences\", J Comput Biol 2000; 7(1-2):203-14.",
+      "search_target": {
+        "subjects": [
+          "Subject_1",
+          "Subject_2",
+          "Subject_3",
+          "Subject_4",
+          "Subject_5",
+          "Subject_6"
+        ]
+      },
+      "params": {
+        "expect": 10,
+        "sc_match": 1,
+        "sc_mismatch": -2,
+        "gap_open": 0,
+        "gap_extend": 0,
+        "filter": "L;m;"
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_2",
+            "query_title": "mq2 query with no significant hit",
+            "query_len": 300,
+            "hits": [
+            ],
+            "stat": {
+              "hsp_len": 13,
+              "eff_space": 941934,
+              "kappa": 0.46,
+              "lambda": 1.28,
+              "entropy": 0.85
+            },
+            "message": "No hits found"
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastn",
+      "version": "BLASTN 2.17.0+",
+      "reference": "Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb Miller (2000), \"A greedy algorithm for aligning DNA sequences\", J Comput Biol 2000; 7(1-2):203-14.",
+      "search_target": {
+        "subjects": [
+          "Subject_1",
+          "Subject_2",
+          "Subject_3",
+          "Subject_4",
+          "Subject_5",
+          "Subject_6"
+        ]
+      },
+      "params": {
+        "expect": 10,
+        "sc_match": 1,
+        "sc_mismatch": -2,
+        "gap_open": 0,
+        "gap_extend": 0,
+        "filter": "L;m;"
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_3",
+            "query_title": "mq3 query matching msF on the minus strand",
+            "query_len": 300,
+            "query_masking": [
+              {
+                "from": 92,
+                "to": 98
+              }
+            ],
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "msF",
+                    "title": "msF contains the second query region"
+                  }
+                ],
+                "len": 560,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 468.323,
+                    "score": 253,
+                    "evalue": 9.88219e-136,
+                    "identity": 283,
+                    "query_from": 3,
+                    "query_to": 300,
+                    "query_strand": "Plus",
+                    "hit_from": 428,
+                    "hit_to": 131,
+                    "hit_strand": "Minus",
+                    "align_len": 298,
+                    "gaps": 0,
+                    "qseq": "TTGTGTTTACGTGTTGACGTCGAGACAAGGGCAACGTGTTACGTGCGCCCGTGACCTGTTGGACAGCCTGACGTGGCACTGTTATTCGGAcccccccGTCATTCTCTATAACCAGCCCAGTGTATCGCCCCACAGTGGGGTGTTCTCGGGGTTATGGTCAATACTGATATAACAAGAAAGCAGGCCAAGTCACGAATTTGTCGAGGAGGTTGCCACATGAGATGCGCACAAGTGCCGACACCCGGTGGCTGTACCAATACGCAGCCTGCCGACAGTTCTTCAGGAGGTGTAAGATGTT",
+                    "hseq": "TTGTGTTTACGTGTTGACGTCGAGACAAGGGCAGCGTGTTACGTGCGCCCGTGACCTGTTGGACAGCTTGACGTGGCACTGTTTTTCGGACGCCCCCGTCATTATCTATAACCAGCCCAGTCTATCGCCCCACAGTGGGGTGCTCTCGGGGTTATGGTCAATACTGATATAACAAGAACGCAGGCCAAGTACCGAATTTGTCCAGGAGGTTGCCAAGTGAGATGCGTACAAGTGCCGACACCCGGTGGCTGTACCAATAGGCAGCCTGCCGACAGTTCTTCAGGAGGTGTAAGATGTT",
+                    "midline": "||||||||||||||||||||||||||||||||| ||||||||||||||||||||||||||||||||| ||||||||||||||| ||||||| ||||||||||| ||||||||||||||||| |||||||||||||||||||| ||||||||||||||||||||||||||||||||||| |||||||||||  |||||||||| ||||||||||||  ||||||||| |||||||||||||||||||||||||||||||| ||||||||||||||||||||||||||||||||||||||"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 13,
+              "eff_space": 941934,
+              "kappa": 0.46,
+              "lambda": 1.28,
+              "entropy": 0.85
+            }
+          }
+        ]
+      }
+    }
+  }
+]
+}

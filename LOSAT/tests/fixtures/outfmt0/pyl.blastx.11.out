@@ -1,0 +1,485 @@
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastx",
+      service "plain",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_1"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">pyl_q1"
+                  }
+                }
+              },
+              title "pyl_q1"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 396,
+              seq-data ncbi4na '422141421884821142122284428112428882112482184F
+FF22112281218422142824814288222151A8824288424112844111224111422846152181422182
+21284111184218142182388211211112284411418122882882111FFF2848128442848428824282
+1848211151A2212182214418442481124181118446152182184824114284414411114181423882
+11844248182218441218428182882FFF48221812288284242884444184281251A8121118122484
+82428122248112428218482448212211211841'H
+            }
+          },
+          seq {
+            id {
+              local str "Query_2"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">pyl_q2"
+                  }
+                }
+              },
+              title "pyl_q2"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 306,
+              seq-data ncbi4na '8421884881841124128882188848881841841848884214
+18184844428822A8641888448144842818242148118282258A4121848822184288824882144481
+82FFF88884442888288882288842848188811C882218182448488214411428421428A861821821
+2414218444812442841841258A882142822412884822182844124882FFF2184482184814124888
+44421444288124414824144244'H
+            }
+          }
+        }
+      },
+      subject sequences {
+        {
+          id {
+            local str "Subject_1"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">pyl_s1"
+                }
+              }
+            },
+            title "pyl_s1"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 120,
+            seq-data ncbieaa "LANAFXVMOPTYMPARSFPOFABELETESLOHSHPLKMHZIOQQNLED
+TFFKOLYWUCFAHVKOPHPGWRNDKJOHHVEAGGKDSOQWRI*GHAIFOVHTFCAWGCYXYKYRVATRNAHV"
+          }
+        },
+        {
+          id {
+            local str "Subject_2"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">pyl_s2"
+                }
+              }
+            },
+            title "pyl_s2"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 90,
+            seq-data ncbieaa "CPNVYXTMOERPDGQVGAEOVIBRTHARDDOSCSFLNTDZEOKYSKGK
+ESPKODTLUESMEHVOGDYCDSTYQJOGSPHICKHHHKQMKV"
+          }
+        },
+        {
+          id {
+            local str "Subject_3"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">pyl_s3 O and X"
+                }
+              }
+            },
+            title "pyl_s3 O and X"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 120,
+            seq-data ncbieaa "LANAFXVMXPTYMPARSFPOFABELETESLOHSHPLKMHZIXQQNLED
+TFFKOLYWUCFAHVKOPHPGWRNDKJXHHVEAGGKDSOQWRI*GHAIFOVHTFCAWGCYXYKYRVATRNAHV"
+          }
+        }
+      },
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, 1 }
+        },
+        {
+          name "LongestIntronLength",
+          value integer 0
+        },
+        {
+          name "MaskAtHash",
+          value boolean FALSE
+        },
+        {
+          name "SegFilteringWindow",
+          value integer 12
+        },
+        {
+          name "SegFilteringLocut",
+          value real { 22, 10, -1 }
+        },
+        {
+          name "SegFilteringHicut",
+          value real { 25, 10, -1 }
+        },
+        {
+          name "WordThreshold",
+          value integer 12
+        },
+        {
+          name "WindowSize",
+          value integer 40
+        },
+        {
+          name "UngappedMode",
+          value boolean FALSE
+        },
+        {
+          name "QueryGeneticCode",
+          value integer 1
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "CompositionBasedStats",
+          value integer 2
+        },
+        {
+          name "SmithWatermanMode",
+          value boolean FALSE
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 30240
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 545
+          },
+          {
+            id str "blast_score",
+            value int 545
+          },
+          {
+            id str "e_value",
+            value real { 476487983612386, 10, -92 }
+          },
+          {
+            id str "bit_score",
+            value real { 214542001155002, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 114
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 115
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 914090909090909, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_3"
+            },
+            loc {
+              int {
+                from 21,
+                to 380,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 0,
+                to 119,
+                strand unknown,
+                id local str "Subject_3"
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 545
+          },
+          {
+            id str "blast_score",
+            value int 545
+          },
+          {
+            id str "e_value",
+            value real { 476487983612386, 10, -92 }
+          },
+          {
+            id str "bit_score",
+            value real { 214542001155002, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 114
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 115
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 914090909090909, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_1"
+            },
+            loc {
+              int {
+                from 21,
+                to 380,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 0,
+                to 119,
+                strand unknown,
+                id local str "Subject_1"
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 411
+          },
+          {
+            id str "blast_score",
+            value int 411
+          },
+          {
+            id str "e_value",
+            value real { 189423495422306, 10, -72 }
+          },
+          {
+            id str "bit_score",
+            value real { 162925257982076, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 85
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 86
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 887352941176471, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              local str "Subject_2"
+            },
+            loc {
+              int {
+                from 15,
+                to 284,
+                strand minus,
+                id local str "Query_2"
+              },
+              int {
+                from 0,
+                to 89,
+                strand unknown,
+                id local str "Subject_2"
+              }
+            }
+          }
+        }
+      }
+    },
+    masks {
+      {
+        locations {
+          packed-int {
+            {
+              from 305,
+              to 344,
+              id local str "Query_1"
+            }
+          }
+        },
+        frame plus3
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 126,
+              to 162,
+              id local str "Query_2"
+            }
+          }
+        },
+        frame plus1
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 25,
+              to 40,
+              id local str "Query_2"
+            }
+          }
+        },
+        frame plus2
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 176,
+              to 215,
+              id local str "Query_2"
+            }
+          }
+        },
+        frame plus3
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 185,
+              to 196,
+              id local str "Query_2"
+            },
+            {
+              from 11,
+              to 49,
+              id local str "Query_2"
+            }
+          }
+        },
+        frame minus2
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 112,
+              to 147,
+              id local str "Query_2"
+            }
+          }
+        },
+        frame minus3
+      }
+    },
+    ka-blocks {
+      {
+        lambda { 317605957635731, 10, -15 },
+        k { 133956144488482, 10, -15 },
+        h { 401214524497119, 10, -15 },
+        gapped FALSE
+      },
+      {
+        lambda { 267, 10, -3 },
+        k { 41, 10, -3 },
+        h { 14, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 30240",
+      "Effective search space used: 30240",
+      "Length adjustment: 20"
+    }
+  }
+}

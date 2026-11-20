@@ -1,0 +1,386 @@
+//! EXPERIMENT (LOSAT_X_TBXRPTPAR): TBLASTX's report stage
+//! (`write_tblastx_outputs` in blast_engine/run_impl.rs) on the search's pool.
+//!
+//! The reports are written once, after the last query batch, by the thread of the batch loop.
+//! Before this switch every part of that stage ran on that thread while the other threads of
+//! the pool waited: on the genome 3 x 3 input at 16 threads (ws, 2026-10-19) the stage took
+//! 1.31 s of 8.6 s with outfmt 6 and 3.37 s of 10.6 s with outfmt 0, of which the displayed
+//! identities took 0.99 s (each HSP's codons translated again from the nucleotides), the
+//! outfmt 0 rows 1.80 s (translated a second time, with the masks lowercased), the tabular rows
+//! 0.17 s (outfmt 0's text 0.41 s) and the final order (then `report_order` over every batch's
+//! HSPs at once; now `hit_collector.rs` inside each batch's search) 0.15 s.
+//!
+//! What the switch changes (read once per process, `on`), when the pool has two threads or
+//! more (`pool`):
+//! 1. The displayed identities (`report::set_displayed_identities`) run over chunks of the final
+//!    list on the pool, each chunk with the serial function.
+//! 2. The outfmt 0 rows (`report::pairwise_hits`, also the Web adapter's hit records) are an
+//!    indexed parallel map of `PairwiseRows::hit` over the final list, or over the HSPs of one
+//!    window of queries (`run_impl::write_tblastx_outputs`), collected in its order.
+//! 3. The outfmt 6 / 7 rows of a query (`report::write_tabular`) with more than `CHUNK` rows are
+//!    formatted into one buffer per chunk of `CHUNK` rows by the pool's threads, in windows of
+//!    `WINDOW_CHUNKS` chunks per thread; the loop's thread writes a window's buffers in order
+//!    before the next window is formatted, so at most one window of rows is held unwritten. The
+//!    warnings before each query, the outfmt 7 headers and the last line stay on the loop's
+//!    thread, in the serial order. With the Web adapter's format observer (`FormatProbe`, which
+//!    flushes around every row) the rows are written by the serial function.
+//!
+//! With a Seq-align format requested (outfmt 8, 12), the engine counts of the Seq-aligns
+//! (`report::engine_counts`) run over chunks of the final list on the pool as item 1 does.
+//! The outfmt 0 text (`write_tblastx_pairwise_report`) and the writes stay on the loop's thread
+//! (the final order is made in each batch's search, `hit_collector.rs`).
+//!
+//! Why the bytes are those of the serial stage: every value is computed by the serial code's
+//! function of one HSP (or of one row) on the same inputs (the HSP, the query and subject
+//! letters, the genetic codes, the placements, the masks), which reads nothing another HSP
+//! writes; the order of the final list is not changed (chunks are disjoint slices; the map is
+//! collected by index); the rows of a query are the serial rows, concatenated in chunk order.
+//! No floating-point value is summed across HSPs. The same bytes go to the writer in the same
+//! order, in larger writes; a failed write stops the run as before.
+//!
+//! Off (the serial stage): the switch off (`LOSAT_X_TBXRPTPAR=0`);
+//! a pool of one thread or none (`-num_threads 1`, builds without the `parallel`
+//! feature, Wasm without threads).
+//!
+//! Memory: the outfmt 0 rows are one list of the final list's length in both forms; the tabular
+//! windows hold at most `CHUNK` x `WINDOW_CHUNKS` x threads rows formatted (~13 MB at 16
+//! threads for rows of ~100 bytes).
+
+use std::io::{self, Write};
+use std::sync::{Arc, OnceLock};
+
+use crate::blastinput::fasta_reader::FastaRecord;
+use crate::report::pairwise::PairwiseHit;
+use crate::utils::genetic_code::GeneticCode;
+use crate::utils::threading::SearchPool;
+
+use super::blast_engine::TblastxHsp;
+use super::report::{self, PairwiseRows, SubjectLetters};
+use super::scoring::TbxScore;
+
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+use rayon::prelude::*;
+
+/// The rows (or HSPs) of one task.
+const CHUNK: usize = 1024;
+
+/// The chunks of tabular rows formatted per thread before the loop's thread writes them.
+const WINDOW_CHUNKS: usize = 4;
+
+// No NCBI counterpart: chooses which threads compute the report's values; it does not change any
+// value NCBI computes. Read once per process.
+/// LOSAT_X_TBXRPTPAR (a strict-set switch: on unless `LOSAT_X_TBXRPTPAR` is `0`;
+/// `utils/xswitch.rs`).
+fn on() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBXRPTPAR"))
+}
+
+/// The pool the report stage runs on (`Some` with the switch on and a pool of two threads or
+/// more), or `None` for the serial stage.
+pub(crate) fn pool<'p, 'q>(pool: &'p SearchPool<'q>) -> Option<&'p SearchPool<'q>> {
+    const PARALLEL: bool = cfg!(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ));
+    let on = on();
+    let pooled = PARALLEL && on && pool.enabled() && pool.threads() > 1;
+    if on {
+        crate::utils::xreach::x_reach!("LOSAT_X_TBXRPTPAR", pooled);
+    }
+    pooled.then_some(pool)
+}
+
+/// `report::write_tabular` without a format observer, with the rows of each query formatted on
+/// `pool` (item 3).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn write_tabular<W: Write>(
+    pool: &SearchPool<'_>,
+    hits: &[TblastxHsp],
+    writer: &mut W,
+    comments: bool,
+    query_titles: &[&[u8]],
+    database: &str,
+    query_ids: &[Arc<[u8]>],
+    subject_ids: &[crate::algorithm::common::tabular::SubjectId],
+    unsearched: &[bool],
+    epilog: Option<usize>,
+    mut warnings: Option<&mut crate::report::query_warnings::QueryWarnings<'_>>,
+) -> io::Result<()> {
+    let config = crate::report::outfmt6::OutputConfig::ncbi_compat();
+    let mut by_query: Vec<Vec<&TblastxHsp>> = vec![Vec::new(); query_titles.len()];
+    for hsp in hits {
+        by_query[hsp.hit.q_idx as usize].push(hsp);
+    }
+    for (q_idx, query_hits) in by_query.iter().enumerate() {
+        // The query's warnings come before its lines (`QueryWarnings`).
+        if let Some(warnings) = warnings.as_deref_mut() {
+            warnings.before_query(q_idx, &mut *writer)?;
+        }
+        if comments {
+            report::write_outfmt7_query_header(
+                writer,
+                query_titles[q_idx],
+                database,
+                (!unsearched[q_idx]).then_some(query_hits.len()),
+            )?;
+        }
+        // A subject's first row loads it where the query's batch did not prefetch it
+        // (`QueryWarnings::subject_read`, as `report::write_tabular`).
+        let marks = warnings
+            .as_deref()
+            .is_some_and(|warnings| warnings.reads_with_texts(q_idx));
+        let mut previous: Option<u32> = None;
+        if query_hits.len() <= CHUNK {
+            for hsp in query_hits {
+                if marks && previous != Some(hsp.hit.s_idx) {
+                    previous = Some(hsp.hit.s_idx);
+                    if let Some(warnings) = warnings.as_deref_mut() {
+                        warnings.subject_read(q_idx, hsp.hit.s_idx, &mut *writer)?;
+                    }
+                }
+                report::write_tabular_row(writer, hsp, query_ids, subject_ids, &config)?;
+            }
+            continue;
+        }
+        for window in query_hits.chunks(CHUNK * WINDOW_CHUNKS * pool.threads()) {
+            let buffers = format_rows(pool, window, query_ids, subject_ids, &config)?;
+            for (rows, buffer) in window.chunks(CHUNK).zip(buffers) {
+                let reads = if marks {
+                    first_rows(rows, &buffer, &mut previous)
+                } else {
+                    Vec::new()
+                };
+                crate::report::query_warnings::write_marked(
+                    &buffer,
+                    &reads,
+                    q_idx,
+                    &mut *writer,
+                    warnings.as_deref_mut(),
+                )?;
+            }
+        }
+    }
+    // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:2233-2238
+    // ```c++
+    //     if (m_FormatType == CFormattingArgs::eTabularWithComments) {
+    //         CBlastTabularInfo tabinfo(m_Outfile, m_CustomOutputFormatSpec);
+    //         tabinfo.PrintNumProcessed(m_QueriesFormatted);
+    // ```
+    // The same last line as `report::write_tabular`.
+    if let (true, Some(queries_before)) = (comments, epilog) {
+        writeln!(
+            writer,
+            "# BLAST processed {} queries",
+            queries_before + query_titles.len()
+        )?;
+    }
+    Ok(())
+}
+
+/// The rows of `rows` into one buffer (`report::write_tabular_row`).
+fn format_chunk(
+    rows: &[&TblastxHsp],
+    query_ids: &[Arc<[u8]>],
+    subject_ids: &[crate::algorithm::common::tabular::SubjectId],
+    config: &crate::report::outfmt6::OutputConfig,
+) -> io::Result<Vec<u8>> {
+    let mut buffer = Vec::with_capacity(rows.len() * 96);
+    for hsp in rows {
+        report::write_tabular_row(&mut buffer, hsp, query_ids, subject_ids, config)?;
+    }
+    Ok(buffer)
+}
+
+// The parallel forms of items 1-3; without threads (the second forms) they are the serial loops.
+/// `report::set_displayed_identities` over chunks of `hits` on `pool` (item 1).
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+pub(crate) fn set_displayed_identities<S: TbxScore>(
+    pool: &SearchPool<'_>,
+    hits: &mut [TblastxHsp],
+    queries: &[FastaRecord],
+    subjects: SubjectLetters<'_>,
+    query_code: &GeneticCode,
+    db_code: &GeneticCode,
+    sc: S,
+) {
+    pool.install(|| {
+        hits.par_chunks_mut(CHUNK).for_each(|chunk| {
+            report::set_displayed_identities(chunk, queries, subjects, query_code, db_code, sc)
+        })
+    })
+}
+
+#[cfg(not(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+)))]
+pub(crate) fn set_displayed_identities<S: TbxScore>(
+    _pool: &SearchPool<'_>,
+    hits: &mut [TblastxHsp],
+    queries: &[FastaRecord],
+    subjects: SubjectLetters<'_>,
+    query_code: &GeneticCode,
+    db_code: &GeneticCode,
+    sc: S,
+) {
+    report::set_displayed_identities(hits, queries, subjects, query_code, db_code, sc)
+}
+
+/// `report::engine_counts` (the Seq-aligns' engine counts, outfmt 8 and 12 only) over chunks of
+/// `hits` on `pool`, as item 1: each chunk counted by the serial function, the chunks' counts
+/// joined in the list's order.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+pub(crate) fn engine_counts<S: TbxScore>(
+    pool: &SearchPool<'_>,
+    hits: &[TblastxHsp],
+    queries: &[FastaRecord],
+    subjects: SubjectLetters<'_>,
+    query_code: &GeneticCode,
+    db_code: &GeneticCode,
+    sc: S,
+) -> Vec<(u32, u32)> {
+    let chunks: Vec<Vec<(u32, u32)>> = pool.install(|| {
+        hits.par_chunks(CHUNK)
+            .map(|chunk| report::engine_counts(chunk, queries, subjects, query_code, db_code, sc))
+            .collect()
+    });
+    chunks.concat()
+}
+
+#[cfg(not(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+)))]
+pub(crate) fn engine_counts<S: TbxScore>(
+    _pool: &SearchPool<'_>,
+    hits: &[TblastxHsp],
+    queries: &[FastaRecord],
+    subjects: SubjectLetters<'_>,
+    query_code: &GeneticCode,
+    db_code: &GeneticCode,
+    sc: S,
+) -> Vec<(u32, u32)> {
+    report::engine_counts(hits, queries, subjects, query_code, db_code, sc)
+}
+
+/// The outfmt 0 rows of `hits` (`report::pairwise_hits`, the Seq-aligns' identities
+/// `seqalign_identities` by HSP) as an indexed map on `pool` (item 2).
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+pub(crate) fn pairwise_hits(
+    pool: &SearchPool<'_>,
+    hits: &[TblastxHsp],
+    seqalign_identities: Option<&[u32]>,
+    rows: &PairwiseRows<'_>,
+) -> Vec<PairwiseHit> {
+    debug_assert!(seqalign_identities.is_none_or(|identities| identities.len() == hits.len()));
+    pool.install(|| {
+        hits.par_iter()
+            .enumerate()
+            .with_min_len(CHUNK / 4)
+            .map_init(Vec::new, |window, (index, hsp)| {
+                rows.hit(
+                    hsp,
+                    seqalign_identities.map(|identities| identities[index]),
+                    window,
+                )
+            })
+            .collect()
+    })
+}
+
+#[cfg(not(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+)))]
+pub(crate) fn pairwise_hits(
+    _pool: &SearchPool<'_>,
+    hits: &[TblastxHsp],
+    seqalign_identities: Option<&[u32]>,
+    rows: &PairwiseRows<'_>,
+) -> Vec<PairwiseHit> {
+    let mut window = Vec::new();
+    hits.iter()
+        .enumerate()
+        .map(|(index, hsp)| {
+            rows.hit(
+                hsp,
+                seqalign_identities.map(|identities| identities[index]),
+                &mut window,
+            )
+        })
+        .collect()
+}
+
+/// Where the subjects of `rows` (formatted into `buffer`, one line each) have their first row,
+/// after the row of subject `previous` (updated): the buffer's length at each, and the subject
+/// (`report::query_warnings::write_marked`).
+fn first_rows(
+    rows: &[&TblastxHsp],
+    buffer: &[u8],
+    previous: &mut Option<u32>,
+) -> Vec<(usize, u32)> {
+    let mut reads = Vec::new();
+    let mut at = 0;
+    for hsp in rows {
+        if *previous != Some(hsp.hit.s_idx) {
+            *previous = Some(hsp.hit.s_idx);
+            reads.push((at, hsp.hit.s_idx));
+        }
+        at += buffer[at..]
+            .iter()
+            .position(|&byte| byte == b'\n')
+            .map_or(buffer.len() - at, |end| end + 1);
+    }
+    reads
+}
+
+/// The rows of `window`, one buffer per chunk of `CHUNK` rows, in order.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+fn format_rows(
+    pool: &SearchPool<'_>,
+    window: &[&TblastxHsp],
+    query_ids: &[Arc<[u8]>],
+    subject_ids: &[crate::algorithm::common::tabular::SubjectId],
+    config: &crate::report::outfmt6::OutputConfig,
+) -> io::Result<Vec<Vec<u8>>> {
+    pool.install(|| {
+        window
+            .par_chunks(CHUNK)
+            .map(|rows| format_chunk(rows, query_ids, subject_ids, config))
+            .collect()
+    })
+}
+
+/// The rows of `window`, one buffer per chunk of `CHUNK` rows, in order.
+#[cfg(not(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+)))]
+fn format_rows(
+    _pool: &SearchPool<'_>,
+    window: &[&TblastxHsp],
+    query_ids: &[Arc<[u8]>],
+    subject_ids: &[crate::algorithm::common::tabular::SubjectId],
+    config: &crate::report::outfmt6::OutputConfig,
+) -> io::Result<Vec<Vec<u8>>> {
+    window
+        .chunks(CHUNK)
+        .map(|rows| format_chunk(rows, query_ids, subject_ids, config))
+        .collect()
+}

@@ -1,0 +1,246 @@
+BLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/e2d_t_qp2.faa).
+           2 sequences; 1,917 total letters
+
+
+
+Query= LvMJNV_93001_98000 window 1 of LvMJNV
+
+Length=5000
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT63274.1                                                            18.8    6.7  
+
+
+> BDT63274.1
+Length=1046
+
+ Score = 18.8 bits (49),  Expect = 6.7, Method: Compositional matrix adjust.
+ Identities = 8/20 (40%), Positives = 12/20 (60%), Gaps = 0/20 (0%)
+ Frame = +2
+
+Query  4094  ILVSDFKHKEKTSRRRCVKK  4153
+             I+VS    +++   R CVKK
+Sbjct  894   IVVSPSGKRKQNDERECVKK  913
+
+
+
+Lambda      K        H        a         alpha
+   0.229   0.0926    0.251    0.911     9.61 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.195   0.0320    0.100     1.90     60.7     61.1 
+
+Effective search space used: 2811297
+
+
+Query= LvMJNV_143001_152000 window 2 of LvMJNV
+
+Length=9000
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT63274.1                                                            19.3    8.9  
+
+
+> BDT63274.1
+Length=1046
+
+ Score = 19.3 bits (51),  Expect = 8.9, Method: Compositional matrix adjust.
+ Identities = 7/16 (44%), Positives = 10/16 (63%), Gaps = 0/16 (0%)
+ Frame = -1
+
+Query  3498  MQKYYFYRKEKCVVGI  3451
+             +Q+  FY  EK  VG+
+Sbjct  198   VQQVLFYTSEKNSVGV  213
+
+
+ Score = 19.0 bits (50),  Expect = 10.0, Method: Compositional matrix adjust.
+ Identities = 7/14 (50%), Positives = 10/14 (71%), Gaps = 0/14 (0%)
+ Frame = -2
+
+Query  7616  ISIDRFNVLGMFDF  7575
+             I+  +F+ LGM DF
+Sbjct  356   ITETKFHFLGMEDF  369
+
+
+
+Lambda      K        H        a         alpha
+   0.229   0.0926    0.251    0.911     9.61 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.195   0.0320    0.100     1.90     60.7     61.1 
+
+Effective search space used: 5130440
+
+
+Query= LvMJNV_160001_165000 window 3 of LvMJNV
+
+Length=5000
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT63274.1                                                            18.8    8.0  
+
+
+> BDT63274.1
+Length=1046
+
+ Score = 18.8 bits (49),  Expect = 8.0, Method: Compositional matrix adjust.
+ Identities = 10/27 (37%), Positives = 11/27 (41%), Gaps = 0/27 (0%)
+ Frame = -2
+
+Query  2836  EGRCVDHSIGETIPPGESQRRASPYFY  2756
+             E  CVD  IG      E Q     Y+Y
+Sbjct  94    EVYCVDKEIGYYGGLKEEQFMGYNYYY  120
+
+
+
+Lambda      K        H        a         alpha
+   0.229   0.0926    0.251    0.911     9.61 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.195   0.0320    0.100     1.90     60.7     61.1 
+
+Effective search space used: 2811297
+
+
+Query= LvMJNV_199001_206000 window 4 of LvMJNV
+
+Length=7000
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT63275.1                                                            27.8    0.017
+BDT63274.1                                                            20.4    2.9  
+
+
+> BDT63275.1
+Length=871
+
+ Score = 27.8 bits (81),  Expect = 0.017, Method: Compositional matrix adjust.
+ Identities = 13/38 (34%), Positives = 23/38 (61%), Gaps = 0/38 (0%)
+ Frame = +3
+
+Query  570  KLAHVYPLVLKSVVFSNLCSIEYLIDPNASVATMKASF  683
+            K+A +   ++K+ VF++LC+   L +PNA V   +  F
+Sbjct  476  KIAAILKPLIKTQVFASLCTFSILNNPNAVVVFSEVHF  513
+
+
+ Score = 19.9 bits (53),  Expect = 4.5, Method: Compositional matrix adjust.
+ Identities = 12/32 (38%), Positives = 18/32 (56%), Gaps = 0/32 (0%)
+ Frame = -2
+
+Query  2031  LIKLPLSFSLVLFNEAQERVSAAL*HIFKRMV  1936
+             LIK  L   L+ + +A ERV+  +   FK +V
+Sbjct  818   LIKTILRDDLISYEDAFERVAFEIREDFKNIV  849
+
+
+ Score = 19.6 bits (52),  Expect = 5.5, Method: Compositional matrix adjust.
+ Identities = 7/21 (33%), Positives = 13/21 (62%), Gaps = 0/21 (0%)
+ Frame = +3
+
+Query  2163  FPKWTMWPSKKNF*KRWSESL  2225
+             FP+W     K+ F  R++E++
+Sbjct  135   FPRWKSQIEKRFFLYRYNENV  155
+
+
+> BDT63274.1
+Length=1046
+
+ Score = 20.4 bits (55),  Expect = 2.9, Method: Compositional matrix adjust.
+ Identities = 5/9 (56%), Positives = 8/9 (89%), Gaps = 0/9 (0%)
+ Frame = -1
+
+Query  4306  PSLPFCKTP  4280
+             P+L +C+TP
+Sbjct  996   PNLSYCETP  1004
+
+
+
+Lambda      K        H        a         alpha
+   0.229   0.0926    0.251    0.911     9.61 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.195   0.0320    0.100     1.90     60.7     61.1 
+
+Effective search space used: 3971055
+
+
+Query= LvMJNV_242001_247000 window 5 of LvMJNV
+
+Length=5000
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT63274.1                                                            19.0    6.3  
+
+
+> BDT63274.1
+Length=1046
+
+ Score = 19.0 bits (50),  Expect = 6.3, Method: Compositional matrix adjust.
+ Identities = 6/8 (75%), Positives = 7/8 (88%), Gaps = 0/8 (0%)
+ Frame = +1
+
+Query  4531  CFFCSGVL  4554
+             CFFCS V+
+Sbjct  163   CFFCSKVI  170
+
+
+ Score = 18.8 bits (49),  Expect = 6.8, Method: Compositional matrix adjust.
+ Identities = 11/28 (39%), Positives = 14/28 (50%), Gaps = 4/28 (14%)
+ Frame = -1
+
+Query  2174  MESLSDYKISHESYVNSKRGWQKETIHS  2091
+             ME + D K     Y+N+  GW K T  S
+Sbjct  366   MEDFKDRK----RYLNNLLGWLKATTLS  389
+
+
+ Score = 18.5 bits (48),  Expect = 8.3, Method: Compositional matrix adjust.
+ Identities = 6/17 (35%), Positives = 11/17 (65%), Gaps = 0/17 (0%)
+ Frame = -2
+
+Query  4354  LSNEDQMGLDGYTNRMK  4304
+             L++  +MGLD Y   ++
+Sbjct  612   LTHATKMGLDSYVTFIR  628
+
+
+
+Lambda      K        H        a         alpha
+   0.229   0.0926    0.251    0.911     9.61 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.195   0.0320    0.100     1.90     60.7     61.1 
+
+Effective search space used: 2811297
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt0/e2d_t_qp2.faa).
+    Posted date:  Unknown
+  Number of letters in database: 1,917
+  Number of sequences in database:  2
+
+
+
+Matrix: BLOSUM45
+Gap Penalties: Existence: 14, Extension: 2
+Neighboring words threshold: 15
+Window for multiple hits: 60

@@ -1,0 +1,7 @@
+# BLASTN 2.17.0+
+# Query: lcase_minus query with lowercase 91-110
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/lcase_minus_subject.fasta)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+lcase_minus	lcase_minus_s	100.000	200	0	0	1	200	200	1	2.05e-83	289
+# BLAST processed 1 queries

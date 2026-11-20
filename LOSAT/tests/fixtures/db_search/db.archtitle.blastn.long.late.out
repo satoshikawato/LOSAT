@@ -1,0 +1,387 @@
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastn",
+      service "megablast",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_1"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">lq1 long query 1"
+                  }
+                }
+              },
+              title "lq1 long query 1"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 1100,
+              seq-data ncbi2na '761D3AAFCF7DAE9F1EF30CF4A260E181D83A65B7C4B616
+F6025FF33D0F3995FA41AB4DFA4443149BB215B5C541AB7336E5B348A4B1E245AE838E5B3FE1D6
+0A00AA2CFF17840629DFA61349482131F48204AFC9F58DEA1F6A976B27D64F5BBE1F5E48F48C2F
+C814315AC2944A8A840161F3EFE21362043C44511273682AC776D090924A16F3AF4E671509CA98
+34678AC3D78D9C20CA2A9E8D82CF342D0353579A83FF070C33120FBC5D5B69FECD7E67A30BB167
+215983A983A3E5C6738C512AEAE92C5B25DEDFE0A5ADD32EE740EC9569105DAE682CECD2DFD2C2
+C574171C4CE1BD3E77EB229175EB6FFA0160C17A3DBE82D7B59A38CA478F8608EBF8ECB0B4A4C3
+FF3D9F602D877DCD9B1051FF96D8D4700783'H
+            }
+          },
+          seq {
+            id {
+              local str "Query_2"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">lq2 long query 2"
+                  }
+                }
+              },
+              title "lq2 long query 2"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 1100,
+              seq-data ncbi2na '02A8DA766B9F72E8EA4A14AC5A00B5BA8EDCBB8CB28A5A
+6DAB0181489229D922EBC357A3315DD7618AB0FDFF2BB6C9C7DF728C7024D7F725BA9C29AE62CA
+DCE3250ABD8A576C9749548322EBFC61F1946C836BB7CC77799CA216B39DB403822806C01B3740
+4B39BC888A22155B38A4AEE410C589614E3E06D6C1C3299A4A4B778F80677B0571774CF2C4E579
+E1B13C5E20E2C529C9E0A303A44884301712027079AF580761C987203B4683C011AE1239A20827
+56365E5E80AB0DBBDA44C7CBB58A687A9C237CAC002E3D23E5D762AD05F344C350DA387EBAE0A1
+586398080396293EB68DB5CDF673788FF02B1EE2018E8A0B8E6281DECC84C07B50040A64B8BD9D
+BD9301D2CB4C0184CF1CD140A5BBD6BB1F20'H
+            }
+          },
+          seq {
+            id {
+              local str "Query_3"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">lq3 long query 3"
+                  }
+                }
+              },
+              title "lq3 long query 3"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 1100,
+              seq-data ncbi2na '6018C9934AEF11690116D89D98486D7577909360DD87C5
+B6185E64149D1FD19C3357F570632523816E8AEA23FB3C1943AC9FD4D2835316CA91F2318F281B
+39F6AEFAA85F71830C35BB26BCE4AD5F1754E62FBF2ACED174CBBAFB0F70617DBF8F5444A73D3D
+3B494E148EA81194D43EB1F85EAD585E78A4E3855E217596FE378D4F8E23F1142D9C966621EA29
+E4E71E74E77E37B779CDDD4DB639B3E82860D007C031D814C4A0375A957A18674EBFFC64370F98
+597DF2740338613DCA8DC2E54FFF4B4DA18991E42CFCB4D7396D4E7F5D30397BDD0260FB3796B1
+73BC1E9E7AA36B963A6020ED81E32ED879C6A8BFAB24C607DFB7D991DB18FFE1C01CD380595F79
+7901BD7A7C511C7FF8244C40FD4C7F2FFAD4'H
+            }
+          },
+          seq {
+            id {
+              local str "Query_4"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">lq4 long query 4"
+                  }
+                }
+              },
+              title "lq4 long query 4"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 1100,
+              seq-data ncbi2na '640678DE10FF0E04BAE6C16CCBCC3B97A76109EF5C1532
+7BE4E033B3B133B707BCF01884D3DC4DEC204D53167788D788E777D2D8CBEB510227050636F623
+05DB3627BF45A44B45AFBC26D354D30E9A36B1E5477F5888DD74F392433248D0E5D20A3BB0159C
+C317DE99BE543A518B2E89E029AF68AA53CA02A4D002EC229130AA853F865ED93F51E3364C7CE0
+0DCDC7577CCDB7729B13BF3A2623FCEE5084CA605627D3509A871E29F4AA2575F69DF7DA932813
+B63DDCE2E800109FC36E745438B0DAC9841D6DDE3D9936E1F7205C9708CCA5203E343CC45D134E
+677E77A384F2D99F3FA485F7BCC947F07E2F6B5046A9B25A516EAF1353CCC4CE0ED4717F18EB31
+2C59A3286262D9978B1A1D165C4FD93C279D'H
+            }
+          },
+          seq {
+            id {
+              local str "Query_5"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">lq5 long query 5"
+                  }
+                }
+              },
+              title "lq5 long query 5"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 1100,
+              seq-data ncbi2na 'AE51D2DCBF203905B425AA70521AE47488647908CDF487
+B719A853740EBA72FAC233880C975C4ECC9AC351BD10790CC5C75C9F791F8B9F2053CE8321D00F
+807E805E27DE568C276886342561BBC7597DF39688621B0095DC3726ED7E95551C74F985B49175
+23B7B7885ACD67BE3DDC25817B0289B34271EB252B52BCA488E0248D6B73A36CE31845760B8176
+702B3479604E3DC6A551A0C39174B1C9943259E35755FB4E12906F572A15C5EAEF534194DF5E12
+E1D0FEEBF16C461D024982263F1352525587C158C6DD13DEB53AA47AD8989500BC345A1AA301A3
+7A0D024E27622121B3FAF6BC2132425171E1E7E842334199E5765D5302C5B220D831995F722E2F
+D3213F60E564DC78C9E6C8B5488836A54CA0'H
+            }
+          }
+        }
+      },
+      subject database "tests/db_search/arch_snucl",
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, 1 }
+        },
+        {
+          name "MaskAtHash",
+          value boolean TRUE
+        },
+        {
+          name "UngappedMode",
+          value boolean FALSE
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 1020693
+        }
+      },
+      program-options {
+        {
+          name "LCaseMask",
+          value query-mask {
+            locations {
+              packed-int {
+                {
+                  from 369,
+                  to 375,
+                  id local str "Query_5"
+                },
+                {
+                  from 369,
+                  to 375,
+                  id local str "Query_5"
+                }
+              }
+            },
+            frame plus1
+          }
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+    },
+    masks {
+      {
+        locations {
+          packed-int {
+            {
+              from 369,
+              to 375,
+              id local str "Query_5"
+            }
+          }
+        },
+        frame plus1
+      }
+    },
+    ka-blocks {
+      {
+        lambda { 133270576282382, 10, -14 },
+        k { 620991117264207, 10, -15 },
+        h { 112409184650115, 10, -14 },
+        gapped FALSE
+      },
+      {
+        lambda { 128, 10, -2 },
+        k { 46, 10, -2 },
+        h { 85, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 1020693",
+      "Effective search space used: 1020693",
+      "Length adjustment: 13"
+    }
+  }
+}
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastn",
+      service "megablast",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_6"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">lq6 long query 6 caf\303\251"
+                  }
+                }
+              },
+              title "lq6 long query 6 caf##"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 1100,
+              seq-data ncbi2na '3FD27D2C47DE7F8F4D44B5370CFB1D0BBDF8E7A3B2CAB0
+6B7307CDC9AB6B1F84D86000A3A98559C53F532CE9B960B9422BB3A8174C90E80C9320F9D04B2D
+A629CA05236F5D86969D07D8C86CC5A8913F694079C468277F96DA0E8F4ECE9C0717F0AB0D8071
+94B88176EACA64D550DC62E5C15BAFB0570E9E9F06A09ABF207DF9C3852B060DB567C4F3EDA856
+B23192D48D452A55425ACCC0F682611C501666F372B48A1D6083BE0D6AD3617BAA90A3BF55712E
+8EEC0AD709F0A22830336AABAA92B0F2B91CD57C400DA5A59C505DBC277CA6C5D611E077E82E3B
+CB260A17C30849E5C17A5E2150FB9B58CAA84484E10041D0292C784D585EF8DFC60CA93525BAF3
+AE683DA36C208D911F423ABA5BD812B53FFB'H
+            }
+          }
+        }
+      },
+      subject database "tests/db_search/arch_snucl",
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, 1 }
+        },
+        {
+          name "MaskAtHash",
+          value boolean TRUE
+        },
+        {
+          name "UngappedMode",
+          value boolean FALSE
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 1020693
+        }
+      },
+      program-options {
+        {
+          name "LCaseMask",
+          value query-mask {
+            locations {
+              packed-int {
+                {
+                  from 757,
+                  to 768,
+                  id local str "Query_6"
+                },
+                {
+                  from 757,
+                  to 768,
+                  id local str "Query_6"
+                }
+              }
+            },
+            frame plus1
+          }
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+    },
+    masks {
+      {
+        locations {
+          packed-int {
+            {
+              from 757,
+              to 768,
+              id local str "Query_6"
+            }
+          }
+        },
+        frame plus1
+      }
+    },
+    ka-blocks {
+      {
+        lambda { 133270576282382, 10, -14 },
+        k { 620991117264207, 10, -15 },
+        h { 112409184650115, 10, -14 },
+        gapped FALSE
+      },
+      {
+        lambda { 128, 10, -2 },
+        k { 46, 10, -2 },
+        h { 85, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 1020693",
+      "Effective search space used: 1020693",
+      "Length adjustment: 13"
+    }
+  }
+}
+Blast4-archive ::= {
+  request {
+    body get-request-info {
+      request-id "Error"
+    }
+  },
+  results {
+  },
+  messages {
+    {
+      code 2,
+      message "BLAST query error: CFastaReader: Near line 104, there's a line
+ that doesn't look like plausible data, but it's not marked as defline or
+ comment."
+    }
+  }
+}

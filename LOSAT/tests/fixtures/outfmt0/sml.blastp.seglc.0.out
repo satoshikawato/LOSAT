@@ -1,0 +1,86 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/x16_seg_s.faa).
+           1 sequences; 116 total letters
+
+
+
+Query= qs1 low-complexity run inside the alignment lower over part of the Q
+run and at 80-95
+
+Length=119
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+ss1 subject with the same run                                         133     9e-47
+
+
+> ss1 subject with the same run
+Length=116
+
+ Score = 133 bits (335),  Expect = 9e-47, Method: Compositional matrix adjust.
+ Identities = 109/119 (92%), Positives = 110/119 (92%), Gaps = 3/119 (3%)
+
+Query  1    MWMEHSVLKANFAVLRKVMDDPKIRDGpmavmkqqqqqqqqqqqqqqqqqqqqqGWENYC  60
+            MWMEHSVLKA FAV RKVMDDPKIRDGPMAVMKQQQQQQQQQQQQQQQQQQQQQGWENYC
+Sbjct  1    MWMEHSVLKAVFAVRRKVMDDPKIRDGPMAVMKQQQQQQQQQQQQQQQQQQQQQGWENYC  60
+
+Query  61   WPANMSWKVLMKYEFSSDIHpcnlwicwipkematPGWWNTDTLHMSEMGLWMHKYPKC  119
+            WPANMSWKVLMKYEFSSDIH    WICWIPKE  TPGWW TDTLHM+EMGLWMHKYPKC
+Sbjct  61   WPANMSWKVLMKYEFSSDIH---PWICWIPKEQQTPGWWKTDTLHMAEMGLWMHKYPKC  116
+
+
+
+Lambda      K        H        a         alpha
+   0.323    0.135    0.509    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 10918
+
+
+Query= qs2 no hits expected
+
+Length=73
+
+
+***** No hits found *****
+
+
+
+
+
+Effective search space used: 0
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt0/x16_seg_s.faa).
+    Posted date:  Unknown
+  Number of letters in database: 116
+  Number of sequences in database:  1
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

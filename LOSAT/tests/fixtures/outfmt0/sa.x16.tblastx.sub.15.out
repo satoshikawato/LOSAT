@@ -1,0 +1,651 @@
+{
+"BlastOutput2": [
+{
+    "report": {
+      "program": "tblastx",
+      "version": "TBLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1",
+          "Subject_2",
+          "Subject_3"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 0.01,
+        "filter": "L;",
+        "query_gencode": 1,
+        "db_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_1",
+            "query_title": "xq1 plus strand with repeat",
+            "query_len": 243,
+            "query_masking": [
+              {
+                "from": 102,
+                "to": 114
+              },
+              {
+                "from": 103,
+                "to": 142
+              },
+              {
+                "from": 104,
+                "to": 143
+              }
+            ],
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "xs1",
+                    "title": "xs1 gene one"
+                  }
+                ],
+                "len": 244,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 143.112,
+                    "score": 306,
+                    "evalue": 1.66502e-39,
+                    "identity": 70,
+                    "positive": 70,
+                    "query_from": 13,
+                    "query_to": 231,
+                    "query_frame": 1,
+                    "hit_from": 3,
+                    "hit_to": 221,
+                    "hit_frame": 3,
+                    "align_len": 73,
+                    "gaps": 0,
+                    "qseq": "FWDKESRSPHESAPQYARKIWEMAAAVAPHq*q*q*Q*Q*Q*Q*QATKRSVINTIRLLQVEGLEMTQTHLLWS",
+                    "hseq": "FWDKESRSPHESAPQYARKIWEMAAAVAPHQ*Q*Q*Q*Q*Q*Q*QATIRSVINIIRLAQVEGLEMTQTHLLWS",
+                    "midline": "FWDKESRSPHESAPQYARKIWEMAAAVAPHQ*Q*Q*Q*Q*Q*Q*QAT RSVIN IRL QVEGLEMTQTHLLWS"
+                  },
+                  {
+                    "num": 2,
+                    "bit_score": 44.5971,
+                    "score": 91,
+                    "evalue": 1.54538e-17,
+                    "identity": 23,
+                    "positive": 23,
+                    "query_from": 12,
+                    "query_to": 98,
+                    "query_frame": -2,
+                    "hit_from": 2,
+                    "hit_to": 88,
+                    "hit_frame": -1,
+                    "align_len": 29,
+                    "gaps": 0,
+                    "qseq": "GATAAAISQILRAYCGADSWGERLSLSQK",
+                    "hseq": "GATAAAISQIFLAYWGALS*GERDSLSQK",
+                    "midline": "GATAAAISQI  AY GA S GER SLSQK"
+                  },
+                  {
+                    "num": 3,
+                    "bit_score": 42.3061,
+                    "score": 86,
+                    "evalue": 1.54538e-17,
+                    "identity": 16,
+                    "positive": 21,
+                    "query_from": 147,
+                    "query_to": 230,
+                    "query_frame": -2,
+                    "hit_from": 137,
+                    "hit_to": 220,
+                    "hit_frame": -1,
+                    "align_len": 28,
+                    "gaps": 0,
+                    "qseq": "DHKR*VWVISRPSTCKSLMVFITERLVA",
+                    "hseq": "DQSKWVWVISKPSTCAKRIMLITERIVA",
+                    "midline": "D  + VWVIS+PSTC   ++ ITER+VA"
+                  },
+                  {
+                    "num": 4,
+                    "bit_score": 47.3464,
+                    "score": 97,
+                    "evalue": 1.12133e-10,
+                    "identity": 40,
+                    "positive": 48,
+                    "query_from": 13,
+                    "query_to": 231,
+                    "query_frame": -1,
+                    "hit_from": 3,
+                    "hit_to": 221,
+                    "hit_frame": -3,
+                    "align_len": 73,
+                    "gaps": 0,
+                    "qseq": "RP*KMSLGHLKAFHL*KSYGIYNRAFGCllllllllllllllLMRSDSRSHFPNLARILRCGFMGGAAFLIPK",
+                    "hseq": "RPK*MGLGHL*TFDLCQAYYVNHGTNSCLLLLLLLLLLLLLLLMRCNCSRHFPNLSSILGSALVRGAGLLIPE",
+                    "midline": "RP  M LGHL  F L ++Y + +    CLLLLLLLLLLLLLLLMR +   HFPNL+ IL    + GA  LIP+"
+                  },
+                  {
+                    "num": 5,
+                    "bit_score": 33.6001,
+                    "score": 67,
+                    "evalue": 3.44685e-08,
+                    "identity": 14,
+                    "positive": 17,
+                    "query_from": 15,
+                    "query_to": 83,
+                    "query_frame": 3,
+                    "hit_from": 5,
+                    "hit_to": 73,
+                    "hit_frame": 2,
+                    "align_len": 23,
+                    "gaps": 0,
+                    "qseq": "LG*GKPLPP*IRTAVCAQDLGNG",
+                    "hseq": "LG*GVPLPSRERSPIC*KDLGNG",
+                    "midline": "LG*G PLP   R+ +C +DLGNG"
+                  },
+                  {
+                    "num": 6,
+                    "bit_score": 21.2285,
+                    "score": 40,
+                    "evalue": 3.44685e-08,
+                    "identity": 8,
+                    "positive": 14,
+                    "query_from": 182,
+                    "query_to": 235,
+                    "query_frame": 2,
+                    "hit_from": 172,
+                    "hit_to": 225,
+                    "hit_frame": 1,
+                    "align_len": 18,
+                    "gaps": 0,
+                    "qseq": "FYRWKALR*PRLIFYGLI",
+                    "hseq": "WHRSKV*R*PKPIYFGLL",
+                    "midline": "++R K  R*P+ I++GL+"
+                  },
+                  {
+                    "num": 7,
+                    "bit_score": 33.6001,
+                    "score": 67,
+                    "evalue": 1.54088e-06,
+                    "identity": 13,
+                    "positive": 15,
+                    "query_from": 11,
+                    "query_to": 82,
+                    "query_frame": -3,
+                    "hit_from": 1,
+                    "hit_to": 72,
+                    "hit_frame": -2,
+                    "align_len": 24,
+                    "gaps": 0,
+                    "qseq": "PFPKSCAHTAVRIHGGSGFPYPKN",
+                    "hseq": "PFPKSF*HIGERSREGSGTPYPRS",
+                    "midline": "PFPKS  H   R   GSG PYP++"
+                  },
+                  {
+                    "num": 8,
+                    "bit_score": 26.2688,
+                    "score": 51,
+                    "evalue": 0.000248153,
+                    "identity": 11,
+                    "positive": 12,
+                    "query_from": 17,
+                    "query_to": 82,
+                    "query_frame": 2,
+                    "hit_from": 7,
+                    "hit_to": 72,
+                    "hit_frame": 1,
+                    "align_len": 22,
+                    "gaps": 0,
+                    "qseq": "GIRKAAPPMNPHRSMRARFGKW",
+                    "hseq": "GIRSPAPLTRALPNMLERFGKW",
+                    "midline": "GIR  AP      +M  RFGKW"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 14,
+              "eff_space": 10184,
+              "kappa": 0.133956144488482,
+              "lambda": 0.317605957635731,
+              "entropy": 0.401214524497119
+            }
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "tblastx",
+      "version": "TBLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1",
+          "Subject_2",
+          "Subject_3"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 0.01,
+        "filter": "L;",
+        "query_gencode": 1,
+        "db_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_2",
+            "query_title": "xq2 minus strand",
+            "query_len": 169,
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "xs2",
+                    "title": "xs2 gene two (minus)"
+                  }
+                ],
+                "len": 190,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 92.709,
+                    "score": 196,
+                    "evalue": 3.73901e-34,
+                    "identity": 34,
+                    "positive": 34,
+                    "query_from": 50,
+                    "query_to": 166,
+                    "query_frame": -1,
+                    "hit_from": 56,
+                    "hit_to": 172,
+                    "hit_frame": -1,
+                    "align_len": 39,
+                    "gaps": 0,
+                    "qseq": "WCSIPQGNVNDRTEGTPNSASCLYWWPGGTIAHVVIPTN",
+                    "hseq": "WCSIPQGKVNDRTELAENSASCLYWWPGGTIAHVVIPLN",
+                    "midline": "WCSIPQG VNDRTE   NSASCLYWWPGGTIAHVVIP N"
+                  },
+                  {
+                    "num": 2,
+                    "bit_score": 48.721,
+                    "score": 100,
+                    "evalue": 3.73901e-34,
+                    "identity": 16,
+                    "positive": 17,
+                    "query_from": 1,
+                    "query_to": 54,
+                    "query_frame": -2,
+                    "hit_from": 11,
+                    "hit_to": 64,
+                    "hit_frame": -1,
+                    "align_len": 18,
+                    "gaps": 0,
+                    "qseq": "PINWNRKVYAPTFTVHQC",
+                    "hseq": "PLNWNRMVYAPTFTVHQC",
+                    "midline": "P+NWNR VYAPTFTVHQC"
+                  },
+                  {
+                    "num": 3,
+                    "bit_score": 68.8822,
+                    "score": 144,
+                    "evalue": 1.43512e-20,
+                    "identity": 28,
+                    "positive": 29,
+                    "query_from": 57,
+                    "query_to": 167,
+                    "query_frame": 3,
+                    "hit_from": 63,
+                    "hit_to": 173,
+                    "hit_frame": 3,
+                    "align_len": 37,
+                    "gaps": 0,
+                    "qseq": "GITTCAIVPPGHQYKQDAELGVPSVRSLTLPCGMEHQ",
+                    "hseq": "GITT*AIVPPGHQ*RQDAEFSANSVRSFTFPCGMEHQ",
+                    "midline": "GITT AIVPPGHQ +QDAE    SVRS T PCGMEHQ"
+                  },
+                  {
+                    "num": 4,
+                    "bit_score": 26.727,
+                    "score": 52,
+                    "evalue": 1.43512e-20,
+                    "identity": 12,
+                    "positive": 12,
+                    "query_from": 11,
+                    "query_to": 55,
+                    "query_frame": 2,
+                    "hit_from": 21,
+                    "hit_to": 65,
+                    "hit_frame": 3,
+                    "align_len": 15,
+                    "gaps": 0,
+                    "qseq": "TVKVGA*TFLFQLIG",
+                    "hseq": "TVKVGA*TILFQFNG",
+                    "midline": "TVKVGA*T LFQ  G"
+                  },
+                  {
+                    "num": 5,
+                    "bit_score": 32.6837,
+                    "score": 65,
+                    "evalue": 1.64839e-08,
+                    "identity": 15,
+                    "positive": 20,
+                    "query_from": 59,
+                    "query_to": 166,
+                    "query_frame": 2,
+                    "hit_from": 65,
+                    "hit_to": 172,
+                    "hit_frame": 2,
+                    "align_len": 36,
+                    "gaps": 0,
+                    "qseq": "DHDVRNSTTGPPV*ARRGVGSALGAIVNIALWYGAP",
+                    "hseq": "DNHMSYSSTRPPIKTRCRVLG*FGAIVHFPLWNGTP",
+                    "midline": "D+ +  S+T PP+  R  V    GAIV+  LW G P"
+                  },
+                  {
+                    "num": 6,
+                    "bit_score": 21.6867,
+                    "score": 41,
+                    "evalue": 1.64839e-08,
+                    "identity": 7,
+                    "positive": 12,
+                    "query_from": 1,
+                    "query_to": 54,
+                    "query_frame": 1,
+                    "hit_from": 11,
+                    "hit_to": 64,
+                    "hit_frame": 2,
+                    "align_len": 18,
+                    "gaps": 0,
+                    "qseq": "TLMHSKGRSIDLSIPIDW",
+                    "hseq": "TLVNGESGGINHSIPVQW",
+                    "midline": "TL++ +   I+ SIP+ W"
+                  },
+                  {
+                    "num": 7,
+                    "bit_score": 37.724,
+                    "score": 76,
+                    "evalue": 5.87178e-08,
+                    "identity": 16,
+                    "positive": 21,
+                    "query_from": 75,
+                    "query_to": 167,
+                    "query_frame": -3,
+                    "hit_from": 81,
+                    "hit_to": 173,
+                    "hit_frame": -3,
+                    "align_len": 31,
+                    "gaps": 0,
+                    "qseq": "LVLHTTRQC*RSHRGHSQLRVLLILVARWYY",
+                    "hseq": "LVFHSTRESERSHRISRELCILSLLVAGWNY",
+                    "midline": "LV H+TR+  RSHR   +L +L +LVA W Y"
+                  },
+                  {
+                    "num": 8,
+                    "bit_score": 30.8509,
+                    "score": 61,
+                    "evalue": 2.51204e-07,
+                    "identity": 14,
+                    "positive": 19,
+                    "query_from": 76,
+                    "query_to": 168,
+                    "query_frame": 1,
+                    "hit_from": 82,
+                    "hit_to": 174,
+                    "hit_frame": 1,
+                    "align_len": 31,
+                    "gaps": 0,
+                    "qseq": "*YHRATSISKTRSWECPRCDR*HCLVVWSTK",
+                    "hseq": "*FHPATNKDKMQSSRLIRCDRSLSLVEWNTR",
+                    "midline": "*+H AT+  K +S    RCDR   LV W+T+"
+                  },
+                  {
+                    "num": 9,
+                    "bit_score": 19.3957,
+                    "score": 36,
+                    "evalue": 2.51204e-07,
+                    "identity": 7,
+                    "positive": 11,
+                    "query_from": 3,
+                    "query_to": 47,
+                    "query_frame": 3,
+                    "hit_from": 13,
+                    "hit_to": 57,
+                    "hit_frame": 1,
+                    "align_len": 15,
+                    "gaps": 0,
+                    "qseq": "IDAQ*RSEHRPFYSN",
+                    "hseq": "IGER*KWGHKPFYSS",
+                    "midline": "I  +*+  H+PFYS+"
+                  },
+                  {
+                    "num": 10,
+                    "bit_score": 29.9345,
+                    "score": 59,
+                    "evalue": 1.29914e-05,
+                    "identity": 14,
+                    "positive": 16,
+                    "query_from": 76,
+                    "query_to": 165,
+                    "query_frame": -2,
+                    "hit_from": 82,
+                    "hit_to": 171,
+                    "hit_frame": -2,
+                    "align_len": 30,
+                    "gaps": 0,
+                    "qseq": "GAPYHKAMLTIAPRALPTPRLAYTGGPVVL",
+                    "hseq": "GVPFHKGK*TIAPN*PRTLHLVFIGGRVEL",
+                    "midline": "G P+HK   TIAP    T  L + GG V L"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 13,
+              "eff_space": 6665,
+              "kappa": 0.133956144488482,
+              "lambda": 0.317605957635731,
+              "entropy": 0.401214524497119
+            }
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "tblastx",
+      "version": "TBLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1",
+          "Subject_2",
+          "Subject_3"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 0.01,
+        "filter": "L;",
+        "query_gencode": 1,
+        "db_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_3",
+            "query_title": "xq3 unrelated (no hits)",
+            "query_len": 120,
+            "hits": [
+            ],
+            "stat": {
+              "hsp_len": 12,
+              "eff_space": 4424,
+              "kappa": 0.133956144488482,
+              "lambda": 0.317605957635731,
+              "entropy": 0.401214524497119
+            },
+            "message": "No hits found"
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "tblastx",
+      "version": "TBLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1",
+          "Subject_2",
+          "Subject_3"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 0.01,
+        "filter": "L;",
+        "query_gencode": 1,
+        "db_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_4",
+            "query_title": "xq4 plus strand gene two",
+            "query_len": 165,
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "xs2",
+                    "title": "xs2 gene two (minus)"
+                  }
+                ],
+                "len": 190,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 115.161,
+                    "score": 245,
+                    "evalue": 2.80296e-31,
+                    "identity": 43,
+                    "positive": 44,
+                    "query_from": 4,
+                    "query_to": 165,
+                    "query_frame": 1,
+                    "hit_from": 11,
+                    "hit_to": 172,
+                    "hit_frame": -1,
+                    "align_len": 54,
+                    "gaps": 0,
+                    "qseq": "WCSIPQGNVNDRTEETPNSWSDLYWWPGGTIAHVVIPTNWNKKVYAPTFTVRLC",
+                    "hseq": "WCSIPQGKVNDRTELAENSASCLYWWPGGTIAHVVIPLNWNRMVYAPTFTVHQC",
+                    "midline": "WCSIPQG VNDRTE   NS S LYWWPGGTIAHVVIP NWN+ VYAPTFTV  C"
+                  },
+                  {
+                    "num": 2,
+                    "bit_score": 90.418,
+                    "score": 191,
+                    "evalue": 7.87193e-24,
+                    "identity": 39,
+                    "positive": 42,
+                    "query_from": 3,
+                    "query_to": 164,
+                    "query_frame": -2,
+                    "hit_from": 12,
+                    "hit_to": 173,
+                    "hit_frame": 3,
+                    "align_len": 54,
+                    "gaps": 0,
+                    "qseq": "HKRTVKVGA*TFLFQLVGITTCAMVPPGHQYKSDQEFGVSSVRSFTFPCGMLHQ",
+                    "hseq": "HW*TVKVGA*TILFQFNGITT*AIVPPGHQ*RQDAEFSANSVRSFTFPCGMEHQ",
+                    "midline": "H  TVKVGA*T LFQ  GITT A+VPPGHQ + D EF  +SVRSFTFPCGM HQ"
+                  },
+                  {
+                    "num": 3,
+                    "bit_score": 53.7613,
+                    "score": 111,
+                    "evalue": 8.52791e-13,
+                    "identity": 19,
+                    "positive": 28,
+                    "query_from": 4,
+                    "query_to": 156,
+                    "query_frame": -1,
+                    "hit_from": 20,
+                    "hit_to": 172,
+                    "hit_frame": 2,
+                    "align_len": 51,
+                    "gaps": 0,
+                    "qseq": "HSEGGSIDFLVPVGWDHHVCDGPTRPPVQVGPGIWSFLSAVVHVPLWYAAP",
+                    "hseq": "NGESGGINHSIPVQWDNHMSYSSTRPPIKTRCRVLG*FGAIVHFPLWNGTP",
+                    "midline": "+ E G I+  +PV WD+H+    TRPP++    +     A+VH PLW   P"
+                  },
+                  {
+                    "num": 4,
+                    "bit_score": 45.5136,
+                    "score": 93,
+                    "evalue": 2.59217e-10,
+                    "identity": 20,
+                    "positive": 29,
+                    "query_from": 3,
+                    "query_to": 152,
+                    "query_frame": 3,
+                    "hit_from": 24,
+                    "hit_to": 173,
+                    "hit_frame": -3,
+                    "align_len": 50,
+                    "gaps": 0,
+                    "qseq": "LVQHTTGERERPH*GNSKFLVRLVLVAWWDHRTRGDPNQLEQESLCSHLH",
+                    "hseq": "LVFHSTRESERSHRISRELCILSLLVAGWNYSSCGYPIELE*NGLCPHFH",
+                    "midline": "LV H+T E ER H  + +  +  +LVA W++ + G P +LE   LC H H"
+                  },
+                  {
+                    "num": 5,
+                    "bit_score": 29.0181,
+                    "score": 57,
+                    "evalue": 2.395e-05,
+                    "identity": 15,
+                    "positive": 24,
+                    "query_from": 17,
+                    "query_to": 154,
+                    "query_frame": -3,
+                    "hit_from": 22,
+                    "hit_to": 159,
+                    "hit_frame": 1,
+                    "align_len": 46,
+                    "gaps": 0,
+                    "qseq": "Q*RWEHRLSCSSWLGSPRVRWSHQATSTSRTRNLEFPQCGRSRSPV",
+                    "hseq": "R*KWGHKPFYSSSMG*PHEL*FHPATNKDKMQSSRLIRCDRSLSLV",
+                    "midline": "+*+W H+   SS +G P     H AT+  + ++    +C RS S V"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 13,
+              "eff_space": 6510,
+              "kappa": 0.133956144488482,
+              "lambda": 0.317605957635731,
+              "entropy": 0.401214524497119
+            }
+          }
+        ]
+      }
+    }
+  }
+]
+}

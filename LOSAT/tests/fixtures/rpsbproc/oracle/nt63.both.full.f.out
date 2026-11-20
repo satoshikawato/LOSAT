@@ -1,0 +1,69 @@
+#Post-RPSBLAST Processing Utility
+
+#Input data file:	arch/nt63.asn
+#Output data file:	(stdout)
+#Annotation data at:	nt
+#E-Value cutoff:	0.01
+#Redundancy:	Full
+#Data requested:	Domain hits and site annotations
+#Output format -- tab-delimited table
+#Show superfamilies: YES
+#DATA
+#SESSION	<session-ordinal>	<program>	<database>	<score-matrix>	<evalue-threshold>
+#QUERY	<query-id>	<seq-type>	<seq-length>	<definition-line>
+#DOMAINS
+#<session-ordinal>	<query-id[readingframe]>	<hit-type>	<PSSM-ID>	<from>	<to>	<E-Value>	<bitscore>	<accession>	<short-name>	<incomplete>	<superfamily PSSM-ID>
+#more such lines......
+#ENDDOMAINS
+#SITES
+#<session-ordinal>	<query-id[readingframe]>	<annot-type>	<title>	<residue(coordinates)>	<complete-size>	<mapped-size>	<source-domain>
+#more such lines......
+#ENDSITES
+#MOTIFS
+#<session-ordinal>	<query-id[readingframe]>	<title>	<from>	<to>	<source-domain>
+#more such lines......
+#ENDMOTIFS
+#ENDQUERY	<query-id>
+#more query sections..
+#ENDSESSION	<session-ordinal>
+#more session sections..
+#ENDDATA
+#=====================================================================
+DATA
+SESSION	1	tblastn	2.17.0+	Cdd	BLOSUM62	0.01
+QUERY	Query_1	Nucleotide	5000	mg00063_310001-315000
+DOMAINS
+1	Query_1[1]	Non-specific	492229	4576	4998	3.64871e-46	168.281	pfam11924	IAT_beta	C	-
+1	Query_1[1]	Non-specific	468908	4561	4998	8.29251e-45	178.077	NF040978	Ve_IatC_Nterm	C	-
+1	Query_1[1]	Non-specific	511111	4549	4995	4.86805e-23	104.859	NF040981	Ve_YrIlm_NTERM	NC	-
+1	Query_1[-1]	Specific	522332	93	590	3.53429e-85	275.785	pfam16449	MatB	-	-
+1	Query_1[-1]	Specific	503450	2544	2777	1.50075e-37	135.733	NF002462	PRK01678	-	-
+1	Query_1[-1]	Specific	440024	2526	2777	1.5818e-27	107.154	COG0254	RpmE	-	-
+1	Query_1[-1]	Specific	514079	2544	2777	1.82951e-23	95.1824	pfam01197	Ribosomal_L31	-	-
+1	Query_1[-1]	Non-specific	502586	2538	2777	1.07561e-16	76.115	NF000612	PRK00019	-	-
+1	Query_1[-1]	Non-specific	272907	2538	2777	6.29841e-14	68.0837	TIGR00105	L31	-	529067
+1	Query_1[-1]	Non-specific	503034	2538	2777	3.69013e-10	57.656	NF001809	PRK00528	-	-
+1	Query_1[-1]	Non-specific	177058	2544	2780	4.32952e-09	54.2713	CHL00136	rpl31	-	529067
+1	Query_1[-1]	Specific	469362	3144	3242	3.7529e-05	42.3935	NF041474	membrane_YkgR	-	-
+1	Query_1[-2]	Specific	197715	776	901	2.62562e-09	54.8406	smart00421	HTH_LUXR	C	481199
+1	Query_1[-2]	Specific	442052	776	1273	5.67389e-09	57.8434	COG2771	CsgD	-	-
+1	Query_1[-2]	Specific	99777	776	901	1.30469e-08	52.5368	cd06170	LuxR_C_like	C	532797
+1	Query_1[-2]	Non-specific	441799	776	901	2.89885e-07	51.0462	COG2197	CitB	N	-
+1	Query_1[-2]	Non-specific	513237	776	901	3.80625e-07	48.7508	pfam00196	GerE	C	532797
+1	Query_1[-2]	Non-specific	444607	776	913	0.000221487	41.484	COG5905	GerE	C	-
+1	Query_1[-2]	Non-specific	443623	776	901	0.00625886	39.6986	COG4566	FixJ	N	-
+1	Query_1[-3]	Specific	503166	2392	2514	2.28885e-14	68.4852	NF002021	PRK00831	-	-
+1	Query_1[-3]	Specific	440027	2392	2514	2.2937e-09	54.3605	COG0257	RpmJ	-	481008
+1	Query_1[-3]	Specific	513456	2392	2514	8.85959e-08	49.8042	pfam00444	Ribosomal_L36	-	481008
+ENDDOMAINS
+SUPERFAMILIES
+1	Query_1	Superfamily	0	2538	2777	6.29841e-14	68.0837	cl00377	RpmE	-	-
+1	Query_1	Superfamily	0	776	901	2.62562e-09	54.8406	cl46859	HTH_CRP	C	-
+1	Query_1	Superfamily	0	2392	2514	2.2937e-09	54.3605	cl46668	Ribosomal_L36	-	-
+ENDSUPERFAMILIES
+SITES
+1	Query_1[-2]	Specific	DNA binding residues	T901-899,D898-896,R895-893,Q856-854,P853-851,K850-848,C826-824,S823-821,K817-815,T814-812,Y808-806,T805-803,H802-800,R799-797,R796-794	16	0	99777
+ENDSITES
+ENDQUERY
+ENDSESSION	1
+ENDDATA

@@ -1,0 +1,49 @@
+#Post-RPSBLAST Processing Utility
+
+#Input data file:	arch/x_motdom.xml
+#Output data file:	(stdout)
+#Annotation data at:	sites
+#E-Value cutoff:	0.01
+#Redundancy:	Concise
+#Data requested:	Domain hits and site annotations
+#Output format -- tab-delimited table
+#Show superfamilies: NO
+#DATA
+#SESSION	<session-ordinal>	<program>	<database>	<score-matrix>	<evalue-threshold>
+#QUERY	<query-id>	<seq-type>	<seq-length>	<definition-line>
+#DOMAINS
+#<session-ordinal>	<query-id[readingframe]>	<hit-type>	<PSSM-ID>	<from>	<to>	<E-Value>	<bitscore>	<accession>	<short-name>	<incomplete>	<superfamily PSSM-ID>
+#more such lines......
+#ENDDOMAINS
+#SITES
+#<session-ordinal>	<query-id[readingframe]>	<annot-type>	<title>	<residue(coordinates)>	<complete-size>	<mapped-size>	<source-domain>
+#more such lines......
+#ENDSITES
+#MOTIFS
+#<session-ordinal>	<query-id[readingframe]>	<title>	<from>	<to>	<source-domain>
+#more such lines......
+#ENDMOTIFS
+#ENDQUERY	<query-id>
+#more query sections..
+#ENDSESSION	<session-ordinal>
+#more session sections..
+#ENDDATA
+#=====================================================================
+DATA
+SESSION	1	RPSBLAST 2.17.0+	Cdd	BLOSUM62	0.01
+QUERY	Query_1	Peptide	136	NP_416435.1 flagellar biosynthesis protein FliS [Escherichia coli str. K-12 substr. MG1655]
+DOMAINS
+1	Query_1	Specific	188033	1	129	1.20229e-56	172.421	TIGR00208	fliS	-	529210
+ENDDOMAINS
+SITES
+1	Query_1	Specific	heterodimer interface	Q25,V28,M30,L31,G34,K60,N63,I64,G68,L69,S72,L73,L81,N84,A87,L88,Y89,Y91,E110,V111,A113,L114,N117,I118,A121,W122,E124	29	27	294015
+ENDSITES
+MOTIFS
+1	Query_1	coiled coil	Q25	45F	294015
+1	Query_1	coiled coil	Q51	73L	294015
+1	Query_1	coiled coil	L81	97L	294015
+1	Query_1	coiled coil	S106	124E	294015
+ENDMOTIFS
+ENDQUERY
+ENDSESSION	1
+ENDDATA

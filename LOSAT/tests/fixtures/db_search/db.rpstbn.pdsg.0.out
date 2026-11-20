@@ -1,0 +1,498 @@
+RPSTBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: rps_mini
+           3 sequences; 560 total letters
+
+
+
+Query= stopq
+
+Length=600
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+gnl|CDD|103f103 DNA polymerase [White spot syndrome virus] residu...  19.2    0.12 
+
+
+>CDD:103 f103 DNA polymerase [White spot syndrome virus] residues 1101-1290
+Length=190
+
+ Score = 19.2 bits (38),  Expect = 0.12
+ Identities = 5/22 (23%), Positives = 11/22 (50%), Gaps = 0/22 (0%)
+ Frame = +2
+
+Query  362  DNNDSDNNNDSSSNNNNDDNSD  427
+            +N D++  N+ +   N   N +
+Sbjct  75   ENLDAEKTNNKTWCTNTSPNMN  96
+
+
+ Score = 18.9 bits (37),  Expect = 0.15
+ Identities = 4/22 (18%), Positives = 11/22 (50%), Gaps = 0/22 (0%)
+ Frame = +2
+
+Query  47   DNNSSSNSDDSSSSNSNSNNNN  112
+            +N  +  +++ +   + S N N
+Sbjct  75   ENLDAEKTNNKTWCTNTSPNMN  96
+
+
+ Score = 18.5 bits (36),  Expect = 0.17
+ Identities = 6/44 (14%), Positives = 18/44 (41%), Gaps = 0/44 (0%)
+ Frame = +2
+
+Query  446  SSNNSDDSDNSDSNDNSNDNSNSNNSSSNSDDSNDNNNNSDNSS  577
+            +SN++  +  +   ++       N  +  +++     N S N +
+Sbjct  53   NSNSNRQTPITRIEESLGLRFIENLDAEKTNNKTWCTNTSPNMN  96
+
+
+ Score = 18.5 bits (36),  Expect = 0.20
+ Identities = 9/44 (20%), Positives = 17/44 (39%), Gaps = 0/44 (0%)
+ Frame = +2
+
+Query  128  DSNSNSDDNSNDSDDSNSDDNSDNNSNDNDDNNSNNNNDDSDDN  259
+            +SNSN        ++S      +N   +  +N +   N   + N
+Sbjct  53   NSNSNRQTPITRIEESLGLRFIENLDAEKTNNKTWCTNTSPNMN  96
+
+
+ Score = 18.1 bits (35),  Expect = 0.25
+ Identities = 3/22 (14%), Positives = 13/22 (59%), Gaps = 0/22 (0%)
+ Frame = +2
+
+Query  44   DDNNSSSNSDDSSSSNSNSNNN  109
+            ++ ++   ++ +  +N++ N N
+Sbjct  75   ENLDAEKTNNKTWCTNTSPNMN  96
+
+
+ Score = 17.3 bits (33),  Expect = 0.48
+ Identities = 5/22 (23%), Positives = 10/22 (45%), Gaps = 0/22 (0%)
+ Frame = +2
+
+Query  428  DDNNNNSSNNSDDSDNSDSNDN  493
+            ++ +   +NN     N+  N N
+Sbjct  75   ENLDAEKTNNKTWCTNTSPNMN  96
+
+
+ Score = 16.9 bits (32),  Expect = 0.56
+ Identities = 10/49 (20%), Positives = 21/49 (43%), Gaps = 1/49 (2%)
+ Frame = +2
+
+Query  392  SSSNNNNDDNSDDDNNNNSSNNSDDSDNSDSNDNSNDNSNSNNSSSNSD  538
+            +S  N+N +          S      +N D+ + +N+ +   N+S N +
+Sbjct  49   ASWKNSNSNRQTPITRIEESLGLRFIENLDA-EKTNNKTWCTNTSPNMN  96
+
+
+ Score = 16.9 bits (32),  Expect = 0.69
+ Identities = 9/46 (20%), Positives = 17/46 (37%), Gaps = 0/46 (0%)
+ Frame = +2
+
+Query  77   SSSSNSNSNNNNNSNDDDSNSNSDDNSNDSDDSNSDDNSDNNSNDN  214
+            +S  NSNSN        + +       N   +  ++     N++ N
+Sbjct  49   ASWKNSNSNRQTPITRIEESLGLRFIENLDAEKTNNKTWCTNTSPN  94
+
+
+ Score = 16.9 bits (32),  Expect = 0.72
+ Identities = 9/47 (19%), Positives = 17/47 (36%), Gaps = 0/47 (0%)
+ Frame = +2
+
+Query  323  SSNDSNSNDSDNDDNNDSDNNNDSSSNNNNDDNSDDDNNNNSSNNSD  463
+            S  +SNSN        +         N + +  ++     N+S N +
+Sbjct  50   SWKNSNSNRQTPITRIEESLGLRFIENLDAEKTNNKTWCTNTSPNMN  96
+
+
+ Score = 16.5 bits (31),  Expect = 0.87
+ Identities = 6/32 (19%), Positives = 12/32 (38%), Gaps = 0/32 (0%)
+ Frame = +2
+
+Query  368  NDSDNNNDSSSNNNNDDNSDDDNNNNSSNNSD  463
+               +N +   +NN     +   N N ++   D
+Sbjct  72   RFIENLDAEKTNNKTWCTNTSPNMNVTAAGMD  103
+
+
+ Score = 16.5 bits (31),  Expect = 0.92
+ Identities = 8/44 (18%), Positives = 19/44 (43%), Gaps = 1/44 (2%)
+ Frame = +2
+
+Query  32   SSNNDDNNSSSNSDDSSSSNSNSNNN-NNSNDDDSNSNSDDNSN  160
+            +SN++     +  ++S       N +   +N+    +N+  N N
+Sbjct  53   NSNSNRQTPITRIEESLGLRFIENLDAEKTNNKTWCTNTSPNMN  96
+
+
+ Score = 16.2 bits (30),  Expect = 1.0
+ Identities = 6/34 (18%), Positives = 13/34 (38%), Gaps = 3/34 (9%)
+ Frame = +2
+
+Query  497  NDNSNSNNSSSNSDDS---NDNNNNSDNSSDDDS  589
+            N NSN     +  ++S       N     +++ +
+Sbjct  53   NSNSNRQTPITRIEESLGLRFIENLDAEKTNNKT  86
+
+
+ Score = 16.2 bits (30),  Expect = 1.1
+ Identities = 8/44 (18%), Positives = 20/44 (45%), Gaps = 3/44 (7%)
+ Frame = +2
+
+Query  437  NNNSSNNSDDSDNSDS---NDNSNDNSNSNNSSSNSDDSNDNNN  559
+            N+NS+  +  +   +S       N ++   N+ +   +++ N N
+Sbjct  53   NSNSNRQTPITRIEESLGLRFIENLDAEKTNNKTWCTNTSPNMN  96
+
+
+ Score = 16.2 bits (30),  Expect = 1.2
+ Identities = 5/21 (24%), Positives = 7/21 (33%), Gaps = 0/21 (0%)
+ Frame = +2
+
+Query  266  NSDDNDDNDNNNSNNNDDNSS  328
+            N D    N+     N   N +
+Sbjct  76   NLDAEKTNNKTWCTNTSPNMN  96
+
+
+ Score = 15.8 bits (29),  Expect = 1.4
+ Identities = 9/40 (23%), Positives = 15/40 (38%), Gaps = 0/40 (0%)
+ Frame = +2
+
+Query  218  DNNSNNNNDDSDDNSSNSDDNDDNDNNNSNNNDDNSSNDS  337
+            ++NSN     +    S      +N +    NN    +N S
+Sbjct  53   NSNSNRQTPITRIEESLGLRFIENLDAEKTNNKTWCTNTS  92
+
+
+ Score = 15.8 bits (29),  Expect = 1.4
+ Identities = 10/44 (23%), Positives = 15/44 (34%), Gaps = 1/44 (2%)
+ Frame = +2
+
+Query  146  DDNSNDSDDSNSDDNSDN-NSNDNDDNNSNNNNDDSDDNSSNSD  274
+            + NSN        + S      +N D    NN     + S N +
+Sbjct  53   NSNSNRQTPITRIEESLGLRFIENLDAEKTNNKTWCTNTSPNMN  96
+
+
+ Score = 15.8 bits (29),  Expect = 1.4
+ Identities = 9/44 (20%), Positives = 15/44 (34%), Gaps = 3/44 (7%)
+ Frame = +2
+
+Query  287  NDNNNSNNNDDNSSNDSNSNDSDNDDNNDSDNN---NDSSSNNN  409
+            N N+N                 +N D   ++N     ++S N N
+Sbjct  53   NSNSNRQTPITRIEESLGLRFIENLDAEKTNNKTWCTNTSPNMN  96
+
+
+ Score = 15.8 bits (29),  Expect = 1.6
+ Identities = 8/44 (18%), Positives = 13/44 (30%), Gaps = 12/44 (27%)
+ Frame = +2
+
+Query  200  NSNDNDD------------NNSNNNNDDSDDNSSNSDDNDDNDN  295
+            NSN N                  N + +  +N +   +   N N
+Sbjct  53   NSNSNRQTPITRIEESLGLRFIENLDAEKTNNKTWCTNTSPNMN  96
+
+
+ Score = 15.4 bits (28),  Expect = 1.9
+ Identities = 11/47 (23%), Positives = 18/47 (38%), Gaps = 0/47 (0%)
+ Frame = +2
+
+Query  98   SNNNNNSNDDDSNSNSDDNSNDSDDSNSDDNSDNNSNDNDDNNSNNN  238
+            S  N+NSN     +  +++       N D    NN     + + N N
+Sbjct  50   SWKNSNSNRQTPITRIEESLGLRFIENLDAEKTNNKTWCTNTSPNMN  96
+
+
+ Score = 15.4 bits (28),  Expect = 2.0
+ Identities = 3/16 (19%), Positives = 8/16 (50%), Gaps = 0/16 (0%)
+ Frame = +2
+
+Query  23  NSDSSNNDDNNSSSNS  70
+           N D+   ++    +N+
+Sbjct  76  NLDAEKTNNKTWCTNT  91
+
+
+ Score = 15.4 bits (28),  Expect = 2.3
+ Identities = 8/44 (18%), Positives = 17/44 (39%), Gaps = 2/44 (5%)
+ Frame = +2
+
+Query  83   SSNSNSNNNNNSNDDDSNSNSDDNSN--DSDDSNSDDNSDNNSN  208
+            +SNSN        ++       +N +   +++     N+  N N
+Sbjct  53   NSNSNRQTPITRIEESLGLRFIENLDAEKTNNKTWCTNTSPNMN  96
+
+
+ Score = 15.0 bits (27),  Expect = 2.9
+ Identities = 6/32 (19%), Positives = 13/32 (41%), Gaps = 0/32 (0%)
+ Frame = +2
+
+Query  443  NSSNNSDDSDNSDSNDNSNDNSNSNNSSSNSD  538
+                N D    ++    +N + N N +++  D
+Sbjct  72   RFIENLDAEKTNNKTWCTNTSPNMNVTAAGMD  103
+
+
+ Score = 14.2 bits (25),  Expect = 4.4
+ Identities = 4/17 (24%), Positives = 7/17 (41%), Gaps = 0/17 (0%)
+ Frame = +2
+
+Query  11  DSSNNSDSSNNDDNNSS  61
+           + +NN     N   N +
+Sbjct  80  EKTNNKTWCTNTSPNMN  96
+
+
+ Score = 13.5 bits (23),  Expect = 7.7
+ Identities = 5/22 (23%), Positives = 10/22 (45%), Gaps = 0/22 (0%)
+ Frame = +2
+
+Query  281  DDNDNNNSNNNDDNSSNDSNSN  346
+            ++ D   +NN    ++   N N
+Sbjct  75   ENLDAEKTNNKTWCTNTSPNMN  96
+
+
+
+Lambda      K        H        a         alpha
+   0.273    0.101    0.253    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 82388
+
+
+Query= YP_009220476.1 bt strand=+ flank=0
+
+Length=637
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+gnl|CDD|102f102 ribonucleotide reductase large subunit [White spo...  19.2    0.14 
+
+
+>CDD:102 f102 ribonucleotide reductase large subunit [White spot syndrome 
+virus] residues 301-480
+Length=180
+
+ Score = 19.2 bits (38),  Expect = 0.14
+ Identities = 5/15 (33%), Positives = 11/15 (73%), Gaps = 0/15 (0%)
+ Frame = -3
+
+Query  53   KVNPAKMAA*TPHIC  9
+            ++N A++   TP++C
+Sbjct  115  QINSARIETGTPYVC  129
+
+
+ Score = 15.0 bits (27),  Expect = 2.5
+ Identities = 5/15 (33%), Positives = 8/15 (53%), Gaps = 0/15 (0%)
+ Frame = -2
+
+Query  102  FVKFNISHNYANNNE  58
+            +V F  + N  +N E
+Sbjct  127  YVCFKDTINRKSNQE  141
+
+
+ Score = 14.6 bits (26),  Expect = 3.9
+ Identities = 6/19 (32%), Positives = 12/19 (63%), Gaps = 2/19 (11%)
+ Frame = +3
+
+Query  210  VTNTKLRESLRGWSGDKRQ  266
+            + N  +++  +G  GDKR+
+Sbjct  1    IFNVSVKKVSQG--GDKRR  17
+
+
+ Score = 13.9 bits (24),  Expect = 6.3
+ Identities = 6/16 (38%), Positives = 10/16 (63%), Gaps = 0/16 (0%)
+ Frame = +2
+
+Query  215  KHETTGKFTWLVRGQA  262
+            K+E  GK   +V+ +A
+Sbjct  96   KYEAEGKGKEVVKARA  111
+
+
+ Score = 13.5 bits (23),  Expect = 8.9
+ Identities = 6/19 (32%), Positives = 10/19 (53%), Gaps = 3/19 (16%)
+ Frame = -1
+
+Query  613  TNRCRD*TSYS---KDSVC  566
+            +N C +   YS   + +VC
+Sbjct  149  SNLCTEIVQYSDSEETAVC  167
+
+
+
+Lambda      K        H        a         alpha
+   0.317    0.136    0.383    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 87584
+
+
+Query= YP_009220478.1 bt strand=- flank=0
+
+Length=905
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+gnl|CDD|102f102 ribonucleotide reductase large subunit [White spo...  18.5    0.36 
+
+
+>CDD:102 f102 ribonucleotide reductase large subunit [White spot syndrome 
+virus] residues 301-480
+Length=180
+
+ Score = 18.5 bits (36),  Expect = 0.36
+ Identities = 7/27 (26%), Positives = 15/27 (56%), Gaps = 0/27 (0%)
+ Frame = +2
+
+Query  140  YSPNARYFLRLQDLAGCKPMRHRNLLP  220
+            +  + + F+  +  AG + +R R+L P
+Sbjct  27   WHLDVKDFIDCRKNAGNEDLRTRDLFP  53
+
+
+ Score = 18.5 bits (36),  Expect = 0.39
+ Identities = 6/14 (43%), Positives = 8/14 (57%), Gaps = 0/14 (0%)
+ Frame = -3
+
+Query  285  GGRGRRGSGYAFIP  244
+            GG  RRG+   +I 
+Sbjct  12   GGDKRRGAAAIYIS  25
+
+
+ Score = 16.5 bits (31),  Expect = 1.5
+ Identities = 5/26 (19%), Positives = 12/26 (46%), Gaps = 0/26 (0%)
+ Frame = +3
+
+Query  84   PYITFASV*HFPGFHRI*GIVRTLDI  161
+            PY+ F    +        GI+++ ++
+Sbjct  126  PYVCFKDTINRKSNQENVGIIKSSNL  151
+
+
+ Score = 15.4 bits (28),  Expect = 3.1
+ Identities = 5/9 (56%), Positives = 6/9 (67%), Gaps = 0/9 (0%)
+ Frame = +2
+
+Query  542  RTRRLLPPL  568
+            RTR L P +
+Sbjct  47   RTRDLFPAI  55
+
+
+ Score = 15.4 bits (28),  Expect = 3.3
+ Identities = 7/23 (30%), Positives = 12/23 (52%), Gaps = 2/23 (9%)
+ Frame = -1
+
+Query  872  RGNSCLYKSFYFSGA--IIECKK  810
+            RG + +Y S +       I+C+K
+Sbjct  17   RGAAAIYISDWHLDVKDFIDCRK  39
+
+
+ Score = 14.6 bits (26),  Expect = 5.2
+ Identities = 9/25 (36%), Positives = 12/25 (48%), Gaps = 3/25 (12%)
+ Frame = +1
+
+Query  742  TTTPT---KHTNRINDNNKNIIIIR  807
+            T TP    K T     N +N+ II+
+Sbjct  123  TGTPYVCFKDTINRKSNQENVGIIK  147
+
+
+ Score = 14.6 bits (26),  Expect = 6.3
+ Identities = 8/30 (27%), Positives = 15/30 (50%), Gaps = 1/30 (3%)
+ Frame = -1
+
+Query  317  DEFLDSGEEMEEDEEEEDLDTLLS-RLETG  231
+            +++   G+  E  +     D + S R+ETG
+Sbjct  95   EKYEAEGKGKEVVKARALFDQINSARIETG  124
+
+
+ Score = 14.2 bits (25),  Expect = 8.4
+ Identities = 5/15 (33%), Positives = 8/15 (53%), Gaps = 0/15 (0%)
+ Frame = -2
+
+Query  400  RLERQVPLVAWVKTM  356
+            R+E   P V +  T+
+Sbjct  120  RIETGTPYVCFKDTI  134
+
+
+ Score = 13.9 bits (24),  Expect = 9.4
+ Identities = 4/8 (50%), Positives = 7/8 (88%), Gaps = 0/8 (0%)
+ Frame = +3
+
+Query  534  WLLELEDF  557
+            W L+++DF
+Sbjct  27   WHLDVKDF  34
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 127370
+
+
+Query= YP_009220482.1 bt strand=+ flank=1
+
+Length=624
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+gnl|CDD|101f101 TK-TMK, chimeric thymidine and thymidylate kinase...  18.1    0.28 
+
+
+>CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [White 
+spot syndrome virus] residues 1-190
+Length=190
+
+ Score = 18.1 bits (35),  Expect = 0.28
+ Identities = 10/40 (25%), Positives = 15/40 (38%), Gaps = 1/40 (3%)
+ Frame = +2
+
+Query  377  RYGRGEFGPEKHSLAETIQSTVQDMSEPYITHIFKKNTDV  496
+            RYG G      H+  E I+      S   +  +  +  DV
+Sbjct  54   RYGCGTGTIVTHA-GEVIEGCTTVSSIKELISVLPEVVDV  92
+
+
+ Score = 15.0 bits (27),  Expect = 2.5
+ Identities = 6/25 (24%), Positives = 10/25 (40%), Gaps = 3/25 (12%)
+ Frame = -1
+
+Query  408  FSGPNSPLPYLIRRYASAEASKQKC  334
+            F+G ++   YL   Y       + C
+Sbjct  23   FAGKST---YLKNIYQQENGGNKHC  44
+
+
+ Score = 14.2 bits (25),  Expect = 5.6
+ Identities = 4/12 (33%), Positives = 9/12 (75%), Gaps = 1/12 (8%)
+ Frame = +2
+
+Query  119  LYIRHASKQEKY  154
+            L+++H S + +Y
+Sbjct  45   LFVKH-SLETRY  55
+
+
+ Score = 13.5 bits (23),  Expect = 8.9
+ Identities = 4/12 (33%), Positives = 7/12 (58%), Gaps = 0/12 (0%)
+ Frame = +1
+
+Query  40   NNNQTDELAYGG  75
+            N+N  + +  GG
+Sbjct  169  NDNDNNVICVGG  180
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 85680
+
+
+  Database: rps_mini
+    Posted date:  Nov 7, 2026  10:01 PM
+  Number of letters in database: 560
+  Number of sequences in database:  3
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Window for multiple hits: 40

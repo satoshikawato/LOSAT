@@ -1,0 +1,25 @@
+{
+  "node": "v24.21.0",
+  "nproc": 4,
+  "threads": 16,
+  "arms": {
+    "default": {
+      "runs": 1000,
+      "fail": 4,
+      "oob": 4,
+      "other": [],
+      "probes": [
+        "{\"tid\":11,\"startArg\":13363016,\"standby\":10,\"before\":{\"length\":12320768},\"after\":{\"length\":13369344,\"stack\":13363008,\"tls\":13363040,\"tidStoreInBounds\":true}}",
+        "{\"tid\":15,\"startArg\":17565384,\"standby\":14,\"before\":{\"length\":16580608},\"after\":{\"length\":17629184,\"stack\":17565376,\"tls\":17565408,\"tidStoreInBounds\":true}}",
+        "{\"tid\":4,\"startArg\":6008872,\"standby\":3,\"before\":{\"length\":4980736},\"after\":{\"length\":6029312,\"stack\":6008864,\"tls\":6008896,\"tidStoreInBounds\":true}}",
+        "{\"tid\":12,\"startArg\":14413608,\"standby\":11,\"before\":{\"length\":13369344},\"after\":{\"length\":15466496,\"stack\":14413600,\"tls\":14413632,\"tidStoreInBounds\":true}}"
+      ],
+      "errors": [
+        "RuntimeError: memory access out of bounds",
+        "RuntimeError: memory access out of bounds",
+        "RuntimeError: memory access out of bounds",
+        "RuntimeError: memory access out of bounds"
+      ]
+    }
+  }
+}

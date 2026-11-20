@@ -1,0 +1,10 @@
+>gnl|BL_ORD_ID|0 len1
+>gnl|BL_ORD_ID|1 len2
+>gnl|BL_ORD_ID|2 len3
+>gnl|BL_ORD_ID|3 len4
+>gnl|BL_ORD_ID|4 len10
+0 - 9
+>gnl|BL_ORD_ID|5 len64
+0 - 63
+>gnl|BL_ORD_ID|6 len65
+0 - 64

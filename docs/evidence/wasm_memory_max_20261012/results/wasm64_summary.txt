@@ -1,0 +1,4 @@
+rust-src rc=0
+build serial rc=101 errors=2 warnings=1
+      1 error: the wasm*-unknown-unknown targets are not supported by default, you may need to enable the "js" feature. For more information see: https://docs.rs/getrandom/#webassembly-support
+      1 error: could not compile `getrandom` (lib) due to 1 previous error

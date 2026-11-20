@@ -1,0 +1,1 @@
+- `tblastx` takes the two-hit test's too-far and overlap outcomes without a branch in the scan in slices of a long query too (`LOSAT_X_TBXHITBF` now acts where `LOSAT_X_TBXQSLICE` cuts): Sakai x MG1655[0:1 Mb] x0.784 at 8 threads; same results.

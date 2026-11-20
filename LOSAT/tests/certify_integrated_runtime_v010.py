@@ -22,10 +22,7 @@ from typing import Iterable, Sequence
 
 EXPECTED_NATIVE_COUNTS = {"blastn": 14, "blastp": 9, "tblastx": 20}
 EXPECTED_WASM_COUNTS = {"blastn": 14, "blastp": 7, "tblastx": 20}
-EXPECTED_BLASTN_CLASSIFICATIONS = {
-    "EXACT_TEXT": 13,
-    "SOURCE_UNDETERMINED_ACCEPTED": 1,
-}
+EXPECTED_BLASTN_CLASSIFICATIONS = {"EXACT_TEXT": 14}
 EXPECTED_TBLASTX_CLASSIFICATIONS = {"EXACT_TEXT": 14, "HSP_SET_DIFF": 6}
 BLASTP_THREAD_PAIRS = {
     "pairwise_default_thread4": "pairwise_default_serial",
@@ -245,7 +242,7 @@ def record_toolchain(repo_root: Path, output_dir: Path) -> dict[str, object]:
             "profile": "release",
             "locked": True,
             "build_command": (
-                "cargo build --release --bin LOSAT --target wasm32-wasip1 --target-dir target/serial-command "
+                "cargo build --release --bin losat --target wasm32-wasip1 --target-dir target/serial-command "
                 "--no-default-features --locked"
             ),
             "target_rustflags": wasm_rustflags,
@@ -777,7 +774,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--native-bin",
         type=Path,
-        default=repo_root / "LOSAT" / "target" / "release" / "LOSAT",
+        default=repo_root / "LOSAT" / "target" / "release" / "losat",
     )
     parser.add_argument(
         "--wasm-bin",
@@ -788,7 +785,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         / "serial-command"
         / "wasm32-wasip1"
         / "release"
-        / "LOSAT.wasm",
+        / "losat.wasm",
     )
     parser.add_argument(
         "--wasm-runner",

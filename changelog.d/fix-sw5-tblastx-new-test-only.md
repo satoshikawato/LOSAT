@@ -1,0 +1,1 @@
+- Lints: `MatrixScores::new` in the tblastx scoring, which only the tests call since `-word_size` 2 and 4 (#900) build the scores with `with_word`, is compiled for the tests only. `cargo clippy --all-targets --all-features -- -D warnings` passes on `dev` again: #900's checks ran before the lint table of #899 reached `dev`. No output changes.

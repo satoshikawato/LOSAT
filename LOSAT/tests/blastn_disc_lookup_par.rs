@@ -1,49 +1,51 @@
 //! The discontiguous megablast tables filled by the search pool (`LOSAT_X_DISCLUTPAR`,
 //! `src/algorithm/blastn/x_disc_lookup_par.rs`) on whole searches.
 //!
-//! The switch is in the strict set: on unless `LOSAT_X_DISCLUTPAR=0` (or `LOSAT_X_DEFAULT=0`). It
+//! The switch is in the strict set: on unless `LOSAT_X_DISCLUTPAR=0`. It
 //! chooses between two LOSAT code paths with the same result: the tables of `s_FillDiscMBTable`
 //! filled by one loop, or by the threads of the search pool, each owning whole blocks of cells of
 //! both templates' tables. So the property under test is that the report does not depend on it:
 //! for `-task dc-megablast` with one template and with two (`coding_and_optimal`), template
-//! lengths 16, 18 and 21 and word sizes 11 and 12, with `-subject` and with `-db`, at 1 and 4
-//! threads, the searches with the switch off (`=0`), by default, with it set to 1, and with the
-//! shadow (`LOSAT_X_DISCLUTPARSHADOW`, which builds the tables the other way as well and compares
-//! every element) give the same bytes. The shadow's counters show that the pool built the tables at 4 threads and not at 1,
-//! and how many tables had two templates. The same holds with `LOSAT_X_PAIRPARDISC`, in
-//! `LOSAT_X_QBATCHPAR` slots (private pools of two threads), for split query chunks
-//! (`CHUNK_SIZE`), and for megablast with a template (`-word_size 11 -template_type ...`);
-//! megablast without a template never builds this table. One search fills its table in several
-//! chunks of the pool fill (a query of 0.66 Mb, both strands), with one template and with two.
-//! That the parts run on several workers of the pool is checked by the unit test
-//! `the_fill_runs_on_several_workers_of_the_pool`; that the bytes equal NCBI's is the business of
-//! the blastn fixtures.
+//! lengths 16, 18 and 21 and word sizes 11 and 12, with `-subject` and with `-db`, at 1, 4, 8 and
+//! 16 threads, the searches with the switch off (`=0`), by default and with it set to 1 give the
+//! same bytes. `LOSAT_X_REACH` shows that the pool built the tables at 4, 8 and 16 threads and not
+//! at 1. The same holds with `LOSAT_X_PAIRPARDISC`, at 4 threads with several query batches
+//! (`BATCH_SIZE`) and for split query chunks (`CHUNK_SIZE`), and for megablast with a template
+//! (`-word_size 11 -template_type ...`); megablast without a template never builds this table. One
+//! search fills its table in several chunks of the pool fill (a query of 0.66 Mb, both strands),
+//! with one template and with two. That the parts run on several workers of the pool is checked by
+//! the unit test `the_fill_runs_on_several_workers_of_the_pool`; that the bytes equal NCBI's is the
+//! business of the blastn fixtures.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-/// The switches that joined the default set on 2026-10-17 (perf/perfmb-default-bundle), each
-/// `0`, the default before, unless the search sets it: every search here runs as it was written,
-/// with the switches off that it does not name (the default runs in `default_bundle.rs`).
+mod temp_support;
+use temp_support::{worker_log_if_unset, TempFile};
+
+mod reach_support;
+
+/// The switches that joined the default set on 2026-10-17 (perf/perfmb-default-bundle), and
+/// `LOSAT_X_DCCSR` (2026-10-21; a one-template table above its size rule is built as CSR, not by
+/// the fill these tests compare), each `0`, the default before, unless the search sets it: every search here
+/// runs as it was written, with the switches off that it does not name (the default runs in
+/// `default_bundle.rs`).
 const PREVIOUS_DEFAULT: &[(&str, &str)] = &[
     ("LOSAT_X_BPDBCUT", "0"),
     ("LOSAT_X_BPLKPAHEAD", "0"),
     ("LOSAT_X_BPREDOLPT", "0"),
     ("LOSAT_X_BPREDOPAR", "0"),
-    ("LOSAT_X_BPSUBJMETA", "0"),
+    ("LOSAT_X_DCCSR", "0"),
     ("LOSAT_X_DIAGLV", "0"),
     ("LOSAT_X_PAIRPARDISC", "0"),
     ("LOSAT_X_PAIRPARFOLD", "0"),
-    ("LOSAT_X_QBATCHPAR", "0"),
-    ("LOSAT_X_QDUSTPAR", "0"),
     ("LOSAT_X_QPREPPAR", "0"),
     ("LOSAT_X_RPTSTREAM", "0"),
 ];
 
 const SWITCH: (&str, &str) = ("LOSAT_X_DISCLUTPAR", "1");
 const OFF: (&str, &str) = ("LOSAT_X_DISCLUTPAR", "0");
-const SHADOW: (&str, &str) = ("LOSAT_X_DISCLUTPARSHADOW", "1");
 
 fn fasta(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -128,7 +130,7 @@ fn queries() -> Temp {
     Temp(path)
 }
 
-/// The database made by `LOSAT makedb` from LC738868, LC738869 and LC738870 (in a directory of
+/// The database made by `losat makeblastdb` from LC738868, LC738869 and LC738870 (in a directory of
 /// this test, removed when dropped), and its name.
 fn database() -> (Temp, String) {
     let dir = Temp(temp_path("db"));
@@ -140,16 +142,17 @@ fn database() -> (Temp, String) {
     }
     std::fs::write(&set, bytes).unwrap();
     let db = dir.0.join("set").to_str().unwrap().to_string();
-    let output = losat()
-        .arg("makedb")
+    let (mut command, _log) = losat();
+    let output = command
+        .arg("makeblastdb")
         .arg("-in")
         .arg(&set)
         .args(["-dbtype", "nucl", "-out", &db])
         .output()
-        .expect("run LOSAT makedb");
+        .expect("run losat makeblastdb");
     assert!(
         output.status.success(),
-        "makedb: {}",
+        "makeblastdb: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     (dir, db)
@@ -160,8 +163,8 @@ fn database() -> (Temp, String) {
 /// a file of this process when the environment has none): a binary built with the
 /// `blastx-worker-probe` feature (`cargo test --all-features`, as in CI) needs that file name as
 /// soon as a search has more than one thread, and it selects nothing.
-fn losat() -> Command {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
+fn losat() -> (Command, Option<TempFile>) {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
         if (text.starts_with("LOSAT_") && name != "LOSAT_BLASTX_WORKER_LOG")
@@ -170,19 +173,16 @@ fn losat() -> Command {
             command.env_remove(name);
         }
     }
-    if std::env::var_os("LOSAT_BLASTX_WORKER_LOG").is_none() {
-        command.env(
-            "LOSAT_BLASTX_WORKER_LOG",
-            std::env::temp_dir().join(format!(
-                "losat_disclutpar_{}_worker.log",
-                std::process::id()
-            )),
-        );
-    }
-    command
+    let log = worker_log_if_unset(&mut command, "blastn_disc_lookup_par_worker");
+    (command, log)
 }
 
-type Var = (&'static str, &'static str);
+type Var<'a> = (&'a str, &'a str);
+
+/// The variables of `parts`, one after the other.
+fn joined<'a>(parts: &[&[Var<'a>]]) -> Vec<Var<'a>> {
+    parts.iter().flat_map(|part| part.iter().copied()).collect()
+}
 
 /// One search of `queries` against `subject` (`-subject FILE` or `-db NAME`), `-outfmt 6` on
 /// standard output, with `vars` as its only variables that choose a code path. Returns the report
@@ -192,9 +192,10 @@ fn blastn(
     subject: &[&str],
     extra: &[&str],
     threads: u32,
-    vars: &[Var],
-) -> (Vec<u8>, String) {
-    let output = losat()
+    vars: &[Var<'_>],
+) -> (Vec<u8>, String, Option<TempFile>) {
+    let (mut command, log) = losat();
+    let output = command
         .arg("blastn")
         .arg("-query")
         .arg(queries)
@@ -211,50 +212,35 @@ fn blastn(
         output.status.success(),
         "{extra:?} {vars:?} threads {threads}: {stderr}"
     );
-    (output.stdout, stderr)
-}
-
-/// The shadow's line `[X_SHADOW] DISCLUTPAR tables=T pool=P two_templates=W cells=C diffs=0
-/// identical` in `stderr`, whose other lines must be `expected` (the standard error of the run
-/// without the switch, such as the warning for the query of `N`s only): `(T, P, W)`.
-fn shadow_counts(stderr: &str, expected: &str) -> (u64, u64, u64) {
-    let line = stderr
-        .lines()
-        .find(|line| line.starts_with("[X_SHADOW] DISCLUTPAR "))
-        .unwrap_or_else(|| panic!("no shadow line:\n{stderr}"));
-    assert!(line.ends_with(" diffs=0 identical"), "{line}");
-    let rest: Vec<&str> = stderr.lines().filter(|l| *l != line).collect();
-    assert_eq!(rest, expected.lines().collect::<Vec<_>>(), "{stderr}");
-    let field = |name: &str| -> u64 {
-        line.split_whitespace()
-            .find_map(|word| word.strip_prefix(name))
-            .and_then(|value| value.parse().ok())
-            .unwrap_or_else(|| panic!("no {name} in: {line}"))
-    };
-    if field("tables=") > 0 {
-        assert!(field("cells=") > 0, "{line}");
-    }
-    (field("tables="), field("pool="), field("two_templates="))
+    (output.stdout, stderr, log)
 }
 
 /// For one search (`subject` and `extra` arguments): the report with the switch off at one
-/// thread, then off, by default (on), on (`=1`) and the shadow at 1 and 4 threads, all the same
-/// bytes; the switch writes nothing, the shadow one line whose tables were built on the pool only
-/// at 4 threads, with two templates exactly when `two_templates`.
-fn check(subject: &[&str], extra: &[&str], two_templates: bool, env: &[Var]) {
+/// thread, then off, by default (on) and on (`=1`) at 1, 4, 8 and 16 threads, all the same bytes;
+/// the switch writes nothing, and the pool builds the tables (`LOSAT_X_REACH`) above one thread
+/// only.
+fn check(subject: &[&str], extra: &[&str], env: &[Var<'_>]) {
     let queries = queries();
-    let with = |more: &[Var]| -> Vec<Var> { env.iter().chain(more).copied().collect() };
-    let (expected, expected_stderr) = blastn(&queries, subject, extra, 1, &with(&[OFF]));
+    let (expected, expected_stderr, _log) =
+        blastn(&queries, subject, extra, 1, &joined(&[env, &[OFF]]));
     assert!(!expected.is_empty(), "{extra:?}: no hits");
-    for threads in [1, 4] {
-        let (report, stderr) = blastn(&queries, subject, extra, threads, &with(&[OFF]));
+    for threads in [1, 4, 8, 16] {
+        let (report, stderr, _log) =
+            blastn(&queries, subject, extra, threads, &joined(&[env, &[OFF]]));
         assert!(
             report == expected,
             "{extra:?} threads {threads}: off differs"
         );
         assert_eq!(stderr, expected_stderr, "{extra:?} threads {threads}");
         for (on, what) in [(&[][..], "default"), (&[SWITCH][..], "on")] {
-            let (report, stderr) = blastn(&queries, subject, extra, threads, &with(on));
+            let reach = reach_support::Reach::new("disclutpar");
+            let (report, stderr, _log) = blastn(
+                &queries,
+                subject,
+                extra,
+                threads,
+                &joined(&[env, on, &[reach.var()]]),
+            );
             assert!(
                 report == expected,
                 "{extra:?} threads {threads}: {what} differs"
@@ -263,20 +249,12 @@ fn check(subject: &[&str], extra: &[&str], two_templates: bool, env: &[Var]) {
                 stderr, expected_stderr,
                 "{extra:?} threads {threads} {what}"
             );
+            assert_eq!(
+                reach.sides("LOSAT_X_DISCLUTPAR").0,
+                threads > 1,
+                "{extra:?} threads {threads} {what}: the pool's fill"
+            );
         }
-        let (report, stderr) = blastn(&queries, subject, extra, threads, &with(&[SHADOW]));
-        assert!(
-            report == expected,
-            "{extra:?} threads {threads}: shadow differs"
-        );
-        let (tables, pool, two) = shadow_counts(&stderr, &expected_stderr);
-        assert!(tables > 0, "{extra:?} threads {threads}: {stderr}");
-        if threads == 1 {
-            assert_eq!(pool, 0, "{extra:?}: {stderr}");
-        } else {
-            assert_eq!(pool, tables, "{extra:?}: {stderr}");
-        }
-        assert_eq!(two, if two_templates { tables } else { 0 }, "{stderr}");
     }
 }
 
@@ -294,7 +272,7 @@ fn args(v: &[String]) -> Vec<&str> {
 #[test]
 fn dc_megablast_default_template() {
     let s = subject();
-    check(&args(&s), &["-task", "dc-megablast"], false, &[]);
+    check(&args(&s), &["-task", "dc-megablast"], &[]);
 }
 
 #[test]
@@ -310,7 +288,6 @@ fn dc_megablast_two_templates_of_21() {
             "-template_length",
             "21",
         ],
-        true,
         &[],
     );
 }
@@ -330,7 +307,6 @@ fn dc_megablast_optimal_16_word_12() {
             "-template_length",
             "16",
         ],
-        false,
         &[],
     );
 }
@@ -350,7 +326,6 @@ fn dc_megablast_two_templates_of_18_word_12() {
             "-template_length",
             "18",
         ],
-        true,
         &[],
     );
 }
@@ -359,7 +334,7 @@ fn dc_megablast_two_templates_of_18_word_12() {
 fn dc_megablast_database_one_and_two_templates() {
     let (_dir, db) = database();
     let subject = ["-db", db.as_str()];
-    check(&subject, &["-task", "dc-megablast"], false, &[]);
+    check(&subject, &["-task", "dc-megablast"], &[]);
     check(
         &subject,
         &[
@@ -370,7 +345,6 @@ fn dc_megablast_database_one_and_two_templates() {
             "-template_length",
             "16",
         ],
-        true,
         &[],
     );
 }
@@ -382,51 +356,49 @@ fn dc_megablast_with_pairpardisc() {
     check(
         &args(&s),
         &["-task", "dc-megablast"],
-        false,
         &[("LOSAT_X_PAIRPARDISC", "1")],
     );
 }
 
-// The batches searched in LOSAT_X_QBATCHPAR slots (2 slots of 2 threads, each with a private
-// pool, batches of 10,000 letters): the slots' tables are built on their pools, and the report is
-// the same. Then a batch split into query chunks (`CHUNK_SIZE`), each chunk with its own table.
+// Several batches (batches of 10,000 letters), each batch's table built on the pool, and the
+// report is the same. Then a batch split into query chunks (`CHUNK_SIZE`), each chunk with its own
+// table.
 #[test]
-fn qbatchpar_slots_and_split_chunks() {
+fn several_batches_and_split_chunks() {
     let queries = queries();
     let s = subject();
     let subject = args(&s);
     let extra = ["-task", "dc-megablast"];
-    for (env, slots) in [
-        (
-            &[("BATCH_SIZE", "10000")][..],
-            &[("LOSAT_X_QBATCHPAR", "1"), ("LOSAT_X_QBATCHPARSLOTS", "2")][..],
-        ),
-        (
-            &[("BATCH_SIZE", "1000000"), ("CHUNK_SIZE", "7000")][..],
-            &[][..],
-        ),
+    for env in [
+        &[("BATCH_SIZE", "10000")][..],
+        &[("BATCH_SIZE", "1000000"), ("CHUNK_SIZE", "7000")][..],
     ] {
-        let with =
-            |more: &[Var]| -> Vec<Var> { env.iter().chain(slots).chain(more).copied().collect() };
-        let (expected, expected_stderr) = blastn(&queries, &subject, &extra, 1, env);
+        let (expected, expected_stderr, _log) = blastn(&queries, &subject, &extra, 1, env);
         assert!(!expected.is_empty(), "{env:?}: no hits");
-        let (report, stderr) = blastn(&queries, &subject, &extra, 4, &with(&[OFF]));
-        assert!(report == expected, "{env:?} {slots:?}: off differs");
+        let (report, stderr, _log) = blastn(&queries, &subject, &extra, 4, &joined(&[env, &[OFF]]));
+        assert!(report == expected, "{env:?}: off differs");
         assert_eq!(stderr, expected_stderr, "{env:?}");
         for on in [&[][..], &[SWITCH][..]] {
-            let (report, stderr) = blastn(&queries, &subject, &extra, 4, &with(on));
-            assert!(report == expected, "{env:?} {slots:?} {on:?}: on differs");
+            let reach = reach_support::Reach::new("disclutpar-batches");
+            let (report, stderr, _log) = blastn(
+                &queries,
+                &subject,
+                &extra,
+                4,
+                &joined(&[env, on, &[reach.var()]]),
+            );
+            assert!(report == expected, "{env:?} {on:?}: on differs");
             assert_eq!(stderr, expected_stderr, "{env:?}");
+            assert!(
+                reach.sides("LOSAT_X_DISCLUTPAR").0,
+                "{env:?} {on:?}: no table was built on a pool"
+            );
         }
-        let (report, stderr) = blastn(&queries, &subject, &extra, 4, &with(&[SHADOW]));
-        assert!(report == expected, "{env:?} {slots:?}: shadow differs");
-        let (tables, pool, _) = shadow_counts(&stderr, &expected_stderr);
-        assert!(tables > 1 && pool == tables, "{env:?}: {stderr}");
     }
 }
 
 // Megablast builds this table only with a template (and word size 11 or 12); without one, the
-// shadow compares nothing.
+// switch's path does not act.
 #[test]
 fn megablast_with_and_without_a_template() {
     let s = subject();
@@ -442,19 +414,30 @@ fn megablast_with_and_without_a_template() {
             "-template_length",
             "18",
         ],
-        false,
         &[],
     );
     let queries = queries();
-    let (expected, expected_stderr) = blastn(&queries, &args(&s), &["-task", "megablast"], 1, &[]);
-    let (report, stderr) = blastn(&queries, &args(&s), &["-task", "megablast"], 4, &[SHADOW]);
-    assert!(report == expected, "megablast: shadow differs");
-    assert_eq!(shadow_counts(&stderr, &expected_stderr), (0, 0, 0));
+    let (expected, expected_stderr, _log) =
+        blastn(&queries, &args(&s), &["-task", "megablast"], 1, &[]);
+    let reach = reach_support::Reach::new("disclutpar-megablast");
+    let (report, stderr, _log) = blastn(
+        &queries,
+        &args(&s),
+        &["-task", "megablast"],
+        4,
+        &[SWITCH, reach.var()],
+    );
+    assert!(report == expected, "megablast: on differs");
+    assert_eq!(stderr, expected_stderr, "megablast");
+    assert!(
+        !reach.sides("LOSAT_X_DISCLUTPAR").0,
+        "megablast without a template built a discontiguous table on a pool"
+    );
 }
 
 // With LOSAT_TIMING the builds print their summed wall time at exit, with or without the switch,
 // and how many were built on a pool: all of them with the switch at 4 threads (by default and set
-// to 1), none with it off (`=0`, or `LOSAT_X_DEFAULT=0`) or at 1 thread; and the split line: the
+// to 1), none with it off (`=0`) or at 1 thread; and the split line: the
 // chunks and phases of the pool fills (and its prefault rounds, at most one per fill), or the time
 // of the original loop.
 #[test]
@@ -463,19 +446,14 @@ fn timing_line_is_printed() {
     let s = subject();
     let subject = args(&s);
     let extra = ["-task", "dc-megablast"];
-    let (expected, _) = blastn(&queries, &subject, &extra, 1, &[]);
+    let (expected, _, _log) = blastn(&queries, &subject, &extra, 1, &[]);
     for (threads, vars, on_pool) in [
         (4, &[("LOSAT_TIMING", "1"), SWITCH][..], true),
         (4, &[("LOSAT_TIMING", "1")][..], true),
         (4, &[("LOSAT_TIMING", "1"), OFF][..], false),
-        (
-            4,
-            &[("LOSAT_TIMING", "1"), ("LOSAT_X_DEFAULT", "0")][..],
-            false,
-        ),
         (1, &[("LOSAT_TIMING", "1"), SWITCH][..], false),
     ] {
-        let (report, stderr) = blastn(&queries, &subject, &extra, threads, vars);
+        let (report, stderr, _log) = blastn(&queries, &subject, &extra, threads, vars);
         assert!(report == expected, "{vars:?} {threads}: the report differs");
         let line = stderr
             .lines()
@@ -512,7 +490,7 @@ fn timing_line_is_printed() {
         }
     }
     // Megablast builds no discontiguous table: no line.
-    let (_, stderr) = blastn(
+    let (_, stderr, _log) = blastn(
         &queries,
         &subject,
         &["-task", "megablast"],
@@ -536,50 +514,108 @@ fn split_field(stderr: &str, name: &str) -> String {
 
 // A table filled in several chunks of the pool fill: AP027131 (0.66 Mb, so about 1.3 million
 // positions on both strands, against chunks of 524,288) against NZ_CP006932, dc-megablast with
-// one template and with two (`coding_and_optimal`, 18): off at 1 and 4 threads, on and the shadow at 4
-// threads give the same bytes, the shadow compares pool-built tables with the original loop's,
-// and LOSAT_TIMING's split counts more chunks than tables.
+// one template and with two (`coding_and_optimal`, 18): off at 1 and 4 threads and on at 4 threads
+// give the same bytes, the pool builds the tables (`LOSAT_X_REACH`), and LOSAT_TIMING's split
+// counts more chunks than tables.
 #[test]
 fn dc_megablast_across_chunk_boundaries() {
     let query = fasta("AP027131.fasta");
     let subject_path = fasta("NZ_CP006932.fasta");
     let subject = ["-subject", subject_path.to_str().unwrap()];
-    for (extra, two_templates) in [
-        (&["-task", "dc-megablast"][..], false),
-        (
-            &[
-                "-task",
-                "dc-megablast",
-                "-template_type",
-                "coding_and_optimal",
-                "-template_length",
-                "18",
-            ][..],
-            true,
-        ),
+    for extra in [
+        &["-task", "dc-megablast"][..],
+        &[
+            "-task",
+            "dc-megablast",
+            "-template_type",
+            "coding_and_optimal",
+            "-template_length",
+            "18",
+        ][..],
     ] {
-        let (expected, expected_stderr) = blastn(&query, &subject, extra, 1, &[OFF]);
+        let (expected, expected_stderr, _log) = blastn(&query, &subject, extra, 1, &[OFF]);
         assert!(!expected.is_empty(), "{extra:?}: no hits");
-        let (report, stderr) = blastn(&query, &subject, extra, 4, &[OFF]);
+        let (report, stderr, _log) = blastn(&query, &subject, extra, 4, &[OFF]);
         assert!(report == expected, "{extra:?}: off differs");
         assert_eq!(stderr, expected_stderr, "{extra:?}");
-        let (report, stderr) = blastn(&query, &subject, extra, 4, &[SWITCH]);
+        let reach = reach_support::Reach::new("disclutpar-chunks");
+        let (report, stderr, _log) = blastn(&query, &subject, extra, 4, &[SWITCH, reach.var()]);
         assert!(report == expected, "{extra:?}: on differs");
         assert_eq!(stderr, expected_stderr, "{extra:?}");
-        let (report, stderr) = blastn(&query, &subject, extra, 4, &[SHADOW]);
-        assert!(report == expected, "{extra:?}: shadow differs");
-        let (tables, pool, two) = shadow_counts(&stderr, &expected_stderr);
-        assert!(tables > 0 && pool == tables, "{extra:?}: {stderr}");
-        assert_eq!(two, if two_templates { tables } else { 0 }, "{stderr}");
-        let (report, stderr) = blastn(&query, &subject, extra, 4, &[SWITCH, ("LOSAT_TIMING", "1")]);
+        assert!(
+            reach.sides("LOSAT_X_DISCLUTPAR").0,
+            "{extra:?}: no table was built on a pool"
+        );
+        let (report, stderr, _log) =
+            blastn(&query, &subject, extra, 4, &[SWITCH, ("LOSAT_TIMING", "1")]);
         assert!(
             report == expected,
             "{extra:?}: on with LOSAT_TIMING differs"
         );
+        let build_line = stderr
+            .lines()
+            .find(|line| line.starts_with("[TIMING] disc_lookup_build: "))
+            .unwrap_or_else(|| panic!("{extra:?}: no timing line:\n{stderr}"));
+        let tables: u64 = build_line
+            .split([' ', '(', ')'])
+            .find_map(|word| word.strip_prefix("builds="))
+            .and_then(|value| value.parse().ok())
+            .unwrap_or_else(|| panic!("no builds= in: {build_line}"));
         let chunks: u64 = split_field(&stderr, "chunks=").parse().unwrap();
         assert!(
-            chunks > tables,
+            tables > 0 && chunks > tables,
             "{extra:?}: {chunks} chunks for {tables} tables:\n{stderr}"
+        );
+    }
+}
+
+// LOSAT_X_DCCSR on a table above its size rule: MG1655 (4.6 Mb, one table of about 9.2 million
+// words, more than a quarter of the 4,194,304 cells at word size 11; AP027131's table above has
+// 818,022 words and keeps its chains) against AP027131, dc-megablast with one template, laid out
+// as CSR, built on the pool at 4 threads and by one loop at 1 thread. The chains (`=0`, the
+// expected report at 1 thread) and the CSR (`=1`) give the same bytes at 1 and 4 threads, and
+// LOSAT_TIMING counts CSR tables built on the pool only at 4 threads.
+#[test]
+fn dc_megablast_csr_of_a_large_table() {
+    const CSR: (&str, &str) = ("LOSAT_X_DCCSR", "1");
+    let query = fasta("MG1655.fna");
+    let subject_path = fasta("AP027131.fasta");
+    let subject = ["-subject", subject_path.to_str().unwrap()];
+    let extra = &["-task", "dc-megablast"][..];
+    let (expected, expected_stderr, _log) = blastn(&query, &subject, extra, 1, &[]);
+    assert!(!expected.is_empty(), "no hits");
+    let field = |line: &str, name: &str| -> u64 {
+        line.split_whitespace()
+            .find_map(|word| word.strip_prefix(name))
+            .and_then(|value| value.parse().ok())
+            .unwrap_or_else(|| panic!("no {name} in: {line}"))
+    };
+    for threads in [1, 4] {
+        let (report, stderr, _log) = blastn(&query, &subject, extra, threads, &[CSR]);
+        assert!(report == expected, "threads {threads}: on differs");
+        assert_eq!(stderr, expected_stderr, "threads {threads}");
+        let (report, stderr, _log) = blastn(
+            &query,
+            &subject,
+            extra,
+            threads,
+            &[CSR, ("LOSAT_TIMING", "1")],
+        );
+        assert!(
+            report == expected,
+            "threads {threads}: on with LOSAT_TIMING differs"
+        );
+        let line = stderr
+            .lines()
+            .find(|line| line.starts_with("[TIMING] disc_lookup_csr: "))
+            .unwrap_or_else(|| panic!("no CSR timing line:\n{stderr}"));
+        let builds = field(line, "builds=");
+        assert!(builds > 0, "{line}");
+        let parallel = if threads > 1 { builds } else { 0 };
+        assert_eq!(
+            field(line, "parallel="),
+            parallel,
+            "threads {threads}: {line}"
         );
     }
 }

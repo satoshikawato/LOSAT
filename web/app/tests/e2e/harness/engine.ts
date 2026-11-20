@@ -3,22 +3,26 @@
 // contract suites against the real implementations, and the runtime checks (cancel,
 // renewal, the serial fallback).
 import { ENGINE_ASSETS } from 'virtual:losat-engine';
+import { sha256Hex, WasmEngine, type RenewalLimits, type RuntimeEnd } from 'losat';
+import type { InputRole, OutputFormat, ProgramId } from 'losat/domain';
+import type { EngineGateway, EngineInput, OutputStream, RuntimeInfo } from 'losat/ports';
 import type { RunView } from '../../../src/application/coordinator';
 import { createApp, type App } from '../../../src/composition';
 import { buildArgv } from '../../../src/domain/argv';
-import type { OutputFormat } from '../../../src/domain/output-format';
-import type { ProgramId } from '../../../src/domain/programs';
+import { fastaParser, programById } from '../../../src/domain/programs';
 import { isTerminal, type RunRecord, type RunStatus } from '../../../src/domain/run';
-import { sha256Hex } from '../../../src/infra/browser/platform';
 import { startDataWorker } from '../../../src/infra/data-worker/gateway';
-import { WasmEngine } from '../../../src/infra/engine-worker/gateway';
-import type { RenewalLimits } from '../../../src/infra/engine-worker/policy';
-import type { EngineEvent, WorkerTestCommand } from '../../../src/infra/engine-worker/protocol';
-import type { EngineInput, RuntimeInfo } from '../../../src/ports/engine';
-import type { OutputStream } from '../../../src/ports/run-output';
+import {
+  HOLD_USE_CHANNEL,
+  STOP_AT_OUTPUT_CHANNEL,
+  type EngineEvent,
+  type WorkerTestCommand,
+} from '../../../../packages/losat/src/infra/engine-worker/protocol';
 import { runCases, type CaseResult } from '../../contract/contract';
 import { ENGINE_INPUT_CASES } from '../../contract/engine-input.contract';
 import { RUN_OUTPUT_CASES, type RemoteWriter } from '../../contract/run-output.contract';
+import { answerLink } from '../../../../packages/losat/src/infra/engine-worker/link';
+import type { HighMemoryEvent, HighMemoryRequest, HighMemoryResult, HighMemorySearch } from './protocol';
 
 export interface SearchInput {
   /** Where the harness fetches the bytes (the test serves them). */
@@ -59,6 +63,7 @@ export interface SearchResult {
 
 export interface SessionOptions {
   readonly renewal?: Partial<RenewalLimits>;
+  readonly onRuntimeEnd?: (end: RuntimeEnd) => void;
 }
 
 const FORMATS: readonly OutputFormat[] = [0, 6, 7];
@@ -96,6 +101,7 @@ export class SearchSession {
     this.app = createApp({
       downloader: { save: (fileName, bytes) => this.exported.set(fileName, bytes) },
       ...(options.renewal === undefined ? {} : { renewal: options.renewal }),
+      ...(options.onRuntimeEnd === undefined ? {} : { onRuntimeEnd: options.onRuntimeEnd }),
     });
   }
 
@@ -201,6 +207,21 @@ export async function searches(list: readonly SearchCase[], options: SessionOpti
   return results;
 }
 
+/**
+ * Runs `search` as the first search of a new application, `afterMs` after the engine was
+ * told to prepare for it (EngineGateway.prepare, as the search form does): at 0 the search
+ * meets the preparation still in progress.
+ */
+export async function preparedSearch(search: SearchCase, afterMs: number): Promise<SearchResult> {
+  const session = new SearchSession();
+  // The gateway that the draft holds; the application exposes no engine of its own.
+  const { engine } = (session.app.draft as unknown as { readonly deps: { readonly engine: EngineGateway } }).deps;
+  const [query, subject] = await Promise.all([fetchFile(search.query), fetchFile(search.subject)]);
+  engine.prepare?.({ requestedThreads: search.threads, inputBytes: query.size + subject.size });
+  await new Promise((resolve) => setTimeout(resolve, afterMs));
+  return session.search(search);
+}
+
 export interface CancelResult {
   readonly cancelled: SearchResult;
   readonly next: SearchResult;
@@ -208,11 +229,21 @@ export interface CancelResult {
   readonly cancelMs: number;
   /** Milliseconds of the next search from its start to its search phase (worker, instance, inputs). */
   readonly nextPrepareMs: number;
+  /** How the runtimes ended until the next search completed and the cancelled one ended (gateway.ts, RuntimeEnd). */
+  readonly runtimeEnds: readonly RuntimeEnd[];
 }
 
 /** Cancels `long` once it runs, then runs `next` in the same application. */
 export async function cancelThenSearch(long: SearchCase, next: SearchCase, afterMs = 300): Promise<CancelResult> {
-  const session = new SearchSession();
+  const runtimeEnds: RuntimeEnd[] = [];
+  let firstEnded: () => void = () => undefined;
+  const firstEnd = new Promise<void>((resolve) => (firstEnded = resolve));
+  const session = new SearchSession({
+    onRuntimeEnd: (end) => {
+      runtimeEnds.push(end);
+      firstEnded();
+    },
+  });
   const runId = await session.enqueue(long);
   await session.until(runId, ['running']);
   await new Promise((resolve) => setTimeout(resolve, afterMs));
@@ -222,9 +253,133 @@ export async function cancelThenSearch(long: SearchCase, next: SearchCase, after
   const cancelMs = performance.now() - cancelAt;
   const cancelled = await session.describe(long.id, cancelledView, 0);
   const result = await session.search(next);
+  // The cancelled runtime ends once its keeper grew the memory, which may come after the next
+  // search; the test's timeout bounds the wait.
+  await firstEnd;
   const phase = result.record.phaseTimes;
   const nextPrepareMs = (phase?.running ?? 0) - (result.record.startedAt ?? 0);
-  return { cancelled, next: result, cancelMs, nextPrepareMs };
+  return { cancelled, next: result, cancelMs, nextPrepareMs, runtimeEnds: [...runtimeEnds] };
+}
+
+export interface StopResult {
+  /** The search whose instance the armed Engine worker stopped at its first output. */
+  readonly stopped: SearchResult;
+  /** How the runtimes ended until the stopped one ended (gateway.ts, RuntimeEnd). */
+  readonly runtimeEnds: readonly RuntimeEnd[];
+}
+
+/**
+ * Runs `search`, then arms its Engine worker to stop the instance at the first output of the
+ * next search, as a trap in the engine would (engine-worker.ts, test builds), and runs
+ * `search` again in the same runtime.
+ */
+export async function stopDuringSearch(search: SearchCase): Promise<StopResult> {
+  const runtimeEnds: RuntimeEnd[] = [];
+  let firstEnded: () => void = () => undefined;
+  const firstEnd = new Promise<void>((resolve) => (firstEnded = resolve));
+  const session = new SearchSession({
+    onRuntimeEnd: (end) => {
+      runtimeEnds.push(end);
+      firstEnded();
+    },
+  });
+  const first = await session.search(search);
+  if (first.status !== 'completed') throw new Error(`the first search did not complete: ${first.record.error}`);
+  const arming = new BroadcastChannel(STOP_AT_OUTPUT_CHANNEL);
+  try {
+    const armed = new Promise<void>((resolve) => {
+      arming.onmessage = (event: MessageEvent<{ type?: string }>) => {
+        if (event.data?.type === 'armed') resolve();
+      };
+    });
+    arming.postMessage({ type: 'arm' });
+    await armed;
+  } finally {
+    arming.close();
+  }
+  const stopped = await session.search(search);
+  // The test's timeout bounds the wait.
+  await firstEnd;
+  return { stopped, runtimeEnds: [...runtimeEnds] };
+}
+
+export interface WarmUpCancelResult {
+  /** The status of the search that was cancelled while the warm-up before it used the threaded instance. */
+  readonly cancelled: RunStatus;
+  /** The same search afterwards, in the same application. */
+  readonly next: SearchResult;
+  /** How the runtimes ended until the next search completed (gateway.ts, RuntimeEnd). */
+  readonly runtimeEnds: readonly RuntimeEnd[];
+}
+
+/**
+ * Has the engine prepare the threaded runtime of `search` with its argv, so that the Engine
+ * worker warms the threaded instance up (runtime.ts, warmUp), with that warm-up armed to hold
+ * at its start until the Gateway ends the runtime (engine-worker.ts, test builds); then queues
+ * `search` behind it, cancels it once the Gateway has posted it, and runs `search` again.
+ */
+export async function cancelDuringWarmUp(search: SearchCase): Promise<WarmUpCancelResult> {
+  const runtimeEnds: RuntimeEnd[] = [];
+  let firstEnded: () => void = () => undefined;
+  const firstEnd = new Promise<void>((resolve) => (firstEnded = resolve));
+  const session = new SearchSession({
+    onRuntimeEnd: (end) => {
+      runtimeEnds.push(end);
+      firstEnded();
+    },
+  });
+  // The gateway that the draft holds; the application exposes no engine of its own.
+  const { engine } = (session.app.draft as unknown as { readonly deps: { readonly engine: EngineGateway } }).deps;
+  const [query, subject] = await Promise.all([fetchFile(search.query), fetchFile(search.subject)]);
+  const hint = { requestedThreads: search.threads, inputBytes: query.size + subject.size };
+  const channel = new BroadcastChannel(HOLD_USE_CHANNEL);
+  const heard = (type: string) =>
+    new Promise<void>((resolve) => channel.addEventListener('message', (event: MessageEvent<{ type?: string }>) => event.data?.type === type && resolve()));
+  const armed = heard('armed');
+  const holding = new Promise<void>((resolve, reject) =>
+    channel.addEventListener('message', (event: MessageEvent<{ type?: string; reason?: string }>) => {
+      if (event.data?.type === 'holding') resolve();
+      if (event.data?.type === 'not-held') reject(new Error(`the warm-up did not hold the threaded instance: ${event.data.reason ?? ''}`));
+    }),
+  );
+  const gateway = engine as { run: EngineGateway['run'] };
+  try {
+    // The Engine worker and its threaded instance start; the worker listens once its script runs.
+    // A hint whose modules did not load starts nothing (Chromium can fail the fetch of an engine
+    // module that the Data worker fetches at the same time, net::ERR_CACHE_WRITE_FAILURE;
+    // support/harness-server.ts): the next hint loads them again, as the form's next one would.
+    let answered = false;
+    void armed.then(() => (answered = true));
+    while (!answered) {
+      engine.prepare?.(hint);
+      channel.postMessage({ type: 'arm' });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    const argv = buildArgv({ program: search.program, queryName: search.query.name, subjectName: search.subject.name, parameters: parameters(search.options) });
+    engine.prepare?.({ ...hint, argv });
+    await holding;
+    const run = gateway.run.bind(engine);
+    let posted: () => void = () => undefined;
+    const runPosted = new Promise<void>((resolve) => (posted = resolve));
+    gateway.run = (request, output, onPhase) => {
+      const result = run(request, output, onPhase);
+      posted();
+      return result;
+    };
+    const runId = await session.enqueue(search);
+    await runPosted;
+    // The Gateway posts the search after the compiled modules' promise, which has settled.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    session.app.coordinator.cancel(runId);
+    const cancelled = (await session.until(runId, ['cancelled'])).status;
+    // The test's timeout bounds the wait.
+    await firstEnd;
+    delete (gateway as { run?: unknown }).run;
+    const next = await session.search(search);
+    return { cancelled, next, runtimeEnds: [...runtimeEnds] };
+  } finally {
+    channel.close();
+  }
 }
 
 export interface RetentionResult {
@@ -253,13 +408,14 @@ export async function retention(
     ...(options.renewal === undefined ? {} : { renewal: options.renewal }),
   });
   const inputs = new Map<string, Promise<EngineInput>>();
-  const input = (search: SearchCase, which: SearchInput) => {
-    const key = JSON.stringify([which.url, which.name]);
+  const input = (search: SearchCase, role: InputRole) => {
+    const which = search[role];
+    const parser = fastaParser(programById(search.program), role);
+    const key = JSON.stringify([which.url, which.name, parser]);
     let cached = inputs.get(key);
     if (cached === undefined) {
       cached = (async () => {
         const source = await data.addSource(await fetchFile(which));
-        const parser = search.program === 'blastx' ? 1 : 0;
         const revision = await data.indexSource(source.sourceId, parser);
         const run = await data.buildRunInput([revision.revisionId]);
         return { bytes: run.bytes, sha256: run.sha256, revisionIds: [revision.revisionId], records: run.records };
@@ -280,7 +436,7 @@ export async function retention(
     const output = await data.openRun(runId);
     try {
       const runtime = await engine.run(
-        { runId, argv, query: await input(search, search.query), subject: await input(search, search.subject), requestedThreads: search.threads },
+        { runId, argv, query: await input(search, 'query'), subject: await input(search, 'subject'), requestedThreads: search.threads },
         output,
         () => undefined,
       );
@@ -340,13 +496,15 @@ export async function timed(list: readonly SearchCase[], options: TimedOptions =
     ...(options.renewal === undefined ? {} : { renewal: options.renewal }),
   });
   const inputs = new Map<string, Promise<EngineInput>>();
-  const input = (which: SearchInput) => {
-    const key = JSON.stringify([which.url, which.name]);
+  const input = (search: SearchCase, role: InputRole) => {
+    const which = search[role];
+    const parser = fastaParser(programById(search.program), role);
+    const key = JSON.stringify([which.url, which.name, parser]);
     let cached = options.reindex === true ? undefined : inputs.get(key);
     if (cached === undefined) {
       cached = (async () => {
         const source = await data.addSource(await fetchFile(which));
-        const revision = await data.indexSource(source.sourceId, 0);
+        const revision = await data.indexSource(source.sourceId, parser);
         const run = await data.buildRunInput([revision.revisionId]);
         return { bytes: run.bytes, sha256: run.sha256, revisionIds: [revision.revisionId], records: run.records };
       })();
@@ -358,8 +516,8 @@ export async function timed(list: readonly SearchCase[], options: TimedOptions =
   for (const [i, search] of list.entries()) {
     const runId = `timed-${i}`;
     const argv = buildArgv({ program: search.program, queryName: search.query.name, subjectName: search.subject.name, parameters: parameters(search.options) });
-    const query = await input(search.query);
-    const subject = await input(search.subject);
+    const query = await input(search, 'query');
+    const subject = await input(search, 'subject');
     const output = await data.openRun(runId);
     const phases: Partial<Record<string, number>> = {};
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -436,7 +594,7 @@ export async function engineInput(env: {
 /** The run output contract with the writer in the real Engine worker (test hooks). */
 export async function runOutputEngine(): Promise<{ backend: string; results: CaseResult[] }> {
   const data = startDataWorker();
-  const worker = new Worker(new URL('../../../src/infra/engine-worker/engine-worker.ts', import.meta.url), {
+  const worker = new Worker(new URL('../../../../packages/losat/src/infra/engine-worker/engine-worker.ts', import.meta.url), {
     type: 'module',
     name: 'losat-engine',
   });
@@ -506,6 +664,89 @@ export function recordScanner(): Promise<CaseResult[]> {
     };
     worker.postMessage('start');
   });
+}
+
+/**
+ * The threaded reactor on the shared memory as the Engine worker creates it and on one
+ * that starts above 2 GiB (high-memory-worker.ts): the test compares the two.
+ */
+export async function highMemory(
+  cases: ReadonlyArray<{ readonly program: string; readonly argv: readonly string[]; readonly query: SearchInput; readonly subject: SearchInput }>,
+  threads: number,
+): Promise<HighMemoryResult> {
+  const bytesOf = async (input: SearchInput) => new Uint8Array(await (await fetchFile(input)).arrayBuffer());
+  const searches: HighMemorySearch[] = [];
+  for (const c of cases) searches.push({ program: c.program, argv: c.argv, query: await bytesOf(c.query), subject: await bytesOf(c.subject) });
+  const request: HighMemoryRequest = { threads, cases: searches };
+  const worker = new Worker(new URL('./high-memory-worker.ts', import.meta.url), { type: 'module' });
+  // A thread that stops leaves the worker inside the engine: the page hears of it on the thread worker's link.
+  const links: MessagePort[] = [];
+  try {
+    return await new Promise<HighMemoryResult>((resolve, reject) => {
+      worker.onerror = (event) => reject(new Error(`the high-memory worker failed: ${event.message}`));
+      worker.onmessage = (event: MessageEvent<HighMemoryEvent>) => {
+        const message = event.data;
+        if (message.type === 'link') {
+          links.push(message.port);
+          answerLink(message.port, (linked) => {
+            if (linked?.type === 'fault') reject(new Error(linked.message));
+          });
+        } else if (message.type === 'result') resolve(message.result);
+        else reject(new Error(message.message));
+      };
+      worker.postMessage(request);
+    });
+  } finally {
+    for (const port of links) port.close();
+    worker.terminate();
+  }
+}
+
+/**
+ * Starts `rounds` workers one after another (wait-worker.ts), each with a shared memory of
+ * `maximumPages` of its own, the application's keeper of it, and an instance of the module at
+ * `url`, whose export `park` waits on that memory without a timeout. Once a worker waits, it is
+ * ended as the Gateway ends a runtime whose threaded instance is in use (gateway.ts, retire):
+ * the keeper is asked to grow the memory, and the worker ends on its answer. Returns what each
+ * worker said: `waiting`, or that it could not have its memory (and the rounds stop there).
+ */
+export async function endWaitingWorkers(url: string, rounds: number, maximumPages: number): Promise<string[]> {
+  const module = await WebAssembly.compile(await (await fetch(url)).arrayBuffer());
+  const answers: string[] = [];
+  for (let round = 0; round < rounds; round++) {
+    const worker = new Worker(new URL('./wait-worker.ts', import.meta.url), { type: 'module' });
+    // The keeper's link (link.ts), which the worker posts before it gives the keeper the other end.
+    let keeper: MessagePort | undefined;
+    let grown: () => void = () => undefined;
+    try {
+      const answer = await new Promise<string>((resolve) => {
+        worker.onmessage = (event: MessageEvent<string | { readonly type: 'link'; readonly port: MessagePort }>) => {
+          if (typeof event.data === 'string') {
+            resolve(event.data);
+            return;
+          }
+          keeper = event.data.port;
+          answerLink(keeper, (message) => {
+            if (message?.type === 'grown') grown();
+          });
+        };
+        worker.onerror = (event) => resolve(`the worker failed: ${event.message}`);
+        worker.postMessage({ module, maximumPages });
+      });
+      answers.push(answer);
+      if (answer !== 'waiting') break;
+      // The thread is in its wait a moment after it said so.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      await new Promise<void>((resolve) => {
+        grown = resolve;
+        keeper!.postMessage({ type: 'grow' });
+      });
+    } finally {
+      keeper?.close();
+      worker.terminate();
+    }
+  }
+  return answers;
 }
 
 /** What the browser offers for the threaded module. */

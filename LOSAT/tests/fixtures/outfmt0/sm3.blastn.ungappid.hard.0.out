@@ -1,0 +1,66 @@
+BLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/sm3_u_s.fna).
+           1 sequences; 201 total letters
+
+
+
+Query= qu d
+
+Length=201
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+su d                                                                  365     4e-106
+
+
+> su d
+Length=201
+
+ Score = 365 bits (398),  Expect = 4e-106
+ Identities = 201/201 (100%), Gaps = 0/201 (0%)
+ Strand=Plus/Plus
+
+Query  1    CGTCGGAGGTACATGATTGGAAGAAAACCTGGCGCCTTTGCACATCTCTTAATCTCAGTC  60
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  1    CGTCGGAGGTACATGATTGGAAGAAAACCTGGCGCCTTTGCACATCTCTTAATCTCAGTC  60
+
+Query  61   ACTTAAAATAGCAGAGACACTTCTACTGATACTCCAAGAGgCCTCGTAATTAAGTATTGC  120
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  61   ACTTAAAATAGCAGAGACACTTCTACTGATACTCCAAGAGGCCTCGTAATTAAGTATTGC  120
+
+Query  121  AATAGCTGCAGAAGTGCTAACCAACGACTTGGGAAATGTAGCGCTAGGTGGTTCGTTCTT  180
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  121  AATAGCTGCAGAAGTGCTAACCAACGACTTGGGAAATGTAGCGCTAGGTGGTTCGTTCTT  180
+
+Query  181  GGCGGAGTTGCGGCTATAGCA  201
+            |||||||||||||||||||||
+Sbjct  181  GGCGGAGTTGCGGCTATAGCA  201
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+
+Effective search space used: 37249
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt0/sm3_u_s.fna).
+    Posted date:  Unknown
+  Number of letters in database: 201
+  Number of sequences in database:  1
+
+
+
+Matrix: blastn matrix 2 -3

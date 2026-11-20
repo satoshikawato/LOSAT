@@ -1,7 +1,7 @@
 //! BLASTX's subject loop searched as a flow of tasks (`LOSAT_X_BXSUBJFLOW`,
 //! `src/algorithm/blastx/x_subject_flow.rs`) on whole searches.
 //!
-//! The switch is in the strict set (on unless `=0` or `LOSAT_X_DEFAULT=0`). With `=0` and two or
+//! The switch is in the strict set (on unless `=0`). With `=0` and two or
 //! more threads a query chunk's subjects are searched in waves of `threads x 64` and each wave is
 //! handed to the sink after its slowest worker; with the switch the other threads search tasks of
 //! `k` consecutive subjects ahead and the loop's thread hands them to the sink in subject order.
@@ -10,8 +10,10 @@
 //! default, and 2, 7 and 16), outfmt 0, 6 and 7, a database (`-db`) and a
 //! FASTA subject set (`-subject`), and an ungapped search (whose subjects carry link cutoffs).
 //! The shadow (`LOSAT_X_BXSUBJFLOWSHADOW`) searches every task again on another table and must
-//! find the same subjects. `LOSAT_TIMING` shows that the flow ran (and the waves did not). The
-//! fallback to the waves where a diagonal offset could pass 2^30 (`-window_size` near 2^28, a
+//! find the same subjects. The tasks are cut by residues as well (`LOSAT_X_BXTASKRES`, in the
+//! strict set): a task ends after `k` subjects or before the subject that would take it past `k`
+//! times the mean subject length; with `=0` they are the grid of `k` subjects. `LOSAT_TIMING`
+//! shows that the flow ran (and the waves did not). The fallback to the waves where a diagonal offset could pass 2^30 (`-window_size` near 2^28, a
 //! diagonal table of 1 GiB or more) is a unit test of the module. That the bytes equal NCBI's
 //! is the business of the BLASTX fixtures and the campaign's comparison runs.
 //!
@@ -34,7 +36,7 @@ fn fixture(name: &str) -> PathBuf {
 /// --all-features`, as in CI) needs that file name as soon as a search has more than one
 /// thread, and it selects nothing.
 fn losat() -> Command {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         if name.to_string_lossy().starts_with("LOSAT_") && name != "LOSAT_BLASTX_WORKER_LOG" {
             command.env_remove(name);
@@ -52,8 +54,15 @@ fn temp_dir() -> PathBuf {
 }
 
 /// The query (letters 100,000-109,000 of AP027131) and the subject set (its proteins and those
-/// of AP027132 and AP027133) as files, and the subject set's `LOSAT makedb` database.
+/// of AP027132 and AP027133) as files, and the subject set's `losat makeblastdb` database.
 fn inputs(dir: &Path) -> (PathBuf, PathBuf, String) {
+    inputs_of(dir, 9_000, 1)
+}
+
+/// A query of `length` letters of AP027131 from position 100,000, and the three protein sets
+/// (1,711 proteins) `copies` times, each copy after the first with its names prefixed by `cN_`, as
+/// a FASTA file and as a database.
+fn inputs_of(dir: &Path, length: usize, copies: usize) -> (PathBuf, PathBuf, String) {
     let genome = std::fs::read_to_string(fixture("AP027131.fasta")).unwrap();
     let letters: String = genome
         .lines()
@@ -61,31 +70,38 @@ fn inputs(dir: &Path) -> (PathBuf, PathBuf, String) {
         .flat_map(str::chars)
         .filter(|c| !c.is_ascii_whitespace())
         .skip(100_000)
-        .take(9_000)
+        .take(length)
         .collect();
     let query = dir.join("query.fna");
     std::fs::write(
         &query,
-        format!(">piece AP027131 100000-109000\n{letters}\n"),
+        format!(">piece AP027131 100000-{}\n{letters}\n", 100_000 + length),
     )
     .unwrap();
     let set = dir.join("set.faa");
-    let mut bytes = Vec::new();
-    for name in ["AP027131.faa", "AP027132.faa", "AP027133.faa"] {
-        bytes.extend(std::fs::read(fixture(name)).unwrap());
+    let mut text = String::new();
+    for copy in 0..copies {
+        for name in ["AP027131.faa", "AP027132.faa", "AP027133.faa"] {
+            let proteins = std::fs::read_to_string(fixture(name)).unwrap();
+            if copy == 0 {
+                text.push_str(&proteins);
+            } else {
+                text.push_str(&proteins.replace('>', &format!(">c{copy}_")));
+            }
+        }
     }
-    std::fs::write(&set, bytes).unwrap();
+    std::fs::write(&set, text).unwrap();
     let db = dir.join("set").to_str().unwrap().to_string();
     let output = losat()
-        .arg("makedb")
+        .arg("makeblastdb")
         .arg("-in")
         .arg(&set)
         .args(["-dbtype", "prot", "-out", &db])
         .output()
-        .expect("run LOSAT makedb");
+        .expect("run losat makeblastdb");
     assert!(
         output.status.success(),
-        "makedb: {}",
+        "makeblastdb: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     (query, set, db)
@@ -105,6 +121,20 @@ fn blastx(query: &Path, args: &[&str], threads: u32, env: &[(&str, &str)]) -> (V
     let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
     assert!(output.status.success(), "{args:?} {env:?}: {stderr}");
     (output.stdout, stderr)
+}
+
+/// Whether a search that wrote its reach files (`LOSAT_X_REACH`) into `reach` took `switch`'s own
+/// path.
+fn own_side_reached(reach: &Path, switch: &str) -> bool {
+    std::fs::read_dir(reach).unwrap().any(|file| {
+        std::fs::read_to_string(file.unwrap().path())
+            .unwrap()
+            .lines()
+            .any(|line| {
+                let fields: Vec<&str> = line.split('\t').collect();
+                fields[0] == switch && fields[1] == "1"
+            })
+    })
 }
 
 /// The numbers of a `[TIMING] blastx_subject_flow` or `blastx_subject_waves` line: `name=value`.
@@ -136,11 +166,12 @@ fn the_report_does_not_depend_on_the_subject_flow() {
                 "{args:?}: too few hits to test"
             );
             for threads in [2, 3, 4] {
-                for k in ["1", "2", "7", "16"] {
-                    let (report, _) = blastx(&query, &args, threads, &[("LOSAT_X_BXSUBJFLOW", k)]);
+                for (k, cut) in [("1", "1"), ("2", "1"), ("7", "1"), ("16", "1"), ("16", "0")] {
+                    let env = [("LOSAT_X_BXSUBJFLOW", k), ("LOSAT_X_BXTASKRES", cut)];
+                    let (report, _) = blastx(&query, &args, threads, &env);
                     assert!(
                         report == reference,
-                        "{args:?} threads {threads} LOSAT_X_BXSUBJFLOW={k}: report differs"
+                        "{args:?} threads {threads} {env:?}: report differs"
                     );
                 }
             }
@@ -171,7 +202,8 @@ fn an_ungapped_search_and_the_shadow_give_the_same_report() {
             ],
         );
         assert!(report == reference, "{extra:?}: report differs");
-        let tasks = 1_711_u64.div_ceil(2);
+        // Tasks of at most 2 subjects and twice the mean length (LOSAT_X_BXTASKRES).
+        let tasks = 1_143;
         assert!(
             stderr.contains(&format!(
                 "[X_SHADOW] BXSUBJFLOW tasks_compared={tasks} (subject results identical)"
@@ -195,12 +227,32 @@ fn the_flow_takes_the_subject_loop() {
     let (reference, stderr) = blastx(&query, &args, 2, &off);
     assert_eq!(timing(&stderr, "blastx_subject_flow", "loops"), 0);
     assert!(timing(&stderr, "blastx_subject_waves", "waves") > 0);
-    // The default: the 1,711 subjects as 27 tasks of 64, and no wave.
-    let (report, stderr) = blastx(&query, &args, 2, &[("LOSAT_TIMING", "1")]);
+    // The default: the 1,711 subjects as 29 tasks of at most 64 subjects and 64 times the mean
+    // length (LOSAT_X_BXTASKRES), and no wave; the grid of 64 with that switch off: 27 tasks.
+    let reach = dir.join("reach-taskres");
+    let reach_text = reach.to_str().unwrap().to_string();
+    let (report, stderr) = blastx(
+        &query,
+        &args,
+        2,
+        &[
+            ("LOSAT_TIMING", "1"),
+            ("LOSAT_X_REACH", reach_text.as_str()),
+        ],
+    );
     assert!(report == reference);
     assert_eq!(timing(&stderr, "blastx_subject_flow", "loops"), 1);
-    assert_eq!(timing(&stderr, "blastx_subject_flow", "tasks"), 27);
+    assert_eq!(timing(&stderr, "blastx_subject_flow", "tasks"), 29);
     assert_eq!(timing(&stderr, "blastx_subject_waves", "waves"), 0);
+    assert!(own_side_reached(&reach, "LOSAT_X_BXTASKRES"));
+    let (report, stderr) = blastx(
+        &query,
+        &args,
+        2,
+        &[("LOSAT_TIMING", "1"), ("LOSAT_X_BXTASKRES", "0")],
+    );
+    assert!(report == reference);
+    assert_eq!(timing(&stderr, "blastx_subject_flow", "tasks"), 27);
     // A `-subject` file takes the same loop.
     let (subject_report, stderr) = blastx(
         &query,
@@ -216,10 +268,10 @@ fn the_flow_takes_the_subject_loop() {
     );
     assert!(subject_report == subject_reference);
     assert_eq!(timing(&stderr, "blastx_subject_flow", "loops"), 1);
-    assert_eq!(timing(&stderr, "blastx_subject_flow", "tasks"), 27);
+    assert_eq!(timing(&stderr, "blastx_subject_flow", "tasks"), 29);
     assert_eq!(timing(&stderr, "blastx_subject_waves", "waves"), 0);
-    // The helpers search: with 856 tasks of 2 subjects at 4 threads the loop takes tasks that
-    // were searched ahead (only a helper, or the loop's thread while it waits for a helper's task,
+    // The helpers search: with 1,143 tasks of at most 2 subjects at 4 threads the loop takes tasks
+    // that were searched ahead (only a helper, or the loop's thread while it waits for a helper's task,
     // searches ahead), so the helper tables are the ones under test above.
     let (report, stderr) = blastx(
         &query,
@@ -228,21 +280,157 @@ fn the_flow_takes_the_subject_loop() {
         &[("LOSAT_X_BXSUBJFLOW", "2"), ("LOSAT_TIMING", "1")],
     );
     assert!(report == reference);
-    assert_eq!(timing(&stderr, "blastx_subject_flow", "tasks"), 856);
+    assert_eq!(timing(&stderr, "blastx_subject_flow", "tasks"), 1_143);
     assert!(timing(&stderr, "blastx_subject_flow", "ahead") > 0);
     assert!(timing(&stderr, "blastx_subject_flow", "taken") > 0);
-    // LOSAT_X_DEFAULT=0 returns to the waves.
-    let (report, stderr) = blastx(
-        &query,
-        &args,
-        2,
-        &[("LOSAT_X_DEFAULT", "0"), ("LOSAT_TIMING", "1")],
-    );
-    assert!(report == reference);
-    assert_eq!(timing(&stderr, "blastx_subject_flow", "loops"), 0);
     // One thread: no pool, so the subject loop of the waves runs (on this thread).
     let (report, stderr) = blastx(&query, &args, 1, &[("LOSAT_TIMING", "1")]);
     assert!(report == reference);
+    assert_eq!(timing(&stderr, "blastx_subject_flow", "loops"), 0);
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn the_chunks_of_a_split_query_take_the_flow_one_after_another() {
+    let dir = std::env::temp_dir().join(format!(
+        "losat-blastx-subject-flow-chunks-{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    // 30,000 letters: three query chunks (blastx/split.rs), each against 3,422 subjects (the 1,711
+    // proteins twice), 57 tasks of at most 64 (LOSAT_X_BXTASKRES; the grid's 54 with it off).
+    // LOSAT_X_BXCHUNKFLOW needs at least 2,048 subjects and 256 per thread: up to 8 threads the chunks run one after another, each with the flow; at 16
+    // they run side by side.
+    let (query, set, db) = inputs_of(&dir, 30_000, 2);
+    let args = ["-db", db.as_str(), "-outfmt", "6"];
+    let (reference, _) = blastx(&query, &args, 1, &[]);
+    assert!(
+        reference.iter().filter(|&&b| b == b'\n').count() > 20,
+        "too few hits to test"
+    );
+    // (threads, environment, flow loops): in order at 2 and 8 threads, as one flow across the
+    // three chunks (LOSAT_X_BXCHUNKCROSS), or one flow per chunk with that switch off; side by side
+    // at 16 threads and with LOSAT_X_BXCHUNKFLOW off; with LOSAT_X_BXSUBJFLOW=0 the chunks run
+    // side by side (2 threads) with the waves.
+    for (threads, env, loops) in [
+        (2, &[][..], 1),
+        (8, &[][..], 1),
+        (3, &[("LOSAT_X_BXBUILDPAR", "0")][..], 1),
+        (2, &[("LOSAT_X_BXCHUNKCROSS", "0")][..], 3),
+        (8, &[("LOSAT_X_BXCHUNKCROSS", "0")][..], 3),
+        // The helpers' own diagonal tables; the batch inside the capped batch flow (K = 2 below
+        // the thread count), whose helpers leave once every task is claimed.
+        (2, &[("LOSAT_X_BXDIAGKEEP", "0")][..], 1),
+        (4, &[("LOSAT_X_BXUNITCAP", "2")][..], 1),
+        (16, &[][..], 0),
+        (2, &[("LOSAT_X_BXTASKRES", "0")][..], 1),
+        (2, &[("LOSAT_X_BXCHUNKFLOW", "0")][..], 0),
+        (2, &[("LOSAT_X_BXSUBJFLOW", "0")][..], 0),
+    ] {
+        let mut env = env.to_vec();
+        env.push(("LOSAT_TIMING", "1"));
+        let (report, stderr) = blastx(&query, &args, threads, &env);
+        assert!(
+            report == reference,
+            "threads {threads} {env:?}: report differs"
+        );
+        assert_eq!(
+            timing(&stderr, "blastx_subject_flow", "loops"),
+            loops,
+            "threads {threads} {env:?}"
+        );
+        if loops > 0 {
+            let grid = env.contains(&("LOSAT_X_BXTASKRES", "0"));
+            let tasks = if grid { 162 } else { 171 };
+            assert_eq!(timing(&stderr, "blastx_subject_flow", "tasks"), tasks);
+        }
+    }
+    // The capped row runs inside the capped batch flow: the cap acted (`LOSAT_X_REACH`), which it
+    // does not at 4 threads without `LOSAT_X_BXUNITCAP=2` (K = 8).
+    for (cap, acted) in [(Some("2"), true), (None, false)] {
+        let reach = dir.join(format!("reach-cap-{acted}"));
+        let reach_text = reach.to_str().unwrap().to_string();
+        let mut env = vec![("LOSAT_X_REACH", reach_text.as_str())];
+        env.extend(cap.map(|k| ("LOSAT_X_BXUNITCAP", k)));
+        let (report, _) = blastx(&query, &args, 4, &env);
+        assert!(report == reference);
+        assert_eq!(own_side_reached(&reach, "LOSAT_X_BXUNITCAP"), acted);
+    }
+    // The flow's shadow compares every task of the three chunks, across the chunks and per chunk.
+    for env in [&[][..], &[("LOSAT_X_BXCHUNKCROSS", "0")][..]] {
+        let mut env = env.to_vec();
+        env.push(("LOSAT_X_BXSUBJFLOWSHADOW", "1"));
+        let (report, stderr) = blastx(&query, &args, 3, &env);
+        assert!(report == reference);
+        assert!(
+            stderr.contains("[X_SHADOW] BXSUBJFLOW tasks_compared=171 (subject results identical)"),
+            "{stderr}"
+        );
+    }
+    // Chunks without a valid context (all N): the loop gives them `chunk_start` only, in the flow
+    // across chunks as in the serial loop. 10,000 letters, 25,000 N, 10,000 letters: four chunks
+    // (blastx/split.rs), the third all N. The flow across chunks counts the tasks of all four (228,
+    // the third chunk's skipped); the loop per chunk searches the other three (171).
+    let letters: String = std::fs::read_to_string(&query)
+        .unwrap()
+        .lines()
+        .skip(1)
+        .collect();
+    let gapped = dir.join("gapped.fna");
+    std::fs::write(
+        &gapped,
+        format!(
+            ">gapped\n{}{}{}\n",
+            &letters[..10_000],
+            "N".repeat(25_000),
+            &letters[10_000..20_000]
+        ),
+    )
+    .unwrap();
+    let (reference, _) = blastx(&gapped, &args, 1, &[]);
+    for (threads, env, loops, tasks) in [
+        (2, &[][..], 1, 228),
+        (8, &[][..], 1, 228),
+        (2, &[("LOSAT_X_BXCHUNKCROSS", "0")][..], 3, 171),
+    ] {
+        let mut env = env.to_vec();
+        env.push(("LOSAT_TIMING", "1"));
+        let (report, stderr) = blastx(&gapped, &args, threads, &env);
+        assert!(
+            report == reference,
+            "N stretch, threads {threads} {env:?}: report differs"
+        );
+        assert_eq!(
+            timing(&stderr, "blastx_subject_flow", "loops"),
+            loops,
+            "N stretch, threads {threads} {env:?}"
+        );
+        assert_eq!(
+            timing(&stderr, "blastx_subject_flow", "tasks"),
+            tasks,
+            "N stretch, threads {threads} {env:?}"
+        );
+    }
+    // A `-subject` file takes the same rule.
+    let args = ["-subject", set.to_str().unwrap(), "-outfmt", "6"];
+    let (reference, _) = blastx(&query, &args, 1, &[]);
+    for (threads, loops) in [(4, 1), (16, 0)] {
+        let (report, stderr) = blastx(&query, &args, threads, &[("LOSAT_TIMING", "1")]);
+        assert!(
+            report == reference,
+            "-subject threads {threads}: report differs"
+        );
+        assert_eq!(timing(&stderr, "blastx_subject_flow", "loops"), loops);
+    }
+    // Fewer than 2,048 subjects: side by side.
+    std::fs::create_dir_all(dir.join("few")).unwrap();
+    let (query, _, db) = inputs_of(&dir.join("few"), 30_000, 1);
+    let (_, stderr) = blastx(
+        &query,
+        &["-db", db.as_str(), "-outfmt", "6"],
+        2,
+        &[("LOSAT_TIMING", "1")],
+    );
     assert_eq!(timing(&stderr, "blastx_subject_flow", "loops"), 0);
     std::fs::remove_dir_all(&dir).unwrap();
 }

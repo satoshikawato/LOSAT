@@ -1,5 +1,5 @@
-//! EXPERIMENT (LOSAT_X_BPDBCUT / LOSAT_X_BPDBCUTSHADOW): the blocks of a `-db` search's
-//! preliminary stage cut by the size of the database and the thread count.
+//! EXPERIMENT (LOSAT_X_BPDBCUT): the blocks of a `-db` search's preliminary stage cut by the size
+//! of the database and the thread count.
 //!
 //! Without the switch, `search_blocks` reads the database in blocks of at most `BLOCK_BYTES`
 //! (1 MiB) of its sequence file, and with more than one thread searches rounds of up to
@@ -13,7 +13,9 @@
 //! bytes, where the sequence bytes are the letters, one sentinel byte per sequence and one before
 //! the first (the size of a one-volume sequence file; `x_sequence_bytes`): about 4 blocks per
 //! thread, of at least 4 KiB. A database of at least 4 x threads MiB keeps blocks of 1 MiB; at one
-//! thread nothing changes. The rounds, the tasks and the merge are those of `search_blocks_of`; only
+//! thread nothing changes (EXPERIMENT LOSAT_X_BPDBKEEP: blocks of at most 96 KiB at every thread
+//! count, `x_db_keep.rs`, so a failed search at one thread also reads the blocks of `BLOCK_BYTES`
+//! again for its error). The rounds, the tasks and the merge are those of `search_blocks_of`; only
 //! its `block_bytes` differs.
 //!
 //! Why the reports do not change (the integer argument of `search_blocks`'s comment, which already
@@ -54,20 +56,10 @@
 //! blast_engine.c:1409; seqdbimpl.cpp:328-350, quoted above `SeqDb::next_block`), whatever the
 //! thread count; LOSAT's blocks are cut by bytes, because one block is one read of one file.
 //!
-//! `LOSAT_X_BPDBCUT` is a switch of the strict set (on by default since 2026-10-17): on unless it is `0`, or
-//! `LOSAT_X_DEFAULT=0` and it is not set. It acts for every task of BLASTP with `-db` (blastp, blastp-fast, blastp-short), the only program whose search
+//! `LOSAT_X_BPDBCUT` is a switch of the strict set (on by default since 2026-10-17): on unless it is `0`.
+//! It acts for every task of BLASTP with `-db` (blastp, blastp-fast, blastp-short), the only program whose search
 //! reaches this driver.
-//!
-//! `LOSAT_X_BPDBCUTSHADOW=1` (shadow mode, implies the switch): after each search with the cut, the
-//! search runs again as without the switch (`search_blocks_of` with `BLOCK_BYTES`, the same pool,
-//! rounds and kernel) into separate hit lists, and the two are compared: every preliminary and
-//! compact hit list of every query, every field (their `Debug` text), or the texts of the two
-//! errors. The first difference stops the run (panic) after printing the line that is otherwise
-//! printed at exit: `[X_SHADOW] BPDBCUT searches= blocks= blocks_ref= lists_compared= identical`
-//! (`blocks`: the blocks of the cut; `blocks_ref`: the blocks of `BLOCK_BYTES`; `lists_compared`:
-//! hit lists compared, preliminary and compact, that are not empty on either side).
 
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
 use anyhow::Result;
@@ -76,33 +68,16 @@ use crate::seqdb::SeqDb;
 use crate::utils::threading::SearchPool;
 
 use super::{
-    read_search_block, search_blocks_of, BlastpDatabase, BlastpHitList, BlastpSubjectRef,
-    BlastpSubjectResult, BlastpSubjectScratch, XPrelimHsp, BLOCK_BYTES,
+    read_search_block, search_blocks_of, BlastpDatabase, BlastpSubjectRef, BlastpSubjectResult,
+    BlastpSubjectScratch, PrelimSink, BLOCK_BYTES,
 };
 
-/// EXPERIMENT (LOSAT_X_BPDBCUT): the mode the variables select.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum XDbCut {
-    Off,
-    On,
-    Shadow,
-}
-
-// No NCBI counterpart: reads the LOSAT_X_BPDBCUT / LOSAT_X_BPDBCUTSHADOW switches once; it does not
-// change any value NCBI computes.
-/// EXPERIMENT (LOSAT_X_BPDBCUT): a strict-set switch, on unless it is `0`, or `LOSAT_X_DEFAULT=0`
-/// and it is not set; `LOSAT_X_BPDBCUTSHADOW` (any value) selects the shadow mode.
-pub(super) fn x_bp_db_cut() -> XDbCut {
-    static MODE: OnceLock<XDbCut> = OnceLock::new();
-    *MODE.get_or_init(|| {
-        if std::env::var_os("LOSAT_X_BPDBCUTSHADOW").is_some() {
-            XDbCut::Shadow
-        } else if crate::utils::xswitch::on("LOSAT_X_BPDBCUT") {
-            XDbCut::On
-        } else {
-            XDbCut::Off
-        }
-    })
+// No NCBI counterpart: reads the LOSAT_X_BPDBCUT switch once; it does not change any value NCBI
+// computes.
+/// EXPERIMENT (LOSAT_X_BPDBCUT): a strict-set switch, on unless it is `0`.
+pub(super) fn x_bp_db_cut() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPDBCUT"))
 }
 
 // No NCBI counterpart: the size of the blocks (scheduling); it changes no value NCBI computes.
@@ -131,9 +106,13 @@ pub(super) fn x_cut_block_bytes(sequence_bytes: u64, threads: usize) -> u64 {
 // No NCBI counterpart: the size of the blocks (scheduling); it changes no value NCBI computes.
 /// The bytes of the database's sequences as a one-volume sequence file holds them: the letters, a
 /// sentinel byte after each sequence and one before the first (each further volume has one more).
+/// The sequences are the included ones (`SeqDb::included_length`); an index that cannot be read
+/// counts as the largest database, whose blocks are those of one thread (the search then meets
+/// the error in the order of one thread).
 pub(super) fn x_sequence_bytes(database: &BlastpDatabase) -> u64 {
     database
-        .total_letters()
+        .included_letters()
+        .unwrap_or(u64::MAX)
         .saturating_add(u64::from(database.num_sequences()))
         .saturating_add(1)
 }
@@ -141,13 +120,36 @@ pub(super) fn x_sequence_bytes(database: &BlastpDatabase) -> u64 {
 // No NCBI counterpart: the size of the blocks (scheduling); it changes no value NCBI computes.
 /// The block size of the search of `database` on `pool`: the cut when the pool searches the rounds
 /// with more than one thread, else `BLOCK_BYTES`.
+#[cfg(test)]
 pub(super) fn x_db_cut_block_bytes(database: &BlastpDatabase, pool: &SearchPool<'_>) -> u64 {
+    x_keep_cap(x_db_cut_bytes(database, pool))
+}
+
+// No NCBI counterpart: the size of the blocks (scheduling); it changes no value NCBI computes.
+/// The cut of `database` on `pool` (`x_cut_block_bytes` at the pool's threads, 1 when it is off).
+fn x_db_cut_bytes(database: &BlastpDatabase, pool: &SearchPool<'_>) -> u64 {
     let threads = if pool.enabled() { pool.threads() } else { 1 };
+    if threads <= 1 {
+        return BLOCK_BYTES;
+    }
     x_cut_block_bytes(x_sequence_bytes(database), threads)
 }
 
-// No NCBI counterpart: counts blocks for the shadow's line; it changes no value NCBI computes.
+// No NCBI counterpart: the size of the blocks (scheduling); it changes no value NCBI computes.
+/// `cut`, or with LOSAT_X_BPDBKEEP at most `X_KEEP_BLOCK_BYTES`.
+fn x_keep_cap(cut: u64) -> u64 {
+    // EXPERIMENT (LOSAT_X_BPDBKEEP): blocks that a worker's kept buffer holds below glibc's mmap
+    // threshold (`x_db_keep.rs`).
+    if crate::seqdb::x_bp_db_keep() {
+        cut.min(super::x_db_keep::X_KEEP_BLOCK_BYTES)
+    } else {
+        cut
+    }
+}
+
+// No NCBI counterpart: counts blocks for the unit tests; it changes no value NCBI computes.
 /// The number of blocks of at most `block_bytes` that `search_blocks_of` reads.
+#[cfg(test)]
 pub(super) fn x_count_blocks(db: &SeqDb, block_bytes: u64) -> u64 {
     let mut blocks = 0;
     let mut next_ordinal = 0u32;
@@ -170,82 +172,15 @@ pub(super) fn x_count_blocks(db: &SeqDb, block_bytes: u64) -> u64 {
 /// The error that the search of `db` with blocks of `BLOCK_BYTES` returns, found by reading and
 /// preparing those blocks in order; `error` (the cut's) when every block reads (an error that does
 /// not come back on a second read).
-pub(super) fn x_one_thread_error(db: &SeqDb, error: anyhow::Error) -> anyhow::Error {
+pub(super) fn x_one_thread_error(db: &SeqDb, program: &str, error: anyhow::Error) -> anyhow::Error {
     let mut next_ordinal = 0u32;
     while let Some(range) = db.next_block(next_ordinal, BLOCK_BYTES) {
-        if let Err(first) = read_search_block(db, range) {
+        if let Err(first) = read_search_block(db, range, program) {
             return first;
         }
         next_ordinal = range.end_ordinal();
     }
     error
-}
-
-static X_SEARCHES: AtomicU64 = AtomicU64::new(0);
-static X_BLOCKS: AtomicU64 = AtomicU64::new(0);
-static X_BLOCKS_REF: AtomicU64 = AtomicU64::new(0);
-static X_LISTS_COMPARED: AtomicU64 = AtomicU64::new(0);
-
-// No NCBI counterpart: prints counters and changes no value NCBI computes.
-fn x_shadow_print_line(identical: bool) {
-    eprintln!(
-        "[X_SHADOW] BPDBCUT searches={} blocks={} blocks_ref={} lists_compared={}{}",
-        X_SEARCHES.load(Ordering::Relaxed),
-        X_BLOCKS.load(Ordering::Relaxed),
-        X_BLOCKS_REF.load(Ordering::Relaxed),
-        X_LISTS_COMPARED.load(Ordering::Relaxed),
-        if identical {
-            " identical"
-        } else {
-            " DIFFERENT"
-        },
-    );
-}
-
-// No NCBI counterpart: prints counters and changes no value NCBI computes.
-/// EXPERIMENT (LOSAT_X_BPDBCUTSHADOW): the line `main` prints at exit.
-pub(super) fn x_bp_db_cut_print_summary() {
-    if x_bp_db_cut() == XDbCut::Shadow {
-        x_shadow_print_line(true);
-    }
-}
-
-// No NCBI counterpart: the shadow mode's check stops the run on a difference.
-fn x_shadow_difference(message: String) -> ! {
-    // The panic ends the run before `main` prints the line at exit: it is printed here.
-    x_shadow_print_line(false);
-    panic!("[X_SHADOW] BPDBCUT {message}");
-}
-
-// No NCBI counterpart: a check of the shadow mode; it changes no value NCBI computes.
-/// Compares the hit lists of the cut (`lists`) with those of `BLOCK_BYTES` (`expected`) by their
-/// `Debug` text, one query at a time; returns the lists compared (those not empty on either side).
-fn x_compare_lists<H: std::fmt::Debug>(
-    kind: &str,
-    lists: &[Option<BlastpHitList<H>>],
-    expected: &[Option<BlastpHitList<H>>],
-) -> u64 {
-    if lists.len() != expected.len() {
-        x_shadow_difference(format!(
-            "{kind} hit lists: {} queries, {} without the cut",
-            lists.len(),
-            expected.len()
-        ));
-    }
-    let mut compared = 0;
-    for (query, (list, expected)) in lists.iter().zip(expected).enumerate() {
-        if list.is_none() && expected.is_none() {
-            continue;
-        }
-        let (text, expected_text) = (format!("{list:?}"), format!("{expected:?}"));
-        if text != expected_text {
-            x_shadow_difference(format!(
-                "{kind} hit list of query {query} differs from the one without the cut: {text} / {expected_text}"
-            ));
-        }
-        compared += 1;
-    }
-    compared
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1407-1413
@@ -274,8 +209,7 @@ fn x_compare_lists<H: std::fmt::Debug>(
 //         }
 // ```
 /// EXPERIMENT (LOSAT_X_BPDBCUT): `search_blocks` with the blocks of the cut
-/// (`x_db_cut_block_bytes`) and, on failure, the error of the one-thread order; in `mode`
-/// `Shadow`, the search again with `BLOCK_BYTES` and the comparison of the two (module header).
+/// (`x_db_cut_block_bytes`) and, on failure, the error of the one-thread order.
 ///
 /// The output is that of the blocks of `BLOCK_BYTES` (the one-thread order's, apart from the
 /// exception in the module header) for any cut: the cut only moves where blocks end, every
@@ -283,32 +217,26 @@ fn x_compare_lists<H: std::fmt::Debug>(
 /// table, and the round's results are merged in ordinal order (module header). No floating-point
 /// operation changes order.
 #[allow(clippy::too_many_arguments)]
-pub(super) fn x_search_blocks_cut<S, K>(
-    mode: XDbCut,
+pub(super) fn x_search_blocks_cut<S, K, P>(
     database: &BlastpDatabase,
     pool: &SearchPool<'_>,
     window: i32,
     blocks_per_thread: usize,
     new_scratch: &S,
     process_subject: &K,
-    preliminary_hit_lists: &mut [Option<BlastpHitList>],
-    x_compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
-    prelim_hitlist_size: usize,
+    sink: &mut P,
 ) -> Result<()>
 where
     S: Fn() -> BlastpSubjectScratch + Sync,
     K: Fn(&mut BlastpSubjectScratch, usize, BlastpSubjectRef<'_>, &mut BlastpSubjectResult) + Sync,
+    P: PrelimSink + Send,
 {
     let db = &database.db;
-    let block_bytes = x_db_cut_block_bytes(database, pool);
-    let shadow = mode == XDbCut::Shadow;
-    if shadow
-        && !(preliminary_hit_lists.iter().all(Option::is_none)
-            && x_compact_hit_lists.iter().all(Option::is_none))
-    {
-        x_shadow_difference("the hit lists are not empty before the search".to_string());
-    }
-    let result = search_blocks_of(
+    let cut = x_db_cut_bytes(database, pool);
+    // The cut's own rule (LOSAT_X_BPDBKEEP's cap acts at every thread count, `x_keep_cap`).
+    crate::utils::xreach::x_reach!("LOSAT_X_BPDBCUT", cut != BLOCK_BYTES);
+    let block_bytes = x_keep_cap(cut);
+    search_blocks_of(
         database,
         pool,
         window,
@@ -316,65 +244,15 @@ where
         blocks_per_thread,
         new_scratch,
         process_subject,
-        preliminary_hit_lists,
-        x_compact_hit_lists,
-        prelim_hitlist_size,
+        sink,
     )
     .map_err(|error| {
         if block_bytes == BLOCK_BYTES {
             error
         } else {
-            x_one_thread_error(db, error)
+            x_one_thread_error(db, database.program, error)
         }
-    });
-    if !shadow {
-        return result;
-    }
-    let mut expected_lists: Vec<Option<BlastpHitList>> = std::iter::repeat_with(|| None)
-        .take(preliminary_hit_lists.len())
-        .collect();
-    let mut expected_compact: Vec<Option<BlastpHitList<XPrelimHsp>>> =
-        std::iter::repeat_with(|| None)
-            .take(x_compact_hit_lists.len())
-            .collect();
-    let expected = search_blocks_of(
-        database,
-        pool,
-        window,
-        BLOCK_BYTES,
-        blocks_per_thread,
-        new_scratch,
-        process_subject,
-        &mut expected_lists,
-        &mut expected_compact,
-        prelim_hitlist_size,
-    );
-    let compared = match (&result, &expected) {
-        (Ok(()), Ok(())) => {
-            x_compare_lists("preliminary", preliminary_hit_lists, &expected_lists)
-                + x_compare_lists("compact", x_compact_hit_lists, &expected_compact)
-        }
-        (Err(error), Err(expected)) => {
-            let (text, expected_text) = (format!("{error:#}"), format!("{expected:#}"));
-            if text != expected_text {
-                x_shadow_difference(format!(
-                    "the search's error differs from the one without the cut: {text} / {expected_text}"
-                ));
-            }
-            0
-        }
-        (Ok(()), Err(expected)) => x_shadow_difference(format!(
-            "the search succeeded; without the cut it failed: {expected:#}"
-        )),
-        (Err(error), Ok(())) => x_shadow_difference(format!(
-            "the search failed, without the cut it succeeded: {error:#}"
-        )),
-    };
-    X_SEARCHES.fetch_add(1, Ordering::Relaxed);
-    X_BLOCKS.fetch_add(x_count_blocks(db, block_bytes), Ordering::Relaxed);
-    X_BLOCKS_REF.fetch_add(x_count_blocks(db, BLOCK_BYTES), Ordering::Relaxed);
-    X_LISTS_COMPARED.fetch_add(compared, Ordering::Relaxed);
-    result
+    })
 }
 
 #[cfg(test)]
@@ -415,3 +293,7 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "x_db_cut_fixture_tests.rs"]
+mod fixture_tests;

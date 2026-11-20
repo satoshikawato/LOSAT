@@ -1,0 +1,364 @@
+BLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: pq.faa
+           5 sequences; 1,845 total letters
+
+
+
+Query= h_slice AP027133 106001-121000 with ambiguity codes and an N block
+
+Length=15000
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDV02158.1 serine hydroxymethyltransferase [Candidatus Hepatoplas...  487     9e-159
+BDV02443.1 tRNA-specific 2-thiouridylase MnmA [Candidatus Hepatop...  444     2e-143
+BDV02441.1 aspartyl/glutamyl-tRNA amidotransferase subunit A [Can...  299     6e-93 
+BDV02702.1 peptide chain release factor 1 [Candidatus Hepatoplasm...  293     6e-92 
+BDV02159.1 uracil phosphoribosyltransferase [Candidatus Hepatopla...  248     3e-78 
+
+
+>BDV02158.1 serine hydroxymethyltransferase [Candidatus Hepatoplasma 
+vulgare]
+Length=409
+
+ Score = 487 bits (1254),  Expect = 9e-159, Method: Compositional matrix adjust.
+ Identities = 256/393 (65%), Positives = 313/393 (80%), Gaps = 2/393 (1%)
+ Frame = +1
+
+Query  13045  MRDREIEKLILLEKKRQDKEIELIASENFVSNDILEATGSILTNKYAEGYPNARYYEGCE  13224
+              M D+++EKLI  E+KRQ   ++LIASENFVS D+++ATGS+ TNKYAEGYPNARYY GCE
+Sbjct  1      MEDKKVEKLINNEEKRQMDFVQLIASENFVSKDVMKATGSVFTNKYAEGYPNARYYGGCE  60
+
+Query  13225  NVDKIETLAIERLKKLFNAKYANVQPHSGTQANLAAYNALLKPGAKIlglslssgghlsh  13404
+              NVDK+E LAIERLKK+FNAK+ANVQPHSG QAN+AAYNA+LKPG KIL +SL+SGGHL+H
+Sbjct  61     NVDKLEELAIERLKKIFNAKFANVQPHSGAQANIAAYNAILKPGDKILSMSLNSGGHLTH  120
+
+Query  13405  gFKITISGTFYKSYTYEVDPKTNLLDYDNILQXXKKVKPDLIICGYSAYPRIIDFKKFRA  13584
+              G  ++I G FYK ++YEV+ +T  LDY+ I +  K+VKP+LIICG SAY RIIDFKKF A
+Sbjct  121    GHFVSIVGKFYKIFSYEVNKETEQLDYEEIRKIAKEVKPNLIICGASAYSRIIDFKKFVA  180
+
+Query  13585  IADTVGAYLLADIAHIAGLVAAKLHPNPLDFGVDIVTSTTHKTLRGPRGGIILTNKEEIF  13764
+              IA  V AYLLADIAHIAGL+ A LHPNPL+ GVDIVTSTTHKTLRG RGGIILTN  E+ 
+Sbjct  181    IAKEVNAYLLADIAHIAGLIVADLHPNPLNDGVDIVTSTTHKTLRGARGGIILTNNPELA  240
+
+Query  13765  KKINSSVFPASQGGPLMHVIAAKAVAFYEALDKSFISYQKQVIENAKVLANRLIEHNVKI  13944
+                ++ SVFP +QGGPLM+VIA K V+FYEA   SF  YQK +I NA V+AN  I+  VKI
+Sbjct  241    ILLDKSVFPGTQGGPLMNVIAGKTVSFYEASLPSFKEYQKNIISNANVMANFFIQKGVKI  300
+
+Query  13945  TTNGTDNHLLLVDVKKSFNLTGAEAEKILKKHHITVNKNAIPFDKLSPKIASGIRLGTAA  14124
+               + GTDNHLL+++ KKSFN TG EAE+IL K +I VNKNAIPFD+  P + SGIR+GT A
+Sbjct  301    ISGGTDNHLLMINTKKSFNKTGKEAEEILYKVNIIVNKNAIPFDEERPIVTSGIRIGTPA  360
+
+Query  14125  MTTKG*KEADFIKLADKIYQLLQK*EESNMKIK  14223
+              MTT G +  +F+K+A+ IY +L+   + N+ IK
+Sbjct  361    MTTLGWRNKEFLKIAEVIYNVLK--NDDNISIK  391
+
+
+ Score = 20.8 bits (42),  Expect = 4.8, Method: Compositional matrix adjust.
+ Identities = 10/29 (34%), Positives = 14/29 (48%), Gaps = 0/29 (0%)
+ Frame = +2
+
+Query  10070  EDTKHFRKEIFEQEILMGRITYESIKDFK  10156
+              E+ +   KE+    I+ G   Y  I DFK
+Sbjct  148    EEIRKIAKEVKPNLIICGASAYSRIIDFK  176
+
+
+>BDV02443.1 tRNA-specific 2-thiouridylase MnmA [Candidatus Hepatoplasma 
+vulgare]
+Length=442
+
+ Score = 444 bits (1143),  Expect = 2e-143, Method: Compositional matrix adjust.
+ Identities = 233/377 (62%), Positives = 294/377 (78%), Gaps = 7/377 (2%)
+ Frame = +3
+
+Query  4572  DFKPKKGAKIAIALSGGVDSATSAYLLKKAGYQLKAFFMVN*DSTINSELNYILTDDEVC  4751
+             +F P+K A IAI LSGGVDS+ SAYLLKK GY+LKAFFM N DST+N+E N  L ++E+C
+Sbjct  68    NFVPEKDATIAICLSGGVDSSVSAYLLKKQGYKLKAFFMRNWDSTLNNEENLNLNENEIC  127
+
+Query  4752  QQTKDYIDAKKVADFLGIELIRINFIKQY*DLVFQKFLREIKMGITPNPDIFCNKYIKFK  4931
+             +Q KDY DAKKVAD LGIELI++NF+ +Y D VF++FL E++ G+TPNPDIFCNKYIKF 
+Sbjct  128   EQEKDYNDAKKVADQLGIELIKLNFVNEYWDFVFKRFLNELEEGLTPNPDIFCNKYIKFD  187
+
+Query  4932  EFTDYIFKNYPEIEYVATGHYAAIKEKNNQFFLAQAIDNFKDQTYFLSEIDQNILSKIYF  5111
+              F  YI KN+PEI+Y+ATGHYA IK K  + +L +A D  KDQTYFLSEI++++L+K++F
+Sbjct  188   HFVKYISKNFPEIDYIATGHYAKIKIKEGKAYLFKAKDEIKDQTYFLSEINKDVLNKLFF  247
+
+Query  5112  PLANFKKSEVRKMALKANLPTATKKDSTGICFIGKRNFPDFIANYLKEKEGDIVDQKTNK  5291
+             PLAN  KSEVR +A +ANL T  KKDSTGICFIGKRNF  FI NY K++EG+I+D+K+NK
+Sbjct  248   PLANKMKSEVRSIAKEANLYTKDKKDSTGICFIGKRNFSSFIENYFKKEEGNIIDEKSNK  307
+
+Query  5292  VLGRHRGVLFYTLGQRKGLNLGGQEYPYFVSKKDIKKNILYVA--TEKNPEYLYSNYIET  5465
+             ++G+H+GV FYT+GQR+GL L G   PYFVS K+IK NILYV+  TEK   YLY N ++T
+Sbjct  308   IIGKHQGVKFYTIGQRRGLGLSGFNEPYFVSNKNIKNNILYVSYDTEK---YLYKNKLKT  364
+
+Query  5466  ENFNLLASLELLKDD--V*IKTRHSEIIYEATILDVTKKNDKIKVILKTKEDIKAVTPGQ  5639
+              NF  L   ++L  +  V IKTRHSEIIY   I  + KK+D   + L+TKE IKA+TPGQ
+Sbjct  365   NNFKFLTEEDILSKNKQVRIKTRHSEIIYNGIIKSIEKKDDLFMINLETKEKIKAITPGQ  424
+
+Query  5640  EVVIYKHKLCLGGGQIS  5690
+             EVVIY H+LC+GGGQI+
+Sbjct  425   EVVIYDHELCVGGGQIA  441
+
+
+>BDV02441.1 aspartyl/glutamyl-tRNA amidotransferase subunit A 
+[Candidatus Hepatoplasma vulgare]
+Length=430
+
+ Score = 299 bits (765),  Expect = 6e-93, Method: Compositional matrix adjust.
+ Identities = 187/417 (45%), Positives = 256/417 (61%), Gaps = 5/417 (1%)
+ Frame = +1
+
+Query  1621  NDFKIAKEGKLSNIPFAIKDNYSIKNXNTTAGTTLLSDFKPLTFSTVFEKXLSEGAIPLF  1800
+             N  K  K   L N+ FA+KDN++++N  TT GT LL +FK    STV+EK +  GA P+ 
+Sbjct  14    NKIKKNKVQPLKNMTFALKDNFAVRNIPTTGGTKLLENFKITYNSTVYEKLIKAGAKPIT  73
+
+Query  1801  KANLDELAMG*SGXTSHYKIVNNPFYKNLIIGGSSSGXVYLVARDIVPFSLGSDTGDSVR  1980
+             KANLDELAMG SG TS + +V NP+  + IIGGSSSG  YL+A   V FS+GSDTGDSVR
+Sbjct  74    KANLDELAMGFSGLTSGFGVVLNPYDGSKIIGGSSSGSAYLIANKEVDFSIGSDTGDSVR  133
+
+Query  1981  KXAVYGNVIGFKPT*GLVSRYGLFXFAPS*DTVG*FTKTIDQSVLLLDXLKGYDFRDQTS  2160
+             K A Y  +  FKPT G+VSRYGLF F+PS DTVG F+K +D S LLLD L+G D +D TS
+Sbjct  134   KPAWYVGITAFKPTWGIVSRYGLFDFSPSWDTVGWFSKNVDDSALLLDVLQGKDEKDFTS  193
+
+Query  2161  -KKIEQNFSYLDNXYKDKKNLVVGYFSEILDEIKNDXIKKTYLKFlnkyqqkgyklkklk  2337
+                 E++F    N  K K+++ +GY    LD+IK+  I   +   + K ++ G+ + ++ 
+Sbjct  194   LNSREKDFLKDINNIK-KEDVKLGYIKSFLDDIKDKDILNKFNDLILKLKKDGFNIVEID  252
+
+Query  2338  xnlellSLISIVYDVISSTESLSCXSNLQGFLFGNGYDQDKSYLEAIXAARGDNFVYEVK  2517
+              +L+L   I  VY +ISS    S  SNL  FLFGN   ++  +   I   R  NFVYEVK
+Sbjct  253   LDLKLFKTILTVYRIISSVNGFSSNSNLTSFLFGNFELENDEFKNEITRIRS-NFVYEVK  311
+
+Query  2518  KRFLFAAYSISXHEKIYNQARRIRHLINKELDKIFXQADALVLPAVMDFAPEKKIAQQXK  2697
+             KRFL ++      + +YN+AR+IRHL    L  +F + DA+++P   ++AP  K A    
+Sbjct  312   KRFLLSSEVFLNKKNLYNKARKIRHLYINALSDLFAKIDAIIMPPAGNYAPSIKDAFNAV  371
+
+Query  2698  TRNSRTLADNFLTLFNSNGSPSXSLPITNEKAESVFINIATKPNDDLSCFRIAKIFE  2868
+               NS  + D +L +FN+NGSPS ++PI     +   +NIAT P +D  C +I K+ E
+Sbjct  372   KYNS--IMDEYLGIFNANGSPSLNIPILKNIEKPFSVNIATAPFNDKKCLQIGKLLE  426
+
+
+>BDV02702.1 peptide chain release factor 1 [Candidatus Hepatoplasma 
+vulgare]
+Length=354
+
+ Score = 293 bits (750),  Expect = 6e-92, Method: Compositional matrix adjust.
+ Identities = 163/309 (53%), Positives = 223/309 (72%), Gaps = 4/309 (1%)
+ Frame = +2
+
+Query  10619  KIKD-NDFNEIKKL---TTEQKKYQLTYDLYKKYLNLVDEIRDSENILQTESDKKLSEQL  10786
+              KI D N F+ I+KL    +  KKY+  Y+ Y KY +L  +I D  +I+++E++K   +  
+Sbjct  22     KINDPNIFSNIEKLKLLNSLFKKYKPIYEEYNKYKSLTKDINDLHSIIKSETNKDSIDSY  81
+
+Query  10787  KKLInsnkkeilnleekllDSLIEKDPIDDYNAFIEIKGAAGGLEANIFANDLLNMYLKY  10966
+              + L+  N ++   + + +LD L+EKDP D+ NA IEIKG  GG EAN+FA ++  MY KY
+Sbjct  82     RNLLKENFEKEEEIYQNILDLLVEKDPNDEKNAIIEIKGRVGGEEANLFAANIFEMYKKY  141
+
+Query  10967  AQRLNFKTKIIDLQESEKKGISYVNFKISGEGAYGKFKYEAGVHRVQRIPETESNGRVHT  11146
+              A + N++ ++ID   SE+ G S + F   G  AYGKFKYE+G HRVQR+P+TES  ++ T
+Sbjct  142    ALKQNYELEVIDSNVSEQGGYSSITFFAIGRDAYGKFKYESGTHRVQRVPKTESQDKLQT  201
+
+Query  11147  STATVSVIPELDDLELKINKSDLRIDTYRSSGAGGQHVNKTDSAVRILHIPTGIVVSSQN  11326
+              ST +V VIPE D+L ++IN +DLRIDTYRSSGAGGQHVNKTDSAVRI HIPTG+ VSSQ+
+Sbjct  202    STVSVYVIPENDELNIEINPNDLRIDTYRSSGAGGQHVNKTDSAVRITHIPTGLSVSSQD  261
+
+Query  11327  GRSQHDNKDRAMQTLRNKIYQQKIAQEQEDLNKVKKEAVGTGDRSEKIRTYNYQQNRVTD  11506
+              GRSQHDNKD+AM+TL +KI   ++ +E+E   + K++ + + +RSEKIRTYNY +NRVTD
+Sbjct  262    GRSQHDNKDKAMKTLISKINNLQLEEEREKETETKRKILSSSERSEKIRTYNYPENRVTD  321
+
+Query  11507  HRANITLKK  11533
+              HR N+ LKK
+Sbjct  322    HRINLKLKK  330
+
+
+>BDV02159.1 uracil phosphoribosyltransferase [Candidatus Hepatoplasma 
+vulgare]
+Length=210
+
+ Score = 248 bits (632),  Expect = 3e-78, Method: Compositional matrix adjust.
+ Identities = 120/207 (58%), Positives = 163/207 (79%), Gaps = 1/207 (0%)
+ Frame = +1
+
+Query  14218  IKIINHSLIQHKLTLLRNKNTNAKDFREYLNEISRLLAFEVLRDIKLKQIEIETPIQKTK  14397
+              I +I H L Q KL  LR++ T++K+FREYL E+S L+A+EV +D+K+K+ +I TP+ KT 
+Sbjct  4      INLIEHPLAQDKLASLRSEETSSKEFREYLEELSVLIAYEVFKDLKVKEEKIITPLSKTT  63
+
+Query  14398  AKVLNEKINLFPILRAGQGMVEGFLGVVPNAKIGHIGLYRDEKTFKAKKYLFKFPKDAK-  14574
+               K +NE+INLFPILRAGQG V GFL VVP A++GHIGLYRDEKT K  +YLFK+PK+   
+Sbjct  64     GKKINEEINLFPILRAGQGFVSGFLNVVPKARVGHIGLYRDEKTLKPVQYLFKYPKNKNI  123
+
+Query  14575  EESLNIILDPMIATGGSAIEAIKFLKKENIKNIKFVSIVTVEEAINKINQKFPDVELITC  14754
+              E++ NI+LDP+IATGGS   A+K L+  N+KNIK V+I++V++ I K+ + +P++     
+Sbjct  124    EKTYNILLDPIIATGGSIRAALKILENINLKNIKVVAIISVKDTIEKLAKDYPNINFYLI  183
+
+Query  14755  AVDQKLNQKGYIIPGLGDAGDRIYGTK  14835
+              A+D+KL++KGYIIPGLGDAGDRIYGTK
+Sbjct  184    AIDKKLDKKGYIIPGLGDAGDRIYGTK  210
+
+
+ Score = 21.6 bits (44),  Expect = 2.2, Method: Compositional matrix adjust.
+ Identities = 9/25 (36%), Positives = 16/25 (64%), Gaps = 0/25 (0%)
+ Frame = -3
+
+Query  1951  MKTERYLLPLNKPIPKKIHR*LNFY  1877
+             +K E+ + PL+K   KKI+  +N +
+Sbjct  50    VKEEKIITPLSKTTGKKINEEINLF  74
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 7632300
+
+
+Query= h_mut_10pct AP027133 118901-120300 with substitutions and indels
+
+Length=1397
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDV02158.1 serine hydroxymethyltransferase [Candidatus Hepatoplas...  329     4e-113
+BDV02159.1 uracil phosphoribosyltransferase [Candidatus Hepatopla...  25.4    0.011 
+BDV02702.1 peptide chain release factor 1 [Candidatus Hepatoplasm...  21.9    0.19  
+BDV02441.1 aspartyl/glutamyl-tRNA amidotransferase subunit A [Can...  17.7    3.6   
+
+
+>BDV02158.1 serine hydroxymethyltransferase [Candidatus Hepatoplasma 
+vulgare]
+Length=409
+
+ Score = 329 bits (843),  Expect = 4e-113, Method: Compositional matrix adjust.
+ Identities = 198/384 (52%), Positives = 255/384 (66%), Gaps = 5/384 (1%)
+ Frame = +1
+
+Query  148   RDGEIEKLILLETQRQDKEIELIASENVVSNDMLESTGSFLTN--AQGYPNA*NIHYEGC  321
+              D ++EKLI  E +RQ   ++LIASEN VS D++++TGS  TN  A+GYPNA   +Y GC
+Sbjct  2     EDKKVEKLINNEEKRQMDFVQLIASENFVSKDVMKATGSVFTNKYAEGYPNA--RYYGGC  59
+
+Query  322   *TVGKIETLAFDRFKKLFNAKYAAVHPHSGTQANLAAYNALLKPRAKTlg*slssgrhls  501
+               V K+E LA +R KK+FNAK+A V PHSG QAN+AAYNA+LKP  K L  SL+SG HL+
+Sbjct  60    ENVDKLEELAIERLKKIFNAKFANVQPHSGAQANIAAYNAILKPGDKILSMSLNSGGHLT  119
+
+Query  502   lgFTITISGTFHKSYT*EVDPNTNLLGYDNIL-IAKKVKLDLLLCGYSA*PRIIDFKPFT  678
+              G  ++I G F+K ++ EV+  T  L Y+ I  IAK+VK +L++CG SA  RIIDFK F 
+Sbjct  120   HGHFVSIVGKFYKIFSYEVNKETEQLDYEEIRKIAKEVKPNLIICGASAYSRIIDFKKFV  179
+
+Query  679   AIADSVGAYLLADIAHIAGLGAAKLHPNPLDFGVDFVTSTTHKTLRGTRGVIIVTNKGEK  858
+             AIA  V AYLLADIAHIAGL  A LHPNPL+ GVD VTSTTHKTLRG RG II+TN  E 
+Sbjct  180   AIAKEVNAYLLADIAHIAGLIVADLHPNPLNDGVDIVTSTTHKTLRGARGGIILTNNPEL  239
+
+Query  859   VKKFNSSVFPASQRGPLMHGLAAKAVAFYVVLDQ*FNSNLEQFIENAKVLANGLLEHNVK  1038
+                 + SVFP +Q GPLM+ +A K V+FY      F    +  I NA V+AN  ++  VK
+Sbjct  240   AILLDKSVFPGTQGGPLMNVIAGKTVSFYEASLPSFKEYQKNIISNANVMANFFIQKGVK  299
+
+Query  1039  ITPNGTVNQLLLVDVKKGFNLTGAEPEIILRKHHITINEHAISFRKLSPKNAY*NRL*TA  1218
+             I   GT N LL+++ KK FN TG E E IL K +I +N++AI F +  P      R+ T 
+Sbjct  300   IISGGTDNHLLMINTKKSFNKTGKEAEEILYKVNIIVNKNAIPFDEERPIVTSGIRIGTP  359
+
+Query  1219  AWTAKG*MDADFVKLADEIYQLLQ  1290
+             A T  G  + +F+K+A+ IY +L+
+Sbjct  360   AMTTLGWRNKEFLKIAEVIYNVLK  383
+
+
+>BDV02159.1 uracil phosphoribosyltransferase [Candidatus Hepatoplasma 
+vulgare]
+Length=210
+
+ Score = 25.4 bits (54),  Expect = 0.011, Method: Compositional matrix adjust.
+ Identities = 11/27 (41%), Positives = 16/27 (59%), Gaps = 0/27 (0%)
+ Frame = +1
+
+Query  1315  IQIINHCSIQHKITVLRKKNTIAKDFR  1395
+             I +I H   Q K+  LR + T +K+FR
+Sbjct  4     INLIEHPLAQDKLASLRSEETSSKEFR  30
+
+
+>BDV02702.1 peptide chain release factor 1 [Candidatus Hepatoplasma 
+vulgare]
+Length=354
+
+ Score = 21.9 bits (45),  Expect = 0.19, Method: Compositional matrix adjust.
+ Identities = 14/55 (25%), Positives = 27/55 (49%), Gaps = 9/55 (16%)
+ Frame = +1
+
+Query  829  VIIVTNKGEKVKKFNSSVFPASQRGPLMHGLAAKAVAFYVVLDQ*FNSNLEQFIE  993
+            ++  + + EK++ +N   +P ++       L  K       LDQ  N NL++FI+
+Sbjct  299  ILSSSERSEKIRTYN---YPENRVTDHRINLKLKK------LDQVLNGNLDEFID  344
+
+
+ Score = 16.9 bits (32),  Expect = 6.7, Method: Compositional matrix adjust.
+ Identities = 7/14 (50%), Positives = 8/14 (57%), Gaps = 0/14 (0%)
+ Frame = -2
+
+Query  742  HRVQRYGRYLQADK  701
+            HRVQR  +    DK
+Sbjct  185  HRVQRVPKTESQDK  198
+
+
+>BDV02441.1 aspartyl/glutamyl-tRNA amidotransferase subunit A 
+[Candidatus Hepatoplasma vulgare]
+Length=430
+
+ Score = 17.7 bits (34),  Expect = 3.6, Method: Compositional matrix adjust.
+ Identities = 5/13 (38%), Positives = 10/13 (77%), Gaps = 0/13 (0%)
+ Frame = -2
+
+Query  1249  QRPFILLLSTLPF  1211
+             ++PF + ++T PF
+Sbjct  401   EKPFSVNIATAPF  413
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 691605
+
+
+Query= tiny shorter than 10 bases
+
+Length=8
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 3690
+
+
+  Database: pq.faa
+    Posted date:  Oct 29, 2026  6:29 PM
+  Number of letters in database: 1,845
+  Number of sequences in database:  5
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 12
+Window for multiple hits: 40

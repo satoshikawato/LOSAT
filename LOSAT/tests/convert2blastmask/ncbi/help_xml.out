@@ -1,0 +1,58 @@
+<?xml version="1.0"?>
+<ncbi_application xmlns="ncbi:application"
+ xmlns:xs="http://www.w3.org/2001/XMLSchema-instance"
+ xs:schemaLocation="ncbi:application ncbi_application.xsd"
+>
+<program type="regular">
+<name>convert2blastmask</name>
+<version>2.17.0</version>
+<description>Convert masking information in lower-case masked FASTA input to file formats suitable for makeblastdb</description>
+<detailed_description></detailed_description>
+</program>
+<arguments>
+<key name="in" type="File_In" optional="true">
+<description>Input file name</description>
+<synopsis>input_file_name</synopsis>
+<default>-</default>
+</key>
+<key name="masking_algorithm" type="String">
+<description>Masking algorithm name (e.g.: dust, seg, windowmasker, repeat). Use &apos;other&apos; for user-defined type</description>
+<synopsis>mask_program_name</synopsis>
+</key>
+<key name="masking_options" type="String">
+<description>Masking algorithm options to create the masked input (free text to describe/include (command line) options used to create the masking)</description>
+<synopsis>mask_program_options</synopsis>
+</key>
+<key name="out" type="File_Out" optional="true">
+<description>Output file name</description>
+<synopsis>output_file_name</synopsis>
+<default>-</default>
+</key>
+<key name="outfmt" type="String" optional="true">
+<description>Output file format</description>
+<synopsis>output_format</synopsis>
+<constraint>
+<description>`interval&apos;, `maskinfo_asn1_bin&apos;, `maskinfo_asn1_text&apos;, `maskinfo_xml&apos;</description>
+<Strings case_sensitive="true">
+<value>interval</value>
+<value>maskinfo_asn1_bin</value>
+<value>maskinfo_asn1_text</value>
+<value>maskinfo_xml</value>
+</Strings>
+</constraint>
+<default>maskinfo_asn1_text</default>
+</key>
+<flag name="h" optional="true">
+<description>Print USAGE and DESCRIPTION;  ignore all other parameters</description>
+</flag>
+<flag name="help" optional="true">
+<description>Print USAGE, DESCRIPTION and ARGUMENTS; ignore all other parameters</description>
+</flag>
+<flag name="parse_seqids" optional="true">
+<description>Parse Seq-ids in FASTA input</description>
+</flag>
+<flag name="version" optional="true">
+<description>Print version number;  ignore other arguments</description>
+</flag>
+</arguments>
+</ncbi_application>

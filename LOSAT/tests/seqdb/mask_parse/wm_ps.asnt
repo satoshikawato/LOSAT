@@ -1,0 +1,70 @@
+Blast-db-mask-info ::= {
+  algo-id 3,
+  algo-program windowmasker,
+  algo-options "",
+  masks {
+    masks {
+      packed-int {
+        {
+          from 604,
+          to 1236,
+          id local str "w0"
+        },
+        {
+          from 1544,
+          to 1936,
+          id local str "w0"
+        }
+      },
+      packed-int {
+        {
+          from 604,
+          to 1236,
+          id local str "w1"
+        },
+        {
+          from 1544,
+          to 1936,
+          id local str "w1"
+        }
+      },
+      packed-int {
+        {
+          from 604,
+          to 1236,
+          id local str "w2"
+        },
+        {
+          from 1544,
+          to 1936,
+          id local str "w2"
+        }
+      },
+      packed-int {
+        {
+          from 604,
+          to 1236,
+          id local str "w3"
+        },
+        {
+          from 1544,
+          to 1936,
+          id local str "w3"
+        }
+      },
+      packed-int {
+        {
+          from 604,
+          to 1236,
+          id local str "w4"
+        },
+        {
+          from 1544,
+          to 1936,
+          id local str "w4"
+        }
+      }
+    },
+    more FALSE
+  }
+}

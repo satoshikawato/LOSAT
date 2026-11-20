@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Sweep `-query_loc` and `-subject_loc` of BLASTN, BLASTP, TBLASTN and TBLASTX against NCBI
-(Session S11, E2d; comparison only).
+(Session S11, E2d; comparison only); BLASTX with `--programs blastx` (line SX, SXd2).
 
 Every case runs NCBI BLAST+ and LOSAT from LOSAT/ on the same inputs with one range (or a
 pair of ranges) in each requested output format, and is classified:
@@ -47,6 +47,7 @@ INPUTS = {
     "blastp": (f"{F}/e2d_p_q.faa", f"{F}/e2d_p_sp75m.faa", 674, 871),
     "tblastn": (f"{F}/e2d_p_q.faa", f"{F}/e2d_n_sub8k.fa", 674, 8001),
     "tblastx": (f"{F}/e2d_x_q.fa", f"{F}/e2d_t_ts.fa", 768, 797),
+    "blastx": (f"{F}/bx_best_hsp_query.fna", f"{F}/bx_best_hsp_subject.faa", 2505, 1294),
 }
 # Multi-record inputs: (program, query, subject).
 MULTI = [
@@ -61,6 +62,9 @@ MULTI = [
     ("tblastn", f"{F}/e2d_t_qabshort.faa", f"{F}/e2d_n_sub8k.fa"),
     ("tblastx", f"{F}/e2d_x_ab15.fa", f"{F}/e2d_n_s_plus.fa"),
     ("tblastx", f"{F}/e2d_n_qn.fa", f"{F}/e2d_n_sub_multi_t.fa"),
+    ("blastx", "tests/db_search/bslice_q.fna", "tests/db_search/bslice.faa"),
+    ("blastx", f"{F}/x16_bx_q_unsearched.fna", "tests/db_search/bslice.faa"),
+    ("blastx", f"{F}/sxd_bx_many_q.fna", f"{F}/sxd_bx_sloc_warn.faa"),
 ]
 SPELLINGS = ["10-20", "1-2", "+1-5", "01-05", "1-+5", "1-2147483647", "1-1", "5-5", "20-10", "2-1",
              "0-10", "10-0", "-10", "10-", "10", "1--5", "1-2-3", "", "-", "--", "-5-10", " 1-5",

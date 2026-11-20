@@ -4,24 +4,27 @@ use std::fmt::Write as _;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use LOSAT::api::local_blast::{
-    run_local_blastn, run_local_blastp, run_local_tblastn, run_local_tblastx, FormatObserver,
-    FormatOutput, HspIndex, OutputSink, ReportOutputs,
+use losat::api::FastaRecord;
+use losat::web_adapter::{
+    run_local_blastn, run_local_blastp, run_local_blastx, run_local_tblastn, run_local_tblastx,
+    ApplicationSettings, CallerStart, Cli, Commands, CountsSource, FormatObserver, FormatOutput,
+    FormatRefusal, HspIndex, OutputSink, PairwiseHit, ReportOutputs, RunFiles,
 };
-use LOSAT::blastinput::fasta_reader::FastaRecord;
-use LOSAT::cli::{Cli, Commands};
-use LOSAT::report::PairwiseHit;
 
-use crate::emit::{emit, StreamWriter, STREAM_DIAGNOSTICS, STREAM_HITS};
+use crate::emit::{
+    emit, StreamWriter, STREAM_CUSTOM, STREAM_DIAGNOSTICS, STREAM_HITS, STREAM_RESPONSE,
+    STREAM_RUN_FILES,
+};
 use crate::json;
 
-/// The programs that ABI v2 runs. BLASTX joins in session SX.
+/// The programs that ABI v2 runs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Program {
     Blastp,
     Tblastn,
     Blastn,
     Tblastx,
+    Blastx,
 }
 
 impl Program {
@@ -31,7 +34,10 @@ impl Program {
             "tblastn" => Ok(Self::Tblastn),
             "blastn" => Ok(Self::Blastn),
             "tblastx" => Ok(Self::Tblastx),
-            "blastx" => Err("blastx is not available in LOSAT Web ABI v2 yet".into()),
+            "blastx" => Ok(Self::Blastx),
+            "psiblast" => Err("psiblast is not available in the browser (ABI v2)".into()),
+            "rpsblast" => Err("rpsblast is not available in the browser (ABI v2)".into()),
+            "rpstblastn" => Err("rpstblastn is not available in the browser (ABI v2)".into()),
             other => Err(format!("unknown program '{other}'")),
         }
     }
@@ -42,6 +48,7 @@ impl Program {
             Self::Tblastn => "tblastn",
             Self::Blastn => "blastn",
             Self::Tblastx => "tblastx",
+            Self::Blastx => "blastx",
         }
     }
 
@@ -49,67 +56,545 @@ impl Program {
     /// exactly these, each on the stream of the same number.
     pub fn formats(self) -> &'static [u32] {
         match self {
-            Self::Blastp | Self::Tblastn | Self::Blastn | Self::Tblastx => &[0, 6, 7],
+            Self::Blastp | Self::Tblastn | Self::Blastn | Self::Tblastx | Self::Blastx => {
+                &[0, 6, 7]
+            }
         }
     }
 }
 
-/// Parses an argv (program name first) with the engine's CLI parser.
+/// One output of a run: a format that every run of the program writes (`Program::formats`), on
+/// the stream of its number, or the output of the argv's own `-outfmt` (any other format that the
+/// CLI writes, or 6 and 7 with fields), on `STREAM_CUSTOM` (docs/web/abi_v2.md §5, §7).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Output {
+    pub stream: u32,
+    /// The format's number, which sets its hit list size.
+    pub number: u32,
+    /// The `-outfmt` value that the engine writes it for.
+    pub outfmt: String,
+    /// Whether this is the argv's own format (`Requested`): LOSAT's refusal of its report fails
+    /// the run, as the CLI's run of the argv fails. A refusal of another output's report fails
+    /// that output alone (`FormatRefusal::FailsAlone`, `search`).
+    pub requested: bool,
+}
+
+impl Output {
+    fn format(number: u32) -> Self {
+        Self {
+            stream: number,
+            number,
+            outfmt: number.to_string(),
+            requested: false,
+        }
+    }
+}
+
+/// The argv's `-outfmt` as a run reads it (`parse_run`): the `-outfmt` value of the argv's own
+/// output (`STREAM_CUSTOM`), if it has one, and the number of the argv's format. Without an output
+/// of its own the argv's format is the program's format of that number (0, 6 or 7).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Requested {
+    pub custom: Option<String>,
+    pub number: u32,
+}
+
+/// The outputs of a run: the output of the argv's `-outfmt` (`parse_run`) if it has one, then
+/// the program's formats; the argv's format among them is `Output::requested`. The first format
+/// of a search writes the warnings that the formats share (the formatting handler's, the
+/// queries'), and the output of the `-outfmt` adds those of its fields' writer (NCBI's taxdb
+/// warning), so that stream 3 is the CLI's standard error for that `-outfmt` (BLASTX writes the
+/// warnings of its first format only).
+pub fn outputs(program: Program, requested: &Requested) -> Vec<Output> {
+    let mut outputs = Vec::new();
+    if let Some(outfmt) = &requested.custom {
+        outputs.push(Output {
+            stream: STREAM_CUSTOM,
+            number: requested.number,
+            outfmt: outfmt.clone(),
+            requested: true,
+        });
+    }
+    outputs.extend(program.formats().iter().map(|&number| Output {
+        requested: requested.custom.is_none() && number == requested.number,
+        ..Output::format(number)
+    }));
+    outputs
+}
+
+/// The `-outfmt` value of the program's arguments.
+fn outfmt_of(command: &mut Commands) -> &mut String {
+    match command {
+        Commands::Blastp(a) => &mut a.outfmt,
+        Commands::Tblastn(a) => &mut a.outfmt,
+        Commands::Blastn(a) => &mut a.outfmt,
+        Commands::Tblastx(a) => &mut a.outfmt,
+        Commands::Blastx(a) => &mut a.outfmt,
+        Commands::Psiblast(_)
+        | Commands::Rpsblast(_)
+        | Commands::Rpstblastn(_)
+        | Commands::Makedb(_)
+        | Commands::Rpsbproc(_) => {
+            unreachable!("rejected by Program::parse")
+        }
+    }
+}
+
+/// The engine's name of the program, for its reading of `-outfmt`.
+fn engine_program(program: Program) -> losat::web_adapter::EngineProgram {
+    use losat::web_adapter::EngineProgram as Engine;
+    match program {
+        Program::Blastp => Engine::Blastp,
+        Program::Tblastn => Engine::Tblastn,
+        Program::Blastn => Engine::Blastn,
+        Program::Tblastx => Engine::Tblastx,
+        Program::Blastx => Engine::Blastx,
+    }
+}
+
+/// Parses an argv (program name first) with the engine's CLI parser (`parse_run`), without the
+/// output of its `-outfmt`.
 pub fn parse(words: &[&str]) -> Result<(Program, Commands), String> {
+    parse_run(words).map(|(program, command, _)| (program, command))
+}
+
+/// Parses an argv (program name first) with the engine's CLI parser, and reads its `-outfmt` as
+/// the CLI does (`parse_formatting_string`, `report_format`, with the CLI's messages; the
+/// formatting handler's check of a custom delimiter comes later, `custom_handler_check`). A run
+/// writes the program's formats 0, 6 and 7 whatever the value; every other format that the CLI
+/// writes (5, 8 to 16, 18, 20, BLASTN's 17), and 6 and 7 with words after the number (fields,
+/// `delim=`), add an output of their own, the third value returned (docs/web/abi_v2.md §7). The
+/// rule reads the words, not the fields they make, so that the application reads it from the argv
+/// alike: `6 std` adds an output with the bytes of outfmt 6. 0 with words adds none (the CLI writes
+/// outfmt 0); 1 to 4 add one without the words. The output of outfmt 13 and 14 is a
+/// ZIP archive of the master file and the side files (`search`). The arguments come back with
+/// `-outfmt` at the CLI's default, `0`: the engine is given the formats of each search
+/// (`ReportOutputs`), and the checks of the arguments alone (`check_options`) read the formats
+/// as they do without `-outfmt`, but for an `-outfmt` whose custom delimiter the CLI rejects
+/// (`validate`).
+pub fn parse_run(words: &[&str]) -> Result<(Program, Commands, Requested), String> {
+    let (program, command) = parse_words(words)?;
+    read_outfmt(words, program, command)
+}
+
+/// The first part of `parse_run`: the adapter's own rules and the engine's CLI parser, without the
+/// reading of `-outfmt`, which NCBI makes in `Run`, after the settings and a dry run's end
+/// (`started_command`).
+fn parse_words(words: &[&str]) -> Result<(Program, Commands), String> {
     for word in words.iter().skip(1) {
         let key = word.split('=').next().unwrap_or("");
-        if matches!(key, "-out" | "--out" | "-outfmt" | "--outfmt") {
+        if matches!(key, "-out" | "--out") {
             return Err(format!(
                 "{key} is not accepted: a run writes every output format of the program"
             ));
+        }
+        // The records are registered and read before the options of a run are known
+        // (`store::register`), so their ids could not be parsed: the run would write the report
+        // of a search without the option.
+        if matches!(key, "-parse_deflines" | "--parse_deflines") {
+            return Err(format!("{key} is not supported in the browser yet"));
         }
     }
     // The formats come from `Program::formats`, and every program accepts the CLI's
     // default `-outfmt 0`, so the host's words are parsed exactly as on the command line,
     // with the CLI's binary name: an error (an unknown program too) is the CLI's message.
-    let argv = std::iter::once("LOSAT").chain(words.iter().copied());
-    let cli: Cli =
-        LOSAT::cli::try_parse_from(argv).map_err(|error| LOSAT::cli::render_message(&error))?;
+    let argv = std::iter::once("losat").chain(words.iter().copied());
+    let cli: Cli = losat::web_adapter::try_parse_cli(argv)
+        .map_err(|error| losat::web_adapter::command_line_message(&error, false))?;
     let program = Program::parse(words.first().copied().unwrap_or(""))?;
     Ok((program, cli.command))
 }
 
-/// `validate`: `parse`, then the syntax of `-subject_loc` and `-query_loc`, BLASTN's
+/// The second part of `parse_run`: the argv's `-outfmt`, read as the CLI reads it.
+fn read_outfmt(
+    words: &[&str],
+    program: Program,
+    mut command: Commands,
+) -> Result<(Program, Commands, Requested), String> {
+    let outfmt = std::mem::replace(outfmt_of(&mut command), "0".to_string());
+    let choice = losat::web_adapter::parse_formatting_string(&outfmt)
+        .map_err(|error| format!("{error:#}"))?;
+    // The `@PG` line of SAM (outfmt 17) shows the command line, which `main` gives BLASTN: the
+    // run's, `losat` and its argv, each word followed by one space (`cli::command_line_bytes`). Only
+    // a run that writes SAM holds it.
+    if let (Commands::Blastn(args), losat::web_adapter::SAM_FORMAT) = (&mut command, choice.number)
+    {
+        let mut line = b"losat ".to_vec();
+        for word in words {
+            line.extend_from_slice(word.as_bytes());
+            line.push(b' ');
+        }
+        args.command_line = Some(line);
+    }
+    // What the CLI rejects, with its message: a format that LOSAT's program does not write, and the
+    // formats that NCBI's formatting handler rejects (`report_format` gives none: SAM of another
+    // program, AIRR, FASTA), which a run never gives the engine; the CLI rejects those after the
+    // ranges and the query options, so for an argv with an error of both the CLI reports the
+    // other. The CLI is taken with `-out`, which the formats 13 and 14 need there (a run gives
+    // them a receiver of their side files, `search`). The handler's
+    // check of a custom delimiter comes with the program's checks of the options (`validate`) and
+    // in the engine's `run_local`.
+    let engine = engine_program(program);
+    losat::web_adapter::report_format(&choice, engine, Some(std::path::Path::new("out")))
+        .and_then(|format| match format {
+            Some(_) => Ok(()),
+            None => losat::web_adapter::formatting_handler_check(&choice, engine),
+        })
+        .map_err(|error| format!("{error:#}"))?;
+    // NCBI's white space around the value (`NStr::TruncateSpaces`), as `parse_formatting_string`
+    // reads it: a space inside is followed by words.
+    let words_follow = outfmt
+        .trim_matches(|c| matches!(c, ' ' | '\t' | '\n' | '\x0b' | '\x0c' | '\r'))
+        .contains(' ');
+    let custom = match choice.number {
+        0 => None,
+        6 | 7 => words_follow.then_some(outfmt),
+        // The query-anchored formats (every program's, line RG T3) without the words after the
+        // number, which the CLI drops (`FormatChoice::normalized`) and the engine's library
+        // refuses after 0 to 4, as a field list.
+        1..=4 => Some(choice.normalized()),
+        _ => Some(outfmt),
+    };
+    let number = choice.number as u32;
+    Ok((program, command, Requested { custom, number }))
+}
+
+/// Whether the run of `words` writes the BLAST archive (outfmt 11), whose Bioseqs show the whole
+/// records (`store::with_inputs`).
+pub fn writes_archive(words: &[&str]) -> bool {
+    parse_run(words).is_ok_and(|(_, _, requested)| {
+        requested.custom.is_some_and(|outfmt| {
+            losat::web_adapter::parse_formatting_string(&outfmt)
+                .is_ok_and(|choice| choice.number == losat::web_adapter::ARCHIVE_FORMAT)
+        })
+    })
+}
+
+/// The environment of the application start of a run in LOSAT Web (`start`): no variable but the
+/// directory of BLASTN's `-window_masker_taxid` (`files::WINDOW_MASKER_PATH`), set in the layer of
+/// NCBI's registry that comes before its files, so that the registry of `-window_masker_taxid`
+/// (`.ncbirc` and the environment) gives that directory whatever a registered `.ncbirc` sets.
+const START_VARIABLES: &[(&str, &str)] = &[(
+    "NCBI_CONFIG__WINDOW_MASKER__WINDOW_MASKER_PATH",
+    crate::files::WINDOW_MASKER_PATH,
+)];
+
+/// The NCBI application start of a run of `words` (program name first), as the command line's
+/// before it reads the arguments (`losat::web_adapter::start_run`): in the environment
+/// `START_VARIABLES`, with the registry files registered now (kind 2, `files::registry_files`) and
+/// the file of `-logfile` going to `run_files`; the messages that the command line writes to its
+/// standard error go to `diagnostics`. `Err` when the start ends the run (a usage report or a
+/// load that LOSAT refuses, a `-logfile` name that LOSAT Web refuses, the error of NCBI's load:
+/// `-conffile` of a file that is not registered, a registry file that NCBI cannot read), with the
+/// message that the command line writes to its standard error without `-logfile`, and the start
+/// when its file of `-logfile` is open (it has the messages); and for a program that ABI v2 does
+/// not run, with the error of its argv (`parse`: an unknown program's is the command line's).
+fn start(
+    words: &[&str],
+    run_files: &RunFiles,
+    diagnostics: &mut dyn std::io::Write,
+) -> Result<CallerStart, (String, Option<Box<CallerStart>>)> {
+    let (name, arguments) = words.split_first().unwrap_or((&"", &[]));
+    if let Err(error) = Program::parse(name) {
+        return Err((parse(words).err().unwrap_or(error), None));
+    }
+    let files = crate::files::registry_files();
+    let start = losat::web_adapter::start_run(
+        name,
+        arguments,
+        START_VARIABLES,
+        &files,
+        run_files,
+        diagnostics,
+    )
+    .map_err(|message| (message, None))?;
+    match start.ended() {
+        Some(message) => Err((message.to_string(), Some(Box::new(start)))),
+        None => Ok(start),
+    }
+}
+
+/// The argv `words` after the run's start `started`, in the command line's order (`cli::main_entry`):
+/// the arguments parsed (`parse_words`), the settings that LOSAT refuses (`start.settings()?`), the
+/// end of a dry run (`None`: rc 0), then `-outfmt`, which NCBI reads in `Run` (`read_outfmt`: a dry
+/// run does not read it). `validate` and `run` take the argv here.
+fn started_command(
+    words: &[&str],
+    started: &CallerStart,
+) -> Result<Option<(Program, Commands, Requested)>, String> {
+    let (program, command) = parse_words(words)?;
+    started.settings()?;
+    if started.dry_run() {
+        return Ok(None);
+    }
+    read_outfmt(words, program, command).map(Some)
+}
+
+/// A receiver of the files of a run that keeps none (`validate`, which emits nothing).
+struct NoFiles;
+
+impl losat::web_adapter::FileReceiver for NoFiles {
+    fn receive(&self, _name: &[u8], _bytes: &[u8]) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// The *start* JSON of `losat_web2_start` (docs/web/abi_v2.md §4, §9): what NCBI's application
+/// reads of the argv `words` (program name first) before its arguments (`preparse`): the file of
+/// the last `-conffile` (which the host registers as kind 2 before it validates), the file of
+/// `-logfile` (NCBI's scan of it, `log_file`: a run gives it on `STREAM_RUN_FILES`) and whether
+/// the run is a dry run. An unknown program, and a version word, which LOSAT Web refuses, are
+/// errors.
+pub fn start_json(words: &[&str]) -> Result<String, String> {
+    use losat::web_adapter::Preparsed;
+    Program::parse(words.first().copied().unwrap_or(""))?;
+    let arguments = &words[1..];
+    let (conffile, dryrun) = match losat::web_adapter::preparse(arguments) {
+        Preparsed::Words {
+            conffile, dryrun, ..
+        } => (conffile, dryrun),
+        Preparsed::Version(_) => {
+            let argv = std::iter::once("losat").chain(words.iter().copied());
+            return Err(match losat::web_adapter::try_parse_cli(argv) {
+                Err(error) => losat::web_adapter::command_line_message(&error, false),
+                Ok(_) => unreachable!("the parser refuses a version word"),
+            });
+        }
+    };
+    let mut out = String::from("{\"conffile\":");
+    json::optional_string(&mut out, conffile.as_deref().and_then(|name| name.to_str()));
+    out.push_str(",\"log_file\":");
+    json::optional_string(
+        &mut out,
+        losat::web_adapter::log_file(arguments).and_then(|name| name.to_str()),
+    );
+    let _ = write!(out, ",\"dry_run\":{dryrun}}}");
+    Ok(out)
+}
+
+/// `losat_web2_start`: emits the *start* JSON (`start_json`) on stream 2.
+pub fn emit_start(words: &[&str]) -> Result<(), String> {
+    let response = start_json(words)?;
+    emit(STREAM_RESPONSE, response.as_bytes());
+    Ok(())
+}
+
+/// `validate`: the application start (`start`: its errors are the command line's first), then
+/// `parse`, the settings that LOSAT refuses, and nothing more for a dry run (`-dryrun`); then the
+/// syntax of `-subject_loc` and `-query_loc`, BLASTN's
 /// `-dust` value and the scoring options that NCBI rejects or that its Karlin-Altschul
 /// tables do not support, with NCBI's message (for a batch of one query), and TBLASTX's
 /// checks of its options alone (NCBI's `-evalue` check, the options that LOSAT's TBLASTX
 /// rejects).
+/// BLASTN's checks include the hit list size, which differs between the searches of a run
+/// (`search_groups`): the run is valid when at least one search is (`run` lets the others
+/// fail, see there), and the error is that of the first search, the tabular formats'.
 /// `run` leaves them to the engine, which reports them as the CLI does.
 pub fn validate(words: &[&str]) -> Result<(), String> {
-    use LOSAT::blastinput::seq_range::{parse_optional_range, RangeRole};
+    use losat::web_adapter::{parse_optional_range, RangeRole};
+    let started = start(
+        words,
+        &RunFiles::Receiver(Arc::new(NoFiles)),
+        &mut std::io::sink(),
+    )
+    .map_err(|(message, _)| message)?;
+    let Some((program, command, requested)) = started_command(words, &started)? else {
+        return Ok(());
+    };
+    let custom = requested.custom.as_deref();
+    let settings = started.settings()?;
     // The ranges' syntax, in NCBI's order: the subject range where the subjects are read
     // (before the other option handlers), the query range with the query options (the
     // engine's option checks read it). Whether a range fits the records is checked by
     // `run`, which has them.
-    let subject_range = |subject_loc: Option<&str>, program: &str| {
-        parse_optional_range(subject_loc, RangeRole::Subject, program).map(|_| ())
+    let subject_range = |subject_loc: Option<&str>| {
+        parse_optional_range(subject_loc, RangeRole::Subject).map(|_| ())
     };
-    match parse(words)? {
-        (_, Commands::Blastn(mut args)) => subject_range(args.subject_loc.as_deref(), "BLASTN")
+    let groups = search_groups(&outputs(program, &requested), &command);
+    let custom_check = || custom_handler_check(program, custom);
+    // A custom delimiter that a field uses makes the CLI reject the argv, whatever the hit list
+    // sizes of the searches: its error is that of the CLI's checks with the argv's `-outfmt`, which
+    // make the handler's check where the CLI does (the error may come before it).
+    let custom_rejected = custom_check().is_err();
+    let with_custom = |outfmt: &mut String| {
+        if custom_rejected {
+            custom.expect("a rejected -outfmt").clone_into(outfmt);
+        }
+    };
+    // The CLI checks the thread count before the options (`validate_threads`), the checks of the
+    // options alone last; with the argv's `-outfmt` they stop at its delimiter first.
+    if custom_rejected {
+        losat::web_adapter::validate_threads(num_threads(&command))
+            .map_err(|error| format!("{error:#}"))?;
+    }
+    match command {
+        Commands::Blastn(mut args) => subject_range(args.subject_loc.as_deref())
             .and_then(|()| args.resolve_dust())
             .and_then(|()| {
-                parse_optional_range(args.query_loc.as_deref(), RangeRole::Query, "BLASTN")
-                    .map(|_| ())
+                if validates_window_masker(&args) {
+                    give_blastn_counts(&mut args, &crate::files::source(), settings);
+                    args.resolve_window_masker()
+                } else {
+                    Ok(())
+                }
             })
-            .and_then(|()| LOSAT::algorithm::blastn::scoring::check_scoring(&args))
-            .map_err(|error| format!("{error:#}"))?,
-        (_, Commands::Tblastx(args)) => subject_range(args.subject_loc.as_deref(), "TBLASTX")
-            .and_then(|()| LOSAT::algorithm::tblastx::blast_engine::check_options(&args))
-            .map_err(|error| format!("{error:#}"))?,
-        (_, Commands::Blastp(args)) => subject_range(args.subject_loc.as_deref(), "BLASTP")
-            .and_then(|()| LOSAT::algorithm::blastp::blast_engine::check_options(&args))
-            .map_err(|error| format!("{error:#}"))?,
-        (_, Commands::Tblastn(args)) => subject_range(args.subject_loc.as_deref(), "TBLASTN")
-            .and_then(|()| LOSAT::algorithm::tblastn::check_options(&args))
-            .map_err(|error| format!("{error:#}"))?,
+            .and_then(|()| {
+                parse_optional_range(args.query_loc.as_deref(), RangeRole::Query).map(|_| ())
+            })
+            .map_err(|error| format!("{error:#}"))
+            // The formatting handler comes after the query options (`process_options`).
+            .and_then(|()| custom_check())
+            .and_then(|()| {
+                let mut first_error = None;
+                for group in &groups {
+                    match blastn_group_check(&mut args, group) {
+                        Ok(()) => return Ok(()),
+                        Err(error) => {
+                            first_error.get_or_insert(error);
+                        }
+                    }
+                }
+                first_error.map_or(Ok(()), Err)
+            })?,
+        // The checks of the options read the formats as without `-outfmt` (`parse_run`); with an
+        // `-outfmt` whose custom delimiter the CLI rejects they read the argv's (`with_custom`),
+        // and fail as the CLI's.
+        Commands::Tblastx(mut args) => subject_range(args.subject_loc.as_deref())
+            .and_then(|()| {
+                with_custom(&mut args.outfmt);
+                losat::web_adapter::check_tblastx_options(&args)
+            })
+            .map_err(|error| format!("{error:#}"))
+            .and_then(|()| custom_check())?,
+        Commands::Blastp(mut args) => subject_range(args.subject_loc.as_deref())
+            .and_then(|()| {
+                with_custom(&mut args.outfmt);
+                losat::web_adapter::check_blastp_options(&args)
+            })
+            .map_err(|error| format!("{error:#}"))
+            .and_then(|()| custom_check())?,
+        Commands::Tblastn(mut args) => subject_range(args.subject_loc.as_deref())
+            .and_then(|()| {
+                with_custom(&mut args.outfmt);
+                losat::web_adapter::check_tblastn_options(&args)
+            })
+            .map_err(|error| format!("{error:#}"))
+            .and_then(|()| custom_check())?,
+        // The checks of each search's formats, as for BLASTN: BLASTX resolves its options for
+        // each format (the hit list size). Its ranges are read among them, where its run reads
+        // them: after LOSAT's limits of the options (`blastx::check_options`).
+        Commands::Blastx(args) => {
+            // The tabular search's formats hold the argv's `-outfmt`: its error is the run's.
+            if custom_rejected {
+                return blastx_group_check(&args, &groups[0]).and_then(|()| custom_check());
+            }
+            let mut first_error = None;
+            for group in &groups {
+                match blastx_group_check(&args, group) {
+                    Ok(()) => return Ok(()),
+                    Err(error) => {
+                        first_error.get_or_insert(error);
+                    }
+                }
+            }
+            if let Some(error) = first_error {
+                return Err(error);
+            }
+        }
         _ => {}
     }
     Ok(())
+}
+
+/// NCBI's formatting handler's check of the argv's own `-outfmt` (a custom delimiter that a field
+/// uses to separate its entries), with the CLI's message. `validate` and `run` ask it whether the
+/// CLI rejects the argv: `validate` then reports the error of the program's checks of the options
+/// with that `-outfmt`, which make it where the CLI does (BLASTN's right after the query range),
+/// and `run` tolerates no failed search. A run's engine makes it (`run_local`).
+fn custom_handler_check(program: Program, custom: Option<&str>) -> Result<(), String> {
+    let Some(outfmt) = custom else {
+        return Ok(());
+    };
+    losat::web_adapter::parse_formatting_string(outfmt)
+        .and_then(|choice| {
+            losat::web_adapter::formatting_handler_check(&choice, engine_program(program))
+        })
+        .map_err(|error| format!("{error:#}"))
+}
+
+/// BLASTN's checks of the options for the search of the output formats `group`, whose hit list
+/// size is the one the CLI derives for them: the checks that `run_local` makes before it reads
+/// a query (`process_options`: the counts of the report, `check_scoring_options`; then
+/// `check_losat_limits`). `validate` runs it for each search of a run, and `run` asks it which
+/// search is rejected (`group_rejected`).
+///
+/// It does not check the Karlin-Altschul tables (scores and gap costs without a row, NCBI's
+/// `Error: Substitution scores ...`) nor LOSAT's limit of greedy gap costs: a CLI run meets them
+/// only when some query context has an ungapped Karlin-Altschul block (`context_blocks`,
+/// `any_valid_context` in `blast_engine/run.rs`), which depends on the query's letters (a query
+/// of N only has none, and the same scores give rc 0 with a warning). `validate` has no query,
+/// so `run` makes these checks and stops with the CLI's message and exit code.
+/// Making them for a query of any letters would reject what the CLI accepts (WA-FM-01).
+fn blastn_group_check(
+    args: &mut losat::web_adapter::BlastnArgs,
+    group: &[Output],
+) -> Result<(), String> {
+    use losat::web_adapter::{check_losat_limits, check_scoring_options};
+    // The host has no database files.
+    if args.db.is_some() {
+        return Err("-db (a database search) is not supported in the browser yet".to_string());
+    }
+    let outfmts: Vec<i32> = group.iter().map(|output| output.number as i32).collect();
+    // `process_options` sets the counts that the checks read.
+    let (counts, _) = losat::web_adapter::run_report_counts(
+        "blastn",
+        &outfmts,
+        args.max_target_seqs,
+        args.num_descriptions,
+        args.num_alignments,
+    )
+    .map_err(|error| format!("{error:#}"))?;
+    args.report_counts = counts;
+    check_scoring_options(args)
+        .and_then(|()| check_losat_limits(args))
+        .map_err(|error| format!("{error:#}"))
+}
+
+/// BLASTX's checks (`blastx::check_options`) for the search of the output formats `group`, as
+/// `run_local` makes them before it searches. `validate` runs it for each search of a run, and
+/// `run` asks it which search is rejected (`group_rejected`).
+fn blastx_group_check(
+    args: &losat::web_adapter::BlastxArgs,
+    group: &[Output],
+) -> Result<(), String> {
+    let outfmts: Vec<&str> = group.iter().map(|output| output.outfmt.as_str()).collect();
+    losat::web_adapter::check_blastx_options(args, &outfmts).map_err(|error| format!("{error:#}"))
+}
+
+/// Whether the options' checks reject the search of the output formats `group`, as the CLI
+/// rejects those formats alone because of their hit list size: BLASTN's and BLASTX's checks
+/// fail (`blastn_group_check`: a hit list of 0, or a preliminary hit list size below 1;
+/// `blastx_group_check`), or, for the other programs, the hit list size is 0. `run` tolerates
+/// a failed search of a two-search run only for this reason (`fails_run`). With the checks
+/// themselves as the predicate, a search that fails them for another reason than its hit list
+/// (for example `-evalue 0`) is rejected as the other search is, so `run` fails with the
+/// tabular search's error, which `validate` reports.
+fn group_rejected(command: &mut Commands, group: &[Output]) -> bool {
+    match command {
+        Commands::Blastn(args) => blastn_group_check(args, group).is_err(),
+        Commands::Blastx(args) => blastx_group_check(args, group).is_err(),
+        _ => hit_list_size(command, group[0].number) == 0,
+    }
+}
+
+/// Whether the failure of one search fails the run. A failed search of a run of two
+/// searches is tolerated only when it wrote no byte of its formats and `rejected` says that
+/// the options' checks reject its hit list size (`group_rejected`); any other error (for
+/// example a thread pool that cannot start) fails the run. When the other search fails too,
+/// `run` fails with the tabular search's error. (A format whose report the engine refuses fails
+/// alone inside its search, `Searched::refused`.)
+fn fails_run(failed: &Failed, rejected: bool) -> bool {
+    failed.wrote || !rejected
 }
 
 /// Records the byte range of every HSP row (stream 6) and section (stream 0), and of
@@ -131,6 +616,23 @@ struct RangeRecorder {
 impl RangeRecorder {
     fn position(&self, format: usize) -> u64 {
         self.positions[format].load(Ordering::SeqCst)
+    }
+
+    /// Forgets the events of the format `format`, which failed alone (`search`): its stream is
+    /// dropped, so no HSP record points into it (stream 6: `out6`; stream 0: `out0` and
+    /// `out0_subject`), and an HSP that its report had begun when it stopped is not a fault.
+    fn forget(&mut self, format: usize) {
+        self.open[format] = None;
+        match self.streams[format] {
+            6 => self.out6.clear(),
+            0 => {
+                self.out0.clear();
+                self.out0_subject.clear();
+                self.subject_start = None;
+                self.subject = None;
+            }
+            _ => {}
+        }
     }
 }
 
@@ -218,15 +720,9 @@ impl FormatObserver for RangeRecorder {
 ///             continue; //SB-2307. ignore well formed, not found accession
 ///         }
 /// ```
-fn searched_queries(
-    query_loc: Option<&str>,
-    program: &str,
-    records: &[FastaRecord],
-) -> Option<Vec<usize>> {
-    use LOSAT::blastinput::seq_range::{
-        parse_optional_range, record_interval, RangeRole, RecordInterval,
-    };
-    let range = parse_optional_range(query_loc, RangeRole::Query, program).ok()??;
+fn searched_queries(query_loc: Option<&str>, records: &[FastaRecord]) -> Option<Vec<usize>> {
+    use losat::web_adapter::{parse_optional_range, record_interval, RangeRole, RecordInterval};
+    let range = parse_optional_range(query_loc, RangeRole::Query).ok()??;
     Some(
         records
             .iter()
@@ -239,15 +735,207 @@ fn searched_queries(
     )
 }
 
-/// Runs one search and emits its streams. On failure nothing more is emitted and the
-/// host discards what it received.
-pub fn run(words: &[&str], query: &[FastaRecord], subject: &[FastaRecord]) -> Result<(), String> {
-    let (program, command) = parse(words)?;
-    let formats = program.formats();
-    let mut writers: Vec<StreamWriter> = formats.iter().map(|&f| StreamWriter::new(f)).collect();
-    let mut diagnostics = StreamWriter::new(STREAM_DIAGNOSTICS);
+/// The options that set the hit list size: `-max_target_seqs`, `-num_descriptions` and
+/// `-num_alignments` of the program's arguments.
+fn count_options(command: &Commands) -> [Option<usize>; 3] {
+    match command {
+        Commands::Blastp(a) => [a.max_target_seqs, a.num_descriptions, a.num_alignments],
+        Commands::Tblastn(a) => [a.max_target_seqs, a.num_descriptions, a.num_alignments],
+        Commands::Blastn(a) => [a.max_target_seqs, a.num_descriptions, a.num_alignments],
+        Commands::Tblastx(a) => [a.max_target_seqs, a.num_descriptions, a.num_alignments],
+        // A positive `i32` (the parser's `positive`).
+        Commands::Blastx(a) => [
+            a.max_target_seqs.map(|n| n as usize),
+            a.num_descriptions,
+            a.num_alignments,
+        ],
+        // Rejected by `Program::parse`.
+        Commands::Psiblast(_)
+        | Commands::Rpsblast(_)
+        | Commands::Rpstblastn(_)
+        | Commands::Makedb(_)
+        | Commands::Rpsbproc(_) => [None; 3],
+    }
+}
+
+/// `-num_threads` of the program's arguments.
+fn num_threads(command: &Commands) -> usize {
+    match command {
+        Commands::Blastp(a) => a.num_threads,
+        Commands::Tblastn(a) => a.num_threads,
+        Commands::Blastn(a) => a.num_threads,
+        Commands::Tblastx(a) => a.num_threads,
+        // A positive `i32` (the parser's `positive`).
+        Commands::Blastx(a) => a.num_threads as usize,
+        // Rejected by `Program::parse`.
+        Commands::Psiblast(_)
+        | Commands::Rpsblast(_)
+        | Commands::Rpstblastn(_)
+        | Commands::Makedb(_)
+        | Commands::Rpsbproc(_) => 1,
+    }
+}
+
+/// The hit list size that the CLI derives for the output format `format` from the options
+/// of `command` (`report_counts`, NCBI `blast_args.cpp:2894-2973`).
+pub fn hit_list_size(command: &Commands, format: u32) -> usize {
+    let [max_target_seqs, descriptions, alignments] = count_options(command);
+    losat::web_adapter::report_counts(format as i32, max_target_seqs, descriptions, alignments)
+        .hitlist_size
+}
+
+/// The searches of a run: the output formats grouped by hit list size, the tabular
+/// formats first. One group is one `run_local` call, and every format of it is written from
+/// that search, as the CLI writes it alone: the CLI's search depends on the hit list size,
+/// which `-num_descriptions` and `-num_alignments` (without `-max_target_seqs`) can make
+/// differ between the pairwise format 0 and the tabular formats. Without those options the
+/// sizes are equal and the group is the program's formats with the tabular ones first (the one
+/// search of before). The tabular formats go first because the formatting handler's warnings
+/// belong to the first format, and the CLI writes the tabular formats' (`ReportCounts::warnings`;
+/// `-line_length`, `-sorthits` and `-sorthsps` warn for formats above 4 or other than 0 only,
+/// blast_args.cpp:2947-2989). The
+/// output of the argv's `-outfmt` (a format above 4) has the hit list size of the tabular
+/// formats, so it joins the tabular group, first (`outputs`): it adds no search.
+pub fn search_groups(formats: &[Output], command: &Commands) -> Vec<Vec<Output>> {
+    let [_, descriptions, alignments] = count_options(command);
+    let mut ordered: Vec<Output> = formats.to_vec();
+    ordered.sort_by_key(|format| format.number <= 4);
+    if descriptions.is_none() && alignments.is_none() {
+        return vec![ordered];
+    }
+    let mut groups: Vec<(usize, Vec<Output>)> = Vec::new();
+    for format in ordered {
+        let size = hit_list_size(command, format.number);
+        match groups.iter_mut().find(|(group, _)| *group == size) {
+            Some((_, group)) => group.push(format),
+            None => groups.push((size, vec![format])),
+        }
+    }
+    groups.into_iter().map(|(_, group)| group).collect()
+}
+
+/// A search that failed.
+struct Failed {
+    /// The error of the run, when this failure fails it.
+    message: String,
+    /// What the CLI writes to standard error for the error: NCBI's message (a
+    /// `NativeError`), or `Error: ` and the error, as `main` returns it.
+    cli_stderr: Vec<u8>,
+    /// NCBI's message (a `NativeError`), which the CLI also writes to the file of `-logfile` when
+    /// the run's messages go there (`CallerStart::post`); `None` for LOSAT's own errors.
+    native: Option<Vec<u8>>,
+    /// Whether the search had written a byte of any of its formats. The host discards
+    /// the streams of a failed run, but a search that wrote nothing leaves the other
+    /// searches' streams as the CLI writes them.
+    wrote: bool,
+}
+
+impl Failed {
+    /// `error` is the engine's `anyhow::Error`, which this crate does not name.
+    fn new<E>(error: &E, wrote: bool) -> Self
+    where
+        E: std::ops::Deref<Target = dyn std::error::Error + Send + Sync + 'static>
+            + std::fmt::Display
+            + std::fmt::Debug,
+    {
+        let native = error
+            .downcast_ref::<losat::web_adapter::NativeError>()
+            .map(|native| native.message.clone().into_bytes());
+        let cli_stderr = match &native {
+            Some(native) => native.clone(),
+            None => format!("Error: {error:?}\n").into_bytes(),
+        };
+        Self {
+            message: format!("{error:#}"),
+            cli_stderr,
+            native,
+            wrote,
+        }
+    }
+}
+
+/// The name that the side files of outfmt 13 and 14 follow, as the CLI's `-out` (no directory and
+/// no extension, so that the side files have the names that the master file lists: `results_1.json`
+/// for 13 too, where an `-out` ending in `.json` lists other names than its side files have,
+/// `report::blast_xml2::files`).
+pub const SIDE_FILE_BASE: &str = "results";
+
+/// The name of the master file in the archive of outfmt 13 or 14.
+pub fn master_name(number: u32) -> String {
+    let extension = if number == 13 { "json" } else { "xml" };
+    format!("{SIDE_FILE_BASE}.{extension}")
+}
+
+/// The output of outfmt 13 or 14 (stream 4): a ZIP archive (`zip::ZipStream`) of the side files,
+/// added as the engine hands each over, and of the master file, added after the run.
+struct ArchivedFiles(std::sync::Mutex<Option<crate::zip::ZipStream<StreamWriter>>>);
+
+impl ArchivedFiles {
+    fn take(&self) -> crate::zip::ZipStream<StreamWriter> {
+        self.0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take()
+            .expect("the archive is taken once, after the run")
+    }
+}
+
+impl losat::web_adapter::FileReceiver for ArchivedFiles {
+    fn receive(&self, name: &[u8], bytes: &[u8]) -> std::io::Result<()> {
+        match self
+            .0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .as_mut()
+        {
+            Some(zip) => zip.add(name, bytes),
+            None => Err(std::io::Error::other("the archive was closed")),
+        }
+    }
+}
+
+/// What one search wrote.
+struct Searched {
+    /// The streams of the formats that were written (not those of `refused`).
+    writers: Vec<StreamWriter>,
+    recorder: RangeRecorder,
+    hits: Option<std::sync::Arc<Vec<PairwiseHit>>>,
+    ordinals: Option<Vec<usize>>,
+    /// The formats that failed alone (`FormatRefusal::FailsAlone`): each one's stream and
+    /// refusal, in the order of the formats. Their streams stay empty.
+    refused: Vec<(u32, Failed)>,
+}
+
+impl Searched {
+    /// Whether the format of `stream` failed alone.
+    fn refused(&self, stream: u32) -> bool {
+        self.refused.iter().any(|(refused, _)| *refused == stream)
+    }
+}
+
+/// One `run_local` call that writes the output formats `formats` (a group of
+/// `search_groups`), with the warnings of the CLI to `diagnostics`. A format other than the
+/// argv's own (`Output::requested`) whose report fails, at a check before its rows or in its
+/// middle (`FormatRefusal`), fails alone (`FormatRefusal::FailsAlone`, `Searched::refused`): the
+/// call writes the others, as the CLI's run of each format alone writes it; an error of the argv's
+/// own format fails the call, as it fails the CLI. The bytes that a format that failed alone had
+/// written stay with its writer, which is dropped, and its observer events with the recorder,
+/// which forgets them (`RangeRecorder::forget`); where a chunk of them reached the host already
+/// (a report that failed after 1 MiB, BLASTX's later query batch), the host is told to discard
+/// that stream (`emit::discard`).
+fn search(
+    command: Commands,
+    formats: &[Output],
+    query: &[FastaRecord],
+    subject: &[FastaRecord],
+    diagnostics: &mut (dyn std::io::Write + Send),
+) -> Result<Searched, Failed> {
+    let mut writers: Vec<StreamWriter> = formats
+        .iter()
+        .map(|format| StreamWriter::new(format.stream))
+        .collect();
     let mut recorder = RangeRecorder {
-        streams: formats.to_vec(),
+        streams: formats.iter().map(|format| format.stream).collect(),
         positions: writers.iter().map(StreamWriter::position).collect(),
         open: vec![None; formats.len()],
         out6: Vec::new(),
@@ -257,46 +945,143 @@ pub fn run(words: &[&str], query: &[FastaRecord], subject: &[FastaRecord]) -> Re
         subject: None,
         fault: None,
     };
-    let outfmts: Vec<String> = formats.iter().map(u32::to_string).collect();
-    let mut collected: Option<Vec<PairwiseHit>> = None;
+    let mut collected: Option<std::sync::Arc<Vec<PairwiseHit>>> = None;
+    // Outfmt 13 and 14: the master file goes to memory and the side files to a ZIP archive on the
+    // format's stream, to which the master file is added after the run (`ArchivedFiles`).
+    let mut archives: Vec<Option<(Vec<u8>, Arc<ArchivedFiles>)>> = formats
+        .iter()
+        .zip(writers.iter_mut())
+        .map(|(format, writer)| {
+            matches!(format.number, 13 | 14).then(|| {
+                let stream = std::mem::replace(writer, StreamWriter::new(format.stream));
+                let zip = crate::zip::ZipStream::new(stream);
+                (
+                    Vec::new(),
+                    Arc::new(ArchivedFiles(std::sync::Mutex::new(Some(zip)))),
+                )
+            })
+        })
+        .collect();
     let ordinals;
-    {
-        let mut on_hits = |hits: &[PairwiseHit]| collected = Some(hits.to_vec());
+    let outcome = {
+        let mut on_hits = |hits| collected = Some(hits);
         let mut outputs = ReportOutputs {
-            formats: outfmts
+            formats: formats
                 .iter()
                 .zip(writers.iter_mut())
-                .map(|(outfmt, writer)| FormatOutput {
-                    outfmt,
-                    sink: OutputSink::Writer(writer),
+                .zip(archives.iter_mut())
+                .map(|((format, writer), archive)| FormatOutput {
+                    outfmt: &format.outfmt,
+                    refusal: if format.requested {
+                        FormatRefusal::FailsCall
+                    } else {
+                        FormatRefusal::FailsAlone
+                    },
+                    sink: match archive {
+                        Some((master, files)) => OutputSink::Files(
+                            master,
+                            losat::web_adapter::SideFileSink::new(SIDE_FILE_BASE, files.clone()),
+                        ),
+                        None => OutputSink::Writer(writer),
+                    },
                 })
                 .collect(),
-            diagnostics: &mut diagnostics,
+            diagnostics,
             hits: Some(&mut on_hits),
             observer: Some(&mut recorder),
         };
         let result = match command {
             Commands::Blastp(args) => {
-                ordinals = searched_queries(args.query_loc.as_deref(), "BLASTP", query);
+                ordinals = searched_queries(args.query_loc.as_deref(), query);
                 run_local_blastp(args, query, subject, "", "", &mut outputs)
             }
+            // The host has no PSSM files: `-in_pssm` is refused as by `validate`
+            // (`check_tblastn_options`), before the search.
             Commands::Tblastn(args) => {
-                ordinals = searched_queries(args.query_loc.as_deref(), "TBLASTN", query);
-                run_local_tblastn(args, query, subject, &mut outputs)
+                ordinals = searched_queries(args.query_loc.as_deref(), query);
+                losat::web_adapter::refuse_tblastn_pssm_query(&args)
+                    .and_then(|()| run_local_tblastn(args, query, subject, &mut outputs))
             }
             Commands::Blastn(args) => {
-                ordinals = searched_queries(args.query_loc.as_deref(), "BLASTN", query);
+                ordinals = searched_queries(args.query_loc.as_deref(), query);
                 run_local_blastn(args, query, subject, &mut outputs)
             }
             Commands::Tblastx(args) => {
-                ordinals = searched_queries(args.query_loc.as_deref(), "TBLASTX", query);
+                ordinals = searched_queries(args.query_loc.as_deref(), query);
                 run_local_tblastx(args, query, subject, &mut outputs)
             }
-            Commands::Blastx(_) | Commands::Makedb(_) => {
+            Commands::Blastx(args) => {
+                ordinals = searched_queries(args.query_loc.as_deref(), query);
+                run_local_blastx(args, query, subject, &mut outputs)
+            }
+            Commands::Psiblast(_)
+            | Commands::Rpsblast(_)
+            | Commands::Rpstblastn(_)
+            | Commands::Makedb(_)
+            | Commands::Rpsbproc(_) => {
                 unreachable!("rejected by Program::parse")
             }
         };
-        result.map_err(|error| format!("{error:#}"))?;
+        // The refusals of the formats that failed alone, by format.
+        let refusals: Vec<_> = outputs
+            .formats
+            .iter_mut()
+            .map(|format| format.refusal.take_refused())
+            .collect();
+        (result, refusals)
+    };
+    let (outcome, refusals) = outcome;
+    // The archives: the master file after the side files and the central directory, on the
+    // format's stream again. A run that failed leaves the side files written (the host discards
+    // them).
+    for ((format, writer), archive) in formats.iter().zip(writers.iter_mut()).zip(&mut archives) {
+        let Some((master, files)) = archive.take() else {
+            continue;
+        };
+        let zip = files.take();
+        *writer = if outcome.is_ok() {
+            let mut zip = zip;
+            match zip
+                .add(master_name(format.number).as_bytes(), &master)
+                .and_then(|()| zip.finish())
+            {
+                Ok(stream) => stream,
+                Err(error) => {
+                    return Err(Failed {
+                        cli_stderr: format!("{error}\n").into_bytes(),
+                        message: format!("the archive of outfmt {}: {error}", format.number),
+                        native: None,
+                        wrote: true,
+                    })
+                }
+            }
+        } else {
+            zip.into_inner()
+        };
+    }
+    if let Err(error) = outcome {
+        let wrote = writers
+            .iter()
+            .any(|writer| writer.position().load(Ordering::SeqCst) > 0);
+        return Err(Failed::new(&error, wrote));
+    }
+    // The formats that failed alone: their writers are dropped with what they hold, the host
+    // discards what it received of them, and the recorder forgets their events.
+    let mut written = Vec::with_capacity(writers.len());
+    let mut refused = Vec::new();
+    for (index, ((format, writer), refusal)) in
+        formats.iter().zip(writers).zip(refusals).enumerate()
+    {
+        match refusal {
+            None => written.push(writer),
+            Some(error) => {
+                if writer.sent() {
+                    crate::emit::discard(format.stream);
+                }
+                recorder.forget(index);
+                refused.push((format.stream, Failed::new(&error, false)));
+            }
+        }
     }
     if let Some((hsp, _)) = recorder.open.iter().flatten().next() {
         recorder
@@ -304,16 +1089,528 @@ pub fn run(words: &[&str], query: &[FastaRecord], subject: &[FastaRecord]) -> Re
             .get_or_insert(format!("HSP {hsp} started but did not end"));
     }
     if let Some(fault) = recorder.fault.take() {
-        return Err(format!("internal error in the output ranges: {fault}"));
+        let message = format!("internal error in the output ranges: {fault}");
+        return Err(Failed {
+            cli_stderr: message.clone().into_bytes(),
+            message,
+            native: None,
+            wrote: true,
+        });
     }
+    Ok(Searched {
+        writers: written,
+        recorder,
+        hits: collected,
+        ordinals,
+        refused,
+    })
+}
+
+/// The HSPs of one (query, subject) pair, in the list's order.
+type Pairs = std::collections::HashMap<(u32, u32), Vec<usize>>;
+
+fn pairs(hits: &[PairwiseHit], only: impl Fn(usize) -> bool) -> Pairs {
+    let mut pairs = Pairs::new();
+    for (index, record) in hits.iter().enumerate() {
+        if only(index) {
+            pairs
+                .entry((record.hit.q_idx, record.hit.s_idx))
+                .or_default()
+                .push(index);
+        }
+    }
+    pairs
+}
+
+/// Whether two searches found the same HSP: every field of the `PairwiseHit`, the numbers
+/// of `f64` by their bits.
+fn same_hsp(a: &PairwiseHit, b: &PairwiseHit) -> bool {
+    let (x, y) = (&a.hit, &b.hit);
+    x.identity.to_bits() == y.identity.to_bits()
+        && x.length == y.length
+        && x.mismatch == y.mismatch
+        && x.gapopen == y.gapopen
+        && (x.q_start, x.q_end, x.s_start, x.s_end) == (y.q_start, y.q_end, y.s_start, y.s_end)
+        && x.e_value.to_bits() == y.e_value.to_bits()
+        && x.bit_score.to_bits() == y.bit_score.to_bits()
+        && x.num_ident == y.num_ident
+        && x.query_frame == y.query_frame
+        && x.query_length == y.query_length
+        && (x.q_idx, x.s_idx, x.raw_score) == (y.q_idx, y.s_idx, y.raw_score)
+        && (x.sort_query_offset, x.sort_query_end) == (y.sort_query_offset, y.sort_query_end)
+        && (x.sort_subject_offset, x.sort_subject_end)
+            == (y.sort_subject_offset, y.sort_subject_end)
+        && x.has_sort_offsets == y.has_sort_offsets
+        && x.gap_info == y.gap_info
+        && x.num_positives == y.num_positives
+        && a.query_seq == b.query_seq
+        && a.subject_seq == b.subject_seq
+        && a.query_frame == b.query_frame
+        && a.subject_frame == b.subject_frame
+        && a.positives == b.positives
+        && a.gaps == b.gaps
+        && a.subject_length == b.subject_length
+        && a.subject_title == b.subject_title
+        && a.comp_adjust_method == b.comp_adjust_method
+        && a.sum_n == b.sum_n
+}
+
+/// Gives the HSPs of the tabular search `first` the sections of format 0 from the other
+/// search, `second`, for the pairs (query, subject) whose HSPs in `second`'s format 0 are
+/// exactly those of `first`: the same count and, in order, every field of the HSP equal
+/// (`same_hsp`). A format 0 hit list
+/// of another size can keep other subjects or other HSPs of a subject (the preliminary
+/// list evicts a subject before its alignment is extended), and such a pair stays without
+/// a section. Records, rows and sections that this leaves unlinked are still correct.
+fn link_format0(
+    first: &[PairwiseHit],
+    first_recorder: &mut RangeRecorder,
+    second: &[PairwiseHit],
+    second_recorder: &RangeRecorder,
+) {
+    let headed = pairs(second, |index| {
+        second_recorder.out0.get(index).copied().flatten().is_some()
+    });
+    let ours = pairs(first, |_| true);
+    let same = same_hsp;
+    for (pair, theirs) in headed {
+        let Some(mine) = ours.get(&pair) else {
+            continue;
+        };
+        if mine.len() != theirs.len()
+            || !mine
+                .iter()
+                .zip(&theirs)
+                .all(|(&a, &b)| same(&first[a], &second[b]))
+        {
+            continue;
+        }
+        for (&a, &b) in mine.iter().zip(&theirs) {
+            for (target, source) in [
+                (&mut first_recorder.out0, &second_recorder.out0),
+                (
+                    &mut first_recorder.out0_subject,
+                    &second_recorder.out0_subject,
+                ),
+            ] {
+                if target.len() <= a {
+                    target.resize(a + 1, None);
+                }
+                target[a] = source.get(b).copied().flatten();
+            }
+        }
+    }
+}
+
+/// Whether `validate` reads the WindowMasker options where the command line reads them: after
+/// `-dust`, before the query range and the other options (`resolve_window_masker`: the check of
+/// the file of `-window_masker_db`, with the CLI's message for a format other than the two binary
+/// ones, then "at most one of" the options, then the file of `-window_masker_taxid`). Not when
+/// `-window_masker_db` names a file that is not registered: a host that validates an argv without
+/// its files (the application's control reactor) leaves the file to `run`, where a name that is
+/// not registered is the CLI's file that cannot be opened. A taxid whose file is not registered
+/// is the CLI's taxid without a file, whose error comes with the search (`batch_error`). An argv
+/// without the options is validated as before named input files.
+fn validates_window_masker(args: &losat::web_adapter::BlastnArgs) -> bool {
+    match args.window_masker_db.as_deref() {
+        Some(name) => crate::files::registered(name),
+        None => args.window_masker_taxid.is_some(),
+    }
+}
+
+/// The counts source of BLASTN's `-window_masker_db` and `-window_masker_taxid`: the named input
+/// files registered when the run starts (`files::source`), which the engine opens by the option's
+/// value, or by the taxid's name in `files::WINDOW_MASKER_PATH`, as the command line opens the
+/// file of that name. `None` without the options, so a run without them gives the engine what it
+/// gave before named input files.
+fn window_masker_counts(command: &Commands) -> Option<Arc<dyn CountsSource>> {
+    match command {
+        Commands::Blastn(args)
+            if args.window_masker_db.is_some() || args.window_masker_taxid.is_some() =>
+        {
+            Some(crate::files::source())
+        }
+        _ => None,
+    }
+}
+
+/// Gives a search's command the run's counts source (`window_masker_counts`).
+fn give_counts(
+    command: &mut Commands,
+    counts: Option<&Arc<dyn CountsSource>>,
+    settings: &ApplicationSettings,
+) {
+    if let (Commands::Blastn(args), Some(counts)) = (command, counts) {
+        give_blastn_counts(args, counts, settings);
+    }
+}
+
+/// Gives BLASTN's arguments the counts source, and with `-window_masker_taxid` the registry of
+/// `-window_masker_taxid` of the run's start (`ApplicationSettings::window_masker_registry`), as
+/// the command line gives its own: the directory `files::WINDOW_MASKER_PATH` (`START_VARIABLES`),
+/// and the posts of a registered `.ncbirc`.
+fn give_blastn_counts(
+    args: &mut losat::web_adapter::BlastnArgs,
+    counts: &Arc<dyn CountsSource>,
+    settings: &ApplicationSettings,
+) {
+    args.window_masker_counts = Some(counts.clone());
+    if args.window_masker_taxid.is_some() {
+        args.window_masker_registry = Some(settings.window_masker_registry.clone());
+    }
+}
+
+/// Runs the searches of the run and emits its streams. On failure nothing more is emitted
+/// and the host discards what it received.
+///
+/// Without `-num_descriptions` and `-num_alignments` this is one search that writes every
+/// format. With them it is one search per distinct hit list size of the formats
+/// (`search_groups`), so that each format's stream is the CLI's output for that format
+/// alone. The output of the argv's `-outfmt` (stream 4) is written by the tabular search, as the
+/// CLI writes that `-outfmt`. The HSP records follow the tabular search;
+/// a record gets the section of format 0 only where the search of format 0 has exactly its HSPs
+/// (`link_format0`) (docs/web/abi_v2.md §5, §7, §8).
+///
+/// A search of a two-search run that fails before it writes a byte of its formats, and
+/// that the options' checks reject because of its hit list size (`group_rejected`:
+/// `-num_alignments 0` for the tabular formats, a BLASTN `-num_descriptions` of 2,147,483,598
+/// or more for format 0, where N + 50 overflows the 32-bit preliminary hit list size), does
+/// not fail the run when the other search succeeds, as the CLI fails that format alone: the
+/// streams of its formats stay empty (with no tabular search there are no records). Any other
+/// error of a search (for example a thread pool that cannot start) fails the run, as does a
+/// failure after a byte was written; so do both searches failing, as the CLI fails every
+/// format.
+///
+/// Stream 3 is the CLI's standard error for the tabular formats (the tabular search's
+/// diagnostics, with its error when it failed, or the refusals of its formats that failed
+/// alone): for `-outfmt 6`, or for the argv's `-outfmt` when it has an output of its own
+/// (`outputs`). It is followed by what the CLI's standard error for format 0 adds to it (the
+/// lines of the format 0 search's diagnostics that stream 3 does not hold yet, then its error
+/// when it failed, or the refusal of format 0 when it failed alone), so that each text comes
+/// once (`Diagnostics`).
+pub fn run(words: &[&str], query: &[FastaRecord], subject: &[FastaRecord]) -> Result<(), String> {
+    let files = Arc::new(RunFileArchive::default());
+    let run_files = RunFiles::Receiver(files.clone());
+    let mut diagnostics = StreamWriter::new(STREAM_DIAGNOSTICS);
+    let (result, started) = match start(words, &run_files, &mut diagnostics) {
+        Ok(mut started) => (
+            run_started(words, query, subject, &mut started, &mut diagnostics),
+            Some(started),
+        ),
+        Err((message, started)) => (Err(message), started.map(|started| *started)),
+    };
+    // The run's files (the file of `-logfile`), after the run, whether it failed or not.
+    let handed = started.map_or(Ok(()), CallerStart::finish);
+    let emitted = handed.and_then(|()| files.emit());
+    result.and(emitted.map_err(|error| format!("the files of the run: {error}")))
+}
+
+/// The files of a run besides its outputs (the file of `-logfile`), which the engine hands over
+/// when the run ends (`RunFiles::Receiver`), emitted as a ZIP archive on `STREAM_RUN_FILES` after
+/// the run, whether it succeeded or failed (docs/web/abi_v2.md §5), and only when there are any.
+#[derive(Default)]
+struct RunFileArchive(std::sync::Mutex<Vec<(Vec<u8>, Vec<u8>)>>);
+
+impl RunFileArchive {
+    /// Emits the archive of the files (stored entries, as stream 4's, `zip::ZipStream`). `Err` when
+    /// the archive cannot hold a file (a name of 65,536 bytes or more).
+    fn emit(&self) -> std::io::Result<()> {
+        let files = std::mem::take(
+            &mut *self
+                .0
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()),
+        );
+        if files.is_empty() {
+            return Ok(());
+        }
+        let mut zip = crate::zip::ZipStream::new(StreamWriter::new(STREAM_RUN_FILES));
+        for (name, bytes) in &files {
+            zip.add(name, bytes)?;
+        }
+        zip.finish()?.finish();
+        Ok(())
+    }
+}
+
+impl losat::web_adapter::FileReceiver for RunFileArchive {
+    fn receive(&self, name: &[u8], bytes: &[u8]) -> std::io::Result<()> {
+        self.0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .push((name.to_vec(), bytes.to_vec()));
+        Ok(())
+    }
+}
+
+/// `run` after the application start `started` (`started_command`: the argv, the settings that
+/// LOSAT refuses, a dry run's end), then the searches. The messages that the command line writes
+/// to its standard error during the run go where the run's messages go, as they come
+/// (`CallerStart::sink`: the file of `-logfile` in TBLASTX, else stream 3), and the error that ends
+/// the run with an NCBI message is posted there too (`CallerStart::post`), as on the command line.
+fn run_started(
+    words: &[&str],
+    query: &[FastaRecord],
+    subject: &[FastaRecord],
+    started: &mut CallerStart,
+    diagnostics: &mut StreamWriter,
+) -> Result<(), String> {
+    let Some(parsed) = started_command(words, started)? else {
+        diagnostics.finish();
+        return Ok(());
+    };
+    let settings = started.settings()?.clone();
+    let mut posted = None;
+    let searched = {
+        let mut sink = started.sink(diagnostics);
+        search_all(
+            parsed,
+            words,
+            query,
+            subject,
+            &settings,
+            &mut sink,
+            &mut posted,
+        )
+    };
+    let Done {
+        mut writers,
+        records,
+    } = match searched {
+        Ok(done) => done,
+        Err(message) => {
+            if let Some(text) = posted {
+                started.post(&text);
+            }
+            return Err(message);
+        }
+    };
     for writer in &mut writers {
         writer.finish();
     }
     diagnostics.finish();
-    if let Some(hits) = collected {
+    if let Some((hits, recorder, ordinals)) = records {
         emit_hit_records(&hits, &recorder, ordinals.as_deref());
     }
     Ok(())
+}
+
+/// The HSP records of the tabular search (`emit_hit_records`): its hits, the recorder of their
+/// ranges and the hits' ordinals.
+type HitRecords = (Arc<Vec<PairwiseHit>>, RangeRecorder, Option<Vec<usize>>);
+
+/// What the searches of a run wrote (`search_all`): the streams of the formats, and the HSP
+/// records of the tabular search.
+struct Done {
+    writers: Vec<StreamWriter>,
+    records: Option<HitRecords>,
+}
+
+/// The searches of a run of the parsed argv `parsed` (`run`): the messages that the command line
+/// writes to its standard error go to `diagnostics`; for an error that ends the run, `posted` gets
+/// the NCBI message that the command line writes for it (`Failed::native`).
+fn search_all(
+    parsed: (Program, Commands, Requested),
+    words: &[&str],
+    query: &[FastaRecord],
+    subject: &[FastaRecord],
+    settings: &ApplicationSettings,
+    diagnostics: &mut (dyn std::io::Write + Send),
+    posted: &mut Option<Vec<u8>>,
+) -> Result<Done, String> {
+    let (program, command, requested) = parsed;
+    let groups = search_groups(&outputs(program, &requested), &command);
+    let custom_accepted = custom_handler_check(program, requested.custom.as_deref()).is_ok();
+    let threads = num_threads(&command);
+    let counts = window_masker_counts(&command);
+    let mut command = Some(command);
+    // Each search: what it wrote or why it failed, and (after the first) its diagnostics.
+    let mut outcomes: Vec<(Result<Searched, Failed>, Vec<u8>)> = Vec::new();
+    // What the first search of a run of several wrote to stream 3.
+    let mut first_diagnostics = Vec::new();
+    // The searches of the run share one thread pool (`with_run_pool`): a browser holds a thread
+    // worker for every thread that may start, and the threads of a pool may not have returned when
+    // the next pool starts, so each pool of its own needed thread workers of its own.
+    losat::web_adapter::with_run_pool(threads, program.name(), || -> Result<(), String> {
+        for group in &groups {
+            let mut command = match command.take() {
+                Some(command) => command,
+                None => parse(words)?.1,
+            };
+            give_counts(&mut command, counts.as_ref(), settings);
+            let mut scratch = Vec::new();
+            // Whether the options' checks reject this search, found before `search` takes the
+            // command.
+            let rejected = group_rejected(&mut command, group);
+            // The first search writes to stream 3 as it goes, kept where a next search follows;
+            // the next searches' warnings, which repeat the reader's and the queries' warnings of
+            // the first, are held until the searches end (`Diagnostics`).
+            let result = match (outcomes.is_empty(), groups.len() > 1) {
+                (true, false) => search(command, group, query, subject, &mut *diagnostics),
+                (true, true) => search(
+                    command,
+                    group,
+                    query,
+                    subject,
+                    &mut Kept {
+                        sink: &mut *diagnostics,
+                        copy: &mut first_diagnostics,
+                    },
+                ),
+                (false, _) => search(command, group, query, subject, &mut scratch),
+            };
+            // The CLI rejects an `-outfmt` whose custom delimiter a field uses: the failure of its
+            // search (the tabular one) is never tolerated.
+            if let Err(failed) = &result {
+                if fails_run(failed, rejected && custom_accepted) {
+                    posted.clone_from(&failed.native);
+                    return Err(failed.message.clone());
+                }
+            }
+            outcomes.push((result, scratch));
+        }
+        Ok(())
+    })?;
+    if outcomes.iter().all(|(result, _)| result.is_err()) {
+        // The CLI fails every format; the error is that of the tabular formats.
+        return Err(match outcomes.remove(0).0 {
+            Err(failed) => {
+                *posted = failed.native;
+                failed.message
+            }
+            Ok(_) => unreachable!("every search failed"),
+        });
+    }
+    // Stream 3: the CLI's standard error of each search in turn, its warnings and then its error
+    // or the refusals of its formats that failed alone, each text once (`Diagnostics`).
+    let mut texts = Diagnostics::after(&first_diagnostics);
+    for (position, (result, scratch)) in outcomes.iter().enumerate() {
+        if position > 0 {
+            texts.warnings(scratch, &mut *diagnostics);
+        }
+        match result {
+            Err(failed) => texts.error(&failed.cli_stderr, &mut *diagnostics),
+            Ok(done) => {
+                for (_, refused) in &done.refused {
+                    texts.error(&refused.cli_stderr, &mut *diagnostics);
+                }
+            }
+        }
+    }
+    let mut searched: Vec<Searched> = Vec::new();
+    let mut tabular_failed = false;
+    for (position, (result, _)) in outcomes.into_iter().enumerate() {
+        match result {
+            Ok(done) => searched.push(done),
+            Err(_) => tabular_failed |= position == 0,
+        }
+    }
+    let mut writers = Vec::new();
+    let mut records = None;
+    if !tabular_failed {
+        let mut first = searched.remove(0);
+        if let Some(hits) = &first.hits {
+            for other in searched.iter().filter(|other| !other.refused(0)) {
+                if let Some(second) = &other.hits {
+                    link_format0(hits, &mut first.recorder, second, &other.recorder);
+                }
+            }
+        }
+        writers.append(&mut first.writers);
+        // The HSP records point into stream 6 (§8): none where it failed alone.
+        if !first.refused(6) {
+            records = first
+                .hits
+                .map(|hits| (hits, first.recorder, first.ordinals));
+        }
+    }
+    for other in &mut searched {
+        writers.append(&mut other.writers);
+    }
+    Ok(Done { writers, records })
+}
+
+/// A writer to `sink` that keeps a copy of what it writes in `copy` (`search_all`: the first
+/// search's diagnostics, which the next searches' warnings repeat).
+struct Kept<'w> {
+    sink: &'w mut (dyn std::io::Write + Send),
+    copy: &'w mut Vec<u8>,
+}
+
+impl std::io::Write for Kept<'_> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let written = self.sink.write(buf)?;
+        self.copy.extend_from_slice(&buf[..written]);
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.sink.flush()
+    }
+}
+
+/// Stream 3 of a run (`search_all`, docs/web/abi_v2.md §5): the CLI's standard error of each
+/// search in turn, where each text comes once. A search after the first writes only the lines of
+/// its warnings that stream 3 does not hold yet: the reader's and the queries' warnings, which
+/// every search of the run writes (up to the place where its formats end), come with the first
+/// search, and so does a formatting handler's line that both searches write (`Examining 5 or
+/// more matches`); a search after one that failed before its warnings writes them. The errors of
+/// the searches that failed and the refusals of the formats that failed alone follow the
+/// warnings of their search, each once (streams 6 and 7 of a search stop at the same row).
+struct Diagnostics<'t> {
+    /// The lines that stream 3 holds, with the number of times it holds each.
+    lines: std::collections::HashMap<&'t [u8], usize>,
+    /// The errors that stream 3 holds.
+    errors: Vec<&'t [u8]>,
+}
+
+impl<'t> Diagnostics<'t> {
+    /// Stream 3 after the first search's warnings `first` (what it wrote to stream 3 as it
+    /// went).
+    fn after(first: &'t [u8]) -> Self {
+        let mut texts = Diagnostics {
+            lines: std::collections::HashMap::new(),
+            errors: Vec::new(),
+        };
+        texts.hold(first);
+        texts
+    }
+
+    /// Stream 3 holds `text` (one more time for each of its lines).
+    fn hold(&mut self, text: &'t [u8]) {
+        for line in text.split_inclusive(|&byte| byte == b'\n') {
+            *self.lines.entry(line).or_default() += 1;
+        }
+    }
+
+    /// The warnings of a search after the first, `text`: a line is written to `sink` where the
+    /// search writes it more times than stream 3 holds it (its n-th copy of a line repeats the
+    /// n-th copy that stream 3 holds).
+    fn warnings(&mut self, text: &'t [u8], sink: &mut dyn std::io::Write) {
+        let mut copies: std::collections::HashMap<&'t [u8], usize> =
+            std::collections::HashMap::new();
+        for line in text.split_inclusive(|&byte| byte == b'\n') {
+            let copy = copies.entry(line).or_default();
+            *copy += 1;
+            if *copy > self.lines.get(line).copied().unwrap_or(0) {
+                let _ = sink.write_all(line);
+            }
+        }
+        for (line, copies) in copies {
+            let held = self.lines.entry(line).or_default();
+            *held = (*held).max(copies);
+        }
+    }
+
+    /// An error of a search, or a refusal of a format that failed alone, `text`: written to
+    /// `sink` unless stream 3 holds it.
+    fn error(&mut self, text: &'t [u8], sink: &mut dyn std::io::Write) {
+        if !self.errors.contains(&text) {
+            let _ = sink.write_all(text);
+            self.errors.push(text);
+            self.hold(text);
+        }
+    }
 }
 
 /// Emits one JSON object per HSP on stream 1 (docs/web/abi_v2.md §8); `ordinals` maps the
@@ -369,6 +1666,10 @@ fn emit_hit_records(hits: &[PairwiseHit], recorder: &RangeRecorder, ordinals: Op
 }
 
 #[cfg(test)]
+#[path = "run_start_tests.rs"]
+mod start_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -379,21 +1680,62 @@ mod tests {
             parse(&words),
             Ok((Program::Blastp, Commands::Blastp(_)))
         ));
-        for owned in ["-outfmt", "-out", "-outfmt=6"] {
+        for owned in ["-out", "-out=x"] {
             let error = parse(&["blastp", "-query", "q", "-subject", "s", owned, "6"]).unwrap_err();
             assert!(error.contains("is not accepted"), "{owned}: {error}");
         }
-        assert!(parse(&["blastx", "-query", "q", "-subject", "s"]).is_err());
+        // -num_descriptions and -num_alignments are accepted (also as `-x=v`),
+        // parsed as on the command line; -max_target_seqs excludes both (clap's conflict).
+        for program in ["blastp", "tblastn", "blastn", "tblastx", "blastx"] {
+            for option in [
+                &["-num_descriptions", "3"][..],
+                &["-num_alignments", "0"],
+                &["-num_alignments=3"],
+            ] {
+                let words = [&[program, "-query", "q", "-subject", "s"][..], option].concat();
+                assert!(parse(&words).is_ok(), "{program} {option:?}");
+                assert!(validate(&words).is_ok(), "{program} {option:?}");
+            }
+            let words = [
+                program,
+                "-query",
+                "q",
+                "-subject",
+                "s",
+                "-max_target_seqs",
+                "3",
+            ];
+            assert!(parse(&words).is_ok(), "{program}");
+            for option in ["-num_descriptions", "-num_alignments"] {
+                let both = [&words[..], &[option, "3"]].concat();
+                let cli = losat::web_adapter::try_parse_cli(
+                    std::iter::once("losat").chain(both.iter().copied()),
+                )
+                .unwrap_err();
+                assert_eq!(
+                    parse(&both).unwrap_err(),
+                    losat::web_adapter::command_line_message(&cli, false),
+                    "{program} {option}"
+                );
+                assert!(parse(&both).unwrap_err().contains("cannot be used with"));
+            }
+        }
+        assert!(matches!(
+            parse(&["blastx", "-query", "q", "-subject", "s"]),
+            Ok((Program::Blastx, Commands::Blastx(_)))
+        ));
+        assert!(parse(&["psiblast", "-query", "q", "-subject", "s"]).is_err());
         // An unknown program and a parser error are the CLI's messages.
         for words in [&["nosuch"][..], &["tblastx", "-query", "q"][..]] {
-            let cli = LOSAT::cli::try_parse_from::<Cli, _, _>(
-                std::iter::once("LOSAT").chain(words.iter().copied()),
+            let cli = losat::web_adapter::try_parse_cli(
+                std::iter::once("losat").chain(words.iter().copied()),
             )
             .map(|_| ())
-            .map_err(|error| LOSAT::cli::render_message(&error));
+            .map_err(|error| losat::web_adapter::command_line_message(&error, false));
             assert_eq!(parse(words).map(|_| ()), cli, "{words:?}");
         }
         assert_eq!(Program::Tblastx.formats(), &[0, 6, 7]);
+        assert_eq!(Program::Blastx.formats(), &[0, 6, 7]);
         // validate rejects BLASTN scoring that NCBI rejects, with NCBI's message.
         // validate reads BLASTN's -dust as the run does.
         let error =
@@ -415,7 +1757,16 @@ mod tests {
             error.starts_with("BLAST query/options error: Greedy extension"),
             "{error}"
         );
-        let error = validate(&unsupported).unwrap_err();
+        // The tables depend on the query's letters, so `run` checks them (WA-FM-01,
+        // `blastn_scores_without_table_row_are_left_to_the_run`).
+        assert!(validate(&unsupported).is_ok());
+        let letters = b"ACGTACGTAGCTAGCTAGGATCGATCGATCGTAGCTAGCTAGCTAGGCTAGCATCGATCGA";
+        let error = run(
+            &unsupported,
+            &[FastaRecord::new("Query_1", b"q", letters)],
+            &[FastaRecord::new("Subject_1", b"s", letters)],
+        )
+        .unwrap_err();
         assert!(
             error.starts_with("BLAST engine error: Error: Substitution scores 1 and -6"),
             "{error}"
@@ -458,18 +1809,38 @@ mod tests {
         );
         // The options require each other: a parser error, the CLI's message.
         assert!(validate(&[&dc[..], &["-template_type", "coding"]].concat()).is_err());
-        // validate reports TBLASTX's checks of its options alone, as the run does.
+        // validate reports TBLASTX's checks of its options alone, as the run does; the one-hit
+        // word finder (`-window_size 0`) runs as the CLI runs it (line RG, X2).
         let tblastx = ["tblastx", "-query", "q", "-subject", "s"];
         assert!(validate(&tblastx).is_ok());
+        assert!(validate(&[&tblastx[..], &["-window_size", "0"]].concat()).is_ok());
+        let error = validate(&[&tblastx[..], &["-evalue", "0"]].concat()).unwrap_err();
+        assert!(
+            error.starts_with("BLAST query/options error: expect value"),
+            "{error}"
+        );
+        // validate reports BLASTX's checks of each search's options, as the run does (NCBI's
+        // errors and LOSAT's refusals); the tabular search that -num_alignments 0 rejects alone
+        // is tolerated, as `run` tolerates it.
+        let blastx = ["blastx", "-query", "q", "-subject", "s"];
+        assert!(validate(&blastx).is_ok());
+        assert!(validate(&[&blastx[..], &["-num_alignments", "0"]].concat()).is_ok());
         for (extra, start) in [
-            (["-evalue", "0"], "BLAST query/options error: expect value"),
             (
-                ["-window_size", "0"],
-                "-window_size 0 (the one-hit word finder)",
+                &["-evalue", "0"][..],
+                "BLAST query/options error: expect value",
+            ),
+            (
+                &["-matrix", "IDENTITY"],
+                "BLAST query/options error: IDENTITY is not a supported matrix",
+            ),
+            (
+                &["-num_descriptions", "0", "-num_alignments", "0"],
+                "BLAST query/options error: No hits are being saved",
             ),
         ] {
-            let error = validate(&[&tblastx[..], &extra[..]].concat()).unwrap_err();
-            assert!(error.starts_with(start), "{error}");
+            let error = validate(&[&blastx[..], extra].concat()).unwrap_err();
+            assert!(error.starts_with(start), "{extra:?}: {error}");
         }
         // An error of the CLI parser keeps the CLI's message.
         for words in [
@@ -493,16 +1864,129 @@ mod tests {
                 "7",
             ][..],
         ] {
-            let cli = LOSAT::cli::try_parse_from::<Cli, _, _>(
-                ["LOSAT"].into_iter().chain(words.iter().copied()),
+            let cli = losat::web_adapter::try_parse_cli(
+                ["losat"].into_iter().chain(words.iter().copied()),
             )
             .unwrap_err();
             assert_eq!(
                 parse(words).unwrap_err(),
-                LOSAT::cli::render_message(&cli),
+                losat::web_adapter::command_line_message(&cli, false),
                 "{words:?}"
             );
         }
+    }
+
+    /// The text a run wrote on `stream`.
+    fn emitted(stream: u32) -> String {
+        let bytes = crate::emit::EMITTED.with(|emitted| {
+            emitted
+                .borrow()
+                .iter()
+                .filter(|(number, _)| *number == stream)
+                .flat_map(|(_, bytes)| bytes.clone())
+                .collect::<Vec<u8>>()
+        });
+        String::from_utf8(bytes).unwrap()
+    }
+
+    // WA-FM-01. The CLI meets the Karlin-Altschul tables (scores and gap costs without a row,
+    // LOSAT's limit of greedy gap costs) only when some query context has an ungapped
+    // Karlin-Altschul block (`context_blocks`), which depends on the query's letters: a query
+    // of N only has none, and the same scores give a warning and rc 0. `validate` has no query,
+    // so it makes the checks of the options only, and `run` rejects with the CLI's message and
+    // exit code (`validate` accepts a subset of what the CLI accepts).
+    #[test]
+    fn blastn_scores_without_table_row_are_left_to_the_run() {
+        let megablast = ["blastn", "-query", "q", "-subject", "s"];
+        let blastn = [&megablast[..], &["-task", "blastn"]].concat();
+        let with = |base: &[&str], extra: &[&str]| validate(&[base, extra].concat());
+        // The scores of the symptom: no table row, and a pair that the CLI rejects for some
+        // queries.
+        for base in [&megablast[..], &blastn[..]] {
+            for pair in [
+                &["-reward", "7"][..],
+                &["-reward", "7", "-penalty", "-2"],
+                &["-reward", "3", "-penalty", "-1"],
+                &["-reward", "4", "-penalty", "-1"],
+                &["-reward", "5", "-penalty", "-1"],
+                &["-reward", "2", "-penalty", "-1"],
+            ] {
+                assert_eq!(with(base, pair), Ok(()), "{base:?} {pair:?}");
+            }
+        }
+        // The checks of the options stand: NCBI's and LOSAT's refusals.
+        let error = with(&megablast, &["-reward", "7", "-evalue", "0"]).unwrap_err();
+        assert!(
+            error.starts_with("BLAST query/options error: expect value"),
+            "{error}"
+        );
+        let gaps = [
+            "-reward",
+            "3",
+            "-penalty",
+            "-1",
+            "-gapopen",
+            "5",
+            "-gapextend",
+            "0",
+        ];
+        let error = with(&blastn, &gaps).unwrap_err();
+        assert!(
+            error.contains("gap extension penalty cannot be 0"),
+            "{error}"
+        );
+        let error = with(&megablast, &["-reward", "0"]).unwrap_err();
+        assert!(error.contains("a reward of 0"), "{error}");
+
+        // `run` meets the tables with the query's letters, as the CLI does.
+        let search = |base: &[&str], extra: &[&str], letters: &[u8]| {
+            crate::emit::EMITTED.with(|emitted| emitted.borrow_mut().clear());
+            let query = [FastaRecord::new("Query_1", b"mq1 query", letters)];
+            let subject = [FastaRecord::new("Subject_1", b"ms1", ACGT)];
+            let result = run(&[base, extra].concat(), &query, &subject);
+            (
+                result,
+                emitted(crate::emit::STREAM_DIAGNOSTICS),
+                emitted(crate::emit::STREAM_HITS),
+            )
+        };
+        const ACGT: &[u8] = b"ACGTACGTAGCTAGCTAGGATCGATCGATCGTAGCTAGCTAGCTAGGCTAGCATCGATCGA";
+        const NNNN: &[u8] = b"NNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN";
+        const WARNING: &str =
+            "Warning: [blastn] Query_1 mq1 query: Could not calculate ungapped Karlin-Altschul";
+        // An expected score that is not negative (no block for ACGT): a warning, no hit.
+        for base in [&megablast[..], &blastn[..]] {
+            for pair in [
+                &["-reward", "3", "-penalty", "-1"][..],
+                &["-reward", "5", "-penalty", "-1"],
+            ] {
+                let (result, diagnostics, hits) = search(base, pair, ACGT);
+                assert_eq!(result, Ok(()), "{base:?} {pair:?}");
+                assert!(diagnostics.starts_with(WARNING), "{diagnostics}");
+                assert_eq!(hits, "");
+            }
+        }
+        let (result, diagnostics, _) = search(&megablast, &["-reward", "7"], ACGT);
+        assert_eq!(result, Ok(()));
+        assert!(diagnostics.starts_with(WARNING), "{diagnostics}");
+        // A query of N only has no block for any scores: `-task blastn -reward 7` is a warning.
+        let (result, diagnostics, hits) = search(&blastn, &["-reward", "7"], NNNN);
+        assert_eq!(result, Ok(()));
+        assert!(diagnostics.starts_with(WARNING), "{diagnostics}");
+        assert_eq!(hits, "");
+        // A query of A, C, G and T has a block for 7 and -3, which has no row: the CLI's error.
+        let (result, _, _) = search(&blastn, &["-reward", "7"], ACGT);
+        let error = result.unwrap_err();
+        assert_eq!(
+            error.trim_end(),
+            "BLAST engine error: Error: Substitution scores 7 and -3 are not supported"
+        );
+        // Letters of ambiguity put a block under scores whose expected score is 0: (3, -1) with
+        // a B (LOSAT's own limit of the gap costs, or NCBI's table error, as the CLI).
+        let mut ambiguous = ACGT.to_vec();
+        ambiguous.extend_from_slice(b"B");
+        let (result, _, _) = search(&megablast, &["-reward", "3", "-penalty", "-1"], &ambiguous);
+        assert!(result.is_err());
     }
 
     fn recorder() -> RangeRecorder {
@@ -521,6 +2005,17 @@ mod tests {
 
     // LOSAT Web gives the engine subject records: BLASTP's `-db` (a database read from
     // files, CLI only until LOSAT Web takes a database) is rejected by `validate` and by
+    // The CLI writes these records' ids from the option; a run here has read them without it.
+    #[test]
+    fn parse_deflines_is_rejected() {
+        for program in ["blastp", "tblastn", "blastn", "tblastx", "blastx"] {
+            let words = [program, "-query", "q", "-subject", "s", "-parse_deflines"];
+            let expected = "-parse_deflines is not supported in the browser yet";
+            assert_eq!(validate(&words).unwrap_err(), expected);
+            assert_eq!(run(&words, &[], &[]).unwrap_err(), expected);
+        }
+    }
+
     // `run`, before any search.
     #[test]
     fn a_database_search_is_rejected() {
@@ -528,14 +2023,14 @@ mod tests {
         let error = validate(&words).unwrap_err();
         assert_eq!(
             error,
-            "-db (a database search) is not supported by LOSAT Web yet"
+            "-db (a database search) is not supported in the browser yet"
         );
         let protein = b"MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQ";
         let query = [FastaRecord::new("Query_1", b"q", protein)];
         let subject = [FastaRecord::new("Subject_1", b"s", protein)];
         assert_eq!(
             run(&words, &query, &subject).unwrap_err(),
-            "-db (a database search) is not supported by LOSAT Web yet"
+            "-db (a database search) is not supported in the browser yet"
         );
         // `-db` with `-subject` is the parser's conflict, as on the command line.
         let both = ["blastp", "-query", "q", "-subject", "s", "-db", "swissprot"];
@@ -590,9 +2085,1890 @@ mod tests {
         assert!(q_idx(&words).iter().all(|&index| index == 1));
         let ranged = [&words[..], &["-query_loc", "5-40"]].concat();
         assert!(q_idx(&ranged).iter().all(|&index| index == 1));
-        let ordinals = searched_queries(Some("5-40"), "BLASTP", &query).unwrap();
+        let ordinals = searched_queries(Some("5-40"), &query).unwrap();
         assert_eq!(ordinals, vec![2]);
-        assert_eq!(searched_queries(None, "BLASTP", &query), None);
+        assert_eq!(searched_queries(None, &query), None);
+    }
+
+    fn fasta(text: &[u8]) -> Vec<FastaRecord> {
+        let text = std::str::from_utf8(text).unwrap();
+        text.split('>')
+            .filter(|entry| !entry.is_empty())
+            .map(|entry| {
+                let (name, residues) = entry.split_once('\n').unwrap();
+                FastaRecord::new(name, name.as_bytes(), residues.trim_end().as_bytes())
+            })
+            .collect()
+    }
+
+    /// The program's formats `numbers` (`Program::formats`), as a search group holds them.
+    fn formats(numbers: &[u32]) -> Vec<Output> {
+        numbers
+            .iter()
+            .map(|&number| Output::format(number))
+            .collect()
+    }
+
+    /// Bytes as text, so that a failed comparison prints readable text.
+    fn text(bytes: &[u8]) -> String {
+        String::from_utf8_lossy(bytes).into_owned()
+    }
+
+    /// The bytes of each stream that `run` emitted, joined.
+    /// The streams of a run as a host keeps them (docs/web/abi_v2.md §5): each stream's chunks in
+    /// order, and for each signal of stream 9, what came of the stream it names dropped (stream 9
+    /// itself holds the signals).
+    fn streams(
+        words: &[&str],
+        query: &[FastaRecord],
+        subject: &[FastaRecord],
+    ) -> Result<std::collections::BTreeMap<u32, Vec<u8>>, String> {
+        crate::emit::EMITTED.with(|emitted| emitted.borrow_mut().clear());
+        run(words, query, subject)?;
+        let mut streams = std::collections::BTreeMap::new();
+        crate::emit::EMITTED.with(|emitted| {
+            for (stream, bytes) in emitted.borrow().iter() {
+                if *stream == crate::emit::STREAM_DISCARD {
+                    let discarded = u32::from_le_bytes(bytes[..].try_into().unwrap());
+                    streams.insert(discarded, Vec::new());
+                }
+                streams
+                    .entry(*stream)
+                    .or_insert_with(Vec::new)
+                    .extend_from_slice(bytes);
+            }
+        });
+        Ok(streams)
+    }
+
+    /// The streams that the signals of stream 9 of `streams` discard, in order.
+    fn discarded(streams: &std::collections::BTreeMap<u32, Vec<u8>>) -> Vec<u32> {
+        streams
+            .get(&crate::emit::STREAM_DISCARD)
+            .map_or(&[][..], Vec::as_slice)
+            .chunks(4)
+            .map(|signal| u32::from_le_bytes(signal.try_into().unwrap()))
+            .collect()
+    }
+
+    // The searches of a run: one per distinct hit list size of the formats 0, 6 and 7 (NCBI
+    // `blast_args.cpp:2894-2973`), the tabular formats first; without -num_descriptions and
+    // -num_alignments the one search of the program's formats, the tabular ones first.
+    #[test]
+    fn a_run_searches_once_for_each_hit_list_size() {
+        let groups = |program: &str, options: &[&str]| {
+            let words = [&[program, "-query", "q", "-subject", "s"][..], options].concat();
+            let (program, command, requested) = parse_run(&words).unwrap();
+            search_groups(&outputs(program, &requested), &command)
+                .iter()
+                .map(|group| group.iter().map(|output| output.stream).collect())
+                .collect::<Vec<Vec<u32>>>()
+        };
+        let one = vec![vec![6, 7, 0]];
+        let one_tabular_first = vec![vec![6, 7, 0]];
+        let two = vec![vec![6, 7], vec![0]];
+        for program in ["blastp", "tblastn", "blastn", "tblastx", "blastx"] {
+            for (options, expected) in [
+                (&[][..], &one),
+                (&["-max_target_seqs", "3"], &one),
+                // The hit list of format 0 is max(-num_descriptions, -num_alignments), with
+                // 500 and 250 for the one that is not given; the tabular formats' is
+                // -num_alignments, or 500.
+                (&["-num_descriptions", "500"], &one_tabular_first),
+                (&["-num_descriptions", "3"], &two),
+                (&["-num_alignments", "600"], &one_tabular_first),
+                (&["-num_alignments", "3"], &two),
+                (&["-num_alignments", "0"], &two),
+                (
+                    &["-num_descriptions", "2", "-num_alignments", "4"],
+                    &one_tabular_first,
+                ),
+                (&["-num_descriptions", "4", "-num_alignments", "2"], &two),
+                (
+                    &["-num_descriptions", "0", "-num_alignments", "0"],
+                    &one_tabular_first,
+                ),
+            ] {
+                assert_eq!(&groups(program, options), expected, "{program} {options:?}");
+            }
+            // The output of the argv's -outfmt (stream 4) has the hit list size of 6 and 7: it
+            // joins the tabular search, first, and adds none.
+            for (options, expected) in [
+                (&["-outfmt", "6 qseqid"][..], vec![vec![4, 6, 7, 0]]),
+                (
+                    &["-outfmt", "7 std qcovs", "-num_alignments", "3"],
+                    vec![vec![4, 6, 7], vec![0]],
+                ),
+                (
+                    &["-outfmt=6 sseqid", "-num_descriptions", "500"],
+                    vec![vec![4, 6, 7, 0]],
+                ),
+                (&["-outfmt", "7"], vec![vec![6, 7, 0]]),
+            ] {
+                assert_eq!(groups(program, options), expected, "{program} {options:?}");
+            }
+        }
+    }
+
+    // -outfmt is read as the CLI reads it, with the CLI's messages; 0, 6 and 7 add no output, 6 and
+    // 7 with words after the number add one (WA2-OP-03, Owner 2026-11-05), and so does every other
+    // format that the CLI writes (W11), 13 and 14 without the CLI's need of -out.
+    #[test]
+    fn outfmt_is_read_as_on_the_command_line() {
+        let custom = |program: &str, outfmt: &str| {
+            parse_run(&[program, "-query", "q", "-subject", "s", "-outfmt", outfmt])
+                .map(|(_, _, requested)| requested.custom)
+        };
+        for program in ["blastp", "tblastn", "blastn", "tblastx", "blastx"] {
+            for outfmt in ["0", "6", "7", " 7 ", "0 qseqid", "+6"] {
+                assert_eq!(custom(program, outfmt), Ok(None), "{program} {outfmt:?}");
+            }
+            for outfmt in [
+                "6 qseqid sseqid pident",
+                "7 std qcovs",
+                "6 std",
+                "6 delim=,",
+                " 6 -qseqid ",
+                "+7 sseqid",
+            ] {
+                assert_eq!(
+                    custom(program, outfmt),
+                    Ok(Some(outfmt.to_string())),
+                    "{program} {outfmt:?}"
+                );
+            }
+            // The -flag=value form, and the arguments come back with the CLI's default.
+            let words = [program, "-query", "q", "-subject", "s", "-outfmt=6 qseqid"];
+            let (_, mut command, given) = parse_run(&words).unwrap();
+            assert_eq!(given.custom.as_deref(), Some("6 qseqid"));
+            assert_eq!(outfmt_of(&mut command), "0");
+            // Every other format that the CLI writes adds an output, with or without words (W11).
+            for outfmt in [
+                "5",
+                "8",
+                "9",
+                "10",
+                "12",
+                "15",
+                "16",
+                "20",
+                " 5 ",
+                "+010",
+                "10 qseqid",
+                "20 delim=| std",
+                "5 qseqid",
+                "11",
+                "13",
+                "14",
+                "14 qseqid",
+            ] {
+                assert_eq!(
+                    custom(program, outfmt),
+                    Ok(Some(outfmt.to_string())),
+                    "{program} {outfmt:?}"
+                );
+                let words = [program, "-query", "q", "-subject", "s", "-outfmt", outfmt];
+                assert_eq!(validate(&words), Ok(()), "{program} {outfmt:?}");
+            }
+            // Every program writes the query-anchored formats 1 to 4 (line RG T3: BLASTP in T3a,
+            // BLASTN and TBLASTN in T3b, BLASTX and TBLASTX in T3c), each an output of its own
+            // without the words after the number, which the CLI drops.
+            let anchored: &[(&str, &str)] = &[
+                ("1", "1"),
+                ("2", "2"),
+                ("3", "3"),
+                ("4", "4"),
+                (" 3 ", "3"),
+                ("+02", "2"),
+                ("1 qseqid", "1"),
+                ("4 std", "4"),
+            ];
+            for &(outfmt, number) in anchored {
+                assert_eq!(
+                    custom(program, outfmt),
+                    Ok(Some(number.to_string())),
+                    "{program} {outfmt:?}"
+                );
+                let words = [program, "-query", "q", "-subject", "s", "-outfmt", outfmt];
+                assert_eq!(validate(&words), Ok(()), "{program} {outfmt:?}");
+            }
+            // What the CLI rejects, with its message.
+            let engine = engine_program(Program::parse(program).unwrap());
+            let rejected: &[&str] = &["abc", "99", "6\tqseqid"];
+            for &outfmt in rejected {
+                let cli = losat::web_adapter::parse_formatting_string(outfmt)
+                    .and_then(|choice| {
+                        losat::web_adapter::report_format(&choice, engine, None)?;
+                        losat::web_adapter::formatting_handler_check(&choice, engine)
+                    })
+                    .unwrap_err();
+                assert_eq!(
+                    custom(program, outfmt),
+                    Err(format!("{cli:#}")),
+                    "{program} {outfmt:?}"
+                );
+            }
+            // The formatting handler's check of a custom delimiter comes where the CLI makes it:
+            // after the ranges (and BLASTN's query options), in validate and in the engine's run.
+            let conflict = "6 delim=; qseqid staxids";
+            assert_eq!(custom(program, conflict), Ok(Some(conflict.to_string())));
+            let words = [program, "-query", "q", "-subject", "s", "-outfmt", conflict];
+            let handler = losat::web_adapter::parse_formatting_string(conflict)
+                .and_then(|choice| losat::web_adapter::formatting_handler_check(&choice, engine))
+                .unwrap_err();
+            assert_eq!(validate(&words), Err(format!("{handler:#}")), "{program}");
+            assert!(validate(&words)
+                .unwrap_err()
+                .contains("Your custom record separator (;)"));
+            let ranged = [&words[..], &["-subject_loc", "5-2"]].concat();
+            assert!(
+                validate(&ranged)
+                    .unwrap_err()
+                    .starts_with("BLAST engine error: Invalid specification of subject location"),
+                "{program}: {:?}",
+                validate(&ranged)
+            );
+            let query = [FastaRecord::new("q", b"q", b"ACGTACGTACGT")];
+            assert_eq!(
+                run(&words, &query, &query),
+                Err(format!("{handler:#}")),
+                "{program}"
+            );
+            // The CLI rejects the argv whatever the hit list sizes: a run of two searches does not
+            // write the other one, and validate gives the error of the CLI's checks with the argv's
+            // -outfmt (review 2).
+            for extra in [
+                &["-num_descriptions", "3"][..],
+                &["-num_alignments", "3"],
+                &["-num_alignments", "0"],
+                &["-evalue", "0"],
+            ] {
+                let both = [&words[..], extra].concat();
+                assert_eq!(
+                    validate(&both),
+                    Err(format!("{handler:#}")),
+                    "{program} {extra:?}"
+                );
+                assert_eq!(
+                    run(&both, &query, &query),
+                    Err(format!("{handler:#}")),
+                    "{program} {extra:?}"
+                );
+            }
+            let twice = [
+                program, "-query", "q", "-subject", "s", "-outfmt", "6", "-outfmt", "7",
+            ];
+            assert!(parse(&twice)
+                .unwrap_err()
+                .contains("cannot be used multiple times"));
+            assert!(validate(&[
+                program,
+                "-query",
+                "q",
+                "-subject",
+                "s",
+                "-outfmt",
+                "7 std qcovs"
+            ])
+            .is_ok());
+        }
+        assert_eq!(
+            custom("blastn", "abc").unwrap_err(),
+            "BLAST query/options error: 'abc' is not a valid output format\nPlease refer to the BLAST+ user manual.\n"
+        );
+        assert_eq!(
+            custom("blastn", "99").unwrap_err(),
+            "Error: Formatting choice is out of range\n"
+        );
+        assert_eq!(custom("blastp", "17").unwrap_err(), "BLAST query/options error: SAM format is only applicable to blastn\nPlease refer to the BLAST+ user manual.\n");
+        assert_eq!(custom("blastn", "17 SQ"), Ok(Some("17 SQ".to_string())));
+    }
+
+    /// The streams of `run` over inputs that the program's reader reads (`store::register`).
+    fn registered_streams(
+        words: &[&str],
+        query: &[u8],
+        subject: &[u8],
+    ) -> std::collections::BTreeMap<u32, Vec<u8>> {
+        let program = Program::parse(words[0]).unwrap();
+        let (query, _) = crate::store::register(words[0], 0, query).unwrap();
+        let (subject, _) = crate::store::register(words[0], 1, subject).unwrap();
+        crate::emit::EMITTED.with(|emitted| emitted.borrow_mut().clear());
+        let result = crate::store::with_inputs(
+            program,
+            query,
+            subject,
+            writes_archive(words),
+            |queries, subjects| run(words, queries, subjects),
+        );
+        crate::store::release(query).unwrap();
+        crate::store::release(subject).unwrap();
+        result.unwrap().unwrap();
+        let mut streams = std::collections::BTreeMap::new();
+        crate::emit::EMITTED.with(|emitted| {
+            for (stream, bytes) in emitted.borrow().iter() {
+                streams
+                    .entry(*stream)
+                    .or_insert_with(Vec::new)
+                    .extend_from_slice(bytes);
+            }
+        });
+        streams
+    }
+
+    /// NCBI BLAST+ 2.17.0's frozen outputs of `-outfmt` with fields, for every program
+    /// (`LOSAT/tests/outfmt0_manifest.tsv`, rows `tab.*`: id, program, query, subject, -outfmt).
+    const CUSTOM_ROWS: [(&str, &str, &str, &str, &str); 12] = [
+        ("tab.bn.delim_pipe.6", "blastn", "tests/db_search/nslice_q.fna", "tests/db_search/nslice.fna", "6 delim=| std sstrand"),
+        ("tab.bn.align.7", "blastn", "tests/db_search/nslice_q.fna", "tests/db_search/nslice.fna", "7 qseq sseq evalue bitscore score length pident nident mismatch positive gapopen gaps ppos frames qframe sframe btop"),
+        ("tab.bp.cov.6", "blastp", "tests/db_search/ids/ids_q.faa", "tests/fasta/outfmt11/arch_bp_s.faa", "6 std qcovs qcovhsp qcovus"),
+        ("tab.bp.ids.7", "blastp", "tests/db_search/ids/ids_q.faa", "tests/db_search/ids/prot.faa", "7 std qseqid qgi qacc qaccver qlen sseqid sallseqid sgi sallgi sacc saccver sallacc slen"),
+        ("tab.bx.qframe.6", "blastx", "tests/db_search/ids/ids_q.fna", "tests/fasta/outfmt11/arch_bp_s.faa", "6 qseqid qstart frames sframe qframe"),
+        ("tab.bx.align.7", "blastx", "tests/db_search/ids/ids_q.fna", "tests/fasta/outfmt11/arch_bp_s.faa", "7 qseq sseq evalue bitscore score length pident nident mismatch positive gapopen gaps ppos frames qframe sframe btop"),
+        ("tab.tbn.delim_pipe.6", "tblastn", "tests/db_search/tab_tbn_q.faa", "tests/db_search/tslice.fna", "6 delim=| std sframe sstrand"),
+        ("tab.tbn.align.7", "tblastn", "tests/db_search/tab_tbn_q.faa", "tests/db_search/tslice.fna", "7 qseq sseq evalue bitscore score length pident nident mismatch positive gapopen gaps ppos frames qframe sframe btop"),
+        ("tab.tbx.removed.6", "tblastx", "tests/db_search/tab_tbx_q.fna", "tests/db_search/xslice.fna", "6 -qseqid"),
+        ("tab.tbx.align.7", "tblastx", "tests/db_search/tab_tbx_q.fna", "tests/db_search/xslice.fna", "7 qseq sseq evalue bitscore score length pident nident mismatch positive gapopen gaps ppos frames qframe sframe btop"),
+        // Fields whose writer warns (taxdb, once per query block).
+        ("tab.bn.tax.7", "blastn", "tests/db_search/nslice_q.fna", "tests/db_search/nslice.fna", "7 staxid ssciname scomname sblastname sskingdom staxids sscinames scomnames sblastnames sskingdoms stitle salltitles sstrand qcovs qcovhsp qcovus"),
+        ("tab.bx.delim_comma.6", "blastx", "tests/db_search/ids/ids_q.fna", "tests/fasta/outfmt11/arch_bp_s.faa", "6 delim=, qseqid sseqid scomnames"),
+    ];
+
+    // The output of the argv's -outfmt (6 or 7 with fields here) is stream 4, NCBI's bytes of the same
+    // command line, in the five programs, and stream 3 NCBI's standard error of it (with the
+    // warnings of its fields' writer); the formats 0, 6 and 7 and the HSP records are those of
+    // the run without -outfmt.
+    #[test]
+    fn a_custom_outfmt_is_written_as_the_cli_writes_it() {
+        let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../LOSAT");
+        let read = |path: &str| std::fs::read(format!("{root}/{path}")).unwrap();
+        for (id, program, query, subject, outfmt) in CUSTOM_ROWS {
+            let words = [program, "-query", query, "-subject", subject];
+            let plain = registered_streams(&words, &read(query), &read(subject));
+            let with = [&words[..], &["-outfmt", outfmt]].concat();
+            let custom = registered_streams(&with, &read(query), &read(subject));
+            let ncbi = read(&format!("tests/fixtures/outfmt0/{id}.out"));
+            assert_eq!(text(&custom[&STREAM_CUSTOM]), text(&ncbi), "{id}");
+            let stderr = std::fs::read(format!("{root}/tests/fixtures/outfmt0/{id}.err"))
+                .unwrap_or_default();
+            let diagnostics = custom.get(&STREAM_DIAGNOSTICS).cloned().unwrap_or_default();
+            assert_eq!(text(&diagnostics), text(&stderr), "{id}: stream 3");
+            for stream in [0, 6, 7, STREAM_HITS] {
+                assert_eq!(
+                    plain.get(&stream),
+                    custom.get(&stream),
+                    "{id}: stream {stream}"
+                );
+            }
+            assert!(!plain.contains_key(&STREAM_CUSTOM), "{id}");
+        }
+    }
+
+    /// NCBI BLAST+ 2.17.0's frozen outputs of the formats besides 0, 6 and 7 (rows of
+    /// `LOSAT/tests/outfmt0_manifest.tsv`: id and argv, run from LOSAT/): every program in 5, 8, 9,
+    /// 12, 15 and 16, 10 and 20 with and without fields, the BLAST archive (11) of four programs
+    /// with `-query_loc`, `-subject_loc` and deflines that the title does not give, and SAM (17).
+    const FORMAT_ROWS: [(&str, &[&str]); 55] = [
+        (
+            "sm1.blastp.x16.soft.5",
+            &[
+                "blastp",
+                "-query",
+                "tests/fasta/outfmt0/x16_seg_q.faa",
+                "-subject",
+                "tests/fasta/outfmt0/x16_seg_s.faa",
+                "-seg",
+                "yes",
+                "-soft_masking",
+                "true",
+                "-outfmt",
+                "5",
+            ],
+        ),
+        (
+            "sm1.blastp.x16.soft.11",
+            &[
+                "blastp",
+                "-query",
+                "tests/fasta/outfmt0/x16_seg_q.faa",
+                "-subject",
+                "tests/fasta/outfmt0/x16_seg_s.faa",
+                "-seg",
+                "yes",
+                "-soft_masking",
+                "true",
+                "-outfmt",
+                "11",
+            ],
+        ),
+        (
+            "sm1.blastp.x16.soft.16",
+            &[
+                "blastp",
+                "-query",
+                "tests/fasta/outfmt0/x16_seg_q.faa",
+                "-subject",
+                "tests/fasta/outfmt0/x16_seg_s.faa",
+                "-seg",
+                "yes",
+                "-soft_masking",
+                "true",
+                "-outfmt",
+                "16",
+            ],
+        ),
+        (
+            "sm2.tblastx.mask.soft.5",
+            &[
+                "tblastx",
+                "-query",
+                "tests/fasta/outfmt0/mask_query.fasta",
+                "-subject",
+                "tests/fasta/outfmt0/mask_subject.fasta",
+                "-soft_masking",
+                "true",
+                "-outfmt",
+                "5",
+            ],
+        ),
+        (
+            "sm2.tblastx.mask.soft.16",
+            &[
+                "tblastx",
+                "-query",
+                "tests/fasta/outfmt0/mask_query.fasta",
+                "-subject",
+                "tests/fasta/outfmt0/mask_subject.fasta",
+                "-soft_masking",
+                "true",
+                "-outfmt",
+                "16",
+            ],
+        ),
+        (
+            "sm3.megablast.mask.hard.5",
+            &[
+                "blastn",
+                "-query",
+                "tests/fasta/outfmt0/mask_query.fasta",
+                "-subject",
+                "tests/fasta/outfmt0/mask_subject.fasta",
+                "-task",
+                "megablast",
+                "-soft_masking",
+                "false",
+                "-outfmt",
+                "5",
+            ],
+        ),
+        (
+            "sm3.megablast.mask.hard.16",
+            &[
+                "blastn",
+                "-query",
+                "tests/fasta/outfmt0/mask_query.fasta",
+                "-subject",
+                "tests/fasta/outfmt0/mask_subject.fasta",
+                "-task",
+                "megablast",
+                "-soft_masking",
+                "false",
+                "-outfmt",
+                "16",
+            ],
+        ),
+        (
+            "sm3.megablast.mask.hard.11",
+            &[
+                "blastn",
+                "-query",
+                "tests/fasta/outfmt0/mask_query.fasta",
+                "-subject",
+                "tests/fasta/outfmt0/mask_subject.fasta",
+                "-task",
+                "megablast",
+                "-soft_masking",
+                "false",
+                "-outfmt",
+                "11",
+            ],
+        ),
+        (
+            "sa.multi.megablast.8",
+            &[
+                "blastn",
+                "-query",
+                "tests/fasta/outfmt0/multi_query.fasta",
+                "-subject",
+                "tests/fasta/outfmt0/multi_subject.fasta",
+                "-task",
+                "megablast",
+                "-outfmt",
+                "8",
+            ],
+        ),
+        (
+            "sa.multi.megablast.12",
+            &[
+                "blastn",
+                "-query",
+                "tests/fasta/outfmt0/multi_query.fasta",
+                "-subject",
+                "tests/fasta/outfmt0/multi_subject.fasta",
+                "-task",
+                "megablast",
+                "-outfmt",
+                "12",
+            ],
+        ),
+        (
+            "sa.e2e.blastp.invalid_o.8",
+            &[
+                "blastp",
+                "-query",
+                "tests/fasta/outfmt0/e2e_invalid_query.faa",
+                "-subject",
+                "tests/fasta/outfmt0/e2e_protein_subject.faa",
+                "-outfmt",
+                "8",
+            ],
+        ),
+        (
+            "sa.e2e.blastp.invalid_o.12",
+            &[
+                "blastp",
+                "-query",
+                "tests/fasta/outfmt0/e2e_invalid_query.faa",
+                "-subject",
+                "tests/fasta/outfmt0/e2e_protein_subject.faa",
+                "-outfmt",
+                "12",
+            ],
+        ),
+        (
+            "sa.e2e.tblastn.xdrop_final.8",
+            &[
+                "tblastn",
+                "-query",
+                "tests/fasta/outfmt0/e2e_protein_query.faa",
+                "-subject",
+                "tests/fasta/outfmt0/e2e_tblastn_subject.fna",
+                "-xdrop_gap_final",
+                "1e9",
+                "-outfmt",
+                "8",
+            ],
+        ),
+        (
+            "sa.e2d.tblastn.sloc.12",
+            &[
+                "tblastn",
+                "-query",
+                "tests/fasta/outfmt0/e2d_t_qp2.faa",
+                "-subject",
+                "tests/fasta/outfmt0/e2d_n_sub8k.fa",
+                "-subject_loc",
+                "1001-6000",
+                "-outfmt",
+                "12",
+            ],
+        ),
+        (
+            "sa.tblastx.nohit.8",
+            &[
+                "tblastx",
+                "-query",
+                "tests/fasta/outfmt0/tblastx_multi_query.fasta",
+                "-subject",
+                "tests/fasta/outfmt0/tblastx_multi_subject.fasta",
+                "-evalue",
+                "1e-100",
+                "-outfmt",
+                "8",
+            ],
+        ),
+        (
+            "sa.tblastx.nohit.12",
+            &[
+                "tblastx",
+                "-query",
+                "tests/fasta/outfmt0/tblastx_multi_query.fasta",
+                "-subject",
+                "tests/fasta/outfmt0/tblastx_multi_subject.fasta",
+                "-evalue",
+                "1e-100",
+                "-outfmt",
+                "12",
+            ],
+        ),
+        (
+            "sa.blastx.multi.8",
+            &[
+                "blastx",
+                "-query",
+                "tests/fasta/outfmt0/e2e_tblastn_subject.fna",
+                "-subject",
+                "tests/fasta/outfmt0/e2d_t_qp2.faa",
+                "-outfmt",
+                "8",
+            ],
+        ),
+        (
+            "sa.blastx.multi.12",
+            &[
+                "blastx",
+                "-query",
+                "tests/fasta/outfmt0/e2e_tblastn_subject.fna",
+                "-subject",
+                "tests/fasta/outfmt0/e2d_t_qp2.faa",
+                "-outfmt",
+                "12",
+            ],
+        ),
+        (
+            "sa.multi.megablast.9",
+            &[
+                "blastn",
+                "-query",
+                "tests/fasta/outfmt0/multi_query.fasta",
+                "-subject",
+                "tests/fasta/outfmt0/multi_subject.fasta",
+                "-task",
+                "megablast",
+                "-outfmt",
+                "9",
+            ],
+        ),
+        (
+            "sa.e2e.blastp.invalid_o.9",
+            &[
+                "blastp",
+                "-query",
+                "tests/fasta/outfmt0/e2e_invalid_query.faa",
+                "-subject",
+                "tests/fasta/outfmt0/e2e_protein_subject.faa",
+                "-outfmt",
+                "9",
+            ],
+        ),
+        (
+            "sa.e2d.tblastn.sloc.9",
+            &[
+                "tblastn",
+                "-query",
+                "tests/fasta/outfmt0/e2d_t_qp2.faa",
+                "-subject",
+                "tests/fasta/outfmt0/e2d_n_sub8k.fa",
+                "-subject_loc",
+                "1001-6000",
+                "-outfmt",
+                "9",
+            ],
+        ),
+        (
+            "sa.tblastx.nohit.9",
+            &[
+                "tblastx",
+                "-query",
+                "tests/fasta/outfmt0/tblastx_multi_query.fasta",
+                "-subject",
+                "tests/fasta/outfmt0/tblastx_multi_subject.fasta",
+                "-evalue",
+                "1e-100",
+                "-outfmt",
+                "9",
+            ],
+        ),
+        (
+            "sa.blastx.multi.9",
+            &[
+                "blastx",
+                "-query",
+                "tests/fasta/outfmt0/e2e_tblastn_subject.fna",
+                "-subject",
+                "tests/fasta/outfmt0/e2d_t_qp2.faa",
+                "-outfmt",
+                "9",
+            ],
+        ),
+        (
+            "x5.tblastn.sloc2_470",
+            &[
+                "tblastn",
+                "-query",
+                "tests/fasta/outfmt0/e2e_protein_query.faa",
+                "-subject",
+                "tests/fasta/outfmt0/e2e_tblastn_subject.fna",
+                "-subject_loc",
+                "2-470",
+                "-outfmt",
+                "5",
+            ],
+        ),
+        (
+            "x5.blastx.ungapped_cbs0",
+            &[
+                "blastx",
+                "-query",
+                "tests/fasta/outfmt0/x5_bx_q_mix.fna",
+                "-subject",
+                "tests/db_search/bslice.faa",
+                "-ungapped",
+                "-comp_based_stats",
+                "0",
+                "-max_target_seqs",
+                "1",
+                "-outfmt",
+                "5",
+            ],
+        ),
+        (
+            "sa.e2e.blastp.invalid_o.15",
+            &[
+                "blastp",
+                "-query",
+                "tests/fasta/outfmt0/e2e_invalid_query.faa",
+                "-subject",
+                "tests/fasta/outfmt0/e2e_protein_subject.faa",
+                "-outfmt",
+                "15",
+            ],
+        ),
+        (
+            "sa.x16.blastn.minus.15",
+            &[
+                "blastn",
+                "-query",
+                "tests/fasta/outfmt0/x16n_q.fna",
+                "-subject",
+                "tests/fasta/outfmt0/x16n_s.fna",
+                "-outfmt",
+                "15",
+            ],
+        ),
+        (
+            "x16.blastx.ungapped_cbs0.16",
+            &[
+                "blastx",
+                "-query",
+                "tests/fasta/outfmt0/x5_bx_q_mix.fna",
+                "-subject",
+                "tests/db_search/bslice.faa",
+                "-ungapped",
+                "-comp_based_stats",
+                "0",
+                "-max_target_seqs",
+                "1",
+                "-outfmt",
+                "16",
+            ],
+        ),
+        (
+            "x16.blastx.ungapped_cbs0.15",
+            &[
+                "blastx",
+                "-query",
+                "tests/fasta/outfmt0/x5_bx_q_mix.fna",
+                "-subject",
+                "tests/db_search/bslice.faa",
+                "-ungapped",
+                "-comp_based_stats",
+                "0",
+                "-max_target_seqs",
+                "1",
+                "-outfmt",
+                "15",
+            ],
+        ),
+        (
+            "sa.x16.tblastn.sloc.16",
+            &[
+                "tblastn",
+                "-query",
+                "tests/fasta/outfmt0/e2e_protein_query.faa",
+                "-subject",
+                "tests/fasta/outfmt0/e2e_tblastn_subject.fna",
+                "-subject_loc",
+                "2-470",
+                "-outfmt",
+                "16",
+            ],
+        ),
+        (
+            "sa.x16.tblastn.sloc.15",
+            &[
+                "tblastn",
+                "-query",
+                "tests/fasta/outfmt0/e2e_protein_query.faa",
+                "-subject",
+                "tests/fasta/outfmt0/e2e_tblastn_subject.fna",
+                "-subject_loc",
+                "2-470",
+                "-outfmt",
+                "15",
+            ],
+        ),
+        (
+            "sa.x16.tblastx.sub.15",
+            &[
+                "tblastx",
+                "-query",
+                "tests/fasta/outfmt0/x16x_q.fna",
+                "-subject",
+                "tests/fasta/outfmt0/x16x_s.fna",
+                "-evalue",
+                "0.01",
+                "-max_target_seqs",
+                "2",
+                "-outfmt",
+                "15",
+            ],
+        ),
+        (
+            "culling.tblastn.dom_cl2.11",
+            &[
+                "tblastn",
+                "-query",
+                "tests/fasta/outfmt0/culling_dom_q.faa",
+                "-subject",
+                "tests/fasta/outfmt0/culling_dom_s.fna",
+                "-culling_limit",
+                "2",
+                "-outfmt",
+                "11",
+            ],
+        ),
+        (
+            "sa.sam.multi.17p",
+            &[
+                "blastn",
+                "-query",
+                "tests/fasta/outfmt0/sam_multi_q.fna",
+                "-subject",
+                "tests/fasta/outfmt0/sam_multi_s.fna",
+                "-task",
+                "megablast",
+                "-outfmt",
+                "17",
+            ],
+        ),
+        (
+            "sa.sam.multi.17q",
+            &[
+                "blastn",
+                "-query",
+                "tests/fasta/outfmt0/sam_multi_q.fna",
+                "-subject",
+                "tests/fasta/outfmt0/sam_multi_s.fna",
+                "-task",
+                "megablast",
+                "-outfmt",
+                "17 SQ",
+            ],
+        ),
+        (
+            "sa.arch.bn.g4.11",
+            &[
+                "blastn",
+                "-query",
+                "tests/fasta/outfmt11/arch_q.fna",
+                "-subject",
+                "tests/fasta/outfmt11/arch_s.fna",
+                "-max_target_seqs",
+                "1",
+                "-dust",
+                "20 64 1",
+                "-query_loc",
+                "10-300",
+                "-subject_loc",
+                "10-300",
+                "-dbsize",
+                "1000000",
+                "-outfmt",
+                "11",
+            ],
+        ),
+        (
+            "sa.arch.bn.qloc.11",
+            &[
+                "blastn",
+                "-query",
+                "tests/fasta/outfmt11/arch_q.fna",
+                "-subject",
+                "tests/fasta/outfmt11/arch_s.fna",
+                "-query_loc",
+                "10-300",
+                "-outfmt",
+                "11",
+            ],
+        ),
+        (
+            "sa.arch.bp.sloc.11",
+            &[
+                "blastp",
+                "-query",
+                "tests/fasta/outfmt11/arch_bp_q.faa",
+                "-subject",
+                "tests/fasta/outfmt11/arch_bp_s.faa",
+                "-subject_loc",
+                "10-100",
+                "-outfmt",
+                "11",
+            ],
+        ),
+        (
+            "sa.arch.bp.titles.11",
+            &[
+                "blastp",
+                "-query",
+                "tests/fasta/outfmt11/arch_bp_titles.faa",
+                "-subject",
+                "tests/fasta/outfmt11/arch_bp_s.faa",
+                "-outfmt",
+                "11",
+            ],
+        ),
+        (
+            "sa.arch.tbn.qloc.11",
+            &[
+                "tblastn",
+                "-query",
+                "tests/fasta/outfmt11/arch_tbn_q.faa",
+                "-subject",
+                "tests/fasta/outfmt11/arch_tbn_s.fna",
+                "-query_loc",
+                "10-100",
+                "-outfmt",
+                "11",
+            ],
+        ),
+        (
+            "sa.arch.tbx.def.11",
+            &[
+                "tblastx",
+                "-query",
+                "tests/fasta/outfmt11/arch_tbx_q.fna",
+                "-subject",
+                "tests/fasta/outfmt11/arch_tbx_s.fna",
+                "-outfmt",
+                "11",
+            ],
+        ),
+        (
+            "sa.arch.tbx.qloc.11",
+            &[
+                "tblastx",
+                "-query",
+                "tests/fasta/outfmt11/arch_tbx_q.fna",
+                "-subject",
+                "tests/fasta/outfmt11/arch_tbx_s.fna",
+                "-query_loc",
+                "10-100",
+                "-outfmt",
+                "11",
+            ],
+        ),
+        (
+            "sa.arch.tbx.stitles.11",
+            &[
+                "tblastx",
+                "-query",
+                "tests/fasta/outfmt11/arch_tbx_q.fna",
+                "-subject",
+                "tests/fasta/outfmt11/arch_tbx_s_titles.fna",
+                "-outfmt",
+                "11",
+            ],
+        ),
+        (
+            "tab.bn.csv.10",
+            &[
+                "blastn",
+                "-query",
+                "tests/db_search/nslice_q.fna",
+                "-subject",
+                "tests/db_search/nslice.fna",
+                "-outfmt",
+                "10 std sstrand",
+            ],
+        ),
+        (
+            "tab.bn.csvhdr.20",
+            &[
+                "blastn",
+                "-query",
+                "tests/db_search/nslice_q.fna",
+                "-subject",
+                "tests/db_search/nslice.fna",
+                "-outfmt",
+                "20 qseqid sseqid evalue",
+            ],
+        ),
+        (
+            "tab.bp.csv.10",
+            &[
+                "blastp",
+                "-query",
+                "tests/db_search/ids/ids_q.faa",
+                "-subject",
+                "tests/fasta/outfmt11/arch_bp_s.faa",
+                "-outfmt",
+                "10 std",
+            ],
+        ),
+        (
+            "tab.bp.csvhdr.20",
+            &[
+                "blastp",
+                "-query",
+                "tests/db_search/ids/ids_q.faa",
+                "-subject",
+                "tests/fasta/outfmt11/arch_bp_s.faa",
+                "-outfmt",
+                "20 qseqid sseqid evalue",
+            ],
+        ),
+        (
+            "tab.bx.csv.10",
+            &[
+                "blastx",
+                "-query",
+                "tests/db_search/ids/ids_q.fna",
+                "-subject",
+                "tests/fasta/outfmt11/arch_bp_s.faa",
+                "-outfmt",
+                "10 std",
+            ],
+        ),
+        (
+            "tab.bx.csvhdr.20",
+            &[
+                "blastx",
+                "-query",
+                "tests/db_search/ids/ids_q.fna",
+                "-subject",
+                "tests/fasta/outfmt11/arch_bp_s.faa",
+                "-outfmt",
+                "20 qseqid sseqid evalue",
+            ],
+        ),
+        (
+            "tab.tbn.csv.10",
+            &[
+                "tblastn",
+                "-query",
+                "tests/db_search/tab_tbn_q.faa",
+                "-subject",
+                "tests/db_search/tslice.fna",
+                "-outfmt",
+                "10 std sstrand",
+            ],
+        ),
+        (
+            "tab.tbn.csvhdr.20",
+            &[
+                "tblastn",
+                "-query",
+                "tests/db_search/tab_tbn_q.faa",
+                "-subject",
+                "tests/db_search/tslice.fna",
+                "-outfmt",
+                "20 qseqid sseqid evalue",
+            ],
+        ),
+        (
+            "tab.tbx.csv.10",
+            &[
+                "tblastx",
+                "-query",
+                "tests/db_search/tab_tbx_q.fna",
+                "-subject",
+                "tests/db_search/xslice.fna",
+                "-outfmt",
+                "10 std sstrand",
+            ],
+        ),
+        (
+            "tab.tbx.csvhdr.20",
+            &[
+                "tblastx",
+                "-query",
+                "tests/db_search/tab_tbx_q.fna",
+                "-subject",
+                "tests/db_search/xslice.fna",
+                "-outfmt",
+                "20 qseqid sseqid evalue",
+            ],
+        ),
+        (
+            "sxd.blastx.qloc.10",
+            &[
+                "blastx",
+                "-query",
+                "tests/db_search/bslice_q.fna",
+                "-subject",
+                "tests/db_search/bslice.faa",
+                "-query_loc",
+                "1001-3000",
+                "-outfmt",
+                "10",
+            ],
+        ),
+        (
+            "sxd.blastx.qframe.20",
+            &[
+                "blastx",
+                "-query",
+                "tests/db_search/bslice_q.fna",
+                "-subject",
+                "tests/db_search/bslice.faa",
+                "-query_loc",
+                "1002-3000",
+                "-outfmt",
+                "20",
+            ],
+        ),
+    ];
+
+    /// A SAM document without the CL tag of its `@PG` line (`db_search_fixtures.strip_sam_cl`, the
+    /// rule of the SAM rows: the CLI writes its own command line there).
+    fn without_cl(document: &[u8]) -> Vec<u8> {
+        let text = String::from_utf8(document.to_vec()).unwrap();
+        let head = "\n@PG\tID:0\tVN:2.17.0+";
+        let Some(at) = text.find(&format!("{head}\tCL:")) else {
+            return document.to_vec();
+        };
+        let start = at + head.len();
+        let end = start + text[start..].find("\tPN:blastn\n").unwrap();
+        format!("{}{}", &text[..start], &text[end..]).into_bytes()
+    }
+
+    // The output of an -outfmt besides 0, 6 and 7 is stream 4, NCBI's bytes of the same command
+    // line (W11), and stream 3 NCBI's standard error of it; the formats 0, 6 and 7 and the HSP
+    // records are those of the run without -outfmt. The archive's Bioseqs are the whole records
+    // and the deflines as read; SAM's @PG line shows the run's command line.
+    #[test]
+    fn every_format_is_written_as_the_cli_writes_it() {
+        let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../LOSAT");
+        let read = |path: &str| std::fs::read(format!("{root}/{path}")).unwrap();
+        for (id, words) in FORMAT_ROWS {
+            let at = |flag: &str| words[words.iter().position(|w| *w == flag).unwrap() + 1];
+            let (query, subject) = (read(at("-query")), read(at("-subject")));
+            let with = registered_streams(words, &query, &subject);
+            let plain = registered_streams(&words[..words.len() - 2], &query, &subject);
+            let mut ncbi = read(&format!("tests/fixtures/outfmt0/{id}.out"));
+            let mut ours = with.get(&STREAM_CUSTOM).cloned().unwrap_or_default();
+            if at("-outfmt").starts_with("17") {
+                let cl = format!("\tCL:losat {} \tPN:blastn\n", words.join(" "));
+                assert!(text(&ours).contains(&cl), "{id}: {cl:?}");
+                (ncbi, ours) = (without_cl(&ncbi), without_cl(&ours));
+            }
+            assert!(ours == ncbi, "{id}: stream 4");
+            let stderr = std::fs::read(format!("{root}/tests/fixtures/outfmt0/{id}.err"))
+                .unwrap_or_default();
+            let diagnostics = with.get(&STREAM_DIAGNOSTICS).cloned().unwrap_or_default();
+            assert_eq!(text(&diagnostics), text(&stderr), "{id}: stream 3");
+            for stream in [0, 6, 7, STREAM_HITS] {
+                assert!(
+                    plain.get(&stream) == with.get(&stream),
+                    "{id}: stream {stream}"
+                );
+            }
+        }
+    }
+
+    /// The rows of NCBI's frozen outputs (`LOSAT/tests/outfmt0_manifest.tsv`) for which `keep(program,
+    /// format number, files column)` holds, as (fixture id, argv): the arguments of
+    /// `run_oracle.search_argv` (none of the rows taken here quotes a value).
+    fn manifest_rows(keep: impl Fn(&str, &str, &str) -> bool) -> Vec<(String, Vec<String>)> {
+        let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../LOSAT");
+        let manifest =
+            std::fs::read_to_string(format!("{root}/tests/outfmt0_manifest.tsv")).unwrap();
+        let mut lines = manifest.lines().filter(|line| !line.starts_with('#'));
+        let header: Vec<&str> = lines.next().unwrap().split('\t').collect();
+        let column = |name: &str| header.iter().position(|h| *h == name).unwrap();
+        let mut rows = Vec::new();
+        for line in lines {
+            let row: Vec<&str> = line.split('\t').collect();
+            let field = |name: &str| row.get(column(name)).copied().unwrap_or("");
+            let outfmt = match field("outfmt") {
+                "" => "0",
+                outfmt => outfmt,
+            };
+            let number = outfmt
+                .trim()
+                .split(' ')
+                .next()
+                .unwrap()
+                .trim_start_matches('+');
+            let number = number.trim_start_matches('0');
+            if !keep(field("program"), number, field("files")) {
+                continue;
+            }
+            let extra = field("extra_args");
+            assert!(
+                !extra.contains(['"', '\'', '\\']),
+                "{}",
+                field("fixture_id")
+            );
+            let mut argv = vec![
+                field("program").to_string(),
+                "-query".to_string(),
+                field("query").to_string(),
+                "-subject".to_string(),
+                field("subject").to_string(),
+            ];
+            if !field("task").is_empty() {
+                argv.extend(["-task".to_string(), field("task").to_string()]);
+            }
+            argv.extend(extra.split_whitespace().map(str::to_string));
+            argv.extend(["-outfmt".to_string(), outfmt.to_string()]);
+            rows.push((field("fixture_id").to_string(), argv));
+        }
+        rows
+    }
+
+    // Outfmt 13 and 14 are a ZIP archive on stream 4: NCBI's side files, named as the CLI names them
+    // for `-out results`, and NCBI's master file (`results.json` / `results.xml`), which lists them by
+    // those names; stream 3 is NCBI's standard error, and the other streams are those of the run
+    // without -outfmt (the 18 rows of the manifest with side files).
+    #[test]
+    fn outfmt_13_and_14_are_an_archive_of_ncbis_files() {
+        let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../LOSAT");
+        let read = |path: &str| std::fs::read(format!("{root}/{path}")).unwrap();
+        let rows = manifest_rows(|_, _, files| files == "xinclude");
+        assert_eq!(rows.len(), 18);
+        let programs: std::collections::BTreeSet<&str> =
+            rows.iter().map(|(_, argv)| argv[0].as_str()).collect();
+        assert_eq!(programs.len(), 5);
+        for (id, argv) in &rows {
+            let words: Vec<&str> = argv.iter().map(String::as_str).collect();
+            let at = |flag: &str| words[words.iter().position(|w| *w == flag).unwrap() + 1];
+            let number: u32 = at("-outfmt").trim().parse().unwrap();
+            let extension = if number == 13 { "json" } else { "xml" };
+            let (query, subject) = (read(at("-query")), read(at("-subject")));
+            let with = registered_streams(&words, &query, &subject);
+            let plain = registered_streams(&words[..words.len() - 2], &query, &subject);
+            let mut expected = Vec::new();
+            for n in 1.. {
+                let path = format!("{root}/tests/fixtures/outfmt0/{id}.out_{n}.{extension}");
+                let Ok(side) = std::fs::read(path) else {
+                    break;
+                };
+                expected.push((format!("results_{n}.{extension}").into_bytes(), side));
+            }
+            let master = text(&read(&format!("tests/fixtures/outfmt0/{id}.out")))
+                .replace(&format!("{id}.out_"), "results_");
+            expected.push((master_name(number).into_bytes(), master.into_bytes()));
+            let archive = with.get(&STREAM_CUSTOM).cloned().unwrap_or_default();
+            let files = crate::zip::read(&archive);
+            assert_eq!(files.len(), expected.len(), "{id}: entries");
+            for ((name, bytes), (want_name, want)) in files.iter().zip(&expected) {
+                assert_eq!(text(name), text(want_name), "{id}");
+                assert!(bytes == want, "{id}: {}", text(name));
+            }
+            let stderr = std::fs::read(format!("{root}/tests/fixtures/outfmt0/{id}.err"))
+                .unwrap_or_default();
+            let diagnostics = with.get(&STREAM_DIAGNOSTICS).cloned().unwrap_or_default();
+            assert_eq!(text(&diagnostics), text(&stderr), "{id}: stream 3");
+            for stream in [0, 6, 7, STREAM_HITS] {
+                assert!(
+                    plain.get(&stream) == with.get(&stream),
+                    "{id}: stream {stream}"
+                );
+            }
+        }
+    }
+
+    // BLASTX writes the BLAST archive (outfmt 11) as NCBI does: the 57 rows of the manifest that a
+    // run takes (not the one with -parse_deflines, nor the one with a `>?` gap line, which the
+    // store refuses: maintainer decision 3), stream 4 and stream 3.
+    #[test]
+    fn blastx_writes_ncbis_archive() {
+        let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../LOSAT");
+        let read = |path: &str| std::fs::read(format!("{root}/{path}")).unwrap();
+        let gap_line = |path: &str| {
+            read(path)
+                .split(|b| *b == b'\n')
+                .any(|l| l.starts_with(b">?"))
+        };
+        let rows = manifest_rows(|program, number, _| program == "blastx" && number == "11");
+        let rows: Vec<_> = rows
+            .into_iter()
+            .filter(|(_, argv)| !argv.iter().any(|word| word == "-parse_deflines"))
+            .filter(|(_, argv)| {
+                let file = |flag: &str| &argv[argv.iter().position(|w| w == flag).unwrap() + 1];
+                !gap_line(file("-query")) && !gap_line(file("-subject"))
+            })
+            .collect();
+        assert_eq!(rows.len(), 57);
+        for (id, argv) in &rows {
+            let words: Vec<&str> = argv.iter().map(String::as_str).collect();
+            let at = |flag: &str| words[words.iter().position(|w| *w == flag).unwrap() + 1];
+            let (query, subject) = (read(at("-query")), read(at("-subject")));
+            let with = registered_streams(&words, &query, &subject);
+            let ncbi = read(&format!("tests/fixtures/outfmt0/{id}.out"));
+            let ours = with.get(&STREAM_CUSTOM).cloned().unwrap_or_default();
+            assert!(ours == ncbi, "{id}: stream 4");
+            let stderr = std::fs::read(format!("{root}/tests/fixtures/outfmt0/{id}.err"))
+                .unwrap_or_default();
+            let diagnostics = with.get(&STREAM_DIAGNOSTICS).cloned().unwrap_or_default();
+            assert_eq!(text(&diagnostics), text(&stderr), "{id}: stream 3");
+        }
+    }
+
+    // The store keeps the deflines that the archive cannot make from the title (a control byte, white
+    // space after the `>` or at the end; not a CRLF line end), aside from the records: only a run that
+    // writes the archive gives the records a source, which they hold no longer after it.
+    #[test]
+    fn the_store_keeps_the_deflines_that_the_title_does_not_give() {
+        let fasta: &[u8] = b">a one\r\nACGT\n>b\twith tab\nGG\n>  c\nTT\n>d \nAA\n>e\r\nCC\n";
+        let (handle, _) = crate::store::register("blastn", 0, fasta).unwrap();
+        let (subject, _) = crate::store::register("blastn", 1, b">s\nACGTACGT\n").unwrap();
+        let sources = |whole: bool| {
+            crate::store::with_inputs(
+                Program::Blastn,
+                handle,
+                subject,
+                whole,
+                |queries, subjects| {
+                    let source = |record: &FastaRecord| {
+                        record.source.as_ref().map(|source| source.defline.clone())
+                    };
+                    (
+                        queries.iter().map(source).collect::<Vec<_>>(),
+                        subjects.iter().map(source).collect::<Vec<_>>(),
+                    )
+                },
+            )
+            .unwrap()
+        };
+        assert_eq!(sources(false), (vec![None; 5], vec![None]));
+        let kept = |line: &[u8]| Some(line.to_vec());
+        assert_eq!(
+            sources(true),
+            (
+                vec![
+                    kept(b""),
+                    kept(b">b\twith tab"),
+                    kept(b">  c"),
+                    kept(b">d "),
+                    kept(b"")
+                ],
+                vec![kept(b"")]
+            )
+        );
+        assert_eq!(sources(false), (vec![None; 5], vec![None]));
+        crate::store::release(handle).unwrap();
+        crate::store::release(subject).unwrap();
+        // A first record without a defline, a kept defline at the end of the input without a line
+        // end, and CR line ends.
+        for (fasta, kept_lines) in [
+            (
+                &b"ACGT\n>b\tx\nGG\n"[..],
+                vec![b"".to_vec(), b">b\tx".to_vec()],
+            ),
+            (&b">a\nAC\n>b \t"[..], vec![b"".to_vec(), b">b \t".to_vec()]),
+            (
+                &b">a \rAC\r>b\rGG\r"[..],
+                vec![b">a ".to_vec(), b"".to_vec()],
+            ),
+        ] {
+            let (handle, _) = crate::store::register("blastn", 0, fasta).unwrap();
+            let (subject, _) = crate::store::register("blastn", 1, b">s\nACGTACGT\n").unwrap();
+            let defline = |whole: bool| {
+                crate::store::with_inputs(Program::Blastn, handle, subject, whole, |queries, _| {
+                    queries
+                        .iter()
+                        .map(|record| record.source.as_ref().map(|source| source.defline.clone()))
+                        .collect::<Vec<_>>()
+                })
+                .unwrap()
+            };
+            assert_eq!(defline(false), vec![None; kept_lines.len()], "{fasta:?}");
+            assert_eq!(
+                defline(true),
+                kept_lines.into_iter().map(Some).collect::<Vec<_>>(),
+                "{fasta:?}"
+            );
+            crate::store::release(handle).unwrap();
+            crate::store::release(subject).unwrap();
+        }
+    }
+
+    const SPLIT_QUERY: &[u8] =
+        include_bytes!("../../../LOSAT/tests/fasta/outfmt0/numdesc_split_q.fna");
+    const SPLIT_SUBJECT: &[u8] =
+        include_bytes!("../../../LOSAT/tests/fasta/outfmt0/numdesc_split_s.fna");
+    const SPLIT_OUT0: &[u8] =
+        include_bytes!("../../../LOSAT/tests/fixtures/outfmt0/numdesc.blastn.split_na3.out");
+    const SPLIT_OUT6: &[u8] =
+        include_bytes!("../../../LOSAT/tests/fixtures/outfmt0/numdesc.blastn.split_na3.6.out");
+    const SPLIT_ERR6: &[u8] =
+        include_bytes!("../../../LOSAT/tests/fixtures/outfmt0/numdesc.blastn.split_na3.6.err");
+
+    // The one input where outfmt 0 and outfmt 6/7 keep other subjects with -num_alignments 3
+    // (the hit list of outfmt 0 is 500, the tabular formats' 3, and the subject A_split, whose
+    // gap the preliminary X-drop cannot cross, is evicted from the small list): two searches.
+    // Each stream is NCBI's frozen bytes of its format alone; the HSP records are the
+    // tabular list, and only the HSPs that outfmt 0 shows identically have its sections.
+    #[test]
+    fn two_searches_write_each_format_as_the_cli_does() {
+        let query = fasta(SPLIT_QUERY);
+        let subject = fasta(SPLIT_SUBJECT);
+        let words = [
+            "blastn",
+            "-query",
+            "tests/fasta/outfmt0/numdesc_split_q.fna",
+            "-subject",
+            "tests/fasta/outfmt0/numdesc_split_s.fna",
+            "-task",
+            "blastn",
+            "-num_alignments",
+            "3",
+        ];
+        let streams = streams(&words, &query, &subject).unwrap();
+        assert_eq!(streams[&0], SPLIT_OUT0);
+        assert_eq!(streams[&6], SPLIT_OUT6);
+        // The warning of the tabular formats, once (outfmt 0 has none).
+        assert_eq!(streams[&3], SPLIT_ERR6);
+        let out0 = String::from_utf8(streams[&0].clone()).unwrap();
+        let headings: Vec<&str> = out0.lines().filter(|l| l.starts_with('>')).collect();
+        assert_eq!(headings, ["> A_split", "> D00", "> D01"]);
+        let records = String::from_utf8(streams[&1].clone()).unwrap();
+        let field = |line: &str, name: &str| {
+            let at = line.find(&format!("\"{name}\":")).unwrap() + name.len() + 3;
+            line[at..]
+                .split(&[',', '}'][..])
+                .next()
+                .unwrap()
+                .to_string()
+        };
+        let lines: Vec<&str> = records.lines().collect();
+        // D00 D01 D02 are the subjects 1, 2 and 3; D02 is not in outfmt 0's list.
+        assert_eq!(
+            lines.iter().map(|l| field(l, "s_idx")).collect::<Vec<_>>(),
+            ["1", "2", "3"]
+        );
+        let pointed: Vec<bool> = lines.iter().map(|l| !l.contains("\"out0\":null")).collect();
+        assert_eq!(pointed, [true, true, false]);
+        assert!(lines[2].contains("\"out0_subject\":null"));
+        let out0_subject = |line: &str| {
+            let at = line.find("\"out0_subject\":[").unwrap() + 16;
+            let range: Vec<usize> = line[at..]
+                .split(']')
+                .next()
+                .unwrap()
+                .split(',')
+                .map(|n| n.parse().unwrap())
+                .collect();
+            out0[range[0]..range[1]].lines().next().unwrap().to_string()
+        };
+        assert_eq!(out0_subject(lines[0]), "> D00");
+        assert_eq!(out0_subject(lines[1]), "> D01");
+        // The output of -outfmt "6 std" comes from the tabular search: NCBI's outfmt 6 with
+        // -num_alignments 3, without A_split, which the hit list of outfmt 0 keeps. The other
+        // streams do not change.
+        let custom = [&words[..], &["-outfmt", "6 std"]].concat();
+        let with = self::streams(&custom, &query, &subject).unwrap();
+        assert_eq!(with[&STREAM_CUSTOM], SPLIT_OUT6);
+        for stream in [0, 6, 7, STREAM_HITS, STREAM_DIAGNOSTICS] {
+            assert_eq!(with.get(&stream), streams.get(&stream), "stream {stream}");
+        }
+    }
+
+    // The same command line without a difference of the hit list sizes is one search.
+    #[test]
+    fn equal_hit_list_sizes_are_one_search() {
+        let query = fasta(SPLIT_QUERY);
+        let subject = fasta(SPLIT_SUBJECT);
+        fn words<'a>(extra: &[&'a str]) -> Vec<&'a str> {
+            [
+                &["blastn", "-query", "q", "-subject", "s", "-task", "blastn"][..],
+                extra,
+            ]
+            .concat()
+        }
+        let plain = streams(&words(&[]), &query, &subject).unwrap();
+        // -num_alignments 500: format 0 keeps the default hit list of 500 as the tabular
+        // formats do (one search, and no warning).
+        let same = streams(&words(&["-num_alignments", "500"]), &query, &subject).unwrap();
+        for stream in [0, 6, 7, 1] {
+            assert_eq!(plain[&stream], same[&stream], "stream {stream}");
+        }
+        assert!(plain.get(&3).is_none_or(|bytes| bytes.is_empty()));
+        assert!(same.get(&3).is_none_or(|bytes| bytes.is_empty()));
+        // -num_descriptions 500 is the other default that makes one search; outfmt 6 and 7
+        // ignore it with NCBI's warning, which stream 3 carries once.
+        let ignored = streams(&words(&["-num_descriptions", "500"]), &query, &subject).unwrap();
+        for stream in [0, 6, 7, 1] {
+            assert_eq!(plain[&stream], ignored[&stream], "stream {stream}");
+        }
+        assert_eq!(
+            String::from_utf8(ignored[&3].clone()).unwrap(),
+            "Warning: [blastn] The parameter -num_descriptions is ignored for output formats > 4 . Use -max_target_seqs to control output\n"
+        );
+    }
+
+    // The CLI's standard error for `-outfmt 6` with `-num_descriptions 3`: the formatting
+    // handler's two warnings, then NCBI's error for a hit list of 0 (`-num_alignments 0`).
+    const ERR6_ND3_NA0: &str = "Warning: [blastn] The parameter -num_descriptions is ignored for output formats > 4 . Use -max_target_seqs to control output\nWarning: [blastn] Examining 5 or more matches is recommended\nBLAST query/options error: No hits are being saved\nPlease refer to the BLAST+ user manual.\n";
+    const SPLIT_ND3_NA0_OUT0: &[u8] =
+        include_bytes!("../../../LOSAT/tests/fixtures/outfmt0/numdesc.blastn.split_nd3_na0.out");
+    const SPLIT_ND3_NA0_ERR0: &[u8] =
+        include_bytes!("../../../LOSAT/tests/fixtures/outfmt0/numdesc.blastn.split_nd3_na0.err");
+
+    // -num_alignments 0 gives the tabular formats a hit list of 0, which the CLI rejects with
+    // NCBI's error for -outfmt 6 and 7; format 0 is written as the CLI writes it and the run
+    // does not fail. Stream 0 is NCBI's frozen bytes, streams 6, 7 and 1 are empty, and stream 3
+    // is the CLI's standard error for outfmt 6 followed by the lines of that for outfmt 0 that it
+    // does not hold: none, as its one line (the handler's `Examining 5 or more matches`, for the
+    // hit list size 3) is the first search's too, and each text comes once.
+    #[test]
+    fn a_hit_list_size_of_zero_fails_the_tabular_formats_only() {
+        let query = fasta(SPLIT_QUERY);
+        let subject = fasta(SPLIT_SUBJECT);
+        let words = [
+            "blastn",
+            "-query",
+            "tests/fasta/outfmt0/numdesc_split_q.fna",
+            "-subject",
+            "tests/fasta/outfmt0/numdesc_split_s.fna",
+            "-task",
+            "blastn",
+            "-num_descriptions",
+            "3",
+            "-num_alignments",
+            "0",
+        ];
+        let streams = streams(&words, &query, &subject).unwrap();
+        assert_eq!(text(&streams[&0]), text(SPLIT_ND3_NA0_OUT0));
+        for stream in [1, 6, 7] {
+            assert!(
+                streams.get(&stream).is_none_or(|bytes| bytes.is_empty()),
+                "stream {stream}"
+            );
+        }
+        assert!(ERR6_ND3_NA0.contains(&text(SPLIT_ND3_NA0_ERR0)));
+        assert_eq!(text(&streams[&3]), ERR6_ND3_NA0);
+        // Both formats' hit lists of 0 fail every format, as the CLI does.
+        let both = [
+            &words[..7],
+            &["-num_descriptions", "0", "-num_alignments", "0"],
+        ]
+        .concat();
+        let error = run(&both, &query, &subject).unwrap_err();
+        assert!(error.contains("No hits are being saved"), "{error}");
+        assert!(validate(&both)
+            .unwrap_err()
+            .contains("No hits are being saved"));
+        // validate accepts -num_alignments 0: the format 0 search is valid.
+        validate(&words).unwrap();
+    }
+
+    // The reverse: a -num_descriptions of 2,147,483,598 or more (N + 50 overflows) makes BLASTN's preliminary hit list
+    // size for format 0 only (the tabular formats ignore -num_descriptions). The CLI's outfmt 6
+    // and 7 succeed and its outfmt 0 fails with LOSAT's error (NCBI crashes there); the run
+    // writes the tabular formats and the records as the CLI does, stream 0 stays empty, and
+    // stream 3 is the CLI's standard error for outfmt 6 followed by that for outfmt 0.
+    #[test]
+    fn a_hit_list_size_that_overflows_fails_format_0_only() {
+        let query = fasta(SPLIT_QUERY);
+        let subject = fasta(SPLIT_SUBJECT);
+        let plain_words = ["blastn", "-query", "q", "-subject", "s", "-task", "blastn"];
+        let plain = streams(&plain_words, &query, &subject).unwrap();
+        let words = [&plain_words[..], &["-num_descriptions", "2147483647"]].concat();
+        validate(&words).unwrap();
+        let streams = streams(&words, &query, &subject).unwrap();
+        // The tabular formats are the plain run's (-num_descriptions is ignored by them).
+        for stream in [6, 7] {
+            assert_eq!(streams[&stream], plain[&stream], "stream {stream}");
+        }
+        assert!(streams.get(&0).is_none_or(|bytes| bytes.is_empty()));
+        // The records follow the tabular list, with no section of format 0.
+        let records = String::from_utf8(streams[&1].clone()).unwrap();
+        assert!(records.lines().count() > 0);
+        assert!(records.lines().all(|line| line.contains("\"out0\":null")));
+        assert_eq!(
+            String::from_utf8(streams[&3].clone()).unwrap(),
+            "Warning: [blastn] The parameter -num_descriptions is ignored for output formats > 4 . Use -max_target_seqs to control output\nError: a hit list size of 2147483647 (-num_descriptions / -num_alignments), whose preliminary hit list size overflows NCBI BLAST+'s 32-bit int (NCBI crashes), is not supported by LOSAT's BLASTN\n"
+        );
+        // The same on the other options of the format 0 search: both searches rejected fails.
+        let both = [&words[..], &["-num_alignments", "0"]].concat();
+        assert!(run(&both, &query, &subject).is_err());
+        assert!(validate(&both).is_err());
+    }
+
+    // The tolerance of a failed search is the options' checks' rejection of its hit list
+    // size and nothing else: any other error (a thread pool that cannot start, which a real
+    // run cannot trigger cheaply: the pool is built by the engine from the host's threads)
+    // fails the run, as does a failure after a byte was written.
+    #[test]
+    fn only_a_rejected_hit_list_size_is_tolerated() {
+        let failed = |wrote| Failed {
+            message: "failed to build blastn pool with 4 threads".into(),
+            cli_stderr: Vec::new(),
+            native: None,
+            wrote,
+        };
+        assert!(fails_run(&failed(false), false));
+        assert!(fails_run(&failed(true), true));
+        assert!(fails_run(&failed(true), false));
+        assert!(!fails_run(&failed(false), true));
+        // The predicate is the options' checks': rejected for a hit list of 0 and for the
+        // overflow of N + 50, not for 2^30 or any other size the CLI accepts.
+        let command = |extra: &[&str]| {
+            let words = [
+                &["blastn", "-query", "q", "-subject", "s", "-task", "blastn"][..],
+                extra,
+            ]
+            .concat();
+            parse(&words).unwrap().1
+        };
+        let rejected =
+            |extra: &[&str], group: &[u32]| group_rejected(&mut command(extra), &formats(group));
+        assert!(rejected(&["-num_alignments", "0"], &[6, 7]));
+        assert!(!rejected(&["-num_alignments", "0"], &[0]));
+        assert!(rejected(&["-num_descriptions", "2147483598"], &[0]));
+        assert!(!rejected(&["-num_descriptions", "2147483597"], &[0]));
+        assert!(!rejected(&["-num_descriptions", "1073741824"], &[0]));
+        assert!(!rejected(&[], &[6, 7, 0]));
+        let mut blastp = parse(&["blastp", "-num_alignments", "0"]).unwrap().1;
+        assert!(group_rejected(&mut blastp, &formats(&[6])));
+        assert!(!group_rejected(&mut blastp, &formats(&[0])));
+    }
+
+    // A coding sequence of the protein of `q_idx_is_the_registered_index`.
+    const CODING: &[u8] = b"ATGAAAACCGCGTATATTGCGAAACAGCGTCAGATTAGCTTTGTGAAAAGCCATTTTAGCCGTCAGCTGGAAGAACGTCTGGGCCTGATTGAAGTGCAGGCGCCGATTCTGAGCCGTGTGGGCGATGGCACCCAGGATAACCTGAGCGGCGCGGAAAAAGCGGTGCAGGTGAAAGTGAAAGCGCTGCCGGATGCGCAG";
+
+    // Line RG item T7 (PD-LOSAT-NCBI-DEFECTS 1.37): a subject titled `Subject_9 bad x\x81y title`,
+    // whose title NCBI's `GenerateDefline` cannot decode (a `Subject_` first word and a byte in no
+    // encoding NCBI guesses). Each stream is the CLI's run of its format: the default tabular
+    // formats stop where NCBI stops (at the row's `saccver`, a null pointer), outfmt 0 writes
+    // NCBI's line in place of the alignment, a field list without `sacc` and `saccver` writes
+    // NCBI's catch rows. Streams 6 and 7 that the argv does not ask for fail alone in the run's
+    // one search (`FormatRefusal::FailsAlone`): they and the HSP records (stream 1, which point
+    // into stream 6) stay empty, stream 3 has the refusal once after the warnings, and the other
+    // formats are written. The argv's own `-outfmt 6`, `7` or `sacc` fails the run, as the CLI
+    // fails (exit 1). BLASTX reads the title as its bytes as the other programs do.
+    #[test]
+    fn a_subject_title_ncbi_cannot_decode_fails_the_tabular_streams_the_argv_does_not_ask_for() {
+        let protein = b"MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQ";
+        let title = b"Subject_9 bad x\x81y title";
+        let refusal = "subject record 1 (Subject_9)";
+        for (program, query, subject) in [
+            ("blastn", CODING, CODING),
+            ("tblastx", CODING, CODING),
+            ("blastx", CODING, &protein[..]),
+        ] {
+            let query = [FastaRecord::new("Query_1", b"q", query)];
+            let subject = [FastaRecord::new("Subject_1", title, subject)];
+            let words = [program, "-query", "q", "-subject", "s"];
+            let plain = streams(&words, &query, &subject).unwrap();
+            assert!(
+                text(&plain[&0]).contains(
+                    "Sequence with id Subject_1 no longer exists in database...alignment skipped"
+                ),
+                "{program}"
+            );
+            for stream in [1, 6, 7] {
+                assert!(
+                    plain.get(&stream).is_none_or(|bytes| bytes.is_empty()),
+                    "{program}: stream {stream}"
+                );
+            }
+            let error = text(&plain[&3]);
+            assert_eq!(error.matches(refusal).count(), 1, "{program}: {error}");
+            assert!(
+                error.contains("null pointer exception (exit 255)"),
+                "{program}: {error}"
+            );
+            let fields = [&words[..], &["-outfmt", "6 qseqid sseqid sallseqid"]].concat();
+            let custom = streams(&fields, &query, &subject).unwrap();
+            assert!(
+                text(&custom[&STREAM_CUSTOM]).starts_with("q\tUnknown\tSubject_1\n"),
+                "{program}: {}",
+                text(&custom[&STREAM_CUSTOM])
+            );
+            assert!(!custom[&0].is_empty(), "{program}");
+            assert!(text(&custom[&3]).contains(refusal), "{program}");
+            for argv in [
+                &["-outfmt", "6"][..],
+                &["-outfmt", "7"],
+                &["-outfmt", "6 qseqid sacc"],
+            ] {
+                let stops = [&words[..], argv].concat();
+                let error = run(&stops, &query, &subject).unwrap_err();
+                assert!(
+                    error.contains(refusal) && error.contains("null pointer exception"),
+                    "{program} {argv:?}: {error}"
+                );
+            }
+        }
+    }
+
+    // NCBI BLAST+ 2.17.0 writes BLASTP's `-outfmt 6` of a subject titled `, ,` (exit 0: `,` is its
+    // `sseqid`, line RG item T7 review 2 `web/n6.out`) and crashes in outfmt 0, where
+    // `x_CleanAndCompress` reads past the title's end; the CLI refuses outfmt 0 (rule 3). A run
+    // whose argv asks for `-outfmt 6` or a field list writes those, and stream 0 fails alone:
+    // empty, its refusal on stream 3 after the warnings of the CLI's `-outfmt 6` (those of a second
+    // query, whose O letters are replaced by X: stream 0 fails before it takes them), the HSP
+    // records without `out0`. The default `-outfmt 0` fails the run, as the CLI fails.
+    #[test]
+    fn a_blastp_title_of_punctuation_fails_stream_0_alone_where_the_argv_asks_for_another_format() {
+        let protein = b"CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGRPARPTLTRSVRHTISPDPFFVCRCRRDYSIQYMLQPRLLRPSENVESGTCANLVMRAVVKVSAYDFAVKTSNDFDGGVCERDKSYVTLIPSGLSTPFVNLVRHAMQLKVPSRLAACYTHLAALKGLGSPRLTEYNRCSTHSGRGLFEPESTLGDPSRVQIPLTETRCNSRLVTPITNYCTSKSREPRHSCNLVRVNVILICNSARGYLCKRSRGTEYHKFTSSEFSSPPWMNLTLVNYQN";
+        let query = [
+            FastaRecord::new("Query_1", b"q1 one", protein),
+            FastaRecord::new("Query_2", b"q2 two", b"OOOOOOOOOOOOOOOOOOOO"),
+        ];
+        let subject = [FastaRecord::new("Subject_1", b", ,", protein)];
+        let words = ["blastp", "-query", "q", "-subject", "s"];
+        let refusal = "subject record 1 has a title of punctuation";
+        let ncbi = "q1\t,\t100.000\t300\t0\t0\t1\t300\t1\t300\t0.0\t618\n";
+        let six = [&words[..], &["-outfmt", "6"]].concat();
+        // The warnings of the same run with a title that NCBI writes in every format.
+        let good = [FastaRecord::new("Subject_1", b"s1 good", protein)];
+        let warnings = text(&streams(&six, &query, &good).unwrap()[&3]);
+        assert!(
+            warnings.contains("O characters replaced by X"),
+            "{warnings}"
+        );
+        let written = streams(&six, &query, &subject).unwrap();
+        assert_eq!(text(&written[&6]), ncbi);
+        assert!(text(&written[&7]).contains(ncbi));
+        assert!(written.get(&0).is_none_or(|bytes| bytes.is_empty()));
+        let error = text(&written[&3]);
+        assert!(error.starts_with(&warnings), "{error}");
+        assert_eq!(error.matches(refusal).count(), 1, "{error}");
+        let records = text(&written[&STREAM_HITS]);
+        assert!(
+            records.contains("\"out6\":[0,") && records.contains("\"out0\":null"),
+            "{records}"
+        );
+        let fields = [&words[..], &["-outfmt", "6 qseqid sseqid evalue"]].concat();
+        let custom = streams(&fields, &query, &subject).unwrap();
+        assert_eq!(text(&custom[&STREAM_CUSTOM]), "q1\t,\t0.0\n");
+        assert_eq!(text(&custom[&6]), ncbi);
+        assert!(custom.get(&0).is_none_or(|bytes| bytes.is_empty()));
+        let error = run(&words, &query, &subject).unwrap_err();
+        assert!(error.contains(refusal), "{error}");
+    }
+
+    // BLASTX searches a nucleotide query against protein subjects and writes every format, the
+    // HSP records and the warnings as the other programs do, one search for each hit list size:
+    // with -num_alignments 0 the tabular search fails alone with NCBI's error on stream 3, and
+    // format 0 is written.
+    #[test]
+    fn blastx_runs_as_the_other_programs_do() {
+        let protein = b"MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQ";
+        let query = [FastaRecord::new("q", b"q", CODING)];
+        let subject = [FastaRecord::new("s", b"s", protein)];
+        let words = ["blastx", "-query", "q.fna", "-subject", "s.faa"];
+        let plain = streams(&words, &query, &subject).unwrap();
+        let row = text(&plain[&6]);
+        assert!(
+            row.starts_with("q\ts\t100.000\t66\t0\t0\t1\t198\t1\t66\t"),
+            "{row}"
+        );
+        assert_eq!(row.lines().count(), 1);
+        assert!(text(&plain[&7]).contains("# BLASTX "));
+        assert!(text(&plain[&0]).starts_with("BLASTX "));
+        let records = text(&plain[&1]);
+        assert_eq!(records.lines().count(), 1);
+        assert!(records.contains("\"q_idx\":0"), "{records}");
+        assert!(!records.contains("\"out0\":null"), "{records}");
+        assert!(plain.get(&3).is_none_or(|bytes| bytes.is_empty()));
+        let zero = streams(
+            &[&words[..], &["-num_alignments", "0"]].concat(),
+            &query,
+            &subject,
+        )
+        .unwrap();
+        assert!(text(&zero[&0]).contains("Sequences producing significant alignments"));
+        for stream in [1, 6, 7] {
+            assert!(
+                zero.get(&stream).is_none_or(|bytes| bytes.is_empty()),
+                "stream {stream}"
+            );
+        }
+        // The CLI's standard error for `-outfmt 6`: the hit list size's warning, then NCBI's error.
+        assert_eq!(
+            text(&zero[&3]),
+            "Warning: [blastx] Examining 5 or more matches is recommended\nBLAST query/options error: No hits are being saved\nPlease refer to the BLAST+ user manual.\n"
+        );
+        // Both searches fail, each for its own reason (the tabular formats' hit list is checked
+        // before the e-value): the run fails with the tabular search's error, as validate.
+        let both = [&words[..], &["-num_alignments", "0", "-evalue", "0"]].concat();
+        let error = run(&both, &query, &subject).unwrap_err();
+        assert!(error.contains("No hits are being saved"), "{error}");
+        assert_eq!(validate(&both).unwrap_err(), error);
+        let mut format0 = parse(&both).unwrap().1;
+        assert!(
+            group_rejected(&mut format0, &formats(&[0]))
+                && group_rejected(&mut format0, &formats(&[6, 7]))
+        );
+    }
+
+    // BLASTX reads -query_loc and -subject_loc as the CLI does (DW-39): the rows give record
+    // coordinates, a query that the range skips keeps its registered index in the HSP records,
+    // and validate reads the ranges where the run reads them, after LOSAT's limits of the
+    // options and the subject range first.
+    #[test]
+    fn blastx_ranges_as_the_other_programs() {
+        let protein = b"MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQ";
+        let query = [
+            FastaRecord::new("short", b"short", b"ACGTACGT"),
+            FastaRecord::new("q", b"q", CODING),
+        ];
+        let subject = [FastaRecord::new("s", b"s", protein)];
+        let words = [
+            "blastx",
+            "-query",
+            "q.fna",
+            "-subject",
+            "s.faa",
+            "-query_loc",
+            "31-198",
+            "-subject_loc",
+            "5-66",
+        ];
+        assert!(validate(&words).is_ok());
+        let ranged = streams(&words, &query, &subject).unwrap();
+        let row = text(&ranged[&6]);
+        assert!(
+            row.starts_with("q\ts\t100.000\t56\t0\t0\t31\t198\t11\t66\t"),
+            "{row}"
+        );
+        let records = text(&ranged[&1]);
+        assert_eq!(records.lines().count(), 1);
+        assert!(records.contains("\"q_idx\":1"), "{records}");
+        assert_eq!(searched_queries(Some("31-198"), &query), Some(vec![1]));
+        // The errors of the argv, as the run reports them.
+        for extra in [
+            &["-subject_loc", "5-2", "-query_loc", "9-1"][..],
+            &["-query_loc", "9-1", "-evalue", "0"],
+            &["-subject_loc", "5-2", "-matrix", "IDENTITY"],
+        ] {
+            let argv = [&words[..5], extra].concat();
+            let error = run(&argv, &query, &subject).unwrap_err();
+            assert_eq!(validate(&argv).unwrap_err(), error, "{extra:?}");
+        }
+        let error =
+            validate(&[&words[..5], &["-subject_loc", "5-2", "-query_loc", "9-1"]].concat())
+                .unwrap_err();
+        assert!(error.contains("subject location"), "{error}");
+        // The subject range comes before NCBI's errors of the options (IDENTITY, which BLASTX
+        // does not take).
+        let error =
+            validate(&[&words[..5], &["-subject_loc", "5-2", "-matrix", "IDENTITY"]].concat())
+                .unwrap_err();
+        assert!(error.contains("subject location"), "{error}");
+        // A subject range that starts past the subject's end is an error of the records, which
+        // validate does not see.
+        let past = [&words[..5], &["-subject_loc", "70-80"]].concat();
+        assert!(validate(&past).is_ok());
+        let error = run(&past, &query, &subject).unwrap_err();
+        assert!(error.contains("Invalid from coordinate"), "{error}");
     }
 
     // Observer events that break the formatter contract fail the run instead of
@@ -631,6 +4007,463 @@ mod tests {
         assert_eq!(
             (valid.out6.len(), valid.out0.len(), valid.out0_subject.len()),
             (1, 1, 1)
+        );
+    }
+
+    // A format that failed alone leaves no trace in the HSP records (review 3 N5 of line RG T7):
+    // the recorder forgets the ranges of its stream and an HSP that its report had begun.
+    #[test]
+    fn a_format_that_failed_alone_is_forgotten_by_the_recorder() {
+        let mut recorder = recorder();
+        recorder.hsp_begin(1, 0);
+        recorder.hsp_end(1, 0);
+        recorder.subject_begin(0, 0);
+        recorder.subject_end(0, 0);
+        recorder.hsp_begin(0, 0);
+        recorder.hsp_end(0, 0);
+        recorder.hsp_begin(0, 1);
+        recorder.forget(0);
+        assert!(recorder.open.iter().all(Option::is_none));
+        assert!(recorder.out0.is_empty() && recorder.out0_subject.is_empty());
+        assert_eq!(recorder.out6.len(), 1);
+        recorder.forget(1);
+        assert!(recorder.out6.is_empty());
+        assert!(recorder.fault.is_none());
+    }
+
+    /// `letters` pseudo-random nucleotides (a fixed linear congruential generator, `seed`).
+    fn random_nucleotides(letters: usize, seed: u64) -> Vec<u8> {
+        let mut state = seed;
+        (0..letters)
+            .map(|_| {
+                state = state
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
+                b"ACGT"[(state >> 62) as usize]
+            })
+            .collect()
+    }
+
+    /// `letters` pseudo-random residues of the 20 amino acids (the generator of
+    /// `random_nucleotides`, `seed`).
+    fn random_protein(letters: usize, seed: u64) -> Vec<u8> {
+        let mut state = seed;
+        (0..letters)
+            .map(|_| {
+                state = state
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
+                b"ACDEFGHIKLMNPQRSTVWY"[((state >> 33) % 20) as usize]
+            })
+            .collect()
+    }
+
+    /// A coding sequence of the protein `letters` (one codon for each of the 20 amino acids).
+    fn codons(letters: &[u8]) -> Vec<u8> {
+        letters
+            .iter()
+            .flat_map(|&residue| {
+                let codon: &[u8] = match residue {
+                    b'A' => b"GCG",
+                    b'C' => b"TGC",
+                    b'D' => b"GAT",
+                    b'E' => b"GAA",
+                    b'F' => b"TTT",
+                    b'G' => b"GGC",
+                    b'H' => b"CAT",
+                    b'I' => b"ATT",
+                    b'K' => b"AAA",
+                    b'L' => b"CTG",
+                    b'M' => b"ATG",
+                    b'N' => b"AAC",
+                    b'P' => b"CCG",
+                    b'Q' => b"CAG",
+                    b'R' => b"CGT",
+                    b'S' => b"AGC",
+                    b'T' => b"ACC",
+                    b'V' => b"GTG",
+                    b'W' => b"TGG",
+                    b'Y' => b"TAT",
+                    _ => unreachable!("not one of the 20 amino acids"),
+                };
+                codon.iter().copied()
+            })
+            .collect()
+    }
+
+    // Line RG item T7-W (review 3 W3 of line RG T7, dev too): with `-sorthits`, NCBI BLAST+ 2.17.0
+    // pads a description table whose last total is above 99999 bits without end
+    // (showdefline.cpp:940-944), which the CLI refuses in outfmt 0 (`TotalScoreRefusal`, in the
+    // middle of the report), while its `-outfmt 6`, field list and 5 are NCBI's (the 60 kb self hit
+    // here: `1.108e+05` bits, NCBI's row). The queries before it write more than 1 MiB of outfmt
+    // 0, so a chunk of stream 0 has reached the host when it fails: a run whose argv asks for
+    // another format writes it, and stream 0 fails alone, discarded by the signal of stream 9,
+    // its refusal once on stream 3 after the warnings, the HSP records without `out0`. The
+    // default outfmt 0 fails the run with the refusal, as the CLI fails.
+    #[test]
+    fn a_sorthits_total_ncbi_pads_without_end_fails_stream_0_alone_after_its_chunks() {
+        let mut query = Vec::new();
+        let mut subject = Vec::new();
+        for n in 0..7u64 {
+            let letters = random_nucleotides(50_000, n + 1);
+            query.push(FastaRecord::new(
+                format!("Query_{}", n + 1),
+                format!("q{n}").as_bytes(),
+                &letters,
+            ));
+            subject.push(FastaRecord::new(
+                format!("Subject_{}", n + 1),
+                format!("s{n}").as_bytes(),
+                &letters,
+            ));
+        }
+        let big = random_nucleotides(60_000, 99);
+        query.push(FastaRecord::new("Query_8", b"bq", &big));
+        subject.push(FastaRecord::new("Subject_8", b"bs", &big));
+        let words = ["blastn", "-query", "q", "-subject", "s", "-sorthits", "0"];
+        let refusal = "-sorthits: the total score of the description table's last subject is wider than its column";
+        let row = "bq\tbs\t100.000\t60000\t0\t0\t1\t60000\t1\t60000\t0.0\t1.108e+05\n";
+        let six = streams(&[&words[..], &["-outfmt", "6"]].concat(), &query, &subject).unwrap();
+        assert!(text(&six[&6]).ends_with(row), "{}", text(&six[&6]));
+        assert_eq!(text(&six[&6]).lines().count(), 8);
+        assert_eq!(discarded(&six), [0]);
+        assert!(six[&0].is_empty());
+        let error = text(&six[&3]);
+        assert!(
+            error.starts_with(
+                "Warning: [blastn] The parameter -sorthits is ignored for output formats > 4.\n"
+            ),
+            "{error}"
+        );
+        assert_eq!(error.matches(refusal).count(), 1, "{error}");
+        let records = text(&six[&STREAM_HITS]);
+        assert_eq!(records.lines().count(), 8);
+        assert!(
+            records.contains("\"out6\":[0,")
+                && !records.contains("\"out0\":[")
+                && !records.contains("\"out0_subject\":["),
+            "{records}"
+        );
+        for argv in ["6 qseqid sseqid evalue", "5"] {
+            let custom =
+                streams(&[&words[..], &["-outfmt", argv]].concat(), &query, &subject).unwrap();
+            assert!(!custom[&STREAM_CUSTOM].is_empty(), "{argv}");
+            assert_eq!(text(&custom[&6]), text(&six[&6]), "{argv}");
+            assert!(custom[&0].is_empty(), "{argv}");
+            assert_eq!(discarded(&custom), [0], "{argv}");
+            assert_eq!(text(&custom[&3]).matches(refusal).count(), 1, "{argv}");
+        }
+        assert_eq!(
+            text(&streams(&[&words[..], &["-outfmt", "6 qseqid sseqid evalue"]].concat(), &query, &subject).unwrap()[&STREAM_CUSTOM]),
+            "q0\ts0\t0.0\nq1\ts1\t0.0\nq2\ts2\t0.0\nq3\ts3\t0.0\nq4\ts4\t0.0\nq5\ts5\t0.0\nq6\ts6\t0.0\nbq\tbs\t0.0\n"
+        );
+        let error = run(&words, &query, &subject).unwrap_err();
+        assert!(error.contains(refusal), "{error}");
+    }
+
+    // Line RG item T7-W (review 3 W4 of line RG T7, dev too): an NCBI error of outfmt 0 alone.
+    // NCBI BLAST+ 2.17.0's BLASTX writes outfmt 0 of this ungapped one-hit run up to
+    // `CSeq_align::GetSeqRange(): Row is empty` (Seq_align.cpp:226-229, exit 255), while its
+    // `-outfmt 6` and field list complete (exit 0), and so does the CLI. A run whose argv asks
+    // for them writes NCBI's rows, stream 0 fails alone (no chunk of it reached the host) with
+    // NCBI's exception on stream 3 after the prefetch warning, each once; the default outfmt 0
+    // fails the run with NCBI's exception, as the CLI fails.
+    #[test]
+    fn an_ncbi_error_of_outfmt_0_alone_fails_stream_0_alone_where_the_argv_asks_for_another_format()
+    {
+        let query = [FastaRecord::new(
+            "Query_1",
+            b"c00556_q",
+            b"GACTCCCTCGAGCTTC",
+        )];
+        let subject = [FastaRecord::new("Subject_1", b"c00556_s", b"WRTIVII")];
+        let words = [
+            "blastx",
+            "-query",
+            "q",
+            "-subject",
+            "s",
+            "-ungapped",
+            "-window_size",
+            "0",
+            "-comp_based_stats",
+            "0",
+            "-seg",
+            "no",
+            "-evalue",
+            "1e5",
+            "-word_size",
+            "3",
+            "-threshold",
+            "2",
+        ];
+        let exception = "CSeq_align::GetSeqRange(): Row is empty";
+        let warning = "Warning: [blastx] Error pre-fetching sequence data\n";
+        for (argv, stream, ncbi) in [
+            (
+                "6",
+                6,
+                "Query_1\tc00556_s\t0.000\t0\t0\t0\t0\t0\t0\t0\t3.7\t 4.2\n",
+            ),
+            (
+                "6 qseqid sseqid evalue",
+                STREAM_CUSTOM,
+                "Query_1\tc00556_s\t3.7\n",
+            ),
+        ] {
+            let written =
+                streams(&[&words[..], &["-outfmt", argv]].concat(), &query, &subject).unwrap();
+            assert_eq!(text(&written[&stream]), ncbi, "{argv}");
+            assert!(written.get(&0).is_none_or(Vec::is_empty), "{argv}");
+            assert!(discarded(&written).is_empty(), "{argv}");
+            let error = text(&written[&3]);
+            assert!(error.starts_with(warning), "{argv}: {error}");
+            assert_eq!(error.matches(warning).count(), 1, "{argv}: {error}");
+            assert_eq!(error.matches(exception).count(), 1, "{argv}: {error}");
+        }
+        let error = run(&words, &query, &subject).unwrap_err();
+        assert!(error.contains(exception), "{error}");
+    }
+
+    // Line RG item T7-W (decision T7-4, review 3 N5 of line RG T7): BLASTX writes its formats
+    // query batch by query batch (10,002 query letters, NCBI's). The first batch (103 queries of
+    // 99 letters against 320 subjects) writes more than 1 MiB of streams 6 and 7; the last query,
+    // in the second batch, alone hits a subject whose title NCBI cannot decode, where NCBI's
+    // tabular `saccver` stops (PD-LOSAT-NCBI-DEFECTS 1.37). With the default outfmt 0, or a field
+    // list without `saccver`, the CLI completes; streams 6 and 7, which the argv does not ask
+    // for, fail alone at that batch with a chunk sent: the signals of stream 9 discard them, the
+    // run writes the others, the HSP records (which point into stream 6) are not written, and
+    // stream 3 has the refusal once. The argv's own `-outfmt 6` fails the run, as the CLI fails.
+    #[test]
+    fn a_blastx_stream_that_fails_alone_at_a_later_batch_is_discarded() {
+        let protein = b"MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQ";
+        let other = b"CFDYQGKGFISMYSLRLTSNPFPEIFSRVERPMRGRLALIDVRHRVPYACGDESHIVAGRPARPTLTRS";
+        let mut query: Vec<FastaRecord> = (0..103)
+            .map(|n| {
+                FastaRecord::new(
+                    format!("Query_{}", n + 1),
+                    format!("q{n}").as_bytes(),
+                    &CODING[..99],
+                )
+            })
+            .collect();
+        query.push(FastaRecord::new("Query_104", b"qlast", &codons(other)));
+        let mut subject: Vec<FastaRecord> = (0..320)
+            .map(|n| {
+                FastaRecord::new(
+                    format!("Subject_{}", n + 1),
+                    format!("s{n}").as_bytes(),
+                    protein,
+                )
+            })
+            .collect();
+        subject.push(FastaRecord::new(
+            "Subject_321",
+            b"Subject_9 bad x\x81y title",
+            other,
+        ));
+        let words = ["blastx", "-query", "q", "-subject", "s", "-evalue", "1e-10"];
+        let refusal = "subject record 321 (Subject_9)";
+        let plain = streams(&words, &query, &subject).unwrap();
+        assert_eq!(discarded(&plain), [6, 7]);
+        for stream in [6, 7, STREAM_HITS] {
+            assert!(
+                plain.get(&stream).is_none_or(Vec::is_empty),
+                "stream {stream}"
+            );
+        }
+        let report = text(&plain[&0]);
+        assert!(report.len() > 1 << 20, "{}", report.len());
+        assert!(
+            report.contains("Query= qlast")
+                && report.contains("Sequence with id Subject_321 no longer exists"),
+            "{}",
+            &report[report.len() - 2000..]
+        );
+        let last = &report[report.find("Query= qlast").unwrap()..];
+        assert!(last.contains("Effective search space used:"), "{last}");
+        let error = text(&plain[&3]);
+        assert_eq!(error.matches(refusal).count(), 1, "{error}");
+        let fields = [&words[..], &["-outfmt", "6 qseqid evalue"]].concat();
+        let custom = streams(&fields, &query, &subject).unwrap();
+        assert_eq!(discarded(&custom), [6, 7]);
+        let rows = text(&custom[&STREAM_CUSTOM]);
+        assert!(
+            rows.starts_with("q0\t") && rows.contains("\nqlast\t"),
+            "{}",
+            &rows[rows.len().saturating_sub(300)..]
+        );
+        assert_eq!(rows.lines().count(), 103 * 320 + 1);
+        assert_eq!(text(&custom[&0]), report);
+        let error = run(&[&words[..], &["-outfmt", "6"]].concat(), &query, &subject).unwrap_err();
+        assert!(error.contains(refusal), "{error}");
+    }
+
+    // Line RG item T7-W (review N5): a run of two searches (`-num_descriptions 5` gives format 0
+    // a hit list size of its own, §7) in which stream 0, which the argv's `-outfmt 6` does not ask
+    // for, fails alone in its search, after the report of a query with a warning (`warning`, which
+    // the format 0 search writes before it fails, as the CLI's outfmt 0 does). Stream 3 holds
+    // each text once: the CLI's standard error for `-outfmt 6` (the first search's), then the
+    // refusal of stream 0 (`refusal`), without the warnings that the format 0 search repeats. So
+    // it is that of the run's one search without `-num_descriptions` after the formatting
+    // handler's line of `-num_descriptions`, which the CLI's `-outfmt 6` writes first.
+    fn two_searches_write_each_text_once(
+        program: &str,
+        words: &[&str],
+        query: &[FastaRecord],
+        subject: &[FastaRecord],
+        warning: &str,
+        refusal: &str,
+    ) {
+        let one = streams(&[words, &["-outfmt", "6"]].concat(), query, subject).unwrap();
+        let alone = text(&one[&3]);
+        assert_eq!(alone.matches(warning).count(), 1, "{program}: {alone}");
+        assert_eq!(alone.matches(refusal).count(), 1, "{program}: {alone}");
+        assert!(
+            alone.find(warning) < alone.find(refusal),
+            "{program}: {alone}"
+        );
+        let two = streams(
+            &[words, &["-outfmt", "6", "-num_descriptions", "5"]].concat(),
+            query,
+            subject,
+        )
+        .unwrap();
+        assert_eq!(
+            text(&two[&3]),
+            format!(
+                "Warning: [{program}] The parameter -num_descriptions is ignored for output formats > 4 . Use -max_target_seqs to control output\n{alone}"
+            ),
+            "{program}"
+        );
+        assert!(!two[&6].is_empty(), "{program}");
+        assert_eq!(two[&6], one[&6], "{program}");
+        for streams in [&one, &two] {
+            assert!(streams.get(&0).is_none_or(Vec::is_empty), "{program}");
+            assert!(discarded(streams).is_empty(), "{program}");
+        }
+    }
+
+    /// The refusal of a `-sorthits` total above 99999 bits (`TotalScoreRefusal`).
+    const SORTHITS_REFUSAL: &str =
+        "-sorthits: the total score of the description table's last subject is wider than its column";
+
+    // N5 in BLASTN: a query of N (no Karlin-Altschul parameters, NCBI's warning), then a 60 kb
+    // self hit whose `-sorthits` total is above 99999 bits (review `bnw_nd5_f6`).
+    #[test]
+    fn blastn_two_searches_write_each_text_once() {
+        let big = random_nucleotides(60_000, 5);
+        let query = [
+            FastaRecord::new("Query_1", b"nq1 ns", &[b'N'; 60]),
+            FastaRecord::new("Query_2", b"bq big", &big),
+        ];
+        let subject = [FastaRecord::new("Subject_1", b"bs big", &big)];
+        two_searches_write_each_text_once(
+            "blastn",
+            &["blastn", "-query", "q", "-subject", "s", "-sorthits", "0"],
+            &query,
+            &subject,
+            "Warning: [blastn] Query_1 nq1 ns: Could not calculate ungapped Karlin-Altschul parameters",
+            SORTHITS_REFUSAL,
+        );
+    }
+
+    // N5 in TBLASTX: a query without letters (NCBI's warning; a query of N has none in TBLASTX's
+    // search of `-subject`), then a 30 kb self hit whose total over the frames is above 99999 bits
+    // (review `tx_*`).
+    #[test]
+    fn tblastx_two_searches_write_each_text_once() {
+        let big = random_nucleotides(30_000, 6);
+        let query = [
+            FastaRecord::new("Query_1", b"eq1 empty", b""),
+            FastaRecord::new("Query_2", b"bq big", &big),
+        ];
+        let subject = [FastaRecord::new("Subject_1", b"bs big", &big)];
+        two_searches_write_each_text_once(
+            "tblastx",
+            &["tblastx", "-query", "q", "-subject", "s", "-sorthits", "0"],
+            &query,
+            &subject,
+            "Warning: [tblastx] Query_1 eq1 empty: Sequence contains no data",
+            SORTHITS_REFUSAL,
+        );
+    }
+
+    // N5 in BLASTP: a query of X (no Karlin-Altschul parameters), then a 60,000-residue self hit
+    // whose total is above 99999 bits (review `bp_nd5_f6`).
+    #[test]
+    fn blastp_two_searches_write_each_text_once() {
+        let big = random_protein(60_000, 7);
+        let query = [
+            FastaRecord::new("Query_1", b"xq1 xs", &[b'X'; 60]),
+            FastaRecord::new("Query_2", b"bq big", &big),
+        ];
+        let subject = [FastaRecord::new("Subject_1", b"bs big", &big)];
+        two_searches_write_each_text_once(
+            "blastp",
+            &["blastp", "-query", "q", "-subject", "s", "-sorthits", "0"],
+            &query,
+            &subject,
+            "Warning: [blastp] Query_1 xq1 xs: Could not calculate ungapped Karlin-Altschul parameters",
+            SORTHITS_REFUSAL,
+        );
+    }
+
+    // N5 in TBLASTN: the queries of BLASTP's case against a coding sequence of the big protein.
+    #[test]
+    fn tblastn_two_searches_write_each_text_once() {
+        let big = random_protein(60_000, 8);
+        let query = [
+            FastaRecord::new("Query_1", b"xq1 xs", &[b'X'; 60]),
+            FastaRecord::new("Query_2", b"bq big", &big),
+        ];
+        let subject = [FastaRecord::new("Subject_1", b"bs big", &codons(&big))];
+        two_searches_write_each_text_once(
+            "tblastn",
+            &["tblastn", "-query", "q", "-subject", "s", "-sorthits", "0"],
+            &query,
+            &subject,
+            "Warning: [tblastn] Query_1 xq1 xs: Could not calculate ungapped Karlin-Altschul parameters",
+            SORTHITS_REFUSAL,
+        );
+    }
+
+    // N5 in BLASTX: the ungapped one-hit run of NCBI's `Row is empty` in outfmt 0 alone (W4,
+    // `an_ncbi_error_of_outfmt_0_alone_...`), whose prefetch warning every search writes.
+    #[test]
+    fn blastx_two_searches_write_each_text_once() {
+        let query = [FastaRecord::new(
+            "Query_1",
+            b"c00556_q",
+            b"GACTCCCTCGAGCTTC",
+        )];
+        let subject = [FastaRecord::new("Subject_1", b"c00556_s", b"WRTIVII")];
+        two_searches_write_each_text_once(
+            "blastx",
+            &[
+                "blastx",
+                "-query",
+                "q",
+                "-subject",
+                "s",
+                "-ungapped",
+                "-window_size",
+                "0",
+                "-comp_based_stats",
+                "0",
+                "-seg",
+                "no",
+                "-evalue",
+                "1e5",
+                "-word_size",
+                "3",
+                "-threshold",
+                "2",
+            ],
+            &query,
+            &subject,
+            "Warning: [blastx] Error pre-fetching sequence data\n",
+            "CSeq_align::GetSeqRange(): Row is empty",
         );
     }
 }

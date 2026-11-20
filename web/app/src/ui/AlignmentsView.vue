@@ -11,12 +11,13 @@
 // arrive in the same frame are shown together, so that the page is measured once a frame.
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { sameHsp, type HspId, type RangeEntry, type ResultsBrowser, type ResultsState } from '../application/results';
-import { windowAround } from '../domain/result-index';
+import { flagGiven, windowAround } from '../domain/result-index';
 import { formatCount } from './format';
 import HspTable from './HspTable.vue';
+import LosatLoader from './LosatLoader.vue';
+import { vScrollFocus } from './scroll-focus';
 
 const props = defineProps<{ results: ResultsBrowser; state: ResultsState }>();
-const emit = defineEmits<{ descriptions: [] }>();
 
 /** Ranges shown on each side of the selected one, and added by "Show earlier/later matches". */
 const REACH = 25;
@@ -29,7 +30,16 @@ const ranges = computed(() => props.state.ranges);
 const selectedAt = computed(() => ranges.value.findIndex((range) => sameHsp(range.id, props.state.hsp)));
 const detail = computed(() => props.state.detail);
 const entry = computed(() => props.state.hsps.find((hsp) => sameHsp(hsp.id, detail.value?.id)));
-const limitGiven = computed(() => props.state.loaded?.run.snapshot.argv.includes('-max_target_seqs') ?? false);
+const limitGiven = computed(() => flagGiven(props.state.loaded?.run.snapshot.argv ?? [], '-max_target_seqs'));
+/** What outfmt 0 does with -num_descriptions / -num_alignments; undefined where neither is given. */
+const outfmt0 = computed(() => props.state.loaded?.limits.outfmt0);
+/** -sorthits orders outfmt 0's hit list: its first subjects are not the first ones in the engine's order. */
+const sorted = computed(() => props.state.loaded?.limits.sorted === true);
+/** Outfmt 0's own search failed: stream 0 is empty next to the tabular records (its error is in the diagnostics). */
+const outfmt0Failed = computed(() => props.state.loaded?.outfmt0Failed === true);
+const plural = (count: number, one: string, many = `${one}s`) => `${formatCount(count)} ${count === 1 ? one : many}`;
+/** The subjects whose alignments outfmt 0 shows, "3 subjects" or "subjects" where -num_alignments cannot be read. */
+const alignedSubjects = computed(() => (outfmt0.value?.alignments === undefined ? 'subjects' : plural(outfmt0.value.alignments, 'subject')));
 
 /** The subject's heading in outfmt 0, as written: read with the selected HSP, or for the Descriptions. */
 const heading = computed(() => {
@@ -104,6 +114,7 @@ function selectRange(range: RangeEntry | undefined): void {
   void reveal(range.id, true);
 }
 
+/** Previous and Next are marked aria-disabled at the ends, not disabled, so that the one pressed keeps the focus (WA2-AX-04). */
 function selectSubject(offset: number): void {
   const next = props.state.subjects[position.value + offset];
   if (next !== undefined) props.results.selectSubject(next.sIdx);
@@ -222,14 +233,18 @@ const sectionState = (range: RangeEntry): 'pending' | 'ready' | 'failed' => {
       <div class="tool-band alignments-nav">
         <span class="alignments-position muted small">Subject {{ formatCount(position + 1) }} of {{ formatCount(state.subjects.length) }}</span>
         <span class="alignments-buttons">
-          <button type="button" :disabled="position <= 0" data-testid="alignments-prev-subject" @click="selectSubject(-1)">Previous</button>
-          <button type="button" :disabled="position >= state.subjects.length - 1" data-testid="alignments-next-subject" @click="selectSubject(1)">
+          <button type="button" :aria-disabled="position <= 0 || undefined" data-testid="alignments-prev-subject" @click="selectSubject(-1)">Previous</button>
+          <button
+            type="button"
+            :aria-disabled="position >= state.subjects.length - 1 || undefined"
+            data-testid="alignments-next-subject"
+            @click="selectSubject(1)"
+          >
             Next
           </button>
-          <button type="button" data-testid="alignments-descriptions" @click="emit('descriptions')">Descriptions</button>
         </span>
       </div>
-      <pre v-if="heading !== undefined" class="output subject-heading" data-testid="detail-heading">{{ heading }}</pre>
+      <pre v-if="heading !== undefined" v-scroll-focus="'outfmt 0 heading'" class="output subject-heading" data-testid="detail-heading">{{ heading }}</pre>
       <!-- The fields on one line of the template: the spaces between them are part of the text. -->
       <p class="alignments-summary" data-testid="alignments-summary">
         <span><strong>Sequence ID:</strong> {{ subject.first.sseqid }}</span>  <span><strong>Length:</strong> {{ formatCount(subject.length) }}</span>  <span><strong>Number of Matches:</strong> {{ formatCount(subject.hspCount) }}<template v-if="ranges.length < subject.hspCount"> ({{ formatCount(ranges.length) }} shown)</template></span>
@@ -291,23 +306,50 @@ const sectionState = (range: RangeEntry): 'pending' | 'ready' | 'failed' => {
           </p>
           <p v-if="detail.state === 'failed'" class="error" data-testid="detail-error">The HSP could not be read: {{ detail.error }}</p>
           <template v-if="range.inOutfmt0">
-            <p v-if="detail.state === 'loading'" class="muted">Reading the alignment…</p>
-            <pre v-if="detail.section !== undefined" class="output range-text" data-testid="detail-section">{{ detail.section }}</pre>
+            <p v-if="detail.state === 'loading'" class="muted"><LosatLoader />Reading the alignment…</p>
+            <pre
+              v-if="detail.section !== undefined"
+              v-scroll-focus="`Range ${range.n} in outfmt 0`"
+              class="output range-text"
+              data-testid="detail-section"
+              >{{ detail.section }}</pre
+            >
           </template>
+          <p v-else-if="outfmt0Failed" class="notice" data-testid="detail-not-in-outfmt0">
+            No outfmt 0 alignment is linked to this HSP: the search of outfmt 0 failed, and its error is in the diagnostics. The outfmt 6 row
+            below and outfmt 7 hold the HSP.
+          </p>
+          <p v-else-if="outfmt0?.separate" class="notice" data-testid="detail-not-in-outfmt0">
+            No outfmt 0 alignment is linked to this HSP. Its search has a hit list of its own<template v-if="outfmt0.hitList !== undefined">
+              ({{ plural(outfmt0.hitList, 'subject') }} per query)</template
+            >, because <span class="option-name">-num_descriptions</span> and <span class="option-name">-num_alignments</span> give it another size
+            than outfmt 6 and 7, and it shows the alignments of its first {{ alignedSubjects }}<template v-if="sorted">
+              in its order of <span class="option-name">-sorthits</span></template
+            >
+            (<span class="option-name">-num_alignments</span>). Those can be other subjects, or another set of HSPs of a subject (which may
+            include this one), than outfmt 6 and 7 keep. The outfmt 6 row below and outfmt 7 hold the HSP.
+          </p>
           <p v-else class="notice" data-testid="detail-not-in-outfmt0">
-            outfmt 0 does not show this HSP. It shows the alignments of the first {{ state.outfmt0Subjects }} subjects of this query
-            (BLAST+'s <span class="option-name">-num_alignments</span>: 250<template v-if="limitGiven"
-              >, here <span class="option-name">-max_target_seqs</span></template
-            >), and this subject comes after them. The outfmt 6 row below and outfmt 7 hold the HSP.
+            outfmt 0 does not show this HSP. It shows the alignments of the first {{ state.outfmt0Subjects }} subjects of this query<template
+              v-if="sorted"
+            >
+              in its order of <span class="option-name">-sorthits</span></template
+            >
+            (BLAST+'s <span class="option-name">-num_alignments</span>: <template v-if="outfmt0?.alignments !== undefined">{{ outfmt0.alignments }}</template
+            ><template v-else>250</template
+            ><template v-if="limitGiven">, here <span class="option-name">-max_target_seqs</span></template
+            >), and this subject <template v-if="sorted">is not one of them</template><template v-else>comes after them</template>. The outfmt 6
+            row below and outfmt 7 hold the HSP.
           </p>
           <h5 class="row-label">outfmt 6 row</h5>
-          <pre class="output row-text" data-testid="detail-row">{{ detail.row }}</pre>
+          <pre v-scroll-focus="'outfmt 6 row'" class="output row-text" data-testid="detail-row">{{ detail.row }}</pre>
         </div>
 
         <!-- Another HSP of the subject: its section, read when the block comes into view. -->
         <template v-else-if="range.inOutfmt0">
           <pre
             v-if="sectionState(range) === 'ready'"
+            v-scroll-focus="`Range ${range.n} in outfmt 0`"
             class="output range-text"
             data-testid="range-section"
             data-state="ready"

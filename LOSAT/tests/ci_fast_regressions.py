@@ -7,17 +7,22 @@ docs/evidence/losat_web_e1a/capture_outputs.py and checks, per case:
   (docs/evidence/losat_web_e1a/baseline/hashes.tsv);
 - the frozen expected hash (Gate A, TLOSAN Stage G), with the known mismatches of
   frozen_mismatch_allowlist.json (a stale entry fails);
-the outfmt 0 fixtures (docs/evidence/losat_web_e2a/check_losat.py) of the
-selected programs at 1 and 4 threads, for BLASTN the frozen NCBI outputs of
+the -subject fixtures of outfmt0_manifest.tsv (docs/evidence/losat_web_e2a/check_losat.py: outfmt 0/6/7
+and the 8/9/12 rows sa.* (8/12 in ulp.*) and the 5 rows of BLASTN and BLASTP; its rows of outfmt 13 and 14 run with
+`-out` and compare the master and side files, xinclude_fixtures.py) of the selected programs at 1 and 4 threads, for BLASTN the frozen NCBI outputs of
 blastn_regression_fixtures.py (preliminary hit lists, batches, split, ambiguity,
 lowercase masking) and for TBLASTX those of tblastx_regression_fixtures.py (query
-batches, warnings, hit lists, ambiguity, empty inputs, failed writes); for each
+batches, warnings, hit lists, ambiguity, empty inputs, failed writes); when one of the five classic
+programs is selected the frozen NCBI range errors of range_regression_fixtures.py (`-query_loc` /
+`-subject_loc`, every row); for each
 selected program the FASTA-input fixtures of fasta_input_fixtures.py (`check --rows
 <program>`: stdout, stderr, exit code and combined stream against the frozen NCBI
 hashes, and LOSAT's explicit rejections where it rejects an input or option); for BLASTP,
-BLASTN, TBLASTN, BLASTX and TBLASTX the `-db` fixtures of db_search_fixtures.py (`check --program <program>`: stdout,
+BLASTN, TBLASTN, BLASTX, TBLASTX and PSIBLAST the `-db` fixtures of db_search_fixtures.py (`check --program <program>`: stdout,
 stderr and exit status against the frozen NCBI `<program> -db -num_threads 1` bytes, at 1 and
-4 threads).
+4 threads), with --library-example the `-subject` and `-db` rows through the library API (at 1
+thread); and, whenever a program is selected, the command lines of the downstream tools and
+the common forms of each program (dropin_corpus.py `check`: every row).
 
 Programs are selected from the changed paths (--changed-from): a program's own
 directory selects it and every program that imports it; any other engine or
@@ -27,6 +32,7 @@ nightly workflow passes --all-cases.
 
 Usage:
   ci_fast_regressions.py --losat BIN --out DIR [--programs all|LIST | --changed-from REV] [--all-cases] [--jobs N]
+      [--library-example BIN]
   ci_fast_regressions.py --select-only --changed-from REV
 """
 from __future__ import annotations
@@ -34,6 +40,7 @@ from __future__ import annotations
 import argparse
 import concurrent.futures
 import csv
+import dataclasses
 import json
 import os
 import re
@@ -42,6 +49,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Callable
 
 REPO = Path(__file__).resolve().parents[2]
 TESTS = REPO / "LOSAT" / "tests"
@@ -55,10 +63,15 @@ import capture_outputs  # noqa: E402
 import certify_platform_native_v010 as certify  # noqa: E402
 from frozen_allowlist import Allowlist  # noqa: E402
 
-PROGRAMS = capture_outputs.PROGRAMS
-FIXTURE_PROGRAMS = ("blastn", "blastp", "tblastn", "tblastx")
-DB_SEARCH_PROGRAMS = ("blastp", "blastn", "tblastn", "blastx", "tblastx")  # the programs of db_search_manifest.tsv
+# psiblast (line PS) has no capture case: its fixtures are rows of outfmt0_manifest.tsv and
+# db_search_manifest/psiblast.tsv; rpsblast's (line PS, PS11a) and rpstblastn's (PS12a) are rows of
+# db_search_manifest/rpsblast.tsv and rpstblastn.tsv.
+PROGRAMS = capture_outputs.PROGRAMS + ("psiblast", "rpsblast", "rpstblastn")
+FIXTURE_PROGRAMS = ("blastn", "blastp", "tblastn", "tblastx", "blastx")  # the programs of fasta_input_fixtures.py
+OUTFMT0_PROGRAMS = ("blastn", "blastp", "tblastn", "tblastx", "blastx", "psiblast")  # the programs of outfmt0_manifest.tsv
+DB_SEARCH_PROGRAMS = ("blastp", "blastn", "tblastn", "blastx", "tblastx", "psiblast", "rpsblast", "rpstblastn")  # the programs of db_search_manifest/ (a file each, and row family files)
 REGRESSION_FIXTURES = {"blastn": "BLASTN", "tblastx": "TBLASTX"}
+RANGE_PROGRAMS = ("blastn", "blastp", "blastx", "tblastn", "tblastx")  # the programs of range_regression_manifest.tsv
 # TBLASTX manifest cases that finish in under 30 s (2026-10-01, native release binary);
 # the other 13 (46 s to over 10 min) run in the nightly workflow.
 FAST_TBLASTX = frozenset({
@@ -66,10 +79,16 @@ FAST_TBLASTX = frozenset({
     "p08_trcumjnv_mellatmjnv", "p12_lc738874_lc738875_default", "p13_mela_mje_reverse",
 })
 # A change to the FASTA-input reader (NCBI's CFastaReader port), its fixture script, manifests or
-# inputs selects all four programs (they share the reader).
+# inputs selects every program (they share the reader).
 FASTA_INPUT_PATHS = ("LOSAT/src/blastinput/", "LOSAT/tests/fasta_input_fixtures", "LOSAT/tests/fixtures/fasta_input/")
-PROGRAM_DIR = re.compile(r"^LOSAT/src/algorithm/(blastn|blastp|blastx|tblastn|tblastx)/")
-STAGE_G_PREFIX = "/mnt/c/Users/genom/GitHub/LOSAT/"
+PROGRAM_DIR = re.compile(r"^LOSAT/src/algorithm/(blastn|blastp|blastx|tblastn|tblastx|psiblast|rpsblast|rpstblastn)/")
+
+
+def default_jobs() -> int:
+    """The CPUs this process may run on (a `taskset` or a ws lease narrows them), else os.cpu_count()."""
+    if hasattr(os, "sched_getaffinity"):
+        return len(os.sched_getaffinity(0))
+    return os.cpu_count() or 4
 
 
 def program_dependents() -> dict[str, set[str]]:
@@ -78,7 +97,7 @@ def program_dependents() -> dict[str, set[str]]:
     for program in PROGRAMS:
         text = "".join(path.read_text(errors="replace")
                        for path in (REPO / "LOSAT/src/algorithm" / program).rglob("*.rs"))
-        imports[program] = set(re.findall(r"crate::algorithm::(blastn|blastp|blastx|tblastn|tblastx)\b", text)) - {program}
+        imports[program] = set(re.findall(r"crate::algorithm::(blastn|blastp|blastx|tblastn|tblastx|psiblast|rpsblast|rpstblastn)\b", text)) - {program}
     dependents = {program: {program} for program in PROGRAMS}
     changed = True
     while changed:
@@ -182,65 +201,187 @@ def check_rows(rows, baseline, allowlist: Allowlist, programs: set[str], all_cas
     return failures, allowed
 
 
-def run_fasta_input_fixtures(losat: Path, programs: set[str], out: Path, jobs: int) -> tuple[list[str], dict[str, float]]:
-    """fasta_input_fixtures.py check for each selected program: every row `same` or an expected explicit rejection."""
+@dataclasses.dataclass
+class Task:
+    """One fixture script run of the fixture phase: its command, the log the phase writes for it (None when
+    the script writes its own `--out` file) and how its result becomes failure lines."""
+    name: str
+    argv: list[str]
+    failures: Callable[[subprocess.CompletedProcess], list[str]]
+    cwd: Path | None = None
+    log: Path | None = None
+
+
+def run_tasks(tasks: list[Task], jobs: int) -> tuple[list[str], dict[str, float]]:
+    """Runs the tasks `jobs` at a time and returns their failure lines in the order of `tasks`, whatever the
+    order they end in, and each task's seconds. No task reads what another writes: the searches that write
+    files write them into a temporary directory of their own (xinclude_fixtures.py, the RPS databases and
+    HOME of db_search_fixtures.py, dropin_corpus.py), and each log is the task's own. Until 2026-11 the
+    tasks ran one after the other, most of them one search on one thread at a time: 7.8 to 10.6 of the 7.9 to
+    10.8 minutes of the step on a 4-vCPU runner (5 pull request runs with every program, 2026-11-12/13)."""
+    def run(task: Task) -> tuple[subprocess.CompletedProcess, float]:
+        started = time.perf_counter()
+        result = subprocess.run(task.argv, cwd=task.cwd, capture_output=True, text=True)
+        seconds = round(time.perf_counter() - started, 1)
+        if task.log is not None:
+            task.log.write_text(result.stdout + result.stderr)
+        return result, seconds
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, jobs)) as pool:
+        results = list(pool.map(run, tasks))
     failures, seconds = [], {}
+    for task, (result, took) in zip(tasks, results):
+        seconds[task.name] = took
+        failures += task.failures(result)
+    return failures, seconds
+
+
+def fasta_input_tasks(losat: Path, programs: set[str], out: Path, jobs: int) -> list[Task]:
+    """fasta_input_fixtures.py check for each selected program: every row `same` or an expected explicit rejection."""
+    tasks = []
     for program in FIXTURE_PROGRAMS:
         if program not in programs:
             continue
         log = out / f"{program}-fasta-input-fixtures.tsv"
-        started = time.perf_counter()
-        result = subprocess.run([sys.executable, str(TESTS / "fasta_input_fixtures.py"), "check", "--losat", str(losat),
-                                 "--out", str(log), "--rows", program, "--jobs", str(jobs)],
-                                capture_output=True, text=True)
-        seconds[program] = round(time.perf_counter() - started, 1)
-        if result.returncode != 0:
+
+        def failures(result, program=program, log=log) -> list[str]:
+            if result.returncode == 0:
+                return []
+            found = []
             if log.exists():
                 rows = [line.split("\t") for line in log.read_text().splitlines()[1:]]
-                failures += [f"{program.upper()} FASTA-input fixture {row[0]}: {row[4]}" for row in rows
-                             if len(row) > 4 and row[4] not in ("same", "rejection")][:20]
-            failures.append(f"{program.upper()} FASTA-input fixtures differ: see {log.name} "
-                            f"({result.stdout.strip() or result.stderr.strip()[-200:]})")
-    return failures, seconds
+                found += [f"{program.upper()} FASTA-input fixture {row[0]}: {row[4]}" for row in rows
+                          if len(row) > 4 and row[4] not in ("same", "rejection")][:20]
+            found.append(f"{program.upper()} FASTA-input fixtures differ: see {log.name} "
+                         f"({result.stdout.strip() or result.stderr.strip()[-200:]})")
+            return found
+
+        tasks.append(Task(f"fasta-input {program}",
+                          [sys.executable, str(TESTS / "fasta_input_fixtures.py"), "check", "--losat", str(losat),
+                           "--out", str(log), "--rows", program, "--jobs", str(jobs)], failures))
+    return tasks
 
 
-def run_fixtures(losat: Path, programs: set[str], out: Path) -> list[str]:
+# What a build without the `diagnostics` feature writes for a set diagnostic variable (LOSAT/src/utils/xdiag.rs).
+STARTUP_TRACE_NOTICE = ("LOSAT_STARTUP_TRACE is ignored: this losat was built without the diagnostics feature "
+                        "(docs/agents/diagnostics.md, \"Diagnostic build\")\n")
+
+
+def check_startup_trace_notice(losat: Path) -> list[str]:
+    """`losat --version` with LOSAT_STARTUP_TRACE=1 on the DEFAULT release binary: the same stdout as the plain
+    run and the notice line as the only stderr. Every other CI test build is `--all-features`, which reads the
+    variable, so this run is what checks the default side."""
+    base = {key: value for key, value in os.environ.items() if not key.startswith("LOSAT_")}
+    plain = subprocess.run([str(losat), "--version"], capture_output=True, env=base)
+    traced = subprocess.run([str(losat), "--version"], capture_output=True,
+                            env={**base, "LOSAT_STARTUP_TRACE": "1"})
     failures = []
-    selected = [program for program in FIXTURE_PROGRAMS if program in programs]
-    if not selected:
-        return failures
-    for threads in (1, 4):
-        log = out / f"outfmt0-fixtures-n{threads}.tsv"
-        result = subprocess.run([sys.executable, str(FIXTURE_DIR / "check_losat.py"), "--losat", str(losat),
-                                 "--programs", ",".join(selected), "--threads", str(threads)],
-                                cwd=FIXTURE_DIR, capture_output=True, text=True)
-        log.write_text(result.stdout + result.stderr)
-        if result.returncode != 0:
-            failures.append(f"outfmt 0 fixtures differ at {threads} thread(s): see {log.name}")
+    if plain.returncode != 0 or traced.returncode != 0:
+        failures.append(f"`losat --version` exited with {plain.returncode} (plain) and {traced.returncode} "
+                        "(LOSAT_STARTUP_TRACE=1)")
+    if plain.stderr != b"":
+        failures.append(f"`losat --version` wrote to stderr without a diagnostic variable: {plain.stderr!r}")
+    if plain.stdout != traced.stdout:
+        failures.append("LOSAT_STARTUP_TRACE=1 changed the stdout of `losat --version`")
+    if traced.stderr.decode(errors="replace") != STARTUP_TRACE_NOTICE:
+        failures.append("`losat --version` with LOSAT_STARTUP_TRACE=1 did not write exactly the notice of a "
+                        "default build (--losat must be a default build, without --features diagnostics): "
+                        f"stderr {traced.stderr.decode(errors='replace')!r}")
+    return failures
+
+
+def outfmt0_task(name: str, losat: Path, selected: list[str], log: Path, threads: int, library: bool) -> Task:
+    """check_losat.py over the outfmt 0 manifest's rows of the selected programs."""
+    message = (f"outfmt 0 fixtures differ through the library: see {log.name}" if library
+               else f"outfmt 0 fixtures differ at {threads} thread(s): see {log.name}")
+    return Task(name, [sys.executable, str(FIXTURE_DIR / "check_losat.py"), "--losat", str(losat),
+                       "--programs", ",".join(selected), "--threads", str(threads), *(["--library"] if library else [])],
+                lambda result: [] if result.returncode == 0 else [message], cwd=FIXTURE_DIR, log=log)
+
+
+def db_search_task(losat: Path, program: str, out: Path, threads: int | None) -> Task:
+    """db_search_fixtures.py check of one program's `-db` rows, at `threads` threads, or through the library
+    API (`threads` None: `examples/library_command_line` at its one thread)."""
+    if threads is None:
+        log = out / f"db-search-library-{program}.tsv"
+        argv = ["check", "--library", "--losat", str(losat), "--program", program, "--out", str(log)]
+
+        def failures(result) -> list[str]:
+            if result.returncode == 0:
+                return []
+            return [f"{program.upper()} -db fixture through the library {line}"
+                    for line in result.stdout.splitlines() if "\tdiffers\t" in line][:20] + \
+                [f"{program.upper()} -db fixtures differ through the library: see {log.name}"]
+        return Task(f"db {program} library", [sys.executable, str(TESTS / "db_search_fixtures.py"), *argv], failures)
+    log = out / f"db-search-fixtures-{program}-n{threads}.tsv"
+    argv = ["check", "--losat", str(losat), "--program", program, "--threads", str(threads), "--out", str(log)]
+
+    def failures(result) -> list[str]:
+        if result.returncode == 0:
+            return []
+        return [f"{program.upper()} -db fixture at {threads} thread(s) {line}"
+                for line in result.stdout.splitlines()
+                if "\t" in line and line.split("\t")[1] not in ("same", "rejection")][:20] + \
+            [f"{program.upper()} -db fixtures differ at {threads} thread(s): see {log.name}"]
+    return Task(f"db {program} n{threads}", [sys.executable, str(TESTS / "db_search_fixtures.py"), *argv], failures)
+
+
+def fixture_tasks(losat: Path, programs: set[str], out: Path, library_example: Path | None) -> list[Task]:
+    """The fixture scripts of the selected programs: the outfmt 0 rows at 1 and 4 threads, the `-db` rows at 1
+    and 4 threads, the BLASTN and TBLASTX regression fixtures, the range regression fixtures and the drop-in
+    corpus; with `library_example`
+    (`examples/library_command_line`) the `-subject` and `-db` rows through the library API too (`check_losat.py`
+    and `db_search_fixtures.py check --library`). The outfmt 0 tasks come first: each took 50 to 90 s one after
+    the other, the longest of the phase, and a task that starts last ends last."""
+    tasks = []
+    selected = [program for program in OUTFMT0_PROGRAMS if program in programs]
+    if selected:
+        for threads in (1, 4):
+            tasks.append(outfmt0_task(f"outfmt0 n{threads}", losat, selected, out / f"outfmt0-fixtures-n{threads}.tsv",
+                                      threads, library=False))
+        if library_example is not None:
+            tasks.append(outfmt0_task("outfmt0 library", library_example, selected,
+                                      out / "outfmt0-fixtures-library.tsv", 1, library=True))
     for program in DB_SEARCH_PROGRAMS:
         if program not in programs:
             continue
-        for threads in (1, 4):
-            log = out / f"db-search-fixtures-{program}-n{threads}.tsv"
-            result = subprocess.run([sys.executable, str(TESTS / "db_search_fixtures.py"), "check", "--losat", str(losat),
-                                     "--program", program, "--threads", str(threads), "--out", str(log)],
-                                    capture_output=True, text=True)
-            if result.returncode != 0:
-                failures += [f"{program.upper()} -db fixture at {threads} thread(s) {line}"
-                             for line in result.stdout.splitlines()
-                             if "\t" in line and line.split("\t")[1] not in ("same", "rejection")][:20]
-                failures.append(f"{program.upper()} -db fixtures differ at {threads} thread(s): see {log.name}")
+        tasks += [db_search_task(losat, program, out, 1), db_search_task(losat, program, out, 4)]
+        if library_example is not None:
+            tasks.append(db_search_task(library_example, program, out, None))
     for program, name in REGRESSION_FIXTURES.items():
         if program not in programs:
             continue
         log = out / f"{program}-regression-fixtures.tsv"
-        result = subprocess.run([sys.executable, str(TESTS / f"{program}_regression_fixtures.py"), "check",
-                                 "--losat", str(losat), "--out", str(log)], capture_output=True, text=True)
-        if result.returncode != 0:
-            failures += [f"{name} regression fixture {line}" for line in result.stdout.splitlines()
-                         if "\t" in line and not line.endswith("\tsame")]
-            failures.append(f"{name} regression fixtures differ: see {log.name}")
-    return failures
+
+        def failures(result, name=name, log=log) -> list[str]:
+            if result.returncode == 0:
+                return []
+            return [f"{name} regression fixture {line}" for line in result.stdout.splitlines()
+                    if "\t" in line and not line.endswith("\tsame")] + [f"{name} regression fixtures differ: see {log.name}"]
+        tasks.append(Task(f"{program} regression", [sys.executable, str(TESTS / f"{program}_regression_fixtures.py"),
+                                                    "check", "--losat", str(losat), "--out", str(log)], failures))
+    if programs & set(RANGE_PROGRAMS):
+        log = out / "range-regression-fixtures.tsv"
+
+        def range_failures(result, log=log) -> list[str]:
+            if result.returncode == 0:
+                return []
+            return [f"range regression fixture {line}" for line in result.stdout.splitlines()
+                    if "\t" in line and not line.endswith("\tsame")] + [f"range regression fixtures differ: see {log.name}"]
+        tasks.append(Task("range regression", [sys.executable, str(TESTS / "range_regression_fixtures.py"), "check",
+                                               "--losat", str(losat), "--out", str(log)], range_failures))
+    log = out / "dropin-corpus.tsv"
+
+    def dropin_failures(result) -> list[str]:
+        if result.returncode == 0:
+            return []
+        found = [f"drop-in corpus {line}" for line in result.stdout.splitlines() if "\tdiffers\t" in line][:20]
+        if result.stderr.strip():
+            found.append(f"drop-in corpus raised: {result.stderr.strip().splitlines()[-1]}")
+        return found + [f"drop-in corpus differs: see {log.name}"]
+    tasks.append(Task("dropin corpus", [sys.executable, str(TESTS / "dropin_corpus.py"), "check", "--losat", str(losat),
+                                        "--out", str(log)], dropin_failures))
+    return tasks
 
 
 def main() -> int:
@@ -251,7 +392,10 @@ def main() -> int:
     parser.add_argument("--changed-from", default="")
     parser.add_argument("--all-cases", action="store_true")
     parser.add_argument("--select-only", action="store_true")
-    parser.add_argument("--jobs", type=int, default=os.cpu_count() or 4)
+    parser.add_argument("--jobs", type=int, default=default_jobs(),
+                        help="searches of the capture and fixture scripts at once (default: the CPUs this process may use)")
+    parser.add_argument("--library-example", type=Path,
+                        help="examples/library_command_line: the fixtures through the library API too")
     args = parser.parse_args()
 
     if args.changed_from:
@@ -276,8 +420,6 @@ def main() -> int:
     if ordered:
         losat = args.losat.resolve()
         stage_lexical_fixtures()
-        if "tblastn" in programs and not Path(STAGE_G_PREFIX).is_dir():
-            raise SystemExit(f"TBLASTN Stage G inputs are named by {STAGE_G_PREFIX}; link the checkout there first")
         cases = capture_outputs.all_cases(programs)
         if not args.all_cases:
             cases = [case for case in cases if case.program != "tblastx" or case.case_id in FAST_TBLASTX]
@@ -287,11 +429,15 @@ def main() -> int:
         summary["cases"] = len(rows)
         failures, allowed = check_rows(rows, read_tsv(BASELINE), Allowlist(), programs, args.all_cases)
         started = time.perf_counter()
-        failures += run_fixtures(losat, programs, out)
+        failures += check_startup_trace_notice(losat)
+        example = args.library_example.resolve() if args.library_example else None
+        tasks = fixture_tasks(losat, programs, out, example) + fasta_input_tasks(losat, programs, out, args.jobs)
+        task_failures, task_seconds = run_tasks(tasks, args.jobs)
+        failures += task_failures
         summary["fixture_seconds"] = round(time.perf_counter() - started, 1)
-        fasta_failures, fasta_seconds = run_fasta_input_fixtures(losat, programs, out, args.jobs)
-        failures += fasta_failures
-        summary["fasta_input_seconds"] = fasta_seconds
+        summary["fasta_input_seconds"] = {name.removeprefix("fasta-input "): seconds
+                                          for name, seconds in task_seconds.items() if name.startswith("fasta-input ")}
+        summary["task_seconds"] = task_seconds
         summary["failures"], summary["allowed"] = failures, allowed
         summary["losat_sha256"] = capture_outputs.sha256_bytes(losat.read_bytes())
     (out / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")

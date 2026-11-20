@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="US-ASCII"?>
+<!DOCTYPE BlastOutput PUBLIC "-//NCBI//NCBI BlastOutput/EN" "http://www.ncbi.nlm.nih.gov/dtd/NCBI_BlastOutput.dtd">
+<BlastOutput>
+  <BlastOutput_program>blastx</BlastOutput_program>
+  <BlastOutput_version>BLASTX 2.17.0+</BlastOutput_version>
+  <BlastOutput_reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</BlastOutput_reference>
+  <BlastOutput_db>tests/db_search/bslice</BlastOutput_db>
+  <BlastOutput_query-ID>Query_1</BlastOutput_query-ID>
+  <BlastOutput_query-def>m_fam_lc MelaMJNV 26001-29000, 301-700 and 1501-1800 in lower case</BlastOutput_query-def>
+  <BlastOutput_query-len>3000</BlastOutput_query-len>
+  <BlastOutput_param>
+    <Parameters>
+      <Parameters_matrix>BLOSUM62</Parameters_matrix>
+      <Parameters_expect>10</Parameters_expect>
+      <Parameters_gap-open>11</Parameters_gap-open>
+      <Parameters_gap-extend>1</Parameters_gap-extend>
+      <Parameters_filter>L;</Parameters_filter>
+    </Parameters>
+  </BlastOutput_param>
+<BlastOutput_iterations>
+<Iteration>
+  <Iteration_iter-num>1</Iteration_iter-num>
+  <Iteration_query-ID>Query_1</Iteration_query-ID>
+  <Iteration_query-def>m_fam_lc MelaMJNV 26001-29000, 301-700 and 1501-1800 in lower case</Iteration_query-def>
+  <Iteration_query-len>3000</Iteration_query-len>
+<Iteration_hits>
+<Hit>
+  <Hit_num>1</Hit_num>
+  <Hit_id>gnl|BL_ORD_ID|32</Hit_id>
+  <Hit_def>BDT61962.1 baculoviral IAP repeat-containing protein [Penaeus monodon majanivirus A]</Hit_def>
+  <Hit_accession>32</Hit_accession>
+  <Hit_len>577</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>231.876</Hsp_bit-score>
+      <Hsp_score>590</Hsp_score>
+      <Hsp_evalue>1.61264e-68</Hsp_evalue>
+      <Hsp_query-from>1802</Hsp_query-from>
+      <Hsp_query-to>2707</Hsp_query-to>
+      <Hsp_hit-from>4</Hsp_hit-from>
+      <Hsp_hit-to>356</Hsp_hit-to>
+      <Hsp_query-frame>-3</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>128</Hsp_identity>
+      <Hsp_positive>187</Hsp_positive>
+      <Hsp_gaps>59</Hsp_gaps>
+      <Hsp_align-len>357</Hsp_align-len>
+      <Hsp_qseq>SSPGCMFAQNLYSLEDLNKYCKPP----QIHKTFIKYARDTLIYEQHRLETFADWPHDFVSPIELAADGFYFLKKQDHVMCVFCVGILGLFEMGDIVREKHKHAFPGCAFVRGDKTCNIPAVKKNIFEKLSHEYKP-------------------------PKQTKSPLLDYIGIFEYNISSVRFKRDTFEKRLASF-KDWPEYLVQKPQDLAEAGFYYCGLSDHVACFYCEGGILNWERNDIPWHEHAKYYPTCNYLYLKKGKNFIDNIQ------LKISENTLYESFD-------------------EMDLLMELDIVRCIVSIGYSINDAKCILKKHVTETGWPYLSIEPYVLD</Hsp_qseq>
+      <Hsp_hseq>SHPNSFLQQEEYRLTTFSEHETSPIDTTRVYRNMPFVSYDCLRYEEKRLGTFIDWPHEWLKPSELAADGFYYLRKDDHCACIFCRGIVGAWEKTDTPRGEHERHFPHCPFIRGQPTGNVPIVQGNILARLPVLHASLDDCGSRRVEADACRFSSRHMAGSYPECRGSP--DETGLYQHS-GPKRSDFTTLDSRLKSYVEGWP-ILGLHARDLAEAGFFYCGLSDHVRCFHCGKGLRNWISSDIPWKEHARWYPKCRFVLLTKGQDYINEVQQEHPPYTRTASTTIYSGIDKAASGSSNSPTEVQSVSEQELDLLMSLDVVKCVLEMGYPSCIVRACLKDRVEQTGEPYFVIEPCLED</Hsp_hseq>
+      <Hsp_midline>S P     Q  Y L   +++   P    ++++     + D L YE+ RL TF DWPH+++ P ELAADGFY+L+K DH  C+FC GI+G +E  D  R +H+  FP C F+RG  T N+P V+ NI  +L   +                           P+   SP  D  G+++++    R    T + RL S+ + WP  L    +DLAEAGF+YCGLSDHV CF+C  G+ NW  +DIPW EHA++YP C ++ L KG+++I+ +Q       + +  T+Y   D                   E+DLLM LD+V+C++ +GY     +  LK  V +TG PY  IEP + D</Hsp_midline>
+    </Hsp>
+    <Hsp>
+      <Hsp_num>2</Hsp_num>
+      <Hsp_bit-score>76.2554</Hsp_bit-score>
+      <Hsp_score>186</Hsp_score>
+      <Hsp_evalue>5.20591e-17</Hsp_evalue>
+      <Hsp_query-from>1325</Hsp_query-from>
+      <Hsp_query-to>1492</Hsp_query-to>
+      <Hsp_hit-from>522</Hsp_hit-from>
+      <Hsp_hit-to>577</Hsp_hit-to>
+      <Hsp_query-frame>-3</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>30</Hsp_identity>
+      <Hsp_positive>40</Hsp_positive>
+      <Hsp_gaps>0</Hsp_gaps>
+      <Hsp_align-len>56</Hsp_align-len>
+      <Hsp_qseq>EHMYEDRICKVCMSNEARVVYFPCTHMIACEDCTLALESCPICRKDINYVVRPIIS</Hsp_qseq>
+      <Hsp_hseq>ERMREDRTCKVCMDSEIAIVFLPCSHMVTCVSCAVSLRQCPICRRDIKHVCRAIVS</Hsp_hseq>
+      <Hsp_midline>E M EDR CKVCM +E  +V+ PC+HM+ C  C ++L  CPICR+DI +V R I+S</Hsp_midline>
+    </Hsp>
+    <Hsp>
+      <Hsp_num>3</Hsp_num>
+      <Hsp_bit-score>38.891</Hsp_bit-score>
+      <Hsp_score>89</Hsp_score>
+      <Hsp_evalue>2.24022e-05</Hsp_evalue>
+      <Hsp_query-from>2270</Hsp_query-from>
+      <Hsp_query-to>2914</Hsp_query-to>
+      <Hsp_hit-from>45</Hsp_hit-from>
+      <Hsp_hit-to>288</Hsp_hit-to>
+      <Hsp_query-frame>-3</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>57</Hsp_identity>
+      <Hsp_positive>97</Hsp_positive>
+      <Hsp_gaps>59</Hsp_gaps>
+      <Hsp_align-len>259</Hsp_align-len>
+      <Hsp_qseq>IHLEQRRVETFINQFKENIDESLPIHYRLLAKAGFFYMKKDVIACFCCKLQIDVKTLRTSDDIIMIHKKSSPGCMFAQNLYS----LEDLNKYCKPPQIHKTF--------------------------IKYARDTLIYEQH-------------RLETFAD-WPHDFVSPIELAADGFYFLKKQDHVMCVFCVGILGLFEMGDIVREKHKHAFPGCAFVRGDKTCNIPAVKKNIFEKLSHEYKPPKQTKSPLLDYIGI</Hsp_qseq>
+      <Hsp_hseq>LRYEEKRLGTFIDWPHEWLKPSE------LAADGFYYLRKD-DHCACIFCRGIVGAWEKTDTPRGEHERHFPHCPFIRGQPTGNVPIVQGNILARLPVLHASLDDCGSRRVEADACRFSSRHMAGSYPECRGSPDETGLYQHSGPKRSDFTTLDSRLKSYVEGWPILGLHARDLAEAGFFYCGLSDHVRCFHCGKGLRNWISSDIPWKEHARWYPKCRFVLLTK-------GQDYINEVQQEHPPYTRTASTTI-YSGI</Hsp_hseq>
+      <Hsp_midline>+  E++R+ TFI+   E +  S       LA  GF+Y++KD   C C   +  V     +D     H++  P C F +   +    +   N   + P +H +                            + + D     QH             RL+++ + WP   +   +LA  GF++    DHV C  C   L  +   DI  ++H   +P C FV   K        ++   ++  E+ P  +T S  + Y GI</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+</Iteration_hits>
+  <Iteration_stat>
+    <Statistics>
+      <Statistics_db-num>35</Statistics_db-num>
+      <Statistics_db-len>14391</Statistics_db-len>
+      <Statistics_hsp-len>62</Statistics_hsp-len>
+      <Statistics_eff-space>11463298</Statistics_eff-space>
+      <Statistics_kappa>0.041</Statistics_kappa>
+      <Statistics_lambda>0.267</Statistics_lambda>
+      <Statistics_entropy>0.14</Statistics_entropy>
+    </Statistics>
+  </Iteration_stat>
+</Iteration>
+</BlastOutput_iterations>
+</BlastOutput>
+

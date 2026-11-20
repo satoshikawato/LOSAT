@@ -1,0 +1,212 @@
+PSITBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: tfn
+           16 sequences; 10,937 total letters
+
+
+
+Query= gi|4504347 hemoglobin subunit alpha [Homo sapiens]
+
+Length=30
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+ENST00000251595.11 cdna chromosome:GRCh38:16:172876:173710:1 gene...  56.9    4e-16
+ENST00000320868.9 cdna chromosome:GRCh38:16:176680:177522:1 gene:...  56.9    5e-16
+ENSDART00000113098.5 cdna chromosome:GRCz11:3:55100045:55100936:1...  49.2    4e-13
+ENSDART00000101709.5 cdna chromosome:GRCz11:3:55093581:55094399:1...  44.2    3e-11
+ENSDART00000125092.4 cdna chromosome:GRCz11:3:55120330:55121125:-...  44.2    3e-11
+ENST00000652335.1 cdna chromosome:GRCh38:16:142728:153964:1 gene:...  42.3    1e-10
+ENST00000335295.4 cdna chromosome:GRCh38:11:5225464:5227071:-1 ge...  34.2    1e-07
+ENST00000292901.8 cdna chromosome:GRCh38:11:5232678:5234658:-1 ge...  33.4    2e-07
+ENST00000336906.6 cdna chromosome:GRCh38:11:5253188:5254781:-1 ge...  29.6    5e-06
+ENST00000396895.3 cdna chromosome:GRCh38:11:5268345:5269945:-1 ge...   9.9    118  
+
+
+>ENST00000251595.11 cdna chromosome:GRCh38:16:172876:173710:1 gene:ENSG00000188536.15 
+gene_biotype:protein_coding transcript_biotype:protein_coding 
+gene_symbol:HBA2 description:hemoglobin subunit alpha 
+2 [Source:HGNC Symbol;Acc:HGNC:4824]
+Length=576
+
+ Score = 56.9 bits (136),  Expect = 4e-16
+ Identities = 30/30 (100%), Positives = 30/30 (100%), Gaps = 0/30 (0%)
+ Frame = +2
+
+Query  1    MVLSPADKTNVKAAWGKVGAHAGEYGAEAL  30
+            MVLSPADKTNVKAAWGKVGAHAGEYGAEAL
+Sbjct  38   MVLSPADKTNVKAAWGKVGAHAGEYGAEAL  127
+
+
+>ENST00000320868.9 cdna chromosome:GRCh38:16:176680:177522:1 gene:ENSG00000206172.10 
+gene_biotype:protein_coding transcript_biotype:protein_coding 
+gene_symbol:HBA1 description:hemoglobin subunit alpha 
+1 [Source:HGNC Symbol;Acc:HGNC:4823]
+ ENSDART00000101734.5 cdna chromosome:GRCz11:3:55127549:55128258:-1 gene:ENSDARG00000088330.5 
+gene_biotype:protein_coding transcript_biotype:protein_coding 
+gene_symbol:hbae1.2 description:hemoglobin, alpha 
+embryonic 1.2 [Source:ZFIN;Acc:ZDB-GENE-170302-1]
+Length=577
+
+ Score = 56.9 bits (136),  Expect = 5e-16
+ Identities = 30/30 (100%), Positives = 30/30 (100%), Gaps = 0/30 (0%)
+ Frame = +2
+
+Query  1    MVLSPADKTNVKAAWGKVGAHAGEYGAEAL  30
+            MVLSPADKTNVKAAWGKVGAHAGEYGAEAL
+Sbjct  38   MVLSPADKTNVKAAWGKVGAHAGEYGAEAL  127
+
+
+>ENSDART00000113098.5 cdna chromosome:GRCz11:3:55100045:55100936:1 gene:ENSDARG00000097011.3 
+gene_biotype:protein_coding transcript_biotype:protein_coding 
+gene_symbol:hbaa1 description:hemoglobin, alpha 
+adult 1 [Source:ZFIN;Acc:ZDB-GENE-980526-79]
+ FBtr0337025 cdna primary_assembly:BDGP6.54:3R:6607913:6608914:-1 gene:FBgn0250846 
+gene_biotype:protein_coding transcript_biotype:protein_coding 
+gene_symbol:glob2 description:globin 2
+Length=651
+
+ Score = 49.2 bits (116),  Expect = 4e-13
+ Identities = 17/30 (57%), Positives = 18/30 (60%), Gaps = 0/30 (0%)
+ Frame = +2
+
+Query  1    MVLSPADKTNVKAAWGKVGAHAGEYGAEAL  30
+            M LS  DK  VKA W K+   A E GAEAL
+Sbjct  116  MSLSDTDKAVVKAIWAKISPKADEIGAEAL  205
+
+
+>ENSDART00000101709.5 cdna chromosome:GRCz11:3:55093581:55094399:1 gene:ENSDARG00000069735.5 
+gene_biotype:protein_coding transcript_biotype:protein_coding 
+gene_symbol:hbaa2 description:hemoglobin, alpha 
+adult 2 [Source:ZFIN;Acc:ZDB-GENE-081104-38]
+Length=564
+
+ Score = 44.2 bits (103),  Expect = 3e-11
+ Identities = 12/30 (40%), Positives = 17/30 (57%), Gaps = 0/30 (0%)
+ Frame = +3
+
+Query  1    MVLSPADKTNVKAAWGKVGAHAGEYGAEAL  30
+            M L+  DK  +K  WGK+ + A   G EA+
+Sbjct  42   MSLTAKDKAVIKGFWGKIASQADSIGQEAM  131
+
+
+>ENSDART00000125092.4 cdna chromosome:GRCz11:3:55120330:55121125:-1 gene:ENSDARG00000089475.6 
+gene_biotype:protein_coding transcript_biotype:protein_coding 
+gene_symbol:hbae1.1 description:hemoglobin, alpha 
+embryonic 1.1 [Source:ZFIN;Acc:ZDB-GENE-980526-80]
+Length=633
+
+ Score = 44.2 bits (103),  Expect = 3e-11
+ Identities = 13/30 (43%), Positives = 16/30 (53%), Gaps = 0/30 (0%)
+ Frame = +2
+
+Query  1    MVLSPADKTNVKAAWGKVGAHAGEYGAEAL  30
+            M LS  DK  VK  W K+   A + G +AL
+Sbjct  92   MSLSAKDKAAVKTLWAKIAGKADDIGHDAL  181
+
+
+>ENST00000652335.1 cdna chromosome:GRCh38:16:142728:153964:1 gene:ENSG00000130656.7 
+gene_biotype:protein_coding transcript_biotype:protein_coding 
+gene_symbol:HBZ description:hemoglobin subunit zeta [Source:HGNC 
+Symbol;Acc:HGNC:4835]
+Length=547
+
+ Score = 42.3 bits (98),  Expect = 1e-10
+ Identities = 9/30 (30%), Positives = 15/30 (50%), Gaps = 0/30 (0%)
+ Frame = +2
+
+Query  1    MVLSPADKTNVKAAWGKVGAHAGEYGAEAL  30
+            M L+  ++T + + W K+   A   G E L
+Sbjct  380  MSLTKTERTIIVSMWAKISTQADTIGTETL  469
+
+
+>ENST00000335295.4 cdna chromosome:GRCh38:11:5225464:5227071:-1 gene:ENSG00000244734.6 
+gene_biotype:protein_coding transcript_biotype:protein_coding 
+gene_symbol:HBB description:hemoglobin subunit beta 
+[Source:HGNC Symbol;Acc:HGNC:4827]
+Length=628
+
+ Score = 34.2 bits (77),  Expect = 1e-07
+ Identities = 14/28 (50%), Positives = 18/28 (64%), Gaps = 2/28 (7%)
+ Frame = +3
+
+Query  3    LSPADKTNVKAAWGKVGAHAGEYGAEAL  30
+            L+P +K+ V A WGKV  +  E G EAL
+Sbjct  60   LTPEEKSAVTALWGKV--NVDEVGGEAL  137
+
+
+>ENST00000292901.8 cdna chromosome:GRCh38:11:5232678:5234658:-1 gene:ENSG00000223609.12 
+gene_biotype:protein_coding transcript_biotype:protein_coding 
+gene_symbol:HBD description:hemoglobin subunit delta 
+[Source:HGNC Symbol;Acc:HGNC:4829]
+Length=661
+
+ Score = 33.4 bits (75),  Expect = 2e-07
+ Identities = 14/28 (50%), Positives = 17/28 (61%), Gaps = 2/28 (7%)
+ Frame = +1
+
+Query  3    LSPADKTNVKAAWGKVGAHAGEYGAEAL  30
+            L+P +KT V A WGKV  +    G EAL
+Sbjct  235  LTPEEKTAVNALWGKV--NVDAVGGEAL  312
+
+
+>ENST00000336906.6 cdna chromosome:GRCh38:11:5253188:5254781:-1 gene:ENSG00000196565.16 
+gene_biotype:protein_coding transcript_biotype:protein_coding 
+gene_symbol:HBG2 description:hemoglobin subunit gamma 
+2 [Source:HGNC Symbol;Acc:HGNC:4832]
+Length=586
+
+ Score = 29.6 bits (65),  Expect = 5e-06
+ Identities = 9/28 (32%), Positives = 14/28 (50%), Gaps = 2/28 (7%)
+ Frame = +3
+
+Query  3    LSPADKTNVKAAWGKVGAHAGEYGAEAL  30
+             +  DK  + + WGKV  +  + G E L
+Sbjct  63   FTEEDKATITSLWGKV--NVEDAGGETL  140
+
+
+>ENST00000396895.3 cdna chromosome:GRCh38:11:5268345:5269945:-1 gene:ENSG00000213931.7 
+gene_biotype:protein_coding transcript_biotype:protein_coding 
+gene_symbol:HBE1 description:hemoglobin subunit epsilon 
+1 [Source:HGNC Symbol;Acc:HGNC:4830]
+Length=623
+
+ Score =  9.9 bits (14),  Expect = 118
+ Identities = 3/3 (100%), Positives = 3/3 (100%), Gaps = 0/3 (0%)
+ Frame = +1
+
+Query  27   AEA  29
+            AEA
+Sbjct  448  AEA  456
+
+
+
+Lambda      K        H        a         alpha
+   0.310    0.126    0.376    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0429    0.140     1.90     42.6     43.6 
+
+Effective search space used: 89125
+
+
+  Database: tfn
+    Posted date:  Oct 30, 2026  12:55 PM
+  Number of letters in database: 10,937
+  Number of sequences in database:  16
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 13
+Window for multiple hits: 40

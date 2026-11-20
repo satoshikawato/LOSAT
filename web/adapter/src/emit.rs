@@ -13,6 +13,18 @@ pub const CHUNK: usize = 1 << 20;
 pub const STREAM_HITS: u32 = 1;
 pub const STREAM_RESPONSE: u32 = 2;
 pub const STREAM_DIAGNOSTICS: u32 = 3;
+/// The output of the argv's own `-outfmt`: a format besides 0, 6 and 7, or 6 or 7 with fields
+/// (docs/web/abi_v2.md §5, §7).
+pub const STREAM_CUSTOM: u32 = 4;
+/// The inflated bytes of a compressed source file (`inflate_chunk`, `inflate_end`;
+/// docs/web/abi_v2.md §4, §5).
+pub const STREAM_INFLATED: u32 = 5;
+/// The files of a run besides its outputs (the file of `-logfile`): a ZIP archive, emitted after
+/// the run, also when it failed (docs/web/abi_v2.md §5).
+pub const STREAM_RUN_FILES: u32 = 8;
+/// The signal that the host discards what it received of an output stream, which failed alone
+/// after it sent a chunk (`discard`; docs/web/abi_v2.md §5).
+pub const STREAM_DISCARD: u32 = 9;
 
 #[cfg(target_arch = "wasm32")]
 #[link(wasm_import_module = "losat_host")]
@@ -40,6 +52,13 @@ pub fn emit(stream: u32, bytes: &[u8]) {
     }
 }
 
+/// Tells the host to discard what it received of `stream` in this run: one `emit` on
+/// `STREAM_DISCARD` whose 4 bytes are the stream's number, little-endian. The run sends nothing
+/// more of that stream (docs/web/abi_v2.md §5).
+pub fn discard(stream: u32) {
+    emit(STREAM_DISCARD, &stream.to_le_bytes());
+}
+
 /// A stream that the engine writes one output to. It sends whole chunks as they fill
 /// and publishes how many bytes were written, so that an observer can take byte
 /// positions at any moment without a flush.
@@ -63,6 +82,12 @@ impl StreamWriter {
         self.position.clone()
     }
 
+    /// Whether a chunk of the stream was sent to the host: bytes were written beyond what the
+    /// buffer holds. A writer dropped before `finish` sends nothing else.
+    pub fn sent(&self) -> bool {
+        self.position.load(Ordering::SeqCst) > self.buffer.len() as u64
+    }
+
     /// Sends what is left.
     pub fn finish(&mut self) {
         emit(self.stream, &self.buffer);
@@ -71,14 +96,25 @@ impl StreamWriter {
 }
 
 impl Write for StreamWriter {
+    /// Sends whole chunks as they fill. A write of a chunk or more is not copied past the chunk
+    /// that the buffer completes: its whole chunks are sent from `data` (a side file of outfmt 13
+    /// or 14 comes in one write). The chunks are the same as with every byte buffered.
     fn write(&mut self, data: &[u8]) -> io::Result<usize> {
-        self.buffer.extend_from_slice(data);
         self.position.fetch_add(data.len() as u64, Ordering::SeqCst);
-        if self.buffer.len() >= CHUNK {
-            let full = self.buffer.len() / CHUNK * CHUNK;
-            emit(self.stream, &self.buffer[..full]);
-            self.buffer.drain(..full);
+        let mut rest = data;
+        if !self.buffer.is_empty() {
+            let take = rest.len().min(CHUNK - self.buffer.len());
+            self.buffer.extend_from_slice(&rest[..take]);
+            rest = &rest[take..];
+            if self.buffer.len() < CHUNK {
+                return Ok(data.len());
+            }
+            emit(self.stream, &self.buffer);
+            self.buffer.clear();
         }
+        let full = rest.len() / CHUNK * CHUNK;
+        emit(self.stream, &rest[..full]);
+        self.buffer.extend_from_slice(&rest[full..]);
         Ok(data.len())
     }
 

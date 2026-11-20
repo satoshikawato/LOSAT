@@ -1,0 +1,24 @@
+{
+  "version": "1.2",
+  "dbname": "psr_cpa",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "psr_cpa (parsed Seq-ids)",
+  "number-of-letters": 750,
+  "number-of-sequences": 3,
+  "last-updated": "2026-11-08T20:41:00",
+  "number-of-volumes": 1,
+  "bytes-total": 50398,
+  "bytes-to-cache": 882,
+  "files": [
+    "psr_cpa.pdb",
+    "psr_cpa.phr",
+    "psr_cpa.pin",
+    "psr_cpa.pog",
+    "psr_cpa.pos",
+    "psr_cpa.pot",
+    "psr_cpa.psq",
+    "psr_cpa.ptf",
+    "psr_cpa.pto"
+  ]
+}

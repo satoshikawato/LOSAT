@@ -1,0 +1,22 @@
+Error: (803.7) [blastp] Blast4-request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xC3] in string at line 21
+q1 oneé
+Error: (803.7) [blastp] Blast4-request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xA9] in string at line 21
+q1 oneé
+Warning: [blastp] Query_2 q2 two: One or more O characters replaced by X for alignment score calculations at positions 10 
+Error: (803.7) [blastp] Blast4-request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xC3] in string at line 21
+q3 thrée
+Error: (803.7) [blastp] Blast4-request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xA9] in string at line 21
+q3 thrée
+Warning: [blastp] Query_3 q3 thrée: One or more O characters replaced by X for alignment score calculations at positions 10 
+FASTA-Reader: Title ends with at least 50 valid amino acid characters.  Was the sequence accidentally put in the title line?
+Error: (803.7) [blastp] Blast4-request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xC3] in string at line 22
+q4 fouré MKVLAAGIVAMKVLAAGIVAMKVLAAGIVAMKVLAAGIVAMKVLAAGIVAMKVLAAGIVA
+Error: (803.7) [blastp] Blast4-request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xA9] in string at line 22
+q4 fouré MKVLAAGIVAMKVLAAGIVAMKVLAAGIVAMKVLAAGIVAMKVLAAGIVAMKVLAAGIVA
+BLAST engine error: Warning: Sequence contains no data 

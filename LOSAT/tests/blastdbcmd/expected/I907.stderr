@@ -1,0 +1,6 @@
+Error: [blastdbcmd] Entry not found: NP_400001.3
+Error: [blastdbcmd] Skipped NP_400001.3
+Error: [blastdbcmd] Entry not found: NOSUCH
+Error: [blastdbcmd] Skipped NOSUCH
+Error: [blastdbcmd] Invalid filtering algorithm ID: 21
+Error: [blastdbcmd] Skipped U10002.1

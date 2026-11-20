@@ -5,7 +5,9 @@
 //! This module contains the subject scanning functions that iterate through
 //! subject sequences and find k-mer hits against the lookup table.
 
-use super::lookup::{BlastAaLookupTable, AA_HITS_PER_CELL, PV_ARRAY_BTS, PV_ARRAY_MASK};
+use super::lookup::{
+    BlastAaLookupTable, XCell, XHit, AA_HITS_PER_CELL, PV_ARRAY_BTS, PV_ARRAY_MASK,
+};
 use super::scan::OffsetPair;
 
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_def.h:141-150
@@ -66,7 +68,7 @@ pub(super) fn determine_scanning_offsets(
 /// - Pointer-style iteration matching NCBI's C implementation
 /// - Inline presence vector test
 #[inline]
-pub fn s_blast_aa_scan_subject(
+pub(crate) fn s_blast_aa_scan_subject(
     lookup: &BlastAaLookupTable,
     subject: &[u8],
     seq_ranges: &[(i32, i32)],
@@ -84,8 +86,8 @@ pub fn s_blast_aa_scan_subject(
     // word_length = lookup->word_length;
     // ```
     let word_length = lookup.word_length as usize;
-    let word_length_i32 = lookup.word_length as i32;
-    let lut_word_length_i32 = lookup.word_length as i32;
+    let word_length_i32 = lookup.word_length;
+    let lut_word_length_i32 = lookup.word_length;
     let charsize = lookup.charsize as usize;
     let mask = lookup.mask as usize;
     let pv = lookup.pv.as_ptr();
@@ -121,7 +123,8 @@ pub fn s_blast_aa_scan_subject(
             // Reference: ncbi-blast/c++/include/algo/blast/core/blast_lookup.h:55-57
             let pv_word = unsafe { *pv.add(index >> PV_ARRAY_BTS) };
             if (pv_word & (1u32 << (index & PV_ARRAY_MASK))) != 0 {
-                // SAFETY: index is within backbone bounds (masked)
+                // SAFETY: `index < backbone_size`: the crate's callers pass NCBIstdaa letters (below
+                // 28), so the word's index stays in the table's cells (the mask alone allows 32,768).
                 let cell = unsafe { &*backbone.add(index) };
                 let numhits = cell.num_used;
 
@@ -147,7 +150,7 @@ pub fn s_blast_aa_scan_subject(
                     } else {
                         // NCBI: copy hits from overflow list.
                         // Reference: ncbi-blast/c++/src/algo/blast/core/blast_aascan.c:99-115
-                        let cursor = cell.entries[0] as usize;
+                        let cursor = cell.cursor();
                         unsafe {
                             let src = overflow.add(cursor);
                             let dest = offset_pairs.as_mut_ptr().add(dest_base);
@@ -178,6 +181,57 @@ pub fn s_blast_aa_scan_subject(
     totalhits
 }
 
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_aascan.c:60-127 (quoted at
+// `s_blast_aa_scan_subject` and `s_blast_aa_scan_subject_one_range`)
+// No NCBI counterpart for the form: the scan of `s_blast_aa_scan_subject` over a lookup table of
+// either cell width, with checked reads. BLASTX's table of 16-bit hits (`BackboneCell16`, built
+// where the fused loop scans it) is read by the reference scan only in the diagnostic stages and
+// for a `-subject` with lower-case letters; the table of `Int4` hits keeps the functions above.
+/// The pairs of `s_blast_aa_scan_subject` for a table of cells `C`: the same scan ranges, the same
+/// pairs in the same order, the same early return when `offset_pairs` is full.
+pub(crate) fn x_blast_aa_scan_subject_cells<C: XCell>(
+    lookup: &BlastAaLookupTable<C>,
+    subject: &[u8],
+    seq_ranges: &[(i32, i32)],
+    offset_pairs: &mut [OffsetPair],
+    array_size: i32,
+    s_range: &mut [i32; 3],
+) -> i32 {
+    let mut totalhits: i32 = 0;
+    let word_length = lookup.word_length as usize;
+    let charsize = lookup.charsize as usize;
+    let mask = lookup.mask as usize;
+    while determine_scanning_offsets(seq_ranges, lookup.word_length, lookup.word_length, s_range) {
+        let (s_first, s_last) = (s_range[1] as usize, s_range[2] as usize);
+        let mut index: usize = 0;
+        for &ch in &subject[s_first..s_first + word_length - 1] {
+            index = (index << charsize) | ch as usize;
+        }
+        let mut s = s_first;
+        while s <= s_last {
+            index = ((index << charsize) | subject[s + word_length - 1] as usize) & mask;
+            if lookup.pv[index >> PV_ARRAY_BTS] & (1u32 << (index & PV_ARRAY_MASK)) != 0 {
+                let cell = &lookup.backbone[index];
+                let numhits = cell.count() as i32;
+                if numhits > array_size - totalhits {
+                    s_range[1] = s as i32;
+                    return totalhits;
+                }
+                for (i, hit) in cell.hits(&lookup.overflow).iter().enumerate() {
+                    offset_pairs[totalhits as usize + i] = OffsetPair {
+                        q_off: hit.q() as u32,
+                        s_off: s as u32,
+                    };
+                }
+                totalhits += numhits;
+            }
+            s += 1;
+        }
+        s_range[1] = s as i32;
+    }
+    totalhits
+}
+
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:495-504
 // ```c
 // scan_range[0] = 0;
@@ -201,7 +255,7 @@ pub fn s_blast_aa_scan_subject(
 // }
 // ```
 #[inline]
-pub fn s_blast_aa_scan_subject_one_range(
+pub(crate) fn s_blast_aa_scan_subject_one_range(
     lookup: &BlastAaLookupTable,
     subject: &[u8],
     offset_pairs: &mut [OffsetPair],
@@ -265,12 +319,14 @@ pub fn s_blast_aa_scan_subject_one_range(
         //     numhits = bbc[index].num_used;
         //     if (numhits <= (array_size - totalhits)) {
         // ```
-        // SAFETY: `index` is masked to the lookup backbone space, and the PV
-        // allocation is sized from that same space during lookup finalization.
+        // Bounds (not yet a SAFETY argument): `index < backbone_size` needs every letter of the
+        // word below 28 (the mask alone allows 32,768), and every builder gives `pv`
+        // `(backbone_size >> PV_ARRAY_BTS) + 1` words. The crate's callers pass NCBIstdaa letters
+        // and words inside `subject` (TBLASTN's `x_scan_unit` does not scan a raised first-range
+        // word past it).
         let pv_word = unsafe { *pv.add(index >> PV_ARRAY_BTS) };
         if (pv_word & (1u32 << (index & PV_ARRAY_MASK))) != 0 {
-            // SAFETY: The same masked index addresses the finalized NCBI-style
-            // thick backbone cell.
+            // Bounds: `index < backbone_size` as for `pv` above addresses one of the table's cells.
             let cell = unsafe { &*backbone.add(index) };
             let numhits = cell.num_used;
 
@@ -308,7 +364,7 @@ pub fn s_blast_aa_scan_subject_one_range(
                     //     offset_pairs[i + totalhits].qs_offsets.s_off = s_off;
                     // }
                     // ```
-                    let cursor = cell.entries[0] as usize;
+                    let cursor = cell.cursor();
                     unsafe {
                         // SAFETY: For overflow cells, NCBI lookup construction
                         // stores a cursor to `numhits` contiguous query offsets;

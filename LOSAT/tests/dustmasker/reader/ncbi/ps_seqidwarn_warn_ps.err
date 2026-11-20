@@ -1,0 +1,8 @@
+Warning: (1306.7) NCBI C++ Exception:
+    T0 "/opt/conda/conda-bld/blast_1787399212531/work/c++/src/objects/seq/../seqloc/Seq_id.cpp", line 2663: Error: (CSeqIdException::eFormat) ncbi::objects::CSeq_id::ParseIDs() - Unsupported ID type xyz
+
+Warning: (1306.7) NCBI C++ Exception:
+    T0 "/opt/conda/conda-bld/blast_1787399212531/work/c++/src/objects/seq/../seqloc/Seq_id.cpp", line 2663: Error: (CSeqIdException::eFormat) ncbi::objects::CSeq_id::ParseIDs() - Unsupported ID type ABC
+
+Error: (CObjReaderParseException::eNoIDs) Could not construct seq-id from 'xyz|ABC|DEF' (m_Pos = 1)
+Error: (106.16) Application's execution failed (CObjReaderParseException::eNoIDs) Could not construct seq-id from 'xyz|ABC|DEF' (m_Pos = 1)

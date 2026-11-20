@@ -1,0 +1,121 @@
+BLASTN 2.17.0+
+
+
+Reference: Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb
+Miller (2000), "A greedy algorithm for aligning DNA sequences", J
+Comput Biol 2000; 7(1-2):203-14.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/pd_sub_range_n.fna).
+           2 sequences; 540 total letters
+
+
+
+Query= qn1 first half
+
+Length=1620
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+ranged one                                                            499     3e-145
+
+
+> ranged one
+Length=270
+
+ Score = 499 bits (270),  Expect = 3e-145
+ Identities = 270/270 (100%), Gaps = 0/270 (0%)
+ Strand=Plus/Plus
+
+Query  1    TGTCTGTTTCGTAATGAACGTTATAGCTATGCTACCCAATGGAATTATGTGCAACCGGGT  60
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  1    TGTCTGTTTCGTAATGAACGTTATAGCTATGCTACCCAATGGAATTATGTGCAACCGGGT  60
+
+Query  61   TGTGAAGAACCGTTTGAAGGTACCAGCTTTCCGTATACCAAATGGGGTCCGGATTGTTGG  120
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  61   TGTGAAGAACCGTTTGAAGGTACCAGCTTTCCGTATACCAAATGGGGTCCGGATTGTTGG  120
+
+Query  121  TGTGGTTGTGGTCTGAAAGATACCTATGAATGGTGTGAATATCGTATGATGACCCGTGGT  180
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  121  TGTGGTTGTGGTCTGAAAGATACCTATGAATGGTGTGAATATCGTATGATGACCCGTGGT  180
+
+Query  181  TTTGATATGTGTTGGAAAAATGGTTATGATGTGGAACTGAGCAATCAATGTAGCCAATAT  240
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  181  TTTGATATGTGTTGGAAAAATGGTTATGATGTGGAACTGAGCAATCAATGTAGCCAATAT  240
+
+Query  241  GATAATTTTGATTTTTGGCTGGAAGTGCAA  270
+            ||||||||||||||||||||||||||||||
+Sbjct  241  GATAATTTTGATTTTTGGCTGGAAGTGCAA  270
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 825998
+
+
+Query= qn2 second half
+
+Length=1620
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+ranged two                                                            499     3e-145
+
+
+> ranged two
+Length=270
+
+ Score = 499 bits (270),  Expect = 3e-145
+ Identities = 270/270 (100%), Gaps = 0/270 (0%)
+ Strand=Plus/Plus
+
+Query  1    TATTTTACCAATGATAATTATCGTAATGATAGCTGGGATGAATTTTTTAGCCAACTGAAT  60
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  1    TATTTTACCAATGATAATTATCGTAATGATAGCTGGGATGAATTTTTTAGCCAACTGAAT  60
+
+Query  61   AAATGTCCGTTTCGTTATTGGTGGAATATGTGGGCTTTTATTGGTATGGATGTGCGTGCT  120
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  61   AAATGTCCGTTTCGTTATTGGTGGAATATGTGGGCTTTTATTGGTATGGATGTGCGTGCT  120
+
+Query  121  CCGATGCTGACCGGTATTCATCAAGTGTGGACCCCGATGATTATTATGATTAGCGATCTG  180
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  121  CCGATGCTGACCGGTATTCATCAAGTGTGGACCCCGATGATTATTATGATTAGCGATCTG  180
+
+Query  181  ATGGAAAGCATGGAACCGTGTGCTCTGATGCATCTGGCTCCGTGGTGTTGGATGTGTTGT  240
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  181  ATGGAAAGCATGGAACCGTGTGCTCTGATGCATCTGGCTCCGTGGTGTTGGATGTGTTGT  240
+
+Query  241  AGCCCGGAAATTTTTTGTTGGCAAAATGAT  270
+            ||||||||||||||||||||||||||||||
+Sbjct  241  AGCCCGGAAATTTTTTGTTGGCAAAATGAT  270
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 825998
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt0/pd_sub_range_n.fna).
+    Posted date:  Unknown
+  Number of letters in database: 540
+  Number of sequences in database:  2
+
+
+
+Matrix: blastn matrix 1 -2
+Gap Penalties: Existence: 0, Extension: 2.5

@@ -1,5 +1,6 @@
 //! Existing reactor ABI adapter; the search, batching and reports use BLASTX owners.
 use super::{args::BlastxArgs, input, native, query_setup::BATCH_SIZE, report, runtime};
+use crate::api::local_blast::OutputSink;
 use anyhow::{bail, Result};
 use std::{cell::RefCell, io::Write, path::Path};
 
@@ -17,22 +18,93 @@ pub(crate) fn parse_args(extra: &[&str]) -> Result<BlastxArgs> {
         .iter()
         .any(|key| key.split('=').next().unwrap_or(key) == "-db")
     {
-        bail!("-db (a database search) is not supported by LOSAT Web yet");
+        bail!("-db (a database search) is not supported in the browser yet");
     }
     if extra.iter().any(|key| {
         matches!(
             key.split('=').next().unwrap_or(key),
-            "-query" | "-subject" | "-out" | "-help" | "--help" | "--version"
+            "-query"
+                | "-subject"
+                | "-out"
+                | "-h"
+                | "-help"
+                | "-help-full"
+                | "-xmlhelp"
+                | "--help"
+                | "--version"
         )
     }) {
         bail!("file/help arguments are unsupported for the BLASTX web API");
     }
     let mut argv = vec!["losat", "blastx", "-query", "query", "-subject", "subject"];
     argv.extend_from_slice(extra);
-    match crate::cli::try_parse_from::<crate::cli::Cli, _, _>(argv)?.command {
+    // ABI v1 is frozen (plan TD-1): its `-outfmt` keeps the values and the parser errors of
+    // the CLI's BLASTX parser before it read `-outfmt` as NCBI (`v1_outfmt`).
+    use clap::CommandFactory;
+    let command = crate::cli::Cli::command().mut_subcommand("blastx", |blastx| {
+        blastx.mut_arg("outfmt", |outfmt| outfmt.value_parser(v1_outfmt))
+    });
+    match crate::cli::try_parse_from_command::<crate::cli::Cli, _, _>(command, argv)?.command {
         crate::cli::Commands::Blastx(args) => Ok(args),
         _ => unreachable!("fixed BLASTX subcommand"),
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2827-2845
+// ```c++
+//         }
+//         int val = 0;
+//         try { val = NStr::StringToInt(fmt_choice); }
+//         catch (const CStringException&) {   // probably a conversion error
+//             CNcbiOstrstream os;
+//             os << "'" << fmt_choice << "' is not a valid output format";
+//             string msg = CNcbiOstrstreamToString(os);
+//             NCBI_THROW(CInputException, eInvalidInput, msg);
+//         }
+//         if (val < 0 || val >= static_cast<int>(eEndValue)) {
+//             string msg("Formatting choice is out of range");
+//             throw std::out_of_range(msg);
+//         }
+//         if (m_IsIgBlast && (val != 3 && val != 4 && val != 7 && val != eAirrRearrangement)) {
+//             string msg("Formatting choice is not valid");
+//             throw std::out_of_range(msg);
+//         }
+//         fmt_type = static_cast<EOutputFormat>(val);
+//         if ( !(fmt_type == eTabular ||
+// ```
+/// ABI v1's reading of a BLASTX `-outfmt` value, which is frozen (plan TD-1): the values
+/// and the errors of the CLI's BLASTX parser before it read `-outfmt` as NCBI.
+fn v1_outfmt(value: &str) -> std::result::Result<String, String> {
+    let mut tokens = value.split_whitespace();
+    let f = tokens.next().ok_or("empty outfmt")?;
+    if !matches!(f, "0" | "6" | "7") {
+        return Err("unsupported BLASTX outfmt: use 0, 6 or 7".into());
+    }
+    let fields: Vec<_> = tokens.collect();
+    if f == "0" && !fields.is_empty() {
+        return Err("custom fields require outfmt 6/7".into());
+    }
+    for field in fields {
+        if field != "std" && !super::args::FIELDS.contains(&field) {
+            return Err(format!("unsupported BLASTX outfmt field '{field}'"));
+        }
+    }
+    Ok(value.to_string())
+}
+
+/// The options of ABI v1's BLASTX: the format number and the fields as ABI v1 read them
+/// (`v1_outfmt`: the words between white space, each `std` or one of `args::FIELDS`), before
+/// BLASTX read `-outfmt` as NCBI; a list other than the `std` fields is written by the shared
+/// tabular writer, as the CLI's (`ResolvedOptions::tabular`), without a taxonomy database
+/// (DECISIONS 7 of line CLI C2; ABI v1's fields show no taxonomy).
+fn v1_resolve(args: &BlastxArgs) -> Result<super::args::ResolvedOptions> {
+    let mut words = args.outfmt.split_whitespace();
+    let number = words.next().unwrap_or_default().parse::<u8>()?;
+    args.resolve_with_format(&crate::blastinput::app::FormatChoice {
+        number: i32::from(number),
+        spec: words.collect::<Vec<_>>().join(" "),
+        delimiter: String::new(),
+    })
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:302-314
@@ -53,6 +125,10 @@ pub(crate) fn parse_args(extra: &[&str]) -> Result<BlastxArgs> {
 // ```
 // Original bytes are reparsed on each call with this role's gencode/mask
 // options; generic FASTA handles never cache translated or masked search state.
+#[cfg_attr(
+    not(target_arch = "wasm32"),
+    expect(dead_code, reason = "called only by the web ABI (`web_api`, wasm32)")
+)]
 pub(crate) fn run_pair(
     args: BlastxArgs,
     query: &[u8],
@@ -75,12 +151,19 @@ pub(crate) fn run_pair(
     //    		ERR_POST(Warning << "Examining 5 or more matches is recommended");
     //     }
     // ```
-    if args.max_target_seqs.unwrap_or(500) < 5 {
-        diagnostics
-            .borrow_mut()
-            .write_all(b"Warning: [blastx] Examining 5 or more matches is recommended\n")?;
-    }
-    let options = args.resolve()?;
+    // (The same bytes as before for the options ABI v1 had: a hit list size below 5 from
+    // -max_target_seqs; `native::warnings_of` also reads -num_descriptions / -num_alignments,
+    // which the CLI parser now accepts.)
+    let v1_outfmt_number = args
+        .outfmt
+        .split_whitespace()
+        .next()
+        .and_then(|word| word.parse::<i32>().ok())
+        .unwrap_or(0);
+    diagnostics
+        .borrow_mut()
+        .write_all(&native::warnings_of(&args, v1_outfmt_number))?;
+    let options = v1_resolve(&args)?;
     if query.is_empty() {
         bail!("No sequence input was provided");
     }
@@ -89,7 +172,14 @@ pub(crate) fn run_pair(
     }
     let mut output = Vec::new();
     let label = Path::new(subject_label);
-    let shown = report::ShownSubjects::Fasta { path: label };
+    let no_parsed = report::RecordsParsed::default();
+    let shown = report::ShownSubjects::Fasta {
+        path: label,
+        parsed: &no_parsed,
+    };
+    // The run's decision for a matrix name that NCBI's XML does not know
+    // (`blast_xml::xml_matrix_failure`): none, as ABI v1 writes outfmt 0, 6 and 7 (`v1_outfmt`).
+    let xml_matrix = super::blast_xml::xml_matrix_failure(std::slice::from_ref(&options), true);
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:784-788
     // ```c++
     //         		if(warning != kEmptyStr){
@@ -98,19 +188,18 @@ pub(crate) fn run_pair(
     //         		warning += "Subject sequence contains no data";
     //         		ERR_POST(Warning << warning);
     // ```
-    for s in subjects.iter().filter(|s| s.sequence.is_empty()) {
-        writeln!(
-            diagnostics.borrow_mut(),
-            "Warning: [blastx] {} {}: Subject sequence contains no data",
-            s.internal_id,
-            s.title
-        )?;
-    }
+    super::native::write_empty_subject_warnings(&subjects, &mut *diagnostics.borrow_mut())?;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:254-254
     // ```c++
     //         formatter.PrintProlog();
     // ```
-    report::write_prolog(&mut output, &options, &subjects, &shown)?;
+    report::write_prolog(
+        &mut output,
+        &mut *diagnostics.borrow_mut(),
+        &options,
+        &subjects,
+        &shown,
+    )?;
     let mut processed = 0;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:259-262
     // ```c++
@@ -119,7 +208,7 @@ pub(crate) fn run_pair(
     //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
     //             CRef<IQueryFactory> queries(new CObjMgr_QueryFactory(*query_batch));
     // ```
-    // EXPERIMENT (LOSAT_X_BXPOOL): see native.rs.
+    // One pool for the whole run at 2+ threads: see native.rs.
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:259-291
     // ```c
     //         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
@@ -137,9 +226,9 @@ pub(crate) fn run_pair(
     // Same batch loop as in native.rs, as a closure over the pool its searches run on (see
     // native.rs).
     let mut x_run_batches = |x_pool: Option<&crate::utils::threading::SearchPool<'_>>| {
-        // EXPERIMENT (LOSAT_X_BXBATCH): see native.rs.
+        // Several query batches searched at a time with a pool of 2+ threads: see native.rs.
         #[cfg(feature = "parallel")]
-        if let Some(pool) = x_pool.filter(|pool| runtime::x_bx_batch() && pool.enabled()) {
+        if let Some(pool) = x_pool.filter(|pool| pool.enabled()) {
             use rayon::prelude::*;
             enum XEvent {
                 Warn(Vec<u8>),
@@ -207,13 +296,22 @@ pub(crate) fn run_pair(
                             let mut results =
                                 searched.next().expect("one search per queued batch")?;
                             report::render_queries(
-                                &mut output,
+                                &mut crate::cli::NcbiOstream::sink(&mut OutputSink::Writer(
+                                    &mut output,
+                                ))?,
                                 &mut *diagnostics.borrow_mut(),
                                 &options,
                                 queries,
                                 &subjects,
                                 &shown,
                                 &mut results,
+                                processed,
+                                // No document here holds a report back (`stops`).
+                                false,
+                                None,
+                                xml_matrix,
+                                // The queued batches are searched: the pool is free.
+                                Some(pool),
                             )?;
                             processed += queries.len();
                         }
@@ -289,13 +387,19 @@ pub(crate) fn run_pair(
                 //                	    formatter.PrintOneResultSet(**result, query_batch);
                 // ```
                 report::render_queries(
-                    &mut output,
+                    &mut crate::cli::NcbiOstream::sink(&mut OutputSink::Writer(&mut output))?,
                     &mut *diagnostics.borrow_mut(),
                     &options,
                     queries,
                     &subjects,
                     &shown,
                     &mut results,
+                    processed,
+                    // No document here holds a report back (`stops`).
+                    false,
+                    None,
+                    xml_matrix,
+                    x_pool,
                 )?;
                 processed += queries.len();
                 Ok(())
@@ -309,9 +413,9 @@ pub(crate) fn run_pair(
     //                 lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
     //                 results = lcl_blast.Run();
     // ```
-    // Dispatch point: one pool for the whole run (LOSAT_X_BXPOOL) instead of one per batch, as
+    // Dispatch point: with 2+ threads one pool for the whole run instead of one per batch, as
     // NCBI's CLocalBlast has per batch. Reuse of threads only.
-    if runtime::x_bx_pool() && options.num_threads > 1 {
+    if options.num_threads > 1 {
         crate::utils::threading::x_with_search_pool_local(
             options.num_threads as usize,
             "BLASTX",
@@ -320,11 +424,65 @@ pub(crate) fn run_pair(
     } else {
         x_run_batches(None)?;
     }
-    drop(x_run_batches);
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:297-297
     // ```c++
     //         formatter.PrintEpilog(opt);
     // ```
-    report::write_epilog(&mut output, &options, &subjects, &shown, processed)?;
+    report::write_epilog(
+        &mut output,
+        &mut *diagnostics.borrow_mut(),
+        &options,
+        &subjects,
+        &shown,
+        processed,
+        None,
+        xml_matrix,
+    )?;
     Ok(output)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ABI v1 is frozen (plan TD-1): its BLASTX `-outfmt` keeps the values and the parser
+    // errors of the CLI parser before BLASTX read `-outfmt` as NCBI (dev 0797cc40, whose
+    // `losat blastx -outfmt 5` wrote these lines with exit status 2).
+    #[test]
+    fn web_v1_keeps_its_outfmt_values_and_errors() {
+        let error = |outfmt: &str| {
+            let error = parse_args(&["-outfmt", outfmt]).unwrap_err();
+            crate::cli::render_message(error.downcast_ref::<clap::Error>().unwrap())
+        };
+        for (outfmt, reason) in [
+            ("5", "unsupported BLASTX outfmt: use 0, 6 or 7"),
+            ("abc", "unsupported BLASTX outfmt: use 0, 6 or 7"),
+            ("13", "unsupported BLASTX outfmt: use 0, 6 or 7"),
+            ("0 std", "custom fields require outfmt 6/7"),
+            ("6 delim=", "unsupported BLASTX outfmt field 'delim='"),
+            ("7 qaccver foo", "unsupported BLASTX outfmt field 'foo'"),
+        ] {
+            assert_eq!(
+                error(outfmt),
+                format!(
+                    "error: invalid value '{outfmt}' for '-outfmt <OUTFMT>': {reason}\n\nFor more information, try '--help'.\n"
+                )
+            );
+        }
+        // White space between the words, read as ABI v1 read it.
+        for (outfmt, number, fields) in [
+            ("6\tqseqid", 6, &["qseqid"][..]),
+            (" 7 ", 7, &[]),
+            ("0", 0, &[]),
+        ] {
+            let args = parse_args(&["-outfmt", outfmt]).unwrap();
+            let options = v1_resolve(&args).unwrap();
+            assert_eq!(options.outfmt, number, "{outfmt:?}");
+            if !fields.is_empty() {
+                let spec = options.tabular.expect("a field list");
+                let names: Vec<&str> = spec.fields.iter().map(|f| f.name()).collect();
+                assert_eq!(names, fields, "{outfmt:?}");
+            }
+        }
+    }
 }

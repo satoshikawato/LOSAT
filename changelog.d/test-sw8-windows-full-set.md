@@ -1,0 +1,1 @@
+- Internal: two tests that failed only in the full platform set on Windows now pass there: the `.freq` stride test of `seqdb::rps` unmaps a volume before it writes the next one over its files, and `seq_id_first_line` writes its registry file as `ncbi.ini` on Windows, the name NCBI BLAST+ and LOSAT read there.

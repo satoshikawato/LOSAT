@@ -1,0 +1,181 @@
+//! TBLASTX's report stage on the search's pool (`LOSAT_X_TBXRPTPAR`,
+//! `src/algorithm/tblastx/x_rpt_par.rs`) on whole searches.
+//!
+//! The switch is in the strict set (`src/utils/xswitch.rs`): it is on unless `LOSAT_X_TBXRPTPAR` is
+//! `0`. With it on and two or more threads, the displayed
+//! identities, the outfmt 0 rows and the tabular rows of the final list are computed by the pool's
+//! threads (the Seq-align engine counts of outfmt 8 and 12 too). The reach rows (`LOSAT_X_REACH`,
+//! `tests/reach_support`) show that the pooled stage ran.
+//!
+//! The property under test is that the reports, the messages and the exit status do not depend on
+//! the switch or on the thread count: the searches are compared with the same LOSAT search with the
+//! switch off at one thread. The first query below has more than 2,048 rows (AP027131 x AP027133,
+//! 120 kb each, genetic code 4 for both, which a local subject honors: the approved deviation of
+//! `docs/release/tblastx_v0.1.0_certification.md`), so the identities, the outfmt 0 rows and the
+//! tabular rows are cut into several chunks on the pool.
+
+use std::path::Path;
+use std::process::{Command, Output};
+
+mod reach_support;
+mod temp_support;
+use temp_support::TempFile;
+
+const OFF: (&str, &str) = ("LOSAT_X_TBXRPTPAR", "0");
+const THREADS: [u32; 5] = [1, 2, 4, 8, 16];
+
+fn letters(name: &str) -> Vec<u8> {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fasta")
+        .join(name);
+    std::fs::read(path)
+        .expect("test FASTA")
+        .split(|&b| b == b'\n')
+        .filter(|line| !line.starts_with(b">"))
+        .flatten()
+        .copied()
+        .filter(|b| !b.is_ascii_whitespace())
+        .collect()
+}
+
+/// A FASTA file of `records` (title, letters) in a temporary directory of its own, removed with
+/// the file when the value is dropped (kept when the test panics, to be looked at).
+fn write_fasta(file: &str, records: &[(&str, &[u8])]) -> TempFile {
+    let path = TempFile::keep_on_failure("losat-tbxrptpar", file);
+    let mut text = Vec::new();
+    for (title, seq) in records {
+        text.extend_from_slice(format!(">{title}\n").as_bytes());
+        for line in seq.chunks(70) {
+            text.extend_from_slice(line);
+            text.push(b'\n');
+        }
+    }
+    std::fs::write(&path, text).expect("write FASTA");
+    path
+}
+
+/// Two queries from AP027131 (the second with a title of several words) and a record without
+/// letters between them, which has a warning before its report; written per test (see `Files`).
+fn queries() -> TempFile {
+    let a = letters("AP027131.fasta");
+    write_fasta(
+        "queries.fa",
+        &[
+            ("a", &a[..120_000]),
+            ("empty record", b""),
+            ("a second part", &a[400_000..430_000]),
+        ],
+    )
+}
+
+/// A subject from AP027133 (a title of several words), written per test (see `Files`).
+fn subjects() -> TempFile {
+    let b = letters("AP027133.fasta");
+    write_fasta("subjects.fa", &[("b first part", &b[..120_000])])
+}
+
+/// The query and the subject files of one test, removed when the value is dropped. The reports
+/// (outfmt 0 and 7) name the files, so the runs of one test, which are compared, all use these.
+struct Files {
+    queries: TempFile,
+    subjects: TempFile,
+}
+
+impl Files {
+    fn new() -> Files {
+        Files {
+            queries: queries(),
+            subjects: subjects(),
+        }
+    }
+}
+
+/// The binary with the given variables as its only `LOSAT_*` variables that choose a code path
+/// (`LOSAT_BLASTX_WORKER_LOG` stays: a binary built with the `blastx-worker-probe` feature needs it
+/// as soon as a search has more than one thread, and it selects nothing).
+fn tblastx(files: &Files, threads: u32, outfmt: &str, switches: &[(&str, &str)]) -> Output {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
+    for (name, _) in std::env::vars_os() {
+        if name.to_string_lossy().starts_with("LOSAT_") && name != "LOSAT_BLASTX_WORKER_LOG" {
+            command.env_remove(name);
+        }
+    }
+    command.envs(switches.iter().copied());
+    command
+        .arg("tblastx")
+        .arg("-query")
+        .arg(&files.queries)
+        .arg("-subject")
+        .arg(&files.subjects)
+        .args(["-query_gencode", "4", "-db_gencode", "4"])
+        .args(["-outfmt", outfmt])
+        .args(["-num_threads", &threads.to_string()])
+        .output()
+        .expect("run LOSAT")
+}
+
+fn stderr(output: &Output) -> String {
+    String::from_utf8_lossy(&output.stderr).into_owned()
+}
+
+fn check_format(outfmt: &str) {
+    let files = Files::new();
+    let off = tblastx(&files, 1, outfmt, &[OFF]);
+    assert!(off.status.success(), "{}", stderr(&off));
+    assert!(!off.stdout.is_empty(), "the pairs have hits");
+    // LOSAT writes no warning with outfmt 8.
+    assert!(
+        outfmt == "8" || stderr(&off).contains("empty record"),
+        "the empty record has a warning: {}",
+        stderr(&off)
+    );
+    if matches!(outfmt, "6" | "7") {
+        // The first query's rows are formatted in windows of chunks (more than 1,024 rows).
+        let rows = String::from_utf8_lossy(&off.stdout)
+            .lines()
+            .filter(|line| line.starts_with("a\t"))
+            .count();
+        assert!(
+            rows > 2_048,
+            "outfmt {outfmt}: {rows} rows of the first query"
+        );
+    }
+    for threads in THREADS {
+        let reach = reach_support::Reach::new("rptpar");
+        let on = tblastx(&files, threads, outfmt, &[reach.var()]);
+        assert!(on.status.success(), "threads {threads}: {}", stderr(&on));
+        assert_eq!(on.stdout, off.stdout, "outfmt {outfmt}, threads {threads}");
+        assert_eq!(
+            stderr(&on),
+            stderr(&off),
+            "outfmt {outfmt}, threads {threads}"
+        );
+        // The pooled stage runs with two threads or more, not with one.
+        let sides = reach.sides("LOSAT_X_TBXRPTPAR");
+        assert_eq!(
+            sides.0,
+            threads > 1,
+            "outfmt {outfmt}, threads {threads}: sides {sides:?}"
+        );
+    }
+}
+
+#[test]
+fn the_tabular_report_does_not_depend_on_the_switch_at_any_thread_count() {
+    check_format("6");
+}
+
+#[test]
+fn the_commented_tabular_report_does_not_depend_on_the_switch() {
+    check_format("7");
+}
+
+#[test]
+fn the_pairwise_report_does_not_depend_on_the_switch() {
+    check_format("0");
+}
+
+#[test]
+fn the_seq_align_report_does_not_depend_on_the_switch() {
+    check_format("8");
+}

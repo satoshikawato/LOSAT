@@ -1,0 +1,22 @@
+{
+  "version": "1.2",
+  "dbname": "noacc_v5",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "noacc_v5 (no parsed Seq-ids)",
+  "number-of-letters": 221,
+  "number-of-sequences": 3,
+  "last-updated": "2026-10-30T23:50:00",
+  "number-of-volumes": 1,
+  "bytes-total": 37529,
+  "bytes-to-cache": 361,
+  "files": [
+    "noacc_v5.pdb",
+    "noacc_v5.phr",
+    "noacc_v5.pin",
+    "noacc_v5.pot",
+    "noacc_v5.psq",
+    "noacc_v5.ptf",
+    "noacc_v5.pto"
+  ]
+}

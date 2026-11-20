@@ -1,0 +1,7 @@
+#
+# Alias file of line DBID, ordnum
+#
+TITLE njoined_r (njoined after nfound_v4, without it)
+DBLIST nfound_v4 njoined_a njoined_b
+FIRST_OID 3
+LAST_OID 4

@@ -1,0 +1,1 @@
+- docs: README states what the binary does now (output formats `10`, `11` and `20`, custom tabular fields and `delim=` in all five programs, taxonomy and id filters and several names in `-db`) and lists the NCBI BLAST+ options, values and programs that LOSAT refuses.

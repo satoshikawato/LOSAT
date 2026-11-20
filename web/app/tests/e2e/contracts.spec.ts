@@ -6,6 +6,7 @@
 import { BLOCK_STORE_CASES } from '../contract/block-store.contract';
 import { RUN_OUTPUT_CASES } from '../contract/run-output.contract';
 import { buildHarness, serveHarness, setQuota, type HarnessFiles } from './support/browser';
+import { navigate } from './support/navigate';
 import { expect, test, type Profile } from './support/profile';
 
 test.skip(({ browserName }) => browserName !== 'chromium', 'uses a Chromium profile and the Chrome DevTools Protocol');
@@ -23,7 +24,7 @@ async function openHarness(profile: Profile) {
   // The harness logs each case as it finishes.
   page.on('console', (message) => console.log(message.text()));
   await page.exposeFunction('setStorageQuota', (bytes: number | null) => setQuota(page, bytes));
-  await page.goto('/__harness/index.html');
+  await navigate(page, '/__harness/index.html');
   await page.waitForFunction(() => window.losatHarness !== undefined);
   return page;
 }

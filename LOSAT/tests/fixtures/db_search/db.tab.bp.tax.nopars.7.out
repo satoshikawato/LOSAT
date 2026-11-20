@@ -1,0 +1,19 @@
+# BLASTP 2.17.0+
+# Query: YP_009220551.1 ICP11/P9 [White spot syndrome virus]
+# Database: tests/db_search/paja
+# Fields: subject tax id, subject sci name, subject com names, subject blast name, subject super kingdom, subject tax ids, subject sci names, subject com names, subject blast names, subject super kingdoms, subject title, subject titles, subject strand, % query coverage per subject, % query coverage per hsp, % query coverage per uniq subject
+# 2 hits found
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	BDT63579.1 wsv343-like protein [Pasiphaea japonica whispovirus]	BDT63579.1 wsv343-like protein [Pasiphaea japonica whispovirus]	N/A	38	38	N/A
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	BDT63568.1 hypothetical protein [Pasiphaea japonica whispovirus]	BDT63568.1 hypothetical protein [Pasiphaea japonica whispovirus]	N/A	9	9	N/A
+# BLASTP 2.17.0+
+# Query: YP_009220614.1 envelope protein [White spot syndrome virus]
+# Database: tests/db_search/paja
+# Fields: subject tax id, subject sci name, subject com names, subject blast name, subject super kingdom, subject tax ids, subject sci names, subject com names, subject blast names, subject super kingdoms, subject title, subject titles, subject strand, % query coverage per subject, % query coverage per hsp, % query coverage per uniq subject
+# 2 hits found
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	BDT63571.1 wsv269-like protein [Pasiphaea japonica whispovirus]	BDT63571.1 wsv269-like protein [Pasiphaea japonica whispovirus]	N/A	15	15	N/A
+N/A	N/A	N/A	N/A	N/A	0	N/A	N/A	N/A	N/A	BDT63503.1 wsv514-like protein [Pasiphaea japonica whispovirus]	BDT63503.1 wsv514-like protein [Pasiphaea japonica whispovirus]	N/A	21	21	N/A
+# BLASTP 2.17.0+
+# Query: nohit a query without hits
+# Database: tests/db_search/paja
+# 0 hits found
+# BLAST processed 3 queries

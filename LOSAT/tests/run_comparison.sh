@@ -114,9 +114,9 @@ mapfile -d '' -t TBLASTX_NODE_ARGS < "$BENCHMARK_DIR/node-tblastx-args.bin"
 LOSAT_OUT_DIR="$BENCHMARK_DIR/losat_out"
 BLAST_OUT_DIR="$BENCHMARK_DIR/blast_out"
 FASTA_DIR="$SCRIPT_DIR/fasta"
-LOSAT_BIN="${LOSAT_BIN:-$SCRIPT_DIR/../target/release/LOSAT}"
-LOSAT_WASM_BIN="${LOSAT_WASM_BIN:-$SCRIPT_DIR/../target/serial-command/wasm32-wasip1/release/LOSAT.wasm}"
-LOSAT_WASM_THREADED_BIN="${LOSAT_WASM_THREADED_BIN:-$SCRIPT_DIR/../target/threaded-command/wasm32-wasip1-threads/release/LOSAT.wasm}"
+LOSAT_BIN="${LOSAT_BIN:-$SCRIPT_DIR/../target/release/losat}"
+LOSAT_WASM_BIN="${LOSAT_WASM_BIN:-$SCRIPT_DIR/../target/serial-command/wasm32-wasip1/release/losat.wasm}"
+LOSAT_WASM_THREADED_BIN="${LOSAT_WASM_THREADED_BIN:-$SCRIPT_DIR/../target/threaded-command/wasm32-wasip1-threads/release/losat.wasm}"
 NODE_BIN="${NODE_BIN:-node}"
 
 
@@ -161,10 +161,10 @@ if [[ "$RUN_LOSAT_WASM" == 1 || "$RUN_LOSAT_WASM_THREADED" == 1 ]]; then
         cargo --version
     fi
     if [[ "$RUN_LOSAT_WASM" == 1 && "$BUILD_LOSAT_WASM" == 1 ]]; then
-        (cd .. && cargo build --release --bin LOSAT --target wasm32-wasip1 --no-default-features --target-dir target/serial-command)
+        (cd .. && cargo build --release --bin losat --target wasm32-wasip1 --no-default-features --target-dir target/serial-command)
     fi
     if [[ "$RUN_LOSAT_WASM_THREADED" == 1 && "$BUILD_LOSAT_WASM_THREADED" == 1 ]]; then
-        (cd .. && cargo build --release --bin LOSAT --target wasm32-wasip1-threads --features wasm-threads --target-dir target/threaded-command)
+        (cd .. && cargo build --release --bin losat --target wasm32-wasip1-threads --features wasm-threads --target-dir target/threaded-command)
     fi
     # Require the exact requested command artifacts; never pick a stale deps/ file.
     # NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176

@@ -1,0 +1,25 @@
+{
+  "version": "1.2",
+  "dbname": "pshare_t5",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "pshare_t5 (parsed Seq-ids, taxid 99990)",
+  "number-of-letters": 1320,
+  "number-of-sequences": 6,
+  "last-updated": "2026-11-08T00:58:00",
+  "number-of-volumes": 1,
+  "number-of-taxids": 1,
+  "bytes-total": 51619,
+  "bytes-to-cache": 1503,
+  "files": [
+    "pshare_t5.pdb",
+    "pshare_t5.phr",
+    "pshare_t5.pin",
+    "pshare_t5.pog",
+    "pshare_t5.pos",
+    "pshare_t5.pot",
+    "pshare_t5.psq",
+    "pshare_t5.ptf",
+    "pshare_t5.pto"
+  ]
+}

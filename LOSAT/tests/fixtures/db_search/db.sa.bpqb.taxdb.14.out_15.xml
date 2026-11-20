@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="US-ASCII"?>
+<BlastOutput2
+    xmlns="http://www.ncbi.nlm.nih.gov"
+    xmlns:xs="http://www.w3.org/2001/XMLSchema-instance"
+    xs:schemaLocation="http://www.ncbi.nlm.nih.gov http://www.ncbi.nlm.nih.gov/data_specs/schema_alt/NCBI_BlastOutput2.xsd"
+>
+  <report>
+    <Report>
+      <program>blastp</program>
+      <version>BLASTP 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <db>tests/db_search/paja_taxid</db>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>BLOSUM62</matrix>
+          <expect>0.1</expect>
+          <gap-open>11</gap-open>
+          <gap-extend>1</gap-extend>
+          <filter>F</filter>
+          <cbs>2</cbs>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <search>
+            <Search>
+              <query-id>Query_15</query-id>
+              <query-title>BDT62562.1 wsv306-like protein [Metapenaeus ensis majanivirus]</query-title>
+              <query-len>408</query-len>
+              <hits>
+                <Hit>
+                  <num>1</num>
+                  <description>
+                    <HitDescr>
+                      <id>gnl|BL_ORD_ID|41</id>
+                      <accession>41</accession>
+                      <title>BDT63539.1 wsv306-like protein [Pasiphaea japonica whispovirus]</title>
+                      <taxid>10090</taxid>
+                      <sciname>Mus musculus</sciname>
+                    </HitDescr>
+                  </description>
+                  <len>153</len>
+                  <hsps>
+                    <Hsp>
+                      <num>1</num>
+                      <bit-score>86.2705</bit-score>
+                      <score>212</score>
+                      <evalue>2.43863e-22</evalue>
+                      <identity>42</identity>
+                      <positive>73</positive>
+                      <query-from>259</query-from>
+                      <query-to>383</query-to>
+                      <hit-from>6</hit-from>
+                      <hit-to>137</hit-to>
+                      <align-len>132</align-len>
+                      <gaps>7</gaps>
+                      <qseq>LQFHCNEEMNAGIMMAAYQD-NDGNILPICVCTYPYYLTGPTCKHRTYNRVVDYELWEKTGYADFLTDPFNDYKKANRICKSKTINTTAVFDERDGCFYCQP------LAAHFAQSLQMRGPYEPALILDKD</qseq>
+                      <hseq>MKYLCDKEMHAGKAKAIYKNLVSGKYISKCTCLYPKYHTGPTCKQKTYCYVIYHDKWQTTSHPNFLHDPIQHFQIAEDVCRELKNNTRAIYNPKRGHIVCPPILKLVKIALTHRVALTHRGFHKPCFIIKRN</hseq>
+                      <midline>+++ C++EM+AG   A Y++   G  +  C C YP Y TGPTCK +TY  V+ ++ W+ T + +FL DP   ++ A  +C+    NT A+++ + G   C P      +A     +L  RG ++P  I+ ++</midline>
+                    </Hsp>
+                  </hsps>
+                </Hit>
+              </hits>
+              <stat>
+                <Statistics>
+                  <db-num>86</db-num>
+                  <db-len>66738</db-len>
+                  <hsp-len>67</hsp-len>
+                  <eff-space>20792816</eff-space>
+                  <kappa>0.041</kappa>
+                  <lambda>0.267</lambda>
+                  <entropy>0.14</entropy>
+                </Statistics>
+              </stat>
+            </Search>
+          </search>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>

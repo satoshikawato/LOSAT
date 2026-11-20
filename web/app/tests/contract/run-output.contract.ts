@@ -1,10 +1,10 @@
-// Run output channel contract (ports/run-output.ts, ports/data.ts RunStore): an engine-side
+// Run output channel contract (losat/ports run-output.ts, ports/data.ts RunStore): an engine-side
 // writer sends the outputs of a run over the MessagePort of `openRun`, and the data layer
 // stages, commits, discards and reads them. Vitest runs it in one thread; Playwright runs
 // it with the writer in a separate worker and the real Data worker (OPFS). S09 runs it with
 // the writer inside the real Engine worker.
+import { DIAGNOSTICS_STREAM, HITS_STREAM, type OutputStream } from 'losat/ports';
 import type { RunStore } from '../../src/ports/data';
-import { DIAGNOSTICS_STREAM, HITS_STREAM, type OutputStream } from '../../src/ports/run-output';
 import {
   check,
   concatBytes,
@@ -189,6 +189,41 @@ export const RUN_OUTPUT_CASES: readonly ContractCase<RunOutputEnv>[] = [
       await env.data.commitRun('run-i');
       sameBytes(await env.data.readOutput('run-i', 6), bytes('one-1\none-2\n'), 'first run');
       sameBytes(await env.data.readOutput('run-j', 6), bytes('two-1\n'), 'second run');
+    },
+  },
+  {
+    name: "a discard drops what arrived of one output, which stays empty; the others and the end's totals are kept",
+    async run(env) {
+      const baseline = await env.usage();
+      const writer = await openWriter(env, 'run-o');
+      await writer.write(6, pattern(2 * MiB, 1));
+      await writer.write(0, bytes('Query= q1\n'));
+      await writer.write(6, pattern(MiB, 2));
+      // The engine's signal of stream 9 (ABI v2 §5): outfmt 6 failed alone after these chunks.
+      await writer.post({ type: 'discard', stream: 6 });
+      await writer.write(7, bytes('# BLASTN\n'));
+      await writer.write(DIAGNOSTICS_STREAM, bytes('Error: refused\n'));
+      await writer.write(0, bytes('Lambda\n'));
+      await writer.end();
+      const result = await env.data.commitRun('run-o');
+      same(result.byteLengths[6], 0, 'outfmt 6');
+      same((await env.data.readOutput('run-o', 6)).length, 0, 'outfmt 6 bytes');
+      sameBytes(await env.data.readOutput('run-o', 0), bytes('Query= q1\nLambda\n'), 'outfmt 0');
+      sameBytes(await env.data.readOutput('run-o', 7), bytes('# BLASTN\n'), 'outfmt 7');
+      same(await env.data.readDiagnostics('run-o'), 'Error: refused\n', 'diagnostics');
+      same(result.hitCount, 0, 'hitCount');
+      // The 3 MiB of outfmt 6 are not held: only the 41 bytes of the other streams.
+      same(await env.usage(), baseline + 41, 'bytes held after the commit');
+    },
+  },
+  {
+    name: 'a discard of a stream that is not an output fails the commit',
+    async run(env) {
+      const writer = await openWriter(env, 'run-p');
+      await writer.write(HITS_STREAM, bytes(hitLine(0)));
+      await writer.post({ type: 'discard', stream: HITS_STREAM });
+      await writer.end();
+      await rejects(env.data.commitRun('run-p'), /incomplete/, 'commit');
     },
   },
   {

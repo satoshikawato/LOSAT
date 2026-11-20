@@ -1,0 +1,640 @@
+#!/usr/bin/env python3
+"""Line RG item T5: database sequences without a title whose taxid a taxonomy database names.
+
+Writes, from LOSAT/ (`python3 tests/db_search/t5/make_t5.py NCBI_BIN`, NCBI_BIN the directory of
+NCBI BLAST+ 2.17.0's makeblastdb):
+
+- `tests/seqdb/taxdb/t5.tsv` and the taxonomy database `tests/seqdb/taxdb/t5/` of it
+  (`tests/seqdb/taxdb/make_taxdb.py write`): one name of each form that NCBI's
+  `CDeflineGenerator` changes when it makes a title from it (TAXA below).
+- in `tests/db_search/t5/`: for each taxid of TAXA and 77777 (which the taxonomy database does
+  not hold), the version 4 databases `n_<taxid>` and `p_<taxid>` of one sequence without a title
+  (`>` alone; the letters of `../ids/ndup.fna` and `../ids/pdup.faa`), made with `-taxid <taxid>`
+  and without `-parse_seqids`, and for the taxids of PARSED `np_<taxid>` and `pp_<taxid>` with
+  `-parse_seqids` (the id `gb|AB0000<n>.1|` alone); alias files over them (ALIASES).
+
+With `--mix-only` (`python3 tests/db_search/t5/make_t5.py NCBI_BIN --mix-only`) it writes only the
+version 5 databases `nmix` and `pmix` (fix 1 of the review of T5: the cases the rows above do not
+reach) and leaves everything else as it is: one sequence for each record of MIX (the letters of
+`ndup.fna` / `pdup.faa`), with `-parse_seqids` and the taxids of MIX by `-taxid_map`: several
+definition lines with other taxids, the target's line without a taxid (blastdbcmd `-target_only`
+takes the first source from the other lines), titled and untitled lines, and one line of each Seq-id
+kind whose title NCBI makes from the source (tpg, emb, gi, pdb with and without a chain, lcl, gnl;
+for the protein also sp, ref NP_ and WP_, and a title ending in a ", partial [name]" suffix that
+`x_AdjustProteinTitleSuffix` rewrites from the first source). Version 5, for `-taxids` and
+`-negative_taxids` with `-no_taxid_expansion` (NCBI filters no version 4 database by taxid). The
+record with the suffix goes to the version 4 database `psuffix` of its own (written before LOSAT's
+searches wrote such a heading; rows `db.t5.psuffix.*` search it since line RG item T5c).
+
+With `--suffix-only` (`python3 tests/db_search/t5/make_t5.py NCBI_BIN --suffix-only`, line RG item
+T5c) it writes only the protein databases of titles ending in `]` whose end NCBI's
+`x_AdjustProteinTitleSuffix` rewrites from the Bioseq's first source (SUFFIX, SUFFIX_STORED): `psfx`
+(version 5, `-parse_seqids`, `-taxid_map`: a titled line and an untitled one, whose outfmt 0 heading
+shows the generated title, and `lcl|Subject_9nn` records, whose tabular ids are its first word) and
+the version 4 databases `psfs_<taxid>` without `-parse_seqids` (`-taxid`, `psfs_none` without one)
+with the alias `psfs` over them (the tabular ids are the first word of the generated title).
+
+With `--word-only` (`python3 tests/db_search/t5/make_t5.py NCBI_BIN --word-only`, fix 1 of line RG
+item T5c) it writes only the version 4 protein databases `pword_<taxid>` without `-parse_seqids`
+(WORD_STORED; `pword_none` without `-taxid`) and the alias `pword` over them: titles whose generated
+title has no first word, so that NCBI keeps the sequence's own `gnl|BL_ORD_ID|n` in the tabular ids
+(`BL_ORD_ID:n` for `sacc` and `saccver`): a title of one space, a prefix alone (`TPA:`), and
+`MAG: (plastid) [ ]`, which `x_AdjustProteinTitleSuffix` cuts to `MAG:` where the Bioseq has a
+source (taxid 77777, which no taxonomy database here names); `  MAG:  ` and `chi, partial [ ]` give a
+word.
+
+With `--taxid-only` (`python3 tests/db_search/t5/make_t5.py NCBI_BIN --taxid-only`, fix 2 of line
+RG item T5c) it writes only the version 4 databases `ptx_<name>` and `ntx_<name>` of TAXID_ENCODINGS
+without `-parse_seqids` (`-taxid 9606`; two records, the letters of `pdup.faa` / `ndup.fna`): the
+`taxid [2]` of the first record (OID 0) holds another encoding than makeblastdb's `02 02 25 86`
+(the record and the header offsets of the index rewritten): the application INTEGER tag `0x42`
+and nine content bytes of sign extension, which NCBI's `ReadInt4` reads as 9606, and 2^31 in five
+bytes, which it fails on (`eOverflow`, `TTaxId` is an `int`) wherever it reads the header (probe
+`remaining-gaps-20261112/T/taxid_t5c.md` of line RG).
+
+With `--sfu-only` (`python3 tests/db_search/t5/make_t5.py NCBI_BIN --sfu-only`, merge 4 of line RG
+item T5c with item T7) it writes only the version 4 protein databases of titles ending in ` [ ]` with
+the taxid 100009, whose name (`Bad \x81 name`) NCBI's `x_AdjustProteinTitleSuffix` writes at their end
+and `GenerateDefline` then cannot decode (the lookup fails: `Unknown`): `psfu_100009` without
+`-parse_seqids` (SFU_STORED; the alias `psfu`) and `psfux` with `-parse_seqids` and `-taxid_map`
+(SFUX: an `lcl|Subject_901` record, a titled line followed by an untitled one, whose outfmt 0 heading
+NCBI skips, and a control).
+
+With `--k5-only` (`python3 tests/db_search/t5/make_t5.py NCBI_BIN --k5-only`, merge 5 of line RG
+item T5c with item K4h) it writes only the taxonomy database `tests/seqdb/taxdb/k5/` of
+`tests/seqdb/taxdb/k5.tsv` (the rows of `taxdb.tsv`, 99990 still the last entry, and K5_TAXA: names
+with two-byte UTF-8, with control bytes and with a byte that `GenerateDefline` cannot decode in all four
+fields), the version 4 protein databases of titles ending in `]` with those taxids: `pk5_<taxid>`
+without `-parse_seqids` (K5_STORED; the alias `pk5`), `pk5x` (taxid 5003 alone) and `pk5s` with
+`-parse_seqids` and `-taxid_map` (K5S), and the queries `k5_qa` and `k5_qc` (`.faa`, and `.fna` of
+the same letters back-translated): q0 without hits, q1 with a title of two-byte UTF-8 (`qa`, NCBI's
+outfmt 5 stream leaves its `Iteration` out) or a control byte (`qc`) hitting every record, q2 hitting
+only the records of group A (K5_A), so that `BATCH_SIZE=1` with `PRE_FETCH_SEQS_LIMIT` of that count
+turns q1's prefetch off and q2's on. makeblastdb stores a title byte outside 0x20..0x7E as `#`, so
+these bytes reach a database title only through the name at its rewritten end.
+
+Python 3 standard library only; makeblastdb is NCBI's (the comparison oracle builds the inputs).
+"""
+import os
+import struct
+import subprocess
+import sys
+
+TAXA = [
+    # taxid, scientific name, common name, blast name, kingdom
+    (100001, b"uncultured bacterium", b"", b"bacteria", b"Bacteria"),
+    (100002, b"Bacillus sp.", b"", b"firmicutes", b"Bacteria"),
+    (100003, b"  Spaced   name  ", b"sp", b"x", b"Bacteria"),
+    (100004, b"A &amp; B &lt;x&gt; &#65;", b"", b"x", b"Bacteria"),
+    (100005, b"TPA: tpa organism", b"", b"x", b"Bacteria"),
+    (100006, b"MAG uncultured thing", b"", b"x", b"Bacteria"),
+    # A byte that NCBI's HtmlDecode cannot place in an encoding (it throws).
+    (100009, b"Bad \x81 name", b"", b"x", b"Bacteria"),
+    # An empty scientific name: no name.
+    (100010, b"", b"only common", b"x", b"Bacteria"),
+]
+UNNAMED = 77777
+PARSED = [100001, 100005, 100010]
+NAMED = [100001, 100002, 100003, 100004, 100005, 100006]
+ALIASES = {
+    # outfmt 0 and 18: every form, the unknown encoding and the taxids without a name.
+    "nall": ("n", NAMED + [100009, 100010, UNNAMED]),
+    "pall": ("p", NAMED + [100009, 100010, UNNAMED]),
+    # blastdbcmd, dustmasker and segmasker: no title NCBI cannot decode (NCBI stops there).
+    "nclean": ("n", NAMED + [100010, UNNAMED]),
+    "pclean": ("p", NAMED + [100010, UNNAMED]),
+    # The tabular subject ids of a nucleotide: an empty title without a name has no id.
+    "ntab": ("n", NAMED),
+    "npall": ("np", PARSED),
+    "ppall": ("pp", PARSED),
+    # Line RG item T7: the name NCBI cannot decode before and after a named sequence (rows db.t7.*).
+    "nt7_bf": ("n", [100009, 100001]),
+    "nt7_fb": ("n", [100001, 100009]),
+    "pt7_bf": ("p", [100009, 100001]),
+    "pt7_fb": ("p", [100001, 100009]),
+}
+
+CTRL_A = "\x01"
+# The records of `nmix` / `pmix` / `psuffix`: ([(Seq-ids, title, taxid or None), ...], databases
+# ("np": nmix and pmix, "p": pmix, "f": psuffix). `{k}` is 1 for the nucleotide database and 2 for
+# the protein ones.
+MIX = [
+    # Two lines without titles, taxids 100001 then 100002.
+    ([("gb|AB30{k}001.1|", "", 100001), ("gb|AB30{k}002.1|", "", 100002)], "np"),
+    # The first line without a taxid: its source is the second line's (also with -target_only).
+    ([("gb|AB31{k}001.1|", "", None), ("gb|AB31{k}002.1|", "", 100002)], "np"),
+    # The first line untitled (100002), the second titled (100001).
+    ([("gb|AB32{k}001.1|", "", 100002), ("gb|AB32{k}002.1|", "second title", 100001)], "np"),
+    # The first line titled (100001), the second untitled (100002).
+    ([("gb|AB33{k}001.1|", "first title", 100001), ("gb|AB33{k}002.1|", "", 100002)], "np"),
+    ([("tpg|BK3{k}0041.1|", "", 100001)], "np"),
+    ([("emb|CA3{k}0051.1|", "", 100005)], "np"),
+    ([("gi|300006{k}|gb|AB34{k}061.1|", "", 100002)], "np"),
+    ([("pdb|1XY{k}|", "", 100001)], "np"),
+    ([("pdb|1XZ{k}|A", "", 100002)], "np"),
+    ([("lcl|Subject_1", "", 100001)], "np"),
+    ([("gnl|mydb|seq{k}1", "", 100004)], "np"),
+    ([("sp|P99901.1|NAME_BACSP", "", 100002)], "p"),
+    ([("ref|NP_300001.1|", "", 100001)], "p"),
+    ([("ref|WP_300000001.1|", "", 100002)], "p"),
+    # A title with the suffix of a source the first line does not have (taxid 0 / 100002).
+    ([("gb|AB36{k}001.1|", "alpha, partial [Bacillus sp.]", None), ("gb|AB36{k}002.1|", "", 100002)], "f"),
+]
+
+
+# The records of `psfx` (line RG item T5c): [(Seq-id, title, taxid or None), ...]. The probe of
+# T5c (`remaining-gaps-20261112/T/t5c/make_probe.py`) with three organelle names more.
+SUFFIX = [
+    [("gb|AC400001.1|", "alpha, partial [Bacillus sp.]", None), ("gb|AD400001.1|", "", 100002)],
+    [("gb|AC400002.1|", "alpha, partial [Bacillus sp.]", 100002), ("gb|AD400002.1|", "", None)],
+    [("gb|AC400003.1|", "beta [bacillus SP.]", 100002), ("gb|AD400003.1|", "", None)],
+    [("gb|AC400004.1|", "gamma (mitochondrion) [Bacillus sp.]", 100002), ("gb|AD400004.1|", "", 100002)],
+    [("gb|AC400005.1|", "delta (foo) [Bacillus sp.]", 100002), ("gb|AD400005.1|", "", None)],
+    [("gb|AC400006.1|", "epsilon [Homo sapiens]", 100002), ("gb|AD400006.1|", "", None)],
+    [("gb|AC400007.1|", "zeta protein, partial [ ]", 100002), ("gb|AD400007.1|", "", None)],
+    [("gb|AC400008.1|", "eta protein, partial []", 100002), ("gb|AD400008.1|", "", None)],
+    [("gb|AC400009.1|", "theta. [Bacillus sp.]", 100002), ("gb|AD400009.1|", "", None)],
+    [("gb|AC400010.1|", "TPA: iota, partial [Bacillus sp.].", 100002), ("gb|AD400010.1|", "", None)],
+    [("gb|AC400011.1|", "kappa, partial (chloroplast) [Bacillus sp.]", 100002), ("gb|AD400011.1|", "", None)],
+    [("gb|AC400012.1|", "lambda (chloroplast), partial [Bacillus sp.]", 100002), ("gb|AD400012.1|", "", None)],
+    [("gb|AC400013.1|", "mu(plasmid) [Bacillus sp.]", 100002), ("gb|AD400013.1|", "", None)],
+    [("gb|AC400014.1|", "nu (x)(virus) [Bacillus sp.]", 100002), ("gb|AD400014.1|", "", None)],
+    [("gb|AC400015.1|", "x, [Bacillus sp.]", 100002), ("gb|AD400015.1|", "", None)],
+    [("gb|AC400016.1|", "omicron, partial  [Bacillus sp.]", 100002), ("gb|AD400016.1|", "", None)],
+    [("gb|AC400017.1|", "pi, partial[Bacillus sp.]", 100002), ("gb|AD400017.1|", "", None)],
+    [("gb|AC400018.1|", "rho, partial, partial [Bacillus sp.]", 100002), ("gb|AD400018.1|", "", None)],
+    [("gb|AC400019.1|", "sigma &amp; tau, partial [Bacillus sp.]", 100002), ("gb|AD400019.1|", "", None)],
+    [("gb|AC400020.1|", "upsilon, partial [Bacillus sp.] ~;", 100002), ("gb|AD400020.1|", "", None)],
+    [("gb|AC400021.1|", "phi, partial [Bacillus sp.]", 77777), ("gb|AD400021.1|", "", None)],
+    [("gb|AC400022.1|", "chi protein, partial [ ]", 77777), ("gb|AD400022.1|", "", None)],
+    [("gb|AC400023.1|", "psi protein, partial []", 77777), ("gb|AD400023.1|", "", None)],
+    [("gb|AC400024.1|", "omega, partial [uncultured bacterium]", None), ("gb|AD400024.1|", "", 100001)],
+    [("gb|AC400025.1|", "aa, partial [a &amp; b &lt;x&gt; &#65;]", 100004), ("gb|AD400025.1|", "", None)],
+    [("gb|AC400026.1|", "bb, partial [  spaced   NAME  ]", 100003), ("gb|AD400026.1|", "", None)],
+    [("gb|AC400027.1|", "cc, partial [TPA: tpa organism]", 100005), ("gb|AD400027.1|", "", None)],
+    [("gb|AC400028.1|", "ee, partial [only common]", 100010), ("gb|AD400028.1|", "", None)],
+    [("gb|AC400029.1|", "ff, partial [Bacillus sp.]", 100002), ("gb|AD400029.1|", "", 100001),
+     ("gb|AE400029.1|", "other title", 100001)],
+    [("gb|AC400030.1|", ",, [Bacillus sp.]", 100002), ("gb|AD400030.1|", "", None)],
+    [("gb|AC400031.1|", "gg, partial [Bacillus sp.]", None), ("gb|AD400031.1|", "", None)],
+    [("gb|AC400032.1|", "hh (mitochondrion), partial [Bacillus sp.]", 100002), ("gb|AD400032.1|", "", None)],
+    [("gb|AC400033.1|", "ii protein (plastid) [ ]", 100002), ("gb|AD400033.1|", "", None)],
+    [("gb|AC400035.1|", "MAG: kk, partial [Bacillus sp.]", 100002), ("gb|AD400035.1|", "", None)],
+    [("gb|AC400036.1|", "ll (chromosome) [Bacillus sp.]", 100002), ("gb|AD400036.1|", "", None)],
+    [("gb|AC400037.1|", "mm (protoplast) [Bacillus sp.]", 100002), ("gb|AD400037.1|", "", None)],
+    [("gb|AC400038.1|", "nn (extrachromosomal) [Bacillus sp.]", 100002), ("gb|AD400038.1|", "", None)],
+    [("lcl|Subject_901", "alpha, partial [Bacillus sp.]", 100002)],
+    [("lcl|Subject_902", "x, [Bacillus sp.]", 100002)],
+    [("lcl|Subject_903", "a, [ ]", 77777)],
+    [("lcl|Subject_904", "theta. [Bacillus sp.]", 100002)],
+    [("lcl|Subject_905", "beta, partial [Bacillus sp.]", None), ("gb|AF400005.1|", "", 100002)],
+    [("lcl|Subject_906", "kappa, partial (chloroplast) [Bacillus sp.]", 100002)],
+]
+# The titles of `psfs_<taxid>` (version 4, without -parse_seqids; None: no -taxid).
+SUFFIX_STORED = {
+    100002: ["alpha, partial [Bacillus sp.]", "x, [Bacillus sp.]", "theta. [Bacillus sp.]",
+             "zeta protein, partial [ ]", "kappa, partial (chloroplast) [Bacillus sp.]",
+             "TPA: iota, partial [Bacillus sp.].", "beta [bacillus SP.]", "omicron, partial  [Bacillus sp.]",
+             "epsilon, [Homo sapiens]", "sigma &amp; tau, partial [Bacillus sp.]", "ab, [Bacillus sp.]",
+             "pi, partial[Bacillus sp.]", "nu (x)(virus) [Bacillus sp.]", "ll (chromosome) [Bacillus sp.]",
+             "mm, partial (protoplast) [Bacillus sp.]"],
+    77777: ["a, [ ]", "phi, partial [Bacillus sp.]", "psi protein, partial []", "chi, partial [ ]"],
+    None: ["alpha, partial [Bacillus sp.]", "chi, partial [ ]"],
+}
+
+# The titles of `pword_<taxid>` (version 4, without -parse_seqids; None: no -taxid).
+WORD_STORED = {
+    77777: ["MAG: (plastid) [ ]", " ", "TPA:", "chi, partial [ ]", "  MAG:  "],
+    None: ["MAG: (plastid) [ ]", " ", "chi, partial [ ]"],
+}
+
+# The titles of `psfu_<taxid>` (merge 4 of line RG item T5c: the rewritten end takes a name that
+# NCBI cannot decode; `kappa, partial [Homo sapiens]` keeps its end).
+SFU_STORED = {
+    100009: ["chi, partial [ ]", "hypothetical protein [ ]", "kappa, partial [Homo sapiens]"],
+}
+# The records of `psfux` (version 4, -parse_seqids, -taxid_map), as SUFFIX.
+SFUX = [
+    [("lcl|Subject_901", "chi, partial [ ]", 100009)],
+    [("gb|AC400031.1|", "omega, partial [ ]", None), ("gb|AD400031.1|", "", 100009)],
+    [("lcl|Subject_904", "delta, partial [Homo sapiens]", 100001)],
+]
+
+# The inner bytes of the taxid `[2]` of the first record of `ptx_<name>` and `ntx_<name>` (fix 2 of
+# line RG item T5c); makeblastdb writes `02 02 25 86` (INTEGER 9606).
+TAXID_ENCODINGS = {
+    # The application INTEGER tag, which NCBI's ExpectIntegerTag takes as the INTEGER tag.
+    "app42": "42022586",
+    # Nine content bytes, the first seven sign extension, which ReadStdSigned skips.
+    "sx9": "0209" + "00" * 7 + "2586",
+    # 2^31 in five bytes: outside an int, NCBI's "overflow error".
+    "big5": "02050080000000",
+}
+TAXID_TITLES = ["patched record, its taxid in another encoding", "plain record as makeblastdb writes it"]
+
+# The names that `--k5-only` adds to `taxdb.tsv`'s rows for `tests/seqdb/taxdb/k5` (merge 5 of line RG
+# item T5c with item K4h): (taxid, scientific, common, blast, kingdom), below 99990 so that it stays
+# the last entry (`offset_last_past_end`'s offset error).
+K5_TAXA = [
+    (5001, b"Caf\xc3\xa9 sp.", b"caf\xc3\xa9 common", b"b\xc3\xa9blast", b"K\xc3\xa9ngdom"),
+    (5002, b"Ctl\x07 name", b"c\x1bcommon", b"b\x7fblast", b"K\x01ngdom"),
+    (5003, b"Bad \x81 name", b"x\x81common", b"ybl\x81st", b"Bacteria"),
+]
+# The records of `pk5_<taxid>`: (title, group); group A holds K5_A, group B K5_B.
+K5_STORED = {
+    99990: [("chi, partial [ ]", "A"), ("alpha, partial [Homo sapiens]", "A"), ("hypothetical protein [ ]", "A"),
+            ("bchi, partial [ ]", "B")],
+    5001: [("eta, partial [ ]", "A"), ("MAG: (plastid) [ ]", "A"), ("beta2, partial [ ]", "B")],
+    5002: [("theta, partial [ ]", "A"), ("iota, partial [Homo sapiens]", "A"), ("btheta, partial [ ]", "B")],
+    77777: [("lambda, partial [ ]", "A"), ("blambda [ ]", "B")],
+    9606: [("mu, partial [ ]", "A"), ("nu, partial [Homo sapiens]", "A"), ("bmu, partial [ ]", "B")],
+}
+K5X_STORED = [("kappa, partial [ ]", "A"), ("zeta, partial [Homo sapiens]", "A"), ("bkappa, partial [ ]", "B")]
+# The records of `pk5s`: ([(Seq-id, title, taxid or None)], group).
+K5S = [
+    ([("lcl|Subject_901", "chi, partial [ ]", 99990)], "A"),
+    ([("lcl|Subject_902", "eta, partial [ ]", 5001)], "A"),
+    ([("lcl|Subject_903", "theta, partial [ ]", 5002)], "A"),
+    ([("lcl|Subject_904", "lambda, partial [ ]", 77777)], "A"),
+    ([("lcl|Subject_905", "alpha, partial [Homo sapiens]", 9606)], "A"),
+    ([("gb|AC500001.1|", "omega, partial [ ]", None), ("gb|AD500001.1|", "", 99990)], "A"),
+    ([("gb|AC500002.1|", "sigma, partial [ ]", None), ("gb|AD500002.1|", "", 5001)], "A"),
+    ([("gb|AC500003.1|", "tau, partial [ ]", None), ("gb|AD500003.1|", "", 5002)], "A"),
+    ([("gb|AC500004.1|", "upsilon, partial [ ]", None), ("gb|AD500004.1|", "", 77777)], "A"),
+    ([("lcl|Subject_911", "bchi, partial [ ]", 99990)], "B"),
+    ([("lcl|Subject_912", "btheta, partial [ ]", 5002)], "B"),
+    ([("gb|AC500011.1|", "bomega, partial [ ]", None), ("gb|AD500011.1|", "", 5001)], "B"),
+]
+K5_A = ("MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHK"
+        "YPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYM")
+K5_Q2 = ("SVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCM"
+         "CVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTASEG")
+K5_B = ("LPVASKCGEPTKQYEKAIRLGQGDFSFFAAIIGGMNIYIGIQMAPRGFLDNMANDMPMTNGTTGCLAPQAYRPQASCGIEKSPVPVLSEPMCR"
+        "DINVPFNLYDMNMGDFMTGCDYQCKPL")
+K5_NOHIT = "WWWWWWWWWWHHHHHHHHHHWWWWWWWWWW"
+K5_QUERIES = {"qa": b"q1 a\xc3\xa9b z", "qc": b"q1 c\x07d z"}
+K5_CODONS = dict(A="GCT", R="CGT", N="AAT", D="GAT", C="TGT", Q="CAA", E="GAA", G="GGT", H="CAT", I="ATT",
+                 L="CTG", K="AAA", M="ATG", F="TTT", P="CCG", S="TCT", T="ACT", W="TGG", Y="TAT", V="GTT")
+
+
+def tlv_end(data, at):
+    """The end of the BER value at `at` (indefinite constructed values walked)."""
+    at += 1
+    first = data[at]
+    at += 1
+    if first == 0x80:
+        while data[at:at + 2] != b"\x00\x00":
+            at = tlv_end(data, at)
+        return at + 2
+    if first < 0x80:
+        return at + first
+    count = first - 0x80
+    return at + count + int.from_bytes(data[at:at + count], "big")
+
+
+def with_taxid(record, inner):
+    """`record` (a `Blast-def-line-set` of one line, as makeblastdb writes it) with the inner bytes of
+    its indefinite `taxid [2]` replaced by `inner`."""
+    assert record[:4] == b"\x30\x80\x30\x80", record[:4].hex()
+    at = 4
+    while record[at] != 0xA2:
+        at = tlv_end(record, at)
+    end = tlv_end(record, at)
+    assert record[at:at + 2] == b"\xa2\x80" and record[end - 2:end] == b"\x00\x00", record[at:end].hex()
+    return record[:at + 2] + bytes.fromhex(inner) + record[end - 2:]
+
+
+def patch_first_taxid(base, ext, inner):
+    """Rewrites the header file of the version 4 database `base` with the first record's taxid
+    `inner` (`with_taxid`) and the header offsets of its index file."""
+    index = bytearray(open(f"{base}.{ext}in", "rb").read())
+    version, = struct.unpack(">I", index[0:4])
+    assert version == 4, version
+    at = 8
+    for _ in range(2):  # title, date
+        at += 4 + struct.unpack(">I", index[at:at + 4])[0]
+    count, = struct.unpack(">I", index[at:at + 4])
+    at += 4 + 8 + 4  # count, total length, longest sequence
+    offsets = list(struct.unpack(f">{count + 1}I", index[at:at + 4 * (count + 1)]))
+    headers = open(f"{base}.{ext}hr", "rb").read()
+    records = [headers[offsets[k]:offsets[k + 1]] for k in range(count)]
+    records[0] = with_taxid(records[0], inner)
+    offsets = [0]
+    for record in records:
+        offsets.append(offsets[-1] + len(record))
+    index[at:at + 4 * (count + 1)] = struct.pack(f">{count + 1}I", *offsets)
+    open(f"{base}.{ext}hr", "wb").write(b"".join(records))
+    open(f"{base}.{ext}in", "wb").write(bytes(index))
+
+
+def taxid_main(ncbi_bin):
+    here = os.path.join("tests", "db_search", "t5")
+    work = os.path.join(here, "work")
+    os.makedirs(work, exist_ok=True)
+    env = {"PATH": "/usr/bin:/bin", "HOME": os.path.abspath(work), "BLAST_USAGE_REPORT": "false"}
+    for kind, dbtype, ext, source in (("p", "prot", "p", "pdup.faa"), ("n", "nucl", "n", "ndup.fna")):
+        seq = letters(os.path.join("tests", "db_search", "ids", source))
+        fasta = os.path.join(work, f"{kind}tx.fa")
+        with open(fasta, "w") as f:
+            for title in TAXID_TITLES:
+                f.write(">" + title + "\n" + seq + "\n")
+        for name, inner in TAXID_ENCODINGS.items():
+            out = os.path.join(here, f"{kind}tx_{name}")
+            subprocess.run([os.path.join(ncbi_bin, "makeblastdb"), "-in", fasta, "-dbtype", dbtype,
+                            "-blastdb_version", "4", "-taxid", "9606", "-title", f"{kind}tx_{name}",
+                            "-out", out], check=True, stdout=subprocess.DEVNULL, env=env)
+            # makeblastdb's version 4 JSON metadata file is not read by a search.
+            if os.path.exists(f"{out}.{ext}js"):
+                os.remove(f"{out}.{ext}js")
+            patch_first_taxid(out, ext, inner)
+    for name in os.listdir(work):
+        os.remove(os.path.join(work, name))
+    os.rmdir(work)
+
+
+def stored_main(ncbi_bin, prefix, stored):
+    """The version 4 protein databases `<prefix>_<taxid>` of the titles `stored` (the letters of
+    `pdup.faa`, `-taxid <taxid>`, none for `None`) and the alias `<prefix>` over them."""
+    here = os.path.join("tests", "db_search", "t5")
+    seq = letters(os.path.join("tests", "db_search", "ids", "pdup.faa"))
+    work = os.path.join(here, "work")
+    os.makedirs(work, exist_ok=True)
+    env = {"PATH": "/usr/bin:/bin", "HOME": os.path.abspath(work), "BLAST_USAGE_REPORT": "false"}
+    names = []
+    for taxid, titles in stored.items():
+        name = f"{prefix}_{taxid if taxid is not None else 'none'}"
+        names.append(name)
+        fasta = os.path.join(work, name + ".fa")
+        with open(fasta, "w") as f:
+            for title in titles:
+                f.write(">" + title + "\n" + seq + "\n")
+        cmd = [os.path.join(ncbi_bin, "makeblastdb"), "-in", fasta, "-dbtype", "prot",
+               "-blastdb_version", "4", "-title", name, "-out", os.path.join(here, name)]
+        if taxid is not None:
+            cmd += ["-taxid", str(taxid)]
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, env=env)
+        # makeblastdb's version 4 JSON metadata file is not read by a search.
+        if os.path.exists(os.path.join(here, name + ".pjs")):
+            os.remove(os.path.join(here, name + ".pjs"))
+    with open(os.path.join(here, f"{prefix}.pal"), "w") as f:
+        f.write(f"TITLE {prefix}\nDBLIST {' '.join(names)} \n")
+    for name in os.listdir(work):
+        os.remove(os.path.join(work, name))
+    os.rmdir(work)
+
+
+def suffix_main(ncbi_bin):
+    here = os.path.join("tests", "db_search", "t5")
+    seq = letters(os.path.join("tests", "db_search", "ids", "pdup.faa"))
+    work = os.path.join(here, "work")
+    os.makedirs(work, exist_ok=True)
+    env = {"PATH": "/usr/bin:/bin", "HOME": os.path.abspath(work), "BLAST_USAGE_REPORT": "false"}
+    mk = os.path.join(ncbi_bin, "makeblastdb")
+    fasta, taxmap = os.path.join(work, "psfx.fa"), os.path.join(work, "psfx.map")
+    with open(fasta, "w") as f, open(taxmap, "w") as m:
+        for lines in SUFFIX:
+            parts = []
+            for seqid, title, taxid in lines:
+                parts.append(seqid + (" " + title if title else ""))
+                if taxid is not None:
+                    m.write(f"{map_key(seqid)}\t{taxid}\n")
+            f.write(">" + CTRL_A.join(parts) + "\n" + seq + "\n")
+    subprocess.run([mk, "-in", fasta, "-dbtype", "prot", "-parse_seqids", "-blastdb_version", "5",
+                    "-taxid_map", taxmap, "-title", "psfx", "-out", os.path.join(here, "psfx")],
+                   check=True, stdout=subprocess.DEVNULL, env=env)
+    names = []
+    for taxid, titles in SUFFIX_STORED.items():
+        name = f"psfs_{taxid if taxid is not None else 'none'}"
+        names.append(name)
+        fasta = os.path.join(work, name + ".fa")
+        with open(fasta, "w") as f:
+            for title in titles:
+                f.write(">" + title + "\n" + seq + "\n")
+        cmd = [mk, "-in", fasta, "-dbtype", "prot", "-blastdb_version", "4", "-title", name,
+               "-out", os.path.join(here, name)]
+        if taxid is not None:
+            cmd += ["-taxid", str(taxid)]
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, env=env)
+        # makeblastdb's version 4 JSON metadata file is not read by a search.
+        if os.path.exists(os.path.join(here, name + ".pjs")):
+            os.remove(os.path.join(here, name + ".pjs"))
+    with open(os.path.join(here, "psfs.pal"), "w") as f:
+        f.write(f"TITLE psfs\nDBLIST {' '.join(names)} \n")
+    for name in os.listdir(work):
+        os.remove(os.path.join(work, name))
+    os.rmdir(work)
+
+
+def sfu_main(ncbi_bin):
+    """`psfu_100009` with its alias `psfu` (`stored_main`) and `psfux` (SFUX)."""
+    stored_main(ncbi_bin, "psfu", SFU_STORED)
+    here = os.path.join("tests", "db_search", "t5")
+    seq = letters(os.path.join("tests", "db_search", "ids", "pdup.faa"))
+    work = os.path.join(here, "work")
+    os.makedirs(work, exist_ok=True)
+    env = {"PATH": "/usr/bin:/bin", "HOME": os.path.abspath(work), "BLAST_USAGE_REPORT": "false"}
+    fasta, taxmap = os.path.join(work, "psfux.fa"), os.path.join(work, "psfux.map")
+    with open(fasta, "w") as f, open(taxmap, "w") as m:
+        for lines in SFUX:
+            parts = []
+            for seqid, title, taxid in lines:
+                parts.append(seqid + (" " + title if title else ""))
+                if taxid is not None:
+                    m.write(f"{map_key(seqid)}\t{taxid}\n")
+            f.write(">" + CTRL_A.join(parts) + "\n" + seq + "\n")
+    out = os.path.join(here, "psfux")
+    subprocess.run([os.path.join(ncbi_bin, "makeblastdb"), "-in", fasta, "-dbtype", "prot", "-parse_seqids",
+                    "-blastdb_version", "4", "-taxid_map", taxmap, "-title", "psfux", "-out", out],
+                   check=True, stdout=subprocess.DEVNULL, env=env)
+    # makeblastdb's version 4 JSON metadata file is not read by a search.
+    if os.path.exists(out + ".pjs"):
+        os.remove(out + ".pjs")
+    for name in os.listdir(work):
+        os.remove(os.path.join(work, name))
+    os.rmdir(work)
+
+
+def k5_main(ncbi_bin):
+    """`tests/seqdb/taxdb/k5`, `pk5_<taxid>` with the alias `pk5`, `pk5x`, `pk5s` and the queries
+    `k5_q*` (K5_TAXA, K5_STORED, K5X_STORED, K5S, K5_QUERIES)."""
+    here = os.path.join("tests", "db_search", "t5")
+    taxdir = os.path.join("tests", "seqdb", "taxdb")
+    rows = [line for line in open(os.path.join(taxdir, "taxdb.tsv"), "rb").read().split(b"\n") if line]
+    rows += [b"\t".join([str(row[0]).encode()] + list(row[1:])) for row in K5_TAXA]
+    rows.sort(key=lambda row: int(row.split(b"\t")[0]))
+    tsv = os.path.join(taxdir, "k5.tsv")
+    with open(tsv, "wb") as f:
+        f.write(b"\n".join(rows) + b"\n")
+    subprocess.run([sys.executable, os.path.join(taxdir, "make_taxdb.py"), "write", tsv,
+                    os.path.join(taxdir, "k5")], check=True)
+    work = os.path.join(here, "work")
+    os.makedirs(work, exist_ok=True)
+    env = {"PATH": "/usr/bin:/bin", "HOME": os.path.abspath(work), "BLAST_USAGE_REPORT": "false"}
+    seqs = {"A": K5_A, "B": K5_B}
+
+    def make(name, records, taxid, parse, taxmap=None):
+        fasta = os.path.join(work, name + ".fa")
+        with open(fasta, "w") as f:
+            for defline, group in records:
+                f.write(">" + defline + "\n" + seqs[group] + "\n")
+        cmd = [os.path.join(ncbi_bin, "makeblastdb"), "-in", fasta, "-dbtype", "prot",
+               "-blastdb_version", "4", "-title", name, "-out", os.path.join(here, name)]
+        if taxid is not None:
+            cmd += ["-taxid", str(taxid)]
+        if parse:
+            cmd += ["-parse_seqids", "-taxid_map", taxmap]
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, env=env)
+        # makeblastdb's version 4 JSON metadata file is not read by a search.
+        if os.path.exists(os.path.join(here, name + ".pjs")):
+            os.remove(os.path.join(here, name + ".pjs"))
+
+    for taxid, records in K5_STORED.items():
+        make(f"pk5_{taxid}", records, taxid, False)
+    with open(os.path.join(here, "pk5.pal"), "w") as f:
+        f.write(f"TITLE pk5\nDBLIST {' '.join(f'pk5_{taxid}' for taxid in K5_STORED)} \n")
+    make("pk5x", K5X_STORED, 5003, False)
+    taxmap = os.path.join(work, "pk5s.map")
+    records = []
+    with open(taxmap, "w") as m:
+        for lines, group in K5S:
+            records.append((CTRL_A.join(seqid + (" " + title if title else "") for seqid, title, _ in lines),
+                            group))
+            for seqid, _, taxid in lines:
+                if taxid is not None:
+                    m.write(f"{map_key(seqid)}\t{taxid}\n")
+    make("pk5s", records, None, True, taxmap)
+    for name in os.listdir(work):
+        os.remove(os.path.join(work, name))
+    os.rmdir(work)
+    for name, title in K5_QUERIES.items():
+        queries = [(b"q0 none", K5_NOHIT), (title, K5_A + K5_B), (b"q2 two", K5_Q2)]
+        with open(os.path.join(here, f"k5_{name}.faa"), "wb") as f:
+            for t, letters_ in queries:
+                f.write(b">" + t + b"\n" + letters_.encode() + b"\n")
+        with open(os.path.join(here, f"k5_{name}.fna"), "wb") as f:
+            for t, letters_ in queries:
+                f.write(b">" + t + b"\n" + "".join(K5_CODONS[c] for c in letters_).encode() + b"\n")
+
+
+def map_key(seqid):
+    """The key of `-taxid_map` for the Seq-id `seqid`: its accession.version, a PDB molecule
+    with `_` and its chain, the local or general tag."""
+    parts = seqid.split("|")
+    kind = parts[0]
+    if kind == "gi":
+        return map_key("|".join(parts[2:]))
+    if kind == "pdb":
+        return parts[1] + ("_" + parts[2] if len(parts) > 2 and parts[2] else "")
+    if kind == "lcl":
+        return parts[1]
+    if kind == "gnl":
+        return parts[2]
+    return parts[1]
+
+
+def mix_main(ncbi_bin):
+    here = os.path.join("tests", "db_search", "t5")
+    seqs = {"n": letters(os.path.join("tests", "db_search", "ids", "ndup.fna")),
+            "p": letters(os.path.join("tests", "db_search", "ids", "pdup.faa"))}
+    work = os.path.join(here, "work")
+    os.makedirs(work, exist_ok=True)
+    for kind, name, dbtype, k, version in (("n", "nmix", "nucl", 1, "5"), ("p", "pmix", "prot", 2, "5"),
+                                           ("f", "psuffix", "prot", 2, "4")):
+        fasta = os.path.join(work, f"{name}.fa")
+        taxmap = os.path.join(work, f"{name}.map")
+        with open(fasta, "w") as f, open(taxmap, "w") as m:
+            for lines, molecules in MIX:
+                if kind not in molecules:
+                    continue
+                parts = []
+                for seqid, title, taxid in lines:
+                    seqid = seqid.format(k=k)
+                    parts.append(seqid + (" " + title if title else ""))
+                    if taxid is not None:
+                        m.write(f"{map_key(seqid)}\t{taxid}\n")
+                f.write(">" + CTRL_A.join(parts) + "\n" + seqs[dbtype[0]] + "\n")
+        out = os.path.join(here, name)
+        cmd = [os.path.join(ncbi_bin, "makeblastdb"), "-in", fasta, "-dbtype", dbtype,
+               "-parse_seqids", "-blastdb_version", version, "-taxid_map", taxmap,
+               "-title", name, "-out", out]
+        env = {"PATH": "/usr/bin:/bin", "HOME": os.path.abspath(work),
+               "BLAST_USAGE_REPORT": "false"}
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, env=env)
+        # makeblastdb's version 4 JSON metadata file is not read.
+        if version == "4" and os.path.exists(out + ".pjs"):
+            os.remove(out + ".pjs")
+    for name in os.listdir(work):
+        os.remove(os.path.join(work, name))
+    os.rmdir(work)
+
+
+def letters(path):
+    with open(path) as f:
+        return "".join(line.strip() for line in f if not line.startswith(">"))
+
+
+def main():
+    ncbi_bin = sys.argv[1]
+    here = os.path.join("tests", "db_search", "t5")
+    taxdir = os.path.join("tests", "seqdb", "taxdb")
+    tsv = os.path.join(taxdir, "t5.tsv")
+    with open(tsv, "wb") as f:
+        for row in TAXA:
+            f.write(b"\t".join([str(row[0]).encode()] + list(row[1:])) + b"\n")
+    subprocess.run([sys.executable, os.path.join(taxdir, "make_taxdb.py"), "write", tsv,
+                    os.path.join(taxdir, "t5")], check=True)
+    seqs = {"n": letters(os.path.join("tests", "db_search", "ids", "ndup.fna")),
+            "p": letters(os.path.join("tests", "db_search", "ids", "pdup.faa"))}
+    work = os.path.join(here, "work")
+    os.makedirs(work, exist_ok=True)
+    taxids = [row[0] for row in TAXA] + [UNNAMED]
+    for kind, dbtype in (("n", "nucl"), ("p", "prot")):
+        for taxid in taxids:
+            fasta = os.path.join(work, f"{kind}.fa")
+            with open(fasta, "w") as f:
+                f.write(">\n" + seqs[kind] + "\n")
+            makeblastdb(ncbi_bin, fasta, dbtype, taxid, os.path.join(here, f"{kind}_{taxid}"), False)
+        for number, taxid in enumerate(PARSED, 1):
+            fasta = os.path.join(work, f"{kind}p.fa")
+            with open(fasta, "w") as f:
+                f.write(f">gb|AB0000{number:02d}.1|\n" + seqs[kind] + "\n")
+            makeblastdb(ncbi_bin, fasta, dbtype, taxid, os.path.join(here, f"{kind}p_{taxid}"), True)
+    for name in os.listdir(work):
+        os.remove(os.path.join(work, name))
+    os.rmdir(work)
+    for name, (prefix, members) in ALIASES.items():
+        ext = "nal" if prefix.startswith("n") else "pal"
+        with open(os.path.join(here, f"{name}.{ext}"), "w") as f:
+            f.write(f"TITLE {name}\nDBLIST {' '.join(f'{prefix}_{t}' for t in members)} \n")
+
+
+def makeblastdb(ncbi_bin, fasta, dbtype, taxid, out, parse):
+    cmd = [os.path.join(ncbi_bin, "makeblastdb"), "-in", fasta, "-dbtype", dbtype,
+           "-blastdb_version", "4", "-taxid", str(taxid), "-title", os.path.basename(out),
+           "-out", out]
+    if parse:
+        cmd.append("-parse_seqids")
+    env = {"PATH": "/usr/bin:/bin", "HOME": os.path.abspath(os.path.dirname(out)),
+           "BLAST_USAGE_REPORT": "false"}
+    subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, env=env)
+    # makeblastdb's version 4 JSON metadata file is not read by a search.
+    for ext in (".njs", ".pjs"):
+        if os.path.exists(out + ext):
+            os.remove(out + ext)
+
+
+if __name__ == "__main__":
+    if "--mix-only" in sys.argv[2:]:
+        mix_main(sys.argv[1])
+    elif "--suffix-only" in sys.argv[2:]:
+        suffix_main(sys.argv[1])
+    elif "--word-only" in sys.argv[2:]:
+        stored_main(sys.argv[1], "pword", WORD_STORED)
+    elif "--taxid-only" in sys.argv[2:]:
+        taxid_main(sys.argv[1])
+    elif "--sfu-only" in sys.argv[2:]:
+        sfu_main(sys.argv[1])
+    elif "--k5-only" in sys.argv[2:]:
+        k5_main(sys.argv[1])
+    else:
+        main()

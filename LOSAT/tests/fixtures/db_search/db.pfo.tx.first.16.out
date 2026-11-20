@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="US-ASCII"?>
+<BlastXML2
+    xmlns="http://www.ncbi.nlm.nih.gov"
+    xmlns:xs="http://www.w3.org/2001/XMLSchema-instance"
+    xs:schemaLocation="http://www.ncbi.nlm.nih.gov http://www.ncbi.nlm.nih.gov/data_specs/schema_alt/NCBI_BlastOutput2.xsd"
+>
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>tblastx</program>
+      <version>TBLASTX 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <db>tests/db_search/multidb/na tests/db_search/multidb/nnp</db>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>BLOSUM62</matrix>
+          <expect>1e-10</expect>
+          <filter>L;</filter>
+          <query-gencode>1</query-gencode>
+          <db-gencode>1</db-gencode>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <search>
+            <Search>
+              <query-id>Query_2</query-id>
+              <query-title>mix2_u glob1 of multidb/nnp (no accession table)</query-title>
+              <query-len>1043</query-len>
+              <query-masking>
+                <Range>
+                  <from>24</from>
+                  <to>75</to>
+                </Range>
+                <Range>
+                  <from>630</from>
+                  <to>693</to>
+                </Range>
+                <Range>
+                  <from>888</from>
+                  <to>918</to>
+                </Range>
+                <Range>
+                  <from>990</from>
+                  <to>1038</to>
+                </Range>
+                <Range>
+                  <from>154</from>
+                  <to>190</to>
+                </Range>
+                <Range>
+                  <from>661</from>
+                  <to>679</to>
+                </Range>
+                <Range>
+                  <from>2</from>
+                  <to>44</to>
+                </Range>
+              </query-masking>
+              <hits>
+                <Hit>
+                  <num>1</num>
+                  <description>
+                    <HitDescr>
+                      <id>gnl|BL_ORD_ID|13</id>
+                      <accession>13</accession>
+                      <title>FBtr0083245 cdna primary_assembly:BDGP6.54:3R:15896926:15902584:-1 gene:FBgn0027657 gene_biotype:protein_coding transcript_biotype:protein_coding gene_symbol:glob1 description:globin 1</title>
+                    </HitDescr>
+                  </description>
+                  <len>1043</len>
+                  <hsps>
+                    <Hsp>
+                      <num>1</num>
+                      <bit-score>769.483</bit-score>
+                      <score>1673</score>
+                      <evalue>0</evalue>
+                      <identity>332</identity>
+                      <positive>332</positive>
+                      <query-from>48</query-from>
+                      <query-to>1043</query-to>
+                      <query-frame>3</query-frame>
+                      <hit-from>48</hit-from>
+                      <hit-to>1043</hit-to>
+                      <hit-frame>3</hit-frame>
+                      <align-len>332</align-len>
+                      <gaps>0</gaps>
+                      <qseq>RKSFIKASRARNSIQFKY*RRRVQLPGI*YKLLKAIKRGPNAYREL*SES*EEPKRSINMNSDEVQLIKKTWEIPVATPTDSGAAILTQFFNRFPSNLEKFPFRDVPLEELSGNARFRAHAGRIIRVFDESIQVLGQDGDLEKLDEIWTKIAVSHIPRTVSKESYNQLKGVILDVLTAACSLDESQAATWAKLVDHVYGIIFKAIDDDGNAK*MRQLEVEMQPNPRKDATDASRWHLQHMHSLCSSK*LINVSYSRFVIMNANVQNKNTHTVKTYVCVELLTHAHTPHTYTRTCIAL*SFNPLSALST**QTIHGISKGEIRKLINKIQFES</qseq>
+                      <hseq>RKSFIKASRARNSIQFKY*RRRVQLPGI*YKLLKAIKRGPNAYREL*SES*EEPKRSINMNSDEVQLIKKTWEIPVATPTDSGAAILTQFFNRFPSNLEKFPFRDVPLEELSGNARFRAHAGRIIRVFDESIQVLGQDGDLEKLDEIWTKIAVSHIPRTVSKESYNQLKGVILDVLTAACSLDESQAATWAKLVDHVYGIIFKAIDDDGNAK*MRQLEVEMQPNPRKDATDASRWHLQHMHSLCSSK*LINVSYSRFVIMNANVQNKNTHTVKTYVCVELLTHAHTPHTYTRTCIAL*SFNPLSALST**QTIHGISKGEIRKLINKIQFES</hseq>
+                      <midline>RKSFIKASRARNSIQFKY*RRRVQLPGI*YKLLKAIKRGPNAYREL*SES*EEPKRSINMNSDEVQLIKKTWEIPVATPTDSGAAILTQFFNRFPSNLEKFPFRDVPLEELSGNARFRAHAGRIIRVFDESIQVLGQDGDLEKLDEIWTKIAVSHIPRTVSKESYNQLKGVILDVLTAACSLDESQAATWAKLVDHVYGIIFKAIDDDGNAK*MRQLEVEMQPNPRKDATDASRWHLQHMHSLCSSK*LINVSYSRFVIMNANVQNKNTHTVKTYVCVELLTHAHTPHTYTRTCIAL*SFNPLSALST**QTIHGISKGEIRKLINKIQFES</midline>
+                    </Hsp>
+                  </hsps>
+                </Hit>
+              </hits>
+              <stat>
+                <Statistics>
+                  <db-num>17</db-num>
+                  <db-len>11514</db-len>
+                  <hsp-len>26</hsp-len>
+                  <eff-space>1090116</eff-space>
+                  <kappa>0.133956144488482</kappa>
+                  <lambda>0.317605957635731</lambda>
+                  <entropy>0.401214524497119</entropy>
+                </Statistics>
+              </stat>
+            </Search>
+          </search>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+</BlastXML2>

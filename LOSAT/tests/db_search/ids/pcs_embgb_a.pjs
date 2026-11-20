@@ -1,0 +1,24 @@
+{
+  "version": "1.2",
+  "dbname": "pcs_embgb_a",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "pcs_embgb_a (parsed Seq-ids)",
+  "number-of-letters": 500,
+  "number-of-sequences": 2,
+  "last-updated": "2026-11-14T09:13:00",
+  "number-of-volumes": 1,
+  "bytes-total": 50030,
+  "bytes-to-cache": 631,
+  "files": [
+    "pcs_embgb_a.pdb",
+    "pcs_embgb_a.phr",
+    "pcs_embgb_a.pin",
+    "pcs_embgb_a.pog",
+    "pcs_embgb_a.pos",
+    "pcs_embgb_a.pot",
+    "pcs_embgb_a.psq",
+    "pcs_embgb_a.ptf",
+    "pcs_embgb_a.pto"
+  ]
+}

@@ -1,0 +1,22 @@
+
+                                          Tax BLAST report                                          
+
+Query= pq1 query protein one
+
+Length=300
+
+                                           Organism Report                                           
+Accession                                 Description                                Score E-value 
+
+                                   Homo sapiens (human) [primates]                                   
+ XP_000206 md2 ok first                                                                243   1e-86   
+ XP_000206 md2 ok first                                                                11.9  9.6     
+
+                                          Tax BLAST report                                          
+
+Query= pq2 unrelated query (no hits)
+
+Length=40
+
+                                           Organism Report                                           
+Accession...  Description... Score... E-value... 

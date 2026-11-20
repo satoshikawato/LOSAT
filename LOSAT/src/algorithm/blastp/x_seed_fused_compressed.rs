@@ -1,4 +1,4 @@
-//! EXPERIMENT (LOSAT_X_BPSEED): the two-hit seed stage of blastp-fast (the compressed lookup table,
+//! The two-hit seed stage of blastp-fast (the compressed lookup table,
 //! `CompressedAaLookupTable`) with the subject scan and the diagonal test in one loop.
 //!
 //! The reference path copies every word hit of the subject into the offset-pair buffer
@@ -45,19 +45,18 @@
 //!   the statements of the one scan here on the same state (offset, index, `preshift`,
 //!   `next_char`), so the hits and their order are those of a scan without rounds.
 //!
-//! The closure, the switches (`LOSAT_X_BPSEED`, `LOSAT_X_BPSEEDSHADOW`, `LOSAT_X_BPSEED_PREFETCH`) and
-//! the shadow are those of `x_seed_fused.rs`. `LOSAT_X_BPSEED` is a switch of the
-//! strict set (`utils/xswitch.rs`): on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set.
+//! The closure and the prefetch distance are those of `x_seed_fused.rs`.
 
 use std::cell::Cell;
 
-use super::x_seed_fused::{x_prefetch, x_prefetch_distance, x_test_hit};
+use super::x_seed_fused::{x_prefetch, x_test_hit, X_PREFETCH_DISTANCE};
 use crate::algorithm::tblastx::blast_extend::DiagStruct;
+#[cfg(target_arch = "x86_64")]
+use crate::algorithm::tblastx::lookup::compressed::CompressedLookupBackboneCell;
 use crate::algorithm::tblastx::lookup::compressed::{
     compressed_pv_test, compressed_reciprocal_divide, compute_compressed_index_u8,
-    BlastCompressedAaLookupTable, CompressedBackbonePayload, CompressedLookupBackboneCell,
-    COMPRESSED_HITS_CELL_MASK, COMPRESSED_HITS_PER_BACKBONE_CELL,
-    COMPRESSED_HITS_PER_OVERFLOW_CELL,
+    BlastCompressedAaLookupTable, CompressedBackbonePayload, COMPRESSED_HITS_CELL_MASK,
+    COMPRESSED_HITS_PER_BACKBONE_CELL, COMPRESSED_HITS_PER_OVERFLOW_CELL,
 };
 
 /// No NCBI counterpart: the buffers of the fused loop, reused across subjects (NCBI copies the hits
@@ -434,7 +433,7 @@ pub(crate) fn x_scan_two_hit_compressed<F>(
     F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
 {
     assert!(diag_mask >= 0 && diag_array.len() > diag_mask as usize);
-    let prefetch_distance = x_prefetch_distance();
+    let prefetch_distance = X_PREFETCH_DISTANCE;
     let mut scratch = X_SCRATCH.with(Cell::take).unwrap_or_default();
     x_scan_cells(
         lookup,
@@ -796,7 +795,8 @@ mod tests {
                 query.push(0);
             }
             let lookup = build_blosum62_compressed_lookup(word_size, threshold, &query, &locations)
-                .expect("compressed lookup");
+                .expect("compressed lookup")
+                .expect("within the overflow banks");
             assert!(lookup.longest_chain > 5, "cells with overflow lists");
             let longest = lookup.longest_chain as usize;
             let mut subjects = Vec::new();

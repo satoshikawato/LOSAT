@@ -1,0 +1,116 @@
+TBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: x16 ntaxid 9606
+           2 sequences; 965 total letters
+
+
+
+Query= qinv invalid letters
+
+Length=60
+
+
+***** No hits found *****
+
+
+
+
+
+Effective search space used: 0
+
+
+Query= qempty
+
+Length=0
+
+
+***** No hits found *****
+
+
+
+
+
+Effective search space used: 0
+
+
+Query= tq1 translated from sn1 (frame +1)
+
+Length=86
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+sn1 alpha                                                             181     5e-65
+sn2 beta                                                              91.3    1e-29
+
+
+>sn1 alpha
+Length=488
+
+ Score = 181 bits (458),  Expect = 5e-65, Method: Compositional matrix adjust.
+ Identities = 86/86 (100%), Positives = 86/86 (100%), Gaps = 0/86 (0%)
+ Frame = +1
+
+Query  1    MWMEHSVLEAIFAVLRKVMDDPKIRDGPMAAMKGWENYCWPANISWKVLMKFEFSSDIHP  60
+            MWMEHSVLEAIFAVLRKVMDDPKIRDGPMAAMKGWENYCWPANISWKVLMKFEFSSDIHP
+Sbjct  46   MWMEHSVLEAIFAVLRKVMDDPKIRDGPMAAMKGWENYCWPANISWKVLMKFEFSSDIHP  225
+
+Query  61   CNLCICCLRIWQTQDCRRRIRCIGQQ  86
+            CNLCICCLRIWQTQDCRRRIRCIGQQ
+Sbjct  226  CNLCICCLRIWQTQDCRRRIRCIGQQ  303
+
+
+>sn2 beta
+Length=477
+
+ Score = 91.3 bits (225),  Expect = 1e-29, Method: Compositional matrix adjust.
+ Identities = 46/67 (69%), Positives = 53/67 (79%), Gaps = 1/67 (1%)
+ Frame = -3
+
+Query  3    MEHSVLEAIFAVLRKVMDDPKIRDGPMAAMKGWENYCWPANISWKVLM-KFEFSSDIHPC  61
+            MEHSVL+A FA L +VMDDPKI+ GPMA MKG E+YC PAN+SWKV M  F FSSDIH C
+Sbjct  451  MEHSVLKANFAGLSEVMDDPKIQYGPMAVMKGMEHYCPPANLSWKVRMFSFGFSSDIHAC  272
+
+Query  62   NLCICCL  68
+            NL +C +
+Sbjct  271  NLWLCSI  251
+
+
+ Score = 11.5 bits (18),  Expect = 8.9, Method: Compositional matrix adjust.
+ Identities = 3/9 (33%), Positives = 5/9 (56%), Gaps = 0/9 (0%)
+ Frame = +1
+
+Query  28   PMAAMKGWE  36
+            P+A    W+
+Sbjct  370  PLAHTVFWD  396
+
+
+
+Lambda      K        H        a         alpha
+   0.331    0.140    0.519    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 19803
+
+
+  Database: x16 ntaxid 9606
+    Posted date:  Oct 21, 2026  12:42 PM
+  Number of letters in database: 965
+  Number of sequences in database:  2
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 13
+Window for multiple hits: 40

@@ -1,0 +1,25 @@
+{
+  "version": "1.2",
+  "dbname": "tm_psi",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "tm psi",
+  "number-of-letters": 1680,
+  "number-of-sequences": 8,
+  "last-updated": "2026-11-04T15:57:00",
+  "number-of-volumes": 1,
+  "number-of-taxids": 6,
+  "bytes-total": 52105,
+  "bytes-to-cache": 1841,
+  "files": [
+    "tm_psi.pdb",
+    "tm_psi.phr",
+    "tm_psi.pin",
+    "tm_psi.pog",
+    "tm_psi.pos",
+    "tm_psi.pot",
+    "tm_psi.psq",
+    "tm_psi.ptf",
+    "tm_psi.pto"
+  ]
+}

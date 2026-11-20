@@ -1,0 +1,6103 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: x16 taxid 99990
+           2 sequences; 265 total letters
+
+
+
+Query= q1 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             270     6e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.136    0.501    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q2 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q3 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q4 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q5 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q6 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q7 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q8 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q9 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q10 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q11 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q12 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q13 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q14 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q15 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q16 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q17 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q18 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q19 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q20 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q21 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q22 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q23 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q24 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q25 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q26 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q27 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q28 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q29 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q30 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q31 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q32 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q33 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q34 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q35 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q36 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q37 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q38 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q39 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q40 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q41 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q42 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q43 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q44 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q45 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q46 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q47 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q48 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q49 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q50 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q51 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q52 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q53 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q54 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q55 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q56 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q57 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q58 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q59 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q60 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q61 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q62 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q63 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q64 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q65 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q66 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q67 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q68 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q69 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q70 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q71 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q72 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q73 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q74 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q75 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q76 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q77 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q78 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q79 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q80 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q81 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q82 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q83 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q84 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q85 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q86 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q87 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q88 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q89 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q90 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q91 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q92 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q93 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q94 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q95 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q96 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q97 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q98 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q99 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q100 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q101 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q102 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q103 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q104 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q105 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q106 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q107 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q108 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q109 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q110 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q111 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q112 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q113 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q114 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q115 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q116 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q117 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q118 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q119 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q120 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q121 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q122 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q123 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q124 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q125 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q126 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q127 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q128 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q129 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q130 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q131 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q132 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q133 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q134 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q135 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q136 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q137 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q138 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q139 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q140 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q141 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q142 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q143 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q144 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q145 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q146 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q147 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q148 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q149 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q150 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q151 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q152 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q153 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q154 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q155 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q156 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q157 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q158 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q159 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q160 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q161 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q162 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q163 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q164 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q165 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q166 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q167 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q168 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q169 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q170 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q171 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q172 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q173 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q174 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q175 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q176 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q177 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q178 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q179 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q180 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q181 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q182 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q183 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q184 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q185 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q186 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q187 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q188 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q189 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q190 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q191 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q192 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q193 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q194 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q195 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q196 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q197 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q198 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q199 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q200 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q201 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q202 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q203 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q204 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q205 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q206 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q207 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q208 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q209 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q210 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q211 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q212 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q213 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q214 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q215 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q216 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q217 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q218 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q219 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q220 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q221 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q222 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q223 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q224 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q225 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q226 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q227 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q228 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q229 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q230 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q231 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q232 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q233 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q234 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q235 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q236 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q237 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q238 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q239 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q240 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q241 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q242 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q243 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q244 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q245 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q246 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q247 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q248 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q249 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q250 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q251 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q252 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q253 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q254 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q255 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q256 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q257 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q258 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q259 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q260 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q261 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q262 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q263 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q264 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q265 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q266 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q267 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q268 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q269 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q270 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q271 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q272 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q273 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q274 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q275 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q276 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q277 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q278 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q279 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q280 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q281 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q282 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q283 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q284 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q285 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q286 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q287 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q288 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+Query= q289 copy
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+st2 plain                                                             283     4e-105
+st1 alpha                                                             272     1e-100
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 27467
+
+
+  Database: x16 taxid 99990
+    Posted date:  Oct 21, 2026  12:03 PM
+  Number of letters in database: 265
+  Number of sequences in database:  2
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 20
+Window for multiple hits: 40

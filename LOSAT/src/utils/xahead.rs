@@ -1,4 +1,4 @@
-//! EXPERIMENT (LOSAT_X_AHEAD[=window]): an ordered loop whose expensive,
+//! No NCBI counterpart: an ordered loop whose expensive,
 //! pure step is evaluated ahead of the loop by the other threads of the
 //! search pool.
 //!
@@ -59,11 +59,10 @@
 //! still tests and adds in the NCBI order; the other threads only evaluate the
 //! alignment call for indexes the owner has not reached, which depends on the index
 //! alone. A value nobody takes is dropped. This changes which thread computes a value and
-//! when, and nothing else. Shadow mode (LOSAT_X_AHEADSHADOW) recomputes every value the
-//! owner takes and compares it.
+//! when, and nothing else.
 
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Mutex, MutexGuard, OnceLock};
+use std::sync::{Mutex, MutexGuard};
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3850,3918-3919,4045-4046
 /// ```c
@@ -75,22 +74,9 @@ use std::sync::{Mutex, MutexGuard, OnceLock};
 ///          status = s_BlastDynProgNtGappedAlignment(&query_tmp, subject,
 ///                       gap_align, score_params, init_hsp);
 /// ```
-/// Reads the LOSAT_X_AHEAD switch once: the number of upcoming indexes of the loop above
-/// that may be evaluated ahead. Placement of work only.
-/// Look-ahead distance in indexes; `None` when the switch is off.
-pub(crate) fn window() -> Option<usize> {
-    static WINDOW: OnceLock<Option<usize>> = OnceLock::new();
-    *WINDOW.get_or_init(|| crate::utils::xswitch::value("LOSAT_X_AHEAD", 2..=65_536, 16))
-}
-
-/// No NCBI counterpart: reads the switch of the shadow comparison; it does not change any
-/// value NCBI computes.
-/// `LOSAT_X_AHEADSHADOW`: the owner evaluates every value it takes once more
-/// on its own scratch and compares.
-pub(crate) fn shadow() -> bool {
-    static SHADOW: OnceLock<bool> = OnceLock::new();
-    *SHADOW.get_or_init(|| std::env::var_os("LOSAT_X_AHEADSHADOW").is_some())
-}
+/// The number of upcoming indexes of the loop above that may be evaluated ahead (the built-in
+/// value of the former `LOSAT_X_AHEAD`, which graduated on 2026-10-22). Placement of work only.
+pub(crate) const WINDOW: usize = 16;
 
 // No NCBI counterpart: the states of one slot of the look-ahead ring; the slot holds a
 // value that NCBI computes inside its loop, computed earlier.
@@ -133,6 +119,11 @@ pub(crate) struct Ahead<R> {
     cells: Box<[Mutex<Cell<R>>]>,
     /// Indexes below this have been offered or closed by the owner.
     announced: Padded<AtomicUsize>,
+    /// The loop's length as the owner last gave it (`announce`), `usize::MAX` before.
+    total: Padded<AtomicUsize>,
+    /// Whether a helper leaves once every index of the loop is claimed (`x_new_leaving`), instead
+    /// of waiting for the owner to finish.
+    leave: bool,
     /// The next index a helper looks at.
     cursor: Padded<AtomicUsize>,
     finished: AtomicBool,
@@ -174,6 +165,22 @@ impl<R> Ahead<R> {
     // No NCBI counterpart: makes an empty ring of `window` slots; it does not change any value
     // NCBI computes.
     pub(crate) fn new(window: usize) -> Self {
+        Self::x_with(window, false)
+    }
+
+    // No NCBI counterpart: scheduling only. A helper that leaves frees its thread for other work
+    // of the pool (another loop's tasks) while the owner takes the last values.
+    /// `new(window)` whose helpers leave once every index of the loop is claimed.
+    #[cfg_attr(
+        not(feature = "parallel"),
+        expect(dead_code, reason = "used only with the parallel feature")
+    )]
+    pub(crate) fn x_new_leaving(window: usize) -> Self {
+        Self::x_with(window, true)
+    }
+
+    // No NCBI counterpart: the constructor of both (scheduling only).
+    fn x_with(window: usize, leave: bool) -> Self {
         let window = window.max(2);
         Self {
             cells: (0..window)
@@ -185,6 +192,8 @@ impl<R> Ahead<R> {
                 })
                 .collect(),
             announced: Padded(AtomicUsize::new(0)),
+            total: Padded(AtomicUsize::new(usize::MAX)),
+            leave,
             cursor: Padded(AtomicUsize::new(0)),
             finished: AtomicBool::new(false),
             evaluated: AtomicU64::new(0),
@@ -208,8 +217,23 @@ impl<R> Ahead<R> {
     /// Owner, at index `at`: offer the indexes of `[at, at + window)` below
     /// `len` that have not been offered yet. `wanted(j)` is the owner's guess,
     /// with what it knows now, whether index `j` will need its value.
-    pub(crate) fn announce(&self, at: usize, len: usize, mut wanted: impl FnMut(usize) -> bool) {
-        let end = at.saturating_add(self.cells.len()).min(len);
+    pub(crate) fn announce(&self, at: usize, len: usize, wanted: impl FnMut(usize) -> bool) {
+        self.x_announce_until(at, len, len, wanted);
+    }
+
+    // No NCBI counterpart (scheduling only): `announce` of a loop of `len` indexes that offers none
+    // at or past `until` yet (the flow across BLASTX chunks offers the tasks of the loop's chunk and
+    // the next one only, `blastx/x_subject_flow.rs` `run_chunks`). Helpers that leave do so once
+    // every index below `len` is claimed, as with `announce`.
+    pub(crate) fn x_announce_until(
+        &self,
+        at: usize,
+        until: usize,
+        len: usize,
+        mut wanted: impl FnMut(usize) -> bool,
+    ) {
+        self.total.0.store(len, Ordering::Release);
+        let end = at.saturating_add(self.cells.len()).min(len).min(until);
         let mut next = self.announced.0.load(Ordering::Relaxed);
         while next < end {
             let state = if wanted(next) {
@@ -274,6 +298,16 @@ impl<R> Ahead<R> {
     /// No NCBI counterpart: the helper loop (scheduling of independent work); it does not
     /// change any value NCBI computes.
     /// Helper thread: evaluate offered indexes until the owner is done.
+    #[cfg_attr(
+        not(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        )),
+        expect(
+            dead_code,
+            reason = "used only where the helper pool runs (parallel, and wasm-threads on wasm32)"
+        )
+    )]
     pub(crate) fn work<S>(&self, scratch: &mut S, compute: &impl Fn(usize, &mut S) -> R) {
         let mut idle = 0u32;
         while !self.finished.load(Ordering::Acquire) {
@@ -283,6 +317,13 @@ impl<R> Ahead<R> {
                     self.evaluate(index, scratch, compute);
                 }
                 None => {
+                    // Every index below `total` is claimed: no later one will be offered.
+                    if self.leave
+                        && self.cursor.0.load(Ordering::Acquire)
+                            >= self.total.0.load(Ordering::Acquire)
+                    {
+                        return;
+                    }
                     idle = idle.saturating_add(1);
                     if idle < 128 {
                         std::hint::spin_loop();
@@ -366,6 +407,10 @@ impl<R> Ahead<R> {
 
     // No NCBI counterpart: tells the helpers that the loop has ended; it does not change any
     // value NCBI computes.
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     fn finish(&self) {
         self.finished.store(true, Ordering::Release);
     }
@@ -382,8 +427,16 @@ impl<R> Ahead<R> {
 }
 
 // No NCBI counterpart: ends the helpers when the loop exits, also on a panic.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 struct Finish<'a, R>(&'a Ahead<R>);
 
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 impl<R> Drop for Finish<'_, R> {
     fn drop(&mut self) {
         self.0.finish();
@@ -462,12 +515,16 @@ mod tests {
     }
 
     #[cfg(feature = "parallel")]
-    fn ordered_sum(n: usize, window: usize, helpers: usize) -> (u64, Vec<usize>) {
+    fn ordered_sum(n: usize, window: usize, helpers: usize, leave: bool) -> (u64, Vec<usize>) {
         let compute = |index: usize, scratch: &mut u64| -> u64 {
             *scratch += 1;
             value_of(index)
         };
-        let ahead = Ahead::new(window);
+        let ahead = if leave {
+            Ahead::x_new_leaving(window)
+        } else {
+            Ahead::new(window)
+        };
         let mut kept: Vec<usize> = Vec::new();
         let mut sum = 0u64;
         let mut owner_scratch = 0u64;
@@ -480,7 +537,7 @@ mod tests {
             with_helpers(Some(&ahead), scratches, &compute, || {
                 for index in 0..n {
                     // What the owner knows changes with every value it keeps.
-                    let live = |j: usize, sum: u64| (j as u64).wrapping_add(sum) % 3 != 0;
+                    let live = |j: usize, sum: u64| !(j as u64).wrapping_add(sum).is_multiple_of(3);
                     ahead.announce(index, n, |j| live(j, sum));
                     if !live(index, sum) {
                         ahead.skip(index);
@@ -496,7 +553,7 @@ mod tests {
         });
         let (evaluated, taken) = ahead.counts();
         assert!(taken <= evaluated);
-        eprintln!("window {window} helpers {helpers}: evaluated ahead {evaluated}, taken {taken}, kept {}", kept.len());
+        eprintln!("window {window} helpers {helpers} leave {leave}: evaluated ahead {evaluated}, taken {taken}, kept {}", kept.len());
         (sum, kept)
     }
 
@@ -507,7 +564,7 @@ mod tests {
             let mut kept = Vec::new();
             let mut sum = 0u64;
             for index in 0..5000usize {
-                if (index as u64).wrapping_add(sum) % 3 == 0 {
+                if (index as u64).wrapping_add(sum).is_multiple_of(3) {
                     continue;
                 }
                 sum = sum.wrapping_mul(31).wrapping_add(value_of(index));
@@ -517,7 +574,9 @@ mod tests {
         };
         for &(window, helpers) in &[(2, 1), (8, 1), (64, 1), (64, 3), (5, 2), (256, 7)] {
             for _ in 0..3 {
-                assert_eq!(ordered_sum(5000, window, helpers), serial);
+                assert_eq!(ordered_sum(5000, window, helpers, false), serial);
+                // Helpers that leave once every index is claimed (the owner takes the rest).
+                assert_eq!(ordered_sum(5000, window, helpers, true), serial);
             }
         }
     }

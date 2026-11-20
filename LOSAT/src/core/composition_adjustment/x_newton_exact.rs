@@ -1,4 +1,3 @@
-//! EXPERIMENT (LOSAT_X_NEWTONEXACT / LOSAT_X_NEWTONEXACTSHADOW):
 //! `Blast_OptimizeTargetFrequencies` for the relative-entropy-constrained
 //! problem, bit for bit.
 //!
@@ -46,9 +45,6 @@
 //!
 //! What this module does **not** change: the libm `ln` (same function, same
 //! arguments), the Euclidean norms, the step bound, the stopping test.
-//!
-//! `LOSAT_X_NEWTONEXACTSHADOW=1` runs both this code and the reference on every
-//! call and aborts on the first value that differs.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:762-768,774-777,781-785
 //! ```c
@@ -98,6 +94,7 @@
 use super::adjust_scores::{
     COMPO_NUM_TRUE_AA, K_COMPO_ADJUST_ERR_TOLERANCE, K_COMPO_ADJUST_ITERATION_LIMIT,
 };
+use crate::utils::glibc_fma_libm::GlibcLibm;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
@@ -120,8 +117,11 @@ pub(crate) static PROF: [AtomicU64; 12] = [
 ];
 // No NCBI counterpart: reads LOSAT_X_NEWTONEXACT_PROF once; it does not change any value NCBI computes.
 pub(crate) fn prof_enabled() -> bool {
+    if !crate::utils::xdiag::ON {
+        return false;
+    }
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("LOSAT_X_NEWTONEXACT_PROF").is_some())
+    *ON.get_or_init(|| crate::utils::xdiag::var_os("LOSAT_X_NEWTONEXACT_PROF").is_some())
 }
 // No NCBI counterpart: reads the time-stamp counter for the profile output; it does not change any value NCBI computes.
 #[inline(always)]
@@ -146,6 +146,7 @@ fn prof_add(i: usize, t0: u64, on: bool) -> u64 {
     }
 }
 // No NCBI counterpart: prints the profile counters; it does not change any value NCBI computes.
+#[cfg(test)]
 pub(crate) fn prof_print() {
     if !prof_enabled() {
         return;
@@ -178,32 +179,6 @@ const M: usize = 2 * N;
 /// Lane padding for the 20-row vectors of the trailing block.
 const P: usize = 24;
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:686-687,693-696
-// ```c
-// int
-// Blast_OptimizeTargetFrequencies(double x[],
-// ...
-//                                 int constrain_rel_entropy,
-//                                 double relative_entropy,
-//                                 double tol,
-//                                 int maxits)
-// ```
-// No NCBI counterpart: reads LOSAT_X_NEWTONEXACT and LOSAT_X_NEWTONEXACTSHADOW once. It chooses
-// between the port of this function (reference), this module, or both with a comparison.
-/// 0 = reference, 1 = this module, 2 = both (checked bit for bit on every call).
-pub(crate) fn mode() -> u8 {
-    static MODE: OnceLock<u8> = OnceLock::new();
-    *MODE.get_or_init(|| {
-        if std::env::var_os("LOSAT_X_NEWTONEXACTSHADOW").is_some() {
-            2
-        } else if crate::utils::xswitch::on("LOSAT_X_NEWTONEXACT") {
-            1
-        } else {
-            0
-        }
-    })
-}
-
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:747-748,635-636
 // ```c
 //     /* Use q as the initial value for x */
@@ -217,7 +192,7 @@ pub(crate) fn mode() -> u8 {
 /// `ln(1.0)` as the libm of this process computes it (not constant-folded).
 pub(super) fn ln_one() -> f64 {
     static LN_ONE: OnceLock<f64> = OnceLock::new();
-    *LN_ONE.get_or_init(|| std::hint::black_box(1.0f64).ln())
+    *LN_ONE.get_or_init(|| std::hint::black_box(1.0f64).glibc_ln())
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:193-208
@@ -872,14 +847,14 @@ fn optimize(
         for i in 0..N {
             let xr = &x[i * N..i * N + N];
             for j in 0..N {
-                resids_z[j] += -1.0 * xr[j];
+                resids_z[j] += -xr[j];
             }
         }
         for i in 1..N {
             let xr = &x[i * N..i * N + N];
             let mut s = resids_z[i + N - 1];
             for &v in xr {
-                s += -1.0 * v;
+                s += -v;
             }
             resids_z[i + N - 1] = s;
         }
@@ -907,6 +882,10 @@ fn optimize(
         //                and start a new iteration */
         //             if (++its <= maxits) {
         // ```
+        #[expect(
+            clippy::neg_cmp_op_on_partial_ord,
+            reason = "NCBI's convergence test `!(rnorm > tol)` stops on a NaN rnorm (optimize_target_freq.c:760-762); `<=` would not"
+        )]
         if !(rnorm > K_COMPO_ADJUST_ERR_TOLERANCE) {
             break;
         }
@@ -1021,8 +1000,8 @@ fn optimize(
                     let k = base + j;
                     let ws = resids_x[k] * dinv[k];
                     workspace[k] = ws;
-                    resids_z[j] += -1.0 * ws;
-                    srow += -1.0 * ws;
+                    resids_z[j] += -ws;
+                    srow += -ws;
                     s39 -= grads1[k] * ws;
                 }
                 if i > 0 {
@@ -1142,6 +1121,8 @@ unsafe fn optimize_avx2(
     ln_one: f64,
     first_iteration_shortcut: bool,
 ) -> i32 {
+    // No NCBI counterpart (memory placement only): see `x_frame_align`.
+    crate::utils::x_frame::x_frame_align();
     optimize(
         x,
         q,
@@ -1243,6 +1224,8 @@ pub(crate) fn optimize_target_frequencies_exact(
                     optimize_avx512(x, q, row_sums, col_sums, relative_entropy, ln_one, shortcut)
                 }
             }
+            // SAFETY: `x86_level` returns 1 only when `is_x86_feature_detected!("avx2")` was true,
+            // which the `#[target_feature(enable = "avx2")]` of `optimize_avx2` needs.
             1 => {
                 return unsafe {
                     optimize_avx2(x, q, row_sums, col_sums, relative_entropy, ln_one, shortcut)
@@ -1337,7 +1320,7 @@ mod tests {
         let mut dinv = [0.0f64; NN];
         for v in dinv.iter_mut() {
             *v = if wide {
-                2f64.powf(xorshift(state) * 40.0 - 30.0)
+                2f64.glibc_pow(xorshift(state) * 40.0 - 30.0)
             } else {
                 1.0e-4 + xorshift(state) * 0.05
             };

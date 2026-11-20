@@ -3,21 +3,68 @@
 //! defaults and allowed values of the command line.
 
 use std::fmt::Write as _;
+use std::sync::{Mutex, PoisonError};
 
 use clap::CommandFactory;
-use LOSAT::cli::Cli;
+use losat::web_adapter::Cli;
 
 use crate::json;
 use crate::run::Program;
 
-/// Options that the adapter sets itself.
-const ADAPTER_OWNED: [&str; 3] = ["out", "outfmt", "num_threads"];
+/// Options that the adapter or the host sets itself or refuses (`run::parse`): the output
+/// file and format (a run writes every format of the program; a host passes the words of a
+/// `-outfmt` of its own, whose other formats and 6 or 7 with fields add an output,
+/// `run::parse_run`) and the thread count, and the
+/// options of NCBI's command line that the application has no control for (`-mt_mode`,
+/// which needs `-num_threads` and has no effect; `-use_index`, which a search of records ignores
+/// as NCBI ignores it with `-subject`;
+/// `-parse_deflines`, since a record is read before the options of a run are known).
+/// `-num_descriptions` and `-num_alignments` are described: a run searches once for each
+/// distinct hit list size of its formats (`run::search_groups`).
+const ADAPTER_OWNED: [&str; 6] = [
+    "out",
+    "outfmt",
+    "num_threads",
+    "mt_mode",
+    "use_index",
+    "parse_deflines",
+];
 
 /// Genetic codes are small integers; every accepted one is below this bound.
 const GENETIC_CODE_PROBE: u32 = 64;
 
+/// The options of `program` that the browser's searches of records take none of (tblastn's
+/// `-in_pssm`, which the browser refuses until line PS's PSW1; the search strategy file
+/// `-export_search_strategy`, until line RG's F1w gives it as a side file): the browser's list
+/// (`losat::web_adapter::records_refused_options`), which the adapter's `describe` leaves out.
+fn records_refused(program: Program) -> &'static [&'static str] {
+    let program = match program {
+        Program::Blastp => losat::api::Program::Blastp,
+        Program::Tblastn => losat::api::Program::Tblastn,
+        Program::Blastn => losat::api::Program::Blastn,
+        Program::Tblastx => losat::api::Program::Tblastx,
+        Program::Blastx => losat::api::Program::Blastx,
+    };
+    losat::web_adapter::records_refused_options(program)
+}
+
+/// Each program's response after its first `describe`: the response is pure, and its
+/// `defaults` resolve some hundred probe argvs (`defaults::defaults`), while the application
+/// asks again each time it opens a result.
+static DESCRIBED: Mutex<Vec<(Program, String)>> = Mutex::new(Vec::new());
+
 pub fn describe(program: &str) -> Result<String, String> {
     let program = Program::parse(program)?;
+    let mut described = DESCRIBED.lock().unwrap_or_else(PoisonError::into_inner);
+    if let Some((_, response)) = described.iter().find(|(known, _)| *known == program) {
+        return Ok(response.clone());
+    }
+    let response = describe_program(program)?;
+    described.push((program, response.clone()));
+    Ok(response)
+}
+
+fn describe_program(program: Program) -> Result<String, String> {
     let root = Cli::command();
     let command = root
         .find_subcommand(program.name())
@@ -33,9 +80,13 @@ pub fn describe(program: &str) -> Result<String, String> {
     }
     out.push_str("],\"parameters\":[");
     let mut first = true;
+    let refused = records_refused(program);
     for arg in command.get_arguments() {
         let Some(long) = arg.get_long() else { continue };
-        if matches!(long, "help" | "version") || ADAPTER_OWNED.contains(&long) {
+        if matches!(long, "help" | "version")
+            || ADAPTER_OWNED.contains(&long)
+            || refused.contains(&long)
+        {
             continue;
         }
         if !first {
@@ -105,6 +156,68 @@ pub fn describe(program: &str) -> Result<String, String> {
         }
         out.push(']');
     }
+    out.push_str(",\"defaults\":");
+    crate::defaults::write(&mut out, &crate::defaults::defaults(program)?);
     out.push('}');
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn options_the_adapter_owns_or_refuses_are_not_described() {
+        for program in ["blastp", "tblastn", "blastn", "tblastx", "blastx"] {
+            let described = describe(program).unwrap();
+            for flag in ADAPTER_OWNED {
+                assert!(
+                    !described.contains(&format!("\"-{flag}\"")),
+                    "{program} lists -{flag}"
+                );
+            }
+            // The hit list options are described with the CLI's help text, which carries
+            // the defaults (they are `Option`s: "given or not" is NCBI's).
+            for (flag, default) in [
+                ("num_descriptions", "[default: 500]"),
+                ("num_alignments", "[default: 250]"),
+            ] {
+                let entry = described
+                    .split("{\"flag\":")
+                    .find(|entry| entry.starts_with(&format!("\"-{flag}\"")))
+                    .unwrap_or_else(|| panic!("{program} does not list -{flag}"));
+                assert!(entry.contains(default), "{program} -{flag}: {entry}");
+                assert!(entry.contains("\"takes_value\":true"), "{program} -{flag}");
+            }
+            assert!(described.contains("\"-max_target_seqs\""), "{program}");
+        }
+    }
+
+    // tblastn's `-in_pssm` (a PSSM query file): the browser refuses it until line PS's PSW1; the
+    // search strategy file of the five programs: until line RG's F1w. The adapter's `describe`
+    // lists neither (the browser's list, `records_refused`).
+    #[test]
+    fn options_a_search_of_records_does_not_take_are_not_described() {
+        assert_eq!(
+            records_refused(Program::Tblastn),
+            ["in_pssm", "export_search_strategy"]
+        );
+        for program in [
+            Program::Blastn,
+            Program::Blastp,
+            Program::Blastx,
+            Program::Tblastx,
+        ] {
+            assert_eq!(records_refused(program), ["export_search_strategy"]);
+        }
+        for program in ["blastp", "tblastn", "blastn", "tblastx", "blastx"] {
+            let described = describe(program).unwrap();
+            for flag in records_refused(Program::parse(program).unwrap()) {
+                assert!(
+                    !described.contains(&format!("\"-{flag}\"")),
+                    "{program} lists -{flag}"
+                );
+            }
+        }
+    }
 }

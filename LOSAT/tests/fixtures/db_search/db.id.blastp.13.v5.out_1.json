@@ -1,0 +1,577 @@
+{
+  "BlastOutput2": {
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/ids/prot_v5"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_1",
+          "query_title": "qp1 query protein one",
+          "query_len": 140,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "ref|XP_000001.1|",
+                  "accession": "XP_000001",
+                  "title": "alpha protein [Homo sapiens]",
+                  "taxid": 9606
+                },
+                {
+                  "id": "sp|P99999.2|TEST_HUMAN",
+                  "accession": "P99999",
+                  "title": "alpha-like protein",
+                  "taxid": 10090
+                },
+                {
+                  "id": "gb|AAA00001.1|",
+                  "accession": "AAA00001",
+                  "title": "hypothetical protein, partial",
+                  "taxid": 9606
+                }
+              ],
+              "len": 137,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 255.758,
+                  "score": 652,
+                  "evalue": 8.89008e-93,
+                  "identity": 125,
+                  "positive": 128,
+                  "query_from": 1,
+                  "query_to": 140,
+                  "hit_from": 1,
+                  "hit_to": 137,
+                  "align_len": 140,
+                  "gaps": 3,
+                  "qseq": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTASEG",
+                  "hseq": "MWMEHSVLKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP---WICWIPKEQQTPGWWKTDTLHMAEMGLWMHKYPKCMCVMVRYTDQSLRHWEINTDANFEKLKILHHMVGHGRTASEG",
+                  "midline": "MWMEHSVLKA FAV RKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP   WICWIPKE  TPGWW TDTLHM+EMGLWMHKYPKCMCVMVR TDQSLRHW+I  DANFEKLKI H+MVGHGRTASEG"
+                }
+              ]
+            },
+            {
+              "num": 2,
+              "description": [
+                {
+                  "id": "ref|XP_900001.1|",
+                  "accession": "XP_900001",
+                  "title": "first defline without a gi"
+                },
+                {
+                  "id": "gi|9002|emb|CAA90002.1|",
+                  "accession": "CAA90002",
+                  "title": "second defline with a gi"
+                },
+                {
+                  "id": "sp|P90003.1|NAME3_HUMAN",
+                  "accession": "P90003",
+                  "title": "third defline swissprot"
+                }
+              ],
+              "len": 137,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 251.906,
+                  "score": 642,
+                  "evalue": 2.81851e-91,
+                  "identity": 123,
+                  "positive": 126,
+                  "query_from": 1,
+                  "query_to": 140,
+                  "hit_from": 1,
+                  "hit_to": 137,
+                  "align_len": 140,
+                  "gaps": 3,
+                  "qseq": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTASEG",
+                  "hseq": "MWMEHSVLKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP---WICWIPKEQQTPGWWKTDTQHMAEAGLWMHKYPKCMCVMVRYTDQSLRHWEINTDANFEKLKILHHMVGHGRTASEG",
+                  "midline": "MWMEHSVLKA FAV RKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP   WICWIPKE  TPGWW TDT HM+E GLWMHKYPKCMCVMVR TDQSLRHW+I  DANFEKLKI H+MVGHGRTASEG"
+                }
+              ]
+            },
+            {
+              "num": 3,
+              "description": [
+                {
+                  "id": "gi|123456|ref|NP_000002.1|",
+                  "accession": "NP_000002",
+                  "title": "gi plus ref protein",
+                  "taxid": 10116
+                }
+              ],
+              "len": 137,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 251.906,
+                  "score": 642,
+                  "evalue": 2.81851e-91,
+                  "identity": 123,
+                  "positive": 126,
+                  "query_from": 1,
+                  "query_to": 140,
+                  "hit_from": 1,
+                  "hit_to": 137,
+                  "align_len": 140,
+                  "gaps": 3,
+                  "qseq": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTASEG",
+                  "hseq": "MWMEHSVLKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP---WICWIPKEQQTPGWWKTDTQHMAEAGLWMHKYPKCMCVMVRYTDQSLRHWEINTDANFEKLKILHHMVGHGRTASEG",
+                  "midline": "MWMEHSVLKA FAV RKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP   WICWIPKE  TPGWW TDT HM+E GLWMHKYPKCMCVMVR TDQSLRHW+I  DANFEKLKI H+MVGHGRTASEG"
+                }
+              ]
+            },
+            {
+              "num": 4,
+              "description": [
+                {
+                  "id": "ref|XP_910001.1|",
+                  "accession": "XP_910001",
+                  "title": "long title number 01 with many words so that it is longer than sixty characters in total"
+                },
+                {
+                  "id": "ref|XP_910002.1|",
+                  "accession": "XP_910002",
+                  "title": "long title number 02 with many words so that it is longer than sixty characters in total"
+                },
+                {
+                  "id": "ref|XP_910003.1|",
+                  "accession": "XP_910003",
+                  "title": "long title number 03 with many words so that it is longer than sixty characters in total"
+                },
+                {
+                  "id": "ref|XP_910004.1|",
+                  "accession": "XP_910004",
+                  "title": "long title number 04 with many words so that it is longer than sixty characters in total"
+                },
+                {
+                  "id": "ref|XP_910005.1|",
+                  "accession": "XP_910005",
+                  "title": "long title number 05 with many words so that it is longer than sixty characters in total"
+                },
+                {
+                  "id": "ref|XP_910006.1|",
+                  "accession": "XP_910006",
+                  "title": "long title number 06 with many words so that it is longer than sixty characters in total"
+                },
+                {
+                  "id": "ref|XP_910007.1|",
+                  "accession": "XP_910007",
+                  "title": "long title number 07 with many words so that it is longer than sixty characters in total"
+                },
+                {
+                  "id": "ref|XP_910008.1|",
+                  "accession": "XP_910008",
+                  "title": "long title number 08 with many words so that it is longer than sixty characters in total"
+                },
+                {
+                  "id": "ref|XP_910009.1|",
+                  "accession": "XP_910009",
+                  "title": "long title number 09 with many words so that it is longer than sixty characters in total"
+                },
+                {
+                  "id": "ref|XP_910010.1|",
+                  "accession": "XP_910010",
+                  "title": "long title number 10 with many words so that it is longer than sixty characters in total"
+                },
+                {
+                  "id": "ref|XP_910011.1|",
+                  "accession": "XP_910011",
+                  "title": "long title number 11 with many words so that it is longer than sixty characters in total"
+                },
+                {
+                  "id": "ref|XP_910012.1|",
+                  "accession": "XP_910012",
+                  "title": "long title number 12 with many words so that it is longer than sixty characters in total"
+                }
+              ],
+              "len": 137,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 247.284,
+                  "score": 630,
+                  "evalue": 1.86341e-89,
+                  "identity": 121,
+                  "positive": 124,
+                  "query_from": 1,
+                  "query_to": 140,
+                  "hit_from": 1,
+                  "hit_to": 137,
+                  "align_len": 140,
+                  "gaps": 3,
+                  "qseq": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTASEG",
+                  "hseq": "MWMEHSVLKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMIYEFSSDIQP---WACWIPKEQQTQGWWKTDTLHMAEMGLWMHKYPKCMCVMVRYTDQSLRHWEINTDANFEKLKILHHMVGHGRTASEG",
+                  "midline": "MWMEHSVLKA FAV RKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLM YEFSSDI P   W CWIPKE  T GWW TDTLHM+EMGLWMHKYPKCMCVMVR TDQSLRHW+I  DANFEKLKI H+MVGHGRTASEG"
+                }
+              ]
+            },
+            {
+              "num": 5,
+              "description": [
+                {
+                  "id": "sp|Q00003|ABC_MOUSE",
+                  "accession": "Q00003",
+                  "title": "swissprot without version"
+                }
+              ],
+              "len": 137,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 247.284,
+                  "score": 630,
+                  "evalue": 1.86341e-89,
+                  "identity": 121,
+                  "positive": 124,
+                  "query_from": 1,
+                  "query_to": 140,
+                  "hit_from": 1,
+                  "hit_to": 137,
+                  "align_len": 140,
+                  "gaps": 3,
+                  "qseq": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTASEG",
+                  "hseq": "MWMEHSVLKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMIYEFSSDIQP---WACWIPKEQQTQGWWKTDTLHMAEMGLWMHKYPKCMCVMVRYTDQSLRHWEINTDANFEKLKILHHMVGHGRTASEG",
+                  "midline": "MWMEHSVLKA FAV RKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLM YEFSSDI P   W CWIPKE  T GWW TDTLHM+EMGLWMHKYPKCMCVMVR TDQSLRHW+I  DANFEKLKI H+MVGHGRTASEG"
+                }
+              ]
+            },
+            {
+              "num": 6,
+              "description": [
+                {
+                  "id": "emb|CAA00005.1|",
+                  "accession": "CAA00005",
+                  "title": "emb protein"
+                }
+              ],
+              "len": 137,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 241.891,
+                  "score": 616,
+                  "evalue": 2.86645e-87,
+                  "identity": 119,
+                  "positive": 123,
+                  "query_from": 1,
+                  "query_to": 140,
+                  "hit_from": 1,
+                  "hit_to": 137,
+                  "align_len": 140,
+                  "gaps": 3,
+                  "qseq": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTASEG",
+                  "hseq": "MWMEHSVLKAVFAVRRKVMDFPKMRDGPMAVMKGWENYCWPANMSTKVLMKYEFSSDIHP---WICWIPKEQQTPGWWKTDTLHPQEMGLWMHKYPKCMCVMVRYTDQALRHWEINRDANFEKYKILHHMVGHGRTASEG",
+                  "midline": "MWMEHSVLKA FAV RKVMD PK+RDGPMAVMKGWENYCWPANMS KVLMKYEFSSDIHP   WICWIPKE  TPGWW TDTLH  EMGLWMHKYPKCMCVMVR TDQ+LRHW+I  DANFEK KI H+MVGHGRTASEG"
+                }
+              ]
+            },
+            {
+              "num": 7,
+              "description": [
+                {
+                  "id": "ref|XP_920001.1|",
+                  "accession": "XP_920001",
+                  "title": "has a title"
+                },
+                {
+                  "id": "emb|CAA92002.1|",
+                  "accession": "CAA92002",
+                  "title": ""
+                },
+                {
+                  "id": "dbj|BAA92003.1|",
+                  "accession": "BAA92003",
+                  "title": "third has a title"
+                }
+              ],
+              "len": 137,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 240.736,
+                  "score": 613,
+                  "evalue": 7.61004e-87,
+                  "identity": 119,
+                  "positive": 123,
+                  "query_from": 1,
+                  "query_to": 140,
+                  "hit_from": 1,
+                  "hit_to": 137,
+                  "align_len": 140,
+                  "gaps": 3,
+                  "qseq": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTASEG",
+                  "hseq": "MWMEHSVLKAVFDVRRKVMDDPKIRSGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP---WIEWIPKEQQTPGWWKTDTLHMAEMGLWMHCYPKCMCYMVRYTDQSLRHWEINTDANFEKLKILHHIVGHGRTASEG",
+                  "midline": "MWMEHSVLKA F V RKVMDDPKIR GPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP   WI WIPKE  TPGWW TDTLHM+EMGLWMH YPKCMC MVR TDQSLRHW+I  DANFEKLKI H++VGHGRTASEG"
+                }
+              ]
+            },
+            {
+              "num": 8,
+              "description": [
+                {
+                  "id": "tr|A0A000|A0A000_YEAST",
+                  "accession": "A0A000",
+                  "title": "trembl entry"
+                }
+              ],
+              "len": 137,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 240.736,
+                  "score": 613,
+                  "evalue": 7.61004e-87,
+                  "identity": 119,
+                  "positive": 123,
+                  "query_from": 1,
+                  "query_to": 140,
+                  "hit_from": 1,
+                  "hit_to": 137,
+                  "align_len": 140,
+                  "gaps": 3,
+                  "qseq": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTASEG",
+                  "hseq": "MWMEHSVLKAVFDVRRKVMDDPKIRSGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP---WIEWIPKEQQTPGWWKTDTLHMAEMGLWMHCYPKCMCYMVRYTDQSLRHWEINTDANFEKLKILHHIVGHGRTASEG",
+                  "midline": "MWMEHSVLKA F V RKVMDDPKIR GPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP   WI WIPKE  TPGWW TDTLHM+EMGLWMH YPKCMC MVR TDQSLRHW+I  DANFEKLKI H++VGHGRTASEG"
+                }
+              ]
+            },
+            {
+              "num": 9,
+              "description": [
+                {
+                  "id": "pdb|1ABC|A",
+                  "accession": "1ABC_A",
+                  "title": "Chain A, test structure"
+                }
+              ],
+              "len": 137,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 237.654,
+                  "score": 605,
+                  "evalue": 1.31863e-85,
+                  "identity": 118,
+                  "positive": 123,
+                  "query_from": 1,
+                  "query_to": 140,
+                  "hit_from": 1,
+                  "hit_to": 137,
+                  "align_len": 140,
+                  "gaps": 3,
+                  "qseq": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTASEG",
+                  "hseq": "MWMEHSVLKAVFAVRRKVMDDPKMCCGPFAVPKGWENYCWPANMSWKVLMKYEFSSDIHP---WICWIPKEQQTPGWWKTDTLHMAEMGLWMHKYPKCMCVMVRYTDKSKRHWEIGTDANFEKLKILHHMVGHGRTASEG",
+                  "midline": "MWMEHSVLKA FAV RKVMDDPK+  GP AV KGWENYCWPANMSWKVLMKYEFSSDIHP   WICWIPKE  TPGWW TDTLHM+EMGLWMHKYPKCMCVMVR TD+S RHW+I  DANFEKLKI H+MVGHGRTASEG"
+                }
+              ]
+            },
+            {
+              "num": 10,
+              "description": [
+                {
+                  "id": "dbj|BAA00006.1|",
+                  "accession": "BAA00006",
+                  "title": "dbj protein"
+                }
+              ],
+              "len": 137,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 233.417,
+                  "score": 594,
+                  "evalue": 6.76737e-84,
+                  "identity": 116,
+                  "positive": 120,
+                  "query_from": 1,
+                  "query_to": 140,
+                  "hit_from": 1,
+                  "hit_to": 137,
+                  "align_len": 140,
+                  "gaps": 3,
+                  "qseq": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTASEG",
+                  "hseq": "MWMEHSVLKAVFAVRRKVMDDPKIRDGPMAMMKGWENYCWPAMMSWKVLMKYEFSSDIHP---WICWHPKEQQTPGWWKTKTLHKAEMGLWMHKYAACMCVMKRYTDQMLRHWEIDPDANFEKLKILHHMVGHGRTASEG",
+                  "midline": "MWMEHSVLKA FAV RKVMDDPKIRDGPMA+MKGWENYCWPA MSWKVLMKYEFSSDIHP   WICW PKE  TPGWW T TLH +EMGLWMHKY  CMCVM R TDQ LRHW+I  DANFEKLKI H+MVGHGRTASEG"
+                }
+              ]
+            },
+            {
+              "num": 11,
+              "description": [
+                {
+                  "id": "pir||S00007",
+                  "accession": "S00007",
+                  "title": "pir protein"
+                }
+              ],
+              "len": 137,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 223.787,
+                  "score": 569,
+                  "evalue": 3.32734e-80,
+                  "identity": 112,
+                  "positive": 117,
+                  "query_from": 1,
+                  "query_to": 140,
+                  "hit_from": 1,
+                  "hit_to": 137,
+                  "align_len": 140,
+                  "gaps": 3,
+                  "qseq": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTASEG",
+                  "hseq": "MWMEHSVLKAVFAVRVKVMDVPKIRDGPMGVMKGWELHCWPANMKWKVLMKYEFSSDDHP---WICWIPKEQQTPGWWKTDTLSMAEMGLVMHKYPKCICVMVGYVDQSLRHWEINTAANFEKLKILHHMVGHGRTASEG",
+                  "midline": "MWMEHSVLKA FAV  KVMD PKIRDGPM VMKGWE +CWPANM WKVLMKYEFSSD HP   WICWIPKE  TPGWW TDTL M+EMGL MHKYPKC+CVMV   DQSLRHW+I   ANFEKLKI H+MVGHGRTASEG"
+                }
+              ]
+            },
+            {
+              "num": 12,
+              "description": [
+                {
+                  "id": "prf||0008123A",
+                  "accession": "0008123A",
+                  "title": "prf protein"
+                }
+              ],
+              "len": 137,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 217.238,
+                  "score": 552,
+                  "evalue": 1.46346e-77,
+                  "identity": 110,
+                  "positive": 115,
+                  "query_from": 1,
+                  "query_to": 140,
+                  "hit_from": 1,
+                  "hit_to": 137,
+                  "align_len": 140,
+                  "gaps": 3,
+                  "qseq": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTASEG",
+                  "hseq": "MWMEHSVLKAVFAVRRKFMDDPKIRDGPMAVIWGWENYCWPANMSRKFLRKYEFSSSSH---IWICWIPKEQQTVGWWPTDTLHMAEMGLWMHKDPKCMCVMVRYTDQSLRLWEINTDATFEKLINLHHMVGHGRTASEG",
+                  "midline": "MWMEHSVLKA FAV RK MDDPKIRDGPMAV+ GWENYCWPANMS K L KYEFSS  H   +WICWIPKE  T GWW TDTLHM+EMGLWMHK PKCMCVMVR TDQSLR W+I  DA FEKL   H+MVGHGRTASEG"
+                }
+              ]
+            },
+            {
+              "num": 13,
+              "description": [
+                {
+                  "id": "myprot9",
+                  "accession": "myprot9",
+                  "title": "local id protein"
+                }
+              ],
+              "len": 137,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 213.772,
+                  "score": 543,
+                  "evalue": 3.48048e-76,
+                  "identity": 109,
+                  "positive": 115,
+                  "query_from": 1,
+                  "query_to": 140,
+                  "hit_from": 1,
+                  "hit_to": 137,
+                  "align_len": 140,
+                  "gaps": 3,
+                  "qseq": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTASEG",
+                  "hseq": "MWMEHSVLKAVFAVRVKVIDDPKIELGPMAVMKGWENNCWPANMSWKVLMYNEFSSDINP---WICWIPKEQQTPGWWKLDTLHMAEMWLWMHKYPKCKCVMVRYTDQSLHRFEWNTDYNFEKLKILHHMVGHGRTASEG",
+                  "midline": "MWMEHSVLKA FAV  KV+DDPKI  GPMAVMKGWEN CWPANMSWKVLM  EFSSDI+P   WICWIPKE  TPGWW  DTLHM+EM LWMHKYPKC CVMVR TDQSL  ++   D NFEKLKI H+MVGHGRTASEG"
+                }
+              ]
+            },
+            {
+              "num": 14,
+              "description": [
+                {
+                  "id": "gnl|mydb|prot10",
+                  "accession": "prot10",
+                  "title": "general id protein"
+                }
+              ],
+              "len": 137,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 209.534,
+                  "score": 532,
+                  "evalue": 1.74406e-74,
+                  "identity": 108,
+                  "positive": 113,
+                  "query_from": 1,
+                  "query_to": 140,
+                  "hit_from": 1,
+                  "hit_to": 137,
+                  "align_len": 140,
+                  "gaps": 3,
+                  "qseq": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTASEG",
+                  "hseq": "MWMEHSVLKAVNHVRRKVDDDPKIRLGPMAVMCGSENYCWPACMSWKVLMKYEFSSDIHP---WITWKPKEQQTPGWWKTDTGQMAEMGLIMQKYPKCMCVMVRYTDKSLRHWEGNTDACFEKLKILHHLVGHGRTASEG",
+                  "midline": "MWMEHSVLKA   V RKV DDPKIR GPMAVM G ENYCWPA MSWKVLMKYEFSSDIHP   WI W PKE  TPGWW TDT  M+EMGL M KYPKCMCVMVR TD+SLRHW+   DA FEKLKI H++VGHGRTASEG"
+                }
+              ]
+            },
+            {
+              "num": 15,
+              "description": [
+                {
+                  "id": "ref|XP_000011.2|",
+                  "accession": "XP_000011",
+                  "title": "bare refseq accession"
+                }
+              ],
+              "len": 137,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 204.912,
+                  "score": 520,
+                  "evalue": 1.00738e-72,
+                  "identity": 105,
+                  "positive": 111,
+                  "query_from": 1,
+                  "query_to": 140,
+                  "hit_from": 1,
+                  "hit_to": 137,
+                  "align_len": 140,
+                  "gaps": 3,
+                  "qseq": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTASEG",
+                  "hseq": "MWMEHSVLKAVFAVRRKVMDSPKIFDGPMKVMKGWENYCWQANLSWKELMKYEFSQDIH---WWICWNIKEQQTIGWWKTDTIHRAEMGLDMYKRPECMDVMVRYTDQSLFHWEINTDAMFEKLKILHNMVGHGRTASEG",
+                  "midline": "MWMEHSVLKA FAV RKVMD PKI DGPM VMKGWENYCW AN+SWK LMKYEFS DIH    WICW  KE  T GWW TDT+H +EMGL M+K P+CM VMVR TDQSL HW+I  DA FEKLKI H MVGHGRTASEG"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 51,
+            "db_len": 4677,
+            "hsp_len": 36,
+            "eff_space": 295464,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          }
+        }
+      }
+    }
+  }
+}

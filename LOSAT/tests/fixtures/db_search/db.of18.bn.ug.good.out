@@ -1,0 +1,36 @@
+
+                                          Tax BLAST report                                          
+
+Query= nq1 query nucleotide one
+
+Length=900
+
+                                           Organism Report                                           
+Accession                                          Description                        Score E-value 
+
+                                   Homo sapiens (human) [primates]                                   
+ XM_000101                  subject one two HSPs                                       824   0.0     
+ XM_000111                  subject eleven strong then planted weak HSP                549   1e-159  
+ s3_local_identifier        subject three with a title that is longer than the desc... 549   1e-159  
+
+                                Mus musculus (house mouse) [rodents]                                
+ tag_s8                     subject eight                                              312   4e-88   
+ CAA00102                   subject two                                                253   2e-70   
+
+                                Escherichia coli () [enterobacteria]                                
+ AB000104                   subject four                                               274   9e-77   
+
+                              unclassified sequences () [unclassified]                              
+ AB000110                   subject ten                                                207   2e-56   
+
+                                     synthetic construct () [-]                                     
+ XM_000105                  subject five 203    s 3e-55    e Accession                   a <@de... 203   3e-55   
+
+                                          Tax BLAST report                                          
+
+Query= nq2 unrelated query (no hits)
+
+Length=120
+
+                                           Organism Report                                           
+Accession...  Description... Score... E-value... 

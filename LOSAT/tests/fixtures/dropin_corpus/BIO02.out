@@ -1,0 +1,27 @@
+# BLASTX 2.17.0+
+# Query: h_slice AP027133 106001-121000 with ambiguity codes and an N block
+# Database: pdb
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 7 hits found
+h_slice	BDV02158.1	65.140	393	135	1	13045	14223	1	391	9.15e-159	487
+h_slice	BDV02158.1	34.483	29	19	0	10070	10156	148	176	4.8	20.8
+h_slice	BDV02443.1	61.804	377	137	3	4572	5690	68	441	2.01e-143	444
+h_slice	BDV02441.1	44.844	417	225	4	1621	2868	14	426	6.44e-93	299
+h_slice	BDV02702.1	52.751	309	142	2	10619	11533	22	330	5.85e-92	293
+h_slice	BDV02159.1	57.971	207	86	1	14218	14835	4	210	3.44e-78	248
+h_slice	BDV02159.1	36.000	25	16	0	1951	1877	50	74	2.2	21.6
+# BLASTX 2.17.0+
+# Query: h_mut_10pct AP027133 118901-120300 with substitutions and indels
+# Database: pdb
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 5 hits found
+h_mut_10pct	BDV02158.1	51.562	384	181	3	148	1290	2	383	4.02e-113	329
+h_mut_10pct	BDV02159.1	40.741	27	16	0	1315	1395	4	30	0.011	25.4
+h_mut_10pct	BDV02702.1	25.455	55	32	2	829	993	299	344	0.19	21.9
+h_mut_10pct	BDV02702.1	50.000	14	7	0	742	701	185	198	6.7	16.9
+h_mut_10pct	BDV02441.1	38.462	13	8	0	1249	1211	401	413	3.6	17.7
+# BLASTX 2.17.0+
+# Query: tiny shorter than 10 bases
+# Database: pdb
+# 0 hits found
+# BLAST processed 3 queries

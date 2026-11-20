@@ -1,0 +1,24 @@
+{
+  "version": "1.2",
+  "dbname": "pshare_v5",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "pshare_v5 (parsed Seq-ids)",
+  "number-of-letters": 1320,
+  "number-of-sequences": 6,
+  "last-updated": "2026-11-03T00:02:00",
+  "number-of-volumes": 1,
+  "bytes-total": 51585,
+  "bytes-to-cache": 1487,
+  "files": [
+    "pshare_v5.pdb",
+    "pshare_v5.phr",
+    "pshare_v5.pin",
+    "pshare_v5.pog",
+    "pshare_v5.pos",
+    "pshare_v5.pot",
+    "pshare_v5.psq",
+    "pshare_v5.ptf",
+    "pshare_v5.pto"
+  ]
+}

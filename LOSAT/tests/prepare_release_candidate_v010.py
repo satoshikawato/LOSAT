@@ -670,7 +670,7 @@ def prepare_source(args: argparse.Namespace) -> None:
             repo_root,
         )
         require_success(result, "clean source-crate installation")
-        installed_binary = install_root / "bin/LOSAT"
+        installed_binary = install_root / "bin/losat"
         if not installed_binary.is_file():
             raise ReleaseFailure("clean source-crate installation produced no LOSAT binary")
         installed_version = version_output([str(installed_binary)], repo_root)

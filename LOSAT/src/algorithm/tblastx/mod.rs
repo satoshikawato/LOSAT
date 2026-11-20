@@ -4,35 +4,61 @@
 //! which translates both query and subject sequences in all six reading frames
 //! and performs protein-protein alignment.
 
+// NCBI c++/src/app/blast/tblastx_app.cpp:198 (`WriteArchive`): TBLASTX's BLAST archive (outfmt 11),
+// one Blast4-archive per query batch.
+mod anchored;
+mod archive;
 pub mod args;
 pub mod blast_aascan;
 pub mod blast_engine;
 pub mod blast_extend;
 pub mod blast_gapalign;
+mod blast_xml;
 pub mod chaining;
 pub mod constants;
 mod database;
 pub mod diagnostics;
 pub mod extension;
-pub mod filtering;
 pub mod hsp_culling;
+// NCBI's HSP collector inside the search of a query batch: the hit lists of its queries.
+pub(crate) mod hit_collector;
 pub mod lookup;
 pub mod ncbi_cutoffs;
 pub mod reevaluate;
 pub(crate) mod report;
+// NCBI c++/src/algo/blast/api/blast_seqalign.cpp:1549-1649 (BlastHitList2SeqAlign_OMF): the
+// Seq-aligns of each query's final hit list (outfmt 8, 12).
 mod scan;
+pub(crate) mod seqalign;
+// The scores of the search's matrix (`-matrix`).
+pub(crate) mod scoring;
 pub mod stage_dump;
 pub(crate) mod subjects;
 pub mod sum_stats_linking;
+// NCBI c++/src/algo/blast/format/blast_format.cpp:770-834 (`CBlastTabularInfo`): the tabular
+// reports with a field list or a delimiter and outfmt 10 and 20, once per run, from the final hit
+// list (`report::tabular`).
+mod tabular;
 pub mod tracing;
 pub mod translation;
 mod ungapped_hit_sort;
 // Diagnostic (LOSAT_TIMING): the stage times of the two linking calls of a subject. No NCBI
 // counterpart; it computes no value the search reads.
 mod x_link_timing;
+// EXPERIMENT (LOSAT_X_TBXRPTPAR): the report stage on the search's pool.
+mod x_rpt_par;
 // EXPERIMENT (LOSAT_X_TBXSCANBF): the lookup scan without a branch on the presence vector.
 mod x_scan_bf;
+// The lookup scan without a branch on the presence vector, used by TBLASTN, BLASTP, BLASTX and
+// TBLASTX (moved from `tblastn`, SW6 item 3).
+pub(crate) mod x_aascan_bf;
+pub(crate) mod x_scan_byte;
+// EXPERIMENT (LOSAT_X_TBXBOARD): units and link groups handed out by one board per search.
 pub mod x_seed_bucket;
+pub(crate) mod x_work_board;
 
 pub use args::TblastxArgs;
 pub use blast_engine::run;
+
+#[cfg(test)]
+mod run_engine_tests;

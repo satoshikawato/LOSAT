@@ -1,0 +1,7 @@
+Warning: [blastn] Subject mask not found in tests/db_search/dbmask/a5, proceeding without subject masking.
+Error: (803.7) [blastn] Blast4-request.body.queue-search.program-options.E.value.string
+Bad char [0xC3] in string at line 60
+café
+Error: (803.7) [blastn] Blast4-request.body.queue-search.program-options.E.value.string
+Bad char [0xA9] in string at line 60
+café

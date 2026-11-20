@@ -91,15 +91,6 @@ fn tree_hsp(h: &PreliminaryHsp, batch: &PreparedQueryBatch) -> TreeHsp {
 //        */
 //       if (program_number == eBlastTypeRpsBlast ||
 // ```
-pub fn ordinary_traceback(
-    input: &[PreliminaryHsp],
-    batch: &PreparedQueryBatch,
-    _parameters: &[ContextParameters],
-    options: &ResolvedOptions,
-    subject: &[u8],
-) -> Result<Vec<RedoneHsp>> {
-    ordinary_traceback_observed(input, batch, _parameters, options, subject, &mut |_, _| {})
-}
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:402-407
 // ```c++
 //        */
@@ -122,12 +113,12 @@ pub(crate) fn ordinary_traceback_observed(
         "BLASTX ordinary traceback requires gapped composition 0"
     );
     let ka = lookup_protein_params(&ProteinScoringSpec {
-        matrix: ScoringMatrix::Blosum62,
+        matrix: options.scoring,
         gap_open: options.gap_open,
         gap_extend: options.gap_extend,
     });
-    let xdrop = ((options.gap_x_dropoff_final * std::f64::consts::LN_2 / ka.lambda) as i32)
-        .max((options.gap_x_dropoff * std::f64::consts::LN_2 / ka.lambda) as i32);
+    // blast_parameters.c:454-463: the final X-drop (`parameters::gapped_x_drops`).
+    let xdrop = super::parameters::gapped_x_drops(options, &ka).1;
     let mut tree = BlastIntervalTree::new(
         0,
         batch.sequence_start.len() as i32,
@@ -198,7 +189,9 @@ pub(crate) fn ordinary_traceback_observed(
         //          /* compute the cutoff score to use */
         // ```
         if h.q_gapped_start == 0 && h.s_gapped_start == 0 {
-            let Some((q, s)) = get_offsets_for_gapped_alignment(query, subject, &h) else {
+            let Some((q, s)) =
+                get_offsets_for_gapped_alignment(query, subject, &h, options.scoring)
+            else {
                 continue;
             };
             h.q_gapped_start = q;
@@ -253,7 +246,7 @@ pub(crate) fn ordinary_traceback_observed(
             &subject[shift..shift + s_length],
             h.q_gapped_start as usize,
             s_start,
-            ScoringMatrix::Blosum62,
+            options.scoring,
             None,
             options.gap_open,
             options.gap_extend,
@@ -304,7 +297,7 @@ pub(crate) fn ordinary_traceback_observed(
         h.s_end = aligned.subject_stop + i32::try_from(shift)?;
         let node = tree_hsp(&h, batch);
         tree.add_hsp(
-            node.clone(),
+            node,
             node.query_context_offset,
             IndexMethod::QueryAndSubject,
         );
@@ -471,7 +464,7 @@ pub(crate) fn ordinary_traceback_observed(
             continue;
         }
         tree.add_hsp(
-            node.clone(),
+            node,
             node.query_context_offset,
             IndexMethod::QueryAndSubject,
         );
@@ -575,6 +568,7 @@ fn get_offsets_for_gapped_alignment(
     query: &[u8],
     subject: &[u8],
     h: &PreliminaryHsp,
+    matrix: ScoringMatrix,
 ) -> Option<(i32, i32)> {
     let q_start = h.q_start as usize;
     let s_start = h.s_start as usize;
@@ -586,7 +580,8 @@ fn get_offsets_for_gapped_alignment(
             h.s_start + (q_length / 2) as i32,
         ));
     }
-    let score_at = |q: usize, s: usize| crate::utils::matrix::blosum62_score(query[q], subject[s]);
+    let score_at =
+        |q: usize, s: usize| crate::utils::matrix::protein_score(matrix, query[q], subject[s]);
     let mut score: i32 = (0..11).map(|i| score_at(q_start + i, s_start + i)).sum();
     let mut max_score = score;
     let mut max_offset = q_start + 10;
@@ -729,7 +724,7 @@ mod tests {
                 s_end: end as i32,
                 s_gapped_start: 0,
             };
-            let result = get_offsets_for_gapped_alignment(&q, &s, &h);
+            let result = get_offsets_for_gapped_alignment(&q, &s, &h, ScoringMatrix::Blosum62);
             assert_eq!(
                 result,
                 if f[2] != 0 { Some((f[3], f[4])) } else { None },

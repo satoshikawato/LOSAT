@@ -1,0 +1,249 @@
+<?xml version="1.0" encoding="US-ASCII"?>
+<!DOCTYPE BlastOutput PUBLIC "-//NCBI//NCBI BlastOutput/EN" "http://www.ncbi.nlm.nih.gov/dtd/NCBI_BlastOutput.dtd">
+<BlastOutput>
+  <BlastOutput_program>blastx</BlastOutput_program>
+  <BlastOutput_version>BLASTX 2.17.0+</BlastOutput_version>
+  <BlastOutput_reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</BlastOutput_reference>
+  <BlastOutput_db>pdb</BlastOutput_db>
+  <BlastOutput_query-ID>Query_1</BlastOutput_query-ID>
+  <BlastOutput_query-def>h_slice AP027133 106001-121000 with ambiguity codes and an N block</BlastOutput_query-def>
+  <BlastOutput_query-len>15000</BlastOutput_query-len>
+  <BlastOutput_param>
+    <Parameters>
+      <Parameters_matrix>BLOSUM62</Parameters_matrix>
+      <Parameters_expect>0.001</Parameters_expect>
+      <Parameters_gap-open>11</Parameters_gap-open>
+      <Parameters_gap-extend>1</Parameters_gap-extend>
+      <Parameters_filter>L;</Parameters_filter>
+    </Parameters>
+  </BlastOutput_param>
+<BlastOutput_iterations>
+<Iteration>
+  <Iteration_iter-num>1</Iteration_iter-num>
+  <Iteration_query-ID>Query_1</Iteration_query-ID>
+  <Iteration_query-def>h_slice AP027133 106001-121000 with ambiguity codes and an N block</Iteration_query-def>
+  <Iteration_query-len>15000</Iteration_query-len>
+<Iteration_hits>
+<Hit>
+  <Hit_num>1</Hit_num>
+  <Hit_id>gnl|BL_ORD_ID|0</Hit_id>
+  <Hit_def>BDV02158.1 serine hydroxymethyltransferase [Candidatus Hepatoplasma vulgare]</Hit_def>
+  <Hit_accession>0</Hit_accession>
+  <Hit_len>409</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>487.649</Hsp_bit-score>
+      <Hsp_score>1254</Hsp_score>
+      <Hsp_evalue>9.15458e-159</Hsp_evalue>
+      <Hsp_query-from>13045</Hsp_query-from>
+      <Hsp_query-to>14223</Hsp_query-to>
+      <Hsp_hit-from>1</Hsp_hit-from>
+      <Hsp_hit-to>391</Hsp_hit-to>
+      <Hsp_query-frame>1</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>256</Hsp_identity>
+      <Hsp_positive>313</Hsp_positive>
+      <Hsp_gaps>2</Hsp_gaps>
+      <Hsp_align-len>393</Hsp_align-len>
+      <Hsp_qseq>MRDREIEKLILLEKKRQDKEIELIASENFVSNDILEATGSILTNKYAEGYPNARYYEGCENVDKIETLAIERLKKLFNAKYANVQPHSGTQANLAAYNALLKPGAKIXXXXXXXXXXXXXXFKITISGTFYKSYTYEVDPKTNLLDYDNILQXXKKVKPDLIICGYSAYPRIIDFKKFRAIADTVGAYLLADIAHIAGLVAAKLHPNPLDFGVDIVTSTTHKTLRGPRGGIILTNKEEIFKKINSSVFPASQGGPLMHVIAAKAVAFYEALDKSFISYQKQVIENAKVLANRLIEHNVKITTNGTDNHLLLVDVKKSFNLTGAEAEKILKKHHITVNKNAIPFDKLSPKIASGIRLGTAAMTTKG*KEADFIKLADKIYQLLQK*EESNMKIK</Hsp_qseq>
+      <Hsp_hseq>MEDKKVEKLINNEEKRQMDFVQLIASENFVSKDVMKATGSVFTNKYAEGYPNARYYGGCENVDKLEELAIERLKKIFNAKFANVQPHSGAQANIAAYNAILKPGDKILSMSLNSGGHLTHGHFVSIVGKFYKIFSYEVNKETEQLDYEEIRKIAKEVKPNLIICGASAYSRIIDFKKFVAIAKEVNAYLLADIAHIAGLIVADLHPNPLNDGVDIVTSTTHKTLRGARGGIILTNNPELAILLDKSVFPGTQGGPLMNVIAGKTVSFYEASLPSFKEYQKNIISNANVMANFFIQKGVKIISGGTDNHLLMINTKKSFNKTGKEAEEILYKVNIIVNKNAIPFDEERPIVTSGIRIGTPAMTTLGWRNKEFLKIAEVIYNVLK--NDDNISIK</Hsp_hseq>
+      <Hsp_midline>M D+++EKLI  E+KRQ   ++LIASENFVS D+++ATGS+ TNKYAEGYPNARYY GCENVDK+E LAIERLKK+FNAK+ANVQPHSG QAN+AAYNA+LKPG KIL +SL+SGGHL+HG  ++I G FYK ++YEV+ +T  LDY+ I +  K+VKP+LIICG SAY RIIDFKKF AIA  V AYLLADIAHIAGL+ A LHPNPL+ GVDIVTSTTHKTLRG RGGIILTN  E+   ++ SVFP +QGGPLM+VIA K V+FYEA   SF  YQK +I NA V+AN  I+  VKI + GTDNHLL+++ KKSFN TG EAE+IL K +I VNKNAIPFD+  P + SGIR+GT AMTT G +  +F+K+A+ IY +L+   + N+ IK</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+<Hit>
+  <Hit_num>2</Hit_num>
+  <Hit_id>gnl|BL_ORD_ID|2</Hit_id>
+  <Hit_def>BDV02443.1 tRNA-specific 2-thiouridylase MnmA [Candidatus Hepatoplasma vulgare]</Hit_def>
+  <Hit_accession>2</Hit_accession>
+  <Hit_len>442</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>444.891</Hsp_bit-score>
+      <Hsp_score>1143</Hsp_score>
+      <Hsp_evalue>2.0127e-143</Hsp_evalue>
+      <Hsp_query-from>4572</Hsp_query-from>
+      <Hsp_query-to>5690</Hsp_query-to>
+      <Hsp_hit-from>68</Hsp_hit-from>
+      <Hsp_hit-to>441</Hsp_hit-to>
+      <Hsp_query-frame>3</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>233</Hsp_identity>
+      <Hsp_positive>294</Hsp_positive>
+      <Hsp_gaps>7</Hsp_gaps>
+      <Hsp_align-len>377</Hsp_align-len>
+      <Hsp_qseq>DFKPKKGAKIAIALSGGVDSATSAYLLKKAGYQLKAFFMVN*DSTINSELNYILTDDEVCQQTKDYIDAKKVADFLGIELIRINFIKQY*DLVFQKFLREIKMGITPNPDIFCNKYIKFKEFTDYIFKNYPEIEYVATGHYAAIKEKNNQFFLAQAIDNFKDQTYFLSEIDQNILSKIYFPLANFKKSEVRKMALKANLPTATKKDSTGICFIGKRNFPDFIANYLKEKEGDIVDQKTNKVLGRHRGVLFYTLGQRKGLNLGGQEYPYFVSKKDIKKNILYVA--TEKNPEYLYSNYIETENFNLLASLELLKDD--V*IKTRHSEIIYEATILDVTKKNDKIKVILKTKEDIKAVTPGQEVVIYKHKLCLGGGQIS</Hsp_qseq>
+      <Hsp_hseq>NFVPEKDATIAICLSGGVDSSVSAYLLKKQGYKLKAFFMRNWDSTLNNEENLNLNENEICEQEKDYNDAKKVADQLGIELIKLNFVNEYWDFVFKRFLNELEEGLTPNPDIFCNKYIKFDHFVKYISKNFPEIDYIATGHYAKIKIKEGKAYLFKAKDEIKDQTYFLSEINKDVLNKLFFPLANKMKSEVRSIAKEANLYTKDKKDSTGICFIGKRNFSSFIENYFKKEEGNIIDEKSNKIIGKHQGVKFYTIGQRRGLGLSGFNEPYFVSNKNIKNNILYVSYDTEK---YLYKNKLKTNNFKFLTEEDILSKNKQVRIKTRHSEIIYNGIIKSIEKKDDLFMINLETKEKIKAITPGQEVVIYDHELCVGGGQIA</Hsp_hseq>
+      <Hsp_midline>+F P+K A IAI LSGGVDS+ SAYLLKK GY+LKAFFM N DST+N+E N  L ++E+C+Q KDY DAKKVAD LGIELI++NF+ +Y D VF++FL E++ G+TPNPDIFCNKYIKF  F  YI KN+PEI+Y+ATGHYA IK K  + +L +A D  KDQTYFLSEI++++L+K++FPLAN  KSEVR +A +ANL T  KKDSTGICFIGKRNF  FI NY K++EG+I+D+K+NK++G+H+GV FYT+GQR+GL L G   PYFVS K+IK NILYV+  TEK   YLY N ++T NF  L   ++L  +  V IKTRHSEIIY   I  + KK+D   + L+TKE IKA+TPGQEVVIY H+LC+GGGQI+</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+<Hit>
+  <Hit_num>3</Hit_num>
+  <Hit_id>gnl|BL_ORD_ID|4</Hit_id>
+  <Hit_def>BDV02441.1 aspartyl/glutamyl-tRNA amidotransferase subunit A [Candidatus Hepatoplasma vulgare]</Hit_def>
+  <Hit_accession>4</Hit_accession>
+  <Hit_len>430</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>299.286</Hsp_bit-score>
+      <Hsp_score>765</Hsp_score>
+      <Hsp_evalue>6.44384e-93</Hsp_evalue>
+      <Hsp_query-from>1621</Hsp_query-from>
+      <Hsp_query-to>2868</Hsp_query-to>
+      <Hsp_hit-from>14</Hsp_hit-from>
+      <Hsp_hit-to>426</Hsp_hit-to>
+      <Hsp_query-frame>1</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>187</Hsp_identity>
+      <Hsp_positive>256</Hsp_positive>
+      <Hsp_gaps>5</Hsp_gaps>
+      <Hsp_align-len>417</Hsp_align-len>
+      <Hsp_qseq>NDFKIAKEGKLSNIPFAIKDNYSIKNXNTTAGTTLLSDFKPLTFSTVFEKXLSEGAIPLFKANLDELAMG*SGXTSHYKIVNNPFYKNLIIGGSSSGXVYLVARDIVPFSLGSDTGDSVRKXAVYGNVIGFKPT*GLVSRYGLFXFAPS*DTVG*FTKTIDQSVLLLDXLKGYDFRDQTS-KKIEQNFSYLDNXYKDKKNLVVGYFSEILDEIKNDXIKKTYLKFXXXXXXXXXXXXXXXXXXXXXSLISIVYDVISSTESLSCXSNLQGFLFGNGYDQDKSYLEAIXAARGDNFVYEVKKRFLFAAYSISXHEKIYNQARRIRHLINKELDKIFXQADALVLPAVMDFAPEKKIAQQXKTRNSRTLADNFLTLFNSNGSPSXSLPITNEKAESVFINIATKPNDDLSCFRIAKIFE</Hsp_qseq>
+      <Hsp_hseq>NKIKKNKVQPLKNMTFALKDNFAVRNIPTTGGTKLLENFKITYNSTVYEKLIKAGAKPITKANLDELAMGFSGLTSGFGVVLNPYDGSKIIGGSSSGSAYLIANKEVDFSIGSDTGDSVRKPAWYVGITAFKPTWGIVSRYGLFDFSPSWDTVGWFSKNVDDSALLLDVLQGKDEKDFTSLNSREKDFLKDINNIK-KEDVKLGYIKSFLDDIKDKDILNKFNDLILKLKKDGFNIVEIDLDLKLFKTILTVYRIISSVNGFSSNSNLTSFLFGNFELENDEFKNEITRIRS-NFVYEVKKRFLLSSEVFLNKKNLYNKARKIRHLYINALSDLFAKIDAIIMPPAGNYAPSIKDAFNAVKYNS--IMDEYLGIFNANGSPSLNIPILKNIEKPFSVNIATAPFNDKKCLQIGKLLE</Hsp_hseq>
+      <Hsp_midline>N  K  K   L N+ FA+KDN++++N  TT GT LL +FK    STV+EK +  GA P+ KANLDELAMG SG TS + +V NP+  + IIGGSSSG  YL+A   V FS+GSDTGDSVRK A Y  +  FKPT G+VSRYGLF F+PS DTVG F+K +D S LLLD L+G D +D TS    E++F    N  K K+++ +GY    LD+IK+  I   +   + K ++ G+ + ++  +L+L   I  VY +ISS    S  SNL  FLFGN   ++  +   I   R  NFVYEVKKRFL ++      + +YN+AR+IRHL    L  +F + DA+++P   ++AP  K A      NS  + D +L +FN+NGSPS ++PI     +   +NIAT P +D  C +I K+ E</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+<Hit>
+  <Hit_num>4</Hit_num>
+  <Hit_id>gnl|BL_ORD_ID|3</Hit_id>
+  <Hit_def>BDV02702.1 peptide chain release factor 1 [Candidatus Hepatoplasma vulgare]</Hit_def>
+  <Hit_accession>3</Hit_accession>
+  <Hit_len>354</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>293.508</Hsp_bit-score>
+      <Hsp_score>750</Hsp_score>
+      <Hsp_evalue>5.85312e-92</Hsp_evalue>
+      <Hsp_query-from>10619</Hsp_query-from>
+      <Hsp_query-to>11533</Hsp_query-to>
+      <Hsp_hit-from>22</Hsp_hit-from>
+      <Hsp_hit-to>330</Hsp_hit-to>
+      <Hsp_query-frame>2</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>163</Hsp_identity>
+      <Hsp_positive>223</Hsp_positive>
+      <Hsp_gaps>4</Hsp_gaps>
+      <Hsp_align-len>309</Hsp_align-len>
+      <Hsp_qseq>KIKD-NDFNEIKKL---TTEQKKYQLTYDLYKKYLNLVDEIRDSENILQTESDKKLSEQLKKLIXXXXXXXXXXXXXXXDSLIEKDPIDDYNAFIEIKGAAGGLEANIFANDLLNMYLKYAQRLNFKTKIIDLQESEKKGISYVNFKISGEGAYGKFKYEAGVHRVQRIPETESNGRVHTSTATVSVIPELDDLELKINKSDLRIDTYRSSGAGGQHVNKTDSAVRILHIPTGIVVSSQNGRSQHDNKDRAMQTLRNKIYQQKIAQEQEDLNKVKKEAVGTGDRSEKIRTYNYQQNRVTDHRANITLKK</Hsp_qseq>
+      <Hsp_hseq>KINDPNIFSNIEKLKLLNSLFKKYKPIYEEYNKYKSLTKDINDLHSIIKSETNKDSIDSYRNLLKENFEKEEEIYQNILDLLVEKDPNDEKNAIIEIKGRVGGEEANLFAANIFEMYKKYALKQNYELEVIDSNVSEQGGYSSITFFAIGRDAYGKFKYESGTHRVQRVPKTESQDKLQTSTVSVYVIPENDELNIEINPNDLRIDTYRSSGAGGQHVNKTDSAVRITHIPTGLSVSSQDGRSQHDNKDKAMKTLISKINNLQLEEEREKETETKRKILSSSERSEKIRTYNYPENRVTDHRINLKLKK</Hsp_hseq>
+      <Hsp_midline>KI D N F+ I+KL    +  KKY+  Y+ Y KY +L  +I D  +I+++E++K   +  + L+  N ++   + + +LD L+EKDP D+ NA IEIKG  GG EAN+FA ++  MY KYA + N++ ++ID   SE+ G S + F   G  AYGKFKYE+G HRVQR+P+TES  ++ TST +V VIPE D+L ++IN +DLRIDTYRSSGAGGQHVNKTDSAVRI HIPTG+ VSSQ+GRSQHDNKD+AM+TL +KI   ++ +E+E   + K++ + + +RSEKIRTYNY +NRVTDHR N+ LKK</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+<Hit>
+  <Hit_num>5</Hit_num>
+  <Hit_id>gnl|BL_ORD_ID|1</Hit_id>
+  <Hit_def>BDV02159.1 uracil phosphoribosyltransferase [Candidatus Hepatoplasma vulgare]</Hit_def>
+  <Hit_accession>1</Hit_accession>
+  <Hit_len>210</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>248.054</Hsp_bit-score>
+      <Hsp_score>632</Hsp_score>
+      <Hsp_evalue>3.43632e-78</Hsp_evalue>
+      <Hsp_query-from>14218</Hsp_query-from>
+      <Hsp_query-to>14835</Hsp_query-to>
+      <Hsp_hit-from>4</Hsp_hit-from>
+      <Hsp_hit-to>210</Hsp_hit-to>
+      <Hsp_query-frame>1</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>120</Hsp_identity>
+      <Hsp_positive>163</Hsp_positive>
+      <Hsp_gaps>1</Hsp_gaps>
+      <Hsp_align-len>207</Hsp_align-len>
+      <Hsp_qseq>IKIINHSLIQHKLTLLRNKNTNAKDFREYLNEISRLLAFEVLRDIKLKQIEIETPIQKTKAKVLNEKINLFPILRAGQGMVEGFLGVVPNAKIGHIGLYRDEKTFKAKKYLFKFPKDAK-EESLNIILDPMIATGGSAIEAIKFLKKENIKNIKFVSIVTVEEAINKINQKFPDVELITCAVDQKLNQKGYIIPGLGDAGDRIYGTK</Hsp_qseq>
+      <Hsp_hseq>INLIEHPLAQDKLASLRSEETSSKEFREYLEELSVLIAYEVFKDLKVKEEKIITPLSKTTGKKINEEINLFPILRAGQGFVSGFLNVVPKARVGHIGLYRDEKTLKPVQYLFKYPKNKNIEKTYNILLDPIIATGGSIRAALKILENINLKNIKVVAIISVKDTIEKLAKDYPNINFYLIAIDKKLDKKGYIIPGLGDAGDRIYGTK</Hsp_hseq>
+      <Hsp_midline>I +I H L Q KL  LR++ T++K+FREYL E+S L+A+EV +D+K+K+ +I TP+ KT  K +NE+INLFPILRAGQG V GFL VVP A++GHIGLYRDEKT K  +YLFK+PK+   E++ NI+LDP+IATGGS   A+K L+  N+KNIK V+I++V++ I K+ + +P++     A+D+KL++KGYIIPGLGDAGDRIYGTK</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+</Iteration_hits>
+  <Iteration_stat>
+    <Statistics>
+      <Statistics_db-num>5</Statistics_db-num>
+      <Statistics_db-len>1845</Statistics_db-len>
+      <Statistics_hsp-len>60</Statistics_hsp-len>
+      <Statistics_eff-space>7632300</Statistics_eff-space>
+      <Statistics_kappa>0.041</Statistics_kappa>
+      <Statistics_lambda>0.267</Statistics_lambda>
+      <Statistics_entropy>0.14</Statistics_entropy>
+    </Statistics>
+  </Iteration_stat>
+</Iteration>
+<Iteration>
+  <Iteration_iter-num>2</Iteration_iter-num>
+  <Iteration_query-ID>Query_2</Iteration_query-ID>
+  <Iteration_query-def>h_mut_10pct AP027133 118901-120300 with substitutions and indels</Iteration_query-def>
+  <Iteration_query-len>1397</Iteration_query-len>
+<Iteration_hits>
+<Hit>
+  <Hit_num>1</Hit_num>
+  <Hit_id>gnl|BL_ORD_ID|0</Hit_id>
+  <Hit_def>BDV02158.1 serine hydroxymethyltransferase [Candidatus Hepatoplasma vulgare]</Hit_def>
+  <Hit_accession>0</Hit_accession>
+  <Hit_len>409</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>329.331</Hsp_bit-score>
+      <Hsp_score>843</Hsp_score>
+      <Hsp_evalue>4.02417e-113</Hsp_evalue>
+      <Hsp_query-from>148</Hsp_query-from>
+      <Hsp_query-to>1290</Hsp_query-to>
+      <Hsp_hit-from>2</Hsp_hit-from>
+      <Hsp_hit-to>383</Hsp_hit-to>
+      <Hsp_query-frame>1</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>198</Hsp_identity>
+      <Hsp_positive>255</Hsp_positive>
+      <Hsp_gaps>5</Hsp_gaps>
+      <Hsp_align-len>384</Hsp_align-len>
+      <Hsp_qseq>RDGEIEKLILLETQRQDKEIELIASENVVSNDMLESTGSFLTN--AQGYPNA*NIHYEGC*TVGKIETLAFDRFKKLFNAKYAAVHPHSGTQANLAAYNALLKPRAKTXXXXXXXXXXXXXXFTITISGTFHKSYT*EVDPNTNLLGYDNIL-IAKKVKLDLLLCGYSA*PRIIDFKPFTAIADSVGAYLLADIAHIAGLGAAKLHPNPLDFGVDFVTSTTHKTLRGTRGVIIVTNKGEKVKKFNSSVFPASQRGPLMHGLAAKAVAFYVVLDQ*FNSNLEQFIENAKVLANGLLEHNVKITPNGTVNQLLLVDVKKGFNLTGAEPEIILRKHHITINEHAISFRKLSPKNAY*NRL*TAAWTAKG*MDADFVKLADEIYQLLQ</Hsp_qseq>
+      <Hsp_hseq>EDKKVEKLINNEEKRQMDFVQLIASENFVSKDVMKATGSVFTNKYAEGYPNA--RYYGGCENVDKLEELAIERLKKIFNAKFANVQPHSGAQANIAAYNAILKPGDKILSMSLNSGGHLTHGHFVSIVGKFYKIFSYEVNKETEQLDYEEIRKIAKEVKPNLIICGASAYSRIIDFKKFVAIAKEVNAYLLADIAHIAGLIVADLHPNPLNDGVDIVTSTTHKTLRGARGGIILTNNPELAILLDKSVFPGTQGGPLMNVIAGKTVSFYEASLPSFKEYQKNIISNANVMANFFIQKGVKIISGGTDNHLLMINTKKSFNKTGKEAEEILYKVNIIVNKNAIPFDEERPIVTSGIRIGTPAMTTLGWRNKEFLKIAEVIYNVLK</Hsp_hseq>
+      <Hsp_midline> D ++EKLI  E +RQ   ++LIASEN VS D++++TGS  TN  A+GYPNA   +Y GC  V K+E LA +R KK+FNAK+A V PHSG QAN+AAYNA+LKP  K L  SL+SG HL+ G  ++I G F+K ++ EV+  T  L Y+ I  IAK+VK +L++CG SA  RIIDFK F AIA  V AYLLADIAHIAGL  A LHPNPL+ GVD VTSTTHKTLRG RG II+TN  E     + SVFP +Q GPLM+ +A K V+FY      F    +  I NA V+AN  ++  VKI   GT N LL+++ KK FN TG E E IL K +I +N++AI F +  P      R+ T A T  G  + +F+K+A+ IY +L+</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+</Iteration_hits>
+  <Iteration_stat>
+    <Statistics>
+      <Statistics_db-num>5</Statistics_db-num>
+      <Statistics_db-len>1845</Statistics_db-len>
+      <Statistics_hsp-len>42</Statistics_hsp-len>
+      <Statistics_eff-space>691605</Statistics_eff-space>
+      <Statistics_kappa>0.041</Statistics_kappa>
+      <Statistics_lambda>0.267</Statistics_lambda>
+      <Statistics_entropy>0.14</Statistics_entropy>
+    </Statistics>
+  </Iteration_stat>
+</Iteration>
+<Iteration>
+  <Iteration_iter-num>3</Iteration_iter-num>
+  <Iteration_query-ID>Query_3</Iteration_query-ID>
+  <Iteration_query-def>tiny shorter than 10 bases</Iteration_query-def>
+  <Iteration_query-len>8</Iteration_query-len>
+<Iteration_hits>
+</Iteration_hits>
+  <Iteration_stat>
+    <Statistics>
+      <Statistics_db-num>5</Statistics_db-num>
+      <Statistics_db-len>1845</Statistics_db-len>
+      <Statistics_hsp-len>0</Statistics_hsp-len>
+      <Statistics_eff-space>3690</Statistics_eff-space>
+      <Statistics_kappa>0.041</Statistics_kappa>
+      <Statistics_lambda>0.267</Statistics_lambda>
+      <Statistics_entropy>0.14</Statistics_entropy>
+    </Statistics>
+  </Iteration_stat>
+  <Iteration_message>No hits found</Iteration_message>
+</Iteration>
+</BlastOutput_iterations>
+</BlastOutput>
+

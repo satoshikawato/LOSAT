@@ -1,0 +1,1 @@
+- `blastp -task blastp-fast` searches the query blocks one at a time again: the two blocks at a time of `LOSAT_X_BPQSLOTS` are removed (the switch saved 7.0 % of the time at 16 threads and raised the max RSS by 9.1 %); reports do not change, and the variable is ignored.

@@ -3,6 +3,7 @@ const fs = require("fs");
 const { WASI } = require("wasi");
 const { performance } = require("perf_hooks");
 const crypto = require("crypto");
+const { unsignedWasiImports, blockingStdioWrite } = require("./wasi_artifact");
 
 // NCBI c++/src/algo/blast/core/blast_engine.c:1410-1413:
 // while ((seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr)) != BLAST_SEQSRC_EOF)
@@ -28,8 +29,13 @@ const crypto = require("crypto");
       version: "preview1", args: job.argv, env: process.env,
       preopens: { "/": "/" }, returnOnExit: true,
     });
+    // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:68-93
+    // CBlastFormat::CBlastFormat(..., CNcbiOstream& outfile, ...) : ..., m_Outfile(outfile),
+    // Standard output and error wait for a full pipe as the native write blocks
+    // (blockingStdioWrite, wasi_artifact.js).
+    const local = unsignedWasiImports(wasi.wasiImport);
     const instance = await WebAssembly.instantiate(module, {
-      wasi_snapshot_preview1: wasi.wasiImport,
+      wasi_snapshot_preview1: { ...local, fd_write: blockingStdioWrite(local.fd_write) },
     });
     const instanceSeconds = (performance.now() - start) / 1000;
     if (typeof instance.exports._start !== "function") {

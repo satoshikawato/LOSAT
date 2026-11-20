@@ -1,4 +1,4 @@
-//! EXPERIMENT (LOSAT_X_DPW128): 128-bit kernels for the X-drop dynamic programming of
+//! EXPERIMENT: 128-bit kernels for the X-drop dynamic programming of
 //! `xdrop_simd.rs` with the per-row savings of the 256-bit kernels (`x_xdrop_avx2.rs`): 8 lanes
 //! of 16 bits and 16 lanes of 8 bits, with (`TB`) and without the traceback. Written once over
 //! the 128-bit `arch` layer of `xdrop_simd.rs`, so the same code is built for x86_64 (SSE4.1 and
@@ -137,16 +137,16 @@
 //!    running best is formed as the inclusive one moved up by a lane (the same values), so that no
 //!    shift is applied to a shifted vector, a pair the compiler merges into one general shuffle.
 //!
-//! Unchanged: the 8 / 16-bit choice (`fits_8bit`), the per-row `sc.ensure`, the rebase test, the
-//! traceback walk (`finish` of the 128-bit kernels) and the cell count.
+//! Unchanged: the 8 / 16-bit choice (`fits_8bit`), the row-start `sc.fits` / `x_room`, the rebase
+//! test, the traceback walk (`finish` of the 128-bit kernels) and the cell count.
 
 #![allow(clippy::too_many_arguments)]
 
 use super::arch::*;
 use super::kernel::finish;
 use super::{
-    build_row_table, fits_8bit, ColSeq, RowSeq, Scores, XdropResult, XdropScratch, FENCE_SENTRY,
-    MAX_M, PAD, SCRIPT_EXTEND_GAP_A, SCRIPT_EXTEND_GAP_B, SCRIPT_GAP_IN_A, SCRIPT_SUB, TAB, VMAX,
+    build_row_table, fits_8bit, script_codes, ColSeq, RowSeq, Scores, XdropResult, XdropScratch,
+    FENCE_SENTRY, MAX_M, PAD, TAB, VMAX,
 };
 
 // No NCBI counterpart: lane operations the `arch` layer of `xdrop_simd.rs` does not have (unsigned
@@ -439,13 +439,8 @@ static LANE_MASK8: [u8; 32] = [
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 ];
 
-/// No NCBI counterpart: LOSAT_X_DPW128 on (`utils/xswitch.rs`) and a CPU that runs these kernels
-/// (SSE4.1 on x86_64, as the 128-bit kernels; always on wasm32 simd128 and aarch64).
-pub(super) fn switch_on() -> bool {
-    crate::utils::xswitch::on("LOSAT_X_DPW128") && available()
-}
-
-/// No NCBI counterpart: the 128-bit kernels' CPU check (LOSAT_X_DPNOAVX selects the SSE4.1 build).
+/// No NCBI counterpart: the 128-bit kernels' CPU check (LOSAT_X_DPNOAVX selects the SSE4.1 build):
+/// SSE4.1 on x86_64, always true on wasm32 simd128 and aarch64.
 pub(super) fn available() -> bool {
     #[cfg(target_arch = "x86_64")]
     {
@@ -823,21 +818,23 @@ pub(super) unsafe fn fill_cols(
     ncols: usize,
     check_fence: bool,
 ) {
+    // `sb` lane k + 1 holds column k + sh (rows over the band, `XdropScratch::x_room`)
+    let sh = sc.x_sh;
     let mut k = sc.sb_filled;
     if ncols > 0 && (s.step == 1 || s.step == -1) {
         let lim = splat8((ncols - 1) as i8);
         let dl = s.data.len() as isize;
-        while k + 16 <= to && k + 16 <= s.zero_from {
+        while k + 16 <= to && k + sh + 16 <= s.zero_from {
             let v = if s.step == 1 {
                 // columns k..k+16 are s.data[i..i + 16]
-                let i = s.base + k as isize;
+                let i = s.base + (k + sh) as isize;
                 if i < 0 || i + 16 > dl {
                     break;
                 }
                 load(s.data.as_ptr().offset(i))
             } else {
                 // columns k..k+16 are s.data[i], s.data[i - 1], ..., s.data[i - 15]
-                let i = s.base - k as isize;
+                let i = s.base - (k + sh) as isize;
                 if i - 15 < 0 || i >= dl {
                     break;
                 }
@@ -852,7 +849,7 @@ pub(super) unsafe fn fill_cols(
         }
     }
     for k in k..to {
-        let ch = s.get(k);
+        let ch = s.get(k + sh);
         if ch as usize >= ncols {
             if check_fence && ch == FENCE_SENTRY {
                 if sc.fence_k == usize::MAX {
@@ -1038,6 +1035,80 @@ unsafe fn body16<const TB: bool>(
     check_fence: bool,
     sc: &mut XdropScratch,
 ) -> Option<XdropResult> {
+    if !TB || sc.x_nib {
+        body16_rows::<TB, TB>(
+            q,
+            s,
+            scores,
+            len1,
+            len2,
+            gap_open,
+            gap_extend,
+            x_drop,
+            check_fence,
+            sc,
+        )
+    } else {
+        body16_bytes(
+            q,
+            s,
+            scores,
+            len1,
+            len2,
+            gap_open,
+            gap_extend,
+            x_drop,
+            check_fence,
+            sc,
+        )
+    }
+}
+
+// No NCBI counterpart: the traceback of `body16` with one byte per cell (`LOSAT_X_DPNIBBLE=0`). Off
+// x86_64 it is a function of its own, so that the default entry keeps one traceback body.
+#[cfg_attr(target_arch = "x86_64", inline(always))]
+#[cfg_attr(not(target_arch = "x86_64"), inline(never))]
+unsafe fn body16_bytes(
+    q: &RowSeq<'_>,
+    s: &ColSeq<'_>,
+    scores: &Scores<'_>,
+    len1: usize,
+    len2: usize,
+    gap_open: i32,
+    gap_extend: i32,
+    x_drop: i32,
+    check_fence: bool,
+    sc: &mut XdropScratch,
+) -> Option<XdropResult> {
+    body16_rows::<true, false>(
+        q,
+        s,
+        scores,
+        len1,
+        len2,
+        gap_open,
+        gap_extend,
+        x_drop,
+        check_fence,
+        sc,
+    )
+}
+
+// No NCBI counterpart: the kernel of `body16` for one trace layout (`NIB`: four-bit codes,
+// `LOSAT_X_DPNIBBLE`).
+#[inline(always)]
+unsafe fn body16_rows<const TB: bool, const NIB: bool>(
+    q: &RowSeq<'_>,
+    s: &ColSeq<'_>,
+    scores: &Scores<'_>,
+    len1: usize,
+    len2: usize,
+    gap_open: i32,
+    gap_extend: i32,
+    x_drop: i32,
+    check_fence: bool,
+    sc: &mut XdropScratch,
+) -> Option<XdropResult> {
     sc.ops.clear();
     if len1 == 0 || len2 == 0 {
         return Some(XdropResult {
@@ -1095,8 +1166,7 @@ unsafe fn body16<const TB: bool>(
     }
     sc.dirty = b_size;
     if TB {
-        sc.trace.resize(b_size, SCRIPT_GAP_IN_A);
-        sc.rows.push((0, 0, b_size as u32));
+        sc.trace.x_row_zero(NIB, b_size);
     }
 
     let mut ramp = [0i16; 8];
@@ -1113,9 +1183,9 @@ unsafe fn body16<const TB: bool>(
         ramp1: load(ramp1.as_ptr()),
         xv: splat16(x as i16),
         kb7: load(core::hint::black_box(&KB7).as_ptr()),
-        c3: splat16(SCRIPT_SUB as i16),
-        c10: splat16(SCRIPT_EXTEND_GAP_A as i16),
-        c40: splat16(SCRIPT_EXTEND_GAP_B as i16),
+        c3: splat16(const { script_codes(NIB).0 } as i16),
+        c10: splat16(const { script_codes(NIB).1 } as i16),
+        c40: splat16(const { script_codes(NIB).2 } as i16),
     };
     let zero_v = zero();
     let hpm0 = load(HPM16.as_ptr());
@@ -1136,8 +1206,17 @@ unsafe fn body16<const TB: bool>(
     let mut wend = [b_size, 0usize];
     let mut cur = 0usize; // buffer holding the previous row
 
+    // the rows over the band (`XdropScratch::x_room`): columns below are relative to `sc.x_sh`
+    let mut len2 = len2;
     for a in 1..=len1 {
-        sc.ensure(b_size + num_extra + 64);
+        if !sc.fits(b_size + num_extra + 64) {
+            let d = sc.x_room(first, b_size + num_extra + 64, true);
+            first -= d;
+            b_size -= d;
+            len2 -= d;
+            wend[0] = wend[0].saturating_sub(d);
+            wend[1] = wend[1].saturating_sub(d);
+        }
         if sc.sb_filled < b_size {
             fill_cols(s, sc, (b_size + 64).min(len2 + 1), ncols, check_fence);
         }
@@ -1198,11 +1277,12 @@ unsafe fn body16<const TB: bool>(
         // no diagonal into the first lane of the band: lane 0 of the row's first block (item 3)
         let mut hpm = hpm0;
 
-        let row_off = sc.trace.len();
-        if TB {
-            sc.trace.reserve(bend - first + num_extra + 96);
-        }
-        let tr = sc.trace.as_mut_ptr().add(row_off);
+        let tr = if TB {
+            // SAFETY: room for every byte of the row loop (see `XTrace::x_row`)
+            sc.trace.x_row(bend - first + num_extra + 96)
+        } else {
+            core::ptr::null_mut()
+        };
 
         let bestv0 = splat16((bias + best_rel) as i16);
         let mut rs = Row {
@@ -1244,7 +1324,9 @@ unsafe fn body16<const TB: bool>(
                 m1,
                 zero_v,
             );
-            if TB {
+            if TB && NIB {
+                store64(tr.add((b0 - first) >> 1), nibs(packus16(r0, r1)));
+            } else if TB {
                 store(tr.add(b0 - first), packus16(r0, r1));
             }
             // 2 bits per lane (item 1)
@@ -1278,15 +1360,19 @@ unsafe fn body16<const TB: bool>(
         }
         wend[wi] = proc_end;
         cur = wi;
+        let rec = if TB {
+            sc.trace.x_row_done(NIB, first + sc.x_sh, proc_end - first)
+        } else {
+            core::ptr::null()
+        };
         if rs.slow {
-            b_off = rs.rec_b;
+            b_off = rs.rec_b + sc.x_sh;
             a_off = a;
             best_rel = lane0(rs.bestv) - bias;
-        }
-        if TB {
-            sc.trace.set_len(row_off + proc_end - first);
-            sc.rows
-                .push((row_off as u32, first as u32, (proc_end - first) as u32));
+            if TB {
+                // No NCBI counterpart: the walk starts at this row's record (`XTrace::x_best`)
+                sc.trace.x_best(rec);
+            }
         }
         if fence_row {
             fence_hit = true;
@@ -1310,7 +1396,7 @@ unsafe fn body16<const TB: bool>(
     }
 
     let best = base + best_rel;
-    finish::<TB>(sc, a_off, b_off, best, fence_hit, cells)
+    finish::<TB, NIB>(sc, a_off, b_off, best, fence_hit, cells)
 }
 
 // ---------------------------------------------------------------------------
@@ -1454,6 +1540,133 @@ unsafe fn body8<const TB: bool>(
     check_fence: bool,
     sc: &mut XdropScratch,
 ) -> Option<XdropResult> {
+    if !TB || sc.x_nib {
+        body8_rows::<TB, TB>(
+            q,
+            s,
+            scores,
+            max_m,
+            len1,
+            len2,
+            gap_open,
+            gap_extend,
+            x_drop,
+            check_fence,
+            sc,
+        )
+    } else {
+        body8_bytes(
+            q,
+            s,
+            scores,
+            max_m,
+            len1,
+            len2,
+            gap_open,
+            gap_extend,
+            x_drop,
+            check_fence,
+            sc,
+        )
+    }
+}
+
+// No NCBI counterpart: the traceback of `body8` with one byte per cell (`LOSAT_X_DPNIBBLE=0`). Off
+// x86_64 it is a function of its own, so that the default entry keeps one traceback body.
+#[cfg_attr(target_arch = "x86_64", inline(always))]
+#[cfg_attr(not(target_arch = "x86_64"), inline(never))]
+unsafe fn body8_bytes(
+    q: &RowSeq<'_>,
+    s: &ColSeq<'_>,
+    scores: &Scores<'_>,
+    max_m: i32,
+    len1: usize,
+    len2: usize,
+    gap_open: i32,
+    gap_extend: i32,
+    x_drop: i32,
+    check_fence: bool,
+    sc: &mut XdropScratch,
+) -> Option<XdropResult> {
+    body8_rows::<true, false>(
+        q,
+        s,
+        scores,
+        max_m,
+        len1,
+        len2,
+        gap_open,
+        gap_extend,
+        x_drop,
+        check_fence,
+        sc,
+    )
+}
+
+// No NCBI counterpart: the kernel of `body8` for one trace layout (`NIB`: four-bit codes,
+// `LOSAT_X_DPNIBBLE`), with its row loop compiled once for a matrix of at most 16 columns (one
+// table lookup per block) and once for a larger one (two), so that no block computes the lookup
+// it does not use (wasm32 had both, merged by a select).
+#[inline(always)]
+unsafe fn body8_rows<const TB: bool, const NIB: bool>(
+    q: &RowSeq<'_>,
+    s: &ColSeq<'_>,
+    scores: &Scores<'_>,
+    max_m: i32,
+    len1: usize,
+    len2: usize,
+    gap_open: i32,
+    gap_extend: i32,
+    x_drop: i32,
+    check_fence: bool,
+    sc: &mut XdropScratch,
+) -> Option<XdropResult> {
+    if scores.ncols() <= 16 {
+        body8_rows_t::<TB, NIB, true>(
+            q,
+            s,
+            scores,
+            max_m,
+            len1,
+            len2,
+            gap_open,
+            gap_extend,
+            x_drop,
+            check_fence,
+            sc,
+        )
+    } else {
+        body8_rows_t::<TB, NIB, false>(
+            q,
+            s,
+            scores,
+            max_m,
+            len1,
+            len2,
+            gap_open,
+            gap_extend,
+            x_drop,
+            check_fence,
+            sc,
+        )
+    }
+}
+
+// No NCBI counterpart: `body8_rows` for a matrix of at most 16 columns (`SMALL`) or more.
+#[inline(always)]
+unsafe fn body8_rows_t<const TB: bool, const NIB: bool, const SMALL: bool>(
+    q: &RowSeq<'_>,
+    s: &ColSeq<'_>,
+    scores: &Scores<'_>,
+    max_m: i32,
+    len1: usize,
+    len2: usize,
+    gap_open: i32,
+    gap_extend: i32,
+    x_drop: i32,
+    check_fence: bool,
+    sc: &mut XdropScratch,
+) -> Option<XdropResult> {
     sc.ops.clear();
     if len1 == 0 || len2 == 0 {
         return Some(XdropResult {
@@ -1510,8 +1723,7 @@ unsafe fn body8<const TB: bool>(
     }
     sc.dirty8 = b_size;
     if TB {
-        sc.trace.resize(b_size, SCRIPT_GAP_IN_A);
-        sc.rows.push((0, 0, b_size as u32));
+        sc.trace.x_row_zero(NIB, b_size);
     }
 
     // 16 * gap_extend <= 128 + gap_open_extend <= 254 (checked above and by the bias test)
@@ -1530,9 +1742,11 @@ unsafe fn body8<const TB: bool>(
         ramp1: load(ramp1.as_ptr()),
         xv: splat8(sat(x)),
         kb15: load(core::hint::black_box(&KB15).as_ptr()),
-        c3: splat8(SCRIPT_SUB as i8),
-        c10: splat8(SCRIPT_EXTEND_GAP_A as i8),
-        c40: splat8(SCRIPT_EXTEND_GAP_B as i8),
+        // (opaque, as `kb15`: wasm32's engines build a constant vector again at each use, here
+        // in every block of the row loop; a vector made once from a value is kept or reloaded)
+        c3: splat8(core::hint::black_box(const { script_codes(NIB).0 }) as i8),
+        c10: splat8(core::hint::black_box(const { script_codes(NIB).1 }) as i8),
+        c40: splat8(core::hint::black_box(const { script_codes(NIB).2 }) as i8),
     };
     let zero_v = zero();
     let hpm0 = load(HPM8.as_ptr());
@@ -1540,7 +1754,7 @@ unsafe fn body8<const TB: bool>(
         Scores::Tables { t, .. } => Some(t.data.as_ptr()),
         _ => None,
     };
-    let small_alphabet = ncols <= 16;
+    debug_assert_eq!(SMALL, ncols <= 16);
     let mut cells: u64 = 0;
 
     let mut base: i32 = 0;
@@ -1552,8 +1766,17 @@ unsafe fn body8<const TB: bool>(
     let mut wend = [b_size, 0usize];
     let mut cur = 0usize;
 
+    // the rows over the band (`XdropScratch::x_room`): columns below are relative to `sc.x_sh`
+    let mut len2 = len2;
     for a in 1..=len1 {
-        sc.ensure(b_size + num_extra + 64);
+        if !sc.fits(b_size + num_extra + 64) {
+            let d = sc.x_room(first, b_size + num_extra + 64, false);
+            first -= d;
+            b_size -= d;
+            len2 -= d;
+            wend[0] = wend[0].saturating_sub(d);
+            wend[1] = wend[1].saturating_sub(d);
+        }
         if sc.sb_filled < b_size {
             fill_cols(s, sc, (b_size + 64).min(len2 + 1), ncols, check_fence);
         }
@@ -1609,13 +1832,12 @@ unsafe fn body8<const TB: bool>(
             base += best_rel;
             best_rel = 0;
         }
-        let mut hpm = hpm0;
-
-        let row_off = sc.trace.len();
-        if TB {
-            sc.trace.reserve(bend - first + num_extra + 96);
-        }
-        let tr = sc.trace.as_mut_ptr().add(row_off);
+        let tr = if TB {
+            // SAFETY: room for every byte of the row loop (see `XTrace::x_row`)
+            sc.trace.x_row(bend - first + num_extra + 96)
+        } else {
+            core::ptr::null_mut()
+        };
 
         let bestv0 = splat8((bias + best_rel) as u8 as i8);
         let mut rs = Row {
@@ -1628,33 +1850,42 @@ unsafe fn body8<const TB: bool>(
         let mut lo_surv = usize::MAX;
         let mut hi_surv = 0usize;
         let mut b0 = first;
-        loop {
-            // scores for the 16 lanes b0..b0+16 (lane b reads column b-1)
-            let idx = load(sb.add(b0));
-            let sv = if small_alphabet {
-                pick(t0, idx)
-            } else {
-                lut32(t0, t1, idx)
-            };
-            let mask = if b0 + 16 <= limit {
-                None
-            } else {
-                Some(load(LANE_MASK8.as_ptr().add(16 - (limit - b0))))
-            };
-            let (d0, r0) = block8::<TB>(&c, &mut rs, hr, hw, e, b0, sv, mask, hpm);
-            hpm = zero_v;
-            if TB {
-                store(tr.add(b0 - first), r0);
-            }
-            // 1 bit per lane (item 1)
-            let live = (!mask8(d0)) & 0xFFFF;
-            if live != 0 {
-                if lo_surv == usize::MAX {
-                    lo_surv = b0 + live.trailing_zeros() as usize;
+        // One block of 16 lanes at `b0` (lane b reads column b-1): `$mask` the lanes of the row's
+        // last block up to `limit`, `$hpm` the left edge of the first block. The first block, the
+        // blocks inside the band and the last block are written out apart (each with its own
+        // constant mask and edge), so the blocks between carry neither from one to the next.
+        macro_rules! step {
+            ($mask:expr, $hpm:expr) => {{
+                let idx = load(sb.add(b0));
+                let sv = if SMALL {
+                    pick(t0, idx)
+                } else {
+                    lut32(t0, t1, idx)
+                };
+                let (d0, r0) = block8::<TB>(&c, &mut rs, hr, hw, e, b0, sv, $mask, $hpm);
+                if TB && NIB {
+                    store64(tr.add((b0 - first) >> 1), nibs(r0));
+                } else if TB {
+                    store(tr.add(b0 - first), r0);
                 }
-                hi_surv = b0 + (31 - live.leading_zeros() as usize);
-            }
-            b0 += 16;
+                // 1 bit per lane (item 1)
+                let live = (!mask8(d0)) & 0xFFFF;
+                if live != 0 {
+                    if lo_surv == usize::MAX {
+                        lo_surv = b0 + live.trailing_zeros() as usize;
+                    }
+                    hi_surv = b0 + (31 - live.leading_zeros() as usize);
+                }
+                b0 += 16;
+            }};
+        }
+        let last_mask = |b0: usize| load(LANE_MASK8.as_ptr().add(16 - (limit - b0)));
+        if b0 + 16 <= limit {
+            step!(None, hpm0);
+        } else {
+            step!(Some(last_mask(b0)), hpm0);
+        }
+        loop {
             if b0 >= bend {
                 if b0 >= limit {
                     break;
@@ -1662,6 +1893,11 @@ unsafe fn body8<const TB: bool>(
                 if lane0_u8(rs.carry) < lane0_u8(rs.thrv) {
                     break;
                 }
+            }
+            if b0 + 16 <= limit {
+                step!(None, zero_v);
+            } else {
+                step!(Some(last_mask(b0)), zero_v);
             }
         }
         let proc_end = b0;
@@ -1676,15 +1912,19 @@ unsafe fn body8<const TB: bool>(
         }
         wend[wi] = proc_end;
         cur = wi;
+        let rec = if TB {
+            sc.trace.x_row_done(NIB, first + sc.x_sh, proc_end - first)
+        } else {
+            core::ptr::null()
+        };
         if rs.slow {
-            b_off = rs.rec_b;
+            b_off = rs.rec_b + sc.x_sh;
             a_off = a;
             best_rel = lane0_u8(rs.bestv) - bias;
-        }
-        if TB {
-            sc.trace.set_len(row_off + proc_end - first);
-            sc.rows
-                .push((row_off as u32, first as u32, (proc_end - first) as u32));
+            if TB {
+                // No NCBI counterpart: the walk starts at this row's record (`XTrace::x_best`)
+                sc.trace.x_best(rec);
+            }
         }
         if fence_row {
             fence_hit = true;
@@ -1707,7 +1947,7 @@ unsafe fn body8<const TB: bool>(
     }
 
     let best = base + best_rel;
-    finish::<TB>(sc, a_off, b_off, best, fence_hit, cells)
+    finish::<TB, NIB>(sc, a_off, b_off, best, fence_hit, cells)
 }
 
 #[cfg(test)]
@@ -1850,7 +2090,7 @@ mod tests {
         let mut accepted = 0usize;
         for _ in 0..3000 {
             let rare = rng.below(8) == 0;
-            let mut pick = |rng: &mut Rng| {
+            let pick = |rng: &mut Rng| {
                 if rare && rng.below(50) == 0 {
                     special[rng.below(special.len() as u64) as usize]
                 } else if rng.below(10) == 0 {
@@ -2035,7 +2275,16 @@ mod tests {
         // 8-bit calls with 16 * gap_extend - gap_open_extend in 113..=128 (handled) and above 128
         // (declined, run by the 128-bit kernel)
         let (mut edge_in, mut edge_out, mut big_ge) = (0usize, 0usize, 0usize);
+        // calls whose rows were moved: [width 8 / 16][128-bit / w128]
+        let mut moved = [[0usize; 2]; 2];
         for case in 0..cases {
+            // rows over the band (`x_room`): 128 or 320 lanes to start with, or every column
+            let lanes = [Some(128), Some(320), None][case % 3];
+            sc128.x_test_rows(lanes);
+            scw.x_test_rows(lanes);
+            // trace layout (LOSAT_X_DPNIBBLE): four-bit codes or one byte per cell
+            let nib = case % 2 == 0;
+            (sc128.x_nib, scw.x_nib) = (nib, nib);
             let n = if rng.below(2) == 0 { 16 } else { 28 };
             let mut scale = if rng.below(3) == 0 { 32 } else { 1 };
             let long = rng.below(6) == 0;
@@ -2221,6 +2470,8 @@ mod tests {
                             assert_eq!(r.cells, expected.5, "{tag}: cells");
                         }
                         handled[usize::from(!wide8)][usize::from(tb)][usize::from(reverse)] += 1;
+                        moved[usize::from(!wide8)][0] += usize::from(sc128.x_sh > 0);
+                        moved[usize::from(!wide8)][1] += usize::from(scw.x_sh > 0);
                         fences += usize::from(r.fence_hit);
                         ops_total += scw.ops.len();
                         if wide8 && (113..=128).contains(&edge) {
@@ -2238,7 +2489,8 @@ mod tests {
         }
         eprintln!(
             "w128 fuzz: cases={cases} handled[w8/w16][so/tb][fwd/rev]={handled:?} fences={fences} \
-             wide={wide} edge_in={edge_in} edge_out={edge_out} big_ge={big_ge}"
+             wide={wide} edge_in={edge_in} edge_out={edge_out} big_ge={big_ge} \
+             moved[w8/w16][128/w128]={moved:?}"
         );
         if cases >= 200 {
             for (w, by_tb) in handled.iter().enumerate() {
@@ -2253,6 +2505,10 @@ mod tests {
             }
             assert!(fences > 0 && ops_total > 0 && wide > 0);
             assert!(edge_in > 0 && edge_out > 0 && big_ge > 0);
+            assert!(
+                moved.iter().flatten().all(|&n| n > 0),
+                "moved rows {moved:?}"
+            );
         }
     }
 
@@ -2519,6 +2775,8 @@ mod neon_ext_tests {
             let w32 = |l: [i32; 4]| -> [u8; 16] {
                 core::array::from_fn(|i| l[i / 4].to_le_bytes()[i % 4])
             };
+            // SAFETY: NEON is part of every aarch64 build (`arch` layer comment in `xdrop_simd.rs`)
+            // and the `ext` functions take registers only; `v` and `b` touch one `[u8; 16]` each.
             unsafe {
                 let (vx, vy) = (v(x), v(y));
                 assert_eq!(

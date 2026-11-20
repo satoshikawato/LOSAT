@@ -1,0 +1,174 @@
+{
+"BlastOutput2": [
+{
+    "report": {
+      "program": "tblastn",
+      "version": "TBLASTN 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1",
+          "Subject_2"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "db_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_1",
+            "query_title": "q1 plain",
+            "query_len": 140,
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "sn2",
+                    "title": "sn2 subject nucleotide beta reverse"
+                  }
+                ],
+                "len": 477,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 184.111,
+                    "score": 466,
+                    "evalue": 2.97453e-65,
+                    "identity": 98,
+                    "positive": 108,
+                    "query_from": 3,
+                    "query_to": 140,
+                    "hit_from": 41,
+                    "hit_to": 451,
+                    "hit_frame": -3,
+                    "align_len": 139,
+                    "gaps": 3,
+                    "qseq": "MEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLM-KYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTASEG",
+                    "hseq": "MEHSVLKANFAGLSEVMDDPKIQYGPMAVMKGMEHYCPPANLSWKVRMFSFGFSSDIHACNLWLCSIPK*MALPGLGKSNTW--SENGPWMHKYPKCKCVQV*FTNYSLWQWKISHDANCEKLKILHYMVGHGRTAAEG",
+                    "midline": "MEHSVLKANFA L +VMDDPKI+ GPMAVMKG E+YC PAN+SWKV M  + FSSDIH CNLW+C IPK MA PG   ++T   SE G WMHKYPKC CV V  T+ SL  WKI HDAN EKLKI HYMVGHGRTA+EG"
+                  },
+                  {
+                    "num": 2,
+                    "bit_score": 16.5494,
+                    "score": 31,
+                    "evalue": 0.326058,
+                    "identity": 10,
+                    "positive": 18,
+                    "query_from": 55,
+                    "query_to": 94,
+                    "hit_from": 322,
+                    "hit_to": 441,
+                    "hit_frame": 1,
+                    "align_len": 40,
+                    "gaps": 0,
+                    "qseq": "SSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHK",
+                    "hseq": "SSD*RAGNSAPCPSLQPLAHTVFWDRPSLH*ARQNLLLAR",
+                    "midline": "SSD    N   C   + +A   +W+  +LH +   L + +"
+                  },
+                  {
+                    "num": 3,
+                    "bit_score": 15.0086,
+                    "score": 27,
+                    "evalue": 1.02719,
+                    "identity": 5,
+                    "positive": 8,
+                    "query_from": 113,
+                    "query_to": 128,
+                    "hit_from": 78,
+                    "hit_to": 125,
+                    "hit_frame": 3,
+                    "align_len": 16,
+                    "gaps": 0,
+                    "qseq": "WKIMHDANFEKLKIFH",
+                    "hseq": "WRILSFSQLASWLIFH",
+                    "midline": "W+I+  +      IFH"
+                  }
+                ]
+              },
+              {
+                "num": 2,
+                "description": [
+                  {
+                    "id": "sn1",
+                    "title": "sn1 subject nucleotide alpha"
+                  }
+                ],
+                "len": 488,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 128.642,
+                    "score": 322,
+                    "evalue": 5.94415e-49,
+                    "identity": 60,
+                    "positive": 63,
+                    "query_from": 1,
+                    "query_to": 66,
+                    "hit_from": 46,
+                    "hit_to": 243,
+                    "hit_frame": 1,
+                    "align_len": 66,
+                    "gaps": 0,
+                    "qseq": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWIC",
+                    "hseq": "MWMEHSVLEAIFAVLRKVMDDPKIRDGPMAAMKGWENYCWPANISWKVLMKFEFSSDIHPCNLCIC",
+                    "midline": "MWMEHSVL+A FAVLRKVMDDPKIRDGPMA MKGWENYCWPAN+SWKVLMK+EFSSDIHPCNL IC"
+                  },
+                  {
+                    "num": 2,
+                    "bit_score": 68.1662,
+                    "score": 165,
+                    "evalue": 5.94415e-49,
+                    "identity": 32,
+                    "positive": 34,
+                    "query_from": 99,
+                    "query_to": 140,
+                    "hit_from": 338,
+                    "hit_to": 463,
+                    "hit_frame": 2,
+                    "align_len": 42,
+                    "gaps": 0,
+                    "qseq": "MCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTASEG",
+                    "hseq": "VCNVVRITDQSLRHCKPNHDANCEKFKIFHNMVGHGRTASEG",
+                    "midline": "+C +VR TDQSLRH K  HDAN EK KIFH MVGHGRTASEG"
+                  },
+                  {
+                    "num": 3,
+                    "bit_score": 49.6766,
+                    "score": 117,
+                    "evalue": 9.26011e-13,
+                    "identity": 28,
+                    "positive": 38,
+                    "query_from": 34,
+                    "query_to": 101,
+                    "hit_from": 120,
+                    "hit_to": 344,
+                    "hit_frame": 3,
+                    "align_len": 75,
+                    "gaps": 7,
+                    "qseq": "GWENYCWPANMSWKVLMKYEFSSDI-------HPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCV",
+                    "hseq": "GWAHGCNEGLGELLLAREYKLESPYEV*VFLRYPPLQFMHLLPKDMANPGLSKTDTLHRSAMGLWRHKHLKGMCV",
+                    "midline": "GW + C        +  +Y+  S         +P   ++  +PK+MA PG   TDTLH S MGLW HK+ K MCV"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 21,
+              "eff_space": 33201,
+              "kappa": 0.041,
+              "lambda": 0.267,
+              "entropy": 0.14
+            }
+          }
+        ]
+      }
+    }
+  }

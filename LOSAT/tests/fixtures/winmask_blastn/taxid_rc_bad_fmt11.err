@@ -1,0 +1,9 @@
+Critical: (110.6) CNcbiRegistry: Syntax error in system-wide configuration file: NCBI C++ Exception:
+    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/corelib/ncbireg.cpp", line 708: Error: (CRegistryException::eSection) ncbi::IRWRegistry::x_Read() - Invalid registry section name: `[my blast]' (m_Pos = 3)
+
+Critical: (110.6) [blastn] CNcbiRegistry: Syntax error in system-wide configuration file: NCBI C++ Exception:
+    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/corelib/ncbireg.cpp", line 708: Error: (CRegistryException::eSection) ncbi::IRWRegistry::x_Read() - Invalid registry section name: `[my blast]' (m_Pos = 3)
+
+Critical: (110.6) [blastn] CNcbiRegistry: Syntax error in system-wide configuration file: NCBI C++ Exception:
+    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/corelib/ncbireg.cpp", line 708: Error: (CRegistryException::eSection) ncbi::IRWRegistry::x_Read() - Invalid registry section name: `[my blast]' (m_Pos = 3)
+

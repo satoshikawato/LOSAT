@@ -1,4 +1,3 @@
-//! EXPERIMENT (LOSAT_X_NEWTONLANES / LOSAT_X_NEWTONLANESSHADOW):
 //! `Blast_OptimizeTargetFrequencies` for four independent problems at once,
 //! one problem per vector lane, bit for bit.
 //!
@@ -44,15 +43,14 @@
 //! and never re-associates sums; SIMD add / sub / mul / div / sqrt are
 //! IEEE-754 per element, so a lane gives the scalar result.
 //!
-//! LOSAT_X_NEWTONLANES8 (aarch64; a switch of the strict set, `utils/xswitch.rs`:
-//! on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set): eight
+//! On aarch64 (no variable; `LOSAT_X_NEWTONLANES8` graduated 2026-10-22): eight
 //! problems per round, value `k` of eight problems in one `[f64; 8]` (`F8`), so
 //! each operation is four 128-bit NEON operations on independent values.  The
 //! lane body is the same generic code; each lane still runs the operation
 //! sequence above.  When the queue is empty and at most four lanes hold a
 //! problem, those problems move to a four-lane state (bit copies of the values
-//! that persist between rounds) and finish there.  On x86-64 and Wasm the switch
-//! does nothing and the lanes stay four wide (on x86-64 the two 256-bit
+//! that persist between rounds) and finish there.  On x86-64 and Wasm the lanes
+//! stay four wide (on x86-64 the two 256-bit
 //! operations per value gave no gain; Wasm is not measured); the unit tests run
 //! the eight-lane body on every target.
 //!
@@ -68,11 +66,11 @@ use super::adjust_scores::{
 use super::x_newton_exact::{
     factor_literal, ln_one, optimize_target_frequencies_exact, structure_ok, Factor, Wparts,
 };
+use std::borrow::BorrowMut;
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::ops::{Index, IndexMut};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::OnceLock;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:725-727
 // ```c
@@ -90,7 +88,7 @@ const LANES: usize = 4;
 const MIN_LANE_BATCH: usize = 3;
 const STORE_CAPACITY: usize = 512;
 const NO_PROBLEM: usize = usize::MAX;
-// No NCBI counterpart: the eight-lane width (LOSAT_X_NEWTONLANES8), the smallest batch that uses
+// No NCBI counterpart: the eight-lane width (aarch64), the smallest batch that uses
 // it, and the number of lanes with a problem at or below which an eight-lane batch whose queue is
 // empty moves to four lanes; they do not change any value NCBI computes.
 const LANES8: usize = 8;
@@ -98,47 +96,16 @@ const MAX_LANES: usize = LANES8;
 const MIN_LANE8_BATCH: usize = LANES + 1;
 const HAND_OVER_LANES: usize = LANES;
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:686-687,693-696
-// ```c
-// int
-// Blast_OptimizeTargetFrequencies(double x[],
-// ...
-//                                 int constrain_rel_entropy,
-//                                 double relative_entropy,
-//                                 double tol,
-//                                 int maxits)
-// ```
-// No NCBI counterpart: reads LOSAT_X_NEWTONLANES and LOSAT_X_NEWTONLANESSHADOW once; it only
-// chooses whether results computed ahead are looked up; it does not change any value NCBI computes.
-/// 0 = off, 1 = `LOSAT_X_NEWTONLANES`, 2 = `LOSAT_X_NEWTONLANESSHADOW` (every
-/// result taken from the store is compared with the reference port).
-pub(crate) fn mode() -> u8 {
-    static MODE: OnceLock<u8> = OnceLock::new();
-    *MODE.get_or_init(|| {
-        if std::env::var_os("LOSAT_X_NEWTONLANESSHADOW").is_some() {
-            2
-        } else if crate::utils::xswitch::on("LOSAT_X_NEWTONLANES") {
-            1
-        } else {
-            0
-        }
-    })
-}
-
-// No NCBI counterpart: reads LOSAT_X_NEWTONLANES8 once (a strict-set switch: on unless it is `0`,
-// or `LOSAT_X_DEFAULT=0` and it is not set). On aarch64 it chooses how many problems share a round
-// when the lanes run; it does not turn them on. On x86-64 and Wasm it is not read and the lanes
-// stay four wide (x86-64 AVX2 measured no gain). It does not change any value NCBI computes.
+// No NCBI counterpart: on aarch64 the lanes share a round among eight problems; on x86-64 and
+// Wasm the lanes stay four wide (x86-64 AVX2 measured no gain). It does not change any value NCBI
+// computes.
 /// Whether batches of `MIN_LANE8_BATCH` or more problems use eight lanes.
 fn eight_lanes() -> bool {
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| {
-        cfg!(target_arch = "aarch64") && crate::utils::xswitch::on("LOSAT_X_NEWTONLANES8")
-    })
+    cfg!(target_arch = "aarch64")
 }
 
-// No NCBI counterpart: counters of the LOSAT_X_STATS / shadow report; they do not change any value
-// NCBI computes.
+// No NCBI counterpart: counters of the LOSAT_X_STATS report; they do not change any value NCBI
+// computes.
 static PREFETCHED: AtomicU64 = AtomicU64::new(0);
 static HITS: AtomicU64 = AtomicU64::new(0);
 static MISSES: AtomicU64 = AtomicU64::new(0);
@@ -148,19 +115,12 @@ static BUSY_LANE_ROUNDS: AtomicU64 = AtomicU64::new(0);
 static BATCHES8: AtomicU64 = AtomicU64::new(0);
 static ROUNDS8: AtomicU64 = AtomicU64::new(0);
 static TAIL_ROUNDS: AtomicU64 = AtomicU64::new(0);
-/// Store hits compared with the reference port (LOSAT_X_NEWTONLANESSHADOW).
-pub(crate) static SHADOWED: AtomicU64 = AtomicU64::new(0);
+static DROPPED: AtomicU64 = AtomicU64::new(0);
+static KEPT: AtomicU64 = AtomicU64::new(0);
 
 // No NCBI counterpart: prints the counters at exit; it does not change any value NCBI computes.
 pub(crate) fn print_stats() {
-    let lanes_mode = mode();
-    if lanes_mode == 2 {
-        eprintln!(
-            "[X_SHADOW] NEWTONLANES calls_compared={} (status and all 400 target frequencies bit-identical)",
-            SHADOWED.load(Ordering::Relaxed)
-        );
-    }
-    if lanes_mode != 0 && std::env::var_os("LOSAT_X_STATS").is_some() {
+    if std::env::var_os("LOSAT_X_STATS").is_some() {
         let prefetched = PREFETCHED.load(Ordering::Relaxed);
         let hits = HITS.load(Ordering::Relaxed);
         eprintln!(
@@ -173,6 +133,16 @@ pub(crate) fn print_stats() {
             LANE_ROUNDS.load(Ordering::Relaxed),
             BUSY_LANE_ROUNDS.load(Ordering::Relaxed),
         );
+        if prefetched > 0 {
+            eprintln!(
+                "[X_STATS] NEWTONDROP dropped={}",
+                DROPPED.load(Ordering::Relaxed)
+            );
+            eprintln!(
+                "[X_STATS] NEWTONBATCH kept={}",
+                KEPT.load(Ordering::Relaxed)
+            );
+        }
         if eight_lanes() {
             eprintln!(
                 "[X_STATS] NEWTONLANES8 batches8={} rounds8={} tail_rounds={}",
@@ -202,10 +172,16 @@ pub(crate) fn print_stats() {
 // ```
 // The arguments of this call that determine its result (`q = mat_b`, `row_probs`, `col_probs`,
 // `desired_re` with `desired_re > 0.0`).
-/// Input of one relative-entropy-constrained problem (alphabet of 20).
+/// The `q` of the inputs of one batch: one copy of the workspace's `mat_b`, shared by them.
+pub(crate) type NewtonQ = std::rc::Rc<[f64; NN]>;
+
+/// Input of one relative-entropy-constrained problem (alphabet of 20). `q` is shared: the inputs
+/// that `x_newton_input` makes for one batch hold one copy of the workspace's `mat_b` instead of
+/// one each (EB s22: an input was 3,528 bytes, so a batch of 33 to 64 inputs was a vector of
+/// 225,792 bytes, kept per thread until its results were taken; now 336 bytes an input).
 #[derive(Clone)]
 pub(crate) struct NewtonInput {
-    pub(crate) q: [f64; NN],
+    pub(crate) q: NewtonQ,
     pub(crate) row: [f64; N],
     pub(crate) col: [f64; N],
     pub(crate) relative_entropy: f64,
@@ -400,7 +376,7 @@ macro_rules! lane_vec {
 }
 
 // No NCBI counterpart: four problems per value (one 256-bit or two 128-bit vectors) and, for
-// LOSAT_X_NEWTONLANES8, eight; it does not change any value NCBI computes.
+// eight on aarch64; it does not change any value NCBI computes.
 lane_vec!(F4, M4, 4, 32, [0, 1, 2, 3]);
 lane_vec!(F8, M8, 8, 64, [0, 1, 2, 3, 4, 5, 6, 7]);
 
@@ -1034,9 +1010,9 @@ impl LaneSlots {
 // `hand_over_at` above zero, when the queue is empty and at most `hand_over_at` lanes hold one.
 /// Returns (rounds, rounds × lanes that held a problem).
 #[inline(always)]
-fn solve_lanes_body<V: LaneVec>(
+fn solve_lanes_body<V: LaneVec, O: BorrowMut<NewtonOutput>>(
     inputs: &[NewtonInput],
-    outputs: &mut [NewtonOutput],
+    outputs: &mut [O],
     st: &mut LaneState<V>,
     lanes: &mut LaneSlots,
     next: &mut usize,
@@ -1238,6 +1214,10 @@ fn solve_lanes_body<V: LaneVec>(
                 continue;
             }
             let lane_rnorm = rnorm[l];
+            #[expect(
+                clippy::neg_cmp_op_on_partial_ord,
+                reason = "NCBI's convergence test `!(rnorm > tol)` stops on a NaN rnorm (optimize_target_freq.c:760-762); `<=` would not"
+            )]
             let finished = if !(lane_rnorm > K_COMPO_ADJUST_ERR_TOLERANCE) {
                 true
             } else {
@@ -1248,7 +1228,7 @@ fn solve_lanes_body<V: LaneVec>(
                 let converged = its[l] <= K_COMPO_ADJUST_ITERATION_LIMIT
                     && lane_rnorm <= K_COMPO_ADJUST_ERR_TOLERANCE
                     && st.z[M - 1][l] < 1.0;
-                let output = &mut outputs[s];
+                let output: &mut NewtonOutput = outputs[s].borrow_mut();
                 output.status = if converged { 0 } else { 1 };
                 for k in 0..NN {
                     output.x[k] = st.x[k][l];
@@ -1277,9 +1257,9 @@ fn solve_lanes_body<V: LaneVec>(
 // The four-lane loop over a whole batch (no lane holds a problem, the queue at its start).
 /// Returns (rounds, rounds × lanes that held a problem).
 #[inline(always)]
-fn solve_lanes4_body(
+fn solve_lanes4_body<O: BorrowMut<NewtonOutput>>(
     inputs: &[NewtonInput],
-    outputs: &mut [NewtonOutput],
+    outputs: &mut [O],
     st: &mut LaneState<F4>,
 ) -> (u64, u64) {
     let mut lanes = LaneSlots::empty();
@@ -1299,9 +1279,9 @@ fn solve_lanes4_body(
 // with their `its` and first-round flag) and finish there. Each problem keeps its operations.
 /// Returns [eight-lane rounds, their busy lane rounds, four-lane rounds, their busy lane rounds].
 #[inline(always)]
-fn solve_lanes8_body(
+fn solve_lanes8_body<O: BorrowMut<NewtonOutput>>(
     inputs: &[NewtonInput],
-    outputs: &mut [NewtonOutput],
+    outputs: &mut [O],
     st8: &mut LaneState<F8>,
     st4: &mut LaneState<F4>,
     hand_over_at: usize,
@@ -1335,9 +1315,9 @@ fn solve_lanes8_body(
 // IEEE-754 operations as the body without the feature; it does not change any value NCBI computes.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
-unsafe fn solve_lanes_avx2(
+unsafe fn solve_lanes_avx2<O: BorrowMut<NewtonOutput>>(
     inputs: &[NewtonInput],
-    outputs: &mut [NewtonOutput],
+    outputs: &mut [O],
     st: &mut LaneState<F4>,
 ) -> (u64, u64) {
     solve_lanes4_body(inputs, outputs, st)
@@ -1349,9 +1329,9 @@ unsafe fn solve_lanes_avx2(
 // ```
 // No NCBI counterpart: the lane body without target features (Wasm, other targets,
 // LOSAT_X_NEWTONEXACT_LEVEL=0); it does not change any value NCBI computes.
-fn solve_lanes_plain(
+fn solve_lanes_plain<O: BorrowMut<NewtonOutput>>(
     inputs: &[NewtonInput],
-    outputs: &mut [NewtonOutput],
+    outputs: &mut [O],
     st: &mut LaneState<F4>,
 ) -> (u64, u64) {
     solve_lanes4_body(inputs, outputs, st)
@@ -1363,12 +1343,12 @@ fn solve_lanes_plain(
 // ```
 // No NCBI counterpart: the eight-lane loop compiled with AVX2 enabled (each `F8` operation is two
 // 256-bit operations on independent values); x86-64 runs it only in the unit tests
-// (LOSAT_X_NEWTONLANES8 acts on aarch64). It does not change any value NCBI computes.
+// (the eight lanes run on aarch64). It does not change any value NCBI computes.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
-unsafe fn solve_lanes8_avx2(
+unsafe fn solve_lanes8_avx2<O: BorrowMut<NewtonOutput>>(
     inputs: &[NewtonInput],
-    outputs: &mut [NewtonOutput],
+    outputs: &mut [O],
     st8: &mut LaneState<F8>,
     st4: &mut LaneState<F4>,
     hand_over_at: usize,
@@ -1382,9 +1362,9 @@ unsafe fn solve_lanes8_avx2(
 // ```
 // No NCBI counterpart: the eight-lane loop without target features (aarch64 NEON through the
 // baseline target; other targets in the unit tests); it does not change any value NCBI computes.
-fn solve_lanes8_plain(
+fn solve_lanes8_plain<O: BorrowMut<NewtonOutput>>(
     inputs: &[NewtonInput],
-    outputs: &mut [NewtonOutput],
+    outputs: &mut [O],
     st8: &mut LaneState<F8>,
     st4: &mut LaneState<F4>,
     hand_over_at: usize,
@@ -1404,9 +1384,9 @@ fn solve_lanes8_plain(
 // ```
 // Solves every problem of the batch, each with the result of this function (`x` and the status).
 // Batches of fewer than `MIN_LANE_BATCH` problems use `x_newton_exact` (same results); with
-// LOSAT_X_NEWTONLANES8 on aarch64, batches of `MIN_LANE8_BATCH` or more use eight lanes.
+// aarch64, batches of `MIN_LANE8_BATCH` or more use eight lanes.
 /// Solves `inputs[i]` into `outputs[i]`.
-pub(crate) fn solve_batch(inputs: &[NewtonInput], outputs: &mut [NewtonOutput]) {
+pub(crate) fn solve_batch<O: BorrowMut<NewtonOutput>>(inputs: &[NewtonInput], outputs: &mut [O]) {
     let lanes8 = if eight_lanes() {
         Some(HAND_OVER_LANES)
     } else {
@@ -1428,7 +1408,11 @@ pub(crate) fn solve_batch(inputs: &[NewtonInput], outputs: &mut [NewtonOutput]) 
 // `solve_batch` with the width given: `lanes8` is `None` for four lanes, `Some(hand_over_at)` for
 // eight lanes on batches of `MIN_LANE8_BATCH` or more (see `solve_lanes8_body`).
 /// Solves `inputs[i]` into `outputs[i]`.
-fn solve_batch_with(inputs: &[NewtonInput], outputs: &mut [NewtonOutput], lanes8: Option<usize>) {
+fn solve_batch_with<O: BorrowMut<NewtonOutput>>(
+    inputs: &[NewtonInput],
+    outputs: &mut [O],
+    lanes8: Option<usize>,
+) {
     assert_eq!(inputs.len(), outputs.len());
     if let Some(hand_over_at) = lanes8 {
         if inputs.len() >= MIN_LANE8_BATCH {
@@ -1438,9 +1422,10 @@ fn solve_batch_with(inputs: &[NewtonInput], outputs: &mut [NewtonOutput], lanes8
     }
     if inputs.len() < MIN_LANE_BATCH {
         for (input, output) in inputs.iter().zip(outputs.iter_mut()) {
+            let output: &mut NewtonOutput = output.borrow_mut();
             output.status = optimize_target_frequencies_exact(
                 &mut output.x,
-                &input.q,
+                &input.q[..],
                 &input.row,
                 &input.col,
                 input.relative_entropy,
@@ -1484,7 +1469,11 @@ thread_local! {
 // ```
 // An eight-lane batch (`solve_lanes8_body`), AVX2 or plain as the four-lane batches.
 /// Solves `inputs[i]` into `outputs[i]` on eight lanes.
-fn solve_batch8(inputs: &[NewtonInput], outputs: &mut [NewtonOutput], hand_over_at: usize) {
+fn solve_batch8<O: BorrowMut<NewtonOutput>>(
+    inputs: &[NewtonInput],
+    outputs: &mut [O],
+    hand_over_at: usize,
+) {
     LANES8_STATES.with(|states| {
         let mut states = states.borrow_mut();
         let (st8, st4) = states.get_or_insert_with(|| (new_lane_state(), new_lane_state()));
@@ -1524,16 +1513,83 @@ thread_local! {
     static STORE: RefCell<VecDeque<Box<StoredResult>>> = const { RefCell::new(VecDeque::new()) };
 }
 
+// No NCBI counterpart: the results of this thread's last prefetch as it solved them
+// (LOSAT_X_NEWTONBATCH), one box each; a result taken is freed at once (`None`), `next` is the first
+// one not taken and `left` counts the ones not taken. It does not change any value NCBI computes.
+/// One box per result, not one vector for the batch: each prefetch made a new block of n x 3,208
+/// bytes (n = 33 to 64 for TBLASTN), which seldom fitted the free space the thread's earlier
+/// blocks left and so pushed the top of its glibc arena (line EB s26 C26 / C28: the largest top
+/// push of TBLASTN at 32 threads, twice as large with half the inputs per prefetch); a box fits the
+/// space the boxes taken before it left.
+struct KeptBatch {
+    inputs: Vec<NewtonInput>,
+    outputs: Vec<Option<Box<NewtonOutput>>>,
+    next: usize,
+    left: usize,
+}
+
+// No NCBI counterpart: per-thread batch computed ahead (LOSAT_X_NEWTONBATCH; the next prefetch drops
+// it, and it goes when its last result is taken); it does not change any value NCBI computes.
+thread_local! {
+    static BATCH: RefCell<Option<KeptBatch>> = const { RefCell::new(None) };
+}
+
 // No NCBI counterpart: solves a batch of inputs gathered ahead of their calls and keeps the results
 // for `take`; it does not change any value NCBI computes.
-/// Solves `inputs` and keeps the results in this thread's store.
+/// Solves `inputs` and keeps the results for this thread's calls.
 pub(crate) fn prefetch(inputs: Vec<NewtonInput>) {
+    // Dispatch point (LOSAT_X_NEWTONDROP, in the strict set; `=0` keeps the results not taken;
+    // LOSAT_X_NEWTONBATCH, in the strict set; `=0` stores the results one by one).
+    x_prefetch(inputs, x_newton_drop(), x_newton_batch());
+}
+
+// No NCBI counterpart: `prefetch`, with `drop` for LOSAT_X_NEWTONDROP and `batch` for
+// LOSAT_X_NEWTONBATCH; it does not change any value NCBI computes.
+/// A call comes after the windows (TBLASTN) or the matches (BLASTP: the next matches of a query, or
+/// a job's matches in the windowed redo) of this thread's earlier calls were walked, so their
+/// results not taken are not asked for again; with `drop` they are dropped before this batch is
+/// solved, without it they stay until the store holds `STORE_CAPACITY` results. A dropped result
+/// asked for after all would be solved by the caller with the same bits (`take` returns `None`).
+/// With `drop` and `batch` the results stay in the boxes they were solved in (one batch a
+/// thread) instead of being copied into the store: no copy, so the caller's inputs, the outputs
+/// and the store's boxes are never held at once; each box is freed when its result is taken. The
+/// batch keeps every result of a prefetch; the store keeps the last `STORE_CAPACITY` of one that
+/// solves more (then more of them are taken from the batch, with the same bits).
+#[inline]
+fn x_prefetch(inputs: Vec<NewtonInput>, drop: bool, batch: bool) {
+    if drop {
+        STORE.with(|store| {
+            let mut store = store.borrow_mut();
+            DROPPED.fetch_add(store.len() as u64, Ordering::Relaxed);
+            store.clear();
+        });
+        BATCH.with(|kept| {
+            if let Some(old) = kept.borrow_mut().take() {
+                DROPPED.fetch_add(old.left as u64, Ordering::Relaxed);
+            }
+        });
+    }
     if inputs.is_empty() {
         return;
     }
-    let mut outputs = vec![NewtonOutput::new(); inputs.len()];
+    let mut outputs: Vec<Box<NewtonOutput>> = (0..inputs.len())
+        .map(|_| Box::new(NewtonOutput::new()))
+        .collect();
     solve_batch(&inputs, &mut outputs);
     PREFETCHED.fetch_add(inputs.len() as u64, Ordering::Relaxed);
+    if drop && batch {
+        KEPT.fetch_add(1, Ordering::Relaxed);
+        let n = inputs.len();
+        BATCH.with(|kept| {
+            *kept.borrow_mut() = Some(KeptBatch {
+                inputs,
+                outputs: outputs.into_iter().map(Some).collect(),
+                next: 0,
+                left: n,
+            });
+        });
+        return;
+    }
     STORE.with(|store| {
         let mut store = store.borrow_mut();
         for (input, output) in inputs.into_iter().zip(outputs) {
@@ -1547,6 +1603,80 @@ pub(crate) fn prefetch(inputs: Vec<NewtonInput>) {
             }));
         }
     });
+}
+
+// No NCBI counterpart (memory only; the results kept are the ones `prefetch` solved):
+// LOSAT_X_NEWTONDROP, in the strict set (on unless `LOSAT_X_NEWTONDROP=0`).
+/// Whether `prefetch` drops the results of this thread's earlier calls that were not taken.
+fn x_newton_drop() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_NEWTONDROP"))
+}
+
+// No NCBI counterpart (memory only; the results kept are the ones `prefetch` solved):
+// LOSAT_X_NEWTONBATCH, in the strict set (on unless `LOSAT_X_NEWTONBATCH=0`).
+/// Whether `prefetch` keeps its batch as the vectors it was solved in (with LOSAT_X_NEWTONDROP; the
+/// batch holds one prefetch).
+fn x_newton_batch() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_NEWTONBATCH"))
+}
+
+// No NCBI counterpart: the result of this thread's kept batch for this input (LOSAT_X_NEWTONBATCH):
+// the first one not taken, from `next` on, whose input equals this one by bits; the batch goes when
+// its last result is taken. It does not change any value NCBI computes.
+// Not inlined: inlined into `take`'s caller (`composition_matrix_adjust`) it changed that function's
+// code on every path (one-thread instructions x1.001 with the switch off).
+#[inline(never)]
+fn x_take_batch(
+    x: &mut [f64],
+    q: &[f64],
+    row: &[f64; N],
+    col: &[f64; N],
+    relative_entropy: f64,
+) -> Option<i32> {
+    BATCH.with(|kept| {
+        let mut kept = kept.borrow_mut();
+        let batch = kept.as_mut()?;
+        let i = (batch.next..batch.inputs.len()).find(|&i| {
+            batch.outputs[i].is_some()
+                && x_same_input(&batch.inputs[i], q, row, col, relative_entropy)
+        })?;
+        let output = batch.outputs[i].take()?;
+        x.copy_from_slice(&output.x);
+        let status = output.status;
+        drop(output);
+        batch.left -= 1;
+        let last = batch.left == 0;
+        if !last {
+            // a result not taken is left at `next` or after it
+            while batch.outputs[batch.next].is_none() {
+                batch.next += 1;
+            }
+        }
+        if last {
+            *kept = None;
+        }
+        Some(status)
+    })
+}
+
+// No NCBI counterpart: whether `input` is this input by bits (relative entropy, column and row
+// probabilities, q); it does not change any value NCBI computes.
+// Not inlined: inlined into the search of the kept batch, the loop over `q` kept its index on the
+// stack (twice the instructions of the store's search, whose closure is a function of its own).
+#[inline(never)]
+fn x_same_input(
+    input: &NewtonInput,
+    q: &[f64],
+    row: &[f64; N],
+    col: &[f64; N],
+    relative_entropy: f64,
+) -> bool {
+    input.relative_entropy.to_bits() == relative_entropy.to_bits()
+        && same_bits(&input.col, col)
+        && same_bits(&input.row, row)
+        && same_bits(&input.q[..], q)
 }
 
 // No NCBI counterpart: bitwise equality of two f64 slices.
@@ -1568,7 +1698,8 @@ fn same_bits(a: &[f64], b: &[f64]) -> bool {
 // No NCBI counterpart: looks up a result computed ahead for exactly this input (relative entropy,
 // column and row probabilities, q compared by bits); on a hit `x` receives the stored final iterate
 // and the stored status is returned. It does not change any value NCBI computes.
-/// The stored result for this input, if any (removed from the store).
+/// The stored result for this input, if any (each result is given once): this thread's kept batch
+/// (LOSAT_X_NEWTONBATCH) first, then its store (empty while a batch is kept).
 pub(crate) fn take(
     x: &mut [f64],
     q: &[f64],
@@ -1576,13 +1707,17 @@ pub(crate) fn take(
     col: &[f64; N],
     relative_entropy: f64,
 ) -> Option<i32> {
+    if let Some(status) = x_take_batch(x, q, row, col, relative_entropy) {
+        HITS.fetch_add(1, Ordering::Relaxed);
+        return Some(status);
+    }
     STORE.with(|store| {
         let mut store = store.borrow_mut();
         let position = store.iter().position(|entry| {
             entry.input.relative_entropy.to_bits() == relative_entropy.to_bits()
                 && same_bits(&entry.input.col, col)
                 && same_bits(&entry.input.row, row)
-                && same_bits(&entry.input.q, q)
+                && same_bits(&entry.input.q[..], q)
         });
         match position {
             Some(position) => {
@@ -1635,6 +1770,7 @@ mod tests {
         let matrix_info = build_matrix_info(ScoringMatrix::Blosum62, 0.3176).unwrap();
         let workspace = BlastCompositionWorkspace::new_blosum62();
         let mut problems = Vec::new();
+        let mut shared_q = None;
         let mut attempts = 0;
         while problems.len() < 40 && attempts < 400 {
             attempts += 1;
@@ -1681,6 +1817,7 @@ mod tests {
                 sequences[1].len() as i32,
                 mode,
                 &workspace,
+                &mut shared_q,
             ) {
                 problems.push(input);
             }
@@ -1690,21 +1827,22 @@ mod tests {
             "realistic problems: {}",
             problems.len()
         );
-        let blosum_q = problems[0].q;
+        let blosum_q = problems[0].q.clone();
         // Random joint distributions, compositions and relative entropies.
         for case in 0..24 {
             let mut input = problems[case % problems.len()].clone();
             if case % 2 == 0 {
                 let mut total = 0.0;
-                for v in input.q.iter_mut() {
+                let q = std::rc::Rc::make_mut(&mut input.q);
+                for v in q.iter_mut() {
                     *v = 1.0e-4 + xorshift(&mut state).powi(2);
                     total += *v;
                 }
-                for v in input.q.iter_mut() {
+                for v in q.iter_mut() {
                     *v /= total;
                 }
             } else {
-                input.q = blosum_q;
+                input.q = blosum_q.clone();
             }
             let (mut sr, mut sc) = (0.0, 0.0);
             for k in 0..N {
@@ -1747,7 +1885,7 @@ mod tests {
                 let mut exact = NewtonOutput::new();
                 exact.status = optimize_target_frequencies_exact(
                     &mut exact.x,
-                    &input.q,
+                    &input.q[..],
                     &input.row,
                     &input.col,
                     input.relative_entropy,
@@ -1755,7 +1893,7 @@ mod tests {
                 let mut reference = NewtonOutput::new();
                 reference.status = x_optimize_reference_for_test(
                     &mut reference.x,
-                    &input.q,
+                    &input.q[..],
                     &input.row,
                     &input.col,
                     input.relative_entropy,
@@ -1867,7 +2005,7 @@ mod tests {
     //             /* We converged at the current iterate */
     //             break;
     // ```
-    // The eight-lane batches (LOSAT_X_NEWTONLANES8): every size 1..=21 and one of 64, with the move
+    // The eight-lane batches (aarch64): every size 1..=21 and one of 64, with the move
     // to four lanes and without it, the plain compilation, and the literal factorisation forced on one
     // lane (any of the eight) in one round; status and all 400 values compared by bits with the exact
     // module and the reference port.
@@ -1944,15 +2082,132 @@ mod tests {
         // A different relative entropy (one ulp) misses.
         let p = &problems[2];
         let re = f64::from_bits(p.relative_entropy.to_bits() + 1);
-        assert_eq!(take(&mut x, &p.q, &p.row, &p.col, re), None);
+        assert_eq!(take(&mut x, &p.q[..], &p.row, &p.col, re), None);
         // Exact inputs hit once each, in any order.
         for i in [3usize, 0, 4, 1, 2] {
             let p = &problems[i];
-            let status = take(&mut x, &p.q, &p.row, &p.col, p.relative_entropy);
+            let status = take(&mut x, &p.q[..], &p.row, &p.col, p.relative_entropy);
             assert_eq!(status, Some(want[i].status));
             assert!(same_bits(&x, &want[i].x));
-            assert_eq!(take(&mut x, &p.q, &p.row, &p.col, p.relative_entropy), None);
+            assert_eq!(
+                take(&mut x, &p.q[..], &p.row, &p.col, p.relative_entropy),
+                None
+            );
         }
+    }
+
+    // No NCBI counterpart: LOSAT_X_NEWTONDROP; a prefetch drops this thread's results of earlier
+    // prefetches not taken (with `=0` they stay); it does not change any value NCBI computes.
+    #[test]
+    fn x_newton_drop_empties_the_store_at_the_next_prefetch() {
+        let problems = test_problems();
+        let want = expected(&problems[..8]);
+        let mut x = [0.0f64; NN];
+        let take_at = |x: &mut [f64; NN], i: usize| {
+            let p = &problems[i];
+            take(x, &p.q[..], &p.row, &p.col, p.relative_entropy)
+        };
+        // the same calls with the switch (`drop`) and with `=0`, in this process, with the results
+        // kept as their batch (LOSAT_X_NEWTONBATCH, only with `drop`) or stored one by one
+        for (drop, batch) in [(true, true), (true, false), (false, true), (false, false)] {
+            x_prefetch(Vec::new(), true, true);
+            x_prefetch(problems[..5].to_vec(), drop, batch);
+            assert_eq!(
+                BATCH.with(|kept| kept.borrow().is_some()),
+                drop && batch,
+                "a batch is kept only with drop, drop {drop} batch {batch}"
+            );
+            for i in [0usize, 2, 4] {
+                assert_eq!(
+                    take_at(&mut x, i),
+                    Some(want[i].status),
+                    "drop {drop} batch {batch}"
+                );
+                assert!(same_bits(&x, &want[i].x));
+            }
+            x_prefetch(problems[5..8].to_vec(), drop, batch);
+            // problems 1 and 3 were not taken before the second prefetch
+            for i in [1usize, 3] {
+                let kept = take_at(&mut x, i);
+                if drop {
+                    assert_eq!(kept, None, "problem {i} dropped, batch {batch}");
+                } else {
+                    assert_eq!(
+                        kept,
+                        Some(want[i].status),
+                        "problem {i} kept with =0, batch {batch}"
+                    );
+                    assert!(same_bits(&x, &want[i].x));
+                }
+            }
+            for i in 5..8 {
+                assert_eq!(
+                    take_at(&mut x, i),
+                    Some(want[i].status),
+                    "drop {drop} batch {batch}"
+                );
+                assert!(same_bits(&x, &want[i].x));
+            }
+            // an empty prefetch drops what is left as well
+            x_prefetch(problems[..2].to_vec(), drop, batch);
+            assert_eq!(
+                take_at(&mut x, 0),
+                Some(want[0].status),
+                "drop {drop} batch {batch}"
+            );
+            x_prefetch(Vec::new(), drop, batch);
+            assert_eq!(
+                take_at(&mut x, 1).is_none(),
+                drop,
+                "problem 1 after an empty prefetch, drop {drop} batch {batch}"
+            );
+        }
+    }
+
+    // No NCBI counterpart: LOSAT_X_NEWTONBATCH; the kept batch gives each result once, in any order,
+    // to the call with its input's bits (also a repeated input), searches on from its first result
+    // not taken, stays out of the store, and goes when its last result is taken; it does not change
+    // any value NCBI computes.
+    #[test]
+    fn x_newton_batch_gives_each_result_once_and_goes_when_all_are_taken() {
+        let problems = test_problems();
+        let mut inputs = problems[..5].to_vec();
+        // problem 2 twice: both calls with its bits get its result
+        inputs.push(problems[2].clone());
+        let want = expected(&inputs);
+        let mut x = [0.0f64; NN];
+        let take_at = |x: &mut [f64; NN], i: usize| {
+            let p = &inputs[i];
+            take(x, &p.q[..], &p.row, &p.col, p.relative_entropy)
+        };
+        x_prefetch(Vec::new(), true, true);
+        x_prefetch(inputs.clone(), true, true);
+        assert!(
+            STORE.with(|store| store.borrow().is_empty()),
+            "the store stays empty"
+        );
+        let next = || BATCH.with(|kept| kept.borrow().as_ref().map(|batch| batch.next));
+        for i in [1usize, 2, 3] {
+            assert_eq!(take_at(&mut x, i), Some(want[i].status), "problem {i}");
+            assert!(same_bits(&x, &want[i].x));
+            assert_eq!(next(), Some(0), "problem 0 is not taken yet");
+        }
+        // results 0 to 3 taken: the search starts at 4
+        assert_eq!(take_at(&mut x, 0), Some(want[0].status));
+        assert!(same_bits(&x, &want[0].x));
+        assert_eq!(next(), Some(4));
+        // the second call with the bits of problem 2 gets the repeated one
+        assert_eq!(take_at(&mut x, 5), Some(want[5].status));
+        assert!(same_bits(&x, &want[5].x));
+        assert_eq!(take_at(&mut x, 2), None, "no result of problem 2 is left");
+        assert_eq!(next(), Some(4), "problem 4 is left");
+        assert_eq!(take_at(&mut x, 4), Some(want[4].status));
+        assert!(same_bits(&x, &want[4].x));
+        assert!(
+            BATCH.with(|kept| kept.borrow().is_none()),
+            "the batch goes with its last result"
+        );
+        assert_eq!(take_at(&mut x, 1), None);
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:686-687,693-696
@@ -1987,7 +2242,7 @@ mod tests {
                     for (input, output) in inputs.iter().zip(exact.iter_mut()) {
                         output.status = optimize_target_frequencies_exact(
                             &mut output.x,
-                            &input.q,
+                            &input.q[..],
                             &input.row,
                             &input.col,
                             input.relative_entropy,

@@ -1,0 +1,936 @@
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastx",
+      service "plain",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_1"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">ENST00000320868.9 cdna
+ chromosome:GRCh38:16:176680:177522:1 gene:ENSG00000206172.10
+ gene_biotype:protein_coding transcript_biotype:protein_coding
+ gene_symbol:HBA1 description:hemoglobin subunit alpha 1 [Source:HGNC
+ Symbol;Acc:HGNC:4823]"
+                  }
+                }
+              },
+              title "ENST00000320868.9 cdna
+ chromosome:GRCh38:16:176680:177522:1 gene:ENSG00000206172.10
+ gene_biotype:protein_coding transcript_biotype:protein_coding
+ gene_symbol:HBA1 description:hemoglobin subunit alpha 1 [Source:HGNC
+ Symbol;Acc:HGNC:4823]"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 577,
+              seq-data ncbi2na '1DF7AD5448748881514EB9EDD796108506D0A597AAC2B6
+99919E98B3AE68A57A228EF5ED7D545142171F5647D85E251A77952BC2A51A420AE96199E14196
+E991BA184E54199ED6578985E4664427DABA15AD07D09D70947979EB857A5951755962F455E6B9
+19757A10BD7A7DEE245B9E1750316F09E8976BA539F7E55FA97555255D755F5E456C556EB7F830
+2DE2EA6900'H
+            }
+          }
+        }
+      },
+      subject database "tests/db_search/taxfilter/tfp",
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, 1 }
+        },
+        {
+          name "LongestIntronLength",
+          value integer 0
+        },
+        {
+          name "MaskAtHash",
+          value boolean FALSE
+        },
+        {
+          name "SegFilteringWindow",
+          value integer 12
+        },
+        {
+          name "SegFilteringLocut",
+          value real { 22, 10, -1 }
+        },
+        {
+          name "SegFilteringHicut",
+          value real { 25, 10, -1 }
+        },
+        {
+          name "WordThreshold",
+          value integer 12
+        },
+        {
+          name "WindowSize",
+          value integer 40
+        },
+        {
+          name "UngappedMode",
+          value boolean FALSE
+        },
+        {
+          name "QueryGeneticCode",
+          value integer 1
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "CompositionBasedStats",
+          value integer 2
+        },
+        {
+          name "SmithWatermanMode",
+          value boolean FALSE
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 76065
+        }
+      },
+      program-options {
+        {
+          name "TaxidList",
+          value integer-list {
+            7955,
+            9606
+          }
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 732
+          },
+          {
+            id str "blast_score",
+            value int 732
+          },
+          {
+            id str "e_value",
+            value real { 714705890379945, 10, -119 }
+          },
+          {
+            id str "bit_score",
+            value real { 286574321851547, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 142
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 142
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 744583333333333, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              swissprot {
+                accession "P69905",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              int {
+                from 37,
+                to 462,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 0,
+                to 141,
+                strand unknown,
+                id swissprot {
+                  accession "P69905",
+                  release "reviewed",
+                  version 2
+                }
+              }
+            }
+          }
+        },
+        ext {
+          {
+            type str "use_this_seqid",
+            data {
+              {
+                label str "SEQIDS",
+                num 1,
+                data strs {
+                  "seqid:P69905.2"
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 27
+          },
+          {
+            id str "blast_score",
+            value int 27
+          },
+          {
+            id str "e_value",
+            value real { 303661792616517, 10, -14 }
+          },
+          {
+            id str "bit_score",
+            value real { 150086208298125, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 6
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 6
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 3625, 10, -3 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              swissprot {
+                accession "P69905",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              int {
+                from 432,
+                to 449,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 132,
+                to 137,
+                strand unknown,
+                id swissprot {
+                  accession "P69905",
+                  release "reviewed",
+                  version 2
+                }
+              }
+            }
+          }
+        },
+        ext {
+          {
+            type str "use_this_seqid",
+            data {
+              {
+                label str "SEQIDS",
+                num 1,
+                data strs {
+                  "seqid:P69905.2"
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 460
+          },
+          {
+            id str "blast_score",
+            value int 460
+          },
+          {
+            id str "e_value",
+            value real { 187220572772495, 10, -77 }
+          },
+          {
+            id str "bit_score",
+            value real { 181800037202027, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 88
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 115
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 744583333333333, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              swissprot {
+                accession "P09105",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              int {
+                from 37,
+                to 462,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 0,
+                to 141,
+                strand unknown,
+                id swissprot {
+                  accession "P09105",
+                  release "reviewed",
+                  version 2
+                }
+              }
+            }
+          }
+        },
+        ext {
+          {
+            type str "use_this_seqid",
+            data {
+              {
+                label str "SEQIDS",
+                num 1,
+                data strs {
+                  "seqid:P09105.2"
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 444
+          },
+          {
+            id str "blast_score",
+            value int 444
+          },
+          {
+            id str "e_value",
+            value real { 48171579930117, 10, -74 }
+          },
+          {
+            id str "bit_score",
+            value real { 175636843987349, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 85
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 109
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 744583333333333, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              swissprot {
+                accession "P02008",
+                release "reviewed",
+                version 2
+              }
+            },
+            loc {
+              int {
+                from 37,
+                to 462,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 0,
+                to 141,
+                strand unknown,
+                id swissprot {
+                  accession "P02008",
+                  release "reviewed",
+                  version 2
+                }
+              }
+            }
+          }
+        },
+        ext {
+          {
+            type str "use_this_seqid",
+            data {
+              {
+                label str "SEQIDS",
+                num 1,
+                data strs {
+                  "seqid:P02008.2"
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 384
+          },
+          {
+            id str "blast_score",
+            value int 384
+          },
+          {
+            id str "e_value",
+            value real { 688835511783521, 10, -66 }
+          },
+          {
+            id str "bit_score",
+            value real { 152524869432308, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 76
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 102
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 744583333333333, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              swissprot {
+                accession "Q90487",
+                release "reviewed",
+                version 3
+              }
+            },
+            loc {
+              int {
+                from 37,
+                to 177,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 0,
+                to 46,
+                strand unknown,
+                id swissprot {
+                  accession "Q90487",
+                  release "reviewed",
+                  version 3
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              swissprot {
+                accession "Q90487",
+                release "reviewed",
+                version 3
+              }
+            },
+            loc {
+              empty local str "Query_1",
+              int {
+                from 47,
+                to 47,
+                strand unknown,
+                id swissprot {
+                  accession "Q90487",
+                  release "reviewed",
+                  version 3
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              swissprot {
+                accession "Q90487",
+                release "reviewed",
+                version 3
+              }
+            },
+            loc {
+              int {
+                from 178,
+                to 462,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 48,
+                to 142,
+                strand unknown,
+                id swissprot {
+                  accession "Q90487",
+                  release "reviewed",
+                  version 3
+                }
+              }
+            }
+          }
+        },
+        ext {
+          {
+            type str "use_this_seqid",
+            data {
+              {
+                label str "SEQIDS",
+                num 1,
+                data strs {
+                  "seqid:Q90487.3"
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 29
+          },
+          {
+            id str "blast_score",
+            value int 29
+          },
+          {
+            id str "e_value",
+            value real { 152616659088133, 10, -14 }
+          },
+          {
+            id str "bit_score",
+            value real { 157790199816472, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 5
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 7
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 414583333333333, 10, -14 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              swissprot {
+                accession "Q90487",
+                release "reviewed",
+                version 3
+              }
+            },
+            loc {
+              int {
+                from 73,
+                to 93,
+                strand minus,
+                id local str "Query_1"
+              },
+              int {
+                from 47,
+                to 53,
+                strand unknown,
+                id swissprot {
+                  accession "Q90487",
+                  release "reviewed",
+                  version 3
+                }
+              }
+            }
+          }
+        },
+        ext {
+          {
+            type str "use_this_seqid",
+            data {
+              {
+                label str "SEQIDS",
+                num 1,
+                data strs {
+                  "seqid:Q90487.3"
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 23
+          },
+          {
+            id str "blast_score",
+            value int 23
+          },
+          {
+            id str "e_value",
+            value real { 781412469451584, 10, -14 }
+          },
+          {
+            id str "bit_score",
+            value real { 134678225261431, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 12
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 16
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 166458333333333, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              swissprot {
+                accession "Q90487",
+                release "reviewed",
+                version 3
+              }
+            },
+            loc {
+              int {
+                from 481,
+                to 516,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 8,
+                to 19,
+                strand unknown,
+                id swissprot {
+                  accession "Q90487",
+                  release "reviewed",
+                  version 3
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              swissprot {
+                accession "Q90487",
+                release "reviewed",
+                version 3
+              }
+            },
+            loc {
+              empty local str "Query_1",
+              int {
+                from 20,
+                to 28,
+                strand unknown,
+                id swissprot {
+                  accession "Q90487",
+                  release "reviewed",
+                  version 3
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              swissprot {
+                accession "Q90487",
+                release "reviewed",
+                version 3
+              }
+            },
+            loc {
+              int {
+                from 517,
+                to 573,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 29,
+                to 47,
+                strand unknown,
+                id swissprot {
+                  accession "Q90487",
+                  release "reviewed",
+                  version 3
+                }
+              }
+            }
+          }
+        },
+        ext {
+          {
+            type str "use_this_seqid",
+            data {
+              {
+                label str "SEQIDS",
+                num 1,
+                data strs {
+                  "seqid:Q90487.3"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    masks {
+      {
+        locations {
+          packed-int {
+            {
+              from 54,
+              to 105,
+              id local str "Query_1"
+            },
+            {
+              from 198,
+              to 282,
+              id local str "Query_1"
+            },
+            {
+              from 339,
+              to 399,
+              id local str "Query_1"
+            },
+            {
+              from 495,
+              to 543,
+              id local str "Query_1"
+            }
+          }
+        },
+        frame plus1
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 116,
+              to 308,
+              id local str "Query_1"
+            },
+            {
+              from 326,
+              to 350,
+              id local str "Query_1"
+            },
+            {
+              from 353,
+              to 413,
+              id local str "Query_1"
+            },
+            {
+              from 503,
+              to 527,
+              id local str "Query_1"
+            }
+          }
+        },
+        frame plus3
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 475,
+              to 543,
+              id local str "Query_1"
+            },
+            {
+              from 355,
+              to 414,
+              id local str "Query_1"
+            },
+            {
+              from 226,
+              to 306,
+              id local str "Query_1"
+            },
+            {
+              from 121,
+              to 183,
+              id local str "Query_1"
+            }
+          }
+        },
+        frame minus1
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 506,
+              to 544,
+              id local str "Query_1"
+            },
+            {
+              from 317,
+              to 415,
+              id local str "Query_1"
+            },
+            {
+              from 125,
+              to 277,
+              id local str "Query_1"
+            },
+            {
+              from 68,
+              to 106,
+              id local str "Query_1"
+            }
+          }
+        },
+        frame minus3
+      }
+    },
+    ka-blocks {
+      {
+        lambda { 317605957635731, 10, -15 },
+        k { 133956144488482, 10, -15 },
+        h { 401214524497119, 10, -15 },
+        gapped FALSE
+      },
+      {
+        lambda { 267, 10, -3 },
+        k { 41, 10, -3 },
+        h { 14, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 76065",
+      "Effective search space used: 76065",
+      "Length adjustment: 27"
+    }
+  }
+}

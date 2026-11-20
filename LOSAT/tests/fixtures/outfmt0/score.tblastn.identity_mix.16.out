@@ -1,0 +1,396 @@
+<?xml version="1.0" encoding="US-ASCII"?>
+<BlastXML2
+    xmlns="http://www.ncbi.nlm.nih.gov"
+    xmlns:xs="http://www.w3.org/2001/XMLSchema-instance"
+    xs:schemaLocation="http://www.ncbi.nlm.nih.gov http://www.ncbi.nlm.nih.gov/data_specs/schema_alt/NCBI_BlastOutput2.xsd"
+>
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>tblastn</program>
+      <version>TBLASTN 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <subjects>Subject_1</subjects>
+          <subjects>Subject_2</subjects>
+          <subjects>Subject_3</subjects>
+          <subjects>Subject_4</subjects>
+          <subjects>Subject_5</subjects>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>IDENTITY</matrix>
+          <expect>10</expect>
+          <gap-open>15</gap-open>
+          <gap-extend>2</gap-extend>
+          <filter>L;</filter>
+          <db-gencode>1</db-gencode>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <bl2seq>
+            <Search>
+              <query-id>Query_1</query-id>
+              <query-title>empty1 no residues</query-title>
+              <query-len>0</query-len>
+              <hits></hits>
+              <stat>
+                <Statistics>
+                  <hsp-len>0</hsp-len>
+                  <eff-space>0</eff-space>
+                  <kappa>-1</kappa>
+                  <lambda>-1</lambda>
+                  <entropy>-1</entropy>
+                </Statistics>
+              </stat>
+              <message>Query_1 empty1 no residues:  Query_1 empty1 no residues: Composition-based statistics cannot be used with the IDENTITY matrix, resetting the composition-based statistics option to 0 Sequence contains no data  No hits found</message>
+            </Search>
+          </bl2seq>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>tblastn</program>
+      <version>TBLASTN 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <subjects>Subject_1</subjects>
+          <subjects>Subject_2</subjects>
+          <subjects>Subject_3</subjects>
+          <subjects>Subject_4</subjects>
+          <subjects>Subject_5</subjects>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>IDENTITY</matrix>
+          <expect>10</expect>
+          <gap-open>15</gap-open>
+          <gap-extend>2</gap-extend>
+          <filter>L;</filter>
+          <db-gencode>1</db-gencode>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <bl2seq>
+            <Search>
+              <query-id>Query_2</query-id>
+              <query-title>withO has O letters</query-title>
+              <query-len>480</query-len>
+              <query-masking>
+                <Range>
+                  <from>31</from>
+                  <to>53</to>
+                </Range>
+                <Range>
+                  <from>72</from>
+                  <to>133</to>
+                </Range>
+                <Range>
+                  <from>139</from>
+                  <to>150</to>
+                </Range>
+              </query-masking>
+              <hits>
+                <Hit>
+                  <num>1</num>
+                  <description>
+                    <HitDescr>
+                      <id>LvMJNV_93001_98000</id>
+                      <title>LvMJNV_93001_98000 window 1 of LvMJNV</title>
+                    </HitDescr>
+                  </description>
+                  <len>5000</len>
+                  <hsps>
+                    <Hsp>
+                      <num>1</num>
+                      <bit-score>396.251</bit-score>
+                      <score>964</score>
+                      <evalue>9.02239e-114</evalue>
+                      <identity>172</identity>
+                      <positive>172</positive>
+                      <query-from>193</query-from>
+                      <query-to>468</query-to>
+                      <hit-from>2408</hit-from>
+                      <hit-to>3229</hit-to>
+                      <hit-frame>2</hit-frame>
+                      <align-len>281</align-len>
+                      <gaps>12</gaps>
+                      <qseq>HLEILNTFRKEIILILQLYANLRCRQQLLGSFNTNSVNYSDEMIKKMIDIILRIDRNSMSFDKYKNVVREALYVYYLVVTKMTGPKHLKRLRTPELHFEYCVVIALLAHNVDIFKKISFPKYRTTNLIQFVSALDCPWYLSVIPNILSVLNRTRSICQTLDFSISDHAKINITLCL---LSEIAEKKPN--NLILATILYLFPRSLKLIKEKGLVRDENTIVLLAKKISEYLKNQWINCNDIACASNLLEGDWVKDECTLKLFKKQCCDTKFAAISLLVQQ</qseq>
+                      <hseq>HVECLIMFKEEITLILREYAQLVRRQQLLRNFNTNSTSYSGEMIKKMINIILKIDNN-MPIDKYKDVVREALYIYHLVVSKMTGPKHLKRLRTPELHFDFCTLIALLSHNVEIVKNIS-TKYRVSSIIQFVSALDCQWYLSVVPNILSVFNRSNSICQTLCFSYERHAQVNITLCLTYALTEI-----NTTNLVLGVILYLFPECLEDIKRAELIKDESLIVPLARKIMEHLRSLWIEKSDIANAAHFLLGSCVEGLDTIKVFRKQNYDKKILAVSVMVQQ</hseq>
+                      <midline>H E L  F  EI LIL  YA L  RQQLL  FNTNS  YS EMIKKMI IIL ID N M  DKYK VVREALY Y LVV KMTGPKHLKRLRTPELHF  C  IALL HNV I K IS  KYR    IQFVSALDC WYLSV PNILSV NR  SICQTL FS   HA  NITLCL   L EI     N  NL L  ILYLFP  L  IK   L  DE  IV LA KI E L   WI   DIA A   L G  V    T K F KQ  D K  A S  VQQ</midline>
+                    </Hsp>
+                  </hsps>
+                </Hit>
+                <Hit>
+                  <num>2</num>
+                  <description>
+                    <HitDescr>
+                      <id>LvMJNV_199001_206000</id>
+                      <title>LvMJNV_199001_206000 window 4 of LvMJNV</title>
+                    </HitDescr>
+                  </description>
+                  <len>7000</len>
+                  <hsps>
+                    <Hsp>
+                      <num>1</num>
+                      <bit-score>24.0576</bit-score>
+                      <score>54</score>
+                      <evalue>0.305496</evalue>
+                      <identity>6</identity>
+                      <positive>6</positive>
+                      <query-from>236</query-from>
+                      <query-to>241</query-to>
+                      <hit-from>4564</hit-from>
+                      <hit-to>4581</hit-to>
+                      <hit-frame>1</hit-frame>
+                      <align-len>6</align-len>
+                      <gaps>0</gaps>
+                      <qseq>IKKMID</qseq>
+                      <hseq>IKKMID</hseq>
+                      <midline>IKKMID</midline>
+                    </Hsp>
+                    <Hsp>
+                      <num>2</num>
+                      <bit-score>19.5586</bit-score>
+                      <score>43</score>
+                      <evalue>6.95754</evalue>
+                      <identity>7</identity>
+                      <positive>7</positive>
+                      <query-from>386</query-from>
+                      <query-to>396</query-to>
+                      <hit-from>100</hit-from>
+                      <hit-to>132</hit-to>
+                      <hit-frame>1</hit-frame>
+                      <align-len>11</align-len>
+                      <gaps>0</gaps>
+                      <qseq>LYLFPRSLKLI</qseq>
+                      <hseq>LYLPARHRKLI</hseq>
+                      <midline>LYL  R  KLI</midline>
+                    </Hsp>
+                  </hsps>
+                </Hit>
+              </hits>
+              <stat>
+                <Statistics>
+                  <hsp-len>8</hsp-len>
+                  <eff-space>4858296</eff-space>
+                  <kappa>0.255</kappa>
+                  <lambda>0.2835</lambda>
+                  <entropy>1.49</entropy>
+                </Statistics>
+              </stat>
+              <message>Query_2 withO has O letters:  Query_2 withO has O letters: Composition-based statistics cannot be used with the IDENTITY matrix, resetting the composition-based statistics option to 0 One or more O characters replaced by X for alignment score calculations at positions 77, 97 </message>
+            </Search>
+          </bl2seq>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>tblastn</program>
+      <version>TBLASTN 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <subjects>Subject_1</subjects>
+          <subjects>Subject_2</subjects>
+          <subjects>Subject_3</subjects>
+          <subjects>Subject_4</subjects>
+          <subjects>Subject_5</subjects>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>IDENTITY</matrix>
+          <expect>10</expect>
+          <gap-open>15</gap-open>
+          <gap-extend>2</gap-extend>
+          <filter>L;</filter>
+          <db-gencode>1</db-gencode>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <bl2seq>
+            <Search>
+              <query-id>Query_3</query-id>
+              <query-title>BDT62569.1 wsv282-like protein [Metapenaeus ensis majanivirus]</query-title>
+              <query-len>480</query-len>
+              <query-masking>
+                <Range>
+                  <from>31</from>
+                  <to>53</to>
+                </Range>
+                <Range>
+                  <from>72</from>
+                  <to>133</to>
+                </Range>
+                <Range>
+                  <from>139</from>
+                  <to>150</to>
+                </Range>
+              </query-masking>
+              <hits>
+                <Hit>
+                  <num>1</num>
+                  <description>
+                    <HitDescr>
+                      <id>LvMJNV_93001_98000</id>
+                      <title>LvMJNV_93001_98000 window 1 of LvMJNV</title>
+                    </HitDescr>
+                  </description>
+                  <len>5000</len>
+                  <hsps>
+                    <Hsp>
+                      <num>1</num>
+                      <bit-score>396.251</bit-score>
+                      <score>964</score>
+                      <evalue>9.02239e-114</evalue>
+                      <identity>172</identity>
+                      <positive>172</positive>
+                      <query-from>193</query-from>
+                      <query-to>468</query-to>
+                      <hit-from>2408</hit-from>
+                      <hit-to>3229</hit-to>
+                      <hit-frame>2</hit-frame>
+                      <align-len>281</align-len>
+                      <gaps>12</gaps>
+                      <qseq>HLEILNTFRKEIILILQLYANLRCRQQLLGSFNTNSVNYSDEMIKKMIDIILRIDRNSMSFDKYKNVVREALYVYYLVVTKMTGPKHLKRLRTPELHFEYCVVIALLAHNVDIFKKISFPKYRTTNLIQFVSALDCPWYLSVIPNILSVLNRTRSICQTLDFSISDHAKINITLCL---LSEIAEKKPN--NLILATILYLFPRSLKLIKEKGLVRDENTIVLLAKKISEYLKNQWINCNDIACASNLLEGDWVKDECTLKLFKKQCCDTKFAAISLLVQQ</qseq>
+                      <hseq>HVECLIMFKEEITLILREYAQLVRRQQLLRNFNTNSTSYSGEMIKKMINIILKIDNN-MPIDKYKDVVREALYIYHLVVSKMTGPKHLKRLRTPELHFDFCTLIALLSHNVEIVKNIS-TKYRVSSIIQFVSALDCQWYLSVVPNILSVFNRSNSICQTLCFSYERHAQVNITLCLTYALTEI-----NTTNLVLGVILYLFPECLEDIKRAELIKDESLIVPLARKIMEHLRSLWIEKSDIANAAHFLLGSCVEGLDTIKVFRKQNYDKKILAVSVMVQQ</hseq>
+                      <midline>H E L  F  EI LIL  YA L  RQQLL  FNTNS  YS EMIKKMI IIL ID N M  DKYK VVREALY Y LVV KMTGPKHLKRLRTPELHF  C  IALL HNV I K IS  KYR    IQFVSALDC WYLSV PNILSV NR  SICQTL FS   HA  NITLCL   L EI     N  NL L  ILYLFP  L  IK   L  DE  IV LA KI E L   WI   DIA A   L G  V    T K F KQ  D K  A S  VQQ</midline>
+                    </Hsp>
+                  </hsps>
+                </Hit>
+                <Hit>
+                  <num>2</num>
+                  <description>
+                    <HitDescr>
+                      <id>LvMJNV_199001_206000</id>
+                      <title>LvMJNV_199001_206000 window 4 of LvMJNV</title>
+                    </HitDescr>
+                  </description>
+                  <len>7000</len>
+                  <hsps>
+                    <Hsp>
+                      <num>1</num>
+                      <bit-score>24.0576</bit-score>
+                      <score>54</score>
+                      <evalue>0.305496</evalue>
+                      <identity>6</identity>
+                      <positive>6</positive>
+                      <query-from>236</query-from>
+                      <query-to>241</query-to>
+                      <hit-from>4564</hit-from>
+                      <hit-to>4581</hit-to>
+                      <hit-frame>1</hit-frame>
+                      <align-len>6</align-len>
+                      <gaps>0</gaps>
+                      <qseq>IKKMID</qseq>
+                      <hseq>IKKMID</hseq>
+                      <midline>IKKMID</midline>
+                    </Hsp>
+                    <Hsp>
+                      <num>2</num>
+                      <bit-score>19.5586</bit-score>
+                      <score>43</score>
+                      <evalue>6.95754</evalue>
+                      <identity>7</identity>
+                      <positive>7</positive>
+                      <query-from>386</query-from>
+                      <query-to>396</query-to>
+                      <hit-from>100</hit-from>
+                      <hit-to>132</hit-to>
+                      <hit-frame>1</hit-frame>
+                      <align-len>11</align-len>
+                      <gaps>0</gaps>
+                      <qseq>LYLFPRSLKLI</qseq>
+                      <hseq>LYLPARHRKLI</hseq>
+                      <midline>LYL  R  KLI</midline>
+                    </Hsp>
+                  </hsps>
+                </Hit>
+              </hits>
+              <stat>
+                <Statistics>
+                  <hsp-len>8</hsp-len>
+                  <eff-space>4858296</eff-space>
+                  <kappa>0.255</kappa>
+                  <lambda>0.2835</lambda>
+                  <entropy>1.49</entropy>
+                </Statistics>
+              </stat>
+              <message>Query_3 BDT62569.1 wsv282.. :  Query_3 BDT62569.1 wsv282.. : Composition-based statistics cannot be used with the IDENTITY matrix, resetting the composition-based statistics option to 0 </message>
+            </Search>
+          </bl2seq>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>tblastn</program>
+      <version>TBLASTN 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <subjects>Subject_1</subjects>
+          <subjects>Subject_2</subjects>
+          <subjects>Subject_3</subjects>
+          <subjects>Subject_4</subjects>
+          <subjects>Subject_5</subjects>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>IDENTITY</matrix>
+          <expect>10</expect>
+          <gap-open>15</gap-open>
+          <gap-extend>2</gap-extend>
+          <filter>L;</filter>
+          <db-gencode>1</db-gencode>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <bl2seq>
+            <Search>
+              <query-id>Query_4</query-id>
+              <query-title>xxxx all X</query-title>
+              <query-len>32</query-len>
+              <hits></hits>
+              <stat>
+                <Statistics>
+                  <hsp-len>0</hsp-len>
+                  <eff-space>0</eff-space>
+                  <kappa>-1</kappa>
+                  <lambda>-1</lambda>
+                  <entropy>-1</entropy>
+                </Statistics>
+              </stat>
+              <message>Query_4 xxxx all X:  Query_4 xxxx all X: Composition-based statistics cannot be used with the IDENTITY matrix, resetting the composition-based statistics option to 0 Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options  No hits found</message>
+            </Search>
+          </bl2seq>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+</BlastXML2>

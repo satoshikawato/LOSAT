@@ -1,6 +1,6 @@
 // The results screen (S13, W4; plan §5.7, design §11): Run -> Query -> Subject -> HSP through
 // the real application, in NCBI BLAST's order and words since W4b (docs/web/ncbi_ui_mapping.md
-// §2): the header block, "Results for", and the tabs Descriptions, Graphic Summary, Alignments,
+// §2): the header block, "Results for", and the tabs Hits (Graphic Summary, Descriptions, Alignments),
 // Dot Plot, Run details and Outputs. The tests run with the FakeEngine build and with the engine
 // build (LOSAT_WEB_REACTORS); what only the engine can show (outfmt 0's frames, a run that the
 // engine refuses, the verification badge of a real run, the bins of real bit scores) is checked in
@@ -8,32 +8,34 @@
 // with the stored outputs as the Outputs view shows them (the outfmt 6 rows and the outfmt 0
 // text), never with values computed here.
 //
-// Every program that LOSAT Web runs is covered: BLASTN, BLASTP, TBLASTN and TBLASTX. BLASTX
-// is not in ABI v2 until session SX (docs/losat_web_gui_sessions/session_sx_blastx_integration.md;
-// the search screen refuses it, search.spec.ts), so it has no results screen to test yet.
-import { readFileSync } from 'node:fs';
+// Every program that LOSAT Web runs is covered: BLASTN, BLASTP, BLASTX, TBLASTN and TBLASTX.
+import { spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expect, type Download, type Locator, type Page } from '@playwright/test';
+import type { OutputFormat } from 'losat/domain';
+import { test } from './support/test';
 import { generateVerificationTable } from '../../build/verification';
-import type { OutputFormat } from '../../src/domain/output-format';
 import { optionKey } from '../../src/domain/verification';
-import { BUILD_HAS_ENGINE } from './support/browser';
+import { RESULTS_REMOVED_MESSAGE } from '../../src/infra/data/block-store';
+import { TMP_DIRECTORY } from '../../src/infra/data/session';
+import { BUILD_HAS_ENGINE, sessionDirectories, sessionFiles } from './support/browser';
 import { REPOSITORY } from './support/harness-server';
-import { fasta, openFiles, openParameters, openSearch, paste, program, showOutput, submit, task, waitStatus } from './support/search';
+import { NATIVE, NO_NATIVE_REASON } from './support/native';
+import { chooseRun, fasta, openFiles, openParameters, openSearch, paste, program, showOutput, submit, task, waitStatus } from './support/search';
 import { repeats } from './support/synthetic';
+import { axeViolations } from './support/axe';
 
-type ProgramId = 'blastn' | 'blastp' | 'tblastn' | 'tblastx';
+type ProgramId = 'blastn' | 'blastp' | 'blastx' | 'tblastn' | 'tblastx';
 type Unit = 'nt' | 'aa';
 type Orientation = 'forward' | 'reverse' | 'unknown';
-type Tab = 'hits' | 'graphic' | 'alignment' | 'dotplot' | 'details' | 'outputs';
+type Tab = 'hits' | 'dotplot' | 'details' | 'outputs';
 
 const FORMATS = [0, 6, 7] as const satisfies readonly OutputFormat[];
-const LABELS: Readonly<Record<ProgramId, string>> = { blastn: 'BLASTN', blastp: 'BLASTP', tblastn: 'TBLASTN', tblastx: 'TBLASTX' };
-/** The tabs' test IDs (W4's: the hits view, the HSP's panes, the run's views). */
+const LABELS: Readonly<Record<ProgramId, string>> = { blastn: 'BLASTN', blastp: 'BLASTP', blastx: 'BLASTX', tblastn: 'TBLASTN', tblastx: 'TBLASTX' };
+/** The tabs' test IDs (the Hits view with its three sections, the dot plot, the run's views). */
 const TABS: Readonly<Record<Tab, string>> = {
   hits: 'results-view-hits',
-  graphic: 'results-view-graphic',
-  alignment: 'pane-alignment',
   dotplot: 'pane-dotplot',
   details: 'results-view-details',
   outputs: 'results-view-outputs',
@@ -79,8 +81,9 @@ const PANEL_QUERIES = Array.from({ length: 150 }, (_, i) => {
 /**
  * Searches of the outfmt 0 fixtures of LOSAT/tests/outfmt0_manifest.tsv with the program's
  * default options: multi.megablast (both strands, a subject with an HSP on each, a query
- * without hits), method.blastp, e2e.tblastn.amb (minus frames; inputs large enough for Auto
- * to choose the threaded runtime) and tblastx.ambig.0 (frames of opposite signs).
+ * without hits), method.blastp, the inputs of pd.blastx.0 (two queries, query frames of both
+ * signs), e2e.tblastn.amb (minus frames; inputs large enough for Auto to choose the threaded
+ * runtime) and tblastx.ambig.0 (frames of opposite signs).
  */
 const PROGRAM_CASES: readonly {
   readonly id: ProgramId;
@@ -92,6 +95,13 @@ const PROGRAM_CASES: readonly {
 }[] = [
   { id: 'blastn', query: 'outfmt0/multi_query.fasta', subject: 'outfmt0/multi_subject.fasta', units: { query: 'nt', subject: 'nt' } },
   { id: 'blastp', query: 'outfmt0/e2e_protein_query.faa', subject: 'outfmt0/e2e_protein_subject.faa', units: { query: 'aa', subject: 'aa' } },
+  {
+    id: 'blastx',
+    query: 'outfmt0/pd_sub_q.fna',
+    subject: 'outfmt0/pd_sub_p.faa',
+    units: { query: 'nt', subject: 'aa' },
+    frameLine: (query) => ` Frame = ${query}\n`,
+  },
   {
     id: 'tblastn',
     query: 'outfmt0/e2e_protein_query.faa',
@@ -168,20 +178,23 @@ const literal = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 async function show(page: Page, tab: Tab): Promise<void> {
   const button = page.getByTestId(TABS[tab]);
   await button.click();
-  await expect(button).toHaveAttribute('aria-pressed', 'true');
+  await expect(button).toHaveAttribute('aria-selected', 'true');
 }
 
-/** Queues the search set in the form and waits until it, run `number`, completes. */
+/**
+ * Starts the search set in the form and waits until it, run `number`, completes; "Run LOSAT"
+ * went to the run's results, and the page goes back to the search form (it keeps its edits).
+ */
 async function run(page: Page, number: number): Promise<void> {
   await submit(page);
   await waitStatus(page, number, 'completed');
+  await page.getByTestId('tab-search').click();
 }
 
-/** Opens a completed run's results from the queue and waits until they are read. */
-async function openFromQueue(page: Page, number: number): Promise<void> {
-  await page.getByTestId(`run-${number}-open`).click();
-  await expect(page.getByTestId('tab-results')).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.getByTestId('results-hits')).toHaveAttribute('data-run', String(number));
+/** Opens a completed run's results in the run picker and waits until they are read. */
+async function openRun(page: Page, number: number): Promise<void> {
+  await chooseRun(page, number);
+  await expect(page.getByTestId('tab-results')).toHaveAttribute('aria-selected', 'true');
 }
 
 /** The commands and stored outputs of the run on the results screen, read in its Outputs view; the Descriptions are shown after. */
@@ -199,24 +212,40 @@ async function readOutputs(page: Page, number: number): Promise<{ command: Recor
 
 const subjectRows = (page: Page) => page.getByTestId('subject-list').locator('[data-testid^="subject-row-"]');
 const hspRows = (page: Page) => page.getByTestId('hsp-list').locator('[data-testid^="hsp-row-"]');
+/** The HSP rows of the dot plot view's table (the Hits view stays mounted, hidden, with a table of its own). */
+const dotRows = (page: Page) => page.getByTestId('results-dotplot').getByTestId('hsp-list').locator('[data-testid^="hsp-row-"]');
 const rangeBlocks = (page: Page) => page.getByTestId('alignments').locator('section.range-block');
 
 /**
  * Watches the reads of outfmt 0 byte ranges that the page asks of the Data worker (its requests
- * `readOutputRange` of format 0, counted as they are sent, answered or not), and can make the
- * next ones fail (the worker answers that it has no such method), as a read of storage may.
+ * `readOutputRange` of format 0, counted as they are sent and as they are answered), and can make
+ * the next ones fail (the worker answers that it has no such method), as a read of storage may.
  */
 async function watchReads(page: Page): Promise<{ asked: () => Promise<number>; failNext: (n: number) => Promise<void> }> {
   await page.evaluate(() => {
-    const w = window as unknown as { __reads?: number; __fail?: number };
+    const w = window as unknown as { __reads?: number; __answered?: number; __fail?: number };
     if (w.__reads !== undefined) return;
     w.__reads = 0;
+    w.__answered = 0;
     w.__fail = 0;
+    // The reads not answered yet, by worker (the IDs of requests are a worker's own).
+    const unanswered = new WeakMap<Worker, Set<unknown>>();
     const post = Worker.prototype.postMessage as (this: Worker, message: unknown, transfer: Transferable[]) => void;
     Worker.prototype.postMessage = function (this: Worker, message: unknown, transfer: Transferable[]) {
-      const request = message as { method?: unknown; args?: unknown[] } | null;
+      const request = message as { id?: unknown; method?: unknown; args?: unknown[] } | null;
       if (typeof request === 'object' && request !== null && request.method === 'readOutputRange' && request.args?.[1] === 0) {
         w.__reads!++;
+        let ids = unanswered.get(this);
+        if (ids === undefined) {
+          const waiting = new Set<unknown>();
+          ids = waiting;
+          unanswered.set(this, waiting);
+          // After the page's own listener: an answer counted here has been handed to the Alignments.
+          this.addEventListener('message', (event) => {
+            if (waiting.delete((event as MessageEvent<{ id?: unknown } | null>).data?.id)) w.__answered!++;
+          });
+        }
+        ids.add(request.id);
         if (w.__fail! > 0) {
           w.__fail!--;
           message = { ...request, method: 'readOutputRange (made to fail by the test)' };
@@ -233,16 +262,29 @@ async function watchReads(page: Page): Promise<{ asked: () => Promise<number>; f
   };
 }
 
-/** Waits until the Alignments ask for no more sections and every section asked for has arrived. */
-async function settledSections(page: Page, asked: () => Promise<number>): Promise<void> {
+/**
+ * Waits until the Alignments ask for no more sections and every section asked for has arrived:
+ * every read asked for is answered, the sections answered are shown, and neither changes for
+ * 700 ms. (Unchanged counts alone were read as settled in CI while nine reads were unanswered.)
+ * It does not know whether the browser has yet to report blocks that came into view: wait for
+ * the section of such a block first.
+ */
+async function settledSections(page: Page): Promise<void> {
   let last = '';
-  const state = async () =>
-    `${await asked()}/${await page.getByTestId('alignments').locator('[data-testid="range-section"]:not([data-state="pending"])').count()}`;
+  const state = () =>
+    page.evaluate(async () => {
+      const w = window as unknown as { __reads: number; __answered: number };
+      const [asked, answered] = [w.__reads, w.__answered];
+      // The sections answered by then are shown at the next frame (AlignmentsView's arrive()).
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      const shown = document.querySelectorAll('[data-testid="alignments"] [data-testid="range-section"]:not([data-state="pending"])').length;
+      return asked === answered ? `${asked}/${shown}` : 'reading';
+    });
   await expect
     .poll(
       async () => {
         const now = await state();
-        const same = now === last;
+        const same = now === last && now !== 'reading';
         last = now;
         return same;
       },
@@ -269,15 +311,13 @@ async function hspId(row: Locator): Promise<string> {
  * subject, its HSP table and detail, and the Descriptions' row. The Descriptions are shown after.
  */
 async function expectSelected(page: Page, id: string, sIdx: number): Promise<void> {
-  await show(page, 'alignment');
   await expect(page.getByTestId('alignments-subject')).toHaveAttribute('data-subject', String(sIdx));
   await expect(page.getByTestId('hsp-detail')).toHaveAttribute('data-hsp', id);
   await expect(page.getByTestId(`range-${id.replace(':', '-')}`).getByTestId('hsp-detail')).toHaveCount(1);
-  await expect(page.getByTestId(`hsp-row-${id.replace(':', '-')}`)).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.getByTestId('hsp-list').locator('[aria-pressed="true"]')).toHaveCount(1);
-  await show(page, 'hits');
-  await expect(page.getByTestId(`subject-row-${sIdx}`)).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.getByTestId('subject-list').locator('[aria-pressed="true"]')).toHaveCount(1);
+  await expect(page.getByTestId(`hsp-row-${id.replace(':', '-')}`)).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByTestId('hsp-list').locator('[aria-selected="true"]')).toHaveCount(1);
+  await expect(page.getByTestId(`subject-row-${sIdx}`)).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByTestId('subject-list').locator('[aria-selected="true"]')).toHaveCount(1);
 }
 
 /**
@@ -290,7 +330,6 @@ async function expectTableFits(page: Page, table: 'subject-table' | 'hsp-table')
   const scroll = page.getByTestId(table).locator('.table-scroll');
   const [scrollWidth, clientWidth] = await scroll.evaluate((element) => [element.scrollWidth, element.clientWidth]);
   expect(scrollWidth, `${table} scrolls sideways`).toBeLessThanOrEqual(clientWidth);
-  await expect(page.getByTestId(`${table}-scroll-hint`)).toHaveCount(0);
   const report = await scroll.evaluate((element) => {
     const cells = [...element.querySelectorAll<HTMLElement>('.table-row [data-field]')];
     const untitled = cells
@@ -346,7 +385,10 @@ async function expectRanges(page: Page, queryRows: readonly string[][], pairRank
     await expect(block.getByTestId('range-label')).toHaveText(rangeLabel(position + 1, queryRows[rank]!));
     const section = block.getByTestId('range-section');
     if (checked >= sections || (await section.count()) === 0) continue;
-    await section.scrollIntoViewIfNeeded();
+    // The block comes into view, not the section: the section's "Reading the alignment…" is
+    // replaced by its text when it arrives, and the scroll of an element replaced meanwhile fails
+    // ("Element is not attached to the DOM", 10 CI jobs from 2026-10-27 to 11-03).
+    await block.scrollIntoViewIfNeeded();
     await expect(section).toHaveAttribute('data-state', 'ready');
     // An HSP's section of outfmt 0 starts with its Score line (an empty text would pass toContain).
     const body = await text(section);
@@ -362,7 +404,7 @@ async function expectRanges(page: Page, queryRows: readonly string[][], pairRank
  * hovered HSP the outfmt 6 strings; a click selects the HSP and shows its Range in the Alignments.
  */
 async function expectGraphicSummary(page: Page, queryRows: readonly string[][], qIdx: number, subjects: number): Promise<void> {
-  await show(page, 'graphic');
+  await show(page, 'hits');
   const canvas = page.getByTestId('graphic-canvas');
   const rows = Math.min(subjects, 100);
   await expect(canvas).toHaveAttribute('data-rows', String(rows));
@@ -394,7 +436,7 @@ async function expectGraphicSummary(page: Page, queryRows: readonly string[][], 
   await expect(popover.locator('.graphic-popover-title')).toHaveText(fields[1]!);
   await expect(popover).toContainText(`HSP ${rank + 1} · Bit score ${fields[11]} · E value ${fields[10]}`);
   await canvas.click({ position: { x: target.x, y: target.y } });
-  await expect(page.getByTestId('pane-alignment')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('results-view-hits')).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByTestId('hsp-detail')).toHaveAttribute('data-hsp', target.hsp);
   const block = page.getByTestId(`range-${target.hsp.replace(':', '-')}`);
   await expect(block).toBeInViewport();
@@ -412,6 +454,23 @@ async function expectNoSideScroll(page: Page, state: string): Promise<void> {
     return { scrollWidth: document.documentElement.scrollWidth, innerWidth: window.innerWidth, beyond };
   });
   expect(scrollWidth, `${state}: the page is wider than the window (${beyond.join(', ')})`).toBeLessThanOrEqual(innerWidth);
+}
+
+/**
+ * The application's own words on the page (its text, titles and ARIA labels), without what the
+ * engine wrote (every `pre.output`: the outputs, the Alignments' outfmt 0 text and the warnings
+ * keep NCBI's words, "Please verify the query ...", and the inputs' titles). None of them says
+ * "verified" or "certified" (the maintainer, 2026-11-04).
+ */
+async function expectNoVerificationWords(page: Page, state: string): Promise<void> {
+  const words = await page.evaluate(() => {
+    const body = document.body.cloneNode(true) as HTMLElement;
+    for (const engine of body.querySelectorAll('pre.output')) engine.remove();
+    const names = ['title', 'aria-label', 'placeholder', 'alt'];
+    const attributes = [...body.querySelectorAll('*')].flatMap((element) => names.map((name) => element.getAttribute(name) ?? ''));
+    return [body.textContent ?? '', ...attributes].join('\n');
+  });
+  expect(words.match(/[^\n]{0,40}(verif|certif)[^\n]{0,40}/gi) ?? [], state).toEqual([]);
 }
 
 /** The columns of a table whose headers are inside the table's box, from left to right. */
@@ -489,7 +548,7 @@ for (const c of PROGRAM_CASES) {
     const title = c.id === 'blastn' ? 'Fixtures of outfmt 0, BLASTN' : '';
     if (title !== '') await page.getByTestId('job-title').fill(title);
     await run(page, 1);
-    await openFromQueue(page, 1);
+    await openRun(page, 1);
     await expect(page.getByTestId('results-run').locator('option:checked')).toHaveText(
       `Run 1 · ${LABELS[c.id]} · ${basename(c.query)} vs ${basename(c.subject)}`,
     );
@@ -522,11 +581,39 @@ for (const c of PROGRAM_CASES) {
       await expect(page.getByTestId('results-subject-id')).toHaveCount(0);
       await expect(page.getByTestId('results-subjects')).toHaveText(`${basename(c.subject)}, ${plural(subjects.length, 'record')}`);
     }
-    // "Download All" opens the Outputs.
+    // "Download All" lists the run's outputs, as NCBI's lists its formats, and saves the one chosen as
+    // one file: the bytes that the Outputs view shows, named with the run, the task and the time (WA-RS-05).
+    const task = /\(task (.+)\)$/.exec(await text(page.getByTestId('results-program')))?.[1];
+    for (const format of FORMATS) {
+      await page.getByTestId('results-download-all').click();
+      const menu = page.getByTestId('results-download-menu');
+      await expect(menu.getByRole('button')).toHaveText(['Pairwise (outfmt 0)', 'Tabular (outfmt 6)', 'Tabular with comment lines (outfmt 7)']);
+      const [download] = await Promise.all([page.waitForEvent('download'), menu.getByTestId(`results-download-${format}`).click()]);
+      expect(download.suggestedFilename()).toMatch(new RegExp(`^losat-run1-${c.id}${task === undefined ? '' : `-${literal(task)}`}-\\d{8}T\\d{6}Z\\.outfmt${format}\\.txt$`));
+      expect(readFileSync((await download.path())!, 'utf8'), `outfmt ${format} saved`).toBe(outputs.text[format]);
+      await expect(menu).toHaveCount(0);
+      await expect(page.getByTestId('results-download-all')).toBeFocused();
+      await expect(page.getByTestId(TABS.hits)).toHaveAttribute('aria-selected', 'true');
+    }
+    // Escape closes the list, and the focus is on the button again.
     await page.getByTestId('results-download-all').click();
-    await expect(page.getByTestId(TABS.outputs)).toHaveAttribute('aria-pressed', 'true');
-    await expect(page.getByTestId('results-outputs')).toBeVisible();
-    await show(page, 'hits');
+    await expect(page.getByTestId('results-download-all')).toHaveAttribute('aria-expanded', 'true');
+    await page.getByTestId('results-download-0').focus();
+    await page.keyboard.press('Escape');
+    await expect(page.getByTestId('results-download-menu')).toHaveCount(0);
+    await expect(page.getByTestId('results-download-all')).toBeFocused();
+    await expect(page.getByTestId('results-download-all')).toHaveAttribute('aria-expanded', 'false');
+    // Other changes of the results (a view filter applied from the keyboard) leave the list open.
+    await page.getByTestId('results-download-all').click();
+    await page.getByTestId('filter-subject').fill('no-such-subject');
+    await page.getByTestId('filter-subject').press('Enter');
+    await expect(page.locator('[data-testid="results-notice"][data-kind="filtered-out"]')).toHaveCount(1);
+    await page.getByTestId('filter-subject').fill('');
+    await page.getByTestId('filter-subject').press('Enter');
+    await expect(page.locator('[data-testid="results-notice"][data-kind="filtered-out"]')).toHaveCount(0);
+    await expect(page.getByTestId('results-download-menu')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.getByTestId('results-download-menu')).toHaveCount(0);
 
     // The Descriptions: NCBI's heading and order of columns, the Subject ID last.
     await expect(page.getByTestId('subject-table').locator('.tool-band h3')).toContainText('Sequences producing significant alignments');
@@ -541,7 +628,7 @@ for (const c of PROGRAM_CASES) {
     ]);
     // Units of the lists.
     await expect(page.getByTestId('subject-sort-length')).toHaveText(`Length (${c.units.subject})`);
-    await show(page, 'alignment');
+    await show(page, 'hits');
     await expect(page.getByTestId('hsp-sort-qStart')).toHaveText(`Query (${c.units.query})`);
     await expect(page.getByTestId('hsp-sort-sStart')).toHaveText(`Subject (${c.units.subject})`);
 
@@ -566,7 +653,7 @@ for (const c of PROGRAM_CASES) {
         await queryRow.click();
         await expect(queryRow).toHaveAttribute('aria-pressed', 'true');
       }
-      await show(page, 'alignment');
+      await show(page, 'hits');
       await expect(detail).toHaveAttribute('data-hsp', new RegExp(`^${qIdx}:`));
       await expect(detail).toHaveAttribute('data-state', 'ready');
       // The query's HSPs are its outfmt 6 rows, by rank.
@@ -599,7 +686,7 @@ for (const c of PROGRAM_CASES) {
         await show(page, 'hits');
         const subject = subjectRows(page).nth(i);
         await subject.click();
-        await expect(subject).toHaveAttribute('aria-pressed', 'true');
+        await expect(subject).toHaveAttribute('aria-selected', 'true');
         const sIdx = await subjectIndex(subject);
         const sseqid = sseqids[i]!;
         const pairRanks = queryRows.flatMap((fields, rank) => (fields[1] === sseqid ? [rank] : []));
@@ -609,7 +696,7 @@ for (const c of PROGRAM_CASES) {
         const descriptionText = await text(description);
         const length = (await text(subject.locator('[data-field="length"]'))).replace(/,/g, '');
 
-        await show(page, 'alignment');
+        await show(page, 'hits');
         await expect(page.getByTestId('alignments-subject')).toHaveAttribute('data-subject', String(sIdx));
         await expect(page.getByTestId('alignments-summary')).toHaveText(
           new RegExp(`^\\s*Sequence ID: ${sseqid.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s+Length: ${count(Number(length))}\\s+Number of Matches: ${count(pairRanks.length)}\\s*$`),
@@ -633,13 +720,14 @@ for (const c of PROGRAM_CASES) {
           const orientation = orientationOf(fields, c.units, translated);
           if (orientation !== undefined) expect(await row.getAttribute('data-orientation')).toBe(orientation);
           if (translated) {
-            // TBLASTN shows the subject's frame only (W4b screen review L9), TBLASTX both.
-            expect(await field('frames')).toMatch(c.id === 'tblastn' ? /^[+-][123]$/ : /^[+-][123]\/[+-][123]$/);
+            // TBLASTN shows the subject's frame only (W4b screen review L9), BLASTX the query's, TBLASTX both.
+            const frames = await field('frames');
+            expect(frames).toMatch(c.id === 'tblastx' ? /^[+-][123]\/[+-][123]$/ : /^[+-][123]$/);
             // The frames' signs agree with the coordinates' directions.
-            const [q, s] = c.id === 'tblastn' ? [undefined, await field('frames')] : (await field('frames')).split('/');
+            const [q, s] = c.id === 'tblastn' ? [undefined, frames] : c.id === 'blastx' ? [frames, undefined] : frames.split('/');
             const sign = (frame: string | undefined) => (frame === undefined ? 1 : frame.startsWith('-') ? -1 : 1);
             expect(sign(q) === sign(s) ? 'forward' : 'reverse').toBe(await row.getAttribute('data-orientation'));
-            seen.frames.add(await field('frames'));
+            seen.frames.add(frames);
           } else {
             await expect(row.locator('[data-field="frames"]')).toHaveCount(0);
           }
@@ -649,7 +737,7 @@ for (const c of PROGRAM_CASES) {
 
         // The detail of the subject's first HSP (selected with the subject), in its Range.
         const first = hspRows(page).first();
-        await expect(first).toHaveAttribute('aria-pressed', 'true');
+        await expect(first).toHaveAttribute('aria-selected', 'true');
         const id = await hspId(first);
         await expect(detail).toHaveAttribute('data-hsp', id);
         await expect(detail).toHaveAttribute('data-state', 'ready');
@@ -678,13 +766,13 @@ for (const c of PROGRAM_CASES) {
         if (c.id === 'blastn') expect(section).toContain(` Strand=Plus/${orientation === 'reverse' ? 'Minus' : 'Plus'}\n`);
         if (translated && BUILD_HAS_ENGINE) {
           const shown = await text(first.locator('[data-field="frames"]'));
-          const [q, s] = c.id === 'tblastn' ? ['', shown] : shown.split('/');
+          const [q, s] = c.id === 'tblastn' ? ['', shown] : c.id === 'blastx' ? [shown, ''] : shown.split('/');
           expect(section).toContain(c.frameLine!(q!, s!));
         }
       }
       seen.queries++;
     }
-    await show(page, 'alignment');
+    await show(page, 'hits');
     await expectTableFits(page, 'hsp-table');
     await show(page, 'hits');
     await expectTableFits(page, 'subject-table');
@@ -733,32 +821,45 @@ for (const c of PROGRAM_CASES) {
     const frames = translated ? await text(page.getByTestId(`hsp-row-${selected!.replace(':', '-')}`).locator('[data-field="frames"]')) : '';
     await show(page, 'dotplot');
     const canvas = page.getByTestId('dotplot-canvas');
-    await expect(canvas).toHaveAttribute('data-segments', (await page.getByTestId('hsp-list').getAttribute('data-count'))!);
-    await expect(page.getByTestId('dotplot')).toContainText(new RegExp(`\\([\\d,]+ ${c.units.query}\\) against subject .* \\([\\d,]+ ${c.units.subject}\\)\\.`));
+    await expect(canvas).toHaveAttribute('data-segments', (await page.getByTestId('results-dotplot').getByTestId('hsp-list').getAttribute('data-count'))!);
+    await expect(page.getByTestId('dotplot')).toContainText(new RegExp(`\\([\\d,]+\\u00a0${c.units.query}\\) against subject .* \\([\\d,]+\\u00a0${c.units.subject}\\)\\.`));
     await expect(page.getByTestId('dotplot-selected')).toContainText(
       `query ${fields[6]}–${fields[7]} ${c.units.query}, subject ${fields[8]}–${fields[9]} ${c.units.subject}` +
-        (c.id === 'tblastn' ? `, subject frame ${frames}.` : translated ? `, frames ${frames.replace('/', ' / ')}.` : '.'),
+        (c.id === 'tblastn' ? `, subject frame ${frames}.` : c.id === 'blastx' ? `, query frame ${frames}.` : translated ? `, frames ${frames.replace('/', ' / ')}.` : '.'),
     );
     // The same scale on both axes, a residue counting as 3 nt against nucleotides (S13b decision
-    // 26: TBLASTN's query), unless the shorter side was raised to 120 px (then the note says so).
-    const [queryLength, subjectLength] = /\(([\d,]+) \w+\) against subject .* \(([\d,]+) \w+\)\./
+    // 26: TBLASTN's query, BLASTX's subject), unless the shorter side was raised to 120 px (then the
+    // note says so).
+    const [queryLength, subjectLength] = /\(([\d,]+)\u00a0\w+\) against subject .* \(([\d,]+)\u00a0\w+\)\./
       .exec(await text(page.getByTestId('dotplot')))!
       .slice(1)
       .map((n) => Number(n.replace(/,/g, '')));
-    const ratio = (queryLength! * (c.units.query === 'aa' && c.units.subject === 'nt' ? 3 : 1)) / subjectLength!;
+    const codon = (unit: Unit, other: Unit) => (unit === 'aa' && other === 'nt' ? 3 : 1);
+    const ratio = (queryLength! * codon(c.units.query, c.units.subject)) / (subjectLength! * codon(c.units.subject, c.units.query));
     const [width, height] = (await canvas.getAttribute('data-plot'))!.split('x').map(Number);
-    if ((await page.getByTestId('dotplot-scale-note').count()) === 0) {
+    const toScale = (await page.getByTestId('dotplot-scale-note').count()) === 0;
+    if (toScale) {
       expect(Math.min(Math.abs(width! - height! * ratio), Math.abs(height! - width! / ratio))).toBeLessThanOrEqual(0.5);
     } else expect(Math.min(width!, height!)).toBe(120);
-    // The axis titles as drawn: the IDs and the units of the visible spans.
+    // The axis titles as drawn: the IDs and the units of the visible spans. The plot is drawn on
+    // an animation frame, after the attributes above are rendered, so the titles are waited for.
     const titles = async () => JSON.parse((await canvas.getAttribute('data-titles'))!) as [string, string];
-    expect((await titles())[1]).toMatch(new RegExp(`^Subject ${literal(fields[1]!)} \\((${c.units.subject === 'aa' ? 'aa|kaa' : 'bp|kbp'})\\)$`));
+    await expect(canvas).toHaveAttribute('data-titles', /^\[/);
+    // A protein axis against a nucleotide one says, while to scale, that it is drawn at 3 nt per aa,
+    // where its room holds the note with the unit (BLASTX's short subject axis may not).
+    const drawnAt = (unit: Unit, other: Unit) => (codon(unit, other) === 3 && toScale ? '(?:; drawn at 3\u00a0nt per aa)?' : '');
+    // Where the room is short, the ID is cut with an ellipsis and the unit kept.
+    const subjectTitle = (await titles())[1];
+    const shown = new RegExp(`^Subject (.+) \\((${c.units.subject === 'aa' ? 'aa|kaa' : 'bp|kbp'})${drawnAt(c.units.subject, c.units.query)}\\)$`).exec(subjectTitle);
+    expect(shown, subjectTitle).not.toBeNull();
+    const shownId = shown![1]!;
+    expect(shownId === fields[1] || (shownId.endsWith('…') && fields[1]!.startsWith(shownId.slice(0, -1))), subjectTitle).toBe(true);
     if (c.id === 'tblastn') {
       // TBLASTN's pair is to scale at 1280 px, its protein axis drawn at 3 nt per aa, which its title
       // says; on a phone the 120 px minimum changes the scale, and the note says so instead (W4b
       // screen review finding 4).
       await expect(page.getByTestId('dotplot-scale-note')).toHaveCount(0);
-      expect((await titles())[0]).toBe(`Query ${fields[0]} (aa; drawn at 3 nt per aa)`);
+      expect((await titles())[0]).toBe(`Query ${fields[0]} (aa; drawn at 3\u00a0nt per aa)`);
       await page.setViewportSize({ width: 390, height: 844 });
       await expect(page.getByTestId('dotplot-scale-note')).toBeVisible();
       await expect.poll(async () => (await titles())[0]).toBe(`Query ${fields[0]} (aa)`);
@@ -788,14 +889,34 @@ for (const c of PROGRAM_CASES) {
       const [, path, threads] = /^\s*(serial|threaded), (\d+) threads?\s*$/.exec(await text(page.getByTestId('run-record').locator('[data-detail="path"]')))!;
       const level = tableLevel(c.id, argv, path!, Number(threads));
       await expect(badge).toHaveAttribute('data-level', level);
-      await expect(badge).toHaveText(level === 'certified' ? 'Certified profile' : 'Engine-supported, outside certified profile');
+      await expect(badge).toHaveText(level === 'certified' ? 'Supported' : 'Not yet supported');
       test.info().annotations.push({ type: 'verification', description: `${c.id} ${argv.slice(5).join(' ') || 'defaults'}, ${path} ${threads}: ${level}` });
     }
     await expect(page.getByTestId('verification-details')).toHaveAttribute('data-level', (await badge.getAttribute('data-level'))!);
+    await expectNoVerificationWords(page, `${c.id}: Run details`);
+    await show(page, 'hits');
+    await expectNoVerificationWords(page, `${c.id}: Hits`);
   });
 }
 
 // --- outfmt 0 and the limits -------------------------------------------------------------------
+
+// -sorthits orders outfmt 0's hit list by its key: the subjects it aligns are its first ones in that order.
+test('with -sorthits, outfmt 0 shows the alignments of the first subjects in its order of -sorthits', async ({ page }) => {
+  const [total, shown] = BUILD_HAS_ENGINE ? [260, 250] : [3, 2];
+  await program(page, 'blastn');
+  await task(page, 'blastn');
+  await openParameters(page);
+  await page.getByTestId('param-sorthits').selectOption('1');
+  await openFiles(page, 'query', [{ name: 'many_query.fasta', text: fasta('outfmt0/many_query.fasta') }]);
+  await openFiles(page, 'subject', [{ name: 'many_subject.fasta', text: fasta('outfmt0/many_subject.fasta') }]);
+  await run(page, 1);
+  await openRun(page, 1);
+  await expect(page.getByTestId('subject-list')).toHaveAttribute('data-count', String(total));
+  await expect(page.locator('[data-testid="results-notice"][data-kind="outfmt0-partial"]')).toContainText(
+    `outfmt 0 shows the alignments of the first ${shown} subjects of this query in its order of -sorthits`,
+  );
+});
 
 test('an HSP that outfmt 0 does not show, and a hit list that may have reached its limit', async ({ page }) => {
   // many.blastn of the outfmt 0 manifest: 260 subjects with hits, outfmt 0 shows the alignments
@@ -806,7 +927,7 @@ test('an HSP that outfmt 0 does not show, and a hit list that may have reached i
   await openFiles(page, 'query', [{ name: 'many_query.fasta', text: fasta('outfmt0/many_query.fasta') }]);
   await openFiles(page, 'subject', [{ name: 'many_subject.fasta', text: fasta('outfmt0/many_subject.fasta') }]);
   await run(page, 1);
-  await openFromQueue(page, 1);
+  await openRun(page, 1);
   await expect(page.getByTestId('subject-list')).toHaveAttribute('data-count', String(total));
   const partial = page.locator('[data-testid="results-notice"][data-kind="outfmt0-partial"]');
   await expect(partial).toContainText(`outfmt 0 shows the alignments of the first ${shown} subjects of this query`);
@@ -817,7 +938,7 @@ test('an HSP that outfmt 0 does not show, and a hit list that may have reached i
 
   // The last subject in the engine's order: the "#" column the other way round. The sort keeps
   // the selected (first) subject, at the list's end now, and shows the list's first rows.
-  await show(page, 'alignment');
+  await show(page, 'hits');
   const selected = await page.getByTestId('hsp-detail').getAttribute('data-hsp');
   await show(page, 'hits');
   await page.getByTestId('subject-sort-order').click();
@@ -825,8 +946,8 @@ test('an HSP that outfmt 0 does not show, and a hit list that may have reached i
   const subjectList = page.getByTestId('subject-list');
   await expect.poll(() => subjectList.evaluate((element) => element.scrollTop)).toBe(0);
   await subjectList.evaluate((element) => (element.scrollTop = element.scrollHeight));
-  await expect(subjectRows(page).and(page.locator('[aria-pressed="true"]'))).toHaveAttribute('data-order', '1');
-  await show(page, 'alignment');
+  await expect(subjectRows(page).and(page.locator('[aria-selected="true"]'))).toHaveAttribute('data-order', '1');
+  await show(page, 'hits');
   await expect(page.getByTestId('hsp-detail')).toHaveAttribute('data-hsp', selected!);
   await show(page, 'hits');
   await subjectList.evaluate((element) => (element.scrollTop = 0));
@@ -835,8 +956,8 @@ test('an HSP that outfmt 0 does not show, and a hit list that may have reached i
   await expect(last.locator('[data-field="description"]')).toHaveText('not in outfmt 0');
   const sseqid = await text(last.locator('[data-field="sseqid"]'));
   await last.click();
-  await expect(last).toHaveAttribute('aria-pressed', 'true');
-  await show(page, 'alignment');
+  await expect(last).toHaveAttribute('aria-selected', 'true');
+  await show(page, 'hits');
   for (const row of await hspRows(page).all()) await expect(row.locator('[data-field="outfmt0"]')).toHaveText('not shown');
   await expect(page.getByTestId('detail-not-in-outfmt0')).toContainText(
     `outfmt 0 does not show this HSP. It shows the alignments of the first ${shown} subjects of this query`,
@@ -849,24 +970,26 @@ test('an HSP that outfmt 0 does not show, and a hit list that may have reached i
   // The Alignments are the tab of the next run opened, and of the results shown again (W4b).
   await page.getByTestId('tab-search').click();
   await page.getByTestId('tab-results').click();
-  await expect(page.getByTestId(TABS.alignment)).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId(TABS.hits)).toHaveAttribute('aria-selected', 'true');
   // outfmt 6 has the HSP; outfmt 0 has no alignment heading for its subject.
   await showOutput(page, 1, 6, false);
   expect((await text(page.getByTestId('result-output'))).split('\n')).toContain(row);
   await showOutput(page, 1, 0, false);
   const escaped = sseqid.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   expect(await text(page.getByTestId('result-output'))).not.toMatch(new RegExp(`^> ?${escaped}(\\s|$)`, 'm'));
-  await show(page, 'alignment');
+  await show(page, 'hits');
 
   // An explicit -max_target_seqs that the query's subjects reach (many.mts255.blastn): the
   // notice says that more subjects may match, not that hits were lost.
   const limit = BUILD_HAS_ENGINE ? 255 : 3;
   await page.getByTestId('tab-search').click();
   await openParameters(page);
-  await page.getByTestId('param-max_target_seqs').fill(String(limit));
+  // 3 and 255 are not in NCBI's list: "Other" takes them.
+  await page.getByTestId('param-max_target_seqs').selectOption('other');
+  await page.getByTestId('param-max_target_seqs-other').fill(String(limit));
   await run(page, 2);
-  await openFromQueue(page, 2);
-  await expect(page.getByTestId(TABS.alignment)).toHaveAttribute('aria-pressed', 'true');
+  await openRun(page, 2);
+  await expect(page.getByTestId(TABS.hits)).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByTestId('results-run-options')).toHaveText(`-task blastn -max_target_seqs ${limit}`);
   await expect(page.getByTestId('results-program')).toHaveText('BLASTN (task blastn)');
   const notice = page.locator('[data-testid="results-notice"][data-kind="subject-limit"]');
@@ -885,6 +1008,61 @@ test('an HSP that outfmt 0 does not show, and a hit list that may have reached i
   }
 });
 
+test('-num_alignments 3: the records follow the tabular list, and the texts say only what is known of the outfmt 0 search', async ({ page }) => {
+  // numdesc.blastn.split_na3: outfmt 6 and 7 keep three subjects, outfmt 0 has a hit list of its own (500). The
+  // third subject of the tabular list has no alignment linked to it (as the FakeEngine's third subject has none).
+  await program(page, 'blastn');
+  await task(page, 'blastn');
+  await openParameters(page);
+  await page.getByTestId('param-num_alignments').fill('3');
+  await openFiles(page, 'query', [{ name: 'split_q.fna', text: fasta('outfmt0/numdesc_split_q.fna') }]);
+  await openFiles(page, 'subject', [{ name: 'split_s.fna', text: fasta('outfmt0/numdesc_split_s.fna') }]);
+  await run(page, 1);
+  await openRun(page, 1);
+  await expect(page.getByTestId('results-run-options')).toHaveText('-task blastn -num_alignments 3');
+  await expect(page.getByTestId('subject-list')).toHaveAttribute('data-count', '3');
+  // The notice counts the subjects whose alignments are linked, and says that the search has a hit list of its own.
+  const partial = page.locator('[data-testid="results-notice"][data-kind="outfmt0-partial"]');
+  await expect(partial).toContainText("outfmt 0's alignments are linked to 2 of this query's 3 subjects (BLAST+'s -num_alignments: 3).");
+  await expect(partial).toContainText('Its search has a hit list of its own (500 subjects per query)');
+  await expect(partial).toContainText("a subject's HSPs are linked only where outfmt 0 shows the alignments of exactly the HSPs that outfmt 6 and 7 keep for it");
+  // The one-search notice reads "shows the alignments of 2 subjects"; the rule above says "shows the alignments of exactly".
+  expect(await text(partial)).not.toMatch(/\bshows the alignments of \d/);
+  // The subject-limit notice is the tabular list's: three subjects is -num_alignments.
+  expect(await noticeKinds(page)).toEqual(['subject-limit']);
+  // The third subject: no outfmt 0 alignment is linked to its HSP.
+  await subjectRows(page).last().click();
+  await show(page, 'hits');
+  const separate = page.getByTestId('detail-not-in-outfmt0');
+  await expect(separate).toContainText('No outfmt 0 alignment is linked to this HSP. Its search has a hit list of its own (500 subjects per query)');
+  await expect(separate).toContainText('it shows the alignments of its first 3 subjects (-num_alignments).');
+  await expect(separate).toContainText('Those can be other subjects, or another set of HSPs of a subject (which may include this one), than outfmt 6 and 7 keep.');
+  expect(await text(separate)).not.toMatch(/did not find/);
+  await expect(page.getByTestId('detail-section')).toHaveCount(0);
+});
+
+test('-num_alignments 0: outfmt 6 and 7 have no hits, and the notice says so', async ({ page }) => {
+  await program(page, 'blastn');
+  await task(page, 'blastn');
+  await openParameters(page);
+  await page.getByTestId('param-num_alignments').fill('0');
+  await openFiles(page, 'query', [{ name: 'split_q.fna', text: fasta('outfmt0/numdesc_split_q.fna') }]);
+  await openFiles(page, 'subject', [{ name: 'split_s.fna', text: fasta('outfmt0/numdesc_split_s.fna') }]);
+  await run(page, 1);
+  await openRun(page, 1);
+  await expect(page.getByTestId('results-run-options')).toHaveText('-task blastn -num_alignments 0');
+  const notice = page.locator('[data-testid="results-notice"][data-kind="no-tabular-hits"]');
+  await expect(notice).toContainText('-num_alignments 0 leaves the hit list of outfmt 6 and 7 empty');
+  expect(await noticeKinds(page)).toEqual(['no-tabular-hits']);
+  if (BUILD_HAS_ENGINE) {
+    // The run is not a failure: outfmt 0 is written, and the diagnostics hold the tabular formats' error.
+    await showOutput(page, 1, 0, false);
+    expect(await text(page.getByTestId('result-output'))).toContain('BLASTN');
+    await show(page, 'details');
+    await expect(page.getByTestId('run-diagnostics')).toContainText('No hits are being saved');
+  }
+});
+
 test("BLASTN: an HSP of one letter has no orientation in its record; the note points to outfmt 0's Strand= line", async ({ page }) => {
   // The example of docs/evidence/losat_web_e2c/AUTHORITY.md §P: a one-letter HSP on the minus
   // strand. The FakeEngine writes a one-letter BLASTN HSP for its third query.
@@ -892,20 +1070,21 @@ test("BLASTN: an HSP of one letter has no orientation in its record; the note po
   await program(page, 'blastn');
   await task(page, 'blastn');
   await openParameters(page);
-  await page.getByTestId('param-word_size').fill('4');
+  await page.getByTestId('param-word_size').selectOption('other');
+  await page.getByTestId('param-word_size-other').fill('4');
   await paste(page, 'query', BUILD_HAS_ENGINE ? '>q\nTAGGACGG\n' : '>q1\nACGTACGTACGT\n>q2\nACGTACGTACGT\n>q\nTAGGACGG\n');
   await paste(page, 'subject', '>s\nYCAYAANTNCRGYACT\n');
   await run(page, 1);
-  await openFromQueue(page, 1);
+  await openRun(page, 1);
   // "Results for" only for the FakeEngine's three queries.
   if (BUILD_HAS_ENGINE) await expect(page.getByTestId('query-list')).toHaveCount(0);
   else await page.getByTestId(`query-row-${qIdx}`).click();
-  await expect(page.getByTestId('subject-row-0')).toHaveAttribute('aria-pressed', 'true');
-  await show(page, 'alignment');
+  await expect(page.getByTestId('subject-row-0')).toHaveAttribute('aria-selected', 'true');
+  await show(page, 'hits');
   const single = page.getByTestId('hsp-list').locator('[data-testid^="hsp-row-"][data-orientation="unknown"]');
   await expect(single).toHaveCount(1);
   await single.click();
-  await expect(single).toHaveAttribute('aria-pressed', 'true');
+  await expect(single).toHaveAttribute('aria-selected', 'true');
   expect(await text(single.locator('[data-field="query"]'))).toMatch(/^(\d+)–\1$/);
   expect(await text(single.locator('[data-field="subject"]'))).toMatch(/^(\d+)–\1$/);
   await expect(single.locator('[data-field="orientation"]')).toHaveText('Not in the record');
@@ -929,7 +1108,7 @@ async function panelRun(page: Page): Promise<void> {
   await paste(page, 'query', PANEL_QUERIES);
   await paste(page, 'subject', PANEL_SUBJECTS);
   await run(page, 1);
-  await openFromQueue(page, 1);
+  await openRun(page, 1);
 }
 
 /** Selects the first subject of the selected query with two HSPs, and returns its index. */
@@ -938,7 +1117,7 @@ async function subjectWithTwoHsps(page: Page): Promise<number> {
   for (const row of await subjectRows(page).all()) {
     if ((await text(row.locator('[data-field="hsps"]'))).trim() === '2') {
       await row.click();
-      await expect(row).toHaveAttribute('aria-pressed', 'true');
+      await expect(row).toHaveAttribute('aria-selected', 'true');
       return subjectIndex(row);
     }
   }
@@ -950,7 +1129,7 @@ test('selection by HSP identity: sorting keeps the selected HSP; another subject
   await expect(page.getByTestId('query-row-0')).toHaveAttribute('aria-pressed', 'true');
   // A subject of the first query with two HSPs; choose its second HSP.
   const sIdx = await subjectWithTwoHsps(page);
-  await show(page, 'alignment');
+  await show(page, 'hits');
   await expect(hspRows(page)).toHaveCount(2);
   const second = hspRows(page).nth(1);
   const id = await hspId(second);
@@ -958,7 +1137,7 @@ test('selection by HSP identity: sorting keeps the selected HSP; another subject
   await expectSelected(page, id, sIdx);
 
   // The "#" column the other way round: the selected HSP is now first, and still selected.
-  await show(page, 'alignment');
+  await show(page, 'hits');
   await page.getByTestId('hsp-sort-rank').click();
   await expect(page.getByTestId('hsp-sort-rank').locator('..')).toHaveAttribute('aria-sort', 'descending');
   expect(await hspId(hspRows(page).first())).toBe(id);
@@ -976,7 +1155,7 @@ test('selection by HSP identity: sorting keeps the selected HSP; another subject
   ]) {
     // Each column one way, then the other.
     for (let click = 0; click < 2; click++) {
-      await show(page, sort.startsWith('hsp-') ? 'alignment' : 'hits');
+      await show(page, 'hits');
       await page.getByTestId(sort).click();
       await expect(page.getByTestId(sort).locator('..')).toHaveAttribute('aria-sort', /^(ascending|descending)$/);
       await expectSelected(page, id, sIdx);
@@ -984,11 +1163,11 @@ test('selection by HSP identity: sorting keeps the selected HSP; another subject
   }
 
   // Another subject: the selection moves to its first HSP in the current order.
-  const unselected = page.getByTestId('subject-list').locator('[data-testid^="subject-row-"][aria-pressed="false"]').first();
+  const unselected = page.getByTestId('subject-list').locator('[data-testid^="subject-row-"][aria-selected="false"]').first();
   const otherIdx = await subjectIndex(unselected);
   await page.getByTestId(`subject-row-${otherIdx}`).click();
-  await expect(page.getByTestId(`subject-row-${otherIdx}`)).toHaveAttribute('aria-pressed', 'true');
-  await show(page, 'alignment');
+  await expect(page.getByTestId(`subject-row-${otherIdx}`)).toHaveAttribute('aria-selected', 'true');
+  await show(page, 'hits');
   const firstOfOther = await hspId(hspRows(page).first());
   expect(firstOfOther).not.toBe(id);
   await expectSelected(page, firstOfOther, otherIdx);
@@ -998,7 +1177,7 @@ test('selection by HSP identity: sorting keeps the selected HSP; another subject
   await expect(page.getByTestId('query-row-1')).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByTestId('query-row-0')).toHaveAttribute('aria-pressed', 'false');
   const firstSubject = await subjectIndex(subjectRows(page).first());
-  await show(page, 'alignment');
+  await show(page, 'hits');
   const firstHsp = await hspId(hspRows(page).first());
   expect(firstHsp).toMatch(/^1:/);
   await expectSelected(page, firstHsp, firstSubject);
@@ -1010,7 +1189,7 @@ test('the Alignments: a block per Range; Next, Previous and First Match; the pre
   await panelRun(page);
   const sIdx = await subjectWithTwoHsps(page);
   const subjectOrder = await subjectRows(page).evaluateAll((rows) => rows.map((row) => Number((row as HTMLElement).dataset['testid']!.replace('subject-row-', ''))));
-  await show(page, 'alignment');
+  await show(page, 'hits');
   const [firstId, secondId] = [await hspId(hspRows(page).nth(0)), await hspId(hspRows(page).nth(1))];
   const [first, second] = [page.getByTestId(`range-${firstId.replace(':', '-')}`), page.getByTestId(`range-${secondId.replace(':', '-')}`)];
   await expect(rangeBlocks(page)).toHaveCount(2);
@@ -1023,7 +1202,7 @@ test('the Alignments: a block per Range; Next, Previous and First Match; the pre
   await first.getByTestId('range-next').click();
   await expect(page.getByTestId('hsp-detail')).toHaveAttribute('data-hsp', secondId);
   await expect(second.getByTestId('hsp-detail')).toHaveCount(1);
-  await expect(page.getByTestId(`hsp-row-${secondId.replace(':', '-')}`)).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId(`hsp-row-${secondId.replace(':', '-')}`)).toHaveAttribute('aria-selected', 'true');
   await expect(second.getByTestId('range-label')).toBeFocused();
   // The first Range shows its section, read when it came into view.
   await expect(first.getByTestId('range-section')).toHaveAttribute('data-state', 'ready');
@@ -1039,7 +1218,7 @@ test('the Alignments: a block per Range; Next, Previous and First Match; the pre
   await expect(page.getByTestId('hsp-detail')).toHaveAttribute('data-hsp', secondId);
   await expect(second.getByTestId('range-label')).toBeInViewport();
 
-  // Previous and Next subject follow the Descriptions' order; "Descriptions" goes back to them.
+  // Previous and Next subject follow the Descriptions' order.
   const at = subjectOrder.indexOf(sIdx);
   const previous = page.getByTestId('alignments-prev-subject');
   const next = page.getByTestId('alignments-next-subject');
@@ -1051,9 +1230,9 @@ test('the Alignments: a block per Range; Next, Previous and First Match; the pre
     await previous.click();
     await expect(page.getByTestId('alignments-subject')).toHaveAttribute('data-subject', String(sIdx));
   }
-  await page.getByTestId('alignments-descriptions').click();
-  await expect(page.getByTestId(TABS.hits)).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.getByTestId(`subject-row-${sIdx}`)).toHaveAttribute('aria-pressed', 'true');
+  // The Descriptions are on the same page, above the Alignments, with the selected subject marked.
+  await expect(page.getByTestId('section-descriptions')).toBeVisible();
+  await expect(page.getByTestId(`subject-row-${sIdx}`)).toHaveAttribute('aria-selected', 'true');
 
   if (!BUILD_HAS_ENGINE) return;
   // A pair of many HSPs (a repeated unit searched against itself, about two HSPs a copy): the
@@ -1065,11 +1244,11 @@ test('the Alignments: a block per Range; Next, Previous and First Match; the pre
     await openFiles(page, role, [{ name: 'repeat.fna', text: repeats(20, 60) }]);
   }
   await run(page, 2);
-  await openFromQueue(page, 2);
-  await expect(page.getByTestId(TABS.hits)).toHaveAttribute('aria-pressed', 'true');
+  await openRun(page, 2);
+  await expect(page.getByTestId(TABS.hits)).toHaveAttribute('aria-selected', 'true');
   const { asked, failNext } = await watchReads(page);
   const before = await asked();
-  await show(page, 'alignment');
+  await show(page, 'hits');
   const total = Number(await page.getByTestId('hsp-list').getAttribute('data-count'));
   expect(total).toBeGreaterThan(80);
   await expect(rangeBlocks(page)).toHaveCount(26);
@@ -1077,12 +1256,15 @@ test('the Alignments: a block per Range; Next, Previous and First Match; the pre
   // Each block that was seen asked for its section once (the reads counted as they were asked
   // for): every read asked for arrived in a block; the blocks never seen still wait.
   const sectionsIn = (state: string) => page.getByTestId('alignments').locator(`[data-testid="range-section"][data-state="${state}"]`);
-  await settledSections(page, asked);
+  await settledSections(page);
   expect((await asked()) - before).toBe(await sectionsIn('ready').count());
   // Further down: the blocks around the 13th ask for theirs. The first read asked for fails.
   await failNext(1);
   await rangeBlocks(page).nth(12).evaluate((block) => block.scrollIntoView({ block: 'start' }));
-  await settledSections(page, asked);
+  // The block at the top of the screen has its section (or its failure) once the browser has
+  // reported it in view, which WebKit did in CI only after the counts had stayed for 700 ms.
+  await expect(rangeBlocks(page).nth(12).getByTestId('range-section')).toHaveAttribute('data-state', /^(ready|failed)$/);
+  await settledSections(page);
   const readNow = await sectionsIn('ready').count();
   expect(readNow).toBeGreaterThan(0);
   expect((await asked()) - before).toBe(readNow + 1);
@@ -1104,9 +1286,12 @@ test('the Alignments: a block per Range; Next, Previous and First Match; the pre
   // arrives to move the blocks (a failed block that leaves the screen is read again on its return).
   await failNext(1000);
   await rangeBlocks(page).nth(45).evaluate((block) => block.scrollIntoView({ block: 'start' }));
-  await settledSections(page, asked);
-  await failNext(0);
   const retried = rangeBlocks(page).nth(45).getByTestId('range-section');
+  // Read, and failed, once the browser has reported the block in view: the reads must still fail
+  // then (in CI, WebKit reported it after failNext(0), and the block was read).
+  await expect(retried).toHaveAttribute('data-state', 'failed');
+  await settledSections(page);
+  await failNext(0);
   await expect(retried).toHaveAttribute('data-state', 'failed');
   await expect(retried).toBeInViewport();
   await retried.getByTestId('range-retry').click();
@@ -1147,19 +1332,9 @@ test('many queries; view filters change the view, not the search; the notices te
   page,
 }) => {
   await panelRun(page);
-  const queue = page.getByTestId('queue').locator(':scope > li');
-  await expect(queue).toHaveCount(1);
-  // The queue's card has one layout, at the same place beside either tab (W4 screen review low 5).
-  const card = async () => {
-    const [run, open] = [(await page.getByTestId('run-1').boundingBox())!, (await page.getByTestId('run-1-open').boundingBox())!];
-    return [run.x, run.width, run.height, open.x - run.x, open.y - run.y].map(Math.round);
-  };
-  const inResults = await card();
-  await page.getByTestId('tab-search').click();
-  expect(await card()).toEqual(inResults);
-  await page.getByTestId('tab-results').click();
+  await expect(page.getByTestId('run-1-option')).toHaveCount(1);
   // The selection is read in the Alignments; "Results for", "Filter Results" and the notices are above the tabs.
-  await show(page, 'alignment');
+  await show(page, 'hits');
   const detail = page.getByTestId('hsp-detail');
 
   // A query without hits: NCBI's words; the tabs stay.
@@ -1168,12 +1343,17 @@ test('many queries; view filters change the view, not the search; the notices te
   await expect(page.locator('[data-testid="results-notice"][data-kind="no-hits"]')).toHaveText('No significant similarity found for this query.');
   expect(await noticeKinds(page)).toEqual(['no-hits']);
   await expect(page.getByTestId('alignments')).toHaveCount(0);
-  await expect(page.getByTestId(TABS.alignment)).toBeVisible();
+  await expect(page.getByTestId(TABS.hits)).toBeVisible();
+  // The Dot Plot tab says so too, in place of a plot (WA-RS-04).
+  await show(page, 'dotplot');
+  await expect(page.getByTestId('dotplot')).toHaveCount(0);
+  await expect(page.getByTestId('results-dotplot-empty')).toHaveText('No significant similarity found for this query.');
+  await expect(page.getByTestId('results-dotplot-empty')).toHaveAttribute('data-kind', 'no-hits');
   await show(page, 'hits');
   await expect(page.getByTestId('subject-table')).toHaveCount(0);
-  await show(page, 'graphic');
+  await show(page, 'hits');
   await expect(page.getByTestId('graphic-summary')).toHaveCount(0);
-  await show(page, 'alignment');
+  await show(page, 'hits');
 
   // The query picker draws only the rows in view, and finds a query by its ID.
   const list = page.getByTestId('query-list');
@@ -1185,6 +1365,9 @@ test('many queries; view filters change the view, not the search; the notices te
   await list.evaluate((element) => (element.scrollTop = element.scrollHeight));
   await expect(page.getByTestId('query-row-149')).toBeVisible();
   await expect(page.getByTestId('query-row-0')).toHaveCount(0);
+  // The selected query (#4) stays drawn out of view: the list's Tab stop (WA2-AX-01).
+  await expect(page.getByTestId('query-row-3')).toBeAttached();
+  await expect(page.getByTestId('query-row-3')).not.toBeInViewport();
   // The selected query (#4, no hits) leaves the list: the first query listed is selected.
   await page.getByTestId('filter-hits-only').check();
   await expect(page.getByTestId('query-count')).toHaveText('113 of 150 queries');
@@ -1215,8 +1398,10 @@ test('many queries; view filters change the view, not the search; the notices te
   );
   expect(await noticeKinds(page)).toEqual(['filtered-out']);
   await expect(page.getByTestId('subject-table')).toHaveCount(0);
-  await show(page, 'alignment');
+  await show(page, 'dotplot');
   await expect(page.getByTestId('hsp-table')).toHaveCount(0);
+  await expect(page.getByTestId('results-dotplot-empty')).toHaveText('No HSPs of this query match the view filters.');
+  await expect(page.getByTestId('results-dotplot-empty')).toHaveAttribute('data-kind', 'filtered-out');
   await show(page, 'hits');
   await page.getByTestId('results-notice-clear').click();
   await expect(filteredOut).toHaveCount(0);
@@ -1256,9 +1441,8 @@ test('many queries; view filters change the view, not the search; the notices te
   await expect(subjectRows(page)).toHaveCount(Number(subjects));
   expect(await noticeKinds(page)).toEqual([]);
   // None of this was a search.
-  await expect(queue).toHaveCount(1);
   await expect(page.getByTestId('results-run').locator('option:not([disabled])')).toHaveCount(1);
-  await expect(page.getByTestId('run-1-status')).toHaveText('completed');
+  await expect(page.getByTestId('run-1-option')).toHaveAttribute('data-status', 'completed');
 
   if (BUILD_HAS_ENGINE) {
     // A run that fails: a TBLASTX subject record without residues. `register` and `validate`
@@ -1276,7 +1460,6 @@ test('many queries; view filters change the view, not the search; the notices te
     await paste(page, 'subject', '>s1 alpha\n');
     await submit(page);
     await waitStatus(page, 2, 'failed');
-    await expect(page.getByTestId('run-2-open')).toHaveCount(0);
     await page.getByTestId('tab-results').click();
     const select = page.getByTestId('results-run');
     await select.selectOption({ label: 'Run 2 · TBLASTX · query.fa vs subject.fa (failed)' });
@@ -1329,21 +1512,21 @@ test('the dot plot: the HSPs of the pair on a canvas; zoom; choosing an HSP on i
   await paste(page, 'query', `>q1\n${dna(21, 20)}\n>q2\n${A}\n`);
   await paste(page, 'subject', `>s1\n${A}${dna(12, 60)}${A}\n`);
   await run(page, 1);
-  await openFromQueue(page, 1);
+  await openRun(page, 1);
   const rows = outfmt6Rows((await readOutputs(page, 1)).text[6]);
   await page.getByTestId('query-row-1').click();
   // The Dot Plot tab has the HSP table under the plot.
   await show(page, 'dotplot');
-  await expect(hspRows(page)).toHaveCount(2);
-  const [firstId, secondId] = [await hspId(hspRows(page).nth(0)), await hspId(hspRows(page).nth(1))];
+  await expect(dotRows(page)).toHaveCount(2);
+  const [firstId, secondId] = [await hspId(dotRows(page).nth(0)), await hspId(dotRows(page).nth(1))];
   const canvas = page.getByTestId('dotplot-canvas');
   await expect(canvas).toHaveAttribute('data-segments', '2');
   await expect(canvas).toHaveAttribute('data-selected', firstId);
   const full = '0,60,0,180';
   await expect(canvas).toHaveAttribute('data-view', full);
 
-  // The canvas is drawn: pixels of the HSPs' colours.
-  expect(await colouredPixels(canvas)).toBeGreaterThan(20);
+  // The canvas is drawn (in an animation frame, after the attributes): pixels of the HSPs' colours.
+  await expect.poll(() => colouredPixels(canvas)).toBeGreaterThan(20);
 
   // Zoom in, in again, out, and back to the whole sequences.
   const span = async () => {
@@ -1387,16 +1570,16 @@ test('the dot plot: the HSPs of the pair on a canvas; zoom; choosing an HSP on i
       name: /^Dot plot of 2 HSPs\. .*Ctrl or ⌘ and the mouse wheel.* n and p to select the next or previous HSP; Enter to show the selected HSP, and Escape to close it\.$/,
     }),
   ).toHaveAttribute('data-testid', 'dotplot-canvas');
-  await expect(canvas).toHaveCSS('touch-action', 'pan-y');
+  await expect(canvas).toHaveCSS('touch-action', 'pan-y pinch-zoom');
   await expect(page.getByTestId('dotplot-legend-selected')).toBeVisible();
 
   // An HSP chosen in the list is selected on the plot; "Zoom to HSP" frames it, from a view
   // zoomed in away from it (with the same scale on both axes, the frame of an HSP that spans the
   // whole query is the whole plot).
-  await hspRows(page).nth(1).click();
+  await dotRows(page).nth(1).click();
   await expect(canvas).toHaveAttribute('data-selected', secondId);
-  const [qStart, qEnd] = (await text(hspRows(page).nth(1).locator('[data-field="query"]'))).split('–').map(Number);
-  const [sStart, sEnd] = (await text(hspRows(page).nth(1).locator('[data-field="subject"]'))).split('–').map(Number);
+  const [qStart, qEnd] = (await text(dotRows(page).nth(1).locator('[data-field="query"]'))).split('–').map(Number);
+  const [sStart, sEnd] = (await text(dotRows(page).nth(1).locator('[data-field="subject"]'))).split('–').map(Number);
   await page.getByTestId('dotplot-zoom-in').click();
   await page.getByTestId('dotplot-zoom-in').click();
   await expect.poll(async () => (await span()).x).toBeLessThan(30);
@@ -1416,20 +1599,16 @@ test('the dot plot: the HSPs of the pair on a canvas; zoom; choosing an HSP on i
   const target = targets.find((t) => t.hsp === firstId)!;
   await canvas.click({ position: { x: target.x, y: target.y } });
   await expect(canvas).toHaveAttribute('data-selected', firstId);
-  await expect(hspRows(page).nth(0)).toHaveAttribute('aria-pressed', 'true');
-  await expect(hspRows(page).nth(1)).toHaveAttribute('aria-pressed', 'false');
-  const firstQuery = await text(hspRows(page).nth(0).locator('[data-field="query"]'));
+  await expect(dotRows(page).nth(0)).toHaveAttribute('aria-selected', 'true');
+  await expect(dotRows(page).nth(1)).toHaveAttribute('aria-selected', 'false');
+  const firstQuery = await text(dotRows(page).nth(0).locator('[data-field="query"]'));
   await expect(page.getByTestId('dotplot-selected')).toContainText(`query ${firstQuery} nt`);
   const popup = page.getByTestId('dotplot-popup');
   await expect(popup).toHaveAttribute('data-hsp', firstId);
-  // Beside the line, off one of its ends: it does not cover the line's midpoint (W4b screen review L10).
-  await expect(popup).toHaveAttribute('data-place', 'beside');
-  const covers = async (point: { x: number; y: number }) => {
-    const [at, plot] = [(await popup.boundingBox())!, (await canvas.boundingBox())!];
-    const [x, y] = [plot.x + point.x, plot.y + point.y];
-    return x >= at.x && x <= at.x + at.width && y >= at.y && y <= at.y + at.height;
-  };
-  expect(await covers(target)).toBe(false);
+  // Right of the plot, which is narrow (the query is a third of the subject): it covers no part of
+  // the plot, so every line can still be clicked (WA-RS-02).
+  await expect(popup).toHaveAttribute('data-place', 'right');
+  await expect.poll(() => coversPlot(popup, canvas)).toBe(false);
   const fields = rows.filter((row) => row[0] === 'q2')[Number(firstId.split(':')[1])]!;
   const value = (name: string) => popup.locator(`dd[data-field="${name}"]`);
   await expect(value('bitscore')).toHaveText(fields[11]!);
@@ -1446,11 +1625,11 @@ test('the dot plot: the HSPs of the pair on a canvas; zoom; choosing an HSP on i
   // closes it and gives the focus back to the plot.
   await page.keyboard.press('n');
   await expect(canvas).toHaveAttribute('data-selected', secondId);
-  await expect(hspRows(page).nth(1)).toHaveAttribute('aria-pressed', 'true');
+  await expect(dotRows(page).nth(1)).toHaveAttribute('aria-selected', 'true');
   await page.keyboard.press('Enter');
   await expect(popup).toHaveAttribute('data-hsp', secondId);
   await expect(popup).toBeFocused();
-  expect(await covers(targets.find((t) => t.hsp === secondId)!)).toBe(false);
+  await expect.poll(() => coversPlot(popup, canvas)).toBe(false);
   await expect(page.getByRole('dialog', { name: `HSP ${Number(secondId.split(':')[1]) + 1}` })).toHaveAttribute('data-testid', 'dotplot-popup');
   await page.keyboard.press('Escape');
   await expect(popup).toHaveCount(0);
@@ -1466,7 +1645,7 @@ test('the dot plot: the HSPs of the pair on a canvas; zoom; choosing an HSP on i
   await expect(popup).toHaveCSS('outline-width', '2px');
   // "Show alignment": the Alignments, with the HSP's Range in view and the focus on its label.
   await popup.getByTestId('dotplot-popup-alignment').click();
-  await expect(page.getByTestId(TABS.alignment)).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId(TABS.hits)).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByTestId('hsp-detail')).toHaveAttribute('data-hsp', secondId);
   const range = page.getByTestId(`range-${secondId.replace(':', '-')}`);
   await expect(range.getByTestId('range-label')).toBeFocused();
@@ -1475,17 +1654,371 @@ test('the dot plot: the HSPs of the pair on a canvas; zoom; choosing an HSP on i
 
 // --- the phone size (S13 screen review) ------------------------------------------------------------
 
-test('narrow screens: the results are no wider than the screen; "Open results" shows them; the tables show the key values first', async ({ page }) => {
+
+/** Whether the popup's box overlaps the canvas's on the page. */
+async function coversPlot(popup: Locator, canvas: Locator): Promise<boolean> {
+  const [at, plot] = [(await popup.boundingBox())!, (await canvas.boundingBox())!];
+  return at.x < plot.x + plot.width && at.x + at.width > plot.x && at.y < plot.y + plot.height && at.y + at.height > plot.y;
+}
+
+/** The distance from a point to a line from (ax, ay) to (bx, by). */
+function distanceToLine(x: number, y: number, [ax, ay, bx, by]: readonly number[]): number {
+  const [dx, dy] = [bx! - ax!, by! - ay!];
+  const t = dx === 0 && dy === 0 ? 0 : Math.max(0, Math.min(1, ((x - ax!) * dx + (y - ay!) * dy) / (dx * dx + dy * dy)));
+  return Math.hypot(x - (ax! + t * dx), y - (ay! + t * dy));
+}
+
+test('the dot plot: the HSP popup is outside the plot, so a click on any line selects it while the popup is open', async ({ page }) => {
+  // One record of six copies of a unit against itself: a diagonal for each offset between the
+  // copies, over the whole plot (the FakeEngine writes one HSP).
+  const record = repeats(300, 6).toString();
+  await program(page, 'blastn');
+  await paste(page, 'query', record);
+  await paste(page, 'subject', record);
+  await run(page, 1);
+  await openRun(page, 1);
+  await show(page, 'dotplot');
+  const canvas = page.getByTestId('dotplot-canvas');
+  const popup = page.getByTestId('dotplot-popup');
+  const targets = JSON.parse((await canvas.getAttribute('data-targets'))!) as { hsp: string; x: number; y: number; ends: number[] }[];
+  expect(targets.length).toBeGreaterThan(BUILD_HAS_ENGINE ? 6 : 0);
+  // The midpoints that no other line passes near, so that a click there picks that line.
+  const clear = targets.filter((t) => targets.every((other) => other === t || distanceToLine(t.x, t.y, other.ends) > 12));
+  expect(clear.length).toBeGreaterThan(BUILD_HAS_ENGINE ? 4 : 0);
+  for (const target of [...clear, ...clear.slice().reverse()]) {
+    // The point in view, clicked where it is on the screen: on whatever is drawn there.
+    await canvas.evaluate((element, y) => window.scrollBy(0, element.getBoundingClientRect().top + y - window.innerHeight / 2), target.y);
+    const plot = (await canvas.boundingBox())!;
+    await page.mouse.click(plot.x + target.x, plot.y + target.y);
+    // The frame that the click asked for places the popup and scrolls it into view: it comes no later
+    // than a frame asked for after the click.
+    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    await expect(canvas).toHaveAttribute('data-selected', target.hsp);
+    await expect(popup).toHaveAttribute('data-hsp', target.hsp);
+    await expect(page.getByTestId(TABS.dotplot)).toHaveAttribute('aria-selected', 'true');
+    await expect.poll(() => coversPlot(popup, canvas), `the popup of ${target.hsp} covers the plot`).toBe(false);
+  }
+  await expectNoSideScroll(page, 'dot plot popup');
+});
+
+test('the dot plot: a popup taller than a short plot is under it, and stays there', async ({ page }) => {
+  // A wide stage and a plot of a long query against a short subject: room on the right, but the
+  // canvas is shorter than the popup.
+  await page.setViewportSize({ width: 1800, height: 900 });
+  const query = dna(41, 2400);
+  await program(page, 'blastn');
+  await paste(page, 'query', `>q\n${query}\n`);
+  await paste(page, 'subject', `>s\n${query.slice(1000, 1200)}\n`);
+  await run(page, 1);
+  await openRun(page, 1);
+  await show(page, 'dotplot');
+  const canvas = page.getByTestId('dotplot-canvas');
+  await canvas.focus();
+  await page.keyboard.press('Enter');
+  const popup = page.getByTestId('dotplot-popup');
+  await expect(popup).toHaveAttribute('data-place', 'below');
+  // Under the plot for its height: the stage has room on the right.
+  const [stage, plot] = [(await page.locator('.plot-stage').boundingBox())!, (await canvas.boundingBox())!];
+  expect(stage.width - plot.width).toBeGreaterThan(400);
+  expect((await popup.boundingBox())!.height).toBeGreaterThan(plot.height);
+  await expect.poll(() => coversPlot(popup, canvas)).toBe(false);
+  // Frames later (a scroll bar may have come with it), it is still there.
+  await page.waitForTimeout(500);
+  await expect(popup).toHaveAttribute('data-place', 'below');
+  await expectNoSideScroll(page, 'dot plot popup under a short plot');
+});
+
+test('the E value filter compares the values that the lists show: an E value written 0.0 passes "E value ≤ 0"', async ({ page }) => {
+  test.skip(!BUILD_HAS_ENGINE, 'NCBI writes an E value below 1e-180 as 0.0; the FakeEngine writes FAKE');
+  // 450 identical letters: an E value of about 1e-240, not 0 (1,200 letters underflow to 0), written 0.0.
+  const sequence = dna(31, 450);
+  await program(page, 'blastn');
+  await paste(page, 'query', `>q\n${sequence}\n`);
+  await paste(page, 'subject', `>s\n${sequence}\n>t\n${sequence.slice(0, 200)}\n`);
+  await run(page, 1);
+  await openRun(page, 1);
+  const rows = outfmt6Rows((await readOutputs(page, 1)).text[6]);
+  const zero = rows.filter((row) => row[10] === '0.0');
+  expect(zero.map((row) => row[1])).toEqual(['s']);
+  expect(rows.find((row) => row[1] === 't')![10]).not.toBe('0.0');
+  await show(page, 'hits');
+  await page.getByTestId('filter-evalue').fill('0');
+  await page.getByTestId('filter-apply').click();
+  await expect(subjectRows(page)).toHaveCount(1);
+  await expect(subjectRows(page).locator('[data-field="sseqid"]')).toHaveText('s');
+  await expect(subjectRows(page).locator('[data-field="evalue"]')).toHaveText('0.0');
+});
+
+test('the dot plot: its Subject list chooses the plotted subject, the same selection as a Descriptions row', async ({ page }) => {
+  // The Owner (2026-11-02): chosen only by a Descriptions row on another tab, the plotted pair was
+  // a riddle. q1 is A; both subjects hold it.
+  await program(page, 'blastn');
+  await paste(page, 'query', `>q1\n${A}\n`);
+  await paste(page, 'subject', `>s1\n${A}${dna(12, 60)}\n>s2\n${dna(13, 40)}${A}\n`);
+  await run(page, 1);
+  await openRun(page, 1);
+  await show(page, 'dotplot');
+  const select = page.getByTestId('dotplot-subject');
+  const options = select.locator('option');
+  await expect(options).toHaveCount(2);
+  const [first, second] = [(await options.nth(0).getAttribute('value'))!, (await options.nth(1).getAttribute('value'))!];
+  const secondId = (await options.nth(1).textContent())!.trim().split(' · ')[0]!;
+  await expect(select).toHaveValue(first);
+
+  await select.selectOption(second);
+  await expect(page.getByTestId('dotplot-title')).toHaveText(`Plot of q1 vs ${secondId}`);
+  await show(page, 'hits');
+  await expect(page.getByTestId(`subject-row-${second}`)).toHaveAttribute('aria-selected', 'true');
+
+  // And back: a Descriptions row chooses the plotted subject too.
+  await page.getByTestId(`subject-row-${first}`).click();
+  await show(page, 'dotplot');
+  await expect(select).toHaveValue(first);
+});
+/** The test ID of the element that has the focus (its tag name without one). */
+const focusedId = (page: Page) => page.evaluate(() => document.activeElement?.getAttribute('data-testid') ?? document.activeElement?.tagName ?? '');
+/** The focus left the rows whose test IDs start with `prefix`, for another element than the page. */
+async function expectFocusLeft(page: Page, prefix: string): Promise<void> {
+  const id = await focusedId(page);
+  expect(id).not.toMatch(new RegExp(`^${prefix}`));
+  expect(id).not.toBe('BODY');
+}
+
+test('the Descriptions and HSP tables are grids: one Tab stop each, arrow keys between rows, Enter or Space selects; axe finds nothing in them', async ({
+  page,
+}) => {
+  // WA2-AX-01 (a Tab stop per row), WA2-AX-02 (rows without a table), WA2-SC-04 (the HSP count).
+  await panelRun(page);
+  await show(page, 'hits');
+  const grid = page.getByRole('grid', { name: 'Subjects' });
+  const rows = subjectRows(page);
+  const count = Number(await page.getByTestId('subject-list').getAttribute('data-count'));
+  expect(count).toBeGreaterThanOrEqual(2);
+  await expect(grid).toHaveAttribute('aria-rowcount', String(count + 1));
+  const columns = await grid.getByRole('columnheader').count();
+  expect(columns).toBe(7);
+  for (const [i, row] of (await rows.all()).entries()) {
+    await expect(row).toHaveAttribute('aria-rowindex', String(i + 2));
+    await expect(row.getByRole('gridcell')).toHaveCount(columns);
+  }
+
+  // One Tab stop: from the last sort button to the selected row, and on out of the table.
+  const selected = rows.and(page.locator('[aria-selected="true"]'));
+  const first = await subjectIndex(selected);
+  await page.getByTestId('subject-sort-length').focus();
+  await page.keyboard.press('Tab');
+  await expect(selected).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expectFocusLeft(page, 'subject-row-');
+  await page.keyboard.press('Shift+Tab');
+  await expect(selected).toBeFocused();
+  // Down moves the focus, not the selection; Enter selects; Home and Space select the first again.
+  await page.keyboard.press('ArrowDown');
+  await expect(rows.nth(1)).toBeFocused();
+  await expect(rows.nth(1)).toHaveAttribute('aria-selected', 'false');
+  await page.keyboard.press('Enter');
+  await expect(rows.nth(1)).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByTestId(`subject-row-${first}`)).toHaveAttribute('aria-selected', 'false');
+  await expect(rows.nth(1)).toBeFocused();
+  await page.keyboard.press('Home');
+  await expect(rows.first()).toBeFocused();
+  await page.keyboard.press(' ');
+  await expect(rows.first()).toHaveAttribute('aria-selected', 'true');
+  await page.keyboard.press('End');
+  await expect(rows.last()).toBeFocused();
+  await page.keyboard.press('ArrowDown');
+  await expect(rows.last()).toBeFocused();
+
+  // The HSP table of the Alignments: the same, and Space chooses the HSP that the Alignments show.
+  await subjectWithTwoHsps(page);
+  const hsps = page.getByTestId('results-hits').getByRole('grid', { name: 'HSPs' });
+  await expect(hsps).toHaveAttribute('aria-rowcount', '3');
+  await expect(page.getByTestId('results-hits').getByTestId('hsp-count')).toHaveText('2 shown');
+  await page.getByTestId('results-hits').getByTestId('hsp-sort-sStart').focus();
+  await page.keyboard.press('Tab');
+  await expect(hspRows(page).nth(0)).toBeFocused();
+  await page.keyboard.press('ArrowDown');
+  await expect(hspRows(page).nth(1)).toBeFocused();
+  await page.keyboard.press(' ');
+  await expect(hspRows(page).nth(1)).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByTestId('hsp-detail')).toHaveAttribute('data-hsp', await hspId(hspRows(page).nth(1)));
+  await expect(hspRows(page).nth(1)).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expectFocusLeft(page, 'hsp-row-');
+
+  expect(await axeViolations(page, ['[data-testid="subject-table"]', '[data-testid="hsp-table"]', '[data-testid="query-list"]'])).toEqual([]);
+  await show(page, 'dotplot');
+  await expect(page.getByTestId('results-dotplot').getByRole('grid', { name: 'HSPs' })).toHaveAttribute('aria-rowcount', '3');
+  expect(await axeViolations(page, ['[data-testid="results-dotplot"] [data-testid="hsp-table"]'])).toEqual([]);
+});
+
+test('the query list: one Tab stop; the keys move the focus beyond the drawn rows, and a focused row scrolled out of view keeps it', async ({
+  page,
+}) => {
+  // WA2-AX-01, WA2-SC-02 (the focus fell to the page), WA2-SC-03 (the place among all items).
+  await panelRun(page);
+  const list = page.getByTestId('query-list');
+  const item = (qIdx: number) => page.getByTestId(`query-row-${qIdx}`);
+  await expect(item(0)).toHaveAttribute('aria-pressed', 'true');
+  await expect(list.getByRole('listitem').first()).toHaveAttribute('aria-setsize', '150');
+  await expect(item(0).locator('..')).toHaveAttribute('aria-posinset', '1');
+
+  // The whole list in the window: the keys then move the list only.
+  await list.evaluate((element) => element.scrollIntoView({ block: 'center' }));
+  await item(0).focus();
+  await page.keyboard.press('End');
+  await expect(item(149)).toBeFocused();
+  await expect(item(149)).toBeInViewport();
+  await expect(item(149).locator('..')).toHaveAttribute('aria-posinset', '150');
+  await expect(item(149)).toHaveAttribute('aria-pressed', 'false');
+  // A page is the rows in view (8) less one.
+  await page.keyboard.press('PageUp');
+  await expect(item(142)).toBeFocused();
+  // The list scrolled back to its first rows: the focused row stays drawn, with the focus.
+  const pageY = await page.evaluate(() => window.scrollY);
+  await list.evaluate((element) => (element.scrollTop = 0));
+  await expect(item(0)).toBeInViewport();
+  await expect(item(142)).toBeFocused();
+  await expect(item(142)).not.toBeInViewport();
+  // The next key moves the list, not the page, and brings the row into view.
+  await page.keyboard.press('PageDown');
+  await expect(item(149)).toBeFocused();
+  await expect(item(149)).toBeInViewport();
+  expect(await page.evaluate(() => window.scrollY)).toBe(pageY);
+  await page.keyboard.press('ArrowUp');
+  await expect(item(148)).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(item(148)).toHaveAttribute('aria-pressed', 'true');
+  await page.keyboard.press('Tab');
+  await expectFocusLeft(page, 'query-row-');
+  await page.keyboard.press('Shift+Tab');
+  await expect(item(148)).toBeFocused();
+});
+
+test('over a thousand subjects: the Descriptions show a subject chosen in the Dot Plot; the keys reach every row, and the rows are the CLI outfmt 6', async ({
+  page,
+}, testInfo) => {
+  test.skip(!BUILD_HAS_ENGINE, 'the FakeEngine has three subjects');
+  // WA2-SC-01 (a reveal while the Hits were hidden), WA2-SC-02, WA2-AX-01 with 1,100 subjects:
+  // each holds 60 to 109 letters of the query.
+  const query = `>q1\n${dna(500, 300)}\n`;
+  const subjects = Array.from({ length: 1100 }, (_, i) => {
+    const at = (i * 13) % 190;
+    return `>s${i + 1} subject ${i + 1}\n${dna(2000 + i, 20 + (i % 7))}${query.slice(4 + at, 4 + at + 60 + (i % 50))}${dna(5000 + i, 30)}\n`;
+  }).join('');
+  await program(page, 'blastn');
+  await openFiles(page, 'query', [{ name: 'query.fa', text: query }]);
+  await openFiles(page, 'subject', [{ name: 'subject.fa', text: subjects }]);
+  await openParameters(page);
+  await page.getByTestId('param-max_target_seqs').selectOption('other');
+  await page.getByTestId('param-max_target_seqs-other').fill('5000');
+  await run(page, 1);
+  await openRun(page, 1);
+  await expect(page.getByTestId('results-run-options')).toHaveText('-max_target_seqs 5000');
+  const list = page.getByTestId('subject-list');
+  await expect(list).toHaveAttribute('data-count', '1100');
+
+  // The first HSP of each subject in the CLI's outfmt 6, in its order (the Descriptions' order).
+  let firstRows: string[][] | undefined;
+  if (NATIVE === undefined) testInfo.annotations.push({ type: 'skip', description: `The rows' values: ${NO_NATIVE_REASON}` });
+  else {
+    const directory = testInfo.outputPath('many-subjects');
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(join(directory, 'query.fa'), query);
+    writeFileSync(join(directory, 'subject.fa'), subjects);
+    const cli = spawnSync(NATIVE, ['blastn', '-query', 'query.fa', '-subject', 'subject.fa', '-max_target_seqs', '5000', '-outfmt', '6', '-num_threads', '1'], {
+      cwd: directory,
+      maxBuffer: 1 << 28,
+    });
+    expect(cli.status, String(cli.stderr)).toBe(0);
+    const seen = new Set<string>();
+    firstRows = [];
+    for (const line of String(cli.stdout).split('\n')) {
+      const fields = line.split('\t');
+      if (fields.length < 12 || seen.has(fields[1]!)) continue;
+      seen.add(fields[1]!);
+      firstRows.push(fields);
+    }
+    expect(firstRows).toHaveLength(1100);
+  }
+  const expectRow = async (row: Locator) => {
+    const order = Number(await row.getAttribute('data-order'));
+    if (firstRows === undefined) return;
+    const fields = firstRows[order - 1]!;
+    await expect(row.locator('[data-field="sseqid"]')).toHaveText(fields[1]!);
+    await expect(row.locator('[data-field="evalue"]')).toHaveText(fields[10]!);
+    await expect(row.locator('[data-field="bitscore"]')).toHaveText(fields[11]!.trim());
+  };
+  const byOrder = (order: number) => subjectRows(page).and(page.locator(`[data-order="${order}"]`));
+
+  // The Dot Plot chooses the last subject while the Descriptions are hidden; back in the Hits, its row is in view.
+  await show(page, 'dotplot');
+  const options = page.getByTestId('dotplot-subject').locator('option');
+  await expect(options).toHaveCount(1100);
+  const lastIdx = (await options.nth(1099).getAttribute('value'))!;
+  await page.getByTestId('dotplot-subject').selectOption(lastIdx);
+  await show(page, 'hits');
+  const chosen = page.getByTestId(`subject-row-${lastIdx}`);
+  await expect(chosen).toHaveAttribute('aria-selected', 'true');
+  // The Graphic Summary of 1,100 subjects is above: the whole table in the window (its list keeps its scroll).
+  await page.getByTestId('subject-table').evaluate((element) => element.scrollIntoView({ block: 'start' }));
+  await expect(chosen).toBeInViewport();
+  await expect(chosen).toHaveAttribute('data-order', '1100');
+  await expectRow(chosen);
+
+  // One Tab stop, at the chosen row; the keys reach the first rows and the last.
+  await page.getByTestId('subject-sort-length').focus();
+  await page.keyboard.press('Tab');
+  await expect(chosen).toBeFocused();
+  await page.keyboard.press('Home');
+  await expect(byOrder(1)).toBeFocused();
+  await expect(byOrder(1)).toBeInViewport();
+  await expectRow(byOrder(1));
+  // A page is the rows in view (10) less one.
+  await page.keyboard.press('PageDown');
+  await page.keyboard.press('PageDown');
+  await expect(byOrder(19)).toBeFocused();
+  await expectRow(byOrder(19));
+  // The list scrolled away with the wheel's distance (WA2-SC-02): the row keeps the focus, and the
+  // next key moves the list, not the page.
+  const pageY = await page.evaluate(() => window.scrollY);
+  await list.evaluate((element) => (element.scrollTop += 900));
+  await expect(byOrder(19)).toBeFocused();
+  await expect(byOrder(19)).not.toBeInViewport();
+  await page.keyboard.press('ArrowDown');
+  await expect(byOrder(20)).toBeFocused();
+  await expect(byOrder(20)).toBeInViewport();
+  expect(await page.evaluate(() => window.scrollY)).toBe(pageY);
+  await expectRow(byOrder(20));
+  await page.keyboard.press('End');
+  await expect(byOrder(1100)).toBeFocused();
+  await expect(byOrder(1100)).toBeInViewport();
+  await page.keyboard.press('Enter');
+  await expect(byOrder(1100)).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByRole('grid', { name: 'Subjects' })).toHaveAttribute('aria-rowcount', '1101');
+  await expect(byOrder(1100)).toHaveAttribute('aria-rowindex', '1101');
+
+  // The list scrolled to rows 500 to 509, the Dot Plot and back, the selection unchanged: the same rows.
+  await list.evaluate((element) => (element.scrollTop = 499 * 28));
+  await expect(byOrder(500)).toBeVisible();
+  await show(page, 'dotplot');
+  await show(page, 'hits');
+  await page.getByTestId('subject-table').evaluate((element) => element.scrollIntoView({ block: 'start' }));
+  await expect.poll(() => list.evaluate((element) => element.scrollTop)).toBe(499 * 28);
+  await expect(byOrder(500)).toBeInViewport();
+  await expect(byOrder(509)).toBeInViewport();
+});
+
+test('narrow screens: the results are no wider than the screen; "Run LOSAT" opens them; the tables show the key values first', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   // A translated search (frames) of files with long names: the run's label in the run picker is long.
   const c = PROGRAM_CASES.find((programCase) => programCase.id === 'tblastx')!;
   await program(page, c.id);
   await openFiles(page, 'query', [{ name: basename(c.query), text: fasta(c.query) }]);
   await openFiles(page, 'subject', [{ name: basename(c.subject), text: fasta(c.subject) }]);
-  await run(page, 1);
-
-  // The queue is under the search form: "Open results" brings the results' heading into view and focuses it.
-  await page.getByTestId('run-1-open').click();
+  // "Run LOSAT" opens the results of the run: the results' heading comes into view and has the focus.
+  await submit(page);
+  await waitStatus(page, 1, 'completed');
   const heading = page.getByTestId('results-heading');
   await expect(heading).toBeFocused();
   await expect(heading).toBeInViewport();
@@ -1512,7 +2045,7 @@ test('narrow screens: the results are no wider than the screen; "Open results" s
   /**
    * The table's sideways scroll after a click on a row (W4 screen review middle 2: Firefox scrolled
    * it). The mouse presses the row where it is in view: Playwright's click() would first scroll the
-   * whole row's button into view itself.
+   * whole row into view itself.
    */
   const clickKeepsScroll = async (table: string, row: Locator) => {
     const scroll = page.getByTestId(table).locator('.table-scroll');
@@ -1521,21 +2054,20 @@ test('narrow screens: the results are no wider than the screen; "Open results" s
     await scroll.evaluate((element) => (element.scrollLeft = 0));
     const box = (await row.boundingBox())!;
     await page.mouse.click(box.x + 24, box.y + box.height / 2);
-    await expect(row).toHaveAttribute('aria-pressed', 'true');
+    await expect(row).toHaveAttribute('aria-selected', 'true');
     await page.waitForTimeout(100);
     expect(await scroll.evaluate((element) => element.scrollLeft), `${table}: scrolled sideways by a click`).toBe(0);
   };
   await clickKeepsScroll('subject-table', subjectRows(page).first());
 
-  await show(page, 'alignment');
+  await show(page, 'hits');
   await expect(page.getByTestId('hsp-detail')).toHaveAttribute('data-state', 'ready');
   await expectNoSideScroll(page, 'alignments');
   // The HSP table: the frames before the ranges, so that they are in view (W4 screen review middle 2).
   expect((await columnsInView(page, 'hsp-table')).slice(0, 4)).toEqual(['rank', 'bitscore', 'evalue', 'frames']);
   await clickKeepsScroll('hsp-table', hspRows(page).nth(Math.min(1, (await hspRows(page).count()) - 1)));
   for (const table of ['subject-table', 'hsp-table']) {
-    await show(page, table === 'subject-table' ? 'hits' : 'alignment');
-    await expect(page.getByTestId(`${table}-scroll-hint`)).toBeVisible();
+    await show(page, 'hits');
     // Each value is under its header.
     const offsets = await page
       .getByTestId(table)
@@ -1553,7 +2085,7 @@ test('narrow screens: the results are no wider than the screen; "Open results" s
   }
 
   // The Graphic Summary, the dot plot, the run details and the outputs.
-  await show(page, 'graphic');
+  await show(page, 'hits');
   await expect(page.getByTestId('graphic-canvas')).toHaveAttribute('data-rows', /^[1-9]/);
   await expectNoSideScroll(page, 'graphic summary');
   await show(page, 'dotplot');
@@ -1575,12 +2107,459 @@ test('narrow screens: the results are no wider than the screen; "Open results" s
   await showOutput(page, 1, 0, false);
   await expectNoSideScroll(page, 'outputs');
 
-  // "Open results" again from the search tab, the page scrolled to the queue at its end, while
-  // the results are read: the heading stays in view.
+  // "Run LOSAT" again from the search tab, the page scrolled to its end, while the results of run 1
+  // are read: the heading of the new run's page comes into view.
   await page.getByTestId('tab-search').click();
   await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
-  await page.getByTestId('run-1-open').click();
+  await submit(page);
+  await expect(page.getByTestId('tab-results')).toHaveAttribute('aria-selected', 'true');
   await expect(heading).toBeFocused();
-  await expect(page.getByTestId('results-outputs')).toBeVisible();
+  await expect(page.getByTestId('run-2-option')).toHaveCount(1);
   await expect(heading).toBeInViewport({ ratio: 1 });
+});
+
+test('the Outputs view lays out blocks of lines near the view, and shows, finds and selects every line', async ({ page, browserName }) => {
+  test.skip(!BUILD_HAS_ENGINE, 'an output of many lines');
+  await openSearch(page);
+  await program(page, 'tblastx');
+  await openFiles(page, 'query', [{ name: 'q.fasta', text: fasta('small_test.fasta') }]);
+  await openFiles(page, 'subject', [{ name: 's.fasta', text: fasta('small_test.fasta') }]);
+  await submit(page);
+  await waitStatus(page, 1, 'completed');
+  await expect(page.getByTestId('results-hits')).toHaveAttribute('data-run', '1');
+  await page.getByTestId('results-view-outputs').click();
+  const output = page.getByTestId('result-output');
+  // A block says when the browser starts or stops skipping its contents.
+  await page.evaluate(() => {
+    const skipped = new WeakMap<EventTarget, boolean>();
+    (window as unknown as { skippedBlocks: typeof skipped }).skippedBlocks = skipped;
+    document.addEventListener(
+      'contentvisibilityautostatechange',
+      (event) => skipped.set(event.target!, (event as Event & { skipped: boolean }).skipped),
+      true,
+    );
+  });
+  // Outfmt 6 after 0: the blocks of one output do not keep the heights of the other's.
+  for (const format of [0, 6, 0] as const) {
+    await page.getByTestId(`format-${format}`).click();
+    await expect(output).toHaveAttribute('data-shown', `1:${format}`);
+    const view = await output.evaluate(async (element) => {
+      const frame = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      await frame();
+      const blocks = [...element.children];
+      const text = element.textContent ?? '';
+      const { skippedBlocks } = window as unknown as { skippedBlocks: WeakMap<EventTarget, boolean> };
+      const skipped = (block: Element) => skippedBlocks.get(block) === true;
+      const marked = () => element.querySelectorAll('.output-chunk-selected').length;
+      const style = getComputedStyle(element);
+      const lineHeight = blocks[0]!.getBoundingClientRect().height / (blocks[0]!.textContent!.split('\n').length - 1);
+      const selection = document.getSelection()!;
+      const lastLine = text.trimEnd().split('\n').at(-1)!;
+      const lastSkipped = blocks.length > 2 ? skipped(blocks.at(-1)!) : null;
+      // Two lines over the boundary of the first two blocks: those two are laid out, the last not.
+      const range = document.createRange();
+      range.setStart(blocks[0]!.firstChild!, blocks[0]!.textContent!.length - 2);
+      range.setEnd(blocks[1]!.firstChild!, 2);
+      selection.removeAllRanges();
+      selection.addRange(range);
+      await frame();
+      const overBoundary = { marked: marked(), lastSkipped: blocks.length > 2 ? skipped(blocks.at(-1)!) : null };
+      selection.selectAllChildren(element);
+      await frame();
+      const all = { marked: marked(), chars: selection.toString().trimEnd().length };
+      selection.removeAllRanges();
+      await frame();
+      const found = (window as unknown as { find(text: string): boolean }).find(lastLine);
+      selection.removeAllRanges();
+      await frame();
+      return {
+        blocks: blocks.length,
+        lines: text.split('\n').length - 1,
+        lineHeight,
+        contentHeight: element.scrollHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom),
+        chars: text.trimEnd().length,
+        lastSkipped,
+        overBoundary,
+        all,
+        found,
+        markedAfter: marked(),
+      };
+    });
+    expect(view.blocks).toBeGreaterThan(1);
+    if (format === 0) {
+      expect(view.lastSkipped).toBe(true);
+      expect(view.overBoundary).toEqual({ marked: 2, lastSkipped: true });
+    }
+    expect(Math.round(view.contentHeight / view.lineHeight)).toBe(view.lines);
+    expect(view.all).toEqual({ marked: view.blocks, chars: view.chars });
+    expect(view.found).toBe(true);
+    expect(view.markedAfter).toBe(0);
+  }
+  // Select all of the page, as the keyboard does, with the output's end in it (WPE WebKit binds
+  // no key to the command).
+  await output.click();
+  if (browserName === 'webkit') await page.evaluate(() => document.execCommand('selectAll'));
+  else await page.keyboard.press('ControlOrMeta+a');
+  const selected = await output.evaluate(async (element) => {
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const last = (element.textContent ?? '').trimEnd().split('\n').at(-1)!;
+    return { marked: element.querySelectorAll('.output-chunk-selected').length, blocks: element.children.length, hasLast: document.getSelection()!.toString().includes(last) };
+  });
+  expect(selected).toEqual({ marked: selected.blocks, blocks: selected.blocks, hasLast: true });
+});
+
+// The browser can remove the stored results under an open tab (clearing the site's data, or some of the files). The
+// Outputs then show no text of another format: reading an output, Export and "Download All" say why, as the Results do
+// when they are opened again (WA2-BR-01). Playwright's WebKit refuses OPFS in its default (incognito) contexts, and the
+// application keeps results in memory there.
+test('after the browser removed the stored results, the Outputs, Export and Download All say why, and show no other format', async ({ page }) => {
+  // A failure that reaches no message reaches the page as an uncaught error.
+  const uncaught: string[] = [];
+  page.on('pageerror', (error) => uncaught.push(String(error)));
+  await program(page, 'blastn');
+  await paste(page, 'query', `>q1\n${A}\n`);
+  await paste(page, 'subject', `>s1\n${S1}\n`);
+  test.skip((await page.getByTestId('storage-status').getAttribute('data-backend')) !== 'opfs', 'this browser keeps results in memory');
+  await submit(page);
+  await waitStatus(page, 1, 'completed');
+  const [session] = await sessionDirectories(page);
+  const runDirectory = (files: readonly string[]) => [...new Set(files.filter((f) => f.startsWith('runs/')).map((f) => f.split('/')[1]!))];
+  const [first] = runDirectory(await sessionFiles(page, session!));
+  await page.getByTestId('tab-search').click();
+  await submit(page);
+  await waitStatus(page, 2, 'completed');
+  expect(runDirectory(await sessionFiles(page, session!))).toHaveLength(2);
+  await showOutput(page, 1, 6);
+  const output = page.getByTestId('result-output');
+  const problem = page.getByTestId('outputs-problem');
+  await expect(output).not.toHaveText('');
+  await expect(problem).toHaveCount(0);
+  // The stored results of run 1 go; run 2's stay. A synchronous access handle holds its file for a moment after it is
+  // closed: the removal is tried again.
+  await expect
+    .poll(
+      () =>
+        page.evaluate(
+          async ({ tmp, session, run }) => {
+            try {
+              const runs = await (await (await navigator.storage.getDirectory()).getDirectoryHandle(tmp)).getDirectoryHandle(session);
+              await (await runs.getDirectoryHandle('runs')).removeEntry(run, { recursive: true });
+              return 'removed';
+            } catch (error) {
+              return (error as Error).name;
+            }
+          },
+          { tmp: TMP_DIRECTORY, session: session!, run: first! },
+        ),
+      { timeout: 10_000 },
+    )
+    .toBe('removed');
+  const removed = RESULTS_REMOVED_MESSAGE;
+  const downloads: string[] = [];
+  page.on('download', (download) => downloads.push(download.suggestedFilename()));
+
+  // Export of the output shown says why next to its button, under the text, which stays.
+  await page.getByTestId('export-output').click();
+  await expect(problem).toHaveText(`Not saved: ${removed}`);
+  await expect(output).toHaveAttribute('data-shown', '1:6');
+  const box = async (testid: string) => (await page.getByTestId(testid).boundingBox())!;
+  expect((await box('outputs-problem')).y).toBeGreaterThanOrEqual((await box('result-output')).y + (await box('result-output')).height);
+  expect((await box('outputs-problem')).y + (await box('outputs-problem')).height).toBeLessThanOrEqual((await box('export-output')).y);
+
+  // Another format: its command, the reason, and no text of the format shown before.
+  await page.getByTestId('format-0').click();
+  await expect(problem).toHaveAttribute('data-failed', '1:0');
+  await expect(problem).toHaveText(`The results of run 1 could not be read: ${removed}`);
+  await expect(output).toHaveCount(0);
+  await expect(page.getByTestId('format-0')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByTestId('result-command')).toHaveText('losat blastn -query query.fa -subject subject.fa -outfmt 0');
+  // Export saves nothing and says why, in the same place.
+  await page.getByTestId('export-output').click();
+  await expect(problem).toHaveText(`Not saved: ${removed}`);
+  await expect(output).toHaveCount(0);
+  // The format shown before cannot be read either.
+  await page.getByTestId('format-6').click();
+  await expect(problem).toHaveAttribute('data-failed', '1:6');
+  await expect(problem).toHaveText(`The results of run 1 could not be read: ${removed}`);
+  await expect(output).toHaveCount(0);
+  // "Download All" says why under the run's line, where its list was.
+  await page.getByTestId('results-download-all').click();
+  await page.getByTestId('results-download-menu').getByTestId('results-download-7').click();
+  await expect(page.getByTestId('results-download-problem')).toHaveText(`Not saved: ${removed}`);
+  await expect(page.getByTestId('results-download-all')).toBeFocused();
+  expect(downloads).toEqual([]);
+  // The message stays on the run's line in the other tabs, and goes when the run picker shows another run, whose
+  // outputs are read and saved.
+  await page.getByTestId('results-view-hits').click();
+  await expect(page.getByTestId('results-download-problem')).toHaveText(`Not saved: ${removed}`);
+  await chooseRun(page, 2);
+  await expect(page.getByTestId('results-download-problem')).toHaveCount(0);
+  await showOutput(page, 2, 0, false);
+  await expect(problem).toHaveCount(0);
+  await page.getByTestId('export-output').click();
+  await expect.poll(() => downloads).toEqual([expect.stringMatching(/^losat-run2-blastn-.*\.outfmt0\.txt$/)]);
+  await expect(problem).toHaveCount(0);
+  expect(uncaught).toEqual([]);
+});
+
+// The output of the argv's own -outfmt (WA2-OP-03, Owner 2026-11-05): -outfmt 6 or 7 with fields in Additional
+// options adds it to the Outputs, Export and "Download All", named by its value, and to the commands of Run details; the
+// formats of every run keep their commands. With the engine, its text is the native CLI's for the same argv (the same
+// commit, one thread), in BLASTN and BLASTP.
+test("Additional options' -outfmt with fields adds its output to the Outputs, Export and Download All", async ({ page }, testInfo) => {
+  const extra = page.getByTestId('param-extra');
+  const validation = page.getByTestId('argv-validation');
+  await openParameters(page);
+  await program(page, 'blastn');
+  await extra.fill('-num_threads 2');
+  await expect(validation).toHaveText('-num_threads is set in the form: Threads');
+  const protein = '>q protein query\nMKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQ\n';
+  const inputs = {
+    blastn: [`>q1 first query\n${A}\n`, `>s1 first subject\n${S1}\n`],
+    blastp: [protein, '>s protein subject\nMKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQ\n'],
+  } as const;
+  const cases = BUILD_HAS_ENGINE
+    ? (['blastn', 'blastp'] as const).flatMap((id) => ['6 qseqid sseqid pident', '7 std qcovs'].map((outfmt) => [id, outfmt] as const))
+    : ([['blastn', '6 qseqid sseqid']] as const);
+  if (BUILD_HAS_ENGINE && NATIVE === undefined) testInfo.annotations.push({ type: 'skip', description: `The text of the outputs: ${NO_NATIVE_REASON}` });
+  const downloads: Download[] = [];
+  page.on('download', (download) => downloads.push(download));
+  const output = page.getByTestId('result-output');
+  const command = page.getByTestId('result-command');
+  for (const [index, [id, outfmt]] of cases.entries()) {
+    const run = index + 1;
+    if (run > 1) await page.getByTestId('tab-search').click();
+    await program(page, id);
+    await paste(page, 'query', inputs[id][0]);
+    await paste(page, 'subject', inputs[id][1]);
+    await openParameters(page);
+    await extra.fill(`-outfmt '${outfmt}'`);
+    await expect(validation).toHaveAttribute('data-state', 'ok');
+    await submit(page);
+    await waitStatus(page, run, 'completed');
+    await chooseRun(page, run);
+    await page.getByTestId('results-view-outputs').click();
+    await expect(page.getByTestId('results-outputs').getByRole('tab')).toHaveText(['outfmt 0', 'outfmt 6', 'outfmt 7', `outfmt ${outfmt}`]);
+    await page.getByTestId('format-custom').click();
+    await expect(output).toHaveAttribute('data-shown', `${run}:4`);
+    await expect(command).toHaveText(`losat ${id} -query query.fa -subject subject.fa -outfmt '${outfmt}'`);
+    await expect(page.getByTestId('export-output')).toHaveText(`Export outfmt ${outfmt}`);
+    const text = (await output.textContent()) ?? '';
+    if (!BUILD_HAS_ENGINE) expect(text).toContain(`# -outfmt ${outfmt}\n`);
+    else if (NATIVE !== undefined) {
+      const directory = testInfo.outputPath(`custom-${run}`);
+      mkdirSync(directory, { recursive: true });
+      writeFileSync(join(directory, 'query.fa'), inputs[id][0]);
+      writeFileSync(join(directory, 'subject.fa'), inputs[id][1]);
+      const cli = spawnSync(NATIVE, [id, '-query', 'query.fa', '-subject', 'subject.fa', '-outfmt', outfmt, '-num_threads', '1'], { cwd: directory });
+      expect(cli.status, String(cli.stderr)).toBe(0);
+      expect(text, `${id} -outfmt '${outfmt}'`).toBe(String(cli.stdout));
+      expect(text.length).toBeGreaterThan(0);
+    }
+    // The formats of every run: their own -outfmt in place of the argv's.
+    await page.getByTestId('format-6').click();
+    await expect(output).toHaveAttribute('data-shown', `${run}:6`);
+    await expect(command).toHaveText(`losat ${id} -query query.fa -subject subject.fa -outfmt 6`);
+    // Export and "Download All" save it byte for byte, as BLAST+'s custom format of its number.
+    await page.getByTestId('format-custom').click();
+    await expect(output).toHaveAttribute('data-shown', `${run}:4`);
+    await page.getByTestId('export-output').click();
+    await page.getByTestId('results-download-all').click();
+    const item = page.getByTestId('results-download-menu').getByTestId('results-download-custom');
+    await expect(item).toHaveText(`${outfmt.startsWith('7') ? 'Tabular with comment lines' : 'Tabular'} (outfmt ${outfmt})`);
+    await item.click();
+    await expect.poll(() => downloads.length).toBe(2 * run);
+    for (const download of downloads.slice(-2)) {
+      expect(download.suggestedFilename()).toMatch(new RegExp(`^losat-run${run}-${id}-.*\\.outfmt${outfmt[0]}-custom\\.txt$`));
+      expect(readFileSync((await download.path())!, 'utf8')).toBe(text);
+    }
+    // Run details: the command of each output.
+    await page.getByTestId('results-view-details').click();
+    await expect(page.getByTestId('run-command-7')).toHaveText(`losat ${id} -query query.fa -subject subject.fa -outfmt 7`);
+    await expect(page.getByTestId('run-command-custom')).toHaveText(`losat ${id} -query query.fa -subject subject.fa -outfmt '${outfmt}'`);
+  }
+  // A run without -outfmt has the formats of every run only.
+  await chooseRun(page, 1);
+  await page.getByTestId('tab-search').click();
+  await extra.fill('');
+  await submit(page);
+  await waitStatus(page, cases.length + 1, 'completed');
+  await chooseRun(page, cases.length + 1);
+  await page.getByTestId('results-view-outputs').click();
+  await expect(page.getByTestId('results-outputs').getByRole('tab')).toHaveText(['outfmt 0', 'outfmt 6', 'outfmt 7']);
+  await page.getByTestId('results-download-all').click();
+  await expect(page.getByTestId('results-download-menu').getByRole('button')).toHaveCount(3);
+});
+
+/** The CRC-32 of ZIP (ISO-HDLC). */
+function crc32(bytes: Uint8Array): number {
+  let crc = ~0;
+  for (const byte of bytes) {
+    crc ^= byte;
+    for (let k = 0; k < 8; k++) crc = crc & 1 ? 0xedb88320 ^ (crc >>> 1) : crc >>> 1;
+  }
+  return ~crc >>> 0;
+}
+
+/**
+ * The entries of a ZIP archive of stored files (the adapter's archive of outfmt 13 and 14), as name and bytes in the order
+ * of its central directory, read as a ZIP reader reads them: the end record, each central header, its local header with
+ * the same CRC-32 and size, and the bytes, whose CRC-32 is checked.
+ */
+function storedZipEntries(archive: Buffer): Array<readonly [string, Buffer]> {
+  const end = archive.length - 22;
+  expect(archive.readUInt32LE(end), 'the end of central directory record').toBe(0x06054b50);
+  const count = archive.readUInt16LE(end + 10);
+  let at = archive.readUInt32LE(end + 16);
+  const entries: Array<readonly [string, Buffer]> = [];
+  for (let i = 0; i < count; i++) {
+    expect(archive.readUInt32LE(at), 'a central header').toBe(0x02014b50);
+    expect(archive.readUInt16LE(at + 10), 'stored').toBe(0);
+    const crc = archive.readUInt32LE(at + 16);
+    const size = archive.readUInt32LE(at + 24);
+    const nameLength = archive.readUInt16LE(at + 28);
+    const name = archive.subarray(at + 46, at + 46 + nameLength).toString('utf8');
+    const local = archive.readUInt32LE(at + 42);
+    expect(archive.readUInt32LE(local), name).toBe(0x04034b50);
+    expect([archive.readUInt32LE(local + 14), archive.readUInt32LE(local + 22)], name).toEqual([crc, size]);
+    const data = local + 30 + archive.readUInt16LE(local + 26) + archive.readUInt16LE(local + 28);
+    const bytes = archive.subarray(data, data + size);
+    expect(crc32(bytes), name).toBe(crc);
+    entries.push([name, bytes]);
+    at += 46 + nameLength + archive.readUInt16LE(at + 30);
+  }
+  return entries;
+}
+
+/** A SAM document without the CL tag of its @PG line, where the CLI writes its own command line (the SAM rows' rule). */
+const withoutCl = (sam: string) => sam.replace(/(\n@PG\tID:0\tVN:[^\t\n]*)\tCL:[^\n]*?(\tPN:blastn\n)/, '$1$2');
+
+// Every other format that the CLI writes (W11, Owner 2026-11-05 "all output formats"): Additional options' -outfmt adds
+// its output to the Outputs, Export (with the format's extension) and "Download All" (BLAST+'s name of the format). A
+// binary output (outfmt 9, and the ZIP archive of the files of 13 and 14) is saved, not shown. With the engine, the output
+// is the native CLI's for the same argv (SAM without the command line of its @PG line, which is each one's own; for 13 and
+// 14 the files of `-out results`, the master file as results.json or results.xml), in BLASTN, BLASTP and BLASTX.
+test("Additional options' -outfmt of another format adds its output to the Outputs, Export and Download All", async ({ page }, testInfo) => {
+  const extra = page.getByTestId('param-extra');
+  const validation = page.getByTestId('argv-validation');
+  const protein = '>q protein query\nMKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQ\n';
+  const inputs = {
+    blastn: [`>q1 first query\n${A}\n`, `>s1 first subject\n${S1}\n`],
+    blastp: [protein, '>s protein subject\nMKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQ\n'],
+    blastx: [fasta('outfmt0/pd_sub_q.fna').toString('utf8'), fasta('outfmt0/pd_sub_p.faa').toString('utf8')],
+  } as const;
+  type Case = readonly [keyof typeof inputs, string, string, string];
+  // Program, -outfmt, the file's extension, and BLAST+'s name of the format.
+  const all: readonly Case[] = [
+    ['blastn', '5', 'outfmt5.xml', 'BLAST XML'],
+    ['blastn', '9', 'outfmt9.asnb', 'Seqalign (Binary ASN.1)'],
+    ['blastn', '11', 'outfmt11.asn', 'BLAST archive (ASN.1)'],
+    ['blastn', '17 SQ', 'outfmt17-custom.sam', 'Sequence Alignment/Map (SAM)'],
+    ['blastp', '10 qseqid sseqid evalue', 'outfmt10-custom.csv', 'Comma-separated values'],
+    ['blastn', '13', 'outfmt13.zip', 'Multiple-file BLAST JSON'],
+    ['blastp', '12', 'outfmt12.json', 'Seqalign (JSON)'],
+    ['blastp', '14', 'outfmt14.zip', 'Multiple-file BLAST XML2'],
+    ['blastx', '11', 'outfmt11.asn', 'BLAST archive (ASN.1)'],
+    ['blastx', '15', 'outfmt15.json', 'Single-file BLAST JSON'],
+    ['blastx', '20', 'outfmt20.csv', 'Comma-separated values with header lines'],
+  ];
+  const cases = BUILD_HAS_ENGINE ? all : all.filter(([, outfmt]) => ['5', '9', '13'].includes(outfmt));
+  if (BUILD_HAS_ENGINE && NATIVE === undefined) testInfo.annotations.push({ type: 'skip', description: `The bytes of the outputs: ${NO_NATIVE_REASON}` });
+  const downloads: Download[] = [];
+  page.on('download', (download) => downloads.push(download));
+  const output = page.getByTestId('result-output');
+  for (const [index, [id, outfmt, extension, name]] of cases.entries()) {
+    const run = index + 1;
+    const binary = ['9', '13', '14'].includes(outfmt);
+    const files = outfmt === '13' || outfmt === '14';
+    if (run > 1) await page.getByTestId('tab-search').click();
+    await program(page, id);
+    await paste(page, 'query', inputs[id][0]);
+    await paste(page, 'subject', inputs[id][1]);
+    await openParameters(page);
+    await extra.fill(outfmt.includes(' ') ? `-outfmt '${outfmt}'` : `-outfmt ${outfmt}`);
+    await expect(validation).toHaveAttribute('data-state', 'ok');
+    await submit(page);
+    await waitStatus(page, run, 'completed');
+    await chooseRun(page, run);
+    await page.getByTestId('results-view-outputs').click();
+    await expect(page.getByTestId('results-outputs').getByRole('tab')).toHaveText(['outfmt 0', 'outfmt 6', 'outfmt 7', `outfmt ${outfmt}`]);
+    await page.getByTestId('format-custom').click();
+    await expect(page.getByTestId('export-output')).toHaveText(`Export outfmt ${outfmt}`);
+    if (binary) await expect(output).toHaveCount(0);
+    else await expect(output).toHaveAttribute('data-shown', `${run}:4`);
+    const text = binary ? '' : ((await output.textContent()) ?? '');
+    await page.getByTestId('export-output').click();
+    await page.getByTestId('results-download-all').click();
+    const item = page.getByTestId('results-download-menu').getByTestId('results-download-custom');
+    await expect(item).toHaveText(`${name} (outfmt ${outfmt})`);
+    await item.click();
+    await expect.poll(() => downloads.length).toBe(2 * run);
+    const saved: Buffer[] = [];
+    for (const download of downloads.slice(-2)) {
+      expect(download.suggestedFilename()).toMatch(new RegExp(`^losat-run${run}-${id}-.*\\.${extension.replace('.', '\\.')}$`));
+      saved.push(readFileSync((await download.path())!));
+    }
+    expect(saved[0]!.equals(saved[1]!)).toBe(true);
+    if (!binary) expect(saved[0]!.toString('utf8')).toBe(text);
+    if (!BUILD_HAS_ENGINE) expect(saved[0]!.toString('utf8')).toContain(`# -outfmt ${outfmt}\n`);
+    else if (NATIVE !== undefined) {
+      const directory = testInfo.outputPath(`format-${run}`);
+      mkdirSync(directory, { recursive: true });
+      writeFileSync(join(directory, 'query.fa'), inputs[id][0]);
+      writeFileSync(join(directory, 'subject.fa'), inputs[id][1]);
+      const out = files ? ['-out', 'results'] : [];
+      const cli = spawnSync(NATIVE, [id, '-query', 'query.fa', '-subject', 'subject.fa', '-outfmt', outfmt, '-num_threads', '1', ...out], { cwd: directory });
+      expect(cli.status, String(cli.stderr)).toBe(0);
+      expect(saved[0]!.length).toBeGreaterThan(0);
+      if (files) {
+        const ext = outfmt === '13' ? 'json' : 'xml';
+        const entries = storedZipEntries(saved[0]!);
+        const expected: Array<readonly [string, Buffer]> = [];
+        for (let n = 1; existsSync(join(directory, `results_${n}.${ext}`)); n++) {
+          expected.push([`results_${n}.${ext}`, readFileSync(join(directory, `results_${n}.${ext}`))]);
+        }
+        expected.push([`results.${ext}`, readFileSync(join(directory, 'results'))]);
+        expect(expected.length).toBeGreaterThan(1);
+        expect(entries.map(([name]) => name)).toEqual(expected.map(([name]) => name));
+        for (const [index, [name, bytes]] of entries.entries()) expect(bytes.equals(expected[index]![1]), name).toBe(true);
+      } else if (outfmt.startsWith('17')) {
+        // The run's own command line: the argv that the engine ran, with the form's threads.
+        expect(text).toContain(`\tCL:losat ${id} -query query.fa -subject subject.fa -outfmt ${outfmt} -num_threads `);
+        expect(withoutCl(text), `${id} -outfmt '${outfmt}'`).toBe(withoutCl(String(cli.stdout)));
+      } else expect(saved[0]!.equals(cli.stdout), `${id} -outfmt '${outfmt}'`).toBe(true);
+    }
+    // Run details: the command of the output.
+    await page.getByTestId('results-view-details').click();
+    await expect(page.getByTestId('run-command-custom')).toHaveText(
+      `losat ${id} -query query.fa -subject subject.fa -outfmt ${outfmt.includes(' ') ? `'${outfmt}'` : outfmt}${files ? ' -out results' : ''}`,
+    );
+  }
+});
+
+// On a phone's width, the output of a long -outfmt (fields, and one long delim= token) wraps in its tab, its command,
+// Export and "Download All": no horizontal scrolling (W10).
+test("the output of a long -outfmt fits a phone's width", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const outfmt = `7 delim=${'|'.repeat(60)} qseq sseq evalue bitscore score length pident nident mismatch positive gapopen gaps ppos btop`;
+  await openParameters(page);
+  await program(page, 'blastn');
+  await paste(page, 'query', `>q1\n${A}\n`);
+  await paste(page, 'subject', `>s1\n${S1}\n`);
+  await page.getByTestId('param-extra').fill(`-outfmt '${outfmt}'`);
+  await expect(page.getByTestId('argv-validation')).toHaveAttribute('data-state', 'ok');
+  await submit(page);
+  await waitStatus(page, 1, 'completed');
+  await chooseRun(page, 1);
+  await page.getByTestId('results-view-outputs').click();
+  await page.getByTestId('format-custom').click();
+  await expect(page.getByTestId('result-output')).toHaveAttribute('data-shown', '1:4');
+  await page.getByTestId('results-download-all').click();
+  await expect(page.getByTestId('results-download-custom')).toBeVisible();
+  const wide = await page.evaluate(() => [document.documentElement.scrollWidth, window.innerWidth]);
+  expect(wide[0], 'the page is wider than the window').toBeLessThanOrEqual(wide[1]!);
+  for (const id of ['format-custom', 'export-output', 'results-download-custom', 'result-command']) {
+    const box = (await page.getByTestId(id).boundingBox())!;
+    expect(box.x + box.width, id).toBeLessThanOrEqual(390);
+  }
 });

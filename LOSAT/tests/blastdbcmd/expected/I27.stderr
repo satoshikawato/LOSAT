@@ -1,0 +1,1 @@
+BLAST Database error: No alias or index file found for nucleotide database [db/p5] in search path [{R}::]. Please verify the spelling of the BLAST database and its molecule type.

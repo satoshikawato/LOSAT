@@ -2,16 +2,16 @@
 // The OPFS store and the cross-worker channel run the same suites in a browser
 // (tests/e2e/contracts.spec.ts).
 import { describe, it } from 'vitest';
-import { sha256Hex } from '../../src/infra/browser/platform';
+import { RunOutputWriter, sha256Hex } from 'losat';
 import { DataService } from '../../src/infra/data/data-service';
 import { MemoryBlockStore } from '../../src/infra/data/memory-block-store';
 import { FakeEngine } from '../../src/infra/fake/fake-engine';
 import { FakeInputChecker, FakeScanner } from '../../src/infra/fake/fake-fasta';
-import { RunOutputWriter } from '../../src/infra/run-output/writer';
 import { BLOCK_STORE_CASES } from '../contract/block-store.contract';
 import { ENGINE_INPUT_CASES } from '../contract/engine-input.contract';
 import { RECORD_SCANNER_CASES } from '../contract/record-scanner.contract';
 import { RUN_OUTPUT_CASES, type RemoteWriter } from '../contract/run-output.contract';
+import { NodeInflater } from './support/node-inflater';
 
 describe('BlockStore contract: memory', () => {
   for (const contractCase of BLOCK_STORE_CASES) {
@@ -50,6 +50,7 @@ describe('Run output contract: DataService with the memory store, in one thread'
       const data = new DataService({
         store,
         scanner: new FakeScanner(),
+        inflater: new NodeInflater(),
         checker: new FakeInputChecker(),
         digest: sha256Hex,
         newToken: () => `token-${++token}`,

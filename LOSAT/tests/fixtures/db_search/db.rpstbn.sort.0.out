@@ -1,0 +1,115 @@
+RPSTBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: rps_mini
+           3 sequences; 560 total letters
+
+
+
+Query= tkcut570
+
+Length=570
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [W...  349     4e-129
+
+
+>CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [White 
+spot syndrome virus] residues 1-190
+Length=190
+
+ Score = 349 bits (895),  Expect = 4e-129
+ Identities = 190/190 (100%), Positives = 190/190 (100%), Gaps = 0/190 (0%)
+ Frame = +1
+
+Query  1    MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG  180
+            MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG
+Sbjct  1    MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG  60
+
+Query  181  TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA  360
+            TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA
+Sbjct  61   TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA  120
+
+Query  361  ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG  540
+            ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG
+Sbjct  121  ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG  180
+
+Query  541  AEMYAAACRD  570
+            AEMYAAACRD
+Sbjct  181  AEMYAAACRD  190
+
+
+ Score = 16.2 bits (30),  Expect = 1.1
+ Identities = 6/14 (43%), Positives = 7/14 (50%), Gaps = 0/14 (0%)
+ Frame = -1
+
+Query  129  MFIASVFLLINIFQ  88
+            MF      L NI+Q
+Sbjct  22   MFAGKSTYLKNIYQ  35
+
+
+ Score = 14.6 bits (26),  Expect = 3.1
+ Identities = 9/36 (25%), Positives = 16/36 (44%), Gaps = 4/36 (11%)
+ Frame = -2
+
+Query  476  FVSILQIMHFDASFTIELVYGSNLCMGLNIC*SEVP  369
+            F  I +++     +T  +V  ++ CM   I   E P
+Sbjct  131  FSPIHKLL----PYTNSIVKLASKCMICKIDTKEAP  162
+
+
+ Score = 14.2 bits (25),  Expect = 5.1
+ Identities = 3/6 (50%), Positives = 3/6 (50%), Gaps = 0/6 (0%)
+ Frame = -1
+
+Query  321  DKYKIC  304
+            D   IC
+Sbjct  172  DNNVIC  177
+
+
+ Score = 13.9 bits (24),  Expect = 6.2
+ Identities = 5/13 (38%), Positives = 5/13 (38%), Gaps = 0/13 (0%)
+ Frame = -2
+
+Query  176  VPHPYRVSRECFT  138
+            V H   V   C T
+Sbjct  63   VTHAGEVIEGCTT  75
+
+
+ Score = 13.1 bits (22),  Expect = 9.3
+ Identities = 4/7 (57%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+ Frame = -3
+
+Query  136  KGNVYCL  116
+             GN +CL
+Sbjct  39   GGNKHCL  45
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 78077
+
+
+  Database: rps_mini
+    Posted date:  Nov 7, 2026  10:01 PM
+  Number of letters in database: 560
+  Number of sequences in database:  3
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Window for multiple hits: 40

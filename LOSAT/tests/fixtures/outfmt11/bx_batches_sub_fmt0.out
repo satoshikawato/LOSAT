@@ -1,0 +1,303 @@
+BLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt11/arch_bx_s.faa).
+           2 sequences; 279 total letters
+
+
+
+Query= b1 sp1 plus
+
+Length=114
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+sp1 subject protein alpha                                             78.2    1e-25
+sp2 subject protein beta, distant                                     58.5    6e-18
+
+
+> sp1 subject protein alpha
+Length=137
+
+ Score = 78.2 bits (191),  Expect = 1e-25, Method: Compositional matrix adjust.
+ Identities = 37/38 (97%), Positives = 37/38 (97%), Gaps = 0/38 (0%)
+ Frame = +1
+
+Query  1    MWMEHSVLKAVFAVRRKVMDDPKIRDGPMHVMKGWENY  114
+            MWMEHSVLKAVFAVRRKVMDDPKIRDGPM VMKGWENY
+Sbjct  1    MWMEHSVLKAVFAVRRKVMDDPKIRDGPMAVMKGWENY  38
+
+
+> sp2 subject protein beta, distant
+Length=142
+
+ Score = 58.5 bits (140),  Expect = 6e-18, Method: Compositional matrix adjust.
+ Identities = 29/37 (78%), Positives = 30/37 (81%), Gaps = 0/37 (0%)
+ Frame = +1
+
+Query  4    WMEHSVLKAVFAVRRKVMDDPKIRDGPMHVMKGWENY  114
+            WMEHSVLKA     RKVMDDPKIRDGPM VMK WE+Y
+Sbjct  2    WMEHSVLKADQLQLRKVMDDPKIRDGPMAVMKVWESY  38
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 7252
+
+
+Query= b2 sp2 minus
+
+Length=105
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+sp2 subject protein beta, distant                                     71.2    5e-23
+sp1 subject protein alpha                                             51.2    3e-15
+
+
+> sp2 subject protein beta, distant
+Length=142
+
+ Score = 71.2 bits (173),  Expect = 5e-23, Method: Compositional matrix adjust.
+ Identities = 34/35 (97%), Positives = 34/35 (97%), Gaps = 0/35 (0%)
+ Frame = -1
+
+Query  105  SVLKWDQLQLRKVMDDPKIRDGPMAVMKVWESYCF  1
+            SVLK DQLQLRKVMDDPKIRDGPMAVMKVWESYCF
+Sbjct  6    SVLKADQLQLRKVMDDPKIRDGPMAVMKVWESYCF  40
+
+
+> sp1 subject protein alpha
+Length=137
+
+ Score = 51.2 bits (121),  Expect = 3e-15, Method: Compositional matrix adjust.
+ Identities = 26/35 (74%), Positives = 28/35 (80%), Gaps = 0/35 (0%)
+ Frame = -1
+
+Query  105  SVLKWDQLQLRKVMDDPKIRDGPMAVMKVWESYCF  1
+            SVLK      RKVMDDPKIRDGPMAVMK WE+YC+
+Sbjct  6    SVLKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCW  40
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 7101
+
+
+Query= b3 no hits
+
+Length=90
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+sp1 subject protein alpha                                             11.2    3.6  
+
+
+> sp1 subject protein alpha
+Length=137
+
+ Score = 11.2 bits (17),  Expect = 3.6, Method: Compositional matrix adjust.
+ Identities = 4/8 (50%), Positives = 4/8 (50%), Gaps = 0/8 (0%)
+ Frame = +1
+
+Query  43  GWC*AATL  66
+           GW    TL
+Sbjct  73  GWWKTDTL  80
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 7046
+
+
+Query= b4 sp1 minus
+
+Length=120
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+sp1 subject protein alpha                                             87.8    2e-29
+sp2 subject protein beta, distant                                     55.5    1e-16
+
+
+> sp1 subject protein alpha
+Length=137
+
+ Score = 87.8 bits (216),  Expect = 2e-29, Method: Compositional matrix adjust.
+ Identities = 40/40 (100%), Positives = 40/40 (100%), Gaps = 0/40 (0%)
+ Frame = -1
+
+Query  120  PANMSWKVLMKYEFSSDIHPWICWIPKEQQTPGWWKTDTL  1
+            PANMSWKVLMKYEFSSDIHPWICWIPKEQQTPGWWKTDTL
+Sbjct  41   PANMSWKVLMKYEFSSDIHPWICWIPKEQQTPGWWKTDTL  80
+
+
+> sp2 subject protein beta, distant
+Length=142
+
+ Score = 55.5 bits (132),  Expect = 1e-16, Method: Compositional matrix adjust.
+ Identities = 28/42 (67%), Positives = 28/42 (67%), Gaps = 3/42 (7%)
+ Frame = -1
+
+Query  117  ANMSWKVLMKYEFSSDIHP---WICWIPKEQQTPGWWKTDTL  1
+            ANMS  VLMKYEF S IHP   W CWIPK    PGW  TDTL
+Sbjct  46   ANMSAHVLMKYEFQSGIHPCNQWTCWIPKYMAVPGWCPTDTL  87
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 7770
+
+
+Query= b5 sp2 plus
+
+Length=120
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+sp2 subject protein beta, distant                                     89.4    5e-30
+sp1 subject protein alpha                                             50.4    9e-15
+
+
+> sp2 subject protein beta, distant
+Length=142
+
+ Score = 89.4 bits (220),  Expect = 5e-30, Method: Compositional matrix adjust.
+ Identities = 39/40 (98%), Positives = 39/40 (98%), Gaps = 0/40 (0%)
+ Frame = +1
+
+Query  1    GIHPCNQWTCWIPSYMAVPGWCPTDTLHVSEMGLWMHCEP  120
+            GIHPCNQWTCWIP YMAVPGWCPTDTLHVSEMGLWMHCEP
+Sbjct  61   GIHPCNQWTCWIPKYMAVPGWCPTDTLHVSEMGLWMHCEP  100
+
+
+> sp1 subject protein alpha
+Length=137
+
+ Score = 50.4 bits (119),  Expect = 9e-15, Method: Compositional matrix adjust.
+ Identities = 24/39 (62%), Positives = 26/39 (67%), Gaps = 3/39 (8%)
+ Frame = +1
+
+Query  4    IHPCNQWTCWIPSYMAVPGWCPTDTLHVSEMGLWMHCEP  120
+            IHP   W CWIP     PGW  TDTLH++EMGLWMH  P
+Sbjct  58   IHP---WICWIPKEQQTPGWWKTDTLHMAEMGLWMHKYP  93
+
+
+ Score = 16.2 bits (30),  Expect = 0.046, Method: Composition-based stats.
+ Identities = 4/6 (67%), Positives = 5/6 (83%), Gaps = 0/6 (0%)
+ Frame = +3
+
+Query  69  HRYPAC  86
+           H+YP C
+Sbjct  90  HKYPKC  95
+
+
+ Score = 11.5 bits (18),  Expect = 4.1, Method: Composition-based stats.
+ Identities = 4/12 (33%), Positives = 5/12 (42%), Gaps = 0/12 (0%)
+ Frame = -1
+
+Query  36   YPTSPLITGVYT  1
+            YP    +   YT
+Sbjct  92   YPKCMCVMVRYT  103
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 7770
+
+
+Query= b6 sp1 plus
+
+Length=120
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+sp1 subject protein alpha                                             88.6    1e-29
+sp2 subject protein beta, distant                                     52.4    2e-15
+
+
+> sp1 subject protein alpha
+Length=137
+
+ Score = 88.6 bits (218),  Expect = 1e-29, Method: Compositional matrix adjust.
+ Identities = 40/40 (100%), Positives = 40/40 (100%), Gaps = 0/40 (0%)
+ Frame = +1
+
+Query  1    TPGWWKTDTLHMAEMGLWMHKYPKCMCVMVRYTDQSLRHW  120
+            TPGWWKTDTLHMAEMGLWMHKYPKCMCVMVRYTDQSLRHW
+Sbjct  71   TPGWWKTDTLHMAEMGLWMHKYPKCMCVMVRYTDQSLRHW  110
+
+
+> sp2 subject protein beta, distant
+Length=142
+
+ Score = 52.4 bits (124),  Expect = 2e-15, Method: Compositional matrix adjust.
+ Identities = 26/40 (65%), Positives = 29/40 (73%), Gaps = 2/40 (5%)
+ Frame = +1
+
+Query  1    TPGWWKTDTLHMAEMGLWMHKYPKCMCVMVRYTDQSLRHW  120
+             PGW  TDTLH++EMGLWMH  P  MC MVR T  +LRHW
+Sbjct  78   VPGWCPTDTLHVSEMGLWMHCEP--MCHMVRETTHALRHW  115
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 7770
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt11/arch_bx_s.faa).
+    Posted date:  Unknown
+  Number of letters in database: 279
+  Number of sequences in database:  2
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 12
+Window for multiple hits: 40

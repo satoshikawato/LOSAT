@@ -12,8 +12,6 @@
 //! formats is rejected without the lookup (`SeqIdLine::GuideFormat`), which also rejects
 //! some lines that the guide does not know and NCBI reads as FASTA (`ZZ123456`).
 
-use super::ReaderConfig;
-
 /// What `CSeq_id(line, fParse_AnyRaw | fParse_ValidLocal)` and its retry make of a line.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum SeqIdLine {
@@ -337,6 +335,10 @@ fn x_identify_accession(main: &[u8], has_version: bool) -> Option<SeqIdLine> {
             && alnum(main[2])
             && alnum(main[3])
         {
+            #[expect(
+                clippy::if_same_then_else,
+                reason = "NCBI returns eAcc_pdb both for a delimited ID and in its switch's case 4 (Seq_id.cpp:1683-1710)"
+            )]
             if main_size > 4
                 && main_size <= 17
                 && matches!(main[4], b'|' | b'-' | b'_' | 0)
@@ -389,6 +391,10 @@ fn x_identify_accession(main: &[u8], has_version: bool) -> Option<SeqIdLine> {
         //     }
         // ```
         let oqp = matches!(main[0], b'O' | b'P' | b'Q');
+        #[expect(
+            clippy::if_same_then_else,
+            reason = "NCBI has the two UniProt patterns as two branches that both return eAcc_swissprot (Seq_id.cpp:1713-1727)"
+        )]
         if digit_pos == 1
             && main_size == 6
             && (oqp || alpha(main[2]))
@@ -560,7 +566,8 @@ fn x_identify_accession(main: &[u8], has_version: bool) -> Option<SeqIdLine> {
 /// at that throw, so a line is FASTA exactly when it is neither tagged, an identified
 /// accession, nor a whitelisted general ID.
 pub(super) fn classify(line: &[u8]) -> SeqIdLine {
-    let line = super::stream::trim_input_space(line);
+    // `NStr::TruncateSpaces_Unsafe(the_id_in, NStr::eTrunc_Both)` (Seq_id.cpp:2459).
+    let line = crate::ncbi_str::truncate_spaces(line);
     // blast_fasta_input.cpp:132: `!line.empty() && isalnum(line.data()[0]&0xff)`.
     if line.first().is_none_or(|&first| !alnum(first)) {
         return SeqIdLine::Fasta;
@@ -573,7 +580,7 @@ pub(super) fn classify(line: &[u8]) -> SeqIdLine {
     }
     if let Some(colon) = line.iter().position(|&byte| byte == b':') {
         let db = line[..colon].to_ascii_uppercase();
-        if RAW_DBTAGS.iter().any(|&known| known == db.as_slice()) {
+        if RAW_DBTAGS.contains(&db.as_slice()) {
             return SeqIdLine::General;
         }
     }
@@ -608,14 +615,17 @@ pub(super) fn classify(line: &[u8]) -> SeqIdLine {
 /// ```
 /// Every line that `classify` does not call FASTA is rejected: NCBI fetches it, skips it
 /// (a query whose ID is not found, or another rethrown exception) or fails (a subject).
-pub(super) fn reject_seq_id_line(line: &[u8], config: &ReaderConfig) -> Option<anyhow::Error> {
+/// `line` is the line as read (`classify` trims it); `program` and `role` name the reader in
+/// the rejection. Both readers ask here: the shared reader (`reader::read_one_seq`, with its
+/// data loaders on) and BLASTX's command line reader (`algorithm::blastx::input`,
+/// `FastaStream::seq_id_role`). BLASTX's web ABI v1 (`algorithm::blastx::web`, frozen) does not:
+/// it reads such a line as data, as before.
+pub(crate) fn reject_seq_id_line(line: &[u8], program: &str, role: &str) -> Option<anyhow::Error> {
     if classify(line) == SeqIdLine::Fasta {
         return None;
     }
     Some(anyhow::anyhow!(
         "the first line of the {role} ({:?}) is not a defline and may be a sequence identifier that NCBI BLAST+ fetches through a data loader (from GenBank or a BLAST database), which is not supported by LOSAT's {program} (start the {role} with a '>' defline, or set DATA_LOADERS=none in the [BLAST] section of .ncbirc)",
-        String::from_utf8_lossy(line),
-        role = config.role,
-        program = config.program,
+        String::from_utf8_lossy(crate::ncbi_str::truncate_spaces(line)),
     ))
 }

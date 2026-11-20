@@ -15,6 +15,10 @@ search does; it writes DIR/<fixture_id>.db.out and checks `db_stdout_sha256`, th
 of that output with its `Posted date:` line (the time makeblastdb ran) replaced by a
 fixed text (check_losat.py compares LOSAT with that output outside the database lines).
 
+A row whose `contract` is `approved_culling_wrap:<limit>` (a -culling_limit above 2147483644, where
+NCBI's Int4 sum with 3 wraps; LOSAT adds in i64, approved exception 1.4 of PD-LOSAT-NCBI-DEFECTS) runs
+NCBI with `-culling_limit <limit>` in place of the row's; the expected output is that report.
+
 A row whose `contract` is `approved_punct_title:<stand-in subject>` (approved exception 2
 of PD-LOSAT-NCBI-DEFECTS: subject titles made only of punctuation, on which NCBI's outfmt 0
 crashes when the subject has hits) runs NCBI with the stand-in subject instead: the same
@@ -24,6 +28,18 @@ that differs. Its expected output is NCBI's report of the stand-in with each pla
 replaced by that title and the stand-in's path by the subject's (the two paths have the
 same length), the check of docs/evidence/losat_web_e2g/title_sweep.py and
 docs/evidence/losat_web_e2e/title_sweep.py.
+
+A row whose `files` column is `xinclude` (outfmt 13 or 14: LOSAT/tests/xinclude_fixtures.py) runs
+with `-out <tmp>/<fixture_id>.out` added. NCBI writes the master file there and the side files
+next to it; the master is DIR/<fixture_id>.out (its hash is `stdout_sha256`, standard output must
+be empty) and the side files are DIR/<fixture_id>.out_<n>.json|xml (`side_sha256`, in order).
+
+A psiblast row whose `files` column is `pssm` runs with `-out_ascii_pssm <tmp>/<fixture_id>.pssm`
+added; the report is DIR/<fixture_id>.out as usual and the PSSM files it writes are
+DIR/<fixture_id>.pssm and DIR/<fixture_id>.pssm.<n> (`side_sha256`; empty when it writes none).
+The kinds `pssm-asn` (`-out_pssm <tmp>/<fixture_id>.asn`) and `pssm-both` (both options) write
+DIR/<fixture_id>.asn too; in these two kinds a file over 64 KB is not frozen, only its SHA-256 is
+kept in `side_sha256` (LOSAT/tests/xinclude_fixtures.py, `FREEZE_LIMIT`).
 
 - default: compare the outputs with the manifest's hash columns; exit 1 on a difference.
 - --freeze: write the hash and size columns of the manifest instead (run with
@@ -52,13 +68,22 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[3]
 ENGINE = REPO / "LOSAT"
+# Appended, so that the helper modules of LOSAT/tests never shadow the standard library.
+sys.path.append(str(ENGINE / "tests"))
+import xinclude_fixtures as xinclude  # noqa: E402  (the rows of outfmt 13 and 14, and of psiblast's PSSM)
+# The one rule of the SAM rows (outfmt 17): the CL tag of the @PG line is not compared.
+from db_search_fixtures import is_sam_outfmt, strip_sam_cl  # noqa: E402
 MANIFEST = ENGINE / "tests/outfmt0_manifest.tsv"
 HASHES = ("stdout_sha256", "stdout_bytes", "stderr_sha256")
+# The columns of the old form of the manifest; the `files` columns follow them and are left out of a
+# row that does not use them (so that the rows of the old form keep their text).
+BASE_COLUMNS = 13
 DEVIATION = "approved_db_gencode_deviation"
 PUNCT_TITLE = "approved_punct_title:"
+CULLING_WRAP = "approved_culling_wrap:"
 # BATCH_SIZE and CHUNK_SIZE change the query batches (blast_input_aux.cpp:86-90,
 # local_blast.cpp:59-62), and with them the report of an invalid query.
-REPORT_ENV = ("BL2SEQ_LEGACY", "CTOOLKIT_COMPATIBLE", "OLD_FSC", "BATCH_SIZE", "CHUNK_SIZE")
+REPORT_ENV = ("BL2SEQ_LEGACY", "CTOOLKIT_COMPATIBLE", "OLD_FSC", "BATCH_SIZE", "CHUNK_SIZE", "ARCHIVE_FORMAT")
 
 
 def read_manifest() -> tuple[list[str], list[str], list[dict[str, str]]]:
@@ -66,6 +91,14 @@ def read_manifest() -> tuple[list[str], list[str], list[dict[str, str]]]:
     comments = [line for line in lines if line.startswith("#")]
     header, *body = [line.split("\t") for line in lines if not line.startswith("#")]
     return comments, header, [dict(zip(header, row)) for row in body]
+
+
+def row_cells(header: list[str], row: dict[str, str]) -> list[str]:
+    """The cells of a row in the manifest: the `files` columns are left out when they are empty."""
+    cells = [row.get(key, "") for key in header]
+    while len(cells) > BASE_COLUMNS and cells[-1] == "":
+        cells.pop()
+    return cells
 
 
 def outfmt(row: dict[str, str]) -> str:
@@ -76,8 +109,20 @@ def outfmt(row: dict[str, str]) -> str:
 def search_argv(row: dict[str, str]) -> list[str]:
     """The search arguments after the program name (the same for NCBI and LOSAT)."""
     task = ["-task", row["task"]] if row["task"] else []
-    return ["-query", row["query"], "-subject", row["subject"], *task, *shlex.split(row["extra_args"]),
-            "-outfmt", outfmt(row)]
+    # A psiblast or tblastn query cell `pssm-gz:PATH` or `pssm:PATH` is a PSSM query (`-in_pssm`;
+    # LOSAT/tests/xinclude_fixtures.py `query_argv`).
+    return [*xinclude.query_argv(row["query"], ENGINE), "-subject", row["subject"], *task,
+            *shlex.split(row["extra_args"]), "-outfmt", outfmt(row)]
+
+
+def oracle_argv(row: dict[str, str]) -> list[str]:
+    """The arguments of NCBI's run: the search arguments, with the -culling_limit of an
+    `approved_culling_wrap` row replaced by the contract's limit."""
+    argv = search_argv(row)
+    contract = row.get("contract", "")
+    if contract.startswith(CULLING_WRAP):
+        argv[argv.index("-culling_limit") + 1] = contract.removeprefix(CULLING_WRAP)
+    return argv
 
 
 def db_argv(row: dict[str, str], db: str) -> list[str]:
@@ -155,16 +200,36 @@ def main() -> int:
     records, differing = [], []
     selected = [row for row in rows if row["fixture_id"].startswith(args.only)]
     for row in selected:
-        command = [str(args.bin_dir / row["program"]), *search_argv(row)]
+        command = [str(args.bin_dir / row["program"]), *oracle_argv(row)]
         start = time.monotonic()
+        files = xinclude.wants_files(row)
+        pssm = xinclude.wants_pssm(row)
         if row.get("contract", "").startswith(PUNCT_TITLE):
             run = punct_title_run(row, args.bin_dir / row["program"])
+        elif files:
+            written = xinclude.run_with_files(command, row["fixture_id"], outfmt(row), cwd=ENGINE)
+            run = written.run
+        elif pssm:
+            pssms = xinclude.run_with_pssm(command, row["fixture_id"], xinclude.files_kind(row), cwd=ENGINE)
+            run = pssms.run
         else:
             run = subprocess.run(command, cwd=ENGINE, capture_output=True)
         wall = time.monotonic() - start
         if run.returncode != 0:
             raise SystemExit(f"{row['fixture_id']}: exit {run.returncode}\n{run.stderr.decode()}")
-        (args.out / f"{row['fixture_id']}.out").write_bytes(run.stdout)
+        defects = []
+        if files and args.freeze:
+            xinclude.freeze(written, args.out, row["fixture_id"], outfmt(row))
+        elif files:
+            # A comparison writes nothing to --out, and a stray file, standard output or a missing
+            # master is a difference of this fixture, not the end of the comparison.
+            defects = xinclude.defects(written)
+        else:
+            (args.out / f"{row['fixture_id']}.out").write_bytes(run.stdout)
+        if pssm and args.freeze:
+            xinclude.freeze_pssm(pssms, args.out, row["fixture_id"], xinclude.files_kind(row))
+        elif pssm:
+            defects = [f"stray files {pssms.stray}"] if pssms.stray else []
         err = args.out / f"{row['fixture_id']}.err"
         if run.stderr:
             err.write_bytes(run.stderr)
@@ -173,6 +238,12 @@ def main() -> int:
         observed = {"stdout_sha256": digest(run.stdout), "stdout_bytes": str(len(run.stdout)),
                     "stderr_sha256": digest(run.stderr) if run.stderr else ""}
         hashes = list(HASHES)
+        if files:
+            observed.update(xinclude.observed(written))
+            hashes.append("side_sha256")
+        if pssm:
+            observed.update(xinclude.observed_pssm(pssms, row["fixture_id"], xinclude.files_kind(row)))
+            hashes.append("side_sha256")
         if row.get("contract") == DEVIATION:
             # outfmt 7 prints the -db argument, so the database has a fixed path.
             db_dir = Path(tempfile.gettempdir()) / "losat_outfmt0_db" / row["fixture_id"]
@@ -189,16 +260,25 @@ def main() -> int:
             hashes.append("db_stdout_sha256")
         if args.freeze:
             row.update(observed)
-        elif any(row.get(key, "") != observed[key] for key in hashes):
+        elif defects:
             differing.append(row["fixture_id"])
-        shown = shlex.join([row["program"], *search_argv(row)])
+        elif any(row.get(key, "") != observed[key] for key in hashes):
+            # A SAM row (outfmt 17) may differ in the CL tag of its @PG line (NCBI's argv[0] is the path
+            # of this run's binary): the frozen file and this run are compared without it.
+            frozen = ENGINE / "tests/fixtures/outfmt0" / f"{row['fixture_id']}.out"
+            same_but_cl = (is_sam_outfmt(outfmt(row)) and frozen.exists()
+                           and row.get("stderr_sha256", "") == observed["stderr_sha256"]
+                           and strip_sam_cl(run.stdout) == strip_sam_cl(frozen.read_bytes()))
+            if not same_but_cl:
+                differing.append(row["fixture_id"])
+        shown = shlex.join([row["program"], *oracle_argv(row)])
         records.append([row["fixture_id"], f"{wall:.2f}", *(observed[key] for key in HASHES), shown])
 
     for record in [["fixture_id", "wall_s", *HASHES, "command"], *records]:
         print("\t".join(record))
     if args.freeze:
         MANIFEST.write_text("\n".join([*comments, "\t".join(header),
-                                       *("\t".join(row.get(key, "") for key in header) for row in rows)]) + "\n")
+                                       *("\t".join(row_cells(header, row)) for row in rows)]) + "\n")
     print(f"# fixtures={len(selected)} differing={differing}")
     return 1 if differing else 0
 

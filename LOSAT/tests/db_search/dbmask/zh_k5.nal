@@ -1,0 +1,7 @@
+#
+# Alias file of k5 without s4 (OID 3, series NP, M4a-2b): s1-s3
+#
+TITLE mask probe v5 mask_id, s1-s3
+DBLIST k5
+FIRST_OID 1
+LAST_OID 3

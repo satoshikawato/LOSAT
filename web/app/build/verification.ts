@@ -8,15 +8,14 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { OutputFormat, ProgramId } from 'losat/domain';
 import type { Plugin } from 'vite';
 import { optionKey, type BrowserVerification, type OptionGrammar, type ProgramVerification, type VerificationTable } from '../src/domain/verification.ts';
-import type { OutputFormat } from '../src/domain/output-format.ts';
-import type { ProgramId } from '../src/domain/programs.ts';
 
 const VIRTUAL_ID = 'virtual:losat-verification';
 const RESOLVED_ID = `\0${VIRTUAL_ID}`;
 const NCBI_VERSION = '2.17.0';
-const PROGRAMS = ['blastn', 'blastp', 'tblastn', 'tblastx'] as const satisfies readonly ProgramId[];
+const PROGRAMS = ['blastn', 'blastp', 'blastx', 'tblastn', 'tblastx'] as const satisfies readonly ProgramId[];
 const DESCRIBE = fileURLToPath(new URL('../src/infra/fake/describe.json', import.meta.url));
 
 type Program = (typeof PROGRAMS)[number];

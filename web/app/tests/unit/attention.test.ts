@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import { Attention, type AttentionDeps } from '../../src/application/attention';
 import type { AppState, RunView } from '../../src/application/coordinator';
+import type { DraftSource, DraftState, RoleDraft } from '../../src/application/draft';
 import { Store } from '../../src/application/store';
 import type { RunStatus } from '../../src/domain/run';
+import type { StoredResultsCheck } from '../../src/ports/data';
 import type { PagePort, WakeLockHandle } from '../../src/ports/page';
 
 class FakeLock implements WakeLockHandle {
@@ -26,6 +28,7 @@ class FakePage implements PagePort {
   leaveGuards: boolean[] = [];
   locks: FakeLock[] = [];
   nextRequestError: Error | undefined;
+  handheld = false;
   requestWakeLock = vi.fn(async (): Promise<WakeLockHandle> => {
     if (this.nextRequestError !== undefined) throw this.nextRequestError;
     const lock = new FakeLock();
@@ -58,6 +61,9 @@ class FakePage implements PagePort {
 const run = (runId: string, number: number, status: RunStatus): RunView =>
   ({ snapshot: { runId, number }, status, record: {} }) as unknown as RunView;
 
+/** The Data worker's answer when every stored result is still there. */
+const KEPT: StoredResultsCheck = { removed: [], unreadable: [] };
+
 const flush = async (): Promise<void> => {
   for (let i = 0; i < 5; i++) await Promise.resolve();
 };
@@ -66,19 +72,28 @@ const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout
 function setup(
   options: {
     supported?: boolean;
+    handheld?: boolean;
+    /** The initial choice; the default (on) unless given. */
+    keepAwake?: boolean;
     runs?: RunView[];
     probe?: AttentionDeps['probe'];
+    checkStored?: AttentionDeps['checkStored'];
     probeTimeoutMs?: number;
     minHiddenMs?: number;
+    draft?: Store<DraftState>;
   } = {},
 ) {
   const page = new FakePage(options.supported ?? true);
+  page.handheld = options.handheld ?? false;
   const runs = new Store<AppState>({ runs: options.runs ?? [] });
   const clock = { now: 1_000 };
   const attention = new Attention({
     page,
     runs,
+    ...(options.draft === undefined ? {} : { draft: options.draft }),
+    keepAwake: options.keepAwake,
     probe: options.probe ?? (() => Promise.resolve()),
+    checkStored: options.checkStored ?? (() => Promise.resolve(KEPT)),
     now: () => clock.now,
     probeTimeoutMs: options.probeTimeoutMs ?? 5_000,
     minHiddenMs: options.minHiddenMs ?? 0,
@@ -101,19 +116,48 @@ describe('leave guard', () => {
     expect(state().active).toBe(status !== 'queued');
   });
 
-  it('follows the runs: on while any run is in progress, off when all are terminal', () => {
+  it('follows the runs: on while any run is in progress, off when all have ended without results', () => {
     const { page, setRuns, state } = setup({ runs: [run('a', 1, 'running'), run('b', 2, 'queued')] });
     expect(page.guard).toBe(true);
-    setRuns([run('a', 1, 'completed'), run('b', 2, 'queued')]);
+    setRuns([run('a', 1, 'cancelled'), run('b', 2, 'queued')]);
     expect(page.guard).toBe(true);
     expect(state()).toMatchObject({ active: false, busy: true });
-    setRuns([run('a', 1, 'completed'), run('b', 2, 'running')]);
+    setRuns([run('a', 1, 'cancelled'), run('b', 2, 'running')]);
     expect(state()).toMatchObject({ active: true, busy: true });
-    setRuns([run('a', 1, 'completed'), run('b', 2, 'failed')]);
+    setRuns([run('a', 1, 'cancelled'), run('b', 2, 'failed')]);
     expect(page.guard).toBe(false);
     expect(state()).toMatchObject({ active: false, busy: false });
     setRuns([run('a', 1, 'cancelled')]);
     expect(page.guard).toBe(false);
+  });
+
+  // Nothing is kept for the next visit (REQ-20), so a reload loses results and inputs for good (WA-IN-06).
+  it('stays on while a run has results', () => {
+    const { page, setRuns, state } = setup({ runs: [run('a', 1, 'running')] });
+    setRuns([run('a', 1, 'completed')]);
+    expect(page.guard).toBe(true);
+    expect(state()).toMatchObject({ active: false, busy: false });
+  });
+
+  it('is on while the search form holds a pasted text or a source of either role', () => {
+    const role = (change: Partial<RoleDraft> = {}): RoleDraft => ({ paste: '', sources: [], mode: 'combined', ...change });
+    const form = (query: RoleDraft, subject: RoleDraft) => ({ query, subject }) as unknown as DraftState;
+    const draft = new Store<DraftState>(form(role(), role()));
+    const { page } = setup({ draft });
+    expect(page.guard).toBe(false);
+    draft.set(form(role({ paste: '>q\nACGT\n' }), role()));
+    expect(page.guard).toBe(true);
+    draft.set(form(role(), role()));
+    expect(page.guard).toBe(false);
+    draft.set(form(role(), role({ sources: [{ key: 'file-1' } as DraftSource] })));
+    expect(page.guard).toBe(true);
+    // A box of accessions only has no source until it is fetched; it is an input too.
+    draft.set(form(role({ paste: 'NC_045512.2' }), role()));
+    expect(page.guard).toBe(true);
+    // A form change that leaves the guard as it is does not set it again.
+    const calls = page.leaveGuards.length;
+    draft.set(form(role({ paste: 'NC_045512.3' }), role()));
+    expect(page.leaveGuards).toHaveLength(calls);
   });
 });
 
@@ -127,15 +171,27 @@ describe('wake lock', () => {
     expect(page.requestWakeLock).not.toHaveBeenCalled();
   });
 
-  it('is off, and not requested, while keepAwake is false', async () => {
+  it('is on by default, and requested as soon as a run is active', async () => {
     const { page, state } = setup({ runs: [run('a', 1, 'running')] });
+    await flush();
+    expect(state()).toMatchObject({ keepAwake: true, wakeLock: 'held', handheld: false });
+    expect(page.requestWakeLock).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports a handheld device (where the choice is shown) from the page', () => {
+    expect(setup({ handheld: true }).state().handheld).toBe(true);
+    expect(setup({ handheld: true, supported: false }).state()).toMatchObject({ handheld: true, wakeLock: 'unsupported' });
+  });
+
+  it('is off, and not requested, while keepAwake is false', async () => {
+    const { page, state } = setup({ keepAwake: false, runs: [run('a', 1, 'running')] });
     await flush();
     expect(state()).toMatchObject({ keepAwake: false, wakeLock: 'off' });
     expect(page.requestWakeLock).not.toHaveBeenCalled();
   });
 
   it('is not requested without runs, and is held from a queued run to the end of the queue', async () => {
-    const { page, attention, setRuns, state } = setup({ runs: [run('a', 1, 'completed')] });
+    const { page, attention, setRuns, state } = setup({ keepAwake: false, runs: [run('a', 1, 'completed')] });
     attention.setKeepAwake(true);
     await flush();
     expect(page.requestWakeLock).not.toHaveBeenCalled();
@@ -155,7 +211,7 @@ describe('wake lock', () => {
   });
 
   it('is requested when keepAwake is turned on during a run, and released when the run completes', async () => {
-    const { page, attention, setRuns, state } = setup({ runs: [run('a', 1, 'running')] });
+    const { page, attention, setRuns, state } = setup({ keepAwake: false, runs: [run('a', 1, 'running')] });
     attention.setKeepAwake(true);
     expect(state()).toMatchObject({ keepAwake: true, wakeLock: 'requesting' });
     await flush();
@@ -182,7 +238,7 @@ describe('wake lock', () => {
   });
 
   it("is 'failed' with the error message when the request is rejected", async () => {
-    const { page, attention, state } = setup({ runs: [run('a', 1, 'running')] });
+    const { page, attention, state } = setup({ keepAwake: false, runs: [run('a', 1, 'running')] });
     page.nextRequestError = new Error('Battery is low');
     attention.setKeepAwake(true);
     await flush();
@@ -190,15 +246,40 @@ describe('wake lock', () => {
   });
 
   it('writes a non-Error rejection as a string', async () => {
-    const { page, attention, state } = setup({ runs: [run('a', 1, 'running')] });
+    const { page, attention, state } = setup({ keepAwake: false, runs: [run('a', 1, 'running')] });
     page.requestWakeLock.mockRejectedValueOnce('refused');
     attention.setKeepAwake(true);
     await flush();
     expect(state()).toMatchObject({ wakeLock: 'failed', wakeLockError: 'refused' });
   });
 
-  it('is requested again after a failure, and the error is cleared', async () => {
-    const { page, attention, setRuns, state } = setup({ runs: [run('a', 1, 'running')] });
+  it('is not requested again while the same runs go on after a failure, so the failure stays shown (WA-RN-04)', async () => {
+    const { page, setRuns, state } = setup();
+    page.nextRequestError = new Error('Wake Lock permission request denied');
+    setRuns([run('a', 1, 'queued'), run('b', 2, 'queued')]);
+    await flush();
+    const seen: string[] = [];
+    const record = () => seen.push(`${state().wakeLock}:${state().wakeLockError ?? ''}`);
+    record();
+    // Two runs one after the other: every phase changes the runs.
+    for (const next of [
+      [run('a', 1, 'preparing'), run('b', 2, 'queued')],
+      [run('a', 1, 'running'), run('b', 2, 'queued')],
+      [run('a', 1, 'finalizing'), run('b', 2, 'queued')],
+      [run('a', 1, 'completed'), run('b', 2, 'preparing')],
+      [run('a', 1, 'completed'), run('b', 2, 'running')],
+      [run('a', 1, 'completed'), run('b', 2, 'finalizing')],
+    ]) {
+      setRuns(next);
+      await flush();
+      record();
+    }
+    expect(page.requestWakeLock).toHaveBeenCalledTimes(1);
+    expect(new Set(seen)).toEqual(new Set(['failed:Wake Lock permission request denied']));
+  });
+
+  it('is requested again after a failure when runs start again, and the error is cleared', async () => {
+    const { page, attention, setRuns, state } = setup({ keepAwake: false, runs: [run('a', 1, 'running')] });
     page.nextRequestError = new Error('Battery is low');
     attention.setKeepAwake(true);
     await flush();
@@ -206,13 +287,51 @@ describe('wake lock', () => {
     page.nextRequestError = undefined;
     setRuns([run('a', 1, 'finalizing')]);
     await flush();
+    expect(state().wakeLock).toBe('failed');
+    expect(page.requestWakeLock).toHaveBeenCalledTimes(1);
+    setRuns([run('a', 1, 'completed')]);
+    setRuns([run('a', 1, 'completed'), run('b', 2, 'running')]);
+    await flush();
     expect(state().wakeLock).toBe('held');
     expect(state().wakeLockError).toBeUndefined();
     expect(page.requestWakeLock).toHaveBeenCalledTimes(2);
   });
 
+  it('is requested once more when the page was hidden and shown while a request that the browser refuses was made', async () => {
+    const { page, setRuns, state } = setup();
+    let refuse!: (error: Error) => void;
+    page.requestWakeLock.mockImplementationOnce(() => new Promise((_, reject) => (refuse = reject)));
+    setRuns([run('a', 1, 'running')]);
+    expect(state().wakeLock).toBe('requesting');
+    page.setVisible(false);
+    page.setVisible(true);
+    refuse(new Error('Battery is low'));
+    await flush();
+    expect(page.requestWakeLock).toHaveBeenCalledTimes(2);
+    expect(state().wakeLock).toBe('held');
+  });
+
+  it('is requested again after a failure when the page is shown again, or the choice is turned on again', async () => {
+    const { page, attention, setRuns, state } = setup();
+    page.nextRequestError = new Error('Battery is low');
+    setRuns([run('a', 1, 'running')]);
+    await flush();
+    expect(state().wakeLock).toBe('failed');
+    page.setVisible(false);
+    page.setVisible(true);
+    await flush();
+    expect(page.requestWakeLock).toHaveBeenCalledTimes(2);
+    expect(state().wakeLock).toBe('failed');
+    page.nextRequestError = undefined;
+    attention.setKeepAwake(false);
+    attention.setKeepAwake(true);
+    await flush();
+    expect(page.requestWakeLock).toHaveBeenCalledTimes(3);
+    expect(state().wakeLock).toBe('held');
+  });
+
   it('is requested again when the browser releases it while the run is active and the page visible', async () => {
-    const { page, attention, state } = setup({ runs: [run('a', 1, 'running')] });
+    const { page, attention, state } = setup({ keepAwake: false, runs: [run('a', 1, 'running')] });
     attention.setKeepAwake(true);
     await flush();
     expect(page.requestWakeLock).toHaveBeenCalledTimes(1);
@@ -224,7 +343,7 @@ describe('wake lock', () => {
   });
 
   it('is not requested again when the browser releases it while the page is hidden', async () => {
-    const { page, attention, state } = setup({ runs: [run('a', 1, 'running')] });
+    const { page, attention, state } = setup({ keepAwake: false, runs: [run('a', 1, 'running')] });
     attention.setKeepAwake(true);
     await flush();
     page.visible = false;
@@ -235,7 +354,7 @@ describe('wake lock', () => {
   });
 
   it('is not requested while the page is hidden, and is requested when it is shown', async () => {
-    const { page, attention, state } = setup({ runs: [run('a', 1, 'running')] });
+    const { page, attention, state } = setup({ keepAwake: false, runs: [run('a', 1, 'running')] });
     page.setVisible(false);
     attention.setKeepAwake(true);
     await flush();
@@ -265,9 +384,13 @@ describe('resume report', () => {
         { number: 2, before: 'queued', now: 'running' },
       ],
       dataWorker: 'checking',
+      stored: 'checking',
+      removed: [],
+      unreadable: [],
     });
     await flush();
     expect(state().resume?.dataWorker).toBe('responding');
+    expect(state().resume).toMatchObject({ stored: 'checked', removed: [], unreadable: [] });
     expect(state().resume?.hiddenMs).toBe(42_000);
   });
 
@@ -280,7 +403,11 @@ describe('resume report', () => {
   });
 
   it("is 'not-responding' when the probe rejects", async () => {
-    const { page, state } = setup({ runs: [run('a', 1, 'running')], probe: () => Promise.reject(new Error('gone')) });
+    const { page, state } = setup({
+      runs: [run('a', 1, 'running')],
+      probe: () => Promise.reject(new Error('gone')),
+      checkStored: () => new Promise(() => undefined), // an answer of the check is an answer of the Data worker too
+    });
     page.setVisible(false);
     page.setVisible(true);
     expect(state().resume?.dataWorker).toBe('checking');
@@ -292,6 +419,7 @@ describe('resume report', () => {
     const { page, state } = setup({
       runs: [run('a', 1, 'running')],
       probe: () => new Promise(() => undefined),
+      checkStored: () => new Promise(() => undefined),
       probeTimeoutMs: 20,
     });
     page.setVisible(false);
@@ -305,12 +433,14 @@ describe('resume report', () => {
 
   it('is not made when no run was in progress as the page was hidden', async () => {
     const probe = vi.fn(() => Promise.resolve());
-    const { page, state } = setup({ runs: [run('a', 1, 'completed'), run('b', 2, 'failed')], probe });
+    const checkStored = vi.fn(() => Promise.resolve(KEPT));
+    const { page, state } = setup({ runs: [run('a', 1, 'completed'), run('b', 2, 'failed')], probe, checkStored });
     page.setVisible(false);
     page.setVisible(true);
     await flush();
     expect(state().resume).toBeUndefined();
     expect(probe).not.toHaveBeenCalled();
+    expect(checkStored).not.toHaveBeenCalled();
   });
 
   it('is not made when there are no runs, nor when the page is shown without having been hidden', async () => {
@@ -396,6 +526,7 @@ describe('resume report', () => {
     const { page, state } = setup({
       runs: [run('a', 1, 'running')],
       probe: () => new Promise<void>((resolve) => (answer = resolve)),
+      checkStored: () => new Promise(() => undefined),
       probeTimeoutMs: 20,
     });
     page.setVisible(false);
@@ -405,5 +536,121 @@ describe('resume report', () => {
     answer!();
     await flush();
     expect(state().resume?.dataWorker).toBe('responding');
+  });
+
+  // WA2-SC-05: after about half an hour hidden, the notice said "The stored results are available." while the
+  // browser had removed the results of every run; the Data worker had only answered.
+  describe('stored results', () => {
+    it('names the completed runs whose stored results the browser removed, or could not read, by number', async () => {
+      const checkStored = vi.fn(() =>
+        Promise.resolve<StoredResultsCheck>({ removed: ['c', 'a', 'gone', 'e'], unreadable: ['d'] }),
+      );
+      const { page, setRuns, state } = setup({
+        runs: [run('a', 1, 'completed'), run('b', 2, 'running'), run('c', 3, 'queued'), run('d', 4, 'completed')],
+        checkStored,
+      });
+      page.setVisible(false);
+      // Run 5's commit reached the Data worker, but its answer did not: it is failed here.
+      setRuns([
+        run('a', 1, 'completed'),
+        run('b', 2, 'completed'),
+        run('c', 3, 'completed'),
+        run('d', 4, 'completed'),
+        run('e', 5, 'failed'),
+      ]);
+      page.setVisible(true);
+      expect(checkStored).toHaveBeenCalledTimes(1);
+      expect(state().resume).toMatchObject({ stored: 'checking', removed: [], unreadable: [] });
+      await flush();
+      // A run that is no longer in the list ('gone') or not completed ('e') is left out.
+      expect(state().resume).toMatchObject({ dataWorker: 'responding', stored: 'checked', removed: [1, 3], unreadable: [4] });
+    });
+
+    it('has no time limit: a slow check leaves the report checking, never "not-responding"', async () => {
+      vi.useFakeTimers();
+      try {
+        let answer: (check: StoredResultsCheck) => void = () => undefined;
+        const { page, state } = setup({
+          runs: [run('a', 1, 'completed'), run('b', 2, 'running')],
+          checkStored: () => new Promise<StoredResultsCheck>((resolve) => (answer = resolve)),
+          probeTimeoutMs: 10_000,
+        });
+        page.setVisible(false);
+        page.setVisible(true);
+        await vi.advanceTimersByTimeAsync(60_000);
+        expect(state().resume).toMatchObject({ dataWorker: 'responding', stored: 'checking' });
+        answer({ removed: ['a'], unreadable: [] });
+        await vi.advanceTimersByTimeAsync(0);
+        expect(state().resume).toMatchObject({ dataWorker: 'responding', stored: 'checked', removed: [1] });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('shows what the check found when it answers after the Data worker missed probeTimeoutMs', async () => {
+      vi.useFakeTimers();
+      try {
+        const { page, state } = setup({
+          runs: [run('a', 1, 'completed'), run('b', 2, 'running')],
+          // storageInfo waits for navigator.storage.estimate(), which can be slow.
+          probe: () => new Promise((resolve) => setTimeout(resolve, 20_000)),
+          checkStored: () => new Promise((resolve) => setTimeout(() => resolve({ removed: ['a'], unreadable: [] }), 15_000)),
+          probeTimeoutMs: 10_000,
+        });
+        page.setVisible(false);
+        page.setVisible(true);
+        await vi.advanceTimersByTimeAsync(10_001);
+        expect(state().resume).toMatchObject({ dataWorker: 'not-responding', stored: 'checking' });
+        await vi.advanceTimersByTimeAsync(5_000);
+        expect(state().resume).toMatchObject({ dataWorker: 'responding', stored: 'checked', removed: [1] });
+        await vi.advanceTimersByTimeAsync(5_000);
+        expect(state().resume).toMatchObject({ dataWorker: 'responding', stored: 'checked', removed: [1] });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("keeps 'responding' when the Data worker answered the check and then refuses `probe`", async () => {
+      let refuse: (error: Error) => void = () => undefined;
+      const { page, state } = setup({
+        runs: [run('a', 1, 'running')],
+        probe: () => new Promise((_, reject) => (refuse = reject)),
+      });
+      page.setVisible(false);
+      page.setVisible(true);
+      await flush();
+      expect(state().resume).toMatchObject({ dataWorker: 'responding', stored: 'checked' });
+      refuse(new Error('late'));
+      await flush();
+      expect(state().resume).toMatchObject({ dataWorker: 'responding', stored: 'checked' });
+    });
+
+    it("is 'failed' when the Data worker refuses the check, and the Data worker's answer stays its own", async () => {
+      const { page, state } = setup({ runs: [run('a', 1, 'running')], checkStored: () => Promise.reject(new Error('gone')) });
+      page.setVisible(false);
+      page.setVisible(true);
+      await flush();
+      expect(state().resume).toMatchObject({ dataWorker: 'responding', stored: 'failed', removed: [], unreadable: [] });
+    });
+
+    it('asks again at each show, and only the answer of the latest show counts', async () => {
+      const answers: Array<(check: StoredResultsCheck) => void> = [];
+      const { page, clock, state } = setup({
+        runs: [run('a', 1, 'completed'), run('b', 2, 'running')],
+        checkStored: () => new Promise<StoredResultsCheck>((resolve) => answers.push(resolve)),
+      });
+      page.setVisible(false);
+      page.setVisible(true);
+      clock.now += 10;
+      page.setVisible(false);
+      page.setVisible(true);
+      expect(answers).toHaveLength(2);
+      answers[1]!({ removed: ['a'], unreadable: [] });
+      await flush();
+      expect(state().resume).toMatchObject({ stored: 'checked', removed: [1] });
+      answers[0]!(KEPT);
+      await flush();
+      expect(state().resume).toMatchObject({ stored: 'checked', removed: [1] });
+    });
   });
 });

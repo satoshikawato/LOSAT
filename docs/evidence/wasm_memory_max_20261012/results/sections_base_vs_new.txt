@@ -1,0 +1,78 @@
+=== engine/losat-threaded-command.wasm
+0a4a5cffb406bd8177ad741fd03270f5897a0c5932140de9229f8bd76647a77c  base/engine/losat-threaded-command.wasm
+3ff7efbf55290d84f1dcb3a5f27d648d1e90c11797fff48da96a5cd628f5e24a  new/engine/losat-threaded-command.wasm
+type                              1114      1114 0896ad3ce42f 0896ad3ce42f equal
+import                             836       836 29589ddfc3a1 d76dc8831bc7 DIFFERENT
+  memory import (flags, initial, maximum): (3, 23, 16384) (3, 23, 65535)
+  differing byte offsets in the section: [15, 16, 17] (count 3, lengths 836 836)
+function                          3214      3214 273075f17e0a 273075f17e0a equal
+table                                7         7 f2868689c699 f2868689c699 equal
+global                              30        30 91a81d7550fd 91a81d7550fd equal
+export                             371       371 8cc7203514c0 8cc7203514c0 equal
+start                                1         1 68aa2e2ee5df 68aa2e2ee5df equal
+element                           1956      1956 9a7fc04b9789 9a7fc04b9789 equal
+datacount                            1         1 084fed08b978 084fed08b978 equal
+code                           3304554   3304554 0b6ef0f1cacf 0b6ef0f1cacf equal
+data                            395643    395643 dc046a7da7e9 dc046a7da7e9 equal
+custom:name                     278063    278063 917c4eec15a5 e27123875da0 DIFFERENT
+custom:producers                   184       184 c175f088933e c175f088933e equal
+custom:target_features             182       182 35d4e342e8ee 35d4e342e8ee equal
+differing sections: ['import', 'custom:name']
+=== engine/losat-threaded-reactor.wasm
+3f748547182b34da535c860c9b596a42df12a92f1bdf2890aa34f50adce017a2  base/engine/losat-threaded-reactor.wasm
+0bee552d3d289b4a3479cec5e2ce16c2c9d009a9032a6e979e0998a2a0f45001  new/engine/losat-threaded-reactor.wasm
+type                              1103      1103 d412f6c4cb31 d412f6c4cb31 equal
+import                             583       583 9be1e547cf73 24bb7393d4cb DIFFERENT
+  memory import (flags, initial, maximum): (3, 22, 16384) (3, 22, 65535)
+  differing byte offsets in the section: [15, 16, 17] (count 3, lengths 583 583)
+function                          3244      3244 e1fbbf3f3b0f e1fbbf3f3b0f equal
+table                                7         7 69d3cc0e6b5f 69d3cc0e6b5f equal
+global                              30        30 ecd676e3e2be ecd676e3e2be equal
+export                             362       362 2673862d61ba 2673862d61ba equal
+start                                1         1 f299791cddd3 f299791cddd3 equal
+element                           2056      2056 a5a812529e2f a5a812529e2f equal
+datacount                            1         1 084fed08b978 084fed08b978 equal
+code                           2664602   2664602 2b3f1ee8286d 2b3f1ee8286d equal
+data                            384303    384303 a990e3c9a992 a990e3c9a992 equal
+custom:name                     279441    279441 7a9ac98d01fc 7a9ac98d01fc equal
+custom:producers                   184       184 97ebb8b26bf4 97ebb8b26bf4 equal
+custom:target_features             182       182 35d4e342e8ee 35d4e342e8ee equal
+differing sections: ['import']
+=== adapter/losat-web-threads.wasm
+4e5d39e8bac5bcba1420c9225875722aad09b96a4bb88882e0db3f95f4c54b67  base/adapter/losat-web-threads.wasm
+66bebac4111fb2e2703e02ddbd0cafd6e28bec39f899a8e70ded10b9daeeb1a5  new/adapter/losat-web-threads.wasm
+type                              1258      1258 c5748f0a1f86 c5748f0a1f86 equal
+import                             601       601 85eeedeebac9 666e45abc4b1 DIFFERENT
+  memory import (flags, initial, maximum): (3, 23, 16384) (3, 23, 65535)
+  differing byte offsets in the section: [15, 16, 17] (count 3, lengths 601 601)
+function                          3707      3707 b4a4a8e63a19 b4a4a8e63a19 equal
+table                                7         7 4cdc460ff479 4cdc460ff479 equal
+global                              30        30 ecd676e3e2be ecd676e3e2be equal
+export                             670       670 10e9fd276fa9 10e9fd276fa9 equal
+start                                1         1 ab897fbdedfa ab897fbdedfa equal
+element                           2212      2212 68fe5654ed76 68fe5654ed76 equal
+datacount                            1         1 084fed08b978 084fed08b978 equal
+code                           3179131   3179131 f332e4db03ad f332e4db03ad equal
+data                            404023    404023 74659486011e 74659486011e equal
+custom:name                     320872    320872 7eadaacc0b7b 7eadaacc0b7b equal
+custom:producers                   184       184 97ebb8b26bf4 97ebb8b26bf4 equal
+custom:target_features             182       182 35d4e342e8ee 35d4e342e8ee equal
+differing sections: ['import']
+=== adapter/losat-web-serial.wasm
+5f8faec547c6f8c6ae7d686ee9db477d7acb5bc145983e56425cf3ded7b113b1  base/adapter/losat-web-serial.wasm
+5f8faec547c6f8c6ae7d686ee9db477d7acb5bc145983e56425cf3ded7b113b1  new/adapter/losat-web-serial.wasm
+type                              1243      1243 f9212846d9c7 f9212846d9c7 equal
+import                             564       564 c178b58985da c178b58985da equal
+  memory import (flags, initial, maximum): None None
+function                          3199      3199 975ca3361e1e 975ca3361e1e equal
+table                                7         7 e4f883da7742 e4f883da7742 equal
+memory                               3         3 a1c09eb8693e a1c09eb8693e equal
+global                              14        14 90301628d2be 90301628d2be equal
+export                             649       649 11e04e2921ec 11e04e2921ec equal
+element                           1810      1810 36e0d3cb462e 36e0d3cb462e equal
+code                           2960403   2960403 6edb1186a0ef 6edb1186a0ef equal
+data                            392123    392123 8a09001f8a2d 8a09001f8a2d equal
+custom:name                     271691    271691 4386f18ec4dc 4386f18ec4dc equal
+custom:producers                   184       184 97ebb8b26bf4 97ebb8b26bf4 equal
+custom:target_features             173       173 6c1cebe9004d 6c1cebe9004d equal
+differing sections: none

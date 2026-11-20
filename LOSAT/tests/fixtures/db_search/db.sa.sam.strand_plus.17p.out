@@ -1,0 +1,9 @@
+@HD	VN:1.2	SO:coordinate	GO:reference
+@SQ	SN:Query_1	LN:1500
+@SQ	SN:Query_2	LN:1400
+@PG	ID:0	VN:2.17.0+	CL:/home/kawato/micromamba/bin/blastn -db tests/db_search/nslice -query tests/db_search/nslice_q.fna -strand plus -outfmt 17 -num_threads 1 	PN:blastn
+BL_ORD_ID:0	0	Query_1	1	255	2000H1500M2500H	*	0	0	*	*	AS:i:1500	EV:f:0	NM:i:0	PI:f:100.00	BS:f:2771.09
+BL_ORD_ID:1	0	Query_1	1	255	2001H107M1I4M1D994M2I345M1I49M2507H	*	0	0	*	*	AS:i:1123	EV:f:0	NM:i:5	PI:f:91.93	BS:f:2074.91
+BL_ORD_ID:2	0	Query_1	758	255	2000H6M1I10M1I621M2I47M1D58M3254H	*	0	0	*	*	AS:i:603	EV:f:0	NM:i:5	PI:f:94.34	BS:f:1114.65
+BL_ORD_ID:3	0	Query_2	1	255	100H800M2100H	*	0	0	*	*	AS:i:676	EV:f:0	NM:i:0	PI:f:95.75	BS:f:1249.46
+BL_ORD_ID:3	0	Query_2	861	255	960H540M1500H	*	0	0	*	*	AS:i:480	EV:f:0	NM:i:0	PI:f:96.30	BS:f:887.512

@@ -1,0 +1,340 @@
+{
+  "Seq_annot": {
+    "desc": [
+      {
+        "user": {
+          "type": {
+            "str": "Hist Seqalign"
+          },
+          "data": [
+            {
+              "label": {
+                "str": "Hist Seqalign"
+              },
+              "data": {
+                "bool": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "user": {
+          "type": {
+            "str": "Blast Type"
+          },
+          "data": [
+            {
+              "label": {
+                "str": "blastn"
+              },
+              "data": {
+                "int": 1
+              }
+            }
+          ]
+        }
+      },
+      {
+        "user": {
+          "type": {
+            "str": "Blast Database Title"
+          },
+          "data": [
+            {
+              "label": {
+                "str": "tfn"
+              },
+              "data": {
+                "bool": true
+              }
+            }
+          ]
+        }
+      }
+    ],
+    "data": {
+      "align": [
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 577
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 577
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 0
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 1066.63714363267
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 577
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 100
+              }
+            }
+          ],
+          "segs": {
+            "denseg": {
+              "dim": 2,
+              "numseg": 1,
+              "ids": [
+                {
+                  "local": {
+                    "str": "Query_1"
+                  }
+                },
+                {
+                  "local": {
+                    "str": "ENST00000320868.9"
+                  }
+                }
+              ],
+              "starts": [
+                0,
+                0
+              ],
+              "lens": [
+                577
+              ],
+              "strands": [
+                "plus",
+                "plus"
+              ]
+            }
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 516
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 516
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 0
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 953.99151484006
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 557
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 100
+              }
+            }
+          ],
+          "segs": {
+            "denseg": {
+              "dim": 2,
+              "numseg": 3,
+              "ids": [
+                {
+                  "local": {
+                    "str": "Query_1"
+                  }
+                },
+                {
+                  "local": {
+                    "str": "ENST00000251595.11"
+                  }
+                }
+              ],
+              "starts": [
+                0,
+                0,
+                545,
+                -1,
+                546,
+                545
+              ],
+              "lens": [
+                545,
+                1,
+                31
+              ],
+              "strands": [
+                "plus",
+                "plus",
+                "plus",
+                "plus",
+                "plus",
+                "plus"
+              ]
+            }
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 30
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 30
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 4.21859510427031e-11
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 56.5197838038539
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 55
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 11.9384748700173
+              }
+            }
+          ],
+          "segs": {
+            "denseg": {
+              "dim": 2,
+              "numseg": 5,
+              "ids": [
+                {
+                  "local": {
+                    "str": "Query_1"
+                  }
+                },
+                {
+                  "local": {
+                    "str": "ENST00000652335.1"
+                  }
+                }
+              ],
+              "starts": [
+                118,
+                460,
+                -1,
+                483,
+                141,
+                484,
+                152,
+                -1,
+                153,
+                495
+              ],
+              "lens": [
+                23,
+                1,
+                11,
+                1,
+                31
+              ],
+              "strands": [
+                "plus",
+                "plus",
+                "plus",
+                "plus",
+                "plus",
+                "plus",
+                "plus",
+                "plus",
+                "plus",
+                "plus"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  }
+}

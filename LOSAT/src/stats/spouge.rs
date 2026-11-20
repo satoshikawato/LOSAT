@@ -1,5 +1,8 @@
-use crate::config::{ProteinScoringSpec, ScoringMatrix};
+use crate::config::ProteinScoringSpec;
+use crate::utils::glibc_fma_libm::GlibcLibm;
+use crate::utils::x87::X87;
 
+use super::protein_options::{gap_costs_row, scoring_matrix_table};
 use super::tables::KarlinParams;
 
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_stat.h:94-112
@@ -22,7 +25,11 @@ use super::tables::KarlinParams;
 #[derive(Debug, Clone, Copy)]
 pub struct BlastGumbelBlk {
     pub lambda: f64,
+    // `C` and `G`: read by the tests that compare the table with NCBI's (`b`, `beta` and `tau`
+    // are made from `G` once).
+    #[cfg(test)]
     pub c: f64,
+    #[cfg(test)]
     pub g: f64,
     pub a: f64,
     pub alpha: f64,
@@ -35,91 +42,70 @@ pub struct BlastGumbelBlk {
     pub db_length: i64,
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:3696-3742
-// ```c
-// if (BLAST_Nint(values[index][0]) == gap_open &&
-//    BLAST_Nint(values[index][1]) == gap_extend) {
-//    gbp->Lambda = values[index][3];
-//    gbp->C = values[index][8];
-//    gbp->G = gap_open + gap_extend;
-//    gbp->a = values[index][6];
-//    gbp->Alpha = values[index][9];
-//    gbp->Sigma = values[index][10];
-//    gbp->a_un  = values[0][6];
-//    gbp->Alpha_un = values[0][9];
-//    gbp->b = 2.0 * gbp->G * (gbp->a_un - gbp->a);
-//    gbp->Beta = 2.0 * gbp->G * (gbp->Alpha_un - gbp->Alpha);
-//    gbp->Tau  = 2.0 * gbp->G * (gbp->Alpha_un - gbp->Sigma);
-// }
-// ```
-//
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:258-271
-// ```c
-// static array_of_8 blosum62_values[BLOSUM62_VALUES_MAX] = {
-//     {(double) INT2_MAX, ..., 0.3176, ..., 0.7916, -3.2, 0.623757, 4.964660, 4.964660},
-//     ...
-//     {11, 1, (double) INT2_MAX, 0.267, 0.041, 0.14, 1.9, -30, 0.669720, 42.602800, 43.636200},
-// };
-// ```
+/// The Gumbel block of a protein scoring scheme from the matrix's table; `None` when its gap
+/// costs are not in the table (NCBI status 2).
+///
+/// NCBI reference: c++/src/algo/blast/core/blast_stat.c:3724-3749
+/// ```c
+///    if (found_matrix) {
+///       Boolean found_values=FALSE;
+///       Int4 index;
+///       for (index=0; index<max_number_values; index++) {
+///          if (BLAST_Nint(values[index][0]) == gap_open &&
+///             BLAST_Nint(values[index][1]) == gap_extend) {
+///             if (gbp) {
+///                gbp->Lambda = values[index][3];
+///                gbp->C = values[index][8];
+///                gbp->G = gap_open + gap_extend;
+///                gbp->a = values[index][6];
+///                gbp->Alpha = values[index][9];
+///                gbp->Sigma = values[index][10];
+///                gbp->a_un  = values[0][6];
+///                gbp->Alpha_un = values[0][9];
+///                gbp->b = 2.0 * gbp->G * (gbp->a_un - gbp->a);
+///                gbp->Beta = 2.0 * gbp->G * (gbp->Alpha_un - gbp->Alpha);
+///                gbp->Tau  = 2.0 * gbp->G * (gbp->Alpha_un - gbp->Sigma);
+///                gbp->filled = TRUE;
+///             }
+///             found_values = TRUE;
+///             break;
+///          }
+///       }
+///
+///       status = found_values ? 0 : 2;
+/// ```
 pub fn lookup_protein_gumbel_params(
     spec: &ProteinScoringSpec,
     db_length: i64,
 ) -> Option<BlastGumbelBlk> {
-    match (spec.matrix, spec.gap_open, spec.gap_extend) {
-        // NCBI c++/src/algo/blast/core/blast_stat.c:183-192,3696-3742:
-        // {INT2_MAX, INT2_MAX, ..., 0.2291, ..., 0.9113, ..., 9.611060, 9.611060},
-        // {14, 2, ..., 0.195, ..., 1.9, ..., 0.685753, 60.736200, 61.102300};
-        // gbp->b = 2*G*(a_un-a); gbp->Beta = 2*G*(Alpha_un-Alpha);
-        // gbp->Tau = 2*G*(Alpha_un-Sigma);
-        (ScoringMatrix::Blosum45, 14, 2) => {
-            let g = (spec.gap_open + spec.gap_extend) as f64;
-            let a = 1.9;
-            let alpha = 60.736200;
-            let sigma = 61.102300;
-            let a_un = 0.9113;
-            let alpha_un = 9.611060;
-            Some(BlastGumbelBlk {
-                lambda: 0.195,
-                c: 0.685753,
-                g,
-                a,
-                alpha,
-                sigma,
-                a_un,
-                alpha_un,
-                b: 2.0 * g * (a_un - a),
-                beta: 2.0 * g * (alpha_un - alpha),
-                tau: 2.0 * g * (alpha_un - sigma),
-                db_length,
-            })
-        }
-        (ScoringMatrix::Blosum62, 11, 1) => {
-            let g = (spec.gap_open + spec.gap_extend) as f64;
-            let a = 1.9;
-            let alpha = 42.602800;
-            let sigma = 43.636200;
-            let a_un = 0.7916;
-            let alpha_un = 4.964660;
-            Some(BlastGumbelBlk {
-                lambda: 0.267,
-                c: 0.669720,
-                g,
-                a,
-                alpha,
-                sigma,
-                a_un,
-                alpha_un,
-                b: 2.0 * g * (a_un - a),
-                beta: 2.0 * g * (alpha_un - alpha),
-                tau: 2.0 * g * (alpha_un - sigma),
-                db_length,
-            })
-        }
-        _ => None,
-    }
+    let table = scoring_matrix_table(spec.matrix);
+    let row = gap_costs_row(table, spec.gap_open, spec.gap_extend)?;
+    let ungapped = &table.values[0];
+    let g = (spec.gap_open + spec.gap_extend) as f64;
+    let a = row.0[6];
+    let alpha = row.0[9];
+    let sigma = row.0[10];
+    let a_un = ungapped.0[6];
+    let alpha_un = ungapped.0[9];
+    Some(BlastGumbelBlk {
+        lambda: row.0[3],
+        #[cfg(test)]
+        c: row.0[8],
+        #[cfg(test)]
+        g,
+        a,
+        alpha,
+        sigma,
+        a_un,
+        alpha_un,
+        b: 2.0 * g * (a_un - a),
+        beta: 2.0 * g * (alpha_un - alpha),
+        tau: 2.0 * g * (alpha_un - sigma),
+        db_length,
+    })
 }
 
-// NCBI c++/src/algo/blast/core/boost_erf.c:1-35,59-260 is adapted
+// NCBI c++/src/algo/blast/core/boost_erf.c:1-35,52-255 is adapted
 // from Boost. (C) Copyright John Maddock 2006.
 // Boost Software License - Version 1.0 - August 17th, 2003
 // Permission is hereby granted, free of charge, to any person or organization
@@ -141,13 +127,43 @@ pub fn lookup_protein_gumbel_params(
 // FOR ANY DAMAGES OR OTHER LIABILITY ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 //
-// NCBI boost_erf.c:76-93,252-255:
+// NCBI boost_erf.c:54-64,252-255:
 // if (z < 0) { ... }
 // double ErfC(double z) { return ErfImpl(z, TRUE); }
 // NCBI blast_stat.c:5216,5223 calls ErfC, not NCBI_ErfC.
 #[inline]
 fn erfc_ncbi(z: f64) -> f64 {
-    // EXPERIMENT (LOSAT_X_ERFMEMO): ErfC is a pure function of its argument and
+    // LOSAT_X_ERFABSORB (graduated 2026-10-26, always on): for z < -6 the reference's value is
+    // 2.0 whatever ErfImpl returns, so ErfImpl is not called.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:58-59,111,207,224-229,234-235
+    // ```c
+    //         else if (z < -0.5) {
+    //             return 2.0 - ErfImpl(-z, invert);
+    // ...
+    //     else if (invert ? (z < 28.0) : (z < 5.8)) {
+    // ...
+    //             static const double Y = 0.5579090118408203125;
+    // ...
+    //             double x = 1.0 / z;
+    // ...
+    //             result = Y + p / q;
+    //             result *= expl(-z * z) / z;
+    // ...
+    //         /* Any value of z larger than 28 will underflow to zero: */
+    //         result = 0;
+    // ```
+    // With x = -z >= 6, ErfImpl(x, TRUE) takes the last rational branch (x >= 4.5) or, from
+    // x = 28 on, returns 0. In that branch Y + p / q lies in [0.5566, 0.5639] for 1/x in
+    // (1/28, 1/6] (|p / q| <= 0.006, q >= 1), expl(-x * x) <= e^-36 (`exp_long_double_product_ncbi`
+    // squares a value below 1 nine times; an underflow only lowers it, never below 0) and the
+    // quotient by x >= 6 divides by six, so 0 <= r <= 0.5639 * e^-36 / 6 < 2.2e-17, a fifth of
+    // 2^-53. The reference's 2.0 - r then rounds to 2.0: the exact difference lies in
+    // [2 - 2^-53, 2], and 2 - 2^-53 is the midpoint between 2 - 2^-52 and 2.0, which rounds to
+    // the even 2.0. A NaN fails the comparison and takes the reference path.
+    if z < -6.0 {
+        return 2.0;
+    }
+    // Memo (was LOSAT_X_ERFMEMO): ErfC is a pure function of its argument and
     // BLAST_SpougeEtoS (blast_stat.c:5236-5282) asks for the same arguments again
     // for every subject of the same length; keep the last results per thread.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:252-255
@@ -173,40 +189,41 @@ fn erfc_ncbi(z: f64) -> f64 {
     // NCBI calls ErfC again with the same arguments for every candidate score `b` of every
     // subject length. The memo returns the value the first call computed for the same bits of
     // `z`; ErfC reads nothing else, so this is reuse only.
-    if x_erf_memo() {
-        let key = z.to_bits();
-        return X_ERFC_MEMO.with(|memo| {
-            let mut memo = memo.borrow_mut();
-            let slot = (key.wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 52) as usize;
-            let (stored, value) = memo[slot];
-            if stored == key {
-                return f64::from_bits(value);
+    let key = z.to_bits();
+    X_ERFC_MEMO.with(|memo| {
+        let (memo, used) = &mut *memo.borrow_mut();
+        if memo.is_empty() {
+            // The allocation of the largest size, of which the slots in use are touched.
+            *memo = Vec::with_capacity(X_ERFC_MOST);
+            memo.resize(X_ERFC_FIRST, (u64::MAX, 0));
+        }
+        let slot = x_erfc_slot(key, memo.len());
+        let (stored, value) = memo[slot];
+        if stored == key {
+            return f64::from_bits(value);
+        }
+        let result = erf_impl_ncbi(z, true);
+        // A key of all ones marks an empty slot; that argument (a NaN) is
+        // simply never stored.
+        if key != u64::MAX {
+            *used += usize::from(stored == u64::MAX);
+            memo[slot] = (key, result.to_bits());
+            if 2 * *used > memo.len() && memo.len() < X_ERFC_MOST {
+                // Twice the slots in the same allocation: the result in slot s moves to slot 2s
+                // or 2s + 1 (the next bit of its hash), taken from the last slot down, so that
+                // each lands on a slot already emptied or new.
+                let half = memo.len();
+                memo.resize(2 * half, (u64::MAX, 0));
+                for slot in (0..half).rev() {
+                    let (stored, value) = std::mem::replace(&mut memo[slot], (u64::MAX, 0));
+                    if stored != u64::MAX {
+                        memo[x_erfc_slot(stored, 2 * half)] = (stored, value);
+                    }
+                }
             }
-            let result = erf_impl_ncbi(z, true);
-            // A key of all ones marks an empty slot; that argument (a NaN) is
-            // simply never stored.
-            if key != u64::MAX {
-                memo[slot] = (key, result.to_bits());
-            }
-            result
-        });
-    }
-    erf_impl_ncbi(z, true)
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:252-255
-// ```c
-// double ErfC(double z)
-// {
-//     return ErfImpl(z, TRUE);
-// }
-// ```
-// No NCBI counterpart: the switch is read once per process. It chooses between calling
-// `erf_impl_ncbi` (the port of ErfC above) and reusing an earlier result of that call.
-fn x_erf_memo() -> bool {
-    use std::sync::OnceLock;
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_ERFMEMO"))
+        }
+        result
+    })
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:5248-5254
@@ -219,13 +236,30 @@ fn x_erf_memo() -> bool {
 //             e = BLAST_SpougeStoE(b, kbp, gbp, m, n);
 // ```
 // No NCBI counterpart: a per-thread table of (argument bits, result bits) for `erfc_ncbi`.
-// It holds earlier ErfC results of the loop above and changes no value.
+// It holds earlier ErfC results of the loop above and changes no value. It uses `X_ERFC_FIRST`
+// slots and doubles them while more than half hold a result, up to `X_ERFC_MOST`, in one
+// allocation of `X_ERFC_MOST` slots of which only the slots in use are written, so that a thread
+// that computes a few values touches a few pages (with 64 threads every thread of a search
+// computes some, and a table of the largest size each was 4 MiB). A new table for each doubling
+// left the outgrown ones in the thread's heap (+60 KiB of RssAnon at one thread), and one step
+// from 64 to 4,096 slots touched 64 KiB in threads that needed fewer (+1-3 MiB at 48 threads).
 thread_local! {
-    static X_ERFC_MEMO: std::cell::RefCell<Vec<(u64, u64)>> =
-        std::cell::RefCell::new(vec![(u64::MAX, 0); 4096]);
+    static X_ERFC_MEMO: std::cell::RefCell<(Vec<(u64, u64)>, usize)> =
+        const { std::cell::RefCell::new((Vec::new(), 0)) };
 }
 
-// NCBI c++/src/algo/blast/core/boost_erf.c:71-249:
+// No NCBI counterpart: the first and the largest number of slots of `X_ERFC_MEMO`.
+const X_ERFC_FIRST: usize = 64;
+const X_ERFC_MOST: usize = 4096;
+
+// No NCBI counterpart: the slot of `key` in a table of `slots` slots (a power of two): the top
+// bits of the hash.
+#[inline]
+fn x_erfc_slot(key: u64, slots: usize) -> usize {
+    (key.wrapping_mul(0x9E37_79B9_7F4A_7C15) >> (64 - slots.trailing_zeros())) as usize
+}
+
+// NCBI c++/src/algo/blast/core/boost_erf.c:52-244:
 // static double ErfImpl(double z, int invert) {
 //   if (z < 0) { if (!invert) return -ErfImpl(-z, invert);
 //     else if (z < -0.5) return 2.0 - ErfImpl(-z, invert);
@@ -245,7 +279,7 @@ fn erf_impl_ncbi(z: f64, mut invert: bool) -> f64 {
     }
     let mut result;
     if z < 0.5 {
-        // NCBI boost_erf.c:96-129:
+        // NCBI boost_erf.c:71-110:
         // if (z < 1e-10) result = z * 1.125 + z * c;
         // else result = z * (Y + p / q);
         if z < 1e-10 {
@@ -274,7 +308,7 @@ fn erf_impl_ncbi(z: f64, mut invert: bool) -> f64 {
             result = z * (Y + horner_ncbi(&P, zz) / horner_ncbi(&Q, zz));
         }
     } else if (invert && z < 28.0) || (!invert && z < 5.8) {
-        // NCBI boost_erf.c:132-233:
+        // NCBI boost_erf.c:111-231:
         // invert = !invert; result = Y + p / q;
         // result *= expl(-z * z) / z;
         invert = !invert;
@@ -369,7 +403,7 @@ fn erf_impl_ncbi(z: f64, mut invert: bool) -> f64 {
         result = y + horner_ncbi(p, x) / horner_ncbi(q, x);
         result = exp_long_double_product_ncbi(result, z);
     } else {
-        // NCBI boost_erf.c:235-240:
+        // NCBI boost_erf.c:232-237:
         // result = 0; invert = !invert;
         result = 0.0;
         invert = !invert;
@@ -384,11 +418,11 @@ fn erf_impl_ncbi(z: f64, mut invert: bool) -> f64 {
 /// ```c
 ///             result *= expl(-z * z) / z;
 /// ```
-/// NCBI has no such helper. The long-double `expl(-z * z) / z` above is emulated here in
+/// NCBI has no such helper. The long-double `expl(-z * z)` above is emulated here in
 /// double-double arithmetic, and `DoubleDouble::mul` needs the rounding error of one product.
 /// `a.mul_add(b, -product)` gives it exactly; the Dekker path gives the same number
 /// (see the test `x_dekker_product_error_matches_fused_multiply_add`).
-/// EXPERIMENT (LOSAT_X_DEKKER, Wasm only): `a.mul_add(b, -product)` for
+/// Graduated 2026-10-22 (was `LOSAT_X_DEKKER`; Wasm only): `a.mul_add(b, -product)` for
 /// `product == a * b`, i.e. the exact rounding error of the product.  Where
 /// the target has no fused multiply-add instruction (Wasm without relaxed
 /// SIMD) `mul_add` is a library routine; Dekker's product (T. J. Dekker 1971,
@@ -397,14 +431,13 @@ fn erf_impl_ncbi(z: f64, mut invert: bool) -> f64 {
 /// the magnitude test guarantees: for 2^-900 < |product| < 2^900 and
 /// |a|, |b| < 2^900 the four partial products of the 26/27-bit halves are
 /// exact, their smallest is above 2^-1010 and nothing reaches 2^1024.
-/// Without the switch, and on every other target, this is `mul_add`.
+/// On every other target, and outside that magnitude range, this is `mul_add`.
 #[inline(always)]
 fn x_product_error(a: f64, b: f64, product: f64) -> f64 {
     #[cfg(target_arch = "wasm32")]
     {
         let size = product.abs();
-        if x_dekker()
-            && size > X_TWO_POW_M900
+        if size > X_TWO_POW_M900
             && size < X_TWO_POW_900
             && a.abs() < X_TWO_POW_900
             && b.abs() < X_TWO_POW_900
@@ -413,19 +446,6 @@ fn x_product_error(a: f64, b: f64, product: f64) -> f64 {
         }
     }
     a.mul_add(b, -product)
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:143-143
-// ```c
-//             result *= expl(-z * z) / z;
-// ```
-// No NCBI counterpart: the switch is read once per process (Wasm builds only). It chooses
-// between `mul_add` and Dekker's product inside the double-double emulation of that line.
-#[cfg(target_arch = "wasm32")]
-fn x_dekker() -> bool {
-    use std::sync::OnceLock;
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_DEKKER"))
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:143-143
@@ -444,7 +464,7 @@ const X_TWO_POW_900: f64 = f64::from_bits((1023 + 900) << 52);
 //             result *= expl(-z * z) / z;
 // ```
 // Dekker (1971) product error with Veltkamp splitting, used in place of `mul_add` inside
-// the double-double emulation of the long-double `expl(-z * z) / z` above.
+// the double-double emulation of the long-double `expl(-z * z)` above.
 #[inline(always)]
 #[allow(dead_code)]
 fn x_dekker_product_error(a: f64, b: f64, product: f64) -> f64 {
@@ -458,11 +478,13 @@ fn x_dekker_product_error(a: f64, b: f64, product: f64) -> f64 {
     ((a_hi * b_hi - product) + a_hi * b_lo + a_lo * b_hi) + a_lo * b_lo
 }
 
-// NCBI c++/src/algo/blast/core/boost_erf.c:149,175,201,230:
-// result *= expl(-z * z) / z;
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:143,171,199,229
+// ```c
+//             result *= expl(-z * z) / z;
+// ```
 // The argument is binary64, while expl and the following division/product
 // evaluate in C long double before the assignment back to binary64.
-// Double-double arithmetic preserves those intermediate guard bits in Rust.
+// Double-double arithmetic holds expl(-z * z) to more than the 64 bits of a long double.
 #[derive(Clone, Copy)]
 struct DoubleDouble {
     hi: f64,
@@ -494,9 +516,9 @@ impl DoubleDouble {
         // ```c
         //             result *= expl(-z * z) / z;
         // ```
-        // Dispatch point of LOSAT_X_DEKKER: the reference path (`mul_add`) is the double-double
-        // product that stands in for the long-double operations of this line. Only the way the
-        // product's rounding error is obtained changes, not its value.
+        // Dispatch point of the Wasm Dekker product: the reference path (`mul_add`) is the
+        // double-double product that stands in for the long-double `expl` of this line. Only the
+        // way the product's rounding error is obtained changes, not its value.
         let error = x_product_error(self.hi, other.hi, product)
             + self.hi * other.lo
             + self.lo * other.hi
@@ -520,8 +542,10 @@ impl DoubleDouble {
     }
 }
 
-// NCBI c++/src/algo/blast/core/boost_erf.c:149,175,201,230:
-// result *= expl(-z * z) / z;
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:143,171,199,229
+// ```c
+//             result *= expl(-z * z) / z;
+// ```
 // Range reduction and the exponential Taylor series reproduce the required
 // long-double precision without a native C or NCBI runtime dependency.
 #[inline]
@@ -537,10 +561,21 @@ fn exp_long_double_product_ncbi(result: f64, z: f64) -> f64 {
     for _ in 0..9 {
         exponential = exponential.mul(exponential);
     }
-    exponential.div_f64(z).mul(DoubleDouble::from_hi(result)).hi
+    // NCBI's x86-64 gcc build evaluates the line in x87 long double (`-z * z` is a double):
+    // expl's 64-bit result, `fdiv` by z rounded to 64 bits, `fmul` by `result` rounded to 64
+    // bits, then the store to the double `result` (53 bits). The 64-bit product can lie exactly
+    // halfway between two doubles, where the store rounds to even and a single rounding of the
+    // exact value may go the other way, so the last three roundings are reproduced. expl is
+    // taken as the 64-bit value nearest the double-double exponential; glibc's expl is not
+    // always correctly rounded, and the result then differs for about 1 argument in 28,000
+    // (docs/evidence/spouge_x87_20261027/manifest.txt).
+    let expl = X87::nearest_to_sum(exponential.hi, exponential.lo);
+    X87::from_f64(result)
+        .mul(expl.div(X87::from_f64(z)))
+        .to_f64()
 }
 
-// NCBI c++/src/algo/blast/core/boost_erf.c:123-127,156-158,181-183:
+// NCBI c++/src/algo/blast/core/boost_erf.c:139-140,167-168,195-196,225-226:
 // p = (((P[last] * x + P[last-1]) * x + ...) * x + P[1]) * x + P[0];
 // q is evaluated in the same order.
 #[inline]
@@ -601,18 +636,18 @@ pub fn blast_spouge_stoe(
     let sqrt_vi_y = vi_y.sqrt();
     let m_f = m_li_y / sqrt_vi_y;
     let p_m_f = erfc_ncbi(-m_f / 2.0_f64.sqrt()) / 2.0;
-    let p1 = m_li_y * p_m_f + sqrt_vi_y * const_val * (-0.5 * m_f * m_f).exp();
+    let p1 = m_li_y * p_m_f + sqrt_vi_y * const_val * (-0.5 * m_f * m_f).glibc_exp();
 
     let n_lj_y = n - (ai_hat * y + bi_hat);
     let vj_y = (2.0 * alphai_hat / lambda).max(alphai_hat * y + betai_hat);
     let sqrt_vj_y = vj_y.sqrt();
     let n_f = n_lj_y / sqrt_vj_y;
     let p_n_f = erfc_ncbi(-n_f / 2.0_f64.sqrt()) / 2.0;
-    let p2 = n_lj_y * p_n_f + sqrt_vj_y * const_val * (-0.5 * n_f * n_f).exp();
+    let p2 = n_lj_y * p_n_f + sqrt_vj_y * const_val * (-0.5 * n_f * n_f).glibc_exp();
 
     let c_y = (2.0 * sigma_hat / lambda).max(sigma_hat * y + tau_hat);
     let area = p1 * p2 + c_y * p_m_f * p_n_f;
-    area * k * (-lambda * y).exp() * db_scale_factor
+    area * k * (-lambda * y).glibc_exp() * db_scale_factor
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:5236-5263
@@ -646,7 +681,7 @@ pub fn blast_spouge_etos(
         1.0
     };
     let e0 = evalue.max(f64::MIN_POSITIVE);
-    let mut b = ((db_scale_factor / e0).ln() / kbp.lambda) as i32;
+    let mut b = ((db_scale_factor / e0).glibc_ln() / kbp.lambda) as i32;
     if b < 2 {
         b = 2;
     }
@@ -728,6 +763,77 @@ mod tests {
     }
 
     use super::*;
+    use crate::config::ScoringMatrix;
+
+    #[test]
+    fn x_erfc_memo_keeps_the_reference_bits_as_it_grows() {
+        // No NCBI counterpart (reuse only): `X_ERFC_MEMO` grows from 64 to 4,096 slots as this
+        // thread fills it; every value, computed or read back after the growth, is ErfC's.
+        let zs: Vec<f64> = (0..6_000).map(|i| -5.9 + f64::from(i) * 1.9e-3).collect();
+        for _ in 0..2 {
+            for &z in &zs {
+                assert_eq!(
+                    erfc_ncbi(z).to_bits(),
+                    erf_impl_ncbi(z, true).to_bits(),
+                    "z={z:e}"
+                );
+            }
+        }
+    }
+
+    // LOSAT_X_ERFABSORB (graduated 2026-10-26): the reference ErfC is 2.0 for every z < -6, and
+    // `erfc_ncbi`, which does not call it there, has the reference's bits everywhere.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:58-59
+    // ```c
+    //         else if (z < -0.5) {
+    //             return 2.0 - ErfImpl(-z, invert);
+    // ```
+    // The argument of `erfc_ncbi` bounds ErfImpl(-z, TRUE) below 2.2e-17 for z <= -6; this
+    // checks the reference on a grid of [-28.5, -6], on random arguments below -6 (dense next to
+    // -6 and 28) and on the doubles just below -6, and that `erfc_ncbi`
+    // equals `erf_impl_ncbi` on random arguments in [-40, 40]. A reference call costs about
+    // 5,000 cycles, so the sets are kept to about 100,000 calls.
+    #[test]
+    fn x_erfc_below_minus_six_is_two_and_the_switched_function_has_the_reference_bits() {
+        let two = 2.0f64.to_bits();
+        let check = |z: f64| {
+            assert_eq!(erf_impl_ncbi(z, true).to_bits(), two, "ErfC({z:e})");
+        };
+        for i in 0..=22_500u32 {
+            check(-28.5 + i as f64 * 1e-3);
+        }
+        let mut below_six = -6.0f64;
+        for _ in 0..20_000 {
+            below_six = f64::from_bits(below_six.to_bits() + 1);
+            check(below_six);
+        }
+        let mut state = 0x0DDB_A11C_AFE5_EED5u64;
+        let mut next = move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state >> 11) as f64 / (1u64 << 53) as f64
+        };
+        for _ in 0..15_000 {
+            let u = next();
+            check(-6.0 - u * u * 24.0);
+            check(-28.0 + (u - 0.5) * 1e-3);
+            check(-6.0 - u * 1e300);
+        }
+        check(f64::NEG_INFINITY);
+        for _ in 0..30_000 {
+            let z = (next() - 0.5) * 80.0;
+            assert_eq!(
+                erfc_ncbi(z).to_bits(),
+                erf_impl_ncbi(z, true).to_bits(),
+                "z={z:e}"
+            );
+        }
+        assert_eq!(
+            erfc_ncbi(f64::NAN).to_bits(),
+            erf_impl_ncbi(f64::NAN, true).to_bits()
+        );
+    }
 
     // NCBI c++/src/algo/blast/core/boost_erf.c:252-255:
     // double ErfC(double z) { return ErfImpl(z, TRUE); }
@@ -808,6 +914,142 @@ mod tests {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:143,171,199,229
+    // ```c
+    //             result *= expl(-z * z) / z;
+    // ```
+    // x86-64 NCBI rounds the long-double product to 64 bits and then stores it to the double:
+    // two roundings. For this argument (P_n_F of swissprot blastp Query_17 x P01717.2) the
+    // 64-bit product 0x9.6644bd26f0b6cp-11 lies halfway between two doubles and the store rounds
+    // to even, up, while the exact product lies just below halfway (one rounding gives ...16d).
+    #[test]
+    fn erfc_rounds_the_long_double_product_twice_as_ncbi() {
+        let z = f64::from_bits(0x4000_08CF_53B9_A16E);
+        assert_eq!(erfc_ncbi(z).to_bits(), 0x3F72_CC89_7A4D_E16E);
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:207-229
+    // ```c
+    //             static const double Y = 0.5579090118408203125;
+    //             ...
+    //             result *= expl(-z * z) / z;
+    // ```
+    // From z near 25.9 the low part of the double-double exponential is subnormal, from 26.6 its
+    // high part, and from about 27.3 it is zero (NCBI's 80-bit expl is still normal there, and the
+    // stored product is zero all the same). The x87 model gets subnormal and zero operands there:
+    // no panic under the test profile's overflow checks, results at most 1e-290 that do not
+    // increase with z, and zero from 27.3 on. NCBI's bits there are not reproduced (the e-value is
+    // 0.0 either way, docs/evidence/spouge_x87_20261027/manifest.txt).
+    #[test]
+    fn erfc_in_the_underflow_range_of_the_double_double_exponential() {
+        let mut previous = f64::INFINITY;
+        for z in [26.0, 26.5, 26.62, 27.0, 27.2257, 27.3, 27.99] {
+            let r = erfc_ncbi(z);
+            assert!(
+                (0.0..=1e-290).contains(&r) && r <= previous,
+                "ErfC({z}) = {r:e}"
+            );
+            if z >= 27.3 {
+                assert_eq!(r.to_bits(), 0, "ErfC({z})");
+            }
+            previous = r;
+        }
+        for i in 0..20_000 {
+            let z = 25.9 + i as f64 * (2.1 / 20_000.0);
+            let r = erf_impl_ncbi(z, true);
+            assert!((0.0..=1e-290).contains(&r), "ErfC({z}) = {r:e}");
+        }
+    }
+
+    fn scaled_blosum62_11_1() -> (ProteinScoringSpec, KarlinParams) {
+        let spec = ProteinScoringSpec {
+            matrix: ScoringMatrix::Blosum62,
+            gap_open: 11,
+            gap_extend: 1,
+        };
+        let kbp = KarlinParams {
+            lambda: 0.267 / 32.0,
+            k: 0.041,
+            h: 0.14,
+            alpha: 1.9,
+            beta: -30.0,
+        };
+        (spec, kbp)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:5223-5229
+    // ```c
+    //     P_n_F = ErfC(-n_F / sqrt(2.0)) / 2.0;
+    //     ...
+    //     e_value = area * k_ * exp(-lambda_ * y_) * db_scale_factor;
+    // ```
+    // swissprot blastp Query_17 (120 letters) x P01717.2 (112 letters), score 6558 of the
+    // matrix scaled by 32: NCBI's e-value 7.11685934590109512e-21 (outfmt 8
+    // `{ 71168593459011, 10, -34 }`) follows from the doubly rounded ErfC above.
+    #[test]
+    fn spouge_stoe_of_swissprot_query_17_x_p01717_has_the_ncbi_bits() {
+        let (spec, kbp) = scaled_blosum62_11_1();
+        let gbp = lookup_protein_gumbel_params(&spec, 186_063_409).unwrap();
+        assert_eq!(
+            blast_spouge_stoe(6558, &kbp, &gbp, 120, 112).to_bits(),
+            0x3BC0_CDE0_A46C_923E
+        );
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:5216-5229
+    // ```c
+    //     P_m_F = ErfC(-m_F / sqrt(2.0)) / 2.0;
+    //     ...
+    //     e_value = area * k_ * exp(-lambda_ * y_) * db_scale_factor;
+    // ```
+    // The rows of docs/evidence/spouge_x87_20261027 (its manifest.txt): ErfC arguments and
+    // Spouge calls of a random sample where one rounding of the long-double product differs
+    // from NCBI's two.
+    #[test]
+    fn pinned_double_rounding_erfc_and_spouge_calls_match_ncbi_double_bits() {
+        let hex = |field: &str| u64::from_str_radix(field, 16).unwrap();
+        let erfc = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../docs/evidence/spouge_x87_20261027/erfc_double_rounding.tsv"
+        ));
+        for row in erfc.lines() {
+            let f: Vec<_> = row.split('\t').collect();
+            let z = f64::from_bits(hex(f[0]));
+            assert_eq!(erfc_ncbi(z).to_bits(), hex(f[1]), "ErfC({z:.17e})");
+        }
+        let (spec, kbp) = scaled_blosum62_11_1();
+        let spouge = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../docs/evidence/spouge_x87_20261027/spouge_double_rounding.tsv"
+        ));
+        for row in spouge.lines() {
+            let f: Vec<_> = row.split('\t').collect();
+            let gbp = lookup_protein_gumbel_params(&spec, f[3].parse().unwrap()).unwrap();
+            let actual = blast_spouge_stoe(
+                f[0].parse().unwrap(),
+                &kbp,
+                &gbp,
+                f[1].parse().unwrap(),
+                f[2].parse().unwrap(),
+            );
+            let want = hex(f[4]);
+            // The ErfC port above is plain double and double-double arithmetic, so its rows
+            // are exact on every platform. `blast_spouge_stoe` also calls the platform `exp`
+            // three times (the two `exp(-0.5 * f * f)` terms and `exp(-lambda * y)`), and the
+            // E value multiplies them into a product. Apple's libm differs from glibc's by
+            // an ULP per call (PD-LOSAT-PLATFORM-LIBM): platform-checks run 41062695644 read
+            // 2 ULP on macOS arm64 (row `54521 99 256`) and 4 ULP on macOS x64 (row
+            // `24337 600 112`). macOS accepts up to 8 ULP, every other OS stays exact.
+            let max_ulp = if cfg!(target_os = "macos") { 8 } else { 0 };
+            assert!(
+                actual.to_bits().abs_diff(want) <= max_ulp,
+                "{row}: bits {} want {want} (at most {max_ulp} ULP apart)",
+                actual.to_bits()
+            );
+        }
+        assert_eq!((erfc.lines().count(), spouge.lines().count()), (337, 177));
+    }
+
     #[test]
     fn test_lookup_protein_gumbel_params_blosum62_11_1() {
         let spec = ProteinScoringSpec {
@@ -822,6 +1064,115 @@ mod tests {
         assert!((gbp.alpha - 42.602800).abs() < 1e-12);
         assert!((gbp.sigma - 43.636200).abs() < 1e-12);
         assert_eq!(gbp.db_length, 66738);
+    }
+
+    // The two Gumbel blocks this file built from literals before it read the table (dev
+    // fb8b10ee6), with the same arithmetic.
+    fn literal_gumbel(
+        gap_open: i32,
+        gap_extend: i32,
+        [lambda, c, a, alpha, sigma, a_un, alpha_un]: [f64; 7],
+    ) -> BlastGumbelBlk {
+        let g = (gap_open + gap_extend) as f64;
+        BlastGumbelBlk {
+            lambda,
+            c,
+            g,
+            a,
+            alpha,
+            sigma,
+            a_un,
+            alpha_un,
+            b: 2.0 * g * (a_un - a),
+            beta: 2.0 * g * (alpha_un - alpha),
+            tau: 2.0 * g * (alpha_un - sigma),
+            db_length: 1234,
+        }
+    }
+
+    fn gumbel_bits(g: &BlastGumbelBlk) -> [u64; 11] {
+        [
+            g.lambda, g.c, g.g, g.a, g.alpha, g.sigma, g.a_un, g.alpha_un, g.b, g.beta, g.tau,
+        ]
+        .map(f64::to_bits)
+    }
+
+    #[test]
+    fn gumbel_blocks_from_the_table_equal_the_former_literals_bit_for_bit() {
+        for (matrix, gap_open, gap_extend, literals) in [
+            (
+                ScoringMatrix::Blosum45,
+                14,
+                2,
+                [0.195, 0.685753, 1.9, 60.736200, 61.102300, 0.9113, 9.611060],
+            ),
+            (
+                ScoringMatrix::Blosum62,
+                11,
+                1,
+                [0.267, 0.669720, 1.9, 42.602800, 43.636200, 0.7916, 4.964660],
+            ),
+        ] {
+            let spec = ProteinScoringSpec {
+                matrix,
+                gap_open,
+                gap_extend,
+            };
+            let table = lookup_protein_gumbel_params(&spec, 1234).expect("in the table");
+            let literal = literal_gumbel(gap_open, gap_extend, literals);
+            assert_eq!(gumbel_bits(&table), gumbel_bits(&literal), "{matrix:?}");
+            assert_eq!(table.db_length, 1234);
+        }
+    }
+
+    #[test]
+    fn every_gap_cost_row_has_a_gumbel_block() {
+        // NCBI blast_stat.c:3724-3749 fills the block for any row of the table, e.g. PAM30
+        // 9/1 {9, 1, INT2_MAX, 0.294, 0.11, 0.61, 0.48, -6, 0.492716, 2.463920, 3.186150}
+        // and the ungapped row's a 0.1938 and Alpha 0.161818.
+        let pam30 = lookup_protein_gumbel_params(
+            &ProteinScoringSpec {
+                matrix: ScoringMatrix::Pam30,
+                gap_open: 9,
+                gap_extend: 1,
+            },
+            0,
+        )
+        .expect("PAM30 9/1");
+        assert_eq!(
+            (
+                pam30.lambda,
+                pam30.c,
+                pam30.g,
+                pam30.a,
+                pam30.alpha,
+                pam30.sigma
+            ),
+            (0.294, 0.492716, 10.0, 0.48, 2.463920, 3.186150)
+        );
+        assert_eq!((pam30.a_un, pam30.alpha_un), (0.1938, 0.161818));
+        let mut rows = 0;
+        for matrix in ScoringMatrix::ALL {
+            for row in &crate::stats::protein_options::scoring_matrix_table(matrix).values[1..] {
+                let spec = ProteinScoringSpec {
+                    matrix,
+                    gap_open: row.0[0] as i32,
+                    gap_extend: row.0[1] as i32,
+                };
+                assert!(lookup_protein_gumbel_params(&spec, 0).is_some(), "{spec:?}");
+                rows += 1;
+            }
+        }
+        assert_eq!(rows, 89);
+        assert!(lookup_protein_gumbel_params(
+            &ProteinScoringSpec {
+                matrix: ScoringMatrix::Blosum62,
+                gap_open: 5,
+                gap_extend: 5,
+            },
+            0,
+        )
+        .is_none());
     }
 
     #[test]

@@ -1,0 +1,98 @@
+<?xml version="1.0"?>
+<ncbi_application xmlns="ncbi:application"
+ xmlns:xs="http://www.w3.org/2001/XMLSchema-instance"
+ xs:schemaLocation="ncbi:application ncbi_application.xsd"
+>
+<program type="regular">
+<name>segmasker</name>
+<version>1.0.0</version>
+<description>Low complexity region masker based on the SEG algorithm</description>
+<detailed_description></detailed_description>
+</program>
+<arguments>
+<key name="hicut" type="Real" optional="true">
+<description>SEG hicut</description>
+<group>2</group>
+<synopsis>float_value</synopsis>
+<default>2.5</default>
+</key>
+<key name="in" type="File_In" optional="true">
+<description>input file name</description>
+<group>1</group>
+<synopsis>input_file_name</synopsis>
+<default>-</default>
+</key>
+<key name="infmt" type="String" optional="true">
+<description>controls the format of the masker input</description>
+<group>1</group>
+<synopsis>input_format</synopsis>
+<constraint>
+<description>`blastdb&apos;, `fasta&apos;</description>
+<Strings case_sensitive="true">
+<value>blastdb</value>
+<value>fasta</value>
+</Strings>
+</constraint>
+<default>fasta</default>
+</key>
+<key name="locut" type="Real" optional="true">
+<description>SEG locut</description>
+<group>2</group>
+<synopsis>float_value</synopsis>
+<default>2.2</default>
+</key>
+<key name="out" type="File_Out" optional="true">
+<description>output file name</description>
+<group>1</group>
+<synopsis>output_file_name</synopsis>
+<default>-</default>
+</key>
+<key name="outfmt" type="String" optional="true">
+<description>controls the format of the masker output</description>
+<group>1</group>
+<synopsis>output_format</synopsis>
+<constraint>
+<description>`fasta&apos;, `interval&apos;, `maskinfo_asn1_bin&apos;, `maskinfo_asn1_text&apos;, `maskinfo_xml&apos;, `seqloc_asn1_bin&apos;, `seqloc_asn1_text&apos;, `seqloc_xml&apos;</description>
+<Strings case_sensitive="true">
+<value>fasta</value>
+<value>interval</value>
+<value>maskinfo_asn1_bin</value>
+<value>maskinfo_asn1_text</value>
+<value>maskinfo_xml</value>
+<value>seqloc_asn1_bin</value>
+<value>seqloc_asn1_text</value>
+<value>seqloc_xml</value>
+</Strings>
+</constraint>
+<default>interval</default>
+</key>
+<key name="window" type="Integer" optional="true">
+<description>SEG window</description>
+<group>2</group>
+<synopsis>integer_value</synopsis>
+<default>12</default>
+</key>
+<flag name="h" optional="true">
+<description>Print USAGE and DESCRIPTION;  ignore all other parameters</description>
+</flag>
+<flag name="help" optional="true">
+<description>Print USAGE, DESCRIPTION and ARGUMENTS; ignore all other parameters</description>
+</flag>
+<flag name="parse_seqids" optional="true">
+<description>Parse Seq-ids in FASTA input</description>
+<group>1</group>
+</flag>
+<flag name="version-full" optional="true">
+<description>Print extended version data;  ignore other arguments</description>
+</flag>
+<flag name="version-full-json" optional="true">
+<description>Print extended version data in JSON format;  ignore other arguments</description>
+</flag>
+<flag name="version-full-xml" optional="true">
+<description>Print extended version data in XML format;  ignore other arguments</description>
+</flag>
+<flag name="xmlhelp" optional="true">
+<description>Print USAGE, DESCRIPTION and ARGUMENTS in XML format; ignore all other parameters</description>
+</flag>
+</arguments>
+</ncbi_application>

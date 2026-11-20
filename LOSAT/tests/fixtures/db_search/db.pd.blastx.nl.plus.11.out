@@ -1,0 +1,1150 @@
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastx",
+      service "plain",
+      queries seq-loc-list {
+        int {
+          from 0,
+          to 4999,
+          strand plus,
+          id gi 42
+        },
+        int {
+          from 0,
+          to 5599,
+          strand plus,
+          id other {
+            accession "NC_000913",
+            version 3
+          }
+        }
+      },
+      subject database "tests/db_search/bslice",
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, 1 }
+        },
+        {
+          name "LongestIntronLength",
+          value integer 0
+        },
+        {
+          name "MaskAtHash",
+          value boolean FALSE
+        },
+        {
+          name "SegFilteringWindow",
+          value integer 12
+        },
+        {
+          name "SegFilteringLocut",
+          value real { 22, 10, -1 }
+        },
+        {
+          name "SegFilteringHicut",
+          value real { 25, 10, -1 }
+        },
+        {
+          name "WordThreshold",
+          value integer 12
+        },
+        {
+          name "WindowSize",
+          value integer 40
+        },
+        {
+          name "UngappedMode",
+          value boolean FALSE
+        },
+        {
+          name "QueryGeneticCode",
+          value integer 1
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "CompositionBasedStats",
+          value integer 2
+        },
+        {
+          name "SmithWatermanMode",
+          value boolean FALSE
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 19329600
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 471
+          },
+          {
+            id str "blast_score",
+            value int 471
+          },
+          {
+            id str "e_value",
+            value real { 784971582174695, 10, -70 }
+          },
+          {
+            id str "bit_score",
+            value real { 186037232537117, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 92
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 132
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 971757770632369, 10, -14 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              other {
+                accession "NC_000913",
+                version 3
+              },
+              general {
+                db "BL_ORD_ID",
+                tag id 2
+              }
+            },
+            loc {
+              int {
+                from 1369,
+                to 1539,
+                strand plus,
+                id other {
+                  accession "NC_000913",
+                  version 3
+                }
+              },
+              int {
+                from 19,
+                to 75,
+                strand unknown,
+                id general {
+                  db "BL_ORD_ID",
+                  tag id 2
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              other {
+                accession "NC_000913",
+                version 3
+              },
+              general {
+                db "BL_ORD_ID",
+                tag id 2
+              }
+            },
+            loc {
+              empty other {
+                accession "NC_000913",
+                version 3
+              },
+              int {
+                from 76,
+                to 77,
+                strand unknown,
+                id general {
+                  db "BL_ORD_ID",
+                  tag id 2
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              other {
+                accession "NC_000913",
+                version 3
+              },
+              general {
+                db "BL_ORD_ID",
+                tag id 2
+              }
+            },
+            loc {
+              int {
+                from 1540,
+                to 1647,
+                strand plus,
+                id other {
+                  accession "NC_000913",
+                  version 3
+                }
+              },
+              int {
+                from 78,
+                to 113,
+                strand unknown,
+                id general {
+                  db "BL_ORD_ID",
+                  tag id 2
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              other {
+                accession "NC_000913",
+                version 3
+              },
+              general {
+                db "BL_ORD_ID",
+                tag id 2
+              }
+            },
+            loc {
+              empty other {
+                accession "NC_000913",
+                version 3
+              },
+              int {
+                from 114,
+                to 115,
+                strand unknown,
+                id general {
+                  db "BL_ORD_ID",
+                  tag id 2
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              other {
+                accession "NC_000913",
+                version 3
+              },
+              general {
+                db "BL_ORD_ID",
+                tag id 2
+              }
+            },
+            loc {
+              int {
+                from 1648,
+                to 1653,
+                strand plus,
+                id other {
+                  accession "NC_000913",
+                  version 3
+                }
+              },
+              int {
+                from 116,
+                to 117,
+                strand unknown,
+                id general {
+                  db "BL_ORD_ID",
+                  tag id 2
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              other {
+                accession "NC_000913",
+                version 3
+              },
+              general {
+                db "BL_ORD_ID",
+                tag id 2
+              }
+            },
+            loc {
+              int {
+                from 1654,
+                to 1656,
+                strand plus,
+                id other {
+                  accession "NC_000913",
+                  version 3
+                }
+              },
+              empty general {
+                db "BL_ORD_ID",
+                tag id 2
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              other {
+                accession "NC_000913",
+                version 3
+              },
+              general {
+                db "BL_ORD_ID",
+                tag id 2
+              }
+            },
+            loc {
+              int {
+                from 1657,
+                to 1668,
+                strand plus,
+                id other {
+                  accession "NC_000913",
+                  version 3
+                }
+              },
+              int {
+                from 118,
+                to 121,
+                strand unknown,
+                id general {
+                  db "BL_ORD_ID",
+                  tag id 2
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              other {
+                accession "NC_000913",
+                version 3
+              },
+              general {
+                db "BL_ORD_ID",
+                tag id 2
+              }
+            },
+            loc {
+              empty other {
+                accession "NC_000913",
+                version 3
+              },
+              int {
+                from 122,
+                to 123,
+                strand unknown,
+                id general {
+                  db "BL_ORD_ID",
+                  tag id 2
+                }
+              }
+            }
+          },
+          {
+            dim 2,
+            ids {
+              other {
+                accession "NC_000913",
+                version 3
+              },
+              general {
+                db "BL_ORD_ID",
+                tag id 2
+              }
+            },
+            loc {
+              int {
+                from 1669,
+                to 1884,
+                strand plus,
+                id other {
+                  accession "NC_000913",
+                  version 3
+                }
+              },
+              int {
+                from 124,
+                to 195,
+                strand unknown,
+                id general {
+                  db "BL_ORD_ID",
+                  tag id 2
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    masks {
+      {
+        locations {
+          packed-int {
+            {
+              from 39,
+              to 69,
+              id gi 42
+            },
+            {
+              from 129,
+              to 153,
+              id gi 42
+            },
+            {
+              from 270,
+              to 300,
+              id gi 42
+            },
+            {
+              from 1044,
+              to 1086,
+              id gi 42
+            },
+            {
+              from 1275,
+              to 1332,
+              id gi 42
+            },
+            {
+              from 2949,
+              to 2973,
+              id gi 42
+            },
+            {
+              from 3135,
+              to 3207,
+              id gi 42
+            },
+            {
+              from 3363,
+              to 3420,
+              id gi 42
+            },
+            {
+              from 3435,
+              to 3474,
+              id gi 42
+            },
+            {
+              from 3486,
+              to 3522,
+              id gi 42
+            },
+            {
+              from 3735,
+              to 3795,
+              id gi 42
+            },
+            {
+              from 4428,
+              to 4470,
+              id gi 42
+            },
+            {
+              from 4647,
+              to 4692,
+              id gi 42
+            }
+          }
+        },
+        frame plus1
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 343,
+              to 388,
+              id gi 42
+            },
+            {
+              from 952,
+              to 973,
+              id gi 42
+            },
+            {
+              from 1147,
+              to 1180,
+              id gi 42
+            },
+            {
+              from 1987,
+              to 2029,
+              id gi 42
+            },
+            {
+              from 3127,
+              to 3190,
+              id gi 42
+            },
+            {
+              from 3214,
+              to 3250,
+              id gi 42
+            },
+            {
+              from 3412,
+              to 3445,
+              id gi 42
+            },
+            {
+              from 3733,
+              to 3766,
+              id gi 42
+            },
+            {
+              from 3787,
+              to 3844,
+              id gi 42
+            },
+            {
+              from 3886,
+              to 3931,
+              id gi 42
+            },
+            {
+              from 4312,
+              to 4360,
+              id gi 42
+            },
+            {
+              from 4654,
+              to 4693,
+              id gi 42
+            },
+            {
+              from 4903,
+              to 4945,
+              id gi 42
+            }
+          }
+        },
+        frame plus2
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 164,
+              to 197,
+              id gi 42
+            },
+            {
+              from 299,
+              to 344,
+              id gi 42
+            },
+            {
+              from 998,
+              to 1082,
+              id gi 42
+            },
+            {
+              from 1250,
+              to 1319,
+              id gi 42
+            },
+            {
+              from 1739,
+              to 1790,
+              id gi 42
+            },
+            {
+              from 1916,
+              to 1961,
+              id gi 42
+            },
+            {
+              from 2714,
+              to 2732,
+              id gi 42
+            },
+            {
+              from 3152,
+              to 3179,
+              id gi 42
+            },
+            {
+              from 3422,
+              to 3449,
+              id gi 42
+            },
+            {
+              from 3464,
+              to 3500,
+              id gi 42
+            },
+            {
+              from 3734,
+              to 3806,
+              id gi 42
+            }
+          }
+        },
+        frame plus3
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 57,
+              to 102,
+              id other {
+                accession "NC_000913",
+                version 3
+              }
+            },
+            {
+              from 162,
+              to 201,
+              id other {
+                accession "NC_000913",
+                version 3
+              }
+            },
+            {
+              from 258,
+              to 315,
+              id other {
+                accession "NC_000913",
+                version 3
+              }
+            },
+            {
+              from 564,
+              to 633,
+              id other {
+                accession "NC_000913",
+                version 3
+              }
+            },
+            {
+              from 831,
+              to 906,
+              id other {
+                accession "NC_000913",
+                version 3
+              }
+            },
+            {
+              from 909,
+              to 942,
+              id other {
+                accession "NC_000913",
+                version 3
+              }
+            },
+            {
+              from 1026,
+              to 1065,
+              id other {
+                accession "NC_000913",
+                version 3
+              }
+            },
+            {
+              from 1074,
+              to 1116,
+              id other {
+                accession "NC_000913",
+                version 3
+              }
+            },
+            {
+              from 1149,
+              to 1203,
+              id other {
+                accession "NC_000913",
+                version 3
+              }
+            },
+            {
+              from 2274,
+              to 2322,
+              id other {
+                accession "NC_000913",
+                version 3
+              }
+            },
+            {
+              from 3054,
+              to 3102,
+              id other {
+                accession "NC_000913",
+                version 3
+              }
+            },
+            {
+              from 3144,
+              to 3168,
+              id other {
+                accession "NC_000913",
+                version 3
+              }
+            },
+            {
+              from 3183,
+              to 3210,
+              id other {
+                accession "NC_000913",
+                version 3
+              }
+            },
+            {
+              from 3219,
+              to 3264,
+              id other {
+                accession "NC_000913",
+                version 3
+              }
+            },
+            {
+              from 3318,
+              to 3381,
+              id other {
+                accession "NC_000913",
+                version 3
+              }
+            },
+            {
+              from 3480,
+              to 3516,
+              id other {
+                accession "NC_000913",
+                version 3
+              }
+            },
+            {
+              from 3567,
+              to 3633,
+              id other {
+                accession "NC_000913",
+                version 3
+              }
+            },
+            {
+              from 3762,
+              to 3816,
+              id other {
+                accession "NC_000913",
+                version 3
+              }
+            },
+            {
+              from 4005,
+              to 4056,
+              id other {
+                accession "NC_000913",
+                version 3
+              }
+            },
+            {
+              from 4158,
+              to 4197,
+              id other {
+                accession "NC_000913",
+                version 3
+              }
+            },
+            {
+              from 4773,
+              to 4803,
+              id other {
+                accession "NC_000913",
+                version 3
+              }
+            },
+            {
+              from 4911,
+              to 4965,
+              id other {
+                accession "NC_000913",
+                version 3
+              }
+            },
+            {
+              from 5007,
+              to 5055,
+              id other {
+                accession "NC_000913",
+                version 3
+              }
+            },
+            {
+              from 5364,
+              to 5445,
+              id other {
+                accession "NC_000913",
+                version 3
+              }
+            },
+            {
+              from 5553,
+              to 5595,
+              id other {
+                accession "NC_000913",
+                version 3
+              }
+            }
+          }
+        },
+        frame plus1
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 31,
+              to 91,
+              id other {
+                accession "NC_000913",
+                version 3
+              }
+            },
+            {
+              from 133,
+              to 187,
+              id other {
+                accession "NC_000913",
+                version 3
+              }
+            },
+            {
+              from 229,
+              to 283,
+              id other {
+                accession "NC_000913",
+                version 3
+              }
+            },
+            {
+              from 319,
+              to 358,
+              id other {
+                accession "NC_000913",
+                version 3
+              }
+            },
+            {
+              from 517,
+              to 562,
+              id other {
+                accession "NC_000913",
+                version 3
+              }
+            },
+            {
+              from 589,
+              to 634,
+              id other {
+                accession "NC_000913",
+                version 3
+              }
+            },
+            {
+              from 1024,
+              to 1060,
+              id other {
+                accession "NC_000913",
+                version 3
+              }
+            },
+            {
+              from 1084,
+              to 1120,
+              id other {
+                accession "NC_000913",
+                version 3
+              }
+            },
+            {
+              from 1162,
+              to 1216,
+              id other {
+                accession "NC_000913",
+                version 3
+              }
+            },
+            {
+              from 2290,
+              to 2323,
+              id other {
+                accession "NC_000913",
+                version 3
+              }
+            },
+            {
+              from 3061,
+              to 3076,
+              id other {
+                accession "NC_000913",
+                version 3
+              }
+            },
+            {
+              from 3769,
+              to 3817,
+              id other {
+                accession "NC_000913",
+                version 3
+              }
+            },
+            {
+              from 4105,
+              to 4156,
+              id other {
+                accession "NC_000913",
+                version 3
+              }
+            },
+            {
+              from 5197,
+              to 5215,
+              id other {
+                accession "NC_000913",
+                version 3
+              }
+            },
+            {
+              from 5464,
+              to 5527,
+              id other {
+                accession "NC_000913",
+                version 3
+              }
+            }
+          }
+        },
+        frame plus2
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 56,
+              to 98,
+              id other {
+                accession "NC_000913",
+                version 3
+              }
+            },
+            {
+              from 143,
+              to 194,
+              id other {
+                accession "NC_000913",
+                version 3
+              }
+            },
+            {
+              from 239,
+              to 290,
+              id other {
+                accession "NC_000913",
+                version 3
+              }
+            },
+            {
+              from 434,
+              to 467,
+              id other {
+                accession "NC_000913",
+                version 3
+              }
+            },
+            {
+              from 515,
+              to 557,
+              id other {
+                accession "NC_000913",
+                version 3
+              }
+            },
+            {
+              from 590,
+              to 635,
+              id other {
+                accession "NC_000913",
+                version 3
+              }
+            },
+            {
+              from 1028,
+              to 1118,
+              id other {
+                accession "NC_000913",
+                version 3
+              }
+            },
+            {
+              from 1889,
+              to 1928,
+              id other {
+                accession "NC_000913",
+                version 3
+              }
+            },
+            {
+              from 1964,
+              to 2009,
+              id other {
+                accession "NC_000913",
+                version 3
+              }
+            },
+            {
+              from 2123,
+              to 2153,
+              id other {
+                accession "NC_000913",
+                version 3
+              }
+            },
+            {
+              from 2687,
+              to 2726,
+              id other {
+                accession "NC_000913",
+                version 3
+              }
+            },
+            {
+              from 3062,
+              to 3080,
+              id other {
+                accession "NC_000913",
+                version 3
+              }
+            },
+            {
+              from 3122,
+              to 3170,
+              id other {
+                accession "NC_000913",
+                version 3
+              }
+            },
+            {
+              from 3452,
+              to 3518,
+              id other {
+                accession "NC_000913",
+                version 3
+              }
+            },
+            {
+              from 3617,
+              to 3665,
+              id other {
+                accession "NC_000913",
+                version 3
+              }
+            },
+            {
+              from 3773,
+              to 3809,
+              id other {
+                accession "NC_000913",
+                version 3
+              }
+            },
+            {
+              from 3974,
+              to 4010,
+              id other {
+                accession "NC_000913",
+                version 3
+              }
+            },
+            {
+              from 4124,
+              to 4166,
+              id other {
+                accession "NC_000913",
+                version 3
+              }
+            },
+            {
+              from 4976,
+              to 4991,
+              id other {
+                accession "NC_000913",
+                version 3
+              }
+            },
+            {
+              from 5072,
+              to 5120,
+              id other {
+                accession "NC_000913",
+                version 3
+              }
+            },
+            {
+              from 5147,
+              to 5177,
+              id other {
+                accession "NC_000913",
+                version 3
+              }
+            },
+            {
+              from 5351,
+              to 5420,
+              id other {
+                accession "NC_000913",
+                version 3
+              }
+            }
+          }
+        },
+        frame plus3
+      }
+    },
+    ka-blocks {
+      {
+        lambda { 317605957635731, 10, -15 },
+        k { 133956144488482, 10, -15 },
+        h { 401214524497119, 10, -15 },
+        gapped FALSE
+      },
+      {
+        lambda { 267, 10, -3 },
+        k { 41, 10, -3 },
+        h { 14, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 19329600",
+      "Effective search space used: 19329600",
+      "Length adjustment: 66"
+    }
+  }
+}

@@ -9,7 +9,7 @@ interface MemoryBlock {
 }
 
 export interface MemoryBlockStoreOptions {
-  /** Memory budget in bytes; unlimited by default (the application sets MEMORY_RESULTS_CAPACITY_BYTES). */
+  /** Memory budget in bytes; unlimited by default (the application sets MEMORY_RESULTS_CAPACITY_BYTES of ports/data.ts). */
   readonly capacityBytes?: number;
   /** The message of the StorageFullError beyond the budget. */
   readonly fullMessage?: string;
@@ -53,6 +53,12 @@ export class MemoryBlockStore implements BlockStore {
         block.chunks.push(bytes.slice());
         block.length += bytes.length;
         this.used += bytes.length;
+      },
+      clear: () => {
+        if (!live() || block.state !== 'open') throw new Error(`block ${path} is not open`);
+        this.used -= block.length;
+        block.chunks.length = 0;
+        block.length = 0;
       },
       seal: async () => {
         if (live() && block.state === 'full') throw new StorageFullError(this.fullMessage);

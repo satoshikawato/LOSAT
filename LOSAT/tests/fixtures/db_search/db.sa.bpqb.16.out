@@ -1,0 +1,1746 @@
+<?xml version="1.0" encoding="US-ASCII"?>
+<BlastXML2
+    xmlns="http://www.ncbi.nlm.nih.gov"
+    xmlns:xs="http://www.w3.org/2001/XMLSchema-instance"
+    xs:schemaLocation="http://www.ncbi.nlm.nih.gov http://www.ncbi.nlm.nih.gov/data_specs/schema_alt/NCBI_BlastOutput2.xsd"
+>
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>blastp</program>
+      <version>BLASTP 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <db>tests/db_search/paja</db>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>BLOSUM62</matrix>
+          <expect>0.1</expect>
+          <gap-open>11</gap-open>
+          <gap-extend>1</gap-extend>
+          <filter>F</filter>
+          <cbs>2</cbs>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <search>
+            <Search>
+              <query-id>Query_1</query-id>
+              <query-title>BDT62524.1 hypothetical protein [Metapenaeus ensis majanivirus]</query-title>
+              <query-len>370</query-len>
+              <hits></hits>
+              <stat>
+                <Statistics>
+                  <db-num>86</db-num>
+                  <db-len>66738</db-len>
+                  <hsp-len>66</hsp-len>
+                  <eff-space>18562848</eff-space>
+                  <kappa>0.041</kappa>
+                  <lambda>0.267</lambda>
+                  <entropy>0.14</entropy>
+                </Statistics>
+              </stat>
+              <message>No hits found</message>
+            </Search>
+          </search>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>blastp</program>
+      <version>BLASTP 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <db>tests/db_search/paja</db>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>BLOSUM62</matrix>
+          <expect>0.1</expect>
+          <gap-open>11</gap-open>
+          <gap-extend>1</gap-extend>
+          <filter>F</filter>
+          <cbs>2</cbs>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <search>
+            <Search>
+              <query-id>Query_2</query-id>
+              <query-title>BDT62525.1 wsv465-like protein [Metapenaeus ensis majanivirus]</query-title>
+              <query-len>377</query-len>
+              <hits></hits>
+              <stat>
+                <Statistics>
+                  <db-num>86</db-num>
+                  <db-len>66738</db-len>
+                  <hsp-len>66</hsp-len>
+                  <eff-space>18990282</eff-space>
+                  <kappa>0.041</kappa>
+                  <lambda>0.267</lambda>
+                  <entropy>0.14</entropy>
+                </Statistics>
+              </stat>
+              <message>No hits found</message>
+            </Search>
+          </search>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>blastp</program>
+      <version>BLASTP 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <db>tests/db_search/paja</db>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>BLOSUM62</matrix>
+          <expect>0.1</expect>
+          <gap-open>11</gap-open>
+          <gap-extend>1</gap-extend>
+          <filter>F</filter>
+          <cbs>2</cbs>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <search>
+            <Search>
+              <query-id>Query_3</query-id>
+              <query-title>BDT62529.1 innexin [Metapenaeus ensis majanivirus]</query-title>
+              <query-len>386</query-len>
+              <hits></hits>
+              <stat>
+                <Statistics>
+                  <db-num>86</db-num>
+                  <db-len>66738</db-len>
+                  <hsp-len>66</hsp-len>
+                  <eff-space>19539840</eff-space>
+                  <kappa>0.041</kappa>
+                  <lambda>0.267</lambda>
+                  <entropy>0.14</entropy>
+                </Statistics>
+              </stat>
+              <message>No hits found</message>
+            </Search>
+          </search>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>blastp</program>
+      <version>BLASTP 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <db>tests/db_search/paja</db>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>BLOSUM62</matrix>
+          <expect>0.1</expect>
+          <gap-open>11</gap-open>
+          <gap-extend>1</gap-extend>
+          <filter>F</filter>
+          <cbs>2</cbs>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <search>
+            <Search>
+              <query-id>Query_4</query-id>
+              <query-title>BDT62536.1 hypothetical protein [Metapenaeus ensis majanivirus]</query-title>
+              <query-len>295</query-len>
+              <hits></hits>
+              <stat>
+                <Statistics>
+                  <db-num>86</db-num>
+                  <db-len>66738</db-len>
+                  <hsp-len>64</hsp-len>
+                  <eff-space>14145054</eff-space>
+                  <kappa>0.041</kappa>
+                  <lambda>0.267</lambda>
+                  <entropy>0.14</entropy>
+                </Statistics>
+              </stat>
+              <message>No hits found</message>
+            </Search>
+          </search>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>blastp</program>
+      <version>BLASTP 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <db>tests/db_search/paja</db>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>BLOSUM62</matrix>
+          <expect>0.1</expect>
+          <gap-open>11</gap-open>
+          <gap-extend>1</gap-extend>
+          <filter>F</filter>
+          <cbs>2</cbs>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <search>
+            <Search>
+              <query-id>Query_5</query-id>
+              <query-title>BDT62539.1 hypothetical protein [Metapenaeus ensis majanivirus]</query-title>
+              <query-len>341</query-len>
+              <hits></hits>
+              <stat>
+                <Statistics>
+                  <db-num>86</db-num>
+                  <db-len>66738</db-len>
+                  <hsp-len>65</hsp-len>
+                  <eff-space>16876848</eff-space>
+                  <kappa>0.041</kappa>
+                  <lambda>0.267</lambda>
+                  <entropy>0.14</entropy>
+                </Statistics>
+              </stat>
+              <message>No hits found</message>
+            </Search>
+          </search>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>blastp</program>
+      <version>BLASTP 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <db>tests/db_search/paja</db>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>BLOSUM62</matrix>
+          <expect>0.1</expect>
+          <gap-open>11</gap-open>
+          <gap-extend>1</gap-extend>
+          <filter>F</filter>
+          <cbs>2</cbs>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <search>
+            <Search>
+              <query-id>Query_6</query-id>
+              <query-title>BDT62541.1 hypothetical protein [Metapenaeus ensis majanivirus]</query-title>
+              <query-len>534</query-len>
+              <hits></hits>
+              <stat>
+                <Statistics>
+                  <db-num>86</db-num>
+                  <db-len>66738</db-len>
+                  <hsp-len>69</hsp-len>
+                  <eff-space>28273860</eff-space>
+                  <kappa>0.041</kappa>
+                  <lambda>0.267</lambda>
+                  <entropy>0.14</entropy>
+                </Statistics>
+              </stat>
+              <message>No hits found</message>
+            </Search>
+          </search>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>blastp</program>
+      <version>BLASTP 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <db>tests/db_search/paja</db>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>BLOSUM62</matrix>
+          <expect>0.1</expect>
+          <gap-open>11</gap-open>
+          <gap-extend>1</gap-extend>
+          <filter>F</filter>
+          <cbs>2</cbs>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <search>
+            <Search>
+              <query-id>Query_7</query-id>
+              <query-title>BDT62542.1 hypothetical protein [Metapenaeus ensis majanivirus]</query-title>
+              <query-len>516</query-len>
+              <hits></hits>
+              <stat>
+                <Statistics>
+                  <db-num>86</db-num>
+                  <db-len>66738</db-len>
+                  <hsp-len>69</hsp-len>
+                  <eff-space>27179388</eff-space>
+                  <kappa>0.041</kappa>
+                  <lambda>0.267</lambda>
+                  <entropy>0.14</entropy>
+                </Statistics>
+              </stat>
+              <message>No hits found</message>
+            </Search>
+          </search>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>blastp</program>
+      <version>BLASTP 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <db>tests/db_search/paja</db>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>BLOSUM62</matrix>
+          <expect>0.1</expect>
+          <gap-open>11</gap-open>
+          <gap-extend>1</gap-extend>
+          <filter>F</filter>
+          <cbs>2</cbs>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <search>
+            <Search>
+              <query-id>Query_8</query-id>
+              <query-title>BDT62543.1 hypothetical protein [Metapenaeus ensis majanivirus]</query-title>
+              <query-len>543</query-len>
+              <hits></hits>
+              <stat>
+                <Statistics>
+                  <db-num>86</db-num>
+                  <db-len>66738</db-len>
+                  <hsp-len>69</hsp-len>
+                  <eff-space>28821096</eff-space>
+                  <kappa>0.041</kappa>
+                  <lambda>0.267</lambda>
+                  <entropy>0.14</entropy>
+                </Statistics>
+              </stat>
+              <message>No hits found</message>
+            </Search>
+          </search>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>blastp</program>
+      <version>BLASTP 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <db>tests/db_search/paja</db>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>BLOSUM62</matrix>
+          <expect>0.1</expect>
+          <gap-open>11</gap-open>
+          <gap-extend>1</gap-extend>
+          <filter>F</filter>
+          <cbs>2</cbs>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <search>
+            <Search>
+              <query-id>Query_9</query-id>
+              <query-title>BDT62544.1 wsv192-like protein [Metapenaeus ensis majanivirus]</query-title>
+              <query-len>351</query-len>
+              <hits>
+                <Hit>
+                  <num>1</num>
+                  <description>
+                    <HitDescr>
+                      <id>gnl|BL_ORD_ID|30</id>
+                      <accession>30</accession>
+                      <title>BDT63528.1 wsv192-like protein [Pasiphaea japonica whispovirus]</title>
+                    </HitDescr>
+                  </description>
+                  <len>1039</len>
+                  <hsps>
+                    <Hsp>
+                      <num>1</num>
+                      <bit-score>89.3521</bit-score>
+                      <score>220</score>
+                      <evalue>1.20544e-21</evalue>
+                      <identity>97</identity>
+                      <positive>173</positive>
+                      <query-from>8</query-from>
+                      <query-to>348</query-to>
+                      <hit-from>629</hit-from>
+                      <hit-to>1031</hit-to>
+                      <align-len>428</align-len>
+                      <gaps>112</gaps>
+                      <qseq>ILIETQQLKERKTFLEREWASKVNWYNLIHFLFPNLSCVK---------NKLLNLSRARIMRISQFLVHYEYFKPVLSNIEFKFNSDMLPLGCKENIFMRLKIGLDIIAHATKCWNWACLQRGWISETIENPT-----------------------PDWVIQLAQQCFQECNIKCEDIEKDCSYIKSPCLLAYRNVVPLIKKDIQ--------FIQDDRL-----------------SSFEFWVELSLNSLVDALRMKKIITENEKDLSNLETLINVKT---PDTFEKLLCLMKIKCEKMNKAFVSKKGDTVDISRWSKKNNGINGKRCIEIKTNSLIEIQ------NVT------------------LDG-KEFSLYMVESQNEVRKQNVEFVE--IKKCKSKIYVKAPCISPLYQRCIKPVSLIIR</qseq>
+                      <hseq>FLVSQQLLKHRQIYSQRETAAATNWYRMLQFLFPKDKAADYIPYTEFAWERLGGLSRYFVSIVSKVLKKSLPCERVFDDIMAKFNTNMLPLGCKPGKFIRTKAGIEIKKHAKQALETAVIR--FFCHEIDNITFAGNNNKKNINNIIKEKLKDKKLNDLAIKLAHQCV----------------TAKPFSDSYNHIRPFLPRDDEEKFVPIPMFGIDDPIFPENDSYIDQTATKCNDTKSNFLIEEHSDVLIEAMVSRGILSEPILSHNNMRKIIASEQNICSNIYQQLRNV-------NHRKLLTNKPRKCDPTPWSSKNTGQSGRSTTEFAPNSVIILSENSNGVNVSDEEYEDKPILCNDGKMMKLDGMSDIFLAAVETQRAMAQTDIIYPKKVIHPKTGKQLIQAPDISPIYRHGGKPAAILLK</hseq>
+                      <midline> L+  Q LK R+ + +RE A+  NWY ++ FLFP                +L  LSR  +  +S+ L      + V  +I  KFN++MLPLGCK   F+R K G++I  HA +    A ++  +    I+N T                        D  I+LA QC                    P   +Y ++ P + +D +        F  DD +                 +   F +E   + L++A+  + I++E     +N+  +I  +     + +++L  +        ++  ++ K    D + WS KN G +G+   E   NS+I +       NV+                  LDG  +  L  VE+Q  + + ++ + +  I     K  ++AP ISP+Y+   KP +++++</midline>
+                    </Hsp>
+                  </hsps>
+                </Hit>
+              </hits>
+              <stat>
+                <Statistics>
+                  <db-num>86</db-num>
+                  <db-len>66738</db-len>
+                  <hsp-len>65</hsp-len>
+                  <eff-space>17488328</eff-space>
+                  <kappa>0.041</kappa>
+                  <lambda>0.267</lambda>
+                  <entropy>0.14</entropy>
+                </Statistics>
+              </stat>
+            </Search>
+          </search>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>blastp</program>
+      <version>BLASTP 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <db>tests/db_search/paja</db>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>BLOSUM62</matrix>
+          <expect>0.1</expect>
+          <gap-open>11</gap-open>
+          <gap-extend>1</gap-extend>
+          <filter>F</filter>
+          <cbs>2</cbs>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <search>
+            <Search>
+              <query-id>Query_10</query-id>
+              <query-title>BDT62555.1 baculoviral IAP repeat-containing protein [Metapenaeus ensis majanivirus]</query-title>
+              <query-len>432</query-len>
+              <hits></hits>
+              <stat>
+                <Statistics>
+                  <db-num>86</db-num>
+                  <db-len>66738</db-len>
+                  <hsp-len>67</hsp-len>
+                  <eff-space>22256240</eff-space>
+                  <kappa>0.041</kappa>
+                  <lambda>0.267</lambda>
+                  <entropy>0.14</entropy>
+                </Statistics>
+              </stat>
+              <message>No hits found</message>
+            </Search>
+          </search>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>blastp</program>
+      <version>BLASTP 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <db>tests/db_search/paja</db>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>BLOSUM62</matrix>
+          <expect>0.1</expect>
+          <gap-open>11</gap-open>
+          <gap-extend>1</gap-extend>
+          <filter>F</filter>
+          <cbs>2</cbs>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <search>
+            <Search>
+              <query-id>Query_11</query-id>
+              <query-title>BDT62556.1 baculoviral IAP repeat-containing protein [Metapenaeus ensis majanivirus]</query-title>
+              <query-len>465</query-len>
+              <hits></hits>
+              <stat>
+                <Statistics>
+                  <db-num>86</db-num>
+                  <db-len>66738</db-len>
+                  <hsp-len>68</hsp-len>
+                  <eff-space>24173330</eff-space>
+                  <kappa>0.041</kappa>
+                  <lambda>0.267</lambda>
+                  <entropy>0.14</entropy>
+                </Statistics>
+              </stat>
+              <message>No hits found</message>
+            </Search>
+          </search>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>blastp</program>
+      <version>BLASTP 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <db>tests/db_search/paja</db>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>BLOSUM62</matrix>
+          <expect>0.1</expect>
+          <gap-open>11</gap-open>
+          <gap-extend>1</gap-extend>
+          <filter>F</filter>
+          <cbs>2</cbs>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <search>
+            <Search>
+              <query-id>Query_12</query-id>
+              <query-title>BDT62557.1 baculoviral IAP repeat-containing protein [Metapenaeus ensis majanivirus]</query-title>
+              <query-len>438</query-len>
+              <hits></hits>
+              <stat>
+                <Statistics>
+                  <db-num>86</db-num>
+                  <db-len>66738</db-len>
+                  <hsp-len>67</hsp-len>
+                  <eff-space>22622096</eff-space>
+                  <kappa>0.041</kappa>
+                  <lambda>0.267</lambda>
+                  <entropy>0.14</entropy>
+                </Statistics>
+              </stat>
+              <message>No hits found</message>
+            </Search>
+          </search>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>blastp</program>
+      <version>BLASTP 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <db>tests/db_search/paja</db>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>BLOSUM62</matrix>
+          <expect>0.1</expect>
+          <gap-open>11</gap-open>
+          <gap-extend>1</gap-extend>
+          <filter>F</filter>
+          <cbs>2</cbs>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <search>
+            <Search>
+              <query-id>Query_13</query-id>
+              <query-title>BDT62560.1 hypothetical protein [Metapenaeus ensis majanivirus]</query-title>
+              <query-len>343</query-len>
+              <hits></hits>
+              <stat>
+                <Statistics>
+                  <db-num>86</db-num>
+                  <db-len>66738</db-len>
+                  <hsp-len>65</hsp-len>
+                  <eff-space>16999144</eff-space>
+                  <kappa>0.041</kappa>
+                  <lambda>0.267</lambda>
+                  <entropy>0.14</entropy>
+                </Statistics>
+              </stat>
+              <message>No hits found</message>
+            </Search>
+          </search>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>blastp</program>
+      <version>BLASTP 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <db>tests/db_search/paja</db>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>BLOSUM62</matrix>
+          <expect>0.1</expect>
+          <gap-open>11</gap-open>
+          <gap-extend>1</gap-extend>
+          <filter>F</filter>
+          <cbs>2</cbs>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <search>
+            <Search>
+              <query-id>Query_14</query-id>
+              <query-title>BDT62561.1 hypothetical protein [Metapenaeus ensis majanivirus]</query-title>
+              <query-len>329</query-len>
+              <hits></hits>
+              <stat>
+                <Statistics>
+                  <db-num>86</db-num>
+                  <db-len>66738</db-len>
+                  <hsp-len>65</hsp-len>
+                  <eff-space>16143072</eff-space>
+                  <kappa>0.041</kappa>
+                  <lambda>0.267</lambda>
+                  <entropy>0.14</entropy>
+                </Statistics>
+              </stat>
+              <message>No hits found</message>
+            </Search>
+          </search>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>blastp</program>
+      <version>BLASTP 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <db>tests/db_search/paja</db>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>BLOSUM62</matrix>
+          <expect>0.1</expect>
+          <gap-open>11</gap-open>
+          <gap-extend>1</gap-extend>
+          <filter>F</filter>
+          <cbs>2</cbs>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <search>
+            <Search>
+              <query-id>Query_15</query-id>
+              <query-title>BDT62562.1 wsv306-like protein [Metapenaeus ensis majanivirus]</query-title>
+              <query-len>408</query-len>
+              <hits>
+                <Hit>
+                  <num>1</num>
+                  <description>
+                    <HitDescr>
+                      <id>gnl|BL_ORD_ID|41</id>
+                      <accession>41</accession>
+                      <title>BDT63539.1 wsv306-like protein [Pasiphaea japonica whispovirus]</title>
+                    </HitDescr>
+                  </description>
+                  <len>153</len>
+                  <hsps>
+                    <Hsp>
+                      <num>1</num>
+                      <bit-score>86.2705</bit-score>
+                      <score>212</score>
+                      <evalue>2.43863e-22</evalue>
+                      <identity>42</identity>
+                      <positive>73</positive>
+                      <query-from>259</query-from>
+                      <query-to>383</query-to>
+                      <hit-from>6</hit-from>
+                      <hit-to>137</hit-to>
+                      <align-len>132</align-len>
+                      <gaps>7</gaps>
+                      <qseq>LQFHCNEEMNAGIMMAAYQD-NDGNILPICVCTYPYYLTGPTCKHRTYNRVVDYELWEKTGYADFLTDPFNDYKKANRICKSKTINTTAVFDERDGCFYCQP------LAAHFAQSLQMRGPYEPALILDKD</qseq>
+                      <hseq>MKYLCDKEMHAGKAKAIYKNLVSGKYISKCTCLYPKYHTGPTCKQKTYCYVIYHDKWQTTSHPNFLHDPIQHFQIAEDVCRELKNNTRAIYNPKRGHIVCPPILKLVKIALTHRVALTHRGFHKPCFIIKRN</hseq>
+                      <midline>+++ C++EM+AG   A Y++   G  +  C C YP Y TGPTCK +TY  V+ ++ W+ T + +FL DP   ++ A  +C+    NT A+++ + G   C P      +A     +L  RG ++P  I+ ++</midline>
+                    </Hsp>
+                  </hsps>
+                </Hit>
+              </hits>
+              <stat>
+                <Statistics>
+                  <db-num>86</db-num>
+                  <db-len>66738</db-len>
+                  <hsp-len>67</hsp-len>
+                  <eff-space>20792816</eff-space>
+                  <kappa>0.041</kappa>
+                  <lambda>0.267</lambda>
+                  <entropy>0.14</entropy>
+                </Statistics>
+              </stat>
+            </Search>
+          </search>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>blastp</program>
+      <version>BLASTP 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <db>tests/db_search/paja</db>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>BLOSUM62</matrix>
+          <expect>0.1</expect>
+          <gap-open>11</gap-open>
+          <gap-extend>1</gap-extend>
+          <filter>F</filter>
+          <cbs>2</cbs>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <search>
+            <Search>
+              <query-id>Query_16</query-id>
+              <query-title>BDT62564.1 wsv310-like protein [Metapenaeus ensis majanivirus]</query-title>
+              <query-len>371</query-len>
+              <hits>
+                <Hit>
+                  <num>1</num>
+                  <description>
+                    <HitDescr>
+                      <id>gnl|BL_ORD_ID|63</id>
+                      <accession>63</accession>
+                      <title>BDT63561.1 wsv244-like protein [Pasiphaea japonica whispovirus]</title>
+                    </HitDescr>
+                  </description>
+                  <len>763</len>
+                  <hsps>
+                    <Hsp>
+                      <num>1</num>
+                      <bit-score>28.1054</bit-score>
+                      <score>61</score>
+                      <evalue>0.0621552</evalue>
+                      <identity>18</identity>
+                      <positive>25</positive>
+                      <query-from>136</query-from>
+                      <query-to>186</query-to>
+                      <hit-from>414</hit-from>
+                      <hit-to>464</hit-to>
+                      <align-len>51</align-len>
+                      <gaps>0</gaps>
+                      <qseq>KNEKAEDKFKKSSSSSSSLLDKDKIINSDNDESTNLNLLLLEKKVLDGKKR</qseq>
+                      <hseq>KNDKPSATFLQLLQYSKQLLANDIVKYCDNDNLTDTNGLLIPNPIHRGQKR</hseq>
+                      <midline>KN+K    F +    S  LL  D +   DND  T+ N LL+   +  G+KR</midline>
+                    </Hsp>
+                  </hsps>
+                </Hit>
+              </hits>
+              <stat>
+                <Statistics>
+                  <db-num>86</db-num>
+                  <db-len>66738</db-len>
+                  <hsp-len>66</hsp-len>
+                  <eff-space>18623910</eff-space>
+                  <kappa>0.041</kappa>
+                  <lambda>0.267</lambda>
+                  <entropy>0.14</entropy>
+                </Statistics>
+              </stat>
+            </Search>
+          </search>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>blastp</program>
+      <version>BLASTP 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <db>tests/db_search/paja</db>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>BLOSUM62</matrix>
+          <expect>0.1</expect>
+          <gap-open>11</gap-open>
+          <gap-extend>1</gap-extend>
+          <filter>F</filter>
+          <cbs>2</cbs>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <search>
+            <Search>
+              <query-id>Query_17</query-id>
+              <query-title>BDT62569.1 wsv282-like protein [Metapenaeus ensis majanivirus]</query-title>
+              <query-len>480</query-len>
+              <hits>
+                <Hit>
+                  <num>1</num>
+                  <description>
+                    <HitDescr>
+                      <id>gnl|BL_ORD_ID|33</id>
+                      <accession>33</accession>
+                      <title>BDT63531.1 wsv282-like protein [Pasiphaea japonica whispovirus]</title>
+                    </HitDescr>
+                  </description>
+                  <len>586</len>
+                  <hsps>
+                    <Hsp>
+                      <num>1</num>
+                      <bit-score>146.362</bit-score>
+                      <score>368</score>
+                      <evalue>2.56833e-40</evalue>
+                      <identity>89</identity>
+                      <positive>151</positive>
+                      <query-from>200</query-from>
+                      <query-to>473</query-to>
+                      <hit-from>301</hit-from>
+                      <hit-to>578</hit-to>
+                      <align-len>279</align-len>
+                      <gaps>6</gaps>
+                      <qseq>FRKEIILILQLYANLRCRQQLLGSFNTNSVNYSDEMIKKMIDIILRIDRNSMSFDKYKNVVREALYVYYLVVTKMTGPKHLKRLRTPELHFEYCVVIALLAHNVDIFKKISFPKYRTTNLIQFVSALDCPWYLSVIPNILSVLNRTRSICQTLDFSISDHAKINITLCLLSE----IAEKKPNNLILATILYLFPRSLKLIKEKGLVRDENTIVLLAKKISEYLKNQWINCNDIACASNLLEGDW-VKDECTLKLFKKQCCDTKFAAISLLVQQQMKKQ</qseq>
+                      <hseq>FYREIHSVISLYLSLVYVQRAMNNDNTNSSGYTEGMVTKILNIIGKIPYNEMSREKYISVGRDALYLYQNIITDMTGPKHYKRLRTPQQQADFCYIIAMLVNDVPIMSDLTLSG-KATNLVQFASATVDPAYHLAVHKMACVFNSSYSVYKILMLDRRTLIRANMILTILSARNKYLSERKPRTVTQSVFLYLQPSLRDRLRASGLTSEESSLGTAVKLVSQQLLYDGIMRQTIEDGCSIMSGGYEGEDGVTLKCLGAGVKDIKTVGLSALFTDRLRKR</hseq>
+                      <midline>F +EI  ++ LY +L   Q+ + + NTNS  Y++ M+ K+++II +I  N MS +KY +V R+ALY+Y  ++T MTGPKH KRLRTP+   ++C +IA+L ++V I   ++    + TNL+QF SA   P Y   +  +  V N + S+ + L        + N+ L +LS     ++E+KP  +  +  LYL P     ++  GL  +E+++    K +S+ L    I    I    +++ G +  +D  TLK       D K   +S L   +++K+</midline>
+                    </Hsp>
+                  </hsps>
+                </Hit>
+              </hits>
+              <stat>
+                <Statistics>
+                  <db-num>86</db-num>
+                  <db-len>66738</db-len>
+                  <hsp-len>68</hsp-len>
+                  <eff-space>25086680</eff-space>
+                  <kappa>0.041</kappa>
+                  <lambda>0.267</lambda>
+                  <entropy>0.14</entropy>
+                </Statistics>
+              </stat>
+            </Search>
+          </search>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>blastp</program>
+      <version>BLASTP 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <db>tests/db_search/paja</db>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>BLOSUM62</matrix>
+          <expect>0.1</expect>
+          <gap-open>11</gap-open>
+          <gap-extend>1</gap-extend>
+          <filter>F</filter>
+          <cbs>2</cbs>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <search>
+            <Search>
+              <query-id>Query_18</query-id>
+              <query-title>BDT62575.1 wsv137-like protein [Metapenaeus ensis majanivirus]</query-title>
+              <query-len>421</query-len>
+              <hits>
+                <Hit>
+                  <num>1</num>
+                  <description>
+                    <HitDescr>
+                      <id>gnl|BL_ORD_ID|16</id>
+                      <accession>16</accession>
+                      <title>BDT63514.1 wsv137-like protein [Pasiphaea japonica whispovirus]</title>
+                    </HitDescr>
+                  </description>
+                  <len>309</len>
+                  <hsps>
+                    <Hsp>
+                      <num>1</num>
+                      <bit-score>48.521</bit-score>
+                      <score>114</score>
+                      <evalue>1.62936e-08</evalue>
+                      <identity>41</identity>
+                      <positive>57</positive>
+                      <query-from>297</query-from>
+                      <query-to>402</query-to>
+                      <hit-from>181</hit-from>
+                      <hit-to>296</hit-to>
+                      <align-len>119</align-len>
+                      <gaps>16</gaps>
+                      <qseq>KINGNPINIYEYDRNDIIAIHNFFSS----------STFHKVHCCNPKHNDRNPSMHLYLKKNVW-YSLIDKWLLTRDEIDRLQMEEDQAINSNMTRFRNFNIILFILSAHCFA--CNY</qseq>
+                      <hseq>KIAGENLQDLKYDDQAINKVRDLFSILGSAMPSEDIKTYRR--CINPKHNDNNPSMKLTLRPYYWKYSKIIKSKLTDEQNATLEDKYNEGYVQNYT-IAGKDIILFCVHATCFSNNCRY</hseq>
+                      <midline>KI G  +   +YD   I  + + FS            T+ +  C NPKHND NPSM L L+   W YS I K  LT ++   L+ + ++    N T     +IILF + A CF+  C Y</midline>
+                    </Hsp>
+                  </hsps>
+                </Hit>
+              </hits>
+              <stat>
+                <Statistics>
+                  <db-num>86</db-num>
+                  <db-len>66738</db-len>
+                  <hsp-len>67</hsp-len>
+                  <eff-space>21585504</eff-space>
+                  <kappa>0.041</kappa>
+                  <lambda>0.267</lambda>
+                  <entropy>0.14</entropy>
+                </Statistics>
+              </stat>
+            </Search>
+          </search>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>blastp</program>
+      <version>BLASTP 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <db>tests/db_search/paja</db>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>BLOSUM62</matrix>
+          <expect>0.1</expect>
+          <gap-open>11</gap-open>
+          <gap-extend>1</gap-extend>
+          <filter>F</filter>
+          <cbs>2</cbs>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <search>
+            <Search>
+              <query-id>Query_19</query-id>
+              <query-title>BDT62587.1 hypothetical protein [Metapenaeus ensis majanivirus]</query-title>
+              <query-len>282</query-len>
+              <hits></hits>
+              <stat>
+                <Statistics>
+                  <db-num>86</db-num>
+                  <db-len>66738</db-len>
+                  <hsp-len>64</hsp-len>
+                  <eff-space>13349012</eff-space>
+                  <kappa>0.041</kappa>
+                  <lambda>0.267</lambda>
+                  <entropy>0.14</entropy>
+                </Statistics>
+              </stat>
+              <message>No hits found</message>
+            </Search>
+          </search>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>blastp</program>
+      <version>BLASTP 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <db>tests/db_search/paja</db>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>BLOSUM62</matrix>
+          <expect>0.1</expect>
+          <gap-open>11</gap-open>
+          <gap-extend>1</gap-extend>
+          <filter>F</filter>
+          <cbs>2</cbs>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <search>
+            <Search>
+              <query-id>Query_20</query-id>
+              <query-title>BDT62588.1 wsv267-like protein [Metapenaeus ensis majanivirus]</query-title>
+              <query-len>320</query-len>
+              <hits></hits>
+              <stat>
+                <Statistics>
+                  <db-num>86</db-num>
+                  <db-len>66738</db-len>
+                  <hsp-len>65</hsp-len>
+                  <eff-space>15592740</eff-space>
+                  <kappa>0.041</kappa>
+                  <lambda>0.267</lambda>
+                  <entropy>0.14</entropy>
+                </Statistics>
+              </stat>
+              <message>No hits found</message>
+            </Search>
+          </search>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>blastp</program>
+      <version>BLASTP 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <db>tests/db_search/paja</db>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>BLOSUM62</matrix>
+          <expect>0.1</expect>
+          <gap-open>11</gap-open>
+          <gap-extend>1</gap-extend>
+          <filter>F</filter>
+          <cbs>2</cbs>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <search>
+            <Search>
+              <query-id>Query_21</query-id>
+              <query-title>BDT62589.1 hypothetical protein [Metapenaeus ensis majanivirus]</query-title>
+              <query-len>292</query-len>
+              <hits></hits>
+              <stat>
+                <Statistics>
+                  <db-num>86</db-num>
+                  <db-len>66738</db-len>
+                  <hsp-len>64</hsp-len>
+                  <eff-space>13961352</eff-space>
+                  <kappa>0.041</kappa>
+                  <lambda>0.267</lambda>
+                  <entropy>0.14</entropy>
+                </Statistics>
+              </stat>
+              <message>No hits found</message>
+            </Search>
+          </search>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>blastp</program>
+      <version>BLASTP 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <db>tests/db_search/paja</db>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>BLOSUM62</matrix>
+          <expect>0.1</expect>
+          <gap-open>11</gap-open>
+          <gap-extend>1</gap-extend>
+          <filter>F</filter>
+          <cbs>2</cbs>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <search>
+            <Search>
+              <query-id>Query_22</query-id>
+              <query-title>BDT62590.1 hypothetical protein [Metapenaeus ensis majanivirus]</query-title>
+              <query-len>324</query-len>
+              <hits></hits>
+              <stat>
+                <Statistics>
+                  <db-num>86</db-num>
+                  <db-len>66738</db-len>
+                  <hsp-len>65</hsp-len>
+                  <eff-space>15837332</eff-space>
+                  <kappa>0.041</kappa>
+                  <lambda>0.267</lambda>
+                  <entropy>0.14</entropy>
+                </Statistics>
+              </stat>
+              <message>No hits found</message>
+            </Search>
+          </search>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>blastp</program>
+      <version>BLASTP 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <db>tests/db_search/paja</db>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>BLOSUM62</matrix>
+          <expect>0.1</expect>
+          <gap-open>11</gap-open>
+          <gap-extend>1</gap-extend>
+          <filter>F</filter>
+          <cbs>2</cbs>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <search>
+            <Search>
+              <query-id>Query_23</query-id>
+              <query-title>BDT62593.1 SARAF-like protein [Metapenaeus ensis majanivirus]</query-title>
+              <query-len>355</query-len>
+              <hits></hits>
+              <stat>
+                <Statistics>
+                  <db-num>86</db-num>
+                  <db-len>66738</db-len>
+                  <hsp-len>66</hsp-len>
+                  <eff-space>17646918</eff-space>
+                  <kappa>0.041</kappa>
+                  <lambda>0.267</lambda>
+                  <entropy>0.14</entropy>
+                </Statistics>
+              </stat>
+              <message>No hits found</message>
+            </Search>
+          </search>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>blastp</program>
+      <version>BLASTP 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <db>tests/db_search/paja</db>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>BLOSUM62</matrix>
+          <expect>0.1</expect>
+          <gap-open>11</gap-open>
+          <gap-extend>1</gap-extend>
+          <filter>F</filter>
+          <cbs>2</cbs>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <search>
+            <Search>
+              <query-id>Query_24</query-id>
+              <query-title>BDT62596.1 wsv161-like protein [Metapenaeus ensis majanivirus]</query-title>
+              <query-len>430</query-len>
+              <hits>
+                <Hit>
+                  <num>1</num>
+                  <description>
+                    <HitDescr>
+                      <id>gnl|BL_ORD_ID|25</id>
+                      <accession>25</accession>
+                      <title>BDT63523.1 wsv011-like protein [Pasiphaea japonica whispovirus]</title>
+                    </HitDescr>
+                  </description>
+                  <len>1243</len>
+                  <hsps>
+                    <Hsp>
+                      <num>1</num>
+                      <bit-score>31.187</bit-score>
+                      <score>69</score>
+                      <evalue>0.00891728</evalue>
+                      <identity>16</identity>
+                      <positive>26</positive>
+                      <query-from>248</query-from>
+                      <query-to>294</query-to>
+                      <hit-from>1196</hit-from>
+                      <hit-to>1241</hit-to>
+                      <align-len>47</align-len>
+                      <gaps>1</gaps>
+                      <qseq>NLYVKQLSFNEYKEKLFFPIWRNMSQSIDNIIGVSNDEFKKCLDAIL</qseq>
+                      <hseq>NQYIREFPGHTILRPVFYPATTNYSRAA-NIIGIENKTFEKCYKQIL</hseq>
+                      <midline>N Y+++   +     +F+P   N S++  NIIG+ N  F+KC   IL</midline>
+                    </Hsp>
+                  </hsps>
+                </Hit>
+              </hits>
+              <stat>
+                <Statistics>
+                  <db-num>86</db-num>
+                  <db-len>66738</db-len>
+                  <hsp-len>67</hsp-len>
+                  <eff-space>22134288</eff-space>
+                  <kappa>0.041</kappa>
+                  <lambda>0.267</lambda>
+                  <entropy>0.14</entropy>
+                </Statistics>
+              </stat>
+            </Search>
+          </search>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>blastp</program>
+      <version>BLASTP 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <db>tests/db_search/paja</db>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>BLOSUM62</matrix>
+          <expect>0.1</expect>
+          <gap-open>11</gap-open>
+          <gap-extend>1</gap-extend>
+          <filter>F</filter>
+          <cbs>2</cbs>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <search>
+            <Search>
+              <query-id>Query_25</query-id>
+              <query-title>BDT62597.1 hypothetical protein [Metapenaeus ensis majanivirus]</query-title>
+              <query-len>339</query-len>
+              <hits></hits>
+              <stat>
+                <Statistics>
+                  <db-num>86</db-num>
+                  <db-len>66738</db-len>
+                  <hsp-len>65</hsp-len>
+                  <eff-space>16754552</eff-space>
+                  <kappa>0.041</kappa>
+                  <lambda>0.267</lambda>
+                  <entropy>0.14</entropy>
+                </Statistics>
+              </stat>
+              <message>No hits found</message>
+            </Search>
+          </search>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>blastp</program>
+      <version>BLASTP 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <db>tests/db_search/paja</db>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>BLOSUM62</matrix>
+          <expect>0.1</expect>
+          <gap-open>11</gap-open>
+          <gap-extend>1</gap-extend>
+          <filter>F</filter>
+          <cbs>2</cbs>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <search>
+            <Search>
+              <query-id>Query_26</query-id>
+              <query-title>BDT62598.1 hypothetical protein [Metapenaeus ensis majanivirus]</query-title>
+              <query-len>335</query-len>
+              <hits>
+                <Hit>
+                  <num>1</num>
+                  <description>
+                    <HitDescr>
+                      <id>gnl|BL_ORD_ID|30</id>
+                      <accession>30</accession>
+                      <title>BDT63528.1 wsv192-like protein [Pasiphaea japonica whispovirus]</title>
+                    </HitDescr>
+                  </description>
+                  <len>1039</len>
+                  <hsps>
+                    <Hsp>
+                      <num>1</num>
+                      <bit-score>27.7202</bit-score>
+                      <score>60</score>
+                      <evalue>0.0626887</evalue>
+                      <identity>10</identity>
+                      <positive>13</positive>
+                      <query-from>284</query-from>
+                      <query-to>301</query-to>
+                      <hit-from>506</hit-from>
+                      <hit-to>523</hit-to>
+                      <align-len>18</align-len>
+                      <gaps>0</gaps>
+                      <qseq>KQNCIHCIYNVFERLVSC</qseq>
+                      <hseq>KKYAIHCIVNVVKRLIDC</hseq>
+                      <midline>K+  IHCI NV +RL+ C</midline>
+                    </Hsp>
+                  </hsps>
+                </Hit>
+              </hits>
+              <stat>
+                <Statistics>
+                  <db-num>86</db-num>
+                  <db-len>66738</db-len>
+                  <hsp-len>65</hsp-len>
+                  <eff-space>16509960</eff-space>
+                  <kappa>0.041</kappa>
+                  <lambda>0.267</lambda>
+                  <entropy>0.14</entropy>
+                </Statistics>
+              </stat>
+            </Search>
+          </search>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>blastp</program>
+      <version>BLASTP 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <db>tests/db_search/paja</db>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>BLOSUM62</matrix>
+          <expect>0.1</expect>
+          <gap-open>11</gap-open>
+          <gap-extend>1</gap-extend>
+          <filter>F</filter>
+          <cbs>2</cbs>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <search>
+            <Search>
+              <query-id>Query_27</query-id>
+              <query-title>BDT62599.1 hypothetical protein [Metapenaeus ensis majanivirus]</query-title>
+              <query-len>424</query-len>
+              <hits></hits>
+              <stat>
+                <Statistics>
+                  <db-num>86</db-num>
+                  <db-len>66738</db-len>
+                  <hsp-len>67</hsp-len>
+                  <eff-space>21768432</eff-space>
+                  <kappa>0.041</kappa>
+                  <lambda>0.267</lambda>
+                  <entropy>0.14</entropy>
+                </Statistics>
+              </stat>
+              <message>No hits found</message>
+            </Search>
+          </search>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>blastp</program>
+      <version>BLASTP 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <db>tests/db_search/paja</db>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>BLOSUM62</matrix>
+          <expect>0.1</expect>
+          <gap-open>11</gap-open>
+          <gap-extend>1</gap-extend>
+          <filter>F</filter>
+          <cbs>2</cbs>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <search>
+            <Search>
+              <query-id>Query_28</query-id>
+              <query-title>BDT62606.1 wsv131-like protein [Metapenaeus ensis majanivirus]</query-title>
+              <query-len>480</query-len>
+              <hits>
+                <Hit>
+                  <num>1</num>
+                  <description>
+                    <HitDescr>
+                      <id>gnl|BL_ORD_ID|14</id>
+                      <accession>14</accession>
+                      <title>BDT63512.1 wsv131-like protein [Pasiphaea japonica whispovirus]</title>
+                    </HitDescr>
+                  </description>
+                  <len>488</len>
+                  <hsps>
+                    <Hsp>
+                      <num>1</num>
+                      <bit-score>41.9726</bit-score>
+                      <score>97</score>
+                      <evalue>3.57033e-06</evalue>
+                      <identity>76</identity>
+                      <positive>118</positive>
+                      <query-from>51</query-from>
+                      <query-to>335</query-to>
+                      <hit-from>49</hit-from>
+                      <hit-to>305</hit-to>
+                      <align-len>288</align-len>
+                      <gaps>34</gaps>
+                      <qseq>INNTQASTTTENIISLQD--KRVSCFPKIFNILTLCMCINQYHLPKLIKKSENVLYFDLSKHNSQIPARNVYNVKNVNFSPQNVNDDKLDNDDDDKSLDYFLFGFSPETEILKNLISVINVLASLFLSSFTILERDLSKRKDL-LCNEGNEVEYINLLKGIKNLNSMSTSILNYLKNQTTTTITTTTTTNNNNNTSTIATRKKKCSCCGSNKKNHHMSPLVDRFIHEISSHHHHDVSVSLEKREKDVMVPPKFIFKKKLTKRRMGKKEKGCNKNKINDRIETILSFIQ</qseq>
+                      <hseq>ITQTQDYLTVENIIGDPDTGERVSPF-LFFDII--LQSINIKH-PSVLNDKQKVLKDII--YAMAVPAIDNLSLPNYGGS--------LGKDTLDSFRSQLKFGFDPLTEVLKNCCASQTVMHSFLKSNLLTLYEKVKKWASVNLEKDGQE---IALCKTIQVI------------GQICTIIEAAKEATSTTSTTFSFNSEKINGCNGCTKKTCKDGGIVAPFLKHVNSNDNHN-SAQAAAALQVPKVPSEFITKSSVPFKRQ-KLDKINNRDVYNKKINSSLSITE</hseq>
+                      <midline>I  TQ   T ENII   D  +RVS F   F+I+     IN  H P ++   + VL   +  +   +PA +  ++ N   S        L  D  D       FGF P TE+LKN  +   V+ S   S+   L   + K   + L  +G E   I L K I+ +             Q  T I       +  +T+     +K   C G  KK      +V  F+  ++S+ +H+ S       +   VP +FI K  +  +R  K +K  N++  N +I + LS  +</midline>
+                    </Hsp>
+                  </hsps>
+                </Hit>
+              </hits>
+              <stat>
+                <Statistics>
+                  <db-num>86</db-num>
+                  <db-len>66738</db-len>
+                  <hsp-len>68</hsp-len>
+                  <eff-space>25086680</eff-space>
+                  <kappa>0.041</kappa>
+                  <lambda>0.267</lambda>
+                  <entropy>0.14</entropy>
+                </Statistics>
+              </stat>
+            </Search>
+          </search>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>blastp</program>
+      <version>BLASTP 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <db>tests/db_search/paja</db>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>BLOSUM62</matrix>
+          <expect>0.1</expect>
+          <gap-open>11</gap-open>
+          <gap-extend>1</gap-extend>
+          <filter>F</filter>
+          <cbs>2</cbs>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <search>
+            <Search>
+              <query-id>Query_29</query-id>
+              <query-title>BDT62609.1 wsv415-like protein [Metapenaeus ensis majanivirus]</query-title>
+              <query-len>518</query-len>
+              <hits>
+                <Hit>
+                  <num>1</num>
+                  <description>
+                    <HitDescr>
+                      <id>gnl|BL_ORD_ID|49</id>
+                      <accession>49</accession>
+                      <title>BDT63547.1 wsv415-like protein [Pasiphaea japonica whispovirus]</title>
+                    </HitDescr>
+                  </description>
+                  <len>478</len>
+                  <hsps>
+                    <Hsp>
+                      <num>1</num>
+                      <bit-score>57.3806</bit-score>
+                      <score>137</score>
+                      <evalue>5.4483e-11</evalue>
+                      <identity>78</identity>
+                      <positive>134</positive>
+                      <query-from>235</query-from>
+                      <query-to>515</query-to>
+                      <hit-from>139</hit-from>
+                      <hit-to>445</hit-to>
+                      <align-len>320</align-len>
+                      <gaps>52</gaps>
+                      <qseq>LSKLCEIIQKFLFN------ASLKKEHIITSLFSINRQDYIDIVHDFFAFDTYSKCILFLLYIQLLLECVPSSSIKFYIVDVYTNELVKIKRKCHVTQLSKENNKNQWFLEQNYNKKQNVIDRILKYIVEPVVDPPPPSSSSSSSFENSNVSIVDNSLLHD-----IIRNARVANYIATREKKEEKENEMDLI--------------GIENMTLTCTNNHNNYTNIILRIRKEPRLINSNKQILFPTFIGQ---QNQLQFLKLSDEAKTILLLPHFFQNYSSLSSCLYGHSTLLNNQ-----------TCTFLMADFLPI</qseq>
+                      <hseq>LSSGCVVSKKHLFNLLFDIPWEIKGAVNVTGIANRSRFTVESMIEWFFNFDTYSKCILFLEIINRHLQC-QASPLSILLDDVYCSVFSKIIRQSYITKVNSDANAPESTLSATSDIKLLRIDECVKNFITTNLD------ITQLMFTNSRMS---SALYGDQQNQLLTKNESTTTNIESVKKILKRKNADSSCVYRSQFTKTPQKNSGITTYSTIKGYNNGKLSPIHVYIRNQPIVPNAHNHLLFPVFSAESPGADILFYLNLKPVTAAYLLLPGIFRHPHQF---LTGDCKWLGNKDKPVSSTKYYPMWKYTLADYCPL</hseq>
+                      <midline>LS  C + +K LFN        +K    +T + + +R     ++  FF FDTYSKCILFL  I   L+C  +S +   + DVY +   KI R+ ++T+++ + N  +  L    + K   ID  +K  +   +D       +   F NS +S   ++L  D     + +N      I + +K  +++N                   GI   +     N+   + I + IR +P + N++  +LFP F  +    + L +L L       LLLP  F++       L G    L N+              + +AD+ P+</midline>
+                    </Hsp>
+                  </hsps>
+                </Hit>
+              </hits>
+              <stat>
+                <Statistics>
+                  <db-num>86</db-num>
+                  <db-len>66738</db-len>
+                  <hsp-len>69</hsp-len>
+                  <eff-space>27300996</eff-space>
+                  <kappa>0.041</kappa>
+                  <lambda>0.267</lambda>
+                  <entropy>0.14</entropy>
+                </Statistics>
+              </stat>
+            </Search>
+          </search>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>blastp</program>
+      <version>BLASTP 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <db>tests/db_search/paja</db>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>BLOSUM62</matrix>
+          <expect>0.1</expect>
+          <gap-open>11</gap-open>
+          <gap-extend>1</gap-extend>
+          <filter>F</filter>
+          <cbs>2</cbs>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <search>
+            <Search>
+              <query-id>Query_30</query-id>
+              <query-title>BDT62611.1 hypothetical protein [Metapenaeus ensis majanivirus]</query-title>
+              <query-len>441</query-len>
+              <hits></hits>
+              <stat>
+                <Statistics>
+                  <db-num>86</db-num>
+                  <db-len>66738</db-len>
+                  <hsp-len>67</hsp-len>
+                  <eff-space>22805024</eff-space>
+                  <kappa>0.041</kappa>
+                  <lambda>0.267</lambda>
+                  <entropy>0.14</entropy>
+                </Statistics>
+              </stat>
+              <message>No hits found</message>
+            </Search>
+          </search>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+</BlastXML2>

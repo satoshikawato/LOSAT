@@ -1,0 +1,192 @@
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastx",
+      service "plain",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_1"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">c00556_q"
+                  }
+                }
+              },
+              title "c00556_q"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 16,
+              seq-data ncbi2na '8757627D'H
+            }
+          }
+        }
+      },
+      subject sequences {
+        {
+          id {
+            local str "Subject_1"
+          },
+          descr {
+            user {
+              type str "CFastaReader",
+              data {
+                {
+                  label str "DefLine",
+                  data str ">c00556_s"
+                }
+              }
+            },
+            title "c00556_s"
+          },
+          inst {
+            repr raw,
+            mol aa,
+            length 7,
+            seq-data ncbieaa "WRTIVII"
+          }
+        }
+      },
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, 5 }
+        },
+        {
+          name "WordSize",
+          value integer 3
+        },
+        {
+          name "LongestIntronLength",
+          value integer 0
+        },
+        {
+          name "MaskAtHash",
+          value boolean FALSE
+        },
+        {
+          name "SegFiltering",
+          value boolean FALSE
+        },
+        {
+          name "WordThreshold",
+          value integer 2
+        },
+        {
+          name "WindowSize",
+          value integer 0
+        },
+        {
+          name "UngappedMode",
+          value boolean TRUE
+        },
+        {
+          name "QueryGeneticCode",
+          value integer 1
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "CompositionBasedStats",
+          value integer 0
+        },
+        {
+          name "SmithWatermanMode",
+          value boolean FALSE
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 35
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+      {
+        type diags,
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              local str "Subject_1"
+            },
+            loc {
+              int {
+                from 3,
+                to 2,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 2,
+                to 1,
+                strand unknown,
+                id local str "Subject_1"
+              }
+            },
+            scores {
+              {
+                id str "score",
+                value int 3
+              },
+              {
+                id str "blast_score",
+                value int 3
+              },
+              {
+                id str "e_value",
+                value real { 372009404945472, 10, -14 }
+              },
+              {
+                id str "bit_score",
+                value real { 423394392169587, 10, -14 }
+              },
+              {
+                id str "num_ident",
+                value int 0
+              },
+              {
+                id str "hsp_percent_coverage",
+                value real { 5, 10, -1 }
+              }
+            }
+          }
+        }
+      }
+    },
+    masks {
+    },
+    ka-blocks {
+      {
+        lambda { 301642313534754, 10, -15 },
+        k { 131359248873828, 10, -15 },
+        h { 307869883917147, 10, -15 },
+        gapped FALSE
+      },
+      {
+        lambda { -1, 10, 0 },
+        k { -1, 10, 0 },
+        h { -1, 10, 0 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 35",
+      "Effective search space used: 35",
+      "Length adjustment: 0"
+    }
+  }
+}

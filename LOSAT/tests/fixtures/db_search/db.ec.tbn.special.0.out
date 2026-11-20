@@ -1,0 +1,73 @@
+TBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: tfn
+           16 sequences; 10,937 total letters
+
+
+
+Query= allx only X residues
+
+Length=36
+
+
+***** No hits found *****
+
+
+
+
+
+Effective search space used: 0
+
+
+Query= nothing
+
+Length=0
+
+
+***** No hits found *****
+
+
+
+
+
+Effective search space used: 0
+
+
+Query= valid after them
+
+Length=47
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.320    0.132    0.415    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 6954
+
+
+  Database: tfn
+    Posted date:  Oct 30, 2026  12:55 PM
+  Number of letters in database: 10,937
+  Number of sequences in database:  16
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 13
+Window for multiple hits: 40

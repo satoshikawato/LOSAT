@@ -1,0 +1,121 @@
+# blastp
+
+`blastp` compares protein queries with protein subjects. Use it to find homologs of a protein in a proteome or a protein database, or short peptides in longer proteins.
+
+## Synopsis
+
+```bash
+losat blastp -query QUERY.faa -subject SUBJECT.faa [options]
+losat blastp -query QUERY.faa -db DB [options]
+```
+
+With the NCBI names installed (see [Coming from NCBI BLAST+](../from-ncbi-blast.md)): `blastp -query QUERY.faa -subject SUBJECT.faa [options]`.
+
+## Tasks
+
+Choose a task with `-task`. Options you leave out take the default of the task.
+
+| Task | Use it for | Defaults that differ |
+|:---|:---|:---|
+| `blastp` (default) | General protein comparison | Word size 3, BLOSUM62, gap open 11, gap extend 1, threshold 11 |
+| `blastp-fast` | A faster search | Word size 5, threshold 20 (uses NCBI's compressed word table) |
+| `blastp-short` | Very short peptide queries | Word size 2, PAM30, gap open 9, gap extend 1, E-value 20000, threshold 16, window size 15 |
+
+## Input
+
+- **Query.** `-query` takes a protein FASTA file with one or more records. The default is the standard input, so `-query -` and no `-query` at all read the standard input. A name ending in `.gz`, `.bz2` or `.zst` is decompressed for you.
+- **Subject.** `-subject` takes a protein FASTA file in the same forms. LOSAT compares each query with each record, with no database to build first.
+- **Database.** `-db` searches a protein BLAST database written by `makeblastdb` or `losat makeblastdb`, or one of NCBI's downloaded databases such as `swissprot`. Name several databases in one string (`-db "a b"`). `-db` and `-subject` cannot be used together. See [BLAST databases](../databases.md).
+- **Database filters.** With `-db` you can restrict the search with `-taxids`, `-taxidlist`, `-negative_taxids`, `-negative_taxidlist`, `-seqidlist` and `-negative_seqidlist` (`-no_taxid_expansion` keeps a taxid from reaching its descendants).
+- **Locations.** `-query_loc START-STOP` searches part of the query, and `-subject_loc START-STOP` part of the subject (with `-subject` only). Positions are 1-based and inclusive.
+- **Masking.** SEG is off by default (`-seg yes` or `-seg "WINDOW LOCUT HICUT"` turns it on). `-lcase_masking` treats lower-case letters of the query as masked.
+
+## Common options
+
+| Option | Default | Meaning |
+|:---|:---|:---|
+| `-task` | `blastp` | One of the three tasks above |
+| `-evalue` | 10 (20000 for `blastp-short`) | Report hits with an E-value at or below this value |
+| `-outfmt` | 0 | Output format; see [Output](#output) |
+| `-out` | standard output | Write the report to a file |
+| `-num_threads` | 1 | Number of threads. The output is the same at every thread count |
+| `-max_target_seqs` | 500 | Keep at most this many subject sequences per query |
+| `-max_hsps` | no limit | Keep at most this many alignments per subject |
+| `-qcov_hsp_perc` | 0 (off) | Drop alignments that cover less than this percent of the query |
+| `-matrix` | `BLOSUM62` (`PAM30` for `blastp-short`) | Scoring matrix: BLOSUM45, 50, 62, 80, 90 or PAM30, 70, 250 |
+| `-gapopen`, `-gapextend` | 11, 1 (the matrix's best values) | Gap costs; the pairs NCBI allows for the matrix |
+| `-word_size` | 3 (2 for `blastp-short`, 5 for `blastp-fast`) | Length of the word that starts an alignment |
+| `-threshold` | 11 (by word size and task) | Minimum score of a neighbouring word |
+| `-comp_based_stats` | 2 | Composition-based statistics: 0 off, 1, 2, 3 |
+| `-seg` | `no` | Low-complexity filter |
+| `-window_size` | 40 (15 for `blastp-short`) | Two-hit window; 0 selects the one-hit method |
+| `-dbsize`, `-searchsp` | from the data | Set the effective database size or search space for the E-value |
+| `-culling_limit` | 0 (off) | Delete a hit that at least this many higher-scoring hits envelop |
+
+For every option: `losat blastp -help`.
+
+## Output
+
+`-outfmt` takes these values:
+
+| Value | Format |
+|:---|:---|
+| 0 | Pairwise alignments (default) |
+| 1 to 4 | Query-anchored alignments (with and without identities, flat) |
+| 5 | BLAST XML |
+| 6, 7 | Tabular, tabular with comment lines |
+| 8, 9 | Seq-align in text and in binary ASN.1 |
+| 10 | Comma-separated values |
+| 11 | BLAST archive |
+| 12 | Seq-align in JSON |
+| 13, 14 | BLAST JSON and XML2 as one file per query (need `-out`) |
+| 15, 16 | BLAST JSON and XML2 in a single file |
+| 18 | Organism report |
+| 20 | Comma-separated values with header lines |
+
+Formats 6, 7, 10 and 20 write twelve fields by default: `qaccver saccver pident length mismatch gapopen qstart qend sstart send evalue bitscore`. A custom list changes them, for example `-outfmt "6 qseqid sseqid pident evalue qcovs"`; `delim=` sets the separator. `losat blastp -help` shows the field names, and [Output formats](../output-formats.md) describes each format.
+
+## Differences from NCBI BLAST+
+
+- With `-window_size 0` and a low `-threshold`, NCBI BLAST+ 2.17.0 can read memory past the end of a sequence and crash. LOSAT reads the letters past the end as the end marker, which gives NCBI BLAST+'s own output where its stray bytes are zero. See [the decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
+
+## What LOSAT refuses
+
+LOSAT stops with an error for these `blastp` settings instead of running something else. The full list is on [What LOSAT refuses](../refusals.md).
+
+- `-ungapped` and `-use_sw_tback`.
+- `-subject_besthit`, `-best_hit_overhang` and `-best_hit_score_edge`.
+- `-comp_based_stats` with unified P-values (`1u`, `2u`, `3u`).
+- `-matrix IDENTITY` with word sizes 5 to 7 (the default of `-task blastp-fast`).
+- `-threshold` values that overflow NCBI's word-table buffers when the word size is 5 to 7.
+- `-html`, `-remote`, `-entrez_query`, `-gilist`, `-ipglist` and `-import_search_strategy`.
+- A hit list size (`-max_target_seqs`, `-num_descriptions`, `-num_alignments`) of 2^31 - 50 or more.
+- `-db_soft_mask` and `-db_hard_mask`.
+
+## Examples
+
+Compare two protein FASTA files and keep hits with an E-value of 1e-5 or lower.
+
+<!-- example: blastp-1 -->
+```bash
+losat blastp -query query.faa -subject proteins.faa -evalue 1e-5 -outfmt 6
+```
+
+Build a protein database, then search it with two threads. The report is the same as with one thread.
+
+<!-- example: blastp-2 -->
+```bash
+losat makeblastdb -in proteins.faa -dbtype prot -out proteins_db
+losat blastp -query query.faa -db proteins_db -num_threads 2 -outfmt 7
+```
+
+Search with a short peptide, using the `blastp-short` task.
+
+<!-- example: blastp-3 -->
+```bash
+losat blastp -query peptide.faa -subject proteins.faa -task blastp-short -outfmt 6
+```
+
+## See also
+
+[blastn](blastn.md), [blastx](blastx.md), [tblastn](tblastn.md), [psiblast](psiblast.md), [makeblastdb](makeblastdb.md), [BLAST databases](../databases.md), [Output formats](../output-formats.md), [What LOSAT refuses](../refusals.md)

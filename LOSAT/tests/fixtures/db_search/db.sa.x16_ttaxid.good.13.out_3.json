@@ -1,0 +1,46 @@
+{
+  "BlastOutput2": {
+    "report": {
+      "program": "tblastn",
+      "version": "TBLASTN 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/x16_ntaxid"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;",
+        "cbs": 2,
+        "db_gencode": 1
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_3",
+          "query_title": "tq3 unrelated protein (no hits expected)",
+          "query_len": 48,
+          "query_masking": [
+            {
+              "from": 3,
+              "to": 21
+            }
+          ],
+          "hits": [
+          ],
+          "stat": {
+            "db_num": 2,
+            "db_len": 965,
+            "hsp_len": 13,
+            "eff_space": 10325,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          },
+          "message": "No hits found"
+        }
+      }
+    }
+  }
+}

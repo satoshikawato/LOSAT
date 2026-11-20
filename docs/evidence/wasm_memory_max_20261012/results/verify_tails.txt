@@ -1,0 +1,3 @@
+vabi.log (V-ABI quick): 60 runs matched the native CLI; frozen hashes: 16/16 equal; ok lines: serial 16, threads 46
+vabi_high.log (V-ABI quick, LOSAT_WASM_MEMORY_INITIAL_PAGES=40000): 60 runs matched the native CLI; frozen hashes: 16/16 equal; ok lines: serial 16, threads 46
+matrix.log (check_wasm_threading.py): 306 command/oracle records; reactor lifecycle gates PASS; format failures=0; PASS lines 15, FAIL lines 0

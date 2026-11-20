@@ -1,0 +1,18 @@
+# BLASTP 2.17.0+
+# Query: P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin [Homo sapiens] >P69906.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin [Pan paniscus] >P69907.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin [Pan troglodytes]
+# Database: tests/db_search/useseqid/p5m
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 12 hits found
+P69905.2	GH000001.1	99.296	142	1	0	1	142	1	142	9.77e-105	285
+P69905.2	891	99.296	142	1	0	1	142	1	142	1.75e-104	284
+P69905.2	2XYZ_AA	99.296	142	1	0	1	142	1	142	1.75e-104	284
+P69905.2	Q99999.3	99.296	142	1	0	1	142	1	142	2.90e-104	283
+P69905.2	GG000001.1	99.296	142	1	0	1	142	1	142	2.90e-104	283
+P69905.2	onlylocal	99.296	142	1	0	1	142	1	142	2.90e-104	283
+P69905.2	NAMEONLY	99.296	142	1	0	1	142	1	142	3.16e-104	283
+P69905.2	TP000001.1	99.296	142	1	0	1	142	1	142	3.42e-104	283
+P69905.2	MM000001.1	99.296	142	1	0	1	142	1	142	3.42e-104	283
+P69905.2	A00001	99.296	142	1	0	1	142	1	142	4.44e-104	283
+P69905.2	mydb:tag2	99.296	142	1	0	1	142	1	142	4.80e-104	283
+P69905.2	locfirst	99.296	142	1	0	1	142	1	142	6.53e-104	283
+# BLAST processed 1 queries

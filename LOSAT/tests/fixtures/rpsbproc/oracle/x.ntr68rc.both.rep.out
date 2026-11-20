@@ -1,0 +1,56 @@
+#Post-RPSBLAST Processing Utility
+
+#Input data file:	arch/x_ntr68rc.xml
+#Output data file:	(stdout)
+#Annotation data at:	nt
+#E-Value cutoff:	0.01
+#Redundancy:	Concise
+#Data requested:	Domain hits and site annotations
+#Output format -- tab-delimited table
+#Show superfamilies: NO
+#DATA
+#SESSION	<session-ordinal>	<program>	<database>	<score-matrix>	<evalue-threshold>
+#QUERY	<query-id>	<seq-type>	<seq-length>	<definition-line>
+#DOMAINS
+#<session-ordinal>	<query-id[readingframe]>	<hit-type>	<PSSM-ID>	<from>	<to>	<E-Value>	<bitscore>	<accession>	<short-name>	<incomplete>	<superfamily PSSM-ID>
+#more such lines......
+#ENDDOMAINS
+#SITES
+#<session-ordinal>	<query-id[readingframe]>	<annot-type>	<title>	<residue(coordinates)>	<complete-size>	<mapped-size>	<source-domain>
+#more such lines......
+#ENDSITES
+#MOTIFS
+#<session-ordinal>	<query-id[readingframe]>	<title>	<from>	<to>	<source-domain>
+#more such lines......
+#ENDMOTIFS
+#ENDQUERY	<query-id>
+#more query sections..
+#ENDSESSION	<session-ordinal>
+#more session sections..
+#ENDDATA
+#=====================================================================
+DATA
+SESSION	1	RPSTBLASTN 2.17.0+	Cdd	BLOSUM62	0.01
+QUERY	Query_1	Nucleotide	5000	mg00068_335001-340000_rc
+DOMAINS
+1	Query_1[-1]	Specific	517326	606	1250	1.64913e-105	335.332	pfam06545	AllG	-	-
+1	Query_1[-1]	Specific	491845	3252	3578	1.65252e-37	136.99	pfam11392	AllH	-	-
+1	Query_1[-1]	Specific	440430	4119	4712	3.6905e-26	110.429	COG0666	ANKYR	-	-
+1	Query_1[-2]	Non-specific	505031	1697	3208	6.43366e-152	476.845	NF004760	PRK06091	-	-
+ENDDOMAINS
+1	Query_1[-1]	Specific	oligomer interface	L4397-4395,E4382-4380,K4379-4377,G4376-4374,L4370-4368,S4367-4365,E4355-4353,A4346-4344,N4316-4314,V4310-4308,W4304-4302,L4292-4290,E4289-4287,V4280-4278,L4277-4275,N4274-4272,Q4253-4251,A4250-4248,L4238-4236,E4229-4227,D4202-4200,Y4196-4194,K4190-4188,E4178-4176,L4175-4173,E4166-4164,R4163-4161,G4160-4158,E4154-4152,E4151-4149,L4139-4137,A4130-4128	36	0	0
+1	Query_1[-1]	Specific	oligomer interface	K4604-4602,T4592-4590,L4589-4587,L4580-4578,Y4577-4575,Q4574-4572,Y4568-4566,A4565-4563,A4553-4551,D4544-4542,D4517-4515,T4511-4509,L4397-4395,E4382-4380,K4379-4377,G4376-4374,L4370-4368,S4367-4365,E4355-4353,A4346-4344,N4316-4314,V4310-4308,W4304-4302,L4292-4290,E4289-4287,V4280-4278,L4277-4275,N4274-4272,Q4253-4251,A4250-4248,L4238-4236,E4229-4227,D4202-4200	36	0	0
+1	Query_1[-1]	Specific	oligomer interface	L4688-4686,Q4679-4677,Q4676-4674,G4673-4671,I4667-4665,D4664-4662,T4652-4650,A4643-4641,D4616-4614,Q4610-4608,K4604-4602,T4592-4590,L4589-4587,L4580-4578,Y4577-4575,Q4574-4572,Y4568-4566,A4565-4563,A4553-4551,D4544-4542,D4517-4515,T4511-4509,L4505-4503,L4493-4491,I4490-4488,L4481-4479,N4478-4476,D4475-4473,L4469-4467,T4466-4464,I4454-4452,P4445-4443	36	0	0
+MOTIFS
+1	Query_1[-1]	ANK repeat	4314	4398	0
+1	Query_1[-1]	ANK repeat	4200	4308	0
+1	Query_1[-1]	ANK repeat	4119	4194	0
+1	Query_1[-1]	ANK repeat	4515	4605	0
+1	Query_1[-1]	ANK repeat	4314	4509	0
+1	Query_1[-1]	ANK repeat	4200	4308	0
+1	Query_1[-1]	ANK repeat	4515	4608	0
+1	Query_1[-1]	ANK repeat	4419	4509	0
+ENDMOTIFS
+ENDQUERY
+ENDSESSION	1
+ENDDATA

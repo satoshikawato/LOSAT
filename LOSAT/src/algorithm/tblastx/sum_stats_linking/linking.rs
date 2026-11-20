@@ -7,6 +7,11 @@ use crate::stats::sum_statistics::{
     gap_decay_divisor, ncbi_large_gap_sum_e, normalize_score, small_gap_sum_e,
 };
 use crate::stats::KarlinParams;
+use crate::utils::glibc_fma_libm::GlibcLibm;
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::sync::OnceLock;
@@ -28,15 +33,15 @@ use rayon::prelude::*;
 
 use crate::algorithm::tblastx::chaining::UngappedHit;
 use crate::algorithm::tblastx::diagnostics::diagnostics_enabled;
-use crate::algorithm::tblastx::extension::convert_coords;
 use crate::algorithm::tblastx::lookup::QueryContext;
+use crate::algorithm::tblastx::tracing::int4_nucleotide_coords;
 use crate::algorithm::tblastx::ungapped_hit_sort::sort_ungapped_hits_by_index_replay;
 
 use super::params::LinkingParams;
 
-// EXPERIMENT (LOSAT_X_HSPINPLACE / LOSAT_X_HSPINPLACESHADOW): the HSP list sorted, grouped, put
-// together and replayed without a second whole copy alive; a child module of this file so that it
-// uses the comparators, per-group functions and replay below unchanged (see tblastx/x_hsp_inplace.rs).
+// The HSP list sorted, linked as sub-slices and replayed without a second whole copy alive; a
+// child module of this file so that it uses the comparators, per-group functions and replay below
+// unchanged (see tblastx/x_hsp_inplace.rs).
 //
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:476-480
 // ```c
@@ -46,13 +51,12 @@ use super::params::LinkingParams;
 //    link_hsp_array[index] = (LinkHSPStruct*) calloc(1, sizeof(LinkHSPStruct));
 //    link_hsp_array[index]->hsp = hsp_array[index];
 // ```
-// NCBI works on one array of pointers to the HSPs; the module is used only when one of its switches
-// is set.
+// NCBI works on one array of pointers to the HSPs.
 #[path = "../x_hsp_inplace.rs"]
 pub(crate) mod x_hsp_inplace;
 pub use x_hsp_inplace::print_summary as x_hsp_inplace_print_summary;
 
-// EXPERIMENT (LOSAT_X_LINKSORT / LOSAT_X_LINKSORTSHADOW): the index sorts of
+// The index sorts of
 // `x_hsp_inplace` as one final sort instead of two and, for long lists, as stable parallel sorts;
 // a child module of this file so that it names the comparators below unchanged (see
 // tblastx/x_link_sort.rs).
@@ -65,16 +69,14 @@ pub use x_hsp_inplace::print_summary as x_hsp_inplace_print_summary;
 //    qsort(link_hsp_array, total_number_of_hsps,sizeof(LinkHSPStruct*),
 //          s_FwdCompareHSPsTransl);
 // ```
-// NCBI's qsort is not stable; the module returns the order of LOSAT's stable sorts and is used
-// only when one of its switches is set.
+// NCBI's qsort is not stable; the module returns the order of LOSAT's stable sorts.
 #[path = "../x_link_sort.rs"]
 mod x_link_sort;
 pub use x_link_sort::print_summary as x_link_sort_print_summary;
 
-// EXPERIMENT (LOSAT_X_LINKSLICES / LOSAT_X_LINKSLICESSHADOW): the groups of the
-// linking call of `x_hsp_inplace` linked as disjoint sub-slices of the one sorted list instead of
-// Vecs cut off it and put together again; a child module of this file so that it calls the
-// per-group functions below unchanged (see tblastx/x_link_slices.rs).
+// The groups of the linking call of `x_hsp_inplace` linked as disjoint sub-slices of the one
+// sorted list instead of Vecs cut off it and put together again; a child module of this file so
+// that it calls the per-group functions below unchanged (see tblastx/x_link_slices.rs).
 //
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:553-558
 // ```c
@@ -85,11 +87,11 @@ pub use x_link_sort::print_summary as x_link_sort_print_summary;
 //    hp_frame_start[frame_index]->prev = hp_start;
 //    number_of_hsps = hp_frame_number[frame_index];
 // ```
-// NCBI's groups are sublists of the one sorted array, linked in place; the module is used only
-// when one of its switches is set.
+// NCBI's groups are sublists of the one sorted array, linked in place.
 #[path = "../x_link_slices.rs"]
 mod x_link_slices;
 pub use x_link_slices::print_summary as x_link_slices_print_summary;
+pub(crate) use x_link_slices::{x_helped as x_link_helped, XHelped};
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -97,14 +99,6 @@ pub use x_link_slices::print_summary as x_link_slices_print_summary;
 
 const WINDOW_SIZE: i32 = GAP_SIZE + OVERLAP_SIZE + 1;
 const TRIM_SIZE: i32 = (OVERLAP_SIZE + 1) / 2;
-
-/// Ordering method indices (NCBI ELinkOrderingMethod)
-const LINK_SMALL_GAPS: usize = 0;
-const LINK_LARGE_GAPS: usize = 1;
-
-/// NCBI BLAST_GAP_PROB (ungapped search default)
-/// Reference: ncbi-blast/c++/include/algo/blast/core/blast_parameters.h:66
-const BLAST_GAP_PROB: f64 = 0.5;
 
 /// Sentinel index indicating end of active list or "not in list"
 const SENTINEL_IDX: usize = usize::MAX;
@@ -134,17 +128,27 @@ static TRACE_LINK_SELECTIONS: OnceLock<bool> = OnceLock::new();
 
 #[inline(always)]
 fn trace_hsp_target() -> Option<TraceHspTarget> {
+    if !crate::utils::xdiag::ON {
+        return None;
+    }
     *TRACE_HSP_TARGET.get_or_init(|| parse_trace_hsp_target_env("LOSAT_TRACE_HSP"))
 }
 
 #[inline(always)]
 fn trace_chain_target() -> Option<TraceHspTarget> {
+    if !crate::utils::xdiag::ON {
+        return None;
+    }
     *TRACE_CHAIN_TARGET.get_or_init(|| parse_trace_hsp_target_env("LOSAT_TRACE_CHAIN_HSP"))
 }
 
 #[inline(always)]
 fn trace_link_selection_summaries() -> bool {
-    *TRACE_LINK_SELECTIONS.get_or_init(|| std::env::var_os("LOSAT_TRACE_LINK_SELECTIONS").is_some())
+    if !crate::utils::xdiag::ON {
+        return false;
+    }
+    *TRACE_LINK_SELECTIONS
+        .get_or_init(|| crate::utils::xdiag::var_os("LOSAT_TRACE_LINK_SELECTIONS").is_some())
 }
 
 /// Use the literal O(n^2)-per-pass port (`link_hsp_group_ncbi`) instead of the
@@ -154,10 +158,10 @@ fn legacy_linking_requested() -> bool {
     static LEGACY: OnceLock<bool> = OnceLock::new();
     *LEGACY.get_or_init(|| {
         std::env::var_os("LOSAT_LINKING_LEGACY").is_some()
-            || std::env::var_os("LOSAT_TRACE_HSP").is_some()
-            || std::env::var_os("LOSAT_TRACE_CHAIN_HSP").is_some()
-            || std::env::var_os("LOSAT_TRACE_LINK_SELECTIONS").is_some()
-            || std::env::var_os("LOSAT_DEBUG_CHAINING").is_some()
+            || crate::utils::xdiag::var_os("LOSAT_TRACE_HSP").is_some()
+            || crate::utils::xdiag::var_os("LOSAT_TRACE_CHAIN_HSP").is_some()
+            || crate::utils::xdiag::var_os("LOSAT_TRACE_LINK_SELECTIONS").is_some()
+            || crate::utils::xdiag::var_os("LOSAT_DEBUG_CHAINING").is_some()
     })
 }
 
@@ -191,7 +195,7 @@ fn link_shadow_enabled() -> bool {
 // print and does not alter the linking algorithm or runtime output.
 #[inline(always)]
 fn parse_trace_hsp_target_env(var_name: &str) -> Option<TraceHspTarget> {
-    let raw = std::env::var(var_name).ok()?;
+    let raw = crate::utils::xdiag::var(var_name).ok()?;
     let parts: Vec<&str> = raw
         .split(|c: char| c == ',' || c == ':' || c == ';' || c.is_whitespace())
         .filter(|p| !p.is_empty())
@@ -215,51 +219,17 @@ fn parse_trace_hsp_target_env(var_name: &str) -> Option<TraceHspTarget> {
     })
 }
 
-#[inline(always)]
-fn trace_match_target(
-    target: TraceHspTarget,
-    q_start: usize,
-    q_end: usize,
-    s_start: usize,
-    s_end: usize,
-) -> bool {
-    q_start as i32 == target.q_start
-        && q_end as i32 == target.q_end
-        && s_start as i32 == target.s_start
-        && s_end as i32 == target.s_end
-}
-
+// No NCBI counterpart (diagnostics): whether an HSP's nucleotide coordinates, its ends read as
+// NCBI's `Int4` (`tracing::int4_nucleotide_coords`), are the trace target's.
 #[inline(always)]
 fn trace_hit_matches_target(target: TraceHspTarget, h: &UngappedHit) -> bool {
-    let (q_start, q_end) = convert_coords(
-        h.q_aa_start as usize,
-        h.q_aa_end as usize,
-        h.q_frame,
-        h.q_orig_len as usize,
-    );
-    let (s_start, s_end) = convert_coords(
-        h.s_aa_start as usize,
-        h.s_aa_end as usize,
-        h.s_frame,
-        h.s_orig_len as usize,
-    );
-    trace_match_target(target, q_start, q_end, s_start, s_end)
-}
-
-/// NCBI BLAST_Nint - round to nearest integer
-/// Reference: ncbi-blast/c++/src/algo/blast/core/ncbi_math.c:437-441
-///
-/// ```c
-/// long BLAST_Nint(double x)
-/// {
-///    x += (x >= 0. ? 0.5 : -0.5);
-///    return (long)x;
-/// }
-/// ```
-#[inline]
-fn blast_nint(x: f64) -> i32 {
-    let rounded = if x >= 0.0 { x + 0.5 } else { x - 0.5 };
-    rounded as i32
+    int4_nucleotide_coords(h)
+        == (
+            i64::from(target.q_start),
+            i64::from(target.q_end),
+            i64::from(target.s_start),
+            i64::from(target.s_end),
+        )
 }
 
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:343-349
@@ -311,6 +281,38 @@ fn rev_compare_hsps_tbx(a: &UngappedHit, b: &UngappedHit) -> Ordering {
         .then_with(|| b.q_aa_end.cmp(&a.q_aa_end))
         .then_with(|| b.s_aa_start.cmp(&a.s_aa_start))
         .then_with(|| b.s_aa_end.cmp(&a.s_aa_end))
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:359-374
+// ```c
+// 	if (h1->query.offset < h2->query.offset)
+// 		return  1;
+// 	if (h1->query.offset > h2->query.offset)
+// 		return -1;
+// 	if (h1->query.end < h2->query.end)
+// 		return  1;
+// 	if (h1->query.end > h2->query.end)
+// 		return -1;
+// 	if (h1->subject.offset < h2->subject.offset)
+// 		return  1;
+// 	if (h1->subject.offset > h2->subject.offset)
+// 		return -1;
+// 	if (h1->subject.end < h2->subject.end)
+// 		return  1;
+// 	if (h1->subject.end > h2->subject.end)
+// 		return -1;
+// ```
+// `s_RevCompareHSPsTbx` with the ends read as NCBI's `Int4` (`UngappedHit::q_end_int4`), for a
+// list of the one-hit word finder that holds an HSP of length 0 or less
+// (`link_one_hit_with_int4_ends`). On ends of 0 or more it is `rev_compare_hsps_tbx`.
+fn rev_compare_hsps_tbx_int4(a: &UngappedHit, b: &UngappedHit) -> Ordering {
+    translated_context_group(a)
+        .cmp(&translated_context_group(b))
+        .then_with(|| a.s_frame.signum().cmp(&b.s_frame.signum()))
+        .then_with(|| b.q_aa_start.cmp(&a.q_aa_start))
+        .then_with(|| b.q_end_int4().cmp(&a.q_end_int4()))
+        .then_with(|| b.s_aa_start.cmp(&a.s_aa_start))
+        .then_with(|| b.s_end_int4().cmp(&a.s_end_int4()))
 }
 
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:234-263
@@ -365,10 +367,10 @@ fn fwd_compare_hsps_transl(a: &UngappedHit, b: &UngappedHit) -> Ordering {
 //       s_FwdCompareHSPsTransl);
 // ```
 #[inline]
-fn sort_hsps_by_ncbi_link_order(
-    hits: &mut [UngappedHit],
-    compare: fn(&UngappedHit, &UngappedHit) -> Ordering,
-) {
+fn sort_hsps_by_ncbi_link_order<C>(hits: &mut [UngappedHit], compare: C)
+where
+    C: Fn(&UngappedHit, &UngappedHit) -> Ordering + Sync,
+{
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:483-486
     // ```c
     // qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
@@ -585,59 +587,6 @@ struct BufferPools {
 // Main entry point
 // ---------------------------------------------------------------------------
 
-/// Apply NCBI-style sum-statistics even-gap linking
-///
-/// This is the main entry point for HSP linking with NCBI-compatible cutoffs.
-///
-/// # Arguments
-/// * `hits` - Vector of ungapped HSPs to link
-/// * `params` - Karlin-Altschul parameters for the scoring matrix
-/// * `linking_params` - NCBI-style linking parameters (avg query length, subject length, etc.)
-/// * `query_contexts` - Query context information
-/// * `subject_frame_bases` - Subject frame base offsets
-/// * `length_adj_per_context` - Pre-computed length adjustment per context
-///   (NCBI: query_info->contexts[ctx].length_adjustment)
-/// * `eff_searchsp_per_context` - Pre-computed effective search space per context
-///   (NCBI: query_info->contexts[ctx].eff_searchsp)
-///
-/// NCBI Parity Note:
-/// In NCBI, length_adjustment and eff_searchsp are calculated once per context
-/// in BLAST_CalcEffLengths (blast_setup.c:700-850) and stored in query_info->contexts[].
-/// link_hsps.c then references these stored values:
-/// ```c
-/// length_adjustment = query_info->contexts[query_context].length_adjustment;
-/// searchsp_eff = query_info->contexts[query_context].eff_searchsp;
-/// ```
-/// We now mirror this by accepting pre-computed vectors instead of recalculating.
-pub fn apply_sum_stats_even_gap_linking(
-    hits: Vec<UngappedHit>,
-    params: &KarlinParams,
-    linking_params: &LinkingParams,
-    query_contexts: &[QueryContext],
-    subject_frame_bases: &[i32],
-    length_adj_per_context: &[i64],
-    eff_searchsp_per_context: &[i64],
-) -> Vec<UngappedHit> {
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:553-558
-    // ```c
-    // for (frame_index=0; frame_index<num_query_frames; frame_index++)
-    // {
-    //    hp_start->next = hp_frame_start[frame_index];
-    //    number_of_hsps = hp_frame_number[frame_index];
-    // }
-    // ```
-    apply_sum_stats_even_gap_linking_with_parallel(
-        hits,
-        params,
-        linking_params,
-        query_contexts,
-        subject_frame_bases,
-        length_adj_per_context,
-        eff_searchsp_per_context,
-        true,
-    )
-}
-
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:553-558
 // ```c
 // for (frame_index=0; frame_index<num_query_frames; frame_index++)
@@ -660,10 +609,9 @@ pub fn apply_sum_stats_even_gap_linking_with_parallel(
         return hits;
     }
 
-    // EXPERIMENT (LOSAT_X_HSPINPLACE / LOSAT_X_HSPINPLACESHADOW), dispatch: the steps of this
-    // function on one list (sort in place, groups cut off the end of the list, exact-capacity
-    // assembly, output replay in place) with the same per-group calls; see x_hsp_inplace.rs for
-    // why it is the same list. With the switch off, and with LOSAT_DEBUG_CUTOFFS or
+    // Dispatch: the steps of this function on one list (sort in place, groups linked as
+    // sub-slices of the list, output replay in place) with the same per-group calls; see
+    // x_hsp_inplace.rs for why it is the same list. With LOSAT_DEBUG_CUTOFFS or
     // LOSAT_DIAGNOSTICS, the body below runs on the untouched input.
     //
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:483-486,990-994
@@ -680,20 +628,18 @@ pub fn apply_sum_stats_even_gap_linking_with_parallel(
     //          s_FwdCompareHSPsTransl);
     // ```
     // NCBI sorts and regroups one array of pointers and never copies the HSPs.
-    if x_hsp_inplace::mode() != 0 {
-        match x_hsp_inplace::linking_dispatch(
-            hits,
-            params,
-            linking_params,
-            query_contexts,
-            subject_frame_bases,
-            length_adj_per_context,
-            eff_searchsp_per_context,
-            allow_parallel,
-        ) {
-            Ok(linked) => return linked,
-            Err(untouched) => hits = untouched,
-        }
+    match x_hsp_inplace::linking_dispatch(
+        hits,
+        params,
+        linking_params,
+        query_contexts,
+        subject_frame_bases,
+        length_adj_per_context,
+        eff_searchsp_per_context,
+        allow_parallel,
+    ) {
+        Ok(linked) => return linked,
+        Err(untouched) => hits = untouched,
     }
 
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:476-480
@@ -729,7 +675,7 @@ pub fn apply_sum_stats_even_gap_linking_with_parallel(
     // Debug output for cutoffs (controlled by LOSAT_DEBUG_CUTOFFS env var)
     static DEBUG_CUTOFFS_PRINTED: std::sync::atomic::AtomicBool =
         std::sync::atomic::AtomicBool::new(false);
-    if std::env::var("LOSAT_DEBUG_CUTOFFS").is_ok()
+    if crate::utils::xenv::debug_cutoffs_is_ok()
         && !DEBUG_CUTOFFS_PRINTED.swap(true, std::sync::atomic::Ordering::SeqCst)
     {
         eprintln!("=== LOSAT Linking Cutoffs Debug ===");
@@ -740,7 +686,7 @@ pub fn apply_sum_stats_even_gap_linking_with_parallel(
         eprintln!("  cutoff_small_gap: {}", cutoffs.cutoff_small_gap);
         eprintln!("  cutoff_big_gap: {}", cutoffs.cutoff_big_gap);
         eprintln!("  gap_prob: {:.6}", cutoffs.gap_prob);
-        eprintln!("  ignore_small_gaps: {}", cutoffs.ignore_small_gaps);
+        eprintln!("  ignore_small_gaps: {}", cutoffs.ignore_small_gaps());
         eprintln!("  WINDOW_SIZE: {}", WINDOW_SIZE);
         eprintln!("  TRIM_SIZE: {}", TRIM_SIZE);
         eprintln!("===================================");
@@ -768,7 +714,7 @@ pub fn apply_sum_stats_even_gap_linking_with_parallel(
     // Keep per-context logK available for the exact NCBI xsum expression below.
     let log_k_by_ctx: Vec<f64> = query_contexts
         .iter()
-        .map(|ctx| ctx.karlin_params.k.ln())
+        .map(|ctx| ctx.karlin_params.k.glibc_ln())
         .collect();
 
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:483-486
@@ -855,7 +801,7 @@ pub fn apply_sum_stats_even_gap_linking_with_parallel(
     let mut results: Vec<UngappedHit> = if allow_parallel && frame_groups.len() > 1 {
         // Use thread_local! macro for thread-local storage (rayon doesn't have ThreadLocal)
         thread_local! {
-            static POOLS: RefCell<Option<BufferPools>> = RefCell::new(None);
+            static POOLS: RefCell<Option<BufferPools>> = const { RefCell::new(None) };
         }
 
         let mut indexed_results: Vec<(usize, Vec<UngappedHit>)> = frame_groups
@@ -1036,6 +982,80 @@ pub fn apply_sum_stats_even_gap_linking_with_parallel(
     replay_ncbi_output_list(references)
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:870-873 (the first
+// `BLAST_LinkHsps` of `s_BlastSearchEngineCore`) and c++/src/algo/blast/core/blast_hits.c:2703-2731
+// (`Blast_HSPListReevaluateUngapped`, called at blast_engine.c:1492-1497)
+// ```c
+//          delete_hsp =
+//             Blast_HSPReevaluateWithAmbiguitiesUngapped(hsp, query_start,
+//                subject_start, word_params, sbp, kTranslateSubject);
+// ...
+//       if (delete_hsp) { /* This HSP is now below the cutoff */
+//          hsp_array[index] = Blast_HSPFree(hsp_array[index]);
+// ...
+//    Blast_HSPListPurgeNullHSPs(hsp_list);
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:687,699 (in
+// `Blast_HSPReevaluateWithAmbiguitiesUngapped`) and :452-453 (in `s_UpdateReevaluatedHSP`)
+// ```c
+//    Int4 hsp_length = hsp->query.end - hsp->query.offset;
+// ...
+//    for (index = 0; index < hsp_length; ++index) {
+// ...
+//     if (hsp->score >= cutoff_score) {
+// ```
+// The first linking call of a subject whose list from the one-hit word finder (`-window_size 0`)
+// holds an HSP of length 0 or less (`UngappedHit::is_int4_inverted`), with its ends as NCBI's
+// `Int4` (`chaining.rs`, the impl of `UngappedHit`). The list is first sorted by score with the
+// `Int4` comparator: NCBI's frame lists are combined by that sort (blast_hits.c:2758-2766), which
+// LOSAT's `append_frame_hits` does with the `u32` one. The two comparators order an end below 0
+// differently but have the same ties (two `i32` are equal exactly when their `u32` bits are), so
+// the stable `u32` sorts of the appends keep every tie class of the `Int4` comparator in the
+// order of the concatenated frame lists, and this stable sort then gives NCBI's list (the stable
+// sort of that concatenation; `x_link_sort.rs`, (S)). The link is then `link_in_place`'s with
+// `rev_compare_hsps_tbx_int4` and the literal port `link_hsp_group_ncbi` for every group
+// (`x_hsp_inplace::link_in_place_int4`): the incremental kernel assumes HSPs whose end is after
+// their start (`linking_incr.rs`), while the literal port computes with `Int4` coordinates as NCBI
+// does. NCBI then sorts by score, reaps by the preliminary E-value and re-evaluates, which scores
+// an HSP of length 0 or less 0 (its loop does not run), below every context's cutoff (at least 1),
+// and deletes it. The reap reads each HSP's own E-value and the sorts are stable, so dropping
+// those HSPs here, before the sort, leaves the other HSPs NCBI keeps in NCBI's order; nothing
+// after this reads a dropped one or an `Int4` end below 0. This path runs only for such a
+// subject; the same subject without such an HSP links with
+// `apply_sum_stats_even_gap_linking_with_parallel`.
+/// The first linking call of a one-hit list holding an HSP of length 0 or less, after which those
+/// HSPs are dropped.
+#[cold]
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn link_one_hit_with_int4_ends(
+    mut hits: Vec<UngappedHit>,
+    params: &KarlinParams,
+    linking_params: &LinkingParams,
+    query_contexts: &[QueryContext],
+    subject_frame_bases: &[i32],
+    length_adj_per_context: &[i64],
+    eff_searchsp_per_context: &[i64],
+    allow_parallel: bool,
+) -> Vec<UngappedHit> {
+    if hits.is_empty() {
+        return hits;
+    }
+    crate::algorithm::tblastx::blast_gapalign::sort_ungapped_hits_by_score_int4(&mut hits);
+    let mut linked = x_hsp_inplace::link_in_place_int4(
+        hits,
+        params,
+        linking_params,
+        query_contexts,
+        subject_frame_bases,
+        length_adj_per_context,
+        eff_searchsp_per_context,
+        allow_parallel,
+    );
+    linked.retain(|hit| !hit.is_int4_inverted());
+    linked
+}
+
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:1012-1028
 // ```c
 // /* hook up the HSP's. */
@@ -1205,9 +1225,9 @@ macro_rules! visit_large_gap_predecessor {
                 eprintln!(
                     "    Linked HSP: q_aa={}-{}, s_aa={}-{}, score={}, num={}",
                     $group_hits[j].q_aa_start,
-                    $group_hits[j].q_aa_end,
+                    $group_hits[j].q_end_int4(),
                     $group_hits[j].s_aa_start,
-                    $group_hits[j].s_aa_end,
+                    $group_hits[j].s_end_int4(),
                     $pool_hsp_links[j].score,
                     $pool_hsp_links[j].num[1]
                 );
@@ -1352,6 +1372,14 @@ fn link_hsp_group_incremental(
     pool_lh_helpers: &mut Vec<LhHelper>,
     pool_hsp_links: &mut Vec<HspLink>,
 ) -> Vec<UngappedHit> {
+    // No NCBI counterpart: the incremental kernel's large-gap sweep assumes every end is after its
+    // start (`linking_incr.rs`). A list that holds an HSP of the one-hit word finder of length 0 or
+    // less links with the literal port (`x_hsp_inplace::link_in_place_int4`), so none arrives here
+    // (debug builds check it).
+    debug_assert!(
+        group_hits.iter().all(|hit| !hit.is_int4_inverted()),
+        "an HSP of length 0 or less reached the incremental linking kernel"
+    );
     let expected = link_shadow_enabled().then(|| {
         link_hsp_group_ncbi(
             group_hits.clone(),
@@ -1400,7 +1428,7 @@ fn link_hsp_group_incremental(
 //    hp_frame_start[frame_index]->prev = hp_start;
 //    number_of_hsps = hp_frame_number[frame_index];
 // ```
-// EXPERIMENT (LOSAT_X_LINKSLICES, tblastx/x_link_slices.rs): `link_hsp_group_incremental` on the
+// `link_hsp_group_incremental` for `x_link_slices.rs` on the
 // group's records where they lie, a sub-slice of the linking call's list, as NCBI links a sublist
 // of its one array. The same kernel with the same arguments; under LOSAT_LINK_FAST_SHADOW the
 // literal port links a copy of the group (`to_vec`, as `clone` above) and the two results must be
@@ -1421,6 +1449,14 @@ fn link_hsp_group_incremental_slice(
     pool_lh_helpers: &mut Vec<LhHelper>,
     pool_hsp_links: &mut Vec<HspLink>,
 ) {
+    // No NCBI counterpart: the incremental kernel's large-gap sweep assumes every end is after its
+    // start (`linking_incr.rs`). A list that holds an HSP of the one-hit word finder of length 0 or
+    // less links with the literal port (`x_hsp_inplace::link_in_place_int4`), so none arrives here
+    // (debug builds check it).
+    debug_assert!(
+        group_hits.iter().all(|hit| !hit.is_int4_inverted()),
+        "an HSP of length 0 or less reached the incremental linking kernel"
+    );
     let expected = link_shadow_enabled().then(|| {
         link_hsp_group_ncbi(
             group_hits.to_vec(),
@@ -1465,10 +1501,10 @@ fn link_hsp_group_incremental_slice(
 /// * `query_contexts` - Query context information
 /// * `subject_frame_bases` - Subject frame base offsets (unused, kept for API)
 /// * `length_adj_per_context` - Pre-computed length adjustment per context
-///   (NCBI: query_info->contexts[ctx].length_adjustment)
+///   (NCBI: `query_info->contexts[ctx].length_adjustment`)
 /// * `eff_searchsp_per_context` - Pre-computed effective search space per context
-///   (NCBI: query_info->contexts[ctx].eff_searchsp)
-/// * `log_k_by_ctx` - Pre-computed log(K) per context (NCBI: kbp[ctx]->logK)
+///   (NCBI: `query_info->contexts[ctx].eff_searchsp`)
+/// * `log_k_by_ctx` - Pre-computed log(K) per context (NCBI: `kbp[ctx]->logK`)
 /// * `pool_lh_helpers` - Thread-local pool for lh_helper buffer reuse
 ///   (NCBI: link_hsps.c:452-454 allocates once with MAX(1024, hspcnt+5))
 /// * `pool_hsp_links` - Thread-local pool for hsp_link buffer reuse
@@ -1517,12 +1553,14 @@ fn link_hsp_group_ncbi(
     fn frame_relative_coords(hit: &UngappedHit) -> (i32, i32, i32, i32) {
         // NCBI parity: hsp->query.offset is frame-relative (0-indexed after
         // s_AdjustInitialHSPOffsets subtracts context offset).
-        // LOSAT's hit.q_aa_start is already 0-indexed frame-relative.
+        // LOSAT's hit.q_aa_start is already 0-indexed frame-relative. The ends are NCBI's `Int4`
+        // (`UngappedHit::q_end_int4`): a one-hit list may hold an HSP of length 0 or less, whose
+        // end lies at or before its start (`x_hsp_inplace::link_in_place_int4`).
         (
             hit.q_aa_start as i32,
-            hit.q_aa_end as i32,
+            hit.q_end_int4(),
             hit.s_aa_start as i32,
-            hit.s_aa_end as i32,
+            hit.s_end_int4(),
         )
     }
 
@@ -1565,8 +1603,8 @@ fn link_hsp_group_ncbi(
     // BLAST_SmallGapSumE(..., query_info->contexts[query_context].eff_searchsp, ...);
     // ```
     //
-    // Previously we recalculated these locally via compute_length_adjustment_simple().
-    // Now we use the SAME pre-computed values from utils.rs for NCBI parity.
+    // These are the SAME pre-computed values as the rest of the search uses (utils.rs), for NCBI
+    // parity.
     // ========================================================================
     let length_adjustment = length_adj_per_context[query_context];
     let eff_search_space = eff_searchsp_per_context[query_context];
@@ -1591,11 +1629,11 @@ fn link_hsp_group_ncbi(
     let cutoff_small = cutoffs.cutoff_small_gap;
     let cutoff_big = cutoffs.cutoff_big_gap;
     let gap_prob = cutoffs.gap_prob;
-    let ignore_small_gaps = cutoffs.ignore_small_gaps;
+    let ignore_small_gaps = cutoffs.ignore_small_gaps();
 
     // Statistics for filtering analysis (long sequences only)
-    let mut stats_index0_filtered = 0usize;
-    let mut stats_index0_passed = 0usize;
+    let stats_index0_filtered = 0usize;
+    let stats_index0_passed = 0usize;
     let mut stats_index1_filtered = 0usize;
     let mut stats_index1_passed = 0usize;
     let is_long_sequence = subject_len_nucl > 600_000;
@@ -1624,7 +1662,7 @@ fn link_hsp_group_ncbi(
             "  lambda={}, k={}, logK={:.4}",
             params.lambda,
             params.k,
-            params.k.ln()
+            params.k.glibc_ln()
         );
     }
 
@@ -1646,7 +1684,8 @@ fn link_hsp_group_ncbi(
     // Debug: trace a specific HSP (via LOSAT_TRACE_HSP) through linking.
     // Also supports legacy `LOSAT_DEBUG_CHAINING` to enable debug prints.
     let trace_target = trace_hsp_target();
-    let debug_chaining = trace_target.is_some() || std::env::var("LOSAT_DEBUG_CHAINING").is_ok();
+    let debug_chaining =
+        trace_target.is_some() || crate::utils::xdiag::var("LOSAT_DEBUG_CHAINING").is_ok();
     let trace_chain_target = trace_chain_target();
     let trace_link_selections = trace_link_selection_summaries();
 
@@ -1715,18 +1754,7 @@ fn link_hsp_group_ncbi(
     if debug_chaining {
         if let Some(i) = target_hsp_idx {
             let hit = &group_hits[i];
-            let (q_start, q_end) = convert_coords(
-                hit.q_aa_start as usize,
-                hit.q_aa_end as usize,
-                hit.q_frame,
-                hit.q_orig_len as usize,
-            );
-            let (s_start, s_end) = convert_coords(
-                hit.s_aa_start as usize,
-                hit.s_aa_end as usize,
-                hit.s_frame,
-                hit.s_orig_len as usize,
-            );
+            let (q_start, q_end, s_start, s_end) = int4_nucleotide_coords(hit);
             let link = &pool_hsp_links[i];
             eprintln!(
                 "[TRACE_LINKING] target_in_group idx={} raw_score={} q_frame={} s_frame={} q={}-{} s={}-{} q_aa={}-{} s_aa={}-{} q_trim={}..{} s_trim={}..{} cutoff_small={} cutoff_big={}",
@@ -1739,9 +1767,9 @@ fn link_hsp_group_ncbi(
                 s_start,
                 s_end,
                 hit.q_aa_start,
-                hit.q_aa_end,
+                hit.q_end_int4(),
                 hit.s_aa_start,
-                hit.s_aa_end,
+                hit.s_end_int4(),
                 link.q_off_trim,
                 link.q_end_trim,
                 link.s_off_trim,
@@ -1814,11 +1842,10 @@ fn link_hsp_group_ncbi(
     // NCBI: path_changed tracks whether any removed HSP had linked_to > 0
     // If path_changed == 0, we can skip chain validation entirely
     let mut path_changed = true;
-    // NCBI `link_hsps.c` sets `gap_prob = link_hsp_params->gap_prob;` regardless
-    // of `ignore_small_gaps` (cutoff[0]==0). The adjustment by `1-gap_prob`
-    // for INDEX 1 is still applied when `num>1`.
-    // NOTE: gap_prob is now passed in from calculate_link_hsp_cutoffs_ncbi
-    // and may be 0 for small search spaces (NCBI line 1076)
+    // NCBI `link_hsps.c` sets `gap_prob = link_hsp_params->gap_prob;` (:468) regardless of
+    // `ignore_small_gaps` (cutoff[0]==0, :495). With small gaps the E-values of sets of more than
+    // one HSP are divided by `gap_prob` and `1-gap_prob` (:918-935); with large gaps only they are
+    // not divided (:939-952). gap_prob is 0 for small search spaces (blast_parameters.c:1076).
 
     while remaining > 0 {
         // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:603-652
@@ -1835,8 +1862,10 @@ fn link_hsp_group_ncbi(
         let path_changed_at_loop_start = path_changed;
         // NCBI lines 607-625: Initialize max sums each pass
         // CRITICAL: must reset to -cutoff each pass to allow all HSPs to be candidates
+        // (`best_sum` is reset where the sums are recomputed, below; with `use_current_max`
+        // only `best` is read, as NCBI's max0/max1 are local to the `if (!first_pass)` block)
         let mut best: [Option<usize>; 2] = [None, None];
-        let mut best_sum: [i64; 2] = [-i64::from(cutoff_small), -i64::from(cutoff_big)];
+        let mut best_sum: [i64; 2];
         let mut use_current_max = false;
 
         // NCBI lines 603-652: Try to reuse previous max
@@ -1858,7 +1887,7 @@ fn link_hsp_group_ncbi(
             // if(sum0>=max0) { max0=sum0; best[0]=H; }
             // if(sum1>=max1) { max1=sum1; best[1]=H; }
             // Read the exact stored-score maxima before unchanged path validation.
-            (best, best_sum) = maximum_tree.maxima([cutoff_small, cutoff_big], ignore_small_gaps);
+            (best, _) = maximum_tree.maxima([cutoff_small, cutoff_big], ignore_small_gaps);
 
             // NCBI line 635: if(path_changed==0) use_current_max=1
             if !path_changed {
@@ -2057,9 +2086,9 @@ fn link_hsp_group_ncbi(
                                     eprintln!(
                                         "    Linked HSP: q_aa={}-{}, s_aa={}-{}, score={}, num={}",
                                         group_hits[j].q_aa_start,
-                                        group_hits[j].q_aa_end,
+                                        group_hits[j].q_end_int4(),
                                         group_hits[j].s_aa_start,
-                                        group_hits[j].s_aa_end,
+                                        group_hits[j].s_end_int4(),
                                         pool_hsp_links[j].score,
                                         pool_hsp_links[j].num[0]
                                     );
@@ -2089,12 +2118,20 @@ fn link_hsp_group_ncbi(
                         + (i_score as f64) * query_contexts[ctx_idx].karlin_params.lambda
                         - log_k_by_ctx[ctx_idx];
 
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:756
+                    // ```c
+                    //                     H->hsp_link.num[index] = H_hsp_num+1;
+                    // ```
+                    // `H_hsp_num` is an Int4 and `num` an Int2: the store keeps the low 16 bits, so
+                    // the count of a set of more than 32,767 HSPs wraps (as in `core::link_hsps`).
+                    let new_num = h_num.wrapping_add(1);
+
                     // is_target_hsp is already defined at line 1085, reuse it here
                     if is_target_hsp {
                         eprintln!(
                             "[DEBUG_CHAINING] INDEX 0 update: new_sum={}, num={}, link={}",
                             new_sum,
-                            h_num + 1,
+                            new_num,
                             if h_link != SENTINEL_IDX {
                                 h_link
                             } else {
@@ -2105,7 +2142,7 @@ fn link_hsp_group_ncbi(
 
                     // NCBI lines 755-758: Update sum, num, link, lh_helper
                     pool_hsp_links[i].sum[0] = new_sum;
-                    pool_hsp_links[i].num[0] = h_num + 1;
+                    pool_hsp_links[i].num[0] = new_num;
                     pool_hsp_links[i].link[0] = h_link;
                     pool_lh_helpers[h_lh_idx].sum[0] = new_sum;
 
@@ -2271,13 +2308,19 @@ fn link_hsp_group_ncbi(
                 let new_xsum = h_xsum
                     + (i_score as f64) * query_contexts[ctx_idx].karlin_params.lambda
                     - log_k_by_ctx[ctx_idx];
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:871
+                // ```c
+                //                  H->hsp_link.num[index] = H_hsp_num+1;
+                // ```
+                // The Int4 sum stored into the Int2 count wraps, as at index 0.
+                let new_num = h_num.wrapping_add(1);
 
                 // is_target_hsp is already defined at line 1218, reuse it here
                 if is_target_hsp {
                     eprintln!(
                         "[DEBUG_CHAINING] INDEX 1 update: new_sum={}, num={}, link={}",
                         new_sum,
-                        h_num + 1,
+                        new_num,
                         if h_link != SENTINEL_IDX {
                             h_link
                         } else {
@@ -2288,7 +2331,7 @@ fn link_hsp_group_ncbi(
 
                 // NCBI lines 870-873: Update sum, num, link, lh_helper
                 pool_hsp_links[i].sum[1] = new_sum;
-                pool_hsp_links[i].num[1] = h_num + 1;
+                pool_hsp_links[i].num[1] = new_num;
                 pool_hsp_links[i].link[1] = h_link;
                 pool_lh_helpers[h_lh_idx].sum[1] = new_sum;
 
@@ -2363,16 +2406,20 @@ fn link_hsp_group_ncbi(
                 // Mirror the persistent addback even if another chain is selected.
                 maximum_tree.update(bi, DualMaximum::active(bi, pool_hsp_links[bi].sum));
 
-                let num = pool_hsp_links[bi].num[0] as usize;
+                // The count is NCBI's Int2: a wrapped (negative) count is not "> 1"
+                // (link_hsps.c:918). BLAST_GapDecayDivisor takes it as an unsigned and raises the
+                // rate to the Int4 `nsegs - 1`; `as usize` sign-extends and gap_decay_divisor
+                // truncates `num_segments - 1` to the same i32.
+                let num = pool_hsp_links[bi].num[0];
                 let xsum = pool_hsp_links[bi].xsum[0];
-                let divisor = gap_decay_divisor(gap_decay_rate, num);
+                let divisor = gap_decay_divisor(gap_decay_rate, num as usize);
                 prob[0] = small_gap_sum_e(
                     WINDOW_SIZE,
-                    num as i16,
+                    num,
                     xsum,
                     eff_query_len as i32,
                     eff_subject_len as i32,
-                    eff_search_space as i64,
+                    eff_search_space,
                     divisor,
                 );
                 // NCBI `link_hsps.c` lines 918-922:
@@ -2390,15 +2437,15 @@ fn link_hsp_group_ncbi(
 
             // NCBI lines 924-935: Also compute prob[1] for large gaps when small gaps enabled
             if let Some(bi) = best[1] {
-                let num = pool_hsp_links[bi].num[1] as usize;
+                let num = pool_hsp_links[bi].num[1];
                 let xsum = pool_hsp_links[bi].xsum[1];
-                let divisor = gap_decay_divisor(gap_decay_rate, num);
+                let divisor = gap_decay_divisor(gap_decay_rate, num as usize);
                 prob[1] = ncbi_large_gap_sum_e(
-                    num as i16,
+                    num,
                     xsum,
                     eff_query_len as i32,
                     eff_subject_len as i32,
-                    eff_search_space as i64,
+                    eff_search_space,
                     divisor,
                 );
                 if num > 1 {
@@ -2411,35 +2458,42 @@ fn link_hsp_group_ncbi(
                 }
             }
         } else {
-            // NCBI lines 939-952: Only consider large gaps
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:939-952
+            // ```c
+            //          else
+            //          {
+            //             /* We only consider the case of big gaps. */
+            //             best[1]->hsp_link.sum[1] +=
+            //                (best[1]->hsp_link.num[1])*cutoff[1];
+            //
+            //             prob[1] = BLAST_LargeGapSumE(
+            //                          best[1]->hsp_link.num[1],
+            //                          best[1]->hsp_link.xsum[1],
+            //                          query_length, subject_length,
+            //                          query_info->contexts[query_context].eff_searchsp,
+            //                          BLAST_GapDecayDivisor(gap_decay_rate,
+            //                                               best[1]->hsp_link.num[1]));
+            //             ordering_method = eLinkLargeGaps;
+            //          }
+            // ```
+            // Only large gaps: the E-value is not divided by `1 - gap_prob`.
             if let Some(bi) = best[1] {
-                // NCBI lines 942-943: Add back cutoff*num
                 pool_hsp_links[bi].sum[1] +=
                     i64::from(pool_hsp_links[bi].num[1]) * i64::from(cutoff_big);
-                // NCBI c++/src/algo/blast/core/link_hsps.c:942-943:
-                // best[1]->hsp_link.sum[1] += (best[1]->hsp_link.num[1])*cutoff[1];
                 // Mirror the persistent addback even if another chain is selected.
                 maximum_tree.update(bi, DualMaximum::active(bi, pool_hsp_links[bi].sum));
 
-                let num = pool_hsp_links[bi].num[1] as usize;
+                let num = pool_hsp_links[bi].num[1];
                 let xsum = pool_hsp_links[bi].xsum[1];
-                let divisor = gap_decay_divisor(gap_decay_rate, num);
+                let divisor = gap_decay_divisor(gap_decay_rate, num as usize);
                 prob[1] = ncbi_large_gap_sum_e(
-                    num as i16,
+                    num,
                     xsum,
                     eff_query_len as i32,
                     eff_subject_len as i32,
-                    eff_search_space as i64,
+                    eff_search_space,
                     divisor,
                 );
-                if num > 1 {
-                    let denom = 1.0 - gap_prob;
-                    if denom == 0.0 || (prob[1] / denom) > int4_max {
-                        prob[1] = int4_max;
-                    } else {
-                        prob[1] /= denom;
-                    }
-                }
             }
         }
 
@@ -2634,7 +2688,7 @@ fn link_hsp_group_ncbi(
         }
 
         let chain_contains_trace_target = chain_target_hsp_idx
-            .map(|target| chain_members.iter().any(|&idx| idx == target))
+            .map(|target| chain_members.contains(&target))
             .unwrap_or(false);
 
         if trace_link_selections || chain_contains_trace_target {
@@ -2666,26 +2720,15 @@ fn link_hsp_group_ncbi(
                     link.sum[1],
                     link.xsum[1],
                     hit.q_aa_start,
-                    hit.q_aa_end,
+                    hit.q_end_int4(),
                     hit.s_aa_start,
-                    hit.s_aa_end,
+                    hit.s_end_int4(),
                     hit.q_frame,
                     hit.s_frame
                 )
             };
             let head = &group_hits[best_i];
-            let (head_q_start, head_q_end) = convert_coords(
-                head.q_aa_start as usize,
-                head.q_aa_end as usize,
-                head.q_frame,
-                head.q_orig_len as usize,
-            );
-            let (head_s_start, head_s_end) = convert_coords(
-                head.s_aa_start as usize,
-                head.s_aa_end as usize,
-                head.s_frame,
-                head.s_orig_len as usize,
-            );
+            let (head_q_start, head_q_end, head_s_start, head_s_end) = int4_nucleotide_coords(head);
             eprintln!(
                 "[TRACE_LINK_SELECTION] context={} subject_sign={} round={} remaining_before={} used_current_max={} path_changed_in={} selected={} evalue={:.6e} chain_len={} linked_set={} target_in_chain={} prob_small={:.6e} prob_large={:.6e} head_idx={} head_raw={} head_q={}-{} head_s={}-{} head_q_frame={} head_s_frame={} best_small={} best_large={}",
                 query_context,
@@ -2733,18 +2776,7 @@ fn link_hsp_group_ncbi(
             );
             for &idx in &chain_members {
                 let hit = &group_hits[idx];
-                let (q_start, q_end) = convert_coords(
-                    hit.q_aa_start as usize,
-                    hit.q_aa_end as usize,
-                    hit.q_frame,
-                    hit.q_orig_len as usize,
-                );
-                let (s_start, s_end) = convert_coords(
-                    hit.s_aa_start as usize,
-                    hit.s_aa_end as usize,
-                    hit.s_frame,
-                    hit.s_orig_len as usize,
-                );
+                let (q_start, q_end, s_start, s_end) = int4_nucleotide_coords(hit);
                 let mark = if chain_target_hsp_idx == Some(idx) {
                     "*"
                 } else {
@@ -2762,9 +2794,9 @@ fn link_hsp_group_ncbi(
                     hit.q_frame,
                     hit.s_frame,
                     hit.q_aa_start,
-                    hit.q_aa_end,
+                    hit.q_end_int4(),
                     hit.s_aa_start,
-                    hit.s_aa_end,
+                    hit.s_end_int4(),
                     hit.start_of_chain,
                 );
             }
@@ -2795,9 +2827,9 @@ fn link_hsp_group_ncbi(
                     link.sum[1],
                     link.xsum[1],
                     hit.q_aa_start,
-                    hit.q_aa_end,
+                    hit.q_end_int4(),
                     hit.s_aa_start,
-                    hit.s_aa_end
+                    hit.s_end_int4()
                 )
             };
             eprintln!(
@@ -2818,18 +2850,7 @@ fn link_hsp_group_ncbi(
             );
             for &idx in &chain_members {
                 let hit = &group_hits[idx];
-                let (q_start, q_end) = convert_coords(
-                    hit.q_aa_start as usize,
-                    hit.q_aa_end as usize,
-                    hit.q_frame,
-                    hit.q_orig_len as usize,
-                );
-                let (s_start, s_end) = convert_coords(
-                    hit.s_aa_start as usize,
-                    hit.s_aa_end as usize,
-                    hit.s_frame,
-                    hit.s_orig_len as usize,
-                );
+                let (q_start, q_end, s_start, s_end) = int4_nucleotide_coords(hit);
                 let next = pool_hsp_links[idx].link[ordering];
                 let next_str = if next == SENTINEL_IDX {
                     "END".to_string()
@@ -2851,9 +2872,9 @@ fn link_hsp_group_ncbi(
                     s_start,
                     s_end,
                     hit.q_aa_start,
-                    hit.q_aa_end,
+                    hit.q_end_int4(),
                     hit.s_aa_start,
-                    hit.s_aa_end,
+                    hit.s_end_int4(),
                     hit.start_of_chain,
                     next_str,
                 );
@@ -3139,7 +3160,7 @@ mod tests {
             for round in 0..160 {
                 for index in 0..size {
                     seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
-                    if round % 11 == 0 || seed % 7 == 0 {
+                    if round % 11 == 0 || seed.is_multiple_of(7) {
                         scores[index] = [(seed % 101) as i64 - 50, ((seed >> 8) % 101) as i64 - 50];
                         active[index] = seed & 8 != 0;
                         tree.update(
@@ -3364,7 +3385,7 @@ mod tests {
         // 2. q_off=100, q_end=150, s_off=150, s_end=200 (ID=2) - same q_*, smaller s_off
         // 3. q_off=100, q_end=140, s_off=200, s_end=250 (ID=3) - same q_off, smaller q_end
         // 4. q_off=50,  q_end=100, s_off=300, s_end=350 (ID=4) - smallest q_off
-        let mut hits = vec![
+        let mut hits = [
             mock_hit(50, 100, 300, 350, 4),  // Should be 4th (smallest q_off)
             mock_hit(100, 140, 200, 250, 3), // Should be 3rd (smaller q_end)
             mock_hit(100, 150, 200, 250, 1), // Should be 1st (largest all)
@@ -3410,7 +3431,7 @@ mod tests {
     #[test]
     fn test_hsp_sort_identical_coords() {
         // Two hits with identical coordinates but different IDs
-        let mut hits = vec![
+        let mut hits = [
             mock_hit(100, 150, 200, 250, 1),
             mock_hit(100, 150, 200, 250, 2),
         ];
@@ -3461,7 +3482,7 @@ mod tests {
 
         // Test: same query coords, different subject offsets
         // NCBI descending: larger s_off should come first
-        let mut hits = vec![
+        let mut hits = [
             mock_hit(100, 150, 50, 100, 1),  // s_off=50 (smaller)
             mock_hit(100, 150, 200, 250, 2), // s_off=200 (larger)
         ];
@@ -3585,7 +3606,6 @@ mod tests {
         let contexts: Vec<_> = (0..12)
             .map(|index| QueryContext {
                 q_idx: (index / 6) as u32,
-                f_idx: (index % 6) as u8,
                 frame: [1, 2, 3, -1, -2, -3][index % 6],
                 aa_seq: Vec::new(),
                 aa_seq_nomask: None,
@@ -3603,7 +3623,6 @@ mod tests {
                 cutoff_small_gap: 20,
                 cutoff_big_gap: 20,
                 gap_prob: 0.5,
-                ignore_small_gaps: false,
             },
         };
         let hits: Vec<_> = (0..96)
@@ -3778,7 +3797,6 @@ mod tests {
             cutoff_small_gap: 41,
             cutoff_big_gap: 44,
             gap_prob: 0.5,
-            ignore_small_gaps: false,
         }
     }
 
@@ -3793,7 +3811,6 @@ mod tests {
         let contexts: Vec<_> = (0..6)
             .map(|index| QueryContext {
                 q_idx: 0,
-                f_idx: index as u8,
                 frame: [1, 2, 3, -1, -2, -3][index],
                 aa_seq: Vec::new(),
                 aa_seq_nomask: None,
@@ -3804,7 +3821,10 @@ mod tests {
                 karlin_params: params,
             })
             .collect();
-        let log_k: Vec<f64> = contexts.iter().map(|c| c.karlin_params.k.ln()).collect();
+        let log_k: Vec<f64> = contexts
+            .iter()
+            .map(|c| c.karlin_params.k.glibc_ln())
+            .collect();
         (params, contexts, log_k)
     }
 
@@ -4127,19 +4147,16 @@ mod tests {
                 cutoff_small_gap: 20,
                 cutoff_big_gap: 20,
                 gap_prob: 0.5,
-                ignore_small_gaps: false,
             },
             LinkHspCutoffs {
                 cutoff_small_gap: 0,
                 cutoff_big_gap: 30,
                 gap_prob: 0.0,
-                ignore_small_gaps: true,
             },
             LinkHspCutoffs {
                 cutoff_small_gap: 30,
                 cutoff_big_gap: 25,
                 gap_prob: 0.5,
-                ignore_small_gaps: false,
             },
         ];
 
@@ -4279,7 +4296,10 @@ mod tests {
         for context in contexts.iter_mut() {
             context.karlin_params = params;
         }
-        let log_k: Vec<f64> = contexts.iter().map(|c| c.karlin_params.k.ln()).collect();
+        let log_k: Vec<f64> = contexts
+            .iter()
+            .map(|c| c.karlin_params.k.glibc_ln())
+            .collect();
         let link_ncbi = |hits: Vec<UngappedHit>, cutoffs: &LinkHspCutoffs| {
             let mut helpers = Vec::new();
             let mut links = Vec::new();
@@ -4323,28 +4343,14 @@ mod tests {
             }
         };
 
-        // (cutoff[0], cutoff[1], gap_prob, ignore_small_gaps, scores from, to)
-        let settings: [(i32, i32, f64, bool, i64, i64); 6] = [
-            (41, 44, 0.5, false, 300_000_000, 1_100_000_000),
-            (41, 44, 0.5, false, 45, 900_000_000),
-            (
-                600_000_000,
-                700_000_000,
-                0.5,
-                false,
-                700_000_001,
-                1_700_000_000,
-            ),
-            (0, 500_000_000, 0.0, true, 500_000_001, 1_500_000_000),
-            (41, -300_000_000, 0.5, false, 200_000_000, 900_000_000),
-            (
-                900_000_000,
-                950_000_000,
-                0.5,
-                false,
-                950_000_001,
-                1_300_000_000,
-            ),
+        // (cutoff[0], cutoff[1], gap_prob, scores from, to); cutoff[0] == 0 ignores small gaps.
+        let settings: [(i32, i32, f64, i64, i64); 6] = [
+            (41, 44, 0.5, 300_000_000, 1_100_000_000),
+            (41, 44, 0.5, 45, 900_000_000),
+            (600_000_000, 700_000_000, 0.5, 700_000_001, 1_700_000_000),
+            (0, 500_000_000, 0.0, 500_000_001, 1_500_000_000),
+            (41, -300_000_000, 0.5, 200_000_000, 900_000_000),
+            (900_000_000, 950_000_000, 0.5, 950_000_001, 1_300_000_000),
         ];
         let mut rng = Rng(0xD1B5_4A32_D192_ED03);
         let cases: usize = std::env::var("LOSAT_FUZZ_CASES")
@@ -4354,13 +4360,13 @@ mod tests {
         // Groups without / with a pass value outside Int4.
         let mut cases_of = [0usize; 2];
         for case in 0..cases {
-            let (c0, c1, gap_prob, ignore_small_gaps, lo, hi) = settings[case % settings.len()];
+            let (c0, c1, gap_prob, lo, hi) = settings[case % settings.len()];
             let cutoffs = LinkHspCutoffs {
                 cutoff_small_gap: c0,
                 cutoff_big_gap: c1,
                 gap_prob,
-                ignore_small_gaps,
             };
+            let ignore_small_gaps = cutoffs.ignore_small_gaps();
             let n = 1 + rng.below(if case % 40 == 0 { 120 } else { 14 }) as usize;
             let span = [60u64, 200, 1200][case % 3];
             let mut hits: Vec<UngappedHit> = Vec::with_capacity(n);
@@ -4447,10 +4453,111 @@ mod tests {
             cutoff_small_gap: 2_000_000_000,
             cutoff_big_gap: 2_050_000_000,
             gap_prob: 0.5,
-            ignore_small_gaps: false,
         };
         let (_, stats) = link_with_both_kernels(chain(2_100_000_000), &cutoffs, plain, "(b)");
         assert_eq!(stats.wide_groups, 0, "{stats:?}");
         assert!(stats.clamped > 0, "{stats:?}");
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:756,871,918,931
+    // ```c
+    //                     H->hsp_link.num[index] = H_hsp_num+1;
+    // ...
+    //             if( best[0]->hsp_link.num[0] > 1 ) {
+    // ...
+    //             if( best[1]->hsp_link.num[1] > 1 ) {
+    // ```
+    // `H_hsp_num` is an Int4 stored into the Int2 count: the count of a set of 32,770 HSPs wraps
+    // to -32766, which is not "> 1", and the sum statistics give a count below 1 the E-value 0
+    // (s_BlastSumP, blast_stat.c:4390-4391: `if (r < 1) return 0.;`). Both kernels keep NCBI's
+    // count (the literal port overflowed an i16 here in builds with overflow checks).
+    #[test]
+    fn a_set_of_more_than_32767_hsps_takes_the_wrapped_int2_count() {
+        let chain = |n: usize| -> Vec<UngappedHit> {
+            fast_test_hits(
+                &(0..n)
+                    .map(|i| (3 * i, 3 * i + 2, 3 * i, 3 * i + 2, 60))
+                    .collect::<Vec<_>>(),
+            )
+        };
+        let cutoffs = fast_test_cutoffs();
+        let options = IncrOptions {
+            verify: true,
+            wide_keys: false,
+        };
+        // The count of the set's first HSP (`hsp_link.num`), then every HSP's after the output
+        // list is hooked up (link_hsps.c:1044-1061 copies the first one's count to the set).
+        let counts = |n: usize| {
+            let (mut linked, _) = link_with_both_kernels(chain(n), &cutoffs, options, "chain");
+            assert_eq!(linked.len(), n);
+            let heads: Vec<i16> = linked
+                .iter()
+                .filter(|h| h.start_of_chain)
+                .map(|h| h.hsp_link_num)
+                .collect();
+            assert!(linked.iter().all(|h| h.linked_set), "{:?}", &linked[..2]);
+            let evalues: Vec<f64> = linked.iter().map(|h| h.e_value).collect();
+            let nums: Vec<i32> = replay_ncbi_output_list(linked.iter_mut().collect())
+                .iter()
+                .map(|h| h.num)
+                .collect();
+            (heads, evalues, nums)
+        };
+        let (heads, evalues, nums) = counts(32_770);
+        assert_eq!(heads, [-32766]);
+        assert!(evalues.iter().all(|&e| e == 0.0), "{:?}", &evalues[..2]);
+        assert!(nums.iter().all(|&n| n == -32766), "{:?}", &nums[..2]);
+        // One HSP fewer than the wrap keeps its count.
+        let (heads, _, nums) = counts(32_767);
+        assert_eq!(heads, [32_767]);
+        assert!(nums.iter().all(|&n| n == 32_767), "{:?}", &nums[..2]);
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:495,939-952
+    // ```c
+    //    ignore_small_gaps = (cutoff[0] == 0);
+    // ...
+    //          else
+    //          {
+    //             /* We only consider the case of big gaps. */
+    // ...
+    //             prob[1] = BLAST_LargeGapSumE(
+    // ...
+    //             ordering_method = eLinkLargeGaps;
+    //          }
+    // ```
+    // With large gaps only, the E-value of a set is not divided by `1 - gap_prob`: the same
+    // HSPs give the same E-values whatever gap_prob is.
+    #[test]
+    fn large_gaps_only_do_not_divide_by_the_gap_probability() {
+        let hits = || {
+            fast_test_hits(&[
+                (100, 130, 200, 230, 120),
+                (300, 330, 400, 430, 110),
+                (500, 530, 600, 630, 100),
+            ])
+        };
+        let large_only = |gap_prob: f64| LinkHspCutoffs {
+            cutoff_small_gap: 0,
+            cutoff_big_gap: 30,
+            gap_prob,
+        };
+        for options in VERIFIED {
+            let (with_zero, _) =
+                link_with_both_kernels(hits(), &large_only(0.0), options, "gap_prob 0");
+            let (with_half, _) =
+                link_with_both_kernels(hits(), &large_only(0.5), options, "gap_prob 0.5");
+            // One set of the three HSPs, with an E-value below the INT4_MAX ceiling.
+            let heads: Vec<i16> = with_zero
+                .iter()
+                .filter(|h| h.start_of_chain)
+                .map(|h| h.hsp_link_num)
+                .collect();
+            assert_eq!(heads, [3], "{with_zero:?}");
+            assert!(with_zero.iter().all(|h| h.e_value < 1.0), "{with_zero:?}");
+            for (a, b) in with_zero.iter().zip(&with_half) {
+                assert_eq!(a.e_value.to_bits(), b.e_value.to_bits(), "{a:?} {b:?}");
+            }
+        }
     }
 }

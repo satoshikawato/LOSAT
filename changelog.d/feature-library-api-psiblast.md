@@ -1,0 +1,2 @@
+- The library API searches with `psiblast`: `Program::Psiblast` is LOSAT's first round, with `-subject` and with a database, in the formats it writes.
+- `run_makeblastdb` and `run_blastdbcmd` run the two database programs from the library, with the command line's words and the caller's writers; a database can be built from FASTA in memory.

@@ -11,6 +11,11 @@ export interface WakeLockHandle {
 export interface PagePort {
   /** Whether the browser has the Screen Wake Lock API. */
   readonly wakeLockSupported: boolean;
+  /**
+   * Whether the device is handheld (its main pointer is coarse: a phone or a tablet): its screen
+   * turns off by itself, which ends the page's work, so the wake lock's choice is shown there.
+   */
+  readonly handheld: boolean;
   /** Rejects when the browser refuses the lock (for example on low battery). */
   requestWakeLock(): Promise<WakeLockHandle>;
   /** While on, the browser asks before the page is closed or reloaded. */

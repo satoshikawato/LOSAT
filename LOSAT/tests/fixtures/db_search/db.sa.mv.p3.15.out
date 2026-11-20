@@ -1,0 +1,313 @@
+{
+"BlastOutput2": [
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/seqdb/db/prot_mv"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_1",
+          "query_title": "p01 first protein [Test organism]",
+          "query_len": 61,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|0",
+                  "accession": "0",
+                  "title": "p01 first protein [Test organism]"
+                }
+              ],
+              "len": 61,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 127.102,
+                  "score": 318,
+                  "evalue": 4.42102e-45,
+                  "identity": 61,
+                  "positive": 61,
+                  "query_from": 1,
+                  "query_to": 61,
+                  "hit_from": 1,
+                  "hit_to": 61,
+                  "align_len": 61,
+                  "gaps": 0,
+                  "qseq": "QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTKD",
+                  "hseq": "QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTKD",
+                  "midline": "QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTKD"
+                }
+              ]
+            },
+            {
+              "num": 2,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|5",
+                  "accession": "5",
+                  "title": "p06 a title longer than 255 bytes token000 token001 token002 token003 token004 token005 token006 token007 token008 token009 token010 token011 token012 token013 token014 token015 token016 token017 token018 token019 token020 token021 token022 token023 token024 token025 token026 token027 token028 token029 token030 token031 token032 token033 token034 token035 token036 token037 token038 token039"
+                }
+              ],
+              "len": 88,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 14.6234,
+                  "score": 26,
+                  "evalue": 1.06032,
+                  "identity": 4,
+                  "positive": 9,
+                  "query_from": 24,
+                  "query_to": 35,
+                  "hit_from": 48,
+                  "hit_to": 59,
+                  "align_len": 12,
+                  "gaps": 0,
+                  "qseq": "FDMKYWRYDLED",
+                  "hseq": "YDLVYYRYTVDG",
+                  "midline": "+D+ Y+RY ++ "
+                },
+                {
+                  "num": 2,
+                  "bit_score": 13.0826,
+                  "score": 22,
+                  "evalue": 4.08612,
+                  "identity": 5,
+                  "positive": 5,
+                  "query_from": 27,
+                  "query_to": 33,
+                  "hit_from": 44,
+                  "hit_to": 50,
+                  "align_len": 7,
+                  "gaps": 0,
+                  "qseq": "KYWRYDL",
+                  "hseq": "KYSHYDL",
+                  "midline": "KY  YDL"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 10,
+            "db_len": 801,
+            "hsp_len": 19,
+            "eff_space": 25662,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          }
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/seqdb/db/prot_mv"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_2",
+          "query_title": "p03 every letter of NCBIstdaa but the gap",
+          "query_len": 33,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|2",
+                  "accession": "2",
+                  "title": "p03 every letter of NCBIstdaa but the gap"
+                }
+              ],
+              "len": 33,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 68.5514,
+                  "score": 166,
+                  "evalue": 1.38672e-22,
+                  "identity": 33,
+                  "positive": 33,
+                  "query_from": 1,
+                  "query_to": 33,
+                  "hit_from": 1,
+                  "hit_to": 33,
+                  "align_len": 33,
+                  "gaps": 0,
+                  "qseq": "ABCDEFGHIKLMNPQRSTVWXYZUOJMHCENQT",
+                  "hseq": "ABCDEFGHIKLMNPQRSTVWXYZUOJMHCENQT",
+                  "midline": "ABCDEFGHIKLMNPQRSTVWXYZUOJMHCENQT"
+                }
+              ]
+            },
+            {
+              "num": 2,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|4",
+                  "accession": "4",
+                  "title": "p05 a title longer than 127 bytes word00 word01 word02 word03 word04 word05 word06 word07 word08 word09 word10 word11 word12 word13 word14 word15 word16 word17 word18 word19"
+                }
+              ],
+              "len": 130,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 14.2382,
+                  "score": 25,
+                  "evalue": 0.591436,
+                  "identity": 4,
+                  "positive": 4,
+                  "query_from": 22,
+                  "query_to": 33,
+                  "hit_from": 66,
+                  "hit_to": 77,
+                  "align_len": 12,
+                  "gaps": 0,
+                  "qseq": "YZUOJMHCENQT",
+                  "hseq": "YSCTWNHWANQV",
+                  "midline": "Y     H  NQ "
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 10,
+            "db_len": 801,
+            "hsp_len": 6,
+            "eff_space": 20007,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          },
+          "message": "Query_2 p03 every letter .. :  Query_2 p03 every letter .. : One or more O characters replaced by X for alignment score calculations at positions 24 "
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/seqdb/db/prot_mv"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_3",
+          "query_title": "p08 selenocysteine pyrrolysine",
+          "query_len": 46,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|7",
+                  "accession": "7",
+                  "title": "p08 selenocysteine pyrrolysine"
+                }
+              ],
+              "len": 46,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 97.0561,
+                  "score": 240,
+                  "evalue": 1.5988e-33,
+                  "identity": 46,
+                  "positive": 46,
+                  "query_from": 1,
+                  "query_to": 46,
+                  "hit_from": 1,
+                  "hit_to": 46,
+                  "align_len": 46,
+                  "gaps": 0,
+                  "qseq": "MUGYDNEDMDNEPCNDCRACIGFRYKYMMVKWOFASVIHWKHVWDJ",
+                  "hseq": "MUGYDNEDMDNEPCNDCRACIGFRYKYMMVKWOFASVIHWKHVWDJ",
+                  "midline": "MUGYDNEDMDNEPCNDCRACIGFRYKYMMVKWOFASVIHWKHVWDJ"
+                }
+              ]
+            },
+            {
+              "num": 2,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|9",
+                  "accession": "9",
+                  "title": "p10 last protein"
+                }
+              ],
+              "len": 300,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 11.927,
+                  "score": 19,
+                  "evalue": 6.592,
+                  "identity": 4,
+                  "positive": 8,
+                  "query_from": 31,
+                  "query_to": 44,
+                  "hit_from": 155,
+                  "hit_to": 168,
+                  "align_len": 14,
+                  "gaps": 0,
+                  "qseq": "KWOFASVIHWKHVW",
+                  "hseq": "QWDKKSLMCFHQVW",
+                  "midline": "+W   S++ +  VW"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 10,
+            "db_len": 801,
+            "hsp_len": 15,
+            "eff_space": 20181,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          },
+          "message": "Query_3 p08 selenocystein.. :  Query_3 p08 selenocystein.. : One or more O characters replaced by X for alignment score calculations at positions 32 "
+        }
+      }
+    }
+  }
+]
+}

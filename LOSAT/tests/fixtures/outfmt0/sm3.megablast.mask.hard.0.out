@@ -1,0 +1,86 @@
+BLASTN 2.17.0+
+
+
+Reference: Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb
+Miller (2000), "A greedy algorithm for aligning DNA sequences", J
+Comput Biol 2000; 7(1-2):203-14.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/mask_subject.fasta).
+           1 sequences; 500 total letters
+
+
+
+Query= q_mask query with lowercase runs and a CA-repeat block
+
+Length=400
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+subj_mask subject with a CA-repeat low-complexity block               326     1e-93
+
+
+> subj_mask subject with a CA-repeat low-complexity block
+Length=500
+
+ Score = 326 bits (176),  Expect = 1e-93
+ Identities = 180/182 (99%), Gaps = 0/182 (0%)
+ Strand=Plus/Plus
+
+Query  219  TATGATACCGTGATGACATGTCCGTGCCAGTCTAGATTACCCGTCATTATTGTTACAGAG  278
+            |||||||||||||||||||||||||||||||||||||||||| |||||||||||||||||
+Sbjct  269  TATGATACCGTGATGACATGTCCGTGCCAGTCTAGATTACCCCTCATTATTGTTACAGAG  328
+
+Query  279  GATGGGTGGGTAGTGCCCTGTTCGTGCGGCTCGTCGTTCCCTCCTACGACCGGCGGCAAC  338
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||| ||||
+Sbjct  329  GATGGGTGGGTAGTGCCCTGTTCGTGCGGCTCGTCGTTCCCTCCTACGACCGGCGCCAAC  388
+
+Query  339  GGAAGGTTTTTACGGTGAAAGATGAGTCAAACTCCCGTTTCAATAAAAGAATATGATCTT  398
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  389  GGAAGGTTTTTACGGTGAAAGATGAGTCAAACTCCCGTTTCAATAAAAGAATATGATCTT  448
+
+Query  399  TG  400
+            ||
+Sbjct  449  TG  450
+
+
+ Score = 305 bits (165),  Expect = 2e-87
+ Identities = 167/168 (99%), Gaps = 0/168 (0%)
+ Strand=Plus/Plus
+
+Query  1    GATGCAAAGCCGGCTCACAAGGATGATGGGGCATAGTTAGCTTCGCCAAAGTCCATACAG  60
+            |||||||||||||||||||||||||||||| |||||||||||||||||||||||||||||
+Sbjct  51   GATGCAAAGCCGGCTCACAAGGATGATGGGCCATAGTTAGCTTCGCCAAAGTCCATACAG  110
+
+Query  61   AAGTGATACGGACTTTTGGGCAGGCCTCATCGGGTGAGTTGGGACTGGTCCGGATGAGTG  120
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  111  AAGTGATACGGACTTTTGGGCAGGCCTCATCGGGTGAGTTGGGACTGGTCCGGATGAGTG  170
+
+Query  121  TGGCAGTGTGAATATTGTAGTTTACAATATGCTGTTATATCGTGCTAG  168
+            ||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  171  TGGCAGTGTGAATATTGTAGTTTACAATATGCTGTTATATCGTGCTAG  218
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 190221
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt0/mask_subject.fasta).
+    Posted date:  Unknown
+  Number of letters in database: 500
+  Number of sequences in database:  1
+
+
+
+Matrix: blastn matrix 1 -2
+Gap Penalties: Existence: 0, Extension: 2.5

@@ -1,0 +1,5 @@
+#
+# Alias file of line DBID, N2a
+#
+TITLE pord_vx (two databases, parsed Seq-ids)
+DBLIST pord_x pord_v5

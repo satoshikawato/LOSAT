@@ -1,0 +1,21 @@
+BLAST engine error: Error: Gap existence and extension values 3 and 3 are not supported for substitution scores 1 and -1
+3 and 2 are supported existence and extension values
+2 and 2 are supported existence and extension values
+1 and 2 are supported existence and extension values
+0 and 2 are supported existence and extension values
+4 and 1 are supported existence and extension values
+3 and 1 are supported existence and extension values
+2 and 1 are supported existence and extension values
+4 and 2 are supported existence and extension values
+Any values more stringent than 4 and 2 are supported
+ Error: Gap existence and extension values 3 and 3 are not supported for substitution scores 1 and -1
+3 and 2 are supported existence and extension values
+2 and 2 are supported existence and extension values
+1 and 2 are supported existence and extension values
+0 and 2 are supported existence and extension values
+4 and 1 are supported existence and extension values
+3 and 1 are supported existence and extension values
+2 and 1 are supported existence and extension values
+4 and 2 are supported existence and extension values
+Any values more stringent than 4 and 2 are supported
+ 

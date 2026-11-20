@@ -1,0 +1,24 @@
+{
+  "version": "1.2",
+  "dbname": "psr_cbx",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "psr_cbx (parsed Seq-ids)",
+  "number-of-letters": 500,
+  "number-of-sequences": 2,
+  "last-updated": "2026-11-08T20:41:00",
+  "number-of-volumes": 1,
+  "bytes-total": 50040,
+  "bytes-to-cache": 623,
+  "files": [
+    "psr_cbx.pdb",
+    "psr_cbx.phr",
+    "psr_cbx.pin",
+    "psr_cbx.pog",
+    "psr_cbx.pos",
+    "psr_cbx.pot",
+    "psr_cbx.psq",
+    "psr_cbx.ptf",
+    "psr_cbx.pto"
+  ]
+}

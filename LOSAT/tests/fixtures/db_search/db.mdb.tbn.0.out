@@ -1,0 +1,451 @@
+TBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: multidb na; multidb nb
+           17 sequences; 11,514 total letters
+
+
+
+Query= P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName:
+Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains:
+RecName: Full=Hemopressin [Homo sapiens] >P69906.2 RecName:
+Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName:
+Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin
+[Pan paniscus] >P69907.2 RecName: Full=Hemoglobin subunit alpha;
+AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain;
+Contains: RecName: Full=Hemopressin [Pan troglodytes]
+
+Length=142
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+ENSTTEST0001.1 copy of record 1                                       286     4e-104
+ENST00000251595.11 cdna chromosome:GRCh38:16:172876:173710:1 gene...  286     4e-104
+ENST00000320868.9 cdna chromosome:GRCh38:16:176680:177522:1 gene:...  286     4e-104
+ENSDART00000113098.5 cdna chromosome:GRCz11:3:55100045:55100936:1...  152     5e-51 
+ENSDART00000101709.5 cdna chromosome:GRCz11:3:55093581:55094399:1...  151     6e-51 
+ENSDART00000125092.4 cdna chromosome:GRCz11:3:55120330:55121125:-...  144     1e-47 
+ENST00000335295.4 cdna chromosome:GRCh38:11:5225464:5227071:-1 ge...  115     2e-36 
+ENST00000336906.6 cdna chromosome:GRCh38:11:5253188:5254781:-1 ge...  113     5e-36 
+ENSDART00000053077.6 cdna chromosome:GRCz11:3:55091230:55092051:-...  102     2e-31 
+ENST00000396895.3 cdna chromosome:GRCh38:11:5268345:5269945:-1 ge...  102     3e-31 
+ENSDART00000101713.5 cdna chromosome:GRCz11:3:55103445:55104310:-...  90.1    1e-26 
+ENST00000292901.8 cdna chromosome:GRCh38:11:5232678:5234658:-1 ge...  86.7    2e-25 
+ENSDART00000066384.5 cdna chromosome:GRCz11:12:20349865:20350629:...  85.9    3e-25 
+ENST00000652335.1 cdna chromosome:GRCh38:16:142728:153964:1 gene:...  66.2    8e-18 
+FBtr0078640 cdna primary_assembly:BDGP6.54:3R:5830062:5831785:1 g...  18.1    1.4   
+FBtr0301286 cdna primary_assembly:BDGP6.54:3R:6607913:6608914:-1 ...  15.4    9.8   
+
+
+>ENSTTEST0001.1 copy of record 1
+Length=577
+
+ Score = 286 bits (732),  Expect = 4e-104, Method: Compositional matrix adjust.
+ Identities = 142/142 (100%), Positives = 142/142 (100%), Gaps = 0/142 (0%)
+ Frame = +2
+
+Query  1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+            MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG
+Sbjct  38   MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  217
+
+Query  61   KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+            KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP
+Sbjct  218  KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  397
+
+Query  121  AVHASLDKFLASVSTVLTSKYR  142
+            AVHASLDKFLASVSTVLTSKYR
+Sbjct  398  AVHASLDKFLASVSTVLTSKYR  463
+
+
+ Score = 19.2 bits (38),  Expect = 0.51, Method: Compositional matrix adjust.
+ Identities = 12/27 (44%), Positives = 14/27 (52%), Gaps = 0/27 (0%)
+ Frame = -1
+
+Query  49   LSHGSAQVKGHGKKVADALTNAVAHVD  75
+            + HG  Q  GH   VA  L  AVA V+
+Sbjct  256  VRHGVGQRVGHLLAVALNLGRAVAQVE  176
+
+
+>ENST00000251595.11 cdna chromosome:GRCh38:16:172876:173710:1 gene:ENSG00000188536.15 
+gene_biotype:protein_coding transcript_biotype:protein_coding 
+gene_symbol:HBA2 description:hemoglobin subunit alpha 
+2 [Source:HGNC Symbol;Acc:HGNC:4824]
+Length=576
+
+ Score = 286 bits (732),  Expect = 4e-104, Method: Compositional matrix adjust.
+ Identities = 142/142 (100%), Positives = 142/142 (100%), Gaps = 0/142 (0%)
+ Frame = +2
+
+Query  1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+            MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG
+Sbjct  38   MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  217
+
+Query  61   KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+            KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP
+Sbjct  218  KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  397
+
+Query  121  AVHASLDKFLASVSTVLTSKYR  142
+            AVHASLDKFLASVSTVLTSKYR
+Sbjct  398  AVHASLDKFLASVSTVLTSKYR  463
+
+
+ Score = 19.2 bits (38),  Expect = 0.51, Method: Compositional matrix adjust.
+ Identities = 12/27 (44%), Positives = 14/27 (52%), Gaps = 0/27 (0%)
+ Frame = -3
+
+Query  49   LSHGSAQVKGHGKKVADALTNAVAHVD  75
+            + HG  Q  GH   VA  L  AVA V+
+Sbjct  256  VRHGVGQRVGHLLAVALNLGRAVAQVE  176
+
+
+>ENST00000320868.9 cdna chromosome:GRCh38:16:176680:177522:1 gene:ENSG00000206172.10 
+gene_biotype:protein_coding transcript_biotype:protein_coding 
+gene_symbol:HBA1 description:hemoglobin subunit alpha 
+1 [Source:HGNC Symbol;Acc:HGNC:4823]
+ ENSDART00000101734.5 cdna chromosome:GRCz11:3:55127549:55128258:-1 gene:ENSDARG00000088330.5 
+gene_biotype:protein_coding transcript_biotype:protein_coding 
+gene_symbol:hbae1.2 description:hemoglobin, alpha 
+embryonic 1.2 [Source:ZFIN;Acc:ZDB-GENE-170302-1]
+Length=577
+
+ Score = 286 bits (732),  Expect = 4e-104, Method: Compositional matrix adjust.
+ Identities = 142/142 (100%), Positives = 142/142 (100%), Gaps = 0/142 (0%)
+ Frame = +2
+
+Query  1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+            MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG
+Sbjct  38   MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  217
+
+Query  61   KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+            KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP
+Sbjct  218  KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  397
+
+Query  121  AVHASLDKFLASVSTVLTSKYR  142
+            AVHASLDKFLASVSTVLTSKYR
+Sbjct  398  AVHASLDKFLASVSTVLTSKYR  463
+
+
+ Score = 19.2 bits (38),  Expect = 0.51, Method: Compositional matrix adjust.
+ Identities = 12/27 (44%), Positives = 14/27 (52%), Gaps = 0/27 (0%)
+ Frame = -1
+
+Query  49   LSHGSAQVKGHGKKVADALTNAVAHVD  75
+            + HG  Q  GH   VA  L  AVA V+
+Sbjct  256  VRHGVGQRVGHLLAVALNLGRAVAQVE  176
+
+
+>ENSDART00000113098.5 cdna chromosome:GRCz11:3:55100045:55100936:1 gene:ENSDARG00000097011.3 
+gene_biotype:protein_coding transcript_biotype:protein_coding 
+gene_symbol:hbaa1 description:hemoglobin, alpha 
+adult 1 [Source:ZFIN;Acc:ZDB-GENE-980526-79]
+ FBtr0337025 cdna primary_assembly:BDGP6.54:3R:6607913:6608914:-1 gene:FBgn0250846 
+gene_biotype:protein_coding transcript_biotype:protein_coding 
+gene_symbol:glob2 description:globin 2
+Length=651
+
+ Score = 152 bits (385),  Expect = 5e-51, Method: Compositional matrix adjust.
+ Identities = 76/143 (53%), Positives = 97/143 (68%), Gaps = 1/143 (1%)
+ Frame = +2
+
+Query  1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHF-DLSHGSAQVKGH  59
+            M LS  DK  VKA W K+   A E GAEAL RM   +P TKTYF H+ DLS GS  VK H
+Sbjct  116  MSLSDTDKAVVKAIWAKISPKADEIGAEALARMLTVYPQTKTYFSHWADLSPGSGPVKKH  295
+
+Query  60   GKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFT  119
+            GK +  A+  A++ +DD+   L+ALS+LHA KLRVDP NFK+LSH ++V +A   PA+FT
+Sbjct  296  GKTIMGAVGEAISKIDDLVGGLAALSELHAFKLRVDPANFKILSHNVIVVIAMLFPADFT  475
+
+Query  120  PAVHASLDKFLASVSTVLTSKYR  142
+            P VH S+DKF  +++  L+ KYR
+Sbjct  476  PEVHVSVDKFFNNLALALSEKYR  544
+
+
+>ENSDART00000101709.5 cdna chromosome:GRCz11:3:55093581:55094399:1 gene:ENSDARG00000069735.5 
+gene_biotype:protein_coding transcript_biotype:protein_coding 
+gene_symbol:hbaa2 description:hemoglobin, alpha 
+adult 2 [Source:ZFIN;Acc:ZDB-GENE-081104-38]
+Length=564
+
+ Score = 151 bits (382),  Expect = 6e-51, Method: Compositional matrix adjust.
+ Identities = 81/143 (57%), Positives = 100/143 (70%), Gaps = 1/143 (1%)
+ Frame = +3
+
+Query  1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHF-DLSHGSAQVKGH  59
+            M L+  DK  +K  WGK+ + A   G EA+ RM   +P TK YF H+ D S GSAQVK H
+Sbjct  42   MSLTAKDKAVIKGFWGKIASQADSIGQEAMGRMLTVYPQTKIYFAHWPDHSLGSAQVKKH  221
+
+Query  60   GKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFT  119
+            GK V  A+T+AV  +DD+  ALS+LSDLHA KLRVDP NFK+LSH +LVTLA H PA+FT
+Sbjct  222  GKIVMGAITDAVGKIDDLLGALSSLSDLHATKLRVDPGNFKILSHNILVTLAVHFPADFT  401
+
+Query  120  PAVHASLDKFLASVSTVLTSKYR  142
+              VH ++DKFLA++S  L  KYR
+Sbjct  402  AEVHVAVDKFLAALSAALADKYR  470
+
+
+>ENSDART00000125092.4 cdna chromosome:GRCz11:3:55120330:55121125:-1 gene:ENSDARG00000089475.6 
+gene_biotype:protein_coding transcript_biotype:protein_coding 
+gene_symbol:hbae1.1 description:hemoglobin, alpha 
+embryonic 1.1 [Source:ZFIN;Acc:ZDB-GENE-980526-80]
+Length=633
+
+ Score = 144 bits (362),  Expect = 1e-47, Method: Compositional matrix adjust.
+ Identities = 71/143 (50%), Positives = 95/143 (66%), Gaps = 1/143 (1%)
+ Frame = +2
+
+Query  1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHF-DLSHGSAQVKGH  59
+            M LS  DK  VK  W K+   A + G +AL RM + +P TKTYF H+ DLS GSA V+ H
+Sbjct  92   MSLSAKDKAAVKTLWAKIAGKADDIGHDALSRMLIVYPQTKTYFSHWKDLSPGSAPVRKH  271
+
+Query  60   GKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFT  119
+            GK V   +  AV+ +DD+   L  LS+LHA +LRVDP NFK+LSH +LV LA   PA+FT
+Sbjct  272  GKTVMGGVAEAVSKIDDLNAGLLNLSELHAFQLRVDPANFKILSHNILVVLATLFPADFT  451
+
+Query  120  PAVHASLDKFLASVSTVLTSKYR  142
+            P  H ++DKFL++++  ++ KYR
+Sbjct  452  PEAHVAMDKFLSALALAMSEKYR  520
+
+
+>ENST00000335295.4 cdna chromosome:GRCh38:11:5225464:5227071:-1 gene:ENSG00000244734.6 
+gene_biotype:protein_coding transcript_biotype:protein_coding 
+gene_symbol:HBB description:hemoglobin subunit beta 
+[Source:HGNC Symbol;Acc:HGNC:4827]
+Length=628
+
+ Score = 115 bits (287),  Expect = 2e-36, Method: Compositional matrix adjust.
+ Identities = 63/145 (43%), Positives = 88/145 (61%), Gaps = 8/145 (6%)
+ Frame = +3
+
+Query  3    LSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHF-DLS-----HGSAQV  56
+            L+P +K+ V A WGKV  +  E G EAL R+ + +P T+ +F  F DLS      G+ +V
+Sbjct  60   LTPEEKSAVTALWGKV--NVDEVGGEALGRLLVVYPWTQRFFESFGDLSTPDAVMGNPKV  233
+
+Query  57   KGHGKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPA  116
+            K HGKKV  A ++ +AH+D++    + LS+LH  KL VDP NF+LL + L+  LA H   
+Sbjct  234  KAHGKKVLGAFSDGLAHLDNLKGTFATLSELHCDKLHVDPENFRLLGNVLVCVLAHHFGK  413
+
+Query  117  EFTPAVHASLDKFLASVSTVLTSKY  141
+            EFTP V A+  K +A V+  L  KY
+Sbjct  414  EFTPPVQAAYQKVVAGVANALAHKY  488
+
+
+>ENST00000336906.6 cdna chromosome:GRCh38:11:5253188:5254781:-1 gene:ENSG00000196565.16 
+gene_biotype:protein_coding transcript_biotype:protein_coding 
+gene_symbol:HBG2 description:hemoglobin subunit gamma 
+2 [Source:HGNC Symbol;Acc:HGNC:4832]
+Length=586
+
+ Score = 113 bits (283),  Expect = 5e-36, Method: Compositional matrix adjust.
+ Identities = 60/145 (41%), Positives = 85/145 (59%), Gaps = 8/145 (6%)
+ Frame = +3
+
+Query  3    LSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHF-DLSHGSA-----QV  56
+             +  DK  + + WGKV     + G E L R+ + +P T+ +F  F +LS  SA     +V
+Sbjct  63   FTEEDKATITSLWGKVNVE--DAGGETLGRLLVVYPWTQRFFDSFGNLSSASAIMGNPKV  236
+
+Query  57   KGHGKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPA  116
+            K HGKKV  +L +A+ H+DD+    + LS+LH  KL VDP NFKLL + L+  LA H   
+Sbjct  237  KAHGKKVLTSLGDAIKHLDDLKGTFAQLSELHCDKLHVDPENFKLLGNVLVTVLAIHFGK  416
+
+Query  117  EFTPAVHASLDKFLASVSTVLTSKY  141
+            EFTP V AS  K +  V++ L+S+Y
+Sbjct  417  EFTPEVQASWQKMVTGVASALSSRY  491
+
+
+>ENSDART00000053077.6 cdna chromosome:GRCz11:3:55091230:55092051:-1 gene:ENSDARG00000069734.5 
+gene_biotype:protein_coding transcript_biotype:protein_coding 
+gene_symbol:hbba2 description:hemoglobin, beta 
+adult 2 [Source:ZFIN;Acc:ZDB-GENE-040801-164]
+Length=650
+
+ Score = 102 bits (255),  Expect = 2e-31, Method: Compositional matrix adjust.
+ Identities = 56/144 (39%), Positives = 81/144 (56%), Gaps = 8/144 (6%)
+ Frame = +3
+
+Query  4    SPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHF-DLSHGSA-----QVK  57
+            S +++  + + W K+  +  E G + L R+ + +P T+ YF  F DLS  SA     +V 
+Sbjct  144  SDSERKTIASVWSKI--NVDEIGPQTLARVLVVYPWTQRYFGAFGDLSCASAIMGNPKVS  317
+
+Query  58   GHGKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAE  117
+             HGK V  AL  AV +VDD+    + LS LH  KL VDP NFKLL+ CL + +A +    
+Sbjct  318  EHGKTVLKALEKAVKNVDDIKTTYAKLSQLHCEKLNVDPDNFKLLADCLSIVIATNFGPA  497
+
+Query  118  FTPAVHASLDKFLASVSTVLTSKY  141
+            F P+V ++  K L+ V   LTS+Y
+Sbjct  498  FNPSVQSTWQKLLSVVVAALTSRY  569
+
+
+>ENST00000396895.3 cdna chromosome:GRCh38:11:5268345:5269945:-1 gene:ENSG00000213931.7 
+gene_biotype:protein_coding transcript_biotype:protein_coding 
+gene_symbol:HBE1 description:hemoglobin subunit epsilon 
+1 [Source:HGNC Symbol;Acc:HGNC:4830]
+Length=623
+
+ Score = 102 bits (253),  Expect = 3e-31, Method: Compositional matrix adjust.
+ Identities = 55/141 (39%), Positives = 84/141 (60%), Gaps = 8/141 (6%)
+ Frame = +2
+
+Query  7    DKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHF-DLSH-----GSAQVKGHG  60
+            +K  V + W K+     E G EAL R+ + +P T+ +F  F +LS      G+ +VK HG
+Sbjct  77   EKAAVTSLWSKMNVE--EAGGEALGRLLVVYPWTQRFFDSFGNLSSPSAILGNPKVKAHG  250
+
+Query  61   KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+            KKV  +  +A+ ++D++  A + LS+LH  KL VDP NFKLL + +++ LA H   EFTP
+Sbjct  251  KKVLTSFGDAIKNMDNLKPAFAKLSELHCDKLHVDPENFKLLGNVMVIILATHFGKEFTP  430
+
+Query  121  AVHASLDKFLASVSTVLTSKY  141
+             V A+  K +++V+  L  KY
+Sbjct  431  EVQAAWQKLVSAVAIALAHKY  493
+
+
+>ENSDART00000101713.5 cdna chromosome:GRCz11:3:55103445:55104310:-1 gene:ENSDARG00000089087.7 
+gene_biotype:protein_coding transcript_biotype:protein_coding 
+gene_symbol:hbba1 description:hemoglobin, beta 
+adult 1 [Source:ZFIN;Acc:ZDB-GENE-990415-18]
+Length=667
+
+ Score = 90.1 bits (222),  Expect = 1e-26, Method: Compositional matrix adjust.
+ Identities = 52/143 (36%), Positives = 79/143 (55%), Gaps = 9/143 (6%)
+ Frame = +3
+
+Query  6    ADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHF-DLSH-----GSAQVKGH  59
+            A++T +   WGK+  +  E G +AL R  + +P T+ YF  F +LS      G+ +V  H
+Sbjct  126  AERTAILGLWGKL--NIDEIGPQALSRCLIVYPWTQRYFATFGNLSSPAAIMGNPKVAAH  299
+
+Query  60   GKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHL-PAEF  118
+            G+ V   L  A+ ++D++ N  +ALS +H+ KL VDP NF+LL+ C+ V  A     A F
+Sbjct  300  GRTVMGGLERAIKNMDNVKNTYAALSVMHSEKLHVDPDNFRLLADCITVCAAMKFGQAGF  479
+
+Query  119  TPAVHASLDKFLASVSTVLTSKY  141
+               V  +  KFLA V + L  +Y
+Sbjct  480  NADVQEAWQKFLAVVVSALCRQY  548
+
+
+>ENST00000292901.8 cdna chromosome:GRCh38:11:5232678:5234658:-1 gene:ENSG00000223609.12 
+gene_biotype:protein_coding transcript_biotype:protein_coding 
+gene_symbol:HBD description:hemoglobin subunit delta 
+[Source:HGNC Symbol;Acc:HGNC:4829]
+Length=661
+
+ Score = 86.7 bits (213),  Expect = 2e-25, Method: Compositional matrix adjust.
+ Identities = 47/105 (45%), Positives = 65/105 (62%), Gaps = 8/105 (8%)
+ Frame = +1
+
+Query  3    LSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHF-DLSH-----GSAQV  56
+            L+P +KT V A WGKV   A   G EAL R+ + +P T+ +F  F DLS      G+ +V
+Sbjct  235  LTPEEKTAVNALWGKVNVDA--VGGEALGRLLVVYPWTQRFFESFGDLSSPDAVMGNPKV  408
+
+Query  57   KGHGKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKL  101
+            K HGKKV  A ++ +AH+D++    S LS+LH  KL VDP NF++
+Sbjct  409  KAHGKKVLGAFSDGLAHLDNLKGTFSQLSELHCDKLHVDPENFRV  543
+
+
+>ENSDART00000066384.5 cdna chromosome:GRCz11:12:20349865:20350629:-1 gene:ENSDARG00000045143.5 
+gene_biotype:protein_coding transcript_biotype:protein_coding 
+gene_symbol:hbbe2 description:hemoglobin beta 
+embryonic-2 [Source:ZFIN;Acc:ZDB-GENE-040702-1]
+Length=590
+
+ Score = 85.9 bits (211),  Expect = 3e-25, Method: Compositional matrix adjust.
+ Identities = 48/124 (39%), Positives = 72/124 (58%), Gaps = 6/124 (5%)
+ Frame = +2
+
+Query  24   EYGAEALERMFLSFPTTKTYFPHF-DLSHGSA-----QVKGHGKKVADALTNAVAHVDDM  77
+            E G +AL+R  + +P T+ YF  F +L +  A     +V  HG  V   L  A+ ++DD+
+Sbjct  143  EAGPKALQRALIVYPWTQRYFGSFGNLYNAEAIINNPKVAAHGTVVLHGLDRAMKNMDDI  322
+
+Query  78   PNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTPAVHASLDKFLASVSTVL  137
+             N  + LS LH+ KL VDP NF+LL+ CL + +A+ + A FT  + A+  KFLA V + L
+Sbjct  323  KNTYAELSVLHSEKLHVDPDNFRLLADCLTIVIASTMGAAFTADMQAAWQKFLAVVVSAL  502
+
+Query  138  TSKY  141
+              +Y
+Sbjct  503  QRQY  514
+
+
+>ENST00000652335.1 cdna chromosome:GRCh38:16:142728:153964:1 gene:ENSG00000130656.7 
+gene_biotype:protein_coding transcript_biotype:protein_coding 
+gene_symbol:HBZ description:hemoglobin subunit zeta [Source:HGNC 
+Symbol;Acc:HGNC:4835]
+Length=547
+
+ Score = 66.2 bits (160),  Expect = 8e-18, Method: Compositional matrix adjust.
+ Identities = 29/56 (52%), Positives = 37/56 (66%), Gaps = 0/56 (0%)
+ Frame = +2
+
+Query  1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQV  56
+            M L+  ++T + + W K+   A   G E LER+FLS P TKTYFPHFDL  GSAQ+
+Sbjct  380  MSLTKTERTIIVSMWAKISTQADTIGTETLERLFLSHPQTKTYFPHFDLHPGSAQL  547
+
+
+ Score = 15.4 bits (28),  Expect = 9.3, Method: Compositional matrix adjust.
+ Identities = 7/16 (44%), Positives = 9/16 (56%), Gaps = 0/16 (0%)
+ Frame = +1
+
+Query  35   LSFPTTKTYFPHFDLS  50
+            LSFPT+      + LS
+Sbjct  148  LSFPTSNRVQSRWSLS  195
+
+
+>FBtr0078640 cdna primary_assembly:BDGP6.54:3R:5830062:5831785:1 gene:FBgn0037385 
+gene_biotype:protein_coding transcript_biotype:protein_coding 
+gene_symbol:glob3 description:globin 3
+Length=1118
+
+ Score = 18.1 bits (35),  Expect = 1.4, Method: Compositional matrix adjust.
+ Identities = 9/37 (24%), Positives = 17/37 (46%), Gaps = 4/37 (11%)
+ Frame = +3
+
+Query  1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSF  37
+            M  + +++  ++ AW  V      YG +    +F SF
+Sbjct  192  MGFTLSERLALRQAWNLVRPFERRYGQD----VFYSF  290
+
+
+>FBtr0301286 cdna primary_assembly:BDGP6.54:3R:6607913:6608914:-1 gene:FBgn0250846 
+gene_biotype:protein_coding transcript_biotype:protein_coding 
+gene_symbol:glob2 description:globin 2
+Length=823
+
+ Score = 15.4 bits (28),  Expect = 9.8, Method: Compositional matrix adjust.
+ Identities = 6/20 (30%), Positives = 10/20 (50%), Gaps = 0/20 (0%)
+ Frame = +2
+
+Query  36   SFPTTKTYFPHFDLSHGSAQ  55
+            +FP      P  DLS+ + +
+Sbjct  167  NFPVYPKPLPDRDLSYKADE  226
+
+
+
+Lambda      K        H        a         alpha
+   0.319    0.130    0.385    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 336945
+
+
+  Database: multidb na
+    Posted date:  Nov 1, 2026  11:22 AM
+  Number of letters in database: 4,849
+  Number of sequences in database:  8
+
+  Database: multidb nb
+    Posted date:  Nov 1, 2026  11:22 AM
+  Number of letters in database: 6,665
+  Number of sequences in database:  9
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 13
+Window for multiple hits: 40

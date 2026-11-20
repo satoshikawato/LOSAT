@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Compare LOSAT with the frozen NCBI outfmt 0 and 7 fixtures (LOSAT/tests/outfmt0_manifest.tsv).
+"""Compare LOSAT with the frozen NCBI -subject fixtures (LOSAT/tests/outfmt0_manifest.tsv: outfmt 0, 6
+and 7, and 8, 9 and 12 in the rows sa.* (8 and 12 in ulp.*), 5 for all five programs, 15 and 16 (BLAST JSON and XML2) for
+all five programs, 13 and 14 (the same as side files and a master file) for every program, and 17 (SAM) for
+BLASTN, whose @PG CL tag is not compared).
 
 Every fixture runs from LOSAT/ as `LOSAT <program> <search_argv>` (the arguments of the
 oracle run). Its stdout must equal LOSAT/tests/fixtures/outfmt0/<fixture_id>.out byte for
@@ -7,14 +10,29 @@ byte, and its stderr must equal <fixture_id>.err when the manifest records stder
 (otherwise LOSAT must write nothing to stderr). Prints one line per fixture, with the
 first differing line of a difference, and exits 1 on any difference.
 
+A row whose `files` column is `xinclude` (outfmt 13 or 14) runs with `-out <tmp>/<fixture_id>.out`;
+its master file must equal <fixture_id>.out, each side file <fixture_id>.out_<n>.json|xml, their
+number the frozen number, and standard output must be empty (LOSAT/tests/xinclude_fixtures.py).
+A psiblast row whose `files` column is `pssm` runs with `-out_ascii_pssm <tmp>/<fixture_id>.pssm`
+(`pssm-asn`: `-out_pssm <tmp>/<fixture_id>.asn`; `pssm-both`: both); its report is compared as usual,
+and the PSSM files it writes must be those of `side_sha256` byte for byte (none when it is empty):
+the frozen ones, or in the kinds `pssm-asn` and `pssm-both` a file over 64 KB by its SHA-256 alone. With `--library` LOSAT is `examples/library_command_line`, the
+same search through the library API, which writes the PSSM files, runs psiblast's rounds and
+searches a PSSM query (`-in_pssm`, a query cell `pssm-gz:` or `pssm:`; the library's `Inputs::pssm`)
+as the command line.
+
 A row with the contract `approved_db_gencode_deviation` (AGENTS.md's approved TBLASTX
 exception: LOSAT's local search applies a non-default -db_gencode to the subject) is
 compared with <fixture_id>.db.out instead, NCBI's search with the subject as a database,
 outside the lines that name the database (`normalize_database_lines`); its line says
 `exception` and how many lines differ from NCBI's local search (<fixture_id>.out).
 
-Usage: check_losat.py --losat LOSAT [--programs blastn,blastp,tblastn,tblastx] [--threads N]
-       [--only PREFIX]
+`--outfmts 5,13` keeps only the rows whose output format (the number that starts the `outfmt` cell, 0 when it is
+empty) is one of those numbers (`LOSAT/tests/check_wasm_threading.py` runs blastx's XML, XML2 and JSON rows through
+the WASI commands so).
+
+Usage: check_losat.py --losat LOSAT [--programs blastn,blastp,tblastn,tblastx,blastx,psiblast] [--threads N]
+       [--only PREFIX] [--outfmts N,...] [--library]
 """
 from __future__ import annotations
 
@@ -24,7 +42,7 @@ import sys
 from pathlib import Path
 import subprocess
 
-from run_oracle import DEVIATION, ENGINE, read_manifest, search_argv
+from run_oracle import DEVIATION, ENGINE, is_sam_outfmt, outfmt, read_manifest, search_argv, strip_sam_cl, xinclude
 
 FIXTURES = ENGINE / "tests/fixtures/outfmt0"
 
@@ -65,21 +83,42 @@ def normalize_database_lines(report: bytes) -> bytes:
     return b"\n".join(kept)
 
 
+def selected_rows(rows: list[dict[str, str]], programs: str, only: str = "", outfmts: str = "") -> list[dict[str, str]]:
+    """The rows of `programs` (names separated by commas) whose id starts with `only`, and, when `outfmts` names
+    numbers separated by commas, whose output format (the first word of `outfmt`) is one of them."""
+    names = set(programs.split(","))
+    formats = [number for number in outfmts.split(",") if number]
+    return [row for row in rows
+            if row["program"] in names and row["fixture_id"].startswith(only)
+            and (not formats or outfmt(row).split()[0] in formats)]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--losat", type=Path, required=True)
-    parser.add_argument("--programs", default="blastn,blastp,tblastn,tblastx")
+    parser.add_argument("--programs", default="blastn,blastp,tblastn,tblastx,blastx,psiblast")
     parser.add_argument("--threads", type=int)
     parser.add_argument("--only", default="")
+    parser.add_argument("--outfmts", default="",
+                        help="only the rows of these output formats, numbers separated by commas (default: all)")
+    parser.add_argument("--library", action="store_true",
+                        help="--losat is examples/library_command_line (the search through the library API)")
     args = parser.parse_args()
-    programs = set(args.programs.split(","))
     differing = []
-    rows = [row for row in read_manifest()[2]
-            if row["program"] in programs and row["fixture_id"].startswith(args.only)]
+    rows = selected_rows(read_manifest()[2], args.programs, args.only, args.outfmts)
     for row in rows:
         threads = ["-num_threads", str(args.threads)] if args.threads else []
-        run = subprocess.run([str(args.losat.resolve()), row["program"], *search_argv(row), *threads],
-                             cwd=ENGINE, capture_output=True)
+        command = [str(args.losat.resolve()), row["program"], *search_argv(row), *threads]
+        files = xinclude.wants_files(row)
+        pssm = xinclude.wants_pssm(row)
+        if files:
+            written = xinclude.run_with_files(command, row["fixture_id"], outfmt(row), cwd=ENGINE)
+            run = written.run
+        elif pssm:
+            pssms = xinclude.run_with_pssm(command, row["fixture_id"], xinclude.files_kind(row), cwd=ENGINE)
+            run = pssms.run
+        else:
+            run = subprocess.run(command, cwd=ENGINE, capture_output=True)
         expected_err_path = FIXTURES / f"{row['fixture_id']}.err"
         expected_err = expected_err_path.read_bytes() if row["stderr_sha256"] else b""
         expected_out = (FIXTURES / f"{row['fixture_id']}.out").read_bytes()
@@ -93,10 +132,19 @@ def main() -> int:
             observed, expected = normalize_database_lines(run.stdout), normalize_database_lines(database_out)
             if observed != expected:
                 problems.append("stdout (database oracle) " + first_difference(expected, observed))
+        elif files:
+            problems += xinclude.problems(written, row, FIXTURES, first_difference)
+        elif is_sam_outfmt(outfmt(row)):
+            # A SAM row (outfmt 17) differs from NCBI's in the CL tag of its @PG line only
+            # (`strip_sam_cl`): LOSAT writes its own command line.
+            if strip_sam_cl(run.stdout) != strip_sam_cl(expected_out):
+                problems.append("stdout " + first_difference(strip_sam_cl(expected_out), strip_sam_cl(run.stdout)))
         elif run.stdout != expected_out:
             problems.append("stdout " + first_difference(expected_out, run.stdout))
         if run.returncode == 0 and run.stderr != expected_err:
             problems.append("stderr " + first_difference(expected_err, run.stderr))
+        if pssm:
+            problems += xinclude.pssm_problems(pssms, row, FIXTURES, first_difference)
         if problems:
             differing.append(row["fixture_id"])
         status = "DIFF" if problems else "same"

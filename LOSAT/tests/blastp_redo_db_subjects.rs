@@ -1,0 +1,252 @@
+//! blastp `-db` searches whose composition redo reads each match's subject from the database
+//! (`src/algorithm/blastp/x_redo_subjects.rs`; the variable `LOSAT_X_BPREDODBSUBJ` graduated on
+//! 2026-10-27).
+//!
+//! The composition redo reads the subject of each match from the database when it redoes the
+//! match, and the reports read the subjects of the final hit lists again. These tests compare the
+//! reports of every redo path (the one-thread loop, `LOSAT_X_BPREDOPAR`, the query-parallel and
+//! the match-parallel redo of `LOSAT_X_BPREDOPAR=0`) and of each set of residues the reports keep
+//! (tabular rows of the default fields and Seq-aligns: the subjects with an O and those of the
+//! HSPs whose query has one; outfmt 0 and other tabular fields (XML reads the same set): every
+//! final subject; the records of `LOSAT_X_BPLISTEDLEAN=0`: every listed subject; the recount of
+//! the HSPs with a pyrrolysine on proteins made for it) with the report of the one-thread search of
+//! the same query and format, which the frozen NCBI `-db` fixtures hold (`db.o_stored.*` for the
+//! stored O). There is no rule (class `always`): every `-db` run takes this path.
+//!
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1381-1385
+//! ```c
+//!         if( program_number == eBlastTypeTblastn ) {
+//!             seq_info->seq_arg.encoding = eBlastEncodingNcbi4na;
+//!         } else {
+//!             seq_info->seq_arg.encoding = eBlastEncodingProtein;
+//!         }
+//! ```
+
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+mod temp_support;
+use temp_support::{TempFile, TempPath};
+
+fn fixture(name: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fasta")
+        .join(name)
+}
+
+/// What one run printed: the report and standard error.
+struct Run {
+    stdout: Vec<u8>,
+    stderr: String,
+    /// The run's worker log, when the test made one: kept until the caller has done with the run,
+    /// and kept on disk when a test panics.
+    _log: Option<TempFile>,
+}
+
+/// A directory of the test `test` (the tests of this file run in parallel), removed with what is
+/// in it when the value is dropped.
+fn work_dir(test: &str) -> TempPath {
+    let dir =
+        std::env::temp_dir().join(format!("losat-bpredodbsubj-{}-{test}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    TempPath::new(dir)
+}
+
+/// A protein database of the fixture's subject proteome (`MejoMJNV.faa`, 124 sequences), made with
+/// `LOSAT makeblastdb` in `dir`; returns the database name.
+fn subject_database(dir: &Path) -> PathBuf {
+    protein_database(&fixture("MejoMJNV.faa"), &dir.join("MejoMJNV"))
+}
+
+/// A protein database of the records of `fasta`, made with `LOSAT makeblastdb` as `name`; returns
+/// `name`.
+fn protein_database(fasta: &Path, name: &Path) -> PathBuf {
+    let name = name.to_path_buf();
+    let output = Command::new(env!("CARGO_BIN_EXE_losat"))
+        .arg("makeblastdb")
+        .arg("-in")
+        .arg(fasta)
+        .args(["-dbtype", "prot"])
+        .arg("-out")
+        .arg(&name)
+        .output()
+        .expect("run LOSAT makeblastdb");
+    assert!(
+        output.status.success(),
+        "makeblastdb: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    name
+}
+
+/// `count` records of the fixture's query proteome (`MeenMJNV.faa`) from BDT62584.1 on (more
+/// subjects of the database than any other: 12 in its preliminary list), written to `dir`. One is a
+/// search with one query, whose matches the redo of `LOSAT_X_BPREDOPAR=0` parallelizes; two (with
+/// BDT62585.1, which has subjects too) take its query-parallel redo.
+fn queries(dir: &Path, count: usize) -> PathBuf {
+    let text = std::fs::read_to_string(fixture("MeenMJNV.faa")).unwrap();
+    let start = text
+        .find(">BDT62584.1 ")
+        .expect("the record is in the fixture");
+    let mut end = start;
+    for _ in 0..count {
+        end = text[end + 1..]
+            .find("\n>")
+            .map_or(text.len(), |at| end + 1 + at + 1);
+    }
+    let path = dir.join(format!("queries_{count}.faa"));
+    std::fs::write(&path, &text[start..end]).unwrap();
+    path
+}
+
+/// One blastp run of `query` against the database `db`, with `vars` as its only `LOSAT_*` variables
+/// that choose a code path, at most 5 subjects per query (so that subjects of the preliminary lists
+/// leave the final ones) and `-outfmt outfmt`; it must exit with 0. `LOSAT_BLASTX_WORKER_LOG`
+/// stays: a binary built with the `blastx-worker-probe` feature (`cargo test --all-features`, as in
+/// CI) needs that file name as soon as a search has more than one thread, and it selects nothing.
+fn blastp(query: &Path, db: &Path, threads: u32, vars: &[(&str, &str)], outfmt: &str) -> Run {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
+    for (name, _) in std::env::vars_os() {
+        let text = name.to_string_lossy();
+        if (text.starts_with("LOSAT_") && name != "LOSAT_BLASTX_WORKER_LOG")
+            || text == "BATCH_SIZE"
+            || text == "CHUNK_SIZE"
+            || text == "OVERLAP_CHUNK_SIZE"
+        {
+            command.env_remove(name);
+        }
+    }
+    // A worker log of this run when the environment names none: it goes with the `Run`, is removed
+    // when the `Run` is dropped, and is kept when the test panics.
+    let log = std::env::var_os("LOSAT_BLASTX_WORKER_LOG")
+        .is_none()
+        .then(|| {
+            let log = TempFile::keep_on_failure("losat-bpredodbsubj-worker", "worker.log");
+            command.env("LOSAT_BLASTX_WORKER_LOG", &log);
+            log
+        });
+    let output = command
+        .arg("blastp")
+        .arg("-query")
+        .arg(query)
+        .arg("-db")
+        .arg(db)
+        .args([
+            "-evalue",
+            "0.001",
+            "-max_target_seqs",
+            "5",
+            "-outfmt",
+            outfmt,
+        ])
+        .args(["-num_threads", &threads.to_string()])
+        .envs(vars.iter().copied())
+        .output()
+        .expect("run LOSAT");
+    let run = Run {
+        stdout: output.stdout,
+        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        _log: log,
+    };
+    assert!(
+        output.status.success(),
+        "{vars:?} threads {threads} outfmt {outfmt}: {:?} {}",
+        output.status.code(),
+        run.stderr
+    );
+    run
+}
+
+#[test]
+fn reports_with_reads_per_match_are_the_one_thread_reports() {
+    let dir = work_dir("reports");
+    let db = subject_database(&dir);
+    let one = queries(&dir, 1);
+    let two = queries(&dir, 2);
+    // Each redo path and each set of residues that the reports keep once. With
+    // `LOSAT_WASI_THREADS_DEBUG=1` the `[losat-thread-stage]` lines name the paths: kappa-redo-par
+    // takes precedence over kappa-match-redo and kappa-query-redo, which are printed before it. The
+    // search lists and reads the subjects search by search, the same for a block of the block
+    // search (the default; every other `-db` test of blastp runs it in it) and for the one
+    // search of all queries of `LOSAT_X_BPQBLOCK=0`, so no case needs more than two queries.
+    for (query, outfmt, threads, vars) in [
+        // `LOSAT_X_BPREDOPAR` (kappa-redo-par) over two queries of one batch, the default fields.
+        (&two, "6", 4, &[][..]),
+        // The query-parallel redo of `LOSAT_X_BPREDOPAR=0` (kappa-query-redo), outfmt 0.
+        (&two, "0", 2, &[("LOSAT_X_BPREDOPAR", "0")][..]),
+        // Its redo of one query's matches (kappa-match-redo), Seq-aligns.
+        (&one, "8", 2, &[("LOSAT_X_BPREDOPAR", "0")][..]),
+        // The one-thread loop, other tabular fields.
+        (&one, "6 qseqid sseqid slen stitle sseq", 1, &[][..]),
+        // `LOSAT_X_BPREDOPAR`, the records of `LOSAT_X_BPLISTEDLEAN=0`.
+        (&one, "6", 2, &[("LOSAT_X_BPLISTEDLEAN", "0")][..]),
+    ] {
+        let what = format!("{query:?} outfmt {outfmt} threads {threads} {vars:?}");
+        let reference = blastp(query, &db, 1, &[], outfmt);
+        assert!(!reference.stdout.is_empty(), "{what}: an empty report");
+        let run = blastp(query, &db, threads, vars, outfmt);
+        assert!(run.stdout == reference.stdout, "{what}: report");
+        assert_eq!(run.stderr, reference.stderr, "{what}: standard error");
+    }
+}
+
+/// The letters before position 27 of the proteins of
+/// `pyrrolysine_recounts_do_not_depend_on_the_threads`.
+const PREFIX: &str = "MKTAYIAKQRQISFVKSHFSRQLEDN";
+/// The letters after position 27.
+const SUFFIX: &str = "GLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQFEVVHSLAKWKRQTLGQHDFSAGEGLYTHMKALRPDEDRLSPLHSVYVDQWDWERVMGDGERQFSTLKSTVEAIWAGIKATEAAVSEEFGLAPFLPDQIHFVHSQELLSRYPDLDAKGRERAIAKDLGAVFLVGIGGKLSDGHRHDVRAPDYDDWSTPSELGHAGLNGDILVWNPVLEDAFELSSMGIRVDADTLKHQLALTGDEDRLELEWHQALLRGEMPQTIGGGIGQSRLTMLLLQLPHIGQVQAGVWPAACVRESVPALL";
+
+// The reports recount the identities of the HSPs whose query or subject has a pyrrolysine (O), which
+// the search reads as X: a query O against a subject X is not identical in NCBI's reports. With the
+// tabular rows of the default fields the reports keep the residues of the subjects with an O and of
+// the subjects of the HSPs whose query has one; these tests compare those rows (and those of other
+// formats) at one thread and at the thread counts of the cases.
+#[test]
+fn pyrrolysine_recounts_do_not_depend_on_the_threads() {
+    let dir = work_dir("pyrrolysine");
+    let with_o_at_128 = format!("{}O{}", &SUFFIX[..100], &SUFFIX[101..]);
+    let subjects = format!(
+        ">sx X at 27\n{PREFIX}X{SUFFIX}\n>so O at 128\n{PREFIX}G{with_o_at_128}\n\
+         >s2 other\nMSTNPKPQRKTKRNTNRRPQDVKFPGGGQIVGGVYLLPRRGPRLGVRATRKTSERSQPRGRRQPIPKARRPEGRTWAQPGYPWPLYGNEGCGWAGWLLSPRGSRPSWGPTDPRRRSRNLGKVIDTLTCGFADLMGYIPLVGAPLGGAARALAHGVRVLEDGVNYATGNLPGCSFSIFLLALLSCLTVPASA\n"
+    );
+    std::fs::write(dir.join("subjects.faa"), subjects).unwrap();
+    let db = protein_database(&dir.join("subjects.faa"), &dir.join("subjects"));
+    // qx holds an X where so holds its O: the recount of qx x so reads so's letters, which only a
+    // read of the redo that found the O keeps.
+    let with_x_at_128 = format!("{}X{}", &SUFFIX[..100], &SUFFIX[101..]);
+    let queries = format!(
+        ">qo O at 27\n{PREFIX}O{SUFFIX}\n>qg G at 27\n{PREFIX}G{SUFFIX}\n>qx X at 128\n{PREFIX}G{with_x_at_128}\n"
+    );
+    let query = dir.join("queries.faa");
+    std::fs::write(&query, queries).unwrap();
+    for (outfmt, threads) in [
+        ("6", 1),
+        ("6", 2),
+        ("7", 1),
+        ("6 qseqid sseqid pident nident mismatch positive", 2),
+        ("0", 1),
+    ] {
+        let what = format!("outfmt {outfmt} threads {threads}");
+        let off = blastp(&query, &db, 1, &[], outfmt);
+        if outfmt == "6" {
+            // The recount ran: qo's O against sx's X and qx's X against so's O are mismatches.
+            for pair in ["qo\tsx\t", "qx\tso\t"] {
+                let row = String::from_utf8_lossy(&off.stdout)
+                    .lines()
+                    .find(|row| row.starts_with(pair))
+                    .map(str::to_string)
+                    .unwrap_or_else(|| panic!("{what}: no {pair:?} row"));
+                assert!(!row.contains("\t100.000\t"), "{what}: {row}");
+            }
+        }
+        let on = blastp(&query, &db, threads, &[], outfmt);
+        assert!(
+            on.stdout == off.stdout,
+            "{what}: report\n{}\n{}",
+            String::from_utf8_lossy(&on.stdout),
+            String::from_utf8_lossy(&off.stdout)
+        );
+        assert_eq!(on.stderr, off.stderr, "{what}: standard error");
+    }
+}

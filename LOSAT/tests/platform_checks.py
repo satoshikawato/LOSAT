@@ -3,20 +3,18 @@
 
 Standard library only; it runs with the stock Python of the Linux, Windows and macOS runners.
 
-run: for each case of platform_check_cases.json, run the binary with the performance switches on
-(the default) and with LOSAT_X_DEFAULT=0 (the reference paths), at 1 and 4 threads, and require
-exit code 0 and one output (one SHA-256) over all four runs.  Each --extra-mode NAME=VAR=VALUE
-adds a mode: the default plus that one variable (such as LOSAT_X_DPNEON=0 on aarch64, which keeps
-the other switches on and runs the scalar X-drop), whose outputs must equal the others too.  Writes DIR/rows.tsv with
-the columns case, threads, mode, exit_code, sha256, seconds.  Exit code 1 on any difference or
-failure.
+run: for each case of platform_check_cases.json, run the binary with the performance switches as
+they are by default, at 1 and 4 threads, and require exit code 0 and one output (one SHA-256) over
+both runs.  Each --extra-mode NAME=VAR=VALUE adds a mode: the default plus that one variable (such
+as LOSAT_X_DPNEON2=0 on aarch64, which runs the 128-bit NEON kernels instead of the register
+pairs), whose outputs must equal the others too.  Writes DIR/rows.tsv with the columns case,
+threads, mode, exit_code, sha256, seconds.  Exit code 1 on any difference or failure.
 
 compare: reads the rows.tsv of several platforms and requires, for every (case, threads, mode),
-the same SHA-256 on all of them.  The default and reference modes must be in every table; an
-extra mode is compared among the tables that have it.  No expected hash is stored: the frozen
-hashes are checked on Linux by ci.yml (ci_fast_regressions.py).  Exit code 1 when a table is
-missing or empty, the tables do not hold the same default and reference keys, or any hash
-differs; the differing rows are printed.
+the same SHA-256 on all of them.  The default mode must be in every table; an extra mode is
+compared among the tables that have it.  No expected hash is stored: the frozen hashes are checked
+on Linux by ci.yml (ci_fast_regressions.py).  Exit code 1 when a table is missing or empty, the
+tables do not hold the same default keys, or any hash differs; the differing rows are printed.
 
 usage:
   platform_checks.py run --losat BIN --out DIR [--cases FILE] [--limit N] [--timeout SECONDS]
@@ -36,8 +34,19 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 CASES = Path(__file__).resolve().parent / "platform_check_cases.json"
 THREADS = (1, 4)
-MODES = ("default", "reference")
+MODES = ("default",)
 HEADER = ["case", "threads", "mode", "exit_code", "sha256", "seconds"]
+
+
+def input_path(arg: str) -> str:
+    """An argument naming a file under LOSAT/tests/ becomes a path relative to the working directory
+    (ROOT/LOSAT), with forward slashes (Rust opens those on Windows too).  An absolute path would
+    differ per runner (/home/runner/..., /Users/runner/..., D:\\a\\...) and -outfmt 7 prints the
+    input path in its "# Database:" comment line, so the same output would hash differently."""
+    prefix = "LOSAT/"
+    if arg.startswith(prefix + "tests/"):
+        return arg[len(prefix):]
+    return arg
 
 
 def run_command(args: argparse.Namespace) -> int:
@@ -49,10 +58,9 @@ def run_command(args: argparse.Namespace) -> int:
     cases = json.loads(Path(args.cases).read_text())
     if args.limit is not None:
         cases = cases[: args.limit]
-    # Every LOSAT_* variable of the caller is dropped; the reference mode and the extra modes set
-    # the only ones used.
+    # Every LOSAT_* variable of the caller is dropped; the extra modes set the only ones used.
     base = {k: v for k, v in os.environ.items() if not k.startswith("LOSAT_")}
-    modes = {"default": {}, "reference": {"LOSAT_X_DEFAULT": "0"}}
+    modes = {"default": {}}
     for spec in args.extra_mode:
         name, _, assignment = spec.partition("=")
         var, sep, value = assignment.partition("=")
@@ -62,7 +70,7 @@ def run_command(args: argparse.Namespace) -> int:
     rows, failures = [], []
     print(f"platform {platform.platform()} machine {platform.machine()} cases {len(cases)}", flush=True)
     for case in cases:
-        argv = [str(ROOT / a) if a.startswith("LOSAT/tests/") else a for a in case["argv"]]
+        argv = [input_path(a) for a in case["argv"]]
         results = {}
         for threads in THREADS:
             for mode, variables in modes.items():
@@ -149,7 +157,7 @@ def compare_command(args: argparse.Namespace) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
-    run = sub.add_parser("run", help="default against LOSAT_X_DEFAULT=0 on this platform")
+    run = sub.add_parser("run", help="outputs at 1 and 4 threads on this platform")
     run.add_argument("--losat", required=True)
     run.add_argument("--out", required=True)
     run.add_argument("--cases", default=str(CASES))

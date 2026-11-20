@@ -1,0 +1,30 @@
+>ref|NM_000001.1|:c9-3 alpha mRNA [Homo sapiens] >gb|AB000001.1| alpha cDNA >emb|X00001.2| alpha clone
+CAGCAAA
+>gi|654321|gb|AB000002.3|:c9-3 gi plus gb nucleotide
+CAGCAAA
+>emb|AJ000003.1|:c9-3 emb nucleotide
+CAGCAAA
+>dbj|AB000004.1|:c9-3 dbj nucleotide
+CAGCAAA
+>ref|NC_000005.11|:c9-3 chromosome-like
+CAGCAAA
+>lcl|mynuc6:c9-3 local id nucleotide
+CAGCAAA
+>gnl|mydb|nuc7:c9-3 general id nucleotide
+CAGCAAA
+>ref|NM_000008.2|:c9-3 bare refseq accession
+CAGCAAA
+>dbj|AB000009|:c9-3 bare genbank accession without version
+CAGCAAA
+>lcl|mynuc_10:c9-3 bare non-accession word
+CAGCAAA
+>gi|1111:c9-3 gi only
+CAGCAAA
+>tpg|BK000012.1|:c9-3 TPA: third-party nucleotide
+CAGCAAA
+>gb|AB000013.1|LOCUS13:c9-3 gb with a locus name
+CAGCAAA
+>pat|US|1234567|14:c9-3 patent nucleotide
+CAGCAAA
+>gi|1515|gb|AB000015.1|:c9-3 >gi|1516|ref|XM_000016.1| second defline
+CAGCAAA

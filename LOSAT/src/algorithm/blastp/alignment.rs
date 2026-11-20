@@ -49,6 +49,13 @@ fn blastp_positive_score<const BLOSUM62: bool>(
 // }
 // ```
 #[derive(Debug, Clone)]
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "num_ident, num_positives, gap_letters, gap_opens and alignment_len are read only by unit tests"
+    )
+)]
 pub struct ProteinAlignmentView {
     pub query_aln: String,
     pub subject_aln: String,
@@ -141,8 +148,10 @@ fn build_alignment_view_with_matrix_impl<const BLOSUM62: bool>(
 
     let mut q_index = q_offset;
     let mut s_index = s_offset;
-    let mut query_aln = String::new();
-    let mut subject_aln = String::new();
+    // The rows live in a `PairwiseHit` while the reports are written: their exact size.
+    let columns = ops.iter().map(|op| op.num() as usize).sum();
+    let mut query_aln = String::with_capacity(columns);
+    let mut subject_aln = String::with_capacity(columns);
     let mut num_ident = 0usize;
     let mut num_positives = 0usize;
     let mut gap_letters = 0usize;
@@ -204,24 +213,6 @@ fn build_alignment_view_with_matrix_impl<const BLOSUM62: bool>(
     })
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:746-824
-// ```c
-// static Int2
-// s_Blast_HSPGetNumIdentitiesAndPositives(..., const BlastScoreBlk* sbp, ...)
-// {
-//     ...
-//     else if (matrix[*q][*s] > 0)
-//         num_pos ++;
-// }
-// ```
-pub fn build_alignment_view(
-    query: &[u8],
-    subject: &[u8],
-    hit: &Hit,
-) -> Option<ProteinAlignmentView> {
-    build_alignment_view_with_matrix(query, subject, hit, ScoringMatrix::Blosum62)
-}
-
 #[cfg(test)]
 mod tests {
     use crate::utils::matrix::ncbistdaa;
@@ -260,7 +251,9 @@ mod tests {
 
         let query = [1u8, 2, 3, 4];
         let subject = [1u8, 2, 5, 4];
-        let view = build_alignment_view(&query, &subject, &hit).expect("alignment");
+        let view =
+            build_alignment_view_with_matrix(&query, &subject, &hit, ScoringMatrix::Blosum62)
+                .expect("alignment");
         assert_eq!(view.alignment_len, 4);
         assert_eq!(view.num_ident, 3);
         assert_eq!(view.gap_letters, 0);
@@ -309,7 +302,9 @@ mod tests {
         // ```
         let query = [ncbistdaa::A, ncbistdaa::R, ncbistdaa::N];
         let subject = [ncbistdaa::A, ncbistdaa::R, ncbistdaa::D, ncbistdaa::C];
-        let view = build_alignment_view(&query, &subject, &hit).expect("alignment");
+        let view =
+            build_alignment_view_with_matrix(&query, &subject, &hit, ScoringMatrix::Blosum62)
+                .expect("alignment");
         // NCBI reference: ncbi-blast/c++/include/algo/blast/core/gapinfo.h:45-51
         // ```c
         // eGapAlignDel = 0, /**< Deletion: a gap in query */

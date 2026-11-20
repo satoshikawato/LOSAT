@@ -1,0 +1,18 @@
+{
+  "version": "1.2",
+  "dbname": "arch_sprot",
+  "dbtype": "Protein",
+  "db-version": 4,
+  "description": "arch_sprot",
+  "number-of-letters": 279,
+  "number-of-sequences": 2,
+  "last-updated": "2026-10-23T11:17:00",
+  "number-of-volumes": 1,
+  "bytes-total": 554,
+  "bytes-to-cache": 370,
+  "files": [
+    "arch_sprot.phr",
+    "arch_sprot.pin",
+    "arch_sprot.psq"
+  ]
+}

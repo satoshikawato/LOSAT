@@ -1,0 +1,98 @@
+{
+  "BlastOutput2": {
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "db/sprot"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_2",
+          "query_title": "q2 plain",
+          "query_len": 136,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|0",
+                  "accession": "0",
+                  "title": "sp1 subject protein alpha"
+                }
+              ],
+              "len": 137,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 247.284,
+                  "score": 630,
+                  "evalue": 8.65031e-91,
+                  "identity": 121,
+                  "positive": 124,
+                  "query_from": 1,
+                  "query_to": 136,
+                  "hit_from": 3,
+                  "hit_to": 135,
+                  "align_len": 136,
+                  "gaps": 3,
+                  "qseq": "MEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTAS",
+                  "hseq": "MEHSVLKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP---WICWIPKEQQTPGWWKTDTLHMAEMGLWMHKYPKCMCVMVRYTDQSLRHWEINTDANFEKLKILHHMVGHGRTAS",
+                  "midline": "MEHSVLKA FAV RKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP   WICWIPKE  TPGWW TDTLHM+EMGLWMHKYPKCMCVMVR TDQSLRHW+I  DANFEKLKI H+MVGHGRTAS"
+                }
+              ]
+            },
+            {
+              "num": 2,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|1",
+                  "accession": "1",
+                  "title": "sp2 subject protein beta, distant"
+                }
+              ],
+              "len": 142,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 181.03,
+                  "score": 458,
+                  "evalue": 1.74292e-64,
+                  "identity": 97,
+                  "positive": 103,
+                  "query_from": 1,
+                  "query_to": 136,
+                  "hit_from": 3,
+                  "hit_to": 140,
+                  "align_len": 140,
+                  "gaps": 6,
+                  "qseq": "MEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWP----ANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTAS",
+                  "hseq": "MEHSVLKADQLQLRKVMDDPKIRDGPMAVMKVWESYCFILHSIANMSAHVLMKYEFQSGIHPCNQWTCWIPKYMAVPGWCPTDTLHVSEMGLWMHCEP--MCHMVRETTHALRHWKINEICNFEKLKAFPYQVPMGRAAN",
+                  "midline": "MEHSVLKA+   LRKVMDDPKIRDGPMAVMK WE+YC+     ANMS  VLMKYEF S IHPCN W CWIPK MA PGW  TDTLH+SEMGLWMH  P  MC MVR T  +LRHWKI    NFEKLK F Y V  GR A+"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 2,
+            "db_len": 279,
+            "hsp_len": 20,
+            "eff_space": 27724,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          }
+        }
+      }
+    }
+  }
+}

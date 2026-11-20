@@ -1,0 +1,36 @@
+sp|P11111.1|ONE_HUMAN	titled first >lcl|Subject_9 second line	P11111
+Subject_8	No definition line	Subject_8
+Subject_7	subject seven	Subject_7
+pat|EP|0238993|7	pre-grant patent	EP0238993_7
+123	numeric local	123
+prf|ABC|DEF	prf two fields	ABC
+ref|NP_000002|	ref without version	NP_000002
+pat|EP|0123456A1|7	patent with letters	EP0123456A1_7
+pat|US|RE33188|1	patent reissue	USRE33188_1
+gnl|ti|123	trace id	123
+long1	long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word 	long1
+gi|3000000000|gb|AAA00100.1|	big gi	AAA00100
+sp|P99999|	swiss no name	P99999
+pdb|1ABC| 	no chain	1ABC
+bbm|123	gibbmt	123
+gpp|GPP123|	genome pipeline	GPP123
+tpd|BK000013.1|	third party ddbj	BK000013
+tpe|BK000012.1|	third party embl	BK000012
+sp|P11111.1|ONE_HUMAN	titled first >lcl|Subject_9 second line	P11111
+Subject_8	No definition line	Subject_8
+Subject_7	subject seven	Subject_7
+pat|EP|0238993|7	pre-grant patent	EP0238993_7
+123	numeric local	123
+prf|ABC|DEF	prf two fields	ABC
+ref|NP_000002|	ref without version	NP_000002
+pat|EP|0123456A1|7	patent with letters	EP0123456A1_7
+pat|US|RE33188|1	patent reissue	USRE33188_1
+gnl|ti|123	trace id	123
+long1	long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word long title word 	long1
+gi|3000000000|gb|AAA00100.1|	big gi	AAA00100
+sp|P99999|	swiss no name	P99999
+pdb|1ABC| 	no chain	1ABC
+bbm|123	gibbmt	123
+gpp|GPP123|	genome pipeline	GPP123
+tpd|BK000013.1|	third party ddbj	BK000013
+tpe|BK000012.1|	third party embl	BK000012

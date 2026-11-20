@@ -1,0 +1,3 @@
+Warning: [blastx] Examining 5 or more matches is recommended
+CFastaReader: Hyphens are invalid and will be ignored around line 4
+FASTA-Reader: Ignoring invalid residues at position(s): On line 8: 11

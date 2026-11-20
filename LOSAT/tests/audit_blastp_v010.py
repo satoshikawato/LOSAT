@@ -284,7 +284,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--losat-bin",
         type=Path,
-        default=repo_root / "LOSAT" / "target" / "release" / "LOSAT",
+        default=repo_root / "LOSAT" / "target" / "release" / "losat",
     )
     parser.add_argument(
         "--output-dir",

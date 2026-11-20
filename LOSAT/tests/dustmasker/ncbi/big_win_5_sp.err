@@ -1,0 +1,16 @@
+USAGE
+  dustmasker [-h] [-help] [-xmlhelp] [-in input_file_name]
+    [-out output_file_name] [-window window_size] [-level level]
+    [-linker linker] [-infmt input_format] [-outfmt output_format]
+    [-parse_seqids] [-hard_masking] [-version-full] [-version-full-xml]
+    [-version-full-json]
+
+DESCRIPTION
+   Low complexity region masker based on Symmetric DUST algorithm
+
+Use '-help' to print detailed descriptions of command line arguments
+========================================================================
+
+Error: Cannot convert string '5 ' to Int8 (m_Pos = 1)
+Error: Argument "window". Argument cannot be converted:  `5 '
+Error:  (CArgException::eConvert) Argument "window". Argument cannot be converted:  `5 '

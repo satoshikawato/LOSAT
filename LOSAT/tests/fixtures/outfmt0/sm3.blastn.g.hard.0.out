@@ -1,0 +1,75 @@
+BLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/sm3_g_s.fna).
+           1 sequences; 396 total letters
+
+
+
+Query= gq
+
+Length=296
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+gs                                                                    217     3e-61
+
+
+> gs
+Length=396
+
+ Score = 217 bits (240),  Expect = 3e-61
+ Identities = 120/120 (100%), Gaps = 0/120 (0%)
+ Strand=Plus/Plus
+
+Query  1    GCTAACCTCCAAGCACTCTGCAATCTTGTGTGTGAGCATAGTACCCACACCAACGTCAGC  60
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  51   GCTAACCTCCAAGCACTCTGCAATCTTGTGTGTGAGCATAGTACCCACACCAACGTCAGC  110
+
+Query  61   CTTCATCAGAAAAAGCGCGGCGCGGCTTAAAGTGACCGAGTGTCAGCTCAGTGAGTGCGT  120
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  111  CTTCATCAGAAAAAGCGCGGCGCGGCTTAAAGTGACCGAGTGTCAGCTCAGTGAGTGCGT  170
+
+
+ Score = 192 bits (212),  Expect = 1e-53
+ Identities = 120/120 (100%), Gaps = 0/120 (0%)
+ Strand=Plus/Plus
+
+Query  177  AACACGCAGGAGGCGACCACCATAGGCCCGGGTTCGTGCTTGCGTCCGGTGATGCTAACC  236
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  227  AACACGCAGGAGGCGACCACCATAGGCCCGGGTTCGTGCTTGCGTCCGGTGATGCTAACC  286
+
+Query  237  GCACTTgggggggAGCTAGTAAAACCTAGCGGAAGCATGCCGACGAGGAGTTATAGCTCG  296
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  287  GCACTTGGGGGGGAGCTAGTAAAACCTAGCGGAAGCATGCCGACGAGGAGTTATAGCTCG  346
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 109725
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt0/sm3_g_s.fna).
+    Posted date:  Unknown
+  Number of letters in database: 396
+  Number of sequences in database:  1
+
+
+
+Matrix: blastn matrix 2 -3
+Gap Penalties: Existence: 5, Extension: 2

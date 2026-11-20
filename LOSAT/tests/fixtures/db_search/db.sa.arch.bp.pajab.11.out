@@ -1,0 +1,2216 @@
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastp",
+      service "plain",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_1"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">BDT62524.1 hypothetical protein [Metapenaeus
+ ensis majanivirus]"
+                  }
+                }
+              },
+              title "BDT62524.1 hypothetical protein [Metapenaeus ensis
+ majanivirus]"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 370,
+              seq-data ncbieaa "MMKRNRRQTDNEMDPVLTKKSKKSLEKEDLKKESKKSLEKKDLKKD
+DVSKKTSGNEDNVMDNDMTKKSEKLLEKEDLDNVSKKTSKEALDNVSKKTSLVDNDMTKKSEESLEKEVLDKVSKKTF
+LVDNDNVMDNDDNVKKNEKSLEKEVLDKVSKKTFLVDNDNVMDNDDNVKKNEKSLEKEVLDKVSEKTSLVDNDTLFNK
+YKKMSQKERQQYIDSIMIKYQTDEKEDSSVMSLYKKYQKMSQKERQQYIESILTKYQTDEKEESSYDTLEKIQKILMI
+QKNHIEILKDNVKLYMDNFKVHNENLQLLKENIKVGREKDEIYKRNEKLEMYNKKLRRQNSELTEDNIRLKRKKRKFW
+RHRNKYNFYKDY"
+            }
+          },
+          seq {
+            id {
+              local str "Query_2"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">BDT62525.1 wsv465-like protein [Metapenaeus
+ ensis majanivirus]"
+                  }
+                }
+              },
+              title "BDT62525.1 wsv465-like protein [Metapenaeus ensis
+ majanivirus]"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 377,
+              seq-data ncbieaa "MEENMKNDEWTLNTSTIDNSIGLVVYMINIGKAMKDLINHIKDHII
+LIDAHIPNLTHAIVTYNDDYDNTMSNKIHEEIKAPYTGNWSSKMIAEYLKNIIETIEKREKNGKMTTRKRKNGAVFNC
+ALIYTIKRLVPAYRKACHNDIEKNLPILIFNITNRDVCIKSFAQNKRYKSFDIKSTIFTGKVFHKRNNNNNNNEAYAL
+RKMIEKDNKLWFRVIKYKDDDDDDDNFSGYAQICKYIEENDAITNERVQLFVSREHSCNCSSEKLIEFMIMQAYALFI
+QPEKHNNSSIIISKNPDNLLLKLVASDISRKNSEYNDDELAILAKKLEATRGQIVDLINRHYLPLTYNFKIIRNDLDF
+HNTNYVFIRLSRSSDVLSC"
+            }
+          },
+          seq {
+            id {
+              local str "Query_3"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">BDT62529.1 innexin [Metapenaeus ensis
+ majanivirus]"
+                  }
+                }
+              },
+              title "BDT62529.1 innexin [Metapenaeus ensis majanivirus]"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 386,
+              seq-data ncbieaa "MIPISVLANLRSLFKGKNSEVDINSKIFKLQYRTTTTILFCLCLLI
+TTNSLVGNPISCLYDSSISYLKEDTVNTYCWIYSTFTIPRYYSHQYQASVAHPGVGTYNSKTDDVKLYHTYYQWVPFI
+LFFQALMFYSPHWLWKIWEGGKVQSTIAGLSVPIKSNQERQKVTLGLIEYLRASHRHHDYYAKKYLFCEFLSILNCIL
+NILLLNKFLNGMFLDYGNKVLAYYQNDNVTTINPMTIVFPKVTKCSVPLYGASGSKEIKDLLCILALNNFNDKIFLFM
+WFWLIILSVLNTLNFIYHVLIFVIPHTRKIYLNRIAKDLQTSNFFNQVGDSFFLYLVKKNVDTLTFDYLFSNLFENLH
+NFSIDVIEKPKEKSVFKGMGKRNVLSHI"
+            }
+          },
+          seq {
+            id {
+              local str "Query_4"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">BDT62536.1 hypothetical protein [Metapenaeus
+ ensis majanivirus]"
+                  }
+                }
+              },
+              title "BDT62536.1 hypothetical protein [Metapenaeus ensis
+ majanivirus]"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 295,
+              seq-data ncbieaa "MTSVTEQSSTIIKKNIPSPTLVSQPPLPPPPPLPPPSSSSLLHDST
+YYDSKILVNSLLDLHDILSVENHQVRNWQEDFEQNIFNDLKHLDASPLFTGLFNFLVNDNDKVDNTWFEQSKETNQSQ
+SSPKQQCNNINFFKLVGLNEDDYAIKTLIAGIMLKDDKNKDNLVRQIIAGNKYATQFATIINVVYRFLKLAKIIFIQY
+WSVTNIEDLFKNQQTLTEEENEEREVARLRAIKKINAIINDSILNVQTPKPPPPPPKPPASTSASTSASVPLLKTIII
+DNIYPFLLALKNTEC"
+            }
+          },
+          seq {
+            id {
+              local str "Query_5"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">BDT62539.1 hypothetical protein [Metapenaeus
+ ensis majanivirus]"
+                  }
+                }
+              },
+              title "BDT62539.1 hypothetical protein [Metapenaeus ensis
+ majanivirus]"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 341,
+              seq-data ncbieaa "MQNNHYRTKQILLHDNDNNNNNNNNNNNNNNNNNNNNNNNSHQNNK
+FGQYDGYRQNNKTILINGHNYQHDYRQKKKLKNEQYQCCDCPKNGEFKRMLIRWQKNKCQNDKTFRQLLFMYKQYNYC
+QYNKHQNNSYHLFIKLVKENQLKFTIHPVFERINENKTNGINSQNDYCQKNKKTLSNRRYNRQNDYCQKKKTLNQCCN
+CQKNRKFKRLLFKWQKTNCQNNRIFRQLLFMYKQYNYCQHKKHQNDSYHLFKKLVKENQLKSTTFIHPVFEKKERILK
+MYHSNDNDDGTFKNQNVKDNEINPNVKDIIGVDLNIVNMDIEKKFKKLLIVDSLKDNKNDD"
+            }
+          },
+          seq {
+            id {
+              local str "Query_6"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">BDT62541.1 hypothetical protein [Metapenaeus
+ ensis majanivirus]"
+                  }
+                }
+              },
+              title "BDT62541.1 hypothetical protein [Metapenaeus ensis
+ majanivirus]"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 534,
+              seq-data ncbieaa "MLYFFYYLNILQFANFFYYLNILQFANFYKSNAYLYLSIFLSIYLS
+IYIYIYIYIYIYIHLSIYLYMYIYFFLIQHLIQYTKTMAEFNLNKENENSSSNDEDNDNVNDNDIKVLKSSLKVDPKH
+QLRILGRKKDSSLPIKGLKKVNQSSNVKYDKCSKKLYPFISSTKAVPLDTNLGPSEIFVREQETLQMWPQSPPPPPPS
+SSSSPSSSSEHVYITTARIEIWQQEQPLLPPPPPPPLPPPPLQQQSFFHTFSFPSPFASFKFKSPSSQPQPPQRSQLL
+LSQPPIPPSQQQQQQQQQQQESLFRTFLPSQIDLPENVYEPPSLFARFKFKSPSSQPQPPQRSQLLLSQPPIPPSQQQ
+QQQQQQQQQESLFRTFLPSQIDLPENVYEPPSLFARFKFKSPSSQPQPPQRSQLLLSQSPIPPSQQQQQQQQQQQESL
+FRTFLPSQNDLPENVYEPPSLFARFKFKSPSSQPQPPQRSQLQQPQSSILSSFNITPSSSSKTTLSVIRMMWSNDANM
+TQEQEQEQEQEQEQEEQQQQ"
+            }
+          },
+          seq {
+            id {
+              local str "Query_7"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">BDT62542.1 hypothetical protein [Metapenaeus
+ ensis majanivirus]"
+                  }
+                }
+              },
+              title "BDT62542.1 hypothetical protein [Metapenaeus ensis
+ majanivirus]"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 516,
+              seq-data ncbieaa "MLKRKYTNICNESIKSNQSKKNKPSSYNQHDLVLPRNKQYIRDNSP
+SPSTSSFIPSITIPFPSTSYISPTSSSSLPVFPSTSSSSLPVFPSPSSYPPYHPPPSSYPPSSSYPPPSYLSPYLHPS
+YPPSPSLLPSRLNSHQSYLNYPYNCSYSSSQSLPSSLYFSSLSSTNPVSISSPPSPPPSSPPPPPLPPSSPPPLPPSS
+PPPPPPSPPPPPSPLSPSSNPPPLIHSPSSHPPPLIPSPSSHPPPLIPSPSSHPPSSFSHPPPLIPSASTMVYTLQVK
+TGGRKLKLLQNLANATLVELSNTNEIAKQILDIDKKNKKQWNKRYYMAISDLLKKFDLKSLDIMNIIINNHIQADTYL
+NQISEAYLQRYKEYFYEEQKLHQCSNQIQLNQLQPIEFEEYTIKSKDEFALDMVKNIGLILINDMTTLKEIGIQINIL
+LKKYESKYESLMKHSKEEDRQTHLLRMTLHKHVSEFNSMKKKISKKLFDAYHQLIMWTIGQKKKTDDEIKCQLGNASK
+SK"
+            }
+          },
+          seq {
+            id {
+              local str "Query_8"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">BDT62543.1 hypothetical protein [Metapenaeus
+ ensis majanivirus]"
+                  }
+                }
+              },
+              title "BDT62543.1 hypothetical protein [Metapenaeus ensis
+ majanivirus]"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 543,
+              seq-data ncbieaa "MPKRKLNNNNNNINNNNNNNNINNNNNNNNNNNMLKRKCTNVCNKS
+IKSNQSKNKLSSYNQHGLILPRNKQYIRDNFPFPSTSSFIPSITVPFPSTSFISPSTSSSLPVFPSTSSYPPSSSPPS
+YLPLSSYPPCLPPSSYPSPSSYPPPSYLFPCLRPSYPSSPSLLPSRLNNHQSYLNCSYSSSQSLPSSSYLSSLSSTNP
+VSIPLPPPPPPPSLSSTNPVSIPLPPPPPPPSLSSTNPVSIPLPPPPPPPSPPPPPPPPPPPPPPPPPPPPPPPPPPP
+PPPPPPPPSPSSSSLLPLFPPPTTVYTLQVKTDGRRLELLQNLANVSLDELSNINEIAKQILDIGEKNKKQWNKRYYM
+AISDLLKEHDSKSLDNMNNIINNYMQANTYLKELSETYLQRCKKYSYGEQKLQQISNQVIELKESIFKSKDKSALNMV
+KIIGLIIINGITTLKNIGIQINYIFNKYNLLMEQSKKENGKNNLLSLKICLLKRLLNKNESKFKSMEKQISGSLYNAY
+DHLLKWTILQKQKTDDEIKCQLGNASKSK"
+            }
+          }
+        }
+      },
+      subject database "tests/db_search/paja",
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, -1 }
+        },
+        {
+          name "MaxHspsPerSubject",
+          value integer 1
+        },
+        {
+          name "MaskAtHash",
+          value boolean FALSE
+        },
+        {
+          name "SegFiltering",
+          value boolean FALSE
+        },
+        {
+          name "WordThreshold",
+          value integer 11
+        },
+        {
+          name "WindowSize",
+          value integer 40
+        },
+        {
+          name "HitlistSize",
+          value integer 2
+        },
+        {
+          name "UngappedMode",
+          value boolean FALSE
+        },
+        {
+          name "CompositionBasedStats",
+          value integer 2
+        },
+        {
+          name "SmithWatermanMode",
+          value boolean FALSE
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 18562848
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+    },
+    masks {
+    },
+    ka-blocks {
+      {
+        lambda { 304427410377841, 10, -15 },
+        k { 123821516147187, 10, -15 },
+        h { 315841807597754, 10, -15 },
+        gapped FALSE
+      },
+      {
+        lambda { 267, 10, -3 },
+        k { 41, 10, -3 },
+        h { 14, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 18562848",
+      "Effective search space used: 18562848",
+      "Length adjustment: 66"
+    }
+  },
+  messages {
+    {
+      code 1,
+      message "Warning: [blastp] Examining 5 or more matches is recommended"
+    }
+  }
+}
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastp",
+      service "plain",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_9"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">BDT62544.1 wsv192-like protein [Metapenaeus
+ ensis majanivirus]"
+                  }
+                }
+              },
+              title "BDT62544.1 wsv192-like protein [Metapenaeus ensis
+ majanivirus]"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 351,
+              seq-data ncbieaa "MSNVRMDILIETQQLKERKTFLEREWASKVNWYNLIHFLFPNLSCV
+KNKLLNLSRARIMRISQFLVHYEYFKPVLSNIEFKFNSDMLPLGCKENIFMRLKIGLDIIAHATKCWNWACLQRGWIS
+ETIENPTPDWVIQLAQQCFQECNIKCEDIEKDCSYIKSPCLLAYRNVVPLIKKDIQFIQDDRLSSFEFWVELSLNSLV
+DALRMKKIITENEKDLSNLETLINVKTPDTFEKLLCLMKIKCEKMNKAFVSKKGDTVDISRWSKKNNGINGKRCIEIK
+TNSLIEIQNVTLDGKEFSLYMVESQNEVRKQNVEFVEIKKCKSKIYVKAPCISPLYQRCIKPVSLIIRPKP"
+            }
+          },
+          seq {
+            id {
+              local str "Query_10"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">BDT62555.1 baculoviral IAP repeat-containing
+ protein [Metapenaeus ensis majanivirus]"
+                  }
+                }
+              },
+              title "BDT62555.1 baculoviral IAP repeat-containing protein
+ [Metapenaeus ensis majanivirus]"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 432,
+              seq-data ncbieaa "MNSQTNQQHVQKGTTIIACDNEKLYEDYRRYTFTINTLSWQYKDWI
+DSSKKDALAKIGYYLSGYKWAPQLTCCFCNGNVESEWNLQDKNWSKNKTKIPIHLCLREKDLRERDGMVTNISLEYSP
+IDSYICGDVVPDCPNPSFNKQNIQDNGILPYTFKYKEYNKLEDRIKTFYTNGWNEINSTQTPEDMAKAGFIYKGENDK
+VTCYQCGQSIYRWDDKDNDPWHEHAKHASHCQHVYIRKGGDFINNIKKSLCGIHVIHEHEVDELIKINTVKYILDMNI
+FQQPDIIRQLVKKQIQVTGQPFFTLNDILSPLFTDMHKRTADNTYSGGYYDYNLHEFIDDKSLKKYLRNSDIVQYVLK
+FLPNRQVIDFLNNKKQIFSDDILNVRKSLGGFIKAMDRDGYIPTYNKCTLQKKYNVDEAKIKNKEYYLNKNCMR"
+            }
+          },
+          seq {
+            id {
+              local str "Query_11"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">BDT62556.1 baculoviral IAP repeat-containing
+ protein [Metapenaeus ensis majanivirus]"
+                  }
+                }
+              },
+              title "BDT62556.1 baculoviral IAP repeat-containing protein
+ [Metapenaeus ensis majanivirus]"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 465,
+              seq-data ncbieaa "MKFHKKNGSTLSNISSKGNYYAYEDYRRYTFKCQKVISKNESIKLA
+KTGIYVNDVSFKFDYRQDPNRRLYMHDEDKLYLHLHCIRCDSSAEKNHKCKGKKFEMKNIPIELCQILRSIQNRDRIC
+SNVCKQSEVKVSHSSNLLSNLGIEEGSPVNRCLNYGSYEKRLDSFIKNGWSNINLNQDPKDMAEAGFVFEYQDNDEVW
+CFYCQRTIYKWDSKCDPWYEHAKHVPYCRYVCTIKSPDFVKQVQQETTCGTFIVHEYELDKLMELSIIQHAILYFKPH
+FVRKVLKKRIEKKAEPFFSVQKCINAVKETIKENSQDEEIIKKNVKETTIGLKESDMSNVVVVVASESDIGSSEKETN
+DDLKETNIESKEDEITLAQKRENNSFFNGNNNTKKFKDNDTVLIDDDDDDDVVKCKDCLQDKIDLLFFPCRHWGCGNC
+TLPIHCLDCNIEITAYTKPFDNTIVINTF"
+            }
+          },
+          seq {
+            id {
+              local str "Query_12"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">BDT62557.1 baculoviral IAP repeat-containing
+ protein [Metapenaeus ensis majanivirus]"
+                  }
+                }
+              },
+              title "BDT62557.1 baculoviral IAP repeat-containing protein
+ [Metapenaeus ensis majanivirus]"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 438,
+              seq-data ncbieaa "MEYNDIKTRANFAINHYEIPVQFTNNEIPVPLTTPMYENIVGQDRR
+LLTFYLFKWPKRTNVIEGYSKLTPLEMANAGFFYTGLTDKVVCFYCGGSISNWERAYDPWYEHAVNFPYCFYVAIHKG
+YTYIKSVLQLDFLRKQMVLKKKTAKEIVDLFKSELENNHISYMPFIPTSQNDDDKLTCLANLHHEMINKHDLPLSKFL
+LKTNENDTKIDDNSSNIKCKICFENNIAFIFSPCYHMVACMQCITKLKRHVDPIHEKFVSQEERLNSLSKWPGNQNVV
+AKVAEAGFFYTGKQDLVTCFYCDGSIYNWNKYSDPWYEHAAHFPHCFHILITKGNEYINRVLQLSYIRKLECLKYTSE
+QIYNEIVNVLLNDLTSHIPHYTDDKDDDKTMKCKICFKNNVEIVLQPCTHMVTCTKCTINLKKCPTCNQTIHIIQKPI
+IM"
+            }
+          },
+          seq {
+            id {
+              local str "Query_13"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">BDT62560.1 hypothetical protein [Metapenaeus
+ ensis majanivirus]"
+                  }
+                }
+              },
+              title "BDT62560.1 hypothetical protein [Metapenaeus ensis
+ majanivirus]"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 343,
+              seq-data ncbieaa "MNYNQIYSQELAVMLSSVPLHKHEDVSNLLSNCAEEEEERLQSIMK
+TNNIYNNAIIKKLALKKCLPIAIARLVMDIWSHSMQEHVEILLLKMAIDQEMLRDYDLPHVTYLNSTVHPRNEWNDWK
+IENCNEIVLLLWDVFGIRKHYNQVYSDRKIFMDMYNKLAQIKPKLLESLPGNVADRHDLSLFSLDQAIGYTLFNVHNC
+PHRLALAAYKLHINNEPHHPEMWSFSHTALEKKKKMELWWKTEARENFYHFDPMQLPDNLTFEYMPFSFLLEYYISVV
+AETSKKNGIEYENMPLLYFTQVTREDLGKIPDKQKACIIEFIKHLKDRPHYINLGCIQANLDW"
+            }
+          },
+          seq {
+            id {
+              local str "Query_14"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">BDT62561.1 hypothetical protein [Metapenaeus
+ ensis majanivirus]"
+                  }
+                }
+              },
+              title "BDT62561.1 hypothetical protein [Metapenaeus ensis
+ majanivirus]"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 329,
+              seq-data ncbieaa "MPRKKFSRKRKLSTTKTTSCSSNEKENEMNYMEKNTNIINNKNEKN
+NSQNTEDYIPFSKDDEGIPHIKKKKREKLYIHVTDLDNNNNNNNDDNNNDSVAITVAMNKDNNNNNNNAMNKDANNKD
+NNNDDDANYYNNNNNKKATIKTIAMDKDDNNSNNKDDNISINNNNNNNNNNNNNNNNNNNNNSETIAMDKDDNNNNNN
+NNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNSNDNSDKKKETISIMAVKQERE
+DKKKEKYNNNNDDDNDDNSDDNAIIETVATIETVAMNKDDNDGNDDDNH"
+            }
+          },
+          seq {
+            id {
+              local str "Query_15"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">BDT62562.1 wsv306-like protein [Metapenaeus
+ ensis majanivirus]"
+                  }
+                }
+              },
+              title "BDT62562.1 wsv306-like protein [Metapenaeus ensis
+ majanivirus]"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 408,
+              seq-data ncbieaa "MIIIIIIKQQKQFNPFDKMTLNFNQLHYKPNCATVNIFCTSDKDCH
+LQCSSAVHYANSHDTGIDKEQQDSSTIIINLCNLLTNQCEPNMIQKGYYDMAINDLKKLSQMEKFLPKAMWDYIKIND
+GKRFIVARARFYENLSFHLKEGTLLDAAIQRIINEHKKNNKRNYSNKLQQINIVDDDNDNISMDLYVKQLFGRTAKPS
+SSQDIILTRDLEHDKKRGEYCTLIATNTAAAAATAATIKSPSKPNDKIVAFNNQYPLQFHCNEEMNAGIMMAAYQDND
+GNILPICVCTYPYYLTGPTCKHRTYNRVVDYELWEKTGYADFLTDPFNDYKKANRICKSKTINTTAVFDERDGCFYCQ
+PLAAHFAQSLQMRGPYEPALILDKDYIDSLNVNQSFKINIDYLDLLNKFY"
+            }
+          },
+          seq {
+            id {
+              local str "Query_16"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">BDT62564.1 wsv310-like protein [Metapenaeus
+ ensis majanivirus]"
+                  }
+                }
+              },
+              title "BDT62564.1 wsv310-like protein [Metapenaeus ensis
+ majanivirus]"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 371,
+              seq-data ncbieaa "MSQINTEKLKSEQNLTNDKCINTRIGGKKRRYSLTIDKTPPHDNSS
+DNDNNNCTLVAQSKKKRPSLKSTEKISNNSNCTLENATKRQCIEFFSNDDNVSSCHDDDTIFEQTLSVSDILETRDDD
+NVDDNALLTKLKNEKAEDKFKKSSSSSSSLLDKDKIINSDNDESTNLNLLLLEKKVLDGKKRNTKVKEFHHPLLKNRV
+IDKNNIDQYMKNQISTIIYNFLSKDVINQLYCKIIKLFNNYFENKLVNLCTKKHRKYFNYYCNLSESDLMKTEINKSF
+YNDLKQLYDDYNNEITRYINKYKQKRFSSLSFIASFIISKKVDKQIKENKGKIFEYFLTKCTKQTNCLFHQIFKQDVI
+NHVYKKKHNKKMI"
+            }
+          }
+        }
+      },
+      subject database "tests/db_search/paja",
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, -1 }
+        },
+        {
+          name "MaxHspsPerSubject",
+          value integer 1
+        },
+        {
+          name "MaskAtHash",
+          value boolean FALSE
+        },
+        {
+          name "SegFiltering",
+          value boolean FALSE
+        },
+        {
+          name "WordThreshold",
+          value integer 11
+        },
+        {
+          name "WindowSize",
+          value integer 40
+        },
+        {
+          name "HitlistSize",
+          value integer 2
+        },
+        {
+          name "UngappedMode",
+          value boolean FALSE
+        },
+        {
+          name "CompositionBasedStats",
+          value integer 2
+        },
+        {
+          name "SmithWatermanMode",
+          value boolean FALSE
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 17488328
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 220
+          },
+          {
+            id str "blast_score",
+            value int 220
+          },
+          {
+            id str "e_value",
+            value real { 12054441037579, 10, -34 }
+          },
+          {
+            id str "bit_score",
+            value real { 893521389818617, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 97
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 193
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 976509971509972, 10, -13 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 25,
+          ids {
+            local str "Query_9",
+            general {
+              db "BL_ORD_ID",
+              tag id 30
+            }
+          },
+          starts {
+            7,
+            628,
+            -1,
+            668,
+            47,
+            677,
+            119,
+            -1,
+            121,
+            749,
+            -1,
+            759,
+            131,
+            782,
+            143,
+            -1,
+            159,
+            794,
+            -1,
+            815,
+            180,
+            823,
+            -1,
+            830,
+            187,
+            847,
+            -1,
+            889,
+            229,
+            892,
+            239,
+            -1,
+            246,
+            902,
+            -1,
+            944,
+            288,
+            950,
+            -1,
+            953,
+            291,
+            971,
+            -1,
+            974,
+            294,
+            975,
+            -1,
+            998,
+            317,
+            1000
+          },
+          lens {
+            40,
+            9,
+            72,
+            2,
+            10,
+            23,
+            12,
+            16,
+            21,
+            8,
+            7,
+            17,
+            42,
+            3,
+            10,
+            7,
+            42,
+            6,
+            3,
+            18,
+            3,
+            1,
+            23,
+            2,
+            31
+          },
+          strands {
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 212
+          },
+          {
+            id str "blast_score",
+            value int 212
+          },
+          {
+            id str "e_value",
+            value real { 243863240923808, 10, -36 }
+          },
+          {
+            id str "bit_score",
+            value real { 862705423745229, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 42
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 79
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 311372549019608, 10, -13 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 5,
+          ids {
+            local str "Query_15",
+            general {
+              db "BL_ORD_ID",
+              tag id 41
+            }
+          },
+          starts {
+            258,
+            5,
+            -1,
+            25,
+            278,
+            26,
+            -1,
+            107,
+            359,
+            113
+          },
+          lens {
+            20,
+            1,
+            81,
+            6,
+            24
+          },
+          strands {
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 61
+          },
+          {
+            id str "blast_score",
+            value int 61
+          },
+          {
+            id str "e_value",
+            value real { 62155185911315, 10, -15 }
+          },
+          {
+            id str "bit_score",
+            value real { 281054064110026, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 18
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 27
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 142466307277628, 10, -13 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_16",
+            general {
+              db "BL_ORD_ID",
+              tag id 63
+            }
+          },
+          starts {
+            135,
+            413
+          },
+          lens {
+            51
+          },
+          strands {
+            unknown,
+            unknown
+          }
+        }
+      }
+    },
+    masks {
+    },
+    ka-blocks {
+      {
+        lambda { 322490455225822, 10, -15 },
+        k { 136772671067713, 10, -15 },
+        h { 419124641321003, 10, -15 },
+        gapped FALSE
+      },
+      {
+        lambda { 267, 10, -3 },
+        k { 41, 10, -3 },
+        h { 14, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 17488328",
+      "Effective search space used: 17488328",
+      "Length adjustment: 65"
+    }
+  }
+}
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastp",
+      service "plain",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_17"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">BDT62569.1 wsv282-like protein [Metapenaeus
+ ensis majanivirus]"
+                  }
+                }
+              },
+              title "BDT62569.1 wsv282-like protein [Metapenaeus ensis
+ majanivirus]"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 480,
+              seq-data ncbieaa "MEVSDNDDDYMSISSGDNDDEVKDTILNNNKDDRDDVDDDDDDDDD
+SDIEFDIDTFKSAILMSKNTYIIDKKSSSSSLSPSSSSSLLLLPSSSSSSSLSSLSSSAIPLQTPSSSSSLPSPSLPS
+SSSLPSPSMSTINKIHHHHHHHHHHHHQPLLITNPRIVVDEIMKEEKKTISDGEYFLYCTSAKSSSNQHLEILNTFRK
+EIILILQLYANLRCRQQLLGSFNTNSVNYSDEMIKKMIDIILRIDRNSMSFDKYKNVVREALYVYYLVVTKMTGPKHL
+KRLRTPELHFEYCVVIALLAHNVDIFKKISFPKYRTTNLIQFVSALDCPWYLSVIPNILSVLNRTRSICQTLDFSISD
+HAKINITLCLLSEIAEKKPNNLILATILYLFPRSLKLIKEKGLVRDENTIVLLAKKISEYLKNQWINCNDIACASNLL
+EGDWVKDECTLKLFKKQCCDTKFAAISLLVQQQMKKQDCLILFH"
+            }
+          },
+          seq {
+            id {
+              local str "Query_18"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">BDT62575.1 wsv137-like protein [Metapenaeus
+ ensis majanivirus]"
+                  }
+                }
+              },
+              title "BDT62575.1 wsv137-like protein [Metapenaeus ensis
+ majanivirus]"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 421,
+              seq-data ncbieaa "MNDGTTNLMNDGTTNLMNCSTTNLMHLEVTLSDFINFISSNAGVNI
+LKSIFMYGIQNNFDKENLWKICLSQTCIQTGITFRLDDDNDKEGIIENVKTRLVVDNDDTSCGEKYYLFIVRKFETIL
+NIIRFLSVKELSSSSSSSYLNNDNVKRIKTSVNFPIKLTKLNADVLATMIYQNAKCKIEKKKKKQKKKKEKKEKEKKE
+KEEKKRKKKKKDYTTIATATATATTTIAIAIATVWFSLADIHVNNNNNDDDNNNNNNSNNNNDNDKKEINVDNNNYLS
+LYLHNKKSKHLSQDKFKINGNPINIYEYDRNDIIAIHNFFSSSTFHKVHCCNPKHNDRNPSMHLYLKKNVWYSLIDKW
+LLTRDEIDRLQMEEDQAINSNMTRFRNFNIILFILSAHCFACNYHENFLTRWQLRQVLKKYYY"
+            }
+          },
+          seq {
+            id {
+              local str "Query_19"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">BDT62587.1 hypothetical protein [Metapenaeus
+ ensis majanivirus]"
+                  }
+                }
+              },
+              title "BDT62587.1 hypothetical protein [Metapenaeus ensis
+ majanivirus]"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 282,
+              seq-data ncbieaa "MHFIMNSINKQERMILVILGIIIKNVLINVNMIVVLRFIYQNFFNY
+FKCCIYIYIYIYICIYMYIYMYIYIYIYIYIYKTNFKMCDAYSHIPPTRQEQKRKRKEKYKDKTPIRICIESDPPSLG
+KNERLNKEKICDHMIRSCLYWAPFVYARPIHVSCLCTSALNVEEMSNIAPIVDCVLLYIKNMYKLTMMQNYLISPRGY
+SVFLYKSSGNDKSTTNINTITSTDTFFMDTWISTSRSETLRYFIKYTDEDNIIMNNKNIDKNSIKKLKQYFAKIVILP
+NV"
+            }
+          },
+          seq {
+            id {
+              local str "Query_20"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">BDT62588.1 wsv267-like protein [Metapenaeus
+ ensis majanivirus]"
+                  }
+                }
+              },
+              title "BDT62588.1 wsv267-like protein [Metapenaeus ensis
+ majanivirus]"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 320,
+              seq-data ncbieaa "MSCVDQLVSTINEHNYLILQTFCLGGPTRLTKLKSFDSALKCYNVL
+QSMPTNLPSTTPYSMVIVLKLSNSELDTFFKTYSYTDVYAKCLKTRKLNYTGNDILSGLLKDVEIWLDEKFKNNCPNC
+KKTLSPCTKLDASIVLSYPIMVELFDLKRVVYFRMIQVAEFVDNKHEKKFVNNDNNNNNNNNNIKNDVKEIVCFSIID
+GMPLEWSNDIFTSIATNTTIISTSIDKSTSKKKMTSKMCCLIHYMWSREMARQVHQTDSCFVRLLSINPSRVKDTRYE
+IKNKYYFHIKELYEKKINFDNFSVIYPQECNEKIKIIIML"
+            }
+          },
+          seq {
+            id {
+              local str "Query_21"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">BDT62589.1 hypothetical protein [Metapenaeus
+ ensis majanivirus]"
+                  }
+                }
+              },
+              title "BDT62589.1 hypothetical protein [Metapenaeus ensis
+ majanivirus]"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 292,
+              seq-data ncbieaa "MMDLKSVFIFVLIIFIFVYVACVISIQVCSNMNKKLIHHVVEYTTD
+FKKNIIRKTLYKMLKYNNLYQNDQHLIILETENNLTKYKENIINIYSRYSSSLEVVVEKDATNHDDIVKLPLDVDKEK
+NVNTTTTTTTTTTTTNNNNNNNNNNSNNNNNNIINTILPFIRCDKLIISKPELIEHSDIEDYIIYKFTTKFQWHKTNN
+NSNNGWSIEIVNTQETLVDNMDKSFTLPFIFTLPDKKSINFTFPSRSIIGTHTNNILEQSLDVWVYKHIKYPIPIPDI
+KMCLLLKKNDEA"
+            }
+          },
+          seq {
+            id {
+              local str "Query_22"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">BDT62590.1 hypothetical protein [Metapenaeus
+ ensis majanivirus]"
+                  }
+                }
+              },
+              title "BDT62590.1 hypothetical protein [Metapenaeus ensis
+ majanivirus]"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 324,
+              seq-data ncbieaa "MKDEIDINYIFIYIGLTIIILLFIIFFILINKIRKLEIKNEQIDTF
+FQIETFEKLIEQTKYQLSLLKSQQDINELKSNHDILFSSVQRAIDSMQRDSKVNEIILLETQAGNNILNKSFIKKKMK
+INSKDYSLEISILDYNPNSFVYESLNKIETNAGDPLIPSADTINYPITRVEHVPLISNNNNNNNNNNNNKINSNEISV
+IDEMTIYLDSIRQLENDNNEFDEFLATIGILYKSSINKTKINSGWNIKLMSAQQAGALNANPSQMFFIIDKNTHELNG
+SKYDGLRESNVKFQILIRKRKLLNSMSDDFKICLLVTKNDNVNV"
+            }
+          },
+          seq {
+            id {
+              local str "Query_23"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">BDT62593.1 SARAF-like protein [Metapenaeus
+ ensis majanivirus]"
+                  }
+                }
+              },
+              title "BDT62593.1 SARAF-like protein [Metapenaeus ensis
+ majanivirus]"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 355,
+              seq-data ncbieaa "MATKINNWLKILLPVTLLLLGRLDVVSSSSTTSWRNADNNIKDAIL
+LKDIEAITLRWGKMTTGQRSTPVLQLECLRGLGTAPCDMFQPRVVQCYNRGSDGVNIQWECKCDMDNEFRFGQIEVSC
+EGYSHSNDQYVLRGSCGLRYSLDFTKEGLRKYHPHGYYPYQNNNNNNNNNNNNNNKNQHKDKDSACPFYNFLATIYQL
+IINLFTAIIFICIICMIINFFINIIMFIIRAINNLVLIGRNHRTQNITPGTTNTYNNLGDEFLIGAATGGILGYLVRY
+IFMEPPNYIRRGGEGLLTGLARNIIQEQQASERIGGARNIIQEQQASERMGTEGGRETTTNSTRITSGFGETSQR"
+            }
+          },
+          seq {
+            id {
+              local str "Query_24"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">BDT62596.1 wsv161-like protein [Metapenaeus
+ ensis majanivirus]"
+                  }
+                }
+              },
+              title "BDT62596.1 wsv161-like protein [Metapenaeus ensis
+ majanivirus]"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 430,
+              seq-data ncbieaa "MSKVINKKKNGPSLNIIRARKADKNEQIKHDVNIKSMGMIPEKKGP
+PKIKKRFTNINANNNINKKRPNTFTTTFDKKKKSASIVTTTTANNNNNNNNNNNNNNNNNNNNNNNKGIGINIPTSKT
+LKFPKLTKLYIGKKLRRILLEEIYLPIRERTLEKKNGRLERWAKRNNTFNKALNAILKHDTNNITNIKLINDKLRETQ
+INYIKSSFIERSNYEEFCTILFNLFNTTHLLNKCFHDDLILIDINNLYVKQLSFNEYKEKLFFPIWRNMSQSIDNIIG
+VSNDEFKKCLDAILSQAHTFIKTTTELKKEIAAIQTFQNLERNSQMKRKQQESFLDHKKRIHMEQEKLICMQTQLLDQ
+QQKIINQQQQQVQQKQQLYTQLPPPQQQIYTQLPPQQPKKNEQQQQQQEQEQQQQQQQEQEQQQQQQQQIEV"
+            }
+          },
+          seq {
+            id {
+              local str "Query_25"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">BDT62597.1 hypothetical protein [Metapenaeus
+ ensis majanivirus]"
+                  }
+                }
+              },
+              title "BDT62597.1 hypothetical protein [Metapenaeus ensis
+ majanivirus]"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 339,
+              seq-data ncbieaa "MEFLEKLNKAIYMTTNNQFYSLHTSKNKKIIHDNELHNTNRKKYEK
+EIISKHDMEEILKNGISIFTQQMKNIYTLINVDDDDDINHNQHINKVSFNLSSKSNNKQIFKQISKIILGNLKKNVQY
+PLFDYNIIKSYFDKQENINMKTQTILPGGSLKSLEWDITYFLYMYFICSFPKGYIQILRKYIEHYIINIDHGKSDNIL
+NILKYNKKEDKDKLVDIILAAIAYPNNKRLYNIFKDNNDIQQFIACERERQISRSMNGKLKIIKPLSKESLCNNIQYL
+YHLKVFANKLDMSDEEVFNIIFPSIDLHIDSSKNETIDKVDNVYMANDNVEYSIQCFIK"
+            }
+          }
+        }
+      },
+      subject database "tests/db_search/paja",
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, -1 }
+        },
+        {
+          name "MaxHspsPerSubject",
+          value integer 1
+        },
+        {
+          name "MaskAtHash",
+          value boolean FALSE
+        },
+        {
+          name "SegFiltering",
+          value boolean FALSE
+        },
+        {
+          name "WordThreshold",
+          value integer 11
+        },
+        {
+          name "WindowSize",
+          value integer 40
+        },
+        {
+          name "HitlistSize",
+          value integer 2
+        },
+        {
+          name "UngappedMode",
+          value boolean FALSE
+        },
+        {
+          name "CompositionBasedStats",
+          value integer 2
+        },
+        {
+          name "SmithWatermanMode",
+          value boolean FALSE
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 25086680
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 368
+          },
+          {
+            id str "blast_score",
+            value int 368
+          },
+          {
+            id str "e_value",
+            value real { 25683266792191, 10, -53 }
+          },
+          {
+            id str "bit_score",
+            value real { 14636167621763, 10, -11 }
+          },
+          {
+            id str "num_ident",
+            value int 89
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 162
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 575833333333333, 10, -13 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 7,
+          ids {
+            local str "Query_17",
+            general {
+              db "BL_ORD_ID",
+              tag id 33
+            }
+          },
+          starts {
+            199,
+            300,
+            313,
+            -1,
+            314,
+            414,
+            -1,
+            471,
+            371,
+            475,
+            -1,
+            544,
+            440,
+            545
+          },
+          lens {
+            114,
+            1,
+            57,
+            4,
+            69,
+            1,
+            33
+          },
+          strands {
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 114
+          },
+          {
+            id str "blast_score",
+            value int 114
+          },
+          {
+            id str "e_value",
+            value real { 162935736350639, 10, -22 }
+          },
+          {
+            id str "bit_score",
+            value real { 485209839346223, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 41
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 62
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 256781472684086, 10, -13 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 11,
+          ids {
+            local str "Query_18",
+            general {
+              db "BL_ORD_ID",
+              tag id 16
+            }
+          },
+          starts {
+            296,
+            180,
+            -1,
+            206,
+            322,
+            216,
+            327,
+            -1,
+            329,
+            221,
+            -1,
+            243,
+            351,
+            244,
+            381,
+            -1,
+            382,
+            274,
+            -1,
+            291,
+            399,
+            293
+          },
+          lens {
+            26,
+            10,
+            5,
+            2,
+            22,
+            1,
+            30,
+            1,
+            17,
+            2,
+            3
+          },
+          strands {
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 69
+          },
+          {
+            id str "blast_score",
+            value int 69
+          },
+          {
+            id str "e_value",
+            value real { 891727758592466, 10, -17 }
+          },
+          {
+            id str "bit_score",
+            value real { 311870030183414, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 16
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 27
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 114302325581395, 10, -13 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 3,
+          ids {
+            local str "Query_24",
+            general {
+              db "BL_ORD_ID",
+              tag id 25
+            }
+          },
+          starts {
+            247,
+            1195,
+            275,
+            -1,
+            276,
+            1223
+          },
+          lens {
+            28,
+            1,
+            18
+          },
+          strands {
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown
+          }
+        }
+      }
+    },
+    masks {
+    },
+    ka-blocks {
+      {
+        lambda { 317535664105308, 10, -15 },
+        k { 132098301180695, 10, -15 },
+        h { 378855800076182, 10, -15 },
+        gapped FALSE
+      },
+      {
+        lambda { 267, 10, -3 },
+        k { 41, 10, -3 },
+        h { 14, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 25086680",
+      "Effective search space used: 25086680",
+      "Length adjustment: 68"
+    }
+  }
+}
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastp",
+      service "plain",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_26"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">BDT62598.1 hypothetical protein [Metapenaeus
+ ensis majanivirus]"
+                  }
+                }
+              },
+              title "BDT62598.1 hypothetical protein [Metapenaeus ensis
+ majanivirus]"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 335,
+              seq-data ncbieaa "MINSTIHKENIKDNNNNNNSNSNNVSTFTNVSLDNDKVFMNKPITD
+KVLITTDHSFTSKLIKDNKVFINEPINVKEKNDEPFTRDEKLNSVKEKNDEPFTNDEKLNNVKKENDEPFTNDEKLNN
+VKEKNDEPFTNDEKLNNVKEKNDEPFTNNEKLNNVKEKNDEPFTNDEKLNNVKEKNDEPFTNDEKLNNVKEKENNQRF
+ISKPSSNTDDKIFNKSINDNDNNNDDDDDDNNTKVKKLKSGNGPTNDLENNEKILDNQNSKKNKLDNQKSKKNNDKTS
+CNQKQNCIHCIYNVFERLVSCFEFIIKRFQIMMNRFSNKELLRIGSFVIHKIMGK"
+            }
+          },
+          seq {
+            id {
+              local str "Query_27"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">BDT62599.1 hypothetical protein [Metapenaeus
+ ensis majanivirus]"
+                  }
+                }
+              },
+              title "BDT62599.1 hypothetical protein [Metapenaeus ensis
+ majanivirus]"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 424,
+              seq-data ncbieaa "MASNELYINKATLNTKDLSDTIDTNPNYNIHDNTNTGYRQIIKTNE
+YDSDSDSNDDDDDDDKNKEKISSYYESSKELNKFLESPNLNDDKQVKKTTNKKVNSNTNNGQKKSSSSSSFKPHNKQG
+NLSNKRLTYETYYLQYPQQLSSEALPRQPSQSCQQKRQQINHDQCTLKKLKTSHDYHHHHHHHQTPYKEKRQNNQDDQ
+YISKRLKTSHDCNPRTCDHVSQQFVSCGNEKQQHYQNSLRECQHTLTQLRIPKYPAEIQCEIQDTLKQNVSTDPQYQI
+PKNPQFPIGLVHLSKQQQLPLPLIQQSSFQLGDGLKCQVYYYGPHILISQNKAPFHSSSNSENPIKGILDHLKCGGNV
+DIGHLKENIKNIIIISPKNIPHLYAIPSDVIDKIKSFNSNNYDEYTNYNEKIDIIYNFIKSAKTKV"
+            }
+          },
+          seq {
+            id {
+              local str "Query_28"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">BDT62606.1 wsv131-like protein [Metapenaeus
+ ensis majanivirus]"
+                  }
+                }
+              },
+              title "BDT62606.1 wsv131-like protein [Metapenaeus ensis
+ majanivirus]"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 480,
+              seq-data ncbieaa "MTLDNNISRDPGYLFLLKKEEEKRKTTLSSLTDITNLLYNDTTRNK
+LRHMINNTQASTTTENIISLQDKRVSCFPKIFNILTLCMCINQYHLPKLIKKSENVLYFDLSKHNSQIPARNVYNVKN
+VNFSPQNVNDDKLDNDDDDKSLDYFLFGFSPETEILKNLISVINVLASLFLSSFTILERDLSKRKDLLCNEGNEVEYI
+NLLKGIKNLNSMSTSILNYLKNQTTTTITTTTTTNNNNNTSTIATRKKKCSCCGSNKKNHHMSPLVDRFIHEISSHHH
+HDVSVSLEKREKDVMVPPKFIFKKKLTKRRMGKKEKGCNKNKINDRIETILSFIQNKKQCKIMDNVISQKSISLLDDY
+NLMKNKKIDNDDNSNGNNNNNDNNNSKNNDNNNNDDNSNNNSDNNNNNCNNKIIIKQNQYDDEVLKCSLVPNKDYYYY
+QYKNNNVVNNDDDDDKNKLFKNLNFLKMRDDQQKRQVTKYLKFE"
+            }
+          },
+          seq {
+            id {
+              local str "Query_29"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">BDT62609.1 wsv415-like protein [Metapenaeus
+ ensis majanivirus]"
+                  }
+                }
+              },
+              title "BDT62609.1 wsv415-like protein [Metapenaeus ensis
+ majanivirus]"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 518,
+              seq-data ncbieaa "MSFISLKLLNNLYNHRERLNLYRHLVNSNNDAARKIDTKSFTTFNI
+TTTTTTTTTTTSCNSKGNNYSSDSVMYSNYHILSIDPLCPANQIYVKVKIKTFIPELASPFLAALLDAAYCYVEKKNI
+GFIENVDNGFDSNNSSDSSNNSSSSSNSNSSSSNKSSNSSSSSSSSSSSNSKNRAININTIITTAANNDDDNNNNNNN
+NNNDDANDNGNAANINIIISTLPLDTKTVYVPLSKLCEIIQKFLFNASLKKEHIITSLFSINRQDYIDIVHDFFAFDT
+YSKCILFLLYIQLLLECVPSSSIKFYIVDVYTNELVKIKRKCHVTQLSKENNKNQWFLEQNYNKKQNVIDRILKYIVE
+PVVDPPPPSSSSSSSFENSNVSIVDNSLLHDIIRNARVANYIATREKKEEKENEMDLIGIENMTLTCTNNHNNYTNII
+LRIRKEPRLINSNKQILFPTFIGQQNQLQFLKLSDEAKTILLLPHFFQNYSSLSSCLYGHSTLLNNQTCTFLMADFLP
+IMNI"
+            }
+          },
+          seq {
+            id {
+              local str "Query_30"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">BDT62611.1 hypothetical protein [Metapenaeus
+ ensis majanivirus]"
+                  }
+                }
+              },
+              title "BDT62611.1 hypothetical protein [Metapenaeus ensis
+ majanivirus]"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 441,
+              seq-data ncbieaa "MLLLQQQQQLYIILLVTSTRITITTLLKSPFYDSNKKNENEIFKIK
+NSDDRDVLNIVVDDPYYPTYVFTNRTCNNVIKVPNNIPTSVYCLRCEKEKNNYNILPPSPQQQQQQQQQQQQPYAYMN
+IYNETKNIILQSKFRITSDAYKCAVVLTTFPRGLNRGEKIWGSCNNKDNFDYTNSTFVTIEALDEPNTIEKILIKWTP
+KKIKYLSCFDKILDENDDDMIMMKNDYIFSWGRISKYNKYSQKFTFEGIDSIKDIDHVINRITDRLNYTILPIIENGL
+YLSVSNQVIVKNLIEYTFGLEVICFKYRYKQPTNITVIIWKNSAINPNIISLPVPANSNYYYPRIKYSIIRLPLQKHL
+IESLEDTNTQVFKVAFGDLLSYDDAITIMIISVIMCVFLFIYLICILFFKKRHLKNDDNTMVTKSAMIDFDNALSNVH
+VGSTF"
+            }
+          }
+        }
+      },
+      subject database "tests/db_search/paja",
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, -1 }
+        },
+        {
+          name "MaxHspsPerSubject",
+          value integer 1
+        },
+        {
+          name "MaskAtHash",
+          value boolean FALSE
+        },
+        {
+          name "SegFiltering",
+          value boolean FALSE
+        },
+        {
+          name "WordThreshold",
+          value integer 11
+        },
+        {
+          name "WindowSize",
+          value integer 40
+        },
+        {
+          name "HitlistSize",
+          value integer 2
+        },
+        {
+          name "UngappedMode",
+          value boolean FALSE
+        },
+        {
+          name "CompositionBasedStats",
+          value integer 2
+        },
+        {
+          name "SmithWatermanMode",
+          value boolean FALSE
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 16509960
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 60
+          },
+          {
+            id str "blast_score",
+            value int 60
+          },
+          {
+            id str "e_value",
+            value real { 62688662772683, 10, -15 }
+          },
+          {
+            id str "bit_score",
+            value real { 277202068350852, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 10
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 12
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 587313432835821, 10, -14 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_26",
+            general {
+              db "BL_ORD_ID",
+              tag id 30
+            }
+          },
+          starts {
+            283,
+            505
+          },
+          lens {
+            18
+          },
+          strands {
+            unknown,
+            unknown
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 97
+          },
+          {
+            id str "blast_score",
+            value int 97
+          },
+          {
+            id str "e_value",
+            value real { 357033021441931, 10, -20 }
+          },
+          {
+            id str "bit_score",
+            value real { 419725911440273, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 76
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 130
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 59875, 10, -3 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 23,
+          ids {
+            local str "Query_28",
+            general {
+              db "BL_ORD_ID",
+              tag id 14
+            }
+          },
+          starts {
+            50,
+            48,
+            -1,
+            66,
+            68,
+            68,
+            74,
+            -1,
+            75,
+            74,
+            81,
+            -1,
+            83,
+            80,
+            91,
+            -1,
+            92,
+            88,
+            107,
+            -1,
+            109,
+            103,
+            128,
+            -1,
+            136,
+            122,
+            -1,
+            177,
+            191,
+            178,
+            198,
+            -1,
+            201,
+            185,
+            211,
+            -1,
+            223,
+            195,
+            282,
+            -1,
+            283,
+            254,
+            311,
+            -1,
+            312,
+            282
+          },
+          lens {
+            18,
+            2,
+            6,
+            1,
+            6,
+            2,
+            8,
+            1,
+            15,
+            2,
+            19,
+            8,
+            55,
+            1,
+            7,
+            3,
+            10,
+            12,
+            59,
+            1,
+            28,
+            1,
+            23
+          },
+          strands {
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 137
+          },
+          {
+            id str "blast_score",
+            value int 137
+          },
+          {
+            id str "e_value",
+            value real { 544830453696767, 10, -25 }
+          },
+          {
+            id str "bit_score",
+            value real { 573805741807214, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 78
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 143
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 547471042471042, 10, -13 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 19,
+          ids {
+            local str "Query_29",
+            general {
+              db "BL_ORD_ID",
+              tag id 49
+            }
+          },
+          starts {
+            234,
+            138,
+            -1,
+            152,
+            248,
+            158,
+            297,
+            -1,
+            298,
+            207,
+            362,
+            -1,
+            368,
+            271,
+            380,
+            -1,
+            383,
+            283,
+            -1,
+            289,
+            389,
+            294,
+            -1,
+            321,
+            416,
+            335,
+            -1,
+            379,
+            460,
+            382,
+            489,
+            -1,
+            492,
+            411,
+            -1,
+            422,
+            503,
+            433
+          },
+          lens {
+            14,
+            6,
+            49,
+            1,
+            64,
+            6,
+            12,
+            3,
+            6,
+            5,
+            27,
+            14,
+            44,
+            3,
+            29,
+            3,
+            11,
+            11,
+            12
+          },
+          strands {
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown,
+            unknown
+          }
+        }
+      }
+    },
+    masks {
+    },
+    ka-blocks {
+      {
+        lambda { 305064510089886, 10, -15 },
+        k { 126472366058357, 10, -15 },
+        h { 346929380169035, 10, -15 },
+        gapped FALSE
+      },
+      {
+        lambda { 267, 10, -3 },
+        k { 41, 10, -3 },
+        h { 14, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 16509960",
+      "Effective search space used: 16509960",
+      "Length adjustment: 65"
+    }
+  }
+}

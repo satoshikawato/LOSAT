@@ -1,30 +1,54 @@
 <script setup lang="ts">
-// What the lists of the selected query do not show, and why (design §11.2): no hits, HSPs
+// What the lists of the selected query do not show, and why (design §11.2): a dry run, no hits, HSPs
 // hidden by the view filters, a hit list that reached its limit (more subjects may match;
 // it is not said that they do), and subjects whose alignments outfmt 0 does not show.
 import { computed } from 'vue';
-import type { ResultsState } from '../application/results';
+import { noHspReason, type ResultsState } from '../application/results';
+import { flagGiven } from '../domain/result-index';
 import { formatCount } from './format';
+import { NO_HSP_TEXT } from './no-hsp-text';
+import { vScrollFocus } from './scroll-focus';
 
 const props = defineProps<{ state: ResultsState }>();
 defineEmits<{ clear: [] }>();
 
 const totals = computed(() => props.state.queryTotals);
 const limit = computed(() => props.state.loaded?.limits.maxTargetSeqs);
-const limitGiven = computed(() => props.state.loaded?.run.snapshot.argv.includes('-max_target_seqs') ?? false);
+/** The option that sets the hit list of the tabular formats, which the HSP records and these lists follow. */
+const limitFlag = computed(() => props.state.loaded?.limits.subjectFlag ?? '-max_target_seqs');
+const limitGiven = computed(() => flagGiven(props.state.loaded?.run.snapshot.argv ?? [], limitFlag.value));
+/** What outfmt 0 does with -num_descriptions / -num_alignments; undefined where neither is given. */
+const outfmt0 = computed(() => props.state.loaded?.limits.outfmt0);
+/** -sorthits orders outfmt 0's hit list: its first subjects are not the first ones in the engine's order. */
+const sorted = computed(() => props.state.loaded?.limits.sorted === true);
+/** Outfmt 0's own search failed: stream 0 is empty next to the tabular records (its error is in the diagnostics). */
+const outfmt0Failed = computed(() => props.state.loaded?.outfmt0Failed === true);
+/** Why the selected query shows no HSP (the Dot Plot tab says the same in place of its plot). */
+const reason = computed(() => noHspReason(props.state));
+/** What the engine wrote to the warnings (BLAST+'s "Query is Empty!"), as it wrote it. */
+const engineWarnings = computed(() => props.state.loaded?.diagnostics.trim() ?? '');
 const plural = (count: number, one: string, many = `${one}s`) => `${formatCount(count)} ${count === 1 ? one : many}`;
 </script>
 
 <template>
   <div class="result-notices" aria-live="polite">
-    <p v-if="state.queries.length === 0" class="notice" data-testid="results-notice" data-kind="no-queries">
-      No queries match the query filters.
+    <p v-if="reason === 'dry-run'" class="notice" data-testid="results-notice" data-kind="dry-run">{{ NO_HSP_TEXT['dry-run'] }}</p>
+    <div v-else-if="reason === 'empty-query'" class="notice" data-testid="results-notice" data-kind="empty-query">
+      <p>{{ NO_HSP_TEXT['empty-query'] }}</p>
+      <pre v-if="engineWarnings !== ''" v-scroll-focus="'Warnings'" class="output" data-testid="results-notice-engine">{{ engineWarnings }}</pre>
+    </div>
+    <p v-else-if="reason === 'no-tabular-hits'" class="notice" data-testid="results-notice" data-kind="no-tabular-hits">
+      <span class="option-name">-num_alignments</span> 0 leaves the hit list of outfmt 6 and 7 empty (BLAST+'s "No hits are being saved" error,
+      in the diagnostics), so this run has no HSP records; outfmt 0 is written as BLAST+ writes it.
+    </p>
+    <p v-else-if="reason === 'no-queries'" class="notice" data-testid="results-notice" data-kind="no-queries">
+      {{ NO_HSP_TEXT['no-queries'] }}
     </p>
     <template v-else-if="totals">
-      <p v-if="totals.hsps === 0" class="notice" data-testid="results-notice" data-kind="no-hits">
-        No significant similarity found for this query.
+      <p v-if="reason === 'no-hits'" class="notice" data-testid="results-notice" data-kind="no-hits">
+        {{ NO_HSP_TEXT['no-hits'] }}
       </p>
-      <p v-else-if="state.subjects.length === 0" class="notice warn" data-testid="results-notice" data-kind="filtered-out">
+      <p v-else-if="reason === 'filtered-out'" class="notice warn" data-testid="results-notice" data-kind="filtered-out">
         No HSPs of this query match the view filters ({{ plural(state.hidden.hsps, 'HSP') }} on
         {{ plural(state.hidden.subjects, 'subject') }} hidden).
         <button type="button" class="link" data-testid="results-notice-clear" @click="$emit('clear')">Clear the filters</button>
@@ -35,18 +59,50 @@ const plural = (count: number, one: string, many = `${one}s`) => `${formatCount(
       </p>
       <p v-if="state.atSubjectLimit && limit !== undefined" class="notice" data-testid="results-notice" data-kind="subject-limit">
         This query has {{ plural(totals.subjects, 'subject') }}, the most that the search keeps
-        ({{ limitGiven ? '' : 'the default of ' }}<span class="option-name">-max_target_seqs</span>: {{ formatCount(limit) }}). More
-        subjects may match; a search with a larger <span class="option-name">-max_target_seqs</span> would show them.
+        ({{ limitGiven ? '' : 'the default of ' }}<span class="option-name">{{ limitFlag }}</span>: {{ formatCount(limit) }}). More
+        subjects may match; a search with a larger <span class="option-name">{{ limitFlag }}</span> would show them.
       </p>
       <p
-        v-if="totals.subjects > 0 && state.outfmt0Subjects < totals.subjects"
+        v-if="totals.subjects > 0 && state.outfmt0Subjects < totals.subjects && outfmt0 === undefined"
         class="notice"
         data-testid="results-notice"
         data-kind="outfmt0-partial"
       >
-        outfmt 0 shows the alignments of the first {{ plural(state.outfmt0Subjects, 'subject') }} of this query
+        outfmt 0 shows the alignments of the first {{ plural(state.outfmt0Subjects, 'subject') }} of this query<template v-if="sorted">
+          in its order of <span class="option-name">-sorthits</span></template
+        >
         (BLAST+'s <span class="option-name">-num_alignments</span>: 250, or <span class="option-name">-max_target_seqs</span> when it is
         given). The other subjects' HSPs are in outfmt 6 and 7.
+      </p>
+      <p
+        v-else-if="totals.subjects > 0 && state.outfmt0Subjects < totals.subjects && outfmt0 !== undefined"
+        class="notice"
+        data-testid="results-notice"
+        data-kind="outfmt0-partial"
+      >
+        <template v-if="outfmt0Failed"
+          >The search of outfmt 0 failed (<span class="option-name">-num_descriptions</span> and <span class="option-name">-num_alignments</span> give
+          it a hit list of its own, and its error is in the diagnostics), so no alignment is linked to this query's
+          {{ plural(totals.subjects, 'subject') }}.
+        </template>
+        <template v-else-if="outfmt0.separate"
+          >outfmt 0's alignments are linked to {{ formatCount(state.outfmt0Subjects) }} of this query's {{ plural(totals.subjects, 'subject') }}<template
+            v-if="outfmt0.alignments !== undefined"
+          >
+            (BLAST+'s <span class="option-name">-num_alignments</span>: {{ formatCount(outfmt0.alignments) }})</template
+          >. Its search has a hit list of its own<template v-if="outfmt0.hitList !== undefined">
+            ({{ plural(outfmt0.hitList, 'subject') }} per query)</template
+          >, because <span class="option-name">-num_descriptions</span> and <span class="option-name">-num_alignments</span> give it another
+          size than outfmt 6 and 7, so a subject's HSPs are linked only where outfmt 0 shows the alignments of exactly the HSPs that outfmt 6 and 7 keep for it.
+        </template>
+        <template v-else
+          >outfmt 0 shows the alignments of {{ plural(state.outfmt0Subjects, 'subject') }} of this query's {{ formatCount(totals.subjects) }}<template
+            v-if="outfmt0.alignments !== undefined"
+          >
+            (BLAST+'s <span class="option-name">-num_alignments</span>: {{ formatCount(outfmt0.alignments) }})</template
+          >.
+        </template>
+        The other subjects' HSPs are in outfmt 6 and 7.
       </p>
     </template>
   </div>

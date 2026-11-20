@@ -1,0 +1,34 @@
+
+                                          Tax BLAST report                                          
+
+Query= nq1 query nucleotide one
+
+Length=900
+
+                                           Organism Report                                           
+Accession                                 Description                                Score E-value 
+
+                                   Homo sapiens (human) [primates]                                   
+ loc       d3 local one                                                                368   0.0     
+ loc2      d3 local two                                                                185   4e-51   
+
+                                Mus musculus (house mouse) [rodents]                                
+ AF000001  d3 genbank one                                                              368   0.0     
+ AF000002  d3 genbank two                                                              185   4e-51   
+
+                                          Tax BLAST report                                          
+
+Query= nq2 unrelated query (no hits)
+
+Length=120
+
+                                           Organism Report                                           
+Accession                                 Description                                Score E-value 
+
+                                   Homo sapiens (human) [primates]                                   
+ loc       d3 local one                                                                21.2  0.011   
+ loc2      d3 local two                                                                16.6  0.26    
+
+                                Mus musculus (house mouse) [rodents]                                
+ AF000001  d3 genbank one                                                              21.2  0.011   
+ AF000002  d3 genbank two                                                              16.6  0.26    

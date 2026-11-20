@@ -1,0 +1,14 @@
+# BLASTX 2.17.0+
+# Query: pyl_q1
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/bx_pyl_s.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 2 hits found
+pyl_q1	pyl_s3	87.500	120	15	0	22	381	1	120	4.76e-78	214
+pyl_q1	pyl_s1	86.667	120	16	0	22	381	1	120	4.76e-78	214
+# BLASTX 2.17.0+
+# Query: pyl_q2
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/bx_pyl_s.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+pyl_q2	pyl_s2	86.667	90	12	0	285	16	1	90	1.89e-58	162
+# BLAST processed 2 queries

@@ -1,9 +1,13 @@
-// A Chromium profile on disk for the storage tests. Playwright's default contexts are
-// incognito: their OPFS lives in memory and ignores the quota that CDP sets, unlike a
-// user's browser profile. A persistent context keeps OPFS on disk, as users have it.
+// A profile on disk of the test's browser, for the storage tests (Chromium) and the OPFS
+// BlockStore contract (browsers.spec.ts). Playwright's default contexts are incognito: in
+// Chromium their OPFS lives in memory and ignores the quota that CDP sets, unlike a user's
+// browser profile, and WebKit 27 refuses OPFS in them ("UnknownError" from getDirectory). A
+// persistent context keeps OPFS on disk, as users have it. It starts with the project's launch
+// options (the WebKit launcher and environment of playwright.config.ts).
 import { readdirSync, readFileSync } from 'node:fs';
-import { test as base, type BrowserContext } from '@playwright/test';
+import type { BrowserContext } from '@playwright/test';
 import { ORIGIN } from './browser';
+import { test as base } from './test';
 
 export interface Profile {
   readonly context: BrowserContext;
@@ -12,9 +16,9 @@ export interface Profile {
 }
 
 export const test = base.extend<{ profile: Profile }>({
-  profile: async ({ playwright }, use, testInfo) => {
+  profile: async ({ playwright, browserName }, use, testInfo) => {
     const dir = testInfo.outputPath('profile');
-    const context = await playwright.chromium.launchPersistentContext(dir, {
+    const context = await playwright[browserName].launchPersistentContext(dir, {
       baseURL: ORIGIN,
       viewport: { width: 1280, height: 720 },
       acceptDownloads: true,
@@ -67,6 +71,16 @@ export function killRenderers(profile: Profile): number {
     }
   }
   const renderers = all.filter((p) => family.has(p.pid) && p.command.includes('--type=renderer'));
-  for (const renderer of renderers) process.kill(renderer.pid, 'SIGKILL');
-  return renderers.length;
+  let killed = 0;
+  for (const renderer of renderers) {
+    try {
+      process.kill(renderer.pid, 'SIGKILL');
+      killed += 1;
+    } catch (error) {
+      // The renderer ended after the list was read (a tab closed just before ends its
+      // renderer a moment later): it is already gone.
+      if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
+    }
+  }
+  return killed;
 }

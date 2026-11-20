@@ -1,0 +1,103 @@
+#Post-RPSBLAST Processing Utility
+
+#Input data file:	arch/ntnohit.asn
+#Output data file:	(stdout)
+#Annotation data at:	nt
+#E-Value cutoff:	0.01
+#Redundancy:	Full
+#Data requested:	Domain hits and site annotations
+#Output format -- tab-delimited table
+#Show superfamilies: YES
+#DATA
+#SESSION	<session-ordinal>	<program>	<database>	<score-matrix>	<evalue-threshold>
+#QUERY	<query-id>	<seq-type>	<seq-length>	<definition-line>
+#DOMAINS
+#<session-ordinal>	<query-id[readingframe]>	<hit-type>	<PSSM-ID>	<from>	<to>	<E-Value>	<bitscore>	<accession>	<short-name>	<incomplete>	<superfamily PSSM-ID>
+#more such lines......
+#ENDDOMAINS
+#SITES
+#<session-ordinal>	<query-id[readingframe]>	<annot-type>	<title>	<residue(coordinates)>	<complete-size>	<mapped-size>	<source-domain>
+#more such lines......
+#ENDSITES
+#MOTIFS
+#<session-ordinal>	<query-id[readingframe]>	<title>	<from>	<to>	<source-domain>
+#more such lines......
+#ENDMOTIFS
+#ENDQUERY	<query-id>
+#more query sections..
+#ENDSESSION	<session-ordinal>
+#more session sections..
+#ENDDATA
+#=====================================================================
+DATA
+SESSION	1	tblastn	2.17.0+	Cdd	BLOSUM62	0.01
+QUERY	Query_1	Nucleotide	5000	mg00001_1-5000
+DOMAINS
+ENDDOMAINS
+SUPERFAMILIES
+ENDSUPERFAMILIES
+ENDQUERY
+QUERY	Query_2	Nucleotide	5000	mg00002_5001-10000
+DOMAINS
+ENDDOMAINS
+SUPERFAMILIES
+ENDSUPERFAMILIES
+ENDQUERY
+ENDSESSION	1
+SESSION	2	tblastn	2.17.0+	Cdd	BLOSUM62	0.01
+QUERY	Query_3	Nucleotide	5000	mg00003_10001-15000
+DOMAINS
+ENDDOMAINS
+SUPERFAMILIES
+ENDSUPERFAMILIES
+ENDQUERY
+QUERY	Query_4	Nucleotide	5000	mg00004_15001-20000
+DOMAINS
+ENDDOMAINS
+SUPERFAMILIES
+ENDSUPERFAMILIES
+ENDQUERY
+ENDSESSION	2
+SESSION	3	tblastn	2.17.0+	Cdd	BLOSUM62	0.01
+QUERY	Query_5	Nucleotide	5000	mg00005_20001-25000
+DOMAINS
+ENDDOMAINS
+SUPERFAMILIES
+ENDSUPERFAMILIES
+ENDQUERY
+QUERY	Query_6	Nucleotide	5000	mg00006_25001-30000
+DOMAINS
+ENDDOMAINS
+SUPERFAMILIES
+ENDSUPERFAMILIES
+ENDQUERY
+ENDSESSION	3
+SESSION	4	tblastn	2.17.0+	Cdd	BLOSUM62	0.01
+QUERY	Query_7	Nucleotide	5000	mg00007_30001-35000
+DOMAINS
+ENDDOMAINS
+SUPERFAMILIES
+ENDSUPERFAMILIES
+ENDQUERY
+QUERY	Query_8	Nucleotide	5000	mg00008_35001-40000
+DOMAINS
+ENDDOMAINS
+SUPERFAMILIES
+ENDSUPERFAMILIES
+ENDQUERY
+ENDSESSION	4
+SESSION	5	tblastn	2.17.0+	Cdd	BLOSUM62	0.01
+QUERY	Query_9	Nucleotide	5000	mg00009_40001-45000
+DOMAINS
+ENDDOMAINS
+SUPERFAMILIES
+ENDSUPERFAMILIES
+ENDQUERY
+QUERY	Query_10	Nucleotide	5000	mg00010_45001-50000
+DOMAINS
+ENDDOMAINS
+SUPERFAMILIES
+ENDSUPERFAMILIES
+ENDQUERY
+ENDSESSION	5
+ENDDATA

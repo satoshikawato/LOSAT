@@ -1,0 +1,11 @@
+# BLASTP 2.17.0+
+# Query: qs1 low-complexity run inside the alignment
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/x16_seg_s.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+qs1	ss1	92.593	81	3	1	20	100	20	97	3.57e-39	112
+# BLASTP 2.17.0+
+# Query: qs2 no hits expected
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/x16_seg_s.faa)
+# 0 hits found
+# BLAST processed 2 queries

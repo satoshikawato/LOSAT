@@ -1,13 +1,17 @@
+import type { OutputFormat, ProgramId } from 'losat/domain';
 // The verification badge of a run (plan §6.1, design §10.3, PD-LOSAT-WEB-APP-BOUNDARY
 // "Compatibility contract"). A run matches a certified profile only when its program and
-// options were compared byte for byte with NCBI BLAST+ for every output format, and its
+// options were compared byte for byte with NCBI BLAST+ for every output format (the records
+// compare the formats that every run writes, so a run that also writes the output of its own
+// -outfmt with fields is outside them, W10), and its
 // runtime path in the browser was checked against the native engine with its thread count.
+// Auto's count depends on the user's processors (serial below 20,000 bytes of input, then half
+// of the processors, at most 8 below 1 MB and 32 from 1 MB), so V-BR runs every count from 1 to
+// 32 for each program (WA-RS-03).
 // The table that says what was compared is generated from docs/web/verification_cells.tsv
 // and the certification records at build time (build/verification.ts); nobody writes it
 // by hand. The badge speaks about the engine, the options and the runtime path, never
 // about the user's inputs: no run is compared with NCBI when it runs.
-import type { OutputFormat } from './output-format';
-import type { ProgramId } from './programs';
 
 /** What the records show for one program. */
 export interface ProgramVerification {
@@ -36,8 +40,13 @@ export interface VerificationTable {
   readonly programs: Readonly<Partial<Record<ProgramId, ProgramVerification>>>;
 }
 
-/** Flags that do not belong to a profile: the inputs, the outputs and the threads. */
-const NOT_OPTIONS = new Set(['-query', '-subject', '-out', '-outfmt', '-num_threads']);
+/**
+ * Flags that do not belong to a profile: the inputs, the outputs and the threads, and the file of
+ * `-logfile`, which names a file of the run's messages as `-out` names its output: the search's
+ * outputs do not change with it (line RG E1w-3b). `-conffile` and `-dryrun` change what the run
+ * reads or does, and stay options (no record compares them).
+ */
+const NOT_OPTIONS = new Set(['-query', '-subject', '-out', '-outfmt', '-num_threads', '-logfile']);
 /** Flags whose value is a coordinate range of the inputs (S11): a profile has the flag, not the range. */
 const RANGE_OPTIONS = new Set(['-query_loc', '-subject_loc']);
 export const RANGE_VALUE = '<range>';
@@ -61,6 +70,11 @@ export function optionKey(words: readonly string[], grammar: OptionGrammar): str
   while (i < words.length) {
     const flag = words[i]!;
     if (!flag.startsWith('-')) return undefined;
+    // `-outfmt=6 qseqid` is the command line's form of `-outfmt '6 qseqid'`.
+    if (NOT_OPTIONS.has(flag.split('=', 1)[0]!) && flag.includes('=')) {
+      i++;
+      continue;
+    }
     const takesValue = NOT_OPTIONS.has(flag) || grammar.takesValue(flag);
     if (takesValue && i + 1 >= words.length) return undefined;
     const value = takesValue ? words[i + 1]! : '';
@@ -78,6 +92,8 @@ export interface BadgeInput {
   readonly argv: readonly string[];
   /** The formats the run wrote. */
   readonly formats: readonly OutputFormat[];
+  /** The -outfmt value of the output of the run's own -outfmt (`customOutfmt`), which no record compares; undefined without one. */
+  readonly custom?: string | undefined;
   readonly runtimePath: 'threaded' | 'serial' | 'fake' | undefined;
   readonly threads: number | undefined;
   readonly grammar: OptionGrammar;
@@ -92,8 +108,11 @@ export interface Badge {
   readonly exceptions: readonly string[];
 }
 
-export const CERTIFIED_LABEL = 'Certified profile';
-export const OUTSIDE_LABEL = 'Engine-supported, outside certified profile';
+// The words of the badge (the maintainer, 2026-11-02: no "certified", which reads as an official
+// certification; the badge says whether the run is supported, DW-36; 2026-11-04: no "verification"
+// either, and the two marks are Supported and Not yet supported). The levels keep their names.
+export const SUPPORTED_LABEL = 'Supported';
+export const NOT_SUPPORTED_LABEL = 'Not yet supported';
 
 export function verificationBadge(input: BadgeInput, table: VerificationTable): Badge {
   const exceptions = approvedExceptions(input.program, input.argv);
@@ -109,9 +128,10 @@ export function verificationBadge(input: BadgeInput, table: VerificationTable): 
   const key = optionKey(input.argv, input.grammar);
   const compared = key === undefined ? undefined : verification?.optionSets[key];
   const outside: string[] = [];
-  const missing = input.formats.filter((format) => !(compared ?? []).includes(format));
+  const custom = input.custom === undefined ? [] : [input.custom];
+  const missing = [...input.formats.filter((format) => !(compared ?? []).includes(format)), ...custom];
   if (compared === undefined) {
-    outside.push(`These options of ${input.program} were not compared with NCBI BLAST+ ${table.ncbi} in the certification records.`);
+    outside.push(`These options of ${input.program} were not compared with NCBI BLAST+ ${table.ncbi} on LOSAT's test fixtures.`);
   } else if (missing.length > 0) {
     outside.push(`These options were compared with NCBI BLAST+ ${table.ncbi} for outfmt ${list(compared)}, not for outfmt ${list(missing)}.`);
   }
@@ -119,7 +139,7 @@ export function verificationBadge(input: BadgeInput, table: VerificationTable): 
   if (browser === undefined) {
     outside.push(`The browser runtime of ${input.program} was not checked against the native engine.`);
   } else {
-    const formats = input.formats.filter((format) => !browser.formats.includes(format));
+    const formats = [...input.formats.filter((format) => !browser.formats.includes(format)), ...custom];
     if (formats.length > 0) outside.push(`The browser runtime was not checked for outfmt ${list(formats)}.`);
     if (input.runtimePath === undefined || !browser.paths.includes(input.runtimePath)) {
       outside.push(`The ${input.runtimePath ?? 'unknown'} runtime path was not checked in the browser.`);
@@ -127,17 +147,20 @@ export function verificationBadge(input: BadgeInput, table: VerificationTable): 
     if (input.threads === undefined || !browser.threads.includes(input.threads)) {
       outside.push(
         `This run used ${input.threads ?? 'an unknown number of'} ${input.threads === 1 ? 'thread' : 'threads'}; ` +
-          `the browser runtime was checked with ${list(browser.threads)} threads.`,
+          `the browser runtime was checked with ${counts(browser.threads)} threads.`,
       );
     }
   }
-  if (outside.length > 0) return { level: 'outside', label: OUTSIDE_LABEL, details: outside, exceptions };
+  if (outside.length > 0) return { level: 'outside', label: NOT_SUPPORTED_LABEL, details: outside, exceptions };
+  // The counts of the run's path: the serial module runs one thread, the threaded module two or more.
+  const pathThreads = browser!.threads.filter((n) => (input.runtimePath === 'serial' ? n === 1 : n > 1));
   return {
     level: 'certified',
-    label: CERTIFIED_LABEL,
+    label: SUPPORTED_LABEL,
     details: [
-      `The program and these options were compared byte for byte with NCBI BLAST+ ${table.ncbi} for outfmt ${list(input.formats)} on the certification fixtures.`,
-      `The ${input.runtimePath} runtime in the browser was checked against the native engine with ${list(browser!.threads)} threads in ${list(browser!.browsers)}.`,
+      `The program and these options were compared byte for byte with NCBI BLAST+ ${table.ncbi} for outfmt ${list(input.formats)} on LOSAT's test fixtures.`,
+      `The ${input.runtimePath} runtime in the browser was checked against the native engine with ${counts(pathThreads)} ` +
+        `${pathThreads.length === 1 && pathThreads[0] === 1 ? 'thread' : 'threads'} in ${list(browser!.browsers)}.`,
       'This is a statement about the engine build and the options, not a comparison of your inputs with NCBI.',
     ],
     exceptions,
@@ -157,6 +180,19 @@ export function approvedExceptions(program: ProgramId, argv: readonly string[]):
     `Approved exception${decision}: LOSAT translates the local subjects with -db_gencode ${code}. NCBI BLAST+ ` +
       'treats -db_gencode differently for local -subject sequences, so its results can differ for this genetic code.',
   ];
+}
+
+/** Thread counts in words, a run of three or more consecutive counts as a range: "1, 2 and 4", "2 to 32". */
+function counts(numbers: readonly number[]): string {
+  const words: string[] = [];
+  for (let i = 0; i < numbers.length; ) {
+    let j = i;
+    while (j + 1 < numbers.length && numbers[j + 1] === numbers[j]! + 1) j++;
+    if (j - i >= 2) words.push(`${numbers[i]} to ${numbers[j]}`);
+    else for (let k = i; k <= j; k++) words.push(String(numbers[k]));
+    i = j + 1;
+  }
+  return list(words);
 }
 
 function list(items: readonly (string | number)[]): string {

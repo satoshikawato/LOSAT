@@ -6,10 +6,10 @@
 //   place) and the real Data worker of the application as the receiver;
 // and, with the engine (engine.ts, S09), searches through the application, the contract
 // suites against the real reactor and Engine worker, and the runtime checks.
+import type { OutputStream } from 'losat/ports';
 import { startDataWorker } from '../../../src/infra/data-worker/gateway';
 import * as engine from './engine';
 import type { StorageBackend } from '../../../src/ports/data';
-import type { OutputStream } from '../../../src/ports/run-output';
 import { runCases, type CaseResult } from '../../contract/contract';
 import { RUN_OUTPUT_CASES, type RemoteWriter } from '../../contract/run-output.contract';
 import type { BlockStorePageMessage, BlockStoreWorkerMessage, EngineDoubleCommand, EngineDoubleReply } from './protocol';

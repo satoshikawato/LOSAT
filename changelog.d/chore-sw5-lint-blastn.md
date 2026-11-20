@@ -1,0 +1,1 @@
+- Lints: the blastn code no longer has warnings of the lints that the `[lints]` table still allows for now (unused imports, variables, `mut`, code and casts, and clippy's style lints): unused items are removed or built only where they are used, and the one kept on purpose carries `#[expect(lint, reason = "...")]`. No output changes.

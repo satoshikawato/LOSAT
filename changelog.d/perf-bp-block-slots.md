@@ -1,0 +1,1 @@
+- `blastp -task blastp-fast` with more than one thread searches two query blocks at a time on its pool, the reports written in block order (`LOSAT_X_BPQSLOTS`, a new switch of the strict set): reports do not change; the threads that waited in a block's joins take the other block's work.

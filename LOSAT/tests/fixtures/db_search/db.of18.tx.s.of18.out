@@ -1,0 +1,37 @@
+
+                                          Tax BLAST report                                          
+
+Query= nq1 query nucleotide one
+
+Length=900
+
+                                           Organism Report                                           
+Accession                                  Description                                Score E-value 
+
+                              Zero taxid sp. (zero common) [zeroblast]                              
+ Subject_1  ref|XM_000101.1| subject one two HSPs                                      368   2e-180  
+ Subject_3  lcl|s3_local_identifier subject three with a title that is longer than ... 288   1e-81   
+ Subject_11 ref|XM_000111.1| subject eleven strong then planted weak HSP               245   1e-71   
+ Subject_9  ref|XM_000109.1| subject nine                                              199   7e-55   
+ Subject_2  emb|CAA00102.2| subject two                                                185   9e-51   
+ Subject_8  gnl|testdb|tag_s8 subject eight                                            176   7e-48   
+ Subject_6  dbj|AB000106.1| subject six                                                170   5e-46   
+ Subject_7  lcl|s7_not_in_taxdb_long_label subject seven taxid not in taxdb            167   2e-45   
+ Subject_4  gb|AB000104.1| subject four                                                165   1e-44   
+ Subject_5  gi|123457|ref|XM_000105.1| subject five 156    s 6e-42    e <@acc_... 156   6e-42   
+ Subject_10 dbj|AB000110.1| subject ten                                                115   2e-29   
+
+                                          Tax BLAST report                                          
+
+Query= nq2 unrelated query (no hits)
+
+Length=120
+
+                                           Organism Report                                           
+Accession                                 Description                                Score E-value 
+
+                              Zero taxid sp. (zero common) [zeroblast]                              
+ Subject_1 ref|XM_000101.1| subject one two HSPs                                       21.2  0.027   
+ Subject_4 gb|AB000104.1| subject four                                                 20.8  0.037   
+ Subject_2 emb|CAA00102.2| subject two                                                 16.6  0.64    
+ Subject_3 lcl|s3_local_identifier subject three with a title that is longer than t... 13.9  4.1     

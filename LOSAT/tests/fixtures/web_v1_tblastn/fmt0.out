@@ -1,0 +1,229 @@
+TBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input: subject).
+           2 sequences; 3,300 total letters
+
+
+
+Query= BDT63287.1 hypothetical protein [Armadillidium vulgare clopovirus]
+
+Length=329
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+AvCLPV_120501_122200 LC738883.1 120501..122200                        593     0.0  
+AvCLPV_134001_135600 LC738883.1 134001..135600                        18.9    0.60 
+
+
+> AvCLPV_120501_122200 LC738883.1 120501..122200
+Length=1700
+
+ Score = 593 bits (1529),  Expect = 0.0, Method: Compositional matrix adjust.
+ Identities = 329/329 (100%), Positives = 329/329 (100%), Gaps = 0/329 (0%)
+ Frame = -3
+
+Query  1     MAAPFRIKNNSPIPLPSIRIYEGGQYINSKSIVGLRPILPKTNHQVQPPLKNVENFRSEQ  60
+             MAAPFRIKNNSPIPLPSIRIYEGGQYINSKSIVGLRPILPKTNHQVQPPLKNVENFRSEQ
+Sbjct  1314  MAAPFRIKNNSPIPLPSIRIYEGGQYINSKSIVGLRPILPKTNHQVQPPLKNVENFRSEQ  1135
+
+Query  61    RFPPNNNLSQSKEKRFQIQSSPKVVSNKIKAKINSNLDSCnnnnnnnnIVDCKDQMKIGK  120
+             RFPPNNNLSQSKEKRFQIQSSPKVVSNKIKAKINSNLDSCNNNNNNNNIVDCKDQMKIGK
+Sbjct  1134  RFPPNNNLSQSKEKRFQIQSSPKVVSNKIKAKINSNLDSCNNNNNNNNIVDCKDQMKIGK  955
+
+Query  121   EGAKRKFDCLRNEEKEEIATLnakksnnnhpssnnnnnknrqnIEILRKAKEYLVQENLV  180
+             EGAKRKFDCLRNEEKEEIATLNAKKSNNNHPSSNNNNNKNRQNIEILRKAKEYLVQENLV
+Sbjct  954   EGAKRKFDCLRNEEKEEIATLNAKKSNNNHPSSNNNNNKNRQNIEILRKAKEYLVQENLV  775
+
+Query  181   LMKKMMIVKEVLFNHCELSKFLKILKKANEIHDEGEKKIKFSLSIPTYQAILTLSSSSCH  240
+             LMKKMMIVKEVLFNHCELSKFLKILKKANEIHDEGEKKIKFSLSIPTYQAILTLSSSSCH
+Sbjct  774   LMKKMMIVKEVLFNHCELSKFLKILKKANEIHDEGEKKIKFSLSIPTYQAILTLSSSSCH  595
+
+Query  241   QERTTLIIEPTDKFEEINGALLLKFEKDFSEQSEDFLRRANKCLQQHQCDFYLDYFLNET  300
+             QERTTLIIEPTDKFEEINGALLLKFEKDFSEQSEDFLRRANKCLQQHQCDFYLDYFLNET
+Sbjct  594   QERTTLIIEPTDKFEEINGALLLKFEKDFSEQSEDFLRRANKCLQQHQCDFYLDYFLNET  415
+
+Query  301   KVKYILDNFVKEVCRLGQKKKNNNCDCFK  329
+             KVKYILDNFVKEVCRLGQKKKNNNCDCFK
+Sbjct  414   KVKYILDNFVKEVCRLGQKKKNNNCDCFK  328
+
+
+ Score = 15.4 bits (28),  Expect = 8.5, Method: Compositional matrix adjust.
+ Identities = 5/6 (83%), Positives = 6/6 (100%), Gaps = 0/6 (0%)
+ Frame = +3
+
+Query  5    FRIKNN  10
+            FR+KNN
+Sbjct  417  FRLKNN  434
+
+
+> AvCLPV_134001_135600 LC738883.1 134001..135600
+Length=1600
+
+ Score = 18.9 bits (37),  Expect = 0.60, Method: Compositional matrix adjust.
+ Identities = 11/32 (34%), Positives = 15/32 (47%), Gaps = 4/32 (13%)
+ Frame = -3
+
+Query  291   FYLDYFL----NETKVKYILDNFVKEVCRLGQ  318
+             FYL Y+L    N +   Y L NF  ++  L  
+Sbjct  1127  FYLYYYLNGI*NRSSFVYFLKNFPNKLLHLHH  1032
+
+
+ Score = 18.9 bits (37),  Expect = 0.63, Method: Compositional matrix adjust.
+ Identities = 7/12 (58%), Positives = 7/12 (58%), Gaps = 0/12 (0%)
+ Frame = +2
+
+Query  283  CLQQHQCDFYLD  294
+            CLQ     FYLD
+Sbjct  818  CLQDKGYKFYLD  853
+
+
+ Score = 18.5 bits (36),  Expect = 0.99, Method: Compositional matrix adjust.
+ Identities = 7/24 (29%), Positives = 11/24 (46%), Gaps = 0/24 (0%)
+ Frame = -1
+
+Query  191  VLFNHCELSKFLKILKKANEIHDE  214
+            ++F HCE+  F   L     +  E
+Sbjct  793  LVFRHCEIYIFFFTLSIIYPLRGE  722
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.135    0.384    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 299592
+
+
+Query= BDT63290.1 hypothetical protein [Armadillidium vulgare clopovirus]
+
+Length=283
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+AvCLPV_134001_135600 LC738883.1 134001..135600                        549     0.0  
+AvCLPV_120501_122200 LC738883.1 120501..122200                        18.9    0.51 
+
+
+> AvCLPV_134001_135600 LC738883.1 134001..135600
+Length=1600
+
+ Score = 549 bits (1414),  Expect = 0.0, Method: Compositional matrix adjust.
+ Identities = 283/283 (100%), Positives = 283/283 (100%), Gaps = 0/283 (0%)
+ Frame = +2
+
+Query  1     MYRNEYYFENQEFKADKSNISLSFKCQKNGTHSFAFVNETRKRFTLNIESLQQVLKLLKM  60
+             MYRNEYYFENQEFKADKSNISLSFKCQKNGTHSFAFVNETRKRFTLNIESLQQVLKLLKM
+Sbjct  407   MYRNEYYFENQEFKADKSNISLSFKCQKNGTHSFAFVNETRKRFTLNIESLQQVLKLLKM  586
+
+Query  61    FSSQKEERTFRLRVPIEENARNLAAGEKTNNEDDFEVNAAADKESLTPQRIYNGESKKKY  120
+             FSSQKEERTFRLRVPIEENARNLAAGEKTNNEDDFEVNAAADKESLTPQRIYNGESKKKY
+Sbjct  587   FSSQKEERTFRLRVPIEENARNLAAGEKTNNEDDFEVNAAADKESLTPQRIYNGESKKKY  766
+
+Query  121   IYLTMTKYQYGKGVDKLCLQDKGYKFYLDGRFVIQNIIDMESDVEKFILEFKNYQKILNH  180
+             IYLTMTKYQYGKGVDKLCLQDKGYKFYLDGRFVIQNIIDMESDVEKFILEFKNYQKILNH
+Sbjct  767   IYLTMTKYQYGKGVDKLCLQDKGYKFYLDGRFVIQNIIDMESDVEKFILEFKNYQKILNH  946
+
+Query  181   SEESFVKFYTNVRIEEGRVEEQKRFLDTSDEDEEVYLGNFLRNKRMMNDFKFRLsnnisk  240
+             SEESFVKFYTNVRIEEGRVEEQKRFLDTSDEDEEVYLGNFLRNKRMMNDFKFRLSNNISK
+Sbjct  947   SEESFVKFYTNVRIEEGRVEEQKRFLDTSDEDEEVYLGNFLRNKRMMNDFKFRLSNNISK  1126
+
+Query  241   tfssssEVRLGCIIYILTHRDHQFNKLKKMVSNNKKTIKKCVV  283
+             TFSSSSEVRLGCIIYILTHRDHQFNKLKKMVSNNKKTIKKCVV
+Sbjct  1127  TFSSSSEVRLGCIIYILTHRDHQFNKLKKMVSNNKKTIKKCVV  1255
+
+
+ Score = 16.5 bits (31),  Expect = 2.9, Method: Compositional matrix adjust.
+ Identities = 8/24 (33%), Positives = 12/24 (50%), Gaps = 0/24 (0%)
+ Frame = -1
+
+Query  183   ESFVKFYTNVRIEEGRVEEQKRFL  206
+             + F+ FY+        V+  KRFL
+Sbjct  1021  KPFLFFYSPFFYSHVCVKFNKRFL  950
+
+
+> AvCLPV_120501_122200 LC738883.1 120501..122200
+Length=1700
+
+ Score = 18.9 bits (37),  Expect = 0.51, Method: Compositional matrix adjust.
+ Identities = 7/12 (58%), Positives = 7/12 (58%), Gaps = 0/12 (0%)
+ Frame = -3
+
+Query  138  CLQDKGYKFYLD  149
+            CLQ     FYLD
+Sbjct  468  CLQQHQCDFYLD  433
+
+
+ Score = 16.2 bits (30),  Expect = 3.5, Method: Compositional matrix adjust.
+ Identities = 7/15 (47%), Positives = 10/15 (67%), Gaps = 3/15 (20%)
+ Frame = +2
+
+Query  24   FKCQKNGTHSFAFVN  38
+            F C +   +SFAF+N
+Sbjct  782  FSCTR---YSFAFLN  817
+
+
+
+Lambda      K        H        a         alpha
+   0.319    0.135    0.379    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 255440
+
+
+Query= BDT63274.1 hypothetical protein [Armadillidium vulgare clopovirus]
+
+Length=1046
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+AvCLPV_120501_122200 LC738883.1 120501..122200                        18.5    2.9  
+
+
+> AvCLPV_120501_122200 LC738883.1 120501..122200
+Length=1700
+
+ Score = 18.5 bits (36),  Expect = 2.9, Method: Compositional matrix adjust.
+ Identities = 5/9 (56%), Positives = 9/9 (100%), Gaps = 0/9 (0%)
+ Frame = +2
+
+Query  590   NLYALECQR  598
+             NL++L+C+R
+Sbjct  1088  NLFSLDCER  1114
+
+
+
+Lambda      K        H        a         alpha
+   0.314    0.130    0.366    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 1011010
+
+
+  Database: User specified sequence set (Input: subject).
+    Posted date:  Unknown
+  Number of letters in database: 3,300
+  Number of sequences in database:  2
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 13
+Window for multiple hits: 40

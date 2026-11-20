@@ -1,0 +1,15 @@
+0|BL_ORD_ID:0|gnl|BL_ORD_ID|0|N/A|ref|NM_000001.1| alpha mRNA [Homo sapiens] gb|AB000001.1| alpha cDNA emb|X00001.2| alpha clone|488
+1|BL_ORD_ID:1|gnl|BL_ORD_ID|1|N/A|gi|654321|gb|AB000002.3| gi plus gb nucleotide|488
+2|BL_ORD_ID:2|gnl|BL_ORD_ID|2|N/A|emb|AJ000003.1| emb nucleotide|488
+3|BL_ORD_ID:3|gnl|BL_ORD_ID|3|N/A|dbj|AB000004.1| dbj nucleotide|488
+4|BL_ORD_ID:4|gnl|BL_ORD_ID|4|N/A|ref|NC_000005.11| chromosome-like|488
+5|BL_ORD_ID:5|gnl|BL_ORD_ID|5|N/A|lcl|mynuc6 local id nucleotide|488
+6|BL_ORD_ID:6|gnl|BL_ORD_ID|6|N/A|gnl|mydb|nuc7 general id nucleotide|488
+7|BL_ORD_ID:7|gnl|BL_ORD_ID|7|N/A|NM_000008.2 bare refseq accession|488
+8|BL_ORD_ID:8|gnl|BL_ORD_ID|8|N/A|AB000009 bare genbank accession without version|488
+9|BL_ORD_ID:9|gnl|BL_ORD_ID|9|N/A|mynuc_10 bare non-accession word|488
+10|BL_ORD_ID:10|gnl|BL_ORD_ID|10|N/A|gi|1111 gi only|488
+11|BL_ORD_ID:11|gnl|BL_ORD_ID|11|N/A|tpg|BK000012.1| third-party nucleotide|488
+12|BL_ORD_ID:12|gnl|BL_ORD_ID|12|N/A|gb|AB000013.1|LOCUS13 gb with a locus name|488
+13|BL_ORD_ID:13|gnl|BL_ORD_ID|13|N/A|pat|US|1234567|14 patent nucleotide|488
+14|BL_ORD_ID:14|gnl|BL_ORD_ID|14|N/A|gi|1515|gb|AB000015.1| gi|1516|ref|XM_000016.1| second defline|488

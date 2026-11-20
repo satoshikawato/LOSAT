@@ -1,0 +1,7 @@
+#
+# Alias file of line DBID, ordnum
+#
+TITLE pfound_r (OIDs 1 to 9 of pfound_v5)
+DBLIST pfound_v5
+FIRST_OID 2
+LAST_OID 10

@@ -5,12 +5,10 @@ The rows cover how NCBI reads the FASTA files of -query and -subject (comparison
 deflines, sequence lines, line ends, text before the first defline, empty records, standard
 input, query batches (BATCH_SIZE), -lcase_masking, for BLASTN (megablast, blastn, dc-megablast,
 blastn-short), TBLASTX, TBLASTN (protein query, nucleotide subject) and BLASTP, with outfmt 0, 6
-and 7 and, on a core subset, -num_threads 2 and 4. Rows of kind `losat-rejection` (first lines
-that NCBI would parse as a Seq-id and fetch over the network) and the `-lcase_masking` rows of
-TBLASTX and BLASTP are never run on NCBI: LOSAT rejects them explicitly (a Seq-id first line:
-AUTHORITY.md section G4 of docs/evidence/losat_web_e2h/, exit 1, "not supported by LOSAT's <PROGRAM>";
-`-lcase_masking`: E2e, AUTHORITY.md section A of docs/evidence/losat_web_e2e/, exit 2, "the NCBI BLAST+
-option -lcase_masking is not supported by LOSAT's <PROGRAM>"). The expectation of such a row is that
+and 7 and, on a core subset, -num_threads 2 and 4; and BLASTX's query and subject from standard input. Rows of kind `losat-rejection` (first lines
+that NCBI would parse as a Seq-id and fetch over the network) are never run on NCBI: LOSAT rejects
+them explicitly (AUTHORITY.md section G4 of docs/evidence/losat_web_e2h/, exit 1, "not supported by
+LOSAT's <PROGRAM>"). The expectation of such a row is that
 rejection: its exit code and the SHA-256 of the stdout, stderr and combined streams of the final LOSAT.
 
 - generate: writes the inputs to LOSAT/tests/fixtures/fasta_input/ (deterministic; the files are
@@ -26,14 +24,13 @@ rejection: its exit code and the SHA-256 of the stdout, stderr and combined stre
 - freeze-rejections --losat BIN --jobs N: runs LOSAT on every row of kind `losat-rejection`, requires
   the exit code and the message of the rule above, and writes the hashes into the manifests.
 - refresh: rewrites the manifests from their existing hashes and the current row definitions.
-- check --losat BIN --out TSV --jobs N: runs `LOSAT <program> <argv>` on the same rows from
+- check --losat BIN --out TSV --jobs N: runs `losat <program> <argv>` on the same rows from
   LOSAT/ and compares stdout, stderr, the exit code and the combined `2>&1` stream with the
   manifest. One line per row: `same`, `differs` (with the first differing line, when the frozen
   files of --expected are present), `rejects` (LOSAT's explicit "not supported by LOSAT"
   rejection where NCBI reads the input: the port must turn it into `same`), `rejection` (a row of kind
   `losat-rejection` with LOSAT's frozen explicit rejection: expected), `pending` (the expectation is not
-  filled yet) or `error`. A last column `group` marks the rows whose option LOSAT rejects
-  (`-lcase_masking` of TBLASTX/BLASTP) and the summary counts them apart. The exit status is 0 only when every
+  filled yet) or `error`. The exit status is 0 only when every
   selected row is `same` or `rejection`; `pending`, `rejects`, `differs` and `error` fail.
 
 NCBI is run without ~/.ncbirc, with BLASTDB, BATCH_SIZE, CHUNK_SIZE, OVERLAP_CHUNK_SIZE and
@@ -68,12 +65,14 @@ import sys
 from dataclasses import dataclass, fields
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from db_search_fixtures import ncbi_env  # noqa: E402  (NCBI's runs: the usage report off)
+
 ENGINE = Path(__file__).resolve().parents[1]
 FIXTURES = ENGINE / "tests/fixtures/fasta_input"
 REL = "tests/fixtures/fasta_input"
 MANIFEST_DIR = ENGINE / "tests/fasta_input_fixtures"      # one <program>.tsv per program
 EMPTY_SHA256 = hashlib.sha256(b"").hexdigest()
-OPTION_NOTE = "option rejected explicitly by LOSAT (E2e, AUTHORITY.md section A of losat_web_e2e)"
 TIMEOUT = 180
 # NCBI reads these and each one changes the batches or the report.
 REPORT_ENV = ("BL2SEQ_LEGACY", "CTOOLKIT_COMPATIBLE", "OLD_FSC", "BATCH_SIZE", "CHUNK_SIZE", "ADAPTIVE_CBS",
@@ -747,12 +746,8 @@ def build_rows() -> list[Row]:
                             continue
                         for fmt in fmts:
                             rid = f"{program}{'.' + task if task else ''}.{name}{tag}.{role}.o{fmt}"
-                            note = v["note"]
-                            if args and program in ("tblastx", "blastp"):
-                                note = (note + "; " if note else "") + "-lcase_masking: " + OPTION_NOTE
-                            lcm_rejected = bool(args) and program in ("tblastx", "blastp")
-                            rows.append(make_row(rid, program, task, query, subject, args, fmt, note=note, tier=v["tier"],
-                                                 kind="losat-rejection" if lcm_rejected else "ncbi"))
+                            rows.append(make_row(rid, program, task, query, subject, args, fmt, note=v["note"], tier=v["tier"],
+                                                 kind="ncbi"))
                             if v["threads"] and not args and (fmt == 0 or (fmt == 6 and task == "megablast")) \
                                     and task in ("", "megablast"):
                                 for n in (2, 4):
@@ -814,6 +809,38 @@ def extra_rows() -> list[Row]:
                     note="the pushback quirk depends on how the bytes arrive (file window, pipe)")
                 add(f"stdin_s_def_utf8_{mode}", program, task, q, "-",
                     stdin=f"{mode}:{variant_file('def_utf8', 's', 'nuc')}", fmts=(6, 0))
+    # BLASTX (whose query stream RPSTBLASTN's search reads too) reads standard input as the programs
+    # above, NCBI's `cin` (one rule for `-` in LOSAT: fasta_reader::stream::InputBackend::of): the
+    # lost_g55 tail is kept from a pipe and from a redirected file, and lost from the path.
+    s_prot = "@/base.s.prot.faa"
+    g55 = variant_file("eol_lost_g55", "q", "nuc")
+    for mode in ("pipe", "file"):
+        add(f"stdin_q_lost_g55_{mode}", "blastx", "", "-", s_prot, stdin=f"{mode}:{g55}", fmts=(6, 0),
+            note="cin keeps the tail that the file named by its path loses")
+    add("eol_lost_g55.q", "blastx", "", g55, s_prot, fmts=(6, 0), note="the same bytes named by their path")
+    add("stdin_q_pipe", "blastx", "", "-", s_prot, stdin="pipe:@/base.q.nuc.fa", fmts=(6, 0))
+    add("stdin_q_file", "blastx", "", "-", s_prot, stdin="file:@/base.q.nuc.fa", fmts=(6, 0))
+    add("stdin_q_empty_pipe", "blastx", "", "-", s_prot, stdin="empty", note="an empty pipe is not an empty query")
+    # `-subject -` (one owner opens it, input_files::open_input), and both from standard input: the
+    # subjects read `cin` to its end, the query then reads nothing (no query, no 'Query is Empty!').
+    q_nuc = "@/base.q.nuc.fa"
+    add("stdin_s_pipe", "blastx", "", q_nuc, "-", stdin=f"pipe:{s_prot}")
+    add("stdin_s_file", "blastx", "", q_nuc, "-", stdin=f"file:{s_prot}")
+    add("stdin_qs_pipe", "blastx", "", "-", "-", stdin=f"pipe:{s_prot}",
+        note="the subject reads standard input to its end; the query then sees EOF (no query, no 'Query is Empty!')")
+    add("stdin_qs_file", "blastx", "", "-", "-", stdin=f"file:{s_prot}", fmts=(6, 0, 7))
+    add("stdin_qs_omitted", "blastx", "", "", "-", stdin=f"pipe:{s_prot}", fmts=(6, 7))
+    add("stdin_s_empty_pipe", "blastx", "", q_nuc, "-", stdin="empty", fmts=(6, 0))
+    add("stdin_s_devnull", "blastx", "", q_nuc, "-", stdin="file:/dev/null", fmts=(6,))
+    add("stdin_qs_empty_pipe", "blastx", "", "-", "-", stdin="empty", fmts=(6, 7))
+    add("stdin_s_ws_pipe", "blastx", "", q_nuc, "-", stdin="pipe:@/file_ws_only.s.prot.faa", fmts=(6, 0))
+    add("stdin_s_def_utf8_pipe", "blastx", "", q_nuc, "-", stdin="pipe:@/def_utf8.s.prot.faa", fmts=(6, 0))
+    for mode in ("pipe", "file"):
+        add(f"stdin_s_lost_g55_{mode}", "blastx", "", q_nuc, "-",
+            stdin=f"{mode}:{variant_file('eol_lost_g55', 's', 'nuc')}", fmts=(6, 0),
+            note="the subject's reader refills from cin as the query's does")
+    add("eol_lost_g55.s", "blastx", "", q_nuc, variant_file("eol_lost_g55", "s", "nuc"), fmts=(6, 0),
+        note="the same bytes named by their path")
     # lost_g55 as plain files, to compare with standard input
     # files that are not files
     for program, task in ALL_PROGRAMS:
@@ -843,6 +870,81 @@ def extra_rows() -> list[Row]:
     for name in ("batchlong_late_bad", "batchlong_late_warn", "batchlong_late_empty", "batchlong_late_allempty", "batchlong_clean"):
         for task in ("megablast", "blastn"):
             add(name, "blastn", task, f"@/{name}.nuc.fa", f"@/batchlong.s.nuc.fa", fmts=(6, 0, 7))
+    # outfmt 11's titles (line NP, series SM): the archive of each batch that NCBI completes holds
+    # the batch's queries and every `-subject` record; the batch that stops the run (here record 6's
+    # CheckDataLine error, a last batch without letters, a batch size of 0) writes neither, and the
+    # error archive holds no sequence. A title that the serial stream replaces bytes of (`café`) is
+    # written as NCBI writes it: `#` for each byte in the archive and a `Bad char` report on stderr.
+    arch_sizes = {"nuc": ("100", "200"), "prot": ("50", "100")}
+    for program, task in ALL_PROGRAMS:
+        if task == "blastn":
+            continue
+        kind = "prot" if program in ("blastp", "tblastn") else "nuc"
+        q, s = base_pair(program)
+        each, two = arch_sizes[kind]
+        bad_s = f"@/batch_title.s.{'prot' if program == 'blastp' else 'nuc'}.{EXT['prot' if program == 'blastp' else 'nuc']}"
+        file = lambda name: f"@/{name}.{kind}.{EXT[kind]}"
+        add("arch_title_late.two", program, task, file("batch_title_late"), s, env=f"BATCH_SIZE={two}", fmts=(11,))
+        add("arch_title_late.each", program, task, file("batch_title_late"), s, env=f"BATCH_SIZE={each}", fmts=(11,))
+        add("arch_title_late.default", program, task, file("batch_title_late"), s, fmts=(11,))
+        add("arch_title_first.two", program, task, file("batch_title_first"), s, env=f"BATCH_SIZE={two}", fmts=(11,))
+        add("arch_title_first.default", program, task, file("batch_title_first"), s, fmts=(11,))
+        # BLASTN's batch size 0 is the mixer's (its first batch, 5,000 letters, holds every record up to
+        # record 6's error); the others' first batch is empty.
+        add("arch_title_first.zero", program, task, file("batch_title_first"), s, env="BATCH_SIZE=0", fmts=(11,))
+        add("arch_title_lastempty.each", program, task, file("batch_title_lastempty"), s, env=f"BATCH_SIZE={each}",
+            fmts=(11,))
+        add("arch_title_lastempty.default", program, task, file("batch_title_lastempty"), s, fmts=(11,))
+        add("arch_title_s.after_error", program, task, file("batch_late_bad"), bad_s, fmts=(11,))
+        add("arch_title_s.clean", program, task, file("batch_clean"), bad_s, fmts=(11,))
+        # (BLASTN's mixer completes the batch, whose archive holds the subjects.)
+        add("arch_title_s.zero", program, task, file("batch_clean"), bad_s, env="BATCH_SIZE=0", fmts=(11,))
+    # outfmt 15 and 16 of a `-subject` search (line NP, series SM): NCBI writes a query's report when
+    # the next query's results arrive, or in the epilog; a run that a later batch stops (record 6's
+    # CheckDataLine error) never writes the last query of the batches before it, so the title of
+    # that query (record 5 with one record a batch, `each`) is not refused. With two records a
+    # batch, record 5 is in the batch that stops (record 4 is the held one); a title on record 1 is
+    # written when record 2's results arrive (NCBI's XML2 stream stops at the byte of `café`, K4h).
+    for program, task in ALL_PROGRAMS:
+        if task == "blastn":
+            continue
+        kind = "prot" if program in ("blastp", "tblastn") else "nuc"
+        _, s = base_pair(program)
+        each, two = arch_sizes[kind]
+        file = lambda name: f"@/{name}.{kind}.{EXT[kind]}"
+        add("xml2_title_late.each", program, task, file("batch_title_late"), s, env=f"BATCH_SIZE={each}",
+            fmts=(15, 16))
+        add("xml2_title_late.two", program, task, file("batch_title_late"), s, env=f"BATCH_SIZE={two}",
+            fmts=(15, 16))
+        add("xml2_title_first.each", program, task, file("batch_title_first"), s, env=f"BATCH_SIZE={each}",
+            fmts=(15, 16))
+    # BLASTN: the search of the batch fails (gap costs that NCBI's tables lack, `BLAST engine error`,
+    # exit 3): NCBI writes no archive of it
+    add("arch_title_lastempty.search_error", "blastn", "blastn", "@/batch_title_lastempty.nuc.fa",
+        "@/base.s.nuc.fa", args="-reward 1 -penalty -5 -gapopen 1 -gapextend 1", fmts=(11,))
+    # BLASTN's default batches (the mixer: the first holds lq1-lq5, the second lq6 and lq7's error)
+    add("arch_titlelong_late", "blastn", "megablast", "@/batchlong_title_late.nuc.fa", "@/batchlong.s.nuc.fa",
+        fmts=(11,))
+    add("arch_titlelong_first", "blastn", "megablast", "@/batchlong_title_first.nuc.fa", "@/batchlong.s.nuc.fa",
+        fmts=(11,))
+    # NCBI's messages of a binary document fall where its output buffer (4096 bytes, back limit 0) has
+    # handed the document's bytes out (M4a-1b part 6; the text archive's back limit is 80): the
+    # combined stream holds them among the bytes. The Seq-annots of outfmt 8 and 9 (M4a-1b2) are one
+    # document per query, whose `-parse_deflines` subject id with a DEL byte NCBI writes as `#` in
+    # each Seq-align, with a message each.
+    for env in ("", "ARCHIVE_FORMAT=bin"):
+        suffix = ".bin" if env else ""
+        add(f"order_title_s{suffix}", "blastn", "megablast", "@/order_big.q.nuc.fa", "@/order_title.s.nuc.fa",
+            env=env, fmts=(11,))
+        add(f"order_delid_s{suffix}", "blastn", "megablast", "@/order_unit.q.nuc.fa", "@/order_delid.s.nuc.fa",
+            env=env, args="-parse_deflines", fmts=(11,))
+    add("order_delid_s", "blastn", "megablast", "@/order_unit.q.nuc.fa", "@/order_delid.s.nuc.fa",
+        args="-parse_deflines", fmts=(8, 9))
+    # BLASTP's Seq-annots (M4a-1b2): a protein subject with a `-parse_deflines` local id holding DEL
+    # (tests/db_search/seqannot/pdel.faa, whose letters repeat the query's, under lcl|p<DEL>1), written
+    # `#` in each Seq-align with NCBI's message each, among the document's bytes.
+    add("seqannot_delid_s", "blastp", "", "tests/db_search/seqannot/qp.faa", "tests/db_search/seqannot/pdel.faa",
+        args="-parse_deflines", fmts=(8, 9))
     # a subject cannot be in a later batch, but its errors and warnings come before the query's
     for program, task in ALL_PROGRAMS:
         q, s = base_pair(program)
@@ -889,6 +991,28 @@ def extra_rows() -> list[Row]:
                 rows.append(make_row(f"{program}{'.' + task if task else ''}.seqid{i}_loaders_env_empty.{role}.o6",
                                      program, task, q, s, outfmt=6, env="NCBI_CONFIG__BLAST__DATA_LOADERS=",
                                      note="empty NCBI_CONFIG__BLAST__DATA_LOADERS: data loaders off", tier="seqid"))
+    # -parse_deflines (line NP, series SM): a file that does not start with a defline stops the reader at its first
+    # line that is neither blank nor a comment (`eNoDefline`, fasta.cpp:386-397). The subjects' GetAllSeqs turns it into
+    # its own input error, `BLAST query/options error: Query input doesn't start with a defline or comment, line N` with
+    # the NUL of `ends` (blast_input.cpp:209-214); the queries keep the reader's `BLAST query error` (GetNextSeqBatch);
+    # the subjects are read first. Outfmt 0 shows what is written before the error (a query's report header). The rows
+    # without -parse_deflines are the variants' own. Outfmt 11 shows the order of the error and the error archive in the
+    # `2>&1` stream: NCBI's CATCH_ALL posts the error (standard error) before PrintErrorArchive writes the archive.
+    pd = "-parse_deflines"
+    for program, task in ALL_PROGRAMS:
+        if task == "blastn":
+            continue
+        q, s = base_pair(program)
+        qkind, skind = kind_of(program, "q"), kind_of(program, "s")
+        for name in ("nodef_seq_only", "nodef_then_defline", "nodef_ws_lead", "nodef_blank_first", "nodef_comment_first"):
+            fmts = (6, 0, 11) if name in ("nodef_seq_only", "nodef_comment_first") else (6,)
+            add(f"pd_{name}_s", program, task, q, variant_file(name, "s", skind), args=pd, fmts=fmts)
+        for name in ("nodef_seq_only", "nodef_comment_first"):
+            add(f"pd_{name}_q", program, task, variant_file(name, "q", qkind), s, args=pd, fmts=(6, 0, 11))
+        add("pd_nodef_seq_only_qs", program, task, variant_file("nodef_seq_only", "q", qkind),
+            variant_file("nodef_comment_first", "s", skind), args=pd, fmts=(6,))
+        add("pd_nodef_seq_only_s_stdin", program, task, q, "-", args=pd, fmts=(6,),
+            stdin=f"pipe:{variant_file('nodef_seq_only', 's', skind)}")
     return rows
 
 
@@ -925,6 +1049,17 @@ def batch_files() -> dict[str, bytes]:
         # batches before come first)
         c = bctx(); c.recs[4][1][1] = ins(c.recs[4][1][1], 8, b"7"); c.recs[5][1].insert(0, BAD_TEXT[kind])
         out[f"batch_late_warn_bad.{kind}.{EXT[kind]}"] = c.render()
+        # outfmt 11's titles (line NP, series SM): `batch_late_bad` (record 6: CheckDataLine error)
+        # with a title that the archive cannot write (`café`) on record 5 or record 1; record 7 of
+        # `batch_late_allempty` (records 5-7 without letters) with that title; a subject file with it
+        # on its second record.
+        for at, name in ((4, "late"), (0, "first")):
+            c = bctx(); c.recs[5][1].insert(0, BAD_TEXT[kind]); c.recs[at][0] += " café".encode()
+            out[f"batch_title_{name}.{kind}.{EXT[kind]}"] = c.render()
+        c = bctx(); c.recs[4][1] = []; c.recs[5][1] = []; c.recs[6][1] = []; c.recs[6][0] += " café".encode()
+        out[f"batch_title_lastempty.{kind}.{EXT[kind]}"] = c.render()
+        c = Ctx(kind, "s"); c.recs[1][0] += " café".encode()
+        out[f"batch_title.s.{kind}.{EXT[kind]}"] = c.render()
     return out
 
 
@@ -952,9 +1087,36 @@ def batchlong_files() -> dict[str, bytes]:
     out["batchlong_late_empty.nuc.fa"] = render([(d, s if s else None) for d, s in empty])
     allempty = [(d, s if i < 5 else None) for i, (d, s) in enumerate(recs)]
     out["batchlong_late_allempty.nuc.fa"] = render(allempty)
+    # outfmt 11's titles: `batchlong_late_bad` with `café` on lq6 (the second batch, which the error of
+    # lq7 interrupts) or lq1 (the first batch).
+    for at, name in ((5, "late"), (0, "first")):
+        titled = list(recs); titled[at] = (titled[at][0] + " café".encode(), titled[at][1])
+        out[f"batchlong_title_{name}.nuc.fa"] = render(titled[:6]) + b">" + titled[6][0] + b"\n" + BAD_TEXT["nuc"] + \
+            b"\n" + b"\n".join(wrap_lines(titled[6][1], 70)) + b"\n" + render(titled[7:])
     out["batchlong.s.nuc.fa"] = b"".join(b">ls%d long subject %d\n" % (i + 1, i + 1) + b"\n".join(wrap_lines(s, 70)) + b"\n"
                                          for i, s in enumerate(subject_parts))
     return out
+
+
+def serial_order_files() -> dict[str, bytes]:
+    """The order of NCBI's 803.7 messages among a binary document's bytes (M4a-1b part 6): a
+    query of 20,000 nucleotides whose archive's first 4 KB go out before the `-subject` title's
+    `café`; a 200-nucleotide unit and a subject of 60 copies of it under a `-parse_deflines` local
+    id with a DEL byte, whose 60 Seq-aligns each write the id (one message each)."""
+    rng = random.Random(20261114)
+    big = "".join(rng.choice("ACGT") for _ in range(20000)).encode()
+    unit = "".join(rng.choice("ACGT") for _ in range(200)).encode()
+    subject = b"".join(unit + "".join(rng.choice("ACGT") for _ in range(80)).encode() for _ in range(60))
+
+    def render(title, seq):
+        return b">" + title + b"\n" + b"\n".join(wrap_lines(seq, 60)) + b"\n"
+
+    return {
+        "order_big.q.nuc.fa": render(b"q1 big query", big),
+        "order_title.s.nuc.fa": render("s1 café subject".encode(), big[5000:7000]),
+        "order_unit.q.nuc.fa": render(b"q1 unit", unit),
+        "order_delid.s.nuc.fa": render(b"lcl|s\x7f1 subject", subject),
+    }
 
 
 def seqid_files() -> dict[str, bytes]:
@@ -965,6 +1127,15 @@ def seqid_files() -> dict[str, bytes]:
                 c = Ctx(kind, role)
                 out[f"seqid{i}.{role}.{kind}.{EXT[kind]}"] = line + b"\n" + c.render()
     return out
+
+
+# Inputs in FIXTURES made by hand, which other fixtures read (tests/db_search/README.md, rows
+# db.archtitle.*.nosq.*): `generate` does not make them and keeps them.
+HAND_MADE = frozenset(
+    f"{stem}.{kind}.{EXT[kind]}"
+    for stem in ("batch_title_unsearched", "batch_title_unsearched_next")
+    for kind in ("nuc", "prot")
+)
 
 
 def command_generate(args) -> int:
@@ -979,9 +1150,10 @@ def command_generate(args) -> int:
                 files[f"{name}.{role}.{kind}.{EXT[kind]}"] = v["fn"](Ctx(kind, role))
     files.update(batch_files())
     files.update(batchlong_files())
+    files.update(serial_order_files())
     files.update(seqid_files())
     for existing in FIXTURES.iterdir():
-        if existing.is_file() and existing.name not in files:
+        if existing.is_file() and existing.name not in files and existing.name not in HAND_MADE:
             existing.unlink()
     total = 0
     for name, data in files.items():
@@ -1001,9 +1173,9 @@ def sha256(data: bytes) -> str:
 
 
 def clean_env(case_env: str = "") -> dict[str, str]:
-    # LOSAT_X_DEFAULT is kept (LOSAT/src/utils/xswitch.rs): with 0 the fixtures run on the reference paths.
+    # LOSAT_X_REACH is kept (LOSAT/src/utils/xreach.rs): it records the switch paths and changes no output.
     env = {k: v for k, v in os.environ.items()
-           if k == "LOSAT_X_DEFAULT"
+           if k == "LOSAT_X_REACH"
            or (k not in REPORT_ENV and not k.startswith(("LOSAT_", "RAYON_", "NCBI_CONFIG__")))}
     for item in shlex.split(case_env):
         key, _, value = item.partition("=")
@@ -1039,8 +1211,11 @@ def row_argv(row: Row, losat: bool) -> list[str]:
     return argv
 
 
-def execute(command: list[str], row: Row, merged: bool) -> tuple[int, bytes, bytes]:
-    kw: dict = dict(cwd=ENGINE, env=clean_env(row.env), timeout=TIMEOUT)
+def execute(command: list[str], row: Row, merged: bool, ncbi: bool = False) -> tuple[int, bytes, bytes]:
+    """The run of `command` with the row's standard input; an NCBI run (`ncbi`) gets BLAST_USAGE_REPORT=false
+    (db_search_fixtures.ncbi_env), LOSAT's the cleaned environment as it is."""
+    env = clean_env(row.env)
+    kw: dict = dict(cwd=ENGINE, env=ncbi_env(env) if ncbi else env, timeout=TIMEOUT)
     handle = None
     try:
         mode, path = stdin_of(row)
@@ -1065,9 +1240,9 @@ def execute(command: list[str], row: Row, merged: bool) -> tuple[int, bytes, byt
             handle.close()
 
 
-def streams(command: list[str], row: Row) -> dict[str, object]:
-    rc, out, err = execute(command, row, False)
-    rc2, merged, _ = execute(command, row, True)
+def streams(command: list[str], row: Row, ncbi: bool = False) -> dict[str, object]:
+    rc, out, err = execute(command, row, False, ncbi)
+    rc2, merged, _ = execute(command, row, True, ncbi)
     return {"rc": rc, "rc_merged": rc2, "stdout": out, "stderr": err, "combined": merged}
 
 
@@ -1206,7 +1381,7 @@ def freeze_one(ncbi_bin: Path, out: Path, row: Row, netns: bool) -> tuple[Row, s
     reason = network_safe(row)
     if reason:
         return row, f"refused: {reason}"
-    result = streams(ncbi_command(ncbi_bin, row, netns), row)
+    result = streams(ncbi_command(ncbi_bin, row, netns), row, ncbi=True)
     if result["rc"] == -999 or result["rc_merged"] == -999:
         return row, "error: timeout"
     (out / f"{row.row_id}.out").write_bytes(result["stdout"])
@@ -1223,10 +1398,7 @@ def freeze_one(ncbi_bin: Path, out: Path, row: Row, netns: bool) -> tuple[Row, s
 
 def rejection_rule(row: Row) -> tuple[int, str]:
     """(exit code, text of stderr) that a row of kind losat-rejection must give."""
-    name = f"LOSAT's {row.program.upper()}"
-    if "-lcase_masking" in row.args:
-        return 2, f"the NCBI BLAST+ option -lcase_masking is not supported by {name}"
-    return 1, f"not supported by {name}"
+    return 1, f"not supported by LOSAT's {row.program.upper()}"
 
 
 def freeze_rejection(losat: Path, row: Row) -> tuple[Row, str]:
@@ -1271,7 +1443,8 @@ def command_freeze(args) -> int:
     ncbi_bin = Path(args.ncbi_bin).resolve()
     out = Path(args.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
-    version = subprocess.run([str(ncbi_bin / "blastn"), "-version"], capture_output=True, text=True).stdout.strip().replace("\n", "; ")
+    version = subprocess.run([str(ncbi_bin / "blastn"), "-version"], capture_output=True, text=True,
+                             env=ncbi_env(dict(os.environ))).stdout.strip().replace("\n", "; ")
     netns = not args.no_netns and subprocess.run(["unshare", "-rn", "true"], capture_output=True).returncode == 0
     defined = build_rows()
     selected = filter_rows([r for r in defined if r.kind == "ncbi"], args.rows, args.match, args.tier)
@@ -1379,24 +1552,14 @@ def command_check(args) -> int:
     rows = filter_rows(read_manifest(), args.rows, args.match, args.tier)
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
         results = list(pool.map(lambda r: check_one(losat, expected_dir, r), rows))
-    def group(row: Row) -> str:
-        return "option-rejected" if OPTION_NOTE in row.note else ""
-
-    lines = ["row_id\tprogram\tkind\ttier\tresult\tdetail\tgroup"] + [
-        f"{row.row_id}\t{row.program}\t{row.kind}\t{row.tier}\t{verdict}\t{detail}\t{group(row)}" for row, verdict, detail in results]
+    lines = ["row_id\tprogram\tkind\ttier\tresult\tdetail"] + [
+        f"{row.row_id}\t{row.program}\t{row.kind}\t{row.tier}\t{verdict}\t{detail}" for row, verdict, detail in results]
     if args.out:
         Path(args.out).write_text("\n".join(lines) + "\n")
     counts: dict[str, int] = {}
     for _, verdict, _ in results:
         counts[verdict] = counts.get(verdict, 0) + 1
     print(" ".join(f"{k}={v}" for k, v in sorted(counts.items())), f"rows={len(results)}")
-    grouped: dict[str, int] = {}
-    for row, verdict, _ in results:
-        if group(row):
-            grouped[verdict] = grouped.get(verdict, 0) + 1
-    if grouped:
-        print(f"separate group, {OPTION_NOTE}: " + " ".join(f"{k}={v}" for k, v in sorted(grouped.items())),
-              f"rows={sum(grouped.values())}")
     return 0 if set(counts) <= {"same", "rejection"} else 1
 
 

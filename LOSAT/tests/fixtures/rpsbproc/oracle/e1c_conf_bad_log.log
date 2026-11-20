@@ -1,0 +1,4 @@
+Error: (CRegistryException::eEntry) Invalid registry entry format: 'garbage' (m_Pos = 1)
+Error: (106.15) Application's initialization failed (CRegistryException::eEntry) Invalid registry entry format: 'garbage' (m_Pos = 1)
+Error: (CRegistryException::eEntry) Invalid registry entry format: 'garbage' (m_Pos = 1)
+Error: (106.15) Application's initialization failed (CRegistryException::eEntry) Invalid registry entry format: 'garbage' (m_Pos = 1)

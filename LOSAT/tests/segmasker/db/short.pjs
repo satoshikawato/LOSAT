@@ -1,0 +1,22 @@
+{
+  "version": "1.2",
+  "dbname": "short",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "in/short.fa",
+  "number-of-letters": 93,
+  "number-of-sequences": 8,
+  "last-updated": "2026-11-13T08:12:00",
+  "number-of-volumes": 1,
+  "bytes-total": 37791,
+  "bytes-to-cache": 262,
+  "files": [
+    "short.pdb",
+    "short.phr",
+    "short.pin",
+    "short.pot",
+    "short.psq",
+    "short.ptf",
+    "short.pto"
+  ]
+}

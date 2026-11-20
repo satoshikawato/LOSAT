@@ -1,0 +1,25 @@
+# RPSBLAST 2.17.0+
+# Query: allx a query of X only
+# Database: rps_mini
+# 0 hits found
+# RPSBLAST 2.17.0+
+# Query: oj_tk TK-TMK with an O at 30 and a J at 60
+# Database: rps_mini
+# Fields: query id, subject id, subject acc., subject acc.ver, subject ids, evalue, bit score, score, % query coverage per hsp, % query coverage per subject, subject title
+# 7 hits found
+oj_tk	gnl|CDD|101	CDD:101	CDD:101	gnl|CDD|101	8.61e-115	321	824	48	57	f101 TK-TMK, chimeric thymidine and thymidylate kinase [White spot syndrome virus] residues 1-190
+oj_tk	gnl|CDD|101	CDD:101	CDD:101	gnl|CDD|101	2.9	15.9	30	7	57	f101 TK-TMK, chimeric thymidine and thymidylate kinase [White spot syndrome virus] residues 1-190
+oj_tk	gnl|CDD|101	CDD:101	CDD:101	gnl|CDD|101	4.8	15.1	28	3	57	f101 TK-TMK, chimeric thymidine and thymidylate kinase [White spot syndrome virus] residues 1-190
+oj_tk	gnl|CDD|102	CDD:102	CDD:102	gnl|CDD|102	0.009	23.5	50	17	21	f102 ribonucleotide reductase large subunit [White spot syndrome virus] residues 301-480
+oj_tk	gnl|CDD|102	CDD:102	CDD:102	gnl|CDD|102	7.9	14.7	27	3	21	f102 ribonucleotide reductase large subunit [White spot syndrome virus] residues 301-480
+oj_tk	gnl|CDD|102	CDD:102	CDD:102	gnl|CDD|102	8.5	14.3	26	5	21	f102 ribonucleotide reductase large subunit [White spot syndrome virus] residues 301-480
+oj_tk	gnl|CDD|103	CDD:103	CDD:103	gnl|CDD|103	8.8	14.3	26	3	3	f103 DNA polymerase [White spot syndrome virus] residues 1101-1290
+# RPSBLAST 2.17.0+
+# Query: rr_part ribonucleotide reductase residues 281-520
+# Database: rps_mini
+# Fields: query id, subject id, subject acc., subject acc.ver, subject ids, evalue, bit score, score, % query coverage per hsp, % query coverage per subject, subject title
+# 3 hits found
+rr_part	gnl|CDD|102	CDD:102	CDD:102	gnl|CDD|102	2.25e-125	341	876	75	75	f102 ribonucleotide reductase large subunit [White spot syndrome virus] residues 301-480
+rr_part	gnl|CDD|101	CDD:101	CDD:101	gnl|CDD|101	0.22	18.6	37	12	12	f101 TK-TMK, chimeric thymidine and thymidylate kinase [White spot syndrome virus] residues 1-190
+rr_part	gnl|CDD|103	CDD:103	CDD:103	gnl|CDD|103	7.5	14.0	25	6	6	f103 DNA polymerase [White spot syndrome virus] residues 1101-1290
+# BLAST processed 3 queries

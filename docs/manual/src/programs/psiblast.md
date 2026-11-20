@@ -19,6 +19,8 @@ With the NCBI names installed (see [Coming from NCBI BLAST+](../from-ncbi-blast.
 - **Database or subject.** `-db` names a protein BLAST database, with or without parsed sequence IDs (see [BLAST databases](../databases.md)). `-db "a b"` searches several databases at once. `-subject` searches a protein FASTA file instead. `-subject_loc START-STOP` searches part of the subject.
 - **Database filters.** `-taxids`, `-taxidlist`, `-negative_taxids`, `-negative_taxidlist`, `-no_taxid_expansion`, `-seqidlist` and `-negative_seqidlist` keep every round to the sequences they select.
 - **PSSM file.** `-in_pssm` reads a PSSM in NCBI's ASN.1 text form, the form `-out_pssm` writes. It is searched with the BLOSUM62 matrix and gap costs 11/1.
+  - The reports show the PSSM's query as the file holds it: lower-case letters stay lower case and match no subject letter, and a gap residue (`-`) is shown as `-`. NCBI BLAST+ shows the same.
+  - A query residue that its coding does not have (such as `*` in `iupacaa`) stops the run with `BLAST engine error: Warning: Invalid residues found at positions ...` and exit status 3, as in NCBI BLAST+. [tblastn](tblastn.md) `-in_pssm` does the same.
 
 ## Rounds and PSSMs
 
@@ -84,6 +86,7 @@ Not yet supported:
 Also refused:
 
 - `-remote`, `-entrez_query`, `-html`, `-import_search_strategy`, `-gilist` and `-ipglist`.
+- `-use_sw_tback`.
 - With `-in_pssm`: any matrix or gap cost other than BLOSUM62 with 11/1, and a PSSM in binary or XML form.
 - A `-subject` file whose sequences all have no letters.
 

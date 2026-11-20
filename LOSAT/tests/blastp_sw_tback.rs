@@ -11,7 +11,7 @@
 //! (`BLAST engine error: Traceback failed`, exit status 3) after the reports of the batches
 //! before, unless the batch's first query holds a redone match: NCBI's clean-up then reads that
 //! query's freed heap and crashes (SIGSEGV), and LOSAT refuses the batch after the same reports
-//! (exit status 1; PD-LOSAT-NCBI-DEFECTS 1.52). `qnohit` (W 87 times) has no hit (the subjects
+//! (exit status 1; PD-LOSAT-NCBI-DEFECTS 1.53). `qnohit` (W 87 times) has no hit (the subjects
 //! have no W). That the bytes equal NCBI's is the business of the fixture rows `db.x4.sw.fail.*`
 //! (frozen on ws); these tests pin LOSAT's decisions and their independence of `-num_threads`.
 //!
@@ -217,7 +217,7 @@ fn d_a_failure_in_batch_2_of_3_comes_after_batch_1() {
 
 // The redo that NCBI never ends (tks_M against send: two HSPs, M against M) in batch 2 of 2
 // (`BATCH_SIZE=1`): LOSAT refuses it after batch 1's report (without the epilog), as NCBI's search
-// of batch 2 never ends after NCBI has printed batch 1 (PD-LOSAT-NCBI-DEFECTS 1.52); in one batch
+// of batch 2 never ends after NCBI has printed batch 1 (PD-LOSAT-NCBI-DEFECTS 1.53); in one batch
 // nothing comes before the refusal.
 #[test]
 fn e_the_endless_redo_is_refused_after_the_batches_before() {

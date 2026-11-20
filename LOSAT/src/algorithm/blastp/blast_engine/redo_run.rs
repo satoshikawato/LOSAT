@@ -1254,7 +1254,7 @@ where
 /// pop; the heaps of the function's own `redoneMatches` (blast_kappa.c:3006, 3119-3130), which its
 /// clean-up empties at 3807-3813, receive no match (the loop inserts into its block's
 /// `redoneMatches`, :3472 and :3496, that thread's heaps), so they pop nothing. LOSAT refuses that
-/// batch (rule 3: NCBI crashes; PD-LOSAT-NCBI-DEFECTS 1.52), in the place of NCBI's error and
+/// batch (rule 3: NCBI crashes; PD-LOSAT-NCBI-DEFECTS 1.53), in the place of NCBI's error and
 /// after the same reports (the S1 form of 2026-11-18: what NCBI formats before its failing step,
 /// not the part of its stdio buffer that its crash loses). Exit status 1, its message.
 ///
@@ -1317,7 +1317,7 @@ fn sw_batch_failed(batch_start: usize, first_query: &BlastCompoHeap) -> anyhow::
 }
 
 /// LOSAT's refusal of a match whose Smith-Waterman redo does not end in NCBI
-/// (`kappa::smith_waterman::SwRedoEndless`; PD-LOSAT-NCBI-DEFECTS 1.52, rule 3, within the class of
+/// (`kappa::smith_waterman::SwRedoEndless`; PD-LOSAT-NCBI-DEFECTS 1.53, rule 3, within the class of
 /// RPS-BLAST's refusal of 1.30). NCBI's search of the match's batch never ends after NCBI has
 /// printed the reports of the batches before (`blastp_app.cpp:257-276`, quoted at
 /// [`sw_batch_failed`]): the refusal fails that batch as NCBI's own error of a batch's search

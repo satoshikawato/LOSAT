@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.52
+- Version: 1.53
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -180,12 +180,18 @@
   of fewer than 12 bases, whose frame NCBI never translates and reads from address 1 on, rule 3, and
   names X-short-bat open in 1.46; line RG item X-short-tbx, Owner-delegated, standing instruction
   2026-09-29, restated 2026-10-07; numbered after 1.50, line DBID item pfoff-2);
-  1.52 2026-11-18 (BLASTP `-use_sw_tback`, line RG item X4: the explicit rejection of 1.30 of a
+  1.52 2026-11-18 (makeblastdb `-mask_data`, line NP item M4a-1c: the explicit rejection of a mask
+  file's string whose length passes the end of the file and is 1 GiB to 2^47 bytes, which NCBI's
+  reader reserves before it reads and which succeeds or fails by the host's memory, and of an
+  element of a mask's list stated as `NULL` that makeblastdb dereferences, whose report holds the
+  run's memory addresses, rule 3; Owner-delegated, standing instruction 2026-09-29, restated
+  2026-10-07; numbered after 1.51, line RG item X-short-tbx);
+  1.53 2026-11-18 (BLASTP `-use_sw_tback`, line RG item X4: the explicit rejection of 1.30 of a
   Smith-Waterman redo that NCBI repeats without end extended from RPSBLAST to BLASTP, rule 3,
   within the class of 1.30; it and BLASTP's rejections of a query chunk split again or without a
   query (decision D13) come after the reports of the query batches before, the form of 1.40 (the
   Owner's decision of 2026-11-16 on line RG's question Q-X2c); Owner-delegated, standing
-  instruction 2026-09-29, restated 2026-10-07; numbered after 1.51, line RG item X-short-tbx; the
+  instruction 2026-09-29, restated 2026-10-07; numbered after 1.52, line NP item M4a-1c; the
   same day, X4 fix round 3: also the explicit rejection of a failed batch whose first query holds
   a redone match, on which NCBI crashes, rule 3; X4 fix round 4: a negative `CHUNK_SIZE` that
   leaves a chunk without a query also after the reports of the batches before; 2026-11-20, review
@@ -350,7 +356,7 @@ Explicit rejections (rule 3):
   negative `CHUNK_SIZE` that splits a batch. Unlike BLASTN's exception 1, the maintainer
   kept the rejection for these programs. BLASTP's rejections of a chunk split again or of a
   chunk without a query come after the reports of the query batches before, where NCBI's
-  exception stops the search of the batch (version 1.52, the form of 1.40; psiblast, which
+  exception stops the search of the batch (version 1.53, the form of 1.40; psiblast, which
   searches one query at a time, stops in the query's round 1 after the rounds of the queries
   before, as NCBI does: review 3 of X4 found that NCBI splits that round too). A chunk without a
   query is refused first: NCBI's `CQuerySplitter::Split` makes every chunk's query factory before
@@ -359,13 +365,13 @@ Explicit rejections (rule 3):
   a positive pair whose evened chunk size falls below the overlap, whose chunk 0 covers the
   batch). A negative `CHUNK_SIZE` is one of these where its wrapped evened size passes the
   batch's length (`split_query_cxx.cpp:145-171`): chunk 0 covers the batch and the chunks after
-  it hold no query, so NCBI stops at the split after the batches before (version 1.52, X4 fix
+  it hold no query, so NCBI stops at the split after the batches before (version 1.53, X4 fix
   round 4; review 2 of X4 found NCBI's exit status 3 with the reports of the batches before,
   rows `db.x4.chunk.neg.*`). A negative pair whose wrapped ranges leave gaps between chunks
   that all hold a query and are not split again is not a failure of NCBI's: NCBI searches on
   with the hits in the gaps lost (exit status 0), and the maintainer kept that setting rejected
   (version 1.1, rule 2). BLASTP's rejection comes where the batch's search would start, after
-  the reports of the query batches before (version 1.52, review 3 of X4: the form of 1.40 for a
+  the reports of the query batches before (version 1.53, review 3 of X4: the form of 1.40 for a
   rejection in the middle of a run; row `db.x4.chunk.neg.gap.6`, whose bytes are NCBI's report
   of the batch before, row `db.x4.chunk.gap_anchor.6`; rows `db.x4.chunk.empty.*` and
   `db.x4.chunk.again.*` hold NCBI's bytes of the other two stops).
@@ -1506,7 +1512,7 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
   and drops the profile, which LOSAT reproduces (rule 2; fixture rows `db.rps.rej.swendless` and
   `db.rps.mini.sw.zero.6`).
 
-- BLASTP `-use_sw_tback` with composition-based statistics (version 1.52, 2026-11-18, line RG item
+- BLASTP `-use_sw_tback` with composition-based statistics (version 1.53, 2026-11-18, line RG item
   X4, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07, within the class of
   1.30; P2: no checkable result exists, P3: one round loop decides it for both programs,
   `core::composition_adjustment::smith_waterman::smith_waterman_redo_window`): a match (a subject's
@@ -1559,6 +1565,32 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
   and without accession tables): the `catch` of the subject block leaves `m_SubjectId` empty
   before any row of the report loaded its subject, and `m_SubjectTaxId` unset; a later such row
   prints what the last loaded row set.
+- makeblastdb `-mask_data` (version 1.52, 2026-11-18, line NP item M4a-1c, Owner-delegated,
+  standing instruction 2026-09-29, restated 2026-10-07): a string of a binary mask file whose
+  length passes the end of the file and is 1 GiB to 2^47 bytes. NCBI's reader reserves the
+  length before it reads the bytes (`CIStreamBuffer::GetChars`, `util/strbuffer.cpp:496-523`):
+  from 2^47 bytes, which no x86-64 host can allocate, it throws `std::bad_alloc` ("BLAST ran out
+  of memory", exit status 4, which LOSAT writes), past the largest `std::string` (2^63 - 1 bytes)
+  `std::length_error` ("Error: basic_string::_M_create", exit status 255, which LOSAT writes), and
+  below 1 GiB its reservation succeeds and the read ends at the end of the file (NCBI's
+  end-of-file report, which LOSAT writes); between them the reservation succeeds or fails by the
+  host's memory and overcommit, the bound of line PS's DECISIONS 40 that `losat rpsbproc` uses.
+  LOSAT refuses it (exit 1, "losat makeblastdb: mask data that LOSAT does not read: a string whose
+  length ... passes the end of the file ..."), before the build. Fixtures
+  `LOSAT/tests/seqdb/mask_parse/b_length_*.asnb` (`make_mask_parse_fixtures.py`).
+  An element of a mask's list of `CRef`s (`masks`, a `mix`, an `equiv`, a `packed-int`) stated as
+  `NULL` (`05 00` in binary), which NCBI's reader takes and leaves as an empty `CRef`
+  (`CObjectIStream::ReadPointer`, `serial/objistr.cpp:1133-1213`), is explicitly rejected under
+  rule 3 where makeblastdb dereferences it: the `GetId` of each mask in `x_ProcessMaskData`
+  (`**iter`) and the walk of `CSeq_loc::CheckId` (`**ii`, `(*li)->CheckId`,
+  `objects/seqloc/Seq_loc.cpp:3541-3620`) stop with a `CCoreException` whose report prints a stack
+  trace with the run's library addresses and the path of the installed binary. LOSAT refuses it
+  there (exit 1, "losat makeblastdb: mask data that LOSAT does not read: an element of ... stated
+  as NULL ..."): after the masks before it, after any error of NCBI's reader in the rest of its
+  object, and only where the walk reaches it (after two Seq-ids or a `feat` the walk stops first,
+  and LOSAT writes NCBI's "Cannot get masked range Seq-id"). Unit tests in
+  `LOSAT/src/writedb/mask_info/tests.rs`; the fixtures `h_pointer_*` and `b_pointer_*` of
+  `make_mask_parse_fixtures.py` hold the cases NCBI completes or fails on without that report.
 - psiblast and tblastn `-in_pssm` (version 1.45, 2026-11-16, line RG item D3-1, Owner-delegated,
   standing instruction 2026-09-29, restated 2026-10-07): LOSAT reads the PSSM's ASN.1 text as
   NCBI's reader does (every member of every type it reaches) and indexes the query's annotations

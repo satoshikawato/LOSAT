@@ -566,6 +566,7 @@ pub(super) fn write_tblastx_tabular(
                     s_frame,
                     rows: rows_read.then_some((qrow.as_slice(), srow.as_slice())),
                     end_gaps: true,
+                    stored_gaps: [&[], &[]],
                     qcovhsp: if group.len() > 1 {
                         // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1222-1225
                         // ```c++

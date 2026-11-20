@@ -4,6 +4,17 @@ LOSAT v0.2.0 writes the output of NCBI BLAST+ 2.17.0. This page lists every case
 
 Cases that LOSAT refuses with an error are on [What LOSAT refuses](refusals.md), not here.
 
+The differences you are most likely to meet in everyday use:
+
+- [A local `-subject` search of `tblastx` and `tblastn` translates the subject with `-db_gencode`](#a-local--subject-search-of-tblastx-and-tblastn-uses--db_gencode); NCBI uses genetic code 1 there.
+- [`-db` output is the same at every `-num_threads`](#-db-output-does-not-depend-on--num_threads), and [`-subject` searches use the threads you ask for](#threads-with--subject).
+- [`tblastx` reports hits on large genome pairs](#tblastx-word-cutoff-on-large-genome-pairs) where NCBI BLAST+ runs out of memory or time.
+- [A `-query`, `-subject` or `makeblastdb -in` file named `.gz`, `.bz2` or `.zst` is read through its decompressor](#compressed--query--subject-and--in).
+- [On macOS, the last digit of a full-precision E value can differ by 1](#last-digit-of-a-full-precision-value-on-macos).
+- [SAM output (`-outfmt 17`) records LOSAT's command line](#sam-output-the-cl-tag).
+
+The other items are rare cases in which NCBI BLAST+ crashes, reads outside its memory, or overflows an integer.
+
 ## Search results
 
 ### A local `-subject` search of `tblastx` and `tblastn` uses `-db_gencode`
@@ -50,9 +61,9 @@ Cases that LOSAT refuses with an error are on [What LOSAT refuses](refusals.md),
 
 ### `-culling_limit` near the largest 32-bit integer
 
-- **What you see.** Limits of 2147483645 to 2147483647 cull nothing, as 2147483644 does. NCBI's 32-bit sum overflows and acts as a limit of 1 for the last two.
+- **What you see.** Limits of 2147483645 to 2147483647 cull nothing, as 2147483644 does. NCBI adds 3 to the limit in a signed 32-bit integer; the sum overflows, and the last two limits act as a limit of 1.
 - **When.** Any program with `-culling_limit` at those values. Every other limit matches NCBI.
-- **Why.** NCBI's behaviour is a signed overflow, which is undefined in C.
+- **Why.** NCBI's behaviour is a signed overflow, which is undefined in C. LOSAT computes the sum without overflow.
 - **Record.** [The decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
 
 ### `gb`, `emb` and `dbj` ids
@@ -68,10 +79,13 @@ Cases that LOSAT refuses with an error are on [What LOSAT refuses](refusals.md),
 - **Why.** Both are failures of NCBI's lookup code. LOSAT gives what NCBI gives for a nearby input.
 - **Record.** [The decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
 
-### Numbers in a PSSM, archive or XML file that overflow NCBI's `int`
+### Numbers and nesting in a PSSM, archive or XML file
 
-- **What you see.** LOSAT reads the number with its exact value. NCBI wraps it. `psiblast` and `tblastn` read a PSSM (`-in_pssm`) whose values nest to any depth, where NCBI may crash with its default 8 MiB stack. A real number such as `1.55e-2147483647` is read as the smallest normal double.
-- **When.** Only with files that hold such values: they do not occur in files that NCBI writes.
+- **What you see.**
+  - A real number whose exponent does not fit in a 32-bit integer, such as `1.55e-2147483647`, is read with its exact exponent: the smallest normal double. NCBI's reader overflows the exponent and reads the largest double.
+  - `psiblast` and `tblastn` read a PSSM (`-in_pssm`) whose values nest to any depth, and `psiblast -out_pssm` writes it back. NCBI reads and writes such values by recursion and can crash (exit status 139, no output) with its default 8 MiB stack; with a stack large enough it writes LOSAT's output.
+  - When `psiblast` writes a PSSM (`-out_pssm`) that holds -2147483648 or -9223372036854775808, LOSAT writes the number. NCBI's writer overflows on these two numbers and prints `-8` or `-0`.
+- **When.** Only with a file that holds such a number or nest (a PSSM given to `-in_pssm`, an archive or XML given to `rpsbproc`). A PSSM that `psiblast` makes from a FASTA query does not nest this way, and NCBI's writers do not write such exponents.
 - **Record.** [The decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
 
 ### `rpsbproc`: ids and positions past 2^31
@@ -97,13 +111,13 @@ Cases that LOSAT refuses with an error are on [What LOSAT refuses](refusals.md),
 ### Last digit of a full-precision value on macOS
 
 - **What you see.** The last (15th) digit of a value printed with all its digits can differ by 1 from the Linux and Windows value.
-- **When.** macOS: the E value in `-outfmt 11` and `-outfmt 8` (tabular output is not affected). Values rounded to 6 digits (XML, JSON) or printed with 2 or 3 digits (tabular) are not affected in practice.
+- **When.** macOS: the E value in `-outfmt 11` and `-outfmt 8` (tabular output is not affected). Values rounded to 6 digits (XML, JSON) or printed with 2 or 3 digits (tabular) are not affected in practice. The WASI modules and the Web engine give the Linux value.
 - **Why.** The platform's maths library differs by 1 ULP. NCBI BLAST+ on macOS is expected to show the same (not tested).
 - **Record.** [The decision record on the last digit of full-precision values](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-PLATFORM-LIBM.md).
 
 ### NCBI's own builds differ across platforms
 
-- **What you see.** If you compare LOSAT with NCBI's own binary on Windows, macOS or Linux aarch64, NCBI's output may differ from its Linux x64 output within bounds recorded in the decision. LOSAT's output is the same bytes on every platform as on Linux x64.
+- **What you see.** If you compare LOSAT with NCBI's own binary on Windows, macOS or Linux aarch64, NCBI's output may differ from its Linux x86_64 output within bounds recorded in the decision. LOSAT's tests compare its output on every platform with the Linux x86_64 bytes: on the release test set it is the same, apart from the macOS last digit above.
 - **Record.** [The decision record on differences between NCBI builds](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-NCBI-PLATFORM-VARIANCE.md).
 
 ## Command line and files
@@ -113,7 +127,13 @@ These cases are about what the program prints around the search, not the search 
 ### Threads with `-subject`
 
 - **What you see.** With `-subject`, NCBI BLAST+ ignores `-num_threads` and writes `'num_threads' is currently ignored when 'subject' is specified.` on the standard error. LOSAT uses the threads you ask for and does not print the line. Above the CPU count NCBI also writes `Number of threads was reduced to N to match the number of available CPUs`; LOSAT does not.
-- **Why.** The output is the same at every thread count, so using the threads only makes the search faster. Every other byte of standard output and standard error equals NCBI's.
+- **Why.** The output is the same at every thread count, so using the threads only makes the search faster. Every other byte of standard output and standard error equals NCBI's, apart from `blastn`'s progress bar on a terminal (next section).
+
+### `blastn`'s progress bar on a terminal
+
+- **What you see.** While `blastn` searches with `-num_threads` 2 or more against two subjects or more (the records of `-subject` or the sequences of `-db`), it draws a progress bar on the standard error: the elapsed time, a bar and the number of subjects done (`19/33`). When the search of each batch of queries ends, the bar is erased, so nothing of it stays on the screen: the report and the shell's prompt appear where they would without it. NCBI BLAST+ writes nothing there during a search.
+- **When.** Only when the standard error is a terminal and, outside Windows, `TERM` is set and is not `dumb`. A standard error sent to a file or a pipe (`2> log.txt`, `2>&1 | less`) gets no byte of it. The library, pylosat and LOSAT Web never draw it.
+- **What does not change.** The bytes of the standard output, the `-out` file and the exit status.
 
 ### Argument errors and help
 
@@ -122,13 +142,18 @@ These cases are about what the program prints around the search, not the search 
 
 ### Version text
 
-- **What you see.** `-version` writes `blastn: 2.17.0+` and a `Package:` line that names LOSAT. `-version-full`, `-version-full-xml` and `-version-full-json` give NCBI's forms with LOSAT's package; the lines in which NCBI's build describes itself (configuration, build signature, dates, revisions) are not written.
+- **What you see.** `-version` writes `blastn: 2.17.0+` and a `Package:` line that names LOSAT (`Package: LOSAT 0.2.0, output compatible with blast 2.17.0`). `-version-full`, `-version-full-xml` and `-version-full-json` give NCBI's forms with LOSAT's package; the lines in which NCBI's build describes itself (configuration, build signature, dates, revisions) are not written.
+
+### SAM output: the `CL:` tag
+
+- **What you see.** In `blastn -outfmt 17`, the `CL:` tag of the `@PG` line holds LOSAT's own command line, as it was run. The rest of the document is NCBI's, byte for byte. A search run through the library has no command line, so its `@PG` line has no `CL:` tag.
+- **Record.** [The decision record on command-line behavior outside the search results](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-CLI-NONSEARCH-DIFFERENCES.md), exception 12. See also [Output formats](output-formats.md).
 
 ### A write that fails, a closed pipe, memory
 
 - **Tabular output (6, 7) cannot be written** (`-out /dev/full`, a full disk): NCBI aborts. LOSAT reports the write error and exits with a non-zero status. For outfmt 0 LOSAT gives NCBI's message and exit status (`BLAST failed to write output`, 6).
 - **A side file of outfmt 13 or 14 cannot be written**: NCBI reports it on the standard error and goes on, exit status 0. LOSAT stops with `BLAST failed to write output` (exit status 6).
-- **Memory runs out**: NCBI catches it and writes `BLAST ran out of memory` (exit status 4). LOSAT aborts.
+- **A search program runs out of memory**: NCBI catches it and writes `BLAST ran out of memory` (exit status 4). LOSAT aborts.
 - **The reader of a pipe closes it** (`... | head`): NCBI is ended by the signal (exit status 141 in a shell, no message). LOSAT stops at once and reports the write failure for outfmt 0, 6 and 7 (exit status 6 for outfmt 0), or stops with exit status 0 for `blastdbcmd`, `dustmasker`, `segmasker`, `convert2blastmask` and for the version and help texts. A short report that LOSAT has written before the reader closes ends with status 0 where NCBI is ended later.
 - **Standard output closed at the start** (`>&-`): NCBI fails on its first write. LOSAT writes the report to `/dev/null` and exits as the search ends.
 - **`rpsbproc` cannot write its report**: NCBI's `rpsbproc` drops the writes and exits with 0. LOSAT stops with `rpsbproc failed to write output` (exit status 4).
@@ -138,7 +163,7 @@ These are error paths: when the output can be written, the output matches NCBI's
 ### Compressed `-query`, `-subject` and `-in`
 
 - **What you see.** A `-query`, `-subject` or `makeblastdb -in` file whose name ends in `.gz`, `.bz2` or `.zst` is read through gzip, bzip2 or zstd. NCBI's search programs read such a file as text and stop at its first line (`CFastaReader: Near line 1, there's a line that doesn't look like plausible data`).
-- **When.** A search program inflates the whole file into an unnamed temporary file beside the input (under `TMPDIR` if the directory refuses it or has no room) before the search; the WASI command stops instead. `makeblastdb` streams. The name alone decides, in any case. A file that is not what its name says stops the run before the search (`-query: 'x.fa.gz' is named .gz but is not gzip data (...)`, exit status 1).
+- **When.** A search program inflates the whole file into an unnamed temporary file beside the input before the search. If that directory refuses the file or has no room, the native program uses the temporary directory (`TMPDIR`; see [Environment variables](environment.md#temporary-files)), and the WASI command, which has no temporary directory, stops with an error. `makeblastdb` streams. The name alone decides, in any case. A file that is not what its name says stops the run before the search (`-query: 'x.fa.gz' is named .gz but is not gzip data (...)`, exit status 1).
 - **Why.** NCBI's own `makeblastdb` reads `.gz`, `.bz2` and `.zst` names, so LOSAT does the same for the searches. A plain file, or a compressed file read through `-query -`, is unchanged.
 
 ## Databases and tools

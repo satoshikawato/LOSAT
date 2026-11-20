@@ -87,6 +87,9 @@ pub(super) struct LocalStageDProfile<'a> {
     /// instead of the plain hit-list collector; the pipe after the traceback is run by the
     /// finish of the search (`tblastn_app.rs`).
     pub culling_limit: i32,
+    /// `-subject_besthit`: the preliminary stage filters each subject frame's list after each
+    /// merge of a chunk (`search_gapped`), the finish of the search each final hit list.
+    pub subject_besthit: bool,
     /// The `-max_intron_length` value (0: NCBI's default). With sum statistics it gives the
     /// largest subject gap of the linking, or turns the linking off
     /// (`core::link_hsps::translated_longest_intron`); without them nothing reads it.
@@ -2453,6 +2456,7 @@ fn preliminary_profile<'a>(
         .0,
         gapped_cutoff: &cutoffs.hit_cutoff,
         hsp_num_max: i32::MAX as usize,
+        subject_besthit: profile.subject_besthit,
     }
 }
 
@@ -4019,6 +4023,7 @@ mod tests {
                 subject_set: Default::default(),
                 engine_positives: false,
                 culling_limit: 0,
+                subject_besthit: false,
                 pssm: None,
                 fetch_excluded: None,
             },
@@ -4072,6 +4077,7 @@ mod tests {
                 subject_set: Default::default(),
                 engine_positives: false,
                 culling_limit: 0,
+                subject_besthit: false,
                 pssm: None,
                 fetch_excluded: None,
             },
@@ -4365,6 +4371,7 @@ mod tests {
                 subject_set: Default::default(),
                 engine_positives: false,
                 culling_limit: 0,
+                subject_besthit: false,
                 pssm: None,
                 fetch_excluded: None,
             },
@@ -4456,6 +4463,7 @@ mod tests {
                 subject_set: Default::default(),
                 engine_positives: false,
                 culling_limit: 0,
+                subject_besthit: false,
                 pssm: None,
                 fetch_excluded: None,
             },
@@ -4616,6 +4624,7 @@ mod tests {
                 subject_set: Default::default(),
                 engine_positives: false,
                 culling_limit: 0,
+                subject_besthit: false,
                 pssm: None,
                 fetch_excluded: None,
             },
@@ -4712,6 +4721,7 @@ mod tests {
                     subject_set: Default::default(),
                     engine_positives: false,
                     culling_limit: 0,
+                    subject_besthit: false,
                     pssm: None,
                     fetch_excluded: None,
                 },
@@ -4899,6 +4909,7 @@ mod tests {
                     subject_set: Default::default(),
                     engine_positives: false,
                     culling_limit: 0,
+                    subject_besthit: false,
                     pssm: None,
                     fetch_excluded: None,
                 };
@@ -5133,6 +5144,7 @@ mod tests {
                     subject_set: Default::default(),
                     engine_positives: false,
                     culling_limit: 0,
+                    subject_besthit: false,
                     pssm: None,
                     fetch_excluded: None,
                 };
@@ -5350,6 +5362,7 @@ mod tests {
                 subject_set: Default::default(),
                 engine_positives: false,
                 culling_limit: 0,
+                subject_besthit: false,
                 pssm: None,
                 fetch_excluded: None,
             },
@@ -5501,6 +5514,7 @@ mod tests {
                 subject_set: Default::default(),
                 engine_positives: false,
                 culling_limit: 0,
+                subject_besthit: false,
                 pssm: None,
                 fetch_excluded: None,
             },
@@ -5674,6 +5688,7 @@ mod tests {
                 subject_set: Default::default(),
                 engine_positives: false,
                 culling_limit: 0,
+                subject_besthit: false,
                 pssm: None,
                 fetch_excluded: None,
             };
@@ -5878,6 +5893,7 @@ mod tests {
                     subject_set: Default::default(),
                     engine_positives: false,
                     culling_limit: 0,
+                    subject_besthit: false,
                     pssm: None,
                     fetch_excluded: None,
                 };
@@ -6045,6 +6061,7 @@ mod tests {
                         subject_set: Default::default(),
                         engine_positives: false,
                         culling_limit: 0,
+                        subject_besthit: false,
                         pssm: None,
                         fetch_excluded: None,
                     },
@@ -6359,6 +6376,7 @@ mod tests {
                 subject_set: Default::default(),
                 engine_positives: false,
                 culling_limit: 0,
+                subject_besthit: false,
                 pssm: None,
                 fetch_excluded: None,
             },
@@ -6552,6 +6570,7 @@ mod tests {
                     subject_set: Default::default(),
                     engine_positives: false,
                     culling_limit: 0,
+                    subject_besthit: false,
                     pssm: None,
                     fetch_excluded: None,
                 },
@@ -6670,6 +6689,7 @@ mod tests {
                 subject_set: Default::default(),
                 engine_positives: false,
                 culling_limit: 0,
+                subject_besthit: false,
                 pssm: None,
                 fetch_excluded: None,
             },
@@ -6770,6 +6790,7 @@ mod tests {
                 subject_set: Default::default(),
                 engine_positives: false,
                 culling_limit: 0,
+                subject_besthit: false,
                 pssm: None,
                 fetch_excluded: None,
             },
@@ -6887,6 +6908,7 @@ mod tests {
                 subject_set: Default::default(),
                 engine_positives: false,
                 culling_limit: 0,
+                subject_besthit: false,
                 pssm: None,
                 fetch_excluded: None,
             },
@@ -7165,6 +7187,7 @@ mod tests {
             subject_set: Default::default(),
             engine_positives: false,
             culling_limit: 0,
+            subject_besthit: false,
             pssm: None,
             fetch_excluded: None,
         };
@@ -7261,6 +7284,7 @@ mod tests {
             subject_set: Default::default(),
             engine_positives: false,
             culling_limit: 0,
+            subject_besthit: false,
             pssm: None,
             fetch_excluded: None,
         };

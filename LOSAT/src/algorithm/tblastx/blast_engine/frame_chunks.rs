@@ -109,6 +109,7 @@ pub(super) fn search_subject_frames<S: TbxScore>(
         ))]
         diag_array_size,
         x_read_failure,
+        subject_besthit,
         ..
     } = cx;
     let &SubjectScan {
@@ -244,6 +245,7 @@ pub(super) fn search_subject_frames<S: TbxScore>(
                     failure: x_read_failure,
                     s_idx,
                 }),
+                subject_besthit,
             },
             &scan_chunk,
             sc,
@@ -290,6 +292,8 @@ pub(super) struct ChunkSums<'s> {
     pub(super) stats_hsp_filtered_by_cutoff: &'s mut usize,
     pub(super) stats_score_distribution: &'s mut Vec<i32>,
     pub(super) one_hit: Option<OneHitChunkMerge<'s>>,
+    /// `-subject_besthit`: the frame's list is filtered after each merge.
+    pub(super) subject_besthit: bool,
 }
 
 /// Searches the chunks of one subject frame (`split_state`) with `scan_chunk`, which scans a chunk
@@ -540,6 +544,21 @@ fn add_chunk_result(sums: &mut ChunkSums<'_>, result: TblastxChunkScanResult) {
             sums.one_hit
                 .expect(TWO_HIT_CHUNK_MERGE_IS_DEFINED)
                 .refuse(undefined);
+        }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:586-591
+        // `-subject_besthit` on the frame's list after each merge (the contexts are the query
+        // frames; the end of an HSP of length 0 or less is NCBI's `Int4`), before the frame's list
+        // joins the subject's and before the linking.
+        if sums.subject_besthit {
+            crate::core::blast_hits::subject_besthit(sums.frame_ungapped_hits, false, |hit| {
+                crate::core::blast_hits::BestHitExtent {
+                    context: i64::from(hit.ctx_idx),
+                    query_frame: i32::from(hit.q_frame),
+                    offset: i64::from(hit.q_aa_start),
+                    end: i64::from(hit.q_end_int4()),
+                    query_length: 0,
+                }
+            });
         }
     }
 }

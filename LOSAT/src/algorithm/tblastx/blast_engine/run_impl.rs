@@ -5486,6 +5486,7 @@ fn search_query_batch<S: TbxScore>(
         scan_debug_range,
         x_read_failure: &x_read_failure,
         query_batch: QueryBatch::new(contexts_ref, &x_read_failure),
+        subject_besthit: args.subject_besthit,
     };
     // The batch's statistics (`SubjectStatistics`); `per_subject`: NCBI computes the statistics
     // of each subject (a database length of 0) with the preliminary stage's option spaces.

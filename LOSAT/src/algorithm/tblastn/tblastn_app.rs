@@ -1966,6 +1966,7 @@ fn search(
                 subject_set,
                 engine_positives,
                 culling_limit: resolved.culling_limit,
+                subject_besthit: resolved.subject_besthit,
                 pssm: pssm.as_deref(),
                 fetch_excluded: fetch_excluded.as_ref(),
             },
@@ -2037,6 +2038,7 @@ fn search(
                             subject_set,
                             engine_positives,
                             culling_limit: resolved.culling_limit,
+                            subject_besthit: resolved.subject_besthit,
                             pssm: pssm.as_deref(),
                             fetch_excluded: fetch_excluded.as_ref(),
                         },
@@ -2130,11 +2132,11 @@ fn search(
             //         Blast_HSPResultsSortByEvalue(results);
             //     }
             // ```
-            // `-max_hsps` and `-qcov_hsp_perc` filter the batch's final hit lists (each query's
-            // context is its searched letters), which the search has sorted by e-value where NCBI
-            // sorts the results (a positive `BlastSeqSrcGetTotLen`); the sort is a total order
-            // (best e-value, first score, OID), so sorting again after the filter gives NCBI's
-            // order, and where NCBI does not sort the lists keep their order.
+            // `-max_hsps`, `-qcov_hsp_perc` and `-subject_besthit` filter the batch's final hit
+            // lists (each query's context is its searched letters), which the search has sorted by
+            // e-value where NCBI sorts the results (a positive `BlastSeqSrcGetTotLen`); the sort is
+            // a total order (best e-value, first score, OID), so sorting again after the filter
+            // gives NCBI's order, and where NCBI does not sort the lists keep their order.
             // `-culling_limit` runs NCBI's culling pipe first on each query's hit list
             // (`BlastHSPStreamTBackClose`, before the filters of `s_FilterBlastResults`;
             // hspfilter_culling.c:699-733); its lists leave in the order of the tree, and the
@@ -2142,6 +2144,7 @@ fn search(
             if resolved.max_hsps > 0
                 || resolved.query_cov_hsp_perc > 0.0
                 || resolved.culling_limit > 0
+                || resolved.subject_besthit
             {
                 for (hitlist, query) in batch_results.iter_mut().zip(&query_seqs[range.clone()]) {
                     if resolved.culling_limit > 0 {
@@ -2153,6 +2156,9 @@ fn search(
                             resolved.query_cov_hsp_perc,
                             query.len(),
                         );
+                    }
+                    if resolved.subject_besthit {
+                        hitlist.subject_besthit();
                     }
                     if subject_set.sorts_results() {
                         hitlist.sort_by_evalue_for_positive_totlen();

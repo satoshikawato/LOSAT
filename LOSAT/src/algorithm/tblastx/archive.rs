@@ -106,6 +106,7 @@ pub(crate) fn option_inputs(args: &TblastxArgs) -> OptionInputs {
     inputs.window_size = args.window_size;
     inputs.seg = args.seg_spec().ok().map(Filter::from);
     inputs.culling_limit = args.culling_limit;
+    inputs.subject_besthit = args.subject_besthit;
     inputs.query_gencode = i32::from(args.query_gencode);
     inputs.db_gencode = i32::from(args.db_gencode);
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:957
@@ -432,7 +433,7 @@ mod tests {
     // probes; `check_archive_layout.py opts`), without the `EffectiveSearchSpace` that each
     // archive adds: the name, the options given besides the inputs, and the list as
     // `Name=variant:value`. LOSAT's TBLASTX refuses some of these options at the command line
-    // (`-strand`, `-subject_besthit`, `-parse_deflines`; `-xdrop_ungap`, which NCBI does not
+    // (`-strand`, `-parse_deflines`; `-xdrop_ungap`, which NCBI does not
     // record, is read since line RG X1, and `-sum_stats` since line RG X3): the list that NCBI
     // would record is what the archive's model knows about them, pinned here.
     const CASES: &[(&str, &[&str], &str)] = &[
@@ -529,14 +530,9 @@ mod tests {
     /// (they stop at the command line) are applied to the inputs by hand.
     fn inputs_of(extra: &[&str]) -> Option<OptionInputs> {
         let mut parsed: Vec<&str> = Vec::new();
-        let mut subject_besthit = false;
         let mut index = 0;
         while index < extra.len() {
             match extra[index] {
-                "-subject_besthit" => {
-                    subject_besthit = true;
-                    index += 1;
-                }
                 // Not recorded (the strand is not an option of the request).
                 "-strand" => index += 2,
                 "-parse_deflines" => index += 1,
@@ -553,9 +549,7 @@ mod tests {
         let Commands::Tblastx(args) = cli.command else {
             return None;
         };
-        let mut inputs = option_inputs(&args);
-        inputs.subject_besthit = subject_besthit;
-        Some(inputs)
+        Some(option_inputs(&args))
     }
 
     // A `-threshold` past `Int4` (2147483648, 1e10, +inf, 1e999) is recorded as `INT_MIN`, as

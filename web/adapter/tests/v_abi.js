@@ -704,6 +704,23 @@ function checkFiles(reactor) {
 const LOG_NAMES = ["run.log", "logs/run.log", "a/b/run.log", "./run.log", "<dir>/abs/run.log", "/dev/stdout", "/dev/fd/1",
   "-", "/dev/stderr", "/dev/fd/2", "/proc/self/fd/2", "//dev/stderr", ".", "..", "logs/", "logs/.", "", "/dev/null", "//dev/null"];
 
+// The CLI's run with its standard output and error on pipes, as a shell's `|` or a terminal gives them: node's child
+// processes get sockets, which `/dev/stdout` and `/dev/stderr` cannot open (ENXIO), so that NCBI and the CLI send the
+// log to `cerr` (python's subprocess makes pipes).
+function nativeOnPipes(native, argv, directory) {
+  const outFile = path.join(directory, ".stdout"), errFile = path.join(directory, ".stderr");
+  const script = "import subprocess, sys\n" +
+    "p = subprocess.run(sys.argv[3:], capture_output=True)\n" +
+    "open(sys.argv[1], 'wb').write(p.stdout); open(sys.argv[2], 'wb').write(p.stderr); sys.exit(p.returncode)\n";
+  const result = require("node:child_process").spawnSync("python3", ["-I", "-c", script, outFile, errFile, native, ...argv],
+                                                         { cwd: directory, env: { PATH: process.env.PATH, HOME: directory } });
+  assert.equal(result.stderr.length, 0, `python3: ${result.stderr}`);
+  const stdout = fs.readFileSync(outFile), stderr = fs.readFileSync(errFile);
+  fs.rmSync(outFile);
+  fs.rmSync(errFile);
+  return { status: result.status, stdout, stderr };
+}
+
 async function checkLogfileNames(reactor, native, scratch, engine, waitForWorkers) {
   const inputs = path.join(ROOT, "LOSAT/tests/fasta/outfmt11");
   const query = path.join(inputs, "arch_tbx_q.fna"), subject = path.join(inputs, "arch_tbx_s.fna");
@@ -737,8 +754,7 @@ async function checkLogfileNames(reactor, native, scratch, engine, waitForWorker
         let cli;
         for (const format of FORMATS[program]) {
           const out = path.join(directory, `native.${format}.out`);
-          const result = require("node:child_process").spawnSync(native, [...words, "-outfmt", String(format), "-num_threads", "1", "-out", out, "-logfile", name],
-                                                                 { cwd: directory, env: { PATH: process.env.PATH, HOME: directory } });
+          const result = nativeOnPipes(native, [...words, "-outfmt", String(format), "-num_threads", "1", "-out", out, "-logfile", name], directory);
           assert.equal(result.status, 0, `${label}: native outfmt ${format}: ${result.stderr}`);
           outputs.set(format, fs.readFileSync(out));
           fs.rmSync(out);

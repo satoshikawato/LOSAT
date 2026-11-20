@@ -823,16 +823,12 @@ fn differential() {
                     Some(runs) => {
                         let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
                         for &(a, b) in &runs {
-                            for byte in (a as u32)
-                                .to_le_bytes()
-                                .into_iter()
-                                .chain((b as u32).to_le_bytes())
-                            {
+                            for byte in a.to_le_bytes().into_iter().chain(b.to_le_bytes()) {
                                 hash ^= u64::from(byte);
                                 hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
                             }
                         }
-                        let count: u64 = runs.iter().map(|&(a, b)| b - a + 1).sum();
+                        let count: u64 = runs.iter().map(|&(a, b)| u64::from(b - a) + 1).sum();
                         (
                             count.to_string(),
                             format!("{hash:016x}"),
@@ -881,22 +877,22 @@ fn differential() {
 /// The runs that the differential harness's walk of NCBI's blocks reports (`walk`, merging a run
 /// that starts right after the last): a GAP block's runs of 1s whose end is not before their start,
 /// up to its length or 65535; `None` for a block whose entries the data does not decide.
-fn harness_walk(vector: &BitVector) -> Option<Vec<(u64, u64)>> {
-    let mut out: Vec<(u64, u64)> = Vec::new();
-    let mut put = |a: u64, b: u64| match out.last_mut() {
-        Some(last) if last.1 + 1 == a => last.1 = b,
+fn harness_walk(vector: &BitVector) -> Option<Vec<(u32, u32)>> {
+    let mut out: Vec<(u32, u32)> = Vec::new();
+    let mut put = |a: u32, b: u32| match out.last_mut() {
+        Some(last) if last.1.checked_add(1) == Some(a) => last.1 = b,
         _ => out.push((a, b)),
     };
     for seg in &vector.one()?.segs {
         match &seg.kind {
             Kind::Poison(_) => return None,
             Kind::Gap(gap) => {
-                let base = u64::from(seg.first) << 16;
+                let base = seg.first << 16;
                 let mut value = gap[0] & 1 != 0;
-                let mut from = 0u64;
+                let mut from = 0u32;
                 let ends = gap.get(1..=usize::from(gap[0] >> 3))?;
                 for &end in ends {
-                    let end = u64::from(end);
+                    let end = u32::from(end);
                     if value && end >= from {
                         put(base + from, base + end);
                     }
@@ -907,7 +903,7 @@ fn harness_walk(vector: &BitVector) -> Option<Vec<(u64, u64)>> {
                     }
                 }
             }
-            _ => seg.each_run(&mut |a, b| put(u64::from(a), u64::from(b))),
+            _ => seg.each_run(&mut put),
         }
     }
     Some(out)

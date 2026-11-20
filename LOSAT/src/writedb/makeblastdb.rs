@@ -1508,7 +1508,7 @@ fn open_new_database(
     // 255), after the files of the build were written.
     let last_updated = match &located.date {
         Ok(date) => iso8601_date_time_exception(date),
-        Err(error) => Err(error.exception.clone()),
+        Err(error) => Err((*error.exception).clone()),
     }
     .map_err(|exception| MakedbError::Build(WriteDbError::Exception(exception)))?;
     let lmdb: Vec<std::path::PathBuf> = version5

@@ -32,7 +32,7 @@ pub struct DateError {
     /// The message of the `CTimeException` that NCBI throws for it.
     pub reason: String,
     /// The exception itself, with the place that NCBI's report names.
-    pub exception: NcbiException,
+    pub exception: Box<NcbiException>,
 }
 
 impl fmt::Display for DateError {
@@ -744,7 +744,7 @@ pub fn database_date(volume_dates: &[&str]) -> Result<String, DateError> {
                     return Err(DateError {
                         date,
                         reason: exception.get_msg().to_owned(),
-                        exception,
+                        exception: Box::new(exception),
                     });
                 }
             };
@@ -755,7 +755,7 @@ pub fn database_date(volume_dates: &[&str]) -> Result<String, DateError> {
                     return Err(DateError {
                         date: d.to_owned(),
                         reason: exception.get_msg().to_owned(),
-                        exception,
+                        exception: Box::new(exception),
                     });
                 }
             };

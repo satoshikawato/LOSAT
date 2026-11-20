@@ -1708,6 +1708,8 @@ pub(super) fn pairwise_hits(
                         comp_adjust_method: Some(u8::try_from(hsp.composition_method)?),
                         sum_n: Some(hsp.num),
                         subject_stored_gaps: a.subject_stored_gaps,
+                        query_stored_gaps: Vec::new(),
+                        query_case: Default::default(),
                         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:530-531
                         // ```c
                         //         else

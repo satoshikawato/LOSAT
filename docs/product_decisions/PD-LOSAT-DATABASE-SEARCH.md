@@ -96,7 +96,15 @@
   (`DB contains no accession info.`, a version 5 database without the accession table in the
   search's list) as NCBI writes them, with the taxonomy database's texts at the loads that NCBI
   makes (none of the throwing `Hit` or of the `Hit`s after it in that report; a later `Hit` or a
-  later batch's prefetch makes them), in every program, which version 1.3 refused)
+  later batch's prefetch makes them), in every program, which version 1.3 refused; on
+  2026-11-18 line NP item M4a-1c read the mask files with a string byte outside 0x20-0x7e and a
+  `UTF8String` tag for a `VisibleString`, with NCBI's posts, which version 1.3 refused, and wrote
+  makeblastdb's report for a damaged mask file, where LOSAT wrote its own text, keeping the
+  refusals of a nesting deeper than 400 levels and of a string length past the end of the file
+  that the host's memory decides, and its review the same day read NCBI's pointer syntax in mask
+  files (`NULL` for an optional member, `@n` with NCBI's report, `:Type value` of the declared
+  type), refusing a `:Type` of another type and a list element stated as `NULL` that makeblastdb
+  dereferences (Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07))
 - Status: Accepted by the maintainer on 2026-10-12, after the probe and design of the
   database search campaign (decisions P1 to P4 below, each as recommended). The decision
   that version 1.0 left open, the thread count of the parity target, was taken by the
@@ -616,9 +624,6 @@ Seq-id finds the masks that makeblastdb gives it (which follows the order of the
 makeblastdb reads and LOSAT refuses (`losat makeblastdb: ...`, exit status 1, without
 makeblastdb's closing "No sequences matched any of the masks provided."):
 
-- A string with a byte outside 0x20-0x7e, which NCBI repairs and logs, and a `UTF8String` tag
-  where a `VisibleString` belongs (`mask data that LOSAT does not read: ...`): LOSAT does not
-  write NCBI's diagnostics for them.
 - Ranges whose order NCBI takes from memory addresses: ranges of two different Seq-id handles
   with the same packed number (`gi|5` and `gb|AY000005.1|`; a local id and a `general` string
   tag; two `giim` handles of one number) written on one strand of one sequence and algorithm,
@@ -627,12 +632,39 @@ makeblastdb's closing "No sequences matched any of the masks provided."):
   an error of makeblastdb that comes later in the run (a mask of the same sequence past its end, a
   later sequence or input file that fails) is reported as makeblastdb reports it. The files are
   left as makeblastdb leaves them after an error of its build at the last sequence (none in
-  version 4; `NAME.nos`, `NAME.not`, `NAME.ntf`, `NAME.nto` in version 5, `.p..` for proteins),
-  where the refusal of a mask string comes before the build and leaves none.
+  version 4; `NAME.nos`, `NAME.not`, `NAME.ntf`, `NAME.nto` in version 5, `.p..` for proteins).
+- Objects nested more than 400 levels deep (`mask data that LOSAT does not read: ...`), before
+  the build.
+- A string whose length passes the end of the file and is 1 GiB to 2^47 bytes (`mask data that
+  LOSAT does not read: ...`), before the build: makeblastdb reserves the length before it reads
+  (`CIStreamBuffer::GetChars`, `util/strbuffer.cpp:496-523`), which succeeds or throws
+  `std::bad_alloc` by the host's memory (the bound of line PS's DECISIONS 40, which `losat
+  rpsbproc` uses).
+- A value stated as `:Type` (NCBI's pointer syntax) of a type other than the one its place
+  declares (`mask data that LOSAT does not read: ...`), before the build: makeblastdb reads it,
+  or stops with "class not found", by the types its process has met before
+  (`CClassTypeInfoBase::GetClassInfoByName`, `serial/classinfob.cpp:244-252`).
+- An element of `masks`, `mix`, `equiv` or `packed-int` stated as `NULL` (`05 00` in binary)
+  where makeblastdb dereferences it (`mask data that LOSAT does not read: ...`), before the
+  build: in the `GetId` of a mask, after the masks before it and after any error of NCBI's reader
+  in the rest of its object. NCBI's report of the null pointer prints the run's memory addresses
+  (rule 3 of PD-LOSAT-NCBI-DEFECTS). A `NULL` that `GetId` does not reach (after two Seq-ids or a
+  `feat`) gives NCBI's "Cannot get masked range Seq-id".
 
-A mask file that NCBI's reader rejects as damaged is no refusal: both programs stop, LOSAT with
-exit status 255 and `Error: mask data in '<file>': <LOSAT's text>` where NCBI prints an
-exception report that names its build tree.
+A string with a byte outside 0x20-0x7e is read as makeblastdb reads it: the byte is stored as `#`
+and NCBI's error is written (`Error: (803.7) [makeblastdb] <the object's path>`, `Bad char [0x..]
+in string at line N` or `at byte N`, and the string as NCBI's reader holds it;
+`ReplaceVisibleChar`, `serial/objistr.cpp:1855-1897`); a `UTF8String` tag where a
+`VisibleString` belongs is read with NCBI's warning (803.10), once per run. NCBI's pointer
+syntax is read as makeblastdb reads it where NCBI reads an empty `CRef`: `NULL` leaves an
+optional member (`fuzz-from`, `fuzz-to`, `fuzz`, `Seq-bond.b`, `PDB-seq-id.rel`) unset, `@n`
+ends the run with NCBI's exception report (`invalid object index: NO_COLLECT defined`), and
+`:Type value` of the declared type is that value. A mask file that
+NCBI's reader rejects as damaged ends the run as makeblastdb ends it, with its exception report
+(`Error: NCBI C++ Exception:` and the trace that names NCBI's build tree, exit status 255), and for
+a string longer than the file: "BLAST ran out of memory" (exit status 4) from 2^47 bytes (no host
+can allocate them) to 2^63 - 1 bytes, `Error: basic_string::_M_create` (exit status 255) past the
+largest `std::string`, and NCBI's end-of-file report below 1 GiB.
 
 Undefined behaviour of NCBI that is not reproduced:
 

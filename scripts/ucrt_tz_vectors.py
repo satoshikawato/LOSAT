@@ -2,7 +2,7 @@
 """Vectors of the Windows C runtime's local time with `TZ` set (LOSAT/tests/unit/ucrt_local_time_vectors.tsv).
 
 NCBI BLAST+ on Windows prints makeblastdb's times with UCRT's `localtime`. LOSAT ports UCRT's
-`_tzset` and `_localtime64_s` (LOSAT/src/writedb/local_offset.rs, section "Windows"); its unit
+`_tzset` and `_localtime64_s` (LOSAT/src/writedb/windows_zone.rs); its unit
 tests compare the port with these vectors on every platform, and the Windows test
 LOSAT/tests/windows_local_time.rs compares the runner's UCRT with them again.
 

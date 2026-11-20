@@ -1943,12 +1943,7 @@ fn gap_set_value(
 /// and the highest one reached, grown as the calls drop the last index), and the new entries from
 /// the first one that can change up to the block's entries after the last word held (`runs`, made
 /// with the capacity of the new entries from there, at most 8191).
-fn gap_set_list(
-    gap: &mut Arr,
-    val: bool,
-    list: &[u16],
-    bits: &mut Block,
-) -> usize {
+fn gap_set_list(gap: &mut Arr, val: bool, list: &[u16], bits: &mut Block) -> usize {
     if list.is_empty() {
         return 0;
     }
@@ -2103,7 +2098,14 @@ fn gap_set_list(
             m &= m - 1;
             if w != next {
                 if next != usize::MAX {
-                    close_stretch(&mut runs, ends, first_value, &mut j, (next as u32) << 6, carry);
+                    close_stretch(
+                        &mut runs,
+                        ends,
+                        first_value,
+                        &mut j,
+                        (next as u32) << 6,
+                        carry,
+                    );
                 }
                 let from = (w as u32) << 6;
                 while u32::from(ends[j]) + 1 < from {
@@ -2127,7 +2129,14 @@ fn gap_set_list(
             next = w + 1;
         }
     }
-    close_stretch(&mut runs, ends, first_value, &mut j, (next as u32) << 6, carry);
+    close_stretch(
+        &mut runs,
+        ends,
+        first_value,
+        &mut j,
+        (next as u32) << 6,
+        carry,
+    );
     debug_assert_eq!(below + runs.len() + e0 - j, end);
     // the block's entries after the last stretch move to their place, then the new ones go
     // before them

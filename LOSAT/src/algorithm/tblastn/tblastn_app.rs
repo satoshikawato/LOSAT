@@ -2500,6 +2500,12 @@ fn search(
             .map(|batch| batch.searched)
             .filter(|searched| !searched.is_empty() && searched.end <= queries.len())
             .collect();
+        // `-db_hard_mask` (series NP, M4b PR 2): the search read `B` over the masked bases, and the
+        // reports count again on the stored ones (`stage_e_report::recounts_shown_counts`).
+        let hard_masked = resolved
+            .db_mask
+            .as_ref()
+            .is_some_and(|mask| mask.kind == crate::blastinput::db_mask::MaskKind::Hard);
         // `-db`: the reported sequences by rank, with their records and lengths, and their packed
         // subjects where a report reads their letters; the database's other sequences are dropped
         // before the reports.
@@ -2510,7 +2516,11 @@ fn search(
                     &titles,
                     &mut results,
                     search_letters,
-                    super::stage_e_report::reads_subject_letters(outputs, pssm.as_deref()),
+                    super::stage_e_report::reads_subject_letters(
+                        outputs,
+                        pssm.as_deref(),
+                        hard_masked,
+                    ),
                     &outputs.formats,
                     &batch_spans,
                 )
@@ -2829,6 +2839,7 @@ fn search(
                         .expect("a database search has its Database: lines"),
                     reported,
                     oids: database.oid_map(),
+                    hard_masked,
                 },
             ),
             _ => (

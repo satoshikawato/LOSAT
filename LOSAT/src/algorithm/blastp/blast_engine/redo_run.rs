@@ -573,7 +573,7 @@ pub(super) fn plan_redo_and_expand_lists<P>(
         // returns at once for the Smith-Waterman redo).
         crate::utils::xreach::x_reach!(
             "LOSAT_X_NEWTONLANES",
-            (x_redo_par_run || !use_parallel_kappa_match_redo) && !args.use_sw_tback
+            (x_redo_par_run || !use_parallel_kappa_match_redo) && !redo.args.use_sw_tback
         );
     }
     // EXPERIMENT (LOSAT_X_BPSEGWIN): a redo not in windows empties no store; the windows record

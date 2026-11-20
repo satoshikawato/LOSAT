@@ -975,6 +975,11 @@ impl BlastCompoHeap {
     /// only the E-value, the score and the subject index, and orders distinct keys strictly, so
     /// every maximum has the root's key. The windows of the parallel redo ask it from many
     /// threads on the heaps as a window's start left them (`x_redo_par.rs`).
+    // Only the parallel redo's windows ask it (the module `x_redo_par` is compiled where they run).
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     pub(crate) fn would_insert_view(&self, evalue: f64, score: i32, subject_index: u32) -> bool {
         if self.n < self.heap_threshold || evalue <= self.ecutoff || evalue < self.worst_evalue {
             return true;
@@ -2613,6 +2618,10 @@ mod tests {
     }
 
     /// A fixed xorshift sequence below `bound`.
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     fn xorshift_below(state: &mut u64, bound: usize) -> usize {
         *state ^= *state << 13;
         *state ^= *state >> 7;
@@ -2629,6 +2638,10 @@ mod tests {
     /// Smith-Waterman match at its first round on a FALSE of the heap as a window's start left it
     /// (`x_redo_par.rs`), and rest on both.
     #[test]
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     fn test_compo_heap_would_insert_view_equals_would_insert_and_a_false_stays_false() {
         const ECUTOFF: f64 = 0.002;
         // Around the cutoff, its stretch and the heap's comparison of E-values.

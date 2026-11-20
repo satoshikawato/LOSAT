@@ -943,4 +943,21 @@ mod tests {
             );
         }
     }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4059-4061
+    // The score of an e-value E in a search space N is ceil(ln(K * N / E) / Lambda).
+    // The ungapped search's word cutoff: e-value 1 divided by the gap decay divisor (1 - 0.5) in
+    // the space `MIN(subject, query) * subject` (BLOSUM62's ungapped block, Lambda 0.3176, K
+    // 0.134): ceil(ln(0.134 * 30000 / 0.5) / 0.3176) = 29, with a query longer than the subject
+    // ceil(ln(0.134 * 90000 / 0.5) / 0.3176) = 32, and without the divisor (a decay outside
+    // (0, 1)) ceil(ln(0.134 * 30000) / 0.3176) = 27.
+    #[test]
+    fn ungapped_word_cutoff_takes_the_shorter_length_and_the_decay() {
+        let kbp = lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
+        assert_eq!(ungapped_word_cutoff(100, 300, 0.5, &kbp), 29);
+        assert_eq!(ungapped_word_cutoff(1000, 300, 0.5, &kbp), 32);
+        assert_eq!(ungapped_word_cutoff(100, 300, 0.0, &kbp), 27);
+        // A space below one letter's score keeps NCBI's cutoff of 1.
+        assert_eq!(ungapped_word_cutoff(1, 1, 0.5, &kbp), 1);
+    }
 }

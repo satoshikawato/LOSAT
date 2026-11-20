@@ -8524,4 +8524,54 @@ mod tests {
         assert_eq!(actual_append, expected_append);
         assert_eq!(snapshots.iter().map(Vec::len).collect::<Vec<_>>(), [2; 6]);
     }
+
+    // The HSPs of an ungapped unit (`BLAST_GetUngappedHSPList`, quoted at `ungapped_chunk_hsps`):
+    // each initial HSP in the context of its word's query offset (a word at a context's first
+    // offset is that context's), the query offsets made the context's, the word's offsets as the
+    // gapped start, the subject offsets the chunk's, and the list sorted by score.
+    #[test]
+    fn ungapped_chunk_hsps_are_context_local_and_sorted_by_score() {
+        // Two queries of 10 and 13 letters: contexts at 0 and 11 of the concatenated query.
+        let contexts = [0, 11];
+        let hit = |q_seed: u32, q_start: i32, s_seed: u32, s_start: i32, length, score| InitHsp {
+            frame: 2,
+            chunk_offset: 0,
+            q_seed,
+            s_seed,
+            q_start,
+            s_start,
+            length,
+            score,
+        };
+        let hsps = ungapped_chunk_hsps(
+            &contexts,
+            2,
+            &[
+                hit(15, 13, 102, 100, 6, 30),
+                hit(3, 1, 42, 40, 5, 50),
+                hit(11, 11, 7, 7, 3, 30),
+            ],
+        );
+        let hsp = |score, q_start, q_end, q_gapped_start, s_start, s_end, s_gapped_start| {
+            GappedHsp {
+                frame: 2,
+                score,
+                q_start,
+                q_end,
+                q_gapped_start,
+                s_start,
+                s_end,
+                s_gapped_start,
+            }
+        };
+        assert_eq!(
+            hsps,
+            [
+                (0, hsp(50, 1, 6, 3, 40, 45, 42)),
+                // Equal scores: the smaller subject offset first (`ScoreCompareHSPs`).
+                (1, hsp(30, 0, 3, 0, 7, 10, 7)),
+                (1, hsp(30, 2, 8, 4, 100, 106, 102)),
+            ]
+        );
+    }
 }

@@ -4394,6 +4394,46 @@ mod tests {
         );
     }
 
+    // `BlastSeqSrcGetAvgSeqLen` (quoted at `average_subject_length`), the length of the ungapped
+    // search's word cutoff: a FASTA set's total over its number of records in NCBI's `Uint4`
+    // (truncated; 0 for no record), a database's average as the database gives it.
+    #[test]
+    fn average_subject_length_is_the_sets_or_the_databases() {
+        let fasta = SubjectSetNumbers::default();
+        assert_eq!(
+            fasta.average_subject_length(&SubjectLetters::Lengths(&[300, 400, 0])),
+            233
+        );
+        assert_eq!(
+            fasta.average_subject_length(&SubjectLetters::Lengths(&[])),
+            0
+        );
+        // An average of 4e9 letters: NCBI's `Uint4`, given back as the source's `Int4`.
+        assert_eq!(
+            fasta.average_subject_length(&SubjectLetters::Lengths(&[
+                4_000_000_000,
+                4_000_000_000
+            ])),
+            -294_967_296
+        );
+        let database = SubjectSetNumbers {
+            database: Some(DatabaseNumbers {
+                total_length: 700,
+                num_seqs: 2,
+                gumbel_db_length: 700,
+                engine_db_length: 700,
+                min_length: 300,
+                request_count: 2,
+                average: 351,
+            }),
+            ..SubjectSetNumbers::default()
+        };
+        assert_eq!(
+            database.average_subject_length(&SubjectLetters::Lengths(&[300, 400])),
+            351
+        );
+    }
+
     // The search reads the subjects as slices of the records' residues (`tblastn_app.rs`).
     fn subject_slices(subjects: &[Vec<u8>]) -> Vec<&[u8]> {
         subjects.iter().map(Vec::as_slice).collect()

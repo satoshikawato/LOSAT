@@ -377,12 +377,10 @@ fn the_start_refuses_the_report_sums_before_its_first_byte() {
             refused
         };
         assert!(refused(&overflow), "{kind:?}");
-        // `-0` in the serial XML only (outfmt 14 and 16); JSON writes INT64_MIN.
-        assert_eq!(
-            refused(&int64_min),
-            matches!(kind, Xml2Kind::Single16 | Xml2Kind::Files14),
-            "{kind:?}"
-        );
+        // NCBI's serial XML (outfmt 14 and 16) prints INT64_MIN as `-0`, its JSON the digits:
+        // LOSAT writes the digits in every format (PD-LOSAT-NCBI-DEFECTS approved exception 17,
+        // Int8 -2^63 written as digits).
+        assert!(!refused(&int64_min), "{kind:?}");
         // A call that writes no report (a run without a query) prints no count.
         let mut writer = Xml2Writer::new(kind, params(Xml2Target::Database));
         let mut out = Vec::new();
@@ -396,7 +394,9 @@ fn the_start_refuses_the_report_sums_before_its_first_byte() {
     let mut blast_xml = crate::report::blast_xml::BlastXmlWriter::new(0);
     let mut out = Vec::new();
     assert!(blast_xml.start(Some(&overflow), &mut out).is_err());
-    assert!(blast_xml.start(Some(&int64_min), &mut out).is_err());
+    assert!(crate::report::blast_xml::BlastXmlWriter::new(0)
+        .start(Some(&int64_min), &mut Vec::new())
+        .is_ok());
     let mut count = run(None, "d");
     count.db_num = i64::from(i32::MAX) + 1;
     assert!(blast_xml.start(Some(&count), &mut out).is_err());
@@ -645,6 +645,37 @@ fn one_hsp_named(
         .unwrap();
     writer.finish(&mut out).unwrap();
     String::from_utf8(out).unwrap()
+}
+
+// PD-LOSAT-NCBI-DEFECTS approved exception 17, Int8 -2^63 written as digits (review C of line RG
+// D1a-4, SF1): XML2's
+// `db-len` of exactly -2^63, NCBI's `-0` in its serial XML (outfmt 14, 16; probe q17b of review
+// C), is written as its digits, as NCBI's JSON writes it (outfmt 13, 15).
+#[test]
+fn a_db_len_of_minus_two_to_the_63_is_written_as_its_digits() {
+    let matrix = FormattingMatrix::new("BLOSUM62").unwrap();
+    let mut run = run(Some(&matrix), "db/sprot");
+    run.db_len = i64::MIN;
+    for (kind, written) in [
+        (Xml2Kind::Single16, "<db-len>-9223372036854775808</db-len>"),
+        (Xml2Kind::Single15, "\"db_len\": -9223372036854775808"),
+    ] {
+        let mut writer = Xml2Writer::new(kind, params(Xml2Target::Database));
+        let query = XmlQuery {
+            id: b"Query_1",
+            title: b"",
+            len: 12,
+            stats: XmlStats::NONE,
+            message: None,
+            searched: true,
+            masks: &[],
+        };
+        let mut out = Vec::new();
+        writer.query(&run, &query, &mut out, |_| Ok(())).unwrap();
+        writer.finish(&mut out).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert!(text.contains(written), "{kind:?}: {text}");
+    }
 }
 
 #[test]

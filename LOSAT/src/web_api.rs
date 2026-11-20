@@ -470,6 +470,7 @@ fn parse_tblastx_args(
         out: Some(out),
         query_gencode: 1,
         db_gencode: 1,
+        max_intron_length: None,
         max_target_seqs: None,
         num_descriptions: None,
         num_alignments: None,
@@ -479,6 +480,7 @@ fn parse_tblastx_args(
         // NCBI blast_options.c:83-85: window=kSegWindow; locut=kSegLocut; hicut=kSegHicut.
         seg: "yes".to_string(),
         soft_masking: None,
+        sum_stats: None,
         lcase_masking: false,
         xdrop_ungap: None,
         window_size: None,

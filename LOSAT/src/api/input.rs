@@ -186,7 +186,7 @@ fn read_source<R: std::io::Read>(
             Role::Query => error.into_app_error(),
             Role::Subject => error.into_all_seqs_error(),
         };
-        Error::Input(format!("{error:#}").trim_end_matches('\n').to_string())
+        Error::Input(format!("{error:#}").trim_end_matches('\n').into())
     })
 }
 
@@ -203,9 +203,8 @@ fn read_source<R: std::io::Read>(
 /// `.bz2` or `.zst` is inflated (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`, exception 8). `read_fasta`
 /// and `read_inputs` read the bytes.
 pub fn read_input_file(role: Role, path: &std::path::Path) -> Result<Vec<u8>, Error> {
-    let input_error = |error: anyhow::Error| {
-        Error::Input(format!("{error:#}").trim_end_matches('\n').to_string())
-    };
+    let input_error =
+        |error: anyhow::Error| Error::Input(format!("{error:#}").trim_end_matches('\n').into());
     let name = match role {
         Role::Query => "query",
         Role::Subject => "subject",
@@ -484,7 +483,8 @@ mod tests {
         // comment lines): NCBI's CFastaReader error, with the CLI's prefix.
         let error = read_fasta(Program::Blastn, Role::Query, b"xyz{}[]|~`^&*()=+\n");
         match error {
-            Err(Error::Input(message)) => {
+            Err(error @ Error::Input(_)) => {
+                let message = error.to_string();
                 assert!(
                     message.starts_with("BLAST query error: CFastaReader: Near line 1"),
                     "{message}"
@@ -518,10 +518,13 @@ mod tests {
         let error = read_input_file(Role::Subject, &missing).unwrap_err();
         assert_eq!(
             error,
-            Error::Input(format!(
+            Error::Input(
+                format!(
                 "Command line argument error: Argument \"subject\". File is not accessible:  `{}'",
                 missing.display()
-            ))
+            )
+                .into()
+            )
         );
         std::fs::remove_dir_all(&directory).unwrap();
     }

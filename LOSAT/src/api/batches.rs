@@ -428,7 +428,7 @@ impl Batches<'_> {
                 self.hsps_before,
             )
             .map_err(|fault| {
-                Error::Search(format!("internal error in the search's parts: {fault}"))
+                Error::Search(format!("internal error in the search's parts: {fault}").into())
             })?;
         let mut hsps = finished.hsps;
         for hsp in &mut hsps {

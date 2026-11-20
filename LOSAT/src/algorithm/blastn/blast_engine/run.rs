@@ -8042,7 +8042,6 @@ pub fn run(
         args.out.as_deref(),
         "BLASTN",
         &args.outfmt,
-        crate::blastinput::app::Program::Blastn,
     )?;
     let output_formats = cli_output_formats(&args.outfmt, args.out.as_deref())?;
     // The BLAST archive (outfmt 11): its request, before anything is read or written.
@@ -9455,6 +9454,9 @@ fn search(
     // The XInclude formats written to standard output fail after the formatter is made (a
     // format 13 or 14 to a file takes the file name as the base of its side files).
     outputs.xinclude_check(args.out.as_deref())?;
+    // LOSAT's refusal of a strategy file on a report stream comes where NCBI makes its formatter
+    // (`strategy::check_report_stream`), after NCBI's own stops.
+    crate::report::archive::strategy::check_report_stream(args.strategy.as_ref())?;
     // NCBI reads the queries after `Query is Empty!`, one batch at a time, with its
     // reader's warnings (`run_in_pool`).
     // NCBI's x_CleanAndCompress reads past the end of some titles of punctuation (NCBI

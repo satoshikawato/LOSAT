@@ -98,7 +98,6 @@ impl RunSetup {
             args.out.as_deref(),
             program.upper,
             &args.outfmt,
-            Program::Blastx,
         )?;
         let choice = app::parse_formatting_string(&args.outfmt)?;
         let format = app::report_format(&choice, Program::Blastx, args.out.as_deref())?;

@@ -81,7 +81,7 @@ Formats 6, 7, 10 and 20 take a custom field list, for example `-outfmt "6 qseqid
 Not yet supported:
 
 - `-in_msa`, `-msa_master_idx`, `-ignore_msa_master` and `-phi_pattern`.
-- `-outfmt` other than 0, 6, 7, 10 and 20 (with `-in_pssm`, other than 0, 6 and 7). `-outfmt 17`, and 13 and 14 without `-out`, get NCBI's own errors.
+- `-outfmt` other than 0, 6, 7, 10 and 20 (with `-in_pssm`, other than 0, 6 and 7). `-outfmt` 17, 19 and 21, and 13 and 14 without `-out`, get NCBI's own errors.
 
 Also refused:
 

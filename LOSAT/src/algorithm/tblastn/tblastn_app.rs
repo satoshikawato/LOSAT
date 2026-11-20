@@ -125,7 +125,6 @@ impl TblastnArgs {
             args.out.as_deref(),
             "TBLASTN",
             &args.outfmt,
-            app::Program::Tblastn,
         )?;
         let choice = app::parse_formatting_string(&args.outfmt)?;
         let format = app::report_format(&choice, app::Program::Tblastn, args.out.as_deref())?;
@@ -914,6 +913,9 @@ fn search_cli(
     // ```
     // The XInclude formats written to standard output fail after the formatter is made.
     crate::blastinput::app::xinclude_check_for(choice, args.out.as_deref())?;
+    // LOSAT's refusal of a strategy file on a report stream comes where NCBI makes its formatter
+    // (`strategy::check_report_stream`), after NCBI's own stops.
+    crate::report::archive::strategy::check_report_stream(args.strategy.as_ref())?;
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:275-277
     // ```c++
     //             for (; !input->End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
@@ -1013,6 +1015,9 @@ fn search_pssm_query(
         outputs.diagnostics,
     )?;
     outputs.xinclude_check(args.out.as_deref())?;
+    // LOSAT's refusal of a strategy file on a report stream comes where NCBI makes its formatter
+    // (`strategy::check_report_stream`), after NCBI's own stops.
+    crate::report::archive::strategy::check_report_stream(args.strategy.as_ref())?;
     if let Some(observer) = outputs.observer.as_deref_mut() {
         observer.pssm_query(&records[0]);
     }
@@ -1285,6 +1290,9 @@ fn search_database(
     }
     let batch_size = before_prolog(&[], None, outputs.diagnostics)?;
     outputs.xinclude_check(args.out.as_deref())?;
+    // LOSAT's refusal of a strategy file on a report stream comes where NCBI makes its formatter
+    // (`strategy::check_report_stream`), after NCBI's own stops.
+    crate::report::archive::strategy::check_report_stream(args.strategy.as_ref())?;
     search(
         &args,
         resolved,
@@ -1367,6 +1375,9 @@ fn run_local_formats(
     // The caller owns the records: their letters are read in place.
     let batch_size = before_prolog(searched_subjects, None, outputs.diagnostics)?;
     outputs.xinclude_check(args.out.as_deref())?;
+    // LOSAT's refusal of a strategy file on a report stream comes where NCBI makes its formatter
+    // (`strategy::check_report_stream`), after NCBI's own stops.
+    crate::report::archive::strategy::check_report_stream(args.strategy.as_ref())?;
     search(
         &args,
         resolved,

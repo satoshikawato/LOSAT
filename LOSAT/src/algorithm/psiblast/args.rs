@@ -671,16 +671,8 @@ impl PsiblastArgs {
     /// `-outfmt`.
     pub fn check_outfmt(outfmt: &str, out: Option<&std::path::Path>, strategy: bool) -> Result<()> {
         use crate::blastinput::app::{Program, ReportFormat};
-        let choice = match crate::blastinput::app::parse_formatting_string(outfmt) {
-            Ok(choice) => choice,
-            // With a search strategy file NCBI reads no `-outfmt` before its option handlers: the
-            // file is created first (`GetExportSearchStrategyStream(args) ||
-            // m_FormattingArgs->ArchiveFormatRequested(args)`, blast_args.cpp:3624-3627, quoted at
-            // `blastp::run`), and the value's error comes after it, from the engine's reading
-            // (`blastp::run`, BLASTX's `RunSetup::open`; line RG F/d36 review 2, probes
-            // ps.f99.essf, rps.f99.essf, rpst.f99.essf).
-            Err(_) if strategy => return Ok(()),
-            Err(error) => return Err(error),
+        let Some(choice) = crate::blastinput::app::early_format_choice(outfmt, strategy)? else {
+            return Ok(());
         };
         if crate::blastinput::app::ncbi_refuses_format(&choice, Program::Blastp, out) {
             return Ok(());

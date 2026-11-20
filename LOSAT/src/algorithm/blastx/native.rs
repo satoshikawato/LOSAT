@@ -892,6 +892,9 @@ fn run_inner(
     // The XInclude formats written to standard output fail after the formatter is made (a
     // format 13 or 14 to a file is LOSAT's rejection, above).
     app::xinclude_check_for(&choice, args.out.as_deref())?;
+    // LOSAT's refusal of a strategy file on a report stream comes where NCBI makes its formatter
+    // (`strategy::check_report_stream`), after NCBI's own stops.
+    crate::report::archive::strategy::check_report_stream(strategy.as_ref())?;
     // `BL2SEQ_LEGACY` makes NCBI search each `-subject` sequence on its own and write the
     // bl2seq report; LOSAT refuses it before the search, where an empty query has already ended
     // the run as NCBI ends it (`Query is Empty!`, exit status 0).

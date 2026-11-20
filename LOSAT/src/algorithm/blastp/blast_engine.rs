@@ -5580,7 +5580,6 @@ pub fn run(
         args.out.as_deref(),
         args.app.name(),
         &args.outfmt,
-        app::Program::Blastp,
     )?;
     let choice = app::parse_formatting_string(&args.outfmt)?;
     let format = app::report_format(&choice, app::Program::Blastp, args.out.as_deref())?;
@@ -6501,6 +6500,8 @@ fn search_pssm_query(
         .and_then(crate::algorithm::psiblast::rounds::PsiRoundPlan::file_request)
         .filter(|_| searches && !xinclude_error_comes(xinclude))
     {
+        // The strategy's request before the PSSM file (`check_psiblast_pssm_files`).
+        crate::report::archive::strategy::check_report_stream(resolved.strategy.as_ref())?;
         crate::algorithm::psiblast::pssm::check_pssm_files(
             request,
             records.len(),
@@ -6544,7 +6545,7 @@ fn pssm_query(args: &BlastpArgs) -> bool {
 /// `records`, or the run's in the first of the library's query batches (none in the later ones).
 /// Where the run ends with NCBI's error of an XInclude format without a file name (`xinclude`,
 /// `xinclude_error_comes`) NCBI writes no PSSM file (its formatter is made before `DoIterations`,
-/// psiblast_app.cpp:503 before :517, `app::ncbi_stops_at_format`), so nothing is refused.
+/// psiblast_app.cpp:503 before :517), so nothing is refused.
 fn check_psiblast_pssm_files(
     resolved: &ResolvedBlastpArgs,
     records: &[FastaRecord],
@@ -6566,6 +6567,9 @@ fn check_psiblast_pssm_files(
             .as_deref()
             .and_then(crate::algorithm::psiblast::rounds::PsiRoundPlan::file_request)
     }) {
+        // NCBI writes the strategy's request (`SaveSearchStrategy`, psiblast_app.cpp:340) before
+        // the PSSM file (`SavePssmToFile`, :385): LOSAT's refusal of the strategy file comes first.
+        crate::report::archive::strategy::check_report_stream(resolved.strategy.as_ref())?;
         crate::algorithm::psiblast::pssm::check_pssm_files(
             request,
             queries,
@@ -6786,23 +6790,14 @@ fn search_database(
     )
 }
 
-/// The first requested format that has no report after the formatting handler's checks (an
-/// XInclude format, 13 or 14, without a file: `app::report_format`), which `search` refuses where
-/// the command line refuses its `-outfmt` (after `Query is Empty!` and the subjects without
-/// letters).
+/// The first requested format that is an XInclude format (13 or 14) without a file
+/// (`ReportOutputs::xinclude_choice`), which `search` refuses where the command line refuses its
+/// `-outfmt` (after `Query is Empty!` and the subjects without letters).
 fn xinclude_format(
     args: &BlastpArgs,
     outputs: &ReportOutputs<'_>,
 ) -> Result<Option<crate::blastinput::app::FormatChoice>> {
-    use crate::blastinput::app;
-    for format in &outputs.formats {
-        let choice = app::parse_formatting_string(format.outfmt)?;
-        let out = format.side_out(args.out.as_deref());
-        if app::report_format(&choice, app::Program::Blastp, out)?.is_none() {
-            return Ok(Some(choice));
-        }
-    }
-    Ok(None)
+    outputs.xinclude_choice(args.out.as_deref())
 }
 
 /// LOSAT's rejection of a protein subject title of punctuation that NCBI's
@@ -7499,6 +7494,9 @@ fn search(
     if let Some(choice) = xinclude {
         crate::blastinput::app::xinclude_check(choice)?;
     }
+    // LOSAT's refusal of a strategy file on a report stream comes where NCBI makes its formatter
+    // (`strategy::check_report_stream`), after NCBI's own stops.
+    crate::report::archive::strategy::check_report_stream(args.strategy.as_ref())?;
     // `PrintProlog`: outfmt 20's formatter warns here when its field list asks for a name of the
     // taxonomy database that it cannot find (`tabular::write_tabular_prolog_warning`); its line
     // of the field names comes with the first report (or `write_pairwise_prologs`), after LOSAT's

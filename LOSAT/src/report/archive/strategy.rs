@@ -115,6 +115,30 @@ pub trait StrategySink: Write + Send {
     fn can_cut(&self) -> bool;
 }
 
+/// The sink of a strategy file that LOSAT refuses before any request (`-`, NCBI's standard
+/// output): it never gets a byte (`StrategyExport::write_with`).
+struct NoSink;
+
+impl Write for NoSink {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl StrategySink for NoSink {
+    fn truncate(&mut self, _len: u64) -> std::io::Result<()> {
+        Ok(())
+    }
+
+    fn can_cut(&self) -> bool {
+        true
+    }
+}
+
 impl StrategySink for std::io::BufWriter<std::fs::File> {
     fn truncate(&mut self, len: u64) -> std::io::Result<()> {
         self.flush()?;
@@ -164,6 +188,8 @@ struct Shared {
     request: ArchiveRequest,
     /// The run's options handle, shared with the run's archive (`OptionsHandle`).
     options: OptionsHandle,
+    /// LOSAT's refusal of the file (`create_strategy_file`, `check_report_stream`).
+    refusal: Option<String>,
     state: Mutex<State>,
 }
 
@@ -197,6 +223,15 @@ impl std::fmt::Debug for StrategyExport {
 //         locality = CBlastOptions::eBoth;
 //     }
 // ```
+/// A strategy file made where NCBI's `SetOptions` makes it (`create_strategy_file`): the file
+/// (`None` for `-`, NCBI's standard output) and LOSAT's refusal of it, if any, which the run
+/// raises where NCBI would start its report (`check_report_stream`).
+#[derive(Debug)]
+pub struct StrategyFile {
+    file: Option<std::fs::File>,
+    refusal: Option<String>,
+}
+
 /// Creates (and empties) the strategy file where NCBI's `SetOptions` does: after the argument
 /// parser accepted the command line and before any option handler runs, so before the
 /// `-outfmt` text is read, the database list is resolved, and `-subject`, `-query` and `-out`
@@ -206,32 +241,59 @@ impl std::fmt::Debug for StrategyExport {
 /// (`-`) or the same file as the standard output or `-out`: NCBI writes each request to the
 /// output's stream before the batch's report (`-`), or to a second stream on the same file,
 /// whose bytes then replace or are replaced by the report's as the two buffers are flushed.
-/// Where NCBI's run ends with its own error of the format first (`format_error_first`,
-/// `app::ncbi_stops_at_format`) it writes no request, so there is nothing to refuse: the file is
-/// created as NCBI creates it (`-`: none, NCBI's is the standard output) and the run goes on to
-/// NCBI's error. `None`: no strategy is written.
-pub fn create_strategy_file(
-    path: &Path,
-    out: Option<&Path>,
-    label: &str,
-    format_error_first: bool,
-) -> Result<Option<std::fs::File>> {
+/// NCBI writes its first request only after its formatter is made and its prolog written (the
+/// first `SaveSearchStrategy`, blastp_app.cpp:262, after :250-253), so every run that NCBI ends
+/// before that point (an empty query, a database error, an option or format error) writes no
+/// request. The refusal is therefore only recorded here and raised where NCBI makes its
+/// formatter (`check_report_stream`); until then the run goes on as NCBI's.
+pub fn create_strategy_file(path: &Path, out: Option<&Path>, label: &str) -> Result<StrategyFile> {
     if path.as_os_str() == "-" {
-        if format_error_first {
-            return Ok(None);
-        }
-        anyhow::bail!(
-            "-export_search_strategy - (the search strategy on the standard output, between the parts of the report) is not supported by LOSAT's {label}; give a file name"
-        );
+        return Ok(StrategyFile {
+            file: None,
+            refusal: Some(format!(
+                "-export_search_strategy - (the search strategy on the standard output, between the parts of the report) is not supported by LOSAT's {label}; give a file name"
+            )),
+        });
     }
     let file = std::fs::File::create(path)
         .map_err(|_| crate::cli::inaccessible("export_search_strategy", path))?;
-    if !format_error_first && is_same_as_output(&file, path, out) {
-        anyhow::bail!(
+    let refusal = is_same_as_output(&file, path, out).then(|| {
+        format!(
             "an -export_search_strategy file that is also the output (-out or the standard output) is not supported by LOSAT's {label}: NCBI writes both through separate streams and the file's bytes follow the order of their flushes"
-        );
+        )
+    });
+    Ok(StrategyFile {
+        file: Some(file),
+        refusal,
+    })
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:250-262 (the same order in
+// blastn_app.cpp:255-282, blastx_app.cpp:251-264, tblastn_app.cpp:267-280, tblastx_app.cpp:170-181,
+// psiblast_app.cpp:503-517 and :340, rpsblast_app.cpp:188-199, rpstblastn_app.cpp:185-196)
+// ```c++
+// 	if(UseXInclude(*fmt_args, args[kArgOutput].AsString())) {
+//         	formatter.SetBaseFile(args[kArgOutput].AsString());
+//         }
+//         formatter.PrintProlog();
+//         ...
+//         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
+//             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
+//             CRef<IQueryFactory> queries(new CObjMgr_QueryFactory(*query_batch));
+//
+//             SaveSearchStrategy(args, m_CmdLineArgs, queries, m_OptsHndl);
+// ```
+/// LOSAT's refusal of the run's strategy file (`create_strategy_file`: the standard output, or
+/// the file of the output), raised where NCBI makes its formatter, right after its XInclude
+/// check (`app::xinclude_check_for`) and before its prolog: every stop of NCBI's before that
+/// point (`Query is Empty!`, a database error, an option or format error) comes first, and the
+/// run writes nothing before the refusal. Each program calls it there; `write_with` raises it
+/// too, so no request is ever written to such a file.
+pub fn check_report_stream(strategy: Option<&StrategyExport>) -> Result<()> {
+    match strategy.and_then(|strategy| strategy.0.refusal.as_deref()) {
+        Some(refusal) => Err(anyhow::anyhow!("{refusal}")),
+        None => Ok(()),
     }
-    Ok(Some(file))
 }
 
 /// Whether the created strategy `file` is the file of `-out` (which exists then: NCBI creates
@@ -304,25 +366,41 @@ pub(crate) fn hitlist_size(outfmt: i32, counts: HitlistArgs) -> i32 {
     .hitlist_size as i32
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3454, 3478-3480
+// ```c++
+// CStdCmdLineArgs::ExtractAlgorithmOptions(const CArgs& args,
+//     ...
+//     else {
+//         m_OutputStream = &args[kArgOutput].AsOutputFile();
+//     }
+// ```
 /// The strategy file of a run's `-export_search_strategy` argument (`path`), created where NCBI
-/// creates it (`create_strategy_file`), or `None` without the argument (or where NCBI's error of
-/// the format comes first and the file is the standard output). A file name that is not UTF-8 is
-/// refused first (`check_utf8_file_name`). `out` is the `-out` argument; `label` names the
-/// program in a refusal; `outfmt` and `program` are the run's `-outfmt` value and the program
-/// whose formatting flags NCBI reads it with (`app::ncbi_stops_at_format`).
+/// creates it (`create_strategy_file`), or `None` without the argument. A file name that is not
+/// UTF-8 is refused first (`check_utf8_file_name`). `out` is the `-out` argument; `label` names
+/// the program in a refusal.
+///
+/// With a strategy file NCBI skips its early reading of `-outfmt` (blast_args.cpp:3624-3627,
+/// quoted at `create_strategy_file`'s callers): a value its parser refuses (`outfmt`, such as
+/// `99`) fails only in the formatting handler, after `CStdCmdLineArgs` (an earlier handler) has
+/// opened `-out`, so NCBI leaves an empty `-out` file too (line RG F/d36 review 2b SF1). The
+/// engine's reading of the value gives the error right after this.
 pub fn open_strategy_file(
     path: Option<&Path>,
     out: Option<&Path>,
     label: &str,
     outfmt: &str,
-    program: crate::blastinput::app::Program,
-) -> Result<Option<std::fs::File>> {
+) -> Result<Option<StrategyFile>> {
     let Some(path) = path else {
         return Ok(None);
     };
     crate::blastinput::input_files::check_utf8_file_name(path, "export_search_strategy", label)?;
-    let format_error_first = crate::blastinput::app::ncbi_stops_at_format(outfmt, program, out);
-    create_strategy_file(path, out, label, format_error_first)
+    let file = create_strategy_file(path, out, label)?;
+    if crate::blastinput::app::parse_formatting_string(outfmt).is_err() {
+        if let Some(out) = out.filter(|out| out.as_os_str() != "-") {
+            std::fs::File::create(out).map_err(|_| crate::cli::inaccessible("out", out))?;
+        }
+    }
+    Ok(Some(file))
 }
 
 impl StrategyExport {
@@ -336,9 +414,20 @@ impl StrategyExport {
         database: Option<&str>,
         options: OptionsHandle,
     ) -> Self {
+        Self::with_refusal(sink, inputs, database, options, None)
+    }
+
+    fn with_refusal(
+        sink: Box<dyn StrategySink>,
+        inputs: &OptionInputs,
+        database: Option<&str>,
+        options: OptionsHandle,
+        refusal: Option<String>,
+    ) -> Self {
         Self(Arc::new(Shared {
             request: ArchiveRequest::for_inputs(inputs, database),
             options,
+            refusal,
             state: Mutex::new(State {
                 held: (!sink.can_cut()).then(std::collections::VecDeque::new),
                 sink,
@@ -359,7 +448,7 @@ impl StrategyExport {
     /// (the archive's is outfmt 11's), and the run's options handle `options` (made once per run
     /// and given to its archive too, `ArchiveHandle::for_program`).
     pub fn for_run(
-        file: std::fs::File,
+        file: StrategyFile,
         mut inputs: OptionInputs,
         outfmt: i32,
         counts: HitlistArgs,
@@ -367,12 +456,12 @@ impl StrategyExport {
         options: &OptionsHandle,
     ) -> Self {
         inputs.hitlist_size = hitlist_size(outfmt, counts);
-        Self::new(
-            Box::new(std::io::BufWriter::new(file)),
-            &inputs,
-            database,
-            options.clone(),
-        )
+        // A refused file gets no request (`check_report_stream`, `write_with`); `-` has none.
+        let sink: Box<dyn StrategySink> = match file.file {
+            Some(file) => Box::new(std::io::BufWriter::new(file)),
+            None => Box::new(NoSink),
+        };
+        Self::with_refusal(sink, &inputs, database, options.clone(), file.refusal)
     }
 
     /// The run's options handle.
@@ -438,6 +527,7 @@ impl StrategyExport {
         queries: Range<usize>,
         make: impl FnOnce(&mut dyn FnMut(&RequestInputs<'_>) -> Result<()>) -> Result<()>,
     ) -> Result<bool> {
+        check_report_stream(Some(self))?;
         self.with_state(|state| {
             if !state.takes(&queries) {
                 return Ok(false);
@@ -1235,10 +1325,11 @@ mod tests {
         }
     }
 
-    /// `-` and a file that is also `-out` are refused unless NCBI's error of the format comes
-    /// first; a path that cannot be created is NCBI's argument error.
+    /// `-` and a file that is also `-out` are made (the file emptied) with LOSAT's refusal, which
+    /// `check_report_stream` and `write_with` raise; a path that cannot be created is NCBI's
+    /// argument error.
     #[test]
-    fn the_file_is_created_or_refused() {
+    fn the_file_is_created_and_its_refusal_kept() {
         let dir = crate::utils::test_dir::temp_dir().join(format!(
             "losat-strategy-{}",
             crate::utils::test_dir::process_id()
@@ -1246,26 +1337,36 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("s.asn");
         std::fs::write(&path, b"old").unwrap();
-        drop(create_strategy_file(&path, None, "BLASTP", false).unwrap());
+        let made = create_strategy_file(&path, None, "BLASTP").unwrap();
+        assert!(made.file.is_some() && made.refusal.is_none());
         assert_eq!(std::fs::read(&path).unwrap(), b"");
-        let refusal = create_strategy_file(Path::new("-"), None, "BLASTP", false).unwrap_err();
-        assert!(refusal.to_string().contains("standard output"), "{refusal}");
-        let same = create_strategy_file(&path, Some(&path), "BLASTP", false).unwrap_err();
-        assert!(same.to_string().contains("also the output"), "{same}");
-        let other = dir.join("o.txt");
-        drop(create_strategy_file(&path, Some(&other), "BLASTP", false).unwrap());
-        // NCBI's error of the format comes first: nothing to refuse, the file is created (`-`:
-        // none).
+        let dash = create_strategy_file(Path::new("-"), None, "BLASTP").unwrap();
+        assert!(dash.file.is_none());
+        assert!(dash.refusal.as_deref().unwrap().contains("standard output"));
         std::fs::write(&path, b"old").unwrap();
-        assert!(create_strategy_file(Path::new("-"), None, "BLASTP", true)
-            .unwrap()
-            .is_none());
-        assert!(create_strategy_file(&path, Some(&path), "BLASTP", true)
-            .unwrap()
-            .is_some());
+        let same = create_strategy_file(&path, Some(&path), "BLASTP").unwrap();
+        assert!(same.refusal.as_deref().unwrap().contains("also the output"));
         assert_eq!(std::fs::read(&path).unwrap(), b"");
+        let other = dir.join("o.txt");
+        assert!(create_strategy_file(&path, Some(&other), "BLASTP")
+            .unwrap()
+            .refusal
+            .is_none());
+        // The refusal comes where the run asks for it, and before any request.
+        let export = StrategyExport::for_run(
+            create_strategy_file(Path::new("-"), None, "BLASTP").unwrap(),
+            OptionInputs::new(Program::Blastp, "blastp"),
+            6,
+            HitlistArgs::default(),
+            None,
+            &OptionsHandle::default(),
+        );
+        let refusal = check_report_stream(Some(&export)).unwrap_err();
+        assert!(refusal.to_string().contains("standard output"), "{refusal}");
+        assert!(export.write_with(0..1, |_| Ok(())).is_err());
+        assert!(check_report_stream(None).is_ok());
         let missing = dir.join("no_such_dir").join("x");
-        let error = create_strategy_file(&missing, None, "BLASTP", true).unwrap_err();
+        let error = create_strategy_file(&missing, None, "BLASTP").unwrap_err();
         let native = error.downcast_ref::<crate::cli::NativeError>().unwrap();
         assert_eq!(native.exit, 1);
         assert_eq!(
@@ -1282,7 +1383,6 @@ mod tests {
                 Path::new("/dev/null"),
                 Some(Path::new("/dev/null")),
                 "BLASTP",
-                false,
             )
             .unwrap(),
         );

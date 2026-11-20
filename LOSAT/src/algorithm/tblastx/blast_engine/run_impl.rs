@@ -1054,7 +1054,6 @@ pub fn run(
         args.out.as_deref(),
         "TBLASTX",
         &args.outfmt,
-        crate::blastinput::app::Program::Tblastx,
     )?;
     let choice = crate::blastinput::app::parse_formatting_string(&args.outfmt)?;
     let format = crate::blastinput::app::report_format(
@@ -1990,15 +1989,11 @@ fn check_report_formats(outputs: &ReportOutputs<'_>, out: Option<&std::path::Pat
     use crate::blastinput::app;
     for format in &outputs.formats {
         let choice = app::parse_formatting_string(format.outfmt)?;
-        let out = format.side_out(out);
-        if app::report_format(&choice, app::Program::Tblastx, out)?.is_none() {
-            app::formatting_handler_check(&choice, app::Program::Tblastx)?;
-            app::xinclude_check_for(&choice, out)?;
-        } else {
-            app::formatting_handler_check(&choice, app::Program::Tblastx)?;
-        }
+        app::report_format(&choice, app::Program::Tblastx, format.side_out(out))?;
+        app::formatting_handler_check(&choice, app::Program::Tblastx)?;
     }
-    Ok(())
+    // The XInclude formats without a file, the one check of every program (`ReportOutputs`).
+    outputs.xinclude_check(out)
 }
 
 /// The search of `run_local` and of the CLI, after NCBI's checks of the options and the
@@ -2089,6 +2084,9 @@ fn search(
     // (`check_report_formats`: `xinclude_check`), as the other format checks of each
     // requested format.
     check_report_formats(outputs, args.out.as_deref())?;
+    // LOSAT's refusal of a strategy file on a report stream comes where NCBI makes its formatter
+    // (`strategy::check_report_stream`), after NCBI's own stops.
+    crate::report::archive::strategy::check_report_stream(args.strategy.as_ref())?;
     crate::blastinput::app::check_search_environment(
         "TBLASTX",
         !matches!(source, SubjectSource::Database(_)),
@@ -3418,6 +3416,9 @@ fn run_in_pool(
     batch_size: u32,
 ) -> Result<()> {
     check_report_formats(outputs, args.out.as_deref())?;
+    // LOSAT's refusal of a strategy file on a report stream comes where NCBI makes its formatter
+    // (`strategy::check_report_stream`), after NCBI's own stops.
+    crate::report::archive::strategy::check_report_stream(args.strategy.as_ref())?;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:253-259
     // ```c++
     //         formatter.PrintProlog();

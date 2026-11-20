@@ -22,3 +22,9 @@
   of LOSAT's own refusal. With an `-outfmt` value that NCBI cannot read (`99`), `psiblast`, `rpsblast` and
   `rpstblastn` create the `-export_search_strategy` file before NCBI's error, as NCBI does (line RG, series F, D-36
   review 2).
+- Every search program's refusal of a search strategy on a report stream (`-export_search_strategy -`, or the file of
+  `-out` or of the standard output) now comes where NCBI BLAST+ 2.17.0 would start its report. A run that NCBI ends
+  before that point now ends as NCBI's: an empty or white-space query gives `Query is Empty!` with exit status 0, a
+  missing database NCBI's database error, an option error NCBI's error (before: LOSAT's refusal, exit status 1). With
+  a strategy file and an `-outfmt` value that NCBI cannot read (`99`), every program also creates the `-out` file
+  before NCBI's error, as NCBI does (line RG, series F, D-36 review 2b).

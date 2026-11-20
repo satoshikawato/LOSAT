@@ -706,19 +706,48 @@ impl ReportOutputs<'_> {
         open_out(&mut self.formats)
     }
 
-    /// NCBI's error of an XInclude format (13, 14) whose side files have no file name to go by
-    /// (`FormatOutput::side_out` of the run's `-out` `out`: no `api::run_to_file` file and no
-    /// receiver of them), for each requested format in turn (`blastinput::app::xinclude_check_for`,
-    /// the one check of the command line and the library). Each program's entry calls it where its
-    /// command line makes the formatter: after `Query is Empty!` and the subjects' warnings.
-    pub(crate) fn xinclude_check(&self, out: Option<&std::path::Path>) -> anyhow::Result<()> {
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:887-899
+    // ```c++
+    // bool
+    // UseXInclude(const CFormattingArgs & f, const string & s)
+    // {
+    // 	CFormattingArgs::EOutputFormat fmt = f.GetFormattedOutputChoice();
+    // 	if((fmt ==  CFormattingArgs::eXml2) || (fmt ==  CFormattingArgs::eJson)) {
+    // 	   if (s == "-"){
+    // 		   string f_str = (fmt == CFormattingArgs::eXml2) ? "14.": "13.";
+    // 		   NCBI_THROW(CInputException, eEmptyUserInput,
+    // 		              "Please provide a file name for outfmt " + f_str);
+    // 	   }
+    // 	   return true;
+    // 	}
+    // 	return false;
+    // }
+    // ```
+    /// The first requested format that is an XInclude format (13, 14) whose side files have no
+    /// file name to go by (`FormatOutput::side_out` of the run's `-out` `out`: no
+    /// `api::run_to_file` file and no receiver of them), for which NCBI's `UseXInclude` fails
+    /// (`blastinput::app::xinclude_check_for`, the one check of the command line and the library).
+    pub(crate) fn xinclude_choice(
+        &self,
+        out: Option<&std::path::Path>,
+    ) -> anyhow::Result<Option<crate::blastinput::app::FormatChoice>> {
         for format in &self.formats {
-            crate::blastinput::app::xinclude_check_for(
-                &crate::blastinput::app::parse_formatting_string(format.outfmt)?,
-                format.side_out(out),
-            )?;
+            let choice = crate::blastinput::app::parse_formatting_string(format.outfmt)?;
+            if crate::blastinput::app::xinclude_check_for(&choice, format.side_out(out)).is_err() {
+                return Ok(Some(choice));
+            }
         }
-        Ok(())
+        Ok(None)
+    }
+
+    /// NCBI's error of the first XInclude format without a file name (`xinclude_choice`). Each
+    /// program's entry calls it where its command line makes the formatter: after `Query is
+    /// Empty!` and the subjects' warnings.
+    pub(crate) fn xinclude_check(&self, out: Option<&std::path::Path>) -> anyhow::Result<()> {
+        match self.xinclude_choice(out)? {
+            Some(choice) => crate::blastinput::app::xinclude_check_for(&choice, None),
+            None => Ok(()),
+        }
     }
 
     /// Whether every requested format is the BLAST archive (outfmt 11), which NCBI's apps but

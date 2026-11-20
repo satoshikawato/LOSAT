@@ -11,7 +11,8 @@
   Warnings, and `/dev/ptmx` nowhere, as there; a user makes files in the working directory, in a home
   (`/home/<user>/...`) and where every user does (`/tmp`, `/var/tmp`, `/dev/shm`, `/run/lock`, also as
   `/var/lock`, `/var/crash`). A name may climb out of a directory of root's, as there
-  (`/etc/default/../../tmp/run.log` is `/tmp/run.log`), and a name of 4 KB starts a run at once.
+  (`/etc/default/../../tmp/run.log` is `/tmp/run.log`), but not out of one that a user cannot enter
+  (`/root/../tmp/run.log`), and a name of 4 KB starts a run at once.
 - `-logfile` names are read as NCBI BLAST+ 2.17.0 reads them, in every program and on Windows by its
   Windows rules (`\` and `/` both end a directory there): a name that ends in `/`
   makes the file without it where no such directory exists (`-logfile logs/` writes to `logs`, where the

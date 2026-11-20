@@ -818,12 +818,14 @@ const LOG_NAMES = ["run.log", "logs/run.log", "a/b/run.log", "./run.log", "<dir>
   "/bin/../tmp/<id>.log", "/var/lock/../tmp/<id>.log", "/dev/fd/../../tmp/<id>.log", "a".repeat(256),
   `logs/${"b".repeat(256)}`,
   // Round 5: a name climbs out of directories of root's that the model does not list, as the CLI passes them.
-  "/etc/default/../../tmp/<id>.log", "/usr/share/doc/../../../tmp/<id>.log"];
+  "/etc/default/../../tmp/<id>.log", "/usr/share/doc/../../../tmp/<id>.log",
+  // Round 6: a name looks nothing up in a directory that a user cannot search (mode 0700, root's), as the CLI's EACCES.
+  "/root/../tmp/<id>.log", "/var/cache/ldconfig/../../../tmp/<id>.log"];
 
 // The rows of `/`-names (LOG_NAMES) compare the Web with the CLI of the host, which must be a Linux like LOSAT Web's
 // (Ubuntu 24.04, as CI's runner): a user that is not root, `/var/lock` and `/var/run` links to `/run/lock` and `/run`,
-// `/run/lock` and `/tmp` where every user makes files (mode 1777), and `/etc/default` and `/usr/share/doc`. Returns
-// why this host differs, or undefined.
+// `/run/lock` and `/tmp` where every user makes files (mode 1777), `/etc/default` and `/usr/share/doc`, and `/root` and
+// `/var/cache/ldconfig` that the user cannot search. Returns why this host differs, or undefined.
 function hostDiffers() {
   const sticky = (directory) => {
     try {
@@ -846,6 +848,15 @@ function hostDiffers() {
       return false;
     }
   };
+  const closed = (directory) => {
+    if (!isDirectory(directory)) return false;
+    try {
+      fs.accessSync(directory, fs.constants.X_OK);
+      return false;
+    } catch {
+      return true;
+    }
+  };
   const differences = [
     [process.getuid?.() === 0, "the run is root's"],
     [!resolves("/var/lock", "/run/lock"), "/var/lock is not /run/lock"],
@@ -854,6 +865,8 @@ function hostDiffers() {
     [!sticky("/tmp"), "/tmp is not mode 1777"],
     [!isDirectory("/etc/default"), "no /etc/default"],
     [!isDirectory("/usr/share/doc"), "no /usr/share/doc"],
+    [!closed("/root"), "the user searches /root, or it is not there"],
+    [!closed("/var/cache/ldconfig"), "the user searches /var/cache/ldconfig, or it is not there"],
   ].filter(([differs]) => differs).map(([, why]) => why);
   return differences.length > 0 ? differences.join(", ") : undefined;
 }

@@ -118,7 +118,8 @@ no file: their messages are on stream 3. A user makes files in the working direc
 (`/home/<user>/...`) and where every user does (`/tmp`, `/var/tmp`, `/dev/shm`, `/run/lock`,
 `/var/lock`, `/var/crash`); every other directory is root's (`/etc/run.log`, `/data/run.log`,
 `/dev/run.log`, `//run.log`), and the system refuses a component of more than 255 bytes. A name
-may climb out of a directory of root's (`/etc/default/../../tmp/run.log` is `/tmp/run.log`). `/dev/fd/2` and
+may climb out of a directory of root's (`/etc/default/../../tmp/run.log` is `/tmp/run.log`), but not out of one
+that a user cannot enter (`/root/../tmp/run.log`). `/dev/fd/2` and
 `/proc/self/fd/2` give no file and send the messages that go to the file nowhere, as `/dev/null`
 does: the command line writes nothing to a log on a file system without free space, which these
 are.

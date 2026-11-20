@@ -323,6 +323,7 @@ fn the_logfile_is_a_file_of_the_run() {
             ("/run/user/1000/run.log", false),
             ("/bin/../tmp/run.log", false),
             ("/etc/default/../tmp/run.log", false),
+            ("/root/../tmp/run.log", false),
             (LONG_NAME, false),
         ] {
             let mut words = plain_words.clone();

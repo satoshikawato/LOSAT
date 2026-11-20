@@ -160,6 +160,79 @@ const LINKS: [(&[u8], &[u8]); 13] = [
     (b"/proc/thread-self/root", b"/"),
 ];
 
+/// The directories of LOSAT Web's Linux in which a user looks up no name (`searchable`), as their
+/// mode gives others no search permission (`x`) and the user owns none of them: those that a user
+/// finds on Ubuntu 24.04.3 (line WQA's D11 round 6, 2026-11-21: `find / -type d ! -perm -0001` as a
+/// user; mode 0700 but `/etc/polkit-1/rules.d` and `/var/lib/polkit-1` 0750, `/proc/tty/driver`
+/// 0500, `/run/systemd/inaccessible/dir` 0000, `/run/systemd/propagate/*` 0600,
+/// `/var/log/unattended-upgrades` 0750, `/var/spool/cron/crontabs` 1730), less Docker's
+/// (`/run/docker`, `/var/lib/docker`), which Ubuntu does not install, and `/lost+found`, which the
+/// model does not have at the root (`ROOT_DIRECTORIES`). Ubuntu 22.04.5 (ws) has these, less
+/// `/etc/credstore*` and `/etc/polkit-1/rules.d`, and those of its desktop packages.
+const CLOSED_DIRECTORIES: [&[u8]; 28] = [
+    b"/etc/credstore",
+    b"/etc/credstore.encrypted",
+    b"/etc/polkit-1/rules.d",
+    b"/etc/ssl/private",
+    b"/proc/tty/driver",
+    b"/root",
+    b"/run/systemd/inaccessible/dir",
+    b"/run/systemd/propagate/polkit.service",
+    b"/run/systemd/propagate/systemd-logind.service",
+    b"/run/systemd/propagate/systemd-resolved.service",
+    b"/run/systemd/propagate/systemd-timesyncd.service",
+    b"/run/systemd/propagate/systemd-udevd.service",
+    b"/sys/kernel/debug",
+    b"/sys/kernel/tracing",
+    b"/var/cache/apt/archives/partial",
+    b"/var/cache/ldconfig",
+    b"/var/cache/private",
+    b"/var/lib/apt/lists/partial",
+    b"/var/lib/polkit-1",
+    b"/var/lib/private",
+    b"/var/lib/snapd/cache",
+    b"/var/lib/snapd/cookie",
+    b"/var/lib/ubuntu-advantage/apt-esm/var/lib/apt/lists/partial",
+    b"/var/lib/update-notifier/package-data-downloads/partial",
+    b"/var/log/private",
+    b"/var/log/unattended-upgrades",
+    b"/var/spool/cron/crontabs",
+    b"/var/spool/rsyslog",
+];
+
+/// The entries of another process (`/proc/<pid>` and its threads' `/proc/<pid>/task/<tid>`) in
+/// which a user looks up no name (`searchable`): its descriptors' directories (`fd`, `fdinfo`,
+/// `map_files`, mode 0500 or 0555 that the kernel checks against the process) and the links to its
+/// working and root directories (`cwd`, `root`), which only the process's user follows. LOSAT Web's
+/// own process is `/proc/self`; a process of `/proc/<pid>` is root's, as `/proc/1` (line WQA's D11
+/// round 6, 2026-11-21: measured as a user on ws's Linux 6.8; Linux 5.15 lets a user search
+/// `fdinfo`).
+const CLOSED_PROCESS_ENTRIES: [&[u8]; 5] = [b"cwd", b"fd", b"fdinfo", b"map_files", b"root"];
+
+/// Whether a user looks up names in `directory`, a path without links (`Walk`): not in
+/// `CLOSED_DIRECTORIES` nor in another process's `CLOSED_PROCESS_ENTRIES`, where the system
+/// refuses (`EACCES`), whatever the name (`.` and `..` too).
+fn searchable(directory: &[u8]) -> bool {
+    let number = |part: &[u8]| !part.is_empty() && part.iter().all(u8::is_ascii_digit);
+    let closed_entry = directory.strip_prefix(b"/proc/").is_some_and(|entry| {
+        match entry
+            .split(|byte| *byte == b'/')
+            .collect::<Vec<_>>()
+            .as_slice()
+        {
+            [pid, closed] => number(pid) && CLOSED_PROCESS_ENTRIES.contains(closed),
+            [pid, task, tid, closed] => {
+                number(pid)
+                    && *task == b"task"
+                    && number(tid)
+                    && CLOSED_PROCESS_ENTRIES.contains(closed)
+            }
+            _ => false,
+        }
+    });
+    !closed_entry && !CLOSED_DIRECTORIES.contains(&directory)
+}
+
 /// The file systems of Linux that report no free space (`statfs`'s `f_bavail` is 0): procfs,
 /// sysfs, devpts and mqueue, where they are mounted.
 const NO_FREE_SPACE: [&[u8]; 4] = [b"/proc", b"/sys", b"/dev/pts", b"/dev/mqueue"];
@@ -185,9 +258,9 @@ const LOST_DEVICES: [&[u8]; 8] = [
 /// The files of procfs that a process may open for writing as a user, of the process
 /// (`/proc/self`) and of its thread (`/proc/thread-self`): those of Linux 5.15, which
 /// `open(O_WRONLY | O_APPEND | O_CREAT)` opens (line WQA's sweep, D11 round 2, 2026-11-20), and
-/// the process's `autogroup` (mode 0644), which the kernels of Ubuntu 24.04 have (automatic group
-/// scheduling; Linux 6.8: fs/proc/base.c, `tgid_base_stuff`) and the measured one did not (line
-/// WQA's D11 round 5, 2026-11-21). The file descriptors 0 to 2 (`fd/0`...) are the standard
+/// the process's `autogroup` (mode 0644), which Ubuntu 24.04's Linux 6.8 has (automatic group
+/// scheduling; measured in `/proc/self` on ws's Linux 6.8, line WQA's D11 rounds 5 and 6,
+/// 2026-11-21) and WSL's 5.15 does not. The file descriptors 0 to 2 (`fd/0`...) are the standard
 /// streams.
 const PROCESS_FILES: [&[u8]; 19] = [
     b"attr/current",
@@ -289,9 +362,8 @@ enum Directory {
     /// (`/etc/default`, `/usr/tmp`): the user cannot change them, and the model does not list
     /// them.
     Unknown,
-    /// No directory: a file that the model knows (`/dev/null`, `/proc/self/fd/1`), a name at the
-    /// root that is not there (`/data`, `/snap`), or a path in `/root`, whose entries a user
-    /// cannot reach (mode 0700).
+    /// No directory: a file that the model knows (`/dev/null`, `/proc/self/fd/1`) or a name at the
+    /// root that is not there (`/data`, `/snap`).
     None,
 }
 
@@ -305,7 +377,6 @@ fn directory_at(directory: &[u8]) -> Directory {
     {
         Directory::Known
     } else if is_known_file(directory)
-        || within(directory, b"/root")
         || !ROOT_DIRECTORIES.iter().any(|root| within(directory, root))
     {
         Directory::None
@@ -346,7 +417,8 @@ fn opens(path: &[u8]) -> bool {
 /// counterpart: the system's resolution, `log_name`): `.` and empty components stay, `..` goes to
 /// the parent of the path walked so far (`/` stays), and a link (`LINKS`; `/proc/self/cwd` and
 /// `/proc/thread-self/cwd`, the working directory `cwd`) is replaced by its target, which is
-/// walked from `/`. Each step costs the component's length, so a name is read in time linear in
+/// walked from `/`. A component looked up in a directory that the user cannot search
+/// (`searchable`: `/root/..`, `/root/.`) refuses the path, as the system does. Each step costs the component's length, so a name is read in time linear in
 /// its length (line WQA's D11 round 5, 2026-11-21: resolving each prefix again was cubic, a minute
 /// for a name of 4 KB in LOSAT Web's serial engine).
 struct Walk<'a> {
@@ -354,6 +426,8 @@ struct Walk<'a> {
     resolved: Vec<u8>,
     /// The working directory, `/proc/self/cwd`'s target.
     cwd: &'a [u8],
+    /// Whether the walk looked a component up in a directory that the user cannot search.
+    refused: bool,
 }
 
 impl<'a> Walk<'a> {
@@ -363,6 +437,7 @@ impl<'a> Walk<'a> {
         let mut walk = Walk {
             resolved: Vec::new(),
             cwd,
+            refused: false,
         };
         if path.first() != Some(&b'/') {
             walk.walk(cwd);
@@ -370,11 +445,12 @@ impl<'a> Walk<'a> {
         walk
     }
 
-    /// `path` with its links followed and its `.` and `..` taken.
-    fn resolve(path: &[u8], cwd: &'a [u8]) -> Vec<u8> {
+    /// `path` with its links followed and its `.` and `..` taken; `None` where the system refuses
+    /// it (`refused`).
+    fn resolve(path: &[u8], cwd: &'a [u8]) -> Option<Vec<u8>> {
         let mut walk = Walk::at(path, cwd);
         walk.walk(path);
-        walk.path().to_vec()
+        (!walk.refused).then(|| walk.path().to_vec())
     }
 
     /// Takes every component of `path`.
@@ -388,8 +464,15 @@ impl<'a> Walk<'a> {
     fn step(&mut self, part: &[u8]) {
         #[cfg(test)]
         WALK_STEPS.with(|steps| steps.set(steps.get() + 1));
+        if part.is_empty() || self.refused {
+            return;
+        }
+        if !searchable(self.path()) {
+            self.refused = true;
+            return;
+        }
         match part {
-            b"" | b"." => {}
+            b"." => {}
             b".." => {
                 let parent = self.resolved.iter().rposition(|byte| *byte == b'/');
                 self.resolved.truncate(parent.unwrap_or(0));
@@ -441,7 +524,8 @@ thread_local! {
 /// bytes). The directory that NCBI checks (the name's as written) is walked as the system walks
 /// it (`directory_at`): each directory that it passes may be one of root's that the model does
 /// not know, which a name passes on its way back out (`/etc/default/../../tmp`, as on the command
-/// line), but none that is not there (`/data`, a file: `/dev/null/x`, `/dev/stdout/..`); the
+/// line), but none that is not there (`/data`, a file: `/dev/null/x`, `/dev/stdout/..`) nor one
+/// that the user cannot search (`searchable`: `/root/..`, `/var/cache/ldconfig/..`); the
 /// directory where it ends must be one that the model knows, root's or one where the user makes
 /// entries, which the user made (`logs`, `/tmp/a`, `/home/me/logs`); not `/bin/..` (`/usr`, then
 /// `/usr/tmp`) or `/var/lock/..` (`/run`, then `/run/tmp`). The opened path is a directory, which
@@ -485,7 +569,7 @@ fn log_name(name: &[u8]) -> LogName {
         let mut walk = Walk::at(directory, &cwd);
         for part in directory.split(|byte| *byte == b'/') {
             walk.step(part);
-            if directory_at(walk.path()) == Directory::None {
+            if walk.refused || directory_at(walk.path()) == Directory::None {
                 return LogName::Unopened;
             }
             if directories.last().map(Vec::as_slice) != Some(walk.path()) {
@@ -497,7 +581,9 @@ fn log_name(name: &[u8]) -> LogName {
         }
     }
     directories.push(cwd.clone());
-    let path = Walk::resolve(&file.path, &cwd);
+    let Some(path) = Walk::resolve(&file.path, &cwd) else {
+        return LogName::Unopened;
+    };
     if file.path.is_empty()
         || !fits(&file.path)
         || directories.iter().any(|directory| within(directory, &path))
@@ -505,7 +591,9 @@ fn log_name(name: &[u8]) -> LogName {
     {
         return LogName::Unopened;
     }
-    let space = Walk::resolve(&file.space, &cwd);
+    // A directory whose free space the system does not read keeps the file (NCBI ignores the
+    // error); its walk is a part of the checked directory's, which the system took.
+    let space = Walk::resolve(&file.space, &cwd).unwrap_or_default();
     if NO_FREE_SPACE.iter().any(|system| within(&space, system)) {
         return LogName::Nowhere;
     }
@@ -638,7 +726,7 @@ mod tests {
             directory_4096.as_str(),
             directory_4099.as_str(),
             // Round 5: a name ends in a directory that the model knows, and passes none that is
-            // not there (a file, a name at the root that is not there, an entry of `/root`).
+            // not there (a file, a name at the root that is not there).
             "/lib/../tmp/run.log",
             "/var/run/lock/../run.log",
             "/etc/default/../tmp/run.log",
@@ -646,6 +734,17 @@ mod tests {
             "/dev/fd/2/../../../tmp/run.log",
             "/root/x/../../tmp/run.log",
             "/data/x/../../tmp/run.log",
+            // Round 6: a name looks nothing up in a directory that the user cannot search (as a
+            // user's command line, `EACCES`; measured on Ubuntu 24.04.3 and ws's Linux 6.8).
+            "/root/../tmp/run.log",
+            "/root/./run.log",
+            "/var/cache/ldconfig/../../../tmp/run.log",
+            "/etc/ssl/private/../../../tmp/run.log",
+            "/var/spool/cron/crontabs/../../../../tmp/run.log",
+            "/proc/1/fd/../../../tmp/run.log",
+            "/proc/1/fdinfo/../../../tmp/run.log",
+            "/proc/1/root/../tmp/run.log",
+            "/proc/1/task/1/cwd/../../../../../tmp/run.log",
         ] {
             assert!(matches!(target(Some(name)), DiagTarget::Stderr), "{name}");
         }
@@ -740,6 +839,11 @@ mod tests {
             "/dev/disk/../../tmp/run.log",
             "/var/log/../../tmp/run.log",
             "/var/lock/../../tmp/run.log",
+            // Round 6: the directories around them, and a process's own descriptors, open to a user.
+            "/var/cache/../../tmp/run.log",
+            "/etc/ssl/../../tmp/run.log",
+            "/proc/1/../../tmp/run.log",
+            "/proc/self/fd/../../../tmp/run.log",
         ];
         for name in names {
             let log = target(Some(name));

@@ -452,13 +452,83 @@ fn score_zero_hsps_write_nothing() {
 /// e-value, bit score, identities, positives). Subject 2 has two HSPs. The e-values and bit
 /// scores as their 15 printed digits.
 const BP_UNGAPPED_HSPS: [(u32, i32, i32, i32, i32, f64, f64, i32, i32); 7] = [
-    (0, 16, 796, 26, 43, 651688149968565e-15, 229109485291396e-13, 9, 12),
-    (1, 25, 146, 69, 40, 171302022762502e-14, 215166600089639e-13, 15, 26),
-    (2, 4, 32, 23, 39, 236412288450052e-14, 210518971689053e-13, 8, 11),
-    (2, 74, 252, 12, 35, 857630603424144e-14, 19192845808671e-12, 6, 8),
-    (3, 41, 971, 22, 39, 236412288450052e-14, 210518971689053e-13, 8, 13),
-    (4, 9, 1640, 19, 38, 326270345375192e-14, 205871343288467e-13, 7, 10),
-    (5, 15, 961, 19, 38, 326270345375192e-14, 205871343288467e-13, 6, 14),
+    (
+        0,
+        16,
+        796,
+        26,
+        43,
+        651688149968565e-15,
+        229109485291396e-13,
+        9,
+        12,
+    ),
+    (
+        1,
+        25,
+        146,
+        69,
+        40,
+        171302022762502e-14,
+        215166600089639e-13,
+        15,
+        26,
+    ),
+    (
+        2,
+        4,
+        32,
+        23,
+        39,
+        236412288450052e-14,
+        210518971689053e-13,
+        8,
+        11,
+    ),
+    (
+        2,
+        74,
+        252,
+        12,
+        35,
+        857630603424144e-14,
+        19192845808671e-12,
+        6,
+        8,
+    ),
+    (
+        3,
+        41,
+        971,
+        22,
+        39,
+        236412288450052e-14,
+        210518971689053e-13,
+        8,
+        13,
+    ),
+    (
+        4,
+        9,
+        1640,
+        19,
+        38,
+        326270345375192e-14,
+        205871343288467e-13,
+        7,
+        10,
+    ),
+    (
+        5,
+        15,
+        961,
+        19,
+        38,
+        326270345375192e-14,
+        205871343288467e-13,
+        6,
+        14,
+    ),
 ];
 
 /// The ordinal ids (`-db`) and the record numbers (`-subject`) of the six subjects.
@@ -509,7 +579,14 @@ fn blastp_ungapped_documents(format: SerialFormat, db_title: Option<&[u8]>) -> V
         .collect();
     let mut buf = Vec::new();
     assert_eq!(
-        write_query(format, &run, &query("Query_1", 109), &subjects, &hsps, &mut buf),
+        write_query(
+            format,
+            &run,
+            &query("Query_1", 109),
+            &subjects,
+            &hsps,
+            &mut buf
+        ),
         Ok(true)
     );
     buf
@@ -563,12 +640,72 @@ fn blastp_ungapped_dendiag_documents_equal_ncbi() {
 /// context, subject start, length, minus strand, score, e-value, bit score, identities). The
 /// minus-strand HSPs start at `1000 - end` in the output; the context's offset is `end - length`.
 const BN_UNGAPPED_HSPS: [(u32, i32, i32, i32, bool, i32, f64, f64, i32); 6] = [
-    (0, 99, 99, 302, false, 302, 177234191655786e-183, 581339129949787e-12, 302),
-    (0, 300, 500, 200, true, 200, 192662373350162e-124, 3852249544608e-10, 200),
-    (0, 749, 799, 152, false, 152, 116563164172467e-96, 292935930701277e-12, 152),
-    (0, 120, 1000, 140, false, 140, 102802205877556e-89, 269863674761396e-12, 140),
-    (1, 400, 0, 300, true, 300, 254754008593196e-182, 577493753959806e-12, 300),
-    (1, 600, 380, 200, false, 200, 192662373350162e-124, 3852249544608e-10, 200),
+    (
+        0,
+        99,
+        99,
+        302,
+        false,
+        302,
+        177234191655786e-183,
+        581339129949787e-12,
+        302,
+    ),
+    (
+        0,
+        300,
+        500,
+        200,
+        true,
+        200,
+        192662373350162e-124,
+        3852249544608e-10,
+        200,
+    ),
+    (
+        0,
+        749,
+        799,
+        152,
+        false,
+        152,
+        116563164172467e-96,
+        292935930701277e-12,
+        152,
+    ),
+    (
+        0,
+        120,
+        1000,
+        140,
+        false,
+        140,
+        102802205877556e-89,
+        269863674761396e-12,
+        140,
+    ),
+    (
+        1,
+        400,
+        0,
+        300,
+        true,
+        300,
+        254754008593196e-182,
+        577493753959806e-12,
+        300,
+    ),
+    (
+        1,
+        600,
+        380,
+        200,
+        false,
+        200,
+        192662373350162e-124,
+        3852249544608e-10,
+        200,
+    ),
 ];
 
 /// `blastn -ungapped` with `-subject`: the Dense-diags of plus-strand and minus-strand HSPs
@@ -608,13 +745,29 @@ fn blastn_ungapped_dendiag_documents_equal_ncbi() {
         )
         .collect();
     for (format, name) in [
-        (SerialFormat::AsnText, &fixture!("blastn_ungapped_mix_fmt8.out")[..]),
-        (SerialFormat::AsnBinary, &fixture!("blastn_ungapped_mix_fmt9.out")[..]),
-        (SerialFormat::Json, &fixture!("blastn_ungapped_mix_fmt12.out")[..]),
+        (
+            SerialFormat::AsnText,
+            &fixture!("blastn_ungapped_mix_fmt8.out")[..],
+        ),
+        (
+            SerialFormat::AsnBinary,
+            &fixture!("blastn_ungapped_mix_fmt9.out")[..],
+        ),
+        (
+            SerialFormat::Json,
+            &fixture!("blastn_ungapped_mix_fmt12.out")[..],
+        ),
     ] {
         let mut buf = Vec::new();
         assert_eq!(
-            write_query(format, &run, &query("Query_1", 1000), &subjects, &hsps, &mut buf),
+            write_query(
+                format,
+                &run,
+                &query("Query_1", 1000),
+                &subjects,
+                &hsps,
+                &mut buf
+            ),
             Ok(true)
         );
         assert_same_bytes(&buf, name);
@@ -631,7 +784,14 @@ fn an_ungapped_query_without_hsps_writes_nothing() {
     };
     let mut buf = Vec::new();
     assert_eq!(
-        write_query(SerialFormat::AsnText, &run, &query("Query_1", 10), &[], &[], &mut buf),
+        write_query(
+            SerialFormat::AsnText,
+            &run,
+            &query("Query_1", 10),
+            &[],
+            &[],
+            &mut buf
+        ),
         Ok(false)
     );
     assert!(buf.is_empty());

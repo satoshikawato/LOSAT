@@ -15363,7 +15363,10 @@ mod tests {
             let mut sink = Vec::new();
             let mut outputs =
                 ReportOutputs::single(outfmt, OutputSink::Writer(&mut sink), &mut diagnostics);
-            let result = process_options(&mut args(&["-ungapped", "-max_target_seqs", "1"]), &mut outputs);
+            let result = process_options(
+                &mut args(&["-ungapped", "-max_target_seqs", "1"]),
+                &mut outputs,
+            );
             drop(outputs);
             if refused {
                 assert_eq!(

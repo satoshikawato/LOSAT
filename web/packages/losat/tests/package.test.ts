@@ -82,6 +82,8 @@ describe.skipIf(!built)('the built package', () => {
       'package.json',
       'README.md',
       'LICENSE',
+      'THIRD_PARTY_NOTICES',
+      'THIRD_PARTY_LICENSES',
     ].sort();
     expect(pack!.name).toBe('losat');
     expect(pack!.version).toBe(engineVersion());

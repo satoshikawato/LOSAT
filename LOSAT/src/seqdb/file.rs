@@ -17,6 +17,13 @@ use super::SeqDbError;
 /// only gives NCBI more zeros to read past the file, where LOSAT then refuses or reads none.
 pub(crate) const MAP_PAGE: u64 = 4096;
 
+/// The bytes that NCBI's mapping of a file of `len` bytes holds (`MAP_PAGE`): whole pages, the
+/// part of the last one after the end of the file zeros. The one form of `taxdb.btd` and
+/// RPS-BLAST's `.rps` (`rps::RpsVolumeFiles::row_after_rows`).
+pub(crate) fn mapped_length(len: u64) -> u64 {
+    len.div_ceil(MAP_PAGE).saturating_mul(MAP_PAGE)
+}
+
 /// Where `DbFile::read_range_in` puts the bytes it reads.
 enum RangeBuffer<'a> {
     /// A new buffer (`read_range`).
@@ -108,10 +115,9 @@ impl DbFile {
     /// [`SeqDbError::Open`].
     pub fn open(path: &Path) -> Result<Self, SeqDbError> {
         if !super::alias::exists(path) {
-            return Err(SeqDbError::NotFound(format!(
-                "Error: File ({}) not found.",
-                path.display()
-            )));
+            return Err(SeqDbError::NotFound(
+                format!("Error: File ({}) not found.", path.display()).into(),
+            ));
         }
         let file = File::open(path).map_err(|source| SeqDbError::Open {
             path: path.to_path_buf(),

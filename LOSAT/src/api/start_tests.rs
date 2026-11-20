@@ -17,6 +17,7 @@ use crate::api::{
     run, run_batches, run_collect, run_to_file, validate, FastaRecord, Inputs, Program,
 };
 
+// Test protein: N-terminal part of E. coli AsnA (RefSeq NP_418200.1), Cys51 changed to Ala.
 const PROTEIN: &[u8] = b"MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQ";
 
 const NUCLEOTIDES: &[u8] =
@@ -377,7 +378,7 @@ fn the_conffile_is_loaded_as_on_the_command_line() {
     }
     // A malformed file.
     std::fs::write(&conffile, "[x\n").unwrap();
-    let report = Error::Search(section_report().repeat(2).trim_end().to_string());
+    let report = Error::Search(section_report().repeat(2).trim_end().into());
     assert_eq!(run_collect(&with(&[]), inputs, &["6"]), Err(report.clone()));
     assert_eq!(
         run_collect(&with(&["-dryrun"]), inputs, &["6"]),
@@ -410,7 +411,7 @@ fn the_conffile_is_loaded_as_on_the_command_line() {
     let search = validate(Program::Blastp, &["-conffile", path_text(&missing)]).unwrap();
     assert_eq!(
         run_collect(&search, inputs, &["6"]),
-        Err(Error::Search(critical.clone()))
+        Err(Error::Search(critical.clone().into()))
     );
     // With `-logfile`: the file gets the post, the error is the same text.
     let log = dir.join("log.txt");
@@ -426,7 +427,7 @@ fn the_conffile_is_loaded_as_on_the_command_line() {
     .unwrap();
     assert_eq!(
         run_collect(&search, inputs, &["6"]),
-        Err(Error::Search(critical.clone()))
+        Err(Error::Search(critical.clone().into()))
     );
     assert_eq!(
         std::fs::read_to_string(&log).unwrap(),
@@ -454,7 +455,7 @@ fn a_started_call_refuses_the_settings_that_the_command_line_refuses() {
     };
     let refused = run_collect(&with(&["-dryrun"]), inputs, &["6"]).unwrap_err();
     assert!(
-        matches!(&refused, Error::Search(reason) if reason.contains("[BLAST] LONG_SEQID")),
+        matches!(&refused, Error::Search(_)) && refused.to_string().contains("[BLAST] LONG_SEQID"),
         "{refused:?}"
     );
     let search = with(&[]);
@@ -514,13 +515,16 @@ fn a_dry_run_parses_with_the_kind_of_its_subject() {
     // `run_to_file`'s file is the parser's `-out`: its usage line names it, as the command line's
     // does when `-out` is given.
     let out = dir.join("out.txt");
-    let Error::Argv(message) = &refused else {
-        unreachable!()
-    };
-    let refused_out = Error::Argv(message.replace(
-        "Usage: losat blastp -query <PATH> -db <NAME>\n",
-        "Usage: losat blastp -query <PATH> -db <NAME> -out <PATH>\n",
-    ));
+    assert!(matches!(refused, Error::Argv(_)), "{refused:?}");
+    let refused_out = Error::Argv(
+        refused
+            .to_string()
+            .replace(
+                "Usage: losat blastp -query <PATH> -db <NAME>\n",
+                "Usage: losat blastp -query <PATH> -db <NAME> -out <PATH>\n",
+            )
+            .into(),
+    );
     assert_ne!(refused_out, refused);
     assert_eq!(
         run_to_file(&search, database, "6", &out, &mut diagnostics),
@@ -566,6 +570,7 @@ fn an_out_file_that_cannot_be_made_is_an_error_of_the_run() {
         .unwrap()
         .message
         .clone();
+    let message = String::from_utf8(message).unwrap();
     for (program, logged) in [(Program::Tblastx, message.as_str()), (Program::Blastn, "")] {
         std::fs::write(&log, "").unwrap();
         let search = validate(program, &["-logfile", path_text(&log)]).unwrap();
@@ -657,7 +662,8 @@ fn an_outfmt_error_goes_where_the_run_s_errors_go() {
             .unwrap()
             .message
             .clone();
-        let refused = Error::Argv(format!("{native:#}"));
+        let message = String::from_utf8(message).unwrap();
+        let refused = Error::Argv(format!("{native:#}").into());
         for (program, logged) in [(Program::Tblastx, message.as_str()), (Program::Blastn, "")] {
             let search = validate(program, &["-logfile", path_text(&log)]).unwrap();
             std::fs::write(&log, "").unwrap();

@@ -10,6 +10,7 @@ import pytest
 from conftest import CASES, FASTA, fasta
 
 ENGINE_TESTS = FASTA.parent
+# Test protein: N-terminal part of E. coli AsnA (RefSeq NP_418200.1), Cys51 changed to Ala.
 PROTEIN = "MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQ"
 FASTA_TEXT = f">one a protein\n{PROTEIN}\n>two the same protein\n{PROTEIN}A\n"
 
@@ -188,6 +189,7 @@ def test_a_tool_is_the_command_line(losat):
         stdout, stderr = losat("blastdbcmd", *words)
         output = pylosat.blastdbcmd(*words)
         assert output.bytes == stdout
+        assert output.diagnostics_bytes == stderr
         assert output.diagnostics == stderr.decode()
 
 
@@ -231,6 +233,24 @@ def test_a_tool_fails_with_the_command_lines_text(tmp_path):
         pylosat.blastdbcmd("-db", str(tmp_path / "none"), "-info")
     with pytest.raises(pylosat.ArgumentError):
         pylosat.makeblastdb("-dbtype", "neither")
+
+
+def test_an_error_holds_the_bytes_that_the_command_line_writes(losat_fails):
+    # blastdbcmd reads `%é` as the specifier `%` and the first byte of `é` (C3), which its error
+    # quotes alone: not UTF-8.
+    words = ("-db", engine_file("seqdb/db/prot_v5"), "-entry", "all", "-outfmt", "%\u00e9")
+    stderr = losat_fails("blastdbcmd", *words)
+    with pytest.raises(pylosat.SearchError) as raised:
+        pylosat.blastdbcmd(*words)
+    error = raised.value
+    assert error.message_bytes == stderr.rstrip(b"\n")
+    assert error.message_bytes.endswith(b"Unrecognized format specification: '%\xc3'")
+    assert str(error) == error.message_bytes.decode("utf-8", "replace")
+    assert str(error).endswith("Unrecognized format specification: '%\ufffd'")
+    # Every exception of pylosat has the bytes.
+    with pytest.raises(pylosat.ArgumentError) as refused:
+        pylosat.makeblastdb("-dbtype", "neither")
+    assert refused.value.message_bytes == str(refused.value).encode()
 
 
 def test_psiblast_is_a_program():

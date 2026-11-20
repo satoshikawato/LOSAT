@@ -181,8 +181,10 @@ impl SeqType {
 #[derive(Debug)]
 pub enum SeqDbError {
     /// A database, volume or file was not found, or no database was named.
-    /// The message is the text of NCBI's exception.
-    NotFound(String),
+    /// The message is the text of NCBI's exception, as bytes: a name it holds keeps the bytes
+    /// of NCBI's `std::string` (a seqid list's word, an LMDB file's name that is not UTF-8:
+    /// probes R3 and R8 of line LIB-B).
+    NotFound(Vec<u8>),
     /// A file that exists could not be opened.
     Open {
         path: PathBuf,
@@ -220,7 +222,8 @@ pub enum SeqDbError {
 impl std::fmt::Display for SeqDbError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            SeqDbError::NotFound(message) | SeqDbError::Range(message) => f.write_str(message),
+            SeqDbError::NotFound(message) => f.write_str(&String::from_utf8_lossy(message)),
+            SeqDbError::Range(message) => f.write_str(message),
             SeqDbError::Open { path, source } | SeqDbError::Io { path, source } => {
                 write!(f, "{}: {}", path.display(), source)
             }
@@ -366,8 +369,8 @@ impl SeqDbError {
     /// own: a search program prints `BLAST Database error: <text>` and ends
     /// with exit status 2. `None`: the error is LOSAT's (a database that
     /// LOSAT refuses, a damaged file, a failed read), to be reported in
-    /// LOSAT's words.
-    pub fn ncbi_message(&self) -> Option<String> {
+    /// LOSAT's words. The text is bytes ([`SeqDbError::NotFound`]).
+    pub fn ncbi_message(&self) -> Option<Vec<u8>> {
         match self {
             SeqDbError::NotFound(message) => Some(message.clone()),
             SeqDbError::Format { message, .. } => (NCBI_FORMAT_MESSAGES
@@ -376,19 +379,24 @@ impl SeqDbError {
                 || NCBI_COLUMN_MESSAGE_PREFIXES
                     .iter()
                     .any(|prefix| message.starts_with(prefix)))
-            .then(|| message.clone()),
+            .then(|| message.clone().into_bytes()),
             SeqDbError::Open { path, source } => {
                 let code = source.raw_os_error()?;
                 let text = source.to_string();
                 let strerror = text.strip_suffix(&format!(" (os error {code})"))?;
                 if strerror.contains("Too many open files") {
-                    Some("Too many open files, please raise the open file limit".to_string())
+                    Some(b"Too many open files, please raise the open file limit".to_vec())
                 } else if cfg!(unix) {
-                    Some(format!(
-                        "Database memory map file error - CMemoryFile: Cannot memory map file \
-                         '{}':{strerror}",
-                        path.display()
-                    ))
+                    Some(
+                        [
+                            b"Database memory map file error - CMemoryFile: Cannot memory map file '"
+                                .as_slice(),
+                            &crate::utils::os_bytes::path_bytes(path),
+                            b"':",
+                            strerror.as_bytes(),
+                        ]
+                        .concat(),
+                    )
                 } else {
                     None
                 }
@@ -460,7 +468,7 @@ impl SeqDbError {
             return Some("Database memory map file error");
         }
         match self.ncbi_message()? {
-            message if message == TOO_MANY => Some(TOO_MANY),
+            message if message == TOO_MANY.as_bytes() => Some(TOO_MANY),
             _ => Some("Database memory map file error"),
         }
     }
@@ -663,10 +671,10 @@ const fn seqdb_site(file: &'static str, line: u32, function: &'static str) -> Th
 /// `eTooManyOpenFiles` and `eMemoryMappingFailure`, which are the texts of the programs'
 /// `CATCH_ALL` and not the exception's own message, and `DB contains no ...`, which NCBI's reader
 /// never throws (it throws lmdb's error first, `InitDbi` quoted above).
-pub(crate) fn throw_site(message: &str) -> Option<ThrowSite> {
+pub(crate) fn throw_site(message: &[u8]) -> Option<ThrowSite> {
     DATABASE_ERROR_SITES
         .iter()
-        .find(|(start, _)| message.starts_with(start))
+        .find(|(start, _)| message.starts_with(start.as_bytes()))
         .map(|&(_, site)| site)
 }
 
@@ -685,8 +693,8 @@ pub(crate) fn throw_site(message: &str) -> Option<ThrowSite> {
 /// `GetDbi`, "DB contains no accession info.": blastp 2.17.0's outfmt 15 at a lookup of a list of
 /// version 5 databases with and without the table, DECISIONS 62 (1) and (2) of line DBID). `None`
 /// for every other text, also those of [`throw_site`], which no lookup was seen to throw.
-pub(crate) fn lookup_throw_site(message: &str) -> Option<ThrowSite> {
-    (message == tax_files::NO_ACCESSION_INFO).then_some(GET_DBI_SITE)
+pub(crate) fn lookup_throw_site(message: &[u8]) -> Option<ThrowSite> {
+    (message == tax_files::NO_ACCESSION_INFO.as_bytes()).then_some(GET_DBI_SITE)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2472-2476
@@ -940,8 +948,6 @@ pub struct SeqDb {
     /// The walks of the alias tree, with the exception of each one whose value does not
     /// convert (`check_alias_values`).
     alias_totals: alias::AliasTotals,
-    /// Whether the alias files give an OID range (`alias::range_mask`).
-    alias_ranges: bool,
     /// Whether NCBI's OID bit set is the special all-set one after the alias files' OID ranges
     /// (`alias::all_bits_special_set`): a positive list left with no id then keeps every OID
     /// (`SeqDb::restrict_seqids`).
@@ -1453,17 +1459,23 @@ impl SeqDb {
             if !names_lmdb(volume) {
                 continue;
             }
+            // The name's bytes, as the volume's header holds them (probe R8 of line LIB-B: a
+            // name that is not UTF-8).
             let lmdb_name = volume.index().lmdb_file.as_deref().unwrap_or_default();
             let lmdb_path = volume
                 .base()
-                .with_file_name(String::from_utf8_lossy(lmdb_name).as_ref());
+                .with_file_name(crate::utils::os_bytes::path_from_bytes(lmdb_name));
             if !std::fs::metadata(&lmdb_path).is_ok_and(|meta| meta.is_file()) {
-                return Err(SeqDbError::NotFound(format!(
-                    "File {} not found. If you renamed any BLAST database files, please use \
-                     original file names, and makeblastdb to rename the database. If you deleted \
-                     any BLAST database files, you need to recreate the database.",
-                    lmdb_path.display()
-                )));
+                return Err(SeqDbError::NotFound(
+                    [
+                        b"File ".as_slice(),
+                        &crate::utils::os_bytes::path_bytes(&lmdb_path),
+                        b" not found. If you renamed any BLAST database files, please use \
+                          original file names, and makeblastdb to rename the database. If you \
+                          deleted any BLAST database files, you need to recreate the database.",
+                    ]
+                    .concat(),
+                ));
             }
         }
 
@@ -1513,7 +1525,6 @@ impl SeqDb {
             included_length: OnceLock::new(),
             first_oid_length: None,
             alias_totals: alias::AliasTotals::default(),
-            alias_ranges: false,
             all_bits_special_set: false,
             oid_list_set_up: AtomicBool::new(false),
             list_applied: false,
@@ -1615,7 +1626,6 @@ impl SeqDb {
         self.stats_total_length = totals.stats_totlen.as_ref().map_or(0, |&value| value);
         self.printed_num_seqs = nseq;
         self.printed_total_length = length;
-        self.alias_ranges = mask.is_some();
         self.all_bits_special_set = alias::all_bits_special_set(root, names, &self.volume_starts);
         if let Some(words) = mask {
             let range = alias::top_iteration_range(root, num_oids).unwrap_or((0, num_oids));
@@ -1787,7 +1797,6 @@ impl SeqDb {
     /// `CSeqDB::GetNumSeqs` of the search: the walk of `NSEQ` (the volumes' OIDs below the
     /// alias files without the key) without a list, the included OIDs with one. It is not the
     /// number of included OIDs ([`SeqDb::num_seqs`]) when an alias file has `NSEQ` or a range.
-    #[cfg(test)]
     pub fn ncbi_num_seqs(&self) -> i32 {
         self.counts.num_seqs
     }
@@ -1815,13 +1824,11 @@ impl SeqDb {
     }
 
     /// `CSeqDB::GetNumSeqsStats`: the walk of `STATS_NSEQ`, 0 without the key.
-    #[cfg(test)]
     pub fn num_seqs_stats(&self) -> i32 {
         self.stats_num_seqs
     }
 
     /// `CSeqDB::GetTotalLengthStats`: the walk of `STATS_TOTLEN`, 0 without the key.
-    #[cfg(test)]
     pub fn total_length_stats(&self) -> u64 {
         self.stats_total_length
     }
@@ -1941,15 +1948,10 @@ impl SeqDb {
         (statistics.setup_total, statistics.setup_count)
     }
 
-    /// Whether the alias files give an OID range (`FIRST_OID`, `LAST_OID`) or a key that
-    /// changes the statistics or the shortest length (`STATS_NSEQ`, `STATS_TOTLEN`,
-    /// `MIN_SEQ_LENGTH`): RPS-BLAST, which searches the volumes' profiles by OID, refuses them
-    /// (`rps_hooks::check_alias_keys`).
-    pub fn alias_ranges_or_statistics(&self) -> bool {
-        self.alias_ranges
-            || self.stats_num_seqs != 0
-            || self.stats_total_length != 0
-            || !matches!(self.alias_totals.min_seq_length, Ok(0))
+    /// Whether every OID of the volumes is included and is its own ordinal id: no alias file's OID
+    /// range (`FIRST_OID`, `LAST_OID`) and no list (`SeqDb::included_ordinal`).
+    pub fn ordinal_ids_are_oids(&self) -> bool {
+        self.filter.is_none()
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:164-173
@@ -2126,6 +2128,18 @@ impl SeqDb {
         }
         let at = self.locate_oid(self.oid(ordinal).get())?;
         Ok(SeqLocation { id: ordinal, ..at })
+    }
+
+    /// The ordinal id of the OID `oid` (`SeqDb::locate_oid`), `None` where the alias files' ranges
+    /// or a list leave it out (NCBI's `x_CheckOrFindOID` of a lookup by Seq-id, which then finds
+    /// nothing: seqdbimpl.cpp:1414-1418) or past the volumes. RPS-BLAST searches every profile of
+    /// its volumes by OID and its reports look them up by ordinal id
+    /// (`rps_search::volumes::report_ordinal_ids`).
+    pub fn included_ordinal(&self, oid: u32) -> Option<u32> {
+        match &self.filter {
+            None => (oid < self.num_oids()).then_some(oid),
+            Some(filter) => filter.contains(oid).then(|| filter.rank(oid)),
+        }
     }
 
     /// The OID in the database of the sequence at `at`, which the readers' messages name (the id
@@ -2547,6 +2561,15 @@ impl SeqDb {
             self.location_oid(&at),
             self.volumes[at.volume].header(at.vol_oid),
         )
+    }
+
+    /// The header of the OID `oid` (`locate_oid`), whether the alias files' ranges and a list
+    /// include it or not, as NCBI's `GetSeqIDs` reads it (seqdbimpl.cpp:793-813, quoted at
+    /// `rps_search::volumes::report_ordinal_ids`): RPS-BLAST's Seq-aligns name every profile of a
+    /// volume's results by it.
+    pub fn read_header_of_oid(&self, oid: u32) -> Result<SequenceHeader, SeqDbError> {
+        let at = self.locate_oid(oid)?;
+        self.sequence_header(at.volume, oid, self.volumes[at.volume].header(at.vol_oid))
     }
 
     /// The `SequenceHeader` of the header `header` of the sequence `oid` (its OID, which the

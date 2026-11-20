@@ -57,9 +57,11 @@ fn open_with<S: AsRef<OsStr> + Clone>(
         Ok(text) => {
             let _ = diagnostics.write_all(text.as_bytes());
         }
-        Err(reason) => return Err(Error::Search(reason.to_string())),
+        Err(reason) => return Err(Error::Search(reason.into())),
     }
-    let mut target = files.log_target(log_file(words)).map_err(Error::Search)?;
+    let mut target = files
+        .log_target(log_file(words))
+        .map_err(|reason| Error::Search(reason.into()))?;
     start.write_log_setup(&mut target);
     Ok(Opened { start, target })
 }
@@ -91,13 +93,9 @@ impl Opened {
                 let _ = self
                     .start
                     .write_config_load(&mut DiagTarget::Stderr, &mut text);
-                Err(Error::Search(
-                    String::from_utf8_lossy(&text)
-                        .trim_end_matches('\n')
-                        .to_string(),
-                ))
+                Err(Error::written(text))
             }
-            Err(reason) => Err(Error::Search(reason)),
+            Err(reason) => Err(Error::Search(reason.into())),
         }
     }
 }
@@ -178,7 +176,7 @@ impl CallStart {
         search.command(inputs)?;
         if let Some(started) = started {
             if let Err(reason) = &started.settings {
-                return Err(Error::Search(reason.clone()));
+                return Err(Error::Search(reason.clone().into()));
             }
             call.settings = Some(started.settings);
             if run_messages_follow_log(program) {
@@ -213,8 +211,10 @@ impl CallStart {
         diagnostics: &mut dyn Write,
     ) -> anyhow::Result<ApplicationSettings> {
         if self.settings.is_none() {
+            // The start's messages are made from text (`ApplicationStart`'s `String`s), so the
+            // engine's error, which is text, holds them whole.
             let started = begin(self.program, &[] as &[&str], diagnostics)
-                .map_err(|error| anyhow::Error::msg(error.message().to_string()))?;
+                .map_err(|error| anyhow::Error::msg(error.to_string_lossy().into_owned()))?;
             self.settings = Some(started.settings);
         }
         self.settings
@@ -286,7 +286,7 @@ impl RunLog {
     /// it. LOSAT's own refusals stay off the file, as on the command line (`cli::main_entry`).
     pub(super) fn post(&mut self, error: &anyhow::Error) {
         if let Some(native) = error.downcast_ref::<crate::cli::NativeError>() {
-            self.post_text(native.message.as_bytes());
+            self.post_text(&native.message);
         }
     }
 
@@ -441,12 +441,14 @@ pub fn begin_with<S: AsRef<OsStr> + Clone>(
     // A run of its own (LOSAT Web's), whose diagnostic stream never fails: LOSAT Web refuses
     // `-in_pssm` (`ncbi_exception::main_diag_failbit`), and no call it runs reads another's.
     let follows = run_messages_follow_log(start.program());
+    // LOSAT Web's errors are text (its JSON): the start's messages are made from text
+    // (`ApplicationStart`'s `String`s), so `Display` replaces no byte of them.
     let mut opened =
-        open_with(start, words, files, diagnostics).map_err(|error| error.message().to_string())?;
+        open_with(start, words, files, diagnostics).map_err(|error| error.to_string())?;
     let ended = opened
         .write_load(diagnostics)
         .err()
-        .map(|error| error.message().to_string());
+        .map(|error| error.to_string());
     let (log, target) = match follows {
         true => (RunLog(Some(opened.target)), None),
         false => (RunLog(None), Some(opened.target)),

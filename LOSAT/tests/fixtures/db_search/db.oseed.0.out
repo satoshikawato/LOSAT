@@ -1,0 +1,127 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: stored O and X in words under the threshold
+           2 sequences; 112 total letters
+
+
+
+Query= q_o
+
+Length=56
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+oseed_x stored X                                                      67.8    1e-22
+
+
+>oseed_x stored X
+Length=56
+
+ Score = 67.8 bits (164),  Expect = 1e-22
+ Identities = 4/56 (7%), Positives = 54/56 (96%), Gaps = 0/56 (0%)
+
+Query  1   IIIIIIIIIIIIIIIIIIIIAOAIIIIIIIIIIAOAIIIIIIIIIIIIIIIIIIII  56
+           ++++++++++++++++++++A A++++++++++A A++++++++++++++++++++
+Sbjct  1   VVVVVVVVVVVVVVVVVVVVAXAVVVVVVVVVVAXAVVVVVVVVVVVVVVVVVVVV  56
+
+
+
+Lambda      K        H        a         alpha
+   0.371    0.201    0.457    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 4802
+
+
+Query= q_x
+
+Length=56
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+oseed_x stored X                                                      67.8    1e-22
+
+
+>oseed_x stored X
+Length=56
+
+ Score = 67.8 bits (164),  Expect = 1e-22
+ Identities = 6/56 (11%), Positives = 56/56 (100%), Gaps = 0/56 (0%)
+
+Query  1   IIIIIIIIIIIIIIIIIIIIAXAIIIIIIIIIIAXAIIIIIIIIIIIIIIIIIIII  56
+           ++++++++++++++++++++AXA++++++++++AXA++++++++++++++++++++
+Sbjct  1   VVVVVVVVVVVVVVVVVVVVAXAVVVVVVVVVVAXAVVVVVVVVVVVVVVVVVVVV  56
+
+
+
+Lambda      K        H        a         alpha
+   0.371    0.201    0.457    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 4802
+
+
+Query= q_ox
+
+Length=56
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+oseed_x stored X                                                      67.8    1e-22
+
+
+>oseed_x stored X
+Length=56
+
+ Score = 67.8 bits (164),  Expect = 1e-22
+ Identities = 5/56 (9%), Positives = 55/56 (98%), Gaps = 0/56 (0%)
+
+Query  1   IIIIIIIIIIIIIIIIIIIIAOAIIIIIIIIIIAXAIIIIIIIIIIIIIIIIIIII  56
+           ++++++++++++++++++++A A++++++++++AXA++++++++++++++++++++
+Sbjct  1   VVVVVVVVVVVVVVVVVVVVAXAVVVVVVVVVVAXAVVVVVVVVVVVVVVVVVVVV  56
+
+
+
+Lambda      K        H        a         alpha
+   0.371    0.201    0.457    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 4802
+
+
+  Database: stored O and X in words under the threshold
+    Posted date:  Nov 20, 2026  11:16 PM
+  Number of letters in database: 112
+  Number of sequences in database:  2
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

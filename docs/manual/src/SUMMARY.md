@@ -45,3 +45,4 @@
 - [Differences from NCBI BLAST+](differences.md)
 - [What LOSAT refuses](refusals.md)
 - [Troubleshooting](troubleshooting.md)
+- [Third-party notices](third-party-notices.md)

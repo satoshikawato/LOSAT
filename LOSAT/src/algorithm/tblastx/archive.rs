@@ -53,7 +53,8 @@ use crate::report::serial::seqalign::{write_seq_aligns, Segments};
 /// The recorded options of a TBLASTX run (`options::algorithm_options`'s inputs), from the
 /// arguments as given: a value is recorded only when it was given or the class of its argument
 /// always sets it (`S/DESIGN_OF8.md` 2.2). TBLASTX has one task, and the options it does not
-/// accept (`-strand`, ...) are never recorded.
+/// accept (`-best_hit_overhang`, ...) are never recorded. `-strand` is not an option of the request:
+/// NCBI keeps it in the queries' Seq-locs (the query reader's strand, `with_strand`).
 pub(crate) fn option_inputs(args: &TblastxArgs) -> OptionInputs {
     let mut inputs = OptionInputs::new(Program::Tblastx, "tblastx");
     inputs.dbsize = args.dbsize;
@@ -433,9 +434,10 @@ mod tests {
     // probes; `check_archive_layout.py opts`), without the `EffectiveSearchSpace` that each
     // archive adds: the name, the options given besides the inputs, and the list as
     // `Name=variant:value`. LOSAT's TBLASTX refuses some of these options at the command line
-    // (`-strand`, `-parse_deflines`; `-xdrop_ungap`, which NCBI does not
-    // record, is read since line RG X1, and `-sum_stats` since line RG X3): the list that NCBI
-    // would record is what the archive's model knows about them, pinned here.
+    // (`-parse_deflines`; `-xdrop_ungap`, which NCBI does not record, is read since line RG X1,
+    // `-sum_stats` since line RG X3, `-strand`, which NCBI does not record either, since line NP
+    // O2b, and `-subject_besthit` since line NP O6b): the list that NCBI would record is what the
+    // archive's model knows about them, pinned here.
     const CASES: &[(&str, &[&str], &str)] = &[
         ("def_sub", &[], "EvalueThreshold=cutoff:e-value:10 LongestIntronLength=integer:0 MaskAtHash=boolean:False SegFilteringWindow=integer:12 SegFilteringLocut=real:2.2 SegFilteringHicut=real:2.5 WordThreshold=integer:13 WindowSize=integer:40 QueryGeneticCode=integer:1 DbGeneticCode=integer:1 HitlistSize=integer:500"),
         ("seg_no_sub", &["-seg", "no"], "EvalueThreshold=cutoff:e-value:10 LongestIntronLength=integer:0 MaskAtHash=boolean:False SegFiltering=boolean:False WordThreshold=integer:13 WindowSize=integer:40 QueryGeneticCode=integer:1 DbGeneticCode=integer:1 HitlistSize=integer:500"),
@@ -533,8 +535,6 @@ mod tests {
         let mut index = 0;
         while index < extra.len() {
             match extra[index] {
-                // Not recorded (the strand is not an option of the request).
-                "-strand" => index += 2,
                 "-parse_deflines" => index += 1,
                 other => {
                     parsed.push(other);

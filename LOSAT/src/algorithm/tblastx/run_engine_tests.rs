@@ -58,6 +58,7 @@ fn db_gencode_controls_local_subject_search_translation() {
         soft_masking: None,
         sum_stats: None,
         lcase_masking: false,
+        strand: "both".to_string(),
         xdrop_ungap: None,
         window_size: None,
         outfmt: "6".to_string(),

@@ -274,6 +274,7 @@ fn strand_of(command: &Commands) -> Option<&str> {
     match command {
         Commands::Blastn(args) => Some(args.strand.as_str()),
         Commands::Blastx(args) => Some(args.strand.as_str()),
+        Commands::Tblastx(args) => Some(args.strand.as_str()),
         _ => None,
     }
 }

@@ -576,7 +576,7 @@ error: the NCBI BLAST+ option -randomize is not supported by LOSAT's makeblastdb
 
 | Option or input | What happens |
 | :--- | :--- |
-| `-mk_counts` of an input without a unit of unambiguous letters (all `N`, or an empty file with `-unit`) | Refused. NCBI writes the percentages of the file as its C runtime prints 0/0 (`-nan` on Linux). |
+| `-mk_counts` of an input without a unit of unambiguous letters (all `N`; or, with `-unit`, no sequence, as when `-ids` keeps none) | Refused. NCBI writes the percentages of the file as its C runtime prints 0/0 (`-nan` on Linux). |
 | `-mk_counts -infmt seqids` | Refused. NCBI fetches each sequence from NCBI's servers. |
 | `-mk_counts` or `-convert` of units of 1 to 3 letters to `oascii` or `obinary` with an `-smem` that is a multiple of 65536 | Refused. NCBI keeps the low 16 bits of `-smem` (0 megabytes); its search for a hash table is then undefined. With units of 4 letters or more NCBI's error is written as NCBI writes it. |
 | `-ids` or `-exclude_ids` with `-text_match F` (and `-infmt blastdb`) | Refused. LOSAT does not match ids as Seq-ids yet. |

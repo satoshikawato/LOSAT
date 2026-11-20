@@ -89,7 +89,7 @@ None that change the output of a normal run. When the reader of the output close
 ## What LOSAT refuses
 
 - Counts files on which NCBI's result is undefined, such as an `ascii` file with units of more than 16 letters.
-- `-mk_counts` of an input without a unit of unambiguous letters (all `N`, or empty with `-unit`): NCBI writes its percentages as its C runtime prints 0/0.
+- `-mk_counts` of an input without a unit of unambiguous letters (all `N`; or, with `-unit`, no sequence, as when `-ids` keeps none): NCBI writes its percentages as its C runtime prints 0/0.
 - `-mk_counts -infmt seqids`: NCBI fetches each sequence from NCBI's servers.
 - `-mk_counts` or `-convert` of units of 1 to 3 letters to `oascii` or `obinary` with an `-smem` that is a multiple of 65536: NCBI's result is undefined.
 - `-text_match F` with `-infmt blastdb` and `-ids` or `-exclude_ids`: LOSAT does not match ids as Seq-ids yet.

@@ -1,0 +1,88 @@
+<HTML>
+<HEAD><TITLE>BLAST Search Results</TITLE></HEAD>
+<BODY BGCOLOR="#FFFFFF" LINK="#0000FF" VLINK="#660099" ALINK="#660099">
+<PRE>
+
+<b>BLASTN 2.17.0+</b>
+
+
+<b><a
+href="https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R
+etrieve&list_uids=10890397&dopt=Citation">Reference</a>:</b>
+Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb Miller (2000),
+"A greedy algorithm for aligning DNA sequences", J Comput Biol 2000;
+7(1-2):203-14.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/html/ns_d2_dust.fna).
+           1 sequences; 440 total letters
+
+
+
+<b>Query=</b> nq low complexity in the middle
+
+Length=360
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+ns2 the same letters                                                  <a href=#Subject_1>665</a>     0.0  
+
+
+><a name=Subject_1></a> ns2 the same letters
+Length=440
+
+ Score = 665 bits (360),  Expect = 0.0
+ Identities = 360/360 (100%), Gaps = 0/360 (0%)
+ Strand=Plus/Plus
+
+Query  1    TTAAGCGCCGCCATTTCTAGAGATTTAGGTTGGAGGTGGTGGTCGACGACTGTGGTTAGT  60
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  41   TTAAGCGCCGCCATTTCTAGAGATTTAGGTTGGAGGTGGTGGTCGACGACTGTGGTTAGT  100
+
+Query  61   CGTGGCGCTGGCACCCAATTGGCGTTGTTCACTCCCTAAACGCGGAAACAGATCTCCTCA  120
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  101  CGTGGCGCTGGCACCCAATTGGCGTTGTTCACTCCCTAAACGCGGAAACAGATCTCCTCA  160
+
+Query  121  CACCCCGTACCAAAATCATGACCCGTTCAC<font color="#000000">atatatatatatatatatatatatatatat</font>  180
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  161  CACCCCGTACCAAAATCATGACCCGTTCACATATATATATATATATATATATATATATAT  220
+
+Query  181  <font color="#000000">atatatatatatatatatatatatatatatgtcga</font>CGTCGTCCCGTACCGCGGGCTGACA  240
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  221  ATATATATATATATATATATATATATATATGTCGACGTCGTCCCGTACCGCGGGCTGACA  280
+
+Query  241  GCTCCCAAGCAATGCGTAAGTGCATATCGTGCGTTGATGAGGGCTCTACAGCGTGCCAGG  300
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  281  GCTCCCAAGCAATGCGTAAGTGCATATCGTGCGTTGATGAGGGCTCTACAGCGTGCCAGG  340
+
+Query  301  TGCAAGACGATTGTCCGACGACGCTTGAGTGCTGAGAGTTACTACGACGACCGATAGAAT  360
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  341  TGCAAGACGATTGTCCGACGACGCTTGAGTGCTGAGAGTTACTACGACGACCGATAGAAT  400
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 149721
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/html/ns_d2_dust.fna).
+    Posted date:  Unknown
+  Number of letters in database: 440
+  Number of sequences in database:  1
+
+
+
+Matrix: blastn matrix 1 -2
+Gap Penalties: Existence: 0, Extension: 2.5
+</PRE>
+</BODY>
+</HTML>

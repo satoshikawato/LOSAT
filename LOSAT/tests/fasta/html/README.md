@@ -36,3 +36,16 @@ alignment columns are known, listed in the title):
 Earlier probe inputs (survey T3's `gen.py`, seed 20261114):
 - `qn_lc.fa`, `sn_lc.fa`: a nucleotide query and subject with lowercase runs and a poly-A run (DUST with
   `-soft_masking false`; tblastx's default SEG on the translated query).
+
+Touching and overlapping masks (the D2 probe of line RG T4a2, 2026-11-20: one `<font>` span or two when a SEG or DUST mask and a
+lowercase run meet; copied byte for byte from the probe's inputs; the query `pq low complexity in the middle` is 45 random residues,
+26 Q, 45 random residues, so SEG masks residues 46-71; blastn's `(AT)x30` is DUST's mask, nucleotides 151-210; the lowercase run is
+5 residues, or 15 nt on the back translation of blastx and tblastx):
+- `pq_d2_touch.faa`, `pq_d2_over1.faa`, `pq_d2_over2.faa`: the run starts one past the mask's end, overlaps its last residue,
+  overlaps its last two residues (tblastn queries; blastp's queries too).
+- `pq_d2_lover1.faa`: the run ends on the mask's first residue (the left side, overlapping by one).
+- `ps_d2.faa`: the query without a run (the blastp subject, the blastx subject); `ns_d2.fna`: its back translation with 60 nt
+  of flank on each side (the tblastn and tblastx subject).
+- `nq_d2_touch.fna`, `nq_d2_over3.fna`, `nq_d2_over6.fna`: blastx and tblastx queries (the back translation alone), a 15 nt run
+  that starts at the nucleotide after the SEG mask of frame +1, overlaps it by 3 nt, by 6 nt.
+- `nq_d2_dusttouch.fna`, `ns_d2_dust.fna`: blastn query with a lowercase run starting one past DUST's mask, and its subject.

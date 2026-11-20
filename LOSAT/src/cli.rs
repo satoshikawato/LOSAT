@@ -1763,7 +1763,7 @@ impl std::io::Write for ReportStream {
     }
 }
 
-// libstdc++ (GCC 13): include/c++/13/bits/basic_ios.tcc:39-49
+// C++ standard, [iostate.flags]: `setstate` calls `clear`, which throws `ios_base::failure` when the bit is in `exceptions()`.
 /// NCBI's `ios::failure` of the outfmt 0 to 4 formatter's stream that an insertion of the report
 /// raises itself, not a write that the file or device refused (`ReportStream::failed`): an
 /// insertion that sets `badbit` (`setstate`, which calls `clear`) throws on a stream with
@@ -1980,7 +1980,11 @@ impl<W: std::io::Write + ?Sized> Insertion<'_, W> {
         Ok(())
     }
 
-    /// Writes the piece where it may end (`insert_streamed`) once it is `PIECE` bytes long.
+    /// Writes the piece where it may end (`insert_streamed`) once it is `PIECE` bytes long. A
+    /// piece ends only if more than `NCBI_BUFSIZ` bytes follow it, which is at least a block (a
+    /// block never exceeds `NCBI_BUFSIZ`), so the last piece always takes the buffer's branch of
+    /// an insertion longer than the room, as the whole insertion does; a final piece that exactly
+    /// filled a block would differ from the whole.
     fn end_piece(&mut self) -> std::io::Result<()> {
         let n = self.piece.len() as u64;
         if n >= Self::PIECE as u64
@@ -2445,9 +2449,10 @@ mod tests {
 
     #[test]
     fn the_organism_reports_standard_output_writes_where_glibc_writes() {
-        // glibc 2.39 `_IO_new_file_xsputn` on a file of `st_blksize` 4096
-        // (`T/t2/fix2/glibc_first_write.log`): the writes end at multiples of the block and the
-        // rest stays held; the first `fwrite` has no buffer yet; a flush empties the buffer.
+        // `std::cout` on a file of `st_blksize` 4096 (observed, glibc 2.35 and 2.39,
+        // `tests/fixtures/stdio_buffer/cout_file.tsv`): the writes end at multiples of the block
+        // and the rest stays held; the first insertion has no buffer yet; a flush empties the
+        // buffer.
         use std::io::Write;
         let run = |pieces: &[usize]| {
             let writes = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -2506,8 +2511,9 @@ mod tests {
 
     #[test]
     fn a_terminals_standard_output_writes_at_its_newlines_as_glibc_does() {
-        // glibc 2.39 on a pty of `st_blksize` 1024 (`T/t2/fix3/glibc_tty_lines.log`): `N` is an
-        // `fwrite` of N bytes, `N:K` with a newline at K, `f` a flush.
+        // `std::cout` on a pty of `st_blksize` 1024 (observed, glibc 2.35 and 2.39,
+        // `tests/fixtures/stdio_buffer/cout_tty.tsv`): `N` is an insertion of N bytes, `N:K` with
+        // a newline at K, `f` a flush.
         let tty = NcbiStdio::Cout {
             block: 1024,
             lines: true,

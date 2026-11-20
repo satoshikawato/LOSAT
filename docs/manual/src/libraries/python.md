@@ -80,7 +80,7 @@ outcome = search.run(query, pylosat.Database("core_nt"), outfmt="6")
 - **`outcome.reports`**: one `Report` per requested format, in the order you asked. `report.bytes` and `report.text` are the report; `report.spans[hsp.index]` is the slice of `report.bytes` that holds the row or section of an HSP.
 - **`outcome.hsps`**: an `HspTable`, one row per HSP in the order of the final hit list. Any Arrow consumer reads it without a copy, through the Arrow PyCapsule interface: `polars.DataFrame(hsps)`, `pyarrow.table(hsps)`, `pandas.DataFrame.from_arrow(hsps)`. `pylosat` itself needs no Arrow library.
 - **`outcome.query_stats[q]`**: the statistics of query `q`: `eff_space` (effective search space), `hsp_len` (length adjustment), `lambda_`, `kappa` and `entropy` (Karlin-Altschul lambda, K and H).
-- **`outcome.diagnostics`**: what the command line writes to its standard error.
+- **`outcome.diagnostics`**: what the command line writes to its standard error, as text with one U+FFFD per maximal ill-formed subpart of its bytes; `outcome.diagnostics_bytes` is the bytes.
 
 The table has 31 columns. The first twelve are those of `-outfmt 6`:
 
@@ -100,10 +100,11 @@ Everything a search returns can be pickled, so a process pool can return it.
 
 ## Writing to a file
 
-`run_to_file` is the command line's `-out`. Use it for large reports and for `-outfmt 13` and `14`, whose side files are written next to the file. It returns what the command line writes to its standard error.
+`run_to_file` is the command line's `-out`. Use it for large reports and for `-outfmt 13` and `14`, whose side files are written next to the file. It returns a `FileOutcome`: what the command line writes to its standard error, as `diagnostics_bytes` and as the text `diagnostics` (U+FFFD for a byte that is not UTF-8).
 
 ```python
-diagnostics = search.run_to_file(query, subject, outfmt="14", path="report.xml")
+written = search.run_to_file(query, subject, outfmt="14", path="report.xml")
+print(written.diagnostics)
 ```
 
 ## Long searches
@@ -121,7 +122,7 @@ The GIL is released while a search runs, so other Python threads go on. Python c
 
 ## Database and masking tools
 
-`makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker` and `convert2blastmask` take the command line's words and return a `ToolOutput`: what the tool writes to standard output (`.bytes`, `.text`) and to standard error (`.diagnostics`). `input=` (text or bytes) is what the tool reads as standard input, so you can build a database from FASTA in memory, give ids to `blastdbcmd -entry_batch -`, or mask sequences in memory.
+`makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker` and `convert2blastmask` take the command line's words and return a `ToolOutput`: what the tool writes to standard output (`.bytes`, `.text`) and to standard error (`.diagnostics_bytes`, `.diagnostics`). Each text has one U+FFFD per maximal ill-formed subpart of its bytes. `input=` (text or bytes) is what the tool reads as standard input, so you can build a database from FASTA in memory, give ids to `blastdbcmd -entry_batch -`, or mask sequences in memory.
 
 ```python
 pylosat.makeblastdb("-dbtype", "prot", "-title", "proteins", "-out", "proteins", input=fasta_text)
@@ -138,6 +139,8 @@ All errors derive from `LosatError` and carry the command line's message for the
 - `ArgumentError`: an option or value that the parser refuses.
 - `InputError`: a FASTA input that the reader refuses or cannot open.
 - `SearchError`: a search, database or tool that fails.
+
+`str(error)` is the message as text, with one U+FFFD per maximal ill-formed subpart of its bytes; `error.message_bytes` is the bytes that the command line writes.
 
 ## What `pylosat` promises, and what it does not
 

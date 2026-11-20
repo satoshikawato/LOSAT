@@ -623,7 +623,7 @@ fn a_library_call_with_outfmt_5_refuses_the_held_title_before_any_format_writes(
         (result, sinks)
     };
     let (result, sinks) = call(&["16"]);
-    let message = result.expect_err("NCBI's error").message().to_string();
+    let message = result.expect_err("NCBI's error").to_string();
     assert!(message.contains("Sequence contains no data"), "{message}");
     assert_eq!(
         String::from_utf8_lossy(&sinks[0])
@@ -634,7 +634,7 @@ fn a_library_call_with_outfmt_5_refuses_the_held_title_before_any_format_writes(
     );
     for formats in [["16", "5"], ["5", "16"]] {
         let (result, sinks) = call(&formats);
-        let message = result.expect_err("the refusal").message().to_string();
+        let message = result.expect_err("the refusal").to_string();
         assert!(message.contains(REFUSAL), "{formats:?}: {message}");
         assert!(
             sinks.iter().all(Vec::is_empty),

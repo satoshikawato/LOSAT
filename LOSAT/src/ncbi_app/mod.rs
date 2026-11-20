@@ -41,7 +41,8 @@ pub(crate) struct Tool {
     /// NCBI's `multimap` of them).
     pub(crate) dependencies: fn() -> Vec<(&'static str, Dep, &'static str)>,
     /// The prefix of the program's diagnostics (`SetDiagPostPrefix`), if it sets one.
-    pub(crate) post_prefix: Option<&'static str>,
+    pub(crate) post_prefix: Option<&'static str>,    /// The components of its full versions (`CVersionAPI::AddComponentVersion`; windowmasker's).
+    pub(crate) components: &'static [crate::ncbi_version::Component],
 }
 
 /// `Tool::dependencies` of a program that sets none.
@@ -373,7 +374,13 @@ fn run_app(
         // arguments are read, whatever their bytes.
         Preparsed::Version(request) => {
             let _ = out.write_all(
-                crate::ncbi_version::print(request, tool.program, tool.version).as_bytes(),
+                crate::ncbi_version::print_with_components(
+                    request,
+                    tool.program,
+                    tool.version,
+                    tool.components,
+                )
+                .as_bytes(),
             );
             return 0;
         }
@@ -467,6 +474,7 @@ mod tests {
             descs: &[],
             dependencies: no_dependencies,
             post_prefix: None,
+            components: &[],
         };
         fn body(
             _: &Args,
@@ -532,6 +540,7 @@ mod tests {
             descs: &[],
             dependencies: no_dependencies,
             post_prefix: None,
+            components: &[],
         };
         let mut stderr = Vec::new();
         let mut diag = Diag {

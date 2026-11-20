@@ -317,6 +317,17 @@ pub fn segmasker<'py>(
     run_tool(py, argv, input, api::run_segmasker)
 }
 
+/// `windowmasker` with the command line's words: `input` is its standard input (`-in -`, and
+/// without `-in`). Returns what it writes to standard output and to standard error.
+#[pyfunction]
+pub fn windowmasker<'py>(
+    py: Python<'py>,
+    argv: Vec<String>,
+    input: PyBackedBytes,
+) -> PyResult<(Bound<'py, PyBytes>, String)> {
+    run_tool(py, argv, input, api::run_windowmasker)
+}
+
 /// `convert2blastmask` with the command line's words: `input` is its standard input (`-in -`,
 /// and without `-in`). Returns what it writes to standard output and to standard error.
 #[pyfunction]

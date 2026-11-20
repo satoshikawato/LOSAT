@@ -16,6 +16,7 @@ use std::io::{Read, Write};
 
 use crate::ncbi_app::args::{flag, key, Constraint, Dep, Desc, Kind};
 use crate::ncbi_app::Tool;
+use crate::ncbi_version::Component;
 
 /// The name in LOSAT's refusals.
 const PROGRAM: &str = "WINDOWMASKER";
@@ -328,7 +329,60 @@ static TOOL: Tool = Tool {
     descs: DESCS,
     dependencies,
     post_prefix: None,
+    components: COMPONENTS,
 };
+
+/// The components that `CWinMaskApplication`'s constructor adds: the algorithm, the counts
+/// algorithm and the four counts formats, which LOSAT's masker and counts readers implement.
+///
+/// NCBI reference (598d8ae6): c++/src/app/winmasker/win_mask_app.cpp:84-95
+/// ```c++
+///     version->AddComponentVersion( new CSeqMaskerVersion(
+///                 CSeqMasker::AlgoVersion ) );
+///     version->AddComponentVersion( new CSeqMaskerVersion(
+///                 CSeqMaskerOstat::StatAlgoVersion ) );
+///     version->AddComponentVersion( new CSeqMaskerVersion(
+///                 CSeqMaskerOstatAscii::FormatVersion ) );
+///     version->AddComponentVersion( new CSeqMaskerVersion(
+///                 CSeqMaskerOstatBin::FormatVersion ) );
+///     version->AddComponentVersion( new CSeqMaskerVersion(
+///                 CSeqMaskerOstatOptAscii::FormatVersion ) );
+///     version->AddComponentVersion( new CSeqMaskerVersion(
+///                 CSeqMaskerOstatOptBin::FormatVersion ) );
+/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker.cpp:57-60,
+/// seq_masker_ostat.cpp:41-47 (`STAT_ALGO_*`), seq_masker_ostat_opt_bin.cpp:39-43 (and the other
+/// formats' `STAT_FMT_*`)
+/// ```c++
+/// #define WIN_MASK_ALGO_NAME "window-masker-algorithm"
+/// #define WIN_MASK_ALGO_VER_MAJOR 1
+/// #define WIN_MASK_ALGO_VER_MINOR 0
+/// #define WIN_MASK_ALGO_VER_PATCH 0
+/// ...
+/// #define STAT_FMT_COMPONENT_NAME "windowmasker-statistics-format-version"
+/// #define STAT_FMT_VER_MAJOR 1
+/// #define STAT_FMT_VER_MINOR 1
+/// #define STAT_FMT_VER_PATCH 0
+/// #define STAT_FMT_VER_PFX "obinary "
+/// ```
+const COMPONENTS: &[Component] = &[
+    component("window-masker-algorithm", "", 0),
+    component("windowmasker-statistics-algorithm-version", "", 0),
+    component("windowmasker-statistics-format-version", "ascii ", 1),
+    component("windowmasker-statistics-format-version", "binary ", 1),
+    component("windowmasker-statistics-format-version", "oascii ", 1),
+    component("windowmasker-statistics-format-version", "obinary ", 1),
+];
+
+const fn component(name: &'static str, prefix: &'static str, minor: u32) -> Component {
+    Component {
+        name,
+        prefix,
+        major: 1,
+        minor,
+        patch: 0,
+    }
+}
 
 // NCBI reference (598d8ae6): c++/src/app/winmasker/main.cpp
 // ```c++

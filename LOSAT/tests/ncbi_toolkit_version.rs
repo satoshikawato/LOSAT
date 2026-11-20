@@ -102,6 +102,48 @@ fn losat_numbers() -> (String, String) {
     )
 }
 
+/// The components of `program`'s full versions: windowmasker's six (NCBI BLAST+ 2.17.0
+/// `windowmasker -version-full*`, probe b1 of line NP M5), each with LOSAT's empty build
+/// information; the text, the XML and the JSON list.
+fn components(program: &str) -> (String, String, String) {
+    if program != "windowmasker" {
+        return (String::new(), String::new(), "[]".to_string());
+    }
+    let list = [
+        ("window-masker-algorithm", "", "0"),
+        ("windowmasker-statistics-algorithm-version", "", "0"),
+        ("windowmasker-statistics-format-version", "ascii ", "1"),
+        ("windowmasker-statistics-format-version", "binary ", "1"),
+        ("windowmasker-statistics-format-version", "oascii ", "1"),
+        ("windowmasker-statistics-format-version", "obinary ", "1"),
+    ];
+    let text = list
+        .iter()
+        .map(|(name, prefix, minor)| format!("\n {name}:{prefix}1.{minor}.0\n"))
+        .collect();
+    let xml = list
+        .iter()
+        .map(|(name, _, minor)| {
+            format!(
+                "<component name=\"{name}\">\n\
+                 <version_info major=\"1\" minor=\"{minor}\" patch_level=\"0\"/>\n\n\
+                 <build_info>\n</build_info>\n</component>\n"
+            )
+        })
+        .collect();
+    let json: Vec<String> = list
+        .iter()
+        .map(|(name, _, minor)| {
+            format!(
+                "\n      {{ \"name\": \"{name}\", \"version_info\": \
+                 {{\"major\": 1, \"minor\": {minor}, \"patch_level\": 0}},\n        \
+                 \"build_info\": {{}}}}"
+            )
+        })
+        .collect();
+    (text, xml, format!("[{}]", json.join(",")))
+}
+
 /// What LOSAT's `word` prints for `program` (RG DECISIONS E3-1).
 fn expected(program: &str, version: &str, numbers: [&str; 3], word: &str) -> String {
     let package = format!(
@@ -110,23 +152,26 @@ fn expected(program: &str, version: &str, numbers: [&str; 3], word: &str) -> Str
     );
     let [major, minor, patch] = numbers;
     let (losat_xml, losat_json) = losat_numbers();
+    let (component_text, component_xml, component_json) = components(program);
     match word {
         "-version" => format!("{program}: {version}\n{package}"),
         "-version-full" => {
-            format!("{program}: {version}\n{package} Package-Config:  \n GI-64bit:  TRUE\n")
+            format!(
+                "{program}: {version}\n{package} Package-Config:  \n GI-64bit:  TRUE\n{component_text}"
+            )
         }
         "-version-full-xml" => format!(
             "<?xml version=\"1.0\"?>\n<ncbi_version xmlns=\"ncbi:version\"\n  \
              xmlns:xs=\"http://www.w3.org/2001/XMLSchema-instance\"\n  \
              xs:schemaLocation=\"ncbi:version ncbi_version.xsd\">\n<appname>{program}</appname>\n\
              <version_info major=\"{major}\" minor=\"{minor}\" patch_level=\"{patch}\"/>\n\
-             <package name=\"LOSAT\">\n<version_info {losat_xml}/>\n<build_info>\n</build_info>\n\
+             {component_xml}<package name=\"LOSAT\">\n<version_info {losat_xml}/>\n<build_info>\n</build_info>\n\
              <config></config>\n</package>\n<build_info>\n</build_info>\n</ncbi_version>\n"
         ),
         "-version-full-json" => format!(
             "{{\n  \"ncbi_version\": {{\n    \"appname\": \"{program}\",\n    \
              \"version_info\": {{\"major\": {major}, \"minor\": {minor}, \"patch_level\": {patch}}},\n    \
-             \"component\": [],\n    \"package\": {{\n      \"name\": \"LOSAT\",\n      \
+             \"component\": {component_json},\n    \"package\": {{\n      \"name\": \"LOSAT\",\n      \
              \"version_info\": {{{losat_json}}},\n      \"build_info\": {{}},\n      \
              \"config\": \"\"}},\n    \"build_info\": {{}}\n  }}\n}}\n"
         ),

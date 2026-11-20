@@ -12,6 +12,8 @@
 //! there is a package (`Package-Config`, the package's and the application's build information)
 //! stay, empty, as NCBI's bioconda build writes an empty `Package-Config`. `GI-64bit` is
 //! `TRUE`: LOSAT reads GIs as NCBI's default 64-bit build (`ParsedSeqId::Gi(i64)`).
+//! windowmasker's components (`Component`: its algorithm and its counts formats, which LOSAT
+//! implements) are written with their versions and an empty build information.
 
 /// The word of NCBI's application start that prints a version and ends the program with exit
 /// status 0 (`ncbi_environment::preparse`).
@@ -91,12 +93,129 @@ impl VersionRequest {
 /// (`CVersionInfo::Print`: `2.17.0+` for the BLAST+ programs, whose `CBlastVersion::Print` adds
 /// the `+`, `1.0.0` for dustmasker and segmasker, `0.5.1` for rpsbproc).
 pub fn print(request: VersionRequest, appname: &str, version: &str) -> String {
+    print_with_components(request, appname, version, &[])
+}
+
+/// A component of an application's version (`CVersionAPI::AddComponentVersion`): its name,
+/// the text before its version in the text form (`CSeqMaskerVersion`'s `ver_pfx`) and its
+/// version. Its build information is NCBI's build's, which LOSAT does not write (empty, as the
+/// application's).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Component {
+    pub name: &'static str,
+    pub prefix: &'static str,
+    pub major: u32,
+    pub minor: u32,
+    pub patch: u32,
+}
+
+/// `print` of an application that has `components` (windowmasker's six).
+pub fn print_with_components(
+    request: VersionRequest,
+    appname: &str,
+    version: &str,
+    components: &[Component],
+) -> String {
     match request {
         VersionRequest::Version => format!("{appname}: {version}\n{}", package_line()),
-        VersionRequest::Full => print_text(appname, version),
-        VersionRequest::FullXml => print_xml(appname, version),
-        VersionRequest::FullJson => print_json(appname, version),
+        VersionRequest::Full => {
+            let mut text = print_text(appname, version);
+            for component in components {
+                text.push_str(&component_text(component));
+            }
+            text
+        }
+        VersionRequest::FullXml => print_xml(appname, version, components),
+        VersionRequest::FullJson => print_json(appname, version, components),
     }
+}
+
+impl Component {
+    fn numbers(&self) -> (String, String, String) {
+        (
+            self.major.to_string(),
+            self.minor.to_string(),
+            self.patch.to_string(),
+        )
+    }
+}
+
+/// A component in the text form: `CSeqMaskerVersion::Print` after an empty line.
+///
+/// NCBI reference (598d8ae6): c++/include/algo/winmask/seq_masker_version.hpp:63-67
+/// ```c++
+///     virtual std::string Print() const {
+///         std::ostringstream os;
+///         os << GetComponentName() << ':' << ver_pfx_ << CVersionInfo::Print();
+///         return os.str();
+///     }
+/// ```
+/// (`CVersionAPI::Print` writes `os << endl << ' ' <<  c->Print() << endl;`, `print_text`.)
+fn component_text(component: &Component) -> String {
+    format!(
+        "\n {}:{}{}.{}.{}\n",
+        component.name, component.prefix, component.major, component.minor, component.patch
+    )
+}
+
+/// A component in the XML form, with LOSAT's empty build information.
+///
+/// NCBI reference (598d8ae6): c++/src/corelib/version.cpp:432-440
+/// ```c++
+///     os << "<component name=\"" << NStr::XmlEncode(GetComponentName()) << "\">\n" <<
+///         CVersionInfo::PrintXml() << endl <<
+///         m_BuildInfo.PrintXml() <<
+///         "</component>" << endl;
+/// ```
+fn component_xml(component: &Component) -> String {
+    let (major, minor, patch) = component.numbers();
+    format!(
+        "<component name=\"{}\">\n{}\n<build_info>\n</build_info>\n</component>\n",
+        component.name,
+        version_info_xml(&VersionNumbers {
+            major: &major,
+            minor: &minor,
+            patch: &patch,
+            name: "",
+        })
+    )
+}
+
+/// The JSON list of components, with LOSAT's empty build information.
+///
+/// NCBI reference (598d8ae6): c++/src/corelib/version.cpp:442-449,840-849
+/// ```c++
+///     os << "{ \"name\": " << NStr::JsonEncode(GetComponentName(),NStr::eJsonEnc_Quoted) <<
+///             ", \"version_info\": " << CVersionInfo::PrintJson() << ",\n" <<
+///             "        \"build_info\": " << m_BuildInfo.PrintJson() << "}";
+/// ...
+///         os << "    \"component\": [";
+///         need_separator = false;
+///         for (const auto& c : m_Components) {
+///             if ( need_separator ) os << ",";
+///             os << "\n      " << c->PrintJson();
+///             need_separator = true;
+///         }
+///         os << "]";
+/// ```
+fn components_json(components: &[Component]) -> String {
+    let items: Vec<String> = components
+        .iter()
+        .map(|component| {
+            let (major, minor, patch) = component.numbers();
+            format!(
+                "\n      {{ \"name\": \"{}\", \"version_info\": {},\n        \"build_info\": {{}}}}",
+                component.name,
+                version_info_json(&VersionNumbers {
+                    major: &major,
+                    minor: &minor,
+                    patch: &patch,
+                    name: "",
+                })
+            )
+        })
+        .collect();
+    format!("[{}]", items.join(","))
 }
 
 /// The package line of the text forms (`fPackageShort`). NCBI's names its package and the
@@ -202,13 +321,14 @@ fn print_text(appname: &str, version: &str) -> String {
 ///     ...
 ///     os << "</build_info>" << endl;
 /// ```
-fn print_xml(appname: &str, version: &str) -> String {
+fn print_xml(appname: &str, version: &str, components: &[Component]) -> String {
     format!(
         "<?xml version=\"1.0\"?>\n\
          <ncbi_version xmlns=\"ncbi:version\"\n  \
          xmlns:xs=\"http://www.w3.org/2001/XMLSchema-instance\"\n  \
          xs:schemaLocation=\"ncbi:version ncbi_version.xsd\">\n\
          <appname>{appname}</appname>\n\
+         {}\
          {}\
          <package name=\"LOSAT\">\n\
          {}\
@@ -220,12 +340,13 @@ fn print_xml(appname: &str, version: &str) -> String {
          </build_info>\n\
          </ncbi_version>\n",
         version_info_xml(&VersionNumbers::of_print(version)),
+        components.iter().map(component_xml).collect::<String>(),
         version_info_xml(&VersionNumbers::losat()),
     )
 }
 
-/// `CVersionAPI::PrintJson(appname, fPrintAll)` with LOSAT's values (`print_xml`): an empty
-/// list of components, as NCBI's BLAST+ programs write.
+/// `CVersionAPI::PrintJson(appname, fPrintAll)` with LOSAT's values (`print_xml`): the list of
+/// components is empty, as NCBI's BLAST+ programs write it, except for windowmasker.
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/version.cpp:829-884
 /// ```c++
@@ -270,12 +391,12 @@ fn print_xml(appname: &str, version: &str) -> String {
 ///
 ///     os << "\n  }\n}\n";
 /// ```
-fn print_json(appname: &str, version: &str) -> String {
+fn print_json(appname: &str, version: &str, components: &[Component]) -> String {
     format!(
         "{{\n  \"ncbi_version\": {{\n    \
          \"appname\": \"{appname}\",\n    \
          \"version_info\": {},\n    \
-         \"component\": [],\n    \
+         \"component\": {},\n    \
          \"package\": {{\n      \
          \"name\": \"LOSAT\",\n      \
          \"version_info\": {},\n      \
@@ -283,6 +404,7 @@ fn print_json(appname: &str, version: &str) -> String {
          \"config\": \"\"}},\n    \
          \"build_info\": {{}}\n  }}\n}}\n",
         version_info_json(&VersionNumbers::of_print(version)),
+        components_json(components),
         version_info_json(&VersionNumbers::losat()),
     )
 }

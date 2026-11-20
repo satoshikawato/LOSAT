@@ -34,6 +34,7 @@ from ._api import (
     dustmasker,
     makeblastdb,
     segmasker,
+    windowmasker,
 )
 from ._pylosat import (
     ENGINE_VERSION,
@@ -81,4 +82,5 @@ __all__ = [
     "dustmasker",
     "makeblastdb",
     "segmasker",
+    "windowmasker",
 ]

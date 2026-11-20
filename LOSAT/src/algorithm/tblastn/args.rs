@@ -226,13 +226,9 @@ pub struct TblastnArgs {
     // ReadSequencesToBlast(..., use_lcase_masks, subjects, ...);
     #[arg(long)]
     pub lcase_masking: bool,
+    // NCBI's flag, off by default: the Smith-Waterman redo of each match
+    // (`match_redo::SmithWatermanRedo`).
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:803-806
-    // ```c++
-    //     arg_desc.AddFlag(kArgUseSWTraceback,
-    //                      "Compute locally optimal Smith-Waterman alignments?",
-    //                      true);
-    // ```
-    // The Smith-Waterman redo of each match (`match_redo::SmithWatermanRedo`).
     #[arg(long)]
     pub use_sw_tback: bool,
     // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:339-342
@@ -1040,9 +1036,9 @@ pub(super) fn search_settings(args: &ResolvedTblastnArgs) -> Result<SearchSettin
             gap_xdrop_bits: args.xdrop_gap,
             final_xdrop_bits: args.xdrop_gap_final,
             word_xdrop_bits: args.xdrop_ungap,
+            // NCBI's traceback runs the redo when composition-based statistics are on or the
+            // traceback is Smith-Waterman: `-use_sw_tback` runs the redo with or without them.
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1486-1487
-            // (quoted above): `-use_sw_tback` runs the redo with or without composition-based
-            // statistics.
             smith_waterman: args.use_sw_tback,
         },
     })

@@ -51,7 +51,7 @@ This matters when your subject FASTA uses a non-standard code, for example a mit
 - As in NCBI, `-comp_based_stats` has no effect, alignments are linked only with `-sum_stats true`, and `-task tblastn-fast` changes nothing. The word size is 2 to 4 and the matrix is one of the standard ones.
 - The subjects are translated with genetic code 1 whatever `-db_gencode` says. LOSAT still checks the value.
 - The report formats are 0 to 4, 6, 7 and 10. Other formats are refused.
-- Also refused with `-in_pssm`: `-ungapped`, `-use_sw_tback` on a search that finds an alignment (one that finds nothing runs), `-db_gencode 32`, `-outfmt 11`, `-mt_mode 1` with more than one thread and `-db`, and a PSSM whose query `-seg` masks completely.
+- Also refused with `-in_pssm`: `-ungapped`, `-use_sw_tback` on a search that finds an alignment, where NCBI fails, crashes, never finishes or writes rows that change from one run to the next (one that finds nothing runs), `-db_gencode 32`, `-outfmt 11`, `-mt_mode 1` with more than one thread and `-db`, and a PSSM whose query `-seg` masks completely.
 
 ## Common options
 

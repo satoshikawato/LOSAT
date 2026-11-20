@@ -215,7 +215,8 @@ fn alignments(result: &BlastRedoOneMatchResult) -> Vec<&BlastCompoAlignment> {
 }
 
 // Two windows of one query (frames +1 and -1): NCBI asks the heap before the query's first
-// alignment of the call (`alignments[query_index] == NULL`), so once, not once per window.
+// alignment of the call (while the query's list of alignments is empty), so once, not once per
+// window.
 #[test]
 fn the_heap_is_asked_before_the_querys_first_alignment_of_the_call() {
     for mode in [
@@ -331,4 +332,51 @@ fn the_batch_errors_name_the_program() {
         endless,
         "a match whose Smith-Waterman redo (-use_sw_tback) does not end in NCBI BLAST+ 2.17.0 (why) is not supported by LOSAT's BLASTP"
     );
+}
+
+/// A batch status whose last redone match failed.
+fn failed_status() -> SwBatchStatus {
+    let mut status = SwBatchStatus::default();
+    let redone = status.redone::<()>(Err(SwRedoFailed.into()), || anyhow::anyhow!("not endless"));
+    assert!(matches!(redone, Ok(None)));
+    assert!(status.failed());
+    status
+}
+
+// Line RG item X4b-1 (review 2, S3 a): NCBI's order at each match of the redo's stream, early
+// termination first, then the fetch (`SwBatchStatus::reaches_redo`). After a failed redo, a match
+// whose subject the fetch excludes clears the status unless early termination stops it first; a
+// match that the test stops keeps the status whether or not its subject is excluded, so the failed
+// redo before it still fails the batch. Testing the exclusion first, or not testing early
+// termination, fails this test.
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3575
+#[test]
+fn an_excluded_list_clears_the_status_unless_early_termination_stops_it() {
+    // (terminates early, excluded at the fetch, redone, the batch still failed)
+    for (terminates_early, excluded, redone, still_failed) in [
+        (true, true, false, true),
+        (true, false, false, true),
+        (false, true, false, false),
+        (false, false, true, true),
+    ] {
+        let mut status = failed_status();
+        let case = format!("terminates early {terminates_early}, excluded {excluded}");
+        assert_eq!(
+            status.reaches_redo(terminates_early, excluded),
+            redone,
+            "{case}"
+        );
+        assert_eq!(status.failed(), still_failed, "{case}");
+    }
+    // A match that is redone sets the status by its own redo.
+    let mut status = failed_status();
+    assert!(status.reaches_redo(false, false));
+    let redone = status.redone(Ok(7), || anyhow::anyhow!("not endless"));
+    assert!(matches!(redone, Ok(Some(7))));
+    assert!(!status.failed());
+    // Without a negative seqid list with ids no list of the stream is marked.
+    let lists = [3u32, 1, 2];
+    let marks = crate::algorithm::common::database::FetchMarks::of(None, &lists, |&oid| Some(oid))
+        .expect("no header to read");
+    assert!((0..=lists.len()).all(|index| !marks.excluded(index)));
 }

@@ -20,6 +20,17 @@ use crate::api::local_blast::{OutputSink, ReportOutputs};
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::report::tabular::SubjectFetch;
 
+/// Whether the error of the batches searched ahead (`stage_d_pipeline::x_search_batches`) is one
+/// that `search` meets again by searching the batches one at a time, after the reports of the
+/// batches before: a read of the database that failed (`XReadError`), a batch whose setup failed
+/// (`SetupEngineError`), or a batch whose search fails after the reports of the batches before
+/// (`app::ErrorAfterBatchReports`: the failed or endless Smith-Waterman redo of `-use_sw_tback`).
+fn searched_again(error: &anyhow::Error) -> bool {
+    error.is::<XReadError>()
+        || error.is::<SetupEngineError>()
+        || error.is::<crate::blastinput::app::ErrorAfterBatchReports>()
+}
+
 /// The failure of a batch whose search failed where NCBI's fails it with its engine error: a
 /// read of the database (`common::x_db_stream::XReadError`), as the check's error fails the first
 /// batch with a valid context, when the reader's error is NCBI's own, and the batch's setup
@@ -1951,10 +1962,9 @@ fn search(
                 .filter(|searched| !searched.is_empty() && searched.end <= searched_done)
                 .collect(),
         };
-        // A read of the database that failed while the batches were searched ahead, a batch
-        // whose setup failed (`SetupEngineError`) or whose search fails after the reports of the
-        // batches before (`ErrorAfterBatchReports`): they are searched again one at a time below,
-        // so that the batch that fails does after the reports of the batches before.
+        // A batch that fails while the batches were searched ahead (`searched_again`) is
+        // searched again one at a time below, so that it fails after the reports of the batches
+        // before.
         let x_searched_ahead = super::stage_d_pipeline::x_search_batches(
             &query_seqs,
             search_letters,
@@ -1981,13 +1991,7 @@ fn search(
         );
         let mut x_searched = match x_searched_ahead {
             Ok(searched) => searched.map(Vec::into_iter),
-            Err(error)
-                if error.is::<XReadError>()
-                    || error.is::<SetupEngineError>()
-                    || error.is::<app::ErrorAfterBatchReports>() =>
-            {
-                None
-            }
+            Err(error) if searched_again(&error) => None,
             Err(error) => return Err(error),
         };
         for range in query_input

@@ -861,11 +861,12 @@ pub(crate) enum SwWindowRedo {
 /// (NCBI's `Blast_ForbiddenRangesInitialize` with the queries' longest length, every range of the
 /// window inside of it) and cleared.
 ///
-/// The query's first alignment is the first alignment of the match's call for that query
-/// (`alignments[query_index] == NULL`), not of the window: `query_had_none` says that the query had
-/// no alignment when the window started (true for one window per query, as BLASTP's and RPS-BLAST's
-/// protein windows are; TBLASTN's translated windows of one query follow each other in one call),
-/// and the heap is asked only while that holds and the window has made none.
+/// The query's first alignment is the first alignment of the match's call for that query (NCBI
+/// asks while the query's list of alignments is empty), not of the window: `query_had_none` says
+/// that the query had no alignment when the window started (true for one window per query, as
+/// BLASTP's and RPS-BLAST's protein windows are; TBLASTN's translated windows of one query follow
+/// each other in one call), and the heap is asked only while that holds and the window has made
+/// none.
 ///
 /// The regime of a significant score of 0 is decided at the window's first significant round. When
 /// the score of 0 passes the threshold (`s_EvalueFromScore(0, ..) = searchsp * K < cutoff_e`, or

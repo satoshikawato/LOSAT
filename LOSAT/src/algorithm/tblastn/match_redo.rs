@@ -6,22 +6,11 @@
 //! the steps around the redo (early termination, the reap, the linking or the e-values, the heaps)
 //! are the same for both (`stage_d_pipeline::run_local_search_with_redo`).
 //!
+//! NCBI's traceback runs the composition-based redo when composition-based statistics are on or
+//! the traceback option is Smith-Waterman, and the redo takes the Smith-Waterman form from that
+//! option alone:
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1486-1498
-//! ```c
-//!     } else if (ext_params->options->compositionBasedStats > 0 ||
-//!                ext_params->options->eTbackExt == eSmithWatermanTbck) {
-//!         Uint4 num_threads = MAX(1, thread_data->num_elems);
-//!         results = Blast_HSPResultsNew(query_info->num_queries);
-//!         /* FIXME partial sequence fetching/translation could lead to fence hit
-//!            and seg fault */
-//!         retval =
-//!                 Blast_RedoAlignmentCore_MT(program_number,
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3038-3039
-//! ```c
-//!     Boolean smithWaterman =
-//!         (Boolean) (extendParams->options->eTbackExt == eSmithWatermanTbck);
-//! ```
 
 use anyhow::Result;
 
@@ -48,7 +37,7 @@ use crate::sequence::packed_subject::SubjectNt;
 /// per query batch: the batch's loop (`stage_d_pipeline::run_local_search_with_redo`) is generic
 /// over it, so that each body is its own function and the X-drop redo keeps its code.
 pub(super) trait MatchRedo: Sync {
-    /// NCBI's `smithWaterman` (`eTbackExt == eSmithWatermanTbck`).
+    /// NCBI's `smithWaterman`: the traceback option is Smith-Waterman (`eSmithWatermanTbck`).
     const SMITH_WATERMAN: bool;
 
     /// The memory one thread keeps from one match to the next.
@@ -168,20 +157,8 @@ impl MatchRedo for SmithWatermanRedo {
         SwMatchScratch::new()
     }
 
+    // The heap test of e-value mode; a cutoff score (sum statistics) reads no heap.
     // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1456-1473
-    // ```c
-    //                 if (do_link_hsps) {
-    //                     alignment_is_significant = aSwScore >= params->cutoff_s;
-    //                 } else {
-    //                     double newSwEvalue;     /* evalue as computed by the
-    //                                              * Smith-Waterman algorithm */
-    // ...
-    //                     if (alignments[query_index] == NULL) {
-    // ...
-    //                             BlastCompo_HeapWouldInsert(
-    //                                 &significantMatches[query_index],
-    //                                 newSwEvalue, aSwScore, matchingSeq->index);
-    // ```
     fn reads_heaps(&self, params: &BlastRedoAlignParams) -> bool {
         !params.do_link_hsps
     }
@@ -269,16 +246,9 @@ pub(super) fn match_outcome<R: MatchRedo, T>(
 /// first failure.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3775-3779
-/// ```c
-///     for (i = 0; i < actual_num_threads; ++i) {
-///         if (status_code_tld[i] != 0) {
-///             status_code = status_code_tld[i];
-///         }
-///     }
-/// ```
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3795-3802 (quoted at
-/// `smith_waterman_match::sw_batch_failed_error`: `s_ClearHeap` pops the first query's heap after
-/// the arrays are freed)
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3795-3802
+/// (cited at `smith_waterman_match::sw_batch_failed_error`: `s_ClearHeap` pops the first query's
+/// heap after the arrays are freed)
 #[cold]
 #[inline(never)]
 pub(super) fn sw_batch_failed(first_query_holds_match: bool) -> anyhow::Error {
@@ -287,26 +257,28 @@ pub(super) fn sw_batch_failed(first_query_holds_match: bool) -> anyhow::Error {
 
 /// LOSAT's refusal of a PSSM query's search (`-in_pssm`, the one query batch) whose
 /// Smith-Waterman redo reaches a match (a preliminary hit list that the fetch keeps), after the
-/// prolog (`ErrorAfterBatchReports`): NCBI's redo of a PSSM query (`positionBased`, the PSSM's rows
-/// as its matrix) makes alignments whose scores pass 2^30 and frame 0 (survey probe
-/// `gdb3.tbn_inpssm_s`), then fails the traceback (`Traceback failed`, exit 3), stops with a C++
-/// exception of the Seq-align mapping (exit 255) or crashes (`free(): invalid pointer`, exit 134,
-/// or SIGSEGV with `-db`), by the input (NCBI BLAST+ 2.17.0, probes `pssm.*` of X4b-1 fix round 1;
-/// rule 3). A search without such a match ends as NCBI's (exit 0). Not ported: the
-/// Smith-Waterman redo of a PSSM (`smith_waterman_match` takes a square matrix).
+/// prolog (`ErrorAfterBatchReports`). NCBI's redo of a PSSM query (`positionBased`, the PSSM's rows
+/// as its matrix) takes the PSSM's rows by the positions of the window, not of the query, and
+/// reads memory it never wrote: it makes alignments whose scores pass 2^30 and frame 0 (survey
+/// probe `gdb3.tbn_inpssm_s`), then, by the input, fails the traceback (`Traceback failed`, exit
+/// 3), stops with a C++ exception of the Seq-align mapping (exit 255), crashes (`free(): invalid
+/// pointer` or `invalid size`, exit 134, or SIGSEGV, with `-subject` and with `-db`), does not end
+/// (still running at 120 s), or ends with exit 0 and rows that differ from run to run (NCBI
+/// BLAST+ 2.17.0, probes `pssm.*` of X4b-1 fix round 1 and probes 1 and 3 of its review 2: 20
+/// PSSM and subject pairs, three runs of each pair that ends). None of these gives a result to
+/// match, so the search is refused (rule 3). A search without such a match ends as NCBI's (exit
+/// 0). Not ported: the Smith-Waterman redo of a PSSM (`smith_waterman_match` takes a square
+/// matrix).
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3359-3360 (the
-/// Smith-Waterman redo of a PSSM query reads the PSSM's rows; `-use_sw_tback` sets the mode
-/// after `SetPSITblastnDefaults`, blast_args.cpp:885)
-/// ```c
-///         if (positionBased) {
-///             matrix_tld[i] = sbp_tld[i]->psi_matrix->pssm->data;
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3359-3360
+/// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/smith_waterman.c:86-90
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:866-873
+/// (`-use_sw_tback` sets the mode after `SetPSITblastnDefaults`, blast_args.cpp:885)
 #[cold]
 #[inline(never)]
 pub(super) fn sw_pssm_refusal() -> anyhow::Error {
     ErrorAfterBatchReports(anyhow::anyhow!(
-        "-use_sw_tback with -in_pssm on a search with hits, with which NCBI BLAST+ 2.17.0's tblastn fails its traceback, stops with an exception or crashes, is not supported by LOSAT's TBLASTN"
+        "-use_sw_tback with -in_pssm on a search with hits, on which NCBI BLAST+ 2.17.0's tblastn fails, crashes, does not end or writes rows that differ from run to run, is not supported by LOSAT's TBLASTN"
     ))
     .into()
 }

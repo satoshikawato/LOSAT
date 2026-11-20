@@ -319,7 +319,7 @@ pub fn cutoff_score_sum_stats(
 
     // NCBI: BLAST_Cutoffs(&new_cutoff, &evalue_hsp, kbp, searchsp, TRUE, gap_decay_rate)
     // When dodecay=TRUE, apply gap decay divisor to E-value before conversion. Every caller's
-    // `new_cutoff` starts at 1 (blast_parameters.c:321 and 965), so a search space too small for
+    // cutoff starts at 1 (blast_parameters.c:320 and 964), so a search space too small for
     // E = 1 gives 1, not a score below it (with `-db` SeqDB's shortest length 10 makes TBLASTN's
     // `n` 3: NCBI's cutoff is 1, which the Smith-Waterman redo's `cutoff_s` reads).
     blast_cutoffs_from_one(cutoff_score_from_evalue_with_decay(
@@ -651,10 +651,11 @@ mod tests {
         }
     }
 
-    // NCBI blast_parameters.c:965-971 (quoted at `cutoff_score_sum_stats`): `BLAST_Cutoffs` starts
-    // from `new_cutoff = 1` and only raises it. With `-db` SeqDB's shortest length 10 makes
-    // TBLASTN's subject length 3: a search space of 3 x 3 gives a score below 1 for E = 0.9, and
-    // the cutoff is 1 (NCBI 2.17.0's `cutoff_s` 1 and 32 of line RG X4b's survey, section 1.6).
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:964-971
+    // `BLAST_Cutoffs` starts from a cutoff of 1 and only raises it. With `-db` SeqDB's shortest
+    // length 10 makes TBLASTN's subject length 3: a search space of 3 x 3 gives a score below 1
+    // for E = 0.9, and the cutoff is 1 (NCBI 2.17.0's `cutoff_s` 1 and 32 of line RG X4b's
+    // survey, section 1.6).
     #[test]
     fn the_sum_statistics_cutoff_is_at_least_one() {
         let gapped = blosum62_gapped();

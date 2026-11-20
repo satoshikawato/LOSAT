@@ -7,38 +7,14 @@
 //! window (the score-only scan, the significance test, the regime of a significant score of 0, the
 //! start scan, the X-drop traceback from the Smith-Waterman start and the forbidden ranges;
 //! `smith_waterman::smith_waterman_redo_window`) is the one RPS-BLAST's redo runs (line PS, PS11c-3),
-//! on the rows that the square matrix gives the query's letters (`matrix[query[queryPos]]`, which
-//! `ALIGN_EX` and the kernels read as they read a PSSM's `pssm[queryPos]`).
+//! on the rows that the square matrix gives the query's letters (the row of the letter at each
+//! query position, which `ALIGN_EX` and the kernels read as they read a PSSM's row of the
+//! position).
 //!
+//! NCBI's redo loop takes this redo when the traceback option is Smith-Waterman and calls it for
+//! a match in place of the X-drop redo:
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3038-3039
-//! ```c
-//!     Boolean smithWaterman =
-//!         (Boolean) (extendParams->options->eTbackExt == eSmithWatermanTbck);
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3602-3622
-//! ```c
-//!                     if (smithWaterman) {
-//!                         *pStatusCode =
-//!                                 Blast_RedoOneMatchSmithWaterman(
-//!                                         alignments,
-//!                                         redo_align_params,
-//!                                         incoming_aligns,
-//!                                         numAligns[frame_index],
-//!                                         kbp->Lambda,
-//!                                         kbp->logK,
-//!                                         &matchingSeq,
-//!                                         query_info,
-//!                                         numQueries,
-//!                                         matrix,
-//!                                         BLASTAA_SIZE,
-//!                                         NRrecord,
-//!                                         forbidden,
-//!                                         redoneMatches,
-//!                                         &pvalueForThisPair,
-//!                                         compositionTestIndex,
-//!                                         &LambdaRatio
-//!                                 );
-//! ```
 //! The steps after it (`s_HSPListFromDistinctAlignments`, the reap, `s_HitlistEvaluateAndPurge`,
 //! the normalization and the identities) are the X-drop redo's (blast_kappa.c:3654-3707): the
 //! callers' (BLASTP's `postprocess_preliminary_hits_smith_waterman`, TBLASTN's stage D).
@@ -62,7 +38,7 @@ use crate::core::composition_adjustment::smith_waterman::{
 };
 
 /// The square matrix's memory of its windows (`SwRedoScratch::window`): the score rows of the
-/// window's query letters in the window's matrix (`matrix[query[queryPos]]`) and the X-drop
+/// window's query letters in the window's matrix (the row of each query letter) and the X-drop
 /// traceback's memory (NCBI's `gap_align`).
 pub(crate) struct SquareWindow {
     rows: QueryPssm,
@@ -83,23 +59,14 @@ impl Default for SquareWindow {
 pub(crate) type SwMatchScratch = SwRedoScratch<SquareWindow>;
 
 /// NCBI's failed Smith-Waterman redo of a match: a significant alignment of score 0 whose X-drop
-/// traceback has no operation (`GapEditScriptNew(0)` is NULL, `s_NewAlignmentUsingXdrop` returns
-/// -1), in any window of the call. NCBI frees the match's alignments (of every window of the call)
-/// and keeps the status -1 (`*pStatusCode`) until the next match that it redoes sets it again; a
-/// status left by the last match of a query batch fails the traceback (`Traceback failed`,
-/// traceback_stage.cpp:251-252), or crashes NCBI's clean-up when the batch's first query holds a
-/// redone match (`sw_batch_failed_error`).
+/// traceback has no operation (NCBI makes no edit script of 0 operations, and
+/// `s_NewAlignmentUsingXdrop` returns -1), in any window of the call. NCBI frees the match's
+/// alignments (of every window of the call) and keeps the status -1 (`*pStatusCode`) until the next
+/// match that it redoes sets it again; a status left by the last match of a query batch fails the
+/// traceback (`Traceback failed`, traceback_stage.cpp:251-252), or crashes NCBI's clean-up when the
+/// batch's first query holds a redone match (`sw_batch_failed_error`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1542-1548
-/// ```c
-/// function_level_cleanup:
-///     if (status != 0) {
-///         for (query_index = 0;  query_index < numQueries;  query_index++) {
-///             BlastCompo_AlignmentsFree(&alignments[query_index],
-///                                       callbacks->free_align_traceback);
-///         }
-///     }
-/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct SwRedoFailed;
 
@@ -133,84 +100,25 @@ impl std::error::Error for SwRedoEndless {}
 /// NCBI's list order (the last one made first) in `alignments_by_query[query_index]`, as the X-drop
 /// redo returns them, with the composition p-value and lambda ratio of the last adjustment.
 /// `lambda` and `log_k` are the match's scaled block (`kbp_gap[context_index]` of the redo's copy);
-/// `would_insert(query_index, evalue, score)` is `BlastCompo_HeapWouldInsert(&significantMatches
-/// [query_index], ...)` with the match's subject index, asked before the query's first alignment of
-/// the call in e-value mode (an error from it ends the call with that error); `cutoff_e` is
-/// `-evalue` (`params->cutoff_e`). Without composition-based statistics no window is adjusted: its
-/// rows are those of `unadjusted`, NCBI's `matrix` argument as the redo's set-up leaves it
-/// (`sbp->matrix->data`, with a scaling factor of 1), and its rule `eDontAdjustMatrix`; the subject
-/// range is not masked by SEG (`get_range`). The errors `SwRedoFailed` and `SwRedoEndless` are
-/// NCBI's failed and endless redos (see there).
+/// `would_insert(query_index, evalue, score)` is NCBI's `BlastCompo_HeapWouldInsert` on the query's
+/// heap of significant matches, with the match's subject index, asked before the query's first
+/// alignment of the call in e-value mode (an error from it ends the call with that error);
+/// `cutoff_e` is `-evalue` (`params->cutoff_e`). Without composition-based statistics no window is
+/// adjusted: its rows are those of `unadjusted`, NCBI's `matrix` argument as the redo's set-up
+/// leaves it (`sbp->matrix->data`, with a scaling factor of 1), and its rule `eDontAdjustMatrix`;
+/// the subject range is not masked by SEG (`get_range`). The errors `SwRedoFailed` and
+/// `SwRedoEndless` are NCBI's failed and endless redos (see there).
 ///
+/// NCBI makes the windows of the match, then for each window takes its subject range, the
+/// composition of its first alignment's subject range and the adjusted matrix:
 /// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1345-1357
-/// ```c
-///     assert((int) compo_adjust_mode < 2 || !positionBased);
-///     for (query_index = 0;  query_index < numQueries;  query_index++) {
-///         alignments[query_index] = NULL;
-///     }
-///     /* Find the multiple translation windows used by tblastn queries. */
-///     status =
-///         s_WindowsFromAligns(incoming_aligns, query_info, hspcnt, numQueries,
-///                             kWindowBorder, matchingSeq->length, &windows,
-///                             &nWindows, query_is_translated, subject_is_translated, params->positionBased);
-/// ```
 /// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1366-1430
-/// ```c
-///         window = windows[window_index];
-///         query_index = window->query_range.context;
-///         query_composition = &query_info[query_index].composition;
-///
-///         nearIdenticalStatus = s_preliminaryTestNearIdentical(query_info,
-///                                              window,
-///                                              window->align,
-///                                              params->near_identical_cutoff);
-///
-///         status =
-///             callbacks->get_range(matchingSeq, &window->subject_range,
-///                                  &subject,
-///                                  &query_info[query_index].seq,
-///                                  &window->query_range,
-///                                  &query,
-///                                  query_info[query_index].words,
-///                                  window->align, nearIdenticalStatus,
-///                                  compo_adjust_mode, TRUE,
-///                                  NULL);
-///         ...
-///         searchsp = query_info[query_index].eff_search_space;
-///
-///         /* For Smith-Waterman alignments, adjust the search using the
-///          * composition of the highest scoring alignment in window */
-///         if (compo_adjust_mode != eNoCompositionBasedStats) {
-///             Blast_AminoAcidComposition subject_composition;
-///             s_GetComposition(&subject_composition, alphsize,
-///                                     &subject, &window->subject_range,
-///                                     window->align, FALSE, subject_is_translated);
-///             adjust_search_failed =
-///                 Blast_AdjustScores(matrix,
-///                                    query_composition, query.length,
-///                                    &subject_composition, subject.length,
-///                                    scaledMatrixInfo, compo_adjust_mode,
-///                                    RE_pseudocounts, NRrecord,
-///                                    &matrix_adjust_rule, callbacks->calc_lambda,
-///                                    pvalueForThisPair,
-///                                    compositionTestIndex,
-///                                    LambdaRatio);
-///             ...
-///         }
-///         if ( !adjust_search_failed ) {
-/// ```
 /// The subject range's last argument is `NULL`: SEG runs (with composition-based statistics) unless
 /// the window's first alignment is near identical, as for the X-drop redo's first range
 /// (`subject_maybe_biased` starts true there and this redo does not read its answer).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3359-3362 (`matrix`, which
 /// `Blast_AdjustScores` overwrites, is the thread's score block's matrix)
-/// ```c
-///         if (positionBased) {
-///             matrix_tld[i] = sbp_tld[i]->psi_matrix->pssm->data;
-///         } else {
-///             matrix_tld[i] = sbp_tld[i]->matrix->data;
-/// ```
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn redo_one_match_smith_waterman<'seq>(
     incoming_aligns: &Option<Box<BlastCompoAlignment>>,
@@ -228,8 +136,9 @@ pub(crate) fn redo_one_match_smith_waterman<'seq>(
     scratch: &mut SwMatchScratch,
 ) -> Result<BlastRedoOneMatchResult> {
     // BLASTX's translated query windows (item X4b-2) and a PSSM's rows do not reach this redo:
-    // psiblast and blastx refuse `-use_sw_tback`, tblastn `-in_pssm` refuses it at its first match
-    // (`tblastn::match_redo::sw_pssm_refusal`).
+    // psiblast and blastx refuse `-use_sw_tback`, and tblastn `-in_pssm` refuses it at its first
+    // match before it calls this redo (`tblastn::match_redo::sw_pssm_refusal`; TBLASTN's redo
+    // parameters never set `position_based`, so this test guards other callers only).
     if params.query_is_translated || params.position_based {
         bail!(
             "the Smith-Waterman redo of translated query or position-based windows is not ported"
@@ -242,18 +151,7 @@ pub(crate) fn redo_one_match_smith_waterman<'seq>(
         None => bail!("the Smith-Waterman redo without composition-based statistics needs the search's matrix"),
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:879-888
-    // ```c++
-    //     if (subject_is_translated || query_is_translated) {
-    //         return s_WindowsFromTranslatedAligns(alignments, query_info,
-    //                                              hspcnt, border,
-    //                                              sequence_length,
-    //                                              pwindows, nWindows,
-    //                                              subject_is_translated, is_pos_based);
-    //     } else {
-    //         return s_WindowsFromProteinAligns(alignments, query_info,
-    //                                           numQueries, sequence_length,
-    //                                           pwindows, nWindows);
-    // ```
+    // Translated windows where the subject is translated, protein windows otherwise.
     let windows = if params.subject_is_translated {
         if matching_seq.genetic_code_id.is_none() {
             bail!("the Smith-Waterman redo of a translated subject needs its genetic code");
@@ -314,8 +212,8 @@ pub(crate) fn redo_one_match_smith_waterman<'seq>(
             params,
         )?;
         let searchsp = query_info.eff_search_space;
-        // NCBI's `matrix[query[queryPos]]` for each position of the window's query: the rows that
-        // the kernels and `ALIGN_EX` read (`positionBased` false, blast_gapalign.c:543-554).
+        // NCBI's matrix row of the query letter at each position of the window's query: the rows
+        // that the kernels and `ALIGN_EX` read (`positionBased` false, blast_gapalign.c:543-554).
         let query = range.query.data();
         let SquareWindow { rows, gap } = &mut scratch.window;
         let fill_rows = |rows: &mut QueryPssm, matrix: &AdjustedProteinMatrix| {
@@ -327,32 +225,14 @@ pub(crate) fn redo_one_match_smith_waterman<'seq>(
             );
         };
         let matrix_adjust_rule = match unadjusted {
+            // NCBI's rule starts as "do not adjust" and stays so without an adjustment.
             // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1332
-            // ```c
-            //     EMatrixAdjustRule matrix_adjust_rule = eDontAdjustMatrix;
-            // ```
             Some(matrix) if !uses_composition => {
                 fill_rows(rows, matrix);
                 EMatrixAdjustRule::DontAdjustMatrix
             }
             _ => {
                 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:923-936
-                // ```c
-                //     if (query_is_translated || subject_is_translated) {
-                //         int start;
-                //         int end;
-                //         start = ((query_is_translated) ?
-                //                  align->queryStart : align->matchStart) - range->begin;
-                //         end   = ((query_is_translated) ?
-                //                  align->queryEnd   : align->matchEnd  ) - range->begin;
-                //         Blast_GetCompositionRange(&left, &right, data, length, start, end);
-                //     } else {
-                //         /* Use the whole subject to compute the composition */
-                //         left = 0;
-                //         right = length;
-                //     }
-                //     Blast_ReadAaComposition(composition, alphsize, &data[left], right-left);
-                // ```
                 let subject_composition = if params.subject_is_translated {
                     translated_subject_composition(
                         &range.subject.buffer,
@@ -387,12 +267,6 @@ pub(crate) fn redo_one_match_smith_waterman<'seq>(
         };
         let rows = &*rows;
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3261-3264
-        // ```c
-        //         if(smithWaterman) {
-        // 	   forbidden_tld[i] = calloc(1,sizeof(Blast_ForbiddenRanges));
-        //            status_code =
-        //                Blast_ForbiddenRangesInitialize(forbidden_tld[i], queryInfo->max_length);
-        // ```
         // The round loop (`smith_waterman_redo_window`, redo_alignment.c:1438-1529) on the
         // subject's range from NCBI's `subject->data - 1`, which `ALIGN_EX` reads from
         // (`s_SWFindFinalEndsUsingXdrop`): the sentinel before the window's letters
@@ -420,18 +294,6 @@ pub(crate) fn redo_one_match_smith_waterman<'seq>(
             }
         };
         // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1465-1474
-        // ```c
-        //                     if (alignments[query_index] == NULL) {
-        //                         /* this is the most significant alignment; if
-        //                          * it will not be accepted, no alignments from
-        //                          * this match will */
-        //                         alignment_is_significant =
-        //                             alignment_is_significant &&
-        //                             BlastCompo_HeapWouldInsert(
-        //                                 &significantMatches[query_index],
-        //                                 newSwEvalue, aSwScore, matchingSeq->index);
-        //                     }
-        // ```
         // The query's list of the whole call: the windows of one query (TBLASTN's frames and
         // regions) follow each other in it.
         let query_had_none = alignments_by_query[query_index].is_none();
@@ -472,21 +334,7 @@ pub(crate) fn redo_one_match_smith_waterman<'seq>(
             SwWindowRedo::Endless => return Err(SwRedoEndless.into()),
         };
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1856-1873
-        // ```c
-        //     if (editScript != NULL) {
-        //         /* Shifted values of the endpoints */
-        //         Int4 aqueryStart =  queryStart + query_range->begin;
-        //         Int4 aqueryEnd   = *pqueryEnd  + query_range->begin;
-        //         Int4 amatchStart =  matchStart + subject_range->begin;
-        //         Int4 amatchEnd   = *pmatchEnd  + subject_range->begin;
-        //
-        //         obj = BlastCompo_AlignmentNew(newScore, matrix_adjust_rule,
-        //                                       aqueryStart, aqueryEnd,
-        //                                       query_range->context,
-        //                                       amatchStart, amatchEnd,
-        //                                       subject_range->context, editScript);
-        // ```
-        // Each alignment prepended in the order made (`newAlign->next = alignments[query_index]`).
+        // Each alignment goes to the head of the query's list, in the order made.
         for align in made {
             let mut new_align = blast_compo_alignment_new(
                 align.score,
@@ -516,18 +364,6 @@ pub(crate) fn redo_one_match_smith_waterman<'seq>(
 /// the redo's set-up does not scale (a scaling factor of 1) and no window adjusts.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3100-3109
-/// ```c
-///     if (compo_adjust_mode != eNoCompositionBasedStats) {
-///         if((0 == strcmp(scoringParams->options->matrix, "BLOSUM62_20"))) {
-///             localScalingFactor = SCALING_FACTOR / 10;
-///         } else {
-///             localScalingFactor = SCALING_FACTOR;
-///         }
-///     } else {
-///         localScalingFactor = 1.0;
-///     }
-///     s_RescaleSearch(sbp, scoringParams, numContexts, localScalingFactor);
-/// ```
 pub(crate) fn unadjusted_square_matrix(
     matrix: crate::config::ScoringMatrix,
 ) -> AdjustedProteinMatrix {
@@ -551,14 +387,9 @@ pub(crate) fn unadjusted_square_matrix(
 /// one).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3644-3646
-/// ```c
-///                     if (*pStatusCode != 0) {
-///                         goto match_loop_cleanup;
-///                     }
-/// ```
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3775-3779 (quoted at
-/// `sw_batch_failed_error`); the reset at the excluded fetch, blast_kappa.c:3560-3575, is quoted
-/// at `FetchMarks`.
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3775-3779 (cited at
+/// `sw_batch_failed_error`); the reset at the excluded fetch, blast_kappa.c:3560-3575, is cited at
+/// `FetchMarks`.
 #[derive(Debug, Default, Clone, Copy)]
 pub(crate) struct SwBatchStatus {
     failed: bool,
@@ -596,6 +427,27 @@ impl SwBatchStatus {
         self.failed = false;
     }
 
+    /// NCBI's two steps at a match of the redo's stream before its redo, in NCBI's order: the
+    /// early termination test (`terminates_early`), then the fetch, which excludes the subject of
+    /// a list that `FetchMarks` marks (`excluded`). Whether the match is redone: not where the
+    /// test stops it, which leaves the status as it is, whether or not the fetch would exclude its
+    /// subject; not where the fetch excludes it (`excluded_at_fetch`: the status cleared). The
+    /// X-drop redo has no status; a marked list is a list skipped there.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3540
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3560-3575
+    #[inline(always)]
+    pub(crate) fn reaches_redo(&mut self, terminates_early: bool, excluded: bool) -> bool {
+        if terminates_early {
+            return false;
+        }
+        if excluded {
+            self.excluded_at_fetch();
+            return false;
+        }
+        true
+    }
+
     /// Whether the last match that the redo of the batch reached failed: the batch fails
     /// (`sw_batch_failed_error`).
     #[inline(always)]
@@ -610,31 +462,11 @@ impl SwBatchStatus {
 /// refusal of the batch where NCBI's clean-up crashes (PD-LOSAT-NCBI-DEFECTS 1.53, rule 3; exit 1).
 /// The caller puts it after the reports of the batches before.
 ///
+/// NCBI keeps the last nonzero status of its threads, and its traceback throws `Traceback failed`
+/// on it; the clean-up after it frees the heaps' arrays before it pops them:
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3775-3779
-/// ```c
-///     for (i = 0; i < actual_num_threads; ++i) {
-///         if (status_code_tld[i] != 0) {
-///             status_code = status_code_tld[i];
-///         }
-///     }
-/// ```
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:251-253
-/// ```c++
-///     if (status) {
-///         NCBI_THROW(CBlastException, eCoreBlastError, "Traceback failed");
-///     }
-/// ```
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3795-3802
-/// ```c
-///         } else {
-///             if (redoneMatches_tld[i] != NULL) {
-///                 int qi;
-///                 for (qi = 0; qi < numQueries; ++qi) {
-///                     sfree(redoneMatches_tld[i][qi].array);
-///                     sfree(redoneMatches_tld[i][qi].heapArray);
-///                 }
-///                 s_ClearHeap(redoneMatches_tld[i]);
-/// ```
 #[cold]
 #[inline(never)]
 pub(crate) fn sw_batch_failed_error(program: &str, first_query_holds_match: bool) -> anyhow::Error {

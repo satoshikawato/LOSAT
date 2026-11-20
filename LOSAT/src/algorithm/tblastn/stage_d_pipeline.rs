@@ -315,7 +315,7 @@ pub(super) struct LocalStageDScoring {
     pub final_xdrop_bits: f64,
     /// The ungapped X-drop in bits (`word_options->x_dropoff`): `-xdrop_ungap` or 7.
     pub word_xdrop_bits: f64,
-    /// `-use_sw_tback`: NCBI's extension option `eTbackExt == eSmithWatermanTbck`, the
+    /// `-use_sw_tback`: NCBI's traceback option set to Smith-Waterman (`eSmithWatermanTbck`), the
     /// Smith-Waterman redo of each match (`match_redo::SmithWatermanRedo`).
     pub smith_waterman: bool,
 }
@@ -1174,7 +1174,7 @@ impl Drop for XSearchTimer {
 // NCBI c++/src/algo/blast/core/blast_engine.c:870-905:
 // BLAST_LinkHsps(...); s_Blast_HSPListReapByPrelimEvalue(...);
 // Preliminary work uses one immutable subject; linking and stream writes follow OID order.
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3038-3039 (quoted at
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3038-3039 (cited at
 // `match_redo`)
 // Dispatch point: the redo of a match is chosen once per query batch, by NCBI's `eTbackExt`
 // (`-use_sw_tback`): the Smith-Waterman redo (`match_redo::SmithWatermanRedo`) or the X-drop redo
@@ -1594,27 +1594,7 @@ fn run_local_search_with_redo<R: MatchRedo>(
         })
         .collect();
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3346-3357
-    // ```c
-    //         redo_align_params_tld[i] =
-    //             s_GetAlignParams(
-    //                     &gapping_params_context_tld[i],
-    //                     queryBlk,
-    //                     queryInfo,
-    //                     hitParams,
-    //                     extendParams
-    //             );
-    //         if (redo_align_params_tld[i] == NULL) {
-    //             status_code = -1;
-    //             goto function_cleanup;
-    //         }
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:657-660
-    // ```c
-    //     stdFreqRatios = _PSIMatrixFrequencyRatiosNew(matrixName);
-    //     if (stdFreqRatios == NULL) {
-    //         return -1;
-    //     }
-    // ```
     // The redo's set-up reads the frequency ratios of the matrix (`s_GetAlignParams`, its
     // `s_MatrixInfoInit`), which IDENTITY has none of (`_PSIMatrixFrequencyRatiosNew` returns NULL
     // past its named matrices, matrix_freq_ratios.c:1734-1736): the batch's traceback fails before
@@ -1634,12 +1614,6 @@ fn run_local_search_with_redo<R: MatchRedo>(
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:674-681 (the score sort
     // only with composition-based statistics: the Smith-Waterman redo of `-comp_based_stats 0`
     // reads the stream in this OID order too)
-    // ```c
-    //     if ((Blast_QueryIsProtein(program) || Blast_QueryIsPssm(program)) &&
-    //         extn_opts->compositionBasedStats != 0) {
-    //         hsp_stream->sort_by_score =
-    //             (SSortByScoreStruct*)calloc(1, sizeof(SSortByScoreStruct));
-    // ```
     if compo_adjust_mode.is_enabled() {
         preliminary_lists.sort_by(|(qa, oa, a), (qb, ob, b)| {
             qa.cmp(qb)
@@ -1652,8 +1626,8 @@ fn run_local_search_with_redo<R: MatchRedo>(
     // The subject of a list in the stream, for NCBI's fetches with `check_oid_exclusion`.
     let list_ordinal = |(_, oid, _): &(usize, usize, LinkedHspList)| u32::try_from(*oid).ok();
     let fetch_refusal = |failed| FetchExcluded::refusal(failed, "TBLASTN");
-    // NCBI blast_traceback.c:1486-1498 (quoted at `match_redo`): the Smith-Waterman redo runs
-    // without composition-based statistics too.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1486-1498 (cited at
+    // `match_redo`): the Smith-Waterman redo runs without composition-based statistics too.
     if !compo_adjust_mode.is_enabled() && !R::SMITH_WATERMAN {
         // NCBI blast_traceback.c:1567-1577 (cited at `blastp::blast_engine::database::
         // exclude_fetched`): the traceback's fetches (`check_oid_exclusion`) exclude a subject that
@@ -1754,7 +1728,8 @@ fn run_local_search_with_redo<R: MatchRedo>(
     // do_link_hsps and cutoff_s follow the sum statistics of the hit-saving parameters
     // (`hitParams->do_sum_stats`: the search's linking parameters, `parameters.link`).
     let gumbel = gumbel.as_ref();
-    // NCBI blast_kappa.c:3038-3039 (quoted at `match_redo`): the redo's `smithWaterman`.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3038-3039 (cited at
+    // `match_redo`): the redo's `smithWaterman`.
     let redo_params = BlastRedoAlignParams {
         smith_waterman: R::SMITH_WATERMAN,
         ..local_kappa_redo_params(
@@ -2133,16 +2108,13 @@ fn run_local_search_with_redo<R: MatchRedo>(
                 };
                 for (at, ((context, oid, list), result)) in batch.iter().zip(computed).enumerate() {
                     let excluded = excluded_at_fetch.excluded(first + at);
-                    if compo_early_termination(list.best_evalue, &heaps) {
-                        // A redone match was done in redo_item (LOSAT_X_TBNSTAGEDROP); a marker's
-                        // subject is not on the stage.
-                        if result.is_none() && !excluded {
+                    let terminates_early = compo_early_termination(list.best_evalue, &heaps);
+                    if !sw_status.reaches_redo(terminates_early, excluded) {
+                        // A match that early termination stops: a redone match was done in
+                        // redo_item (LOSAT_X_TBNSTAGEDROP); a marker's subject is not on the stage.
+                        if terminates_early && result.is_none() && !excluded {
                             x_stage.done(*oid);
                         }
-                        continue;
-                    }
-                    if excluded {
-                        sw_status.excluded_at_fetch();
                         continue;
                     }
                     if let Some(ref mut trace) = observer {
@@ -2183,17 +2155,14 @@ fn run_local_search_with_redo<R: MatchRedo>(
             //     redoneMatches, numQueries)) { Blast_HSPListFree(localMatch); continue; }
             // query_index = localMatch->query_index;
             let excluded = excluded_at_fetch.excluded(index);
-            if compo_early_termination(list.best_evalue, &heaps) {
+            let terminates_early = compo_early_termination(list.best_evalue, &heaps);
+            // NCBI's order (`SwBatchStatus::reaches_redo`): early termination, then the fetch, which
+            // excludes a marker's subject and sets the status back to 0.
+            if !sw_status.reaches_redo(terminates_early, excluded) {
                 // A marker's subject is not on the stage.
-                if !excluded {
+                if terminates_early && !excluded {
                     x_stage.done(oid);
                 }
-                continue;
-            }
-            // NCBI blast_kappa.c:3560-3575 (quoted at `FetchMarks`): the fetch excludes the
-            // marker's subject, and the status returns to 0.
-            if excluded {
-                sw_status.excluded_at_fetch();
                 continue;
             }
             if let Some(ref mut trace) = observer {
@@ -2216,7 +2185,7 @@ fn run_local_search_with_redo<R: MatchRedo>(
             keep_item(context, &mut heaps, item);
         }
     }
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3775-3779 (quoted at
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3775-3779 (cited at
     // `match_redo::sw_batch_failed`)
     // The status of the last match the Smith-Waterman redo reached fails the batch.
     if R::SMITH_WATERMAN && sw_status.failed() {

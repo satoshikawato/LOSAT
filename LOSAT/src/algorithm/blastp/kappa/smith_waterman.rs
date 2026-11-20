@@ -28,20 +28,6 @@ pub(crate) use crate::core::composition_adjustment::smith_waterman_match::{
 /// here (`unadjusted` is `None`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3602-3613
-/// ```c
-///                     if (smithWaterman) {
-///                         *pStatusCode =
-///                                 Blast_RedoOneMatchSmithWaterman(
-///                                         alignments,
-///                                         redo_align_params,
-///                                         incoming_aligns,
-///                                         numAligns[frame_index],
-///                                         kbp->Lambda,
-///                                         kbp->logK,
-///                                         &matchingSeq,
-///                                         query_info,
-///                                         numQueries,
-/// ```
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn redo_one_match_smith_waterman<'seq>(
     incoming_aligns: &Option<Box<BlastCompoAlignment>>,

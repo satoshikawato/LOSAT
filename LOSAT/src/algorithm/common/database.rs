@@ -1229,12 +1229,15 @@ impl<'a> FetchExcluded<'a> {
         items: &mut Vec<T>,
         ordinal: impl Fn(&T) -> Option<u32>,
     ) -> Result<(), (u32, SeqDbError)> {
-        let marks = self.marks(items, ordinal)?;
-        let mut index = 0;
-        items.retain(|_| {
-            index += 1;
-            !marks.excluded(index - 1)
-        });
+        let mut keep = Vec::with_capacity(items.len());
+        for item in items.iter() {
+            keep.push(match ordinal(item) {
+                Some(ordinal) => !self.excludes(ordinal).map_err(|error| (ordinal, error))?,
+                None => true,
+            });
+        }
+        let mut keep = keep.into_iter();
+        items.retain(|_| keep.next().unwrap_or(true));
         Ok(())
     }
 
@@ -1288,36 +1291,7 @@ impl<'a> FetchExcluded<'a> {
 /// the same way).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3560-3575
-/// ```c
-///                     *pStatusCode = s_MatchingSequenceInitialize(
-///                             &matchingSeq,
-///                             program_number,
-///                             seqSrc,
-///                             default_db_genetic_code,
-///                             localMatch->oid,
-///                             ranges
-///                     );
-///                     if (*pStatusCode != 0) {
-///                         /*
-///                          * some sequences may have been excluded by membit filtering
-///                          * so this is not really an exception
-///                          */
-///                         *pStatusCode = 0;
-///                         goto match_loop_cleanup;
-///                     }
-/// ```
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:306-313
-/// ```c++
-///     if (args->check_oid_exclusion) {
-///         if (! seqdb.GetIdSet().Blank()) {
-///             list< CRef<CSeq_id> > seqids = seqdb.GetSeqIDs(oid);
-///
-///             if (seqids.empty()) {
-///                 return BLAST_SEQSRC_EXCLUDED;
-///             }
-///         }
-///     }
-/// ```
 #[derive(Debug, Default)]
 pub(crate) struct FetchMarks(Vec<bool>);
 

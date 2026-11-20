@@ -3727,13 +3727,13 @@ mod tests {
     // Outfmt 13 and 14 are a ZIP archive on stream 4: NCBI's side files, named as the CLI names them
     // for `-out results`, and NCBI's master file (`results.json` / `results.xml`), which lists them by
     // those names; stream 3 is NCBI's standard error, and the other streams are those of the run
-    // without -outfmt (the 18 rows of the manifest with side files).
+    // without -outfmt (the 20 rows of the manifest with side files).
     #[test]
     fn outfmt_13_and_14_are_an_archive_of_ncbis_files() {
         let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../LOSAT");
         let read = |path: &str| std::fs::read(format!("{root}/{path}")).unwrap();
         let rows = manifest_rows(|_, _, files| files == "xinclude");
-        assert_eq!(rows.len(), 18);
+        assert_eq!(rows.len(), 20);
         let programs: std::collections::BTreeSet<&str> =
             rows.iter().map(|(_, argv)| argv[0].as_str()).collect();
         assert_eq!(programs.len(), 5);

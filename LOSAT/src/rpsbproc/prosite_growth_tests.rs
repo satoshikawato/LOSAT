@@ -4,6 +4,7 @@
 //! (The allocations of NCBI's rpsbproc 0.5.1 binary for edited motifs are compared in
 //! `sites_tests.rs`.)
 
+use super::super::RECORD_BYTES;
 use super::*;
 
 const STRING_TABLE: &str = include_str!("../../tests/fixtures/rpsbproc_growth/string_ops.tsv");

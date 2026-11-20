@@ -467,6 +467,7 @@ fn windows_char_is_space(c: u16) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::writedb::local_offset::offset_from_posix_tz;
 
     /// UCRT's `_tzset` and `_localtime64_s` of `ucrtbase.dll` with `TZ` set
     /// (scripts/ucrt_tz_vectors.py; LOSAT/tests/windows_local_time.rs checks them again against
@@ -733,14 +734,13 @@ mod tests {
     fn ucrt_system_zones_change_as_their_rules_say() {
         for (name, info, posix) in system_zones() {
             let zone = ucrt_zone_from_system(Some(&info));
-            let rules = parse_posix(posix.as_bytes());
             let mut t = 1_735_689_600; // 2025-01-01
             while t < 1_830_297_600 {
                 // 2028-01-01
                 for u in [t - 1, t, t + 1] {
                     assert_eq!(
                         zone.offset_at(u),
-                        rules.offset_at(u).map(i64::from),
+                        offset_from_posix_tz(posix, u).map(i64::from),
                         "{name} at {u}"
                     );
                 }

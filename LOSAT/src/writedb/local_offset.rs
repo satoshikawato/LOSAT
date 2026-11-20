@@ -627,7 +627,7 @@ impl Posix {
 /// Offset of a POSIX TZ string at `unix_seconds`. A DST name without rules uses the
 /// United States rules here (no `posixrules` file is consulted).
 #[cfg(test)]
-fn offset_from_posix_tz(spec: &str, unix_seconds: i64) -> Option<i32> {
+pub(super) fn offset_from_posix_tz(spec: &str, unix_seconds: i64) -> Option<i32> {
     parse_posix(spec.as_bytes()).offset_at(unix_seconds)
 }
 

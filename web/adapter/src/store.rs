@@ -556,9 +556,10 @@ pub fn with_inputs<R>(
         (query, ROLE_QUERY, "query"),
         (subject, ROLE_SUBJECT, "subject"),
     ];
+    // A run of -db has no subject (handle 0, checked above); its query is checked as any query.
     for &(handle, role, name) in roles
         .iter()
-        .filter(|(handle, ..)| !(database && *handle == 0))
+        .filter(|(_, role, _)| !(database && *role == ROLE_SUBJECT))
     {
         let entry = store
             .entries

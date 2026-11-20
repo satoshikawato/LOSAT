@@ -288,6 +288,11 @@ def database() -> list[dict]:
                          "argv": [row["program"], "-db", row["db"], "-query", row["query"], *shlex.split(row["extra_args"])],
                          "cwd": str(REPO / "LOSAT"), "cases": [row_id], "frozen": {"6": row["stdout_sha256"]},
                          "database": True})
+    # With -parse_deflines the run registers its query with `register_inputs` (its subject handle 0, the
+    # response's subject null), and the records' `s_idx` are the database's OIDs (abi_v2.md §4, §8); the
+    # native CLI's run of the argv is the reference (review of D12a, low 3).
+    parsed = dict(searches[DATABASE_ROWS.index("db.d1.6")])
+    searches.append({**parsed, "argv": [*parsed["argv"], "-parse_deflines"], "cases": ["db.d1.6.parse_deflines"], "frozen": {}})
     return searches
 
 

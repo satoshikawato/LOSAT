@@ -106,15 +106,30 @@ describe.skipIf(REACTORS === undefined)('a run of -db through the host', () => {
       abi.release(query.handle);
       const frozen = readFileSync(join(LOSAT, 'tests/fixtures/db_search', `${row.id}.out`));
       expect(Buffer.concat(outfmt6).equals(frozen), row.id).toBe(true);
-      // Only what the search reads: far less than the folder's 2.8 MB.
-      const folderBytes = files.reduce((total, { file }) => total + file.size, 0);
-      expect(reader.bytes() - before, row.id).toBeLessThan(folderBytes);
+      // Only what the search reads: at most the bytes of the database's own files (`<db>.*`) and of the filter's list,
+      // never the rest of the folder (2.8 MB in all).
+      const own = files.filter(({ name }) => name.startsWith(`${row.db}.`) || row.extra.includes(name));
+      const ownBytes = own.reduce((total, { file }) => total + file.size, 0);
+      const read = reader.bytes() - before;
+      console.log(`${row.id}: read ${read} of the database's ${ownBytes} bytes (folder ${files.reduce((total, { file }) => total + file.size, 0)})`);
+      expect(read, row.id).toBeLessThanOrEqual(ownBytes);
     }
     // A database that the directory does not hold: the CLI's message.
     directory.open([]);
     const argv = ['blastp', '-db', 'tests/db_search/paja', '-query', 'q.faa', '-num_threads', '1'];
     const query = abi.register('blastp', ROLE_QUERY, new TextEncoder().encode('>q\nMKVLA\n'));
     expect(() => abi.run(argv, query.handle, 0, () => undefined)).toThrow(/BLAST Database error: No alias or index file found for protein database \[tests\/db_search\/paja\]/);
+    // With the database in the directory, the names that the CLI run from LOSAT/ does not find either: an absolute
+    // name (the CLI's root holds no tests/) and `..` after a name that is no folder. The CLI's message, whose
+    // search path names the engine's current directory, /work (abi_v2.md §3; review of D12a, low 4).
+    directory.open(await folder('tests/db_search', paths));
+    for (const name of ['/tests/db_search/paja', 'nofolder/../tests/db_search/paja']) {
+      const named = ['blastp', '-db', name, '-query', 'q.faa', '-num_threads', '1'];
+      expect(() => abi.run(named, query.handle, 0, () => undefined), name).toThrow(
+        `BLAST Database error: No alias or index file found for protein database [${name}] in search path [/work::]. ` +
+          'Please verify the spelling of the BLAST database and its molecule type.',
+      );
+    }
     abi.release(query.handle);
   }, 120_000);
 });

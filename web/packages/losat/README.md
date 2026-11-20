@@ -128,8 +128,13 @@ A search of `-db` reads a BLAST database from the user's device. Give the run th
 the lists of its filters (`-seqidlist`, `-taxidlist`, `-gilist` and their negatives), as
 `EngineRunRequest.files`: each a `DirectoryFile`, a `File` named by its path in the run's working
 directory, as the command line run from that directory names it (`-db db/nt` reads `db/nt.nal`,
-`db/nt.00.nin`, ... and `db/taxdb.btd`). Such a run has no `subject`, and `engine.start(argv)` says so
-(`database`). The engine opens the files by those names and reads each in place, only the bytes that
+`db/nt.00.nin`, ...). The engine looks for the taxonomy files (`taxdb.bti`, `taxdb.btd`,
+`taxonomy4blast.sqlite3`) as the command line does: at the directory's root, or in the directory that
+`[BLAST] BLASTDB` of the run's `.ncbirc` or `-conffile` names (a registry file), not beside the
+database; files named `db/taxdb.*` give the command line's `N/A` names. The directory is the engine's
+current directory, `/work`: a relative name is a file of it, an absolute one (`/db/nt`) names none, and
+a path is looked up as the OS looks it up (`nofolder/../db/nt` fails), as on the command line run from
+that directory. Such a run has no `subject`, and `engine.start(argv)` says so (`database`). The engine opens the files by those names and reads each in place, only the bytes that
 it needs, with `FileReaderSync` in the workers: a database is never copied into memory or into the
 browser's storage. Every thread of a threaded search reads the same files.
 

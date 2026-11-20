@@ -587,7 +587,7 @@ async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, o
   const prespawn = prespawnCount(argv), recycle = recycleWorkers(kind), refill = recycle ? 0 : refillCount(argv);
   // The table of the files that every thread reads and writes (sharedFileImports), at every thread
   // count: a command's, and a reactor's, whose search of -db opens its database by name in the
-  // run directory `options.directory`, preopened as "." on every thread (createWasi; line WQA D12a,
+  // run directory `options.directory`, preopened as "/work" on every thread (createWasi; line WQA D12a,
   // 2026-11-20), and reads it on the search's threads.
   const files = sharedFileTable(), directory = options.directory;
   const workers = new Set(), exits = new Map(), events = [], standby = [];

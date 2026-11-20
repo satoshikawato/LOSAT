@@ -1,6 +1,6 @@
 // WASI preview1 for the engine modules, from @bjorn3/browser_wasi_shim (the shim that
 // gbdraw uses; the version is pinned in package.json). The reactors get no arguments, an
-// empty environment (docs/web/abi_v2.md §3), the run's working directory preopened as `.`,
+// empty environment (docs/web/abi_v2.md §3), the run's working directory preopened as `/work`,
 // read-only, with the files that the argv names (run-directory.ts; none for most runs, so
 // that a file the run does not have is missing as on the command line), an empty standard
 // input, and standard output and error kept in a small buffer. The engine's warnings do not go there (they are ABI stream 3);

@@ -100,7 +100,7 @@ function sharedFileTable() {
 
 // The file functions of one thread with the shared table in front of its own uvwasi functions
 // (`local`, which take the guest's signed i32 values themselves). `directory`: the host directory
-// that descriptor 3 preopens as "." (a LOSAT Web reactor's run directory, wasi_thread_worker.js
+// that descriptor 3 preopens as "/work" (a LOSAT Web reactor's run directory, wasi_thread_worker.js
 // createWasi), else "/".
 function sharedFileImports(table, memory, local, directory) {
   const { os, position, rights, kind } = sharedFileViews(table);

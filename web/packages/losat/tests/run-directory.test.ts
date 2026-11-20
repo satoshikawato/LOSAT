@@ -2,9 +2,9 @@
 // the engine calls them: the preopen `.`, opening a file by its path, reading it in place, a descriptor that one
 // thread opened read on another, and a directory that writes nothing (line WQA D12a, 2026-11-20).
 import { describe, expect, it } from 'vitest';
-import { FILE_FD_BASE, pathNames, PREOPEN_FD, RunDirectory, TABLE_BYTES, type BlobReader } from '../src/infra/reactor/run-directory.ts';
+import { FILE_FD_BASE, pathNames, PREOPEN_FD, RUN_DIRECTORY, RunDirectory, TABLE_BYTES, type BlobReader } from '../src/infra/reactor/run-directory.ts';
 
-const ERRNO = { SUCCESS: 0, BADF: 8, INVAL: 28, IO: 29, ISDIR: 31, NOENT: 44, NOTDIR: 54, ROFS: 69, NOTCAPABLE: 76 };
+const ERRNO = { SUCCESS: 0, BADF: 8, INVAL: 28, IO: 29, ISDIR: 31, NAMETOOLONG: 37, NOENT: 44, NOTDIR: 54, ROFS: 69, NOTCAPABLE: 76 };
 const RIGHT_FD_READ = 1n << 1n;
 const RIGHT_FD_WRITE = 1n << 6n;
 const OFLAGS_CREAT = 1;
@@ -111,14 +111,15 @@ function directoryOf(files: Record<string, string>, table?: SharedArrayBuffer) {
 }
 
 describe("the run's working directory", () => {
-  it('is the preopen `.`, the first directory that WASI asks about', () => {
+  it('is the preopen `/work`, the first directory that WASI asks about', () => {
     const { directory } = directoryOf({});
     const { wasi, view } = guest(directory);
     expect(wasi.fd_prestat_get!(PREOPEN_FD, 0)).toBe(ERRNO.SUCCESS);
     expect(view().getUint8(0)).toBe(0);
-    expect(view().getUint32(4, true)).toBe(1);
-    expect(wasi.fd_prestat_dir_name!(PREOPEN_FD, 16, 1)).toBe(ERRNO.SUCCESS);
-    expect(view().getUint8(16)).toBe(0x2e);
+    expect(view().getUint32(4, true)).toBe(RUN_DIRECTORY.length);
+    expect(wasi.fd_prestat_dir_name!(PREOPEN_FD, 16, RUN_DIRECTORY.length - 1)).toBe(ERRNO.NAMETOOLONG);
+    expect(wasi.fd_prestat_dir_name!(PREOPEN_FD, 16, RUN_DIRECTORY.length)).toBe(ERRNO.SUCCESS);
+    expect(new TextDecoder().decode(new Uint8Array(view().buffer, 16, RUN_DIRECTORY.length))).toBe('/work');
     // Descriptor 4 is not a preopen: the shim's answer.
     expect(wasi.fd_prestat_get!(4, 0)).toBe(ERRNO.BADF);
   });
@@ -126,7 +127,7 @@ describe("the run's working directory", () => {
   it('opens a file by its path, and reads it in place', () => {
     const { directory, reader } = directoryOf({ 'db/nt.nin': 'header-bytes', 'ids.txt': 'P1\nP2\n' });
     const g = guest(directory);
-    for (const name of ['db/nt.nin', './db/nt.nin', 'db//nt.nin', '/db/nt.nin', 'x/../db/nt.nin']) {
+    for (const name of ['db/nt.nin', './db/nt.nin', 'db//nt.nin', 'db/../db/nt.nin', 'db/./nt.nin']) {
       const opened = g.open(name);
       expect(opened.errno, name).toBe(ERRNO.SUCCESS);
       expect(opened.fd).toBeGreaterThanOrEqual(FILE_FD_BASE);
@@ -168,6 +169,13 @@ describe("the run's working directory", () => {
     expect(g.open('db').errno).toBe(ERRNO.ISDIR);
     // Out of the directory: WASI's capability, as the command line's sandbox would refuse.
     expect(g.open('../etc/passwd').errno).toBe(ERRNO.NOTCAPABLE);
+    // A path is looked up one name after another, as the OS looks it up: `..` after a name that is not there, or
+    // any name after a file, fails (review of D12a, low 4).
+    expect(g.open('x/../db/nt.nin').errno).toBe(ERRNO.NOENT);
+    expect(g.stat('x/..').errno).toBe(ERRNO.NOENT);
+    expect(g.open('db/nt.nin/../nt.nin').errno).toBe(ERRNO.NOTDIR);
+    expect(g.stat('db/nt.nin/x').errno).toBe(ERRNO.NOTDIR);
+    expect(g.stat('db/nt.nin/').errno).toBe(ERRNO.NOTDIR);
     const { fd } = g.open('db/nt.nin');
     expect(g.wasi.path_open!(fd, 0, 1024, 1, 0, RIGHT_FD_READ, 0n, 0, 2048)).toBe(ERRNO.NOTDIR);
     // No file of the directory is a link.

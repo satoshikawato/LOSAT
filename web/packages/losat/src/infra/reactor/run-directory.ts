@@ -1,11 +1,15 @@
 // The run's working directory as the engine sees it (docs/web/abi_v2.md §3; line WQA D12a, 2026-11-20): WASI's
-// preopened directory `.` (descriptor 3), read-only, that holds the files that the argv names, as the user gave
-// them (`DirectoryFile`: a BLAST database of `-db` with its volumes, `.nal`/`.pal`, `taxdb.*`, the lists of the
-// filters). The engine opens them by name, as the command line opens them in its working directory (the engine's
-// current directory is the root of WASI's paths, so `db/nt` and `/db/nt` are the same file), and reads them in place:
-// each read takes the bytes that it asks for from the file's Blob (`File.slice`) with `FileReaderSync`, so a file is
-// never copied whole into the Wasm memory or into the browser's storage. The Node host of LOSAT's tests gives the
-// engine the same view from the OS (LOSAT/tests/wasi_files.js, `preopens: { ".": cwd }`).
+// preopened directory `/work` (descriptor 3, `RUN_DIRECTORY`), read-only, that holds the files that the argv names,
+// as the user gave them (`DirectoryFile`: a BLAST database of `-db` with its volumes, `.nal`/`.pal`, `taxdb.*`, the
+// lists of the filters). The engine makes it its current directory and opens the files by name, as the command line
+// opens them in its working directory: `db/nt` is the file `db/nt` of the run, and an absolute name such as `/db/nt`
+// names a file outside it, where there is none (WASI's C library gives a path to the preopen whose name begins it,
+// so under a preopen `.` the names `db/nt` and `/db/nt` were one file; review of D12a, low 4). A path is looked up
+// one name after another, as the OS looks it up: a name after a file is ENOTDIR and a name after a missing one
+// ENOENT, `..` included. The engine reads the files in place: each read takes the bytes that it asks for from the
+// file's Blob (`File.slice`) with `FileReaderSync`, so a file is never copied whole into the Wasm memory or into the
+// browser's storage. The Node hosts of LOSAT's tests give the engine the same view from the OS
+// (LOSAT/tests/wasi_thread_worker.js, `preopens: { "/work": directory }`).
 //
 // LOSAT opens a database file once for a run (LOSAT/src/seqdb/file.rs: on WASI, a seek and a read under a lock) and
 // reads it from the search's threads. A descriptor that one thread opened must therefore be read on another: each
@@ -15,8 +19,10 @@
 // (thread-host.ts, `start`), and a File crosses to a worker without its bytes.
 import type { DirectoryFile } from '../../domain/run-files.js';
 
-/** The descriptor of the preopened directory `.`, the first that WASI's C library asks about. */
+/** The descriptor of the preopened run directory, the first that WASI's C library asks about. */
 export const PREOPEN_FD = 3;
+/** The run directory's name: the preopen's, which the engine makes its current directory (abi_v2.md §3). */
+export const RUN_DIRECTORY = '/work';
 /** The first descriptor of an open file of the directory: far from the shim's own (0-2 and the few it opens). */
 export const FILE_FD_BASE = 0x40000000;
 /** How many files of the directory may be open at once. */
@@ -171,7 +177,7 @@ export class RunDirectory {
 
   /**
    * The WASI functions of the directory in front of `base` (the shim's, which take every other descriptor): the
-   * preopen `.`, and the files that it opens.
+   * preopened run directory, and the files that it opens.
    */
   imports(base: WebAssembly.ModuleImports, memory: GuestMemory): WebAssembly.ModuleImports {
     const fallback = base as WasiImports;
@@ -187,10 +193,20 @@ export class RunDirectory {
       return new DataView(target.buffer, target.byteOffset, target.byteLength);
     };
     const pathAt = (pointer: number, length: number) => new TextDecoder().decode(bytes(pointer, length).slice());
-    /** The file (its index) or directory (-1) of a path of the directory, or an errno. */
+    /**
+     * The file (its index) or directory (-1) of a path of the directory, or an errno. Each name is looked up in the
+     * folder that the names before it give, as the OS looks a path up: a name (`..` too) after a file is ENOTDIR,
+     * after a name that is not there ENOENT; `..` past the directory is ENOTCAPABLE, as WASI gives it.
+     */
     const lookup = (path: string): { readonly file: number } | { readonly errno: number } => {
-      const names = pathNames(path);
-      if (names === undefined) return { errno: ERRNO_NOTCAPABLE };
+      const names: string[] = [];
+      for (const name of path.split('/')) {
+        const here = names.join('/');
+        if (names.length > 0 && !this.directories.has(here)) return { errno: this.byPath.has(here) ? ERRNO_NOTDIR : ERRNO_NOENT };
+        if (name === '' || name === '.') continue;
+        if (name !== '..') names.push(name);
+        else if (names.pop() === undefined) return { errno: ERRNO_NOTCAPABLE };
+      }
       const joined = names.join('/');
       const file = this.byPath.get(joined);
       if (file !== undefined) return { file };
@@ -256,13 +272,13 @@ export class RunDirectory {
       if (Number(fd) !== PREOPEN_FD) return fallback.fd_prestat_get!(fd, pointer);
       const out = view(Number(pointer), 8);
       out.setUint8(0, 0); // a directory
-      out.setUint32(4, 1, true); // the length of its name, "."
+      out.setUint32(4, RUN_DIRECTORY.length, true); // the length of its name
       return ERRNO_SUCCESS;
     };
     own.fd_prestat_dir_name = (fd, pointer, length) => {
       if (Number(fd) !== PREOPEN_FD) return fallback.fd_prestat_dir_name!(fd, pointer, length);
-      if (Number(length) < 1) return ERRNO_NAMETOOLONG;
-      bytes(Number(pointer), 1)[0] = 0x2e;
+      if (Number(length) < RUN_DIRECTORY.length) return ERRNO_NAMETOOLONG;
+      bytes(Number(pointer), RUN_DIRECTORY.length).set(new TextEncoder().encode(RUN_DIRECTORY));
       return ERRNO_SUCCESS;
     };
     own.path_open = (dirfd, dirflags, path, pathLength, oflags, rightsBase, rightsInheriting, fdflags, opened) => {

@@ -77,8 +77,9 @@ function initializeWasiThreadInstance(wasi, instance) {
   wasi.initialize({ exports: { memory: instance.exports.memory } });
 }
 
-// `directory`: a LOSAT Web reactor's run directory, preopened as "." instead of "/" (docs/web/abi_v2.md
-// §3; a search of -db opens its database there by the argv's names, line WQA D12a, 2026-11-20).
+// `directory`: a LOSAT Web reactor's run directory, preopened as "/work" instead of "/" (docs/web/abi_v2.md
+// §3, web/adapter/src/run.rs RUN_DIRECTORY, which the reactor makes its current directory; a search of -db
+// opens its database there by the argv's names, line WQA D12a, 2026-11-20).
 function createWasi(args, directory) {
   return new WASI({
     version: "preview1",
@@ -98,7 +99,7 @@ function createWasi(args, directory) {
 // Preserve lexical filenames at the recorded host cwd.
 // Root preopen permits absolute paths; PWD initializes the guest cwd for
 // relative filenames through std::env::set_current_dir, without rewriting argv.
-    preopens: directory === undefined ? { "/": "/" } : { ".": directory },
+    preopens: directory === undefined ? { "/": "/" } : { "/work": directory },
   });
 }
 

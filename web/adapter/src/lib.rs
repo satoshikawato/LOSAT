@@ -29,6 +29,7 @@ fn last_error() -> &'static Mutex<Vec<u8>> {
 
 /// Runs an export body: records its error, or clears the last error on success.
 fn guarded(body: impl FnOnce() -> Result<i32, String>) -> i32 {
+    run::enter_run_directory();
     let result = body();
     let mut error = last_error().lock().expect("last error");
     match result {

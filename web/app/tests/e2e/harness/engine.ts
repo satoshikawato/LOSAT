@@ -593,13 +593,20 @@ export interface DatabaseResult {
  * Searches of `-db` through one EngineGateway and Data worker, in order (line WQA D12a, 2026-11-20): the query
  * indexed by the Data worker as the application indexes it, the database's files given to the run as Files
  * (`EngineRunRequest.files`), which the engine reads in place on every thread. The outfmt 6 that the run stored.
+ * With `picked`, the selector of an `<input type=file>` whose files the test set (Playwright's `setInputFiles`), the
+ * run's files are the user's picked Files, read from the disk (each by its name, the last part of its path), as a
+ * pick in the application gives them; otherwise Files made from the server's bytes.
  */
-export async function databaseSearches(list: readonly DatabaseSearch[]): Promise<DatabaseResult[]> {
+export async function databaseSearches(list: readonly DatabaseSearch[], picked?: string): Promise<DatabaseResult[]> {
   if (ENGINE_ASSETS === null) throw new Error('the harness was built without the engine (LOSAT_WEB_REACTORS)');
   const data = startDataWorker();
   const engine = new WasmEngine({ assets: ENGINE_ASSETS, control: data });
   const files = new Map<string, Promise<File>>();
+  const pick = picked === undefined ? undefined : [...(document.querySelector<HTMLInputElement>(picked)?.files ?? [])];
   const file = (path: string) => {
+    const name = path.slice(path.lastIndexOf('/') + 1);
+    const chosen = pick?.find((candidate) => candidate.name === name);
+    if (chosen !== undefined) return Promise.resolve(chosen);
     let cached = files.get(path);
     if (cached === undefined) {
       cached = fetchFile({ url: `/__files/LOSAT/${path}`, name: path.slice(path.lastIndexOf('/') + 1) });

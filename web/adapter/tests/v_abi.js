@@ -54,8 +54,9 @@
 //
 // A search with `"database"` (`-db`) has no subject: the run takes subject handle 0 and the engine opens
 // the database and the lists of its filters by the argv's names in the run's working directory, which
-// the host preopens as `.` (abi_v2.md §3): the search's directory, as the CLI runs there (line WQA D12a,
-// 2026-11-20). Each engine runs it on an instance whose `.` is that directory; the threaded engine's
+// the host preopens as `/work`, the reactor's current directory (abi_v2.md §3): the search's directory, as
+// the CLI runs there (line WQA D12a, 2026-11-20). Each engine runs it on an instance whose `/work` is that
+// directory; the threaded engine's
 // threads share the table of the files it opens (LOSAT/tests/wasi_files.js), as the browser host's
 // threads share theirs (web/packages/losat/src/infra/reactor/run-directory.ts).
 //
@@ -330,9 +331,9 @@ function registerTaxidCounts(reactor, counts, search) {
   return { name: WEB_WINDOW_MASKER_PATH, held: registered ? "registered" : "kept" };
 }
 
-// The serial reactor; `directory`, the run's working directory that it preopens as `.` (a search of -db).
+// The serial reactor; `directory`, the run's working directory that it preopens as `/work` (a search of -db).
 async function openSerial(wasmPath, directory) {
-  const wasi = new WASI({ version: "preview1", returnOnExit: true, args: [], env: {}, ...(directory === undefined ? {} : { preopens: { ".": directory } }) });
+  const wasi = new WASI({ version: "preview1", returnOnExit: true, args: [], env: {}, ...(directory === undefined ? {} : { preopens: { "/work": directory } }) });
   let reactor;
   const imports = {
     wasi_snapshot_preview1: unsignedWasiImports(wasi.wasiImport),
@@ -545,7 +546,7 @@ function checkHits(streams, program, label, queryIds, shownIds, database = false
   const out6 = streams.get(6) || Buffer.alloc(0), out0 = streams.get(0) || Buffer.alloc(0);
   const rows = out6.toString().split("\n").filter(Boolean);
   assert.equal(records.length, rows.length, `${label}: one record per outfmt 6 row`);
-  const ranks = new Map();
+  const ranks = new Map(), subjectOf = new Map();
   records.forEach((record, index) => {
     assert.equal(record.index, index, `${label}: index`);
     const rank = ranks.get(record.q_idx) || 0;
@@ -562,8 +563,14 @@ function checkHits(streams, program, label, queryIds, shownIds, database = false
     if (index > 0) assert.ok(record.q_idx >= records[index - 1].q_idx, `${label}: q_idx order at HSP ${index}`);
     const id = queryIds[record.q_idx];
     if (/^[A-Za-z_]+[0-9]+(\.[0-9]+)?$/.test(id)) assert.equal(fields[0], id, `${label}: q_idx of HSP ${index}`);
-    if (shownIds) {
-      assert.equal(fields[0], shownIds.query[record.q_idx], `${label}: the shown query ID of HSP ${index}`);
+    if (shownIds) assert.equal(fields[0], shownIds.query[record.q_idx], `${label}: the shown query ID of HSP ${index}`);
+    if (database) {
+      // A subject of a database is no registered record: `s_idx` is its OID in the database (abi_v2.md §8),
+      // and every row of one OID shows that subject's ID.
+      const shown = subjectOf.get(record.s_idx) ?? fields[1];
+      assert.equal(fields[1], shown, `${label}: the subject ID of OID ${record.s_idx} at HSP ${index}`);
+      subjectOf.set(record.s_idx, shown);
+    } else if (shownIds) {
       assert.equal(fields[1], shownIds.subject[record.s_idx], `${label}: the shown subject ID of HSP ${index}`);
     }
     // A subject beyond the alignments that outfmt 0 shows (for example BLASTN's 250) has
@@ -815,7 +822,7 @@ async function main() {
     const subjects = new Map(); // "program subject" -> handle, kept across runs
     const counts = new Map(); // the -window_masker_db value or taxid file name -> { handle, file }, kept across runs
     let countsRegistered = 0, countsKept = 0;
-    const databases = new Map(); // a -db search's directory -> the engine's instance whose "." it is
+    const databases = new Map(); // a -db search's directory -> the engine's instance whose "/work" it is
     for (const search of all) {
       const program = search.program;
       if (search.database && !databases.has(search.cwd)) databases.set(search.cwd, await engine.open(search.cwd));

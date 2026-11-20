@@ -299,7 +299,11 @@ export class EngineRuntime {
         ...(runFiles.length === 0 ? {} : { runFiles }),
       };
     } finally {
-      if (abi.stoppedBy === undefined) release();
+      if (abi.stoppedBy === undefined) {
+        release();
+        // The run's files are let go: an idle worker keeps no File of the user's (review of D12a, low 6).
+        loaded.directory.open([]);
+      }
       // A stopped threaded instance keeps its thread workers and the keeper: threads of the
       // search may still run and grow the memory. They count as a use, so the Gateway, which
       // ends the runtime on the stop, ends this worker once the keeper has grown the memory

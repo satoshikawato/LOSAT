@@ -292,6 +292,26 @@ pub fn writes_archive(words: &[&str]) -> bool {
     })
 }
 
+/// The run's working directory: the name under which the host preopens it (docs/web/abi_v2.md §3),
+/// and the module's current directory. A relative name of the argv (`-db db/nt`) is a file of it, as
+/// on the command line run from that directory; an absolute one (`/db/nt`) names a file outside it,
+/// where the module has none, as the command line has none at its root. (Under a preopen `.` and the
+/// current directory `/`, WASI's C library gives both names to the same file; review of D12a, low 4.)
+pub const RUN_DIRECTORY: &str = "/work";
+
+/// Makes [`RUN_DIRECTORY`] the module's current directory, once per instance, before its first call
+/// that may read a file. An instance whose host preopened no run directory keeps `/`: its runs find
+/// no file, as the command line finds none that is not there.
+pub fn enter_run_directory() {
+    #[cfg(target_os = "wasi")]
+    {
+        static ENTERED: std::sync::Once = std::sync::Once::new();
+        ENTERED.call_once(|| {
+            let _ = std::env::set_current_dir(RUN_DIRECTORY);
+        });
+    }
+}
+
 /// The database of the arguments `command` (`-db NAME`), which the run opens by name as the command
 /// line opens it, from the files of the run's working directory that the host gives the engine
 /// (docs/web/abi_v2.md §3, §4; line WQA D12a, 2026-11-20). `None` for a search of `-subject`.
@@ -2532,6 +2552,10 @@ mod tests {
             format!("a run of -db takes no subject handle: give 0, not {subject}")
         );
         crate::store::release(subject).unwrap();
+        // Its query handle is checked as any run's: 0 is no query (review of D12a, low 1: the
+        // check skipped every handle 0 of a -db run, and the run stopped the instance).
+        let no_query = crate::store::with_inputs(Program::Blastp, 0, 0, &words, |_, _| ());
+        assert_eq!(no_query.unwrap_err(), "0 is not a registered query handle");
         // A database that is not there: the CLI's error, from the run.
         let error = crate::store::with_inputs(Program::Blastp, query, 0, &words, |queries, _| {
             run(&words, queries, &[])

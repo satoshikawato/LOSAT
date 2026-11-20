@@ -90,6 +90,8 @@ function start(command: ThreadStart): void {
     finish(SLOT_FAILED);
     return;
   }
+  // The thread has returned: the worker keeps no File of the run while it waits for the next (review of D12a, low 6).
+  directory?.take([]);
   if (finish(SLOT_PREPARING)) void prepare();
 }
 

@@ -4,10 +4,15 @@
 // and on the threaded one at 4 threads, whose threads read the descriptors that another thread opened. Outfmt 6 is
 // NCBI BLAST+ 2.17.0's frozen bytes (LOSAT/tests/fixtures/db_search). Each search logs its time and the engine's
 // memory after it; BLASTP's and BLASTX's rows run twice more on one thread at the end, when the browser has compiled
-// their code, for the time of a search without the compilation (line WQA D12a's measurement, P4).
+// their code, for the time of a search without the compilation (line WQA D12a's measurement, P4). Two more tests give
+// the run the user's picked Files (an `<input type=file>` that Playwright sets from the disk), which the Engine worker
+// and the thread workers read from the disk with FileReaderSync, and one of them changed after its pick, which the
+// browser no longer reads (review of D12a, low 5).
 import { createHash } from 'node:crypto';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { appendFileSync, copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import type { Page } from '@playwright/test';
 import { expect } from '@playwright/test';
 import type { ProgramId } from 'losat/domain';
 import type { DatabaseResult, DatabaseSearch } from './harness/engine';
@@ -20,6 +25,9 @@ test.skip(ENGINE === undefined, NO_ENGINE_REASON);
 test.setTimeout(600_000);
 
 const LOSAT = join(REPOSITORY, 'LOSAT');
+// LOSAT's error for a database file whose read fails (seqdb's SeqDbError::Io: the file's path, then the C library's
+// words for the EIO that the host gives for the browser's NotReadableError), as the command line reports a read error.
+const CHANGED_FILE_ERROR = /tests\/db_search\/paja\.psq: I\/O error/;
 const ROWS = ['db.blastn.mega.6', 'db.d1.6', 'db.blastx.default.6', 'db.tblastn.default.6', 'db.tblastx.default.6', 'db.sl.bp.bsl.6', 'db.tf.bp.nosql.6'];
 
 interface Row {
@@ -90,5 +98,57 @@ test('-db searches read the database in place and write NCBI frozen outfmt 6, on
       `${label}: run ${Math.round(result.runMs ?? 0)} ms, search ${Math.round(result.totalMs)} ms, ` +
         `engine memory after ${((result.runtime?.memory?.linearBytesAfter ?? 0) / 2 ** 20).toFixed(1)} MiB`,
     );
+  }
+});
+
+/** A file input of the harness page that holds the picked files, `#db-pick`, set from the disk. */
+async function pick(page: Page, paths: readonly string[]): Promise<void> {
+  await page.evaluate(() => {
+    if (document.querySelector('#db-pick') !== null) return;
+    const input = Object.assign(document.createElement('input'), { type: 'file', multiple: true, id: 'db-pick' });
+    document.body.append(input);
+  });
+  await page.setInputFiles('#db-pick', [...paths]);
+}
+
+test("-db searches read the user's picked Files from the disk, in the Engine worker and in the thread workers", async ({ context, browserName }) => {
+  const page = await openHarness(context, server);
+  const rows = manifestRows().filter((row) => row.id === 'db.d1.6' || row.id === 'db.blastx.default.6');
+  const list = [1, 4].flatMap((threads) => rows.map((row) => searchOf(row, threads)));
+  const files = [...new Set(list.flatMap((search) => search.files))];
+  // Each name once: the harness finds a picked File by its name.
+  expect(new Set(files.map((path) => path.slice(path.lastIndexOf('/') + 1))).size).toBe(files.length);
+  await pick(page, files.map((path) => join(LOSAT, path)));
+  const results: DatabaseResult[] = await page.evaluate((searches) => window.losatHarness!.engine.databaseSearches(searches, '#db-pick'), list);
+  for (const [i, result] of results.entries()) {
+    const label = `${browserName} picked ${result.id} n=${result.threads}`;
+    expect.soft(result.error, label).toBeUndefined();
+    const frozen = createHash('sha256').update(readFileSync(join(LOSAT, 'tests/fixtures/db_search', `${result.id}.out`))).digest('hex');
+    expect.soft(result.sha256, `${label}: outfmt 6 = NCBI frozen`).toBe(frozen);
+    expect.soft(result.runtime?.path, label).toBe(list[i]!.threads === 1 ? 'serial' : 'threaded');
+  }
+});
+
+test('a database file changed after its pick fails the run with the error of a file that cannot be read', async ({ context, browserName }) => {
+  const page = await openHarness(context, server);
+  const row = manifestRows().find((candidate) => candidate.id === 'db.d1.6')!;
+  const search = searchOf(row, 1);
+  // A copy of the folder, so that the repository's files stay as they are.
+  const copy = mkdtempSync(join(tmpdir(), 'losat-e2e-pick-'));
+  try {
+    const paths = search.files.map((path) => {
+      const target = join(copy, path);
+      mkdirSync(dirname(target), { recursive: true });
+      copyFileSync(join(LOSAT, path), target);
+      return target;
+    });
+    await pick(page, paths);
+    // The sequences of the database change after the pick: the browser's File no longer reads them.
+    appendFileSync(join(copy, `${row.db}.psq`), Buffer.from([0]));
+    const [result] = await page.evaluate((searches) => window.losatHarness!.engine.databaseSearches(searches, '#db-pick'), [search]);
+    console.log(`${browserName} changed ${search.id}: ${result!.error ?? `ran, outfmt 6 ${result!.sha256}`}`);
+    expect(result!.error, browserName).toMatch(CHANGED_FILE_ERROR);
+  } finally {
+    rmSync(copy, { recursive: true, force: true });
   }
 });

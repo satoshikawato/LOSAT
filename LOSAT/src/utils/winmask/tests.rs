@@ -615,29 +615,40 @@ fn a_binary_data_part_of_minus_8_bytes_reads_the_trailer_after_the_header() {
 }
 
 #[test]
-fn binary_lookup_probes_as_libstdcxx_lower_bound() {
-    // Units out of order: AC (1), AT (3), CC (5) stored as 5, 1, 3. The halving loop finds
-    // AT, misses AC and CC.
+fn binary_lookup_of_units_out_of_order_is_ncbis() {
+    // A binary file's units are not checked for order: `get_info` finds what NCBI's
+    // `lower_bound` finds (`utils::lower_bound`), here 50 but neither 40, 60 nor 0. Units of 4
+    // letters, each smaller than its reverse complement.
     let w = |x: u32| x.to_ne_bytes().to_vec();
-    let file = [
-        w(0),
-        w(2),
-        w(5),
-        w(10),
-        w(1),
-        w(20),
-        w(3),
-        w(30),
-        w(1),
-        w(2),
-        w(3),
-        w(4),
-    ]
-    .concat();
-    let counts = read_counts(file).unwrap();
-    assert_eq!(counts.true_count(3).unwrap(), 30);
-    assert_eq!(counts.true_count(1).unwrap(), 0);
-    assert_eq!(counts.true_count(5).unwrap(), 0);
+    let mut file = vec![w(0), w(4)];
+    for (unit, count) in [(40, 1), (60, 2), (0, 3), (50, 4)] {
+        file.push(w(unit));
+        file.push(w(count));
+    }
+    file.extend([w(1), w(2), w(3), w(4)]);
+    let counts = read_counts(file.concat()).unwrap();
+    for unit in [40, 60, 0, 50] {
+        assert!(unit < reverse_complement(unit, 4));
+    }
+    let found: Vec<u32> = [40, 60, 0, 50]
+        .iter()
+        .map(|&unit| counts.true_count(unit).unwrap())
+        .collect();
+    assert_eq!(found, [0, 0, 0, 4]);
+    // Units 0, 0, 1, 2, 0 (observed with `observe_lower_bound one`): unit 1 finds the count at
+    // index 2 and unit 2 finds no entry, where `slice::partition_point` would find index 3.
+    let mut file = vec![w(0), w(4)];
+    for (unit, count) in [(0, 1), (0, 2), (1, 3), (2, 4), (0, 5)] {
+        file.push(w(unit));
+        file.push(w(count));
+    }
+    file.extend([w(1), w(2), w(3), w(4)]);
+    let counts = read_counts(file.concat()).unwrap();
+    for unit in [0, 1, 2] {
+        assert!(unit < reverse_complement(unit, 4));
+    }
+    assert_eq!(counts.true_count(1).unwrap(), 3);
+    assert_eq!(counts.true_count(2).unwrap(), 0);
 }
 
 #[test]

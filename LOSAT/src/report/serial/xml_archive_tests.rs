@@ -680,3 +680,20 @@ impl<E: Encoder> Encoder for Flushing<'_, E> {
         self.inner.error()
     }
 }
+
+// PD-LOSAT-NCBI-DEFECTS approved exception 17, Int8 -2^63 written as digits (review C of line RG
+// D1a-4, SF1): `PutInt8` of
+// -2^63, which NCBI's `COStreamBuffer` writes as `-0` (a signed overflow, strbuffer.cpp:1002-1010),
+// is its digits in both encoders of the archive and of the reports' XML.
+#[test]
+fn a_big_integer_of_minus_two_to_the_63_is_its_digits() {
+    for value in [i64::MIN, i64::MIN + 1, -1, 0, i64::MAX] {
+        let text = archive_text(|enc| enc.big_int(value));
+        assert_eq!(text, value.to_string());
+        let mut buf = Vec::new();
+        let mut enc = super::asn_text::AsnTextEncoder::new(&mut buf);
+        enc.big_int(value);
+        assert_eq!(enc.error(), None);
+        assert_eq!(String::from_utf8(buf).unwrap(), value.to_string());
+    }
+}

@@ -142,8 +142,8 @@ Strategy files:
 
 | Option or value | What happens |
 | :--- | :--- |
-| `-task rmblastn` | Refused. |
-| `-reward 0` | Refused (exit status 1). The message is shown below the table. |
+| `-reward 0` with a penalty other than 0 | Refused (exit status 1). The message is shown below the table. `-reward 0 -penalty 0` (the scores of `-task rmblastn`) runs. |
+| `-reward 0 -penalty 0` with `-task megablast` and its greedy extension (without `-no_greedy`; also with `-ungapped` when the gap costs are 0 and 0) | Refused. NCBI divides by zero (exit status 136) or does not finish. |
 | `-ungapped` with `-outfmt 17` (SAM) | Refused. |
 | `-filtering_db`, `-index_name` | Refused. |
 | `-use_index true` with a megablast search of a database that has a MegaBLAST index (made by `makembindex`) | Refused. |
@@ -156,10 +156,10 @@ Strategy files:
 | `-db_soft_mask` or `-db_hard_mask` on a volume with masks but without the algorithm, or with only the big-endian mask file | Refused. |
 | `-window_masker_taxid` with a counts file whose unit size is 17 to 251 | Refused. NCBI's result is undefined. |
 
-The message for `-reward 0` is:
+The message for `-reward 0` with the default penalty of `-task megablast` is:
 
 ```text
-Error: a reward of 0 (NCBI BLAST+'s 16-bit value; 0 is NCBI's matrix scoring of rmblastn, otherwise no query is valid) is not supported by LOSAT's BLASTN
+Error: a reward of 0 with a penalty of -2 (NCBI BLAST+'s 16-bit values), for which no query has Karlin-Altschul values, is not supported by LOSAT's BLASTN; reward 0 needs penalty 0 (matrix-only scoring, as -task rmblastn)
 ```
 
 <details>
@@ -311,16 +311,20 @@ These refusals apply to every search program that reads databases.
 | Alias-file keys `GILIST`, `TILIST`, `SEQIDLIST`, `TAXIDLIST`, `OIDLIST`, `MEMB_BIT`, `MASKLIST` and `OID_MASK_TYPE` | Refused. They select sequences by a list, a mask or a membership bit. |
 | Databases of a `-db` list whose total lengths sum past 64 bits (`-outfmt` 0 to 5 and 13 to 16) | Refused. NCBI's arithmetic overflows. |
 | Databases of a `-db` list whose numbers of sequences sum past 32 bits (`-outfmt` 5) | Refused. |
-| A total length of exactly 9,223,372,036,854,775,808 in BLAST XML and XML2 (`-outfmt` 5, 14 and 16) | Refused. NCBI writes `-0`. |
-| `rpsblast` and `rpstblastn` with the alias keys `FIRST_OID`, `LAST_OID`, `STATS_NSEQ`, `STATS_TOTLEN`, `MIN_SEQ_LENGTH`, or a `LENGTH` of 0 or of 2^63 or more in a profile database | Refused for now. |
+| `rpsblast` and `rpstblastn`: a reported hit of a profile that an alias file's `FIRST_OID` and `LAST_OID` leave out | Refused. NCBI's search ignores the two keys, and its report does not find the profile: it writes `Unknown` or stops with a null pointer exception. A profile whose id an included copy of its record holds is written as that copy, as NCBI finds it. |
 
-`TITLE`, `DBLIST`, `NSEQ`, `LENGTH`, `STATS_NSEQ`, `STATS_TOTLEN`, `MIN_SEQ_LENGTH`, `FIRST_OID` and `LAST_OID` work as in NCBI BLAST+, and `VDBLIST` and `MAX_SEQ_LENGTH` are ignored, as NCBI's reader ignores them.
+`TITLE`, `DBLIST`, `NSEQ`, `LENGTH`, `STATS_NSEQ`, `STATS_TOTLEN`, `MIN_SEQ_LENGTH`, `FIRST_OID` and `LAST_OID` work as in NCBI BLAST+, and `VDBLIST` and `MAX_SEQ_LENGTH` are ignored, as NCBI's reader ignores them. In the profile databases of `rpsblast` and `rpstblastn` they act as in NCBI's search of such a database: one volume is searched with all its keys, and each of several volumes with its own length, count and shortest length under the database's `LENGTH` or `STATS_TOTLEN` and `NSEQ` or `STATS_NSEQ` where these are above 0.
 
 <details>
 <summary>Rare inputs</summary>
 
-- `blastn` and `tblastx` refuse an alias file's `NSEQ 0`, and its `LENGTH` or `STATS_TOTLEN` without `NSEQ` or `STATS_NSEQ` over volumes without sequences. NCBI crashes on them.
+- `blastn` and `tblastx` refuse an alias file's `NSEQ 0`, and its `LENGTH` or `STATS_TOTLEN` without `NSEQ` or `STATS_NSEQ` over volumes without sequences. NCBI crashes on them where a query is searched.
 - `blastp`, `blastx`, `tblastn` and `psiblast` refuse the same cases with `-searchsp` or `OLD_FSC`. `blastx` also refuses them with `-ungapped`.
+- A run of such a database whose queries have no letters to search is reported as in NCBI by `blastp`, `blastx` and `psiblast`. `blastn`, `tblastn` and `tblastx` refuse it.
+- `rpsblast` and `rpstblastn`: an alias file's `LENGTH` and `NSEQ` over one volume also set the length that NCBI's search covers, their sum, which can be shorter or longer than the profiles. Refused: a sum above 2,147,483,647 (NCBI frees the profiles twice and aborts), or one so long that NCBI's diagonal table passes 2^30 entries (its loop never ends).
+- A sum shorter than the profiles is refused where two gapped alignments of a query (of a frame for `rpstblastn`) start past it plus one. NCBI's interval tree then splits without end. With one such alignment the search runs as in NCBI.
+- A sum longer than the profiles is refused where an ungapped extension runs past the row after the last profile. This needs an X-drop above the profiles' delimiter scores and a sum of the profiles plus 2 or more (NCBI reads past its score matrix). At plus 1 the search runs as in NCBI where that row lies within the `.rps` file's last memory page, and is refused where it lies past it (NCBI reads past the file's mapping).
+- `rpsblast` and `rpstblastn` with `-searchsp` or `OLD_FSC` refuse an `NSEQ 0` over one volume where a query is searched (NCBI crashes). A run of queries without a letter to search is reported as in NCBI.
 
 </details>
 
@@ -328,16 +332,19 @@ These refusals apply to every search program that reads databases.
 
 | Option or value | What happens |
 | :--- | :--- |
-| `-in_msa`, `-msa_master_idx`, `-ignore_msa_master`, `-phi_pattern` | Refused: not yet supported. |
+| `-phi_pattern` | Refused: not yet supported. |
+| `-in_msa` with an alignment in FASTA, PHYLIP, NEXUS, Sequin or MultAlin format | Refused: not yet supported. Only Clustal alignments are read. |
+| `-in_msa` with a master sequence from which no ungapped Karlin-Altschul parameters can be computed (X, O, `*` or lower-case x alone, or X with gaps: no residue that the parameters can be computed from), or with `-matrix IDENTITY` | Refused. NCBI crashes. |
+| `-in_msa` with a master sequence that is the start of a longer sequence above it in the alignment (`-msa_master_idx` names it) | Refused. NCBI reads and writes past its alignment buffers there, and its result depends on the memory allocator. Put the master sequence above the longer one in the file. |
 | `-html` | Refused: not yet supported. |
 | `-best_hit_overhang`, `-best_hit_score_edge`, `-subject_besthit` | Refused, as in `blastp`. |
 | `-use_sw_tback` | Refused. |
-| `-outfmt` other than 0, 6, 7, 10 and 20 | Refused: not yet supported. With `-in_pssm`, only 0, 6 and 7 work. |
+| `-outfmt` other than 0, 6, 7, 10 and 20 | Refused: not yet supported. With `-in_pssm` or `-in_msa`, only 0, 6 and 7 work. |
 | `-threshold` with the compressed lookup table | Refused, as in `blastp`. |
 | A hit list size that overflows NCBI's 32-bit integer | Refused, as in `blastp`. |
 | A gapped X-drop that overflows NCBI's kernels | Refused, as in `blastp`. This includes later rounds, and `-in_pssm` with the PSSM's Lambda. |
 | A `-subject` set whose sequences all have no letters | Refused. NCBI's `psiblast` crashes; `blastp` runs it. |
-| `-in_pssm` with a matrix or gap cost other than BLOSUM62 11/1 | Refused. |
+| `-in_pssm` or `-in_msa` with a matrix or gap cost other than BLOSUM62 11/1 | Refused. |
 | `-in_pssm` with a binary or XML PSSM | Refused. |
 | `-out_pssm` or `-out_ascii_pssm` with a file that cannot be written | Refused. |
 | `-out_pssm` or `-out_ascii_pssm` into the standard output, the standard error or the `-out` file | Refused. |
@@ -414,7 +421,7 @@ A PSSM given with `-in_pssm` is refused when its input or content is one of thes
 | A profile database whose volumes differ in matrix or gap costs | Refused. |
 | An empty or inconsistent `.rps` or `.loo` file, or an inconsistent `.aux` file | Refused. NCBI reads past its buffers or crashes. |
 | `rpsblast` in the library API and the Web engine | Refused. |
-| The alias-file keys named in Alias files above | Refused for now. |
+| The profile-database cases named in Alias files above | Refused. |
 
 NCBI's errors for a missing `.aux`, `.loo` or `.rps` file, a wrong magic number or an empty `.aux` come as in NCBI (exit status 3).
 
@@ -443,7 +450,7 @@ NCBI's errors for a missing `.aux`, `.loo` or `.rps` file, a wrong magic number 
 | `-subject` | Refused by the parser (exit status 2; NCBI prints its usage). It is not an `rpstblastn` option. |
 | `-query_gencode 32` | Refused (exit status 2). |
 | `rpstblastn` in the library API and the Web engine | Refused. |
-| The database refusals of `rpsblast` above, and its alias-file keys | Refused. |
+| The database refusals of `rpsblast` above, with its alias-file cases | Refused. |
 
 NCBI's errors for a missing `.aux`, `.loo` or `.rps` file and for an empty `.aux` come as in NCBI (exit status 3). The refusals of options and databases come before the first byte of output, as `rpsblast`'s do, also for queries without a valid frame, which NCBI does not search.
 
@@ -603,7 +610,7 @@ error: the NCBI BLAST+ option -randomize is not supported by LOSAT's makeblastdb
 ## On the list for a later release
 
 - The programs `deltablast`, `makeprofiledb`, `blast_formatter` and `windowmasker`.
-- `psiblast -in_msa` (with `-msa_master_idx` and `-ignore_msa_master`) and `-phi_pattern`.
+- `psiblast -phi_pattern`, and `psiblast -in_msa` with an alignment that is not in Clustal format.
 - The `psiblast` output formats other than `0`, `6`, `7`, `10` and `20` (with `-in_pssm`: `0`, `6`, `7`).
 - The `rpsblast` output formats other than `0`, `6`, `7` and `10`, and the `rpstblastn` ones other than `0` to `4`, `6`, `7` and `10`. Until then, `rpsbproc` reads the `-outfmt 11` archives that NCBI's `rpsblast` and `rpstblastn` write.
 - `-html`.

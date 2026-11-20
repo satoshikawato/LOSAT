@@ -17,6 +17,26 @@ FASTA files:
   reads the stored O (26), which is not the X the query holds for its own O, so `q_o` against `s_o` is not
   "near identical", the subject is SEG-filtered and scores 266 bits; against `s_x` it scores 307 (and
   `-subject` gives 307 for both).
+- `oseed.faa` / `oseed_q.faa` (rows `db.oseed.*`, line NP item DBO): `oseed_o`, 20 V, `AOA`, 10 V, `AOA`, 20 V, and
+  `oseed_x`, the same with X; the queries `q_o`, `q_x` and `q_ox` are the same with I for V and O, X, or O then X in the
+  two words. A query word `AXA` (the query's O is read as X) scores 7 against itself with BLOSUM62, under the threshold
+  11, so NCBI's lookup table holds it under its own letters only: it finds the stored `AXA` of `oseed_x` and not the
+  stored `AOA` of `oseed_o`, which it would meet only as a neighbour (O scores as X). At `-threshold 7` (`db.oseed.t7.6`)
+  it is a neighbour of `AOA` and both subjects are found; with words of 6 (`db.oseed.w6.6`) the compressed alphabet
+  has no letter for O or X. `oseed_bx_q.fna` is `q_x` as DNA (ATT for I, GCT for A, NNN for X), the BLASTX query of
+  `db.oseed.bx.6`.
+- `oreal.faa` / `oreal_q.faa` (row `db.oreal.psi.6`, line NP item DBO): four proteins of `LOSAT/tests/fasta/AP027132.faa`
+  (records `a_BDV02837.1`, `a_BDV02907.1`, `a_BDV02938.1`, `a_BDV02956.1`) with 2 % of their letters replaced by O, X or U, and a protein of
+  `AP027131.faa` (`BDV02481.1_x`) with 3 % replaced by X (a fixed pseudo-random generator; the set was cut down from 1,116
+  such proteins while NCBI's result stayed apart from that of a search that reads a stored O as X). In PSIBLAST's
+  iterations 2 and 3 the PSSM scores a stored O with its own score for O (`BLAST_SCORE_MIN` at a position that has
+  aligned sequences, the matrix's score of X at one that has none), not with its score for X.
+- `opssm.faa` (row `db.opssm.inpssm.6`, line NP item DBO): `opssm_o`, 40 random letters, 12 O and 40 random letters (a
+  fixed pseudo-random generator), and `opssm_x`, the same with X. The row's `-in_pssm` query
+  `LOSAT/tests/fixtures/pssm/dbo_qx_o9.asn.gz` is NCBI's `-out_pssm` of `psiblast -query` `q_x` of `oseed_q.faa`
+  `-db oseed -num_iterations 2 -comp_based_stats 0`, with the score for O set to 9 at every position (the other scores
+  and the frequency ratios as NCBI wrote them): NCBI finds the 12 stored O at every query offset, which a search that
+  reads them as X (score -1) does not.
 - `o_stored_bx_q.fna`: `s_x` back-translated with its twelve X as `NNN` codons, the BLASTX query of `db.o_stored.bx.8`
   (BLASTX reads the stored O of `s_o` as stored, 154 identities; `-subject o_stored.faa` reads it as X, 166, row
   `pyl.blastx.ostored.8` of `outfmt0_manifest.tsv`).
@@ -171,6 +191,12 @@ makeblastdb also writes was deleted). Run from `LOSAT/`:
         -title "PajaWSV proteins" -blastdb_version 4
     makeblastdb -in tests/db_search/o_stored.faa -dbtype prot -out tests/db_search/o_stored \
         -title "stored O against the query's X" -blastdb_version 4
+    makeblastdb -in tests/db_search/oseed.faa -dbtype prot -out tests/db_search/oseed \
+        -title "stored O and X in words under the threshold" -blastdb_version 4
+    makeblastdb -in tests/db_search/oreal.faa -dbtype prot -out tests/db_search/oreal \
+        -title "four proteins with stored O, X and U" -blastdb_version 4
+    makeblastdb -in tests/db_search/opssm.faa -dbtype prot -out tests/db_search/opssm \
+        -title "12 stored O, and X, between random letters" -blastdb_version 4
     makeblastdb -in tests/db_search/vol2.faa -dbtype prot -out tests/db_search/vol2_nophr \
         -title "two volumes, the second without its header file" -blastdb_version 4 -max_file_sz 128B
     rm tests/db_search/vol2_nophr.01.phr
@@ -1528,14 +1554,32 @@ most 9 in BLOSUM62).
   each tile) and `wide.fna` (their back-translation, `build_nq.py`, seed 21).
 - `db_search_fixtures.py` runs a row whose `db` cell is `rps-gz:NAME[+NAME2][!EXT][!EXT=FILE][@ALIAS]` with the files
   `rps/NAME.*.gz` inflated into a fresh directory (without `NAME.EXT`, or with `rps/FILE` in its place, inflated when `FILE`
-  ends in `.gz`), `BLASTDB` set
-  to that directory and `-db "NAME NAME2"`; with `@ALIAS` the alias file `rps/ALIAS.pal` is copied beside them and the
-  run searches `-db ALIAS`. A row whose `covers` cell has `path: {db_dir}` keeps that directory as
+  ends in `.gz`), `BLASTDB` set to that directory and `-db "NAME NAME2"` (a name `DIR/NAME` has its files inflated into
+  the subdirectory `DIR`: a copy of a volume under its own base name, line RG D1a-4 fix 2); with `@ALIAS` the alias file
+  `rps/ALIAS.pal` is copied beside them and the run searches `-db ALIAS`. A row whose `covers` cell has `path: {db_dir}` keeps that directory as
   `{db_dir}` in the frozen bytes (NCBI's RPS errors print the volume's canonical path).
-- Alias files (line RG, D1a-3 review 7 S1, rows `db.rps.rej.l0`, `db.rps.rej.l2p63p1`, `db.rpstbn.rej.l0`,
-  `db.rpstbn.rej.l2p63p1`), written by hand: `rps/l0rps.pal` (`TITLE t`, `DBLIST rps_mini`, `LENGTH 0`) and
-  `rps/l2p63p1rps3v.pal` (`TITLE t`, `DBLIST rps_mini3v`, `LENGTH 9223372036854775809`, 2^63 + 1: negative as NCBI's
-  `Int8`), whose total lengths of 0 or less LOSAT's RPSBLAST and RPSTBLASTN refuse until item D1a-4.
+- Alias files (line RG, D1a-3 review 7 S1 and D1a-4), written by hand, each `TITLE t` and a `DBLIST` of `rps_mini`
+  (one volume: `*rps.pal`), `rps_mini3v` (three volumes: `*rps3v.pal`) or `rps_mini3v.01 rps_mini3v.02` (two volumes:
+  `l0rps2v.pal`) with one or two keys, as named: `l0` `LENGTH 0`, `l0n0` `LENGTH 0` and `NSEQ 0`, `n0` `NSEQ 0`, `nm5`
+  `NSEQ -5`, `sn7` `STATS_NSEQ 7`, `snm5` `STATS_NSEQ -5`, `st5k` `STATS_TOTLEN 5000`, `st63` `STATS_TOTLEN
+  9223372036854775809`, `min1` and `min100` `MIN_SEQ_LENGTH 1` and `100`, `l563n0` `LENGTH 563` and `NSEQ 0`, `fo11` and `fo22` `FIRST_OID` and `LAST_OID` 1
+  and 2 (`fo11rps3v` over the three volumes), `fo3` `FIRST_OID 3` (`fo3rps`, `fo3rps3v`), `n1000`, `n4` and `n5` `NSEQ` 1000, 4
+  and 5, `l400`, `l1000`, `l2p30`, `l2p31`, `l2p63` and `l2p63p1` `LENGTH` 400, 1000, 2^30, 2^31, 2^63 and 2^63 + 1 (the last
+  two 0 and negative as NCBI's `Int8`), `nm300` and `nm562` `NSEQ` -300 and -562, `l400n200`, `l0n600` and `l2p63p1n600`
+  `LENGTH` 400, 0 and 2^63 + 1 with `NSEQ` 200, 600 and 600. The rows `db.rps.{1v,2v,3v}.*`, `db.rpstbn.{1v,3v}.*`,
+  `db.rpstbn.fo11.e5.6`, `db.{rps,rpstbn}.{empty,nolet}.*` and the rejection rows `db.rps.rej.{l0,nm300,l2p30,l2p31,over,n5.over,fo22,l563n0.oldfsc}`,
+  `db.rpstbn.rej.{l0,nm300,fo22,l563n0.oldfsc}` search them (NCBI's search units of item D1a-4: one volume is searched with
+  all its keys, its `LENGTH` plus `NSEQ` the concatenated length of the search, several volumes each bare under the
+  database's length and count; the queries `tests/fasta/rps/lc403.faa`, `lcm2.faa`, `lc403.fna` and `over.faa` are records
+  of `q40.faa` and `nq.fna` whose trees end below the rows, or whose extension runs past the last profile; fix round 1 of
+  D1a-4: `q649.faa` is record YP_009220649.1 of `tests/fasta/WSSV.faa` (its residues 1101-1290 are `gnl|CDD|103`'s
+  fragment), `n103.fna` those 190 residues back-translated with the first codon of each amino acid (A GCT, R CGT, N AAC, D
+  GAC, C TGC, Q CAG, E GAA, G GGT, H CAC, I ATC, L CTG, K AAA, M ATG, F TTC, P CCG, S TCT, T ACC, W TGG, Y TAC, V GTT), and
+  `nolet.fa` two records without letters (`>a`, `>b`); fix round 3 of D1a-4: `tests/fasta/rps/alln.fna` (`n1`, 60 N,
+  and `n2`, 40 N; 110 bytes), a nucleotide run without a valid frame, and `allx.faa` give the rows
+  `db.{rps,rpstbn}.1v.{l563n0,l2p31}.*` (with `OLD_FSC=1` or a count past `Int4`, a run without a valid query is
+  reported as NCBI reports it) and `db.ak.bp.nseq0.oldfsc.allx.7` (BLASTP over `aliaskeys/p_nseq0`);
+  `tests/fixtures/strategy/cases.tsv` copies some of them (`rpsblast.{3v,2v}.*.q40`, `rpstblastn.3v.*.nq.b2000`).
 - Queries: `tests/fasta/WSSV.faa` (177 records, 10 query batches; its long records share diagonals of the 1,024-entry
   table of these databases), `tests/fasta/rps/q40.faa` (33 WSSV records, 11,434 letters, two query batches: the outfmt
   0 K of each batch's first query), `tests/fasta/rps/xoj.faa` (a record of X only, the TK-TMK record with an O at 30

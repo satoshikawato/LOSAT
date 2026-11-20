@@ -2608,7 +2608,10 @@ fn usage_report_reads_ncbirc(program: &str, env: &dyn Fn(&str) -> Option<OsStrin
 ///     }
 /// ```
 fn has_usage_report(program: &str) -> bool {
-    !matches!(program, "rpsbproc" | "dustmasker" | "segmasker")
+    !matches!(
+        program,
+        "rpsbproc" | "dustmasker" | "segmasker" | "windowmasker"
+    )
 }
 
 /// `BLAST_USAGE_REPORT` as `NStr::StringToBool` reads it (`usage_report_reads_ncbirc`): `None`

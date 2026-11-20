@@ -7,10 +7,12 @@
 //! `-set_t_high`, `-set_t_low`); the readers of the four counts formats (optimized binary,
 //! binary, optimized ascii, ascii); the format check. Not ported: the merge pass, the "min"
 //! trigger and discontiguous units (neither caller can turn them on,
-//! `win_mask_config.cpp:336-343`), and the `-t_*_pct` settings.
+//! `win_mask_config.cpp:336-343`). The `-t_*_pct` settings are read from the `##pct:` lines
+//! that NCBI's writers print (`pct`).
 
 mod istat;
 mod ncbi_report;
+mod pct;
 mod score;
 mod taxid;
 mod window;
@@ -27,6 +29,7 @@ use crate::ncbi_exception::NcbiException;
 pub use istat::{
     discover_stat_type, discover_stat_type_in, FormatSite, StatFile, StatType, UnitCounts,
 };
+pub use pct::PctSettings;
 pub use taxid::taxid_stat_file;
 
 use score::ScoreMean;
@@ -115,6 +118,9 @@ pub enum WinMaskError {
     SequenceTooLong { length: usize },
     /// `CSeqMaskerUsetHash::eBadIndex` (`seq_masker_uset_hash.cpp:95-99`).
     BadIndex { key: u32, value: u32 },
+    /// A `##pct:` line that the windowmasker application's `-t_*_pct` settings read and whose
+    /// words NCBI reads by the C++ runtime's number parser (`pct::count_map`): LOSAT refuses it.
+    PctLine { line: String },
 }
 
 impl WinMaskError {
@@ -165,6 +171,10 @@ impl fmt::Display for WinMaskError {
             //               << " : " << htp[hash.first];
             // ```
             Self::BadIndex { key, value } => write!(f, "bad index at key {key} : {value}"),
+            Self::PctLine { line } => write!(
+                f,
+                "the percentage line '{line}' of the counts file is not one that WindowMasker writes (counts of digits, then decimal percentages), so LOSAT does not read it for the -t_*_pct settings"
+            ),
         }
     }
 }

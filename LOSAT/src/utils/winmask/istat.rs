@@ -13,6 +13,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::Path;
 
+use super::pct::{apply_pct, PctSettings};
 use super::{MaskerParams, WinMaskError};
 use crate::ncbi_exception::{NcbiException, ThrowSite};
 use crate::ncbi_str;
@@ -526,17 +527,41 @@ impl UnitCounts {
     ///
     /// 			default: NCBI_THROW(Exception, eCreateFail, "unrecognized unit counts format");
     /// ```
-    /// The `-t_*_pct` settings of the windowmasker application are not ported (blastn passes
-    /// -1, `seq_masker.hpp:178-181`).
+    /// blastn passes no `-t_*_pct` setting (-1 each, `seq_masker.hpp:178-181`); the
+    /// windowmasker application's are [`UnitCounts::open_with_pct`].
     pub fn open(path: &Path, params: &MaskerParams) -> Result<Self, WinMaskError> {
-        let name = path.to_string_lossy().into_owned();
-        let mut file = open_named(path).map_err(|_| WinMaskError::Open { name })?;
-        Self::read(&mut file, params)
+        Self::open_with_pct(path, params, &PctSettings::default(), &mut |_| {})
     }
 
     /// [`UnitCounts::open`] on an opened file or an in-memory copy of one.
     pub fn read<R: Read + Seek>(r: &mut R, params: &MaskerParams) -> Result<Self, WinMaskError> {
+        Self::read_with_pct(r, params, &PctSettings::default(), &mut |_| {})
+    }
+
+    /// [`UnitCounts::open`] with the windowmasker application's `-t_*_pct` settings `pct`
+    /// (`pct::apply_pct`); `warn` gets the warning that NCBI posts, at once, when the file has
+    /// no percentages.
+    pub fn open_with_pct(
+        path: &Path,
+        params: &MaskerParams,
+        pct: &PctSettings,
+        warn: &mut dyn FnMut(String),
+    ) -> Result<Self, WinMaskError> {
+        let name = path.to_string_lossy().into_owned();
+        let mut file = open_named(path).map_err(|_| WinMaskError::Open { name })?;
+        Self::read_with_pct(&mut file, params, pct, warn)
+    }
+
+    /// [`UnitCounts::open_with_pct`] on an opened file or an in-memory copy of one.
+    pub fn read_with_pct<R: Read + Seek>(
+        r: &mut R,
+        params: &MaskerParams,
+        pct: &PctSettings,
+        warn: &mut dyn FnMut(String),
+    ) -> Result<Self, WinMaskError> {
         let found = discover(r)?;
+        check_pct_lines(&found.metadata, found.stat_type)?;
+        let params = &apply_pct(params, &found.metadata, found.stat_type, pct, warn)?;
         let mut counts = Self {
             unit_size: 0,
             threshold: params.cutoff_score,
@@ -553,7 +578,6 @@ impl UnitCounts {
             metadata: found.metadata,
             warnings: Vec::new(),
         };
-        check_pct_lines(&counts.metadata, found.stat_type)?;
         let start_line = counts.metadata.len();
         match found.stat_type {
             StatType::OBinary => counts.read_obinary(r, found.skip)?,
@@ -1746,7 +1770,7 @@ impl<R: Read> Stream<'_, R> {
 /// The binary formats read the first `##pct:` line only (the loop breaks after it), the ascii
 /// ones every such line. A line of exactly those six letters throws `std::out_of_range` from
 /// `substr( 7 )`; the text is libstdc++'s, as in NCBI's Linux builds. The percentages themselves
-/// are used only by the application's `-t_*_pct` settings, which are not ported.
+/// are used only by the application's `-t_*_pct` settings (`pct::apply_pct`).
 fn check_pct_lines(metadata: &[Vec<u8>], stat_type: StatType) -> Result<(), WinMaskError> {
     let mut pct = metadata.iter().filter(|line| line.starts_with(b"##pct:"));
     let short = match stat_type {

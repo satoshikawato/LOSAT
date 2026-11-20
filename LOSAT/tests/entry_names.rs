@@ -59,6 +59,7 @@ const PROGRAMS: [&str; 14] = [
     "blastdbcmd",
     "dustmasker",
     "segmasker",
+    "windowmasker",
     "convert2blastmask",
     "rpsbproc",
 ];
@@ -93,14 +94,15 @@ fn a_shim_prints_what_the_subcommand_prints() {
     assert!(installed.status.success(), "{installed:?}");
     for name in installed_names(&installed).iter().map(String::as_str) {
         // `blastn -version` is what tools read the version from (`blastn: 2.17.0+`; rpsbproc,
-        // which is not part of BLAST+, dustmasker and segmasker have their own: `rpsbproc: 0.5.1`,
-        // `dustmasker: 1.0.0`, `segmasker: 1.0.0`).
+        // which is not part of BLAST+, and the maskers have their own: `rpsbproc: 0.5.1`,
+        // `dustmasker: 1.0.0`, `segmasker: 1.0.0`, `windowmasker: 1.0.0`).
         let version = run(shim(&dir, name), &["-version"]);
         assert!(version.status.success(), "{name}: {version:?}");
         let first_line = match name {
             "rpsbproc" => "rpsbproc: 0.5.1\n".to_string(),
             "dustmasker" => "dustmasker: 1.0.0\n".to_string(),
             "segmasker" => "segmasker: 1.0.0\n".to_string(),
+            "windowmasker" => "windowmasker: 1.0.0\n".to_string(),
             _ => format!("{name}: 2.17.0+\n"),
         };
         assert!(
@@ -281,7 +283,13 @@ fn top_level_help_names_every_program() {
         assert!(text.contains("\nDESCRIPTION\n"), "{text}");
         assert!(text.contains("losat -install-shims [DIR]"), "{text}");
         // An "Other programs" line has a description.
-        for program in ["blastdbcmd", "dustmasker", "segmasker", "convert2blastmask"] {
+        for program in [
+            "blastdbcmd",
+            "dustmasker",
+            "segmasker",
+            "windowmasker",
+            "convert2blastmask",
+        ] {
             let line = text
                 .lines()
                 .find(|line| line.split_whitespace().next() == Some(program))

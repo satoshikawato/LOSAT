@@ -104,7 +104,7 @@ pub(crate) mod seqdb;
 pub(crate) mod seqid;
 
 /// The mask readers and writers of NCBI's masking tools (`dustmasker`, `segmasker`,
-/// `convert2blastmask`).
+/// `windowmasker`, `convert2blastmask`).
 pub(crate) mod seqmasks_io;
 // NCBI objtools/blast/seqdb_writer (CWriteDB) and app/blastdb/makeblastdb.cpp:
 // writer of BLAST database volumes.
@@ -115,10 +115,13 @@ pub(crate) mod blastdbcmd;
 pub(crate) mod dustmasker;
 // NCBI app/segmasker/segmasker.cpp: the masker of low-complexity protein regions.
 pub(crate) mod segmasker;
+// NCBI app/winmasker/win_mask_app.cpp: the masker of over-represented nucleotide regions by
+// unit counts (WindowMasker).
+pub(crate) mod windowmasker;
 // NCBI app/blastdb/convert2blastmask.cpp: the masking information of lower case FASTA input.
 pub(crate) mod convert2blastmask;
 // NCBI corelib/ncbiapp.cpp and corelib/ncbiargs.cpp: the application and argument reader of
-// blastdbcmd, dustmasker, segmasker and convert2blastmask.
+// blastdbcmd, dustmasker, segmasker, windowmasker and convert2blastmask.
 pub(crate) mod ncbi_app;
 // NCBI corelib/ncbiexpt.cpp: the reports of NCBI's exceptions (`CException::what()`).
 pub(crate) mod ncbi_exception;

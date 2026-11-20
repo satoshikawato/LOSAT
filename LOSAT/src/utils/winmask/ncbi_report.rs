@@ -93,6 +93,12 @@ impl WinMaskError {
     /// 			default: NCBI_THROW(Exception, eCreateFail, "unrecognized unit counts format");
     /// ```
     pub fn create_report(&self) -> Option<String> {
+        self.create_exception().map(|exception| exception.what())
+    }
+
+    /// The exception whose report is [`WinMaskError::create_report`], for the windowmasker
+    /// application, which reports it as its own (`CNcbiApplication`'s catch).
+    pub fn create_exception(&self) -> Option<NcbiException> {
         let exception = match self {
             Self::Open { name } => rethrown(open_exception(name)),
             Self::Format { site, .. } => {
@@ -122,9 +128,10 @@ impl WinMaskError {
             | Self::UnsetHashParameter { .. }
             | Self::EmptyCacheBitArray { .. }
             | Self::SequenceTooLong { .. }
-            | Self::BadIndex { .. } => return None,
+            | Self::BadIndex { .. }
+            | Self::PctLine { .. } => return None,
         };
-        Some(exception.what())
+        Some(exception)
     }
 
     /// The warnings that NCBI posts while it reads the file, before the error.

@@ -175,6 +175,7 @@ fn entry_program_description(name: &str) -> &'static str {
         "blastdbcmd" => "BLAST database client",
         "dustmasker" => "Low complexity region masker based on Symmetric DUST algorithm",
         "segmasker" => "Low complexity region masker based on the SEG algorithm",
+        "windowmasker" => "Window based sequence masker",
         "convert2blastmask" => {
             "Convert masking information in lower-case masked FASTA input to file formats suitable for makeblastdb"
         }

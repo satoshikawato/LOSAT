@@ -61,7 +61,7 @@ fn run_in(dir: &Path, program: &str, words: &[&str]) -> Output {
 }
 
 /// The programs and an option of each that takes a value.
-const PROGRAMS: [(&str, &str); 13] = [
+const PROGRAMS: [(&str, &str); 14] = [
     ("blastn", "-out"),
     ("blastp", "-out"),
     ("blastx", "-out"),
@@ -75,6 +75,7 @@ const PROGRAMS: [(&str, &str); 13] = [
     ("blastdbcmd", "-out"),
     ("dustmasker", "-out"),
     ("segmasker", "-out"),
+    ("windowmasker", "-out"),
 ];
 
 #[test]
@@ -179,7 +180,7 @@ fn xmlhelp_writes_ncbis_xml_without_the_refused_arguments() {
         let ncbi = ncbi_xml(program);
         if matches!(
             program,
-            "blastdbcmd" | "dustmasker" | "segmasker" | "convert2blastmask"
+            "blastdbcmd" | "dustmasker" | "segmasker" | "windowmasker" | "convert2blastmask"
         ) {
             assert_eq!(xml.stdout, ncbi, "{program}");
         } else {

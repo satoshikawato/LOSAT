@@ -1,0 +1,74 @@
+#!/usr/bin/env python3
+"""Freezes NCBI BLAST+ 2.17.0 windowmasker's output for each row of cases.tsv (run in this
+directory, as tests/masker_fixtures.rs runs LOSAT): ncbi/<name>.out, .err, .rc, with this
+directory's path in the standard error written as @CWD@. First makes db/wm and db/wm_ps with
+NCBI makeblastdb from in/multi.fa (the second with -parse_seqids). NCBI is run here only, never
+by the tests.
+
+Usage: python3 -I make_fixtures.py --ncbi-bin <dir of windowmasker and makeblastdb>"""
+import argparse
+import os
+import shlex
+import shutil
+import subprocess
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+def environment():
+    env = {k: v for k, v in os.environ.items()
+           if not k.startswith(("LOSAT_", "NCBI_", "BLAST"))}
+    env["NCBI_CONFIG_PATH"] = HERE
+    env["BLAST_USAGE_REPORT"] = "false"
+    return env
+
+
+def cases():
+    rows = []
+    for line in open(os.path.join(HERE, "cases.tsv")):
+        line = line.rstrip("\n")
+        if not line or line.startswith("#"):
+            continue
+        name, arguments = line.split("\t", 1)
+        words = shlex.split(arguments)
+        stdin = None
+        if "<" in words:
+            at = words.index("<")
+            stdin = words[at + 1]
+            del words[at:at + 2]
+        rows.append((name, words, stdin))
+    return rows
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--ncbi-bin", required=True)
+    a = ap.parse_args()
+    windowmasker = os.path.join(a.ncbi_bin, "windowmasker")
+    makeblastdb = os.path.join(a.ncbi_bin, "makeblastdb")
+    env = environment()
+    db = os.path.join(HERE, "db")
+    shutil.rmtree(db, ignore_errors=True)
+    os.makedirs(db)
+    for name, extra in (("wm", []), ("wm_ps", ["-parse_seqids"])):
+        subprocess.run([makeblastdb, "-in", "in/multi.fa", "-dbtype", "nucl", "-out", f"db/{name}"] + extra,
+                       cwd=HERE, env=env, check=True, stdout=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
+    out_dir = os.path.join(HERE, "ncbi")
+    shutil.rmtree(out_dir, ignore_errors=True)
+    os.makedirs(out_dir)
+    for name, words, stdin in cases():
+        source = open(os.path.join(HERE, stdin), "rb") if stdin else subprocess.DEVNULL
+        r = subprocess.run([windowmasker] + words, cwd=HERE, env=env, stdin=source,
+                           capture_output=True, timeout=600)
+        status = r.returncode if r.returncode >= 0 else 128 - r.returncode
+        err = r.stderr.replace(HERE.encode(), b"@CWD@")
+        for ext, data in (("out", r.stdout), ("err", err), ("rc", f"{status}\n".encode())):
+            with open(os.path.join(out_dir, f"{name}.{ext}"), "wb") as f:
+                f.write(data)
+        print(f"{name}\t{status}\t{len(r.stdout)}\t{len(err)}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -126,6 +126,16 @@ impl Diag<'_> {
         self.err_post_bytes(message.as_bytes());
     }
 
+    /// `ERR_POST(Warning << message)` inside `Run`: as `err_post`, of severity `Warning`.
+    pub(crate) fn warning_post(&mut self, message: &str) {
+        self.write_text(&crate::ncbi_exception::post_line(
+            crate::ncbi_exception::Severity::Warning,
+            None,
+            self.tool.post_prefix,
+            message.as_bytes(),
+        ));
+    }
+
     /// `err_post` of a message that is not UTF-8.
     pub(crate) fn err_post_bytes(&mut self, message: &[u8]) {
         self.write_text(&crate::ncbi_exception::error_post_line(

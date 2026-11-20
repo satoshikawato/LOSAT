@@ -101,11 +101,12 @@ fn run_main_entry() -> Result<()> {
     // {
     // 	x_CheckBlastUsageEnv();
     // ```
-    // Every NCBI BLAST+ program's application but dustmasker's and segmasker's has a usage
+    // Every NCBI BLAST+ program's application but the maskers' (dustmasker, segmasker,
+    // windowmasker) has a usage
     // report, made with the application before `AppMain` runs; it reads `.ncbirc`
     // (`ncbi_environment::ApplicationStart`), and its messages go to stderr at once, before
     // `-version` and before blastdbcmd's `-logfile` is read. The start of the others (dustmasker,
-    // segmasker, rpsbproc) writes nothing here.
+    // segmasker, windowmasker, rpsbproc) writes nothing here.
     // The program's application start, made once here and given to what reads after it.
     let start = argv
         .get(1)
@@ -152,6 +153,17 @@ fn run_main_entry() -> Result<()> {
     // `losat segmasker` too.
     if let Some(start) = started("segmasker") {
         std::process::exit(crate::segmasker::run(&argv[2..], start));
+    }
+    // NCBI reference (598d8ae6): c++/src/app/winmasker/main.cpp:39-42
+    // ```c++
+    // int main( int argc, char * argv[] )
+    // {
+    //     return CWinMaskApplication().AppMain(argc, argv);
+    // }
+    // ```
+    // `losat windowmasker` too.
+    if let Some(start) = started("windowmasker") {
+        std::process::exit(crate::windowmasker::run(&argv[2..], start));
     }
     // NCBI reference (598d8ae6): c++/src/app/blastdb/convert2blastmask.cpp:259-263
     // ```c++

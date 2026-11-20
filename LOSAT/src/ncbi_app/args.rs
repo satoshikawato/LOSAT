@@ -26,6 +26,8 @@ pub(crate) enum Kind {
     Integer,
     /// `eDouble`: `CArg_Double` (`NStr::StringToDouble` with `fDecimalPosixOrLocal`).
     Double,
+    /// `eBoolean`: `CArg_Boolean` (`NStr::StringToBool`).
+    Boolean,
     InputFile,
     OutputFile,
 }
@@ -50,17 +52,19 @@ impl Kind {
             Kind::Text => "String",
             Kind::Integer => "Integer",
             Kind::Double => "Real",
+            Kind::Boolean => "Boolean",
             Kind::InputFile => "File_In",
             Kind::OutputFile => "File_Out",
         }
     }
 }
 
-/// The number of an `eInteger` or `eDouble` key.
+/// The number of an `eInteger` or `eDouble` key, or the value of an `eBoolean` key.
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Number {
     Integer(i32),
     Double(f64),
+    Boolean(bool),
 }
 
 /// A constraint on a key's value (`CArgAllow`).
@@ -71,11 +75,53 @@ pub(crate) enum Constraint {
     Strings(&'static [&'static str]),
     /// `CArgAllowValuesGreaterThanOrEqual(min)` (blast_input_aux.hpp:101-121).
     AtLeast(i64),
+    /// `CArgAllow_Integers(min, max)`: an integer from `min` to `max` (`CArgAllow_Int8s::Verify`
+    /// reads the value with `s_StringToInt8`, as `CArg_Integer` does).
+    Integers(i64, i64),
+    /// `CArgAllow_Doubles(min, max)`: a number from `min` to `max`, and its usage text
+    /// (`NStr::DoubleToString` of each end: `0..100`).
+    Doubles(f64, f64, &'static str),
 }
 
 impl Constraint {
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:4778-4794
+    // ```c++
+    // string CArgAllow_Integers::GetUsage(void) const
+    // {
+    //     if (m_MinMax.size() == 1) {
+    //         Int8 x_min = m_MinMax.begin()->first;
+    //         Int8 x_max = m_MinMax.begin()->second;
+    //         if (x_min == x_max) {
+    //             return NStr::Int8ToString(x_min);
+    //         } else if (x_min == kMin_Int && x_max != kMax_Int) {
+    //             return string("less or equal to ") + NStr::Int8ToString(x_max);
+    //         } else if (x_min != kMin_Int && x_max == kMax_Int) {
+    //             return string("greater or equal to ") + NStr::Int8ToString(x_min);
+    //         } else if (x_min == kMin_Int && x_max == kMax_Int) {
+    //             return kEmptyStr;
+    //         }
+    //     }
+    //     return CArgAllow_Int8s::GetUsage();;
+    // }
+    // ```
+    // (`CArgAllow_Int8s::GetUsage` of one range, ncbiargs.cpp:4698-4724: `<min>..<max>`.)
     fn usage(self) -> String {
         match self {
+            Constraint::Integers(min, max) => {
+                let (int_min, int_max) = (i64::from(i32::MIN), i64::from(i32::MAX));
+                if min == max {
+                    min.to_string()
+                } else if min == int_min && max != int_max {
+                    format!("less or equal to {max}")
+                } else if min != int_min && max == int_max {
+                    format!("greater or equal to {min}")
+                } else if min == int_min && max == int_max {
+                    String::new()
+                } else {
+                    format!("{min}..{max}")
+                }
+            }
+            Constraint::Doubles(_, _, usage) => usage.to_string(),
             Constraint::Strings(values) => values
                 .iter()
                 .map(|value| format!("`{value}'"))
@@ -362,6 +408,14 @@ impl Args {
     pub(crate) fn integer(&self, name: &str) -> Option<i32> {
         match self.numbers.get(name) {
             Some(&Number::Integer(number)) => Some(number),
+            _ => None,
+        }
+    }
+
+    /// `AsBoolean()` of the `eBoolean` key `name`: given, or its default.
+    pub(crate) fn boolean(&self, name: &str) -> Option<bool> {
+        match self.numbers.get(name) {
+            Some(&Number::Boolean(value)) => Some(value),
             _ => None,
         }
     }
@@ -771,6 +825,7 @@ fn process_value(tool: &Tool, desc: &Desc, value: &str) -> Result<Option<Number>
     let number = match desc.kind {
         Kind::Integer => Some(Number::Integer(integer_value(tool, desc, value)?)),
         Kind::Double => Some(double_value(desc, value)?),
+        Kind::Boolean => Some(boolean_value(desc, value)?),
         Kind::Text | Kind::Flag | Kind::InputFile | Kind::OutputFile => None,
     };
     let allowed = match desc.constraint {
@@ -781,7 +836,43 @@ fn process_value(tool: &Tool, desc: &Desc, value: &str) -> Result<Option<Number>
         Some(Constraint::AtLeast(min)) => match number {
             Some(Number::Integer(number)) => i64::from(number) >= min,
             Some(Number::Double(number)) => number >= min as f64,
-            None => false,
+            _ => false,
+        },
+        // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:4686-4695
+        // ```c++
+        // bool CArgAllow_Int8s::Verify(const string& value) const
+        // {
+        //     Int8 val = s_StringToInt8(value);
+        //     ITERATE( set< TInterval >, pi, m_MinMax) {
+        //         if (pi->first <= val && val<= pi->second) {
+        //             return true;
+        //         }
+        //     }
+        //     return false;
+        // }
+        // ```
+        // (`s_StringToInt8` reads the value as `integer_value` did, hexadecimal included.)
+        Some(Constraint::Integers(min, max)) => match number {
+            Some(Number::Integer(number)) => (min..=max).contains(&i64::from(number)),
+            _ => false,
+        },
+        // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:4821-4830
+        // ```c++
+        // bool CArgAllow_Doubles::Verify(const string& value) const
+        // {
+        //     double val = NStr::StringToDouble(value, NStr::fDecimalPosixOrLocal);
+        //     ITERATE( set< TInterval >, pi, m_MinMax) {
+        //         if (pi->first <= val && val<= pi->second) {
+        //             return true;
+        //         }
+        //     }
+        //     return false;
+        // }
+        // ```
+        // (the conversion of `double_value`; a NaN is in no range.)
+        Some(Constraint::Doubles(min, max, _)) => match number {
+            Some(Number::Double(number)) => min <= number && number <= max,
+            _ => false,
         },
     };
     match desc.constraint {
@@ -904,6 +995,53 @@ fn double_value(desc: &Desc, value: &str) -> Result<Number, ArgsError> {
                 arg_message(desc.name, "Argument cannot be converted", value),
             ],
         })),
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:489-498
+// ```c++
+// inline CArg_Boolean::CArg_Boolean(const string& name, const string& value)
+//     : CArg_String(name, value)
+// {
+//     try {
+//         m_Boolean = NStr::StringToBool(value);
+//     } catch (const CException& e) {
+//         NCBI_RETHROW(e,CArgException,eConvert, s_ArgExptMsg(GetName(),
+//             "Argument cannot be converted",value));
+//     }
+// }
+// ```
+// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:2837-2838
+// ```c++
+//     NCBI_THROW2(CStringException, eConvert,
+//                 "String cannot be converted to bool", 0);
+// ```
+// As for `CArg_Int8`, the conversion's exception is the predecessor (its text is the first
+// message, with its position: `String cannot be converted to bool (m_Pos = 0)`).
+/// The value of an `eBoolean` key (`CArg_Boolean`).
+fn boolean_value(desc: &Desc, value: &str) -> Result<Number, ArgsError> {
+    match crate::ncbi_str::string_to_bool(value) {
+        Some(boolean) => Ok(Number::Boolean(boolean)),
+        None => {
+            let site = crate::ncbi_exception::ThrowSite {
+                file: "src/corelib/ncbistr.cpp",
+                line: 2837,
+                kind: "CStringException::eConvert",
+                function: Some("ncbi::NStr::StringToBool"),
+            };
+            let error = crate::ncbi_exception::NcbiException::with_pos(
+                site,
+                "String cannot be converted to bool",
+                0,
+            );
+            Err(ArgsError::Invalid(ArgException {
+                code: "eConvert",
+                messages: vec![
+                    error.text(),
+                    arg_message(desc.name, "Argument cannot be converted", value),
+                ],
+            }))
+        }
     }
 }
 

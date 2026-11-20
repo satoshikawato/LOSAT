@@ -412,11 +412,15 @@ impl From<ParseError> for ReadError {
 /// length; length 0 is a gap of unknown length (a lone hyphen at the end of a line).
 /// The gap type and the linkage evidence of a `>?` line only decide whether the delta
 /// literal of the gap gets a `Seq-data.gap`, which the database is built from like a
-/// literal without data (`SeqInst`), so they are not kept; nor is the size's fuzz.
+/// literal without data (`SeqInst`), and whether a gap that becomes N's or X's warns
+/// (`mods`), so only that is kept; nor is the size's fuzz.
 #[derive(Clone, Copy)]
 struct Gap {
     position: usize,
     length: u64,
+    /// A gap type other than `unknown`, or a linkage evidence other than `unspecified`
+    /// alone (`gap_mod_warnings`): `AssembleSeq` warns of it when the gap becomes N's or X's.
+    mods: bool,
 }
 
 /// One piece of a delta sequence (`CDelta_seq`).
@@ -1971,6 +1975,7 @@ impl RecordState {
         self.gaps.push(Gap {
             position: pos,
             length: len,
+            mods: false,
         });
         self.total_gap_length += len;
         self.current_gap_length = 0;
@@ -2141,11 +2146,12 @@ impl RecordState {
         }
         // `multimap` iterates in key order (the order of insertion for equal keys).
         mods.sort_by(|left, right| left.0.cmp(&right.0));
-        gap_mod_warnings(&mods, line_number, self.flags.ignored_problems, warn);
+        let specified = gap_mod_warnings(&mods, line_number, self.flags.ignored_problems, warn);
 
         self.gaps.push(Gap {
             position,
             length: u64::from(gap_size),
+            mods: specified,
         });
         self.total_gap_length += u64::from(gap_size);
     }
@@ -2388,6 +2394,31 @@ impl RecordState {
                 .map_err(|_| ReadError::OutOfMemory)?;
             let mut pos = 0;
             for gap in &self.gaps {
+                // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1393-1410
+                // ```c++
+                //             const bool bHasSpecifiedGapType =
+                //                 ( (*it)->m_pGapType && *(*it)->m_pGapType != CSeq_gap::eType_unknown );
+                //             const bool bHasSpecifiedLinkEvid =
+                //                 ( ! (*it)->m_setOfLinkageEvidence.empty() &&
+                //                   ( (*it)->m_setOfLinkageEvidence.size() > 1 ||
+                //                     *(*it)->m_setOfLinkageEvidence.begin() != CLinkage_evidence::eType_unspecified ) );
+                //             if( bHasSpecifiedGapType || bHasSpecifiedLinkEvid )
+                //             {
+                //                 FASTA_WARNING((*it)->m_uLineNumber,
+                //                     "CFastaReader: Gap mods are ignored because gaps are "
+                //                     "becoming N's or X's in this case.",
+                //                     ILineError::eProblem_ModifierFoundButNoneExpected,
+                //                     "gapline" );
+                //             }
+                // ```
+                if gap.mods {
+                    post_warning(
+                        self.flags.ignored_problems,
+                        Problem::ModifierFoundButNoneExpected,
+                        b"CFastaReader: Gap mods are ignored because gaps are becoming N's or X's in this case.",
+                        warn,
+                    );
+                }
                 if gap.position > pos {
                     new_data.extend_from_slice(&self.seq_data[pos..gap.position]);
                     pos = gap.position;
@@ -2990,12 +3021,17 @@ fn add_and_split(pieces: &mut Vec<DeltaSeq>, residues: &[u8], start: usize, end:
 /// `NStr::Split` with `fSplit_MergeDelimiters | fSplit_Truncate` drops empty pieces. The
 /// names are looked up by `fasta_reader`'s tables (`gap_type_info`,
 /// `linkage_evidence_value`).
+///
+/// Whether the gap has a specified gap type or linkage evidence, as `AssembleSeq` asks of
+/// the `SGap` (quoted at its use): the first known gap type (`unknown` when only evidence is
+/// given), and the evidence the switch leaves (cleared to `unspecified` for a type that allows
+/// only that, cleared for one that forbids any).
 fn gap_mod_warnings(
     mods: &[(Vec<u8>, Vec<u8>)],
     line_number: u64,
     ignored: &[Problem],
     warn: ReaderWarn<'_>,
-) {
+) -> bool {
     let mut conflicting = false;
     let mut gap_type: Option<GapType> = None;
     let mut link_evid = LinkEvid::UnspecifiedOnly;
@@ -3087,4 +3123,8 @@ fn gap_mod_warnings(
             }
         }
     }
+    let specified_type = gap_type.is_some_and(|value_type| value_type != GapType::Unknown);
+    let specified_evidence = matches!(link_evid, LinkEvid::Required)
+        && !(evidence.len() == 1 && evidence.contains(&LINKAGE_UNSPECIFIED));
+    specified_type || specified_evidence
 }

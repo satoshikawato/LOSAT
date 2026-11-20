@@ -34,6 +34,7 @@ const PROGRAMS: &[(&str, &str)] = &[
     ("blastdbcmd", include_str!("ncbi_xmlhelp/blastdbcmd.xml")),
     ("dustmasker", include_str!("ncbi_xmlhelp/dustmasker.xml")),
     ("segmasker", include_str!("ncbi_xmlhelp/segmasker.xml")),
+    ("windowmasker", include_str!("ncbi_xmlhelp/windowmasker.xml")),
     (
         "convert2blastmask",
         include_str!("ncbi_xmlhelp/convert2blastmask.xml"),

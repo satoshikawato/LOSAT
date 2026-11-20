@@ -131,7 +131,8 @@
 //!   `-export_search_strategy` ([`validate`]); the command line writes it.
 //! - [`run_makeblastdb`] and [`run_blastdbcmd`] are the two database programs, and
 //!   [`run_dustmasker`] and [`run_segmasker`] the maskers of low-complexity regions (nucleotide,
-//!   protein) and [`run_convert2blastmask`] the converter of lower case masks: the command
+//!   protein), [`run_windowmasker`] the masker of over-represented nucleotide regions, and
+//!   [`run_convert2blastmask`] the converter of lower case masks: the command
 //!   line's words, with the caller's reader and writers for its standard streams.
 //!
 //! # Items
@@ -145,7 +146,7 @@
 //! - The results: [`Outcome`], [`Batches`], [`Batch`], [`Report`], [`HspRecord`], [`Id`],
 //!   [`QueryStats`], [`QueryRounds`], [`Strand`], [`QueryHits`], [`SubjectHits`]
 //! - The tools: [`run_makeblastdb`], [`run_blastdbcmd`], [`run_dustmasker`], [`run_segmasker`],
-//!   [`run_convert2blastmask`]
+//!   [`run_windowmasker`], [`run_convert2blastmask`]
 //! - The failures: [`Error`]
 //! - The engine's version: [`VERSION`]
 
@@ -179,6 +180,7 @@ pub(crate) use search::file_options;
 pub use search::{validate, Search, API_OWNED};
 pub use tools::{
     run_blastdbcmd, run_convert2blastmask, run_dustmasker, run_makeblastdb, run_segmasker,
+    run_windowmasker,
 };
 pub use view::{QueryHits, SubjectHits};
 

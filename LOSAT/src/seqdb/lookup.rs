@@ -306,8 +306,8 @@ impl IdLookup<'_> {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2413-2422
     // A volume's ISAM sets `oid` to -1 when it does not hold the PIG (`x_IdentToOid`); a
     // volume without PIG files (`x_OpenPigFile` opens none for an empty volume) leaves it
-    // as it was, which in blastdbcmd is uninitialised (`CSeqDB::TOID oid;`). No list filters
-    // the OID.
+    // as it was, which in blastdbcmd is uninitialised (`oid` is declared without a value). No
+    // list filters the OID.
     /// The OID of the PIG `pig`: `Some(Some(oid))` from the first volume whose PIG file has
     /// it, `Some(None)` when a volume has PIG files and none holds it (NCBI's -1), `None` when
     /// no volume has PIG files (NCBI's OID is then never set).

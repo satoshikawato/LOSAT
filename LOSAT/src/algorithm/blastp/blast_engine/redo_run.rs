@@ -957,8 +957,8 @@ where
 /// batch reaches does (`database::HeaderReadError`), whose batches before `search` searches again
 /// and reports alone.
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3774-3778
-/// NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:250-252
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3775-3779
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:251-253
 /// NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:274-276 (the exception leaves the
 /// batch loop before the batch's formatting and `PrintEpilog`)
 ///
@@ -1244,7 +1244,7 @@ where
         *x_prelim_freed += 1;
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3774-3781
         // A failed Smith-Waterman redo of the batch's last redone match fails NCBI's traceback of
-        // the batch (`Traceback failed`, traceback_stage.cpp:250-252), or crashes NCBI's clean-up
+        // the batch (`Traceback failed`, traceback_stage.cpp:251-253), or crashes NCBI's clean-up
         // when the batch's first query holds a redone match (`sw_batch_failed`).
         if sw_last_failed && q_idx + 1 == batch.end {
             return Err(sw_batch_failed(batch.start, &redone_matches[batch.start]));

@@ -77,7 +77,7 @@ impl X87 {
         (self.negative, self.exponent, self.significand)
     }
 
-    /// `long double value = val;` (`fldl`): exact, subnormal doubles included, because the
+    /// Widening a double to a long double (`fldl`): exact, subnormal doubles included, because the
     /// 80-bit format has 11 more significand bits and a wider exponent range than a double.
     pub(crate) fn from_f64(x: f64) -> X87 {
         debug_assert!(x.is_finite());
@@ -107,7 +107,7 @@ impl X87 {
         }
     }
 
-    /// `t1 = first;` (`fild` of an unsigned int): exact.
+    /// Loading an unsigned int into a long double (`fild`): exact.
     pub(crate) fn from_u32(v: u32) -> X87 {
         if v == 0 {
             return X87::ZERO;

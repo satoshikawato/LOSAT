@@ -627,8 +627,8 @@ impl Mix {
                     let seg_len = match start_i {
                         Some(key) if start + curr_len * width1 > key => (key - start) / width1,
                         _ => {
-                            // `hi_start_i = start_i; if (hi_start_i != starts.begin())
-                            // hi_start_i--;`: the new start, which is before `start_i`.
+                            // `hi_start_i` takes `start_i` and steps back by one unless it is
+                            // the first start: the new start, which is before `start_i`.
                             hi_start_i = Some(tmp_key);
                             curr_len
                         }
@@ -1188,9 +1188,10 @@ impl Mix {
     /// A row that `BuildRows` left out keeps the `m_RowIdx` of -1 of `CAlnMixSeq()`: the extra
     /// rows of a sequence without starts, the query's own Bioseq whose `m_AnotherRow` kept none
     /// (`place`). NCBI's `starts[rowidx]` and `lens[rowidx]` then write before their vectors'
-    /// buffers (`prev_start = start; prev_len = len;`, a length of at least 1), and glibc stops
-    /// NCBI when it frees them (`double free or corruption (out)`, exit 134): no section to
-    /// write, `MixError::NcbiAborts` (line RG T3a, PD-LOSAT-NCBI-DEFECTS rule 3).
+    /// buffers (the stores of the previous start and the previous length, a length of at least
+    /// 1), and glibc stops NCBI when it frees them (`double free or corruption (out)`, exit
+    /// 134): no section to write, `MixError::NcbiAborts` (line RG T3a, PD-LOSAT-NCBI-DEFECTS
+    /// rule 3).
     fn fill_unaligned_regions(&mut self) -> Result<(), MixError> {
         let mut starts = vec![-1i64; self.rows.len()];
         let mut lens = vec![0u32; self.rows.len()];

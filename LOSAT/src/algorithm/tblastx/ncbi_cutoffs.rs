@@ -402,7 +402,7 @@ pub fn cutoff_score_max_for_tblastx(
 }
 
 /// The cutoff score that `BLAST_Cutoffs` returns to a caller whose cutoff starts at 1
-/// (`Int4 new_cutoff = 1;`, blast_parameters.c:321 and 916): the larger of 1 and the score
+/// (its `new_cutoff` is set to 1 at blast_parameters.c:321 and 916): the larger of 1 and the score
 /// computed from E (`es`), so a large E-value against a small search space gives 1, not
 /// a score below it.
 ///

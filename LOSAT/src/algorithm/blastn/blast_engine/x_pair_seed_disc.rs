@@ -395,11 +395,12 @@ fn scan_strip_disc_csr<O: SeedOut, const PIECE: bool>(
 /// LOSAT_TIMING counters); without it `out` and `pos` are not read.
 ///
 /// With `LEAN` (LOSAT_X_FOLDLEAN, `lean_on`) the fold takes `type_of_word`'s early return
-/// itself (NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:531
-/// `if (word_length == lut_word_length) return 1;`, with `*extended = 0` and the offsets
-/// unchanged) when the word lengths are equal, and inlines the insert (`insert_inl`). `MEMO`
-/// says the table has the memo of LOSAT_X_DIAGLV2 (`x_last`); without it the retrieve and the
-/// insert do not test for one, so with both off this is the fold before those switches.
+/// itself (NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:531, which
+/// returns 1 when the word length equals the lookup table's word length, with `*extended`
+/// set to 0 and the offsets unchanged) when the word lengths are equal, and inlines the insert
+/// (`insert_inl`). `MEMO` says the table has the memo of LOSAT_X_DIAGLV2 (`x_last`); without it
+/// the retrieve and the insert do not test for one, so with both off this is the fold before
+/// those switches.
 #[allow(clippy::too_many_arguments)]
 #[inline(always)]
 fn fold_two_hit<const PT: bool, const LEAN: bool, const MEMO: bool>(

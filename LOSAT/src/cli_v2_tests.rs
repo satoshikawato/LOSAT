@@ -1169,7 +1169,7 @@ fn numeric_values_are_validated_before_io() {
 
 #[test]
 fn flags_and_value_tokens_are_not_reinterpreted() {
-    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:803-806: -use_sw_tback is a flag; LOSAT's BLASTP runs the
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:804-806: -use_sw_tback is a flag; LOSAT's BLASTP runs the
     // Smith-Waterman redo with composition-based statistics (item X4) and rejects it without
     // them (`-comp_based_stats 0`, `-task blastp-short`, IDENTITY) where the search starts.
     let Commands::Blastp(a) = parse("blastp", &["-use_sw_tback"]).unwrap().command else {
@@ -1468,7 +1468,7 @@ fn output_capabilities_fail_explicitly_and_help_is_canonical() {
                 !text.contains("--query") && !text.contains("--word") && !text.contains("--num")
             );
             assert!(!text.contains("seg_window") && !text.contains("dust_window"));
-            // NCBI's BLASTP tasks and flags are options (c++/src/algo/blast/blastinput/blast_args.cpp:803-806,3158-3163).
+            // NCBI's BLASTP tasks and flags are options (c++/src/algo/blast/blastinput/blast_args.cpp:804-806,3158-3163).
             if program == "blastp" {
                 for option in ["blastp-fast", "blastp-short", "-use_sw_tback"] {
                     assert!(text.contains(option), "{text}");

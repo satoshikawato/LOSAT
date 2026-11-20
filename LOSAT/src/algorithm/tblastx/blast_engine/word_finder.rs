@@ -119,8 +119,8 @@ pub(super) struct FrameCx<'a> {
 /// diagonal offset (fixed during the chunk's scan: only `begin_chunk_scan`, for a chunk shorter
 /// than a word, and `finish_chunk_scan` advance it), and the scores of the search's matrix.
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:473 (`diag_offset =
-/// diag->offset;`, read once per call of the word finder).
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:473 (the diagonal
+/// offset is read once per call of the word finder).
 pub(super) struct ChunkCx<'s, S> {
     pub(super) chunk: SubjectChunk,
     pub(super) subject: &'s [u8],

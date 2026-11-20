@@ -308,6 +308,41 @@ class StatementTest(unittest.TestCase):
         prose = "// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2-3 (blastn: 50, megablast: 6)\n"
         self.assertEqual(checker.check_text("x", [prose], "slash", TABLE), [])
 
+    def test_c_statements_in_backticks_are_quoted_and_left_to_the_writer(self) -> None:
+        for span in (
+            "if (r < 1) return 0.;",
+            "Int4 new_cutoff = 1;",
+            "prot_seq[0] = NULLB;",
+            "gap_prob = link_hsp_params->gap_prob;",
+            "m_String = m_Line; m_Line = m_String;",
+            "curr = stkFlexStack.top(); stkFlexStack.pop();",
+            "case eUCSCRegion: return false;",
+            "while (n < len && buf[n++] != 0);",
+        ):
+            text = f"// Uncited prose: `{span}` and more.\nfn f() {{}}\n"
+            self.assertEqual(self.quoted(text), [1], span)
+            lines = text.split("\n")
+            found = checker.check_text("x", lines, "slash", TABLE)
+            self.assertEqual(checker.fix_lines(list(lines), "slash", found), lines, span)
+        # A span that goes on to the next comment line is found at its first line.
+        two_lines = "// NCBI's loop (`case eBinaryASN: return\n// TestFormatBinaryAsn( mode );`).\n"
+        self.assertEqual(self.quoted(two_lines), [1])
+        for span in (
+            "let x = 1;",
+            "self.table = Vec::new();",
+            "Some(x) => x;",
+            "mod name;",
+            "&amp;",
+            ";",
+            "W -t <taxid>;",
+            "BlastHitSavingParametersUpdate",
+            "x = y",
+        ):
+            self.assertEqual(self.quoted(f"// LOSAT: `{span}` here.\n"), [], span)
+        # In a fence the fence checks decide; in Markdown and text files only fences are read.
+        self.assertEqual(self.quoted("// ```text\n// `q++;`\n// ```\n"), [])
+        self.assertEqual(self.quoted("Prose `q++;` here.\n", "text"), [])
+
     def test_an_indented_block_after_a_blank_docstring_line_is_quoted(self) -> None:
         text = (
             'def f():\n    """Chunks.\n\n'

@@ -42,9 +42,9 @@ use crate::algorithm::tblastx::blast_aascan::BlastOffsetPair;
 pub(super) trait XDiagCell: Copy {
     /// `(last_hit, flag)`.
     fn get(self) -> (i32, bool);
-    /// `last_hit = last_hit; flag = flag;`
+    /// Stores both `last_hit` and `flag`.
     fn set(&mut self, last_hit: i32, flag: bool);
-    /// `last_hit = last_hit;` on a cell whose flag is 0.
+    /// Stores `last_hit` on a cell whose flag is 0.
     fn set_last_hit(&mut self, last_hit: i32);
     /// `(value, flag)` for `x_hits_bf`: `value` is `last_hit` when `flag` is false.
     fn bf_read(self) -> (i32, bool);

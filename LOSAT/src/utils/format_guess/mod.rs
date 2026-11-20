@@ -741,8 +741,8 @@ impl<S: Source> FormatGuess<S> {
         })
     }
 
-    // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:513-601 (`x_TestFormat`: `case eBinaryASN: return
-    // TestFormatBinaryAsn( mode );` and so on for each format; `case eUCSCRegion: return false;`)
+    // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:513-601 (`x_TestFormat`: each format
+    // calls its own test, and the UCSC region format always answers false)
     /// `x_TestFormat(format)`.
     fn test_format(&mut self, format: Format) -> Result<bool, Stop> {
         Ok(match format {

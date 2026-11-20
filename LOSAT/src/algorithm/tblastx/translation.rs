@@ -27,8 +27,7 @@ pub struct QueryFrame {
     /// When reporting coordinates, subtract 1 from the raw position.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:438-453
-    ///   `prot_seq[0] = NULLB;`  // sentinel at beginning
-    ///   `prot_seq[index_prot] = NULLB;`  // sentinel at end
+    /// The first and the last letter of each translated frame are the `NULLB` sentinel.
     pub aa_seq: Vec<u8>,
     /// Unmasked amino acid sequence (NCBI `sequence_nomask` semantics), including sentinels.
     ///

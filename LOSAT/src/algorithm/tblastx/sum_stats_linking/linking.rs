@@ -1477,10 +1477,11 @@ fn link_hsp_group_ncbi(
     // NCBI: path_changed tracks whether any removed HSP had linked_to > 0
     // If path_changed == 0, we can skip chain validation entirely
     let mut path_changed = true;
-    // NCBI `c++/src/algo/blast/core/link_hsps.c` sets `gap_prob = link_hsp_params->gap_prob;` (:468) regardless of
-    // `ignore_small_gaps` (cutoff[0]==0, :495). With small gaps the E-values of sets of more than
-    // one HSP are divided by `gap_prob` and `1-gap_prob` (:918-935); with large gaps only they are
-    // not divided (:939-952). gap_prob is 0 for small search spaces (blast_parameters.c:1076).
+    // NCBI `c++/src/algo/blast/core/link_hsps.c` takes `gap_prob` from the link parameters (:468)
+    // regardless of `ignore_small_gaps` (cutoff[0]==0, :495). With small gaps the E-values of
+    // sets of more than one HSP are divided by `gap_prob` and `1-gap_prob` (:918-935); with
+    // large gaps only they are not divided (:939-952). gap_prob is 0 for small search spaces
+    // (blast_parameters.c:1076).
 
     while remaining > 0 {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:603-652
@@ -3836,8 +3837,8 @@ mod tests {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:756,871,918,931
     // `H_hsp_num` is an Int4 stored into the Int2 count: the count of a set of 32,770 HSPs wraps
     // to -32766, which is not "> 1", and the sum statistics give a count below 1 the E-value 0
-    // (s_BlastSumP, blast_stat.c:4390-4391: `if (r < 1) return 0.;`). Both kernels keep NCBI's
-    // count (the literal port overflowed an i16 here in builds with overflow checks).
+    // (s_BlastSumP, blast_stat.c:4390-4391: it returns 0 when r is below 1). Both kernels keep
+    // NCBI's count (the literal port overflowed an i16 here in builds with overflow checks).
     #[test]
     fn a_set_of_more_than_32767_hsps_takes_the_wrapped_int2_count() {
         let chain = |n: usize| -> Vec<UngappedHit> {

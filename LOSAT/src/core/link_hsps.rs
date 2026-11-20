@@ -1042,7 +1042,7 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:871 (the store into the `Int2`
-    // `num`, as at :756) and blast_stat.c:4390-4391 (`s_BlastSumP`: `if (r < 1) return 0.;`)
+    // `num`, as at :756) and blast_stat.c:4390-4391 (`s_BlastSumP`: it returns 0 when r is below 1)
     #[test]
     fn a_set_of_more_than_32767_hsps_takes_the_wrapped_int2_count() {
         // 32,770 HSPs in order on both sequences link into one large-gap set; NCBI's count wraps

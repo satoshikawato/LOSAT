@@ -46,7 +46,7 @@ fn write_parameters<E: Encoder>(enc: &mut E, run: &XmlRun<'_>) {
     }
     real_member(enc, "expect", 1, run.expect);
     if let Some((reward, penalty)) = run.reward_penalty {
-        // `if ((val = data->GetMatchReward()) != 0) params.SetSc_match(val);`
+        // NCBI writes sc-match only when `GetMatchReward` is not 0.
         if reward != 0 {
             int_member(enc, "sc-match", 3, reward);
         }

@@ -7539,7 +7539,7 @@ mod taxdb_prepass_tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:1447-1455 (quoted
-    // at `SeqidLookup::seqid_to_oids`): without `multi`, `if (! multi) return;` at the first OID.
+    // at `SeqidLookup::seqid_to_oids`): without `multi`, the lookup returns at the first OID.
     /// Line DBID v4late (review 3 of line DBID loadord, H3): in a list of version 4 volumes whose
     /// later volume's string ISAM index does not open (mode 000), NCBI's lookup of an id that an
     /// earlier volume holds returns there (NCBI BLAST+ 2.17.0: exit status 0, probe

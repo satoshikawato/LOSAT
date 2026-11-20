@@ -402,7 +402,7 @@ fn check_gzip_header(buf: &[u8]) -> usize {
         let len = usize::from(buf[header_len]) | (usize::from(buf[header_len + 1]) << 8);
         header_len += 2 + len;
     }
-    // `while (header_len < src_len  &&  buf[header_len++] != 0);`: past the NUL, or to the end.
+    // Skip a NUL-terminated string: past the NUL, or to the end of the source.
     let skip_string = |mut header_len: usize| {
         while header_len < src_len {
             header_len += 1;

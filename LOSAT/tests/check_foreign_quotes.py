@@ -26,6 +26,8 @@ Python's docstrings; every line of Markdown and text files):
     path of `NON_NCBI_PATHS`, or its label is not one of `NCBI_LABEL_RE`.
   - A comment line that is a line of C or C++ (`CODE_LINE_RE`) under a labelled citation, in
     the same comment: a quote without a fence.
+  - In a source file, a C or C++ statement in backticks inside a comment's prose
+    (`inline_statement`), cited or not.
 - LABEL: a comment line labelled as NCBI's (`NCBI reference ...`, `NCBI <path>`) whose label or
   path names another project's source (the code is not NCBI's).
 - PIN (source files): a citation of NCBI's source that does not name the pinned tree: an
@@ -40,7 +42,8 @@ paragraph right above a fence is read for its citation (their fences are mostly 
 examples), and PIN and REF do not apply (dated records keep the paths they were written with).
 
 `--fix` removes what QUOTE finds and pins what PIN finds (a branch that merges a dev with
-quotes removed runs it; it changes comment lines only), then checks again; REF is fixed by hand.
+quotes removed runs it; it changes comment lines only), then checks again; REF and statements in
+backticks are fixed by hand.
 
 The tables below are the one place that says which sources are NCBI's. There is no
 allowlist of exceptions: cite the file and lines instead of quoting them.
@@ -190,7 +193,8 @@ CODE_LINE_RE = re.compile(
     r"(?:=|\breturn\b|\w\()[^.`]*;\s*$|^\s*\}\s*$|\)\s*\{\s*$|^\s*#\s*define\b"
     r"|^\s*(?:static\s+)?(?:const\s+)?(?:unsigned\s+|signed\s+)?"
     r"(?:int|double|float|char|void|size_t|long|bool|Int4|Int8|Uint4|Uint8)\s+\**\w+\s*[(=;]"
-    # C statements: `if (...) continue;`, `q++;`, `break;`, `} else {`, `case X:`, `f (a, b);`
+    # C statements: `if (...) continue`, `q++`, `break`, `} else {`, `case X:`, `f (a, b)` with
+    # the semicolon after each
     r"|^\s*(?:\}\s*)?(?:if|for|while|switch)\s*\(.*\)\s*(?:\{|[^`]*;)?\s*$"
     r"|^\s*(?:break|continue)\s*;\s*$|\w(?:\+\+|--)\s*;\s*$"
     r"|^\s*\}\s*else\b|^\s*else\s*\{\s*$|^\s*case\s+[\w:]+\s*:\s*|^\s*default\s*:\s*$"
@@ -450,6 +454,76 @@ def code_after_citation(text: str) -> int | None:
     return last.end()
 
 
+# A C or C++ statement in backticks inside prose (an `if` with its condition, body and
+# semicolon): a quote without a fence. Each statement of the span (they end with `;`) has a C
+# form; a Rust statement (LOSAT's own code: `let`, `self`, `Some(`, `=>` ...) is not one.
+INLINE_STATEMENT = "statement in backticks"
+SPAN_RE = re.compile(r"`([^`]+)`")
+RUST_STATEMENT_RE = re.compile(
+    r"^(?:let|mod|use|pub|fn|impl|struct|enum|type|#\[)\b|=>|::<|&mut\b|\bas [iuf]\d"
+    r"|\bSome\(|\bOk\(|\bErr\(|\bself\b|\.unwrap\(|!\(|\?$"
+)
+C_STATEMENT_RE = re.compile(
+    r"^(?:if|while|for|switch)\s*\(|^(?:case\s+[\w:]+\s*:|return\b|break$|continue$|goto\b)"
+    r"|->|\+\+|--$|\bm_\w"
+    r"|^(?:static\s+|const\s+|unsigned\s+|long\s+)*(?:Int[1248]|Uint[1248]|int|long|short"
+    r"|char|double|float|Boolean|size_t|void|vector<[^>]*>|string|[A-Z]\w*::\w+)\b[\s*&]+\w"
+    r"|^\w+(?:\[[^\]]*\])*\s*[-+*/%|&^]?=\s*[^=\s]"
+    r"|^\w+(?:\.\w+)*\.\w+\s*\([^;]*\)$|^[A-Za-z_]\w*\s*\([^;]*\)$"
+)
+
+
+def inline_statement(span: str) -> bool:
+    """Whether the text of a backtick span is one or more C or C++ statements."""
+    text = " ".join(span.split())
+    if not text.endswith(";"):
+        return False
+    parts = [part.strip() for part in text.split(";") if part.strip()]
+    if not parts or re.fullmatch(r"&[#\w]+", parts[0]):  # an HTML entity
+        return False
+    if any(RUST_STATEMENT_RE.search(part) for part in parts):
+        return False
+    return all(C_STATEMENT_RE.search(part) for part in parts)
+
+
+def inline_statement_findings(rel: str, texts: Sequence[str | None]) -> list[Finding]:
+    """QUOTE findings for statements in backticks; a span may go on to the next comment line,
+    so each comment run (up to a code line, an empty comment line or a fence) is read as one
+    text. Fenced lines are left to the fence checks."""
+    findings: list[Finding] = []
+    run: list[tuple[int, str]] = []
+    in_fence = False
+
+    def flush() -> None:
+        joined, starts = "", []
+        for number, text in run:
+            starts.append((len(joined), number))
+            joined += text.strip() + " "
+        for match in SPAN_RE.finditer(joined):
+            if inline_statement(match.group(1)):
+                number = [n for offset, n in starts if offset <= match.start()][-1]
+                findings.append(Finding(rel, number, "QUOTE", INLINE_STATEMENT, match.group(0)))
+        run.clear()
+
+    for number, text in enumerate(texts, start=1):
+        if text is None:  # a code line ends the run, and a fence with its comment
+            flush()
+            in_fence = False
+            continue
+        if FENCE_RE.match(text):
+            flush()
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        if not text:
+            flush()
+            continue
+        run.append((number, text))
+    flush()
+    return findings
+
+
 def citation_findings(
     rel: str, number: int, text: str, table: dict[str, int], dirs: frozenset[str]
 ) -> list[Finding]:
@@ -481,6 +555,9 @@ def check_text(
     """The findings of one file, whose lines are `lines` (comments of `style`). PIN and REF are
     checked in source files when `table` is given."""
     findings: list[Finding] = []
+    texts = comment_texts(style, lines)
+    if style != "text":
+        findings.extend(inline_statement_findings(rel, texts))
     last_citation: tuple[int, str] | None = None
     # The citations among the comment lines above the current line, back to a code line, an
     # empty comment line or a fence (the run): the last labelled one decides; without one, every
@@ -496,7 +573,7 @@ def check_text(
     source_file = style != "text"
     if table is not None and dirs is None:
         dirs = directories(table)
-    for number, text in enumerate(comment_texts(style, lines), start=1):
+    for number, text in enumerate(texts, start=1):
         if text is None:
             trailing = TRAILING_COMMENT_RE.search(lines[number - 1]) if style == "slash" else None
             if trailing is not None and table is not None:
@@ -636,6 +713,8 @@ def fix_lines(
         index = finding.line - 1
         if finding.kind == "QUOTE":
             text = texts[index] or ""
+            if finding.source == INLINE_STATEMENT:
+                continue  # inside prose: the writer says it in words
             if finding.source == CODE_AFTER_CITATION:
                 cut = code_after_citation(lines[index])
                 if cut is not None:
@@ -878,7 +957,8 @@ def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
 
 
 ADVICE = {
-    "QUOTE": "source text in a comment: keep or add the citation (path:lines), remove the text",
+    "QUOTE": "source text in a comment: keep or add the citation (path:lines), remove the text "
+    "(a statement in backticks: say what it does in words)",
     "LABEL": "labels another project's code as NCBI's: name the project and version",
     "PIN": "write `NCBI reference (598d8ae6): c++/<path>:<lines>` (rpsbproc: "
     "`NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/<path>:<lines>`)",

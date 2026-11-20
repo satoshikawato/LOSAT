@@ -463,7 +463,7 @@ impl AsnTextEncoder<'_> {
         self.put(b"\"");
         for &byte in value {
             let byte = if MODE == ALLOW {
-                // `if (c == 0) continue;` (objostrasn.cpp:436-438).
+                // A NUL byte is skipped (objostrasn.cpp:436-438).
                 if byte == 0 {
                     continue;
                 }

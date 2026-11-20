@@ -109,7 +109,7 @@ where
 {
     enc.begin_sequence("Search");
     string_member(enc, "query-id", 0, query.id);
-    // `if(q_title != kEmptyStr) search.SetQuery_title(q_title);`
+    // NCBI sets the query title only when it is not empty.
     if !query.title.is_empty() {
         string_member(enc, "query-title", 1, query.title);
     }

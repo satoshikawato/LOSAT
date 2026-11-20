@@ -96,7 +96,7 @@ impl<'b> JsonEncoder<'b> {
     /// NCBI reference (598d8ae6): c++/src/serial/objostrjson.cpp:771-778
     /// NCBI reference (598d8ae6): c++/src/serial/objostrjson.cpp:756-769
     /// NCBI reference (598d8ae6): c++/src/serial/objostrjson.cpp:731-754
-    /// (`static const char* const HEX = "0123456789ABCDEF";`, objostrjson.cpp:570.)
+    /// (The table of upper-case hex digits, objostrjson.cpp:570.)
     fn write_string(&mut self, value: &[u8]) {
         const HEX: &[u8; 16] = b"0123456789ABCDEF";
         self.out.push(b'"');

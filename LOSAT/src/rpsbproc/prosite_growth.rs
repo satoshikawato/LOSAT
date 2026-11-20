@@ -158,7 +158,7 @@ impl Live {
         Ok(())
     }
 
-    /// `curr = stkFlexStack.top(); stkFlexStack.pop();` of a copy of `len` records: the
+    /// Taking the top of `stkFlexStack` into `curr` and popping it, a copy of `len` records: the
     /// assignment allocates only when they do not fit, while the old buffer and the copy on the
     /// stack live. (NCBI's `curr.flex` never shrinks and each copy was made from it, so its
     /// copies always fit; this follows libstdc++ all the same.)

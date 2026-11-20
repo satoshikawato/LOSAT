@@ -262,9 +262,9 @@ pub(crate) fn subject_besthit(hsps: &mut Vec<Hsp>) -> Vec<Hsp> {
         }
         let a = &hsps[i].hsp;
         let begin = (a.q_start - 3).max(0);
-        // `if (e < 0) e = hsp_array[i]->query.end;` (blast_hits.c:2569): only the end of an
-        // HSP of length -4 or less near the start of its context (the one-hit word finder with
-        // `-window_size 0`, aa_ungapped.c:1054,1083) lies below -3.
+        // A negative end is replaced by the query end of the HSP (blast_hits.c:2569): only the
+        // end of an HSP of length -4 or less near the start of its context (the one-hit word
+        // finder with `-window_size 0`, aa_ungapped.c:1054,1083) lies below -3.
         let mut end = a.q_end + 3;
         if end < 0 {
             end = a.q_end;

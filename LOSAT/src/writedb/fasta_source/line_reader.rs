@@ -160,7 +160,8 @@ impl<R: Read> BufferedLineReader<R> {
         }
     }
 
-    /// `m_String = m_Line; m_Line = m_String;` before the buffer is read again.
+    /// Copies the line into `m_String` and makes `m_Line` refer to it, before the buffer is read
+    /// again.
     fn keep_line(&mut self) {
         if let Line::Buffer { start, end } = self.line {
             self.string.clear();

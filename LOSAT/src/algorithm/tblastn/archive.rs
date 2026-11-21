@@ -368,7 +368,9 @@ fn for_each_batch(
         let ka_blocks = match &context.karlin {
             Some((ungapped, gapped)) => [
                 ka_block(ungapped, false),
-                gapped.as_ref().map_or(KaBlock::missing(true), |gapped| ka_block(gapped, true)),
+                gapped
+                    .as_ref()
+                    .map_or(KaBlock::missing(true), |gapped| ka_block(gapped, true)),
             ],
             None => [KaBlock::missing(false), KaBlock::missing(true)],
         };

@@ -3508,10 +3508,8 @@ fn run_preliminary_subjects_into(
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:728-729,804-813,882-887
         // The preliminary e-values take the subject's length as their statistical length when it
         // is positive (`initial_translated_stat_length`).
-        let mut linked = link_or_evalues(
-            &preliminary,
-            initial_translated_stat_length(subject.len()),
-        )?;
+        let mut linked =
+            link_or_evalues(&preliminary, initial_translated_stat_length(subject.len()))?;
         reap_by_evalue(&mut linked, inputs.prelim_evalue);
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1480-1482
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1446,1466-1467
@@ -4431,10 +4429,7 @@ mod tests {
         );
         // An average of 4e9 letters: NCBI's `Uint4`, given back as the source's `Int4`.
         assert_eq!(
-            fasta.average_subject_length(&SubjectLetters::Lengths(&[
-                4_000_000_000,
-                4_000_000_000
-            ])),
+            fasta.average_subject_length(&SubjectLetters::Lengths(&[4_000_000_000, 4_000_000_000])),
             -294_967_296
         );
         let database = SubjectSetNumbers {

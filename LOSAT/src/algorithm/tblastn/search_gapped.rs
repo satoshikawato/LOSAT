@@ -1584,13 +1584,8 @@ fn x_preliminary_protein_hsps_by_unit<
             }
             // NCBI c++/src/algo/blast/core/blast_engine.c:572-586:
             // Blast_HSPListsMerge(&hsp_list, &hsp_list_for_chunks, ...);
-            per_frame = merge_adjusted_chunk(
-                per_frame,
-                unit_hsps,
-                chunk,
-                profile.hsp_num_max,
-                !UNGAPPED,
-            )?;
+            per_frame =
+                merge_adjusted_chunk(per_frame, unit_hsps, chunk, profile.hsp_num_max, !UNGAPPED)?;
             #[cfg(test)]
             probe_push(|| {
                 PreliminaryEvent::Merged(
@@ -8577,8 +8572,8 @@ mod tests {
                 hit(11, 11, 7, 7, 3, 30),
             ],
         );
-        let hsp = |score, q_start, q_end, q_gapped_start, s_start, s_end, s_gapped_start| {
-            GappedHsp {
+        let hsp =
+            |score, q_start, q_end, q_gapped_start, s_start, s_end, s_gapped_start| GappedHsp {
                 frame: 2,
                 score,
                 q_start,
@@ -8587,8 +8582,7 @@ mod tests {
                 s_start,
                 s_end,
                 s_gapped_start,
-            }
-        };
+            };
         assert_eq!(
             hsps,
             [

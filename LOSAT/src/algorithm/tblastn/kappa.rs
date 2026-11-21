@@ -386,8 +386,7 @@ pub(super) fn shown_report_counts(
             .get(qi)
             .context("TBLASTN report query offset overflow")?;
         let was_ident = q == X;
-        let was_positive =
-            was_ident || crate::utils::matrix::protein_score(matrix, q, X) > 0;
+        let was_positive = was_ident || crate::utils::matrix::protein_score(matrix, q, X) > 0;
         let is_ident = q == shown;
         let is_positive = is_ident
             || crate::utils::matrix::protein_display_score(
@@ -2898,7 +2897,10 @@ mod tests {
     fn report_counts_compare_an_ambiguous_codon_as_the_rows_show_it() {
         use crate::utils::matrix::aa_char_to_ncbistdaa;
         let code = GeneticCode::try_from_id(1).unwrap();
-        let query: Vec<u8> = b"MXEXM".iter().map(|&aa| aa_char_to_ncbistdaa(aa)).collect();
+        let query: Vec<u8> = b"MXEXM"
+            .iter()
+            .map(|&aa| aa_char_to_ncbistdaa(aa))
+            .collect();
         for (subject, frame) in [
             (&b"ATGRATSARNNNATG"[..], 1i8),
             (&b"CATNNNYTSATYCAT"[..], -1i8),
@@ -2919,14 +2921,19 @@ mod tests {
                 matrix_adjust_rule: EMatrixAdjustRule::DontAdjustMatrix,
             };
             let mut target = TargetTranslation::new(subject, &code);
-            let (ident, positives, length, mismatches, _, _) = postredo_converted_stats_with_matrix(
-                &converted,
-                &query,
-                &mut target,
-                ScoringMatrix::Blosum62,
-            )
-            .unwrap();
-            assert_eq!((ident, positives, length, mismatches), (4, 4, 5, 1), "frame {frame}");
+            let (ident, positives, length, mismatches, _, _) =
+                postredo_converted_stats_with_matrix(
+                    &converted,
+                    &query,
+                    &mut target,
+                    ScoringMatrix::Blosum62,
+                )
+                .unwrap();
+            assert_eq!(
+                (ident, positives, length, mismatches),
+                (4, 4, 5, 1),
+                "frame {frame}"
+            );
             let shown = shown_report_counts(
                 &converted,
                 &query,

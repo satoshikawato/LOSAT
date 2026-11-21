@@ -1810,7 +1810,10 @@ mod tests {
         let apart = linked(&pair(-1, 3), context(), 3000, &params);
         assert!(apart.iter().all(|l| l.num == 1), "{apart:?}");
         // The final list is in the order of the query starts whatever the frames.
-        assert_eq!(apart.iter().map(|l| l.index).collect::<Vec<_>>(), vec![1, 0]);
+        assert_eq!(
+            apart.iter().map(|l| l.index).collect::<Vec<_>>(),
+            vec![1, 0]
+        );
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:563-571

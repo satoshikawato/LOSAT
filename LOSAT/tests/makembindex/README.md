@@ -8,7 +8,9 @@ made. `tests/makembindex_fixtures.rs` runs every row in its own copy of `in/` an
 (the first 40 records of the generated `many.fa`) from the probe's generator. The databases were made by NCBI BLAST+
 2.17.0: `s1db/s1` of `s1.fa`; `mdb/m` of `m.fa` with the masks of `dustmasker -outfmt maskinfo_asn1_bin` (algorithm id
 11); `idsdb/ids` of `ids.fa` with `-parse_seqids`; `mvdb/mv` of `mv.fa` with `-max_file_sz 8KB` (three volumes).
-`al.nal` is an alias of `mvdb/mv`, `s1db/s1` and `idsdb/ids`.
+`adb/zz` is a second database of `s1.fa`. `al.nal` is an alias of `mvdb/mv`, `s1db/s1` and `idsdb/ids`; `al2.nal`
+of `s1db/s1` and `adb/zz`, whose volumes NCBI indexes in the order of their base names (`s1` before `zz`), not of their
+paths.
 
 `gen/` is made by the test: `big.fa` (one record of 5,100,000 letters with lower case runs, which the index splits into
 chunks, and one of 20,000) and `many.fa` (600 records) from the generator of `makembindex_fixtures.rs`, the databases

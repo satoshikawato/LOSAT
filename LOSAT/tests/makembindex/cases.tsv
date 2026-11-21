@@ -22,6 +22,7 @@ many_n8_vol1	-input gen/manydb/many -volsize 1 -nmer 8
 many_n10_vol2_new_idmap	-input gen/manydb/many -volsize 2 -legacy false -nmer 10 -idmap true
 mv_n8	-input mvdb/mv -nmer 8
 alias_n8	-input al -nmer 8 -idmap true
+alias_order_n8	-input al2 -nmer 8
 ids_idmap	-input idsdb/ids -idmap true -nmer 8
 mdb_mask11	-input mdb/m -db_mask 11 -nmer 9
 mdb_mask_dust	-input mdb/m -db_mask dust

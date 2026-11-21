@@ -819,10 +819,10 @@ pub fn algorithm_options(inputs: &OptionInputs) -> Vec<Param> {
                 // Each when given, after `Culling` (they exclude each other) and before
                 // `UseSubjectBestHit` (NCBI BLAST+ 2.17.0, line NP O6a's probe).
                 if let Some(overhang) = inputs.best_hit_overhang {
-                    list.set("BestHitOverhang", Real(overhang));
+                    list.set(fields::BEST_HIT_OVERHANG, Real(overhang));
                 }
                 if let Some(score_edge) = inputs.best_hit_score_edge {
-                    list.set("BestHitScoreEdge", Real(score_edge));
+                    list.set(fields::BEST_HIT_SCORE_EDGE, Real(score_edge));
                 }
                 if inputs.subject_besthit {
                     list.set(fields::SUBJECT_BEST_HIT, Boolean(true));

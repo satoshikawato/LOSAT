@@ -137,7 +137,8 @@ and tblastn (`-in_pssm`, the library's `Inputs::pssm`) run through the library a
 the rows of rpsblast and rpstblastn (the library API has no such program), those that give both
 `-query` and `-in_pssm` (the library's query is one or the other), those that give `-in_msa` with either of them,
 those with `-msa_master_idx` or `-ignore_msa_master` and no `-in_msa` (the library takes the options with the
-alignment, `Inputs::msa`) and those that read the query from
+alignment, `Inputs::msa`), those that write the search strategy file (`-export_search_strategy`, which the
+library refuses) and those that read the query from
 standard input (the library's query is records) are `library-skip`. psiblast's alignment queries
 (`-in_msa`, a query cell `msa:PATH`, the library's `Inputs::msa`) run through the library as on the command line.
 The tool takes no lock; whoever runs it next to other NCBI runs holds the caller's own.
@@ -1090,13 +1091,16 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
     # the command line `-query` and `-in_pssm` (the parser's exclusion) has no library call, nor has
     # a row that gives `-in_msa` with either of them, or the alignment's master options
     # (`xinclude.ALIGNMENT_OPTIONS`) without `-in_msa` (`Inputs::msa` is the library's alignment
-    # query, line LIB item 1.6).
+    # query, line LIB item 1.6), nor a row that writes the search strategy file
+    # (`-export_search_strategy`: the library writes none and refuses it, `api::search::STRATEGY_FILES`,
+    # line RG item F1b-1).
     argv = search_argv(row)
     if library and (row["program"] in ("rpsblast", "rpstblastn")
                     or ("-query" in argv and "-in_pssm" in argv)
                     or ("-in_msa" in argv and ("-query" in argv or "-in_pssm" in argv))
                     or ("-in_msa" not in argv
                         and any(word in xinclude.ALIGNMENT_OPTIONS for word in argv))
+                    or "-export_search_strategy" in argv
                     or query_stdin(row)):
         return "library-skip", ""
     if (files or pssm) and query_stdin(row):

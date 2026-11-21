@@ -45,11 +45,8 @@ fn subject_set_database_lines_print_totals_of_2_to_the_32_letters_or_more() {
     );
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:395 (quoted at
-// `write_prolog`)
-// ```c++
-//     m_Outfile << NcbiEndl << NcbiEndl;
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:395 (cited at
+// `write_prolog`): the prolog's two `NcbiEndl`, each a newline and a flush.
 // Which programs' prologs flush after each of these two newlines (`write_prolog`'s
 // `endl_flushes`, each program's flushes of dev; review note N3 of line RG T4a1): the prologs
 // of blastx, rpstblastn, tblastn (also with `-in_pssm`), tblastx and the blastn tasks other

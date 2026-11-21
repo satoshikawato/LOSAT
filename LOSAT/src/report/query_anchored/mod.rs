@@ -1108,7 +1108,7 @@ pub(crate) fn fill_row_loc_list(
     }
 }
 
-/// `x_OutputSeq`'s lower case (quoted at `output_seq`) of the letters `letters` of the columns
+/// `x_OutputSeq`'s lower case (cited at `output_seq`) of the letters `letters` of the columns
 /// from `start` on: the columns of the masks of `masks` with the row's frame `row_frame`.
 #[inline]
 fn lower_masked(letters: &mut [u8], start: i64, masks: &[(i64, i64, i8)], row_frame: i8) {

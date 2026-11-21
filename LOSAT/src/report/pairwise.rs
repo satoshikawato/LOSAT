@@ -1656,28 +1656,10 @@ fn write_ncbi_ka_field<W: Write>(writer: &mut W, value: f64) -> io::Result<()> {
 /// case; `blastp_family_program` for blastp's driver).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:360-395
-/// ```c++
-///     // no header for some output types
-///     if (m_FormatType >= CFormattingArgs::eXml) {
-///         ...
-///         return;
-///     }
-///
-///     if (m_IsHTML) {
-///         m_Outfile << kHTML_Prefix << "\n";
-///     }
-///     ...
-///       CBlastFormatUtil::BlastPrintVersionInfo(m_Program, m_IsHTML,
-///                                               m_Outfile);
-///     }
-///
-///     if (m_IsBl2Seq && !m_IsDbScan) {
-///         return;
-///     }
-///
-///     m_Outfile << NcbiEndl << NcbiEndl;
-/// ```
-/// (The callers are those of formats 0-4 that write the references.) `disable_ka_stats` is
+/// NCBI writes no prolog for the XML formats and those after them (they write their own
+/// headers); an HTML report starts with the HTML prefix line; then comes the version line, and,
+/// unless a bl2seq search without a database scan ends there, the two `NcbiEndl`. (The callers
+/// are those of formats 0-4 that write the references.) `disable_ka_stats` is
 /// NCBI's `m_DisableKAStats` (blastn's matrix-only scoring, `BlastnIntro::matrix_only`): a
 /// blastn search then names `rmblastn` in the version line and writes RMBlast's reference, three
 /// lines with no line end after the last, before the `NcbiEndl` pair; the references after it
@@ -2199,19 +2181,7 @@ fn write_blastp_final_footer<W: Write>(
 /// with the stream's default format (`cpp_default_double`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2281-2292
-/// ```c++
-///     if (options.GetWordThreshold()) {
-///         m_Outfile << "Neighboring words threshold: " <<
-///                         options.GetWordThreshold() << "\n";
-///     }
-///     if (options.GetWindowSize()) {
-///         m_Outfile << "Window for multiple hits: " <<
-///                         options.GetWindowSize() << "\n";
-///     }
-///     if (m_IsHTML) {
-///         m_Outfile << kHTML_Suffix << "\n";
-///     }
-/// ```
+/// The two lines, then an HTML report's suffix line.
 fn write_epilog_end<W: Write + ?Sized>(
     writer: &mut W,
     word_threshold: f64,

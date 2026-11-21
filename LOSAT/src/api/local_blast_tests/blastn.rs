@@ -943,14 +943,8 @@ fn reverse_complement_keeping_case(seq: &[u8]) -> Vec<u8> {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2495-2521
-// ```c++
-//         if(id.Which() != CSeq_id::e_not_set){
-//             /*only do this for sequence but not for others like middle line,
-//               features*/
-//             ...
-//                 } else if (m_SeqLocChar==eLowerCase){
-//                     actualSeq[i-start]=tolower((unsigned char) actualSeq[i-start]);
-// ```
+// `x_OutputSeq` puts the masked letters of a sequence row (not of the middle line or features)
+// in lower case.
 // The rows of the hit records that the library API hands out (`HspRecord::query_aligned`,
 // `subject_aligned`) show the masks in lower case as outfmt 0 shows them (`HspMasks::lower_row`
 // with the masks that `x_OutputSeq` reads): with `-lcase_masking`, the query's lowercase and a

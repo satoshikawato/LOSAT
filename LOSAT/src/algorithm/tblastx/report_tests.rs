@@ -334,7 +334,7 @@ fn query_masks_convert_with_ncbis_frame_formulas() {
     assert_eq!(&other, b"AAAAAAAAA");
 }
 
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:4305-4326 (quoted at
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:4305-4326 (cited at
 // `shown_query_masks`): `x_FillLocList` hands the masks to `x_OutputSeq` in the order of the
 // shown list, which a minus frame's conversion makes descending (`protein_to_dna_masks`); the
 // row's scan reads them sorted by start (`FrameMasks`) and gives them back in the list's order.

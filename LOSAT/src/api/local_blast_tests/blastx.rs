@@ -696,12 +696,8 @@ fn errors_of_the_ranges_follow_the_command_line() {
     let _ = std::fs::remove_file(&short_subject);
 }
 
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2500-2502
-// ```c++
-//             int locFrame = (*iter)->seqloc->GetFrame();
-//             if(id.Match((*iter)->seqloc->GetInterval().GetId())
-//                && locFrame == frame){
-// ```
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2500-2503
+// `x_OutputSeq` shows a mask on a row only when the mask's sequence and frame are the row's.
 // The rows of the hit records that the library API hands out (`HspRecord::query_aligned`,
 // `subject_aligned`) show the masks in lower case as outfmt 0 shows them (`HspMasks::lower_row`
 // with the masks that `x_OutputSeq` reads): with `-lcase_masking`, a query row shows the residues

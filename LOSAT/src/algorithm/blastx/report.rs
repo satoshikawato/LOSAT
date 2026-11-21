@@ -1154,28 +1154,15 @@ pub(super) fn pairwise_hits(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:936-951
-// ```c++
-//                 TSeqRange masked_range(loc->ssr->left, loc->ssr->right);
-//                 TSeqRange range(Map(kTarget, masked_range));
-//                 if (range.NotEmpty() && range != kTarget) {
-//                     int frame = BLAST_ContextToFrame(program, index);
-// ```
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2500-2502
-// ```c++
-//             int locFrame = (*iter)->seqloc->GetFrame();
-//             if(id.Match((*iter)->seqloc->GetInterval().GetId())
-//                && locFrame == frame){
-// ```
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2500-2503
 // The masks a row shows are those labelled with the row's frame in the record; a mask keeps
 // the frame of the context it was found in, which counts from the ends of the searched letters.
 // With `-query_loc` the two can differ, and NCBI then shows the masks of another frame's context
 // on the row (the TBLASTX display, `tblastx::report::shown_query_masks`).
 // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmap.cpp:593-595
-// ```c++
-//     TSeqPos delta = (seq_pos - start) / GetWidth(row);
-//     return m_AlnStarts[seg.GetAlnSeg()]
-//         + (plus ? delta : m_Lens[raw_seg] - 1 - delta);
-// ```
+// A position's column in its segment is its distance from the segment's first position divided
+// by the row's width (three nucleotides a residue here), counted from the segment's end on the
+// minus strand.
 /// The outfmt 0 query row `row` of a display alignment (`DisplayAlignment::qseq`, of the 1-based
 /// record positions `ends`, `qstart` and `qend`, on the frame `frame`) and the row's masks
 /// (`HspMasks`, `None` when none meets the row): the query's masks of the row's frame

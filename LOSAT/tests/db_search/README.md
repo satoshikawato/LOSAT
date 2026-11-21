@@ -248,6 +248,9 @@ or indels, some reverse-complemented, two 4 and 7 letters apart) and 500 random 
     makeblastdb -in tests/db_search/rpt_d4.fna -dbtype nucl -out tests/db_search/rpt_d4 \
         -title "rpt_d4 repeats" -blastdb_version 4
 
+`rpt_d4_badcount.nal` (row `db.rpt.badcount.6`) is an alias file of `rpt_d4` whose `STATS_NSEQ` (`2e1`) NCBI cannot
+convert to a number, written by hand.
+
 `txrand.fna` (rows `db.cnt.l0txr.*` through `dbcounts/l0txr.nal`, review 6 R6-M1 of D1a-3): two subjects of 12,000 random
 nucleotides each, with two to five pieces of `tests/db_search/taxfilter/q.fna` (60-250 letters, 20-35 % of them changed,
 half reverse-complemented) written over them (records `g2_3_12000` and `g5_2_12000` of review 6's generator; a fixed

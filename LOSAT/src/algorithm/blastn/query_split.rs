@@ -386,7 +386,8 @@ pub fn restrict_record_masks(
 }
 
 /// `restrict_masks` of a query whose letter before its `-query_loc` interval (record letter
-/// `offset - 1`) is lower case, with `-lcase_masking`. NCBI restricts the lower-case runs of the
+/// `offset - 1`) is in its masks: lower case, with `-lcase_masking`, or joined by the masks of
+/// `-filtering_db` (`repeat_filter::MasksOutside::before`). NCBI restricts the lower-case runs of the
 /// whole record (`restrict_record_masks`); of the letters outside the interval only that one can
 /// reach a part, the first letter of the query's first part, whether its run ends there or goes
 /// on into the interval. The masks in the searched letters' coordinates are moved into the

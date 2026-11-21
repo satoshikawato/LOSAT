@@ -6979,8 +6979,11 @@ pub fn run_local_database(
 /// `RepeatFilter::search_args`) over `query_records` against the filter's database, in `pool`, the
 /// pool of the search whose queries it masks, without a report: the hit lists, as the search hands
 /// them to a library caller (`ReportOutputs::hits`). Its messages are dropped, as NCBI reads only
-/// the alignments of its search of the repeats. An error of NCBI's database reader where the
-/// database is opened is `RepeatError::Database`, NCBI's text.
+/// the alignments of its search of the repeats, and nothing that only a formatter reads is read
+/// (`BlastnArgs::hits_only`: NCBI's search of the repeats has no formatter). An exception of NCBI's
+/// search is `RepeatError::Posted`, its message: an error of the database reader where the
+/// database is opened, and the stop of a batch that the search's set-up finds without a valid query
+/// (`BLAST engine error: `, `CBlastException` eSetup).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/repeats_filter_cxx.cpp:368-390
 pub(crate) fn repeat_search_hits(
@@ -6991,15 +6994,25 @@ pub(crate) fn repeat_search_hits(
 ) -> std::result::Result<Vec<Arc<Vec<PairwiseHit>>>, super::super::repeat_filter::RepeatError> {
     use super::super::repeat_filter::RepeatError;
     use crate::algorithm::common::database::DatabaseOpenError;
-    if let Err(DatabaseOpenError::Reader(error)) =
-        crate::algorithm::common::database::open_search_database(
-            filter.database(),
-            crate::seqdb::SeqType::Nucleotide,
-            filter.settings(),
-        )
-    {
-        if let (None, Some(text)) = (error.ncbi_exception(), error.ncbi_message()) {
-            return Err(RepeatError::Database(text));
+    // The search's `CSeqDB`, without a list, meets the errors of the alias files' counts where it
+    // opens the database (`common::database::restrict_database`).
+    let opened = crate::algorithm::common::database::open_search_database(
+        filter.database(),
+        crate::seqdb::SeqType::Nucleotide,
+        filter.settings(),
+    );
+    let failed = match opened {
+        Ok(database) => database.check_alias_values().err(),
+        Err(DatabaseOpenError::Reader(error)) => Some(error),
+        Err(DatabaseOpenError::Registry(_)) => None,
+    };
+    if let Some(error) = failed {
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:632-639
+        // The set-up of each query posts the exception's `GetMsg()`.
+        match (error.ncbi_exception(), error.ncbi_message()) {
+            (Some(exception), _) => return Err(RepeatError::Posted(exception.get_msg().to_vec())),
+            (None, Some(text)) => return Err(RepeatError::Posted(text)),
+            (None, None) => {}
         }
     }
     // The search writes a tabular report, which nothing reads (as the library's batches do,
@@ -7031,7 +7044,20 @@ pub(crate) fn repeat_search_hits(
             )
         })
     };
-    result.map_err(RepeatError::Search)?;
+    result.map_err(|error| match error.downcast::<crate::cli::NativeError>() {
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:650-651
+        // The search's set-up that finds no valid query stops with its messages, which the
+        // command line writes after `BLAST engine error: `.
+        Ok(native) => match native
+            .message
+            .strip_prefix(b"BLAST engine error: ")
+            .and_then(|text| text.strip_suffix(b"\n"))
+        {
+            Some(text) if native.exit == 3 => RepeatError::Posted(text.to_vec()),
+            _ => RepeatError::Search(native.into()),
+        },
+        Err(error) => RepeatError::Search(error),
+    })?;
     Ok(collected)
 }
 
@@ -8802,9 +8828,9 @@ fn run_in_pool(
         // search (a database's titles are read in its traceback, above): a value that NCBI cannot
         // convert stops the first batch here, after its reader's messages and before its query
         // warnings (`app::check_prefetch_environment`).
-        if let Err(error) =
-            crate::blastinput::app::check_prefetch_environment(outputs.only_archive())
-        {
+        if let Err(error) = crate::blastinput::app::check_prefetch_environment(
+            outputs.only_archive() || args.hits_only,
+        ) {
             write_before_failed_batch(
                 &args,
                 queries.before(&kept, start),
@@ -10944,14 +10970,19 @@ fn search_query_chunks(
             .iter()
             .map(|part| queries.cut(part.query, part.from, part.to))
             .collect();
-        // A query whose letter before its `-query_loc` interval is lower case
-        // (`lower_case_before`) restricts that letter too.
+        // A query whose letter before its `-query_loc` interval is masked in the batch's masks
+        // restricts that letter too: a lower-case letter (`lower_case_before`), or with
+        // `-filtering_db` one that the batch's repeat masks joined (`masks_outside`, bit 0).
         let restricted = chunk
             .queries
             .iter()
             .map(|part| {
                 let (masks, offset) = (&query_masks[part.query], query_offsets[part.query]);
-                if lower_case_before.get(part.query) == Some(&true) {
+                let letter_before = lower_case_before.get(part.query) == Some(&true)
+                    || masks_outside
+                        .get(part.query)
+                        .is_some_and(|outside| outside.before & 1 != 0);
+                if letter_before {
                     restrict_masks_with_letter_before(masks, part, offset)
                 } else {
                     restrict_masks(masks, part, offset)

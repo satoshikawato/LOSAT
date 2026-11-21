@@ -460,6 +460,13 @@ pub struct BlastnArgs {
     // argument of the command line sets this.
     #[arg(skip)]
     pub one_query_batch: bool,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/repeats_filter_cxx.cpp:394-399
+    // The search of the repeats of `-filtering_db` (`repeat_filter`) is a `CLocalBlast` whose
+    // alignments its caller reads: no formatter reads its results, so nothing that only the
+    // formatter reads (`PRE_FETCH_SEQS_LIMIT`) stops it. Its caller takes the hits
+    // (`blast_engine::repeat_search_hits`). No argument of the command line sets this.
+    #[arg(skip)]
+    pub hits_only: bool,
     // NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_input.hpp:180-182
     // The position in the whole input of the first of these records, as a reader's counter
     // starts there (`api::run_batches`): a query's `Query_N` in the messages. 0 on the command

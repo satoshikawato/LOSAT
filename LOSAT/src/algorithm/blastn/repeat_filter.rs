@@ -120,9 +120,11 @@ pub struct RepeatFilter {
 /// Why the repeat search of a batch or chunk failed.
 #[derive(Debug)]
 pub(crate) enum RepeatError {
-    /// An error of NCBI's database reader that NCBI reports for each query of the batch
-    /// (`batch_error`): its text.
-    Database(Vec<u8>),
+    /// An exception of NCBI's search of the repeats, which the set-up of each query of the batch
+    /// posts as a warning (`batch_error`): its message (`GetMsg`). The errors of the database
+    /// reader where the database is opened, and the stop of a search whose own set-up found no
+    /// valid query (`CBlastException` eSetup, the text after `BLAST engine error: `).
+    Posted(Vec<u8>),
     /// Any other error: LOSAT's own rejection of the search, or one that NCBI does not report
     /// as LOSAT does (`rejection`).
     Search(anyhow::Error),
@@ -153,6 +155,7 @@ impl RepeatFilter {
         };
         args.num_threads = threads;
         args.one_query_batch = true;
+        args.hits_only = true;
         Ok(args)
     }
 
@@ -239,7 +242,7 @@ fn join(
     hits: &[(usize, usize)],
     masks: &[MaskedInterval],
     length: usize,
-    mut outside: Option<&mut MasksOutside>,
+    outside: Option<&mut MasksOutside>,
 ) -> Vec<MaskedInterval> {
     let last = length as i64 - 1;
     let mut intervals: Vec<(i64, i64)> = hits
@@ -257,7 +260,7 @@ fn join(
         }
     }
     let combined = combine(intervals);
-    if let Some(outside) = outside.as_deref_mut() {
+    if let Some(outside) = outside {
         for &(left, right) in combined.iter().filter(|interval| interval.0 < 0) {
             for k in 0..REACH {
                 let letter = -(k as i64) - 1;
@@ -295,7 +298,7 @@ where
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:176-228
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:632-652
 pub(crate) fn batch_error(error: &RepeatError, queries: usize) -> Option<crate::cli::NativeError> {
-    let RepeatError::Database(text) = error else {
+    let RepeatError::Posted(text) = error else {
         return None;
     };
     let mut message = b"BLAST engine error: ".to_vec();
@@ -314,12 +317,14 @@ pub(crate) fn batch_error(error: &RepeatError, queries: usize) -> Option<crate::
 /// set-up).
 pub(crate) fn rejection(filter: &RepeatFilter, error: RepeatError) -> anyhow::Error {
     match error {
-        RepeatError::Search(error) => error.context(format!(
-            "the repeat search of -filtering_db {} failed",
+        // The text alone: the search's own error (a `NativeError` that the command line would
+        // write as NCBI's) is not this run's.
+        RepeatError::Search(error) => anyhow::anyhow!(
+            "the repeat search of -filtering_db {} failed: {error:#}",
             filter.database
-        )),
-        RepeatError::Database(text) => anyhow::anyhow!(
-            "the database of -filtering_db {} gives an error where NCBI BLAST+ reports it otherwise ({}); this is not supported by LOSAT's BLASTN",
+        ),
+        RepeatError::Posted(text) => anyhow::anyhow!(
+            "the repeat search of -filtering_db {} stops with an error ({}) where NCBI BLAST+ reports it otherwise; this is not supported by LOSAT's BLASTN",
             filter.database,
             String::from_utf8_lossy(&text)
         ),
@@ -359,6 +364,7 @@ mod tests {
         assert_eq!(args.strand, "plus");
         assert_eq!(args.num_threads, 4);
         assert!(args.one_query_batch);
+        assert!(args.hits_only);
         assert!(args.filtering_db.is_none());
     }
 
@@ -419,7 +425,7 @@ mod tests {
 
     #[test]
     fn batch_error_repeats_the_text_for_each_query() {
-        let error = RepeatError::Database(b"Database name is required.".to_vec());
+        let error = RepeatError::Posted(b"Database name is required.".to_vec());
         let native = batch_error(&error, 2).expect("NCBI's error");
         assert_eq!(native.exit, 3);
         assert_eq!(

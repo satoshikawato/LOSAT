@@ -1738,6 +1738,18 @@ before its crash (`ncbi-near`), `nseq0ns` over `aliaskeys/n_nseq0ns` (`NSEQ 0` o
 sequence file) before the error of the missing file, which NCBI meets only after the division (TBLASTN with the Gumbel
 block, which does not divide: that error). Frozen with NCBI BLAST+ 2.17.0 on the workstation (`env_blast`).
 
+Rows `db.cnt.avg2p32.mb.*`, `db.cnt.avg2p32.mo00.split.6`, `db.cnt.avg2p32.mo52.split.6` and `db.ak.bn.rej.nseq0.mbsplit` (D1a-6 of line RG): a query batch split into chunks
+(`CHUNK_SIZE=200`) over `dbcounts/avg2p32`, whose average length is too short, with options that LOSAT refuses for the
+greedy extension (`-task megablast` with gap costs 40000 and 40000, or reward 0 and penalty 0): NCBI checks the subjects in
+the setup of the first chunk with a valid context, before the greedy set-up, so it stops with `The average subject length is
+too short` (exit 3), as an unsplit batch does (`.mbwhole.6`). `.b1.7` reports two queries without letters first (`BATCH_SIZE=1`,
+`../fasta/rps/alln_q.fna`); `.nq` puts a query of 300 N (`../fasta/rps/n300_q.fna`: that query, then `taxfilter/q.fna`) before
+it, so the first chunks have no valid context. The rejection row has `NSEQ 0`, where NCBI crashes in that setup (SIGFPE).
+Rows `db.gr.bn.*` (the same item): `db.gr.bn.rej.mo00.b1` refuses matrix-only scoring with the greedy extension in the third
+batch of `alln_q.fna` (`BATCH_SIZE=1`) after the reports of the two batches before, the 142 bytes NCBI writes before it
+divides by zero there (SIGFPE); `db.gr.bn.alln_q.b1.7` is the near run NCBI finishes (`ncbi-near`).
+Frozen with NCBI BLAST+ 2.17.0 on the developer machine and again on the workstation (`env_blast`), the same bytes.
+
 Rows `db.ak.*.ord.*` (D1a-2): the order of a search database's errors, NCBI's (probes p4c_e*, p4c_f2): the list, the alias
 files' counts, the formatter's reopening of each name, then the headers (before line DBID mixdb also the accession tables). `o_mix` and `o_mixs` are
 `multidb/na` (with the accession table) and `multidb/nnp` (without) under `NSEQ abc` / `STATS_NSEQ abc`, with `-seqidlist`

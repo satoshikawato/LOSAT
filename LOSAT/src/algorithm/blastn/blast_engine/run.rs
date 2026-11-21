@@ -10285,22 +10285,45 @@ fn search_query_batch<const UNGAPPED: bool>(
             query_offsets,
             lower_case_before,
             ..
-        } if any_valid_context && !UNGAPPED => search_query_chunks(
-            args,
-            &letters,
-            &seq_data.query_masks,
-            query_offsets,
-            lower_case_before,
-            option_spaces.as_ref().unwrap_or(&query_eff_searchsp),
-            &query_context_offsets,
-            subjects,
-            reborrow_outputs(&mut outputs),
-            parallel_pool,
-            batching,
-            first_batch,
-            posts,
-            x_keep,
-        )?,
+        } if any_valid_context && !UNGAPPED => {
+            let chunks = search_query_chunks(
+                args,
+                &letters,
+                &seq_data.query_masks,
+                query_offsets,
+                lower_case_before,
+                option_spaces.as_ref().unwrap_or(&query_eff_searchsp),
+                &query_context_offsets,
+                subjects,
+                reborrow_outputs(&mut outputs),
+                parallel_pool,
+                batching,
+                first_batch,
+                posts,
+                x_keep,
+            )?;
+            // A batch with a valid context whose chunks have none (the chunks' own masks would
+            // cover the letters that the batch's leave open) meets `BLAST_GapAlignSetUp` first
+            // in the set-up of its traceback, after the chunks:
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:231-253
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1831-1837
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback_mt_priv.c:219-226
+            // The greedy set-up refuses there as in a batch that is not split. The check of the
+            // subjects before it (NCBI: `Traceback failed`, exit status 3) is not reproduced: no
+            // input that reaches this was found (line RG D1a-6, review A F1).
+            if let Some((_, false)) = &chunks {
+                if let Some(error) = context_statistics::greedy_setup_refusal(args, false) {
+                    return Err(context_statistics::setup_failure(
+                        error,
+                        first_batch,
+                        reborrow_outputs(&mut outputs),
+                        intro,
+                        &shown,
+                    ));
+                }
+            }
+            chunks.map(|(lists, _)| lists)
+        }
         _ => None,
     };
     // EXPERIMENT (LOSAT_X_BNQPACK): the encoding and the query chunks were the last readers of the
@@ -10733,7 +10756,9 @@ fn search_query_batch<const UNGAPPED: bool>(
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:237-289
 /// A chunk has its own query block, masks, Karlin-Altschul blocks, lookup table and
 /// diagnostics (a split batch gives the next batch size 0 initial hits), and NCBI drops its
-/// warnings. A chunk without a valid context finds nothing, as NCBI ignores its error.
+/// warnings. A chunk without a valid context finds nothing, as NCBI ignores its error. With the
+/// merged lists it returns whether a chunk had a valid context (its set-up checked the subjects
+/// and the greedy set-up).
 #[allow(clippy::too_many_arguments)]
 fn search_query_chunks(
     args: &BlastnArgs,
@@ -10750,7 +10775,7 @@ fn search_query_chunks(
     first_batch: bool,
     posts: &mut Posts,
     x_keep: Option<&Arc<x_mb_lut_keep::Keep>>,
-) -> Result<Option<PrelimHitLists>> {
+) -> Result<Option<(PrelimHitLists, bool)>> {
     let lengths: Vec<usize> = (0..queries.count())
         .map(|index| queries.length(index))
         .collect();
@@ -10783,6 +10808,9 @@ fn search_query_chunks(
     // No NCBI counterpart (memory placement only, `x_query_sentinels`): the chunks' query buffer,
     // kept from chunk to chunk (the batch's own buffer is in use until its traceback).
     let mut query_keep: Vec<u8> = Vec::new();
+    // Whether a chunk had a valid context, so that its set-up (`context_statistics`) checked the
+    // subjects and the greedy set-up.
+    let mut chunk_set_up = false;
     for chunk in &chunks {
         // NCBI fails to make the query factory of a chunk without a query ("Empty
         // CBlastQueryVector"); `split_query_batch` makes none.
@@ -10833,6 +10861,7 @@ fn search_query_chunks(
             x_keep,
             &mut query_keep,
         )?;
+        chunk_set_up |= batch.searched;
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:174-178
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:519-522
         merge_query_chunk(
@@ -10843,7 +10872,7 @@ fn search_query_chunks(
             batching.split.overlap as u32 as i32,
         )?;
     }
-    Ok(Some(merged))
+    Ok(Some((merged, chunk_set_up)))
 }
 
 /// NCBI's `BlastHSPStreamMerge` of a query chunk: the HSPs of each query part's hit list

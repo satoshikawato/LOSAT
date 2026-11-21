@@ -781,15 +781,17 @@ pub(crate) fn psi_search_and_object_of(
     };
     // `other` (255): psiblast searches it as a protein (NCBI's query set-up refuses only the
     // nucleotide molecules). tblastn's query is checked as before.
-    let mol_other = (query.inst.mol.1 == 255 && reader.program == "PSIBLAST")
-        .then(|| match query.inst.seq_data.as_ref() {
+    let mol_other = if query.inst.mol.1 == 255 && reader.program == "PSIBLAST" {
+        match query.inst.seq_data.as_ref() {
             // The coding that NCBI's object manager converts (`CSeq_data::E_Choice`).
             Some(SeqData::Iupacaa(_)) => Some(2),
             Some(SeqData::Ncbieaa(_)) => Some(8),
             Some(SeqData::Ncbistdaa(_)) => Some(10),
             _ => None,
-        })
-        .flatten();
+        }
+    } else {
+        None
+    };
     if !(matches!(query.inst.mol.1, 1..=4) || mol_other.is_some()) || query.inst.repr.1 != 2 {
         return Err(reader.refuse(format!(
             "a PSSM query whose Seq-inst is not a raw protein (repr {}, mol {})",

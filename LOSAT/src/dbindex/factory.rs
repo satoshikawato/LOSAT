@@ -408,7 +408,10 @@ impl SubjectMap {
             .iter()
             .rposition(|lid| lid.seq_start <= soff)
             .expect("a local id at or before the chunk");
-        (at, (soff - self.lid_map[at].seq_start).wrapping_mul(CR as u32))
+        (
+            at,
+            (soff - self.lid_map[at].seq_start).wrapping_mul(CR as u32),
+        )
     }
 
     /// `MakeOffset(seq, off)` of the chunk whose data start at byte `soff`, by its local id
@@ -710,7 +713,14 @@ impl OffsetData {
     /// distances to the ends of its valid interval when one of them is at most the stride.
     // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_factory.cpp:1450-1467
     #[inline]
-    fn encode_and_add_offset(&mut self, nmer: Word, start: u32, stop: u32, curr: u32, offset: Word) {
+    fn encode_and_add_offset(
+        &mut self,
+        nmer: Word,
+        start: u32,
+        stop: u32,
+        curr: u32,
+        offset: Word,
+    ) {
         let mut start_diff = curr
             .wrapping_add(2)
             .wrapping_sub(self.hkey_width as u32)

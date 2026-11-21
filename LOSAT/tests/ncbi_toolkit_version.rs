@@ -9,15 +9,7 @@
 //! the same in both builds), LOSAT's package, and none of the lines that NCBI's build writes about
 //! itself (they differ between NCBI's two builds).
 //!
-//! NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:980-985 (quoted at `ncbi_version::print`)
-//! ```c++
-//!             } else if ( NStr::strcmp(argv[i], s_ArgFullVersion) == 0 ) {
-//!                 delete[] v;
-//!                 // Print full VERSION
-//!                 cout << GetFullVersion().Print( appname );
-//!                 diag_context.DiscardMessages();
-//!                 return 0;
-//! ```
+//! NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:980-985 (cited at `ncbi_version::print`)
 
 #![cfg(unix)]
 
@@ -65,7 +57,7 @@ fn run_in(dir: &Path, program: &str, words: &[&str]) -> Output {
 
 /// The programs, NCBI's version of each (the first line of its `-version-full`, probes `vf`, and
 /// the numbers of its XML and JSON `version_info`), and an option of each that takes a value.
-const PROGRAMS: [(&str, &str, [&str; 3], &str); 14] = [
+const PROGRAMS: [(&str, &str, [&str; 3], &str); 15] = [
     ("blastn", "2.17.0+", ["2", "17", "0"], "-out"),
     ("blastp", "2.17.0+", ["2", "17", "0"], "-out"),
     ("blastx", "2.17.0+", ["2", "17", "0"], "-out"),
@@ -80,6 +72,7 @@ const PROGRAMS: [(&str, &str, [&str; 3], &str); 14] = [
     ("dustmasker", "1.0.0", ["1", "0", "0"], "-out"),
     ("segmasker", "1.0.0", ["1", "0", "0"], "-out"),
     ("convert2blastmask", "2.17.0+", ["2", "17", "0"], "-out"),
+    ("makembindex", "2.17.0", ["2", "17", "0"], "-input"),
 ];
 
 /// LOSAT's package: its version, and its numbers in the XML and JSON.
@@ -268,7 +261,12 @@ fn the_library_s_tools_print_the_versions_as_the_command_line() {
     for (program, version, numbers, value_option) in PROGRAMS {
         let tool = matches!(
             program,
-            "makeblastdb" | "blastdbcmd" | "dustmasker" | "segmasker" | "convert2blastmask"
+            "makeblastdb"
+                | "blastdbcmd"
+                | "dustmasker"
+                | "segmasker"
+                | "convert2blastmask"
+                | "makembindex"
         );
         for word in [
             "-version",

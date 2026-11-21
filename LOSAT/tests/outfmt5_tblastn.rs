@@ -7,13 +7,6 @@
 //! `tests/db_search_manifest/tblastn.tsv` and `tests/xml_dbname.rs`.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:725-733
-//! ```c++
-//!     if( incremental_output && incremental_struct->m_IterationNum == 0) {
-//!         ...
-//!         *out_stream << serial_xml_start << "\n<BlastOutput_iterations>" ;
-//!         incremental_struct->m_SerialXmlEnd = "\n</BlastOutput_iterations>" + serial_xml_end;
-//!     }
-//! ```
 
 use std::fs;
 use std::path::{Path, PathBuf};

@@ -19,6 +19,7 @@ export {
   MESSAGES_STREAM,
   messagesSignal,
   PLACE_NOWHERE,
+  PLACE_RUN,
   ReactorAbi,
   ROLE_QUERY,
   ROLE_SUBJECT,

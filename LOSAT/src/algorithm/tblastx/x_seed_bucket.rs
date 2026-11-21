@@ -1,7 +1,7 @@
 //! EXPERIMENT (SEEDBUCKET, graduated on 2026-10-22: no variable): the two-hit
 //! stage of the TBLASTX word finder with the hits grouped by diagonal range.
 //!
-//! NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:492-614
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:492-614
 //! (`BlastAaWordFinder_TwoHit`): the subject is scanned left to right, and
 //! every hit `(q_off, s_off)` is tested against — and updates — exactly one
 //! cell of the diagonal table, `diag_array[(q_off - s_off) & diag_mask]`.
@@ -35,22 +35,6 @@
 //! a subject of a few megabases pass: 2^32 hits per subject-frame scan.)
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-538,588-606
-//! ```c
-//! Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
-//! Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
-//! ...
-//! diag_coord = (query_offset - subject_offset) & diag_mask;
-//! ...
-//! if (diag_array[diag_coord].flag) {
-//! ...
-//!     last_hit = diag_array[diag_coord].last_hit - diag_offset;
-//!     diff = subject_offset - last_hit;
-//! ...
-//!     if (score >= cutoffs->cutoff_score)
-//!         BlastSaveInitHsp(ungapped_hsps, hsp_q, hsp_s,
-//!                          query_offset, subject_offset, hsp_len,
-//!                          score);
-//! ```
 //! This is the per-hit body of BlastAaWordFinder_TwoHit that the bucketed order applies. The Rust
 //! code runs the same statements on a hit in the same way; only the order across diagonals
 //! (which cell is visited next) differs. Within one diagonal the hits arrive in scan order, so
@@ -59,13 +43,7 @@
 //! NCBI's output.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:306-309
-//! ```c
-//! void Blast_InitHitListSortByScore(BlastInitHitList * init_hitlist)
-//! {
-//!     qsort(init_hitlist->init_hsp_array, init_hitlist->total,
-//!           sizeof(BlastInitHSP), score_compare_match);
-//! ```
-//! NCBI sorts the hit list by score after the scan (called at aa_ungapped.c:282). Equal scores
+//! NCBI sorts the hit list by score after the scan (called at c++/src/algo/blast/core/aa_ungapped.c:282). Equal scores
 //! occur, and the order of the result among them follows the order of the input, so the saved HSPs
 //! must be in scan order before the sort. `restore_flush_order` puts them back, flush by flush.
 //!
@@ -121,15 +99,6 @@ pub(crate) fn min_cells() -> usize {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:502-516
-// ```c
-// while (scan_range[1] <= scan_range[2]) {
-// ...
-//     for (i = 0; i < hits; ++i) {
-//         Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
-//         Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
-// ...
-//         diag_coord = (query_offset - subject_offset) & diag_mask;
-// ```
 // Dispatch point: chooses between the scan-order loop (the port of the C loop above) and the
 // bucketed order, by table size.
 /// Whether a diagonal table of `cells` cells takes the bucketed order: from `min_cells()` up.
@@ -173,9 +142,6 @@ fn capped_budget(setting: Option<usize>) -> usize {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516
-// ```c
-// diag_coord = (query_offset - subject_offset) & diag_mask;
-// ```
 // A bucket is a range of consecutive values of `diag_coord`, the index of the diagonal table.
 /// Diagonal cells per bucket (LOSAT_X_SEEDBUCKET_CELLS, default 32768: a
 /// 128 KiB slice of the diagonal table).
@@ -191,12 +157,6 @@ fn cells_per_bucket() -> u32 {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-516
-// ```c
-// Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
-// Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
-// ...
-// diag_coord = (query_offset - subject_offset) & diag_mask;
-// ```
 // A buffered hit: the (q_off, s_off) of one offset pair, and `seq`, its position among the hits
 // buffered since the last flush (used to restore the scan order of the HSPs that flush saves).
 #[derive(Clone, Copy, Default)]
@@ -207,15 +167,6 @@ struct Hit {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:502-516
-// ```c
-// while (scan_range[1] <= scan_range[2]) {
-// ...
-//     for (i = 0; i < hits; ++i) {
-//         Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
-//         Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
-// ...
-//         diag_coord = (query_offset - subject_offset) & diag_mask;
-// ```
 // The buckets hold the hits buffered since the last flush (one or more calls of scansub in the C
 // loop), grouped by range of diag_coord. Within a bucket the hits are in scan order.
 pub(crate) struct SeedBuckets {
@@ -266,13 +217,6 @@ impl SeedBuckets {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-516
-    // ```c
-    // for (i = 0; i < hits; ++i) {
-    //     Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
-    //     Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
-    // ...
-    //     diag_coord = (query_offset - subject_offset) & diag_mask;
-    // ```
     // The C loop processes the offset pairs in scan order. This processes them bucket by bucket; the
     // hits of one diagonal share a bucket and keep their order, so every diagonal cell sees the
     // same sequence of hits.
@@ -294,12 +238,6 @@ impl SeedBuckets {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:588-591
-// ```c
-// if (score >= cutoffs->cutoff_score)
-//     BlastSaveInitHsp(ungapped_hsps, hsp_q, hsp_s,
-//                      query_offset, subject_offset, hsp_len,
-//                      score);
-// ```
 // NCBI saves an HSP when the hit that produced it is processed, so the saved list is in scan
 // order (the sort at blast_extend.c:306-309 follows). A flush saves its HSPs bucket by bucket;
 // this puts them back into scan order. Every hit of a flush comes after every hit of the flush

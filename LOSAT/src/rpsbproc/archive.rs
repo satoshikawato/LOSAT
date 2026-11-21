@@ -3,20 +3,6 @@
 //! as NCBI's rpsbproc reads them.
 //!
 //! NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:780-792
-//! ```c++
-//!         list<TDomQuery> qobjs;
-//!         while (m_istream->good())
-//!         {
-//!             CBlast4_archive objBlastOutput;
-//!             try
-//!             {
-//!                 ObjStreamIn<CBlast4_archive> (*m_istream, objBlastOutput, eSerial_AsnText);
-//!             }
-//!             catch (...)
-//!             {
-//!                 break;
-//!             }
-//! ```
 //!
 //! An object is read whole before rpsbproc uses it, and any failure of NCBI's typed reader (a
 //! member or variant that the module does not have, a member out of order or twice, a missing
@@ -49,13 +35,6 @@ use crate::seqid::model::{ObjectId, ParsedSeqId};
 
 /// One `Blast4-archive`, with what rpsbproc takes from it.
 // NCBI reference (598d8ae6): c++/src/objects/blast/blast.asn:67-74
-// ```text
-// Blast4-archive ::= SEQUENCE {
-//     request                 Blast4-request,
-//     results                 Blast4-get-search-results-reply,
-//     messages                SEQUENCE OF Blast4-error OPTIONAL
-// }
-// ```
 #[derive(Debug)]
 pub(crate) struct Archive {
     /// `request.ident`.
@@ -184,14 +163,7 @@ pub(crate) enum Segs {
 /// `CSeq_align::GetSeq_id(0)` finds, the second id of the first segment (`ParseAlignSegs`'s hit
 /// id) and the first two locations of each segment. The ids of the other places are read and
 /// left (an archive of a genome holds hundreds of thousands of segments).
-// NCBI reference (598d8ae6): c++/src/objects/seqalign/seqalign.asn:236-241
-// ```text
-// Std-seg ::= SEQUENCE {
-//     dim INTEGER DEFAULT 2 ,       -- dimensionality
-//     ids SET OF Seq-id OPTIONAL ,
-//     loc SET OF Seq-loc ,
-//     scores SET OF Score OPTIONAL }
-// ```
+// NCBI reference (598d8ae6): c++/src/objects/seqalign/seqalign.asn:94-98
 #[derive(Debug)]
 pub(crate) struct StdAlign {
     pub(crate) query_id: QueryRowId,
@@ -284,25 +256,6 @@ pub(crate) struct ArchiveStream<R: Read> {
 
 /// The `Blast4-request-body` variants.
 // NCBI reference (598d8ae6): c++/src/objects/blast/blast.asn:76-98
-// ```text
-// Blast4-request-body ::= CHOICE {
-//     finish-params           Blast4-finish-params-request,
-//     get-databases           NULL,
-//     get-matrices            NULL,
-//     get-parameters          NULL,
-//     get-paramsets           NULL,
-//     get-programs            NULL,
-//     get-search-results      Blast4-get-search-results-request,
-//     get-sequences           Blast4-get-sequences-request,
-//     queue-search            Blast4-queue-search-request,
-//     get-request-info        Blast4-get-request-info-request,
-//     get-sequence-parts      Blast4-get-seq-parts-request,
-//     get-windowmasked-taxids NULL,
-//     get-protocol-info	    Blast4-get-protocol-info-request,
-//     get-search-info	    Blast4-get-search-info-request,
-//     get-databases-ex           Blast4-get-databases-ex-request
-// }
-// ```
 const REQUEST_BODY: [&str; 15] = [
     "finish-params",
     "get-databases",
@@ -323,37 +276,6 @@ const REQUEST_BODY: [&str; 15] = [
 
 /// The `Blast4-value` variants.
 // NCBI reference (598d8ae6): c++/src/objects/blast/blast.asn:512-551
-// ```text
-// Blast4-value ::= CHOICE {
-//     big-integer             BigInt,
-//     bioseq                  Bioseq,
-//     boolean                 BOOLEAN,
-//     cutoff                  Blast4-cutoff,
-//     integer                 INTEGER,
-//     matrix                  PssmWithParameters,
-//     real                    REAL,
-//     seq-align               Seq-align,
-//     seq-id                  Seq-id,
-//     seq-loc                 Seq-loc,
-//     strand-type             Blast4-strand-type,
-//     string                  VisibleString,
-//     big-integer-list        SEQUENCE OF BigInt,
-//     bioseq-list             SEQUENCE OF Bioseq,
-//     boolean-list            SEQUENCE OF BOOLEAN,
-//     cutoff-list             SEQUENCE OF Blast4-cutoff,
-//     integer-list            SEQUENCE OF INTEGER,
-//     matrix-list             SEQUENCE OF PssmWithParameters,
-//     real-list               SEQUENCE OF REAL,
-//     seq-align-list          SEQUENCE OF Seq-align,
-//     seq-id-list             SEQUENCE OF Seq-id,
-//     seq-loc-list            SEQUENCE OF Seq-loc,
-//     strand-type-list        SEQUENCE OF Blast4-strand-type,
-//     string-list             SEQUENCE OF VisibleString,
-//     bioseq-set              Bioseq-set,
-//     seq-align-set           Seq-align-set,
-//     query-mask              Blast4-mask
-// }
-// ```
 const BLAST4_VALUE: [&str; 27] = [
     "big-integer",
     "bioseq",
@@ -385,13 +307,6 @@ const BLAST4_VALUE: [&str; 27] = [
 ];
 
 // NCBI reference (598d8ae6): c++/src/objects/blast/blast.asn:493-497
-// ```text
-// Blast4-strand-type ::= ENUMERATED {
-//     forward-strand          (1),
-//     reverse-strand          (2),
-//     both-strands            (3)
-// }
-// ```
 const BLAST4_STRAND_TYPE: [(&str, i32); 3] = [
     ("forward-strand", 1),
     ("reverse-strand", 2),
@@ -399,17 +314,6 @@ const BLAST4_STRAND_TYPE: [(&str, i32); 3] = [
 ];
 
 // NCBI reference (598d8ae6): c++/src/objects/blast/blast.asn:423-431
-// ```text
-// Blast4-frame-type ::= ENUMERATED {
-//     notset                  (0),
-//     plus1                   (1),
-//     plus2                   (2),
-//     plus3                   (3),
-//     minus1                  (4),
-//     minus2                  (5),
-//     minus3                  (6)
-// }
-// ```
 const BLAST4_FRAME_TYPE: [(&str, i32); 7] = [
     ("notset", 0),
     ("plus1", 1),
@@ -421,15 +325,6 @@ const BLAST4_FRAME_TYPE: [(&str, i32); 7] = [
 ];
 
 // NCBI reference (598d8ae6): c++/src/objects/seqloc/seqloc.asn:115-121
-// ```text
-// Na-strand ::= ENUMERATED {          -- strand of nucleic acid
-//     unknown (0) ,
-//     plus (1) ,
-//     minus (2) ,
-//     both (3) ,                -- in forward orientation
-//     both-rev (4) ,            -- in reverse orientation
-//     other (255) }
-// ```
 const NA_STRAND: [(&str, i32); 6] = [
     ("unknown", 0),
     ("plus", 1),
@@ -440,14 +335,6 @@ const NA_STRAND: [(&str, i32); 6] = [
 ];
 
 // NCBI reference (598d8ae6): c++/src/objects/seqset/seqset.asn:26-51
-// ```text
-//     class ENUMERATED {
-//         not-set (0) ,
-//         nuc-prot (1) ,              -- nuc acid and coded proteins
-//         ...
-//         small-genome-set (23) ,     -- viral segments or mitochondrial minicircles
-//         other (255) } DEFAULT not-set ,
-// ```
 const BIOSEQ_SET_CLASS: [(&str, i32); 25] = [
     ("not-set", 0),
     ("nuc-prot", 1),
@@ -477,20 +364,6 @@ const BIOSEQ_SET_CLASS: [(&str, i32); 25] = [
 ];
 
 // NCBI reference (598d8ae6): c++/src/objects/seq/seq.asn:283-294 (Seq-inst topology, strand)
-// ```text
-//     topology ENUMERATED {          -- topology of molecule
-//         not-set (0) ,
-//         linear (1) ,
-//         circular (2) ,
-//         tandem (3) ,               -- some part of circle
-//         other (255) } DEFAULT linear ,
-//     strand ENUMERATED {            -- strandedness in living organism
-//         not-set (0) ,
-//         ss (1) ,                   -- single strand
-//         ds (2) ,                   -- double strand
-//         mixed (3) ,
-//         other (255) } OPTIONAL ,   -- default ds for DNA, ss for RNA, pept
-// ```
 const SEQ_INST_TOPOLOGY: [(&str, i32); 5] = [
     ("not-set", 0),
     ("linear", 1),
@@ -507,35 +380,6 @@ const SEQ_INST_STRAND: [(&str, i32); 5] = [
 ];
 
 // NCBI reference (598d8ae6): c++/src/objects/seq/seq.asn:47-73
-// ```text
-// Seqdesc ::= CHOICE {
-//     mol-type GIBB-mol ,          -- type of molecule
-//     modif SET OF GIBB-mod ,             -- modifiers
-//     method GIBB-method ,         -- sequencing method
-//     name VisibleString ,         -- a name for this sequence
-//     title VisibleString ,        -- a title for this sequence
-//     org Org-ref ,                -- if all from one organism
-//     comment VisibleString ,      -- a more extensive comment
-//     num Numbering ,              -- a numbering system
-//     maploc Dbtag ,               -- map location of this sequence
-//     pir PIR-block ,              -- PIR specific info
-//     genbank GB-block ,           -- GenBank specific info
-//     pub Pubdesc ,                -- a reference to the publication
-//     region VisibleString ,       -- overall region (globin locus)
-//     user User-object ,           -- user defined object
-//     sp SP-block ,                -- SWISSPROT specific info
-//     dbxref Dbtag ,               -- xref to other databases
-//     embl EMBL-block ,            -- EMBL specific information
-//     create-date Date ,           -- date entry first created/released
-//     update-date Date ,           -- date of last update
-//     prf PRF-block ,              -- PRF specific information
-//     pdb PDB-block ,              -- PDB specific information
-//     het Heterogen ,              -- cofactor, etc associated but not bound
-//     source BioSource ,           -- source of materials, includes Org-ref
-//     molinfo MolInfo ,            -- info on the molecule and techniques
-//     modelev ModelEvidenceSupport -- model evidence for XM records
-// }
-// ```
 const SEQDESC: [&str; 25] = [
     "mol-type",
     "modif",
@@ -565,21 +409,6 @@ const SEQDESC: [&str; 25] = [
 ];
 
 // NCBI reference (598d8ae6): c++/src/objects/seq/seq.asn:346-358
-// ```text
-// Seq-data ::= CHOICE {              -- sequence representations
-//     iupacna IUPACna ,              -- IUPAC 1 letter nuc acid code
-//     iupacaa IUPACaa ,              -- IUPAC 1 letter amino acid code
-//     ncbi2na NCBI2na ,              -- 2 bit nucleic acid code
-//     ncbi4na NCBI4na ,              -- 4 bit nucleic acid code
-//     ncbi8na NCBI8na ,              -- 8 bit extended nucleic acid code
-//     ncbipna NCBIpna ,              -- nucleic acid probabilities
-//     ncbi8aa NCBI8aa ,              -- 8 bit extended amino acid codes
-//     ncbieaa NCBIeaa ,              -- extended ASCII 1 letter aa codes
-//     ncbipaa NCBIpaa ,              -- amino acid probabilities
-//     ncbistdaa NCBIstdaa,           -- consecutive codes for std aas
-//     gap Seq-gap                    -- gap types
-// }
-// ```
 // The letter codes (`IUPACna`, `IUPACaa`, `NCBIeaa`) are `StringStore` and the others
 // `OCTET STRING` (seq.asn:400-461).
 const SEQ_DATA: [&str; 11] = [
@@ -597,20 +426,6 @@ const SEQ_DATA: [&str; 11] = [
 ];
 
 // NCBI reference (598d8ae6): c++/src/objects/seqloc/seqloc.asn:79-90
-// ```text
-// Seq-loc ::= CHOICE {
-//     null NULL ,           -- not placed
-//     empty Seq-id ,        -- to NULL one Seq-id in a collection
-//     whole Seq-id ,        -- whole sequence
-//     int Seq-interval ,    -- from to
-//     packed-int Packed-seqint ,
-//     pnt Seq-point ,
-//     packed-pnt Packed-seqpnt ,
-//     mix Seq-loc-mix ,
-//     equiv Seq-loc-equiv ,  -- equivalent sets of locations
-//     bond Seq-bond ,
-//     feat Feat-id }         -- indirect, through a Seq-feat
-// ```
 const SEQ_LOC: [&str; 11] = [
     "null",
     "empty",
@@ -626,32 +441,11 @@ const SEQ_LOC: [&str; 11] = [
 ];
 
 // NCBI reference (598d8ae6): c++/src/objects/seqalign/seqalign.asn:32-40
-// ```text
-//     segs CHOICE {                   -- alignment data
-//         dendiag SEQUENCE OF Dense-diag ,
-//         denseg              Dense-seg ,
-//         std     SEQUENCE OF Std-seg ,
-//         packed              Packed-seg ,
-//         disc                Seq-align-set,
-//         spliced             Spliced-seg,
-//         sparse              Sparse-seg
-//     } ,
-// ```
 const SEQ_ALIGN_SEGS: [&str; 7] = [
     "dendiag", "denseg", "std", "packed", "disc", "spliced", "sparse",
 ];
 
 // NCBI reference (598d8ae6): c++/src/objects/seqalign/seqalign.asn:22-29
-// ```text
-// Seq-align ::= SEQUENCE {
-//     type ENUMERATED {
-//         not-set (0) ,
-//         global (1) ,
-//         diags (2) ,     -- unbroken, but not ordered, diagonals
-//         partial (3) ,   -- mapping pieces together
-//         disc (4) ,      -- discontinuous alignment
-//         other (255) } ,
-// ```
 const SEQ_ALIGN_TYPE: [(&str, i32); 6] = [
     ("not-set", 0),
     ("global", 1),
@@ -718,14 +512,6 @@ impl<R: Read> ArchiveStream<R> {
 
     /// `ReadFileHeader` and the type check of the root reader, then the object.
     // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:892-898
-    // ```c++
-    //     string name = ReadFileHeader();
-    //     const string& tname = typeInfo->GetName();
-    //     if ( !name.empty() && !tname.empty() && name != tname ) {
-    //         ThrowError(fFormatError,
-    //                    "incompatible type "+name+"<>"+typeInfo->GetName());
-    //     }
-    // ```
     fn archive_object(&mut self) -> Result<Archive> {
         let r = &mut self.reader;
         let id = r.file_header()?;
@@ -755,12 +541,6 @@ impl<R: Read> ArchiveStream<R> {
     }
 
     // NCBI reference (598d8ae6): c++/src/objects/blast/blast.asn:56-63
-    // ```text
-    // Blast4-request ::= SEQUENCE {
-    //     ident                   VisibleString OPTIONAL,
-    //     body                    Blast4-request-body
-    // }
-    // ```
     fn request(&mut self) -> Result<(Option<Vec<u8>>, RequestBody)> {
         let mut members = self.reader.begin_members()?;
         let (mut ident, mut body) = (None, None);
@@ -783,34 +563,8 @@ impl<R: Read> ArchiveStream<R> {
     }
 
     // NCBI reference (598d8ae6): c++/src/objects/blast/blast.asn:156-166
-    // ```text
-    // Blast4-queue-search-request ::= SEQUENCE {
-    //     program                 VisibleString,
-    //     service                 VisibleString,
-    //     queries                 Blast4-queries,
-    //     subject                 Blast4-subject,
-    //     paramset                VisibleString OPTIONAL,
-    //     algorithm-options       Blast4-parameters OPTIONAL,
-    //     program-options         Blast4-parameters OPTIONAL,
-    //     format-options          Blast4-parameters OPTIONAL
-    // }
-    // ```
     // NCBI reference (598d8ae6): c++/src/objects/blast/blast.asn:138-142
-    // ```text
-    // Blast4-queries ::= CHOICE {
-    //     pssm                    PssmWithParameters,
-    //     seq-loc-list            SEQUENCE OF Seq-loc,
-    //     bioseq-set              Bioseq-set
-    // }
-    // ```
     // NCBI reference (598d8ae6): c++/src/objects/blast/blast.asn:499-503
-    // ```text
-    // Blast4-subject ::= CHOICE {
-    //     database                VisibleString,
-    //     sequences               SEQUENCE OF Bioseq,
-    //     seq-loc-list            SEQUENCE OF Seq-loc
-    // }
-    // ```
     fn queue_search(&mut self) -> Result<QueueSearch> {
         const NAMES: [&str; 8] = [
             "program",
@@ -884,30 +638,7 @@ impl<R: Read> ArchiveStream<R> {
     /// `Blast4-parameters`: the values of the first parameters named `MatrixName` and
     /// `EvalueThreshold`.
     // NCBI reference (598d8ae6): c++/src/objects/blast/blast.asn:464-467,505
-    // ```text
-    // Blast4-parameter ::= SEQUENCE {
-    //     name                    VisibleString,
-    //     value                   Blast4-value
-    // }
-    // ...
-    // Blast4-parameters ::= SEQUENCE OF Blast4-parameter
-    // ```
     // NCBI reference (598d8ae6): c++/src/objects/blast/Blast4_parameters.cpp:186-198
-    // ```c++
-    // CRef<CBlast4_parameter>
-    // CBlast4_parameters::GetParamByName(const string name) const
-    // {
-    // 	CRef <CBlast4_parameter> blast4ParamFound;
-    //
-    // 	ITERATE(Tdata,it,this->Get()) {
-    // 		if((*it)->GetName() == name) {
-    // 			blast4ParamFound = (*it);
-    // 			break;
-    // 		}
-    // 	}
-    // 	return blast4ParamFound;
-    // }
-    // ```
     fn parameters(&mut self) -> Result<(Option<ParamValue>, Option<ParamValue>)> {
         let (mut matrix, mut evalue) = (None, None);
         let mut block_start = self.reader.start_block()?;
@@ -935,12 +666,6 @@ impl<R: Read> ArchiveStream<R> {
 
     /// A `Blast4-value` (the variants listed at `BLAST4_VALUE`).
     // NCBI reference (598d8ae6): c++/src/objects/blast/blast.asn:375-378
-    // ```text
-    // Blast4-cutoff ::= CHOICE {
-    //     e-value                 REAL,
-    //     raw-score               INTEGER
-    // }
-    // ```
     fn blast4_value(&mut self) -> Result<ParamValue> {
         let variant = self.reader.choice(&BLAST4_VALUE)?;
         let name = BLAST4_VALUE[variant];
@@ -977,31 +702,7 @@ impl<R: Read> ArchiveStream<R> {
     }
 
     // NCBI reference (598d8ae6): c++/src/objects/blast/blast.asn:287-299
-    // ```text
-    // Blast4-get-search-results-reply ::= SEQUENCE {
-    //     alignments              Seq-align-set OPTIONAL,
-    //     phi-alignments          Blast4-phi-alignments OPTIONAL,
-    //     masks                   SEQUENCE OF Blast4-mask OPTIONAL,
-    //     ka-blocks               SEQUENCE OF Blast4-ka-block OPTIONAL,
-    //     search-stats            SEQUENCE OF VisibleString OPTIONAL,
-    //     pssm                    PssmWithParameters OPTIONAL,
-    //     simple-results          Blast4-simple-results OPTIONAL
-    // }
-    // ```
     // NCBI reference (598d8ae6): c++/src/objects/blast/blast.asn:433-438,454-457
-    // ```text
-    // Blast4-ka-block ::= SEQUENCE {
-    //     lambda                  REAL,
-    //     k                       REAL,
-    //     h                       REAL,
-    //     gapped                  BOOLEAN
-    // }
-    // ...
-    // Blast4-mask ::= SEQUENCE {
-    //     locations               SEQUENCE OF Seq-loc,
-    //     frame                   Blast4-frame-type
-    // }
-    // ```
     fn results(&mut self) -> Result<Results> {
         const NAMES: [&str; 7] = [
             "alignments",
@@ -1091,17 +792,6 @@ impl<R: Read> ArchiveStream<R> {
 
     /// A `Seq-loc` of a mask: the ids of a `packed-int`, the name of another variant.
     // NCBI reference (598d8ae6): c++/src/objects/seqloc/seqloc.asn:93-101
-    // ```text
-    // Seq-interval ::= SEQUENCE {
-    //     from INTEGER ,
-    //     to INTEGER ,
-    //     strand Na-strand OPTIONAL ,
-    //     id Seq-id ,    -- WARNING: this used to be optional
-    //     fuzz-from Int-fuzz OPTIONAL ,
-    //     fuzz-to Int-fuzz OPTIONAL }
-    //
-    // Packed-seqint ::= SEQUENCE OF Seq-interval
-    // ```
     // `from` and `to` are `TSeqPos` (unsigned) in NCBI's classes.
     fn mask_location(&mut self) -> Result<MaskLocation> {
         let variant = self.reader.choice(&SEQ_LOC)?;
@@ -1159,18 +849,6 @@ impl<R: Read> ArchiveStream<R> {
     /// A `Packed-seg`, read for its grammar (`CSeq_align::GetSeq_id` throws for it before
     /// rpsbproc reads more of it, `query::query_row_id`).
     // NCBI reference (598d8ae6): c++/src/objects/seqalign/seqalign.asn:83-92
-    // ```text
-    // Packed-seg ::= SEQUENCE {         -- for (multiway) global or partial alignments
-    //     dim INTEGER DEFAULT 2 ,       -- dimensionality
-    //     numseg INTEGER ,              -- number of segments here
-    //     ids SEQUENCE OF Seq-id ,      -- sequences in order
-    //     starts SEQUENCE OF INTEGER ,  -- start OFFSETS in ids order for whole alignment
-    //     present OCTET STRING ,        -- Boolean if each sequence present or absent in
-    //                                   --   each segment
-    //     lens SEQUENCE OF INTEGER ,    -- length of each segment
-    //     strands SEQUENCE OF Na-strand OPTIONAL ,
-    //     scores SEQUENCE OF Score OPTIONAL }  -- score for each segment
-    // ```
     // `starts` and `lens` are `TSeqPos` (unsigned) in NCBI's class (seqalign.def:28-30).
     fn packed_seg(&mut self) -> Result<()> {
         const NAMES: [&str; 8] = [
@@ -1225,28 +903,6 @@ impl<R: Read> ArchiveStream<R> {
 
     /// The `std` segments of a Seq-align (SEQUENCE OF Std-seg).
     // NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:339-358
-    // ```c++
-    //     case C_Segs::e_Std:
-    //         {{
-    //             // If segments have different number of rows, this will try
-    //             // to find the segment with enough rows to get the id.
-    //             ITERATE(CSeq_align::C_Segs::TStd, seg, GetSegs().GetStd()) {
-    //                 if ( (*seg)->IsSetIds()  &&
-    //                      (size_t)row < (*seg)->GetIds().size()) {
-    //                     return *((*seg)->GetIds()[row]);
-    //                 }
-    //                 else if ( (*seg)->IsSetLoc()  &&
-    //                      (size_t)row < (*seg)->GetLoc().size() ) {
-    //                     const CSeq_loc& loc = *(*seg)->GetLoc()[row];
-    //                     CConstRef<CSeq_id> id(loc.GetId());
-    //                     if (id) {
-    //                         return *id;
-    //                     }
-    //                 }
-    //             }
-    //         }}
-    //         break;
-    // ```
     // (`ids` comes before `loc` in the module's order, so a location's id is kept only for the
     // first location of a segment without ids while no id is found.)
     fn std_segs(&mut self) -> Result<StdAlign> {
@@ -1341,13 +997,6 @@ impl<R: Read> ArchiveStream<R> {
     /// `pnt` read, the other variants read as values; with `keep_id`, the id of a location of a
     /// single id (`empty`, `whole`, `int`, `pnt`).
     // NCBI reference (598d8ae6): c++/src/objects/seqloc/seqloc.asn:103-107
-    // ```text
-    // Seq-point ::= SEQUENCE {
-    //     point INTEGER ,
-    //     strand Na-strand OPTIONAL ,
-    //     id Seq-id ,     -- WARNING: this used to be optional
-    //     fuzz Int-fuzz OPTIONAL }
-    // ```
     // `point` is `TSeqPos` (unsigned) in NCBI's class.
     fn std_loc(&mut self, keep_id: bool) -> Result<(StdLoc, Option<ParsedSeqId>, &'static str)> {
         let variant = self.reader.choice(&SEQ_LOC)?;
@@ -1395,12 +1044,6 @@ impl<R: Read> ArchiveStream<R> {
     }
 
     // NCBI reference (598d8ae6): c++/src/objects/blast/blast.asn:332-337
-    // ```text
-    // Blast4-error ::= SEQUENCE {
-    //     code                    INTEGER,
-    //     message                 VisibleString OPTIONAL
-    // }
-    // ```
     fn messages(&mut self) -> Result<()> {
         let mut block_start = self.reader.start_block()?;
         while self.reader.next_element(&mut block_start)? {
@@ -1426,24 +1069,6 @@ impl<R: Read> ArchiveStream<R> {
 
     /// A `Bioseq-set`: its `seq-set`.
     // NCBI reference (598d8ae6): c++/src/objects/seqset/seqset.asn:22-60
-    // ```text
-    // Bioseq-set ::= SEQUENCE {      -- just a collection
-    //     id Object-id OPTIONAL ,
-    //     coll Dbtag OPTIONAL ,          -- to identify a collection
-    //     level INTEGER OPTIONAL ,       -- nesting level
-    //     class ENUMERATED {
-    //         ...
-    //         other (255) } DEFAULT not-set ,
-    //     release VisibleString OPTIONAL ,
-    //     date Date OPTIONAL ,
-    //     descr Seq-descr OPTIONAL ,
-    //     seq-set SEQUENCE OF Seq-entry ,
-    //     annot SET OF Seq-annot OPTIONAL }
-    //
-    // Seq-entry ::= CHOICE {
-    //         seq Bioseq ,
-    //         set Bioseq-set }
-    // ```
     fn bioseq_set(&mut self) -> Result<Vec<SeqEntry>> {
         const NAMES: [&str; 9] = [
             "id", "coll", "level", "class", "release", "date", "descr", "seq-set", "annot",
@@ -1495,13 +1120,6 @@ impl<R: Read> ArchiveStream<R> {
     }
 
     // NCBI reference (598d8ae6): c++/src/objects/seq/seq.asn:36-40
-    // ```text
-    // Bioseq ::= SEQUENCE {
-    //     id SET OF Seq-id ,            -- equivalent identifiers
-    //     descr Seq-descr OPTIONAL , -- descriptors
-    //     inst Seq-inst ,            -- the sequence data
-    //     annot SET OF Seq-annot OPTIONAL }
-    // ```
     fn bioseq(&mut self) -> Result<Query> {
         let mut query = Query::default();
         let mut members = self.reader.begin_members()?;
@@ -1540,13 +1158,6 @@ impl<R: Read> ArchiveStream<R> {
     /// A `Seq-descr`, its first title and the descriptors LOSAT does not read noted in
     /// `query`. An empty one is NCBI's error.
     // NCBI reference (598d8ae6): c++/src/objects/seq/Seq_descr.cpp:62-68
-    // ```c++
-    // void CSeq_descr::PostRead(void) const
-    // {
-    //     if ( !s_SeqDescrAllowEmpty->Get() && Get().empty() ) {
-    //         NCBI_THROW(CSerialException, eInvalidData,
-    //                    "empty Seq-descr is not allowed");
-    // ```
     // (`OBJECTS_SEQ_DESCR_ALLOW_EMPTY` is false unless the environment sets it, which LOSAT's
     // rpsbproc rejects (`reader_variable`), or a registry file does, which
     // the application start rejects, `ApplicationStart::settings`.)
@@ -1582,46 +1193,7 @@ impl<R: Read> ArchiveStream<R> {
     /// A `User-object`: whether it is a `CFastaReader` object with a `DefLine` field whose
     /// value is not a string.
     // NCBI reference (598d8ae6): c++/src/objects/general/general.asn:128-148
-    // ```text
-    // User-object ::= SEQUENCE {
-    //     class VisibleString OPTIONAL ,   -- endeavor which designed this object
-    //     type Object-id ,                 -- type of object within class
-    //     data SEQUENCE OF User-field }    -- the object itself
-    //
-    // User-field ::= SEQUENCE {
-    //     label Object-id ,                -- field label
-    //     num INTEGER OPTIONAL ,           -- required for strs, ints, reals, oss
-    //     data CHOICE {                    -- field contents
-    //         str UTF8String ,
-    //         int INTEGER ,
-    //         real REAL ,
-    //         bool BOOLEAN ,
-    //         os OCTET STRING ,
-    //         object User-object ,         -- for using other definitions
-    //         strs SEQUENCE OF UTF8String ,
-    //         ints SEQUENCE OF INTEGER ,
-    //         reals SEQUENCE OF REAL ,
-    //         oss SEQUENCE OF OCTET STRING ,
-    //         fields SEQUENCE OF User-field ,
-    //         objects SEQUENCE OF User-object } }
-    // ```
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/biodata_core.cpp:504-523
-    // ```c++
-    // 			if ((*iterSeqDesc)->Which() == CSeqdesc::e_User)
-    // 			{
-    // 				const CUser_object & rUsrDescr = (*iterSeqDesc)->GetUser();
-    // 				if (rUsrDescr.CanGetType())
-    // 				{
-    // 					const CObject_id& typeId = rUsrDescr.GetType();
-    // 					if (typeId.Which() == CObject_id::e_Str && NStr::EqualCase(typeId.GetStr(), "CFastaReader"))
-    // 					{
-    // 						...
-    // 							const CObject_id& label = (*iterUsrField)->GetLabel();
-    // 							if (label.Which() == CObject_id::e_Str && NStr::EqualCase(label.GetStr(), "DefLine"))
-    // 							{
-    // 								const CUser_field::TData& fieldValue = (*iterUsrField)->GetData();
-    // 								const string& fieldStrVal = fieldValue.GetStr();
-    // ```
     // The fields are read as the module has them; a `str` or `strs` is a UTF8String, which NCBI
     // reads with any byte (`Reader::utf8_string`).
     //
@@ -1734,22 +1306,6 @@ impl<R: Read> ArchiveStream<R> {
     }
 
     // NCBI reference (598d8ae6): c++/src/objects/seq/seq.asn:262-297
-    // ```text
-    // Seq-inst ::= SEQUENCE {            -- the sequence data itself
-    //     repr ENUMERATED {              -- representation class
-    //         ...
-    //     mol ENUMERATED {               -- molecule class in living organism
-    //         ...
-    //     length INTEGER OPTIONAL ,      -- length of sequence in residues
-    //     fuzz Int-fuzz OPTIONAL ,       -- length uncertainty
-    //     topology ENUMERATED {          -- topology of molecule
-    //         ...
-    //     strand ENUMERATED {            -- strandedness in living organism
-    //         ...
-    //     seq-data Seq-data OPTIONAL ,   -- the sequence
-    //     ext Seq-ext OPTIONAL ,         -- extensions for special types
-    //     hist Seq-hist OPTIONAL }       -- sequence history
-    // ```
     // `length` is `TSeqPos` (unsigned) in NCBI's class.
     fn seq_inst(&mut self, query: &mut Query) -> Result<()> {
         const NAMES: [&str; 9] = [
@@ -1801,36 +1357,12 @@ impl<R: Read> ArchiveStream<R> {
     }
 
     // NCBI reference (598d8ae6): c++/src/objects/seq/seq.asn:303-324
-    // ```text
-    // Seq-ext ::= CHOICE {
-    //     seg Seg-ext ,        -- segmented sequences
-    //     ref Ref-ext ,        -- hot link to another sequence (a view)
-    //     map Map-ext ,        -- ordered map of markers
-    //     delta Delta-ext }
-    // ...
-    // Delta-ext ::= SEQUENCE OF Delta-seq
-    //
-    // Delta-seq ::= CHOICE {
-    //     loc Seq-loc ,       -- point to a sequence
-    //     literal Seq-literal }   -- a piece of sequence
-    //
-    // Seq-literal ::= SEQUENCE {
-    //     length INTEGER ,         -- must give a length in residues
-    //     fuzz Int-fuzz OPTIONAL , -- could be unsure
-    //     seq-data Seq-data OPTIONAL } -- may have the data
-    // ```
     // `Get1LetterSeqData` reads the literals' data of a `delta` (`query::fill_sequence`); the
     // other variants and the `loc` items give no residues and are read as values, and a
     // literal of `gap` data is skipped (`SeqDataTo1LtrSeq` gives it no letters and -1, which
     // `Get1LetterSeqData` does not append). The `length` of a literal is `TSeqPos` (unsigned,
     // seq.def:13-14).
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/biodata_core.cpp:151,193-194
-    // ```c++
-    // 	dst.clear();
-    // ...
-    // 	default:
-    // 		iDataType = -1;
-    // ```
     fn seq_ext(&mut self, query: &mut Query) -> Result<()> {
         const NAMES: [&str; 4] = ["seg", "ref", "map", "delta"];
         if self.reader.choice(&NAMES)? != 3 {
@@ -1881,21 +1413,6 @@ impl<R: Read> ArchiveStream<R> {
     }
 
     // NCBI reference (598d8ae6): c++/src/objects/seqalign/seqalign.asn:22-51
-    // ```text
-    // Seq-align ::= SEQUENCE {
-    //     type ENUMERATED {
-    //         ...
-    //         other (255) } ,
-    //     dim INTEGER OPTIONAL ,     -- dimensionality
-    //     score SET OF Score OPTIONAL ,   -- for whole alignment
-    //     segs CHOICE {                   -- alignment data
-    //         ...
-    //     } ,
-    //     bounds SET OF Seq-loc OPTIONAL,
-    //     id SEQUENCE OF Object-id OPTIONAL,
-    //     ext SEQUENCE OF User-object OPTIONAL
-    // }
-    // ```
     fn seq_align(&mut self) -> Result<Align> {
         const NAMES: [&str; 7] = ["type", "dim", "score", "segs", "bounds", "id", "ext"];
         let mut align = Align {
@@ -1958,44 +1475,7 @@ impl<R: Read> ArchiveStream<R> {
 
     /// One `Score` of a Seq-align, into the fields `ParseAlignScores` reads.
     // NCBI reference (598d8ae6): c++/src/objects/seqalign/seqalign.asn:283-289
-    // ```text
-    // Score ::= SEQUENCE {
-    //     id Object-id OPTIONAL ,
-    //     value CHOICE {
-    //         real REAL ,
-    //         int INTEGER
-    //     }
-    // }
-    // ```
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/biodata_blast.cpp:214-262
-    // ```c++
-    // 			if (rScore.IsSetId() && rScore.CanGetId())
-    // 			{
-    // 				const CScore::TId& rObjectId = rScore.GetId();  //CObject_id
-    //
-    // 				if (CObject_id::e_Str == rObjectId.Which())
-    // 				{
-    // 					const CObject_id::TStr& rStr = rObjectId.GetStr();    //string
-    // 					if (rStr == "score")
-    // 					{
-    // 						if (rScore.IsSetValue() && rScore.CanGetValue())
-    // 						{
-    // 							dst.m_iScore = rScore.GetValue().GetInt();
-    // 						}
-    // 					}
-    // 					else if (rStr == "e_value")
-    // 					{
-    // 						...
-    // 							dst.m_dEValue = rScore.GetValue().GetReal();
-    // 					...
-    // 					else if (rStr == "bit_score")
-    // 					...
-    // 							dst.m_dBitScore = rScore.GetValue().GetReal();
-    // 					...
-    // 					else if (rStr == "num_ident")
-    // 					...
-    // 							dst.m_iNumIdent = rScore.GetValue().GetInt();
-    // ```
     fn align_score(&mut self, align: &mut Align) -> Result<()> {
         let mut members = self.reader.begin_members()?;
         let mut name: Option<&'static str> = None;
@@ -2059,16 +1539,6 @@ impl<R: Read> ArchiveStream<R> {
     }
 
     // NCBI reference (598d8ae6): c++/src/objects/seqalign/seqalign.asn:74-81
-    // ```text
-    // Dense-seg ::= SEQUENCE {          -- for (multiway) global or partial alignments
-    //     dim INTEGER DEFAULT 2 ,       -- dimensionality
-    //     numseg INTEGER ,              -- number of segments here
-    //     ids SEQUENCE OF Seq-id ,      -- sequences in order
-    //     starts SEQUENCE OF INTEGER ,  -- start OFFSETS in ids order within segs
-    //     lens SEQUENCE OF INTEGER ,    -- lengths in ids order within segs
-    //     strands SEQUENCE OF Na-strand OPTIONAL ,
-    //     scores SEQUENCE OF Score OPTIONAL }  -- score for each seg
-    // ```
     // `starts` are `TSignedSeqPos` and `lens` `TSeqPos` (unsigned) in NCBI's class.
     fn dense_seg(&mut self) -> Result<DenseSeg> {
         const NAMES: [&str; 7] = [

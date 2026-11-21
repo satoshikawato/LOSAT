@@ -3,42 +3,7 @@
 //! runs of `QueryContextIndex`) or a table of four bytes per query letter (`direct_map`).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:219-242
-//! ```c
-//! Int4 BSearchContextInfo(Int4 n, const BlastQueryInfo * A)
-//! {
-//!     Int4 m=0, b=0, e=0, size=0;
-//!
-//!     size = A->last_context+1;
-//!
-//!     if (A->min_length > 0 && A->max_length > 0 && A->first_context == 0) {
-//!         b = MIN(n / (A->max_length + 1), size - 1);
-//!         e = MIN(n / (A->min_length + 1) + 1, size);
-//!         ASSERT(e <= size);
-//!     }
-//!     else {
-//!         b = 0;
-//!         e = size;
-//!     }
-//!
-//!     while (b < e - 1) {
-//! 	m = (b + e) / 2;
-//! 	if (A->contexts[m].query_offset > n)
-//! 	    e = m;
-//! 	else
-//! 	    b = m;
-//!     }
-//!     return b;
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:71-77
-//! ```c
-//!     if (index) {
-//!         Uint4 prev_loc = qinfo->contexts[index-1].query_offset;
-//!         Uint4 prev_len = qinfo->contexts[index-1].query_length;
-//!
-//!         Uint4 shift = prev_len ? prev_len + 1 : 0;
-//!
-//!         qinfo->contexts[index].query_offset = prev_loc + shift;
-//! ```
 //!
 //! The value answered is `direct_map[n]` of `QueryContextIndex` for every `n` below the
 //! concatenated length: the context whose letters hold offset `n`, and 0 for a sentinel. The
@@ -117,11 +82,6 @@ fn x_force_blocks() -> bool {
 
 impl CtxO1 {
     /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:71-77
-    /// ```c
-    ///         Uint4 shift = prev_len ? prev_len + 1 : 0;
-    ///
-    ///         qinfo->contexts[index].query_offset = prev_loc + shift;
-    /// ```
     /// The form for `contexts` (`total_len` = the end of the last context with letters), or
     /// `None` if they are not laid out as above, have no letters, or the table would be too big.
     pub(super) fn build(contexts: &[QueryContext], total_len: usize) -> Option<Self> {
@@ -227,11 +187,6 @@ impl CtxO1 {
     }
 
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:225-227
-    /// ```c
-    ///     if (A->min_length > 0 && A->max_length > 0 && A->first_context == 0) {
-    ///         b = MIN(n / (A->max_length + 1), size - 1);
-    ///         e = MIN(n / (A->min_length + 1) + 1, size);
-    /// ```
     /// `direct_map[n]` for `n` below the concatenated length, `None` above it and in a crowded
     /// block.
     #[inline(always)]

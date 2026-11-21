@@ -3,14 +3,6 @@
 //! own (`LOSAT_X_TBNOWNPOOLS`); `src/algorithm/tblastn/stage_d_pipeline.rs`.
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:275-289
-//! ```c++
-//!             for (; !input->End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
-//!
-//!                 query =  input->GetNextSeqBatch(*scope);
-//!                 query_factory.Reset(new CObjMgr_QueryFactory(*query));
-//!                 ...
-//!                     CLocalBlast lcl_blast(query_factory, m_OptsHndl, db_adapter);
-//! ```
 //! NCBI searches each query batch on its own, one after another. With two or
 //! more threads, the subject plans shared (four or more batches) and at least one batch per
 //! thread, LOSAT searches the batches side by side, each as the one-thread search. With

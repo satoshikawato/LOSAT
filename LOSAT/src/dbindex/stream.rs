@@ -81,7 +81,9 @@ fn title_id(
     facts.taxname = taxname;
     facts.has_source = has_source;
     let defline = generate_bioseq_defline(title, false, false, &facts).map_err(|_| {
-        StreamError::Refused(super::unsupported("a title whose encoding NCBI cannot tell"))
+        StreamError::Refused(super::unsupported(
+            "a title whose encoding NCBI cannot tell",
+        ))
     })?;
     if defline.reads_past_end {
         return Err(StreamError::Refused(super::unsupported(
@@ -165,7 +167,7 @@ impl BlastDbStream {
 
     /// `CSequenceIStreamBlastDB::ShowSupportedFilters(dbname)`: the descriptions of the
     /// database's filtering algorithms (empty when it has none).
-    // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/sequence_istream_bdb.cpp:142-147
+    // NCBI reference (598d8ae6): c++/include/algo/blast/dbindex/sequence_istream_bdb.hpp:53-57
     pub(crate) fn supported_filters(&self) -> Result<String, StreamError> {
         self.descriptions()
     }
@@ -219,15 +221,17 @@ impl BlastDbStream {
         let message = "Cannot find string algorithm id in algorithm map.";
         let site = crate::seqdb::throw_site(message.as_bytes())
             .unwrap_or(ThrowSite::generated("CSeqDBException::eInvalid"));
-        Err(StreamError::Ncbi(NcbiException::new(site, message).rethrow(
-            ThrowSite {
-                file: "src/algo/blast/dbindex/sequence_istream_bdb.cpp",
-                line: 90,
-                kind: PARAM_ERROR,
-                function: None,
-            },
-            format!("unrecognised filter algorithm name{}", self.descriptions()?),
-        )))
+        Err(StreamError::Ncbi(
+            NcbiException::new(site, message).rethrow(
+                ThrowSite {
+                    file: "src/algo/blast/dbindex/sequence_istream_bdb.cpp",
+                    line: 90,
+                    kind: PARAM_ERROR,
+                    function: None,
+                },
+                format!("unrecognised filter algorithm name{}", self.descriptions()?),
+            ),
+        ))
     }
 }
 
@@ -358,7 +362,11 @@ impl<'a> FastaStream<'a> {
         };
         Ok(Some(SeqData {
             letters: crate::seqmasks_io::fasta_reader::iupac_letters(record.inst),
-            masks: if masks.is_empty() { Vec::new() } else { vec![masks] },
+            masks: if masks.is_empty() {
+                Vec::new()
+            } else {
+                vec![masks]
+            },
             id,
             texts: Vec::new(),
         }))

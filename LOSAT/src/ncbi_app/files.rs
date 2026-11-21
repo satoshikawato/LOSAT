@@ -12,15 +12,6 @@ use crate::ncbi_exception::{NcbiException, ThrowSite};
 /// The exception of a file argument whose stream does not open.
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:615-621
-/// ```c++
-/// void CArg_Ios::x_Open(CArgValue::TFileFlags /*flags*/) const
-/// {
-///     if ( !m_Ios ) {
-///         NCBI_THROW(CArgException,eNoFile, s_ArgExptMsg(GetName(),
-///             "File is not accessible",AsString()));
-///     }
-/// }
-/// ```
 fn not_accessible(name: &str, value: &str) -> ArgException {
     ArgException::new(
         "eNoFile",
@@ -71,14 +62,6 @@ impl LineEnds {
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:580-585
-// ```c++
-// IOS_BASE::openmode CArg_Ios::IosMode(CArgValue::TFileFlags flags)
-// {
-//     IOS_BASE::openmode openmode = (IOS_BASE::openmode) 0;
-//     if (flags & CArgValue::fBinary) {
-//         openmode |= IOS_BASE::binary;
-//     }
-// ```
 /// The text mode of an input stream opened without `fBinary` on `platform`, as a filter of the
 /// file's bytes in the order they are read: on Windows (the C runtime's text mode, under
 /// NCBI's `CNcbiIfstream` and the `cin` that `NcbiSys_setmode` sets to `O_TEXT`,
@@ -237,29 +220,6 @@ impl Read for InputFile<'_> {
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:717-737
-// ```c++
-//     if (AsString() == "-") {
-// #if defined(NCBI_OS_MSWIN)
-//         NcbiSys_setmode(NcbiSys_fileno(stdin), (mode & IOS_BASE::binary) ? O_BINARY : O_TEXT);
-// #endif
-//         m_Ios  = &cin;
-//     } else if ( !AsString().empty() ) {
-//         if (!fstrm) {
-//             fstrm = new CNcbiIfstream;
-//         }
-//         if (fstrm) {
-//             fstrm->open(AsString().c_str(),IOS_BASE::in | mode);
-//             if ( !fstrm->is_open() ) {
-//                 delete fstrm;
-//                 fstrm = NULL;
-//             } else {
-//                 m_DeleteFlag = true;
-//             }
-//         }
-//         m_Ios = fstrm;
-//     }
-//     CArg_Ios::x_Open(flags);
-// ```
 /// `AsInputFile()` of the argument `name` whose value is `value`: `-` is the standard input,
 /// `stdin` (probes K30-K32 of line BDC), the empty name opens nothing (K39), and another name
 /// opens the file; on Linux a directory opens too (its reads fail). `Err` is NCBI's `eNoFile`.
@@ -308,40 +268,7 @@ pub(crate) fn read_input_file(
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistre.cpp:196-208
-// ```c++
-// CNcbiIstream& NcbiGetlineEOL(CNcbiIstream& is, string& str, SIZE_TYPE* count)
-// {
-// #if   defined(NCBI_OS_MSWIN)
-//     NcbiGetline(is, str, '\n', count);
-//     if (!str.empty()  &&  str[str.length() - 1] == '\r')
-//         str.resize(str.length() - 1);
-// #elif defined(NCBI_OS_DARWIN)
-//     NcbiGetline(is, str, "\r\n", count);
-// #else /* assume UNIX-like EOLs */
-//     NcbiGetline(is, str, '\n', count);
-// #endif //NCBI_OS_...
-//     return is;
-// }
-// ```
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistre.cpp:90-104
-// ```c++
-//         SIZE_TYPE delim_pos = delims.find(CT_TO_CHAR_TYPE(ch));
-//         if (delim_pos != NPOS) {
-//             // Special case -- if two different delimiters are back to
-//             // back and in the same order as in delims, treat them as
-//             // a single delimiter (necessary for correct handling of
-//             // DOS/MAC-style CR/LF endings).
-//             ch = is.rdbuf()->sgetc();
-//             if (!CT_EQ_INT_TYPE(ch, CT_EOF)
-//                 &&  delims.find(CT_TO_CHAR_TYPE(ch), delim_pos + 1) != NPOS) {
-//                 is.rdbuf()->sbumpc();
-//                 delim_count = 2;
-//             } else {
-//                 delim_count = 1;
-//             }
-//             break;
-//         }
-// ```
 // The loops of blastdbcmd that read lines so skip the empty ones (`if ( !line.empty() )`,
 // blastdbcmd.cpp:333, 385, 450, 497): on macOS a line then ends at any `\r` or `\n`, and the
 // `\r\n` that NCBI takes for one end leaves no other line.
@@ -491,31 +418,6 @@ impl Write for Ostream<'_> {
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:777-799
-// ```c++
-//     if (AsString() == "-") {
-// #if defined(NCBI_OS_MSWIN)
-//         NcbiSys_setmode(NcbiSys_fileno(stdout), (mode & IOS_BASE::binary) ? O_BINARY : O_TEXT);
-// #endif
-//         m_Ios = &cout;
-//     } else if ( !AsString().empty() ) {
-//         if (!fstrm) {
-//             fstrm = new CNcbiOfstream;
-//         }
-//         if (fstrm) {
-//             if (x_CreatePath(m_CurrentFlags)) {
-//                 fstrm->open(AsString().c_str(),IOS_BASE::out | mode);
-//             }
-//             if ( !fstrm->is_open() ) {
-//                 delete fstrm;
-//                 fstrm = NULL;
-//             } else {
-//                 m_DeleteFlag = true;
-//             }
-//         }
-//         m_Ios = fstrm;
-//     }
-//     CArg_Ios::x_Open(flags);
-// ```
 /// `AsOutputFile()` of the argument `name` whose value is `value`: `-` is `stdout`, the empty
 /// name opens nothing, and another name makes or empties the file (`IOS_BASE::out`, without
 /// `fCreatePath`). `Err` is NCBI's `eNoFile`.

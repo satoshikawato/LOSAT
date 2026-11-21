@@ -1,11 +1,6 @@
 //! The search programs of the library API.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:47-49
-//! ```c++
-//!     static const string kProgram("blastx");
-//!     arg.Reset(new CProgramDescriptionArgs(kProgram,
-//!                                   "Translated Query-Protein Subject BLAST"));
-//! ```
 //! Each NCBI application names its program once, in lower case; the API takes the same names.
 #![warn(missing_docs, unused)]
 

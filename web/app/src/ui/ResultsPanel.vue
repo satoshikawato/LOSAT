@@ -11,7 +11,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, useId, watch } from 'v
 import { CUSTOM_OUTPUT, type RunOutput } from 'losat/domain';
 import type { Coordinator, RunView } from '../application/coordinator';
 import { OutputSaver } from '../application/outputs';
-import { noHspReason, type HspId, type ResultsBrowser } from '../application/results';
+import { keptOutputsWritten, noHspReason, type HspId, type ResultsBrowser } from '../application/results';
 import { recordName } from '../domain/dataset';
 import { customOutfmt, FORMAT_NAMES, formatNumber } from '../domain/output-format';
 import { programById, residueUnit } from '../domain/programs';
@@ -317,6 +317,16 @@ async function toAlignments(id: HspId): Promise<void> {
       >
         {{ state.message }}
       </p>
+      <!-- A failed run keeps the output that the command line leaves before its error, as the Outputs of a completed
+           run show it (line WQA's sweep, D15, 2026-11-20). -->
+      <section
+        v-if="state.phase === 'unavailable' && selected?.status === 'failed' && selected.result !== undefined && keptOutputsWritten(selected)"
+        class="results-group failed-outputs"
+        data-testid="results-failed-outputs"
+      >
+        <h3>Outputs</h3>
+        <OutputsView :key="selected.snapshot.runId" :coordinator="coordinator" :run="selected" :files="false" />
+      </section>
       <!-- A failed run keeps the warnings that it wrote to the command line's standard error before its
            error (NCBI's "Subject sequence contains no data" before "The average subject length is too
            short"), as the engine wrote them (line WQA's sweep, D3, 2026-11-19). -->

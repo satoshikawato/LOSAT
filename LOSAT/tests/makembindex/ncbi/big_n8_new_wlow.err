@@ -1,0 +1,3 @@
+Warning: -ws_hint requested is too low. Setting to the minimum value of 12
+creating @CWD@/gen/bigdb/big.00.idx...done
+creating @CWD@/gen/bigdb/big.01.idx...removed (empty)

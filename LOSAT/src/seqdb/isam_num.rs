@@ -46,67 +46,7 @@ fn be_i32(bytes: &[u8]) -> i32 {
 
 impl NumericIsam {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:161-175
-    // ```c++
-    // CSeqDBVol::x_OpenGiFile(void) const{
-    //     CFastMutexGuard mtx_gurad(m_MtxGi);
-    //     if (m_IsamGi.NotEmpty()) {
-    //     	m_IsamGi->AddReference();
-    //     }
-    //     else if ((m_Idx->GetNumOIDs() != 0) && m_HasGis) {
-    //     	try {
-    //         m_IsamGi = new CSeqDBIsam(m_Atlas, m_VolName, (m_IsAA?'p':'n'), 'n', eGiId);
-    //     	} catch(CException &) {
-    //     		m_IsamGi.Reset();
-    //     		m_HasGis = false;
-    //     	}
-    //     }
-    // }
-    // ```
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbisam.cpp:64-118
-    // ```c++
-    //     TIndx info_needed = 10 * sizeof(Int4);
-    //
-    //     bool found_index_file =
-    //         m_Atlas.GetFileSizeL(m_IndexFname, m_IndexFileLength);
-    //
-    //     if ((! found_index_file) || (m_IndexFileLength < info_needed)) {
-    //         return eWrongFile;
-    //     }
-    //     ...
-    //     Int4 Version = SeqDB_GetStdOrd(& FileInfo[0]);
-    //
-    //     if (Version != ISAM_VERSION)
-    //         return eBadVersion;
-    //
-    //     Int4 IsamType = SeqDB_GetStdOrd(& FileInfo[1]);
-    //
-    //     if (IsamType == eNumericLongId && m_Type == eNumeric) {
-    //         m_LongId = true;
-    //         m_TermSize = 12;
-    //         IsamType = eNumeric;
-    //     }
-    //
-    //     if (IsamType != m_Type)
-    //         return eBadType;
-    //
-    //     m_NumTerms    = SeqDB_GetStdOrd(& FileInfo[3]);
-    //     m_NumSamples  = SeqDB_GetStdOrd(& FileInfo[4]);
-    //     m_PageSize    = SeqDB_GetStdOrd(& FileInfo[5]);
-    //     m_MaxLineSize = SeqDB_GetStdOrd(& FileInfo[6]);
-    //
-    //     if(m_PageSize != MEMORY_ONLY_PAGE_SIZE) {
-    //         // Special case of memory-only index
-    //         m_DataFileLength = SeqDB_GetStdOrd(& FileInfo[2]);
-    //
-    //         TIndx disk_file_length(0);
-    //         bool found_data_file =
-    //             m_Atlas.GetFileSizeL(m_DataFname, disk_file_length);
-    //
-    //         if ((! found_data_file) || (m_DataFileLength != disk_file_length)) {
-    //             return eWrongFile;
-    //         }
-    //     }
-    // ```
     // The constructor runs `x_FindIndexBounds` whatever `x_InitSearch` returned. A data file of
     // another length still has its first and last rows: the lookups then find nothing (probe
     // H104). An index with a bad header has no samples and NCBI crashes on it (exit status
@@ -124,18 +64,6 @@ impl NumericIsam {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:136-145
-    // ```c++
-    // CSeqDBVol::x_OpenPigFile(void) const{
-    //     CFastMutexGuard mtx_gurad(m_MtxPig);
-    //     if (m_IsamPig.NotEmpty()) {
-    //     	m_IsamPig->AddReference();
-    //     }
-    //     else if (CSeqDBIsam::IndexExists(m_VolName, (m_IsAA?'p':'n'), 'p') &&
-    //              m_Idx->GetNumOIDs() != 0) {
-    //         m_IsamPig = new CSeqDBIsam(m_Atlas, m_VolName, (m_IsAA?'p':'n'), 'p', ePigId);
-    //     }
-    // }
-    // ```
     /// The PIG ISAM of the volume `base` (`.ppi`/`.ppd`, [`NumericIsam::pig_file_names`]): `None`
     /// when one of its files is no regular file (`CSeqDBIsam::IndexExists`,
     /// `super::isam::open_if_exists`) or the data file has another length than the index says.
@@ -224,21 +152,6 @@ impl NumericIsam {
     }
 
     // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbisam.hpp:1253-1265
-    // ```c++
-    //     Uint8 x_GetNumericKey(const void *p) {
-    //         if (m_LongId)
-    //             return((Uint8) SeqDB_GetStdOrd((Uint8 *)p));
-    //         else
-    //             return((Uint4) SeqDB_GetStdOrd((Uint4 *)p));
-    //     }
-    //
-    //     int x_GetNumericData(const void *p) {
-    //         if (m_LongId)
-    //             return((int) SeqDB_GetStdOrd(((Uint4 *)p)+2));
-    //         else
-    //             return((int) SeqDB_GetStdOrd(((Uint4 *)p)+1));
-    //     }
-    // ```
     /// The key and the OID of the row at `offset` of `file`.
     fn row(&self, file: &DbFile, offset: u64) -> Result<(i64, i32), SeqDbError> {
         let end = offset.saturating_add(self.term_size());
@@ -254,23 +167,6 @@ impl NumericIsam {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbisam.cpp:123-137
-    // ```c++
-    // Int4 CSeqDBIsam::x_GetPageNumElements(Int4   sample_num,
-    //                                       Int4 * start)
-    // {
-    //     Int4 num_elements(0);
-    //
-    //     *start = sample_num * m_PageSize;
-    //
-    //     if (sample_num + 1 == m_NumSamples) {
-    //         num_elements = m_NumTerms - *start;
-    //     } else {
-    //         num_elements = m_PageSize;
-    //     }
-    //
-    //     return num_elements;
-    // }
-    // ```
     /// The first row and the number of rows of the page of `sample`.
     fn page(&self, sample: i32) -> (i64, i64) {
         let start = i64::from(sample) * i64::from(self.page_size);
@@ -283,68 +179,7 @@ impl NumericIsam {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbisam.cpp:153-156,162-231
-    // ```c++
-    //     if (x_OutOfBounds(Number)) {
-    //         done = true;
-    //         return eNotFound;
-    //     }
-    //     ...
-    //     Int4 Start     (0);
-    //     Int4 Stop      (m_NumSamples - 1);
-    //
-    //     while(Stop >= Start) {
-    //         SampleNum = ((Uint4)(Stop + Start)) >> 1;
-    //         ...
-    //         Key = x_GetNumericKey (keydatap);
-    //
-    //         // If this is an exact match, return the master term number.
-    //
-    //         if (Key == Number) {
-    //             if (Data != NULL) {
-    //                 *Data = x_GetNumericData(keydatap);
-    //             }
-    //             ...
-    //             done = true;
-    //             return eNoError;
-    //         }
-    //
-    //         // Otherwise, search for the next sample.
-    //
-    //         if ( Number < Key )
-    //             Stop = --SampleNum;
-    //         else
-    //             Start = SampleNum +1;
-    //     }
-    //
-    //     // If the term is out of range altogether, report not finding it.
-    //
-    //     if ( (SampleNum < 0) || (SampleNum >= m_NumSamples)) {
-    //     ...
-    //         done = true;
-    //         return eNotFound;
-    //     }
-    // ```
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbisam.cpp:429-481
-    // ```c++
-    //     Int4 first = Start;
-    //     Int4 last  = Start + NumElements - 1;
-    //     ...
-    //     // Search the page for the number.
-    //     while (first <= last) {
-    //         current = (first+last)/2;
-    //
-    //         Int8 Key = x_GetNumericKey((char *)KeyDataPage + current * m_TermSize);
-    //
-    //         if (Key > Number) {
-    //             last = --current;
-    //         } else if (Key < Number) {
-    //             first = ++current;
-    //         } else {
-    //             found = true;
-    //             break;
-    //         }
-    //     }
-    // ```
     /// `IdToOid`: the OID the file gives the key `number`.
     pub fn id_to_oid(&self, number: i64) -> Result<Option<i32>, SeqDbError> {
         if number < self.first_key || number > self.last_key {

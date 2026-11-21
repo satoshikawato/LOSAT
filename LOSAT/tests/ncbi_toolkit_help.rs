@@ -6,24 +6,8 @@
 //! flag. LOSAT's help texts are its own (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 1), so the
 //! test holds `-help-full` to LOSAT's `-help` in the same place.
 //!
-//! NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3020-3023, 2840-2852 (quoted at
+//! NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3020-3023, 2840-2852 (cited at
 //! `cli::try_parse_from`) and c++/src/corelib/ncbiapp.cpp:685-697
-//! ```c++
-//!     catch (const CArgHelpException& e) {
-//!         x_AddDefaultArgs();
-//!         // Print USAGE
-//!         if (e.GetErrCode() == CArgHelpException::eHelpXml) {
-//!             m_ArgDesc->PrintUsageXml(cout);
-//!         } else {
-//!             CArgHelpException::TErrCode code =  e.GetErrCode();
-//!             string str;
-//!             m_ArgDesc->ShowAllArguments(code == CArgHelpException::eHelpShowAll)->PrintUsage
-//!                 (str, code == CArgHelpException::eHelpFull || code == CArgHelpException::eHelpShowAll);
-//!             cout << str;
-//!         }
-//!         *exit_code = e.GetErrCode() == CArgHelpException::eHelpErr ? 2 : 0;
-//!     }
-//! ```
 
 #![cfg(unix)]
 
@@ -171,7 +155,7 @@ fn xmlhelp_writes_ncbis_xml_without_the_refused_arguments() {
     for (program, value_option) in PROGRAMS
         .iter()
         .copied()
-        .chain([("convert2blastmask", "-out")])
+        .chain([("convert2blastmask", "-out"), ("makembindex", "-input")])
     {
         let xml = run_in(&dir, program, &["-xmlhelp"]);
         assert_eq!(xml.status.code(), Some(0), "{program}");
@@ -179,7 +163,7 @@ fn xmlhelp_writes_ncbis_xml_without_the_refused_arguments() {
         let ncbi = ncbi_xml(program);
         if matches!(
             program,
-            "blastdbcmd" | "dustmasker" | "segmasker" | "convert2blastmask"
+            "blastdbcmd" | "dustmasker" | "segmasker" | "convert2blastmask" | "makembindex"
         ) {
             assert_eq!(xml.stdout, ncbi, "{program}");
         } else {

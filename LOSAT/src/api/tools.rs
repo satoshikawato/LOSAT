@@ -7,42 +7,10 @@
 //! writes, to the caller's writers; none touches the process's standard streams.
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1360-1363
-//! ```c++
-//! int main(int argc, const char* argv[] /*, const char* envp[]*/)
-//! {
-//!     return CMakeBlastDBApp().AppMain(argc, argv);
-//! }
-//! ```
 //! NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:1295-1298
-//! ```c++
-//! int main(int argc, const char* argv[] /*, const char* envp[]*/)
-//! {
-//!     return CBlastDBCmdApp().AppMain(argc, argv);
-//! }
-//! ```
 //! NCBI reference (598d8ae6): c++/src/app/dustmasker/main.cpp:39-42
-//! ```c++
-//! int main( int argc, char * argv[] )
-//! {
-//!     return CDustMaskApplication().AppMain(argc, argv);
-//! }
-//! ```
 //! NCBI reference (598d8ae6): c++/src/app/segmasker/segmasker.cpp:265-272
-//! ```c++
-//! int main(int argc, const char* argv[])
-//! {
-//!     // Execute main application function
-//!     return SegMaskerApplication().AppMain(argc, argv);
-//! }
-//! ```
 //! NCBI reference (598d8ae6): c++/src/app/blastdb/convert2blastmask.cpp:259-263
-//! ```c++
-//! int main(int argc, const char* argv[])
-//! {
-//!     // Execute main application function
-//!     return CConvert2BlastMaskApplication().AppMain(argc, argv);
-//! }
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/makeindex/main.cpp:51-54
 #![warn(missing_docs, unused)]
 
@@ -206,25 +174,7 @@ pub fn run_makembindex(
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1031-1041
-// ```c++
-//     // Setup some debugging features from environment variables.
-//     if ( !m_Environ->Get(DIAG_TRACE).empty() ) {
-//         SetDiagTrace(eDT_Enable, eDT_Enable);
-//     }
-//     string post_level = m_Environ->Get(DIAG_POST_LEVEL);
-//     if ( !post_level.empty() ) {
-//         EDiagSev sev;
-//         if (CNcbiDiag::StrToSeverityLevel(post_level.c_str(), sev)) {
-//             SetDiagFixedPostLevel(sev);
-//         }
-//     }
-// ```
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1134-1136
-// ```c++
-//     const string dont_scan_bioseq =
-//         GetEnvironment().Get("NCBI_MAKEBLASTDB_DONT_SCAN_BIOSEQ_FOR_CFASTAREADER_USER_OBJECTS");
-//     const bool scan_bioseq_4_cfastareader_usrobj = static_cast<bool>(dont_scan_bioseq.empty());
-// ```
 /// Runs `makeblastdb` with the words after the program name, as on the command line, which
 /// writes the database's files as there. `input` is what the command line reads as standard input
 /// (`-in -`, and without `-in`), so a database can be built from FASTA in memory. What the command

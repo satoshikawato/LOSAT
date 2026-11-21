@@ -40,10 +40,11 @@ fn squeeze(text: &str) -> String {
     text.chars().filter(|c| !c.is_whitespace()).collect()
 }
 
+/// Whether `path` is xdiag's own source: the module and its tests (this file), which name every
+/// variable of `NAMES`.
 fn is_xdiag_source(path: &Path) -> bool {
-    path.to_string_lossy()
-        .replace('\\', "/")
-        .ends_with("utils/xdiag.rs")
+    let path = path.to_string_lossy().replace('\\', "/");
+    path.ends_with("utils/xdiag.rs") || path.ends_with("utils/xdiag_tests.rs")
 }
 
 /// Whether `squeezed` (whitespace removed) sets or passes the variable `name` to a program:

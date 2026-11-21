@@ -345,8 +345,10 @@ fn run_main_entry() -> Result<()> {
             .map_err(anyhow::Error::msg)?;
             // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1134-1136
             // The variables that makeblastdb reads itself.
-            crate::writedb::makeblastdb::check_environment(&|name: &str| std::env::var_os(name))
-                .map_err(anyhow::Error::msg)?;
+            crate::writedb::makeblastdb::check_environment(&args, &|name: &str| {
+                std::env::var_os(name)
+            })
+            .map_err(anyhow::Error::msg)?;
             let status = crate::writedb::makeblastdb::run(&args, &settings);
             if status != 0 {
                 std::process::exit(status);

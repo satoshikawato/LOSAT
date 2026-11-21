@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.64
+- Version: 1.65
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -268,7 +268,12 @@
   (before it a crash, SIGSEGV, probes D1a_P and D1a_R of review A of D1b-1; past it writes over
   NCBI's heap, probes RB9 of review B), rule 3; Owner-delegated, standing instruction 2026-09-29,
   restated 2026-10-07);
-  1.64 2026-11-21 (approved exception 18, the Owner's decision of 2026-11-20 on line RG's question
+  1.64 2026-11-21 (approved exception 18, the numbers of a `secondary-accession` modifier past
+  `int` in psiblast `-in_msa`, line PS item PS6b, PR #1440; proposed under the standing instruction
+  2026-09-29, restated 2026-10-07, on the Owner's rules of 2026-10-10 「NCBI のバグを再現する必要はない」
+  and 2026-10-22 「広い型になおしましょう」, and accepted by the maintainer on 2026-11-21 by marking
+  PR #1440 ready for review, as the PR asked; numbered after 1.63)
+  1.65 2026-11-21 (approved exception 19, the Owner's decision of 2026-11-20 on line RG's question
   F2-Q1, 「Q1=C」: an imported strategy's subjects searched once at any `-num_threads`; line RG item
   F2, `-import_search_strategy`)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
@@ -2206,9 +2211,32 @@ moves only that list (line RG `DECISIONS.md` D1a4-13).
     with that one value written as its digits). The writers' unit tests hold the value, as for
     `INT_MIN` (no fixture row kind holds NCBI's bytes with one value written otherwise).
 
-## Approved exception 18 (an imported strategy's subjects at more than one thread, version 1.64)
+## Approved exception (psiblast `-in_msa`, a `secondary-accession` number past `int`, line PS item PS6b, version 1.64)
 
-Version 1.64, line RG item F2 (DECISIONS F2-Q1). The Owner
+Proposed under the standing instruction of 2026-09-29 (restated 2026-10-07), under the Owner's rules
+of 2026-10-10 「NCBI のバグを再現する必要はない」 and 2026-10-22 「広い型になおしましょう」 and rule 1 above;
+accepted by the maintainer on 2026-11-21 by marking PR #1440 ready for review, as the PR asked.
+
+18. **A number of a `secondary-accession` value that does not fit `int`.** `SSeqIdRange`
+    (`objects/seqloc/Seq_id.cpp:3600-3640`; `int start; int stop;` in `Seq_id.hpp`) reads the digits
+    with `start = start * 10 + digit`, a signed overflow from the tenth digit on (undefined behavior
+    in C++). NCBI BLAST+ 2.17.0's build wraps: `AB9999999999` gives the accession `AB1410065407` in the
+    GB-block's `extra-accessions` and `hist.replaces` (rc 0), and `AB2147483648` or a range that
+    crosses 2^31 gives a negative number that `CSeq_id` refuses, `Malformatted ID AB-2147483648`
+    (rc 255; probes `M.secondary_num_big`, `M.secondary_num_over`, `M.secondary_range_over` of
+    the PS6b review). LOSAT reads the numbers in 64 bits and writes each accession with the digits as
+    written, zero-padded to the first number's width as NCBI pads every number that fits (NCBI 2.17.0
+    `AB1000000000-AB1000000002`, `AB0999999999-AB1000000001` and `AB1000000000`: the same bytes as
+    LOSAT's, probes `S.a`, `S.b`, `S.c` of the fix round); the accession then goes through the same
+    Seq-id parse as every other, which decides by its own rule whether the run goes on. A
+    number of more than 18 digits (past 64 bits) and a range that runs backwards (NCBI's loop does not
+    end) stay refused (rule 3). The range's size has no limit: NCBI expands any range into as many
+    Seq-ids, finishes up to the memory it has (2e7 ids in 115 s and 6.9 GB), and LOSAT writes the ids
+    as it expands them, in less memory than NCBI.
+
+## Approved exception 19 (an imported strategy's subjects at more than one thread, version 1.65)
+
+Version 1.65, line RG item F2 (DECISIONS F2-Q1). The Owner
 decided on 2026-11-20 at 20:05 JST, with the words 「Q1=C」 after asking 「重複すること自体バグでは？」 ("is the
 duplication itself not a bug?"), that a search strategy whose subjects are sequences, imported with
 `-num_threads` above 1, gives the output of `-num_threads 1` in every program. Not taken: NCBI's copies
@@ -2216,7 +2244,7 @@ duplication itself not a bug?"), that a search strategy whose subjects are seque
 alignment printed N times is not a result of the search), and a refusal of the combination (option B:
 the search itself is valid and its `-num_threads 1` result is deterministic).
 
-18. **An imported strategy's subjects at more than one thread.** NCBI decides whether a search takes
+19. **An imported strategy's subjects at more than one thread.** NCBI decides whether a search takes
     `-num_threads` from the command line's `-subject` only (`CMTArgs::x_ExtractAlgorithmOptions`, NCBI
     reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3203-3236): a strategy that carries its subjects
     (`s_ImportSearchStrategy`, NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:532-628)

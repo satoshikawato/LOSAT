@@ -3109,8 +3109,9 @@ mod tests {
     /// 12, 15 and 16, 10 and 20 with and without fields, the BLAST archive (11) of four programs
     /// with `-query_loc`, `-subject_loc` and deflines that the title does not give, SAM (17), and
     /// BLASTP's ungapped search in 8 and 11 (Dense-diag Seq-aligns, line NP item O4b) and with an HSP
-    /// of length 0 in 5, 8 and 15 (`-window_size 0`, also item O4b).
-    const FORMAT_ROWS: [(&str, &[&str]); 60] = [
+    /// of length 0 in 5, 8 and 15 (`-window_size 0`, also item O4b), and BLASTN's ungapped search in
+    /// SAM (one record per subject, item O4a-2).
+    const FORMAT_ROWS: [(&str, &[&str]); 61] = [
         (
             "sm1.blastp.x16.soft.5",
             &[
@@ -3983,6 +3984,19 @@ mod tests {
                 "0",
                 "-outfmt",
                 "15",
+            ],
+        ),
+        (
+            "ungapped.sam.mb.17q",
+            &[
+                "blastn",
+                "-query",
+                "tests/fixtures/blastn_regression/inputs/sam_ug_q.fa",
+                "-subject",
+                "tests/fixtures/blastn_regression/inputs/sam_ug_s.fa",
+                "-ungapped",
+                "-outfmt",
+                "17 SQ",
             ],
         ),
     ];

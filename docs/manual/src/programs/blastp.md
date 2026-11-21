@@ -53,6 +53,7 @@ Choose a task with `-task`. Options you leave out take the default of the task.
 | `-window_size` | 40 (15 for `blastp-short`) | Two-hit window; 0 selects the one-hit method |
 | `-dbsize`, `-searchsp` | from the data | Set the effective database size or search space for the E-value |
 | `-culling_limit` | 0 (off) | Delete a hit that at least this many higher-scoring hits envelop |
+| `-best_hit_overhang`, `-best_hit_score_edge` | off (0.1 for the one not given) | Keep only the best alignments for each region of the query (the Best Hit algorithm). Values above 0 and below 0.5; not with `-culling_limit` |
 | `-subject_besthit` | off | Keep only the best alignment of each subject for each part of the query |
 
 For every option: `losat blastp -help`.
@@ -90,7 +91,6 @@ LOSAT stops with an error for these `blastp` settings instead of running somethi
 - `-use_sw_tback` without composition-based statistics (`-comp_based_stats 0`), and with `-ungapped`.
 - With `-ungapped`: a subject of more than 5,000,000 residues, and a `-matrix` name that begins with `IDENTITY` but is not `IDENTITY`.
 - With `-ungapped -window_size 0` and a low `-threshold`: `-outfmt 1` to `4` with a one-hit alignment of length 0 among the alignments shown, where NCBI BLAST+ crashes.
-- `-best_hit_overhang` and `-best_hit_score_edge`.
 - `-matrix IDENTITY` with word sizes 5 to 7 (the default of `-task blastp-fast`).
 - `-threshold` values that overflow NCBI's word-table buffers when the word size is 5 to 7.
 - `-html`, `-remote`, `-entrez_query`, `-gilist` and `-ipglist`.

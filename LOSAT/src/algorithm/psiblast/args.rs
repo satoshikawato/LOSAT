@@ -113,6 +113,15 @@ pub struct PsiblastArgs {
     // every round culls, the PSSM rounds and `-in_pssm` too (`pssm_hooks::pssm_prelim`).
     #[arg(long, value_parser = nonnegative_ncbi_integer, help = "If the query range of a hit is enveloped by that of at least this many higher-scoring hits, delete the hit")]
     pub culling_limit: Option<i32>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3304-3328
+    // psiblast's `CHspFilteringArgs`, blastp's (`BlastpArgs::best_hit_overhang`): every round,
+    // the PSSM rounds and `-in_pssm` too (`pssm_hooks::pssm_prelim`).
+    /// Best Hit algorithm overhang value (recommended value: 0.1)
+    #[arg(long, value_parser = best_hit_value, value_name = "float_value", conflicts_with = "culling_limit")]
+    pub best_hit_overhang: Option<f64>,
+    /// Best Hit algorithm score edge value (recommended value: 0.1)
+    #[arg(long, value_parser = best_hit_value, value_name = "float_value", conflicts_with = "culling_limit")]
+    pub best_hit_score_edge: Option<f64>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3329,3347-3349
     // psiblast's `CHspFilteringArgs`, blastp's (`BlastpArgs::subject_besthit`): every round.
     /// Return only the best HSP for each non overlapping query region
@@ -358,6 +367,8 @@ impl PsiblastArgs {
             max_hsps_per_subject: self.max_hsps_per_subject,
             qcov_hsp_perc: self.qcov_hsp_perc,
             culling_limit: self.culling_limit,
+            best_hit_overhang: self.best_hit_overhang,
+            best_hit_score_edge: self.best_hit_score_edge,
             subject_besthit: self.subject_besthit,
             ungapped: false,
             xdrop_ungap: self.xdrop_ungap,
@@ -435,6 +446,8 @@ impl PsiblastArgs {
         inputs.qcov_hsp_perc = self.qcov_hsp_perc;
         inputs.max_hsps = self.max_hsps_per_subject.map(|count| count as i32);
         inputs.culling_limit = self.culling_limit;
+        inputs.best_hit_overhang = self.best_hit_overhang;
+        inputs.best_hit_score_edge = self.best_hit_score_edge;
         inputs.subject_besthit = self.subject_besthit;
         // `static_cast<int>` of the double, as BLASTP's (`blastp::archive::option_inputs`).
         inputs.threshold = self

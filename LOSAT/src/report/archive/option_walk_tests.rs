@@ -281,6 +281,19 @@ const PSIBLAST: &[Case] = &[
         &["-culling_limit", "2"],
         &[After("WordThreshold", "Culling", "Integer(2)")],
     ),
+    // Recorded where `-culling_limit` is, the overhang before the score edge, with a query and
+    // with `-in_pssm` (NCBI BLAST+ 2.17.0, line NP O6a-2's strategy probe `ps_q_both.ss`,
+    // `ps_pssm_both.ss`).
+    (
+        "best_hit_overhang",
+        &["-best_hit_overhang", "0.2"],
+        &[After("WordThreshold", "BestHitOverhang", "Real(0.2)")],
+    ),
+    (
+        "best_hit_score_edge",
+        &["-best_hit_score_edge", "0.3"],
+        &[After("WordThreshold", "BestHitScoreEdge", "Real(0.3)")],
+    ),
     // Recorded where `-culling_limit` is, with a query and with `-in_pssm` (NCBI BLAST+ 2.17.0,
     // line NP O6b's strategy probe `ps_q_on.ss`, `ps_pssm_on.ss`).
     (

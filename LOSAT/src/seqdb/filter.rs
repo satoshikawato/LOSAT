@@ -647,13 +647,10 @@ impl LmdbEntry {
         if !ntf_path.is_file() {
             return Err(missing_file(&ntf_path));
         }
-        let ntf_file = DbFile::open(&ntf_path)?;
-        let ntf = Env::open(&ntf_file).map_err(|message| SeqDbError::Format {
-            path: ntf_path.clone(),
-            message,
-        })?;
+        let ntf_file = DbFile::open(&ntf_path).map_err(lmdb_file_error)?;
+        let ntf = Env::open(&ntf_file).map_err(|message| lmdb_open_error(&ntf_file, message))?;
         let nto_path = self.lookup_file("to");
-        let nto = DbFile::open(&nto_path)?;
+        let nto = DbFile::open(&nto_path).map_err(lookup_file_error)?;
         let tax_error = |error: tax_files::TaxError, path: &Path| match error {
             tax_files::TaxError::Data(message) => SeqDbError::Format {
                 path: path.to_path_buf(),
@@ -663,7 +660,7 @@ impl LmdbEntry {
         };
         let mut found = if negative {
             let not_path = self.lookup_file("ot");
-            let not = DbFile::open(&not_path)?;
+            let not = DbFile::open(&not_path).map_err(lookup_file_error)?;
             tax_files::negative_tax_ids_to_oids(&ntf, &nto, &not, self.num_oids, tax_ids)
                 .map_err(|error| tax_error(error, &not_path))?
         } else {
@@ -682,11 +679,8 @@ impl LmdbEntry {
         if !ntf_path.is_file() {
             return Err(missing_file(&ntf_path));
         }
-        let ntf_file = DbFile::open(&ntf_path)?;
-        let ntf = Env::open(&ntf_file).map_err(|message| SeqDbError::Format {
-            path: ntf_path.clone(),
-            message,
-        })?;
+        let ntf_file = DbFile::open(&ntf_path).map_err(lmdb_file_error)?;
+        let ntf = Env::open(&ntf_file).map_err(|message| lmdb_open_error(&ntf_file, message))?;
         tax_files::get_db_tax_ids(&ntf).map_err(|error| match error {
             tax_files::TaxError::Data(message) => SeqDbError::Format {
                 path: ntf_path.clone(),
@@ -710,7 +704,7 @@ impl LmdbEntry {
     /// (NCBI reads past its index there).
     fn oid_tax_ids(&self, oids: &[u32], tax_ids: &mut BTreeSet<i32>) -> Result<(), SeqDbError> {
         let path = self.lookup_file("ot");
-        let file = DbFile::open(&path)?;
+        let file = DbFile::open(&path).map_err(lookup_file_error)?;
         let format = |message: String| SeqDbError::Format {
             path: path.clone(),
             message,
@@ -745,15 +739,12 @@ impl LmdbEntry {
 
     /// The LMDB file, opened for lookups (`with_env`, `lookup::SeqidLookup`).
     pub(super) fn open_file(&self) -> Result<DbFile, SeqDbError> {
-        DbFile::open(&self.lmdb)
+        DbFile::open(&self.lmdb).map_err(lmdb_file_error)
     }
 
     /// The LMDB environment over `file`, this entry's file (`open_file`).
     pub(super) fn open_env<'f>(&self, file: &'f DbFile) -> Result<Env<'f, DbFile>, SeqDbError> {
-        Env::open(file).map_err(|message| SeqDbError::Format {
-            path: self.lmdb.clone(),
-            message,
-        })
+        Env::open(file).map_err(|message| lmdb_open_error(file, message))
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdblmdbset.cpp:81-113
@@ -893,7 +884,7 @@ impl LmdbEntry {
         }
         pairs.sort();
         let nos_path = self.lookup_file("os");
-        let nos_file = DbFile::open(&nos_path)?;
+        let nos_file = DbFile::open(&nos_path).map_err(lookup_file_error)?;
         let lookup =
             tax_files::OidSeqIds::open(&nos_file).map_err(|message| SeqDbError::Format {
                 path: nos_path.clone(),
@@ -1030,8 +1021,10 @@ pub(super) fn entries_accessions_to_oids(
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp:91-96
 // LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:1461-1462
 // (LMDB's notice and the OpenLDAP Public License 2.8: THIRD_PARTY_NOTICES, section 2 (LMDB).)
-/// The error of an LMDB file that opens but is not read: NCBI's text for an empty file (probe
-/// SR4), a file of another format (SR3) and another LMDB version; LOSAT's for the rest.
+/// The error of an LMDB file (`.pdb`/`.ndb`, `.ptf`/`.ntf`) that opens but is not read: NCBI's
+/// text for an empty file (probe SR4; an empty `.ptf` of a taxid list: line WQA D18 review M4,
+/// NCBI BLAST+ 2.17.0 on 2026-11-21), a file of another format (SR3) and another LMDB version;
+/// LOSAT's for the rest.
 fn lmdb_open_error(file: &DbFile, message: String) -> SeqDbError {
     let what = if file.is_empty() {
         "Bad file descriptor"
@@ -1048,22 +1041,38 @@ fn lmdb_open_error(file: &DbFile, message: String) -> SeqDbError {
     SeqDbError::NotFound(format!("LMDB runtime error: mdb_env_open: {what}").into())
 }
 
-/// The error of an LMDB file that does not open: the system's text in NCBI's words (a file
-/// without read permission gives `Permission denied`, checked with NCBI on 2026-10-31).
+/// The error of an LMDB file (`.pdb`/`.ndb`, `.ptf`/`.ntf`) that does not open or whose first
+/// byte cannot be read (`DbFile::open`): `mdb_env_open`'s, with the system's text
+/// (`utils::os_error_text::ncbi_strerror`, so LOSAT Web gives the native CLI's). NCBI BLAST+
+/// 2.17.0 gives it for every code, EMFILE and ENFILE too (a file without read permission:
+/// `Permission denied`, checked with NCBI on 2026-10-31; `open()`, `read()` or `mmap()` of the
+/// file made to fail: line WQA D18 probes 4-7, 2026-11-21).
 fn lmdb_file_error(error: SeqDbError) -> SeqDbError {
-    if let SeqDbError::Open { source, .. } = &error {
-        if let Some(code) = source.raw_os_error() {
-            let text = source.to_string();
-            if let Some(strerror) = text.strip_suffix(&format!(" (os error {code})")) {
-                if cfg!(unix) && !strerror.contains("Too many open files") {
-                    return SeqDbError::NotFound(
-                        format!("LMDB runtime error: mdb_env_open: {strerror}").into(),
-                    );
-                }
-            }
+    if let SeqDbError::Open { source, .. } | SeqDbError::Map { source, .. } = &error {
+        if let Some(strerror) = crate::utils::os_error_text::ncbi_strerror(source) {
+            return SeqDbError::NotFound(
+                format!("LMDB runtime error: mdb_env_open: {strerror}").into(),
+            );
         }
     }
     error
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp:537-538
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp:631-632
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp:714-715
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp:739-740
+/// The error of a lookup file (`.pos`/`.nos`, `.pot`/`.not`, `.pto`/`.nto`) that does not open
+/// or whose first byte cannot be read (`DbFile::open`): NCBI maps these with `CMemoryFile`
+/// itself, outside the reader's atlas, so `CMemoryFile`'s exception reaches the program (`Error:
+/// ` and the report, exit status 255; NCBI BLAST+ 2.17.0 with the file without read permission,
+/// or its `open()` or `mmap()` made to fail, EMFILE included: line WQA D18 probes 5-7,
+/// 2026-11-21).
+fn lookup_file_error(error: SeqDbError) -> SeqDbError {
+    match error.memory_file_exception() {
+        Some(exception) => SeqDbError::Ncbi(exception),
+        None => error,
+    }
 }
 
 fn missing_file(path: &Path) -> SeqDbError {

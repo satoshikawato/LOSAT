@@ -2253,10 +2253,10 @@ The review rows of PR 2 (2026-11-21; `db.tmask.*.te.*`, `*.tl.*`, `*.th1.*`, `*.
 inputs written by `ncbi-parity-20261019/M/m4b/scripts3/gen_fix3.py` (seed 20261124): `edge.fna` (`e1`, 1,200 bases whose
 bases 901-1020 are 40 sense codons of frame +2; `e2`, 1,202 bases, 400 sense codons and `AT`; `e3`, 1,200 bases, and
 `e4`, 1,201, the minus strands of 400 sense codons; `e5` to `e8`, 10, 11, 16 and 17 random bases, around the shortest
-subjects searched: 11 bases in TBLASTX, 17 in TBLASTN at word 5), `long.fna` (`l1`, 7,000 bases with coding stretches at
-3000-3599, frame +1, and 5000-5449, frame -1; `l2`, 3,000 bases: longer than the average, so the traceback fetches parts
-of `l1`), the TBLASTX queries `qxe.fna`, the TBLASTN queries `qne.faa`, the PSSM query `pn1.faa` (the PSSM is
-`../fixtures/pssm/m4b2_pl1.asn.gz`) and the hand masks `hedge3_<case>.asnt` (from/to inclusive below as `[start, end)`):
+subjects searched: 11 bases at word size 3, the default of both programs, 17 at TBLASTN's `-word_size 5`), `long.fna`
+(`l1`, 7,000 bases with coding stretches at 3000-3599, frame +1, and 5000-5449, frame -1; `l2`, 3,000 bases: longer than
+the average, so the traceback fetches parts of `l1`), the TBLASTX queries `qxe.fna`, the TBLASTN queries `qne.faa`, the
+PSSM query `pn1.faa` (the PSSM is `../fixtures/pssm/m4b2_pl1.asn.gz`) and the hand masks `hedge3_<case>.asnt` (from/to inclusive below as `[start, end)`):
 
 | `te` | Mask | Case |
 |---|---|---|
@@ -2267,7 +2267,7 @@ of `l1`), the TBLASTX queries `qxe.fna`, the TBLASTN queries `qne.faa`, the PSSM
 | 16 `h23`, 17 `h13` | `e3` [2, 3), [1, 3) | frame -1 refused |
 | 18 `h46`, 19 `h46b` | `e3` [4, 6), `e4` [4, 6) | frames -2 and -3, frame -3 refused |
 | 31 `two` | `e4` [0, 3), [1200, 1201) | NCBI crashes (frame -1), refused |
-| 32 `m10` to 35 `m17` | the last 3 bases of `e5` to `e8` | frame +1 refused where the subject is searched (from 11 bases in TBLASTX, 17 in TBLASTN), else not searched |
+| 32 `m10` to 35 `m17` | the last 3 bases of `e5` to `e8` | frame +1 refused where the subject is searched (from 11 bases at word size 3, 17 at TBLASTN's `-word_size 5`: row `te.34.w5`), else not searched |
 | 36 `s01`, 37 `s1200` | `e3` [0, 1), [600, 700); `e2` [300, 400), [1200, 1202) | searched (near misses of 14 and 13) |
 
 `tl` has 11 (`long`): `l1` [3270, 3330) and [5201, 5251). The two databases were made with:

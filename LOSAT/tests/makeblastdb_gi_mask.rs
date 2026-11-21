@@ -462,7 +462,9 @@ fn readers_read_the_gi_masks_of_a_single_volume_database() {
     let info = losat(&tmp.0, "blastdbcmd -db db -info");
     assert_eq!((info.0, info.2.as_str()), (0, ""), "{info:?}");
     assert!(
-        info.1.contains("\n0            dust                                    window=64; level=20; linker=1"),
+        info.1.contains(
+            "\n0            dust                                    window=64; level=20; linker=1"
+        ),
         "{info:?}"
     );
     for command in [

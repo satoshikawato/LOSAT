@@ -590,6 +590,12 @@ impl MaskAlgorithms {
         }
     }
 
+    /// Whether the masks are indexed by GI (the files that the alias file's `MASKLIST` names)
+    /// instead of mask columns.
+    pub fn indexed_by_gi(&self) -> bool {
+        self.gi_masks().is_some()
+    }
+
     /// The GI masks, where the database has them instead of mask columns.
     pub(super) fn gi_masks(&self) -> Option<&GiMasks> {
         match &self.kind {
@@ -840,11 +846,7 @@ impl MaskAlgorithms {
 // ```
 /// `s_GetDetails` of the stored description `description` of the algorithm `id` (`source`: the
 /// file that holds it, for LOSAT's errors).
-fn parse_details(
-    id: i32,
-    description: &str,
-    source: &Path,
-) -> Result<MaskAlgorithm, SeqDbError> {
+fn parse_details(id: i32, description: &str, source: &Path) -> Result<MaskAlgorithm, SeqDbError> {
     let bad = |message: String| SeqDbError::Format {
         path: source.to_path_buf(),
         message,
@@ -887,7 +889,6 @@ fn parse_details(
         )),
     }
 }
-
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2470-2506
 // ```c++

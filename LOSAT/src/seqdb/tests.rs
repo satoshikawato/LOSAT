@@ -1477,7 +1477,10 @@ fn masklist_names_the_gi_masks_of_a_database_of_one_name() {
     );
     match algorithms.details(2).unwrap_err() {
         SeqDbError::Range(text) => {
-            assert_eq!(text, format!("Filtering algorithm ID 2 does not exist.\n{table}"))
+            assert_eq!(
+                text,
+                format!("Filtering algorithm ID 2 does not exist.\n{table}")
+            )
         }
         other => panic!("{other}"),
     }
@@ -1485,7 +1488,10 @@ fn masklist_names_the_gi_masks_of_a_database_of_one_name() {
     let twice = format!("{name} {name}");
     for passed_over in [over.as_str(), twice.as_str()] {
         let db = SeqDb::open(passed_over, SeqType::Protein).unwrap();
-        assert!(db.mask_algorithms().unwrap().ids().is_empty(), "{passed_over}");
+        assert!(
+            db.mask_algorithms().unwrap().ids().is_empty(),
+            "{passed_over}"
+        );
     }
 }
 

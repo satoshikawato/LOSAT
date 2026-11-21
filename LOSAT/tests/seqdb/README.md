@@ -184,8 +184,11 @@ directory under the root, environment, words): `blastdbcmd -info`, `-outfmt %m`,
 -db_soft_mask` / `-db_hard_mask` by id and name, from another directory, with `BLASTDB`, by absolute name, through an
 alias file over the database and as `-db 'db db'`, and a plain search of each program family. `gi_mask_read/db/<db>/`
 holds the databases (the root `<R>` in their text files), `gi_mask_read/expected/<case>.{rc,stdout,stderr}` the runs
-(the root as `<R>`), `gi_mask_read/in/` the queries. `tests/gi_mask_read.rs` runs every case through the `losat`
-binary (searches also with `-num_threads 4`) and on databases that `losat makeblastdb` builds;
+(the root as `<R>`), `gi_mask_read/in/` the queries. `bdc_m09_msw_0` (a protein in FASTA with masks) is approved
+difference 5 of PD-LOSAT-BLASTDBCMD-DEVIATIONS: NCBI's headers with the letters of NCBI's `-outfmt %s` run, NCBI's
+own FASTA in `bdc_m09_msw_0.ncbi_stdout`. `tests/gi_mask_read.rs` runs every case through the `losat` binary
+(searches also with `-num_threads 4`, where a search that reads GI-indexed masks is LOSAT's refusal) and on
+databases that `losat makeblastdb` builds;
 `src/seqdb/gi_mask_tests.rs` reads every GI of `gi_mask/db/big*` (1 to 1,100 GIs, one and four data volumes).
 
 ## Masks ordered by address, and the errors that come first (`mask_order/`)

@@ -4,12 +4,13 @@
 //! `-db_hard_mask`, and a plain search of each program family, on the databases that NCBI's
 //! makeblastdb built (`tests/seqdb/gi_mask_read`, `tests/seqdb/make_gi_mask_read_fixtures.py`).
 //! The exit status, standard output and standard error of every case of `cases.tsv` equal NCBI's
-//! (its messages in LOSAT's words, `losat::wording::losat_output_bytes`).
+//! (its messages in LOSAT's words, `losat::wording::losat_output_bytes`), but for LOSAT's refusal
+//! of a search with GI-indexed masks on more than one thread.
 //!
 //! Each case runs the `losat` binary in the directory the table names, under a root that holds
 //! the databases (`<R>` in the frozen files) and the queries, with the environment cleared of
 //! `BLASTDB` and the registry as the fixtures ran NCBI's programs. The searches run again with
-//! `-num_threads 4` and give the same bytes. A round trip builds `m01` (four volumes) and `sv5` (one
+//! `-num_threads 4`: the same bytes, or LOSAT's refusal where they read GI-indexed masks. A round trip builds `m01` (four volumes) and `sv5` (one
 //! volume) with `losat makeblastdb` and runs their cases again: the bytes are NCBI's but for the
 //! date of the database (`Date:` of `-info`, `Posted date:` of the pairwise report).
 //!
@@ -42,7 +43,12 @@ fn cases() -> Vec<Case> {
         .map(|line| {
             let mut fields = line.split('\t').map(str::to_string);
             let name = fields.next().unwrap();
-            let dbs = fields.next().unwrap().split(',').map(str::to_string).collect();
+            let dbs = fields
+                .next()
+                .unwrap()
+                .split(',')
+                .map(str::to_string)
+                .collect();
             let cwd = fields.next().unwrap();
             let env = fields.next().unwrap();
             let env = (env != "-").then(|| {
@@ -162,7 +168,11 @@ fn run(root: &Path, case: &Case, extra: &[&str]) -> (i32, Vec<u8>, Vec<u8>) {
 fn expected(name: &str) -> (i32, Vec<u8>, Vec<u8>) {
     let dir = fixtures().join("expected");
     let read = |ext: &str| std::fs::read(dir.join(format!("{name}.{ext}"))).unwrap();
-    let rc = String::from_utf8(read("rc")).unwrap().trim().parse().unwrap();
+    let rc = String::from_utf8(read("rc"))
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
     let mapped = |bytes: Vec<u8>| losat::wording::losat_output_bytes(&bytes).into_owned();
     (rc, mapped(read("stdout")), mapped(read("stderr")))
 }
@@ -215,7 +225,32 @@ fn is_search(case: &Case) -> bool {
     case.words[0] != "blastdbcmd"
 }
 
-/// Every case of the table, and the searches again with `-num_threads 4`.
+/// Whether the search of `case` reads GI-indexed masks in NCBI's run `want`: `-db_soft_mask` or
+/// `-db_hard_mask` on one database name (NCBI drops the masks of a `-db` of several names), and
+/// NCBI's run ends without a message (no warning that the mask is not found, no error).
+fn reads_gi_masks(case: &Case, want: &(i32, Vec<u8>, Vec<u8>)) -> bool {
+    let masked = case
+        .words
+        .iter()
+        .any(|word| word == "-db_soft_mask" || word == "-db_hard_mask");
+    let db = case.words.iter().position(|word| word == "-db");
+    let one_name = db.is_some_and(|at| !case.words[at + 1].contains(' '));
+    masked && one_name && want.0 == 0 && want.2.is_empty()
+}
+
+/// LOSAT's refusal of a search with GI-indexed masks on more than one thread (NCBI BLAST+ 2.17.0
+/// stops or crashes in some of those runs, probe 2 of M4c-2): exit status 1, LOSAT's message, and
+/// at most the part of NCBI's output that comes before the search (the prolog of outfmt 0).
+fn refused_on_threads(got: &(i32, Vec<u8>, Vec<u8>), want: &(i32, Vec<u8>, Vec<u8>)) -> bool {
+    let stderr = String::from_utf8_lossy(&got.2);
+    got.0 == 1
+        && stderr.contains("with -num_threads above 1 on a database whose masks are indexed by GI")
+        && stderr.contains("is not supported by LOSAT's BLASTN")
+        && want.1.starts_with(&got.1)
+}
+
+/// Every case of the table, and the searches again with `-num_threads 4`: the same bytes, or
+/// LOSAT's refusal where the search reads GI-indexed masks.
 #[test]
 fn readers_give_ncbi_s_output_on_ncbi_s_databases() {
     let root = root("ncbi");
@@ -231,7 +266,11 @@ fn readers_give_ncbi_s_output_on_ncbi_s_databases() {
         }
         if is_search(&case) {
             let got = run(&root.0, &case, &["-num_threads", "4"]);
-            if got != want {
+            let ok = match reads_gi_masks(&case, &want) {
+                true => refused_on_threads(&got, &want),
+                false => got == want,
+            };
+            if !ok {
                 problems.push(format!("{} n4: {}", case.name, describe(&got, &want)));
             }
         }
@@ -273,7 +312,10 @@ fn readers_give_ncbi_s_output_on_losat_s_databases() {
     let mut ran = 0;
     for case in cases() {
         let own = case.dbs.iter().all(|db| db == "m01" || db == "sv5");
-        let alias = case.words.iter().any(|word| word == "al" || word == "db db");
+        let alias = case
+            .words
+            .iter()
+            .any(|word| word == "al" || word == "db db");
         if !own || alias {
             continue;
         }

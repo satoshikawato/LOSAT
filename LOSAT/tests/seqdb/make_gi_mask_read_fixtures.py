@@ -36,7 +36,11 @@ Output files:
                       it runs in (relative to the root), environment (`-` or `NAME=VALUE`), then the
                       program and its words, one per field
   expected/<case>.rc, .stdout, .stderr
-                      NCBI's exit status, standard output and error, the root as `<R>`
+                      NCBI's exit status, standard output and error, the root as `<R>`; for the
+                      cases of `DEVIATION_5` the standard output is the approved difference 5 of
+                      PD-LOSAT-BLASTDBCMD-DEVIATIONS (a mask on a protein in FASTA without a
+                      range): NCBI's headers with the letters of NCBI's `-outfmt %s` run of the
+                      same words, NCBI's own FASTA kept as `<case>.ncbi_stdout`
 """
 import argparse
 import os
@@ -93,6 +97,33 @@ DBS = [
 ]
 
 FMT = "%o %a %g %m"
+
+# The cases whose standard output is approved difference 5 of PD-LOSAT-BLASTDBCMD-DEVIATIONS:
+# NCBI's FASTA of a protein with a mask and no range keeps the masks only in the first third of
+# the sequence; LOSAT masks the whole length, as NCBI's `-outfmt %s` of the same words does.
+DEVIATION_5 = {"bdc_m09_msw_0"}
+# blastdbcmd's FASTA line length (`-line_length` default).
+LINE_LENGTH = 80
+
+
+def with_letters_of(fasta, letters):
+    """NCBI's FASTA `fasta` with the sequence lines of each record replaced by the line of
+    `letters` (the `-outfmt %s` run of the same records, one per line), wrapped at
+    `LINE_LENGTH`."""
+    rows = letters.decode("latin-1").split("\n")
+    out = []
+    record = -1
+    for line in fasta.decode("latin-1").split("\n"):
+        if line.startswith(">"):
+            record += 1
+            out.append(line)
+            seq = rows[record]
+            out.extend(seq[i:i + LINE_LENGTH] for i in range(0, len(seq), LINE_LENGTH))
+        elif record < 0 or line == "":
+            out.append(line)
+    if record + 1 != len([r for r in rows if r]):
+        raise SystemExit("deviation 5: the record counts of the two runs differ")
+    return "\n".join(out).encode("latin-1")
 
 
 def bdc(*words):
@@ -298,7 +329,13 @@ def read(bin_dir, root, out, env):
                                 capture_output=True, env=e)
         rows.append("\t".join([name, dbs, cwd, run_env] + argv))
         (exp / f"{name}.rc").write_text(f"{result.returncode}\n")
-        for stream, data in (("stdout", result.stdout), ("stderr", result.stderr)):
+        stdout = result.stdout
+        if name in DEVIATION_5:
+            letters = subprocess.run([str(bin_dir / words[0])] + words[1:] + ["-outfmt", "%s"],
+                                     cwd=root / cwd, capture_output=True, env=e, check=True)
+            (exp / f"{name}.ncbi_stdout").write_bytes(stdout)
+            stdout = with_letters_of(stdout, letters.stdout)
+        for stream, data in (("stdout", stdout), ("stderr", result.stderr)):
             text = data.decode("latin-1").replace(str(root), "<R>")
             (exp / f"{name}.{stream}").write_bytes(text.encode("latin-1"))
     (out / "cases.tsv").write_text("".join(r + "\n" for r in rows))

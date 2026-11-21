@@ -1340,12 +1340,7 @@ impl SeqDb {
         search: &SearchPath,
         volume_title: &dyn Fn(&str) -> Option<Vec<u8>>,
     ) -> Result<LocatedDatabase, SeqDbError> {
-        let tree = alias::resolve_one_name(
-            name,
-            seqtype,
-            alias::LocalCopy::CurrentDir,
-            search,
-        )?;
+        let tree = alias::resolve_one_name(name, seqtype, alias::LocalCopy::CurrentDir, search)?;
         let mut title = Vec::new();
         alias::walk_title(&tree.root, volume_title, &mut title);
         let mut alias_files = std::collections::BTreeSet::new();

@@ -408,13 +408,16 @@ fn encode<E: Encoder>(enc: &mut E, document: &Document<'_>) -> Option<SerialErro
 }
 
 /// `CMaskWriter::IdToString`: `>`, with `-parse_seqids` the Seq-ids in FASTA form
-/// (`GetStringDescr(eFormat_FastA)`) and a space, then `CDeflineGenerator::GenerateDefline`.
+/// (`GetStringDescr(eFormat_FastA)`, which ranks the ids for a protein when the Bioseq is one:
+/// segmasker's `lcl|a|sp|P12345|` is `sp|P12345|`) and a space, then
+/// `CDeflineGenerator::GenerateDefline`.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/seqmasks_io/mask_writer.cpp:46-65
+/// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:2347-2375
 fn id_to_string(seq: &MaskedBioseq<'_>, parsed_id: bool) -> Result<Vec<u8>, WriteError> {
     let mut text = vec![b'>'];
     if parsed_id {
-        bioseq_fasta(seq.ids, false, &mut text);
+        bioseq_fasta(seq.ids, seq.protein, &mut text);
         text.push(b' ');
     }
     let mut facts = bioseq_facts(seq.ids);

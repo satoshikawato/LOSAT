@@ -23,7 +23,7 @@ use super::rows::QueryPssm;
 use super::traceback0::final_hsp;
 use crate::algorithm::blastp::gapalign::BlastpPreliminaryHsp;
 use crate::algorithm::blastp::hsp::{
-    fill_results_from_compo_heaps, BlastCompoHeap, BlastpHitList, BlastpHspList,
+    fill_results_from_compo_heaps, BlastCompoHeap, BlastpHitList, BlastpHsp, BlastpHspList,
     COMPO_HEAP_EVALUE_STRETCH,
 };
 use crate::algorithm::blastp::x_prelim_compact::XPrelimHsp;
@@ -508,6 +508,52 @@ impl<'a> RedoSubject<'a> for FrameSubject<'a> {
     }
 }
 
+/// The identities and positives that NCBI's RPS-TBLASTN redo counts for an HSP
+/// (`s_ComputeNumIdentities`, which the Seq-align's `num_ident` and `num_positives` show): on the
+/// redo's whole subject, the translation buffer (`one_query->sequence`), at the HSP's offsets in
+/// its own frame, not on the frame's letters, so that the counts of an HSP of any frame but +1
+/// are those of the letters of frame +1 (then the sentinel and the frames after it) at the
+/// same offsets. The query side is the profile's consensus.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:482-531
+/// (`Blast_RedoAlignmentCore` is called with the profile as `query_blk` and `one_query`, the
+/// user's translated query of all frames, as `subject_blk`, blast_traceback.c:1274-1281; the
+/// HSP's subject offsets are in its frame.) The offsets stay inside the buffer, which holds
+/// every frame, the HSP's own among them.
+fn translation_buffer_counts(
+    hsp: &BlastpHsp,
+    query_nomask: &[u8],
+    buffer: &[u8],
+    matrix: crate::config::ScoringMatrix,
+) -> (usize, usize) {
+    let (mut q, mut s) = (hsp.q_start - 1, hsp.s_start.min(hsp.s_end) - 1);
+    let implicit = [GapEditOp::Sub(hsp.q_end.saturating_sub(q) as u32)];
+    let ops = hsp.gap_info.as_deref().unwrap_or(&implicit);
+    let (mut num_ident, mut num_positives) = (0usize, 0usize);
+    for op in ops {
+        match *op {
+            GapEditOp::Sub(n) => {
+                for (&ql, &sl) in query_nomask[q..q + n as usize]
+                    .iter()
+                    .zip(&buffer[s..s + n as usize])
+                {
+                    if ql == sl {
+                        num_ident += 1;
+                        num_positives += 1;
+                    } else if crate::utils::matrix::standard_score(matrix, ql, sl) > 0 {
+                        num_positives += 1;
+                    }
+                }
+                q += n as usize;
+                s += n as usize;
+            }
+            GapEditOp::Del(n) => s += n as usize,
+            GapEditOp::Ins(n) => q += n as usize,
+        }
+    }
+    (num_ident, num_positives)
+}
+
 /// A window of the subject (`s_WindowInfo`'s `subject_range`): `[begin, end)` of the frame
 /// `frame`'s letters. `end` may lie before `begin` (`end - begin` is NCBI's length, then below 0:
 /// `rpstblastn -strand`, whose translation buffer is shorter than `GET_NUCL_LENGTH` assumes). A
@@ -856,6 +902,11 @@ impl RedoMatch<'_> {
                 kind.frame_letters(subject, align.frame),
                 self.matrix,
             );
+            if S::Instance::SUBJECT_IS_TRANSLATED {
+                // The Seq-align's counts (see `translation_buffer_counts`).
+                (hsp.num_ident, hsp.num_positives) =
+                    translation_buffer_counts(&hsp, run.query_nomask, subject, self.matrix);
+            }
             hsp.e_value = e_value;
             hsp.num = num;
             hsp.bit_score = (score as f64 * run.karlin.lambda * SCALING_FACTOR - run.log_k)
@@ -1552,75 +1603,5 @@ pub(crate) mod smith_waterman;
 mod frame_tests;
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn align(score: i32, q: (i32, i32), s: (i32, i32)) -> Align {
-        Align {
-            score,
-            rule: EMatrixAdjustRule::CompoScaleOldMatrix,
-            query_start: q.0,
-            query_end: q.1,
-            match_start: s.0,
-            match_end: s.1,
-            frame: 0,
-            edit_script: Vec::new(),
-        }
-    }
-
-    // `s_WithDistinctEnds`: a new alignment that shares an end with a better one is dropped; one
-    // that beats it replaces every alignment that shares an end and goes to the head.
-    #[test]
-    fn distinct_ends_keep_the_best_of_a_shared_end() {
-        let mut list = vec![align(100, (0, 50), (0, 50)), align(80, (60, 90), (60, 90))];
-        with_distinct_ends::<XDropRedo>(align(90, (0, 40), (0, 40)), &mut list, true);
-        assert_eq!(list.len(), 2);
-        with_distinct_ends::<XDropRedo>(align(120, (10, 90), (10, 90)), &mut list, true);
-        assert_eq!(
-            list.iter().map(|a| a.score).collect::<Vec<_>>(),
-            vec![120, 100]
-        );
-        // With different adjustments a similar end (contained, same diagonal) counts.
-        with_distinct_ends::<XDropRedo>(align(110, (5, 45), (5, 45)), &mut list, false);
-        assert_eq!(list.len(), 2);
-    }
-
-    // `s_HitlistReapContained` keeps the first of two nested HSPs unless the later scores more.
-    #[test]
-    fn contained_hsps_are_reaped() {
-        let mut redone = vec![
-            Redone {
-                align: align(100, (0, 50), (0, 50)),
-                e_value: 0.0,
-                num: 1,
-            },
-            Redone {
-                align: align(90, (10, 40), (10, 40)),
-                e_value: 0.0,
-                num: 1,
-            },
-            Redone {
-                align: align(80, (60, 70), (60, 70)),
-                e_value: 0.0,
-                num: 1,
-            },
-        ];
-        reap_contained::<XDropRedo>(&mut redone);
-        assert_eq!(
-            redone.iter().map(|r| r.align.score).collect::<Vec<_>>(),
-            vec![100, 80]
-        );
-    }
-
-    // `s_preliminaryTestNearIdentical`: the subject span must reach min(query length, 50) and
-    // the score per aligned column the cutoff.
-    #[test]
-    fn the_preliminary_near_identical_test_is_ncbis() {
-        let a = align(1000, (0, 60), (0, 60));
-        assert!(preliminary_test_near_identical(100, &a, 16.0));
-        assert!(!preliminary_test_near_identical(100, &a, 17.0));
-        let short = align(1000, (0, 20), (0, 20));
-        assert!(!preliminary_test_near_identical(100, &short, 1.0));
-        assert!(preliminary_test_near_identical(20, &short, 1.0));
-    }
-}
+#[path = "redo1_tests.rs"]
+mod tests;

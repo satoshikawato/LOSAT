@@ -125,7 +125,7 @@ impl BlastpDbMasking<'_> {
             hard_chunks(
                 kernel,
                 scratch,
-                &mut *masked,
+                &mut masked,
                 s_idx,
                 subject,
                 subject_result,

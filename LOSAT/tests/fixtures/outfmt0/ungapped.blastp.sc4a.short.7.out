@@ -1,0 +1,26 @@
+# BLASTP 2.17.0+
+# Query: BDT63074.1 tyrosine recombinase [Sicyonia whispovirus]
+# Database: User specified sequence set (Input: tests/fasta/PajaWSV.faa)
+# 0 hits found
+# BLASTP 2.17.0+
+# Query: nohit a query without hits
+# Database: User specified sequence set (Input: tests/fasta/PajaWSV.faa)
+# 0 hits found
+# BLASTP 2.17.0+
+# Query: BDT63075.1 wsv226-like protein [Sicyonia whispovirus]
+# Database: User specified sequence set (Input: tests/fasta/PajaWSV.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 8 hits found
+BDT63075.1	BDT63562.1	67.647	34	11	0	574	607	532	565	6.67e-15	73.2
+BDT63075.1	BDT63562.1	80.000	20	4	0	404	423	340	359	3.21e-11	61.0
+BDT63075.1	BDT63562.1	51.220	41	20	0	835	875	787	827	4.50e-11	60.5
+BDT63075.1	BDT63562.1	51.429	35	17	0	507	541	465	499	4.84e-10	57.1
+BDT63075.1	BDT63562.1	66.667	21	7	0	1100	1120	1057	1077	2.83e-08	51.2
+BDT63075.1	BDT63562.1	65.385	26	9	0	200	225	147	172	1.10e-07	49.3
+BDT63075.1	BDT63562.1	50.000	36	18	0	314	349	252	287	2.68e-04	38.0
+BDT63075.1	BDT63562.1	61.111	18	7	0	443	460	376	393	7.42e-04	36.6
+# BLASTP 2.17.0+
+# Query: BDT63076.1 hypothetical protein [Sicyonia whispovirus]
+# Database: User specified sequence set (Input: tests/fasta/PajaWSV.faa)
+# 0 hits found
+# BLAST processed 4 queries

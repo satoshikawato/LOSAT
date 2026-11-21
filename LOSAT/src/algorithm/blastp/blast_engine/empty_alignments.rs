@@ -242,11 +242,13 @@ mod tests {
             true,
         )
         .expect("an HSP of length 0 at the first letter");
+        // LOSAT's words of NCBI's text (`crate::wording`, as `what` gives it).
+        let ncbi = format!(
+            "NCBI C++ Exception:\n    T0 \"{root}/src/objects/seq/seq_align_mapper_base.cpp\", line 1292: Error: (CAnnotMapperException::eBadAlignment) Mapped alignment contains gaps and can not be converted to dense-diag.\n"
+        );
         assert_eq!(
             exception.what(),
-            format!(
-                "NCBI C++ Exception:\n    T0 \"{root}/src/objects/seq/seq_align_mapper_base.cpp\", line 1292: Error: (CAnnotMapperException::eBadAlignment) Mapped alignment contains gaps and can not be converted to dense-diag.\n"
-            )
+            crate::wording::losat_bytes(ncbi.as_bytes()).into_owned()
         );
     }
 

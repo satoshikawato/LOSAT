@@ -17,6 +17,13 @@ not of their paths; `al3.nal` of `ext/b.nin` and `ext/b-2`, where the base name 
 a new style index reads each volume whole, and an old style one every OID of the alias file, as NCBI does; NCBI's
 open of the alias file scans the list without `NSEQ` and `LENGTH`, and the old style's first read builds it.
 
+The `-idmap` titles (line RG item D5a-t): `titles.fa` (titles with HTML entities, end punctuation, leading spaces, a tab,
+`TPA:`), `titlesdb/t` of it; `titlespdb/p` with `-parse_seqids` (`tpg`, `pat`, `lcl` and `gb` ids with and without
+titles); `txdb/tx` with `-parse_seqids -taxid 9606`; and `ttdb/tt` of `tt.fa` with `-parse_seqids -taxid_map
+tt_taxid.txt` (the taxids of `taxt5/`, a copy of `../seqdb/taxdb/t5`: a lower case name, a name with spaces around it, one
+with entities, one starting `TPA: `, an empty name, and a taxid it does not hold). The rows with `BLASTDB=taxt5` find
+that taxonomy database.
+
 `gen/` is made by the test: `big.fa` (one record of 5,100,000 letters with lower case runs, which the index splits into
 chunks, and one of 20,000) and `many.fa` (600 records) from the generator of `makembindex_fixtures.rs`, the databases
 `gen/bigdb/big` and `gen/manydb/many` of them, and `gen/mbigdb/big` with the lower case masks of `big.fa`

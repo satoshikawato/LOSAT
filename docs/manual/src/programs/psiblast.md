@@ -75,7 +75,7 @@ For every option: `losat psiblast -help`.
 | FASTA query (`-query`) | 0, 6, 7, 10, 20 |
 | PSSM or alignment query (`-in_pssm`, `-in_msa`) | 0, 6, 7 |
 
-Formats 6, 7, 10 and 20 take a custom field list, for example `-outfmt "6 qseqid sseqid evalue"`, and `delim=`. With `-outfmt 0`, the report shows each round, and the description table of a later round has NCBI's two parts: sequences used in the model and found again, and sequences not found before or not below the threshold before. With `-outfmt 7`, the comment lines count rounds. See [Output formats](../output-formats.md).
+Formats 6, 7, 10 and 20 take a custom field list, for example `-outfmt "6 qseqid sseqid evalue"`. As in NCBI's `psiblast`, `delim=` is read and checked but the columns keep their tab or comma. With `-outfmt 0`, the report shows each round, and the description table of a later round has NCBI's two parts: sequences used in the model and found again, and sequences not found before or not below the threshold before. With `-outfmt 7`, the comment lines count rounds. See [Output formats](../output-formats.md).
 
 ## Differences from NCBI BLAST+
 
@@ -87,7 +87,7 @@ Not yet supported:
 
 - `-phi_pattern`.
 - `-in_msa` with an alignment in FASTA, PHYLIP, NEXUS, Sequin or MultAlin format. Only the Clustal format is read.
-- `-outfmt` other than 0, 6, 7, 10 and 20 (with `-in_pssm` or `-in_msa`, other than 0, 6 and 7).
+- `-outfmt` other than 0, 6, 7, 10 and 20 (with `-in_pssm` or `-in_msa`, other than 0, 6 and 7). `-outfmt` 17, 19 and 21, and 13 and 14 without `-out`, get NCBI's own errors.
 
 Also refused:
 

@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.61
+- Version: 1.62
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -251,7 +251,10 @@
   width; the explicit rejection, rule 2, of an index volume of more than 4 GiB of packed
   sequences, whose sizes NCBI writes wrapped at 32 bits; Owner-delegated, standing instruction
   2026-09-29, restated 2026-10-07);
-  1.61 2026-11-21 (alias files with `OIDLIST`, line RG item D1b-1: the explicit rejections of an empty
+  1.61 2026-11-21 (`losat makembindex`, line RG item D5a-t: the explicit rejection, rule 3, of a
+  database sequence without letters, whose null Bioseq NCBI dereferences; Owner-delegated,
+  standing instruction 2026-09-29, restated 2026-10-07);
+  1.62 2026-11-21 (alias files with `OIDLIST`, line RG item D1b-1: the explicit rejections of an empty
   OID list file, of bits past the memory page after it and of a file of its header alone, rule 3, and
   the two RPSBLAST and RPSTBLASTN rejections of D1a-4 extended to the profiles `OIDLIST` leaves out
   and to the totals of its scan; the explicit rejection of an alias file's `FIRST_OID`-`LAST_OID`
@@ -2072,6 +2075,14 @@ every query (NCBI's bytes for a query with a next query are deterministic, rule 
   same file on a rerun). Computed in a wider type, the offsets no longer fit the index's 32-bit
   words, so no valid index can be defined. LOSAT refuses (exit 1) at the first sequence of an
   index volume.
+- `losat makembindex` of a database with a sequence without letters (version 1.61, 2026-11-21, line
+  RG item D5a-t, Owner-delegated): `CSeqDB::GetBioseq` gives a null Bioseq for it
+  (`seqdbvol.cpp:1380-1386`) and `CSequenceIStreamBlastDB::next` dereferences it
+  (`sequence_istream_bdb.cpp:105-107`): `CCoreException::eNullPtr`, exit status 3, with a stack
+  trace of the run's memory addresses (probe `remaining-gaps-20261112/D/d5/probe/zero`, a database
+  whose first sequence's offsets were patched to 0 letters; `-idmap` true or false). LOSAT refuses
+  (exit 1) at that sequence. windowmasker skips such a sequence, as NCBI's, and makes no title or
+  taxonomy lookup for it.
 
 - An alias file's `OIDLIST` file (line RG D1b-1, 2026-11-21, Owner-delegated; DECISIONS D1b1-1 of line RG) that
   is empty: NCBI maps nothing and reads the 4-byte header through a null pointer (SIGSEGV, probe G5 of

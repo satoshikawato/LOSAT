@@ -164,12 +164,7 @@ pub(crate) fn write_tabular<W: Write>(
             }
         }
     }
-    // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:2233-2238
-    // ```c++
-    //     if (m_FormatType == CFormattingArgs::eTabularWithComments) {
-    //         CBlastTabularInfo tabinfo(m_Outfile, m_CustomOutputFormatSpec);
-    //         tabinfo.PrintNumProcessed(m_QueriesFormatted);
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2233-2238
     // The same last line as `report::write_tabular`.
     if let (true, Some(queries_before)) = (comments, epilog) {
         writeln!(

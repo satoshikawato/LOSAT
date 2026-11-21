@@ -1,16 +1,6 @@
 //! The filter string of `Parameters_filter` (`BlastFilteringOptionsToString`).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:320-432
-//! ```c
-//!     if (filtering_options->dustOptions) {
-//!         if (filtering_options->dustOptions->level == kDustLevel &&
-//!             filtering_options->dustOptions->window == kDustWindow &&
-//!             filtering_options->dustOptions->linker == kDustLinker) {
-//!             if (!s_SafeStrCat(&retval, &retval_size, "L;")) {
-//!         } else {
-//!             char buffer[24] = { '\0' };
-//!             snprintf(buffer, sizeof(buffer), "D %d %d %d;",
-//! ```
 //! (and likewise `L;` / `S %d %1.1f %1.1f;` for SEG, `R;` / `R -d db;`, `W -t %d;` /
 //! `W -d db;`, `m;` for mask at hash, `F` for an empty string.)
 

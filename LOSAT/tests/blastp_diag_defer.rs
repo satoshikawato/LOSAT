@@ -27,16 +27,6 @@
 //! `the_128_bit_batches_give_the_reports_of_the_reference` compares it with `=2`.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:513-552
-//! ```c
-//!             diag_coord = (query_offset - subject_offset) & diag_mask;
-//!             /* If the reset bit is set, an extension just happened. */
-//!             if (diag_array[diag_coord].flag) {
-//!                 /* If we've already extended past this hit, skip it. */
-//!                 if ((Int4) (subject_offset + diag_offset) <
-//!                     diag_array[diag_coord].last_hit) {
-//!                     continue;
-//!                 }
-//! ```
 
 use std::path::{Path, PathBuf};
 use std::process::Command;

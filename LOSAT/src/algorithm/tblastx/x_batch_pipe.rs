@@ -6,13 +6,6 @@
 //! `x_subject_next.rs` is).
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:176-195
-//! ```c
-//!         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
-//!
-//!             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
-//!     ...
-//!                 results = lcl_blast.Run();
-//! ```
 //! NCBI searches its query batches one after the other, and so does `run_in_pool`. With TBXNEXT
 //! every subject of a batch starts at once, one pool thread each, and its units run on the whole
 //! pool, so the pool is full while units run. After a batch's last unit only its subjects' chains
@@ -485,9 +478,6 @@ impl<'s, R: Send> XPipe<'s, R> {
     }
 
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:193-195
-    // ```c
-    //                 results = lcl_blast.Run();
-    // ```
     /// The result of the loop's next batch, `range`: from its slot if the batch before started
     /// it, else searched here. Call it from the loop, inside `scope`, once per batch in order.
     pub(super) fn take(

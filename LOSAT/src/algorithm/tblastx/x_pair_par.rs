@@ -8,29 +8,7 @@
 //! (`SubjectSplitState`, `merge_tblastx_subject_chunk_hits`, ...) without changing them.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:500-516,614
-//! ```c
-//! while (scan_range[1] <= scan_range[2]) {
-//!     /* scan the subject sequence for hits */
-//!     hits = scansub(lookup_wrap, subject,
-//!                               offset_pairs, array_size, scan_range);
-//! ...
-//!     for (i = 0; i < hits; ++i) {
-//!         Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
-//!         Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
-//! ...
-//!         diag_coord = (query_offset - subject_offset) & diag_mask;
-//! ...
-//! /* increment the offset in the diagonal array */
-//! Blast_ExtendWordExit(ewp, subject->length);
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:805,835-844
-//! ```c
-//! for (context=first_context; context<=last_context; context++) {
-//! ...
-//!     status = s_BlastSearchEngineOneContext(program_number, query, query_info,
-//! ...
-//!     if (Blast_HSPListAppend(&hsp_list_for_chunks, &hsp_list_out, kHspNumMax)) {
-//! ```
 //! NCBI runs the two-hit word finder once per subject frame (and per chunk of a frame longer than
 //! MAX_DBSEQ_LEN), with one scan stream that emits the hits of every query context, on one diagonal
 //! table shared by the frames. This path runs the same two-hit logic (`x_hit`, the unit path's own
@@ -322,22 +300,11 @@ static UM_UNITS: AtomicU64 = AtomicU64::new(0);
 const X_MAX_GROUPS: usize = 6;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:264-266
-// ```c
-// case eAaLookupTable:
-//    offset_array_size = OFFSET_ARRAY_SIZE +
-//       ((BlastAaLookupTable*)lookup->lut)->longest_chain;
-// ```
 // The offset-pair array of a unit is sized from its own lookup table, as NCBI sizes it from the
 // table it scans with (lookup_wrap.c:255-266).
 const OFFSET_ARRAY_SIZE: i32 = 4096;
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:500-504
-// ```c
-// while (scan_range[1] <= scan_range[2]) {
-//     /* scan the subject sequence for hits */
-//     hits = scansub(lookup_wrap, subject,
-//                               offset_pairs, array_size, scan_range);
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:500-505
 // No NCBI counterpart: how many units a batch takes (`group_starts`, scheduling only).
 /// LOSAT_X_TBXFEWGROUPS: a strict-set switch (on unless it is `0`; `utils/xswitch.rs`).
 fn few_groups() -> bool {
@@ -461,9 +428,6 @@ fn x_mask_max_cells(kib: usize, threads: usize) -> usize {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:510
-// ```c
-//         diag_coord = (query_offset - subject_offset) & diag_mask;
-// ```
 // The cell of a hit in a unit's table: the raw diagonal minus the unit's lowest one, without a
 // mask (`XUnmasked`, module doc item 3), or, with LOSAT_X_TBXUNITMASK, that value masked to the
 // unit's table of `x_masked_cells` cells (`XMasked`, module doc). One type per form, so that the
@@ -522,14 +486,6 @@ impl XCells for XMasked {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:52-56
-// ```c
-// diag_array_length = 1;
-// /* What power of 2 is just longer than the query? */
-// while (diag_array_length < (qlen+window_size))
-// {
-//         diag_array_length = diag_array_length << 1;
-// }
-// ```
 /// LOSAT_X_TBXUNITMASK: the cells of the masked table of a unit whose query group extends over
 /// `extent` letters (`x_group_extents`): the smallest power of two of at least extent + window, as
 /// NCBI sizes its table from the whole query.
@@ -783,16 +739,6 @@ pub fn print_summary() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:52-63
-// ```c
-// diag_array_length = 1;
-// /* What power of 2 is just longer than the query? */
-// while (diag_array_length < (qlen+window_size))
-// {
-//         diag_array_length = diag_array_length << 1;
-// }
-// ...
-// diag_table->diag_mask = diag_array_length-1;
-// ```
 // The reference table has diag_array_length cells and masks the diagonal with diag_mask. The units
 // use unmasked tables; the masking cannot change a decision (module doc, item 3). This test is the
 // condition of the earlier, weaker argument of item 3: every context is at most `slack` long, or no
@@ -811,21 +757,7 @@ pub(super) fn guard(
 }
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_extend.h:57-60
-// ```c
-// typedef struct DiagStruct {
-//    signed int last_hit   : 31; /**< Offset of the last hit */
-//    unsigned int flag      : 1 ; /**< Reset the next extension? */
-// } DiagStruct;
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:168-173
-// ```c
-//         if (ewp->diag_table->offset >= INT4_MAX / 4) {
-//             ewp->diag_table->offset = ewp->diag_table->window;
-//             s_BlastDiagClear(ewp->diag_table);
-//         } else {
-//             ewp->diag_table->offset += subject_length + ewp->diag_table->window;
-//         }
-// ```
 // The reference keeps `s + offset` in the 31-bit `last_hit`. Its offset is below INT4_MAX/4 before
 // this step and so at most INT4_MAX/4 - 1 + subject_length + window after it; with an `s` of up to
 // subject_length the stored value stays below 2^30, the first value the signed field cannot hold,
@@ -939,16 +871,6 @@ pub(super) struct XGates<'a> {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:52-63
-// ```c
-// diag_array_length = 1;
-// /* What power of 2 is just longer than the query? */
-// while (diag_array_length < (qlen+window_size))
-// {
-//         diag_array_length = diag_array_length << 1;
-// }
-// ...
-// diag_table->diag_mask = diag_array_length-1;
-// ```
 // The decision of `prepare` (the gates, then the guard against the reference table size above,
 // which LOSAT_X_TBXBAND drops, and the second guard, `last_hit_fits`) as one function, so that the
 // lookup build site (`lut_build`, before the table exists) and `prepare` (after it) decide with the
@@ -1150,11 +1072,6 @@ pub(super) struct XLutBatch {
 
 impl XLutBatch {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:264-266
-    // ```c
-    //    case eAaLookupTable:
-    //       offset_array_size = OFFSET_ARRAY_SIZE +
-    //          ((BlastAaLookupTable*)lookup->lut)->longest_chain;
-    // ```
     // The reference code reads `longest_chain` and the header of the batch table; the stub carries
     // the full table's values (`XPairLutQuery::x_into_stub`).
     /// The table and contexts that take the place of `build_ncbi_lookup`'s for this batch: the
@@ -1165,13 +1082,6 @@ impl XLutBatch {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:246-250
-// ```c
-//     if (backup->offset + MAX_DBSEQ_LEN <
-//         backup->hard_ranges[backup->hm_index].right) {
-//
-//         subject->length = MAX_DBSEQ_LEN;
-//         backup->next = backup->offset + MAX_DBSEQ_LEN - dbseq_chunk_overlap;
-// ```
 // `chunk_switches` of the batch before the lookup build: the expression in `search_query_batch`
 // (`use_parallel_chunks`, which reads the thread request, two switches and the subject lengths
 // only) or'ed with `use_serial_scan_chunks`, as `seed_tables::scan_tables` passes it to `prepare`.
@@ -1194,13 +1104,6 @@ fn early_chunk_switches(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:93-97
-// ```c
-// BlastAaLookupTableNew(lookup_options, (BlastAaLookupTable* *)
-//                       &lookup_wrap->lut);
-// ((BlastAaLookupTable*)lookup_wrap->lut)->use_pssm = has_pssm;
-// BlastAaLookupIndexQuery( (BlastAaLookupTable*) lookup_wrap->lut, matrix,
-//                           query, lookup_segments, 0);
-// ```
 // Dispatch point 0 (per batch, at the lookup build): when the unit path will run for the batch,
 // the tables its units scan with are built here, one per context group, from the reference query
 // preparation; the full table NCBI builds above is then not built. None leaves the batch to the
@@ -1226,14 +1129,6 @@ pub(super) fn lut_build<M: TbxScore>(e: XLutEarly<'_, M>) -> Option<XLutBatch> {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:52-57
-// ```c
-// diag_array_length = 1;
-// /* What power of 2 is just longer than the query? */
-// while (diag_array_length < (qlen+window_size))
-// {
-//         diag_array_length = diag_array_length << 1;
-// }
-// ```
 // The early decision: the inputs of `decide` from the prepared query, by the expressions
 // `seed_tables::scan_tables` uses after the lookup build (`query_length`,
 // `check_diag_table_window`, `diag_array_size`), then the groups and the stub.
@@ -1320,17 +1215,6 @@ fn lut_direct<M: TbxScore>(e: &XLutEarly<'_, M>) -> Option<XLutBatch> {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:454-456,461-465
-// ```c
-//     BlastLookupIndexQueryExactMatches(exact_backbone, lookup->word_length,
-//                                       lookup->charsize, lookup->word_length,
-//                                       query, location);
-// ...
-//     for (i = 0; i < lookup->backbone_size; i++) {
-//         if (exact_backbone[i] != NULL) {
-//             s_AddWordHits(lookup, matrix, query->sequence,
-//                           exact_backbone[i], query_bias, row_max);
-//             sfree(exact_backbone[i]);
-// ```
 // One table per context group (`group_starts`, the groups of `build_groups`), each from the
 // lookup locations of its contexts (`XPairLutQuery::x_build_group`). Scheduling only: the groups
 // are independent. They are built in order on the calling thread; with `on_pool` (the tuning knob
@@ -1590,10 +1474,7 @@ impl XGroup {
         }
     }
 
-    // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:509-511
-    // ```c
-    // hits = scansub(lookup_wrap, subject, offset_pairs, array_size, scan_range);
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-511
     /// One scan call of this group's table: `x_scan_subject_byte` on a table with presence bytes
     /// (LOSAT_X_TBXSCANBYTE), `x_scan_subject` (LOSAT_X_TBXSCANBF's choice), or
     /// `x_scan_subject_compact` on a compacted table. The offset array holds
@@ -1705,19 +1586,7 @@ impl XScratch {
 // EXPERIMENT (LOSAT_X_SEEDUNMAP): the unit path's large per-split blocks mapped by glibc.
 //
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:145-146
-// ```c
-//         diag_table->hit_level_array = (DiagStruct *)
-//             calloc(diag_table->diag_array_length, sizeof(DiagStruct));
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:336-341
-// ```c
-//     if (num >= num_avail) {
-//         if (init_hitlist->do_not_reallocate)
-//             return FALSE;
-//         num_avail *= 2;
-//         match_array = (BlastInitHSP *)
-//             realloc(match_array, num_avail * sizeof(BlastInitHSP));
-// ```
 // No NCBI counterpart for the capacities: NCBI allocates one diagonal table and one init hit list
 // per search thread (`BlastExtendWordNew`, `BLAST_InitHitListNew`, blast_engine.c:1043) and keeps
 // them for the thread's subjects. The unit path holds, per rayon split of a subject's units
@@ -1903,18 +1772,6 @@ struct XHitCtx<'a, M: TbxScore = Blosum62Score> {
 
 impl<M: TbxScore> XHitCtx<'_, M> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:219-243
-    // ```c
-    // Int4 BSearchContextInfo(Int4 n, const BlastQueryInfo * A)
-    // ...
-    //     while (b < e - 1) {
-    // 	m = (b + e) / 2;
-    // 	if (A->contexts[m].query_offset > n)
-    // 	    e = m;
-    // 	else
-    // 	    b = m;
-    //     }
-    //     return b;
-    // ```
     /// `BSearchContextInfo` of a query offset (`x_context_of`).
     #[inline(always)]
     fn context_of(&self, query_offset: u32) -> usize {
@@ -1965,46 +1822,8 @@ enum XHit {
 // EXPERIMENT (LOSAT_X_SEEDCOMPACT): compact, exactly sized seed-stage lists of the unit path.
 //
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_extend.h:142-155
-// ```c
-// typedef struct BlastUngappedData {
-//    Int4 q_start; /**< Start of the ungapped alignment in query */
-//    Int4 s_start; /**< Start of the ungapped alignment in subject */
-//    Int4 length;  /**< Length of the ungapped alignment */
-//    Int4 score;   /**< Score of the ungapped alignment */
-// } BlastUngappedData;
-//
-// /** Structure to hold the initial HSP information */
-// typedef struct BlastInitHSP {
-//     BlastOffsetPair offsets; /**< Offsets in query and subject, or, in PHI
-//                                 BLAST, start and end of pattern in subject. */
-//     BlastUngappedData* ungapped_data; /**< Pointer to a structure holding
-//                                          ungapped alignment information */
-// } BlastInitHSP;
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:360-372
-// ```c
-// BlastSaveInitHsp(BlastInitHitList * ungapped_hsps, Int4 q_start, Int4 s_start,
-//                  Int4 q_off, Int4 s_off, Int4 len, Int4 score)
-// {
-//     BlastUngappedData *ungapped_data = NULL;
-//
-//     ungapped_data = (BlastUngappedData *) malloc(sizeof(BlastUngappedData));
-//
-//     ungapped_data->q_start = q_start;
-//     ungapped_data->s_start = s_start;
-//     ungapped_data->length = len;
-//     ungapped_data->score = score;
-//
-//     BLAST_SaveInitialHit(ungapped_hsps, q_off, s_off, ungapped_data);
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2371-2375
-// ```c
-// s_GetUngappedHSPContext(const BlastQueryInfo* query_info,
-//                         const BlastInitHSP* init_hsp)
-// {
-//     return BSearchContextInfo(init_hsp->offsets.qs_offsets.q_off, query_info);
-// }
-// ```
 // NCBI saves an initial HSP as six values: the query start in the concatenated query, the subject
 // start, the length, the score and the two seed offsets. Its context is searched again from the
 // query offset when the list is converted, and the frames are those of the call. `XUnitHsp` is that
@@ -2054,14 +1873,6 @@ enum XHit {
 // ---------------------------------------------------------------------------------------------
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_extend.h:142-147
-// ```c
-// typedef struct BlastUngappedData {
-//    Int4 q_start; /**< Start of the ungapped alignment in query */
-//    Int4 s_start; /**< Start of the ungapped alignment in subject */
-//    Int4 length;  /**< Length of the ungapped alignment */
-//    Int4 score;   /**< Score of the ungapped alignment */
-// } BlastUngappedData;
-// ```
 // The values of a saved init HSP that vary inside a unit: NCBI's `BlastUngappedData` and
 // `BlastInitHSP.offsets`, and the context `BSearchContextInfo` gives for the query offset.
 /// One saved init HSP of a unit (LOSAT_X_SEEDCOMPACT): 28 bytes.
@@ -2084,12 +1895,6 @@ struct XUnitHsp {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:360-372
-// ```c
-// BlastSaveInitHsp(BlastInitHitList * ungapped_hsps, Int4 q_start, Int4 s_start,
-//                  Int4 q_off, Int4 s_off, Int4 len, Int4 score)
-// ...
-//     BLAST_SaveInitialHit(ungapped_hsps, q_off, s_off, ungapped_data);
-// ```
 // Where `x_hit` saves an init HSP (`BlastSaveInitHsp`). `x_hit` and the scan of a unit
 // (`scan_unit`) are generic over the sink, so each is compiled once per sink and no test of the
 // switch runs per hit; the push statement of `x_hit` is today's.
@@ -2100,13 +1905,6 @@ trait XInitSink {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:351-355
-// ```c
-//     match_array[num].offsets.qs_offsets.q_off = q_off;
-//     match_array[num].offsets.qs_offsets.s_off = s_off;
-//     match_array[num].ungapped_data = ungapped_data;
-//
-//     init_hitlist->total++;
-// ```
 // Switch off: today's list, today's push.
 impl XInitSink for Vec<InitHSP> {
     #[inline(always)]
@@ -2116,14 +1914,6 @@ impl XInitSink for Vec<InitHSP> {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:367-372
-// ```c
-//     ungapped_data->q_start = q_start;
-//     ungapped_data->s_start = s_start;
-//     ungapped_data->length = len;
-//     ungapped_data->score = score;
-//
-//     BLAST_SaveInitialHit(ungapped_hsps, q_off, s_off, ungapped_data);
-// ```
 // LOSAT_X_SEEDCOMPACT: the record of the section above (item 1). `len` is `hsp_len` of `x_hit`
 // (`s_end: hsp_s + hsp_len`). After inlining, the fields of `hsp` that the record drops are not
 // computed.
@@ -2147,20 +1937,6 @@ impl XInitSink for Vec<XUnitHsp> {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4756-4767
-// ```c
-//       context = s_GetUngappedHSPContext(query_info, init_hsp);
-//       s_AdjustInitialHSPOffsets(init_hsp,
-//                                 query_info->contexts[context].query_offset);
-//       ungapped_data = init_hsp->ungapped_data;
-//       Blast_HSPInit(ungapped_data->q_start,
-//                     ungapped_data->length+ungapped_data->q_start,
-//                     ungapped_data->s_start,
-//                     ungapped_data->length+ungapped_data->s_start,
-//                     init_hsp->offsets.qs_offsets.q_off,
-//                     init_hsp->offsets.qs_offsets.s_off,
-//                     context, query_info->contexts[context].frame,
-//                     subject->frame, ungapped_data->score, NULL, &new_hsp);
-// ```
 // LOSAT_X_SEEDCOMPACT: the `InitHSP`s of one unit's records, appended to a chunk's init list in
 // the records' order, with the values `x_hit` takes them from (section above, item a): the ends
 // as NCBI's conversion computes them (`length + start`), the subject frame of the unit's frame `f`
@@ -2249,15 +2025,6 @@ pub(super) struct XPairPar<M: TbxScore = Blosum62Score> {
 
 impl<M: TbxScore> XPairPar<M> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:337-360
-    // ```c
-    // for (i = 0; i < lookup->backbone_size; i++) {
-    //   /* if there are hits there, */
-    //   if (lookup->thin_backbone[i] ) {
-    //       Int4 * dest = NULL;
-    //       /* set the corresponding bit in the pv_array */
-    //       PV_SET(pv, i, PV_ARRAY_BTS);
-    //       bbc[i].num_used = lookup->thin_backbone[i][1];
-    // ```
     // Dispatch point (per batch, after the lookup build): checks the gates and the guard (`decide`)
     // and builds the sub-lookups, or takes the ones PAIRLUT built at the lookup build site
     // (`lut_build`). None means the reference loop runs for every subject of the batch.
@@ -2467,12 +2234,6 @@ impl<M: TbxScore> XPairPar<M> {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:479-491
-    // ```c
-    // status = s_GetNextSubjectChunk(subject, &backup, kNucleotide,
-    //                                dbseq_chunk_overlap);
-    // ...
-    // BlastInitHitListReset(init_hitlist);
-    // ```
     // The seed stage of one subject, first half: the chunks of every frame and the units of every
     // (frame, chunk), run. This is the only part of the seed stage that reads the group tables
     // (`self.groups`: `longest_chain` while the units are listed, the tables in `scan_unit`).
@@ -2583,13 +2344,6 @@ impl<M: TbxScore> XPairPar<M> {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:595-599
-    // ```c
-    //                 if (right_extend) {
-    //                     diag_array[diag_coord].flag = 1;
-    //                     diag_array[diag_coord].last_hit =
-    //                         s_last_off - (wordsize - 1) + diag_offset;
-    //                 }
-    // ```
     // NCBI's one table holds the cell of a diagonal for every context of the batch, so a right
     // walk that went on past a NULLB (extension/query_batch.rs) masks the hits of the next
     // contexts under its stop. A unit's table holds only its group's contexts; where the stop lies
@@ -2642,16 +2396,6 @@ impl<M: TbxScore> XPairPar<M> {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:500-516
-    // ```c
-    // while (scan_range[1] <= scan_range[2]) {
-    //     /* scan the subject sequence for hits */
-    //     hits = scansub(lookup_wrap, subject,
-    //                               offset_pairs, array_size, scan_range);
-    // ...
-    //     for (i = 0; i < hits; ++i) {
-    // ...
-    //         diag_coord = (query_offset - subject_offset) & diag_mask;
-    // ```
     // The scan loop of `scan_unit` (no prefetch, no branch-free loop, no sentinel walks, no probe)
     // for the units of one chunk (`chunk_units`, in group order), each group's tables (its whole
     // table, or LOSAT_X_TBXQSLICE's slices in slice order) one after the other, on one fresh table
@@ -2727,7 +2471,7 @@ impl<M: TbxScore> XPairPar<M> {
         let scan_interiors = tblastx_scan_interiors(chunk.length, None);
         for (unit, sink) in chunk_units.iter().zip(sinks.iter_mut()) {
             for table in with_entries(unit.g) {
-                // NCBI sizes the offset array from the table it scans (lookup_wrap.c:264-266).
+                // NCBI sizes the offset array from the table it scans (c++/src/algo/blast/core/lookup_wrap.c:264-266).
                 let offset_array_size: i32 = OFFSET_ARRAY_SIZE + table.lookup.longest_chain;
                 let offset_pairs_len =
                     crate::algorithm::tblastx::x_scan_bf::x_offset_pairs_len(offset_array_size);
@@ -2776,19 +2520,7 @@ impl<M: TbxScore> XPairPar<M> {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:561-562,578-581
-    // ```c
-    // BLAST_GetUngappedHSPList(init_hitlist, query_info, subject,
-    //         hit_params->options, &hsp_list);
-    // ...
-    // Blast_HSPListAdjustOffsets(hsp_list, backup.offset);
-    // overlap = (backup.offset == backup.hard_ranges[backup.hm_index].left) ?
-    //           0 : dbseq_chunk_overlap;
-    // status = Blast_HSPListsMerge(&hsp_list, &combined_hsp_list,
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:234
-    // ```c
-    // Blast_InitHitListSortByScore(init_hitlist);
-    // ```
     // The seed stage of one subject, second half: the list the reference builds per chunk in order
     // (sort, conversion and offset adjustment, `word_finder::finish_chunk_scan`; chunk merge,
     // `frame_chunks::add_chunk_result`) and per frame in s_f_idx order (append and sort,
@@ -2872,24 +2604,7 @@ impl<M: TbxScore> XPairPar<M> {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:561-562,578-581
-    // ```c
-    // BLAST_GetUngappedHSPList(init_hitlist, query_info, subject,
-    //         hit_params->options, &hsp_list);
-    // ...
-    // Blast_HSPListAdjustOffsets(hsp_list, backup.offset);
-    // overlap = (backup.offset == backup.hard_ranges[backup.hm_index].left) ?
-    //           0 : dbseq_chunk_overlap;
-    // status = Blast_HSPListsMerge(&hsp_list, &combined_hsp_list,
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2876-2881
-    // ```c
-    //    /* If no previous HSP list, just return a copy of the new one. */
-    //    if (!combined_hsp_list) {
-    //       *combined_hsp_list_ptr = hsp_list;
-    //       *hsp_list_ptr = NULL;
-    //       return 0;
-    //    }
-    // ```
     // EXPERIMENT (LOSAT_X_SEEDCOMPACT): `merge_subject` on the compact records (section above
     // `XUnitHsp`, items 3 and a-d). The statements are those of `merge_subject_listed` except three: a
     // unit's list is appended to the chunk's init list by `x_expand_unit` instead of `extend`, the
@@ -3053,9 +2768,6 @@ impl<M: TbxScore> XPairPar<M> {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:145-149
-    // ```c
-    // TBlastThreads the_threads(GetNumberOfThreads());
-    // ```
     // Scheduling only: the units run on the search pool (an indexed map, results in unit order),
     // or in order on the calling thread when the search has one thread. `unit_fn` is
     // `Self::run_unit` (today's lists) or `Self::run_unit_compact` (LOSAT_X_SEEDCOMPACT), each
@@ -3122,26 +2834,7 @@ impl<M: TbxScore> XPairPar<M> {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:494-516
-    // ```c
-    // scan_range[0] = 0;
-    // scan_range[1] = subject->seq_ranges[0].left;
-    // scan_range[2] = subject->seq_ranges[0].right - wordsize;
-    // ...
-    // while (scan_range[1] <= scan_range[2]) {
-    //     /* scan the subject sequence for hits */
-    //     hits = scansub(lookup_wrap, subject,
-    //                               offset_pairs, array_size, scan_range);
-    // ...
-    //     for (i = 0; i < hits; ++i) {
-    //         Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
-    //         Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
-    // ...
-    //         diag_coord = (query_offset - subject_offset) & diag_mask;
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:491
-    // ```c
-    //         BlastInitHitListReset(init_hitlist);
-    // ```
     // The saved init HSPs of one unit as today's list, which starts empty as NCBI's list of a
     // chunk does (`scan_unit` fills it).
     /// The saved init HSPs of one unit, in its scan order.
@@ -3175,19 +2868,7 @@ impl<M: TbxScore> XPairPar<M> {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1043
-    // ```c
-    //     aux_struct->init_hitlist = BLAST_InitHitListNew();
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:229-235
-    // ```c
-    // void BlastInitHitListReset(BlastInitHitList * init_hitlist)
-    // {
-    //     Int4 index;
-    //
-    //     for (index = 0; index < init_hitlist->total; ++index)
-    //         sfree(init_hitlist->init_hsp_array[index].ungapped_data);
-    //     init_hitlist->total = 0;
-    // ```
     // EXPERIMENT (LOSAT_X_SEEDUNMAP, section above `X_MAPPED_BYTES`): whether the blocks of `unit`
     // are mapped (`x_unit_mapped` on its query-group span and chunk), and for such a unit the
     // cleared record vector replaced by an empty one of the mapped capacity unless it has that much
@@ -3508,15 +3189,7 @@ impl<M: TbxScore> XPairPar<M> {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:501-508
-// ```c
-// while (scan_range[1] <= scan_range[2]) {
-//     /* scan the subject sequence for hits */
-//     hits = scansub(lookup_wrap, subject,
-//                               offset_pairs, array_size, scan_range);
-// ...
-//     for (i = 0; i < hits; ++i) {
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:501-509
 // One pass of the scan loop of `scan_unit` (one `scansub` call and the two-hit test of its hits),
 // statement for statement the loop body it was. No NCBI counterpart for the function boundary: on
 // wasm32 (LOSAT Web) it is a function of its own, so that the later batches of a unit run the
@@ -3645,85 +3318,6 @@ fn x_unit_batch<
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:518-606
-// ```c
-// /* If the reset bit is set, an extension just happened. */
-// if (diag_array[diag_coord].flag) {
-//     /* If we've already extended past this hit, skip it. */
-//     if ((Int4) (subject_offset + diag_offset) <
-//         diag_array[diag_coord].last_hit) {
-//         continue;
-//     }
-//     /* Otherwise, start a new hit. */
-//     else {
-//         diag_array[diag_coord].last_hit =
-//             subject_offset + diag_offset;
-//         diag_array[diag_coord].flag = 0;
-//     }
-// }
-// /* If the reset bit is cleared, try to start an extension. */
-// else {
-//     /* find the distance to the last hit on this diagonal */
-//     last_hit = diag_array[diag_coord].last_hit - diag_offset;
-//     diff = subject_offset - last_hit;
-//
-//     if (diff >= window) {
-//         /* We are beyond the window for this diagonal; start a
-//            new hit */
-//         diag_array[diag_coord].last_hit =
-//             subject_offset + diag_offset;
-//         continue;
-//     }
-//
-//     /* If the difference is less than the wordsize (i.e. last
-//        hit and this hit overlap), give up */
-//
-//     if (diff < wordsize) {
-//         continue;
-//     }
-// ...
-//     curr_context = BSearchContextInfo(query_offset, query_info);
-// ...
-//     if (query_offset - diff <
-//         query_info->contexts[curr_context].query_offset) {
-//
-//         /* there was no last hit for this diagnol; start a new hit */
-//         diag_array[diag_coord].last_hit =
-//             subject_offset + diag_offset;
-//         continue;
-//     }
-//
-//     cutoffs = word_params->cutoffs + curr_context;
-//     score = s_BlastAaExtendTwoHit(matrix, subject, query,
-//                                   last_hit + wordsize,
-//                                   subject_offset, query_offset,
-//                                   cutoffs->x_dropoff,
-//                                   &hsp_q, &hsp_s,
-//                                   &hsp_len, use_pssm,
-//                                   wordsize, &right_extend,
-//                                   &s_last_off);
-// ...
-//     /* if the hsp meets the score threshold, report it */
-//     if (score >= cutoffs->cutoff_score)
-//         BlastSaveInitHsp(ungapped_hsps, hsp_q, hsp_s,
-//                          query_offset, subject_offset, hsp_len,
-//                          score);
-//
-//     /* If an extension to the right happened, reset the last hit
-//        so that future hits to this diagonal must start over. */
-//
-//     if (right_extend) {
-//         diag_array[diag_coord].flag = 1;
-//         diag_array[diag_coord].last_hit =
-//             s_last_off - (wordsize - 1) + diag_offset;
-//     }
-//     /* Otherwise, make the present hit into the previous hit for
-//        this diagonal */
-//     else {
-//         diag_array[diag_coord].last_hit =
-//             subject_offset + diag_offset;
-//     }
-// }
-// ```
 // The unit path's own form of the per-hit body of the reference loop
 // (`word_finder::two_hit_one_hit`): its two-hit statements on the unit's unmasked cell, without
 // its trace, debug, diagnostics and HSP-saving statistics (the gates send those runs to the
@@ -3947,34 +3541,6 @@ fn group_starts(contexts: &[QueryContext], wanted: usize) -> Vec<usize> {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:282-299,337-360
-// ```c
-// for (i = 0; i < lookup->backbone_size; i++) {
-//     if (lookup->thin_backbone[i]) {
-// ...
-//         if (lookup->thin_backbone[i][1] > AA_HITS_PER_CELL){
-// ...
-//             overflow_cells_needed += lookup->thin_backbone[i][1];
-//         }
-//         if (lookup->thin_backbone[i][1] > longest_chain)
-//             longest_chain = lookup->thin_backbone[i][1];
-// ...
-//   if (lookup->thin_backbone[i] ) {
-//       Int4 * dest = NULL;
-//       /* set the corresponding bit in the pv_array */
-//       PV_SET(pv, i, PV_ARRAY_BTS);
-//       bbc[i].num_used = lookup->thin_backbone[i][1];
-//       /* if there are three or fewer hits, */
-//       if (lookup->thin_backbone[i][1] <= AA_HITS_PER_CELL)
-//           /* copy them into the thick_backbone cell */
-//           dest = bbc[i].payload.entries;
-//       else /* more than three hits; copy to overflow array */
-//       {
-//           bbc[i].payload.overflow_cursor = overflow_cursor;
-//           dest = (Int4 *) lookup->overflow;
-//           dest += overflow_cursor;
-//           overflow_cursor += lookup->thin_backbone[i][1];
-//       }
-// ```
 // One table per context group in the layout above: each backbone chain of the batch table
 // filtered to the group's contexts (`BSearchContextInfo` ranges of `frame_bases`), order kept;
 // pv bit, inline entries or overflow cursor (cells in index order), and longest_chain rebuilt.
@@ -4145,12 +3711,6 @@ mod tests {
     };
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:343-346
-    // ```c
-    //             PV_SET(pv, i, PV_ARRAY_BTS);
-    //             bbc[i].num_used = lookup->thin_backbone[i][1];
-    //             /* if there are three or fewer hits, */
-    //             if (lookup->thin_backbone[i][1] <= AA_HITS_PER_CELL)
-    // ```
     // No computation: compares the direct groups with the groups `build_groups` filtered out of the
     // reference builder's table (every field of every table, `q_min`, `q_max`), the stub with that
     // table, and the contexts; the first difference stops the test.
@@ -4186,9 +3746,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:844
-    // ```c
-    // if (Blast_HSPListAppend(&hsp_list_for_chunks, &hsp_list_out, kHspNumMax)) {
-    // ```
     // No computation: compares the subject's combined list of the unit path with the reference
     // loop's, every field, and stops at the first difference.
     /// Check of one subject: the unit path's `combined_ungapped_hits` against the reference's.
@@ -4264,16 +3821,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:219-243
-    // ```c
-    //     while (b < e - 1) {
-    // 	m = (b + e) / 2;
-    // 	if (A->contexts[m].query_offset > n)
-    // 	    e = m;
-    // 	else
-    // 	    b = m;
-    //     }
-    //     return b;
-    // ```
     // LOSAT_X_TBXCTXTABLE: the context the units' two-hit test takes (`x_context_of` on the
     // batch's `x_ctx_table`) against the binary search `=0` runs (`get_context_idx`), for every
     // offset from below the first frame base to past the batch's end, on 240 random layouts:
@@ -4533,13 +4080,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:595-599
-    // ```c
-    //                 if (right_extend) {
-    //                     diag_array[diag_coord].flag = 1;
-    //                     diag_array[diag_coord].last_hit =
-    //                         s_last_off - (wordsize - 1) + diag_offset;
-    //                 }
-    // ```
     // Line RG item X2c: frame 1 is R (7,000 letters, about 40,600 against itself) and frame 2 is
     // P, the subject R, one letter, P, so R/R and P/P lie on one raw diagonal across the NULLB
     // between the frames. With a raw X-drop of 40,000 the R/R extension's right walk goes on past
@@ -4709,10 +4249,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:337-360
-    // ```c
-    // PV_SET(pv, i, PV_ARRAY_BTS);
-    // bbc[i].num_used = lookup->thin_backbone[i][1];
-    // ```
     #[test]
     fn sub_lookup_chains_remerge_to_the_full_chain() {
         let mut rng = Rng(0x9e37_79b9_7f4a_7c15);
@@ -4770,12 +4306,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:52-61
-    // ```c
-    // while (diag_array_length < (qlen+window_size))
-    // {
-    //         diag_array_length = diag_array_length << 1;
-    // }
-    // ```
     #[test]
     fn last_hit_fits_edges() {
         // Default window, a query of 20 M letters, the longest chunk NCBI makes: far inside.
@@ -4797,12 +4327,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:52-61
-    // ```c
-    // while (diag_array_length < (qlen+window_size))
-    // {
-    //         diag_array_length = diag_array_length << 1;
-    // }
-    // ```
     #[test]
     fn guard_edges() {
         let window = 40;
@@ -4829,12 +4353,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:560-573
-    // ```c
-    // curr_context = BSearchContextInfo(query_offset, query_info);
-    // ...
-    // if (query_offset - diff <
-    //     query_info->contexts[curr_context].query_offset) {
-    // ```
     #[test]
     fn context_boundary_diagonal() {
         // Context 0 ends with WWW, context 1 starts with CCC: on the raw diagonal of the subject
@@ -4856,12 +4374,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:87-104
-    // ```c
-    // diag->offset = diag->window;
-    // ...
-    //     diag_struct_array[i].flag = 0;
-    //     diag_struct_array[i].last_hit = -diag->window;
-    // ```
     #[test]
     fn cleared_cells_hold_minus_window() {
         let window = 40;
@@ -4883,14 +4395,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:162-173
-    // ```c
-    // if (ewp->diag_table->offset >= INT4_MAX / 4) {
-    //    ewp->diag_table->offset = ewp->diag_table->window;
-    //    s_BlastDiagClear(ewp->diag_table);
-    // } else {
-    //    ewp->diag_table->offset += subject_length + ewp->diag_table->window;
-    // }
-    // ```
     #[test]
     fn diag_offset_near_the_reset_limit() {
         let mut rng = Rng(11);
@@ -4912,11 +4416,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516-606
-    // ```c
-    // diag_coord = (query_offset - subject_offset) & diag_mask;
-    // ...
-    // if (diag_array[diag_coord].flag) {
-    // ```
     #[test]
     fn random_cases_with_and_without_aliasing() {
         let mut rng = Rng(0x1234_5678_9abc_def1);
@@ -4975,18 +4474,6 @@ mod tests {
     // case, also with the batched extensions of LOSAT_X_TBXEXTBATCH.
     //
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:518-528,598-604
-    // ```c
-    // if (diag_array[diag_coord].flag) {
-    //     if ((Int4) (subject_offset + diag_offset) <
-    //         diag_array[diag_coord].last_hit) {
-    //         continue;
-    //     }
-    // ...
-    // if (right_extend) {
-    //     diag_array[diag_coord].flag = 1;
-    //     diag_array[diag_coord].last_hit =
-    //         s_last_off - (wordsize - 1) + diag_offset;
-    // ```
     #[test]
     fn units_equal_the_masked_reference_where_the_first_guard_fails() {
         let mut rng = Rng(0x7e57_ab1e_5eed_0001);
@@ -5628,17 +5115,6 @@ mod tests {
     const FRAMES: [i8; 6] = [1, 2, 3, -1, -2, -3];
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:454-456,461-465
-    // ```c
-    //     BlastLookupIndexQueryExactMatches(exact_backbone, lookup->word_length,
-    //                                       lookup->charsize, lookup->word_length,
-    //                                       query, location);
-    // ...
-    //     for (i = 0; i < lookup->backbone_size; i++) {
-    //         if (exact_backbone[i] != NULL) {
-    //             s_AddWordHits(lookup, matrix, query->sequence,
-    //                           exact_backbone[i], query_bias, row_max);
-    //             sfree(exact_backbone[i]);
-    // ```
     #[test]
     fn direct_groups_equal_build_groups_for_one_query() {
         let mut rng = Rng(0x0dd5_eed5_1234_5678);
@@ -5665,16 +5141,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:580-590
-    // ```c
-    //         for (i = 0; i < alphabet_size; i++) {
-    //             if (score + row[i] >= threshold) {
-    //                 subject_word[current_pos] = i;
-    //                 for (j = 0; j < offset_list[1]; j++) {
-    //                     BlastLookupAddWordHit(lookup->thin_backbone, wordsize,
-    //                                           charsize, subject_word,
-    //                                           query_bias + offset_list[j + 2]);
-    //                 }
-    // ```
     // A threshold of INT_MIN (the conversion of a threshold beyond Int4): every word is a
     // neighbour of every query word, so every cell of a group holds every offset of the group.
     #[test]
@@ -5703,11 +5169,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1045-1047
-    // ```c
-    //       start_offset = query_info->contexts[context].query_offset;
-    //       end_offset = query_info->contexts[context].query_length
-    //           + start_offset - 1;
-    // ```
     // Several queries make more than X_MAX_GROUPS contexts: a group then holds several contexts,
     // and its direct table is built from the lookup locations of all of them.
     #[test]
@@ -5749,13 +5210,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:96-100
-    // ```c
-    //         /* if this location is too small to fit a complete word, skip the
-    //            location */
-    //
-    //         if (word_length > to - from + 1)
-    //             continue;
-    // ```
     // A context masked from end to end has no lookup location, an empty frame has no letter and a
     // two-letter frame no word: their groups have no entry, `q_min` = `q_max` = 0, and the units
     // skip them (`longest_chain` 0).
@@ -5802,9 +5256,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:145-149
-    // ```c
-    // TBlastThreads the_threads(GetNumberOfThreads());
-    // ```
     // The groups built on a search pool (each build on a memo of neighbour lists of
     // `X_TBX_MEMOS`) are the groups built in order on one thread.
     #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
@@ -5840,9 +5291,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:145-149
-    // ```c
-    // TBlastThreads the_threads(GetNumberOfThreads());
-    // ```
     // Builds of two keys side by side (two searches in one process) each take a memo of
     // `X_TBX_MEMOS` and give it back; a memo kept for the other key is replaced, never read.
     #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
@@ -5872,14 +5320,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:52-57
-    // ```c
-    // diag_array_length = 1;
-    // /* What power of 2 is just longer than the query? */
-    // while (diag_array_length < (qlen+window_size))
-    // {
-    //         diag_array_length = diag_array_length << 1;
-    // }
-    // ```
     // `decide` is the decision of `prepare`: the gates, then the guard.
     #[test]
     fn decide_checks_the_gates_and_the_guard() {
@@ -6213,11 +5653,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:264-266
-    // ```c
-    //    case eAaLookupTable:
-    //       offset_array_size = OFFSET_ARRAY_SIZE +
-    //          ((BlastAaLookupTable*)lookup->lut)->longest_chain;
-    // ```
     // The build site gets the stub once.
     #[test]
     fn the_stub_is_taken_once() {
@@ -6509,14 +5944,6 @@ mod tests {
     const COMPACT_ALPHABETS: [&str; 3] = ["ACDEKW", "AW", "ACDEFGHIKLMNPQRSTVWY"];
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:367-372
-    // ```c
-    //     ungapped_data->q_start = q_start;
-    //     ungapped_data->s_start = s_start;
-    //     ungapped_data->length = len;
-    //     ungapped_data->score = score;
-    //
-    //     BLAST_SaveInitialHit(ungapped_hsps, q_off, s_off, ungapped_data);
-    // ```
     // LOSAT_X_SEEDCOMPACT on random units, one chunk per frame, serially (one scratch for every
     // unit of a case): each unit's records are its init HSPs of today, and the merge is today's.
     #[test]
@@ -6536,14 +5963,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2876-2881
-    // ```c
-    //    /* If no previous HSP list, just return a copy of the new one. */
-    //    if (!combined_hsp_list) {
-    //       *combined_hsp_list_ptr = hsp_list;
-    //       *hsp_list_ptr = NULL;
-    //       return 0;
-    //    }
-    // ```
     // Subjects of several chunks per frame (chunks of 103, 160 and 300 letters with the overlap
     // of 100: the first chunk's list moves into the empty frame list, the later ones go through
     // `merge_tblastx_subject_chunk_hits`): the compact merge gives today's list, every field.
@@ -6567,9 +5986,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1043
-    // ```c
-    //     aux_struct->init_hitlist = BLAST_InitHitListNew();
-    // ```
     // On search pools of 1, 2 and 8 threads (one scratch vector per rayon job, kept across its
     // units): the same records, lists and merge as today, with one and with several chunks per
     // frame.
@@ -6610,13 +6026,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2371-2375
-    // ```c
-    // s_GetUngappedHSPContext(const BlastQueryInfo* query_info,
-    //                         const BlastInitHSP* init_hsp)
-    // {
-    //     return BSearchContextInfo(init_hsp->offsets.qs_offsets.q_off, query_info);
-    // }
-    // ```
     // One record, through the sink and back, for context indices below and above 16 bits (a
     // batch of 70,001 contexts with distinct query indices, frames, lengths and offsets); no
     // record expands to nothing. The record is 28 bytes.
@@ -6690,12 +6099,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:479-491
-    // ```c
-    // status = s_GetNextSubjectChunk(subject, &backup, kNucleotide,
-    //                                dbseq_chunk_overlap);
-    // ...
-    // BlastInitHitListReset(init_hitlist);
-    // ```
     // The listing of the tests (`list_units`) is the listing of `run_subject_units` at
     // MAX_DBSEQ_LEN, and `run_subject_units` gives the form the switch of this process selects
     // (today's lists without LOSAT_X_SEEDCOMPACT), with the lists of `run_units` (sorted by the
@@ -6949,10 +6352,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:145-146
-    // ```c
-    //         diag_table->hit_level_array = (DiagStruct *)
-    //             calloc(diag_table->diag_array_length, sizeof(DiagStruct));
-    // ```
     // LOSAT_X_SEEDUNMAP on units where the rule holds (a context of about 66,200 letters against
     // subject frames of 66,000: both sides long; every unit's copy passes 128 KiB), where the
     // query side is short (a context of about 1,200 letters; the copies pass 128 KiB too) and where
@@ -6975,9 +6374,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1043
-    // ```c
-    //     aux_struct->init_hitlist = BLAST_InitHitListNew();
-    // ```
     // On search pools of 1, 2 and 8 threads (at one thread the serial scratch, which never maps;
     // at 2 and 8 one scratch per rayon job, with the switch as it acts in this process): the
     // records of units where the rule holds are those of a scratch without it.
@@ -7033,11 +6429,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:513-516
-    // ```c
-    //     for (i = 0; i < hits; ++i) {
-    //         Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
-    //         Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
-    // ```
     // The unit functions with the prefetch of LOSAT_X_TBXPREFETCH (`PF`) on search pools of 1, 2
     // and 8 threads, in both list forms: the random cases of the compact tests (one and several
     // chunks per frame) and the large case of the unmap tests (batches far longer than
@@ -7126,9 +6517,6 @@ mod tests {
     // word); X-drops above 127 (the walks refuse them).
     //
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1104-1108
-    // ```c
-    //     for (i = 0; i < word_size; i++) {
-    // ```
     /// The comparison above for words of `word` letters: `cases` cases from the generators `seeds`
     /// (data, knobs) with the lookup `thresholds`; with `wide`, the units scan the tables of the
     /// joint builder (`XPairLutQuery::x_build_tables_wide`, on a pool of 1, 4 or 8 threads by case)
@@ -7502,9 +6890,6 @@ mod tests {
     // words against the reference statements on one masked table (`units_equal_the_masked_reference`).
     //
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1104-1108
-    // ```c
-    //     for (i = 0; i < word_size; i++) {
-    // ```
     #[test]
     #[cfg_attr(
         not(feature = "parallel"),
@@ -7529,9 +6914,6 @@ mod tests {
     // (no sentinel walks at 4 letters), then the merged list on 1, 4 and 8 threads.
     //
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1104-1108
-    // ```c
-    //     for (i = 0; i < word_size; i++) {
-    // ```
     #[test]
     #[cfg_attr(
         not(feature = "parallel"),
@@ -7570,16 +6952,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:454-456,461-465
-    // ```c
-    //     BlastLookupIndexQueryExactMatches(exact_backbone, lookup->word_length,
-    //                                       lookup->charsize, lookup->word_length,
-    //                                       query, location);
-    // ...
-    //     for (i = 0; i < lookup->backbone_size; i++) {
-    //         if (exact_backbone[i] != NULL) {
-    //             s_AddWordHits(lookup, matrix, query->sequence,
-    //                           exact_backbone[i], query_bias, row_max);
-    // ```
     // `-word_size 2` (SC10b PR-2): the direct groups of 2-letter words (10-bit backbone indices)
     // are `build_groups` of the reference builder's table of that word length, for one query and
     // several (groups of several contexts), SEG masks and contexts without words, thresholds 0
@@ -7660,16 +7032,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:454-456,461-465
-    // ```c
-    //     BlastLookupIndexQueryExactMatches(exact_backbone, lookup->word_length,
-    //                                       lookup->charsize, lookup->word_length,
-    //                                       query, location);
-    // ...
-    //     for (i = 0; i < lookup->backbone_size; i++) {
-    //         if (exact_backbone[i] != NULL) {
-    //             s_AddWordHits(lookup, matrix, query->sequence,
-    //                           exact_backbone[i], query_bias, row_max);
-    // ```
     // `-word_size 4` (SC10b PR-3): the groups of the joint builder (`lut_wide_groups`, 20-bit
     // backbone indices) are `build_groups` of the chain builder's table of that word length, with the
     // stub, for one query and several (groups of several contexts), SEG masks and contexts without

@@ -299,7 +299,7 @@ impl<'a, S: BxScoring> XSent<'a, S> {
     /// (2 to 4; the caller's instance for `options.word_size`, chosen once per subject): the
     /// sentinel walks for an X-drop in `1..=127`, the reference otherwise; with `SHADOW` both,
     /// compared (a difference stops the run).
-    // NCBI reference: aa_ungapped.c:1089-1155 `s_BlastAaExtendTwoHit` (module header).
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1089-1155 `s_BlastAaExtendTwoHit` (module header).
     #[inline(always)]
     pub(crate) fn two_hit<const SHADOW: bool, const W: usize>(
         &self,
@@ -339,7 +339,7 @@ impl<'a, S: BxScoring> XSent<'a, S> {
     /// `extend_two_hit_blosum62` (another matrix: `extend_two_hit` with it) on the reference's
     /// sequences and the word size `W`, out of line (a candidate whose X-drop is above 127, and the
     /// shadow's comparison).
-    // NCBI reference: aa_ungapped.c:1089-1155 `s_BlastAaExtendTwoHit`.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1089-1155 `s_BlastAaExtendTwoHit`.
     #[cold]
     #[inline(never)]
     fn reference<const W: usize>(

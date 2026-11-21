@@ -207,15 +207,17 @@ fn database_files_that_cannot_be_read_give_ncbis_bytes() {
         let place = |text: &str| text.replace("{W}", dir.to_str().unwrap());
         let (stdout, stderr, status) = run(&dir, set, &row);
         let ncbi_stderr = place(&row[11]);
-        // NCBI's report of a C++ exception (exit status 255) in LOSAT's words
-        // (`losat::wording`, PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 12).
-        let expected_stderr = if row[9] == "255" {
-            losat::wording::losat_text(&ncbi_stderr).into_owned()
-        } else {
-            ncbi_stderr
-        };
+        // NCBI's streams in LOSAT's words (`losat::wording`, AGENTS.md rule 8): the version
+        // line, the prefixes and the report of a C++ exception (exit status 255).
+        let expected_stderr = losat::wording::losat_text(&ncbi_stderr).into_owned();
         assert_eq!(stderr, expected_stderr, "{id}: stderr");
-        assert_eq!(stdout, place(&row[10]), "{id}: stdout");
+        assert_eq!(
+            stdout,
+            String::from_utf8_lossy(&losat::wording::losat_output_bytes(
+                place(&row[10]).as_bytes()
+            )),
+            "{id}: stdout"
+        );
         assert_eq!(status.to_string(), row[9], "{id}: exit status");
         if how == "000" {
             fs::set_permissions(dir.join(file), fs::Permissions::from_mode(0o644)).unwrap();

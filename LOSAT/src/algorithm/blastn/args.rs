@@ -1,5 +1,6 @@
 use super::disc_lookup::DiscWordType;
 use crate::blastinput::value_parsers::*;
+use crate::wording::QUERY_OPTIONS_ERROR;
 use clap::Args;
 use std::path::PathBuf;
 
@@ -595,7 +596,7 @@ impl BlastnArgs {
             self.dust =
                 parse_dust_filtering(&value).map_err(|message| crate::cli::NativeError {
                     exit: 1,
-                    message: format!("BLAST query/options error: {message}\n{footer}\n").into(),
+                    message: format!("{QUERY_OPTIONS_ERROR} {message}\n{footer}\n").into(),
                 })?;
         }
         Ok(())
@@ -630,7 +631,7 @@ impl BlastnArgs {
             return Err(crate::cli::NativeError {
                 exit: 1,
                 message: format!(
-                    "BLAST query/options error: Please specify at most one of filtering_db, window_masker_taxid, or window_masker_db.\n{}\n",
+                    "{QUERY_OPTIONS_ERROR} Please specify at most one of filtering_db, window_masker_taxid, or window_masker_db.\n{}\n",
                     crate::wording::USER_MANUAL_FOOTER
                 ).into(),
             }

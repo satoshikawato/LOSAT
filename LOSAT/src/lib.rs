@@ -14,14 +14,11 @@
 //! (`believed`, `shown_id`, `subject_tabular_id` and the others there); the tests use the module
 //! `wording`.
 
-// The NCBI BLAST+ release that LOSAT's output follows, and the spellings of it that the output
-// carries. This is the one place in the code that names the release; every report, archive and
-// `-version` text takes it from here. `blastdbcmd/help.txt` is NCBI's frozen `-help` text and
-// carries it too; the test `the_frozen_help_names_the_version_that_losat_writes` ties the two.
-//
-// The macros produce literals so that `concat!` can build `&'static str` constants such as
-// "BLASTX 2.17.0+" (`crate::ncbi_blast_version!()`). Other modules call them by path, through the
-// `pub(crate) use` lines below, which therefore have to follow the definitions.
+// The NCBI BLAST+ release that LOSAT's output follows. This is the one place in the code that
+// names the release: `-version` says "output compatible with blast 2.17.0", and `crate::wording`
+// maps NCBI's version statement (`BLASTN 2.17.0+` in the freezes) to LOSAT's (`BLASTN (LOSAT
+// 0.2.0)`, the Owner 2026-11-21 「Q1=B」). NCBI's frozen `-help` texts (`blastdbcmd/help.txt`,
+// `rpstblastn/help.txt`) and `-xmlhelp` files carry it too and are printed through that mapping.
 //
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:81-83
 // NCBI reference (598d8ae6): c++/include/algo/blast/api/version.hpp:53-62
@@ -30,30 +27,21 @@
 //
 // `ncbi_blast_release!()`: NCBI's package version (`GetPackageVersion().Print()`, "2.17.0"),
 // which LOSAT's `-version` names after `output compatible with blast` (LOSAT's own `Package:`
-// version is `CARGO_PKG_VERSION`).
+// version is `CARGO_PKG_VERSION`). A macro, so that `concat!` builds constants with it.
 macro_rules! ncbi_blast_release {
     () => {
         "2.17.0"
     };
 }
-// `ncbi_blast_version!()`: what `CBlastVersion::Print()` writes ("2.17.0+"), used in the report
-// headers ("# BLASTN 2.17.0+"), the XML and JSON version, the archive ident, SAM's `@PG VN` and
-// the first line of `-version`.
-macro_rules! ncbi_blast_version {
-    () => {
-        concat!($crate::ncbi_blast_release!(), "+")
-    };
-}
-pub(crate) use ncbi_blast_release;
-pub(crate) use ncbi_blast_version;
 
 /// NCBI's package version (`GetPackageVersion().Print()`, "2.17.0"), which LOSAT's `-version`
 /// names after `output compatible with blast` (LOSAT's own `Package:` version is
 /// `CARGO_PKG_VERSION`).
 pub(crate) const NCBI_BLAST_RELEASE: &str = ncbi_blast_release!();
-/// What NCBI's `CBlastVersion::Print()` writes: the version in report headers, the XML and JSON
-/// version, the archive ident, SAM's `@PG VN` and the first line of `-version`.
-pub(crate) const NCBI_BLAST_VERSION: &str = ncbi_blast_version!();
+/// What NCBI's `CBlastVersion::Print()` writes ("2.17.0+"): the version in NCBI's report headers,
+/// XML and JSON version, archive ident, SAM's `@PG VN` and `-version`, where LOSAT writes its own
+/// (`crate::wording::LOSAT_VERSION`, `REPORT_VERSION`); the mapping of NCBI's freezes reads it.
+pub(crate) const NCBI_BLAST_VERSION: &str = concat!(ncbi_blast_release!(), "+");
 
 pub(crate) mod algorithm;
 pub(crate) mod common;

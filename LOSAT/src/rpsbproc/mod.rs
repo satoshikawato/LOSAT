@@ -52,10 +52,6 @@ use query::{
 use segset::SegSet;
 use sites::{MotifError, MotifState};
 
-/// rpsbproc's version (`VERDEF`).
-// NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:74-87
-pub const VERSION: &str = "0.5.1";
-
 /// `EErrorSubCode`: the exit codes.
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:91-101
 const E_OK: i32 = 0;
@@ -496,12 +492,16 @@ fn find_data_path(diag: &mut Diagnostics, data_path: Option<&OsStr>) -> Option<O
     }
 }
 
-/// The 9 lines that rpsbproc writes to standard error first (also with `-q`).
+/// The 9 lines that rpsbproc writes to standard error first (also with `-q`); the first names
+/// LOSAT's version (`Post-RPSBLAST Processing Utility (LOSAT 0.2.0)`, `wording::RPSBPROC_TITLE`
+/// and `REPORT_VERSION`) where NCBI's names its own (`v0.5.1`, `VERDEF`; the Owner 2026-11-21
+/// 「Q1=B」).
+// NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:74-87 (`VERDEF`)
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:397-406
 // (`m_silent` is still false here: `-q` is read at main:677.)
 fn banner() {
     write_stderr(&format!(
-        "Post-RPSBLAST Processing Utility v{VERSION}\n\
+        "{} {}\n\
          -------------------------------------------------------\n\
          Download:\n\
          \tftp://ftp.ncbi.nlm.nih.gov/pub/mmdb/cdd/\n\
@@ -509,7 +509,9 @@ fn banner() {
          Blast applications download:\n\
          \tftp://ftp.ncbi.nlm.nih.gov/blast/executables/blast+/LATEST/\n\
          \n\
-         For more information please refer to the README file\n"
+         For more information please refer to the README file\n",
+        crate::wording::RPSBPROC_TITLE,
+        crate::wording::REPORT_VERSION
     ));
 }
 

@@ -97,5 +97,13 @@ g++-13 -O2 -std=c++17 -o observe_sort observe_sort.cpp
   ./observe_sort keys p 20261124 200 60 | awk '$3 >= 6' | head -8 ) > sort_calls.txt
 ```
 
-Larger record sets (not in the repository), replayed through the same Rust functions with no
-mismatch in calls, argument order, number of calls or final order: RECORD_COUNTS.
+Larger record sets (not in the repository) were replayed through the same Rust functions with no
+mismatch in calls, argument order, number of calls or final order:
+
+- every answer sequence of `sort` for 0 to 10 elements: 4,037,914 sorts, 124,682,208 calls;
+- every answer sequence of `partial_sort` for 0 to 9 elements: 606,357 sorts, 16,760,726 calls;
+- 15 random sets of keys, ranges and adversary answers of up to 20,000 elements, for `sort` and
+  `partial_sort`, two of them on the element type with a string and a shared pointer: 176,760
+  sorts, 310,231,613 calls; 17,434 of the `sort` runs reached the heap phase.
+
+That is 4,821,031 sorts and 451,674,547 calls in all. No call was handed a cell outside the range.

@@ -74,32 +74,37 @@ struct ObservedSort {
     ranges: Option<(bool, Vec<Range>)>,
 }
 
+/// The comma-separated items of a field, none for `-`.
+fn items(field: &str) -> Vec<&str> {
+    if field == "-" {
+        Vec::new()
+    } else {
+        field.split(',').collect()
+    }
+}
+
 fn observed_sort(line: &str) -> ObservedSort {
     let fields: Vec<&str> = line.split(' ').collect();
-    let list = |field: &str| -> Vec<&str> {
-        if field == "-" {
-            Vec::new()
-        } else {
-            field.split(',').collect()
-        }
-    };
     let answers = if fields[3] == "-" {
         Vec::new()
     } else {
         fields[3].bytes().map(|answer| answer == b'1').collect()
     };
-    let calls = list(fields[4])
+    let calls = items(fields[4])
         .iter()
         .map(|call| {
             let (first, second) = call.split_once(':').unwrap();
             (first.parse().unwrap(), second.parse().unwrap())
         })
         .collect();
-    let order = list(fields[5]).iter().map(|k| k.parse().unwrap()).collect();
+    let order = items(fields[5])
+        .iter()
+        .map(|k| k.parse().unwrap())
+        .collect();
     assert_eq!(fields[6], "0", "a read outside the range: {line}");
     let ranges = (fields[0] == "G").then(|| {
         let (reverse, ranges) = fields[7].split_once('/').unwrap();
-        let ranges = list(ranges).join(" ");
+        let ranges = items(ranges).join(" ");
         (reverse == "1", parse_ranges(&ranges))
     });
     ObservedSort {

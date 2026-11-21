@@ -596,17 +596,23 @@ where
             }
             _ => return Err(error),
         },
+        // NCBI's argument reader reports an exclusion between makeblastdb's arguments before a
+        // missing mandatory one (the first walk of `x_PostCheck`): the words are read again
+        // without the parser's checks to find it.
+        Err(error) if error.kind() == ErrorKind::MissingRequiredArgument => {
+            let unchecked = command
+                .clone()
+                .ignore_errors(true)
+                .try_get_matches_from(&translated);
+            return Err(unchecked
+                .ok()
+                .and_then(|matches| makeblastdb_dependency_error(&matches))
+                .unwrap_or(error));
+        }
         matches => matches?,
     };
-    // makeblastdb's dependencies are checked after the parse, as NCBI's argument reader checks
-    // them (`x_PostCheck`), in its order and words (`dependency_error`); the error is the
-    // parser's (exit status 2, PD-LOSAT-CLI-NONSEARCH-DIFFERENCES).
-    if let Some(("makeblastdb", words)) = matches.subcommand() {
-        let given =
-            |id: &str| words.value_source(id) == Some(clap::parser::ValueSource::CommandLine);
-        if let Some(message) = crate::writedb::makeblastdb::dependency_error(&given) {
-            return Err(clap::Error::raw(ErrorKind::ArgumentConflict, message));
-        }
+    if let Some(error) = makeblastdb_dependency_error(&matches) {
+        return Err(error);
     }
     let parsed = T::from_arg_matches_mut(&mut matches)
         .map_err(|error| error.format(&mut command.clone()))?;
@@ -614,6 +620,18 @@ where
         Some((scope, name)) => Err(non_utf8_value_error(scope, &name)),
         None => Ok(parsed),
     }
+}
+
+/// makeblastdb's dependencies, checked after the parse as NCBI's argument reader checks them
+/// (`x_PostCheck`), in its order and words (`dependency_error`); the error is the parser's (exit
+/// status 2, PD-LOSAT-CLI-NONSEARCH-DIFFERENCES). `None` for the other programs.
+fn makeblastdb_dependency_error(matches: &clap::ArgMatches) -> Option<clap::Error> {
+    let Some(("makeblastdb", words)) = matches.subcommand() else {
+        return None;
+    };
+    let given = |id: &str| words.value_source(id) == Some(clap::parser::ValueSource::CommandLine);
+    let message = crate::writedb::makeblastdb::dependency_error(&given)?;
+    Some(clap::Error::raw(ErrorKind::ArgumentConflict, message))
 }
 
 /// The value of a word `-name=value` that is not UTF-8: its bytes after the first `=`

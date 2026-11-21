@@ -18,15 +18,21 @@
 //! algorithm whose masks reached no sequence with a GI writes none, and its name becomes empty
 //! (the alias file's `MASKLIST` leaves it out, `super::writer::WriteDb::close`).
 //!
-//! Two algorithms whose names lead to the same files are refused when the second one is
-//! registered ([`GiMasks::add`]): NCBI writes both through two streams into the same paths, and
-//! what the files then hold depends on how its C++ runtime flushes the two streams (survey D6).
+//! Two algorithms whose names lead to the same files (one `-gi_mask_name` twice, or two names of
+//! one path) are written as NCBI writes them while their data files are written one after the
+//! other: an algorithm that reaches no sequence with a GI writes nothing, the offset and index
+//! files are each created, written and closed in turn at the close, and a data volume that one
+//! algorithm closed before the other created it is created anew. LOSAT refuses them when the
+//! data volume of one would be created while the other's of the same path is open
+//! ([`GiMasks::add_gi_mask`]): NCBI writes both through two streams into that file, and its bytes
+//! then depend on how the C++ runtime buffers two streams on one file, which LOSAT does not
+//! reproduce (survey D6).
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
+use super::column::{write_pad_bytes_string, write_string_var};
 use super::files::WriteDbFile;
-use super::mask_data::column::{write_pad_bytes_string, write_string_var};
 use super::WriteDbError;
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_gimask.hpp:145-152
@@ -74,15 +80,16 @@ impl GiMaskData {
         }
     }
 
-    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_gimask.hpp:88-99
-    // `m_MaxFileSize` is the file's (`-max_file_sz`, 999,999,999 for 0). `(num_masks *2+1)*4` is
-    // an `int` expression that overflows (undefined behaviour) past 268,435,455 ranges; LOSAT
-    // computes it without overflow.
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_gimask.hpp:96-99
+    // `m_MaxFileSize` is the file's (`-max_file_sz`, 999,999,999 for 0). NCBI computes the size of
+    // the record (twice the number of ranges plus one, times four) in `int`, which overflows
+    // (undefined behaviour) past 268,435,455 ranges; LOSAT computes it without overflow.
     /// `CanFit`: whether a record of `num_masks` ranges keeps the volume below its size limit.
     fn can_fit(&self, num_masks: usize) -> bool {
         self.data_length + (num_masks as u64 * 2 + 1) * 4 < self.file.max_file_size()
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_gimask.hpp:88-91
     /// `GetOffset`: the volume and the offset of the next record, as `int`s.
     fn offset(&self) -> (i32, i32) {
         (self.index as i32, self.data_length as i32)
@@ -244,6 +251,7 @@ impl GiMask {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_gimask.hpp:251-253
     /// `GetName`: the name, or `""` after a close without GIs.
     pub(crate) fn name(&self) -> &str {
         &self.name
@@ -253,6 +261,20 @@ impl GiMask {
     // A record that does not fit an empty volume opens the next one all the same: the volume
     // `.00` of a first record larger than `-max_file_sz` is never created (survey D8), and a
     // record larger than the limit is written whole into a volume of its own.
+    /// The data volume that a record of `num_masks` ranges goes to (`AddGiMask` below), and
+    /// whether the record creates its files.
+    fn next_volume(&self, num_masks: usize) -> (u32, bool) {
+        match self.data[0].can_fit(num_masks) {
+            true => (self.data[0].index, !self.data[0].file.created()),
+            false => (self.data[0].index + 1, true),
+        }
+    }
+
+    /// The data volume whose files are open: created by a record and not yet closed.
+    fn open_volume(&self) -> Option<u32> {
+        self.data[0].file.created().then_some(self.data[0].index)
+    }
+
     /// `AddGiMask`: the ranges of one sequence, under each of its GIs.
     pub(crate) fn add_gi_mask(&mut self, gis: &[i64], mask: &[(u32, u32)]) {
         if !self.data[0].can_fit(mask.len()) {
@@ -312,14 +334,16 @@ impl GiMask {
 #[derive(Debug, Default)]
 pub(crate) struct GiMasks {
     masks: Vec<GiMask>,
+    /// The place of each mask's files (`files_place`), in the order of `masks`.
+    places: Vec<Option<(PathBuf, String)>>,
     /// `m_MaskAlgoMap`: the position in `masks` of each algorithm id.
     algo_map: BTreeMap<i32, usize>,
 }
 
 impl GiMasks {
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1453-1456
     /// The registration of the algorithm `algorithm_id` (`RegisterMaskAlgorithm` with
-    /// `m_UseGiMask`): its files under `name`. Refused when the files of an algorithm registered
-    /// before are the same files (see the module's documentation).
+    /// `m_UseGiMask`): its files under `name`.
     pub(crate) fn add(
         &mut self,
         algorithm_id: i32,
@@ -327,27 +351,44 @@ impl GiMasks {
         desc: &[u8],
         max_file_size: u64,
         dates: [Vec<u8>; 2],
-    ) -> Result<(), WriteDbError> {
-        if let Some(place) = files_place(name) {
-            if let Some(other) = self
-                .masks
-                .iter()
-                .find(|mask| files_place(mask.name()).as_ref() == Some(&place))
-            {
-                return Err(shared_files_refusal(other.name(), name));
-            }
-        }
+    ) {
         self.algo_map.insert(algorithm_id, self.masks.len());
+        self.places.push(files_place(name));
         self.masks
             .push(GiMask::new(name, desc, max_file_size, dates));
-        Ok(())
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1391-1397
+    // Refused before the record is written when it would create a data volume whose file is open
+    // for another algorithm (the same place and volume number): NCBI would write the two
+    // algorithms' records through two streams into that file (see the module's documentation).
     /// `AddGiMask` of the algorithm `algorithm_id`, which is registered.
-    pub(crate) fn add_gi_mask(&mut self, algorithm_id: i32, gis: &[i64], mask: &[(u32, u32)]) {
-        if let Some(&index) = self.algo_map.get(&algorithm_id) {
-            self.masks[index].add_gi_mask(gis, mask);
+    pub(crate) fn add_gi_mask(
+        &mut self,
+        algorithm_id: i32,
+        gis: &[i64],
+        mask: &[(u32, u32)],
+    ) -> Result<(), WriteDbError> {
+        let Some(&index) = self.algo_map.get(&algorithm_id) else {
+            return Ok(());
+        };
+        if let (Some(place), (volume, true)) = (
+            &self.places[index],
+            self.masks[index].next_volume(mask.len()),
+        ) {
+            let open = self.masks.iter().zip(&self.places).enumerate().find(
+                |&(other, (mask, other_place))| {
+                    other != index
+                        && other_place.as_ref() == Some(place)
+                        && mask.open_volume() == Some(volume)
+                },
+            );
+            if let Some((_, (other, _))) = open {
+                return Err(shared_files_refusal(other.name(), self.masks[index].name()));
+            }
         }
+        self.masks[index].add_gi_mask(gis, mask);
+        Ok(())
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:338-342
@@ -382,7 +423,8 @@ fn files_place(name: &str) -> Option<(PathBuf, String)> {
     Some((dir, file.to_string()))
 }
 
-/// The refusal of a second algorithm whose GI-mask files are those of `first`.
+/// The refusal of the algorithm `second`, whose next record would open a GI-mask data file that
+/// the algorithm `first` has open.
 fn shared_files_refusal(first: &str, second: &str) -> WriteDbError {
     let same = if first == second {
         format!("\"{first}\"")
@@ -390,10 +432,10 @@ fn shared_files_refusal(first: &str, second: &str) -> WriteDbError {
         format!("\"{first}\" and \"{second}\"")
     };
     WriteDbError::Unsupported(format!(
-        "-gi_mask: two masking algorithms would write their GI-mask files under one name \
-         ({same}); NCBI makeblastdb writes both through two streams into the same files, and \
-         what the files then hold depends on how its C++ library flushes the streams, so LOSAT \
-         refuses this (give every -mask_data file its own -gi_mask_name)"
+        "-gi_mask: two masking algorithms would write one GI-mask data file at the same time \
+         (the files of {same}); NCBI makeblastdb's bytes then depend on how the C++ runtime \
+         buffers two streams on one file, and LOSAT does not reproduce that (a -gi_mask_name \
+         that names other files for one of them avoids it)"
     ))
 }
 

@@ -512,7 +512,7 @@ NCBI's errors for a missing `.aux`, `.loo` or `.rps` file and for an empty `.aux
 | Option or value | What happens |
 | :--- | :--- |
 | `-randomize` | Refused. The error names the option. |
-| `-gi_mask` with two mask files whose GI-mask files would be the same files: one `-gi_mask_name` twice, or two names of one path | Refused before anything is written. NCBI writes both into the same files at once, and what they then hold depends on how its C++ library writes them out. |
+| `-gi_mask` with two mask files whose GI-mask files are the same files (one `-gi_mask_name` twice, or two names of one path), when both would write one data file at the same time | Refused at the sequence where the second would start writing that file. NCBI's files then depend on how its C++ runtime buffers two streams on one file. The log head and the removal of an old database of the `-out` name come first; the build then ends as after an error: its volume files are removed, and the GI-mask files written so far and the alias file stay. Where one of the two writes nothing, or their data files are written one after the other, LOSAT writes NCBI's files. |
 | `-input_type asn1_txt`, `asn1_bin` | Refused. `fasta` and `blastdb` work. |
 | `-input_type blastdb` with an empty `-in` and no `-title` | Refused. NCBI reads the title of a database that is not there and crashes. |
 | An option value that is not UTF-8 (a `-title`, `-out` or `-metadata_output_prefix` of other bytes) | Refused. NCBI keeps the bytes. |

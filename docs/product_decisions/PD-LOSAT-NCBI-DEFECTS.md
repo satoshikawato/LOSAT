@@ -296,11 +296,12 @@
   RG and PS, then line NP's 1.66);
   1.68 2026-11-21 (makeblastdb `-gi_mask`, line NP item M4c-1: exception 20, the alias file of a
   database of one volume, which names the volume where NCBI's names the database itself, the
-  Owner's decision of 2026-11-20 (Q6=B); the explicit rejection of two masking algorithms whose
-  GI-mask files are the same files, which NCBI writes through two streams whose flushing decides
-  the bytes, rule 3; the GI-mask writer's other defects reproduced under rule 2; the form of
-  exception 20 and the rejection Owner-delegated, standing instruction 2026-09-29, restated
-  2026-10-07; numbered after 1.67, line LIB-S item S1; first 1.60, then 1.61, 1.63 and
+  Owner's decision of 2026-11-20 (Q6=B); the explicit rejection, rule 2, of two masking
+  algorithms that would write one GI-mask data file at the same time, whose bytes depend on how
+  the C++ runtime buffers two streams on one file; the GI-mask writer's other defects reproduced
+  under rule 2, two algorithms of one name whose files are written one after the other included;
+  the form of exception 20 and the rejection Owner-delegated, standing instruction 2026-09-29,
+  restated 2026-10-07; numbered after 1.67, line LIB-S item S1; first 1.60, then 1.61, 1.63 and
   1.68 at the merges of dev that brought line RG's 1.60, then line RG's 1.61 and line LIB-O's 1.62,
   then the 1.63 to 1.67 of lines RG, PS, NP and LIB-S)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
@@ -1388,8 +1389,11 @@ file would differ, and NCBI's programs still could not open the database).
   whatever its size, and when the first record does not fit `-max_file_sz` the volume `.00` is
   never created. A `-gi_mask_name` in a directory that does not exist writes nothing there and is
   still listed in `MASKLIST`. GIs from 2^31 to 2^32 - 1 are written as the low 32 bits
-  (`GI_TO(int, gi)`). The sum of `CanFit` (`(num_masks *2+1)*4`, an `int` that overflows past
-  268,435,455 ranges) is computed without overflow. Fixtures `LOSAT/tests/seqdb/gi_mask`
+  (`GI_TO(int, gi)`). The size of a record in `CanFit` (`writedb_gimask.hpp:96-99`: twice the
+  number of ranges plus one, times four, which NCBI computes in `int` and which overflows past
+  268,435,455 ranges) is computed without overflow. Two algorithms whose GI-mask files are the
+  same files are written as NCBI writes them where their files are written one after the other
+  (the rule-2 rejection of version 1.68 below covers the others). Fixtures `LOSAT/tests/seqdb/gi_mask`
   (`make_gi_mask_fixtures.py`), tests `LOSAT/tests/makeblastdb_gi_mask.rs` and
   `LOSAT/src/writedb/gi_mask_tests.rs`.
 - Defects without an effect on the output that LOSAT follows: the negative `Int4`
@@ -1916,21 +1920,6 @@ file would differ, and NCBI's programs still could not open the database).
   memory; LOSAT refuses that too ("depends on its memory map"). Tests:
   `LOSAT/tests/makeblastdb_failed_index.rs` (fixture `fsize_rows.txt`) and
   `LOSAT/src/seqdb/damaged_files_tests.rs`.
-- makeblastdb `-gi_mask` (version 1.68, 2026-11-21, line NP item M4c-1, Owner-delegated, standing
-  instruction 2026-09-29, restated 2026-10-07): two masking algorithms whose GI-mask files are the
-  same files (one `-gi_mask_name` twice, two names of one path such as `x` and `./x`, or a name
-  that reaches the same directory through a link; on Windows and macOS also two names that differ
-  only in case). `RegisterMaskAlgorithm` makes a `CWriteDB_GiMask` for each algorithm
-  (`writedb_impl.cpp:1342-1346, 1390-1398`), and each opens its own `ofstream` on the same paths
-  (`writedb_gimask.cpp:46-57`): what the files hold after both are written and closed depends on
-  how the C++ library buffers and flushes two streams on one file, which LOSAT does not model.
-  LOSAT refuses the second algorithm when it is registered, before any file of the masks is
-  written (exit 1, "losat makeblastdb: -gi_mask: two masking algorithms would write their GI-mask
-  files under one name ..."); the log head and the removal of an old database of the `-out` name
-  come before, as makeblastdb's own errors of that step. Where one of the two would reach no
-  sequence with a GI (and so write nothing) the input is refused all the same. Unit tests in
-  `LOSAT/src/writedb/gi_mask_tests.rs`, cases `w25`, `w25b` and `m04` of
-  `LOSAT/tests/seqdb/gi_mask` (`make_gi_mask_fixtures.py`).
 - psiblast and tblastn `-in_pssm` (version 1.45, 2026-11-16, line RG item D3-1, Owner-delegated,
   standing instruction 2026-09-29, restated 2026-10-07): LOSAT reads the PSSM's ASN.1 text as
   NCBI's reader does (every member of every type it reaches) and indexes the query's annotations
@@ -2452,8 +2441,9 @@ or need NCBI's object manager to reproduce. LOSAT refuses them instead (line DBI
 `DECISIONS.md` 9, 20 and 21, line DI-7 for the query's id), under the maintainer's standing
 delegation, which the maintainer accepted on 2026-11-02 with version 1.10. Each is a row of the table
 in [`PD-LOSAT-DATABASE-SEARCH`](PD-LOSAT-DATABASE-SEARCH.md), which also lists refusals that rule 4
-would port. The last three entries are not of these. The last (version 1.60, line RG item D5a)
-and the one before it (version 1.54, line RG item X5) say so themselves. The one before those (version 1.45, line RG item D3-1) is not either: it concerns a PSSM
+would port. The last four entries are not of these. The last (version 1.68, line NP item M4c-1), the one
+before it (version 1.60, line RG item D5a) and the one before that (version 1.54, line RG item X5)
+say so themselves. The one before those (version 1.45, line RG item D3-1) is not either: it concerns a PSSM
 query's Seq-ids, not a database; it is Owner-delegated (standing instruction 2026-09-29, restated
 2026-10-07), not under the acceptance of 2026-11-02; and it has no row in PD-LOSAT-DATABASE-SEARCH.
 Version 1.45's rejection of well-formed BitMagic data was removed in version 1.58: line RG item
@@ -2515,6 +2505,32 @@ Q-BM decodes it as NCBI does, as the Owner decided on 2026-11-16 (「推奨通�
   sizes wrap and no longer match its data. That needs a `-volsize` of about 18,000 or more and more
   than 16 Gbp of sequences in one index volume; LOSAT refuses (exit 1) at the sequence that passes
   4 GiB.
+
+- makeblastdb `-gi_mask`, two masking algorithms that would write one GI-mask data file at the
+  same time (version 1.68, 2026-11-21, line NP item M4c-1, Owner-delegated, standing instruction
+  2026-09-29, restated 2026-10-07; not of the database class above). Two algorithms whose names
+  lead to the same files (one `-gi_mask_name` twice, two names of one path such as `x` and `./x`,
+  or a name that reaches the same directory through a link; on Windows and macOS also two names
+  that differ only in case) each get a `CWriteDB_GiMask` (`writedb_impl.cpp:1453-1456`) with its
+  own streams on the same paths (`writedb_gimask.cpp:46-57`). NCBI exits 0. Where the files are
+  written one after the other, its bytes follow from the order of the writes, and LOSAT writes
+  them as NCBI does: an algorithm that reaches no sequence with a GI creates no file
+  (`writedb_gimask.cpp:92-96, 290-295`), the offset and index files are each created, written
+  and closed in turn at the close (`:109-119`), and a data volume that one algorithm closed before
+  the other created it is created anew (`:70-80`). Where a data volume of one algorithm would be
+  created while the other's of the same number is open, NCBI writes both algorithms' records
+  through two streams into one file, and its bytes then depend on how the C++ runtime buffers two
+  streams on one file (survey D6, probe `m04_dupname`: the files hold the second algorithm's
+  masks); LOSAT does not reproduce that, and its model of the runtime's file streams
+  (`writedb/ofstream.rs`) is under licence audit (2026-11-21). LOSAT refuses the record that
+  would create that volume (exit 1, "losat makeblastdb: -gi_mask: two masking algorithms would
+  write one GI-mask data file at the same time ..."). The build ends there as an error of NCBI's
+  `SetMaskData` ends it (case `x03gi`): the volume files are removed, and the GI-mask files of
+  the other algorithm and the alias file stay. The Owner has not seen this choice yet; the PR of
+  M4c-1 asks it (keep this rejection, or reproduce the runtime's buffering once the audit
+  allows). Unit tests in `LOSAT/src/writedb/gi_mask_tests.rs`, cases `w25`, `w25b` and `m04`
+  (refused) and `x11_1`, `x11_2` and `x12` (written in turn) of `LOSAT/tests/seqdb/gi_mask`
+  (`make_gi_mask_fixtures.py`).
 
 ## Ported (rule 4)
 

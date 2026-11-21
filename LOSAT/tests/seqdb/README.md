@@ -152,7 +152,11 @@ LOSAT does, setup, the words after `makeblastdb`) in a directory of its own, as 
 tested: `-gi_mask` and `-gi_mask_name` on single-volume (version 5 and 4) and multi-volume databases, nucleotide and
 protein, the argument rules, masks of sequences without a GI, ranges past a sequence's end, `-logfile`, a missing
 directory, a rebuild in the same directory, duplicate GIs of version 4, 1 to 1100 GIs (pages of 512), data volumes
-cut by `-max_file_sz`, and descriptions that pad the index header. Each run's exit status, standard output and error
+cut by `-max_file_sz`, descriptions that pad the index header, two algorithms of one name (one that writes nothing,
+data volumes written one after the other, and the refused cases that write one data file at the same time), and
+`-input_type blastdb` from `gi_mask/in/src4.*` (a version 4 database with a mask column that makeblastdb wrote; the
+"bytes-total" of each metadata file a run writes is checked to be the sum of the sizes of the files it lists). Each
+run's exit status, standard output and error
 (the run directory, time and seconds masked as `<C>`, `<T>`, `<S>`) and its files with their sizes are in
 `gi_mask/expected/<case>.{rc,stdout,stderr,files}`; `gi_mask/db/<case>/` keeps the files that `-gi_mask` writes or
 changes (GI-mask files, alias, metadata, mask column, log) and, for six cases, the volume files too.
@@ -167,7 +171,7 @@ database. `gi_mask/in/ncbi_single.nal` is NCBI's own alias file of that kind (`{
 cases `x10_*` put beside a database (setup `F=>G`) as an earlier run of NCBI's leaves it.
 `tests/makeblastdb_gi_mask.rs` runs every case through the `losat` binary and compares them;
 `src/writedb/gi_mask_tests.rs` writes every GI mask of `db/` again from the records, GIs, description and dates it
-holds and compares the six files byte for byte. A rerun changes the dates of the `.gmi`/`.gni`, mask column and
+holds and compares the six files byte for byte (but a name that the alias file lists twice, case `x12`). A rerun changes the dates of the `.gmi`/`.gni`, mask column and
 alias files.
 
 ## Masks ordered by address, and the errors that come first (`mask_order/`)

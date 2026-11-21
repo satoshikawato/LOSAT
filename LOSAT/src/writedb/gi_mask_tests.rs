@@ -1,6 +1,7 @@
 //! Tests of the GI-mask files (`super`): the files of makeblastdb 2.17.0 rebuilt from what they
-//! hold (`tests/seqdb/gi_mask`, `make_gi_mask_fixtures.py`), and the refusal of two algorithms
-//! whose files are the same files. The tests run no NCBI program.
+//! hold (`tests/seqdb/gi_mask`, `make_gi_mask_fixtures.py`), two algorithms whose files are the
+//! same files, and the refusal of two that would write one data file at the same time. The tests
+//! run no NCBI program.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -184,9 +185,24 @@ fn gi_masks_rebuild_makeblastdb_s_files_byte_for_byte() {
             continue;
         }
         let expected = files_under(&fixture);
+        // A name that the alias file lists twice holds the files of two algorithms, written one
+        // after the other (case x12; `makeblastdb_gi_mask.rs` compares them), not one's.
+        let listed: Vec<String> = expected
+            .iter()
+            .filter(|file| file.ends_with(".nal") || file.ends_with(".pal"))
+            .flat_map(|file| {
+                let alias = std::fs::read_to_string(fixture.join(file)).unwrap();
+                alias
+                    .lines()
+                    .filter_map(|line| line.strip_prefix("MASKLIST "))
+                    .flat_map(|names| names.split_whitespace().map(str::to_string))
+                    .collect::<Vec<_>>()
+            })
+            .collect();
         let names: Vec<&str> = expected
             .iter()
             .filter_map(|file| file.strip_suffix(".gmi"))
+            .filter(|name| listed.iter().filter(|l| l.as_str() == *name).count() < 2)
             .collect();
         for name in names {
             let out = TempDir::new("gi-mask-rebuild");
@@ -241,16 +257,12 @@ fn gi_masks_rebuild_makeblastdb_s_files_byte_for_byte() {
 fn an_algorithm_without_gis_writes_nothing_and_loses_its_name() {
     let out = TempDir::new("gi-mask-empty");
     let mut masks = GiMasks::default();
-    masks
-        .add(2, &out.base("used"), b"dust:", 0, dates())
-        .unwrap();
-    masks
-        .add(3, &out.base("unused"), b"dust:x", 0, dates())
-        .unwrap();
+    masks.add(2, &out.base("used"), b"dust:", 0, dates());
+    masks.add(3, &out.base("unused"), b"dust:x", 0, dates());
     // `SetMaskData` passes no sequence without a GI (`super::super::mask_data`).
-    masks.add_gi_mask(2, &[5, 3], &[(1, 4)]);
+    masks.add_gi_mask(2, &[5, 3], &[(1, 4)]).unwrap();
     // An algorithm that was never registered is ignored, as `m_MaskAlgoMap` has no entry for it.
-    masks.add_gi_mask(9, &[7], &[(1, 4)]);
+    masks.add_gi_mask(9, &[7], &[(1, 4)]).unwrap();
     masks.close();
     let names: Vec<&str> = masks.names().collect();
     assert_eq!(names, [out.base("used").as_str(), ""]);
@@ -276,8 +288,8 @@ fn assert_refused(result: Result<(), WriteDbError>, names: &str) {
     match result {
         Err(WriteDbError::Unsupported(text)) => assert!(
             text.starts_with(&format!(
-                "-gi_mask: two masking algorithms would write their GI-mask files under one name \
-                 ({names})"
+                "-gi_mask: two masking algorithms would write one GI-mask data file at the same \
+                 time (the files of {names})"
             )),
             "{text}"
         ),
@@ -285,53 +297,106 @@ fn assert_refused(result: Result<(), WriteDbError>, names: &str) {
     }
 }
 
+/// A record of one range (`AddGiMask`).
+const RANGE: [(u32, u32); 1] = [(1, 4)];
+
 #[test]
-fn two_algorithms_with_the_same_files_are_refused() {
+fn two_algorithms_writing_one_data_file_at_once_are_refused() {
     let out = TempDir::new("gi-mask-place");
     std::fs::create_dir(out.0.join("sub")).unwrap();
     let x = out.base("x");
-    let add = |masks: &mut GiMasks, id: i32, name: &str| masks.add(id, name, b"dust:", 0, dates());
-
-    let mut masks = GiMasks::default();
-    add(&mut masks, 2, &x).unwrap();
-    assert_refused(add(&mut masks, 3, &x), &format!("\"{x}\""));
     let dotted = format!("{}/./x", out.0.display());
+    let up = format!("{}/sub/../x", out.0.display());
+    let upper = out.base("X");
+    let mut masks = GiMasks::default();
+    for (id, name) in [
+        (2, x.clone()),
+        (3, x.clone()),
+        (4, dotted.clone()),
+        (5, up.clone()),
+        (6, out.base("y")),
+        (7, out.base("x.00")),
+        (8, out.base("sub/x")),
+        (9, out.base("missing/x")),
+        (10, out.base("missing/x")),
+        (11, upper.clone()),
+    ] {
+        masks.add(id, &name, b"dust:", 0, dates());
+    }
+    // Registrations write nothing, and an algorithm of the same files that writes nothing is
+    // not refused.
+    assert_eq!(files_under(&out.0), Vec::<String>::new());
+    masks.add_gi_mask(2, &[1], &RANGE).unwrap();
+    assert_refused(masks.add_gi_mask(3, &[2], &RANGE), &format!("\"{x}\""));
     assert_refused(
-        add(&mut masks, 3, &dotted),
+        masks.add_gi_mask(4, &[2], &RANGE),
         &format!("\"{x}\" and \"{dotted}\""),
     );
-    let up = format!("{}/sub/../x", out.0.display());
-    assert_refused(add(&mut masks, 3, &up), &format!("\"{x}\" and \"{up}\""));
+    assert_refused(
+        masks.add_gi_mask(5, &[2], &RANGE),
+        &format!("\"{x}\" and \"{up}\""),
+    );
     // Other files: another name, a volume name, another directory; and a directory that does not
     // exist, where nothing is written (twice).
-    for (id, name) in [
-        (4, out.base("y")),
-        (5, out.base("x.00")),
-        (6, out.base("sub/x")),
-        (7, out.base("missing/x")),
-        (8, out.base("missing/x")),
-    ] {
-        add(&mut masks, id, &name).unwrap();
+    for id in 6..=10 {
+        masks.add_gi_mask(id, &[2], &RANGE).unwrap();
     }
     // Case is part of the name on Linux; Windows and macOS fold it.
-    let upper = out.base("X");
+    let refused = masks.add_gi_mask(11, &[2], &RANGE);
     if cfg!(any(windows, target_os = "macos")) {
-        assert_refused(
-            add(&mut masks, 9, &upper),
-            &format!("\"{x}\" and \"{upper}\""),
-        );
+        assert_refused(refused, &format!("\"{x}\" and \"{upper}\""));
     } else {
-        add(&mut masks, 9, &upper).unwrap();
+        refused.unwrap();
     }
-    // Nothing is written before the first record.
-    assert_eq!(files_under(&out.0), Vec::<String>::new());
-
+    // A refused record is not written.
+    for id in [3, 4, 5] {
+        assert!(masks.masks[id as usize - 2].gi_offset.is_empty(), "{id}");
+        assert_eq!(masks.masks[id as usize - 2].open_volume(), None, "{id}");
+    }
     // Relative names are read from the current directory.
-    let mut relative = GiMasks::default();
-    add(&mut relative, 2, "x").unwrap();
-    assert_refused(add(&mut relative, 3, "./x"), "\"x\" and \"./x\"");
     assert_eq!(files_place("x"), files_place("./x"));
     assert_eq!(files_place(&out.base("missing/x")), None);
+}
+
+/// Two algorithms of one name whose data volumes are written one after the other: each file is
+/// created anew by the stream that writes it, as NCBI's are, until a volume would be created while
+/// the other algorithm's of that number is open.
+#[test]
+fn data_volumes_written_one_after_another_are_written_in_turn() {
+    let out = TempDir::new("gi-mask-turn");
+    let x = out.base("x");
+    let mut masks = GiMasks::default();
+    // Room for one record of one range (12 bytes) per volume.
+    masks.add(2, &x, b"dust:", 20, dates());
+    masks.add(3, &x, b"dust:y", 20, dates());
+    masks.add_gi_mask(2, &[1], &RANGE).unwrap();
+    // Volume 1 of the first algorithm; its volume 0 is closed.
+    masks.add_gi_mask(2, &[2], &RANGE).unwrap();
+    // The second algorithm's volume 0 replaces the first one's.
+    masks.add_gi_mask(3, &[3], &[(5, 9)]).unwrap();
+    // Its volume 1 would open the first algorithm's open volume 1.
+    assert_refused(masks.add_gi_mask(3, &[4], &RANGE), &format!("\"{x}\""));
+    masks.close();
+    let names: Vec<&str> = masks.names().collect();
+    assert_eq!(names, [x.as_str(), x.as_str()]);
+    // The second algorithm's single volume was renamed after the first one's close; its offset
+    // and index files were written last.
+    assert_eq!(
+        files_under(&out.0),
+        ["x.01.gmd", "x.01.gnd", "x.gmd", "x.gmi", "x.gmo", "x.gnd", "x.gni", "x.gno"]
+    );
+    assert_eq!(
+        std::fs::read(out.0.join("x.gmd")).unwrap(),
+        [0, 0, 0, 1, 0, 0, 0, 5, 0, 0, 0, 9]
+    );
+    assert_eq!(
+        std::fs::read(out.0.join("x.01.gmd")).unwrap(),
+        [0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 4]
+    );
+    assert_eq!(
+        std::fs::read(out.0.join("x.gmo")).unwrap(),
+        [0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0]
+    );
 }
 
 #[cfg(unix)]
@@ -340,10 +405,12 @@ fn a_directory_reached_through_a_link_is_the_same_directory() {
     let out = TempDir::new("gi-mask-link");
     std::os::unix::fs::symlink(&out.0, out.0.join("link")).unwrap();
     let mut masks = GiMasks::default();
-    masks.add(2, &out.base("x"), b"dust:", 0, dates()).unwrap();
     let linked = out.base("link/x");
+    masks.add(2, &out.base("x"), b"dust:", 0, dates());
+    masks.add(3, &linked, b"dust:", 0, dates());
+    masks.add_gi_mask(2, &[1], &RANGE).unwrap();
     assert_refused(
-        masks.add(3, &linked, b"dust:", 0, dates()),
+        masks.add_gi_mask(3, &[2], &RANGE),
         &format!("\"{}\" and \"{linked}\"", out.base("x")),
     );
 }

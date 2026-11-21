@@ -231,6 +231,63 @@ pub(crate) fn dependency_multimap(
     deps
 }
 
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3181-3204
+/// The first walk of `x_PostCheck` over the dependencies `deps` (as [`dependency_multimap`]
+/// orders them) of the arguments that `given` says were given: the first exclusion between two
+/// given arguments is the error (`Err`, its message), else the arguments that the given ones
+/// require, each with its first requester, and those they exclude.
+pub(crate) fn walk_dependencies<'a>(
+    deps: &[(&'a str, Dep, &'a str)],
+    given: &dyn Fn(&str) -> bool,
+) -> Result<DependencyWalk<'a>, String> {
+    let mut walk = DependencyWalk::default();
+    for &(first, dep, second) in deps {
+        if !given(first) {
+            continue;
+        }
+        match dep {
+            Dep::Requires => {
+                walk.require.entry(second).or_insert(first);
+            }
+            Dep::Excludes => {
+                if given(second) {
+                    return Err(arg_message(second, "Incompatible with argument", first));
+                }
+                walk.exclude.insert(second);
+            }
+        }
+    }
+    Ok(walk)
+}
+
+/// What [`walk_dependencies`] found: the second walk of `x_PostCheck` goes over the arguments
+/// in the order of their descriptions and asks each one that was not given.
+#[derive(Debug, Default)]
+pub(crate) struct DependencyWalk<'a> {
+    /// The arguments that given ones require, with the first argument that requires each.
+    require: BTreeMap<&'a str, &'a str>,
+    /// The arguments that given ones exclude (they take no default).
+    exclude: BTreeSet<&'a str>,
+}
+
+impl DependencyWalk<'_> {
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3270-3276
+    /// The error of the argument `name`, which was not given, when a given argument requires it.
+    pub(crate) fn missing(&self, name: &str) -> Option<String> {
+        let requester = self.require.get(name)?;
+        Some(arg_message(
+            name,
+            "Must be specified, as it is required by argument",
+            requester,
+        ))
+    }
+
+    /// Whether a given argument excludes the argument `name`.
+    pub(crate) fn excludes(&self, name: &str) -> bool {
+        self.exclude.contains(name)
+    }
+}
+
 /// A `CArgException` with the code name `code` (`eInvalidArg`, ...): `messages` are the
 /// messages of the exceptions it was thrown for (`NCBI_RETHROW`), oldest first, then its own.
 #[derive(Debug, PartialEq, Eq)]
@@ -682,42 +739,17 @@ fn post_check(
     numbers: &mut BTreeMap<&'static str, Number>,
     given: &[&'static str],
 ) -> Result<(), ArgsError> {
-    let mut require: BTreeMap<&str, &str> = BTreeMap::new();
-    let mut exclude: BTreeSet<&str> = BTreeSet::new();
-    for (first, dep, second) in dependencies(tool) {
-        if !given.contains(&first) {
-            continue;
-        }
-        match dep {
-            Dep::Requires => {
-                require.entry(second).or_insert(first);
-            }
-            Dep::Excludes => {
-                if given.contains(&second) {
-                    return Err(invalid(
-                        "eConstraint",
-                        arg_message(second, "Incompatible with argument", first),
-                    ));
-                }
-                exclude.insert(second);
-            }
-        }
-    }
+    let deps = dependencies(tool);
+    let walk = walk_dependencies(&deps, &|name| given.contains(&name))
+        .map_err(|message| invalid("eConstraint", message))?;
     for desc in descs(tool) {
         if given.contains(&desc.name) {
             continue;
         }
-        if let Some(requester) = require.get(desc.name) {
-            return Err(invalid(
-                "eConstraint",
-                arg_message(
-                    desc.name,
-                    "Must be specified, as it is required by argument",
-                    requester,
-                ),
-            ));
+        if let Some(message) = walk.missing(desc.name) {
+            return Err(invalid("eConstraint", message));
         }
-        if exclude.contains(desc.name) {
+        if walk.excludes(desc.name) {
             continue;
         }
         if let Some(default) = desc.default {

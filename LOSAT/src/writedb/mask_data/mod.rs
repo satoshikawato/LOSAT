@@ -152,7 +152,7 @@ impl MaskWriter {
             };
             let dates = [clock.now()?, clock.now()?];
             if let Some(gi_masks) = self.gi_masks.as_mut() {
-                gi_masks.add(algorithm_id, name, &value, max_file_size, dates)?;
+                gi_masks.add(algorithm_id, name, &value, max_file_size, dates);
             }
             return Ok(algorithm_id);
         }
@@ -232,7 +232,7 @@ impl MaskWriter {
 
         if let Some(gi_masks) = self.gi_masks.as_mut() {
             for r1 in ranges.iter().filter(|r1| !r1.offsets.is_empty()) {
-                gi_masks.add_gi_mask(r1.algorithm_id, gis, &r1.offsets);
+                gi_masks.add_gi_mask(r1.algorithm_id, gis, &r1.offsets)?;
             }
             return Ok(());
         }

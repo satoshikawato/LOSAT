@@ -20,7 +20,7 @@ use super::writer::{build_lmdb_file_name, DbVersion, Indices};
 use super::WriteDbError;
 use crate::blastinput::compressed::{compression_of_name, Compression};
 use crate::blastinput::ncbi_environment::{diag_target, ApplicationSettings, DiagStream};
-use crate::ncbi_app::args::{arg_message, dependency_multimap, Dep};
+use crate::ncbi_app::args::{dependency_multimap, walk_dependencies, Dep};
 use crate::ncbi_str::string_to_uint8_data_size;
 use crate::seqdb::date::iso8601_date_time_exception;
 use crate::seqdb::{SearchPath, SeqDb, SeqDbError, SeqType};
@@ -424,13 +424,43 @@ const MAKEBLASTDB_DEPENDENCIES: [(&str, Dep, &str); 8] = [
     ("taxid_map", Dep::Requires, "parse_seqids"),
 ];
 
-/// The arguments that a dependency of makeblastdb requires, in the order its `Init` declares
-/// them (makeblastdb.cpp:246-288): the order `x_PostCheck` looks for missing ones in.
-const REQUIRED_IN_ORDER: [&str; 4] = ["parse_seqids", "mask_data", "mask_id", "gi_mask"];
+// NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:225-332
+/// makeblastdb's arguments in the order its `Init` declares them, each with whether it is
+/// mandatory (`AddKey`, the molecule type alone): the order of `x_PostCheck`'s second walk,
+/// which looks for a required argument that is missing and ends at a missing mandatory one
+/// (that error is the parser's, `crate::cli`). LOSAT registers all of them but `randomize`
+/// (refused) and the hidden `verbose` and `limit_defline` (`MakedbArgs`); the clap id of `in`
+/// is `input`.
+const MAKEBLASTDB_ARGUMENTS: [(&str, bool); 22] = [
+    ("in", false),
+    ("input_type", false),
+    ("dbtype", true),
+    ("title", false),
+    ("parse_seqids", false),
+    ("hash_index", false),
+    ("randomize", false),
+    ("mask_data", false),
+    ("mask_id", false),
+    ("mask_desc", false),
+    ("gi_mask", false),
+    ("gi_mask_name", false),
+    ("out", false),
+    ("blastdb_version", false),
+    ("max_file_sz", false),
+    ("metadata_output_prefix", false),
+    ("logfile", false),
+    ("verbose", false),
+    ("limit_defline", false),
+    ("taxid", false),
+    ("taxid_map", false),
+    ("oid_masks", false),
+];
 
-/// Whether the argument `name` of a dependency was given (`args.Exist(name) && args[name]`).
+/// Whether the argument `name` of a dependency was given (`args.Exist(name) && args[name]`). The
+/// molecule type is a field that a library call always sets.
 fn given(args: &MakedbArgs, name: &str) -> bool {
     match name {
+        "dbtype" => true,
         "parse_seqids" => args.parse_seqids,
         "gi_mask" => args.gi_mask,
         "gi_mask_name" => args.gi_mask_name.is_some(),
@@ -443,16 +473,18 @@ fn given(args: &MakedbArgs, name: &str) -> bool {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3181-3204
-// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3263-3277
-// The first exclusion met in NCBI's `multimap` (`ncbi_app::args::dependency_multimap`) ends the
-// check; else the first missing argument in the order of declaration names the first
-// dependency that required it (`map::insert` keeps the first). `-taxid` with `-taxid_map` meets
-// the dependency of `taxid` first: `Argument "taxid_map". Incompatible with argument:  `taxid'`.
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3162-3296
+// The walk of NCBI's argument reader (`ncbi_app::args::walk_dependencies`, the one port of it):
+// the first exclusion met in NCBI's `multimap` ends the check, else the first missing argument
+// in the order of declaration names the first dependency that required it. `-taxid` with
+// `-taxid_map` meets the dependency of `taxid` first: `Argument "taxid_map". Incompatible with
+// argument:  `taxid'`. Without the molecule type (a mandatory argument) the second walk ends
+// there: only an exclusion is reported, before the parser's own error for it.
 /// The first dependency of makeblastdb's arguments that the arguments `given` break, checked as
 /// NCBI's argument reader checks them after the parse (`CArgDescriptions::x_PostCheck`), with
 /// its sentence. The one check of the dependencies: LOSAT's parser calls it on the command line
-/// (`crate::cli`, exit status 2) and `check_arguments` for the library's callers.
+/// (`crate::cli`, exit status 2) and `check_arguments` for the library's callers. `given` is
+/// asked only of the arguments of a dependency and of the mandatory one.
 pub(crate) fn dependency_error(given: &dyn Fn(&str) -> bool) -> Option<String> {
     // A dependency is checked only for an argument that is given (both sides of an exclusion):
     // when none of them is, nothing can fail, and the multimap is not built.
@@ -462,35 +494,20 @@ pub(crate) fn dependency_error(given: &dyn Fn(&str) -> bool) -> Option<String> {
     {
         return None;
     }
-    let mut require: Vec<(&str, &str)> = Vec::new();
-    for (first, dep, second) in dependency_multimap(MAKEBLASTDB_DEPENDENCIES.to_vec()) {
-        if !given(first) {
+    let deps = dependency_multimap(MAKEBLASTDB_DEPENDENCIES.to_vec());
+    let walk = match walk_dependencies(&deps, given) {
+        Ok(walk) => walk,
+        Err(message) => return Some(message),
+    };
+    for (name, mandatory) in MAKEBLASTDB_ARGUMENTS {
+        let required = walk.missing(name);
+        if (required.is_none() && !mandatory) || given(name) {
             continue;
         }
-        match dep {
-            Dep::Requires => {
-                if !require.iter().any(|&(name, _)| name == second) {
-                    require.push((second, first));
-                }
-            }
-            Dep::Excludes => {
-                if given(second) {
-                    return Some(arg_message(second, "Incompatible with argument", first));
-                }
-            }
-        }
+        // A required argument that is missing, or a missing mandatory one (the parser's error).
+        return required;
     }
-    REQUIRED_IN_ORDER
-        .into_iter()
-        .filter(|name| !given(name))
-        .find_map(|name| {
-            let &(_, requester) = require.iter().find(|&&(required, _)| required == name)?;
-            Some(arg_message(
-                name,
-                "Must be specified, as it is required by argument",
-                requester,
-            ))
-        })
+    None
 }
 
 /// `dependency_error` of the arguments of a library call.

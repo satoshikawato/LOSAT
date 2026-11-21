@@ -305,6 +305,31 @@ fn makedb_takes_makeblastdb_s_option_names() {
             "{words:?}: {err}"
         );
     }
+    // Without the mandatory `-dbtype`, NCBI's reader reports an exclusion first (the first walk
+    // of `x_PostCheck`), and a missing required argument only after the mandatory one, whose
+    // error is the parser's.
+    let err = makedb(&[
+        "-in",
+        "x.fa",
+        "-taxid",
+        "1",
+        "-taxid_map",
+        "m",
+        "-parse_seqids",
+    ])
+    .unwrap_err();
+    assert_eq!(err.exit_code(), 2, "{err}");
+    assert!(
+        err.to_string()
+            .contains("Argument \"taxid_map\". Incompatible with argument:  `taxid'"),
+        "{err}"
+    );
+    let err = makedb(&["-in", "x.fa", "-taxid_map", "m"]).unwrap_err();
+    assert_eq!(
+        err.kind(),
+        clap::error::ErrorKind::MissingRequiredArgument,
+        "{err}"
+    );
 
     // `-mask_data` takes a list of files, `-mask_id` needs `-mask_data` and `-mask_desc` needs
     // `-mask_id` (makeblastdb.cpp:259-277); the parser's errors end with exit status 2 as those of

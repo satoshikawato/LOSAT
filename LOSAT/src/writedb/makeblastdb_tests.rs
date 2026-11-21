@@ -209,6 +209,69 @@ fn argument_dependencies_follow_ncbis_order() {
     assert!(check_arguments(&a).is_ok());
 }
 
+/// The order of `x_PostCheck`'s second walk names every argument of `MakedbArgs` (under NCBI's
+/// name), every argument of a dependency, and only the arguments of NCBI's `Init` that LOSAT
+/// does not register besides; its one mandatory argument is the one clap requires.
+#[test]
+fn the_declaration_order_holds_every_argument() {
+    let command = MakedbArgs::augment_args(clap::Command::new("makeblastdb"));
+    let mut registered: Vec<String> = command
+        .get_arguments()
+        .map(|arg| match arg.get_id().as_str() {
+            "input" => "in".to_string(),
+            id => id.to_string(),
+        })
+        .collect();
+    registered.sort();
+    let mut listed: Vec<String> = MAKEBLASTDB_ARGUMENTS
+        .iter()
+        .map(|(name, _)| name.to_string())
+        .filter(|name| !["randomize", "verbose", "limit_defline"].contains(&name.as_str()))
+        .collect();
+    listed.sort();
+    assert_eq!(registered, listed);
+    for (first, _, second) in MAKEBLASTDB_DEPENDENCIES {
+        for name in [first, second] {
+            assert!(
+                MAKEBLASTDB_ARGUMENTS
+                    .iter()
+                    .any(|&(listed, _)| listed == name),
+                "{name}"
+            );
+        }
+    }
+    let required: Vec<&str> = command
+        .get_arguments()
+        .filter(|arg| arg.is_required_set())
+        .map(|arg| arg.get_id().as_str())
+        .collect();
+    let mandatory: Vec<&str> = MAKEBLASTDB_ARGUMENTS
+        .iter()
+        .filter(|(_, mandatory)| *mandatory)
+        .map(|&(name, _)| name)
+        .collect();
+    assert_eq!(required, mandatory);
+}
+
+/// Without the mandatory molecule type, NCBI's walk reports an exclusion (its first walk) and
+/// stops at the molecule type before any required argument, which it declares later.
+#[test]
+fn a_missing_molecule_type_leaves_only_exclusions() {
+    let given = |words: &'static [&'static str]| move |name: &str| words.contains(&name);
+    assert_eq!(
+        dependency_error(&given(&["taxid", "taxid_map", "parse_seqids"])).as_deref(),
+        Some("Argument \"taxid_map\". Incompatible with argument:  `taxid'")
+    );
+    assert_eq!(dependency_error(&given(&["gi_mask", "mask_data"])), None);
+    assert_eq!(
+        dependency_error(&given(&["dbtype", "gi_mask", "mask_data"])).as_deref(),
+        Some(
+            "Argument \"parse_seqids\". Must be specified, as it is required by argument:  \
+             `gi_mask'"
+        )
+    );
+}
+
 /// `MakedbArgs` with makeblastdb's defaults and `-dbtype prot`, without the parser's checks.
 fn parse_makedb_words_for_test() -> MakedbArgs {
     use clap::Parser;

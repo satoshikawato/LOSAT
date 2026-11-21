@@ -48,34 +48,20 @@ impl WriteDbFile {
 
     /// The constructor with `always_create` false: the file is named but created only by
     /// `create_now` (`CWriteDB_File::Create`).
-    pub(crate) fn lazy(
-        base_name: &str,
-        extension: &str,
-        index: u32,
-        max_file_size: u64,
-    ) -> Self {
+    pub(crate) fn lazy(base_name: &str, extension: &str, index: u32, max_file_size: u64) -> Self {
         Self::named(base_name, extension, Some(index), max_file_size)
     }
 
     /// `lazy` with the index -1 (`m_UseIndex` false): the file `<base>.<ext>`, without a
     /// volume number (the offset and index files of a GI mask, `super::gi_mask`).
-    pub(crate) fn lazy_unindexed(
-        base_name: &str,
-        extension: &str,
-        max_file_size: u64,
-    ) -> Self {
+    pub(crate) fn lazy_unindexed(base_name: &str, extension: &str, max_file_size: u64) -> Self {
         Self::named(base_name, extension, None, max_file_size)
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_files.cpp:158-195
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_files.cpp:247-257
     // A negative index turns the volume number off; a limit of 0 takes the default one.
-    fn named(
-        base_name: &str,
-        extension: &str,
-        index: Option<u32>,
-        max_file_size: u64,
-    ) -> Self {
+    fn named(base_name: &str, extension: &str, index: Option<u32>, max_file_size: u64) -> Self {
         Self {
             stream: OfStream::new(),
             base_name: base_name.to_string(),

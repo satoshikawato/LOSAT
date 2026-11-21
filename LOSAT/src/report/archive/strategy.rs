@@ -464,7 +464,7 @@ pub(crate) fn hitlist_size(outfmt: i32, counts: HitlistArgs) -> i32 {
 /// the program in a refusal.
 ///
 /// With a strategy file NCBI skips its early reading of `-outfmt` (blast_args.cpp:3624-3627,
-/// quoted at `create_strategy_file`'s callers): a value its parser refuses (`99`, `abc`) fails
+/// cited at `create_strategy_file`'s callers): a value its parser refuses (`99`, `abc`) fails
 /// only in the formatting handler, the last of the handlers, so `-subject`, `-subject_loc`,
 /// `-query`, `-out` and `-query_loc` come first, in the order of the other arguments. The
 /// callers read the value with `app::early_format_choice`, which leaves it to their own

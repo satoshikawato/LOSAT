@@ -1,6 +1,6 @@
 //! Public CLI v2 boundary. Clap's double-dash representation is internal only.
 
-use crate::wording::{DATABASE_ERROR, QUERY_OPTIONS_ERROR};
+use crate::wording::{DATABASE_ERROR, ENGINE_ERROR, OPTIONS_ERROR, QUERY_OPTIONS_ERROR};
 use std::{ffi::OsString, fmt};
 
 use clap::{error::ErrorKind, CommandFactory, Parser, Subcommand};
@@ -1445,12 +1445,12 @@ impl NativeError {
             return if e.kind() == "CBlastException::eInvalidOptions" {
                 NativeError {
                     exit: 1,
-                    message: [b"BLAST options error: ".as_slice(), e.get_msg(), b"\n"].concat(),
+                    message: [OPTIONS_ERROR.as_bytes(), b" ", e.get_msg(), b"\n"].concat(),
                 }
             } else {
                 NativeError {
                     exit: 3,
-                    message: [b"BLAST engine error: ".as_slice(), e.get_msg(), b"\n"].concat(),
+                    message: [ENGINE_ERROR.as_bytes(), b" ", e.get_msg(), b"\n"].concat(),
                 }
             };
         }

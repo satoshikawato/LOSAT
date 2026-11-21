@@ -15,7 +15,7 @@ fn limit(words: &[&str]) -> Result<i32, String> {
     }
 }
 
-// NCBI blast_args.cpp (CHspFilteringArgs): `-culling_limit` is an integer >= 0, default 0,
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp (CHspFilteringArgs): `-culling_limit` is an integer >= 0, default 0,
 // hexadecimal accepted as NCBI's argument parser does.
 #[test]
 fn the_option_is_read_as_ncbi_reads_it() {

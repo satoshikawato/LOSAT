@@ -3,27 +3,11 @@
 //! segmasker's writers of a database's sequences).
 
 // NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_tables.cpp:1822-1850
-// ```c++
-// const Uint1 CStdaaToEaa::scm_Table[32] = {
-//     '-', 'A', 'B', 'C', 'D', 'E', 'F', 'G',
-//     'H', 'I', 'K', 'L', 'M', 'N', 'P', 'Q',
-//     'R', 'S', 'T', 'V', 'W', 'X', 'Y', 'Z',
-//     'U', '*', 'O', 'J', 0, 0, 0, 0
-// };
-// ```
 /// NCBIstdaa to ncbieaa, the letters of the FASTA path (`CSeqVector` with `Ncbieaa`): the
 /// table's 28 codes.
 const STDAA_TO_EAA: [u8; 28] = *b"-ABCDEFGHIKLMNPQRSTVWXYZU*OJ";
 
 // NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_tables.cpp:1785-1813
-// ```c++
-// const Uint1 CStdaaToIupacaa::scm_Table[32] = {
-//     255, 'A', 'B', 'C', 'D', 'E', 'F', 'G',
-//     'H', 'I', 'K', 'L', 'M', 'N', 'P', 'Q',
-//     'R', 'S', 'T', 'V', 'W', 'X', 'Y', 'Z',
-//     'U', 255, 'O', 'J', 255, 255, 255, 255
-// };
-// ```
 /// NCBIstdaa to iupacaa, the letters of `GetSequenceAsString` (`-outfmt %s`, `%h`): the gap
 /// (0) and the stop (25) are the byte 255, as NCBI's table has them.
 const STDAA_TO_IUPACAA: [u8; 28] = [

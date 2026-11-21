@@ -109,16 +109,6 @@ impl XRecord for InitHSP {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:274-304
-// ```c
-//     if (0 == (result = BLAST_CMP(h2->ungapped_data->score,
-//                                  h1->ungapped_data->score)) &&
-//         0 == (result = BLAST_CMP(h1->ungapped_data->s_start,
-//                                  h2->ungapped_data->s_start)) &&
-//         0 == (result = BLAST_CMP(h2->ungapped_data->length,
-//                                  h1->ungapped_data->length)) &&
-//         0 == (result = BLAST_CMP(h1->ungapped_data->q_start,
-//                                  h2->ungapped_data->q_start))) {
-// ```
 // `score_compare_init_hsps_ncbi` on the record's own fields, which are NCBI's `BlastUngappedData`
 // (section above `XUnitHsp` in x_pair_par.rs): `len` is `s_end - s_start` of the `InitHSP` and
 // `q_start` its `q_start_absolute`.
@@ -145,13 +135,6 @@ pub(super) trait XUnitSort {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:306-310
-// ```c
-// void Blast_InitHitListSortByScore(BlastInitHitList * init_hitlist)
-// {
-//     qsort(init_hitlist->init_hsp_array, init_hitlist->total,
-//           sizeof(BlastInitHSP), score_compare_match);
-// }
-// ```
 // The comparator of the chunk's sort on one unit's part of the chunk's list; `slice::sort_by` is
 // stable, as `sort_init_hsps_by_score_ncbi` is.
 impl XUnitSort for Vec<InitHSP> {
@@ -165,10 +148,6 @@ impl XUnitSort for Vec<InitHSP> {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:306-310
-// ```c
-//     qsort(init_hitlist->init_hsp_array, init_hitlist->total,
-//           sizeof(BlastInitHSP), score_compare_match);
-// ```
 // The compact records of a unit are its list twice when its task ends: the exact copy the task
 // returns and the scratch vector it was copied from (`run_unit_compact`; the scratch, one per split
 // of the pool's work, is cleared at the start of its next unit). In the task the stable sort runs
@@ -317,13 +296,6 @@ fn x_k1(a: &UngappedHit, b: &UngappedHit) -> Ordering {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1374-1381
-// ```c
-// void Blast_HSPListSortByScore(BlastHSPList* hsp_list)
-// {
-//     if (!Blast_HSPListIsSortedByScore(hsp_list)) {
-//         qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
-//               ScoreCompareHSPs);
-// ```
 // The final sort of the conversion as the stable sort of each K1 run (item 3, argument c); a list
 // out of K1 order gets the ported sort.
 /// Sorts a converted chunk list as `Blast_HSPListSortByScore` does.
@@ -353,14 +325,6 @@ fn x_sort_k1_runs(hits: &mut [UngappedHit]) {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2758-2766
-// ```c
-// for (index=combined_hsp_list->hspcnt, index1=0;
-//      index1<hsp_list->hspcnt; index1++) {
-//    combined_hsp_list->hsp_array[index++] = hsp_list->hsp_array[index1];
-// }
-// combined_hsp_list->hspcnt = new_hspcnt;
-// Blast_HSPListSortByScore(combined_hsp_list);
-// ```
 // The append and the sort as one backward merge of the sorted frame list into the sorted combined
 // list, ties to the combined list (item 4, argument d). The frame list's elements are first copied
 // onto the end of the combined list as place holders, so that every step is a swap.
@@ -641,10 +605,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:274-304
-    // ```c
-    //     if (0 == (result = BLAST_CMP(h2->ungapped_data->score,
-    //                                  h1->ungapped_data->score)) &&
-    // ```
     // The record's comparator is the init comparator on the expanded records.
     #[test]
     fn the_record_order_is_the_init_order() {
@@ -660,10 +620,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:306-310
-    // ```c
-    //     qsort(init_hitlist->init_hsp_array, init_hitlist->total,
-    //           sizeof(BlastInitHSP), score_compare_match);
-    // ```
     // Argument (a): the k-way merge of the units' sorted lists is the stable sort of their
     // concatenation, record for record (the seed offsets tell equal records apart), with empty
     // lists among them.
@@ -760,10 +716,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:306-310
-    // ```c
-    //     qsort(init_hitlist->init_hsp_array, init_hitlist->total,
-    //           sizeof(BlastInitHSP), score_compare_match);
-    // ```
     // The unit's sort in its task is `slice::sort_by` (stable), record for record, at every length
     // around the run and pass boundaries, with a buffer of any capacity and contents.
     #[test]
@@ -826,11 +778,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1374-1381
-    // ```c
-    //     if (!Blast_HSPListIsSortedByScore(hsp_list)) {
-    //         qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
-    //               ScoreCompareHSPs);
-    // ```
     // Argument (c): on a K1-sorted list the run-wise sort is the full stable sort; on a list out of
     // K1 order the full sort runs. `hsp_list_order` tells equal HSPs apart.
     #[test]
@@ -850,10 +797,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2758-2766
-    // ```c
-    // combined_hsp_list->hspcnt = new_hspcnt;
-    // Blast_HSPListSortByScore(combined_hsp_list);
-    // ```
     // Argument (d): the backward merge is the append and the stable sort, also for an unsorted or
     // empty frame list and an empty combined list.
     #[test]

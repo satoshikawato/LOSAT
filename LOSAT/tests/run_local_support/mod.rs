@@ -250,20 +250,8 @@ pub fn field(row: &[u8], index: usize) -> String {
         .to_string()
 }
 
-// NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
-// ```c
-// ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
-//     // Add tab in front of field, except for the first field.
-//     if (iter != m_FieldsToShow.begin())
-//         m_Ostream << m_FieldDelimiter;
-//     x_PrintField(*iter);
-// }
-// m_Ostream << "\n";
-// ```
-// NCBI reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp:1970-1973
-// ```c++
-// x_DisplayAlnvecInfo(out, alnvecInfo,showDefLine);
-// ```
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1970-1973
 /// The ranges of `Report::spans` of report `index`, one per HSP of `Outcome::hsps` in the order of
 /// the hit list; a range is missing only where the report does not show the HSP.
 fn spans_of(outcome: &Outcome, index: usize, context: &str) -> Vec<Range<usize>> {

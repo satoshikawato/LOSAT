@@ -57,21 +57,7 @@ fn contains(outer: &GappedHsp, inner: &GappedHsp) -> bool {
         && inner.score <= outer.score
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:224-273
-// ```c
-// for (iread = 1;  iread < hsp_list->hspcnt;  iread++) {
-//     ...
-//     for (ihsp = 0;  ihsp < iread;  ihsp++) {
-//         ...
-//         if (hsp2 == NULL) continue;
-//         if (hsp2->query.frame == hsp1->query.frame &&
-//             hsp2->subject.frame == hsp1->subject.frame &&
-//             CONTAINED_IN_HSP(q2start, q2end, q1start, s2start, s2end, s1start) &&
-//             CONTAINED_IN_HSP(q2start, q2end, q1end, s2start, s2end, s1end) &&
-//             hsp1->score <= hsp2->score) {
-//             hsp1 = hsp_array[iread] = Blast_HSPFree(hsp_array[iread]);
-//             break;
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:224-273
 // The same test, over the earlier HSPs still kept of the same context and frame whose subject start
 // lies in [max(s_start, s_end) - dmax, min(s_start, s_end)] only (dmax: the largest `s_end -
 // s_start` of an HSP kept so far, at least 0): an HSP `outer` that contains both end points has

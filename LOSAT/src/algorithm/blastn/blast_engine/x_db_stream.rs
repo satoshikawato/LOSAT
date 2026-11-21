@@ -65,7 +65,7 @@
 //!
 //! No NCBI counterpart for the window itself: NCBI's search threads take chunks of ordinal ids
 //! from one iterator and write each sequence's HSP list to the HSP stream when it is done
-//! (blast_engine.c:1409, 1553-1554, quoted above `search_blocks`); the hand-over in ordinal order
+//! (blast_engine.c:1409, 1553-1554, cited above `search_blocks`); the hand-over in ordinal order
 //! keeps the order of its one-thread loop.
 //!
 //! `LOSAT_X_BNDBSTREAM` is a switch of the strict set: on unless it is `0`.
@@ -160,16 +160,6 @@ fn blocks_of(db: &SeqDb, first_ordinal: u32, block_bytes: u64, max: usize) -> Ve
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1409-1413,1553-1554
-// ```c
-//     itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
-//
-//     /* iterate over all subject sequences */
-//     while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-//            != BLAST_SEQSRC_EOF) {
-// ...
-//           /* Save the results. */
-//           status = BlastHSPStreamWrite(hsp_stream, &hsp_list);
-// ```
 /// The window over the whole database: its blocks of at most `block_bytes`, `segment` blocks
 /// after `segment` blocks (`X_SEGMENT_BLOCKS`), through `search_window`; the first error in
 /// ordinal order is returned after the blocks before it are merged.

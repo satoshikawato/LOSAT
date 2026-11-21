@@ -240,7 +240,9 @@ fn check(case: &Case, extra_env: &[(&str, &str)], threads: &str, label: &str) {
     match case.check.as_str() {
         "ncbi" | "parser" => {
             let written = std::fs::read(&ss).ok();
-            let want = frozen(&case.name, "ss");
+            // NCBI's file in LOSAT's words: a file that also holds a report (`-out` and
+            // `-export_search_strategy` the same file) states LOSAT's version (AGENTS.md rule 8).
+            let want = frozen(&case.name, "ss").map(crate::outfmt11_blastx::expected_losat_bytes);
             assert_eq!(
                 written.is_some(),
                 want.is_some(),

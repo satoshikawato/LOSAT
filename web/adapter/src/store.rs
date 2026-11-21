@@ -778,7 +778,7 @@ mod tests {
         // With the loaders off the reader's check of the data line ends the run, as the CLI's.
         assert_eq!(
             register("blastn", ROLE_QUERY, false, b"NM_000518.5\n").unwrap_err(),
-            "BLAST query error: CFastaReader: Near line 1, there's a line that doesn't look like plausible data, but it's not marked as defline or comment."
+            ncbi_in_losat_words("BLAST query error: CFastaReader: Near line 1, there's a line that doesn't look like plausible data, but it's not marked as defline or comment.")
         );
     }
 

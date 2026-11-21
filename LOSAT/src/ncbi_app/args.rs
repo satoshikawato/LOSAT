@@ -23,6 +23,8 @@ use super::Tool;
 pub(crate) enum Kind {
     Flag,
     Text,
+    /// `eBoolean`: `CArg_Boolean` (`NStr::StringToBool`).
+    Boolean,
     Integer,
     /// `eDouble`: `CArg_Double` (`NStr::StringToDouble` with `fDecimalPosixOrLocal`).
     Double,
@@ -37,6 +39,7 @@ impl Kind {
         match self {
             Kind::Flag => "Boolean",
             Kind::Text => "String",
+            Kind::Boolean => "Boolean",
             Kind::Integer => "Integer",
             Kind::Double => "Real",
             Kind::InputFile => "File_In",
@@ -45,9 +48,10 @@ impl Kind {
     }
 }
 
-/// The number of an `eInteger` or `eDouble` key.
+/// The converted value of an `eBoolean`, `eInteger` or `eDouble` key.
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Number {
+    Boolean(bool),
     Integer(i32),
     Double(f64),
 }
@@ -60,6 +64,9 @@ pub(crate) enum Constraint {
     Strings(&'static [&'static str]),
     /// `CArgAllowValuesGreaterThanOrEqual(min)` (blast_input_aux.hpp:101-121).
     AtLeast(i64),
+    /// `CArgAllow_Integers(min, max)`: an integer from `min` to `max`.
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:4686-4695
+    Integers(i64, i64),
 }
 
 impl Constraint {
@@ -71,7 +78,27 @@ impl Constraint {
                 .collect::<Vec<_>>()
                 .join(", "),
             Constraint::AtLeast(min) => format!(">={min}"),
+            Constraint::Integers(min, max) => integers_usage(min, max),
         }
+    }
+}
+
+/// `CArgAllow_Integers::GetUsage` of one range: the number when `min == max`, a bound when the
+/// other is `int`'s limit, else `min..max` (`CArgAllow_Int8s::GetUsage`).
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:4778-4794
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:4698-4724
+fn integers_usage(min: i64, max: i64) -> String {
+    let (int_min, int_max) = (i64::from(i32::MIN), i64::from(i32::MAX));
+    if min == max {
+        min.to_string()
+    } else if min == int_min && max != int_max {
+        format!("less or equal to {max}")
+    } else if min != int_min && max == int_max {
+        format!("greater or equal to {min}")
+    } else if min == int_min && max == int_max {
+        String::new()
+    } else {
+        format!("{min}..{max}")
     }
 }
 
@@ -83,6 +110,19 @@ pub(crate) struct Desc {
     constraint: Option<Constraint>,
     /// `AddKey`: the key must be given (`CArgDescMandatory`).
     mandatory: bool,
+}
+
+#[cfg(test)]
+impl Desc {
+    /// The argument's name.
+    pub(crate) fn name(&self) -> &'static str {
+        self.name
+    }
+
+    /// The usage of its constraint (`CArgAllow::GetUsage`), as `-help` prints it.
+    pub(crate) fn constraint_usage(&self) -> Option<String> {
+        self.constraint.map(Constraint::usage)
+    }
 }
 
 /// `AddFlag(name, comment, true)`: a flag that its word sets (every flag of LOSAT's programs).
@@ -267,6 +307,21 @@ impl Args {
     /// `args[name]` (and `AsBoolean`) of the flag `name`: whether its word was given.
     pub(crate) fn flag(&self, name: &str) -> bool {
         self.given(name)
+    }
+
+    /// `args[name].AsString()` inside `Run`: the value of the key `name`, or NCBI's exception
+    /// of an argument without a value (`CArg_NoValue`), which the application reports as one of
+    /// the reader's (`Diag::run_arg_exception`).
+    pub(crate) fn as_string(&self, name: &str) -> Result<&str, ArgException> {
+        self.value(name).ok_or_else(|| no_value(name))
+    }
+
+    /// `AsBoolean()` of the `eBoolean` key `name`: given, or its default.
+    pub(crate) fn boolean(&self, name: &str) -> Option<bool> {
+        match self.numbers.get(name) {
+            Some(&Number::Boolean(value)) => Some(value),
+            _ => None,
+        }
     }
 
     /// `AsInteger()` of the `eInteger` key `name`: given, or its default.
@@ -484,6 +539,7 @@ fn is_argument_name(name: &str) -> bool {
 /// type, then its constraint; the number of an `eInteger` or `eDouble` key.
 fn process_value(tool: &Tool, desc: &Desc, value: &str) -> Result<Option<Number>, ArgsError> {
     let number = match desc.kind {
+        Kind::Boolean => Some(boolean_value(desc, value)?),
         Kind::Integer => Some(Number::Integer(integer_value(tool, desc, value)?)),
         Kind::Double => Some(double_value(desc, value)?),
         Kind::Text | Kind::Flag | Kind::InputFile | Kind::OutputFile => None,
@@ -496,7 +552,12 @@ fn process_value(tool: &Tool, desc: &Desc, value: &str) -> Result<Option<Number>
         Some(Constraint::AtLeast(min)) => match number {
             Some(Number::Integer(number)) => i64::from(number) >= min,
             Some(Number::Double(number)) => number >= min as f64,
-            None => false,
+            Some(Number::Boolean(_)) | None => false,
+        },
+        // `s_StringToInt8(value)` within the range: the integer `integer_value` converted.
+        Some(Constraint::Integers(min, max)) => match number {
+            Some(Number::Integer(number)) => (min..=max).contains(&i64::from(number)),
+            _ => false,
         },
     };
     match desc.constraint {
@@ -553,6 +614,24 @@ fn integer_value(tool: &Tool, desc: &Desc, value: &str) -> Result<i32, ArgsError
             arg_message(desc.name, "Integer value is out of range", value),
         )
     })
+}
+
+/// The value of an `eBoolean` key (`CArg_Boolean`): `NStr::StringToBool`, whose exception
+/// (`String cannot be converted to bool`, position 0) is the predecessor of the reader's.
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:489-498
+// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:2817-2839
+fn boolean_value(desc: &Desc, value: &str) -> Result<Number, ArgsError> {
+    match crate::ncbi_str::string_to_bool(value) {
+        Some(value) => Ok(Number::Boolean(value)),
+        None => Err(ArgsError::Invalid(ArgException {
+            code: "eConvert",
+            messages: vec![
+                crate::wording::losat_text("String cannot be converted to bool (m_Pos = 0)")
+                    .into_owned(),
+                arg_message(desc.name, "Argument cannot be converted", value),
+            ],
+        })),
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:460-469

@@ -57,6 +57,8 @@ mod makeblastdb_output_streams;
 mod makeblastdb_past_32_bits;
 #[path = "../makeblastdb_rename_lock.rs"]
 mod makeblastdb_rename_lock;
+#[path = "../makembindex_fixtures.rs"]
+mod makembindex_fixtures;
 #[path = "../masker_fixtures.rs"]
 mod masker_fixtures;
 #[path = "../ncbi_lookup_paths.rs"]
@@ -121,6 +123,8 @@ mod parse_deflines_subject;
 mod redo_contain_idx;
 #[path = "../report_counts_cli.rs"]
 mod report_counts_cli;
+#[path = "../rps_pipeline.rs"]
+mod rps_pipeline;
 #[path = "../rpsbproc_fixtures.rs"]
 mod rpsbproc_fixtures;
 #[path = "../search_environment.rs"]

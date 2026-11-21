@@ -78,7 +78,10 @@ def fixtures(directory):
 # LENGTH 4294967296000000000 in l4295, 4294967295999999999 in l4294, 68719476736 and 98784247808 in
 # avg2p32), which the WASI commands run (`main`, "db-total").
 DB_TOTAL_ROWS = ["db.cnt.l4295.bn", "db.cnt.avg2p32.bn", "db.cnt.l4295.bp.0", "db.cnt.l4295.bp.5",
-                 "db.cnt.l4295.bp.15", "db.cnt.l4294.bp.0", "db.cnt.avg2p32.bp_c0", "db.cnt.avg2p32.tx"]
+                 "db.cnt.l4295.bp.15", "db.cnt.l4294.bp.0", "db.cnt.avg2p32.bp_c0", "db.cnt.avg2p32.tx",
+                 "db.cnt.avg2p32.mb.split.6", "db.cnt.avg2p32.mb.split.0", "db.cnt.avg2p32.mb.split.7",
+                 "db.cnt.avg2p32.mb.split.b1.7", "db.cnt.avg2p32.mb.split.nq", "db.cnt.avg2p32.mb.whole.6",
+                 "db.cnt.avg2p32.mo00.split.6", "db.cnt.avg2p32.mo52.split.6"]
 
 
 # NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1098-1108

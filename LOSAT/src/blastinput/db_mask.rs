@@ -338,12 +338,11 @@ pub enum HardScan {
         scanned_word: usize,
     },
     /// blastp and blastx (protein subjects, series NP, M4b): chunks from their hard range's left
-    /// (`residual` 0). A mask that runs to the end after the chunk from the start is searched over
-    /// that chunk alone, at every word (`HardMaskShape::TailMask` is never refused here: the
-    /// approved NCBI defect of [`TAIL_MASK_SEARCHED_WORD`] for these programs, PD-LOSAT-NCBI-DEFECTS
-    /// exception 18; the Owner's answer Q1 = B of M4b, 2026-11-21); the same chunk after an empty
-    /// mask at 0 is refused (`HardMaskShape::FrameStartMask` of frame 0: NCBI frees memory that it
-    /// did not allocate). A hard range longer than `MAX_DBSEQ_LEN`, which NCBI cuts into chunks
+    /// (`residual` 0). A mask that runs to the end after the chunk from the start (after empty
+    /// masks at 0 too) is searched over that chunk alone, at every word (`HardMaskShape::TailMask`
+    /// is never refused here: the approved NCBI defect of [`TAIL_MASK_SEARCHED_WORD`] for these
+    /// programs, PD-LOSAT-NCBI-DEFECTS exception 18; the Owner's answer Q1 = B of M4b,
+    /// 2026-11-21). A hard range longer than `MAX_DBSEQ_LEN`, which NCBI cuts into chunks
     /// that its merge joins across their overlap, is refused (`HardMaskShape::LongRange`), as is
     /// a mask that ends past the sequence (`HardMaskShape::PastEnd`). A chunk shorter than the
     /// word is searched as NCBI searches it, in both scans: the one-hit scan (`-window_size 0`)
@@ -425,9 +424,6 @@ pub enum HardMaskShape {
     /// `x / 3` from frame -1's length). The earlier chunk allocates NCBI's list of ranges, the
     /// "no chunking" branch points the list at the backup's full range, and NCBI BLAST+ 2.17.0
     /// frees that pointer when it restores the subject (a crash in every run, M/m4b/NOTES_M4B2.md).
-    /// Frame 0 is the same chunk of a protein subject (`HardScan::Protein`): an empty mask
-    /// `[0, 0)` (`start` and `end`), which makeblastdb does not write, before a mask that runs to
-    /// the end. Refused until the Owner answers question Q4 of M4b.
     FrameStartMask { frame: i8, start: u32, end: u32 },
     /// A mask `[start, end)` that ends past the sequence's `length` letters, in a protein program
     /// (`HardScan::Protein`; series NP, M4b; review L1 of PR 1) or a translated one
@@ -524,9 +520,8 @@ impl HardMaskShape {
     /// The protein programs' scan (`HardScan::Protein`, series NP, M4b) has chunks that start at
     /// their range's left, so that `ShortLastMask` (a residual before the final chunk's range)
     /// never occurs, a mask that runs to the end after the chunk from the start is searched over
-    /// that chunk (series NP, M4b-3) unless that chunk follows an earlier chunk at 0 (an empty
-    /// mask at 0: `FrameStartMask` of frame 0, NCBI's crash), a mask that ends past the sequence
-    /// is `PastEnd` (before its chunks: its last hard range would be inverted), and a hard range
+    /// that chunk (series NP, M4b-3), a mask that ends past the sequence is `PastEnd` (before its
+    /// chunks: its last hard range would be inverted), and a hard range
     /// longer than `MAX_DBSEQ_LEN` is `LongRange`.
     pub fn of_scan(
         masks: &[(u32, u32)],
@@ -624,16 +619,6 @@ impl HardMaskShape {
         // range, and of the chunk's own range so far.
         let (mut before_range, mut in_range, mut range) = (0usize, 0usize, 0usize);
         while let Some(chunk) = split.next_chunk(DBSEQ_CHUNK_OVERLAP) {
-            if chunk.full_range && chunk.range > 0 && matches!(scan, HardScan::Protein) {
-                // Only chunks at 0 come before it: the empty masks at 0, the one before its range
-                // named (`FrameStartMask` of frame 0).
-                let (start, end) = masks[chunk.range - 1];
-                return Some(HardMaskShape::FrameStartMask {
-                    frame: 0,
-                    start,
-                    end,
-                });
-            }
             if chunk.range != range {
                 (before_range, in_range, range) = (before_range.max(in_range), 0, chunk.range);
             }
@@ -736,15 +721,6 @@ impl HardMaskShape {
                  while it extends within the chunk (at a word of fewer than \
                  {TAIL_MASK_SEARCHED_WORD} letters: rows that differ from a near input's, or a \
                  crash)"
-            ),
-            HardMaskShape::FrameStartMask {
-                frame: 0,
-                start,
-                end,
-            } => format!(
-                "has an empty mask, [{start}, {end}), at its start, followed by a part from its \
-                 start that NCBI BLAST+ 2.17.0 searches as the whole sequence: NCBI then frees \
-                 memory that it did not allocate (a crash in every run)"
             ),
             HardMaskShape::FrameStartMask { frame, start, end } => format!(
                 "has a mask, [{start}, {end}), that leaves reading frame {frame:+} an empty part \

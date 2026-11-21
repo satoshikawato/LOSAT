@@ -876,21 +876,11 @@ fn protein_shapes_of_the_hard_masks() {
     // that chunk, at every word; masked whole too.
     assert_eq!(of(&[(10, 100)], 100, protein), None);
     assert_eq!(of(&[(0, 100)], 100, protein), None);
-    // The same chunk after an empty mask at 0 (not written by makeblastdb): NCBI's "no chunking"
-    // branch after an allocated chunk, a crash (question Q4 of M4b).
-    let restart = of(&[(0, 0), (10, 100)], 100, protein);
-    assert_eq!(
-        restart,
-        Some(HardMaskShape::FrameStartMask {
-            frame: 0,
-            start: 0,
-            end: 0
-        })
-    );
-    assert!(restart
-        .unwrap()
-        .text()
-        .starts_with("has an empty mask, [0, 0), at its start, followed by a part"));
+    // The same chunk after an empty mask at 0 (a hand mask `from 0, to 4294967295`), as in
+    // BLASTN: searched over that chunk (NCBI's "no chunking" branch after an allocated chunk
+    // frees memory that it did not allocate; the near input's normal chunks give the result).
+    assert_eq!(of(&[(0, 0), (10, 100)], 100, protein), None);
+    assert_eq!(of(&[(0, 0), (0, 0), (0, 100)], 100, protein), None);
     // A mask that ends past the sequence, or starts past it: its own shape, not a long range.
     let past = of(&[(10, 20), (90, 120)], 100, protein);
     assert_eq!(

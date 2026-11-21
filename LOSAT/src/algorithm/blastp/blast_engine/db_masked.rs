@@ -164,9 +164,9 @@ impl BlastpDbMasking<'_> {
 /// (`SubjectPlan::next_searched_chunk`). Every chunk is searched over its own letters, the chunk
 /// from the start before a mask that runs to the end included, which NCBI scans past its end (its
 /// "no chunking" branch; an approved NCBI defect, PD-LOSAT-NCBI-DEFECTS exception 18, the Owner's
-/// answer Q1 = B of M4b). The sequences that LOSAT refuses never come here: that chunk after an
-/// empty mask at 0 (`HardMaskShape::FrameStartMask`), a mask past the sequence's end
-/// (`HardMaskShape::PastEnd`) and a range longer than `MAX_DBSEQ_LEN` (`HardMaskShape::LongRange`).
+/// answer Q1 = B of M4b). The sequences that LOSAT refuses never come here: a mask past the
+/// sequence's end (`HardMaskShape::PastEnd`) and a range longer than `MAX_DBSEQ_LEN`
+/// (`HardMaskShape::LongRange`).
 fn hard_chunks(
     kernel: &BlastpPrelimKernel<'_>,
     scratch: &mut BlastpSubjectScratch,

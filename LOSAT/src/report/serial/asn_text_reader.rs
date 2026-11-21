@@ -226,7 +226,7 @@ impl<'a> SliceSource<'a> {
 impl AsnSource for SliceSource<'_> {
     #[inline]
     fn rest(&self, pos: usize) -> &[u8] {
-        self.text.get(pos..).unwrap_or_default()
+        &self.text[pos.min(self.text.len())..]
     }
 
     /// The whole text is kept: only a byte inside it is there.
@@ -311,9 +311,7 @@ impl<R: Read> AsnSource for StreamSource<R> {
     #[inline]
     fn rest(&self, pos: usize) -> &[u8] {
         // A released position wraps to past the buffer: `fill_to` stops at it.
-        self.buf
-            .get(pos.wrapping_sub(self.base)..)
-            .unwrap_or_default()
+        &self.buf[pos.wrapping_sub(self.base).min(self.buf.len())..]
     }
 
     #[inline]
@@ -337,6 +335,9 @@ impl<R: Read> AsnSource for StreamSource<R> {
         }
     }
 }
+
+/// `Reader::white_space_from`'s byte at the end of the text: more than any byte.
+const END_OF_TEXT: u32 = 0x100;
 
 /// The number of `' '` at the start of `bytes`.
 #[inline]
@@ -564,22 +565,22 @@ impl<S: AsnSource> Reader<S> {
             }
         }
         match self.white_space_from(pos) {
-            (pos, Some(c)) => Ok((pos, c)),
-            (pos, None) => {
+            (pos, END_OF_TEXT) => {
                 self.pos = pos;
                 Err(self.end_of_text_in_white_space())
             }
+            (pos, c) => Ok((pos, c as u8)),
         }
     }
 
     /// [`white_space_at`](Self::white_space_at) from a byte that may be white space, a comment,
     /// not kept yet or past the end of the text: the position of the byte found and the byte, or
-    /// the position where the text ends and `None`. (Two words, which a call returns in
-    /// registers.)
+    /// the position where the text ends and [`END_OF_TEXT`]. (A pair of numbers, which a call
+    /// returns in registers.)
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:207-274
     // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:213-253
     #[inline(never)]
-    fn white_space_from(&mut self, mut pos: usize) -> (usize, Option<u8>) {
+    fn white_space_from(&mut self, mut pos: usize) -> (usize, u32) {
         // The line ends found, added to `line` once (when there are any).
         let mut lines = 0;
         loop {
@@ -615,7 +616,7 @@ impl<S: AsnSource> Reader<S> {
                     // The byte found.
                     _ => {
                         self.add_lines(lines);
-                        return (pos + i, Some(c));
+                        return (pos + i, c.into());
                     }
                 }
             };
@@ -634,19 +635,19 @@ impl<S: AsnSource> Reader<S> {
                         None => {
                             // `comment_at` set `pos` where the text ends.
                             self.add_lines(lines);
-                            return (self.pos, None);
+                            return (self.pos, END_OF_TEXT);
                         }
                     },
                     Some(_) => {
                         self.add_lines(lines);
-                        return (pos, Some(b'-'));
+                        return (pos, b'-'.into());
                     }
                 },
                 Some(c) => pos = self.end_of_line_at(pos, c),
             }
         }
         self.add_lines(lines);
-        (pos, None)
+        (pos, END_OF_TEXT)
     }
 
     /// Adds `lines` line ends to `line` (no access to `line` when there are none).

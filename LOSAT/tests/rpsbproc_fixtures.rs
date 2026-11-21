@@ -533,7 +533,14 @@ fn tied_rows_differ_from_ncbi_only_in_the_order_of_tied_hits() {
     let read = |dir: &str, case: &str, suffix: &str| {
         fs::read(fixtures().join(dir).join(format!("{case}.{suffix}"))).unwrap()
     };
-    let in_losat_words = |bytes: Vec<u8>| losat::wording::losat_output_bytes(&bytes).into_owned();
+    // Both sides in LOSAT's words, as `assert_same` reads a case's files: NCBI's frozen bytes and
+    // the `tied` files, which LOSAT wrote before it stated its own version (AGENTS.md rule 8).
+    let in_losat_words = |bytes: Vec<u8>| {
+        keep_the_sessions(
+            &bytes,
+            losat::wording::losat_output_bytes(&bytes).into_owned(),
+        )
+    };
     let table = fs::read_to_string(fixtures().join("tied").join("CLASSES.tsv")).unwrap();
     let mut listed = Vec::new();
     for line in table.lines().skip(1).filter(|line| !line.is_empty()) {
@@ -552,12 +559,12 @@ fn tied_rows_differ_from_ncbi_only_in_the_order_of_tied_hits() {
         for suffix in ["err", "rc"] {
             assert_eq!(
                 in_losat_words(read("oracle", case, suffix)),
-                read("tied", case, suffix),
+                in_losat_words(read("tied", case, suffix)),
                 "{case}: {suffix}"
             );
         }
         let ncbi = in_losat_words(read("oracle", case, "out"));
-        let losat = read("tied", case, "out");
+        let losat = in_losat_words(read("tied", case, "out"));
         assert_eq!(tied_difference(&ncbi, &losat), Ok(expected), "{case}");
         listed.push(case.to_string());
     }

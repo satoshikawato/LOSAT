@@ -59,8 +59,9 @@
 
 use super::extension::{BlastpTwoHitUngappedResult, BlastpUngappedData};
 use super::x_ungapped_fast::Table;
-// The key walks (`walk`, `best_of`) and the query codes they read (`XQueryCode`) are in
-// algorithm/common (`x_key_walk.rs`), where TBLASTX's sentinel walks take them too.
+// The key walks (`walk`, `best_of`), their keys (`KeyTable`) and the query codes they read
+// (`XQueryCode`) are in algorithm/common (`x_key_walk.rs`), where TBLASTX's sentinel walks take
+// them too.
 use crate::algorithm::common::x_key_walk::{best_of, walk, KEY_TABLE_LEN};
 pub(crate) use crate::algorithm::common::x_key_walk::{KeyTable, XQueryCode};
 use std::sync::OnceLock;

@@ -20,8 +20,8 @@
 //! of the best beside the key. The walks have no bound test: the callers' buffers end in sentinels
 //! whose keys stop them (each caller's module comment gives the argument for its buffers).
 
-/// The codes below 32: a step reads the key of query code `q` against subject code `s` at
-/// `q << 5 | s`.
+/// The number of keys: one for each pair of codes below 32, the key of query code `q` against
+/// subject code `s` at `q << 5 | s`.
 pub(crate) const KEY_TABLE_LEN: usize = 32 * 32;
 
 /// The key of a step for every pair of codes below 32 (`q << 5 | s`): `(t << 32) - 1`, `t` the

@@ -741,7 +741,7 @@ fn write_round_epilogs(
         None => args.subject_taxdb_found,
     };
     for format in outputs.formats.iter_mut() {
-        if let Some(spec) = super::super::tabular::custom_tabular_spec(format.outfmt) {
+        if let Some(spec) = super::super::tabular::custom_tabular_spec(format.outfmt, args.app) {
             let mut writer = format.sink.open()?;
             super::super::tabular::write_tabular_round_epilog(
                 spec,

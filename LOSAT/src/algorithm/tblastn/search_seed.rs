@@ -710,11 +710,23 @@ pub(super) fn x_scan_plan(
         match subject {
             // The plan is made from the sequence's bytes, read
             // for it (a database sequence has no lower-case letters).
+            // In a masked search (`-db_soft_mask`, `-db_hard_mask`; series NP, M4b PR 2) every
+            // sequence's units follow from its ranges in bases (`XDbStream::mask_ranges`).
             XPrelimSubject::Stream(stream, oid, _) => stream.with_block(oid, |sequence| {
+                let length = sequence.len();
+                let ranges = stream.mask_ranges(oid, length)?;
+                let db_mask =
+                    ranges
+                        .as_deref()
+                        .map(|ranges| super::x_subject_translate::XDbMaskRanges {
+                            ranges,
+                            hard: stream.mask().is_some_and(|mask| mask.hard()),
+                        });
                 super::x_subject_translate::x_packed_bytes_plan(
                     sequence.packed(),
-                    sequence.len(),
+                    length,
                     db_gencode,
+                    db_mask,
                 )
             }),
             XPrelimSubject::Nt(SubjectNt::Letters(letters)) => {

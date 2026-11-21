@@ -50,14 +50,18 @@ impl BlastnOutputFormat {
     ///
     /// `choice` is the format choice: SAM reads its custom specification (`SQ`, `SR`), and the
     /// tabular formats with a field list or a delimiter, and outfmt 10 and 20, are the custom
-    /// tabular report (`report::tabular::TabularSpec::of`).
+    /// tabular report (`report::tabular::TabularSpec::of_app`).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:770-786
     pub(crate) fn of(
         format: ReportFormat,
         choice: &crate::blastinput::app::FormatChoice,
     ) -> anyhow::Result<Self> {
-        if let Some(spec) = crate::report::tabular::TabularSpec::of(format, choice) {
+        if let Some(spec) = crate::report::tabular::TabularSpec::of_app(
+            format,
+            choice,
+            crate::report::archive::options::RequestKind::Blastn,
+        ) {
             return Ok(BlastnOutputFormat::CustomTabular(spec.intern()));
         }
         if let Some(view) = crate::report::pairwise::PairwiseView::of(format) {

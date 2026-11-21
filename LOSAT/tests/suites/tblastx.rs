@@ -8,6 +8,8 @@
 
 #[path = "../run_local_tblastx.rs"]
 mod run_local_tblastx;
+#[path = "../tblastx_avg0_one_subject.rs"]
+mod tblastx_avg0_one_subject;
 #[path = "../tblastx_band.rs"]
 mod tblastx_band;
 #[path = "../tblastx_batch_pipe.rs"]

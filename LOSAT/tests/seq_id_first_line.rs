@@ -147,7 +147,11 @@ fn the_five_programs_refuse_a_seq_id_first_line_with_one_text() {
                         assert_eq!(status, 1, "{what}: {stderr}");
                         let report = String::from_utf8_lossy(&stdout);
                         if outfmt == "0" && role == "query" {
-                            let prolog = format!("{} 2.17.0+\n", program.to_uppercase());
+                            let prolog = format!(
+                                "{} (LOSAT {})\n",
+                                program.to_uppercase(),
+                                env!("CARGO_PKG_VERSION")
+                            );
                             assert!(
                                 report.starts_with(&prolog) && !report.contains("Query="),
                                 "{what}: {report}"
@@ -227,12 +231,12 @@ fn with_the_data_loaders_off_the_line_is_read_as_ncbi_reads_it() {
                     ("query", true) => (
                         1,
                         b"",
-                        "BLAST query error: CFastaReader: Input doesn't start with a defline or comment around line 1\n",
+                        "LOSAT query error: CFastaReader: Input doesn't start with a defline or comment around line 1\n",
                     ),
                     _ => (
                         1,
                         b"",
-                        "BLAST query/options error: Query input doesn't start with a defline or comment, line 1\0\nPlease refer to the LOSAT user manual.\n",
+                        "LOSAT query/options error: Query input doesn't start with a defline or comment, line 1\0\nPlease refer to the LOSAT user manual.\n",
                     ),
                 };
                 let (status, stdout, stderr) = &runs[0];

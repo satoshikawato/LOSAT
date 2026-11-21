@@ -16,7 +16,7 @@ You need two things.
 
 **1. A BLAST archive.** `rpsbproc` reads the ASN.1 text archive that `rpsblast -outfmt 11` or `rpstblastn -outfmt 11` writes, with one archive per batch of queries. Give it with `-i FILE`, or pipe it to the standard input. It also reads the BLAST XML of `-outfmt 5`, as NCBI's `rpsbproc` does, but prints NCBI's warning that XML support is deprecated.
 
-LOSAT's own `rpsblast` and `rpstblastn` write the archive with NCBI BLAST+ 2.17.0's bytes, so the two can be piped (one archive per batch of queries reaches the standard input as NCBI's do), and NCBI's `rpsblast` and `rpstblastn` work as well. For example:
+LOSAT's own `rpsblast` and `rpstblastn` write the archive with NCBI BLAST+ 2.17.0's bytes (apart from the `ident`, which holds LOSAT's version), so the two can be piped (one archive per batch of queries reaches the standard input as NCBI's do), and NCBI's `rpsblast` and `rpstblastn` work as well. For example:
 
 ```bash
 losat rpsblast -query proteins.faa -db Cdd -evalue 0.01 -outfmt 11 | losat rpsbproc -d cdd_data -t doms -m rep -f

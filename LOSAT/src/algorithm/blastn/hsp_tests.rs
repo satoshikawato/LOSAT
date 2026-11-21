@@ -342,7 +342,11 @@ fn test_blastn_outfmt7_header_matches_ncbi_shape() {
 
     assert_eq!(
         String::from_utf8(output).unwrap(),
-        "# BLASTN 2.17.0+\n# Query: query full description\n# Database: User specified sequence set (Input: subject.fasta)\n# 0 hits found\n# BLAST processed 1 queries\n"
+        concat!(
+            "# BLASTN (LOSAT ",
+            env!("CARGO_PKG_VERSION"),
+            ")\n# Query: query full description\n# Database: User specified sequence set (Input: subject.fasta)\n# 0 hits found\n# BLAST processed 1 queries\n"
+        )
     );
     // A query of a batch that NCBI did not search has no count.
     let mut output = Vec::new();

@@ -122,7 +122,11 @@ fn a_chunk_without_a_query_in_batch_2_is_refused_before_a_split_again() {
     // q31's `# Query:` line.
     let batch1 = alone7
         .stdout
-        .find("# BLASTP 2.17.0+\n# Query: q31")
+        .find(concat!(
+            "# BLASTP (LOSAT ",
+            env!("CARGO_PKG_VERSION"),
+            ")\n# Query: q31"
+        ))
         .expect("q31's report");
     for threads in [1, 4] {
         let commented = search("tests/fasta/x4/chunk_empty.faa", "7", threads, &env);
@@ -159,7 +163,11 @@ fn a_negative_pair_that_leaves_chunks_without_a_query_in_batch_2_is_refused_afte
     assert!(!qa.is_empty());
     let batch1 = whole7
         .stdout
-        .find("# BLASTP 2.17.0+\n# Query: ql")
+        .find(concat!(
+            "# BLASTP (LOSAT ",
+            env!("CARGO_PKG_VERSION"),
+            ")\n# Query: ql"
+        ))
         .expect("ql's report");
     for threads in [1, 4] {
         let run = search("tests/fasta/outfmt0/xsb_ql.faa", "6", threads, &env);

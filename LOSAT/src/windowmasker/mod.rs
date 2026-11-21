@@ -214,12 +214,11 @@ fn dependencies() -> Vec<(&'static str, Dep, &'static str)> {
 }
 
 // NCBI reference (598d8ae6): c++/src/app/winmasker/win_mask_app.cpp:79-84
-/// windowmasker as NCBI's application runs it (`ncbi_app`): its own version and no prefix on
-/// its diagnostics.
+/// windowmasker as NCBI's application runs it (`ncbi_app`): LOSAT's version where NCBI's states its
+/// own (`ncbi_version::print`) and no prefix on its diagnostics.
 static TOOL: Tool = Tool {
     program: "windowmasker",
     refusal_name: PROGRAM,
-    version: "1.0.0",
     help: HELP,
     descs: DESCS,
     dependencies,

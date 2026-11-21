@@ -13,7 +13,7 @@ use std::borrow::Cow;
 
 /// The text NCBI BLAST+ appends for the operating system error of `error`, or `None` where LOSAT
 /// does not know it: an error without a system code (a read that ended early), a code outside
-/// [`ORACLE_TEXTS`] in LOSAT Web, or a platform whose text NCBI takes from another call (Windows),
+/// `ORACLE_TEXTS` in LOSAT Web, or a platform whose text NCBI takes from another call (Windows),
 /// where the caller keeps LOSAT's own words.
 pub(crate) fn ncbi_strerror(error: &std::io::Error) -> Option<Cow<'static, str>> {
     let code = error.raw_os_error()?;

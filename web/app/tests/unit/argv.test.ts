@@ -115,17 +115,23 @@ describe('buildArgv', () => {
     }
   });
 
-  // The database masks of the BLASTN, BLASTP and BLASTX CLIs: their parser would name -subject,
-  // which the browser sets itself (WA-FM-04); the other modes' engines refuse them by name.
-  it('refuses the database masks of BLASTN, BLASTP and BLASTX, also written -flag=value', () => {
-    expect(DATABASE_MASK_PROGRAMS).toEqual(['blastn', 'blastp', 'blastx']);
+  // The database masks of every mode's CLI: their parser would name -subject, which the browser
+  // sets itself (WA-FM-04).
+  it('refuses the database masks of every mode, also written -flag=value', () => {
+    expect(DATABASE_MASK_PROGRAMS).toEqual(['blastn', 'blastp', 'blastx', 'tblastn', 'tblastx']);
     for (const program of DATABASE_MASK_PROGRAMS) {
       for (const flag of DATABASE_MASK_FLAGS) {
         expect(extra(program, [flag, '11']), `${program} ${flag}`).toThrow(`${flag} (a database search filter) is not supported in the browser yet`);
         expect(extra(program, [`${flag}=dust`]), `${program} ${flag}`).toThrow(`${flag} (a database search filter) is not supported in the browser yet`);
       }
     }
-    expect(extra('tblastn', ['-db_soft_mask', '21'])()).toEqual(['tblastn', '-query', 'q.fa', '-subject', 's.fa', '-db_soft_mask', '21']);
+  });
+
+  // BLASTN's -filtering_db searches a BLAST database of repeats, which the browser build cannot read.
+  it('refuses the database of repeats of BLASTN, also written -flag=value', () => {
+    for (const words of [['-filtering_db', 'repeats'], ['-filtering_db=repeats']]) {
+      expect(extra('blastn', words)).toThrow(/^-filtering_db \(a BLAST database of repeats\) is not supported in the browser yet$/);
+    }
   });
 
   it("lists the database masks in the engine's options of the modes that have them (describe)", () => {

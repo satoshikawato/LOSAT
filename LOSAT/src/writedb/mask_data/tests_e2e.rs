@@ -133,7 +133,7 @@ pub(super) fn run_case_with(
         let warn_ref: Warn<'_> = &mut warn;
         let mut db = BuildDatabase::new(
             out_base,
-            &case.title,
+            case.title.as_bytes(),
             case.protein,
             &mut log,
             &time_of(index_date),
@@ -1265,7 +1265,7 @@ fn the_message_of_a_run_without_matching_masks_is_ncbi_s() {
     let tmp = TempDir::new("mask-destructor");
     let mut db = BuildDatabase::new(
         &tmp.base("db"),
-        "t",
+        b"t",
         true,
         &mut log,
         &time_of("Oct 12, 2026  3:22 PM"),

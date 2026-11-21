@@ -7,7 +7,8 @@ use super::view::V;
 use std::collections::HashMap;
 
 use crate::seqid::mask_handle::{
-    handle_seq_id, mask_handle_key, mask_handle_order, mask_handle_packed, GiimTree, TreeHandle,
+    handle_seq_id, mask_handle_key, mask_handle_order, mask_handle_packed, mask_info_key, GiimTree,
+    TreeHandle,
 };
 use crate::seqid::model::GiimportId;
 use crate::seqid::ParsedSeqId;
@@ -289,14 +290,12 @@ impl Handle {
 
     /// `CSeq_id_Handle::GetHandle(id)` of a handle that lives as long as the run (a Bioseq's Seq-id,
     /// `CBioseq_Info::m_Id`; a Seq-table column's default, `CSeqTableLocColumns::m_DefaultIdHandle`):
-    /// the first such lookup of a keyed handle makes its info (`LiveHandles::made_from`).
+    /// the first such lookup of a keyed handle makes its info (`LiveHandles::made_from`: the info
+    /// of an accession is shared with every other number of its prefix, digit count and version).
     pub(super) fn of_run(id: &ParsedSeqId, handles: &mut LiveHandles) -> Handle {
         let handle = Handle::of(id, handles);
-        if let Handle::Key { key, .. } = &handle {
-            handles
-                .made_from
-                .entry(key.clone())
-                .or_insert_with(|| id.clone());
+        if let (Handle::Key { .. }, Ok(Some(info))) = (&handle, mask_info_key(id)) {
+            handles.made_from.entry(info).or_insert_with(|| id.clone());
         }
         handles.mapped(&handle);
         handles.end_object();
@@ -363,8 +362,10 @@ pub(super) struct LiveHandles {
     tree: GiimTree,
     /// What holds each live `giim` handle: its number and holders, by its info.
     holds: HashMap<usize, (i32, Holds)>,
-    /// The Seq-id that made the info of each keyed handle of the run, the first of the run to
-    /// have it (the phase C handles: no other handle is made before the attach).
+    /// The Seq-id that made each info of the keyed handles of the run (by `mask_info_key`: the
+    /// info of a packing Textseq-id is shared by the accessions of one prefix, digit count and
+    /// version), the first of the run to have it (the phase C handles: no other handle is made
+    /// before the attach).
     made_from: HashMap<Vec<u8>, ParsedSeqId>,
 }
 
@@ -487,15 +488,20 @@ impl LiveHandles {
     }
 
     // NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_handle.cpp:220-233
+    // NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.hpp:359-388 (the info of a packed
+    // Textseq-id is shared by its packed key, not by its accession: `seqid::mask_handle::mask_info_key`)
     /// `CSeq_id_Handle::AsString()` of `handle`, the handle of `id` that lives as long as the run:
     /// `GetSeqId()` (`seqid::mask_handle::handle_seq_id` of the Seq-id that made its info) in
     /// FASTA form (`gi|` and the number for a gi).
     pub(super) fn as_string(&self, handle: &Handle, id: &ParsedSeqId) -> String {
         let seq_id = match handle {
-            Handle::Key { key, .. } => self
-                .made_from
-                .get(key)
-                .map_or_else(|| id.clone(), |first| handle_seq_id(first, id)),
+            Handle::Key { .. } => match mask_info_key(id) {
+                Ok(Some(info)) => self
+                    .made_from
+                    .get(&info)
+                    .map_or_else(|| id.clone(), |first| handle_seq_id(first, id)),
+                _ => id.clone(),
+            },
             Handle::Giim { id: number, info } => {
                 ParsedSeqId::Giim(self.tree.made_from(*number, *info).clone())
             }

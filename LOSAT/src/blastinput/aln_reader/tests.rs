@@ -132,22 +132,6 @@ fn a_read_that_fails_is_not_available() {
     }
 }
 
-#[test]
-fn the_other_formats_are_refused_by_name() {
-    let refused: &[(&[u8], &str)] = &[
-        (b">a\nMKV-\n>b\nMKVL\n", "FASTA"),
-        (b"#NEXUS\nbegin data;\n", "NEXUS"),
-        (b" 2 5\nseq1 MKVLA\nseq2 MKVLA\n", "PHYLIP"),
-    ];
-    for (text, name) in refused {
-        assert_eq!(
-            read_alignment(text).unwrap_err(),
-            AlnError::Unsupported(name),
-            "{name}"
-        );
-    }
-}
-
 // `x_GetSequenceMolType`: a row with both T and U is the one error that is thrown from
 // `GetSeqEntry`, and printed.
 #[test]
@@ -289,19 +273,16 @@ fn every_scanned_id_parses_to_an_id_or_fails() {
 }
 
 // The two formats that the guess tells last (review probes `g.sequin`, `g.multalin` of line PS
-// item PS6: NCBI BLAST+ 2.17.0 fails to read both; LOSAT names the format it does not read).
+// item PS6: NCBI BLAST+ 2.17.0 fails to read both: its scanners find no sequence in them).
 #[test]
-fn sequin_and_multalin_are_refused_by_name() {
+fn sequin_and_multalin_samples_of_the_guess_are_not_read() {
     let sequin = b"\n        10        20        30        40        50        60\nBDT63543.1  --MRFIAFLAVVMLAAFIVAALFTANSNYLDGNINKNLDLTKSLQLHGSFTEDDIAANNT\nBDT63093.1  --MSFLAFLIVALLAAYVFSLLFTLNSNYLDHKINTSLDLTSSLKLQGQFTDKDRAENNR\n\n";
     assert_eq!(guess(sequin), AlignFormat::Sequin);
-    assert_eq!(
-        read_alignment(sequin).unwrap_err(),
-        AlnError::Unsupported("Sequin")
-    );
+    assert_eq!(read_alignment(sequin).unwrap_err(), AlnError::NotAvailable);
     let multalin = b"//\n\n       1          50\nBDT63543.1  --MRFIAFLAVVMLAAFIVAALFTANSNYLDGNINKNLDLTKSLQLHGSF\nBDT63093.1  --MSFLAFLIVALLAAYVFSLLFTLNSNYLDHKINTSLDLTSSLKLQGQF\n\n";
     assert_eq!(guess(multalin), AlignFormat::MultAlign);
     assert_eq!(
         read_alignment(multalin).unwrap_err(),
-        AlnError::Unsupported("MultAlin")
+        AlnError::NotAvailable
     );
 }

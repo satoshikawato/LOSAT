@@ -1322,7 +1322,7 @@ rows `db.minraw.*` (DI-6b: `-min_raw_gapped_score`; the queries
     losat makeblastdb -dbtype nucl -in tests/fasta/MejoMJNV.fasta -title MejoMJNV -out tests/db_search/mejo -blastdb_version 4
     rm tests/db_search/mejo.njs
 
-The row `db.blastn.ungapped_rej.17` (outfmt 17 with `-ungapped`) is a refusal until O4a-2; the rows `db.blastn.ungapped.{mb,bn}.{8,9,11,12}` (O4b) are NCBI's Dense-diag Seq-aligns of the same search.
+The rows `db.blastn.ungapped.{mb,bn}.{8,9,11,12}` (O4b) are NCBI's Dense-diag Seq-aligns of the same search; the rows `db.blastn.ungapped.mb.17` and `db.blastn.ungapped.bn.17b` (O4a-2) are its SAM (outfmt 17: one record per subject, its HSPs joined).
 
 ## Several databases in -db (DI-8f)
 
@@ -2244,7 +2244,7 @@ and after the fix) it keeps the first three where those two builds differ.
 `ps5`, `ph5` and `ph4` have the algorithms 21 (seg, defaults) and 22 (seg `-window 8 -locut 1.8 -hicut 2.1`); `phmv`
 (several volumes) and the `pe_*` databases have 21 only. `ps5` keeps `p4`, masked whole, and `pe_tail` has a masked
 tail: with `-db_hard_mask` both are searched over the part before the mask (the Owner's answer Q1 = B of M4b,
-PD-LOSAT-NCBI-DEFECTS exception 18, M4b-3), and their rows hold NCBI's run of the near input where NCBI's own run
+PD-LOSAT-NCBI-DEFECTS exception 19, M4b-3), and their rows hold NCBI's run of the near input where NCBI's own run
 crashes or differs from it: `ps5n` (`near_ps5.asnt`: `ps5`'s algorithm 21 written out by `segmasker -outfmt interval`,
 with `p4`'s mask one letter shorter, [0, 119)) and `pe_tailn` (`edge_tailn.asnt`: [300, 399)). `pe_e0tail`
 (`edge_e0tail.asnt`: an empty mask at 0, `from 0, to 4294967295`, which makeblastdb stores as [0, 0), then [300, 400))
@@ -2309,7 +2309,7 @@ volumes: `t1` and `t2`, `t3`, `t4`) and `tf4` have 11. `th1` has the hand masks 
 reading frames by its positions divided by 3 (the minus frames from frame -1's length); with `-db_hard_mask` a
 sequence whose masks leave NCBI one part of a frame to search, from the frame's start, that stops before the frame's
 end (`tf4`'s `t5`, `head` for frame -1, `tail` for frame +1, `near` for frames +2 and +3) is searched over that part
-alone (the Owner's answers Q1 = B and Q2 = B of M4b, PD-LOSAT-NCBI-DEFECTS exception 18, M4b-3). TBLASTX's rows of
+alone (the Owner's answers Q1 = B and Q2 = B of M4b, PD-LOSAT-NCBI-DEFECTS exception 19, M4b-3). TBLASTX's rows of
 `tail` and `near`, where NCBI writes an HSP once per seed past the part, hold NCBI's run of the near input `th2tn`
 (`hedge_tailn.asnt`: `t4` [1000, 1196), the fewest bases short of the end after which frames +1 to +3 each keep a
 letter after the mask; `nucl_t4n.fna` stores the 4 freed bases as `N`, so that they stay masked as LOSAT reads them);

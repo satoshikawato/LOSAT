@@ -258,7 +258,7 @@ fn seq_id<'s>(seq: &'s MaskedBioseq<'_>) -> &'s ParsedSeqId {
 ///
 /// NCBI reference (598d8ae6): c++/src/objmgr/bioseq_handle.cpp:939-985
 /// NCBI reference (598d8ae6): c++/src/objmgr/scope_impl.cpp:2102-2106
-/// NCBI reference (598d8ae6): c++/include/objects/seqloc/seq_id_handle.hpp:279-282
+/// NCBI reference (598d8ae6): c++/include/objects/seq/seq_id_handle.hpp:279-282
 /// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:609-627
 pub(crate) fn access_seq_id(ids: &[ParsedSeqId]) -> &ParsedSeqId {
     ids.iter()

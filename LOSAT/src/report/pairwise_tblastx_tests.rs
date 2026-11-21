@@ -1212,6 +1212,7 @@ fn an_unreadable_query_writes_one_line_for_each_hsp_with_the_subjects_id() {
         gapped_karlin: karlin,
         gumbel: None,
         gapped: true,
+        show_linked_set_size: false,
         num_descriptions: 500,
         num_alignments: 250,
     };

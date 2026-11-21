@@ -168,6 +168,12 @@ fn x_ring_buffer_dust_matches_reference_on_random_sequences() {
             fast, reference,
             "case {case}: level={level} window={window} linker={linker} start={start} stop={stop}"
         );
+        // `LOSAT_X_DUSTREG` (`x_dust_regs.rs`): the same intervals as the reference.
+        let regs = masker.x_mask_range_regs(&seq, start, stop, &mut NcbiLfgRandom::new());
+        assert_eq!(
+            regs, reference,
+            "regs case {case}: level={level} window={window} linker={linker} start={start} stop={stop}"
+        );
         if !reference.is_empty() {
             masked_cases += 1;
         }

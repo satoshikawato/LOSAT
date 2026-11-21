@@ -1103,8 +1103,9 @@ a crash. Its version is in the list at the top; elsewhere it is cited by its num
     input's own letters BLASTP and BLASTX give other E-values at the default composition-based
     statistics (`pe_tail`), and a 60-letter protein whose last 2 letters are masked aligns 1-58 with
     the tail mask (NCBI's own run, LOSAT the same) but 1-60 with the near input's mask of one letter.
-    TBLASTN with `-ungapped -comp_based_stats 0` and with `-window_size 0` on `th2`'s tail
-    (`db.tmask.tn.hard.th2.13.{ung,w0}.6`): NCBI's own bytes, the same as its run of the near input;
+    TBLASTN with `-window_size 0` on `th2`'s tail (`db.tmask.tn.hard.th2.13.w0.6`): NCBI's own
+    bytes, the same as its run of the near input (with `-ungapped -comp_based_stats 0` too, 4,951
+    bytes, no row repeated; LOSAT refuses TBLASTN `-ungapped` for every database, so no row);
     BLASTP with `-window_size 0` on `pe_tail` (`db.pmask.bp.hard.tail.pe_tail.w0.6`): the near
     input's. Unit tests `protein_shapes_of_the_hard_masks` and
     `translated_hard_masks_are_refused_where_a_frame_restarts_at_its_start`

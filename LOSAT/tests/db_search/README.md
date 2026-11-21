@@ -2209,9 +2209,45 @@ the second dust alone, as its 11, which the alias `tal` and the list `tm5 tb5` n
 volumes: `t1` and `t2`, `t3`, `t4`) and `tf4` have 11. `th1` has the hand masks `mid0`, `mid1`, `mid2`, `adjacent`,
 `overlap` and `mid` as 11 to 16, `th2` `unsorted`, `head`, `tail` and `near` as 11 to 14. A mask is mapped to the six
 reading frames by its positions divided by 3 (the minus frames from frame -1's length); with `-db_hard_mask` LOSAT
-refuses a sequence whose mask leaves a frame without letters after it (`tf4`'s `t5`, `head` for frame -1, `tail` for
-frame +1, `near` for frame +2: the Owner's questions Q1 and Q2 of M4b) and masks out of order (`unsorted`, `overlap`),
+refuses a sequence whose masks leave NCBI one part of a frame to search, from the frame's start, that stops before
+the frame's end (`tf4`'s `t5`, `head` for frame -1, `tail` for frame +1, `near` for frame +2: the Owner's questions Q1
+and Q2 of M4b) and masks out of order (`unsorted`, `overlap`),
 as for the other programs.
+
+The review rows of PR 2 (2026-11-21; `db.tmask.*.te.*`, `*.tl.*`, `*.th1.*`, `*.tm5.*.w0.*`, `*.3f`, `*.1a`) read
+inputs written by `ncbi-parity-20261019/M/m4b/scripts3/gen_fix3.py` (seed 20261124): `edge.fna` (`e1`, 1,200 bases whose
+bases 901-1020 are 40 sense codons of frame +2; `e2`, 1,202 bases, 400 sense codons and `AT`; `e3`, 1,200 bases, and
+`e4`, 1,201, the minus strands of 400 sense codons; `e5` to `e8`, 10, 11, 16 and 17 random bases, around the shortest
+subjects searched: 11 bases in TBLASTX, 17 in TBLASTN at word 5), `long.fna` (`l1`, 7,000 bases with coding stretches at
+3000-3599, frame +1, and 5000-5449, frame -1; `l2`, 3,000 bases: longer than the average, so the traceback fetches parts
+of `l1`), the TBLASTX queries `qxe.fna`, the TBLASTN queries `qne.faa`, the PSSM query `pn1.faa` (the PSSM is
+`../fixtures/pssm/m4b2_pl1.asn.gz`) and the hand masks `hedge3_<case>.asnt` (from/to inclusive below as `[start, end)`):
+
+| `te` | Mask | Case |
+|---|---|---|
+| 11 `f1` | `e1` [600, 902) | covers the first base of frame +2's residue 300 (review F1) |
+| 12 `n47` | `e2` [4, 7) | searched |
+| 13 `n1200` | `e2` [1200, 1202) | NCBI crashes (the minus frames start with an empty part), refused |
+| 14 `h01`, 15 `h12` | `e3` [0, 1), [1, 2) | NCBI crashes (the plus frames start with an empty part), refused |
+| 16 `h23`, 17 `h13` | `e3` [2, 3), [1, 3) | frame -1 refused |
+| 18 `h46`, 19 `h46b` | `e3` [4, 6), `e4` [4, 6) | frames -2 and -3, frame -3 refused |
+| 31 `two` | `e4` [0, 3), [1200, 1201) | NCBI crashes (frame -1), refused |
+| 32 `m10` to 35 `m17` | the last 3 bases of `e5` to `e8` | frame +1 refused where the subject is searched (from 11 bases in TBLASTX, 17 in TBLASTN), else not searched |
+| 36 `s01`, 37 `s1200` | `e3` [0, 1), [600, 700); `e2` [300, 400), [1200, 1202) | searched (near misses of 14 and 13) |
+
+`tl` has 11 (`long`): `l1` [3270, 3330) and [5201, 5251). The two databases were made with:
+
+```
+makeblastdb -in edge.fna -dbtype nucl -out te -title "edge masks" -blastdb_version 4 -mask_data hedge3_f1.asnt,\
+hedge3_n47.asnt,hedge3_n1200.asnt,hedge3_h01.asnt,hedge3_h12.asnt,hedge3_h23.asnt,hedge3_h13.asnt,hedge3_h46.asnt,\
+hedge3_h46b.asnt,hedge3_two.asnt,hedge3_m10.asnt,hedge3_m11.asnt,hedge3_m16.asnt,hedge3_m17.asnt,hedge3_s01.asnt,\
+hedge3_s1200.asnt
+makeblastdb -in long.fna -dbtype nucl -out tl -title "long masks" -blastdb_version 4 -mask_data hedge3_long.asnt
+rm -f *.njs
+```
+
+makeblastdb numbers nine algorithms per masking program (dust 11-19), so the masks after the ninth name windowmasker
+(31-37); the program only names the algorithm.
 
 ## A database title outside the visible ASCII range (M4a-1b part 5, M4a-1b2)
 

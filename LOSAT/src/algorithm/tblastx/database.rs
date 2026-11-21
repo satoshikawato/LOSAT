@@ -406,7 +406,36 @@ pub(crate) fn read_titles(
 
 /// The stores of the sequences that the reported hits of the query batches read so far name, by
 /// ordinal id (`read_reported`).
-pub(crate) type ReportedStores = BTreeMap<u32, Arc<PackedNucleotide>>;
+pub(crate) type ReportedStores = BTreeMap<u32, ReportedStore>;
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2650-2717
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:322-370
+// NCBI counts an HSP's identities and positives (the Seq-align's `num_ident`, `num_positives`)
+// in its ungapped re-evaluation, on the translation of the subject that the re-evaluation
+// fetched: with `-db_hard_mask`, a copy with `B` over the masked bases. The reports show the
+// stored letters.
+/// The letters of a reported database sequence (`read_reported`): those the reports show and
+/// those the search's re-evaluation read, on which the engine's counts are made again
+/// (`report::engine_counts`, `report::stored_engine_identities`).
+#[derive(Clone)]
+pub(crate) struct ReportedStore {
+    /// The stored letters (`XDbStream::read_shared`): the rows of the reports.
+    pub(crate) shown: Arc<PackedNucleotide>,
+    /// The letters of the re-evaluation (`XDbStream::read_stage`: with `-db_hard_mask`, `B` over
+    /// the masked bases; otherwise the same store as `shown`): the engine's identities and
+    /// positives.
+    pub(crate) engine: Arc<PackedNucleotide>,
+}
+
+impl ReportedStore {
+    /// The letters of sequence `ordinal` of `stream`.
+    fn read(stream: &XDbStream<'_>, ordinal: usize) -> Result<Self> {
+        let shown = stream.read_shared(ordinal)?;
+        // Without a hard mask this is `shown` again (the stream shares a store while it is held).
+        let engine = stream.read_stage(ordinal)?;
+        Ok(Self { shown, engine })
+    }
+}
 
 /// Reads the sequences that the reported hits `ordered` of a query batch name into `stores`, once
 /// each (`XDbStream::read_shared`: a long sequence that a search holds is not read again), for
@@ -424,7 +453,7 @@ pub(crate) fn read_reported(
             continue;
         }
         if let std::collections::btree_map::Entry::Vacant(entry) = stores.entry(ordinal) {
-            entry.insert(stream.read_shared(ordinal as usize)?);
+            entry.insert(ReportedStore::read(stream, ordinal as usize)?);
         }
     }
     Ok(())
@@ -690,8 +719,8 @@ pub(crate) struct ReportedSubjects {
     pub(crate) records: Vec<FastaRecord>,
     /// The number of bases of each rank.
     pub(crate) lengths: Vec<u32>,
-    /// The store of each rank (`read_reported`), or none when no report reads letters.
-    pub(crate) stores: Vec<Arc<PackedNucleotide>>,
+    /// The stores of each rank (`read_reported`), or none when no report reads letters.
+    pub(crate) stores: Vec<ReportedStore>,
     /// The sequences with parsed Seq-ids by rank (empty when none is reported): their ids and
     /// titles come from their definition lines (`report::db_subject`).
     pub(crate) parsed: Vec<Option<Arc<ParsedSubject>>>,
@@ -762,7 +791,7 @@ pub(crate) fn hit_identities(
     stores.get(&hsp.hit.s_idx).map_or(1, |store| {
         super::report::stored_engine_identities(
             hsp,
-            store,
+            &store.engine,
             query,
             query_code,
             db_code,
@@ -950,8 +979,8 @@ pub(crate) fn reported_subjects(
                         database.db.oid(ordinal)
                     )
                 })?;
-                kept.push(Arc::clone(store));
-                u32::try_from(store.len()).expect("a database sequence's length fits Int4")
+                kept.push(store.clone());
+                u32::try_from(store.shown.len()).expect("a database sequence's length fits Int4")
             }
             None => *read_lengths.get(&ordinal).with_context(|| {
                 format!(

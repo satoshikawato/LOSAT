@@ -354,8 +354,9 @@ pub enum HardScan {
     /// frames from frame -1's length; `common::translated_chunks::translated_frame_ranges`) and
     /// each frame is chunked as a protein subject (residual 0). The shapes refused are a mask
     /// that ends past the sequence (`HardMaskShape::PastEnd`, as for the protein programs: its
-    /// last range would be inverted) and `TailMask` read per frame
-    /// (`HardMaskShape::FrameTailMask`): both engines join the chunks
+    /// last range would be inverted), `TailMask` read per frame
+    /// (`HardMaskShape::FrameTailMask`) and a frame's "no chunking" chunk after an earlier chunk
+    /// (`HardMaskShape::FrameStartMask`, on which NCBI crashes): both engines join the chunks
     /// of a frame longer than `MAX_DBSEQ_LEN` across their overlap, as for an unmasked subject
     /// (no `LongRange`), and a chunk shorter than a word gives no hit in either scan, as NCBI's
     /// (the one-hit scan reads no word of it, aa_ungapped.c:762-766; the two-hit scan reads one,
@@ -408,17 +409,30 @@ pub enum HardMaskShape {
     /// into chunks that overlap and joins their HSPs across the overlap, which LOSAT's protein
     /// programs do not port.
     LongRange { left: i32, right: i32 },
-    /// `TailMask` in frame `frame` of a translated subject (`HardScan::Translated`): the frame's
-    /// first chunk takes NCBI's "no chunking" branch while it is shorter than the frame, because
-    /// after the mapping to the frame (`x / 3`) the stored mask `[start, end)` that follows it
-    /// leaves no letter of the frame after it (a mask at the sequence's end for a plus frame, at
-    /// its start for a minus frame, or within the two letters that the mapping drops). NCBI
-    /// BLAST+ 2.17.0 then scans the masked letters past the chunk while it extends within the
-    /// chunk: the Owner's question Q1 of M4b (rows that differ from the near input's), and in
-    /// tblastx question Q2 (the re-evaluation trims the HSPs of the seeds past the chunk to one
-    /// HSP that ends at the mask, which NCBI writes once for each of those seeds; M/m4b/
-    /// NOTES_M4B2.md).
+    /// `TailMask` in frame `frame` of a translated subject (`HardScan::Translated`): a chunk from
+    /// the frame's start (after chunks of no letters at 0) takes NCBI's "no chunking" branch while
+    /// it is shorter than the frame. After the mapping to the frame (`x / 3`, the minus frames
+    /// reversed on frame -1's length) the last hard range that starts at 0 is shorter than the
+    /// frame (and not cut at `MAX_DBSEQ_LEN`), and the range after it, if any, starts at the
+    /// frame's end; `[start, end)` is the stored mask that follows that range in the frame's
+    /// direction. Masks at or near either end of the sequence give it, a mask of the third base
+    /// alone too (frame -1). NCBI BLAST+ 2.17.0 then scans the masked letters past the chunk while
+    /// it extends within the chunk: the Owner's question Q1 of M4b (rows that differ from the near
+    /// input's), and in tblastx question Q2 (the re-evaluation trims the HSPs of the seeds past
+    /// the chunk to one HSP that ends at the mask, which NCBI writes once for each of those seeds;
+    /// M/m4b/NOTES_M4B2.md).
     FrameTailMask { frame: i8, start: u32, end: u32 },
+    /// A chunk of frame `frame` of a translated subject (`HardScan::Translated`) that takes NCBI's
+    /// "no chunking" branch after an earlier chunk of the frame: after the mapping to the frame
+    /// the frame's first hard range has no letters and the range after it starts at 0 too (and
+    /// is not cut at `MAX_DBSEQ_LEN`), with no range after it or one at the frame's end.
+    /// `[start, end)` is the stored mask between those two ranges in the frame's direction: a
+    /// mask within the sequence's first two bases (the plus frames) or within the one or two
+    /// bases after its last whole codon from the start (the minus frames, whose mapping reads
+    /// `x / 3` from frame -1's length). The earlier chunk allocates NCBI's list of ranges, the
+    /// "no chunking" branch points the list at the backup's full range, and NCBI BLAST+ 2.17.0
+    /// frees that pointer when it restores the subject (a crash in every run, M/m4b/NOTES_M4B2.md).
+    FrameStartMask { frame: i8, start: u32, end: u32 },
     /// A mask `[start, end)` that ends past the sequence's `length` letters, in a protein program
     /// (`HardScan::Protein`; series NP, M4b; review L1 of PR 1) or a translated one
     /// (`HardScan::Translated`, PR 2: `length` bases). makeblastdb does not write such
@@ -635,9 +649,13 @@ impl HardMaskShape {
     // are those of a protein subject (`s_GetNextSubjectChunk`, :221-311).
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:1045-1110
     // (`BLAST_GetAllTranslations`: frame `f` of `L` bases has `(L - |f| + 1) / 3` residues).
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:145-215, 264-276
+    // (`s_BackupSubject`, `s_AllocateSeqRange`, `s_RestoreSubject` and the "no chunking" branch:
+    // `HardMaskShape::FrameStartMask`)
     /// The first refused shape of the sorted masks `masks` of a translated subject of `length`
     /// bases (`HardScan::Translated`), read off the chunks of its six frames in NCBI's order of
-    /// contexts.
+    /// contexts: the frame's "no chunking" chunk after an earlier chunk (`FrameStartMask`, NCBI
+    /// crashes) or, as the frame's first chunk, shorter than the frame (`FrameTailMask`).
     fn of_frames(
         masks: &[(u32, u32)],
         length: usize,
@@ -669,24 +687,31 @@ impl HardMaskShape {
                 translated_frame_ranges(&nucleotide, frame, frame_length(-1)),
                 false,
             );
+            // The plus frames' ranges are in the order of the masks, the minus frames' in
+            // reverse; range `r` ends where its mask starts (the last range has none).
+            let mask_after = |range: usize| {
+                let index = if frame > 0 {
+                    range
+                } else {
+                    (masks.len() - 1).saturating_sub(range)
+                };
+                masks[index.min(masks.len() - 1)]
+            };
+            let mut first = true;
             while let Some(chunk) = split.next_chunk(DBSEQ_CHUNK_OVERLAP) {
-                if chunk.full_range && chunk.length < frame_len {
-                    // The plus frames' ranges are in the order of the masks, the minus frames'
-                    // in reverse; the chunk's range ends where its mask starts.
-                    // (A chunk of the last range never ends before the frame's end.)
-                    let index = if frame > 0 {
-                        chunk.range
-                    } else {
-                        (masks.len() - 1).saturating_sub(chunk.range)
-                    };
-                    let mask = masks[index.min(masks.len() - 1)];
-                    found = Some(HardMaskShape::FrameTailMask {
-                        frame,
-                        start: mask.0,
-                        end: mask.1,
-                    });
+                if chunk.full_range && !first {
+                    // Only ranges at 0 come before it, so it is not the frame's first range.
+                    let (start, end) = mask_after(chunk.range.saturating_sub(1));
+                    found = Some(HardMaskShape::FrameStartMask { frame, start, end });
                     break 'frames;
                 }
+                if chunk.full_range && chunk.length < frame_len {
+                    // (A chunk of the last range never ends before the frame's end.)
+                    let (start, end) = mask_after(chunk.range);
+                    found = Some(HardMaskShape::FrameTailMask { frame, start, end });
+                    break 'frames;
+                }
+                first = false;
             }
         }
         split.end();
@@ -714,11 +739,17 @@ impl HardMaskShape {
                 ),
             },
             HardMaskShape::FrameTailMask { frame, start, end } => format!(
-                "has a mask, [{start}, {end}), after which frame {frame:+} (positions / 3) has no \
-                 letter, so that the frame's chunk from its start runs to the frame's end, for \
-                 which NCBI BLAST+ 2.17.0 scans the masked letters past that chunk while it \
-                 extends within the chunk (rows that differ from a near input's or with the \
-                 number of threads, the same row repeated in tblastx, or a crash)"
+                "has a mask, [{start}, {end}), after which NCBI BLAST+ 2.17.0 searches no other \
+                 part of reading frame {frame:+}, and the frame's part before it, from the \
+                 frame's start, ends before the frame's end: NCBI then reads the masked letters \
+                 after that part (results that differ from a near input's or with the number of \
+                 threads, the same alignment many times in tblastx, or a crash)"
+            ),
+            HardMaskShape::FrameStartMask { frame, start, end } => format!(
+                "has a mask, [{start}, {end}), that leaves reading frame {frame:+} an empty part \
+                 at its start, followed by a part from its start that NCBI BLAST+ 2.17.0 searches \
+                 as the whole frame: NCBI then frees memory that it did not allocate (a crash in \
+                 every run)"
             ),
 
             HardMaskShape::Unsorted { before, mask } => format!(

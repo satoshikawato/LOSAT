@@ -24,11 +24,11 @@
 //! - the cut only moves where blocks end: `SeqDb::next_block` gives the consecutive sequences of a
 //!   volume that fit the size, at least one (a longer sequence is a block of its own), and the
 //!   blocks follow each other in ordinal order, so every sequence is searched once, in the order of
-//!   its ordinal id, as in NCBI's loop with one thread (blast_engine.c:1407-1413, quoted above
+//!   its ordinal id, as in NCBI's loop with one thread (blast_engine.c:1407-1413, cited above
 //!   `search_blocks`);
 //! - every block starts from a cleared diagonal table at the offset that the one-thread order gives
 //!   its first sequence (`prepare_independent_subject`, `diag_offset_after`, the recurrence of
-//!   `Blast_ExtendWordExit`, blast_extend.c:166-173 quoted above `diag_offset_after`) and advances it
+//!   `Blast_ExtendWordExit`, blast_extend.c:166-173 cited above `diag_offset_after`) and advances it
 //!   inside the block as the one-thread loop does, so each sequence is searched with the decisions
 //!   of the one-thread loop (an entry left by an earlier sequence reads as a cleared entry;
 //!   `x_subject_runs.rs` gives the argument in full, and its one exception, a sequence of more than
@@ -53,7 +53,7 @@
 //!
 //! No NCBI counterpart for the cut itself: NCBI's search threads take chunks of
 //! MAX(sequences / 100, 1) ordinal ids from one iterator (`BlastSeqSrcIteratorNewEx`,
-//! blast_engine.c:1409; seqdbimpl.cpp:328-350, quoted above `SeqDb::next_block`), whatever the
+//! blast_engine.c:1409; seqdbimpl.cpp:328-350, cited above `SeqDb::next_block`), whatever the
 //! thread count; LOSAT's blocks are cut by bytes, because one block is one read of one file.
 //!
 //! `LOSAT_X_BPDBCUT` is a switch of the strict set (on by default since 2026-10-17): on unless it is `0`.
@@ -161,10 +161,6 @@ pub(super) fn x_count_blocks(db: &SeqDb, block_bytes: u64) -> u64 {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1411-1413
-// ```c
-//     while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-//            != BLAST_SEQSRC_EOF) {
-// ```
 // The one-thread loop of `search_blocks_of` reads its blocks of `BLOCK_BYTES` in ordinal order and
 // stops at the first that cannot be read or prepared (`read_search_block`); the kernel itself
 // returns no error. The parallel rounds of the same blocks return the same error (the round's first
@@ -184,30 +180,8 @@ pub(super) fn x_one_thread_error(db: &SeqDb, program: &str, error: anyhow::Error
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1407-1413
-// ```c
-//     db_length = BlastSeqSrcGetTotLen(seq_src);
-//
-//     itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
-//
-//     /* iterate over all subject sequences */
-//     while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-//            != BLAST_SEQSRC_EOF) {
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1553-1554
-// ```c
-//           /* Save the results. */
-//           status = BlastHSPStreamWrite(hsp_stream, &hsp_list);
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:166-173
-// ```c
-//     if (ewp->diag_table) {
-//         if (ewp->diag_table->offset >= INT4_MAX / 4) {
-//             ewp->diag_table->offset = ewp->diag_table->window;
-//             s_BlastDiagClear(ewp->diag_table);
-//         } else {
-//             ewp->diag_table->offset += subject_length + ewp->diag_table->window;
-//         }
-// ```
 /// EXPERIMENT (LOSAT_X_BPDBCUT): `search_blocks` with the blocks of the cut
 /// (`x_db_cut_block_bytes`) and, on failure, the error of the one-thread order.
 ///
@@ -256,43 +230,8 @@ where
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    // The cut: one thread keeps `BLOCK_BYTES`; more threads a quarter of the bytes per thread,
-    // between 4 KiB and 1 MiB.
-    #[test]
-    fn the_cut_is_a_quarter_of_the_bytes_per_thread_between_4_kib_and_1_mib() {
-        for bytes in [0u64, 1, 812, 2_920_000, 64 << 20, u64::MAX] {
-            assert_eq!(x_cut_block_bytes(bytes, 0), BLOCK_BYTES, "{bytes}");
-            assert_eq!(x_cut_block_bytes(bytes, 1), BLOCK_BYTES, "{bytes}");
-        }
-        // BlastDBSpecies6 (2.92 MB) at 16 threads: 64 blocks of 45,625 bytes.
-        assert_eq!(x_cut_block_bytes(2_920_000, 16), 45_625);
-        assert_eq!(x_cut_block_bytes(2_920_000, 2), 365_000);
-        // Small databases: the floor.
-        assert_eq!(x_cut_block_bytes(0, 2), X_MIN_BLOCK_BYTES);
-        assert_eq!(x_cut_block_bytes(812, 7), X_MIN_BLOCK_BYTES);
-        assert_eq!(x_cut_block_bytes(8 * 4096 - 1, 2), X_MIN_BLOCK_BYTES);
-        assert_eq!(x_cut_block_bytes(8 * 4096 + 8, 2), 4097);
-        // From 4 x threads MiB on: `BLOCK_BYTES`.
-        assert_eq!(x_cut_block_bytes((64 << 20) - 64, 16), BLOCK_BYTES - 1);
-        assert_eq!(x_cut_block_bytes(64 << 20, 16), BLOCK_BYTES);
-        assert_eq!(x_cut_block_bytes(u64::MAX, 7), BLOCK_BYTES);
-        assert_eq!(x_cut_block_bytes(u64::MAX, usize::MAX), X_MIN_BLOCK_BYTES);
-        assert_eq!(x_cut_block_bytes(1 << 40, usize::MAX), X_MIN_BLOCK_BYTES);
-        // Never above one thread's blocks, never below the floor; smaller with more threads.
-        for bytes in [0u64, 5_000, 300_000, 2_920_000, 40 << 20, 200 << 20] {
-            let mut previous = BLOCK_BYTES;
-            for threads in 1..=130 {
-                let cut = x_cut_block_bytes(bytes, threads);
-                assert!((X_MIN_BLOCK_BYTES..=BLOCK_BYTES).contains(&cut));
-                assert!(cut <= previous, "{bytes} bytes, {threads} threads");
-                previous = cut;
-            }
-        }
-    }
-}
+#[path = "x_db_cut_tests.rs"]
+mod tests;
 
 #[cfg(test)]
 #[path = "x_db_cut_fixture_tests.rs"]

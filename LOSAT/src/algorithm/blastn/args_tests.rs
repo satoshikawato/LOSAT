@@ -7,7 +7,7 @@ fn parse_args(args: &[&str]) -> BlastnArgs {
     let mut all_args = vec!["losat".to_string(), "blastn".to_string()];
     all_args.extend(args.iter().map(|s| s.to_string()));
 
-    // NCBI blast_args.cpp:2657-2660: select the implemented tabular formatter explicitly.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2657-2660: select the implemented tabular formatter explicitly.
     all_args.extend(["-outfmt".into(), "6".into()]);
     let cli: crate::cli::Cli = crate::cli::try_parse_from(all_args).unwrap();
     let crate::cli::Commands::Blastn(args) = cli.command else {
@@ -21,18 +21,18 @@ fn test_default_values() {
     let args = parse_args(&["-query", "query.fasta", "-subject", "subject.fasta"]);
 
     assert_eq!(args.task, "megablast");
-    // NCBI blast_args.cpp:166-170,648-660: the word size and scores are optional keys;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:166-170,648-660: the word size and scores are optional keys;
     // an omitted one keeps the task's default (coordination.rs).
     assert_eq!(args.word_size, None);
     assert_eq!(args.num_threads, 1);
-    // NCBI blast_args.cpp:142-146: -evalue is an optional key; an omitted one keeps the
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:142-146: -evalue is an optional key; an omitted one keeps the
     // task's default (10, or 1000 for blastn-short; coordination.rs determine_evalue).
     assert_eq!(args.evalue, None);
     assert_eq!(
         crate::algorithm::blastn::coordination::determine_evalue(&args),
         10.0
     );
-    // NCBI blast_args.cpp:2913-2927: an omitted -max_target_seqs keeps the defaults of
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2913-2927: an omitted -max_target_seqs keeps the defaults of
     // the hit list (500) and of the pairwise alignments (250), so it stays unset here.
     assert_eq!(args.max_target_seqs, None);
     assert_eq!(args.reward, None);
@@ -199,7 +199,7 @@ fn options_without_an_ncbi_blastn_equivalent_are_rejected() {
 
 #[test]
 fn query_defaults_to_standard_input() {
-    // NCBI cmdline_flags.cpp:47: const string kDfltArgQuery("-");
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:47
     let args = parse_args(&["-subject", "subject.fasta"]);
     assert_eq!(args.query, PathBuf::from("-"));
 }
@@ -224,16 +224,61 @@ fn test_query_and_subject_paths() {
     assert_eq!(args.subject, Some(PathBuf::from("subject.fasta")));
 }
 
-// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:2558-2562
-// ```c
-//     } else if (!m_IsIgBlast){
-//         // IgBlast permits use of germline database
-//         NCBI_THROW(CInputException, eInvalidInput,
-//            "Either a BLAST database or subject sequence(s) must be specified");
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2558-2562
 // A missing -subject is NCBI's error after the parsing, not a parser error.
 #[test]
 fn test_subject_is_optional_for_the_parser() {
     let args = parse_args(&["-query", "query.fasta"]);
     assert_eq!(args.subject, None);
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3304-3328: the two best
+// hit options take a value above 0 and below 0.5 (NCBI BLAST+ 2.17.0 refuses 0 and 0.5), the one
+// not given is 0.1, and neither goes with `-culling_limit` (also 0).
+#[test]
+fn the_best_hit_options_take_their_range_and_exclude_culling() {
+    use crate::core::hspfilter_besthit::BestHitParams;
+    let base = ["-query", "q.fa", "-subject", "s.fa"];
+    let with = |extra: &[&str]| {
+        let mut words = base.to_vec();
+        words.extend_from_slice(extra);
+        parse_args(&words)
+    };
+    assert_eq!(with(&[]).best_hit(), None);
+    assert_eq!(
+        with(&["-best_hit_overhang", "0.25"]).best_hit(),
+        Some(BestHitParams {
+            overhang: 0.25,
+            score_edge: 0.1
+        })
+    );
+    assert_eq!(
+        with(&["-best_hit_score_edge", "1e-300"]).best_hit(),
+        Some(BestHitParams {
+            overhang: 0.1,
+            score_edge: 1e-300
+        })
+    );
+    let refused = |extra: &[&str]| {
+        let mut argv = vec!["losat", "blastn"];
+        argv.extend_from_slice(&base);
+        argv.extend_from_slice(extra);
+        crate::cli::try_parse_from::<crate::cli::Cli, _, _>(argv).is_err()
+    };
+    for value in ["0", "0.5", "0.6", "-0.1", "nan", "abc"] {
+        assert!(refused(&["-best_hit_overhang", value]), "{value}");
+        assert!(refused(&["-best_hit_score_edge", value]), "{value}");
+    }
+    assert!(refused(&[
+        "-culling_limit",
+        "0",
+        "-best_hit_overhang",
+        "0.1"
+    ]));
+    assert!(refused(&[
+        "-best_hit_score_edge",
+        "0.1",
+        "-culling_limit",
+        "2"
+    ]));
 }

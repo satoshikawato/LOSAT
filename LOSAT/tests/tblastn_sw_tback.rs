@@ -11,7 +11,7 @@
 //! last one fails the batch's traceback (`BLAST engine error: Traceback failed`, exit status 3)
 //! after the reports of the batches before, unless the batch's first query holds a redone match:
 //! NCBI's clean-up then reads that query's freed heap and crashes, and LOSAT refuses the batch
-//! after the same reports (exit status 1; PD-LOSAT-NCBI-DEFECTS 1.59). That the bytes equal NCBI's
+//! after the same reports (exit status 1; PD-LOSAT-NCBI-DEFECTS 1.68). That the bytes equal NCBI's
 //! is the business of the fixture rows `db.x4b.*`; these tests pin LOSAT's decisions and their
 //! independence of `-num_threads`.
 //!

@@ -21,17 +21,6 @@ use super::WriteDbError;
 use crate::seqid::{label, ParsedSeqId};
 
 // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_writer/writedb_isam.hpp:156-165
-// ```c++
-//     enum {
-//         eKeyOffset       = 9*4,  ///< Offset of the key offset table.
-//         eKeyDelim        = 2,    ///< Byte indicating end of key.
-//         eRecordDelim     = 10,   ///< Byte indicating end of data.
-//         eMaxStringLine   = 4096, ///< Maximum line size for string.
-//         eIsamNumericType = 0,    ///< Numeric ISAM file with Int4 key.
-//         eIsamStringType  = 2,    ///< String ISAM file.
-//         eIsamNumericLong = 5     ///< Numeric ISAM file with Int8 key.
-//     };
-// ```
 const KEY_OFFSET: i32 = 9 * 4;
 const KEY_DELIM: u8 = 2;
 const RECORD_DELIM: u8 = 10;
@@ -43,7 +32,7 @@ const ISAM_STRING_TYPE: i32 = 2;
 /// built: makeblastdb does not set `eAddTrace`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum IsamType {
-    /// `ePig`: protein identifier groups, never filled from FASTA input ([`PigIsam`]).
+    /// `ePig`: protein identifier groups, which only `makeblastdb -input_type blastdb` gives.
     Pig,
     /// `eGi`: the numeric index of the GIs.
     Gi,
@@ -54,43 +43,6 @@ pub(crate) enum IsamType {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_isam.cpp:56-96
-// ```c++
-// static string
-// s_IsamExtension(EWriteDBIsamType itype,
-//                 bool             protein,
-//                 bool             is_index)
-// {
-//     char type_ch = '?';
-//
-//     switch(itype) {
-//     case ePig:
-//         type_ch = 'p';
-//         break;
-//
-//     case eGi:
-//         type_ch = 'n';
-//         break;
-//
-//     case eAcc:
-//         type_ch = 's';
-//         break;
-//
-//     case eTrace:
-//         type_ch = 't';
-//         break;
-//
-//     case eHash:
-//         type_ch = 'h';
-//         break;
-//     ...
-//     string extn("???");
-//     extn[0] = protein ? 'p' : 'n';
-//     extn[1] = type_ch;
-//     extn[2] = is_index ? 'i' : 'd';
-//
-//     return extn;
-// }
-// ```
 /// `s_IsamExtension`.
 fn isam_extension(itype: IsamType, protein: bool, is_index: bool) -> &'static str {
     let names: [&'static str; 8] = match itype {
@@ -103,12 +55,6 @@ fn isam_extension(itype: IsamType, protein: bool, is_index: bool) -> &'static st
 }
 
 // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_writer/writedb_general.hpp:53-56
-// ```c++
-// inline int s_DivideRoundUp(int value, int blocksize)
-// {
-//     return ((value + (blocksize - 1)) / blocksize);
-// }
-// ```
 fn divide_round_up(value: i32, blocksize: i32) -> i32 {
     value.wrapping_add(blocksize - 1) / blocksize
 }
@@ -123,29 +69,6 @@ struct IsamFiles {
 
 impl IsamFiles {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_isam.cpp:98-118
-    // ```c++
-    // CWriteDB_Isam::CWriteDB_Isam(EIsamType      itype,
-    //                              const string & dbname,
-    //                              bool           protein,
-    //                              int            index,
-    //                              Uint8          max_file_size,
-    //                              bool           sparse)
-    // {
-    //     m_DFile.Reset(new CWriteDB_IsamData(itype,
-    //                                         dbname,
-    //                                         protein,
-    //                                         index,
-    //                                         max_file_size));
-    //
-    //     m_IFile.Reset(new CWriteDB_IsamIndex(itype,
-    //                                          dbname,
-    //                                          protein,
-    //                                          index,
-    //                                          m_DFile,
-    //                                          sparse,
-    //                                          max_file_size));
-    // }
-    // ```
     // Both files are `CWriteDB_File`s made with `always_create` false
     // (writedb_isam.cpp:181-186, 771-781).
     fn new(itype: IsamType, dbname: &str, protein: bool, index: u32, max_file_size: u64) -> Self {
@@ -166,19 +89,6 @@ impl IsamFiles {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_isam.cpp:220-266
-    // ```c++
-    //     WriteInt4(isam_version);
-    //     WriteInt4(isam_type);
-    //     WriteInt4((int)m_DataFileSize);
-    //
-    //     WriteInt4(num_terms);
-    //     WriteInt4(samples);
-    //     WriteInt4(m_PageSize);
-    //
-    //     WriteInt4(max_line_size);
-    //     WriteInt4(m_Sparse ? 1 : 0);
-    //     WriteInt4(0);
-    // ```
     /// `Create()` of both files and `x_WriteHeader`.
     fn create_with_header(
         &mut self,
@@ -208,36 +118,12 @@ impl IsamFiles {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_isam.cpp:144-152
-    // ```c++
-    // void CWriteDB_Isam::Close()
-    // {
-    //     // Index must be closed first, because ISAM indices are built in
-    //     // memory until the volume is closed, and only then is anything
-    //     // written to disk.
-    //
-    //     m_IFile->Close();
-    //     m_DFile->Close();
-    // }
-    // ```
     fn close(&mut self) {
         self.index.close();
         self.data.close();
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_isam.cpp:154-164
-    // ```c++
-    // void CWriteDB_Isam::RenameSingle()
-    // {
-    //     m_IFile->RenameSingle();
-    //     m_DFile->RenameSingle();
-    // }
-    //
-    // void CWriteDB_Isam::RenameFileIndex(unsigned int num_digits)
-    // {
-    //     m_IFile->RenameFileIndex(num_digits);
-    //     m_DFile->RenameFileIndex(num_digits);
-    // }
-    // ```
     fn rename_single(&mut self) {
         self.index.rename_single();
         self.data.rename_single();
@@ -249,27 +135,7 @@ impl IsamFiles {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_isam.cpp:819-825
-    // ```c++
-    // void CWriteDB_Isam::ListFiles(vector<string> & files) const
-    // {
-    //     if (! m_IFile->Empty()) {
-    //         files.push_back(m_IFile->GetFilename());
-    //         files.push_back(m_DFile->GetFilename());
-    //     }
-    // }
-    // ```
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_isam.cpp:827-835
-    // ```c++
-    // bool CWriteDB_IsamIndex::Empty() const
-    // {
-    //     // Also test 'created' bit in case the file data has already
-    //     // been dumped and cleared.
-    //
-    //     return ! (m_StringSort.Size() ||
-    //               m_NumberTable.size() ||
-    //               m_Created);
-    // }
-    // ```
     // An index with entries is listed before its files are made at the volume's close: a
     // failed build removes those names too (a file that was there).
     /// `ListFiles`: `has_entries` is whether the index holds entries not written yet.
@@ -281,64 +147,8 @@ impl IsamFiles {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_volume.cpp:88-96,196-200,344-347,386-389
-// ```c++
-//         if (m_Protein) {
-//             m_PigIsam.Reset(new CWriteDB_Isam(ePig,
-//                                               dbname,
-//                                               protein,
-//                                               index,
-//                                               max_file_size,
-//                                               false));
-//         }
-// ...
-//         if (m_Protein && (! m_PigIsam->CanFit(1))) {
-// ...
-//             if (m_Protein) {
-//                 m_PigIsam->Close();
-//             }
-// ...
-//         if (m_Protein) {
-//             m_PigIsam->RenameSingle();
-//         }
-// ```
-/// `m_PigIsam` of a protein volume with indices: never filled from FASTA input, so its files
-/// (`.ppi`, `.ppd`) are never written; it takes part in the volume's fit check (`CanFit(1)`),
-/// and `RenameSingle` and `RenameFileIndex` rename a file of those names that is already there.
-#[derive(Debug)]
-pub(crate) struct PigIsam {
-    files: IsamFiles,
-}
-
-impl PigIsam {
-    pub(crate) fn new(dbname: &str, index: u32, max_file_size: u64) -> Self {
-        Self {
-            files: IsamFiles::new(IsamType::Pig, dbname, true, index, max_file_size),
-        }
-    }
-
-    /// `CanFit(1)` of an index that stays empty: 2 * 8 bytes against the file size limit.
-    pub(crate) fn can_fit(&self) -> bool {
-        16 < self.files.index.max_file_size()
-    }
-
-    pub(crate) fn rename_single(&mut self) {
-        self.files.rename_single();
-    }
-
-    pub(crate) fn rename_file_index(&mut self, num_digits: u32) {
-        self.files.rename_file_index(num_digits);
-    }
-}
-
 /// `CWriteDB_IsamIndex::CanFit` with the file's limit.
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_isam.cpp:807-810
-// ```c++
-// bool CWriteDB_IsamIndex::CanFit(int num)
-// {
-//     return (m_DataFileSize + (num+1) * m_BytesPerElem) < m_MaxFileSize;
-// }
-// ```
 fn can_fit(data_file_size: u64, num: usize, bytes_per_elem: u64, max_file_size: u64) -> bool {
     data_file_size + (num as u64 + 1) * bytes_per_elem < max_file_size
 }
@@ -359,54 +169,8 @@ pub(crate) const MAX_STRING_KEY: usize = 256;
 type Entry = [u32; 4];
 
 // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_writer/writedb_general.hpp:281-296
-// ```c++
-//     int Cmp(const CArrayString<STR_SIZE> & other) const
-//     {
-//         for(int i = 0; i<STR_SIZE; i++) {
-//             char ch1 = m_Data[i], ch2 = other.m_Data[i];
-//
-//             if (ch1 < ch2)
-//                 return -1;
-//
-//             if (ch1 > ch2)
-//                 return 1;
-//
-//             if ((! ch1) && (! ch2))
-//                 break;
-//         }
-//
-//         return 0;
-//     }
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_general.cpp:56-78
-// ```c++
-// void CWriteDB_PackedSemiTree::Insert(const char * x, int L)
-// {
-//     if (L <= PREFIX) {
-//         CArrayString<PREFIX> pre(x, L);
-//         CRef<TPacked> & packed = m_Packed[pre];
-//         ...
-//         packed->Insert("", 0);
-//     } else {
-//         CArrayString<PREFIX> pre(x, PREFIX);
-//         CRef<TPacked> & packed = m_Packed[pre];
-//         ...
-//         packed->Insert(x + PREFIX, L-PREFIX);
-//     }
-//     m_Size++;
-// }
-// ```
 // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_writer/writedb_general.hpp:65-81
-// ```c++
-// class CWriteDB_PackedStringsCompare {
-// public:
-//     ...
-//     bool operator()(const char * a, const char * b) const
-//     {
-//         return strcmp(a, b) < 0;
-//     }
-// };
-// ```
 // The records are sorted by their first 6 bytes as `char`, signed on the reference platform
 // (x86-64: a byte of 0x80 or more sorts before every ASCII byte), then by the rest as
 // `strcmp` compares it (unsigned bytes). A record ends with its only line feed and holds no
@@ -639,28 +403,6 @@ pub(crate) struct StringIsamScratch {
 
 impl StringIsam {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_isam.cpp:166-213
-    // ```c++
-    // CWriteDB_IsamIndex::CWriteDB_IsamIndex(EWriteDBIsamType        itype,
-    //                                        ...
-    //     : CWriteDB_File  (dbname,
-    //                       s_IsamExtension(itype, protein, true),
-    //                       index,
-    //                       max_file_size,
-    //                       false),
-    //       ...
-    //       m_Oid          (-1)
-    // {
-    //     ...
-    //     if (itype == eAcc || itype == eHash) {
-    //         ...
-    //         m_BytesPerElem = 1024;
-    //         m_PageSize = 64;
-    //     } else {
-    //         m_BytesPerElem = 8;
-    //         m_PageSize = 256;
-    //     }
-    // }
-    // ```
     pub(crate) fn new(
         itype: IsamType,
         dbname: &str,
@@ -749,39 +491,6 @@ impl StringIsam {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_isam.cpp:721-769
-    // ```c++
-    // void CWriteDB_IsamIndex::x_AddStringData(int oid, const char * sbuf, int ssize)
-    // {
-    //     ...
-    //     char buf[256];
-    //
-    //     int sz = ssize;
-    //     memcpy(buf, sbuf, sz);
-    //     _ASSERT(sz);
-    //
-    //     // lowercase the 'key' portion
-    //     for(int i = 0; i < sz; i++) {
-    //         buf[i] = tolower(buf[i]);
-    //     }
-    //
-    //     buf[sz++] = (char) eKeyDelim;
-    //     sz += sprintf(buf + sz, "%d", oid);
-    //     buf[sz++] = (char) eRecordDelim;
-    //
-    //     // fix for SB-218, SB-819
-    //     if (oid != m_Oid) {
-    //         m_Oid = oid;
-    //         m_OidStringData.clear();
-    //     }
-    //
-    //     string tmp(buf, sz);
-    //     pair< set<string>::iterator, bool> rv = m_OidStringData.insert(tmp);
-    //     if (rv.second) {
-    //         m_StringSort.Insert(buf, sz);
-    //         m_DataFileSize += sz;
-    //     }
-    // }
-    // ```
     // `tolower` of the C locale changes 'A'-'Z' only. A key of more than 256 bytes does not
     // fit `buf`: makeblastdb 2.17.0 stops with "*** buffer overflow detected ***" (SIGABRT,
     // the fortified `memcpy`); LOSAT refuses it with an error naming the key (makedb-v5 S3b
@@ -837,15 +546,6 @@ impl StringIsam {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_isam.cpp:503-509
-    // ```c++
-    // void CWriteDB_IsamIndex::AddHash(int oid, int hash)
-    // {
-    //     char buf[256];
-    //     int sz = sprintf(buf, "%u", (unsigned)hash);
-    //
-    //     x_AddStringData(oid, buf, sz);
-    // }
-    // ```
     /// `AddHash`: the sequence hash of `oid` as a decimal key.
     pub(crate) fn add_hash(&mut self, oid: u32, hash: u32) -> Result<(), WriteDbError> {
         let mut key = Vec::with_capacity(10);
@@ -854,79 +554,7 @@ impl StringIsam {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_isam.cpp:556-603
-    // ```c++
-    // void CWriteDB_IsamIndex::x_AddStringIds(int oid, const TIdList & idlist)
-    // {
-    //     // Build all sub-string objects and add those.
-    //
-    //     ITERATE(TIdList, iter, idlist) {
-    //         const CSeq_id & seqid = **iter;
-    //
-    //         switch(seqid.Which()) {
-    //
-    //         case CSeq_id::e_Gi:
-    //             break;
-    //
-    //         case CSeq_id::e_Pdb:
-    //             x_AddPdb(oid, seqid);
-    //             break;
-    //
-    //         case CSeq_id::e_Local:
-    //             x_AddLocal(oid, seqid);
-    //             break;
-    //
-    //         case CSeq_id::e_Patent:
-    //             x_AddPatent(oid, seqid);
-    //             break;
-    //
-    //         case CSeq_id::e_General:
-    //             if (! m_Sparse) {
-    //                 x_AddStdString(oid, seqid.AsFastaString());
-    //                 const CDbtag & dbt = seqid.GetGeneral();
-    //                 if (dbt.CanGetTag() && dbt.GetTag().IsStr()) {
-    //                     x_AddStdString(oid, dbt.GetTag().GetStr());
-    //                 }
-    //             }
-    //             break;
-    //
-    //         // default processing:
-    //         default:
-    //             {
-    //                 const CTextseq_id * textid  = seqid.GetTextseq_Id();
-    //                 if (textid) {
-    //                     x_AddTextId(oid, *textid);
-    //                 } else {
-    //                     string acc = seqid.AsFastaString();
-    //                     x_AddStringData(oid, acc.data(), acc.size());
-    //                 }
-    //             }
-    //         }
-    //     }
-    // }
-    // ```
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_isam.cpp:605-624
-    // ```c++
-    // void CWriteDB_IsamIndex::x_AddLocal(int             oid,
-    //                                     const CSeq_id & seqid)
-    // {
-    //     const CObject_id & objid = seqid.GetLocal();
-    //
-    //     if (! m_Sparse) {
-    //         x_AddStdString(oid, seqid.AsFastaString());
-    //     }
-    //     if (objid.IsStr()) {
-    //         x_AddStdString(oid, objid.GetStr());
-    //     }
-    // }
-    //
-    // void CWriteDB_IsamIndex::x_AddPatent(int             oid,
-    //                                      const CSeq_id & seqid)
-    // {
-    //     if (! m_Sparse) {
-    //         x_AddStdString(oid, seqid.AsFastaString());
-    //     }
-    // }
-    // ```
     // makeblastdb never sets `eSparseIndex`, so `m_Sparse` is false.
     /// `AddIds` of the string index of the Seq-ids (`x_AddStringIds`).
     pub(crate) fn add_ids(&mut self, oid: u32, ids: &[ParsedSeqId]) -> Result<(), WriteDbError> {
@@ -967,39 +595,6 @@ impl StringIsam {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_isam.cpp:626-673
-    // ```c++
-    // void CWriteDB_IsamIndex::x_AddPdb(int             oid,
-    //                                   const CSeq_id & seqid)
-    // {
-    //     const CPDB_seq_id & pdb = seqid.GetPdb();
-    //     ...
-    //     CTempString mol;
-    //     if (pdb.CanGetMol()) {
-    //         mol = pdb.GetMol().Get();
-    //     }
-    //     if (! mol.size()) {
-    //         NCBI_THROW(CWriteDBException,
-    //                    eArgErr,
-    //                    "Empty molecule string in pdb Seq-id.");
-    //     }
-    //     x_AddStringData(oid, mol);
-    //
-    //     string full_id = seqid.AsFastaString();
-    //     _ASSERT(full_id.size() > 4);
-    //     if (! m_Sparse) {
-    //         x_AddStdString(oid, full_id);
-    //     }
-    //
-    //     string short_id(full_id, 4);
-    //     x_AddStdString(oid, short_id);
-    //
-    //     // mol is always 4 characters long. If chain exists, add a sting in which the
-    //     // '|' delimiter is changed to a space.
-    //     if (short_id[4] == '|')
-    //         short_id[4] = ' ';
-    //     x_AddStdString(oid, short_id);
-    // }
-    // ```
     // The parser takes a mol of 4 characters or more (shorter ones make "Could not construct
     // seq-id"), so `short_id` has a fifth byte: the '|' after a 4-character mol, a letter of a
     // longer one (then the same key is added twice and kept once).
@@ -1025,65 +620,7 @@ impl StringIsam {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_isam.cpp:675-719
-    // ```c++
-    // bool s_NoCaseEqual(CTempString & a, CTempString & b)
-    // {
-    //     if (a.size() != b.size())
-    //         return false;
-    //
-    //     return 0 == NStr::strncasecmp(a.data(), b.data(), a.size());
-    // }
-    //
-    // void CWriteDB_IsamIndex::x_AddTextId(int                 oid,
-    //                                      const CTextseq_id & id)
-    // {
-    //     CTempString acc, nm;
-    //     ...
-    //     if (id.CanGetAccession()) {
-    //         acc = id.GetAccession();
-    //     }
-    //
-    //     if (id.CanGetName()) {
-    //         nm = id.GetName();
-    //     }
-    //
-    //     if (! acc.empty()) {
-    //         x_AddStringData(oid, acc);
-    //     }
-    //
-    //     if (! m_Sparse) {
-    //         // Skip name if it is empty or if it is the same as 'acc' when
-    //         // case is ignored.
-    //
-    //         if (! (nm.empty() || s_NoCaseEqual(acc, nm))) {
-    //             x_AddStringData(oid, nm);
-    //         }
-    //
-    //         int ver = id.CanGetVersion() ? id.GetVersion() : 0;
-    //
-    //         if (ver && acc.size()) {
-    //             x_AddString(oid, acc, ver);
-    //         }
-    //     }
-    // }
-    // ```
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_isam.cpp:771-784
-    // ```c++
-    // void CWriteDB_IsamIndex::x_AddString(int oid, const CTempString & acc, int ver)
-    // {
-    //     _ASSERT(! m_Sparse);
-    //
-    //     if (acc.size() && ver) {
-    //         char buf[256];
-    //         memcpy(buf, acc.data(), acc.size());
-    //
-    //         int sz = acc.size();
-    //         sz += sprintf(buf + sz, ".%d", ver);
-    //
-    //         x_AddStringData(oid, buf, sz);
-    //     }
-    // }
-    // ```
     // The accession of a parsed id has at most 30 characters (`CFastaIdValidate`), so `buf`
     // holds `acc.ver`.
     fn add_text_id(
@@ -1206,97 +743,7 @@ impl StringIsam {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_isam.cpp:268-381
-    // ```c++
-    // void CWriteDB_IsamIndex::x_FlushStringIndex()
-    // {
-    //     ...
-    //     int data_pos = 0;
-    //     unsigned count = m_StringSort.Size();
-    //
-    //     unsigned nsamples = s_DivideRoundUp(count, m_PageSize);
-    //
-    //     string key_buffer;
-    //     vector<int> key_off;
-    //     ...
-    //     int output_count = 0;
-    //     int index = 0;
-    //
-    //     m_StringSort.Sort();
-    //     ...
-    //     string element, prev_elem;
-    //     ...
-    //     element.resize(1);
-    //     element[0] = char(0);
-    //
-    //     while(iter != end_iter) {
-    //         prev_elem.swap(element);
-    //         iter.Get(element);
-    //
-    //         if (prev_elem == element) {
-    //             ++iter;
-    //             continue;
-    //         }
-    //         ...
-    //         if ((output_count & (m_PageSize-1)) == 0) {
-    //             // Write the data file position to the index file.
-    //
-    //             WriteInt4(data_pos);
-    //             ...
-    //             key_off.push_back((int) key_buffer.size());
-    //             ...
-    //             key_buffer.append(element.data(), element.length()-1);
-    //             key_buffer.append(NUL);
-    //         }
-    //         output_count ++;
-    //
-    //         data_pos = m_DataFile->Write(element);
-    //         index ++;
-    //
-    //         ++iter;
-    //     }
-    //
-    //     // Write the final data position.
-    //
-    //     WriteInt4(data_pos);
-    //
-    //     // Push back the final buffer offset.
-    //
-    //     key_off.push_back((int) key_buffer.size());
-    //
-    //     int key_off_start = eKeyOffset + (nsamples + 1) * 8;
-    //
-    //     // Write index file offsets of keys.
-    //
-    //     for(i = 0; i < key_off.size(); i++) {
-    //         WriteInt4(key_off[i] + key_off_start);
-    //     }
-    //
-    //     // Write buffer of keys.
-    //
-    //     Write(key_buffer);
-    // }
-    // ```
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_isam.cpp:457-479
-    // ```c++
-    // void CWriteDB_IsamIndex::x_Flush()
-    // {
-    //     if (m_NumberTable.size() || m_StringSort.Size()) {
-    //         Create();
-    //         m_DataFile->Create();
-    //
-    //         // Step 1: Write header data.
-    //         x_WriteHeader();
-    //         ...
-    //         if (m_Type == eAcc || m_Type == eHash) {
-    //             x_FlushStringIndex();
-    //         } else {
-    //             x_FlushNumericIndex();
-    //         }
-    //     }
-    //
-    //     x_Free();
-    // }
-    // ```
     /// `Close`: writes both files when the index has records.
     pub(crate) fn close(&mut self) -> Result<(), WriteDbError> {
         if self.count != 0 {
@@ -1379,8 +826,9 @@ impl StringIsam {
     }
 }
 
-/// A numeric ISAM index (`CWriteDB_Isam` of `eGi`, or of `ePig`, which FASTA input never
-/// fills) of one volume.
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_volume.cpp:88-96,196-200,280-282,344-347,386-389
+/// A numeric ISAM index (`CWriteDB_Isam` of `eGi`, or of `ePig`: the PIGs of a protein volume,
+/// which only `makeblastdb -input_type blastdb` gives) of one volume.
 #[derive(Debug)]
 pub(crate) struct NumericIsam {
     files: IsamFiles,
@@ -1416,20 +864,6 @@ impl NumericIsam {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_isam.cpp:511-522
-    // ```c++
-    // void CWriteDB_IsamIndex::x_AddGis(int oid, const TIdList & idlist)
-    // {
-    //     ITERATE(TIdList, iter, idlist) {
-    //         const CSeq_id & seqid = **iter;
-    //
-    //         if (seqid.IsGi()) {
-    //             SIdOid row(GI_TO(Int8, seqid.GetGi()), oid);
-    //             m_NumberTable.push_back(row);
-    //             m_DataFileSize += 8;
-    //         }
-    //     }
-    // }
-    // ```
     /// `AddIds` of the numeric index of the GIs (`x_AddGis`).
     pub(crate) fn add_gis(&mut self, oid: u32, ids: &[ParsedSeqId]) {
         for gi in ids.iter().filter_map(ParsedSeqId::gi) {
@@ -1438,47 +872,14 @@ impl NumericIsam {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_isam.cpp:496-501
+    /// `AddPig`: the PIG of OID `oid` (a PIG index).
+    pub(crate) fn add_pig(&mut self, oid: u32, pig: i32) {
+        self.table.push((i64::from(pig), oid as i32));
+        self.data_file_size += 8;
+    }
+
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_isam.cpp:383-455
-    // ```c++
-    // void CWriteDB_IsamIndex::x_FlushNumericIndex()
-    // {
-    //     _ASSERT(m_NumberTable.size());
-    //
-    //     int row_index = 0;
-    //
-    //     sort(m_NumberTable.begin(), m_NumberTable.end());
-    //
-    //     int count = (int) m_NumberTable.size();
-    //
-    //     const SIdOid * prevp = 0;
-    //     ...
-    //     } else {
-    //         for(int i = 0; i < count; i++) {
-    //             const SIdOid & elem = m_NumberTable[i];
-    //
-    //             if (prevp && (*prevp == elem)) {
-    //                 continue;
-    //             } else {
-    //                 prevp = & elem;
-    //             }
-    //
-    //             if ((row_index & (m_PageSize-1)) == 0) {
-    //                 WriteInt4(elem.id());
-    //                 WriteInt4(elem.oid());
-    //             }
-    //
-    //             m_DataFile->WriteInt4(elem.id());
-    //             m_DataFile->WriteInt4(elem.oid());
-    //             row_index ++;
-    //         }
-    //
-    //         // 32 bit numeric files end in (max-uint4, 0).
-    //
-    //         WriteInt4(-1);
-    //         WriteInt4(0);
-    //     }
-    // }
-    // ```
     // `m_UseInt8` is set by trace ids only, which makeblastdb does not index. The rows are
     // sorted as (Int8 id, OID) pairs and the id is written as an `Int4`: a GI of 2^31 or more
     // comes after the smaller ones and is written negative. The header counts the rows
@@ -1532,50 +933,6 @@ impl NumericIsam {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_volume.hpp:53-98
-// ```c++
-// class CWriteDB_GiIndex : public CWriteDB_File {
-// public:
-//     CWriteDB_GiIndex(const string & dbname,
-//                      bool           protein,
-//                      int            index,
-//                      Uint8          max_fsize)
-//     : CWriteDB_File  (dbname, (protein ? "pog" : "nog"), index, max_fsize, false){ }
-//     ...
-//     void AddGi(TGi gi) {
-//         m_Gi.push_back(gi);
-//     }
-//
-// private:
-//     void x_Flush() {
-//
-//         Int4 nGi = m_Gi.size();
-//
-//         if (! nGi) return;
-//
-//         Create();
-//         WriteInt4(kVersion);
-//         WriteInt4(kFileType);
-//         WriteInt4(kGiSize);
-//         WriteInt4(nGi);
-//
-//         for (Int4 i=0; i<4; i++) {
-//             WriteInt4(0);
-//         }
-//
-//         for (Int4 i=0; i<nGi; i++) {
-//             WriteInt4(GI_TO(Int4, m_Gi[i]));
-//         }
-//
-//         vector<TGi> tmp;
-//         m_Gi.swap(tmp);
-//     }
-//
-//     static const int kVersion = 1;
-//     static const int kFileType = 0;
-//     static const int kGiSize = 4;
-//     vector<TGi> m_Gi;
-// };
-// ```
 // The GIs are kept as the `Int4` they are written as (4 bytes per OID instead of 8).
 /// `CWriteDB_GiIndex`: the `.pog` / `.nog` file of a volume.
 #[derive(Debug)]

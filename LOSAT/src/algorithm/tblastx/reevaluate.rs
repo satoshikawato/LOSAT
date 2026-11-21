@@ -6,7 +6,7 @@
 //! subsegment falls below the cutoff.
 //!
 //! Reference:
-//! - ncbi-blast/c++/src/algo/blast/core/blast_hits.c:675-733
+//! - c++/src/algo/blast/core/blast_hits.c:675-733
 
 use crate::algorithm::tblastx::scoring::{Blosum62Score, TbxScore};
 #[cfg(any(
@@ -33,27 +33,6 @@ use std::sync::OnceLock;
 // ---------------------------------------------------------------------------
 
 // NCBI BLAST reference (c++/src/algo/blast/core/blast_hits.c:675-733):
-//   for (index = 0; index < hsp_length; ++index) {
-//       sum += matrix[*query & kResidueMask][*subject];
-//       query++;
-//       subject++;
-//       if (sum < 0) {
-//           sum = 0;
-//           current_q_start = query;
-//           current_s_start = subject;
-//          if (score < cutoff_score) {
-//             best_q_start = best_q_end = query;
-//             best_s_start = best_s_end = subject;
-//             score = 0;
-//          }
-//       } else if (sum > score) {
-//          score = sum;
-//          best_q_end = query;
-//          best_s_end = subject;
-//          best_q_start = current_q_start;
-//          best_s_start = current_s_start;
-//       }
-//   }
 //
 // We batch the matrix lookup (blosum62_score) using AVX2 gather, but keep
 // the exact per-residue control flow (sum updates, branches) to preserve
@@ -134,66 +113,14 @@ unsafe fn gather_scores8_reevaluate_avx2(
 /// - `Blast_HSPReevaluateWithAmbiguitiesUngapped` (blast_hits.c:675-733), for the
 ///   **translated** case (`translated == TRUE`), where `kResidueMask = 0xff`.
 ///
-/// NCBI reference (verbatim, blast_hits.c:675-733):
-/// ```c
-/// Boolean
-/// Blast_HSPReevaluateWithAmbiguitiesUngapped(BlastHSP* hsp, const Uint1* query_start,
-///    const Uint1* subject_start, const BlastInitialWordParameters* word_params,
-///    BlastScoreBlk* sbp, Boolean translated)
-/// {
-///    Int4 sum, score;
-///    Int4** matrix;
-///    const Uint1* query,* subject;
-///    const Uint1* best_q_start,* best_s_start,* best_q_end,* best_s_end;
-///    const Uint1* current_q_start, * current_s_start;
-///    Int4 index;
-///    const Uint1 kResidueMask = (translated ? 0xff : 0x0f);
-///    Int4 hsp_length = hsp->query.end - hsp->query.offset;
-///    Int4 cutoff_score = word_params->cutoffs[hsp->context].cutoff_score;
-///
-///    matrix = sbp->matrix->data;
-///
-///    query = query_start + hsp->query.offset;
-///    subject = subject_start + hsp->subject.offset;
-///    score = 0;
-///    sum = 0;
-///    best_q_start = best_q_end = current_q_start = query;
-///    best_s_start = best_s_end = current_s_start = subject;
-///
-///    for (index = 0; index < hsp_length; ++index) {
-///       sum += matrix[*query & kResidueMask][*subject];
-///       query++;
-///       subject++;
-///       if (sum < 0) {
-///           sum = 0;
-///           current_q_start = query;
-///           current_s_start = subject;
-///          if (score < cutoff_score) {
-///             best_q_start = best_q_end = query;
-///             best_s_start = best_s_end = subject;
-///             score = 0;
-///          }
-///       } else if (sum > score) {
-///          score = sum;
-///          best_q_end = query;
-///          best_s_end = subject;
-///          best_q_start = current_q_start;
-///          best_s_start = current_s_start;
-///       }
-///    }
-///
-///    return s_UpdateReevaluatedHSPUngapped(hsp, cutoff_score, score,
-///                                       query_start, subject_start, best_q_start,
-///                                       best_q_end, best_s_start, best_s_end);
-/// }
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:675-733
 ///
 /// Inputs are offsets into query/subject->sequence buffers (0-based, past NULLB):
 /// - `query_raw` / `subject_raw` start at the first residue (sequence_start + 1)
 /// - `q_off_raw` / `s_off_raw` are 0-based offsets from those starts
 /// - `hsp_len` is the ungapped alignment length in residues
 ///
-/// Reference: blast_util.c:112-116, blast_hits.c:675-733.
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:112-116, c++/src/algo/blast/core/blast_hits.c:675-733.
 ///
 /// Returns updated (q_off_raw, s_off_raw, hsp_len, score) if kept, else `None`.
 #[inline]
@@ -234,12 +161,7 @@ pub(crate) fn reevaluate_ungapped_hit_ncbi_translated(
             }
         }
     }
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:692-701
-    // ```c
-    // for (index = 0; index < hsp_length; ++index) {
-    //    sum += matrix[*query & kResidueMask][*subject];
-    // }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:692-701
     #[cfg(all(
         target_arch = "wasm32",
         target_feature = "simd128",
@@ -338,19 +260,7 @@ fn reevaluate_ungapped_hit_ncbi_translated_scalar<S: TbxScore>(
     let mut best_end: usize = 0;
     let mut current_start: usize = 0;
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:692-705
-    // ```c
-    // query = query_start + hsp->query.offset;
-    // subject = subject_start + hsp->subject.offset;
-    // for (index = 0; index < hsp_length; ++index) {
-    //    sum += matrix[*query & kResidueMask][*subject];
-    //    query++;
-    //    subject++;
-    //    if (sum < 0) {
-    //       ...
-    //    }
-    // }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:692-705
     //
     // Safety: bounds were checked above, so q_ptr/s_ptr are valid for hsp_len bytes.
     let q_ptr = unsafe { query_raw.as_ptr().add(q_off_raw) };
@@ -402,12 +312,7 @@ fn reevaluate_ungapped_hit_ncbi_translated_scalar<S: TbxScore>(
 /// Uses v128 loads to fetch 16 residues at a time, then applies the
 /// **same scalar control flow** as NCBI for each position to preserve parity.
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:692-701
-/// ```c
-/// for (index = 0; index < hsp_length; ++index) {
-///    sum += matrix[*query & kResidueMask][*subject];
-/// }
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:692-701
 #[cfg(all(
     target_arch = "wasm32",
     target_feature = "simd128",
@@ -682,57 +587,7 @@ unsafe fn reevaluate_ungapped_hit_ncbi_translated_avx2(
 /// - `s_Blast_HSPGetNumIdentitiesAndPositives` (blast_hits.c:746-825), for the
 ///   **ungapped** case (no gap_info).
 ///
-/// NCBI reference (verbatim, blast_hits.c:746-792):
-/// ```c
-/// s_Blast_HSPGetNumIdentitiesAndPositives(const Uint1* query, const Uint1* subject,
-///                            			const BlastHSP* hsp, Int4* num_ident_ptr,
-///                            			Int4* align_length_ptr, const BlastScoreBlk* sbp,
-///                            			Int4* num_pos_ptr)
-/// {
-///    Int4 i, num_ident, align_length, q_off, s_off;
-///    Uint1* q,* s;
-///    Int4 q_length = hsp->query.end - hsp->query.offset;
-///    Int4 s_length = hsp->subject.end - hsp->subject.offset;
-///    Int4** matrix = NULL;
-///    Int4 num_pos = 0;
-///
-///    q_off = hsp->query.offset;
-///    s_off = hsp->subject.offset;
-///
-///    if ( !subject || !query || !hsp )
-///       return -1;
-///
-///    q = (Uint1*) &query[q_off];
-///    s = (Uint1*) &subject[s_off];
-///
-///    num_ident = 0;
-///    align_length = 0;
-///
-///    if(NULL != sbp)
-///    {
-/// 	    if(sbp->protein_alphabet)
-/// 		    matrix = sbp->matrix->data;
-///    }
-///
-///    if (!hsp->gap_info) {
-///       /* Ungapped case. Check that lengths are the same in query and subject,
-///          then count number of matches. */
-///       if (q_length != s_length)
-///          return -1;
-///       align_length = q_length;
-///       for (i=0; i<align_length; i++) {
-///          if (*q == *s)
-///             num_ident++;
-///          else if (NULL != matrix) {
-///         	 if (matrix[*q][*s] > 0)
-///         		 num_pos ++;
-///             }
-///          q++;
-///          s++;
-///       }
-///   	}
-/// }
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:746-792
 ///
 /// # Arguments
 /// * `query_nomask` - Query sequence without masking (for identity calculation)
@@ -762,7 +617,6 @@ pub(crate) fn get_num_identities_and_positives_ungapped(
     let align_length = hsp_len;
 
     // NCBI: for (i=0; i<align_length; i++)
-    //   if (*q == *s) num_ident++;
     //
     // SIMD optimization: use AVX2/SSE2 to compare 32/16 bytes at a time
     let num_ident = unsafe {
@@ -882,34 +736,5 @@ unsafe fn count_identities_scalar(q_ptr: *const u8, s_ptr: *const u8, len: usize
 
 // No NCBI counterpart: the bound tests cannot wrap (line LIB, P-S1; they wrapped in release).
 #[cfg(test)]
-mod bounds_wrap_tests {
-    use super::{
-        get_num_identities_and_positives_ungapped, reevaluate_ungapped_hit_ncbi_translated,
-    };
-
-    #[test]
-    fn an_offset_near_usize_max_is_refused() {
-        let seq = [1u8; 40];
-        // `q_off + hsp_len` wraps to 1; 16 letters take the AVX2 loop where it is detected.
-        for len in [2, 16] {
-            let q_off = usize::MAX - len + 2;
-            assert_eq!(
-                reevaluate_ungapped_hit_ncbi_translated(&seq, &seq, q_off, 0, len, 0),
-                None
-            );
-            assert_eq!(
-                reevaluate_ungapped_hit_ncbi_translated(&seq, &seq, 0, usize::MAX, len, 0),
-                None
-            );
-            assert_eq!(
-                get_num_identities_and_positives_ungapped(&seq, &seq, usize::MAX, 0, len),
-                None
-            );
-        }
-        assert_eq!(
-            reevaluate_ungapped_hit_ncbi_translated(&seq, &seq, 0, 0, 41, 0),
-            None
-        );
-        assert!(get_num_identities_and_positives_ungapped(&seq, &seq, 24, 24, 16).is_some());
-    }
-}
+#[path = "reevaluate_bounds_wrap_tests.rs"]
+mod bounds_wrap_tests;

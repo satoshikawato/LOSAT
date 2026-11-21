@@ -1,0 +1,5 @@
+TITLE oidlist k walk
+DBLIST ../taxfilter/tfp
+OIDLIST k.msk
+NSEQ 99
+LENGTH 9999

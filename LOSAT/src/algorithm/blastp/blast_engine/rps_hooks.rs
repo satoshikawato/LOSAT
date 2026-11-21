@@ -7,21 +7,6 @@
 //! and cold: blastp's default path only tests `rps_search`.
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/rpsblast_app.cpp:129-141
-//! ```c++
-//!         	opts_hndl.Reset(&*m_CmdLineArgs->SetOptions(args));
-//!         }
-//!
-//!         CheckForFreqRatioFile(m_CmdLineArgs->GetBlastDatabaseArgs()->GetDatabaseName(),
-//!         		               opts_hndl, true);
-//!         const CBlastOptions& opt = opts_hndl->GetOptions();
-//!
-//!         /*** Initialize the database ***/
-//!         CRef<CBlastDatabaseArgs> db_args(m_CmdLineArgs->GetBlastDatabaseArgs());
-//!         CRef<CLocalDbAdapter> db_adapter;
-//!         CRef<CScope> scope;
-//!         InitializeSubject(db_args, opts_hndl, m_CmdLineArgs->ExecuteRemotely(),
-//!                          db_adapter, scope);
-//! ```
 
 use anyhow::{bail, Result};
 
@@ -41,14 +26,7 @@ use crate::algorithm::tblastx::lookup::{
 use crate::algorithm::tblastx::translation::QueryFrame;
 use crate::stats::KarlinParams;
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:159-164
-// ```c++
-//     // 2. Take care of any rps information
-//     if (Blast_ProgramIsRpsBlast(options->GetProgramType())) {
-//         ...
-//         retval->m_InternalData->m_RpsData =
-//             CSetupFactory::CreateRpsStructures(rps_dbname, options);
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:158-164
 /// The error of the RPS files that NCBI reports itself (`BLAST engine error: <text>`, exit
 /// status 3): a volume's files that cannot be mapped or read, or the score block of an `.aux`
 /// without a matrix name (review B of PS12a, N4). NCBI sets up every volume's files in the first
@@ -72,41 +50,6 @@ impl std::error::Error for RpsEngineError {}
 /// later volume without `.freq` fails inside the search (`RpsVolumeFiles::open_freq`).
 ///
 /// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:807-840
-/// ```c++
-///     bool use_cbs = (opt_handle->GetOptions().GetCompositionBasedStats() == eNoCompositionBasedStats) ? false : true;
-///     if(use_cbs) {
-///         vector<string> db;
-///         NStr::Split(rps_dbname, " ", db);
-///         list<string> failed_db;
-///         for (unsigned int i=0; i < db.size(); i++) {
-///     	    string path;
-///     	    try {
-///                 vector<string> dbpath;
-///        	        CSeqDB::FindVolumePaths(db[i], CSeqDB::eProtein, dbpath);
-///                 path = *dbpath.begin();
-///             } catch (const CSeqDBException& e) {
-///                  NCBI_RETHROW(e, CBlastException, eRpsInit,
-///                               "Cannot retrieve path to RPS database");
-///             }
-///
-///     	    CFile f(path + ".freq");
-///             if(!f.Exists()) {
-///             	failed_db.push_back(db[i]);
-///             }
-///
-///         }
-///         if(!failed_db.empty()) {
-///         	opt_handle->SetOptions().SetCompositionBasedStats(eNoCompositionBasedStats);
-///         	string all_failed = NStr::Join(failed_db, ", ");
-///         	string prog_str = isRpsblast ? "RPSBLAST": "DELTABLAST";
-///         	string msg = all_failed + " contain(s) no freq ratios " \
-///                      	 + "needed for composition-based statistics.\n" \
-///                      	 + prog_str + " will be run without composition-based statistics.";
-///         	ERR_POST(Warning << msg);
-///         }
-///
-///     }
-/// ```
 #[cold]
 #[inline(never)]
 pub(super) fn check_freq_ratio_file(
@@ -146,23 +89,27 @@ pub(super) fn check_freq_ratio_file(
     }
     args.comp_based_stats.mode =
         crate::algorithm::blastp::args::BlastpCompositionMode::NoCompositionBasedStats;
-    writeln!(
-        diagnostics,
-        "Warning: [rpsblast] {} contain(s) no freq ratios needed for composition-based statistics.\nRPSBLAST will be run without composition-based statistics.",
+    let warning = format!(
+        "Warning: [rpsblast] {} contain(s) no freq ratios needed for composition-based statistics.\nRPSBLAST will be run without composition-based statistics.\n",
         failed.join(", ")
-    )?;
+    );
+    match &args.archive {
+        Some(handle) => handle.write_warning(diagnostics, warning.as_bytes())?,
+        None => diagnostics.write_all(warning.as_bytes())?,
+    }
     Ok(())
 }
 
-/// What rpsblast sets in the options handle that the search strategy's requests hold
+/// What rpsblast sets in the options handle that the requests of the archive and of the search
+/// strategy hold
 /// (`report::archive::OptionsHandle::set_search_sets`): before the batches, the composition-based
 /// statistics that `check_freq_ratio_file` turned off (NCBI's `SetCompositionBasedStats` in place:
 /// `CompositionBasedStats 0` in every request, NCBI BLAST+ 2.17.0 `p9.rps.err.nofreq`); at each
 /// batch's set-up, the database's length and `.aux` costs (`rps_search::volumes::search_sets`).
 #[cold]
 #[inline(never)]
-pub(super) fn note_strategy_sets(
-    strategy: &crate::report::archive::strategy::StrategyExport,
+pub(super) fn note_handle_sets(
+    handle: &crate::report::archive::OptionsHandle,
     rps: &RpsSearch,
     args: &ResolvedBlastpArgs,
     database: &database::BlastpDatabase,
@@ -180,7 +127,7 @@ pub(super) fn note_strategy_sets(
     let db_length = database.rps_units().and_then(RpsUnits::strategy_db_length);
     let volumes = RpsVolumeSet::of(database.seqdb());
     let costs = RpsVolumeSetup::new("RPSBLAST").costs(volumes.first());
-    strategy.options().set_search_sets(
+    handle.set_search_sets(
         before_batches,
         crate::algorithm::rps_search::volumes::search_sets(db_length, costs),
     )
@@ -211,11 +158,6 @@ pub(super) fn with_units(
 /// validity) and an empty lookup table: the RPS search scans with the database's prebuilt table.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2746-2748
-/// ```c
-///    Boolean check_ideal =
-///       (program == eBlastTypeBlastx || program == eBlastTypeTblastx ||
-///        program == eBlastTypeRpsTblastn);
-/// ```
 #[cold]
 #[inline(never)]
 pub(super) fn rps_contexts(
@@ -245,6 +187,16 @@ pub(super) struct RpsSearchRun<'a> {
     pub(super) prelim_hitlist_size: usize,
     /// The query batches (searched-query ranges) of the run.
     pub(super) batches: Vec<std::ops::Range<usize>>,
+    /// Whether the engine counts each HSP's identities again for the reports: NCBI's reports
+    /// count them on the sequences of their scope (outfmt 0 always, the tabular formats inside
+    /// their alignment block), not on the masked query of the traceback's count
+    /// (`rps_search::traceback::formatter_identities`). LOSAT's outfmt 0 and default tabular
+    /// writers print the HSP's count, so the engine counts again for them; the tabular writer of
+    /// a field list or outfmt 10 counts on the rows itself and reads the traceback's count for
+    /// the block's gate (`tabular::needs_rows`). Decided once from the reports that the call
+    /// writes (`call_setup::requested_reports`: no `BlastpReport::CustomTabular`), so that the
+    /// count and the report read one decision.
+    pub(super) recount_identities: bool,
 }
 
 /// What blastp's set-up of an rpsblast search reads of its first search unit in place of the
@@ -286,15 +238,7 @@ impl RpsSetup {
 /// for each: NCBI's "auto"). A volume that the alias files reach twice is one volume of the
 /// database's set (`SeqDb`).
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/api/rpsblast_local.cpp:419-424
-/// ```c++
-///    	if((kAutoThreadedSearch == m_num_of_threads) ||
-///    	  (m_num_of_threads > m_rps_databases.size()))
-///    	{
-///    		//Default num of thread : a thread for each db
-///    		m_num_of_threads = static_cast<unsigned int>(m_rps_databases.size());
-///    	}
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/rpsblast_local.cpp:414-424
 #[cold]
 #[inline(never)]
 pub(super) fn volume_count(database: &database::BlastpDatabase) -> usize {
@@ -327,14 +271,6 @@ pub(super) struct RpsSearched {
 /// results into volume 0's (`s_MergeAlignSet`, `merge_volume`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/rpsblast_local.cpp:341-346
-/// ```c++
-/// 	CSeqDB::FindVolumePaths(db, CSeqDB::eProtein, m_rps_databases, NULL, true, true);
-/// 	m_num_of_dbs = static_cast<unsigned int>(m_rps_databases.size());
-/// 	if( 1 == m_num_of_dbs)
-/// 	{
-/// 		m_num_of_threads = kDisableThreadedSearch;
-/// 	}
-/// ```
 #[cold]
 #[inline(never)]
 pub(super) fn rps_search(
@@ -396,21 +332,9 @@ pub(super) fn rps_search(
     // The X-drops in bits and the gap trigger (`RpsSearch::x_drop_bits`); the engine converts
     // them at each volume's scale (`RpsRun::cutoffs`, `RpsRun::gapped_x_drops`).
     let x_drops = rps.x_drop_bits();
-    // NCBI's reports count an HSP's identities on the sequences of their scope (outfmt 0 always,
-    // the tabular formats inside their alignment block), not on the masked query of the
-    // traceback's count (`rps_search::traceback::formatter_identities`). LOSAT's outfmt 0 and
-    // default tabular writers print the HSP's count, so the engine counts again for them; the
-    // tabular writer of a field list or outfmt 10 counts on the rows itself and reads the
-    // traceback's count for the block's gate (`tabular::needs_rows`).
-    let recount_identities = super::super::tabular::custom_tabular_spec(&args.outfmt).is_none();
+    // The reports' identities (`RpsSearchRun::recount_identities`).
+    let recount_identities = run.recount_identities;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:246-250
-    // ```c
-    //     if (backup->offset + MAX_DBSEQ_LEN <
-    //         backup->hard_ranges[backup->hm_index].right) {
-    //
-    //         subject->length = MAX_DBSEQ_LEN;
-    //         backup->next = backup->offset + MAX_DBSEQ_LEN - dbseq_chunk_overlap;
-    // ```
     // A query that NCBI's engine would cut into chunks (`s_GetNextSubjectChunk`) is refused.
     if let Some(long) = run.contexts.iter().find(|ctx| ctx.aa_len > MAX_DBSEQ_LEN) {
         bail!(
@@ -490,10 +414,6 @@ pub(super) fn rps_search(
             .map(|ctx| mask_unsupported_letters(&ctx.aa_seq, files.alphabet))
             .collect();
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:932-940
-        // ```c
-        //     int cbs_stretch = (compositionBasedStats > 1) ? 5 : 1;
-        //     params->prelim_evalue = cbs_stretch*evalue;
-        // ```
         // (The stretch is NCBI's only inside the Gumbel block's branch: blast_parameters.c:922-945.)
         let prelim_evalue = if cbs > 1 && gumbel.is_some() {
             5.0 * args.evalue
@@ -609,18 +529,7 @@ pub(super) fn rps_search(
             program: "RPSBLAST",
         };
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:870-873
-        // ```c
-        //     if (hit_params->link_hsp_params) {
-        //         status = BLAST_LinkHsps(program_number, hsp_list_out, query_info,
-        //                   subject->length, gap_align->sbp, hit_params->link_hsp_params,
-        //                   score_options->gapped_calculation);
-        // ```
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:559-561
-        // ```c
-        //       query_context = hp_start->next->hsp->context;
-        //       length_adjustment = query_info->contexts[query_context].length_adjustment;
-        //       query_length = query_info->contexts[query_context].query_length;
-        // ```
         // With sum statistics (`-sum_stats true`) NCBI's RPS search links the HSPs of each
         // profile with the user query's one-context `query_info` while the HSPs carry the
         // profile's context (0 to the number of profiles), so `BLAST_LinkHsps` reads past its
@@ -767,17 +676,6 @@ pub(super) fn request_space(
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/rpsblast_app.cpp:193-213
-// ```c++
-//         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
-//
-//             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
-//             CRef<IQueryFactory> queries(new CObjMgr_QueryFactory(*query_batch));
-//
-//             SaveSearchStrategy(args, m_CmdLineArgs, queries, opts_hndl);
-//             ...
-//             	CLocalRPSBlast  local_search (query_batch, db_args->GetDatabaseName(), opts_hndl, args[kArgNumThreads].AsInteger() );
-//             	results = local_search.Run();
-// ```
 /// The run's error when the query batch `batch` of `run.batches` fails (`rps_search`). NCBI reads,
 /// writes the search strategy request of, searches and reports one batch before it reads the next,
 /// so an error of its own in a batch's search (a profile volume's sequence file that the batch's
@@ -803,148 +701,8 @@ fn failed_batch_error(run: &RpsSearchRun<'_>, batch: usize, error: anyhow::Error
 // one copy of the macro).
 //
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_gapalign.h:54
-// ```c
-// #define MAX_DBSEQ_LEN 5000000
-// ```
 use crate::core::subject_split::MAX_DBSEQ_LEN;
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::algorithm::blastp::hsp::{BlastpHsp, BlastpHspList};
-
-    /// A list of one subject whose first Seq-align has the given E-value and bit score.
-    fn list(oid: u32, e_value: f64, bit_score: f64) -> BlastpHspList {
-        let mut hsp = BlastpHsp::from_hit(crate::common::Hit {
-            identity: 0.0,
-            length: 1,
-            mismatch: 0,
-            gapopen: 0,
-            q_start: 1,
-            q_end: 1,
-            s_start: 1,
-            s_end: 1,
-            e_value,
-            bit_score,
-            num_ident: 0,
-            query_frame: 0,
-            query_length: 0,
-            q_idx: 0,
-            s_idx: oid,
-            raw_score: 10,
-            sort_query_offset: 0,
-            sort_query_end: 0,
-            sort_subject_offset: 0,
-            sort_subject_end: 0,
-            has_sort_offsets: false,
-            gap_info: None,
-            num_positives: 0,
-        });
-        hsp.e_value = e_value;
-        hsp.bit_score = bit_score;
-        BlastpHspList {
-            oid,
-            query_index: 0,
-            hsps: vec![hsp],
-            best_evalue: e_value,
-        }
-    }
-
-    fn hit_list(lists: Vec<BlastpHspList>) -> BlastpHitList {
-        let mut hit_list = BlastpHitList::new(100);
-        hit_list.hsplist_count = lists.len();
-        hit_list.hsplist_array = lists;
-        hit_list
-    }
-
-    fn oids(hit_list: &BlastpHitList) -> Vec<u32> {
-        hit_list.hsplist_array[..hit_list.hsplist_count]
-            .iter()
-            .map(|list| list.oid)
-            .collect()
-    }
-
-    #[test]
-    fn volumes_merge_by_the_first_alignment_of_each_subject() {
-        // Final: 1 (1e-5), 2 (1e-3), 3 (1e-1). Input: 10 (1e-6), 11 (1e-3, a larger bit score
-        // than 2), 12 (1e-3, the same bit score as 2 or less), 13 (5).
-        let mut lists = vec![Some(hit_list(vec![
-            list(1, 1e-5, 50.0),
-            list(2, 1e-3, 40.0),
-            list(3, 1e-1, 30.0),
-        ]))];
-        let input = vec![Some(hit_list(vec![
-            list(10, 1e-6, 55.0),
-            list(11, 1e-3, 41.0),
-            list(12, 1e-3, 40.0),
-            list(13, 5.0, 20.0),
-        ]))];
-        merge_volume(&mut lists, input);
-        // 10 before 1; at equal E-values 11 (larger bit score) before 2, but 12 (equal) after 2;
-        // 13 goes after 3 (the final side runs out: the rest is appended).
-        assert_eq!(
-            oids(lists[0].as_ref().unwrap()),
-            vec![10, 1, 11, 2, 12, 3, 13]
-        );
-    }
-
-    #[test]
-    fn a_volume_without_hits_changes_nothing_and_an_empty_first_volume_takes_the_next() {
-        let mut lists = vec![Some(hit_list(vec![list(1, 1e-5, 50.0)])), None];
-        let input = vec![
-            None,
-            Some(hit_list(vec![list(10, 1e-6, 55.0), list(11, 1e-2, 9.0)])),
-        ];
-        merge_volume(&mut lists, input);
-        assert_eq!(oids(lists[0].as_ref().unwrap()), vec![1]);
-        assert_eq!(oids(lists[1].as_ref().unwrap()), vec![10, 11]);
-    }
-
-    #[test]
-    fn the_input_is_cut_nowhere_and_volumes_merge_in_order() {
-        let mut lists = vec![Some(hit_list(vec![list(1, 1e-2, 10.0)]))];
-        let second = vec![Some(hit_list(vec![
-            list(10, 1e-3, 10.0),
-            list(11, 1e-1, 10.0),
-        ]))];
-        let third = vec![Some(hit_list(vec![list(20, 1e-2, 10.0)]))];
-        merge_volume(&mut lists, second);
-        merge_volume(&mut lists, third);
-        // 20 ties with 1 on both values: the final side's (already merged) group goes first.
-        assert_eq!(oids(lists[0].as_ref().unwrap()), vec![10, 1, 20, 11]);
-    }
-
-    #[test]
-    fn volumes_are_ordered_by_file_name_then_path() {
-        use crate::seqdb::SeqDb;
-        use std::path::Path;
-        let mut paths = ["zd/x", "ad/y", "prof_rps2v.01", "b/x", "a/x"]
-            .map(Path::new)
-            .to_vec();
-        paths.sort_by(|a, b| SeqDb::compare_volume_paths(a, b));
-        let sorted: Vec<&str> = paths.iter().map(|p| p.to_str().unwrap()).collect();
-        // prof_rps2v.01, then x (a/x, b/x, zd/x by path), then y.
-        assert_eq!(sorted, ["prof_rps2v.01", "a/x", "b/x", "zd/x", "ad/y"]);
-    }
-
-    #[test]
-    fn e_values_below_the_smallest_compare_equal_and_the_bit_score_decides() {
-        // 1e-189 (535 bits) and 1e-190 (534 bits) are both 0 in the Seq-aligns: the larger bit
-        // score first, whichever has the smaller E-value.
-        let mut lists = vec![Some(hit_list(vec![
-            list(1, 1e-189, 535.0),
-            list(2, 1e-100, 300.0),
-        ]))];
-        let input = vec![Some(hit_list(vec![
-            list(10, 1e-190, 534.0),
-            list(11, 1e-190, 536.0),
-        ]))];
-        merge_volume(&mut lists, input);
-        // 10 (534) after 1 (535); 11 (536) is compared with 2 (1e-100): before it.
-        assert_eq!(oids(lists[0].as_ref().unwrap()), vec![1, 10, 11, 2]);
-        let mut lists = vec![Some(hit_list(vec![list(1, 1e-189, 535.0)]))];
-        let input = vec![Some(hit_list(vec![list(10, 1e-190, 536.0)]))];
-        merge_volume(&mut lists, input);
-        assert_eq!(oids(lists[0].as_ref().unwrap()), vec![10, 1]);
-    }
-}
+#[path = "rps_hooks_tests.rs"]
+mod tests;

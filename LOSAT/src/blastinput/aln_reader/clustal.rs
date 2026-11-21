@@ -2,21 +2,10 @@
 //! (`CAlnScanner::xVerifyAlignmentData`): the ids and the rows of a Clustal file, or the failure
 //! that NCBI's scanner throws (every throw of the scanner is a failed read, `super::read`).
 
+use super::base::{verify_rows, ScanFailure, Scanned, SeqInfo};
 use super::lines::PeekAheadStream;
 use crate::ncbi_str::{string_to_int, truncate_spaces};
 use crate::utils::format_guess::tokens;
-
-/// The alignment as the scanner exports it (`SAlignmentFile`): the id string and the row of each
-/// sequence, in the order of the first block.
-pub(crate) struct Scanned {
-    pub(crate) ids: Vec<Vec<u8>>,
-    pub(crate) rows: Vec<Vec<u8>>,
-}
-
-/// The scanner stopped (a `SShowStopper`, which `CAlnReader::Read` hands to the error reporter
-/// that throws it).
-#[derive(Debug, PartialEq, Eq)]
-pub(crate) struct ScanFailure;
 
 struct BlockInfo {
     seq_count: usize,
@@ -27,28 +16,12 @@ struct BlockInfo {
 /// `sTerminateBlock`.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/aln_scanner_clustal.cpp:80-98
-/// ```c++
-///     if (blockInfo.first) {
-///         numSeqs = blockInfo.seqCount;
-///         blockInfo.first = false;
-///     }
-///     else
-///     if (numSeqs != blockInfo.seqCount) {
-///         ...
-///         throw SShowStopper(
-///             lineCount,
-///             EAlnSubcode::eAlnSubcode_BadSequenceCount,
-///             description);
-///     }
-///     blockInfo.seqCount = 0;
-///     blockInfo.lineLength = 0;
-/// ```
 fn terminate_block(num_seqs: &mut usize, block: &mut BlockInfo) -> Result<(), ScanFailure> {
     if block.first {
         *num_seqs = block.seq_count;
         block.first = false;
     } else if *num_seqs != block.seq_count {
-        return Err(ScanFailure);
+        return Err(ScanFailure::Failed);
     }
     block.seq_count = 0;
     block.line_length = 0;
@@ -60,14 +33,6 @@ fn terminate_block(num_seqs: &mut usize, block: &mut BlockInfo) -> Result<(), Sc
 /// line also when other text follows, and a line of nothing else is one too (`npos` is not 0).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/aln_scanner_clustal.cpp:200-206
-/// ```c++
-/// bool
-/// CAlnScannerClustal::sIsConservationLine(
-///     const string& line)
-/// {
-///     return line.find_first_not_of(":.* \t\r\n");
-/// };
-/// ```
 fn is_conservation_line(line: &[u8]) -> bool {
     line.iter().position(|c| !b":.* \t\r\n".contains(c)) != Some(0)
 }
@@ -76,129 +41,11 @@ fn is_conservation_line(line: &[u8]) -> bool {
 /// scanner's `xVerifyAlignmentData`.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/aln_scanner_clustal.cpp:117-196
-/// ```c++
-///     while (iStr.ReadLine(line, lineCount)) {
-///         if (lineCount == 1) {
-///             if (NStr::StartsWith(line, "clustal", NStr::eNocase)) {
-///                 continue;
-///             }
-///         }
-///
-///         NStr::TruncateSpacesInPlace(line);
-///         if (line.empty()) {
-///             if (inBlock) {
-///                 sTerminateBlock(lineCount, numSeqs, blockInfo);
-///                 inBlock = false;
-///             }
-///             continue;
-///         }
-///
-///         if (sIsConservationLine(line)) {
-///             if (!inBlock) {
-///                 ...
-///                 ...
-///             }
-///             sTerminateBlock(lineCount, numSeqs, blockInfo);
-///             inBlock = false;
-///             continue;
-///         }
-///         // Search for end of block
-///         vector<string> tokens;
-///         NStr::Split(line, " \t", tokens, NStr::fSplit_Tokenize);
-///         const auto num_tokens = tokens.size();
-///         if (num_tokens < 2 || num_tokens > 3) {
-///             ...
-///             ...
-///         }
-///
-///         int seqLength = 0;
-///         if (num_tokens == 3) {
-///             seqLength = NStr::StringToInt(tokens[2], NStr::fConvErr_NoThrow);
-///             if (!seqLength) {
-///                 ...
-///             }
-///         }
-///
-///         if (!inBlock) {
-///             inBlock = true;
-///         }
-///
-///         sProcessClustalDataLine(
-///              tokens, lineCount,
-///              blockInfo.seqCount,
-///              numSeqs,
-///              blockInfo.first,
-///              blockInfo.lineLength);
-///
-///         mSequences[blockInfo.seqCount].push_back({tokens[1], lineCount});
-///         ++(blockInfo.seqCount);
-///     }
-///
-///     if (inBlock) {
-///         ...
-///         ...
-///     }
-/// ```
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/aln_scanner_clustal.cpp:219-303
-/// ```c++
-///     auto seqId = tokens[0];
-///     if (firstBlock) {
-///         TLineInfo existingInfo;
-///         auto idComparison = xGetExistingSeqIdInfo(seqId, existingInfo);
-///         if (idComparison != ESeqIdComparison::eDifferentChars) {
-///             ...
-///             ...
-///         }
-///         mSeqIds.push_back({seqId, lineNum});
-///         mSequences.push_back(vector<TLineInfo>());
-///     }
-///     else {
-///         if (seqCount >= numSeqs) {
-///             ...
-///             ...
-///         }
-///
-///         if (seqId != mSeqIds[seqCount].mData) {
-///             ...
-///         }
-///     }
-///
-///     if (seqCount==0) {
-///         blockLineLength = tokens[1].size();
-///         return;
-///     }
-///
-///     auto currentLineLength = tokens[1].size();
-///     if (currentLineLength != blockLineLength) {
-///         ...
-///         ...
-///     }
-/// ```
 /// The base scanner (`xGetExistingSeqIdInfo`: the same id, or one that differs by case only, is
 /// a duplicate):
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/aln_scanner.cpp:205-223
-/// ```c++
-///     for (const auto& idInfo : mSeqIds) {
-///         if (seqId == idInfo.mData) {
-///             existingInfo = idInfo;
-///             return ESeqIdComparison::eIdentical;
-///         }
-///     }
-///
-///     string seqIdLower(seqId);
-///     NStr::ToLower(seqIdLower);
-///     for (const auto& idInfo : mSeqIds) {
-///         string idLower(idInfo.mData);
-///         NStr::ToLower(idLower);
-///         if (seqIdLower == idLower) {
-///             existingInfo = idInfo;
-///             return ESeqIdComparison::eDifferByCase;
-///         }
-///     }
-///
-///     return ESeqIdComparison::eDifferentChars;
-/// ```
 pub(crate) fn scan(input: &mut PeekAheadStream<'_>) -> Result<Scanned, ScanFailure> {
     let mut ids: Vec<Vec<u8>> = Vec::new();
     let mut sequences: Vec<Vec<&[u8]>> = Vec::new();
@@ -223,7 +70,7 @@ pub(crate) fn scan(input: &mut PeekAheadStream<'_>) -> Result<Scanned, ScanFailu
         }
         if is_conservation_line(line) {
             if !in_block {
-                return Err(ScanFailure);
+                return Err(ScanFailure::Failed);
             }
             terminate_block(&mut num_seqs, &mut block)?;
             in_block = false;
@@ -233,104 +80,50 @@ pub(crate) fn scan(input: &mut PeekAheadStream<'_>) -> Result<Scanned, ScanFailu
         // (`utils::format_guess::tokens`), two or three tokens: the id, the data and a count.
         let tokens = tokens(line, b" \t");
         let (Some(id), Some(data)) = (tokens.get(0), tokens.get(1)) else {
-            return Err(ScanFailure);
+            return Err(ScanFailure::Failed);
         };
         if tokens.len() > 3 {
-            return Err(ScanFailure);
+            return Err(ScanFailure::Failed);
         }
         if let Some(count) = tokens.get(2) {
             // `StringToInt(..., fConvErr_NoThrow)`: 0 for a token that is no number.
             if string_to_int(count, 0).unwrap_or(0) == 0 {
-                return Err(ScanFailure);
+                return Err(ScanFailure::Failed);
             }
         }
         in_block = true;
         if block.first {
             if ids.iter().any(|existing| existing.eq_ignore_ascii_case(id)) {
-                return Err(ScanFailure);
+                return Err(ScanFailure::Failed);
             }
             ids.push(id.to_vec());
             sequences.push(Vec::new());
         } else {
             if block.seq_count >= num_seqs {
-                return Err(ScanFailure);
+                return Err(ScanFailure::Failed);
             }
             if id != ids[block.seq_count].as_slice() {
-                return Err(ScanFailure);
+                return Err(ScanFailure::Failed);
             }
         }
         if block.seq_count == 0 {
             block.line_length = data.len();
         } else if data.len() != block.line_length {
-            return Err(ScanFailure);
+            return Err(ScanFailure::Failed);
         }
         sequences[block.seq_count].push(data);
         block.seq_count += 1;
     }
     if in_block {
-        return Err(ScanFailure);
+        return Err(ScanFailure::Failed);
     }
     let rows: Vec<Vec<u8>> = sequences.iter().map(|parts| parts.concat()).collect();
-    verify_rows(&rows)?;
-    Ok(Scanned { ids, rows })
-}
-
-/// `CAlnScanner::xVerifySingleSequenceData` with the sequence info of `SetClustal(eAlpha_Protein)`
-/// (the alphabet of `GetAlphabetLetters(eAlpha_Protein)`, the gap `-` at every place, no
-/// missing or match characters): a row may hold the letters of the alphabet and `-` only. NCBI's
-/// states (the head allows gaps, the first other byte must be in the alphabet; the body allows the
-/// alphabet and gaps; the tail would allow gaps only) end in an error at the first byte that is
-/// neither, for the tail starts at one.
-///
-/// NCBI reference (598d8ae6): c++/src/objtools/readers/aln_scanner.cpp:112-169
-/// ```c++
-///     const string& alphabet = sequenceInfo.Alphabet();
-///     const string legalInHead =
-///         sequenceInfo.BeginningGap() + sequenceInfo.Missing();
-///     const string legalInBody =
-///         alphabet
-///         + sequenceInfo.MiddleGap()
-///         + sequenceInfo.Missing()
-///         + sequenceInfo.Match();
-///     const string legalInTail =
-///         sequenceInfo.EndGap() + sequenceInfo.Missing();
-///     ...
-///         if (seqPart == ESeqPart::HEAD) {
-///             auto startBody = seqData.find_first_not_of(legalInHead);
-///             if (startBody == string::npos) {
-///                 continue;
-///             }
-///             seqPart = ESeqPart::BODY;
-///             seqData = seqData.substr(startBody);
-///             if (alphabet.find(seqData[0]) == string::npos) {
-///                 ...
-///             }
-///         }
-///         if (seqPart == ESeqPart::BODY) {
-///             auto startTail = seqData.find_first_not_of(legalInBody);
-///             if (startTail == string::npos) {
-///                 continue;
-///             }
-///             seqPart = ESeqPart::TAIL;
-///             seqData = seqData.substr(startTail);
-///         }
-///         if (seqPart == ESeqPart::TAIL) {
-///             auto startBad = seqData.find_first_not_of(legalInTail);
-///             if (startBad == string::npos) {
-///                 continue;
-///             }
-///             ...
-///         }
-/// ```
-/// (The pieces of a row are the tokens of its lines: the states run over them in order, which
-/// gives the same result as over the whole row.)
-fn verify_rows(rows: &[Vec<u8>]) -> Result<(), ScanFailure> {
-    if rows.iter().all(|row| {
-        row.iter()
-            .all(|&c| c == b'-' || c == b'*' || c.is_ascii_alphabetic())
-    }) {
-        Ok(())
-    } else {
-        Err(ScanFailure)
-    }
+    let info = SeqInfo::protein();
+    verify_rows(&info, &rows)?;
+    Ok(Scanned {
+        ids,
+        rows,
+        deflines: Vec::new(),
+        info,
+    })
 }

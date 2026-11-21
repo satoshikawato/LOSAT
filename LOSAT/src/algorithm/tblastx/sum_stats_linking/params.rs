@@ -1,6 +1,6 @@
 //! Linking parameters and helper functions.
 //!
-//! Reference: ncbi-blast/c++/src/algo/blast/core/link_hsps.c
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c
 
 use crate::stats::KarlinParams;
 
@@ -22,19 +22,14 @@ impl LinkHspCutoffs {
     /// gap_prob is 0 too (`calculate_link_hsp_cutoffs_ncbi`).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:495
-    /// ```c
-    ///    ignore_small_gaps = (cutoff[0] == 0);
-    /// ```
     pub fn ignore_small_gaps(&self) -> bool {
         self.cutoff_small_gap == 0
     }
 }
 
-/// NCBI reference: c++/src/algo/blast/core/blast_engine.c:1448-1455;
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1448-1455;
 /// c++/src/algo/blast/core/link_hsps.c:468-493
-/// CalculateLinkHSPCutoffs(..., db_length, subject->length);
-/// `cutoff[0] = link_hsp_params->cutoff_small_gap;`
-/// `cutoff[1] = link_hsp_params->cutoff_big_gap;`
+/// (the small-gap and big-gap cutoffs come from the link-HSP parameters)
 /// Per-subject state computed before search and shared by both linking passes.
 #[derive(Debug, Clone)]
 pub struct LinkingParams {
@@ -91,7 +86,7 @@ pub fn compute_avg_query_length_ncbi(query_nucl_lengths: &[usize], searched: (bo
     for &nucl_len in query_nucl_lengths {
         for context in 0..6u32 {
             // NCBI BLAST_GetTranslatedProteinLength:
-            // return (nucleotide_length - context % CODON_LENGTH) / CODON_LENGTH;
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:928-928
             let prot_len = if nucl_len == 0 || nucl_len <= (context % 3) as usize {
                 0
             } else {
@@ -101,8 +96,7 @@ pub fn compute_avg_query_length_ncbi(query_nucl_lengths: &[usize], searched: (bo
             let prot_len = if strand_searched { prot_len } else { 0 };
 
             // NCBI s_QueryInfo_SetContext offset calculation:
-            // Uint4 shift = prev_len ? prev_len + 1 : 0;
-            // qinfo->contexts[index].query_offset = prev_loc + shift;
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:75-77
             let (prev_offset, prev_len) = contexts.last().copied().unwrap_or((0, 0));
             let shift = if prev_len > 0 { prev_len + 1 } else { 0 };
             let new_offset = prev_offset + shift;
@@ -127,33 +121,5 @@ pub fn compute_avg_query_length_ncbi(query_nucl_lengths: &[usize], searched: (bo
 }
 
 #[cfg(test)]
-mod tests {
-    use super::compute_avg_query_length_ncbi;
-
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:200-215 (the contexts
-    // of the strand not searched have length 0) and c++/src/algo/blast/core/blast_parameters.c:
-    // 1023-1026 (the average over every context)
-    #[test]
-    fn average_query_length_counts_the_contexts_of_the_strand_not_searched() {
-        // 300 bases: 100, 99 and 99 residues a strand. Both strands: offsets 0, 101, 201, 301, 402
-        // and 502, (502 + 99 - 1) / 6 = 100.
-        assert_eq!(compute_avg_query_length_ncbi(&[300], (true, true)), 100);
-        // Plus: contexts 3 to 5 have no letters, at offset 301: (301 + 0 - 1) / 6 = 50.
-        assert_eq!(compute_avg_query_length_ncbi(&[300], (true, false)), 50);
-        // Minus: contexts 0 to 2 at offset 0, then 0, 101 and 201: (201 + 99 - 1) / 6 = 49.
-        assert_eq!(compute_avg_query_length_ncbi(&[300], (false, true)), 49);
-        // A second query of 30 bases: its empty contexts start after the first query's last.
-        assert_eq!(compute_avg_query_length_ncbi(&[300, 30], (true, true)), 55);
-        assert_eq!(compute_avg_query_length_ncbi(&[300, 30], (true, false)), 27);
-        assert_eq!(compute_avg_query_length_ncbi(&[300, 30], (false, true)), 27);
-        // No letters in any context: (0 + 0 - 1) / 6, 0 in C and in Rust.
-        assert_eq!(compute_avg_query_length_ncbi(&[2], (false, true)), 0);
-        // One query of 1,200 bases and 300 of 3 bases, one strand: 1,200 + 300 letters and the
-        // separators in 1,806 contexts, an average of 0 (both strands: 1).
-        let mut lengths = vec![1200];
-        lengths.extend([3; 300]);
-        assert_eq!(compute_avg_query_length_ncbi(&lengths, (true, false)), 0);
-        assert_eq!(compute_avg_query_length_ncbi(&lengths, (false, true)), 0);
-        assert_eq!(compute_avg_query_length_ncbi(&lengths, (true, true)), 1);
-    }
-}
+#[path = "params_tests.rs"]
+mod tests;

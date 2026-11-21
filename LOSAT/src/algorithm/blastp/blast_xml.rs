@@ -9,20 +9,6 @@
 //! counts).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:708-744
-//! ```c++
-//!     } else if (m_FormatType == CFormattingArgs::eXml) {
-//!         CRef<CSearchResults> res(const_cast<CSearchResults*>(&results));
-//!         res->TrimSeqAlign(m_HitlistSize);
-//!         m_AccumulatedResults.push_back(res);
-//!         ...
-//!         	CCmdLineBlastXMLReportData report_data(m_AccumulatedQueries,
-//!                                                    m_AccumulatedResults,
-//!                                                    *m_Options, m_DbName, m_DbIsAA,
-//!                                                    m_QueryGenCode, m_DbGenCode,
-//!                                                    m_IsRemoteSearch);
-//!         	BlastXML_FormatReport(xml_output, &report_data, &m_Outfile,
-//!                                   m_BlastXMLIncremental.GetPointer());
-//! ```
 //! (`PrintOneResultSet` is called once per query's result set, the accumulated lists hold that
 //! one query.)
 

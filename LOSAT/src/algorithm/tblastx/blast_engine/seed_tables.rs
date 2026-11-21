@@ -97,21 +97,15 @@ pub(super) fn scan_tables<'b, S: TbxScore>(
     // Diagonal array sizing MUST match NCBI's `s_BlastDiagTableNew`:
     // it depends only on (query_length + window_size), not on subject length.
     //
-    // NCBI reference (verbatim):
-    //   diag_array_length = 1;
-    //   while (diag_array_length < (qlen+window_size))
-    //       diag_array_length = diag_array_length << 1;
-    //   diag_table->diag_array_length = diag_array_length;
-    //   diag_table->diag_mask = diag_array_length-1;
-    // Source: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:52-61
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:52-61
     //
     // `query_length` here must match BLAST_SequenceBlk->length, computed as
     // last_context.query_offset + last_context.query_length (excludes the final trailing NULLB).
-    // References: ncbi-blast/c++/src/algo/blast/core/blast_query_info.c:311-315, 378-381
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:311-315, 378-381
     // NCBI BLAST diag array sizing:
     // diag_array_length = next_power_of_2(qlen + window_size)
     // For tblastx, qlen = total concatenated query buffer (all 6 frames)
-    // Source: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:52-61
+    // Source: c++/src/algo/blast/core/blast_extend.c:52-61
     let query_length: i32 = contexts
         .last()
         .map(|c| c.frame_base + c.aa_len as i32)
@@ -124,7 +118,7 @@ pub(super) fn scan_tables<'b, S: TbxScore>(
     let diag_mask: i32 = diag_array_size - 1;
     if trace_hsp_target().is_some() {
         // NCBI: diag_array_length = next_power_of_2(qlen + window_size).
-        // Reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:52-61
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:52-61
         eprintln!(
             "[TRACE_HSP] diag_table query_length={} window={} diag_array_size={} diag_mask={}",
             query_length, window, diag_array_size, diag_mask
@@ -133,7 +127,7 @@ pub(super) fn scan_tables<'b, S: TbxScore>(
 
     // [C] array_size for offset_pairs
     // NCBI: GetOffsetArraySize() = OFFSET_ARRAY_SIZE (4096) + lookup->longest_chain
-    // Reference: ncbi-blast/c++/include/algo/blast/core/lookup_wrap.h + lookup_wrap.c
+    // NCBI reference (598d8ae6): c++/include/algo/blast/core/lookup_wrap.h + c++/src/algo/blast/core/lookup_wrap.c
     const OFFSET_ARRAY_SIZE: i32 = 4096;
     let offset_array_size: i32 = OFFSET_ARRAY_SIZE + lookup.longest_chain.max(0);
     // EXPERIMENT (LOSAT_X_TBXSCANBF): with the switch, the offset arrays have X_SCAN_BF_SLACK
@@ -150,22 +144,7 @@ pub(super) fn scan_tables<'b, S: TbxScore>(
     // or the cost rule) keeps the reference loop for every subject of the batch.
     //
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:52-63
-    // ```c
-    // while (diag_array_length < (qlen+window_size))
-    // {
-    //         diag_array_length = diag_array_length << 1;
-    // }
-    // ...
-    // diag_table->diag_mask = diag_array_length-1;
-    // ```
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:337-343
-    // ```c
-    // if (lookup->thin_backbone[i] ) {
-    //     Int4 * dest = NULL;
-    //     /* set the corresponding bit in the pv_array */
-    //     PV_SET(pv, i, PV_ARRAY_BTS);
-    //     bbc[i].num_used = lookup->thin_backbone[i][1];
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:337-344
     // The guards compare the subject lengths (and, without LOSAT_X_TBXBAND, the context lengths)
     // with the slack of this table (size above minus query_length); the per-context tables use the
     // layout above.
@@ -293,16 +272,7 @@ pub(super) fn seed_batch<S: TbxScore>(
     // only reader of that table, runs for none.
     //
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1002-1004
-    // ```c
-    // if ((status = BlastExtendWordNew(query->length, word_params,
-    //                                 &aux_struct->ewp)) != 0)
-    //   return status;
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1604-1605
-    // ```c
-    // word_params = BlastInitialWordParametersFree(word_params);
-    // s_BlastCoreAuxStructFree(aux_struct);
-    // ```
     // NCBI keeps its lookup table and diagonal table through the subject loop; when LOSAT
     // frees its copies is not a value NCBI computes (x_seed_release.rs).
     let x_seed_batch = x_seed_release::XSeedBatch::new(lookup, x_pair_par_batch, subjects.count());

@@ -1,0 +1,1021 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: PajaWSV proteins
+           86 sequences; 66,738 total letters
+
+
+
+Query= BDT63074.1 tyrosine recombinase [Sicyonia whispovirus]
+
+Length=897
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT63564.1 wsv079-like protein [Pasiphaea japonica whispovirus]       33.8    0.004
+BDT63551.1 wsv423-like protein [Pasiphaea japonica whispovirus]       31.6    0.017
+BDT63563.1 hypothetical protein [Pasiphaea japonica whispovirus]      29.8    0.060
+BDT63565.1 wsv078-like protein [Pasiphaea japonica whispovirus]       28.4    0.15 
+BDT63556.1 wsv447-like protein [Pasiphaea japonica whispovirus]       28.4    0.15 
+
+
+>BDT63564.1 wsv079-like protein [Pasiphaea japonica whispovirus]
+Length=788
+
+ Score = 33.8 bits (68),  Expect = 0.004
+ Identities = 19/130 (15%), Positives = 63/130 (48%), Gaps = 0/130 (0%)
+
+Query  703  DDDNDDTVTATPTTTTTTTTTTTTTTTTTNANANATTNANATTTGNCIPAYSVITATITN  762
+            D+DN       PT T       T++TT+   N+  T +  ++T         +  +TI++
+Sbjct  413  DNDNMSQQQTPPTLTFQNVKQETSSTTSVPTNSYLTCSTISSTPSTIRSRSYLTCSTISS  472
+
+Query  763  FDECDDDDNDDTVTATPTTTTTTTTTTTSTTSTTTTVAATATSTVDCIDNVKAVPISSDT  822
+                    ++ + +++ ++++ +++++ S++ ++++ +++++S+            S+ +
+Sbjct  473  TPSTIRSRSNSSSSSSSSSSSCSSSSSCSSSFSSSSSSSSSSSSSSSSFQFNKKETSTKS  532
+
+Query  823  PNRQRHHKVR  832
+             N++   + R
+Sbjct  533  QNKKEMEEAR  542
+
+
+ Score = 29.8 bits (59),  Expect = 0.060
+ Identities = 15/103 (15%), Positives = 57/103 (55%), Gaps = 0/103 (0%)
+
+Query  704  DDNDDTVTATPTTTTTTTTTTTTTTTTTNANANATTNANATTTGNCIPAYSVITATITNF  763
+            D+++ +   TP T T       T++TT+    +  T +  ++T + I + S +T +  + 
+Sbjct  413  DNDNMSQQQTPPTLTFQNVKQETSSTTSVPTNSYLTCSTISSTPSTIRSRSYLTCSTISS  472
+
+Query  764  DECDDDDNDDTVTATPTTTTTTTTTTTSTTSTTTTVAATATST  806
+                     ++ +++ +++++ +++++ ++S +++ +++++S+
+Sbjct  473  TPSTIRSRSNSSSSSSSSSSSCSSSSSCSSSFSSSSSSSSSSS  515
+
+
+ Score = 27.5 bits (54),  Expect = 0.29
+ Identities = 14/57 (25%), Positives = 25/57 (44%), Gaps = 0/57 (0%)
+
+Query  624  DNDNDDTVTATATATATATTTTTTTTTTTTTTTTTTTTTTTTTNANANATTNANATT  680
+            DNDN        T T       T++TT+  T +  T +T ++T +   + +    +T
+Sbjct  413  DNDNMSQQQTPPTLTFQNVKQETSSTTSVPTNSYLTCSTISSTPSTIRSRSYLTCST  469
+
+
+ Score = 27.5 bits (54),  Expect = 0.29
+ Identities = 13/62 (21%), Positives = 28/62 (45%), Gaps = 0/62 (0%)
+
+Query  620  DEYDDNDNDDTVTATATATATATTTTTTTTTTTTTTTTTTTTTTTTTNANANATTNANAT  679
+            D         T+T       T++TT+  T +  T +T ++T +T  + +    +T ++  
+Sbjct  415  DNMSQQQTPPTLTFQNVKQETSSTTSVPTNSYLTCSTISSTPSTIRSRSYLTCSTISSTP  474
+
+Query  680  TT  681
+            +T
+Sbjct  475  ST  476
+
+
+ Score = 25.2 bits (49),  Expect = 1.4
+ Identities = 11/34 (32%), Positives = 19/34 (56%), Gaps = 0/34 (0%)
+
+Query  774  TVTATPTTTTTTTTTTTSTTSTTTTVAATATSTV  807
+            + T+ PT +  T +T +ST ST  + +    ST+
+Sbjct  437  STTSVPTNSYLTCSTISSTPSTIRSRSYLTCSTI  470
+
+
+ Score = 24.8 bits (48),  Expect = 1.9
+ Identities = 12/40 (30%), Positives = 18/40 (45%), Gaps = 0/40 (0%)
+
+Query  768  DDDNDDTVTATPTTTTTTTTTTTSTTSTTTTVAATATSTV  807
+            D+DN       PT T       TS+T++  T +    ST+
+Sbjct  413  DNDNMSQQQTPPTLTFQNVKQETSSTTSVPTNSYLTCSTI  452
+
+
+ Score = 24.3 bits (47),  Expect = 2.6
+ Identities = 11/91 (12%), Positives = 47/91 (52%), Gaps = 0/91 (0%)
+
+Query  610  SAITATTANFDEYDDNDNDDTVTATATATATATTTTTTTTTTTTTTTTTTTTTTTTTNAN  669
+            S I + + +      + +  + +++ +++ ++++++++++++++++       T+T + N
+Sbjct  475  STIRSRSNSSSSSSSSSSSCSSSSSCSSSFSSSSSSSSSSSSSSSSFQFNKKETSTKSQN  534
+
+Query  670  ANATTNANATTTGNCIPAYSVITATITNFDE  700
+                  A  T    CI A+   T+ + + ++
+Sbjct  535  KKEMEEARKTHFPGCIHAHRSNTSKVIHHNK  565
+
+
+ Score = 23.9 bits (46),  Expect = 3.6
+ Identities = 12/54 (22%), Positives = 23/54 (43%), Gaps = 0/54 (0%)
+
+Query  626  DNDDTVTATATATATATTTTTTTTTTTTTTTTTTTTTTTTTNANANATTNANAT  679
+            DND+        T T       T++TT+  T +  T +T ++  +   + +  T
+Sbjct  413  DNDNMSQQQTPPTLTFQNVKQETSSTTSVPTNSYLTCSTISSTPSTIRSRSYLT  466
+
+
+ Score = 23.9 bits (46),  Expect = 3.6
+ Identities = 11/50 (22%), Positives = 23/50 (46%), Gaps = 0/50 (0%)
+
+Query  623  DDNDNDDTVTATATATATATTTTTTTTTTTTTTTTTTTTTTTTTNANANA  672
+            +DN +      T T       T++TT+  T +  T +T ++T +   + +
+Sbjct  414  NDNMSQQQTPPTLTFQNVKQETSSTTSVPTNSYLTCSTISSTPSTIRSRS  463
+
+
+ Score = 23.9 bits (46),  Expect = 3.6
+ Identities = 9/38 (24%), Positives = 17/38 (45%), Gaps = 0/38 (0%)
+
+Query  709  TVTATPTTTTTTTTTTTTTTTTTNANANATTNANATTT  746
+            T+ +TP+T+T     + T+      N     ++   TT
+Sbjct  589  TILSTPSTSTAFVVDSKTSKQKMKKNERGEASSQVVTT  626
+
+
+ Score = 23.4 bits (45),  Expect = 4.9
+ Identities = 9/28 (32%), Positives = 16/28 (57%), Gaps = 0/28 (0%)
+
+Query  781  TTTTTTTTTTSTTSTTTTVAATATSTVD  808
+            ++   TTTTT++TS+    +     T+D
+Sbjct  620  SSQVVTTTTTASTSSPPVPSCLNKQTID  647
+
+
+>BDT63551.1 wsv423-like protein [Pasiphaea japonica whispovirus]
+Length=815
+
+ Score = 31.6 bits (63),  Expect = 0.017
+ Identities = 15/35 (43%), Positives = 18/35 (51%), Gaps = 0/35 (0%)
+
+Query  639  ATATTTTTTTTTTTTTTTTTTTTTTTTTNANANAT  673
+            A A+ T T  TT++  TTT T  T     AN N T
+Sbjct  118  AEASLTVTGVTTSSHRTTTDTVATPLKNKANMNHT  152
+
+
+ Score = 28.4 bits (56),  Expect = 0.15
+ Identities = 13/30 (43%), Positives = 15/30 (50%), Gaps = 0/30 (0%)
+
+Query  709  TVTATPTTTTTTTTTTTTTTTTTNANANAT  738
+            TVT   T++  TTT T  T     AN N T
+Sbjct  123  TVTGVTTSSHRTTTDTVATPLKNKANMNHT  152
+
+
+ Score = 27.9 bits (55),  Expect = 0.21
+ Identities = 13/33 (39%), Positives = 16/33 (48%), Gaps = 0/33 (0%)
+
+Query  637  ATATATTTTTTTTTTTTTTTTTTTTTTTTTNAN  669
+            A A+ T T  TT++  TTT T  T      N N
+Sbjct  118  AEASLTVTGVTTSSHRTTTDTVATPLKNKANMN  150
+
+
+ Score = 26.6 bits (52),  Expect = 0.54
+ Identities = 11/27 (41%), Positives = 16/27 (59%), Gaps = 0/27 (0%)
+
+Query  630  TVTATATATATATTTTTTTTTTTTTTT  656
+            ++ A A+ T T  TT++  TTT T  T
+Sbjct  115  SLVAEASLTVTGVTTSSHRTTTDTVAT  141
+
+
+ Score = 25.7 bits (50),  Expect = 1.0
+ Identities = 12/31 (39%), Positives = 15/31 (48%), Gaps = 0/31 (0%)
+
+Query  641  ATTTTTTTTTTTTTTTTTTTTTTTTTNANAN  671
+            A  + T T  TT++  TTT T  T     AN
+Sbjct  118  AEASLTVTGVTTSSHRTTTDTVATPLKNKAN  148
+
+
+ Score = 25.2 bits (49),  Expect = 1.4
+ Identities = 12/33 (36%), Positives = 15/33 (45%), Gaps = 0/33 (0%)
+
+Query  635  ATATATATTTTTTTTTTTTTTTTTTTTTTTTTN  667
+            A A+ T T  TT++  TTT T  T        N
+Sbjct  118  AEASLTVTGVTTSSHRTTTDTVATPLKNKANMN  150
+
+
+ Score = 25.2 bits (49),  Expect = 1.4
+ Identities = 13/36 (36%), Positives = 16/36 (44%), Gaps = 0/36 (0%)
+
+Query  712  ATPTTTTTTTTTTTTTTTTTNANANATTNANATTTG  747
+            A+ T T  TT++  TTT T         N N T  G
+Sbjct  120  ASLTVTGVTTSSHRTTTDTVATPLKNKANMNHTIVG  155
+
+
+ Score = 25.2 bits (49),  Expect = 1.4
+ Identities = 11/28 (39%), Positives = 15/28 (54%), Gaps = 0/28 (0%)
+
+Query  709  TVTATPTTTTTTTTTTTTTTTTTNANAN  736
+            ++T T  TT++  TTT T  T     AN
+Sbjct  121  SLTVTGVTTSSHRTTTDTVATPLKNKAN  148
+
+
+ Score = 25.2 bits (49),  Expect = 1.4
+ Identities = 15/54 (28%), Positives = 23/54 (43%), Gaps = 0/54 (0%)
+
+Query  784  TTTTTTTSTTSTTTTVAATATSTVDCIDNVKAVPISSDTPNRQRHHKVRFKSHH  837
+            T T  TTS+  TTT   AT       +++    P S+   +  +  K +  S H
+Sbjct  123  TVTGVTTSSHRTTTDTVATPLKNKANMNHTIVGPFSNKASSSNKMVKQKTYSPH  176
+
+
+ Score = 24.8 bits (48),  Expect = 1.9
+ Identities = 11/32 (34%), Positives = 15/32 (47%), Gaps = 0/32 (0%)
+
+Query  636  TATATATTTTTTTTTTTTTTTTTTTTTTTTTN  667
+            T+     + T T  TT++  TTT T  T   N
+Sbjct  114  TSLVAEASLTVTGVTTSSHRTTTDTVATPLKN  145
+
+
+ Score = 24.3 bits (47),  Expect = 2.6
+ Identities = 12/33 (36%), Positives = 14/33 (42%), Gaps = 0/33 (0%)
+
+Query  650  TTTTTTTTTTTTTTTTTNANANATTNANATTTG  682
+            T T  TT++  TTT T         N N T  G
+Sbjct  123  TVTGVTTSSHRTTTDTVATPLKNKANMNHTIVG  155
+
+
+ Score = 23.9 bits (46),  Expect = 3.6
+ Identities = 11/32 (34%), Positives = 15/32 (47%), Gaps = 0/32 (0%)
+
+Query  638  TATATTTTTTTTTTTTTTTTTTTTTTTTTNAN  669
+            T+     + T T  TT++  TTT T  T   N
+Sbjct  114  TSLVAEASLTVTGVTTSSHRTTTDTVATPLKN  145
+
+
+ Score = 23.4 bits (45),  Expect = 4.9
+ Identities = 10/28 (36%), Positives = 14/28 (50%), Gaps = 0/28 (0%)
+
+Query  634  TATATATATTTTTTTTTTTTTTTTTTTT  661
+            T+     + T T  TT++  TTT T  T
+Sbjct  114  TSLVAEASLTVTGVTTSSHRTTTDTVAT  141
+
+
+ Score = 23.4 bits (45),  Expect = 4.9
+ Identities = 11/28 (39%), Positives = 13/28 (46%), Gaps = 0/28 (0%)
+
+Query  648  TTTTTTTTTTTTTTTTTTTNANANATTN  675
+            T T  TT++  TTT T  T     A  N
+Sbjct  123  TVTGVTTSSHRTTTDTVATPLKNKANMN  150
+
+
+ Score = 23.0 bits (44),  Expect = 6.8
+ Identities = 11/27 (41%), Positives = 14/27 (52%), Gaps = 0/27 (0%)
+
+Query  774  TVTATPTTTTTTTTTTTSTTSTTTTVA  800
+            T      + T T  TT+S  +TT TVA
+Sbjct  114  TSLVAEASLTVTGVTTSSHRTTTDTVA  140
+
+
+ Score = 22.5 bits (43),  Expect = 9.3
+ Identities = 11/28 (39%), Positives = 13/28 (46%), Gaps = 0/28 (0%)
+
+Query  713  TPTTTTTTTTTTTTTTTTTNANANATTN  740
+            T T  TT++  TTT T  T     A  N
+Sbjct  123  TVTGVTTSSHRTTTDTVATPLKNKANMN  150
+
+
+ Score = 22.5 bits (43),  Expect = 9.3
+ Identities = 10/31 (32%), Positives = 15/31 (48%), Gaps = 0/31 (0%)
+
+Query  193  LLICNLCGKGVRHMMHHLKNIHGLTPNNKPE  223
+            LL  + C K  R    + +N++ L P   PE
+Sbjct  693  LLPADYCDKVKRRNNPYPENVYNLYPQTAPE  723
+
+
+>BDT63563.1 hypothetical protein [Pasiphaea japonica whispovirus]
+Length=2345
+
+ Score = 29.8 bits (59),  Expect = 0.060
+ Identities = 16/73 (22%), Positives = 27/73 (37%), Gaps = 0/73 (0%)
+
+Query  703  DDDNDDTVTATPTTTTTTTTTTTTTTTTTNANANATTNANATTTGNCIPAYSVITATITN  762
+            D++    +    T+     +    +    N N    T     TT + I  + + T    N
+Sbjct  643  DEEEQQQIVELSTSNNKKKSKYKFSFPQKNKNNKNKTTTTTITTTSTINGFPIDTIMSDN  702
+
+Query  763  FDECDDDDNDDTV  775
+             DE DD  ND+ +
+Sbjct  703  TDENDDFFNDEDI  715
+
+
+ Score = 28.4 bits (56),  Expect = 0.15
+ Identities = 14/44 (32%), Positives = 19/44 (43%), Gaps = 0/44 (0%)
+
+Query  667  NANANATTNANATTTGNCIPAYSVITATITNFDECDDDDNDDTV  710
+            N N    T     TT + I  + + T    N DE DD  ND+ +
+Sbjct  672  NKNNKNKTTTTTITTTSTINGFPIDTIMSDNTDENDDFFNDEDI  715
+
+
+ Score = 27.0 bits (53),  Expect = 0.40
+ Identities = 17/60 (28%), Positives = 23/60 (38%), Gaps = 0/60 (0%)
+
+Query  780  TTTTTTTTTTTSTTSTTTTVAATATSTVDCIDNVKAVPISSDTPNRQRHHKVRFKSHHLE  839
+            TTTTT TTT+T       T+ +  T   D   N + + I       +  H    K    E
+Sbjct  679  TTTTTITTTSTINGFPIDTIMSDNTDENDDFFNDEDIKIKMRIAEFKHKHMYNKKKQEQE  738
+
+
+ Score = 26.6 bits (52),  Expect = 0.54
+ Identities = 12/28 (43%), Positives = 15/28 (54%), Gaps = 0/28 (0%)
+
+Query  644  TTTTTTTTTTTTTTTTTTTTTTTNANAN  671
+            TTTTT TTT+T       T  + N + N
+Sbjct  679  TTTTTITTTSTINGFPIDTIMSDNTDEN  706
+
+
+ Score = 26.1 bits (51),  Expect = 0.75
+ Identities = 12/28 (43%), Positives = 15/28 (54%), Gaps = 0/28 (0%)
+
+Query  642  TTTTTTTTTTTTTTTTTTTTTTTTTNAN  669
+            TTTTT TTT+T       T  +  T+ N
+Sbjct  679  TTTTTITTTSTINGFPIDTIMSDNTDEN  706
+
+
+ Score = 26.1 bits (51),  Expect = 0.75
+ Identities = 9/14 (64%), Positives = 11/14 (79%), Gaps = 0/14 (0%)
+
+Query  678   ATTTGNCIPAYSVI  691
+             ATTTGNC+  Y V+
+Sbjct  1748  ATTTGNCLVDYGVL  1761
+
+
+ Score = 26.1 bits (51),  Expect = 0.75
+ Identities = 9/14 (64%), Positives = 11/14 (79%), Gaps = 0/14 (0%)
+
+Query  743   ATTTGNCIPAYSVI  756
+             ATTTGNC+  Y V+
+Sbjct  1748  ATTTGNCLVDYGVL  1761
+
+
+ Score = 26.1 bits (51),  Expect = 0.75
+ Identities = 16/60 (27%), Positives = 23/60 (38%), Gaps = 0/60 (0%)
+
+Query  618   NFDEYDDNDNDDTVTATATATATATTTTTTTTTTTTTTTTTTTTTTTTTNANANATTNAN  677
+             N  +  +N  D T TATAT T    +T            + T++     + N N T   N
+Sbjct  2024  NEKKKSENQIDTTGTATATTTIEEESTNKDNEDGKIIDFSLTSSPRKRKHENINFTKQLN  2083
+
+
+ Score = 25.7 bits (50),  Expect = 1.0
+ Identities = 10/13 (77%), Positives = 11/13 (85%), Gaps = 0/13 (0%)
+
+Query  655  TTTTTTTTTTTTN  667
+            TTTTT TTT+T N
+Sbjct  679  TTTTTITTTSTIN  691
+
+
+ Score = 25.7 bits (50),  Expect = 1.0
+ Identities = 10/13 (77%), Positives = 11/13 (85%), Gaps = 0/13 (0%)
+
+Query  720  TTTTTTTTTTTTN  732
+            TTTTT TTT+T N
+Sbjct  679  TTTTTITTTSTIN  691
+
+
+ Score = 24.8 bits (48),  Expect = 1.9
+ Identities = 10/11 (91%), Positives = 10/11 (91%), Gaps = 0/11 (0%)
+
+Query  782  TTTTTTTTTST  792
+            TTTTT TTTST
+Sbjct  679  TTTTTITTTST  689
+
+
+ Score = 24.8 bits (48),  Expect = 1.9
+ Identities = 12/35 (34%), Positives = 15/35 (43%), Gaps = 0/35 (0%)
+
+Query  704   DDNDDTVTATPTTTTTTTTTTTTTTTTTNANANAT  738
+             D +D+         TT T  TTTT    + N N T
+Sbjct  1404  DKSDEKKQCENQIDTTGTAATTTTIEEESTNKNYT  1438
+
+
+ Score = 24.3 bits (47),  Expect = 2.6
+ Identities = 12/28 (43%), Positives = 14/28 (50%), Gaps = 0/28 (0%)
+
+Query  648  TTTTTTTTTTTTTTTTTTTNANANATTN  675
+            TTTTT TTT+T       T  + N   N
+Sbjct  679  TTTTTITTTSTINGFPIDTIMSDNTDEN  706
+
+
+ Score = 23.9 bits (46),  Expect = 3.6
+ Identities = 11/26 (42%), Positives = 14/26 (54%), Gaps = 0/26 (0%)
+
+Query  646  TTTTTTTTTTTTTTTTTTTTTNANAN  671
+            TTTTT TTT+T       T  + N +
+Sbjct  679  TTTTTITTTSTINGFPIDTIMSDNTD  704
+
+
+ Score = 23.9 bits (46),  Expect = 3.6
+ Identities = 10/19 (53%), Positives = 11/19 (58%), Gaps = 0/19 (0%)
+
+Query  651   TTTTTTTTTTTTTTTTNAN  669
+             TT T  TTTT    +TN N
+Sbjct  1418  TTGTAATTTTIEEESTNKN  1436
+
+
+ Score = 23.9 bits (46),  Expect = 3.6
+ Identities = 10/19 (53%), Positives = 11/19 (58%), Gaps = 0/19 (0%)
+
+Query  716   TTTTTTTTTTTTTTTTNAN  734
+             TT T  TTTT    +TN N
+Sbjct  1418  TTGTAATTTTIEEESTNKN  1436
+
+
+ Score = 23.4 bits (45),  Expect = 4.9
+ Identities = 9/13 (69%), Positives = 10/13 (77%), Gaps = 0/13 (0%)
+
+Query  657  TTTTTTTTTTNAN  669
+            TTTTT TTT+  N
+Sbjct  679  TTTTTITTTSTIN  691
+
+
+ Score = 23.4 bits (45),  Expect = 4.9
+ Identities = 9/13 (69%), Positives = 10/13 (77%), Gaps = 0/13 (0%)
+
+Query  722  TTTTTTTTTTNAN  734
+            TTTTT TTT+  N
+Sbjct  679  TTTTTITTTSTIN  691
+
+
+ Score = 23.4 bits (45),  Expect = 4.9
+ Identities = 9/11 (82%), Positives = 10/11 (91%), Gaps = 0/11 (0%)
+
+Query  643  TTTTTTTTTTT  653
+            TTTTT TTT+T
+Sbjct  679  TTTTTITTTST  689
+
+
+ Score = 23.4 bits (45),  Expect = 4.9
+ Identities = 9/11 (82%), Positives = 10/11 (91%), Gaps = 0/11 (0%)
+
+Query  645  TTTTTTTTTTT  655
+            TTTTT TTT+T
+Sbjct  679  TTTTTITTTST  689
+
+
+ Score = 23.4 bits (45),  Expect = 4.9
+ Identities = 9/11 (82%), Positives = 10/11 (91%), Gaps = 0/11 (0%)
+
+Query  647  TTTTTTTTTTT  657
+            TTTTT TTT+T
+Sbjct  679  TTTTTITTTST  689
+
+
+ Score = 23.4 bits (45),  Expect = 4.9
+ Identities = 9/11 (82%), Positives = 10/11 (91%), Gaps = 0/11 (0%)
+
+Query  649  TTTTTTTTTTT  659
+            TTTTT TTT+T
+Sbjct  679  TTTTTITTTST  689
+
+
+ Score = 23.4 bits (45),  Expect = 4.9
+ Identities = 9/11 (82%), Positives = 10/11 (91%), Gaps = 0/11 (0%)
+
+Query  650  TTTTTTTTTTT  660
+            TTTTT TTT+T
+Sbjct  679  TTTTTITTTST  689
+
+
+ Score = 23.4 bits (45),  Expect = 4.9
+ Identities = 9/11 (82%), Positives = 10/11 (91%), Gaps = 0/11 (0%)
+
+Query  651  TTTTTTTTTTT  661
+            TTTTT TTT+T
+Sbjct  679  TTTTTITTTST  689
+
+
+ Score = 23.4 bits (45),  Expect = 4.9
+ Identities = 9/11 (82%), Positives = 10/11 (91%), Gaps = 0/11 (0%)
+
+Query  652  TTTTTTTTTTT  662
+            TTTTT TTT+T
+Sbjct  679  TTTTTITTTST  689
+
+
+ Score = 23.4 bits (45),  Expect = 4.9
+ Identities = 9/11 (82%), Positives = 10/11 (91%), Gaps = 0/11 (0%)
+
+Query  653  TTTTTTTTTTT  663
+            TTTTT TTT+T
+Sbjct  679  TTTTTITTTST  689
+
+
+ Score = 23.4 bits (45),  Expect = 4.9
+ Identities = 9/11 (82%), Positives = 10/11 (91%), Gaps = 0/11 (0%)
+
+Query  654  TTTTTTTTTTT  664
+            TTTTT TTT+T
+Sbjct  679  TTTTTITTTST  689
+
+
+ Score = 23.4 bits (45),  Expect = 4.9
+ Identities = 9/11 (82%), Positives = 10/11 (91%), Gaps = 0/11 (0%)
+
+Query  656  TTTTTTTTTTT  666
+            TTTTT TTT+T
+Sbjct  679  TTTTTITTTST  689
+
+
+ Score = 23.4 bits (45),  Expect = 4.9
+ Identities = 9/11 (82%), Positives = 10/11 (91%), Gaps = 0/11 (0%)
+
+Query  715  TTTTTTTTTTT  725
+            TTTTT TTT+T
+Sbjct  679  TTTTTITTTST  689
+
+
+ Score = 23.4 bits (45),  Expect = 4.9
+ Identities = 9/11 (82%), Positives = 10/11 (91%), Gaps = 0/11 (0%)
+
+Query  716  TTTTTTTTTTT  726
+            TTTTT TTT+T
+Sbjct  679  TTTTTITTTST  689
+
+
+ Score = 23.4 bits (45),  Expect = 4.9
+ Identities = 9/11 (82%), Positives = 10/11 (91%), Gaps = 0/11 (0%)
+
+Query  717  TTTTTTTTTTT  727
+            TTTTT TTT+T
+Sbjct  679  TTTTTITTTST  689
+
+
+ Score = 23.4 bits (45),  Expect = 4.9
+ Identities = 9/11 (82%), Positives = 10/11 (91%), Gaps = 0/11 (0%)
+
+Query  718  TTTTTTTTTTT  728
+            TTTTT TTT+T
+Sbjct  679  TTTTTITTTST  689
+
+
+ Score = 23.4 bits (45),  Expect = 4.9
+ Identities = 9/11 (82%), Positives = 10/11 (91%), Gaps = 0/11 (0%)
+
+Query  719  TTTTTTTTTTT  729
+            TTTTT TTT+T
+Sbjct  679  TTTTTITTTST  689
+
+
+ Score = 23.4 bits (45),  Expect = 4.9
+ Identities = 9/11 (82%), Positives = 10/11 (91%), Gaps = 0/11 (0%)
+
+Query  721  TTTTTTTTTTT  731
+            TTTTT TTT+T
+Sbjct  679  TTTTTITTTST  689
+
+
+ Score = 23.4 bits (45),  Expect = 4.9
+ Identities = 12/38 (32%), Positives = 18/38 (47%), Gaps = 0/38 (0%)
+
+Query  789   TTSTTSTTTTVAATATSTVDCIDNVKAVPISSDTPNRQ  826
+             TT T +TTTT+   +T+       +   P SS    R+
+Sbjct  1418  TTGTAATTTTIEEESTNKNYTDGEIINFPSSSSPTKRK  1455
+
+
+ Score = 23.0 bits (44),  Expect = 6.8
+ Identities = 12/35 (34%), Positives = 15/35 (43%), Gaps = 0/35 (0%)
+
+Query  706  NDDTVTATPTTTTTTTTTTTTTTTTTNANANATTN  740
+            N +    T TTT TTT+T       T  + N   N
+Sbjct  672  NKNNKNKTTTTTITTTSTINGFPIDTIMSDNTDEN  706
+
+
+ Score = 23.0 bits (44),  Expect = 6.8
+ Identities = 10/40 (25%), Positives = 19/40 (48%), Gaps = 0/40 (0%)
+
+Query  667  NANANATTNANATTTGNCIPAYSVITATITNFDECDDDDN  706
+            N N   TT    T+T N  P  ++++      D+  +D++
+Sbjct  675  NKNKTTTTTITTTSTINGFPIDTIMSDNTDENDDFFNDED  714
+
+
+ Score = 23.0 bits (44),  Expect = 6.8
+ Identities = 10/40 (25%), Positives = 19/40 (48%), Gaps = 0/40 (0%)
+
+Query  732  NANANATTNANATTTGNCIPAYSVITATITNFDECDDDDN  771
+            N N   TT    T+T N  P  ++++      D+  +D++
+Sbjct  675  NKNKTTTTTITTTSTINGFPIDTIMSDNTDENDDFFNDED  714
+
+
+ Score = 23.0 bits (44),  Expect = 6.8
+ Identities = 11/28 (39%), Positives = 13/28 (46%), Gaps = 0/28 (0%)
+
+Query  640  TATTTTTTTTTTTTTTTTTTTTTTTTTN  667
+            T TTT TTT+T       T  +  T  N
+Sbjct  679  TTTTTITTTSTINGFPIDTIMSDNTDEN  706
+
+
+ Score = 23.0 bits (44),  Expect = 6.8
+ Identities = 9/11 (82%), Positives = 10/11 (91%), Gaps = 0/11 (0%)
+
+Query  785  TTTTTTSTTST  795
+            TTTTT +TTST
+Sbjct  679  TTTTTITTTST  689
+
+
+ Score = 23.0 bits (44),  Expect = 6.8
+ Identities = 10/21 (48%), Positives = 11/21 (52%), Gaps = 0/21 (0%)
+
+Query  653   TTTTTTTTTTTTTTNANANAT  673
+             TT T  TTTT    + N N T
+Sbjct  1418  TTGTAATTTTIEEESTNKNYT  1438
+
+
+ Score = 22.5 bits (43),  Expect = 9.3
+ Identities = 7/26 (27%), Positives = 17/26 (65%), Gaps = 0/26 (0%)
+
+Query  603   TSGENALSAITATTANFDEYDDNDND  628
+             +S  ++ S+ ++++ +   + DNDND
+Sbjct  1984  SSSSSSSSSSSSSSCSSSSHSDNDND  2009
+
+
+ Score = 22.5 bits (43),  Expect = 9.3
+ Identities = 13/44 (30%), Positives = 17/44 (39%), Gaps = 0/44 (0%)
+
+Query  636   TATATATTTTTTTTTTTTTTTTTTTTTTTTTNANANATTNANAT  679
+             T TATATTT    +T            + T++       N N T
+Sbjct  2036  TGTATATTTIEEESTNKDNEDGKIIDFSLTSSPRKRKHENINFT  2079
+
+
+>BDT63565.1 wsv078-like protein [Pasiphaea japonica whispovirus]
+Length=514
+
+ Score = 28.4 bits (56),  Expect = 0.15
+ Identities = 13/41 (32%), Positives = 22/41 (54%), Gaps = 0/41 (0%)
+
+Query  637  ATATATTTTTTTTTTTTTTTTTTTTTTTTTNANANATTNAN  677
+            A   A+ TT+T+    +T T + +   T  N  A+ATT+ +
+Sbjct  316  ANPRASATTSTSPPHLSTLTASISEGVTFANPRASATTSTS  356
+
+
+ Score = 26.6 bits (52),  Expect = 0.54
+ Identities = 12/41 (29%), Positives = 21/41 (51%), Gaps = 0/41 (0%)
+
+Query  637  ATATATTTTTTTTTTTTTTTTTTTTTTTTTNANANATTNAN  677
+            A   A+ TT+T+    +T T + +   T  N   +ATT+ +
+Sbjct  345  ANPRASATTSTSPPHLSTPTASISEGVTFANPRTSATTSTS  385
+
+
+ Score = 25.7 bits (50),  Expect = 1.0
+ Identities = 15/67 (22%), Positives = 29/67 (43%), Gaps = 0/67 (0%)
+
+Query  612  ITATTANFDEYDDNDNDDTVTATATATATATTTTTTTTTTTTTTTTTTTTTTTTTNANAN  671
+            ++  TA+  E     N      T+T+    +T T + +   T     T+ TT+T+  + +
+Sbjct  331  LSTLTASISEGVTFANPRASATTSTSPPHLSTPTASISEGVTFANPRTSATTSTSPPHLS  390
+
+Query  672  ATTNANA  678
+              T  N+
+Sbjct  391  TPTAYNS  397
+
+
+ Score = 23.9 bits (46),  Expect = 3.6
+ Identities = 11/35 (31%), Positives = 18/35 (51%), Gaps = 0/35 (0%)
+
+Query  712  ATPTTTTTTTTTTTTTTTTTNANANATTNANATTT  746
+            A P  + TT+T+    +T T + +   T AN  T+
+Sbjct  345  ANPRASATTSTSPPHLSTPTASISEGVTFANPRTS  379
+
+
+ Score = 23.9 bits (46),  Expect = 3.6
+ Identities = 12/44 (27%), Positives = 20/44 (45%), Gaps = 0/44 (0%)
+
+Query  623  DDNDNDDTVTATATATATATTTTTTTTTTTTTTTTTTTTTTTTT  666
+            DD+ +  T      A+      T    +   T ++++T TTTTT
+Sbjct  420  DDSTDRSTKRYIENASVYRNLVTLPEMSNQHTISSSSTMTTTTT  463
+
+
+ Score = 23.0 bits (44),  Expect = 6.8
+ Identities = 8/18 (44%), Positives = 11/18 (61%), Gaps = 0/18 (0%)
+
+Query  18  GGDERDACDNEDRNNCYE  35
+           GGD +D+ DN+     YE
+Sbjct  44  GGDTKDSMDNDTLMAAYE  61
+
+
+ Score = 23.0 bits (44),  Expect = 6.8
+ Identities = 11/35 (31%), Positives = 19/35 (54%), Gaps = 0/35 (0%)
+
+Query  712  ATPTTTTTTTTTTTTTTTTTNANANATTNANATTT  746
+            A+ TT+T+    +T T + +     A   A+ATT+
+Sbjct  320  ASATTSTSPPHLSTLTASISEGVTFANPRASATTS  354
+
+
+>BDT63556.1 wsv447-like protein [Pasiphaea japonica whispovirus]
+Length=1890
+
+ Score = 28.4 bits (56),  Expect = 0.15
+ Identities = 16/60 (27%), Positives = 30/60 (50%), Gaps = 0/60 (0%)
+
+Query  573  RDYKAMQRDHDALHTANRLSKILRDRLEQKTSGENALSAITATTANFDEYDDNDNDDTVT  632
+            R   A+  D+++     + + I ++  +QK+  E A +AI  +  N    DD + +DT T
+Sbjct  262  RQNSAVVEDNNSGVQFKKQNNIKQNTQDQKSVSEKANNAIEDSDKNVATADDQELEDTST  321
+
+
+
+Lambda      K        H
+   0.315    0.128    0.366 
+
+
+Effective search space used: 54795762
+
+
+Query= nohit a query without hits
+
+Length=12
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   0.343    0.153     1.14 
+
+
+Effective search space used: 464156
+
+
+Query= BDT63075.1 wsv226-like protein [Sicyonia whispovirus]
+
+Length=1142
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT63562.1 wsv226-like protein [Pasiphaea japonica whispovirus]       140     4e-35
+BDT63526.1 hypothetical protein [Pasiphaea japonica whispovirus]      34.2    0.004
+BDT63580.1 wsv360-like protein [Pasiphaea japonica whispovirus]       28.2    0.23 
+BDT63571.1 wsv269-like protein [Pasiphaea japonica whispovirus]       25.4    1.6  
+BDT63511.1 wsv133-like protein [Pasiphaea japonica whispovirus]       24.1    4.0  
+
+
+>BDT63562.1 wsv226-like protein [Pasiphaea japonica whispovirus]
+Length=1101
+
+ Score = 140 bits (299),  Expect = 4e-35
+ Identities = 53/105 (50%), Positives = 77/105 (73%), Gaps = 0/105 (0%)
+
+Query  507  RDPLLHMATKEPPVFVRNVLAVAGNYGWFALIVGYMSSPDVLFNKTNCDGLFAPDLIRKY  566
+            RDP+ HM  +E P+F+R++LA+ G+YGWF++++GY  + DVLF   + DGLF+P  IR++
+Sbjct  465  RDPVTHMNRRERPLFLRSMLALCGSYGWFSIVLGYNPTLDVLFMGNDHDGLFSPHWIRRF  524
+
+Query  567  RSEQITTTPLRNRRIDTRFEGLELVDAMGHTSGFRIRPASLSDDH  611
+            R   ++ TP+RNR+ID RF GLEL D  G+   FRIRPASL + +
+Sbjct  525  RKRYVSMTPMRNRKIDLRFHGLELADTPGNACAFRIRPASLCNSN  569
+
+
+ Score = 98.1 bits (207),  Expect = 2e-22
+ Identities = 42/98 (43%), Positives = 59/98 (60%), Gaps = 0/98 (0%)
+
+Query  142  NVSEFVAGLPHVTGDYAEAERFGAPYLPPGKRRKETYRFWASKDFRAQYLGHLAGNRWIG  201
+            N   F+  LPH+TG   +A ++G PYLP  +  K    +W + + + +YLG+L GN  I 
+Sbjct  89   NDKNFINQLPHITGVCEDAVKYGRPYLPTNEMAKIVDGYWNTNNRKKKYLGYLCGNFAIN  148
+
+Query  202  EFVRGEIDATTCVGMLRSVATAYGCGPIIRIALSCLNT  239
+             FV   IDATTC+G LRS ATA+G   +  +A  CL+T
+Sbjct  149  AFVSNTIDATTCIGFLRSRATAFGYPGLKCLAEMCLST  186
+
+
+ Score = 88.9 bits (187),  Expect = 1e-19
+ Identities = 33/109 (30%), Positives = 62/109 (57%), Gaps = 0/109 (0%)
+
+Query  813  SIDLCQFMLQSCEENKVRFFHGECREAAHEFLREVYRGAARYHVKDAHVRGTRVCLTWHR  872
+            ++ +C  +   C+ N  RF   E RE A E +RE+YR +AR H+KD  +RGT++ LTW +
+Sbjct  765  ALSVCYMLYDECDMNYQRFEDAEVRETAFEMVREMYRVSARLHLKDLLMRGTKMSLTWQK  824
+
+Query  873  PFDAPAHRALAGVPRCKMSRLLSCIEKSSGTNPLPTVAVAAGKEVLTLP  921
+            P++  A   ++ +PRC++  ++   E  +    + T+ +   ++ +  P
+Sbjct  825  PYNPVAEATMSNIPRCRIPWIVHRFENRTLNEKMSTLQILETRDQVYRP  873
+
+
+ Score = 72.4 bits (151),  Expect = 1e-14
+ Identities = 30/82 (37%), Positives = 51/82 (62%), Gaps = 0/82 (0%)
+
+Query  285  KVVSKLLGEKTRCVALDWKDTSRELGFCDSRNVGVLTNLIYAIAVPAYTAEMILSTEGKM  344
+            +V  KL  + T CV +DW + S+++ +  SR V +L NLI  I +PAYT ++IL T+ ++
+Sbjct  223  QVYKKLANKNTVCVTMDWSEASKKINYDYSRKVCLLQNLIVIILLPAYTMDVILDTDREL  282
+
+Query  345  EQHVLRKQGMQPPIERVELLKQ  366
+            E++VL   G Q   ++ +  +Q
+Sbjct  283  ERYVLASVGQQDDRDKYKYNQQ  304
+
+
+ Score = 59.0 bits (122),  Expect = 1e-10
+ Identities = 19/47 (40%), Positives = 32/47 (68%), Gaps = 0/47 (0%)
+
+Query  920  LPSLMCLSTRAITPKPVRHTLLELMYGTRAAATISTLTCLSWINWCM  966
+            + +L  L TR    +P+RHTLL+L++G + A  +S +TC  W++WC+
+Sbjct  858  MSTLQILETRDQVYRPIRHTLLQLVFGEKMANYVSVVTCFQWMDWCL  904
+
+
+ Score = 52.6 bits (108),  Expect = 1e-08
+ Identities = 19/41 (46%), Positives = 30/41 (73%), Gaps = 0/41 (0%)
+
+Query  1100  KKSTGRMGFKDIYAVALISLPSTLDQETKDIAADLGIETDI  1140
+             K++TGRMGF+D+Y + LISLP  + ++ K I  +L +ET +
+Sbjct  1057  KRNTGRMGFRDVYMICLISLPVVIHEKCKKIIRELYLETSL  1097
+
+
+ Score = 50.3 bits (103),  Expect = 5e-08
+ Identities = 18/27 (67%), Positives = 21/27 (78%), Gaps = 0/27 (0%)
+
+Query  404  HLFAAPLRLPPFDAHPVVNLENHPLFT  430
+            HL+ APLRLPPFD HPV+NL   P F+
+Sbjct  340  HLYNAPLRLPPFDDHPVINLHECPYFS  366
+
+
+ Score = 33.3 bits (66),  Expect = 0.007
+ Identities = 13/24 (54%), Positives = 17/24 (71%), Gaps = 0/24 (0%)
+
+Query  442  RVLASVSTPAHSAVALKHRSGRRP  465
+            +V+AS+STP+ S V L HR  R P
+Sbjct  375  KVVASISTPSQSMVTLNHRVQRTP  398
+
+
+ Score = 32.8 bits (65),  Expect = 0.009
+ Identities = 11/31 (35%), Positives = 18/31 (58%), Gaps = 0/31 (0%)
+
+Query  621  LGVIGARDNPFYTKTNRPAWYSDASLEDLFG  651
+            L V+    NPF+T+     WY+ + + D+FG
+Sbjct  585  LNVLQGNRNPFFTRLLNFNWYNPSCMSDIFG  615
+
+
+ Score = 29.1 bits (57),  Expect = 0.12
+ Identities = 10/27 (37%), Positives = 17/27 (63%), Gaps = 0/27 (0%)
+
+Query  676  DDRWLVNLQDKKDVLDRCKLALTFLLE  702
+            ++RW  NL DK++V + C  +L   L+
+Sbjct  645  ENRWKANLLDKREVFNSCIFSLIIRLK  671
+
+
+ Score = 28.2 bits (55),  Expect = 0.23
+ Identities = 12/37 (32%), Positives = 20/37 (54%), Gaps = 0/37 (0%)
+
+Query  234  LSCLNTLASGYSNSNNFEVKREDLVASINPPWRATRP  270
+            L CL  +    S++N+F V R+ ++A+  P     RP
+Sbjct  176  LKCLAEMCLSTSSNNSFTVPRKQMMAATFPEEMRRRP  212
+
+
+ Score = 27.7 bits (54),  Expect = 0.32
+ Identities = 9/23 (39%), Positives = 16/23 (70%), Gaps = 0/23 (0%)
+
+Query  653  VTLEQHVRAFDDRIGVFEDLLEG  675
+            + +EQHV  FD+ + +F +L+ G
+Sbjct  619  IYMEQHVAVFDNCLDMFSNLVRG  641
+
+
+ Score = 24.1 bits (46),  Expect = 4.0
+ Identities = 11/29 (38%), Positives = 18/29 (62%), Gaps = 0/29 (0%)
+
+Query  467  KLLGLSKNGIELHVLPALKDTGSRRRKKK  495
+            KL+G++ +GIE+ V+     T S   +KK
+Sbjct  419  KLIGVTNSGIEVRVVKKPTATQSSCLRKK  447
+
+
+>BDT63526.1 hypothetical protein [Pasiphaea japonica whispovirus]
+Length=171
+
+ Score = 34.2 bits (68),  Expect = 0.004
+ Identities = 20/55 (36%), Positives = 26/55 (47%), Gaps = 0/55 (0%)
+
+Query  88   EEEEAEAAVETEATFKAEDAETATIESEAETALEAKAETALEAEADLYEQEIRRN  142
+            EEEE E   E E   + E+ E    E E E   E + E   E E +  E+E R+N
+Sbjct  103  EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEKEKEKRKN  157
+
+
+>BDT63580.1 wsv360-like protein [Pasiphaea japonica whispovirus]
+Length=6062
+
+ Score = 28.2 bits (55),  Expect = 0.23
+ Identities = 11/34 (32%), Positives = 20/34 (59%), Gaps = 0/34 (0%)
+
+Query  1104  GRMGFKDIYAVALISLPSTLDQETKDIAADLGIE  1137
+             GR+   ++  V   S+P T+ + TKD+   LG++
+Sbjct  5136  GRVIVNELAGVVAKSVPKTVYENTKDMINQLGVD  5169
+
+
+>BDT63571.1 wsv269-like protein [Pasiphaea japonica whispovirus]
+Length=507
+
+ Score = 25.4 bits (49),  Expect = 1.6
+ Identities = 10/24 (42%), Positives = 16/24 (67%), Gaps = 0/24 (0%)
+
+Query  19   LTLEQVVQHSLGELAFDFSDIKIE  42
+            +T+E+V+  S G  A  FSD+ +E
+Sbjct  201  MTIEEVLAFSEGTAATGFSDLYVE  224
+
+
+>BDT63511.1 wsv133-like protein [Pasiphaea japonica whispovirus]
+Length=258
+
+ Score = 24.1 bits (46),  Expect = 4.0
+ Identities = 8/15 (53%), Positives = 10/15 (67%), Gaps = 0/15 (0%)
+
+Query  609  DDHCGGDSDDGGLGV  623
+            DDH  GD+ DG + V
+Sbjct  138  DDHVSGDNGDGDIKV  152
+
+
+
+Lambda      K        H
+   0.319    0.135    0.404 
+
+
+Effective search space used: 70388052
+
+
+Query= BDT63076.1 hypothetical protein [Sicyonia whispovirus]
+
+Length=109
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT63501.1 wsv166-like protein [Pasiphaea japonica whispovirus]       22.9    0.65 
+BDT63580.1 wsv360-like protein [Pasiphaea japonica whispovirus]       21.5    1.7  
+BDT63521.1 wsv023-like protein [Pasiphaea japonica whispovirus]       21.1    2.4  
+BDT63519.1 wsv026-like protein [Pasiphaea japonica whispovirus]       21.1    2.4  
+BDT63579.1 wsv343-like protein [Pasiphaea japonica whispovirus]       20.6    3.3  
+
+
+>BDT63501.1 wsv166-like protein [Pasiphaea japonica whispovirus]
+Length=1023
+
+ Score = 22.9 bits (43),  Expect = 0.65
+ Identities = 9/26 (35%), Positives = 12/26 (46%), Gaps = 0/26 (0%)
+
+Query  17   NTMSMLNKTYNLFVLFNFLLLKFSGK  42
+            N  + LNK  NLF+  N       G+
+Sbjct  797  NEKTFLNKNENLFIFSNLFAKNLVGE  822
+
+
+>BDT63580.1 wsv360-like protein [Pasiphaea japonica whispovirus]
+Length=6062
+
+ Score = 21.5 bits (40),  Expect = 1.7
+ Identities = 15/69 (22%), Positives = 26/69 (38%), Gaps = 0/69 (0%)
+
+Query  26   YNLFVLFNFLLLKFSGKKGADPSREAKRNHNITSSLCRVLGCRHLARLYHSAPPCSATLL  85
+            YN +   N + L  +G K  +   +  R  N+ S   R      L + +      +A   
+Sbjct  147  YNAYSSKNLIPLFMAGNKHNEFGAKVIRQSNLRSCFLRQNAVESLLKDFQRMKTNAAKAF  206
+
+Query  86   IPATRRGSM  94
+            I A +  S+
+Sbjct  207  IDAVKEKSV  215
+
+
+>BDT63521.1 wsv023-like protein [Pasiphaea japonica whispovirus]
+Length=279
+
+ Score = 21.1 bits (39),  Expect = 2.4
+ Identities = 8/23 (35%), Positives = 11/23 (48%), Gaps = 0/23 (0%)
+
+Query  5   MADPPWRSTASMNTMSMLNKTYN  27
+           +ADPP       N     N++YN
+Sbjct  33  VADPPQNLIIDTNESLSANESYN  55
+
+
+ Score = 19.2 bits (35),  Expect = 8.6
+ Identities = 6/12 (50%), Positives = 8/12 (67%), Gaps = 0/12 (0%)
+
+Query  75   HSAPPCSATLLI  86
+            HS PP   T+L+
+Sbjct  253  HSTPPVPITVLL  264
+
+
+>BDT63519.1 wsv026-like protein [Pasiphaea japonica whispovirus]
+Length=1516
+
+ Score = 21.1 bits (39),  Expect = 2.4
+ Identities = 8/22 (36%), Positives = 13/22 (59%), Gaps = 0/22 (0%)
+
+Query  42   KKGADPSREAKRNHNITSSLCR  63
+            K G    R +  + +ITS++CR
+Sbjct  972  KAGTYADRYSNNSISITSAICR  993
+
+
+>BDT63579.1 wsv343-like protein [Pasiphaea japonica whispovirus]
+Length=4023
+
+ Score = 20.6 bits (38),  Expect = 3.3
+ Identities = 7/19 (37%), Positives = 10/19 (53%), Gaps = 0/19 (0%)
+
+Query  10    WRSTASMNTMSMLNKTYNL  28
+             WR T   +  +  N T+NL
+Sbjct  1641  WRKTRQEHQETKTNTTFNL  1659
+
+
+
+Lambda      K        H
+   0.322    0.132    0.422 
+
+
+Effective search space used: 5139520
+
+
+  Database: PajaWSV proteins
+    Posted date:  Oct 13, 2026  1:44 PM
+  Number of letters in database: 66,738
+  Number of sequences in database:  86
+
+
+
+Matrix: BLOSUM62
+Neighboring words threshold: 11
+Window for multiple hits: 40

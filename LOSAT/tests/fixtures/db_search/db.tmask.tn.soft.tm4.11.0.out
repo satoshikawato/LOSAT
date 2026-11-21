@@ -1,0 +1,560 @@
+TBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: dust masks v4
+Masked using: 'dust', options: 'window=64; level=20; linker=1'
+           4 sequences; 9,600 total letters
+
+
+
+Query= pn1 t1 450-899 frame +1
+
+Length=150
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+t1 coding-like subject t1 with a CA repeat and a poly-A               210     2e-70
+t2 homolog of t1 300-1199                                             187     2e-63
+t3 long subject t3 with two repeats                                   22.7    0.044
+
+
+>t1 coding-like subject t1 with a CA repeat and a poly-A
+Length=1500
+
+ Score = 210 bits (535),  Expect = 2e-70, Method: Compositional matrix adjust.
+ Identities = 128/149 (86%), Positives = 130/149 (87%), Gaps = 0/149 (0%)
+ Frame = +1
+
+Query  2    TQCCVHSGRWVPFTMCGDSPLATREYMRPGPDGVIICLQDRGGLWSVGLhththththth  61
+            TQCCVHSGR VP T CG+SPLAT EYMR GPDGVIICL DRGGL SVGLHTHTHTHTHTH
+Sbjct  454  TQCCVHSGRVVPQTPCGESPLATSEYMRTGPDGVIICLYDRGGL*SVGLHTHTHTHTHTH  633
+
+Query  62   ththwwthtSIHSDKCSLHTDVKMVLSNASWYIAYRKMWTLPGVKEMSVEGIPHPGGGHN  121
+            THTH  THTS HS KCSLHTD KMVLSNASWYIA  KMWT  GVKEMSVEGIPHPGGGH+
+Sbjct  634  THTHTHTHTSCHSYKCSLHTDFKMVLSNASWYIALYKMWTRSGVKEMSVEGIPHPGGGHS  813
+
+Query  122  RCLQALAITSGNEPFRISYLGPWLQLYRV  150
+            RC  ALAITS NEPFRISYLGPWLQLYRV
+Sbjct  814  RCSFALAITSRNEPFRISYLGPWLQLYRV  900
+
+
+ Score = 15.4 bits (28),  Expect = 9.9, Method: Compositional matrix adjust.
+ Identities = 6/17 (35%), Positives = 9/17 (53%), Gaps = 2/17 (12%)
+ Frame = -2
+
+Query  6     VHSGR--WVPFTMCGDS  20
+             +HS    W P+  C D+
+Sbjct  1352  IHSQE*CWSPWHFCQDT  1302
+
+
+>t2 homolog of t1 300-1199
+Length=900
+
+ Score = 187 bits (475),  Expect = 2e-63, Method: Compositional matrix adjust.
+ Identities = 117/148 (79%), Positives = 120/148 (81%), Gaps = 0/148 (0%)
+ Frame = +1
+
+Query  2    TQCCVHSGRWVPFTMCGDSPLATREYMRPGPDGVIICLQDRGGLWSVGLhththththth  61
+            TQCCVHSGR VP T CG+SPLAT EYMR GP GVIICL DRGG+ SVGLH HTHTHTHTH
+Sbjct  154  TQCCVHSGRVVPQTPCGESPLATSEYMRTGPAGVIICLYDRGGM*SVGLHKHTHTHTHTH  333
+
+Query  62   ththwwthtSIHSDKCSLHTDVKMVLSNASWYIAYRKMWTLPGVKEMSVEGIPHPGGGHN  121
+            THTH  THTS H  KCSLHT  KMVLS AS YIA  KMW L GVKEMSVE IPHP GGH+
+Sbjct  334  THTHTHTHTSCHYYKCSLHTAFKMVLSIASGYIALYKMWALSGVKEMSVE*IPHPSGGHS  513
+
+Query  122  RCLQALAITSGNEPFRISYLGPWLQLYR  149
+            RC  ALAITS NEPFRI YLGPWLQLYR
+Sbjct  514  RCSFALAITSRNEPFRIRYLGPWLQLYR  597
+
+
+>t3 long subject t3 with two repeats
+Length=6000
+
+ Score = 22.7 bits (47),  Expect = 0.044, Method: Compositional matrix adjust.
+ Identities = 10/27 (37%), Positives = 14/27 (52%), Gaps = 0/27 (0%)
+ Frame = -2
+
+Query  121   NRCLQALAITSGNEPFRISYLGPWLQL  147
+             +R L AL + S        Y+GPW +L
+Sbjct  1412  DRILHALRVYSCRRDSIKQYMGPWRKL  1332
+
+
+ Score = 17.7 bits (34),  Expect = 2.0, Method: Compositional matrix adjust.
+ Identities = 7/14 (50%), Positives = 8/14 (57%), Gaps = 0/14 (0%)
+ Frame = +2
+
+Query  112  GIPHPGGGHNRCLQ  125
+            GIP P    +RCL 
+Sbjct  749  GIPEPDQCVSRCLN  790
+
+
+ Score = 15.8 bits (29),  Expect = 8.5, Method: Compositional matrix adjust.
+ Identities = 5/7 (71%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+ Frame = +1
+
+Query  114   PHPGGGH  120
+             PH  GGH
+Sbjct  3859  PHSRGGH  3879
+
+
+
+Lambda      K        H        a         alpha
+   0.323    0.139    0.480    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 344876
+
+
+Query= pn2 t1 1000-1299 frame -1
+
+Length=100
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+t1 coding-like subject t1 with a CA repeat and a poly-A               105     2e-31
+t2 homolog of t1 300-1199                                             55.1    8e-14
+t3 long subject t3 with two repeats                                   15.0    7.0  
+
+
+>t1 coding-like subject t1 with a CA repeat and a poly-A
+Length=1500
+
+ Score = 105 bits (261),  Expect = 2e-31, Method: Compositional matrix adjust.
+ Identities = 84/99 (85%), Positives = 84/99 (85%), Gaps = 0/99 (0%)
+ Frame = -3
+
+Query  2     TWNGMPAECSISGvrrvrrtlrsllFGRSPLLEMRRFVSHIGEQLTYISMDSLHQWffff  61
+             T NGMPAE SISGVRRVRRTLRSLLFGRSPLLE RRFVSHIGEQ TYIS  SLHQ FFFF
+Sbjct  1297  T*NGMPAENSISGVRRVRRTLRSLLFGRSPLLEHRRFVSHIGEQ*TYIS*FSLHQNFFFF  1118
+
+Query  62    fffffLRCARIRAALWTSAGVADSISKLWTSGAQYVDTS  100
+             FFFFFL C RIRAAL TSA VADSISKLW  G  YVDTS
+Sbjct  1117  FFFFFL*C*RIRAAL*TSA*VADSISKLW**GLTYVDTS  1001
+
+
+>t2 homolog of t1 300-1199
+Length=900
+
+ Score = 55.1 bits (131),  Expect = 8e-14, Method: Compositional matrix adjust.
+ Identities = 46/64 (72%), Positives = 48/64 (75%), Gaps = 0/64 (0%)
+ Frame = -3
+
+Query  36   RRFVSHIGEQLTYISMDSLHQWfffffffffLRCARIRAALWTSAGVADSISKLWTSGAQ  95
+            RRF SHIGEQ TYIS  S+HQ FFFFFFFFFL C RIRAAL T A VA  I KLW  G +
+Sbjct  895  RRFGSHIGEQ*TYIS*LSVHQNFFFFFFFFFL*C*RIRAAL*TPA*VAYGI*KLW**GLR  716
+
+Query  96   YVDT  99
+            YVDT
+Sbjct  715  YVDT  704
+
+
+>t3 long subject t3 with two repeats
+Length=6000
+
+ Score = 15.0 bits (27),  Expect = 7.0, Method: Composition-based stats.
+ Identities = 5/10 (50%), Positives = 6/10 (60%), Gaps = 0/10 (0%)
+ Frame = +1
+
+Query  90    WTSGAQYVDT  99
+             W S +QY  T
+Sbjct  1918  WISVSQYART  1947
+
+
+
+Lambda      K        H        a         alpha
+   0.322    0.131    0.440    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 202224
+
+
+Query= pn3 t3 2301-2800 frame +2
+
+Length=166
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+t3 long subject t3 with two repeats                                   183     9e-58
+
+
+>t3 long subject t3 with two repeats
+Length=6000
+
+ Score = 183 bits (465),  Expect = 9e-58, Method: Compositional matrix adjust.
+ Identities = 141/165 (85%), Positives = 144/165 (87%), Gaps = 0/165 (0%)
+ Frame = +1
+
+Query  1     SHGLDSACCKGYMSPTPTNSITEQCGTMHLGFPPGKAQHNAKNLIRARLDNVGPSTEPEA  60
+             SHGLDSA CKGY+SPTPT+SITEQ GTMHLG  PGKAQHNA NLI ARLD VGPSTEPEA
+Sbjct  2302  SHGLDSAVCKGYISPTPTHSITEQAGTMHLGPAPGKAQHNA*NLI*ARLD*VGPSTEPEA  2481
+
+Query  61    KTVRMYPhththththththththtemftfthtGGMGNQNLVQLRYQCPMSVSPSSIEYl  120
+             KTVRM PHTHTHTHTHTHTHTHTHT   T THT GMGNQNLVQ+R QCP S SPSS EYL
+Sbjct  2482  KTVRM*PHTHTHTHTHTHTHTHTHTHTHTHTHT*GMGNQNLVQVRSQCP*SESPSSFEYL  2661
+
+Query  121   kcddsdlknllsllAHEMPKTRLCFSVTSGELLVSNQTLISTDQA  165
+             KCD SDLKNLLSLLAH MPKTR CFSVTSGELLVSNQTLISTD A
+Sbjct  2662  KCD*SDLKNLLSLLAH*MPKTR*CFSVTSGELLVSNQTLISTDGA  2796
+
+
+
+Lambda      K        H        a         alpha
+   0.314    0.129    0.389    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 390144
+
+
+Query= pn4 t3 4650-5000 frame -2
+
+Length=116
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+t3 long subject t3 with two repeats                                   133     8e-41
+
+
+>t3 long subject t3 with two repeats
+Length=6000
+
+ Score = 133 bits (334),  Expect = 8e-41, Method: Compositional matrix adjust.
+ Identities = 100/116 (86%), Positives = 100/116 (86%), Gaps = 0/116 (0%)
+ Frame = -2
+
+Query  1     WDGGGTYICYKSLMLKVDQTHNSLPFCEGEERGTLIEGSLRIIESYYGWYTMthththth  60
+             WDGGGTY CYKSL LKVDQTH SLPF E EERGTLIEGSLRIIESYYGWYT THTHTHTH
+Sbjct  5000  WDGGGTY*CYKSLRLKVDQTHTSLPFKE*EERGTLIEGSLRIIESYYGWYTHTHTHTHTH  4821
+
+Query  61    thththtCNCSVTEAVCYESYPDSPTSGWEGQVDIMLILPtrrststatestGYGL  116
+             THTHTHTCNCSV E VCY S PDSPT GWEGQV   LIL TRRSTS ATESTGYGL
+Sbjct  4820  THTHTHTCNCSVLE*VCY*SNPDSPTDGWEGQV*RKLILVTRRSTSQATESTGYGL  4653
+
+
+ Score = 15.8 bits (29),  Expect = 4.9, Method: Compositional matrix adjust.
+ Identities = 6/13 (46%), Positives = 7/13 (54%), Gaps = 0/13 (0%)
+ Frame = -2
+
+Query  2    DGGGTYICYKSLM  14
+            +G   Y C  SLM
+Sbjct  413  EGTRNYTCKSSLM  375
+
+
+ Score = 15.4 bits (28),  Expect = 7.0, Method: Composition-based stats.
+ Identities = 4/6 (67%), Positives = 6/6 (100%), Gaps = 0/6 (0%)
+ Frame = +2
+
+Query  82    PDSPTS  87
+             P+SPT+
+Sbjct  1946  PESPTA  1963
+
+
+
+Lambda      K        H        a         alpha
+   0.319    0.140    0.469    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 247860
+
+
+Query= pn5 t4 200-499 frame +3
+
+Length=100
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+t4 random subject t4 for the hand masks                               167     2e-55
+t1 coding-like subject t1 with a CA repeat and a poly-A               20.4    0.12 
+t3 long subject t3 with two repeats                                   15.0    7.5  
+
+
+>t4 random subject t4 for the hand masks
+Length=1200
+
+ Score = 167 bits (422),  Expect = 2e-55, Method: Compositional matrix adjust.
+ Identities = 88/100 (88%), Positives = 88/100 (88%), Gaps = 0/100 (0%)
+ Frame = +3
+
+Query  1    GQCDPKQEFTSLSCFPSTHKGPAGQMGSDWSKTSERCWSHCRANYAYLSSYVPLFTTNVI  60
+            GQCDPKQ FTSL   PSTHKGPAGQ GSDWSK SERCWSHCRANYAYLSSYVPLF TNVI
+Sbjct  201  GQCDPKQ*FTSL*F*PSTHKGPAGQ*GSDWSKLSERCWSHCRANYAYLSSYVPLF*TNVI  380
+
+Query  61   RLNFLATNRIVQYCGCEGNGSTYYGKCVPSTLPCSEDLAT  100
+            RLN LATNRIVQ CG EG  STYYGKCVPSTLPCSEDLAT
+Sbjct  381  RLN*LATNRIVQ*CG*EG**STYYGKCVPSTLPCSEDLAT  500
+
+
+ Score = 20.4 bits (41),  Expect = 0.11, Method: Composition-based stats.
+ Identities = 10/22 (45%), Positives = 11/22 (50%), Gaps = 0/22 (0%)
+ Frame = +3
+
+Query  32    KTSERCWSHCRANYAYLSSYVP  53
+             KT  R   H RA    LSS+ P
+Sbjct  996   KTLSRDERHARAPTTLLSSFFP  1061
+
+
+>t1 coding-like subject t1 with a CA repeat and a poly-A
+Length=1500
+
+ Score = 20.4 bits (41),  Expect = 0.12, Method: Compositional matrix adjust.
+ Identities = 14/44 (32%), Positives = 17/44 (39%), Gaps = 6/44 (14%)
+ Frame = -1
+
+Query  46    AYLSSYVPLFTTNVIRLNFLATNRIVQYCGCEGNGSTYYGKCVP  89
+             A LS Y  L      R   L   R+ +Y G E +   YY    P
+Sbjct  1320  ALLSGYAKL------RTACLRKTRLAEYAGSEEHFGAYYSVARP  1207
+
+
+ Score = 15.4 bits (28),  Expect = 6.5, Method: Compositional matrix adjust.
+ Identities = 5/6 (83%), Positives = 6/6 (100%), Gaps = 0/6 (0%)
+ Frame = -3
+
+Query  79   NGSTYY  84
+            NGST+Y
+Sbjct  757  NGSTFY  740
+
+
+>t3 long subject t3 with two repeats
+Length=6000
+
+ Score = 15.0 bits (27),  Expect = 7.5, Method: Composition-based stats.
+ Identities = 4/7 (57%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+ Frame = +2
+
+Query  19    HKGPAGQ  25
+             H GP G+
+Sbjct  3314  HTGPTGR  3334
+
+
+
+Lambda      K        H        a         alpha
+   0.319    0.133    0.447    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 202224
+
+
+Query= pn6 t4 550-849 frame -3
+
+Length=100
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+t4 random subject t4 for the hand masks                               156     2e-51
+t1 coding-like subject t1 with a CA repeat and a poly-A               16.2    2.9  
+t3 long subject t3 with two repeats                                   15.8    4.6  
+
+
+>t4 random subject t4 for the hand masks
+Length=1200
+
+ Score = 156 bits (395),  Expect = 2e-51, Method: Compositional matrix adjust.
+ Identities = 84/100 (84%), Positives = 84/100 (84%), Gaps = 0/100 (0%)
+ Frame = -3
+
+Query  1    FLMYFSSVEASVAGRTCKYAWLHSLNVGPCELTGCGRCSQLPTEERLCHRIKTSLREQPG  60
+            FL  FSSVEASVAGRTCK A LHS NVGPC L GCGRCSQLP EERLC RI TSL EQPG
+Sbjct  850  FL*GFSSVEASVAGRTCKNA*LHSQNVGPCVLLGCGRCSQLP*EERLCRRICTSLAEQPG  671
+
+Query  61   RLEKCEVLNVHTHLSVPKMGNFIARYDGMGTCRDGRAEVV  100
+            R EKCEVLNVHTHLSVP  GN IARYDG GTCRDGRAEVV
+Sbjct  670  RWEKCEVLNVHTHLSVP**GNDIARYDG*GTCRDGRAEVV  551
+
+
+>t1 coding-like subject t1 with a CA repeat and a poly-A
+Length=1500
+
+ Score = 16.2 bits (30),  Expect = 2.9, Method: Compositional matrix adjust.
+ Identities = 7/17 (41%), Positives = 9/17 (53%), Gaps = 0/17 (0%)
+ Frame = -3
+
+Query  46  RLCHRIKTSLREQPGRL  62
+           R  HR+    R +PG L
+Sbjct  79  RDPHRVHIIKRSKPGVL  29
+
+
+ Score = 15.4 bits (28),  Expect = 5.8, Method: Composition-based stats.
+ Identities = 5/14 (36%), Positives = 8/14 (57%), Gaps = 0/14 (0%)
+ Frame = +1
+
+Query  46    RLCHRIKTSLREQP  59
+             R C  +K +  E+P
+Sbjct  1042  RCCQPLKRTFIERP  1083
+
+
+>t3 long subject t3 with two repeats
+Length=6000
+
+ Score = 15.8 bits (29),  Expect = 4.6, Method: Compositional matrix adjust.
+ Identities = 5/12 (42%), Positives = 7/12 (58%), Gaps = 0/12 (0%)
+ Frame = +1
+
+Query  25    LNVGPCELTGCG  36
+             LN+G  +   CG
+Sbjct  3052  LNIGSVQSIRCG  3087
+
+
+ Score = 15.0 bits (27),  Expect = 7.8, Method: Composition-based stats.
+ Identities = 6/8 (75%), Positives = 6/8 (75%), Gaps = 0/8 (0%)
+ Frame = +3
+
+Query  79    MGNFIARY  86
+             MGN  ARY
+Sbjct  1452  MGNK*ARY  1475
+
+
+
+Lambda      K        H        a         alpha
+   0.324    0.137    0.445    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 202224
+
+
+Query= pn7 t4 1000-1199 frame +1
+
+Length=66
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+t4 random subject t4 for the hand masks                               119     6e-38
+t3 long subject t3 with two repeats                                   20.4    0.059
+t1 coding-like subject t1 with a CA repeat and a poly-A               15.8    2.5  
+t2 homolog of t1 300-1199                                             14.6    5.1  
+
+
+>t4 random subject t4 for the hand masks
+Length=1200
+
+ Score = 119 bits (299),  Expect = 6e-38, Method: Compositional matrix adjust.
+ Identities = 60/66 (91%), Positives = 61/66 (92%), Gaps = 0/66 (0%)
+ Frame = +2
+
+Query  1     AQQRGAPRACPWNPTVFILSHMTWHFCTSDHSGSPAALPQNSRIHKVSAETPLRQSRVAC  60
+             AQQR APRACP+NPTVFILSH TWHFC SDHSGSPAALPQNSRI KVSAETPLRQS VAC
+Sbjct  1001  AQQR*APRACPYNPTVFILSHTTWHFCPSDHSGSPAALPQNSRIAKVSAETPLRQS*VAC  1180
+
+Query  61    TSQSNT  66
+             TSQSNT
+Sbjct  1181  TSQSNT  1198
+
+
+>t3 long subject t3 with two repeats
+Length=6000
+
+ Score = 20.4 bits (41),  Expect = 0.059, Method: Compositional matrix adjust.
+ Identities = 11/24 (46%), Positives = 14/24 (58%), Gaps = 0/24 (0%)
+ Frame = -1
+
+Query  33    GSPAALPQNSRIHKVSAETPLRQS  56
+             G  A  P +SR+H+ SAE   R S
+Sbjct  2319  GV*AVGPDSSRLHQKSAELRRRHS  2248
+
+
+ Score = 16.2 bits (30),  Expect = 1.9, Method: Compositional matrix adjust.
+ Identities = 5/8 (63%), Positives = 5/8 (63%), Gaps = 0/8 (0%)
+ Frame = -3
+
+Query  6     APRACPWN  13
+             APR   WN
+Sbjct  3589  APRRVTWN  3566
+
+
+ Score = 15.4 bits (28),  Expect = 3.7, Method: Compositional matrix adjust.
+ Identities = 8/18 (44%), Positives = 9/18 (50%), Gaps = 0/18 (0%)
+ Frame = +3
+
+Query  19    LSHMTWHFCTSDHSGSPA  36
+             L  MTW   +S    SPA
+Sbjct  3912  LRAMTWRHKSSVVVSSPA  3965
+
+
+ Score = 14.6 bits (26),  Expect = 6.1, Method: Compositional matrix adjust.
+ Identities = 5/10 (50%), Positives = 7/10 (70%), Gaps = 0/10 (0%)
+ Frame = +1
+
+Query  6    APRACPWNPT  15
+            A R C ++PT
+Sbjct  109  ANRPCVYSPT  138
+
+
+>t1 coding-like subject t1 with a CA repeat and a poly-A
+Length=1500
+
+ Score = 15.8 bits (29),  Expect = 2.5, Method: Compositional matrix adjust.
+ Identities = 4/4 (100%), Positives = 4/4 (100%), Gaps = 0/4 (0%)
+ Frame = -2
+
+Query  24    WHFC  27
+             WHFC
+Sbjct  1322  WHFC  1311
+
+
+ Score = 15.0 bits (27),  Expect = 4.9, Method: Compositional matrix adjust.
+ Identities = 4/10 (40%), Positives = 6/10 (60%), Gaps = 0/10 (0%)
+ Frame = +3
+
+Query  22   MTWHFCTSDH  31
+            +   FC S+H
+Sbjct  810  LPLQFCASNH  839
+
+
+>t2 homolog of t1 300-1199
+Length=900
+
+ Score = 14.6 bits (26),  Expect = 5.1, Method: Compositional matrix adjust.
+ Identities = 4/6 (67%), Positives = 5/6 (83%), Gaps = 0/6 (0%)
+ Frame = +3
+
+Query  26   FCTSDH  31
+            FC S+H
+Sbjct  522  FCVSNH  539
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.124    0.410    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 114108
+
+
+  Database: dust masks v4
+  Masked using: 'dust', options: 'window=64; level=20; linker=1'
+    Posted date:  Nov 21, 2026  8:36 AM
+  Number of letters in database: 9,600
+  Number of sequences in database:  4
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 13
+Window for multiple hits: 40

@@ -6,7 +6,7 @@ import type { OutputFormat } from '../domain/output-format.js';
 import type { ResolvedDefault } from '../domain/parameters.js';
 import type { ProgramId } from '../domain/programs.js';
 import type { CountsFile, CountsUse } from '../domain/counts.js';
-import type { MessagePlace, RegistryFile, RunFile } from '../domain/run-files.js';
+import type { MessagePlace, PrintedKind, RegistryFile, RunFile } from '../domain/run-files.js';
 
 export interface ParameterDescription {
   readonly flag: string;
@@ -29,7 +29,16 @@ export interface ProgramDescription {
   readonly subjectGencodes?: readonly number[];
 }
 
-export type ValidationResult = { readonly ok: true } | { readonly ok: false; readonly message: string };
+/**
+ * The verdict of `validate`. A valid argv also says whether its run reads the inputs with NCBI's
+ * data loaders on (`dataLoaders`, ABI v2 *validation*, version 8): off under `[BLAST]
+ * DATA_LOADERS=none` of its `-conffile`, where the reader reads a first line that may be a Seq-id as
+ * data, as the CLI does (line WQA's D16, 2026-11-20). A refused argv says it too when the engine's
+ * start read the registry before the option that it refuses (line WQA's D13 round 3, L1).
+ */
+export type ValidationResult =
+  | { readonly ok: true; readonly dataLoaders: boolean }
+  | { readonly ok: false; readonly message: string; readonly dataLoaders?: boolean };
 
 /**
  * What NCBI's application reads of an argv before its arguments (docs/web/abi_v2.md §4
@@ -50,9 +59,14 @@ export interface StartInfo {
    * Engine worker registers a run's inputs by it.
    */
   readonly registerInputs: boolean;
+  /**
+   * What a run of the argv prints in place of a search, as the command line does (ABI v2 §5 stream 11): its help or
+   * its version; null for a search. Such a run reads no inputs (line WQA's D14, 2026-11-20).
+   */
+  readonly prints: PrintedKind | null;
 }
 
-/** The engine's *start* of an argv, or the CLI's message for an argv that it cannot start (a version word). */
+/** The engine's *start* of an argv, or the CLI's message for an argv that it cannot start (a program that LOSAT Web does not run). */
 export type StartResult = { readonly ok: true; readonly start: StartInfo } | { readonly ok: false; readonly message: string };
 
 /**
@@ -128,6 +142,11 @@ export interface RuntimeInfo {
    * it made any. A run that fails gives its files with its rejection (`runFilesOf`).
    */
   readonly runFiles?: readonly RunFile[];
+  /**
+   * The text that the run printed in place of a search (ABI v2 stream 11: the command line's standard output), for an
+   * argv whose start `prints` (line WQA's D14, 2026-11-20).
+   */
+  readonly printed?: Uint8Array;
 }
 
 /** One input of a run: the exact FASTA bytes of the run snapshot and their record table. */

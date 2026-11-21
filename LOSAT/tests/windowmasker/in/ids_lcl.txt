@@ -1,0 +1,4 @@
+lcl|rec2
+rec2
+rec4
+lcl|rec4.

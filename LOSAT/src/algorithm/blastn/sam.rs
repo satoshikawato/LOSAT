@@ -1,18 +1,10 @@
 //! BLASTN's SAM records (outfmt 17): the report records of each query's final hit list
 //! (`report::record`) added to the run's [`SamDocument`], one query at a time. The records are
 //! built as for the Seq-annot of outfmt 8 and 12 (`algorithm::blastn::seqalign`); the SAM
-//! formatter reads the Dense-seg segments, the scores, the sequences' lengths and, with `SQ`,
-//! their letters.
+//! formatter reads the Dense-seg segments (of an `-ungapped` search, a subject's Dense-diags
+//! joined), the scores, the sequences' lengths and, with `SQ`, their letters.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:750-755
-//! ```c++
-//!     if (m_FormatType == CFormattingArgs::eSAM) {
-//!         if (results.HasAlignments()) {
-//!             m_SamFormatter->Print(*results.GetSeqAlign());
-//!         }
-//!         return;
-//!     }
-//! ```
 //! (a query without alignments writes nothing: no unmapped record). The Seq-aligns are those of
 //! `BlastHitList2SeqAlign_OMF`, without `PruneSeqalign` (`algorithm::blastn::seqalign`).
 
@@ -36,10 +28,13 @@ pub(crate) struct SubjectLengths<'a> {
 }
 
 /// Adds the records of the queries of `hit_lists` (indexed by query) to `document`.
-/// `queries_before` is the number of queries earlier calls added (a query's reference key).
+/// `queries_before` is the number of queries earlier calls added (a query's reference key);
+/// `ungapped`: an `-ungapped` search, whose Seq-align of a subject holds all its HSPs (one
+/// record per subject).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn add_blastn_sam(
     document: &mut SamDocument,
+    ungapped: bool,
     hit_lists: &[Option<BlastnHitList>],
     queries: &QueryNames<'_>,
     queries_before: usize,
@@ -51,7 +46,7 @@ pub(crate) fn add_blastn_sam(
     let run = RunRecord {
         program: Program::Blastn,
         db_title: subjects.db_title(),
-        gapped: true,
+        gapped: !ungapped,
     };
     let mut sam_subjects: Vec<SamSequence<'_>> = Vec::new();
     let mut hsp_records: Vec<HspRecord<'_>> = Vec::new();

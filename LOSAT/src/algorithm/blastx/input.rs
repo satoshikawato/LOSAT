@@ -1,13 +1,6 @@
 //! Local FASTA state before translation. Internal IDs and defline titles differ.
 use anyhow::{bail, Result};
 // NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:100-104
-// ```c++
-// bool CStreamLineReader::AtEOF(void) const
-// {
-//     return !m_UngetLine &&
-//         (m_Stream->eof()  ||  CT_EQ_INT_TYPE(m_Stream->peek(), CT_EOF));
-// }
-// ```
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 #[cfg(test)]
 use std::path::Path;
@@ -20,28 +13,7 @@ use crate::ncbi_str::{is_space, truncate_spaces, truncate_spaces_begin, truncate
 
 #[derive(Debug, Clone)]
 // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:619-631
-// ```c++
-// void CFastaReader::PostProcessIDs(
-//     const CBioseq::TId& defline_ids,
-//     const string& /*defline*/,
-//     const bool has_range,
-//     const TSeqPos range_start,
-//     const TSeqPos range_end)
-// {
-//     if (defline_ids.empty()) {
-//         GenerateID();
-//     }
-//     else {
-//         SetIDs() = defline_ids;
-//     }
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta_reader_utils.cpp:177-180
-// ```c++
-//     size_t title_start = NPOS;
-//     if ((fFastaFlags & CFastaReader::fNoParseID)) {
-//         title_start = start;
-//     }
-// ```
 pub struct FastaRecord {
     pub internal_id: String,
     /// The title as read, bytes: NCBI's reader keeps a title in any encoding, and its formatters
@@ -64,9 +36,9 @@ pub struct FastaRecord {
     pub skipped: Option<Box<[SkippedRecord]>>,
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:146-155 (quoted at
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:146-155 (cited at
 // `emit_fasta_batch`: the batch drops a record whose range starts past its end) after the
-// reader added it to its scope (blast_fasta_input.cpp:395, quoted at
+// reader added it to its scope (blast_fasta_input.cpp:395, cited at
 // `query_batch::QueryScope::of_shown`)
 /// A record of a reader batch that the `-query_loc` range skipped (`FastaRecord::skipped`): what
 /// NCBI's scope holds of it at the batch's prefetch, its generated local id (`Query_<n>`, its
@@ -309,14 +281,6 @@ impl FastaRecord {
     /// (`lower_case_before`, `split::x_chunk_masks`).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:1041-1046
-    /// ```c
-    ///    for (seqloc = *mask; seqloc; seqloc = next_loc) {
-    ///       next_loc = seqloc->next;
-    ///       seqloc->ssr->left = MAX(0, seqloc->ssr->left - from);
-    ///       seqloc->ssr->right = MIN(seqloc->ssr->right, to) - from;
-    ///       /* If this mask location does not intersect the [from,to] interval,
-    ///          do not add it to the newly constructed list and free its contents. */
-    /// ```
     pub fn cut_in_place(&mut self, from: usize, to_exclusive: usize, keep_whole: bool) {
         let length = self.sequence.len();
         let source = self.source.get_or_insert_with(Default::default);
@@ -347,30 +311,6 @@ impl FastaRecord {
 }
 #[derive(Debug, Clone)]
 // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:974-995
-// ```c++
-//         case eCharType_Bad:
-//             if( bad_pos_line_num < 0 ) {
-//                 bad_pos_line_num = LineNumber();
-//             }
-//             bad_pos_vec.push_back(pos);
-//             break;
-//         default:
-//             _TROUBLE;
-//         }
-//     }
-//
-//     m_SeqData.resize(m_CurrentPos);
-//
-//     if( bIgnorableHyphenSeen ) {
-//         _ASSERT( bHyphensIgnoreAndWarn );
-//         FASTA_WARNING_EX(LineNumber(),
-//             "CFastaReader: Hyphens are invalid and will be ignored around line " << LineNumber(),
-//             ILineError::eProblem_IgnoredResidue,
-//             kEmptyStr, kEmptyStr, "-" );
-//     }
-//
-//     // before throwing, be sure that we're in a valid state so that callers can
-// ```
 pub struct InputWarning {
     pub line: usize,
     pub kind: &'static str,
@@ -381,49 +321,9 @@ pub struct InputWarning {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:319-343
-// ```c++
-//     CFastaReader::TFlags flags = m_Config.GetBelieveDeflines() ?
-//                                     CFastaReader::fParseRawID:
-//                                     (CFastaReader::fNoParseID |
-//                                      CFastaReader::fDLOptional);
-//
-//     // Allow CFastaReader fSkipCheck flag to be set based
-//     // on new CBlastInputSourceConfig property - GetSkipSeqCheck() -RMH-
-//     flags += ( m_Config.GetSkipSeqCheck() ? CFastaReader::fSkipCheck : 0 );
-//
-//     flags += (m_ReadProteins
-//               ? CFastaReader::fAssumeProt
-//               : CFastaReader::fAssumeNuc);
-//     const char* env_var = getenv("BLASTINPUT_GEN_DELTA_SEQ");
-//     if (env_var == NULL || (env_var && string(env_var) == kEmptyStr)) {
-//         flags += CFastaReader::fNoSplit;
-//     }
-//     // This is necessary to enable the ignoring of gaps in classes derived from
-//     // CFastaReader
-//
-//    	flags+= CFastaReader::fHyphensIgnoreAndWarn;
-//
-//     flags+= CFastaReader::fDisableNoResidues;
-//     // Do not check more than few characters in local ID for illegal characters.
-//     // Illegal characters can be things like = and we want to let those through.
-//     flags+= CFastaReader::fQuickIDCheck;
-// ```
 #[cfg(test)]
 pub fn read_fasta(path: &Path, protein: bool, lowercase: bool) -> Result<Vec<FastaRecord>> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:291-301
-    // ```c++
-    // CBlastFastaInputSource::CBlastFastaInputSource(CNcbiIstream& infile,
-    //                                        const CBlastInputSourceConfig& iconfig)
-    //     : m_Config(iconfig),
-    //       m_LineReader(iconfig.GetConvertGapsToNs() ?
-    //                    new CStreamLineReaderConverter(infile) :
-    //                    new CStreamLineReader(infile)),
-    //       m_ReadProteins(iconfig.IsProteinInput())
-    // {
-    //     x_InitInputReader();
-    // }
-    //
-    // ```
     let file = anyhow::Context::with_context(std::fs::File::open(path), || {
         format!("cannot read BLASTX input {}", path.display())
     })?;
@@ -437,163 +337,15 @@ pub fn read_fasta(path: &Path, protein: bool, lowercase: bool) -> Result<Vec<Fas
     )
 }
 // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:350-375
-// ```c++
-//         if (c == '>' ) {
-//             CTempString next_line = *++GetLineReader();
-//             string strmodified;
-//             if( NStr::StartsWith(next_line, ">?_") ) {
-//                 CTempString tmp = next_line.substr(3);
-//                 strmodified = ">";
-//                 strmodified.append(tmp.data(), tmp.length());
-//                 next_line = strmodified;
-//             }
-//             if( NStr::StartsWith(next_line, ">?") ) {
-//                 // This is actually a data line. an assembly gap, in particular, which
-//                 // we handle farther below
-//                 GetLineReader().UngetLine();
-//             } else {
-//                 if(need_defline) {
-//                     ParseDefLine(next_line, pMessageListener);
-//                     need_defline = false;
-//                     continue;
-//                 } else {
-//                     GetLineReader().UngetLine();
-//                     // start of the next sequence
-//                     break;
-//                 }
-//             }
-//         }
-//
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:378-389
-// ```c++
-//         if (line.empty()) {
-//             continue; // ignore lines containing only whitespace
-//         }
-//         c = line[0];
-//
-//         if (c == '!'  ||  c == '#' || c == ';') {
-//             // no content, just a comment or blank line
-//             continue;
-//         } else if (need_defline) {
-//             if (TestFlag(fDLOptional)) {
-//                 ParseDefLine(">", pMessageListener);
-//                 need_defline = false;
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:941-966
-// ```c++
-//             m_SeqData[m_CurrentPos] = c;
-//             CloseMask();
-//             ++m_CurrentPos;
-//             break;
-//         case eCharType_MaskedNonGap:
-//             CloseGap(pos == 0);
-//             m_SeqData[m_CurrentPos] = s_ASCII_MustBeLowerToUpper(c);
-//             OpenMask();
-//             ++m_CurrentPos;
-//             break;
-//         case eCharType_Gap: {
-//             CloseMask();
-//             // open a gap
-//
-//             size_t pos2 = pos + 1;
-//             while( pos2 < s_len && s[pos2] == c ) {
-//                 ++pos2;
-//             }
-//             _ASSERT(pos2 <= s_len);
-//             m_CurrentGapLength += pos2 - pos;
-//             m_CurrentGapChar = toupper(c);
-//             pos = pos2 - 1; // `- 1` compensates for the `++pos` in the `for`
-//             break;
-//         }
-//         case eCharType_JustIgnore:
-//             break;
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:2038-2043
-// ```c++
-//     NStr::TruncateSpacesInPlace(processed_title);
-//     if (!processed_title.empty()) {
-//         auto pDesc = Ref(new CSeqdesc());
-//         pDesc->SetTitle() = processed_title;
-//         bioseq.SetDescr().Set().push_back(std::move(pDesc));
-//     }
-// ```
 #[cfg(test)]
 pub fn parse_fasta(data: &[u8], protein: bool, lowercase: bool) -> Result<Vec<FastaRecord>> {
     parse_fasta_batches(data, protein, lowercase, usize::MAX, &mut |_| Ok(()))
 }
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:140-171
-// ```c++
-//     while (size_read < GetBatchSize()) {
-//
-//         if (End())
-//             break;
-//
-//         CRef<CBlastSearchQuery> q;
-//         try { q.Reset(m_Source->GetNextSequence(scope)); }
-//         catch (const CObjReaderParseException& e) {
-//             if (e.GetErrCode() == CObjReaderParseException::eEOF) {
-//                 break;
-//             }
-//             throw;
-//         }
-//         catch (const exception&) {
-//             continue; //SB-2307. ignore well formed, not found accession
-//         }
-//
-//         CConstRef<CSeq_loc> loc = q->GetQuerySeqLoc();
-//
-//         if (loc->IsInt()) {
-//             size_read += sequence::GetLength(loc->GetInt().GetId(),
-//                                              q->GetScope());
-//         } else if (loc->IsWhole()) {
-//             size_read += sequence::GetLength(loc->GetWhole(), q->GetScope());
-//         } else {
-//             // programmer error, CBlastInputSource should only return Seq-locs
-//             // of type interval or whole
-//             abort();
-//         }
-//
-//         retval->AddQuery(q);
-//     }
-// ```
 // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:260-293
-// ```c++
-// 	    BLAST_PROF_START( APP.LOOP.PRE );
-//             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
-//             CRef<IQueryFactory> queries(new CObjMgr_QueryFactory(*query_batch));
-//
-//             SaveSearchStrategy(args, m_CmdLineArgs, queries, m_OptsHndl);
-//
-//             CRef<CSearchResultSet> results;
-// 	    BLAST_PROF_STOP( APP.LOOP.PRE );
-//
-//             if (m_CmdLineArgs->ExecuteRemotely()) {
-//                 CRef<CRemoteBlast> rmt_blast =
-//                     InitializeRemoteBlast(queries, db_args, m_OptsHndl,
-//                           m_CmdLineArgs->ProduceDebugRemoteOutput(),
-//                           m_CmdLineArgs->GetClientId());
-//                 results = rmt_blast->GetResultSet();
-//             } else {
-// 	        BLAST_PROF_START( APP.LOOP.BLAST );
-//                 CLocalBlast lcl_blast(queries, m_OptsHndl, db_adapter);
-//                 lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
-//                 results = lcl_blast.Run();
-// 	        BLAST_PROF_STOP( APP.LOOP.BLAST );
-//             }
-// 	    BLAST_PROF_START( APP.LOOP.FMT );
-//             if (fmt_args->ArchiveFormatRequested(args)) {
-//                 formatter.WriteArchive(*queries, *m_OptsHndl, *results, 0, m_Bah.GetMessages());
-//                 m_Bah.ResetMessages();
-//             } else {
-//                 BlastFormatter_PreFetchSequenceData(*results, scope,
-//                 		                            fmt_args->GetFormattedOutputChoice());
-//             	ITERATE(CSearchResultSet, result, *results) {
-//                	    formatter.PrintOneResultSet(**result, query_batch);
-//             	}
-//             }
-// 	    BLAST_PROF_STOP( APP.LOOP.FMT );
-// ```
 #[cfg(test)]
 pub(crate) fn parse_fasta_batches(
     data: &[u8],
@@ -607,13 +359,6 @@ pub(crate) fn parse_fasta_batches(
     })
 }
 // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:2213-2217
-// ```c++
-//     if ( ! pMessageListener && (_eSeverity) <= eDiag_Warning ) {
-//         LOG_POST_X(1, Warning << pLineExpt->Message());
-//     } else if ( ! pMessageListener || ! pMessageListener->PutError( *pLineExpt ) )
-//     {
-//         throw CObjReaderParseException(DIAG_COMPILE_INFO, 0, _eErrCode, _MessageStrmOps, _uLineNum, _eSeverity);
-// ```
 // Native caller posts each reader event immediately; retained warnings continue
 // to serve the independent B input-state probe. Batch delivery is unchanged.
 #[cfg(any(target_arch = "wasm32", test))]
@@ -627,21 +372,6 @@ pub(crate) fn parse_fasta_batches_with_warnings(
 ) -> Result<Vec<FastaRecord>> {
     parse_fasta_lines(
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:302-314
-        // ```c++
-        // CBlastFastaInputSource::CBlastFastaInputSource(const string& user_input,
-        //                                        const CBlastInputSourceConfig& iconfig)
-        //     : m_Config(iconfig),
-        //       m_ReadProteins(iconfig.IsProteinInput())
-        // {
-        //     if (user_input.empty()) {
-        //         NCBI_THROW(CInputException, eEmptyUserInput,
-        //                    "No sequence input was provided");
-        //     }
-        //     m_LineReader.Reset(new CMemoryLineReader(user_input.c_str(),
-        //                                              user_input.size()));
-        //     x_InitInputReader();
-        // }
-        // ```
         FastaMemoryLines { remaining: data },
         protein,
         lowercase,
@@ -657,34 +387,6 @@ pub(crate) fn parse_fasta_batches_with_warnings(
     )
 }
 // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:350-375
-// ```c++
-//         if (c == '>' ) {
-//             CTempString next_line = *++GetLineReader();
-//             string strmodified;
-//             if( NStr::StartsWith(next_line, ">?_") ) {
-//                 CTempString tmp = next_line.substr(3);
-//                 strmodified = ">";
-//                 strmodified.append(tmp.data(), tmp.length());
-//                 next_line = strmodified;
-//             }
-//             if( NStr::StartsWith(next_line, ">?") ) {
-//                 // This is actually a data line. an assembly gap, in particular, which
-//                 // we handle farther below
-//                 GetLineReader().UngetLine();
-//             } else {
-//                 if(need_defline) {
-//                     ParseDefLine(next_line, pMessageListener);
-//                     need_defline = false;
-//                     continue;
-//                 } else {
-//                     GetLineReader().UngetLine();
-//                     // start of the next sequence
-//                     break;
-//                 }
-//             }
-//         }
-//
-// ```
 fn parse_fasta_lines<L: AsRef<[u8]>>(
     lines: impl Iterator<Item = L>,
     protein: bool,
@@ -719,34 +421,6 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
         let raw = raw.as_ref();
         let line = raw.strip_suffix(b"\r").unwrap_or(raw);
         // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:350-375
-        // ```c++
-        //         if (c == '>' ) {
-        //             CTempString next_line = *++GetLineReader();
-        //             string strmodified;
-        //             if( NStr::StartsWith(next_line, ">?_") ) {
-        //                 CTempString tmp = next_line.substr(3);
-        //                 strmodified = ">";
-        //                 strmodified.append(tmp.data(), tmp.length());
-        //                 next_line = strmodified;
-        //             }
-        //             if( NStr::StartsWith(next_line, ">?") ) {
-        //                 // This is actually a data line. an assembly gap, in particular, which
-        //                 // we handle farther below
-        //                 GetLineReader().UngetLine();
-        //             } else {
-        //                 if(need_defline) {
-        //                     ParseDefLine(next_line, pMessageListener);
-        //                     need_defline = false;
-        //                     continue;
-        //                 } else {
-        //                     GetLineReader().UngetLine();
-        //                     // start of the next sequence
-        //                     break;
-        //                 }
-        //             }
-        //         }
-        //
-        // ```
         let escaped_header = line
             .strip_prefix(b">?_")
             .map(|suffix| [b">".as_slice(), suffix].concat());
@@ -759,18 +433,6 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
             truncate_spaces(line)
         };
         // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:399-408
-        // ```c++
-        //
-        //         if ( !TestFlag(fNoSeqData) ) {
-        //             try {
-        //                 string strmodified;
-        //                 if( NStr::StartsWith(line, ">?_") ) {
-        //                     CTempString tmp = line.substr(3);
-        //                     strmodified = ">";
-        //                     strmodified.append(tmp.data(), tmp.length());
-        //                     line = strmodified;
-        //                 }
-        // ```
         let rewritten_data;
         let line = if !is_header && line.starts_with(b">?_") {
             rewritten_data = [b">".as_slice(), &line[3..]].concat();
@@ -782,34 +444,7 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
             continue;
         }
         // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:383-398
-        // ```c++
-        //         if (c == '!'  ||  c == '#' || c == ';') {
-        //             // no content, just a comment or blank line
-        //             continue;
-        //         } else if (need_defline) {
-        //             if (TestFlag(fDLOptional)) {
-        //                 ParseDefLine(">", pMessageListener);
-        //                 need_defline = false;
-        //             } else {
-        //                 const auto lineNum = LineNumber();
-        //                 GetLineReader().UngetLine();
-        //                 NCBI_THROW2(CObjReaderParseException, eNoDefline,
-        //                             "CFastaReader: Input doesn't start with"
-        //                             " a defline or comment around line " + NStr::NumericToString(lineNum),
-        //                              lineNum);
-        //             }
-        //         }
-        // ```
         // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:774-780
-        // ```c++
-        // void CFastaReader::ParseDataLine(
-        //     const TStr& s, ILineErrorListener * pMessageListener)
-        // {
-        //     if( NStr::StartsWith(s, ">?") ) {
-        //         ParseGapLine(s, pMessageListener);
-        //         return;
-        //     }
-        // ```
         // `-parse_deflines` reads without `fDLOptional`, so a first line that is not a defline,
         // a comment or blank stops the read before `ParseDataLine`: a `>?N` gap line too, and
         // whatever its size or modifiers.
@@ -818,42 +453,7 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
         }
         if line.starts_with(b">?") {
             // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1098-1122
-            // ```c++
-            //
-            //     // just in case there's a gap before this one,
-            //     // even though somewhat unusual
-            //     CloseGap();
-            //
-            //     // sRemainingLine will hold the part of the line left to parse
-            //     TStr sRemainingLine = line.substr(2);
-            //     NStr::TruncateSpacesInPlace(sRemainingLine);
-            //
-            //     const TSeqPos uPos = GetCurrentPos(eRawPos);
-            //
-            //     // check if size is unknown
-            //     SGap::EKnownSize eIsKnown = SGap::eKnownSize_Yes;
-            //     if( NStr::StartsWith(sRemainingLine, "unk") ) {
-            //         eIsKnown = SGap::eKnownSize_No;
-            //         sRemainingLine = sRemainingLine.substr(3);
-            //         NStr::TruncateSpacesInPlace(sRemainingLine, NStr::eTrunc_Begin);
-            //     }
-            //
-            //     // extract the gap size
-            //     TSeqPos uGapSize = 0;
-            //     {
-            //         // find how many digits in number
-            //         TStr::size_type uNumDigits = 0;
-            //         while( uNumDigits != sRemainingLine.size() &&
-            // ```
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:77-82
-            // ```c++
-            //     /// Override this method to force the parent class to ignore gaps
-            //     /// @param len length of the gap? @sa CFastaReader
-            //     protected:
-            //     virtual void x_CloseGap(TSeqPos /*len*/, bool /*atStartOfLine*/,
-            //                             ILineErrorListener * /*pMessageListener*/)
-            //         { }
-            // ```
             // The gap line is read as the reader of the other programs reads it
             // (`fasta_reader::reader::gap_line_size`, the whole `ParseGapLine`): a size that is not
             // a number from 1 to 4294967295 is 1 after `Bad gap size`, and the modifiers only warn.
@@ -880,62 +480,12 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
                 record.warnings.push(warning);
             }
             // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1387-1394
-            // ```c++
-            //         // Encountered >? lines; substitute runs of Ns or Xs as appropriate.
-            //         string    new_data;
-            //         char      gap_char(inst.IsAa() ? 'X' : 'N');
-            //         SIZE_TYPE pos = 0;
-            //         new_data.reserve(GetCurrentPos(ePosWithGaps));
-            //         ITERATE (TGaps, it, m_Gaps) {
-            //             // since we're not parsing gaps, we have to throw out
-            //             // any specified extra information that can't be
-            // ```
             // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1411-1425
-            // ```c++
-            //             if ((*it)->m_uPos > pos) {
-            //                 new_data.append(m_SeqData, pos, (*it)->m_uPos - pos);
-            //                 pos = (*it)->m_uPos;
-            //             }
-            //             new_data.append((*it)->m_uLen, gap_char);
-            //         }
-            //         if (m_CurrentPos > pos) {
-            //             new_data.append(m_SeqData, pos, m_CurrentPos - pos);
-            //         }
-            //         swap(m_SeqData, new_data);
-            //         m_Gaps.clear();
-            //         m_CurrentPos += m_TotalGapLength;
-            //         m_TotalGapLength = 0;
-            //         m_CurrentGapChar = '\0';
-            //     }
-            // ```
             if count > i32::MAX as usize - record.sequence.len() {
                 bail!("BLASTX sequence exceeds Int4 length");
             }
             // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1082-1090
-            // ```c++
-            //     m_MaskRangeStart = GetCurrentPos(ePosWithGapsAndSegs);
-            // }
-            //
-            // void CFastaReader::x_CloseMask(void)
-            // {
-            //     _ASSERT(m_MaskRangeStart != kInvalidSeqPos);
-            //     m_CurrentMask->SetPacked_int().AddInterval
-            //         (GetBestID(), m_MaskRangeStart, GetCurrentPos(ePosWithGapsAndSegs) - 1,
-            //          eNa_strand_plus);
-            // ```
             // NCBI reference (598d8ae6): c++/include/objtools/readers/fasta.hpp:505-514
-            // ```c++
-            //     TSeqPos pos = m_CurrentPos;
-            //     switch (pos_type) {
-            //     case ePosWithGapsAndSegs:
-            //         return pos + m_SegmentBase + m_TotalGapLength;
-            //     case ePosWithGaps:
-            //         return pos + m_TotalGapLength;
-            //     case eRawPos:
-            //         return pos;
-            //     default:
-            //         return kInvalidSeqPos;
-            // ```
             if let Some(last) = record
                 .lowercase_masks
                 .last_mut()
@@ -963,15 +513,6 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
                 emit_fasta_batch(&mut records, batch_size, &mut batch, deliver)?;
             }
             // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:353-359
-            // ```c++
-            //             if( NStr::StartsWith(next_line, ">?_") ) {
-            //                 CTempString tmp = next_line.substr(3);
-            //                 strmodified = ">";
-            //                 strmodified.append(tmp.data(), tmp.length());
-            //                 next_line = strmodified;
-            //             }
-            //             if( NStr::StartsWith(next_line, ">?") ) {
-            // ```
             let believed = match parse_deflines {
                 Some(read) => Some(read_believed_defline(
                     line,
@@ -998,63 +539,6 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
                 .map_or(title_bytes.len(), |i| i + 1);
             let title = truncate_spaces_end(&title_bytes[..end]).to_vec();
             // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1623-1677
-            // ```c++
-            //     // check for nuc or aa sequences at the end of the title
-            //     const static size_t kWarnNumNucCharsAtEnd = 20;
-            //     const static size_t kWarnAminoAcidCharsAtEnd = 50;
-            //
-            //     const size_t length = sLineText.length();
-            //     SIZE_TYPE pos_to_check = length-1;
-            //
-            //     if((length > kWarnNumNucCharsAtEnd) && !TestFlag(fAssumeProt)) {
-            //         // find last non-nuc character, within the last kWarnNumNucCharsAtEnd characters
-            //         const SIZE_TYPE last_pos_to_check_for_nuc = (sLineText.length() - kWarnNumNucCharsAtEnd);
-            //         for( ; pos_to_check >= last_pos_to_check_for_nuc; --pos_to_check ) {
-            //             if( ! s_ASCII_IsUnAmbigNuc(sLineText[pos_to_check]) ) {
-            //                 // found a character which is not an unambiguous nucleotide
-            //                 break;
-            //             }
-            //         }
-            //         if( pos_to_check < last_pos_to_check_for_nuc ) {
-            //             FASTA_WARNING(iLineNum,
-            //                 "FASTA-Reader: Title ends with at least " << kWarnNumNucCharsAtEnd
-            //                 << " valid nucleotide characters.  Was the sequence "
-            //                 << "accidentally put in the title line?",
-            //                 ILineError::eProblem_UnexpectedNucResidues,
-            //                 "defline"
-            //                 );
-            //             return true; // found problem
-            //         }
-            //     }
-            //
-            //     if((length > kWarnAminoAcidCharsAtEnd) && !TestFlag(fAssumeNuc)) {
-            //         // check for aa's at the end of the title
-            //         // for efficiency, continue where the nuc search left off, since
-            //         // we know that nucs can be amino acids, also
-            //         const SIZE_TYPE last_pos_to_check_for_amino_acid =
-            //             ( sLineText.length() - kWarnAminoAcidCharsAtEnd );
-            //         for( ; pos_to_check >= last_pos_to_check_for_amino_acid; --pos_to_check ) {
-            //             // can't just use "isalpha" in case it includes characters
-            //             // with diacritics (an accent, tilde, umlaut, etc.)
-            //             const char ch = sLineText[pos_to_check];
-            //             if( ( ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') ) {
-            //                 // potential amino acid, so keep going
-            //             } else {
-            //                 // non-amino-acid found
-            //                 break;
-            //             }
-            //         }
-            //
-            //         if( pos_to_check < last_pos_to_check_for_amino_acid ) {
-            //             FASTA_WARNING(iLineNum,
-            //                 "FASTA-Reader: Title ends with at least " << kWarnAminoAcidCharsAtEnd
-            //                 << " valid amino acid characters.  Was the sequence "
-            //                 << "accidentally put in the title line?",
-            //                 ILineError::eProblem_UnexpectedAminoAcids,
-            //                 "defline");
-            //             return true; // found problem
-            //         }
-            // ```
             let raw_title = &title_bytes[..end];
             let kind = if !protein
                 && raw_title.len() > 20
@@ -1124,10 +608,6 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
                 break;
             }
             // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:930-931
-            // ```c++
-            //         case '\t': case '\n': case '\v': case '\f': case '\r': case ' ':
-            //             continue;
-            // ```
             if is_space(c) {
                 continue;
             }
@@ -1211,12 +691,6 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
     Ok(batch.kept.unwrap_or_default())
 }
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:364-367
-// ```c++
-//     CRef<CSeqIdGenerator> idgen
-//         (new CSeqIdGenerator(m_Config.GetLocalIdCounterInitValue(),
-//                              m_Config.GetLocalIdPrefix()));
-//     m_InputReader->SetIDGenerator(*idgen);
-// ```
 /// How `-parse_deflines` reads: the strand of a query's Seq-loc, and the search's ids of the other
 /// role's records (`FastaStream::id_scope`).
 #[derive(Clone, Copy)]
@@ -1317,35 +791,8 @@ fn new_record(index: usize, protein: bool, title: Vec<u8>) -> FastaRecord {
     }
 }
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:437-447
-// ```c++
-//         ? 0 : m_Config.GetRange().GetTo();
-//
-//     // Get the sequence length
-//     const TSeqPos seqlen = seq_entry->GetSeq().GetInst().GetLength();
-//     //if (seqlen == 0) {
-//     //    NCBI_THROW(CInputException, eEmptyUserInput,
-//     //               "Query contains no sequence data");
-//     //}
-//     _ASSERT(seqlen != numeric_limits<TSeqPos>::max());
-//     if (to > 0 && to < from) {
-//         NCBI_THROW(CInputException, eInvalidRange,
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:457-461
-// ```c++
-//
-//     // set sequence range
-//     retval->SetInt().SetFrom(from);
-//     retval->SetInt().SetTo((to > 0 && to < seqlen) ? to : (seqlen-1));
-//
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1361-1365
-// ```c++
-//
-//     // apply source mods *after* figuring out mol type
-//     ITERATE(vector<SLineTextAndLoc>, title_ci, m_CurrentSeqTitles) {
-//         ParseTitle(*title_ci, pMessageListener);
-//     }
-// ```
 /// NCBI posts a record's title warning when it assembles the record, after the warnings of its
 /// data lines; a record whose data stops the reading posts none. Under `-parse_deflines` the
 /// record's ids then join the search's ids (`fasta_reader`'s `assemble_seq`, whose
@@ -1369,15 +816,6 @@ fn finish_record(
         scope.add_record(&believed.ids, None, role, program)?;
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:334-340
-    // ```c++
-    //     }
-    //     // This is necessary to enable the ignoring of gaps in classes derived from
-    //     // CFastaReader
-    //
-    //    	flags+= CFastaReader::fHyphensIgnoreAndWarn;
-    //
-    //     flags+= CFastaReader::fDisableNoResidues;
-    // ```
     // Empty records remain input objects; query/subject setup owns their
     if record.sequence.len() > i32::MAX as usize {
         bail!("BLASTX sequence exceeds Int4 length");
@@ -1386,46 +824,6 @@ fn finish_record(
     Ok(())
 }
 // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:726-763
-// ```c++
-//         ( TestFlag(fAssumeNuc) && TestFlag(fForceType) ) ||
-//         ( m_CurrentSeq && m_CurrentSeq->IsSetInst() &&
-//           m_CurrentSeq->GetInst().IsSetMol() &&  m_CurrentSeq->IsNa() ) );
-//     size_t ambig_nuc = 0;
-//     for (size_t pos = 0;  pos < len_to_check;  ++pos) {
-//         unsigned char c = s[pos];
-//         if (s_ASCII_IsAlpha(c) ||  c == '*') {
-//             ++good;
-//             if( bIsNuc && s_ASCII_IsAmbigNuc(c) ) {
-//                 ++ambig_nuc;
-//             }
-//         } else if( c == '-' ) {
-//             if( ! bIgnoreHyphens ) {
-//                 ++good;
-//             }
-//             // if bIgnoreHyphens == true, the "hyphens are ignored" warning
-//             // will be triggered elsewhere
-//         } else if (isspace(c)  ||  (c >= '0' && c <= '9')) {
-//             // treat whitespace and digits as neutral
-//         } else if (c == ';') {
-//             break; // comment -- ignore rest of line
-//         } else {
-//             ++bad;
-//         }
-//     }
-//     if (bad >= good / 3  &&
-//         (len_to_check > 3  ||  good == 0  ||  bad > good))
-//     {
-//         FASTA_ERROR( LineNumber(),
-//             "CFastaReader: Near line " << LineNumber()
-//             << ", there's a line that doesn't look like plausible data, "
-//             "but it's not marked as defline or comment.",
-//             CObjReaderParseException::eFormat);
-//     }
-//     // warn if more than a certain percentage is ambiguous nucleotides
-//     const static size_t kWarnPercentAmbiguous = 40; // e.g. "40" means "40%"
-//     const size_t percent_ambig = (good == 0)?100:((ambig_nuc * 100) / good);
-//     if( len_to_check > 3 && percent_ambig > kWarnPercentAmbiguous ) {
-// ```
 fn check_data_line(line: &[u8], number: usize) -> Result<()> {
     let len = line.len().min(70);
     let (mut good, mut bad) = (0, 0);
@@ -1445,41 +843,16 @@ fn check_data_line(line: &[u8], number: usize) -> Result<()> {
 }
 
 // NCBI reference (598d8ae6): c++/include/objtools/readers/reader_exception.hpp:46-49
-// ```c++
-// class CObjReaderParseException :
-//     public CParseTemplException<CObjReaderException>
-// {
-// public:
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:754-758
-// ```c++
-//         FASTA_ERROR( LineNumber(),
-//             "CFastaReader: Near line " << LineNumber()
-//             << ", there's a line that doesn't look like plausible data, "
-//             "but it's not marked as defline or comment.",
-//             CObjReaderParseException::eFormat);
-// ```
 #[derive(Debug)]
 pub(crate) struct FastaParseError(pub String);
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:181-184
-// ```c++
-//     catch (const CObjReaderParseException& e) {                             \
-//         LOG_POST(Error << "BLAST query error: " << e.GetMsg());             \
-//         exit_code = BLAST_INPUT_ERROR;                                      \
-//     }                                                                       \
-// ```
 impl std::fmt::Display for FastaParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.0)
     }
 }
 // NCBI reference (598d8ae6): c++/include/objtools/readers/reader_exception.hpp:46-49
-// ```c++
-// class CObjReaderParseException :
-//     public CParseTemplException<CObjReaderException>
-// {
-// public:
-// ```
 impl std::error::Error for FastaParseError {}
 
 /// The reader's `eNoDefline` at a line (1-based): under `-parse_deflines` the first line that
@@ -1488,14 +861,6 @@ impl std::error::Error for FastaParseError {}
 /// error instead (`native::subject_input_error`).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:391-396
-/// ```c++
-///                 const auto lineNum = LineNumber();
-///                 GetLineReader().UngetLine();
-///                 NCBI_THROW2(CObjReaderParseException, eNoDefline,
-///                             "CFastaReader: Input doesn't start with"
-///                             " a defline or comment around line " + NStr::NumericToString(lineNum),
-///                              lineNum);
-/// ```
 #[derive(Debug)]
 pub(crate) struct NoDeflineError(pub u64);
 
@@ -1513,241 +878,10 @@ impl std::error::Error for NoDeflineError {}
 
 #[cfg(test)]
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:86-94
-// ```c++
-//         for (i = 0; i < retval->last_context + 1; i++) {
-//             retval->contexts[i].query_index =
-//                 Blast_GetQueryIndexFromContext(i, program);
-//             ASSERT(retval->contexts[i].query_index != -1);
-//
-//             retval->contexts[i].frame = BLAST_ContextToFrame(program,  i);
-//             ASSERT(retval->contexts[i].frame != INT1_MAX);
-//
-//             retval->contexts[i].is_valid = TRUE;
-// ```
-mod tests {
-    use super::*;
-
-    // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta_reader_utils.cpp:214-223 (quoted at
-    // the reader): the title is the defline's bytes up to the first byte below 0x20 after its first,
-    // as they are. BLASTX's record and the shared reader's record of the same title have the same
-    // names (`fasta_reader::RecordNames`, their one owner).
-    #[test]
-    fn titles_keep_their_bytes_and_their_names_are_the_shared_records() {
-        let titles: [&[u8]; 13] = [
-            b"q1 a\xc3\xa9b z",
-            b"q1 a\xe9b z",
-            b"q1 a\xa9b z",
-            b"q1 a\x81b z",
-            b"q1 a\xc0\x80b z",
-            b"q1 a\xe0\x81\x81b z",
-            b"q1 a\xed\xa0\x80b z",
-            b"q1 a\xf5\x80\x80\x80b z",
-            b"q1 one\xe9",
-            b"\x01q1 ab z",
-            b"q1\xe9 rest",
-            b"Subject_1\x81 rest",
-            b"q1 a title longer than thirty-five bytes \xe9 end",
-        ];
-        for title in titles {
-            let mut data = b">".to_vec();
-            data.extend_from_slice(title);
-            data.extend_from_slice(b"\nACGT\n");
-            for protein in [false, true] {
-                let records = parse_fasta(&data, protein, false).unwrap();
-                let record = &records[0];
-                assert_eq!(record.title, title, "{title:?}");
-                let shared = crate::blastinput::fasta_reader::FastaRecord::new(
-                    record.internal_id.clone(),
-                    title,
-                    b"ACGT",
-                );
-                assert_eq!(record.query_line(), shared.query_line(), "{title:?}");
-                assert_eq!(record.shown_id(), shared.shown_id(), "{title:?}");
-                assert_eq!(record.warning_id(), shared.warning_id(), "{title:?}");
-                assert_eq!(
-                    record.names().warning_query_id(),
-                    shared.names().warning_query_id(),
-                    "{title:?}"
-                );
-                assert_eq!(
-                    record.subject_tabular_id(),
-                    shared.subject_tabular_id(true).unwrap(),
-                    "{title:?}"
-                );
-            }
-        }
-        // The rules themselves, as NCBI writes them: a warning's id and title cut to 25 bytes and
-        // `.. ` past 35 (blast_setup_cxx.cpp:533-543), the tabular id the title's first word
-        // (tabular.cpp:474-504), a `Subject_` word's id the first word of the title
-        // `GenerateDefline` makes, none where it throws (showdefline.cpp:225-231).
-        let record = |title: &[u8], protein: bool| {
-            let mut data = b">".to_vec();
-            data.extend_from_slice(title);
-            data.extend_from_slice(b"\nACGT\n");
-            parse_fasta(&data, protein, false).unwrap().remove(0)
-        };
-        let long = b"q1 a title longer than thirty-five bytes \xe9 end";
-        assert_eq!(
-            record(long, false).names().warning_query_id(),
-            b"Query_1 q1 a title longer.. "
-        );
-        assert_eq!(
-            record(long, true).names().warning_query_id(),
-            b"Subject_1 q1 a title long.. "
-        );
-        assert_eq!(
-            record(b"q1 one\xe9", false).names().warning_query_id(),
-            b"Query_1 q1 one\xe9"
-        );
-        assert_eq!(&*record(b"q1 a\x81b z", false).query_line(), b"q1 a\x81b z");
-        assert_eq!(record(b"q1\xe9 rest", false).shown_id(), b"q1\xe9");
-        assert_eq!(record(b"\x01q1 ab z", false).shown_id(), b"\x01q1");
-        assert_eq!(
-            record(b"q1 a\xe9b z", true).subject_tabular_id(),
-            Some(b"q1".to_vec())
-        );
-        assert_eq!(
-            record(b"Subject_1\x81 rest", true).subject_tabular_id(),
-            None
-        );
-        // A byte below 0x20 after the first ends the title.
-        for (data, title) in [
-            (&b">q1 a\x01b z\nACGT\n"[..], &b"q1 a"[..]),
-            (b">q1 a\tb z\nACGT\n", b"q1 a"),
-            (b">q1\x01 rest\nACGT\n", b"q1"),
-        ] {
-            assert_eq!(parse_fasta(data, false, false).unwrap()[0].title, title);
-        }
-    }
-    #[test]
-    // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:736-751
-    // ```c++
-    //             }
-    //         } else if( c == '-' ) {
-    //             if( ! bIgnoreHyphens ) {
-    //                 ++good;
-    //             }
-    //             // if bIgnoreHyphens == true, the "hyphens are ignored" warning
-    //             // will be triggered elsewhere
-    //         } else if (isspace(c)  ||  (c >= '0' && c <= '9')) {
-    //             // treat whitespace and digits as neutral
-    //         } else if (c == ';') {
-    //             break; // comment -- ignore rest of line
-    //         } else {
-    //             ++bad;
-    //         }
-    //     }
-    //     if (bad >= good / 3  &&
-    // ```
-    // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:974-990
-    // ```c++
-    //         case eCharType_Bad:
-    //             if( bad_pos_line_num < 0 ) {
-    //                 bad_pos_line_num = LineNumber();
-    //             }
-    //             bad_pos_vec.push_back(pos);
-    //             break;
-    //         default:
-    //             _TROUBLE;
-    //         }
-    //     }
-    //
-    //     m_SeqData.resize(m_CurrentPos);
-    //
-    //     if( bIgnorableHyphenSeen ) {
-    //         _ASSERT( bHyphensIgnoreAndWarn );
-    //         FASTA_WARNING_EX(LineNumber(),
-    //             "CFastaReader: Hyphens are invalid and will be ignored around line " << LineNumber(),
-    // ```
-    fn ncbi_reader_preserves_normalized_positions_and_warnings() {
-        let r = parse_fasta(b">  q description   \r\natg1-2-3ACT;rest\r\n", false, true).unwrap();
-        assert_eq!(r[0].title, b"q description");
-        assert_eq!(r[0].internal_id, "Query_1");
-        assert_eq!(r[0].sequence, b"ATGACT");
-        assert_eq!(r[0].lowercase_masks, vec![(0, 2)]);
-        assert_eq!(r[0].warnings.len(), 2);
-        assert_eq!(r[0].warnings[1].positions, vec![4, 6, 8]);
-        assert!(parse_fasta(b">q\nATG?!ACT", false, false).is_err());
-    }
-    #[test]
-    // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:382-390
-    // ```c++
-    //
-    //         if (c == '!'  ||  c == '#' || c == ';') {
-    //             // no content, just a comment or blank line
-    //             continue;
-    //         } else if (need_defline) {
-    //             if (TestFlag(fDLOptional)) {
-    //                 ParseDefLine(">", pMessageListener);
-    //                 need_defline = false;
-    //             } else {
-    // ```
-    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:437-442
-    // ```c++
-    //         ? 0 : m_Config.GetRange().GetTo();
-    //
-    //     // Get the sequence length
-    //     const TSeqPos seqlen = seq_entry->GetSeq().GetInst().GetLength();
-    //     //if (seqlen == 0) {
-    //     //    NCBI_THROW(CInputException, eEmptyUserInput,
-    // ```
-    fn empty_file_record_and_optional_defline_differ() {
-        assert!(parse_fasta(b"", false, false).unwrap().is_empty());
-        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:339-340
-        // ```c++
-        //
-        //     flags+= CFastaReader::fDisableNoResidues;
-        // ```
-        assert!(parse_fasta(b">q\n", false, false).unwrap()[0]
-            .sequence
-            .is_empty());
-        assert_eq!(
-            parse_fasta(b"ATGACT", false, false).unwrap()[0].sequence,
-            b"ATGACT"
-        );
-        let r = parse_fasta(b">dup\nATG\n>dup\nACT", false, false).unwrap();
-        assert_eq!(
-            r.iter().map(|r| r.internal_id.as_str()).collect::<Vec<_>>(),
-            vec!["Query_1", "Query_2"]
-        );
-    }
-}
+#[path = "input_tests.rs"]
+mod tests;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:140-171
-// ```c++
-//     while (size_read < GetBatchSize()) {
-//
-//         if (End())
-//             break;
-//
-//         CRef<CBlastSearchQuery> q;
-//         try { q.Reset(m_Source->GetNextSequence(scope)); }
-//         catch (const CObjReaderParseException& e) {
-//             if (e.GetErrCode() == CObjReaderParseException::eEOF) {
-//                 break;
-//             }
-//             throw;
-//         }
-//         catch (const exception&) {
-//             continue; //SB-2307. ignore well formed, not found accession
-//         }
-//
-//         CConstRef<CSeq_loc> loc = q->GetQuerySeqLoc();
-//
-//         if (loc->IsInt()) {
-//             size_read += sequence::GetLength(loc->GetInt().GetId(),
-//                                              q->GetScope());
-//         } else if (loc->IsWhole()) {
-//             size_read += sequence::GetLength(loc->GetWhole(), q->GetScope());
-//         } else {
-//             // programmer error, CBlastInputSource should only return Seq-locs
-//             // of type interval or whole
-//             abort();
-//         }
-//
-//         retval->AddQuery(q);
-//     }
-// ```
 ///
 /// With a range (`-query_loc`) the batch counts the length of the whole record and cuts the record
 /// to its interval; a record whose interval starts more than one letter past its end adds nothing
@@ -1787,22 +921,7 @@ fn emit_fasta_batch(
         attach_skipped(records, &mut batch.skipped_records);
         deliver(records)?;
         // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:259-261
-        // ```c++
-        //         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
-        // 	    BLAST_PROF_START( APP.LOOP.PRE );
-        //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
-        // ```
         // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:931-938
-        // ```c++
-        // void QueryBatchCleanup()
-        // {
-        // #if defined(NCBI_OS_LINUX) && HAVE_MALLOC_H
-        // 	malloc_trim(0);
-        // #endif
-        //     return;
-        //
-        // }
-        // ```
         // NCBI's batch is local to one turn of the loop: the batch read for the next turn
         // replaces it. A read that keeps no record drops the batch once delivered likewise.
         batch.release(records);
@@ -1842,12 +961,6 @@ struct ReaderBatch<'r> {
 
 impl ReaderBatch<'_> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:364-367
-    // ```c++
-    //     CRef<CSeqIdGenerator> idgen
-    //         (new CSeqIdGenerator(m_Config.GetLocalIdCounterInitValue(),
-    //                              m_Config.GetLocalIdPrefix()));
-    //     m_InputReader->SetIDGenerator(*idgen);
-    // ```
     /// The index of the next record (`Query_<index + 1>`): the reader's one id generator counts
     /// every record read before it, kept, dropped once delivered, or skipped by the range.
     fn number(&self, records: &[FastaRecord]) -> usize {
@@ -1868,83 +981,15 @@ impl ReaderBatch<'_> {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:310-313
-// ```c++
-//     }
-//     m_LineReader.Reset(new CMemoryLineReader(user_input.c_str(),
-//                                              user_input.size()));
-//     x_InitInputReader();
-// ```
 #[cfg(any(target_arch = "wasm32", test))]
 struct FastaMemoryLines<'a> {
     remaining: &'a [u8],
 }
 // NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:353-381
-// ```c++
-// CMemoryLineReader& CMemoryLineReader::operator++(void)
-// {
-//     /* If at EOF - noop */
-//     if (AtEOF()) {
-//         m_Line = CTempString(NULL);
-//         return *this;
-//     }
-//     const char* p = m_Pos;
-//     if ( p == m_Line.begin() ) {
-//         /* If after UngetLine(), line is already in buffer, so end is known*/
-//         p = m_Line.end();
-//     } else {
-//         /* Line is in stream, go char by char until delimiters */
-//         while ( p < m_End  &&  *p != '\r'  && *p != '\n' ) {
-//             ++p;
-//         }
-//         m_Line = CTempString(m_Pos, p - m_Pos);
-//     }
-//     // skip over delimiters until the beginning of the next string
-//     if (p + 1 < m_End  &&  *p == '\r'  &&  p[1] == '\n') {
-//         m_Pos = p + 2;
-//     } else if (p < m_End) {
-//         m_Pos = p + 1;
-//     } else { // no final line break
-//         m_Pos = p;
-//     }
-//     ++m_LineNumber;
-//     return *this;
-// }
-// ```
 #[cfg(any(target_arch = "wasm32", test))]
 impl<'a> Iterator for FastaMemoryLines<'a> {
     type Item = &'a [u8];
     // NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:353-381
-    // ```c++
-    // CMemoryLineReader& CMemoryLineReader::operator++(void)
-    // {
-    //     /* If at EOF - noop */
-    //     if (AtEOF()) {
-    //         m_Line = CTempString(NULL);
-    //         return *this;
-    //     }
-    //     const char* p = m_Pos;
-    //     if ( p == m_Line.begin() ) {
-    //         /* If after UngetLine(), line is already in buffer, so end is known*/
-    //         p = m_Line.end();
-    //     } else {
-    //         /* Line is in stream, go char by char until delimiters */
-    //         while ( p < m_End  &&  *p != '\r'  && *p != '\n' ) {
-    //             ++p;
-    //         }
-    //         m_Line = CTempString(m_Pos, p - m_Pos);
-    //     }
-    //     // skip over delimiters until the beginning of the next string
-    //     if (p + 1 < m_End  &&  *p == '\r'  &&  p[1] == '\n') {
-    //         m_Pos = p + 2;
-    //     } else if (p < m_End) {
-    //         m_Pos = p + 1;
-    //     } else { // no final line break
-    //         m_Pos = p;
-    //     }
-    //     ++m_LineNumber;
-    //     return *this;
-    // }
-    // ```
     fn next(&mut self) -> Option<Self::Item> {
         if self.remaining.is_empty() {
             return None;
@@ -1967,26 +1012,6 @@ impl<'a> Iterator for FastaMemoryLines<'a> {
     }
 }
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:856-873
-// ```c++
-// 	char c;
-// 	CNcbiStreampos orig_p = in.tellg();
-// 	// Piped input
-// 	if(orig_p < 0)
-// 		return false;
-//
-// 	IOS_BASE::iostate orig_state = in.rdstate();
-// 	IOS_BASE::fmtflags orig_flags = in.setf(ios::skipws);
-//
-// 	if(! (in >> c))
-// 		return true;
-//
-// 	in.seekg(orig_p);
-// 	in.flags(orig_flags);
-// 	in.clear();
-// 	in.setstate(orig_state);
-//
-// 	return false;
-// ```
 pub(crate) fn stream_is_empty<R: Read + Seek>(stream: &mut FastaStream<R>) -> bool {
     if stream.no_position {
         return false;
@@ -2011,17 +1036,6 @@ pub(crate) fn stream_is_empty<R: Read + Seek>(stream: &mut FastaStream<R>) -> bo
     }
 }
 // NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:166-174
-// ```c++
-//
-//     switch (m_EOLStyle) {
-//     case eEOL_unknown: x_AdvanceEOLUnknown();                   break;
-//     case eEOL_cr:      x_AdvanceEOLSimple('\r', '\n');          break;
-//     case eEOL_lf:      x_AdvanceEOLSimple('\n', '\r');          break;
-//     case eEOL_crlf:    x_AdvanceEOLCRLF();                      break;
-//     case eEOL_mixed:   NcbiGetline(*m_Stream, m_Line, "\r\n");  break;
-//     }
-//     return *this;
-// ```
 #[derive(Clone, Copy, PartialEq)]
 enum EolStyle {
     Unknown,
@@ -2031,67 +1045,20 @@ enum EolStyle {
     Mixed,
 }
 // NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:81-89
-// ```c++
-//       m_UngetLine(false), m_AutoEOL(eol_style == eEOL_unknown),
-//       m_EOLStyle(eol_style)
-// {
-// }
-//
-//
-// CStreamLineReader::CStreamLineReader(CNcbiIstream& is,
-//                                      EOwnership ownership)
-//     : m_Stream(&is, ownership), m_LineNumber(0), m_LastReadSize(0),
-// ```
 // NCBI reference (598d8ae6): c++/src/corelib/stream_utils.cpp:437-443
-// ```c++
-//     if (!del_ptr  &&  how != ePushback_NoCopy) {
-//         del_ptr = new CT_CHAR_TYPE[buf_size];
-//         buf = (CT_CHAR_TYPE*) memcpy(del_ptr, buf, buf_size);
-//     }
-//
-//     (void) new CPushback_Streambuf(is, buf, buf_size, del_ptr);
-// }
-// ```
 // NCBI reference (598d8ae6): c++/src/corelib/stream_utils.cpp:134-143
-// ```c++
-// CPushback_Streambuf::CPushback_Streambuf(istream&      is,
-//                                          CT_CHAR_TYPE* buf,
-//                                          size_t        buf_size,
-//                                          void*         del_ptr)
-//     : m_Is(is), m_Next(0), m_Buf(buf), m_BufSize(buf_size), m_DelPtr(del_ptr)
-// {
-//     _ASSERT(m_Buf  &&  m_BufSize);
-//     setp(0, 0);  // unbuffered output at this level of streambuf's hierarchy
-//     setg(m_Buf, m_Buf, m_Buf + m_BufSize);
-//     m_Sb = m_Is.rdbuf(this);
-// ```
 struct PushbackBuffer {
     bytes: Vec<u8>,
     position: usize,
     capacity: usize,
 }
 // NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:81-89
-// ```c++
-//       m_UngetLine(false), m_AutoEOL(eol_style == eEOL_unknown),
-//       m_EOLStyle(eol_style)
-// {
-// }
-//
-//
-// CStreamLineReader::CStreamLineReader(CNcbiIstream& is,
-//                                      EOwnership ownership)
-//     : m_Stream(&is, ownership), m_LineNumber(0), m_LastReadSize(0),
-// ```
 pub(crate) struct FastaStream<R: Read> {
     input: BufReader<R>,
     failed: bool,
     eol: EolStyle,
     pushback: Vec<PushbackBuffer>,
     // NCBI reference (598d8ae6): c++/src/corelib/stream_utils.cpp:235-236
-    // ```c++
-    //     x_FillBuffer((size_t) m_Sb->in_avail());
-    //     return gptr() < egptr() ? CT_TO_INT_TYPE(*gptr()) : CT_EOF;
-    // ```
     backend_available: Option<fn(&mut R) -> std::io::Result<usize>>,
     /// Whether the input's buffered bytes count as readable (`in_avail` of a `filebuf`'s get
     /// area); false for `cin`, whose `stdio_sync_filebuf` has no get area
@@ -2128,55 +1095,12 @@ pub(crate) struct FastaStream<R: Read> {
     pub(crate) keep_skipped: bool,
 }
 // NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:81-89
-// ```c++
-//       m_UngetLine(false), m_AutoEOL(eol_style == eEOL_unknown),
-//       m_EOLStyle(eol_style)
-// {
-// }
-//
-//
-// CStreamLineReader::CStreamLineReader(CNcbiIstream& is,
-//                                      EOwnership ownership)
-//     : m_Stream(&is, ownership), m_LineNumber(0), m_LastReadSize(0),
-// ```
 impl<R: Read> FastaStream<R> {
     // NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:81-89
-    // ```c++
-    //       m_UngetLine(false), m_AutoEOL(eol_style == eEOL_unknown),
-    //       m_EOLStyle(eol_style)
-    // {
-    // }
-    //
-    //
-    // CStreamLineReader::CStreamLineReader(CNcbiIstream& is,
-    //                                      EOwnership ownership)
-    //     : m_Stream(&is, ownership), m_LineNumber(0), m_LastReadSize(0),
-    // ```
     pub(crate) fn new(input: R) -> Self {
         Self {
             // NCBI reference (598d8ae6): c++/include/corelib/ncbistre.hpp:437-440
-            // ```c++
-            // #else
-            // /// Portable alias for ifstream.
-            // typedef IO_PREFIX::ifstream      CNcbiIfstream;
-            // #endif
-            // ```
             // NCBI reference (598d8ae6): c++/src/corelib/stream_utils.cpp:224-236
-            // ```c++
-            // CT_INT_TYPE CPushback_Streambuf::underflow(void)
-            // {
-            //     // we are here because there is no more data in the pushback buffer
-            //     _ASSERT(gptr()  &&  gptr() >= egptr());
-            //
-            // #ifdef NCBI_COMPILER_MIPSPRO
-            //     if (m_MIPSPRO_ReadsomeGptrSetLevel  &&  m_MIPSPRO_ReadsomeGptr != gptr())
-            //         return CT_EOF;
-            //     m_MIPSPRO_ReadsomeGptr = (CT_CHAR_TYPE*)(-1L);
-            // #endif //NCBI_COMPILER_MIPSPRO
-            //
-            //     x_FillBuffer((size_t) m_Sb->in_avail());
-            //     return gptr() < egptr() ? CT_TO_INT_TYPE(*gptr()) : CT_EOF;
-            // ```
             // The pinned CNcbiIfstream exposes 8191 readable bytes per default
             // window (independent C++ file_window oracle; tested at EOF/pushback
             // boundaries). Preserve that window because reuse retains EOF state.
@@ -2185,10 +1109,6 @@ impl<R: Read> FastaStream<R> {
             eol: EolStyle::Unknown,
             pushback: Vec::new(),
             // NCBI reference (598d8ae6): c++/src/corelib/stream_utils.cpp:235-236
-            // ```c++
-            //     x_FillBuffer((size_t) m_Sb->in_avail());
-            //     return gptr() < egptr() ? CT_TO_INT_TYPE(*gptr()) : CT_EOF;
-            // ```
             backend_available: None,
             get_area: true,
             no_position: false,
@@ -2203,7 +1123,7 @@ impl<R: Read> FastaStream<R> {
         }
     }
 
-    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:856-873 (quoted at the read
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:856-873 (cited at the read
     // before the search, `blast_xml::prescan_queries`: NCBI reads ahead on the argument's one stream
     // and puts it back at `orig_p`)
     /// The input this stream reads, given back: the bytes it buffered are dropped, so the caller
@@ -2213,77 +1133,7 @@ impl<R: Read> FastaStream<R> {
         self.input.into_inner()
     }
     // NCBI reference (598d8ae6): c++/src/corelib/stream_utils.cpp:224-236
-    // ```c++
-    // CT_INT_TYPE CPushback_Streambuf::underflow(void)
-    // {
-    //     // we are here because there is no more data in the pushback buffer
-    //     _ASSERT(gptr()  &&  gptr() >= egptr());
-    //
-    // #ifdef NCBI_COMPILER_MIPSPRO
-    //     if (m_MIPSPRO_ReadsomeGptrSetLevel  &&  m_MIPSPRO_ReadsomeGptr != gptr())
-    //         return CT_EOF;
-    //     m_MIPSPRO_ReadsomeGptr = (CT_CHAR_TYPE*)(-1L);
-    // #endif //NCBI_COMPILER_MIPSPRO
-    //
-    //     x_FillBuffer((size_t) m_Sb->in_avail());
-    //     return gptr() < egptr() ? CT_TO_INT_TYPE(*gptr()) : CT_EOF;
-    // ```
     // NCBI reference (598d8ae6): c++/src/corelib/stream_utils.cpp:306-358
-    // ```c++
-    // void CPushback_Streambuf::x_FillBuffer(size_t max_size)
-    // {
-    //     _ASSERT(m_Sb);
-    //     if ( !max_size ) {
-    //         ++max_size;
-    //     }
-    //
-    //     CPushback_Streambuf* sb = dynamic_cast<CPushback_Streambuf*> (m_Sb);
-    //     if ( !sb ) {
-    //         CT_CHAR_TYPE* bp = 0;
-    //         size_t buf_size = m_DelPtr
-    //             ? (size_t)(m_Buf - (CT_CHAR_TYPE*) m_DelPtr) + m_BufSize : 0;
-    //         if (buf_size < kMinBufSize) {
-    //             buf_size = kMinBufSize;
-    //             bp = new CT_CHAR_TYPE[buf_size];
-    //         }
-    //         streamsize r = (streamsize)(buf_size < max_size ? buf_size : max_size);
-    //         streamsize n = m_Sb->sgetn(bp ? bp : (CT_CHAR_TYPE*) m_DelPtr, r);
-    //         if (n <= 0) {
-    //             // NB: For unknown reasons WorkShop6 can return -1 from sgetn :-/
-    //             delete[] bp;
-    //             return;
-    //         }
-    //         if (bp) {
-    //             delete[] (CT_CHAR_TYPE*) m_DelPtr;
-    //             m_DelPtr = bp;
-    //         }
-    //         m_Buf = (CT_CHAR_TYPE*) m_DelPtr;
-    //         m_BufSize = buf_size;
-    //         setg(m_Buf, m_Buf, m_Buf + n);
-    //         return;
-    //     }
-    //
-    //     _ASSERT(&m_Is  == &sb->m_Is);
-    //     _ASSERT(m_Next == sb);
-    //     m_Sb       = sb->m_Sb;
-    //     m_Next     = sb->m_Next;
-    //     sb->m_Sb   = 0;
-    //     sb->m_Next = 0;
-    //     if (sb->gptr() >= sb->egptr()) {
-    //         delete sb;
-    //         x_FillBuffer(max_size);
-    //         return;
-    //     }
-    //     delete[] (CT_CHAR_TYPE*) m_DelPtr;
-    //     m_Buf        = sb->m_Buf;
-    //     m_BufSize    = sb->m_BufSize;
-    //     m_DelPtr     = sb->m_DelPtr;
-    //     sb->m_DelPtr = 0;
-    //     setg(sb->gptr(), sb->gptr(), sb->egptr());
-    //     delete sb;
-    // }
-    //
-    // ```
     fn raw_peek(&mut self) -> Option<u8> {
         while let Some(buffer) = self.pushback.last() {
             if let Some(&byte) = buffer.bytes.get(buffer.position) {
@@ -2297,41 +1147,6 @@ impl<R: Read> FastaStream<R> {
                 continue;
             }
             // NCBI reference (598d8ae6): c++/src/corelib/stream_utils.cpp:306-338
-            // ```c++
-            // void CPushback_Streambuf::x_FillBuffer(size_t max_size)
-            // {
-            //     _ASSERT(m_Sb);
-            //     if ( !max_size ) {
-            //         ++max_size;
-            //     }
-            //
-            //     CPushback_Streambuf* sb = dynamic_cast<CPushback_Streambuf*> (m_Sb);
-            //     if ( !sb ) {
-            //         CT_CHAR_TYPE* bp = 0;
-            //         size_t buf_size = m_DelPtr
-            //             ? (size_t)(m_Buf - (CT_CHAR_TYPE*) m_DelPtr) + m_BufSize : 0;
-            //         if (buf_size < kMinBufSize) {
-            //             buf_size = kMinBufSize;
-            //             bp = new CT_CHAR_TYPE[buf_size];
-            //         }
-            //         streamsize r = (streamsize)(buf_size < max_size ? buf_size : max_size);
-            //         streamsize n = m_Sb->sgetn(bp ? bp : (CT_CHAR_TYPE*) m_DelPtr, r);
-            //         if (n <= 0) {
-            //             // NB: For unknown reasons WorkShop6 can return -1 from sgetn :-/
-            //             delete[] bp;
-            //             return;
-            //         }
-            //         if (bp) {
-            //             delete[] (CT_CHAR_TYPE*) m_DelPtr;
-            //             m_DelPtr = bp;
-            //         }
-            //         m_Buf = (CT_CHAR_TYPE*) m_DelPtr;
-            //         m_BufSize = buf_size;
-            //         setg(m_Buf, m_Buf, m_Buf + n);
-            //         return;
-            //     }
-            //
-            // ```
             let buffered = if self.get_area {
                 self.input.buffer().len()
             } else {
@@ -2369,20 +1184,6 @@ impl<R: Read> FastaStream<R> {
         }
     }
     // NCBI reference (598d8ae6): c++/src/corelib/ncbistre.cpp:87-98
-    // ```c++
-    //             iostate = NcbiEofbit;
-    //             break;
-    //         }
-    //         SIZE_TYPE delim_pos = delims.find(CT_TO_CHAR_TYPE(ch));
-    //         if (delim_pos != NPOS) {
-    //             // Special case -- if two different delimiters are back to
-    //             // back and in the same order as in delims, treat them as
-    //             // a single delimiter (necessary for correct handling of
-    //             // DOS/MAC-style CR/LF endings).
-    //             ch = is.rdbuf()->sgetc();
-    //             if (!CT_EQ_INT_TYPE(ch, CT_EOF)
-    //                 &&  delims.find(CT_TO_CHAR_TYPE(ch), delim_pos + 1) != NPOS) {
-    // ```
     fn raw_take(&mut self) -> Option<u8> {
         let byte = self.raw_peek()?;
         if let Some(buffer) = self.pushback.last_mut() {
@@ -2393,52 +1194,7 @@ impl<R: Read> FastaStream<R> {
         Some(byte)
     }
     // NCBI reference (598d8ae6): c++/src/corelib/stream_utils.cpp:413-443
-    // ```c++
-    //         if (how == ePushback_Stepback
-    //             ||  (how == ePushback_Copy
-    //                  &&  buf_size <= (del_ptr
-    //                                   ? CPushback_Streambuf::kMinBufSize
-    //                                   : CPushback_Streambuf::kMinBufSize >> 4))) {
-    //             CT_CHAR_TYPE* bp = sb->gptr();
-    //             size_t avail = bp - sb->m_Buf;
-    //             size_t take  = avail < buf_size ? avail : buf_size;
-    //             if (take) {
-    //                 bp -= take;
-    //                 buf_size -= take;
-    //                 if (how != ePushback_Stepback  &&  bp != buf + buf_size) {
-    //                     memmove(bp, buf + buf_size, take);
-    //                 }
-    //                 sb->setg(bp, bp, sb->egptr());
-    //             }
-    //         }
-    //     }
-    //
-    //     if ( !buf_size ) {
-    //         delete[] (CT_CHAR_TYPE*) del_ptr;
-    //         return;
-    //     }
-    //
-    //     if (!del_ptr  &&  how != ePushback_NoCopy) {
-    //         del_ptr = new CT_CHAR_TYPE[buf_size];
-    //         buf = (CT_CHAR_TYPE*) memcpy(del_ptr, buf, buf_size);
-    //     }
-    //
-    //     (void) new CPushback_Streambuf(is, buf, buf_size, del_ptr);
-    // }
-    // ```
     // NCBI reference (598d8ae6): c++/src/corelib/stream_utils.cpp:134-143
-    // ```c++
-    // CPushback_Streambuf::CPushback_Streambuf(istream&      is,
-    //                                          CT_CHAR_TYPE* buf,
-    //                                          size_t        buf_size,
-    //                                          void*         del_ptr)
-    //     : m_Is(is), m_Next(0), m_Buf(buf), m_BufSize(buf_size), m_DelPtr(del_ptr)
-    // {
-    //     _ASSERT(m_Buf  &&  m_BufSize);
-    //     setp(0, 0);  // unbuffered output at this level of streambuf's hierarchy
-    //     setg(m_Buf, m_Buf, m_Buf + m_BufSize);
-    //     m_Sb = m_Is.rdbuf(this);
-    // ```
     fn push_back(&mut self, bytes: &[u8]) {
         let mut remaining = bytes.len();
         if let Some(buffer) = self.pushback.last_mut() {
@@ -2461,13 +1217,6 @@ impl<R: Read> FastaStream<R> {
         }
     }
     // NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:100-104
-    // ```c++
-    // bool CStreamLineReader::AtEOF(void) const
-    // {
-    //     return !m_UngetLine &&
-    //         (m_Stream->eof()  ||  CT_EQ_INT_TYPE(m_Stream->peek(), CT_EOF));
-    // }
-    // ```
     pub(crate) fn at_eof(&mut self) -> bool {
         if self.unget_line.is_some() {
             return false;
@@ -2481,24 +1230,6 @@ impl<R: Read> FastaStream<R> {
         self.failed
     }
     // NCBI reference (598d8ae6): c++/src/corelib/ncbistre.cpp:151-166
-    // ```c++
-    //     SIZE_TYPE size = 0;
-    //     SIZE_TYPE max_size = str.max_size();
-    //     do {
-    //         CT_INT_TYPE nextc = is.get();
-    //         if (CT_EQ_INT_TYPE(nextc, CT_EOF)
-    //             ||  CT_EQ_INT_TYPE(nextc, CT_TO_INT_TYPE(delim))) {
-    //             ++size;
-    //             break;
-    //         }
-    //         if ( !is.unget() )
-    //             break;
-    //         if (size == max_size) {
-    //             is.clear(NcbiFailbit);
-    //             break;
-    //         }
-    //         SIZE_TYPE n = max_size - size;
-    // ```
     fn next_byte(&mut self) -> Option<u8> {
         if self.failed {
             return None;
@@ -2510,54 +1241,7 @@ impl<R: Read> FastaStream<R> {
         byte
     }
     // NCBI reference (598d8ae6): c++/src/corelib/ncbistre.cpp:87-105
-    // ```c++
-    //             iostate = NcbiEofbit;
-    //             break;
-    //         }
-    //         SIZE_TYPE delim_pos = delims.find(CT_TO_CHAR_TYPE(ch));
-    //         if (delim_pos != NPOS) {
-    //             // Special case -- if two different delimiters are back to
-    //             // back and in the same order as in delims, treat them as
-    //             // a single delimiter (necessary for correct handling of
-    //             // DOS/MAC-style CR/LF endings).
-    //             ch = is.rdbuf()->sgetc();
-    //             if (!CT_EQ_INT_TYPE(ch, CT_EOF)
-    //                 &&  delims.find(CT_TO_CHAR_TYPE(ch), delim_pos + 1) != NPOS) {
-    //                 is.rdbuf()->sbumpc();
-    //                 delim_count = 2;
-    //             } else {
-    //                 delim_count = 1;
-    //             }
-    //             break;
-    //         }
-    // ```
     // NCBI reference (598d8ae6): c++/src/corelib/ncbistre.cpp:151-174
-    // ```c++
-    //     SIZE_TYPE size = 0;
-    //     SIZE_TYPE max_size = str.max_size();
-    //     do {
-    //         CT_INT_TYPE nextc = is.get();
-    //         if (CT_EQ_INT_TYPE(nextc, CT_EOF)
-    //             ||  CT_EQ_INT_TYPE(nextc, CT_TO_INT_TYPE(delim))) {
-    //             ++size;
-    //             break;
-    //         }
-    //         if ( !is.unget() )
-    //             break;
-    //         if (size == max_size) {
-    //             is.clear(NcbiFailbit);
-    //             break;
-    //         }
-    //         SIZE_TYPE n = max_size - size;
-    //         is.get(buf, n < sizeof(buf) ? n : sizeof(buf), delim);
-    //         n = (size_t) is.gcount();
-    //         str.append(buf, n);
-    //         size += n;
-    //         _ASSERT(size == str.length());
-    //     } while ( is.good() );
-    // #endif
-    //
-    // ```
     fn getline(&mut self, delimiters: &[u8]) -> (Vec<u8>, Option<u8>) {
         let mut line = Vec::new();
         let mut last = None;
@@ -2587,41 +1271,7 @@ impl<R: Read> FastaStream<R> {
         (line, last)
     }
     // NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:245-267
-    // ```c++
-    // CStreamLineReader::EEOLStyle CStreamLineReader::x_AdvanceEOLSimple(char eol,
-    //                                                                    char alt_eol)
-    // {
-    //     SIZE_TYPE pos;
-    //     NcbiGetline(*m_Stream, m_Line, eol, &m_LastReadSize);
-    //     if (m_AutoEOL  &&  (pos = m_Line.find(alt_eol)) != NPOS) {
-    //         ++pos;
-    //         if (eol != '\n'  ||  pos != m_Line.size()) {
-    //             // an *immediately* preceding CR is quite all right
-    //             CStreamUtils::Pushback(*m_Stream, m_Line.data() + pos,
-    //                                    m_Line.size() - pos);
-    //             m_EOLStyle = eEOL_mixed;
-    //         }
-    //         m_Line.resize(pos - 1);
-    //         m_LastReadSize = pos;
-    //         return (m_EOLStyle == eEOL_mixed) ? m_EOLStyle : eEOL_crlf;
-    //     } else if (m_AutoEOL  &&  eol == '\r'  &&
-    //                CT_EQ_INT_TYPE(m_Stream->peek(), CT_TO_INT_TYPE(alt_eol))) {
-    //         m_Stream->get();
-    //         ++m_LastReadSize;
-    //         return eEOL_crlf;
-    //     }
-    //     return (eol == '\r') ? eEOL_cr : eEOL_lf;
-    // ```
     // NCBI reference (598d8ae6): c++/src/corelib/stream_utils.cpp:437-443
-    // ```c++
-    //     if (!del_ptr  &&  how != ePushback_NoCopy) {
-    //         del_ptr = new CT_CHAR_TYPE[buf_size];
-    //         buf = (CT_CHAR_TYPE*) memcpy(del_ptr, buf, buf_size);
-    //     }
-    //
-    //     (void) new CPushback_Streambuf(is, buf, buf_size, del_ptr);
-    // }
-    // ```
     fn advance_simple(&mut self, eol: u8, alternate: u8) -> (Vec<u8>, EolStyle) {
         let (mut line, _) = self.getline(&[eol]);
         if let Some(position) = line.iter().position(|&byte| byte == alternate) {
@@ -2653,29 +1303,8 @@ impl<R: Read> FastaStream<R> {
     }
 }
 // NCBI reference (598d8ae6): c++/include/corelib/ncbistre.hpp:437-440
-// ```c++
-// #else
-// /// Portable alias for ifstream.
-// typedef IO_PREFIX::ifstream      CNcbiIfstream;
-// #endif
-// ```
 impl FastaStream<crate::blastinput::input_files::InputFile> {
     // NCBI reference (598d8ae6): c++/src/corelib/stream_utils.cpp:224-236
-    // ```c++
-    // CT_INT_TYPE CPushback_Streambuf::underflow(void)
-    // {
-    //     // we are here because there is no more data in the pushback buffer
-    //     _ASSERT(gptr()  &&  gptr() >= egptr());
-    //
-    // #ifdef NCBI_COMPILER_MIPSPRO
-    //     if (m_MIPSPRO_ReadsomeGptrSetLevel  &&  m_MIPSPRO_ReadsomeGptr != gptr())
-    //         return CT_EOF;
-    //     m_MIPSPRO_ReadsomeGptr = (CT_CHAR_TYPE*)(-1L);
-    // #endif //NCBI_COMPILER_MIPSPRO
-    //
-    //     x_FillBuffer((size_t) m_Sb->in_avail());
-    //     return gptr() < egptr() ? CT_TO_INT_TYPE(*gptr()) : CT_EOF;
-    // ```
     /// A stream over an opened input, whose refills read as NCBI's stream of it answers them
     /// (`fasta_reader::stream::InputBackend::of`: `cin` for `-`, a `CNcbiIfstream` for a path).
     pub(crate) fn from_file(input: impl Into<crate::blastinput::input_files::InputFile>) -> Self {
@@ -2735,71 +1364,10 @@ impl QueryStreamSettings {
     }
 }
 // NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:154-174
-// ```c++
-// CStreamLineReader& CStreamLineReader::operator++(void)
-// {
-//     /* If at EOF - noop */
-//     if (AtEOF()) {
-//         m_Line = string();
-//         return *this;
-//     }
-//     ++m_LineNumber;
-//     if ( m_UngetLine ) {
-//         m_UngetLine = false;
-//         return *this;
-//     }
-//
-//     switch (m_EOLStyle) {
-//     case eEOL_unknown: x_AdvanceEOLUnknown();                   break;
-//     case eEOL_cr:      x_AdvanceEOLSimple('\r', '\n');          break;
-//     case eEOL_lf:      x_AdvanceEOLSimple('\n', '\r');          break;
-//     case eEOL_crlf:    x_AdvanceEOLCRLF();                      break;
-//     case eEOL_mixed:   NcbiGetline(*m_Stream, m_Line, "\r\n");  break;
-//     }
-//     return *this;
-// ```
 impl<R: Read> Iterator for FastaStream<R> {
     type Item = Vec<u8>;
     // NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:219-241
-    // ```c++
-    // CStreamLineReader::EEOLStyle CStreamLineReader::x_AdvanceEOLUnknown(void)
-    // {
-    //     _ASSERT(m_AutoEOL);
-    //     NcbiGetline(*m_Stream, m_Line, "\r\n", &m_LastReadSize);
-    //     m_Stream->unget();
-    //     CT_INT_TYPE eol = m_Stream->get();
-    //     if (CT_EQ_INT_TYPE(eol, CT_TO_INT_TYPE('\r'))) {
-    //         m_EOLStyle = eEOL_cr;
-    //     } else if (CT_EQ_INT_TYPE(eol, CT_TO_INT_TYPE('\n'))) {
-    //         // NcbiGetline doesn't yield enough information to determine
-    //         // whether eEOL_lf or eEOL_crlf is more appropriate, and not
-    //         // all streams allow tellg() (which could otherwise resolve
-    //         // matters), so defer further analysis to x_AdvanceEOLCRLF,
-    //         // which will be responsible for reading the next line and
-    //         // supports switching to eEOL_lf as appropriate.
-    //         //
-    //         // An alternative approach would have been to pass \n\r rather
-    //         // than \r\n, and then check for an immediately following \n
-    //         // if eol turned out to be \r, but that would miscount an
-    //         // actual(!) \n\r sequence as a single line break.
-    //         m_EOLStyle = eEOL_crlf;
-    //     }
-    //     return m_EOLStyle;
-    // ```
     // NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:271-281
-    // ```c++
-    // CStreamLineReader::EEOLStyle CStreamLineReader::x_AdvanceEOLCRLF(void)
-    // {
-    //     if (m_AutoEOL) {
-    //         EEOLStyle style = x_AdvanceEOLSimple('\n', '\r');
-    //         if (style == eEOL_mixed) {
-    //             // found an embedded CR
-    //             m_EOLStyle = eEOL_cr;
-    //         } else if (style != eEOL_crlf) {
-    //             m_EOLStyle = eEOL_lf;
-    //         }
-    //     } else {
-    // ```
     fn next(&mut self) -> Option<Self::Item> {
         if let Some(line) = self.unget_line.take() {
             return Some(line);
@@ -2838,26 +1406,7 @@ impl<R: Read> Iterator for FastaStream<R> {
     }
 }
 // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:259-262
-// ```c++
-//         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
-// 	    BLAST_PROF_START( APP.LOOP.PRE );
-//             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
-//             CRef<IQueryFactory> queries(new CObjMgr_QueryFactory(*query_batch));
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:140-150
-// ```c++
-//     while (size_read < GetBatchSize()) {
-//
-//         if (End())
-//             break;
-//
-//         CRef<CBlastSearchQuery> q;
-//         try { q.Reset(m_Source->GetNextSequence(scope)); }
-//         catch (const CObjReaderParseException& e) {
-//             if (e.GetErrCode() == CObjReaderParseException::eEOF) {
-//                 break;
-//             }
-// ```
 #[cfg(test)]
 pub(crate) fn parse_fasta_stream_with_warnings<R: Read>(
     stream: &mut FastaStream<R>,
@@ -2953,20 +1502,6 @@ fn read_fasta_stream<R: Read>(
     // already.
     let mut delivered = false;
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:130-162
-    // ```c++
-    //     virtual CRef<CSeq_entry> ReadOneSeq(ILineErrorListener * pMessageListener) {
-    //
-    //         const string line = NStr::TruncateSpaces_Unsafe(*++GetLineReader());
-    //         if ( !line.empty() && isalnum(line.data()[0]&0xff) ) {
-    //             try {
-    //                 CRef<CSeq_id> id(new CSeq_id(line, (CSeq_id::fParse_AnyRaw |
-    // 							CSeq_id::fParse_ValidLocal)));
-    // ...
-    //         // If all fails, fall back to parent's implementation
-    //         GetLineReader().UngetLine();
-    //         return CFastaReader::ReadOneSeq(pMessageListener);
-    //     }
-    // ```
     // BLASTX reads its query and its subjects with the reader of the other programs
     // (`CBlastFastaInputSource`), whose every record first tries its first line as a Seq-id when
     // the data loaders are on (`seq_id_role`). Only the input's first line can be one: a record
@@ -3011,1145 +1546,23 @@ fn read_fasta_stream<R: Read>(
 }
 
 // NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:100-104
-// ```c++
-// bool CStreamLineReader::AtEOF(void) const
-// {
-//     return !m_UngetLine &&
-//         (m_Stream->eof()  ||  CT_EQ_INT_TYPE(m_Stream->peek(), CT_EOF));
-// }
-// ```
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:856-873
-// ```c++
-// 	char c;
-// 	CNcbiStreampos orig_p = in.tellg();
-// 	// Piped input
-// 	if(orig_p < 0)
-// 		return false;
-//
-// 	IOS_BASE::iostate orig_state = in.rdstate();
-// 	IOS_BASE::fmtflags orig_flags = in.setf(ios::skipws);
-//
-// 	if(! (in >> c))
-// 		return true;
-//
-// 	in.seekg(orig_p);
-// 	in.flags(orig_flags);
-// 	in.clear();
-// 	in.setstate(orig_state);
-//
-// 	return false;
-// ```
 #[cfg(test)]
-mod stream_tests {
-    use super::*;
-    // NCBI reference (598d8ae6): c++/src/corelib/stream_utils.cpp:235-236
-    // ```c++
-    //     x_FillBuffer((size_t) m_Sb->in_avail());
-    //     return gptr() < egptr() ? CT_TO_INT_TYPE(*gptr()) : CT_EOF;
-    // ```
-    use std::io::Cursor;
-    // NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:100-104
-    // ```c++
-    // bool CStreamLineReader::AtEOF(void) const
-    // {
-    //     return !m_UngetLine &&
-    //         (m_Stream->eof()  ||  CT_EQ_INT_TYPE(m_Stream->peek(), CT_EOF));
-    // }
-    // ```
-    // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:727-735
-    // ```c++
-    //             fstrm->open(AsString().c_str(),IOS_BASE::in | mode);
-    //             if ( !fstrm->is_open() ) {
-    //                 delete fstrm;
-    //                 fstrm = NULL;
-    //             } else {
-    //                 m_DeleteFlag = true;
-    //             }
-    //         }
-    //         m_Ios = fstrm;
-    // ```
-    trait NativeRead: Read + Seek {
-        // NCBI reference (598d8ae6): c++/src/corelib/stream_utils.cpp:235-236
-        // ```c++
-        //     x_FillBuffer((size_t) m_Sb->in_avail());
-        //     return gptr() < egptr() ? CT_TO_INT_TYPE(*gptr()) : CT_EOF;
-        // ```
-        fn available(&mut self) -> std::io::Result<usize>;
-    }
-    // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:727-735
-    // ```c++
-    //             fstrm->open(AsString().c_str(),IOS_BASE::in | mode);
-    //             if ( !fstrm->is_open() ) {
-    //                 delete fstrm;
-    //                 fstrm = NULL;
-    //             } else {
-    //                 m_DeleteFlag = true;
-    //             }
-    //         }
-    //         m_Ios = fstrm;
-    // ```
-    impl NativeRead for crate::blastinput::input_files::InputFile {
-        // NCBI reference (598d8ae6): c++/src/corelib/stream_utils.cpp:235-236
-        // ```c++
-        //     x_FillBuffer((size_t) m_Sb->in_avail());
-        //     return gptr() < egptr() ? CT_TO_INT_TYPE(*gptr()) : CT_EOF;
-        // ```
-        fn available(&mut self) -> std::io::Result<usize> {
-            (crate::blastinput::fasta_reader::stream::InputBackend::of(self).available)(self)
-        }
-    }
-    // NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:100-104
-    // ```c++
-    // bool CStreamLineReader::AtEOF(void) const
-    // {
-    //     return !m_UngetLine &&
-    //         (m_Stream->eof()  ||  CT_EQ_INT_TYPE(m_Stream->peek(), CT_EOF));
-    // }
-    // ```
-    struct Input {
-        data: Cursor<Vec<u8>>,
-        seekable: bool,
-        fault: Option<u64>,
-        error: bool,
-    }
-    // NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:100-104
-    // ```c++
-    // bool CStreamLineReader::AtEOF(void) const
-    // {
-    //     return !m_UngetLine &&
-    //         (m_Stream->eof()  ||  CT_EQ_INT_TYPE(m_Stream->peek(), CT_EOF));
-    // }
-    // ```
-    impl Read for Input {
-        // NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:100-104
-        // ```c++
-        // bool CStreamLineReader::AtEOF(void) const
-        // {
-        //     return !m_UngetLine &&
-        //         (m_Stream->eof()  ||  CT_EQ_INT_TYPE(m_Stream->peek(), CT_EOF));
-        // }
-        // ```
-        fn read(&mut self, bytes: &mut [u8]) -> std::io::Result<usize> {
-            if self.fault.is_some_and(|p| self.data.position() >= p) {
-                return if self.error {
-                    Err(std::io::Error::other("filebuf read failure"))
-                } else {
-                    Ok(0)
-                };
-            }
-            let length = bytes.len().min(1);
-            self.data.read(&mut bytes[..length])
-        }
-    }
-    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:856-871
-    // ```c++
-    // 	char c;
-    // 	CNcbiStreampos orig_p = in.tellg();
-    // 	// Piped input
-    // 	if(orig_p < 0)
-    // 		return false;
-    //
-    // 	IOS_BASE::iostate orig_state = in.rdstate();
-    // 	IOS_BASE::fmtflags orig_flags = in.setf(ios::skipws);
-    //
-    // 	if(! (in >> c))
-    // 		return true;
-    //
-    // 	in.seekg(orig_p);
-    // 	in.flags(orig_flags);
-    // 	in.clear();
-    // 	in.setstate(orig_state);
-    // ```
-    // NCBI reference (598d8ae6): c++/src/corelib/stream_utils.cpp:235-236
-    // ```c++
-    //     x_FillBuffer((size_t) m_Sb->in_avail());
-    //     return gptr() < egptr() ? CT_TO_INT_TYPE(*gptr()) : CT_EOF;
-    // ```
-    impl NativeRead for Input {
-        // NCBI reference (598d8ae6): c++/src/corelib/stream_utils.cpp:235-236
-        // ```c++
-        //     x_FillBuffer((size_t) m_Sb->in_avail());
-        //     return gptr() < egptr() ? CT_TO_INT_TYPE(*gptr()) : CT_EOF;
-        // ```
-        fn available(&mut self) -> std::io::Result<usize> {
-            Ok(0)
-        }
-    }
-    impl Seek for Input {
-        // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:856-871
-        // ```c++
-        // 	char c;
-        // 	CNcbiStreampos orig_p = in.tellg();
-        // 	// Piped input
-        // 	if(orig_p < 0)
-        // 		return false;
-        //
-        // 	IOS_BASE::iostate orig_state = in.rdstate();
-        // 	IOS_BASE::fmtflags orig_flags = in.setf(ios::skipws);
-        //
-        // 	if(! (in >> c))
-        // 		return true;
-        //
-        // 	in.seekg(orig_p);
-        // 	in.flags(orig_flags);
-        // 	in.clear();
-        // 	in.setstate(orig_state);
-        // ```
-        fn seek(&mut self, position: SeekFrom) -> std::io::Result<u64> {
-            if self.seekable {
-                self.data.seek(position)
-            } else {
-                Err(std::io::Error::new(
-                    std::io::ErrorKind::Unsupported,
-                    "nonseekable stream",
-                ))
-            }
-        }
-    }
-    // NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:154-174
-    // ```c++
-    // CStreamLineReader& CStreamLineReader::operator++(void)
-    // {
-    //     /* If at EOF - noop */
-    //     if (AtEOF()) {
-    //         m_Line = string();
-    //         return *this;
-    //     }
-    //     ++m_LineNumber;
-    //     if ( m_UngetLine ) {
-    //         m_UngetLine = false;
-    //         return *this;
-    //     }
-    //
-    //     switch (m_EOLStyle) {
-    //     case eEOL_unknown: x_AdvanceEOLUnknown();                   break;
-    //     case eEOL_cr:      x_AdvanceEOLSimple('\r', '\n');          break;
-    //     case eEOL_lf:      x_AdvanceEOLSimple('\n', '\r');          break;
-    //     case eEOL_crlf:    x_AdvanceEOLCRLF();                      break;
-    //     case eEOL_mixed:   NcbiGetline(*m_Stream, m_Line, "\r\n");  break;
-    //     }
-    //     return *this;
-    // ```
-    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:856-873
-    // ```c++
-    // 	char c;
-    // 	CNcbiStreampos orig_p = in.tellg();
-    // 	// Piped input
-    // 	if(orig_p < 0)
-    // 		return false;
-    //
-    // 	IOS_BASE::iostate orig_state = in.rdstate();
-    // 	IOS_BASE::fmtflags orig_flags = in.setf(ios::skipws);
-    //
-    // 	if(! (in >> c))
-    // 		return true;
-    //
-    // 	in.seekg(orig_p);
-    // 	in.flags(orig_flags);
-    // 	in.clear();
-    // 	in.setstate(orig_state);
-    //
-    // 	return false;
-    // ```
-    #[test]
-    fn pinned_cpp_stream_state_and_line_oracle() {
-        // NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:353-381
-        // ```c++
-        // CMemoryLineReader& CMemoryLineReader::operator++(void)
-        // {
-        //     /* If at EOF - noop */
-        //     if (AtEOF()) {
-        //         m_Line = CTempString(NULL);
-        //         return *this;
-        //     }
-        //     const char* p = m_Pos;
-        //     if ( p == m_Line.begin() ) {
-        //         /* If after UngetLine(), line is already in buffer, so end is known*/
-        //         p = m_Line.end();
-        //     } else {
-        //         /* Line is in stream, go char by char until delimiters */
-        //         while ( p < m_End  &&  *p != '\r'  && *p != '\n' ) {
-        //             ++p;
-        //         }
-        //         m_Line = CTempString(m_Pos, p - m_Pos);
-        //     }
-        //     // skip over delimiters until the beginning of the next string
-        //     if (p + 1 < m_End  &&  *p == '\r'  &&  p[1] == '\n') {
-        //         m_Pos = p + 2;
-        //     } else if (p < m_End) {
-        //         m_Pos = p + 1;
-        //     } else { // no final line break
-        //         m_Pos = p;
-        //     }
-        //     ++m_LineNumber;
-        //     return *this;
-        // }
-        // ```
-        // Decode lossless independent C++ fixture bytes; no Rust-generated
-        // expected lines or normalization of actual public report streams.
-        let decode = |encoded: &str| -> Vec<u8> {
-            if let Some(runs) = encoded.strip_prefix('~') {
-                let mut bytes = Vec::new();
-                for run in runs.split(',') {
-                    let (byte, count) = run.split_once(':').unwrap();
-                    let byte = u8::from_str_radix(byte, 16).unwrap();
-                    bytes.extend(std::iter::repeat_n(byte, count.parse::<usize>().unwrap()));
-                }
-                bytes
-            } else {
-                encoded
-                    .as_bytes()
-                    .chunks(2)
-                    .map(|b| u8::from_str_radix(std::str::from_utf8(b).unwrap(), 16).unwrap())
-                    .collect()
-            }
-        };
-        for row in include_str!("../../../tests/unit/blastx_stage_e_io_stream_expected.tsv").lines()
-        {
-            let fields: Vec<_> = row.split('\t').collect();
-            assert_eq!(fields.len(), 9);
-            let data = decode(fields[1]);
-            let count = fields[8].parse::<usize>().unwrap();
-            let expected: Vec<Vec<u8>> = if count == 0 {
-                Vec::new()
-            } else {
-                fields[7].split('|').map(decode).collect()
-            };
-            assert_eq!(expected.len(), count);
-            // NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:353-381
-            // ```c++
-            // CMemoryLineReader& CMemoryLineReader::operator++(void)
-            // {
-            //     /* If at EOF - noop */
-            //     if (AtEOF()) {
-            //         m_Line = CTempString(NULL);
-            //         return *this;
-            //     }
-            //     const char* p = m_Pos;
-            //     if ( p == m_Line.begin() ) {
-            //         /* If after UngetLine(), line is already in buffer, so end is known*/
-            //         p = m_Line.end();
-            //     } else {
-            //         /* Line is in stream, go char by char until delimiters */
-            //         while ( p < m_End  &&  *p != '\r'  && *p != '\n' ) {
-            //             ++p;
-            //         }
-            //         m_Line = CTempString(m_Pos, p - m_Pos);
-            //     }
-            //     // skip over delimiters until the beginning of the next string
-            //     if (p + 1 < m_End  &&  *p == '\r'  &&  p[1] == '\n') {
-            //         m_Pos = p + 2;
-            //     } else if (p < m_End) {
-            //         m_Pos = p + 1;
-            //     } else { // no final line break
-            //         m_Pos = p;
-            //     }
-            //     ++m_LineNumber;
-            //     return *this;
-            // }
-            // ```
-            if fields[0].starts_with("memory_") {
-                let lines: Vec<_> = FastaMemoryLines { remaining: &data }.collect();
-                assert_eq!(
-                    lines,
-                    expected.iter().map(Vec::as_slice).collect::<Vec<_>>(),
-                    "{} memory lines",
-                    fields[0]
-                );
-                continue;
-            }
-            let fault: i64 = fields[4].parse().unwrap();
-            let file_backend = fields[0].starts_with("file_");
-            for &error in if file_backend {
-                &[false][..]
-            } else {
-                &[false, true][..]
-            } {
-                let temporary = crate::utils::test_dir::temp_dir().join(format!(
-                    "losatx-e-stream-unit-{}-{}",
-                    crate::utils::test_dir::process_id(),
-                    fields[0]
-                ));
-                let input: Box<dyn NativeRead> = if file_backend {
-                    assert!(!temporary.exists());
-                    std::fs::write(&temporary, &data).unwrap();
-                    Box::new(crate::blastinput::input_files::InputFile::from(
-                        std::fs::File::open(&temporary).unwrap(),
-                    ))
-                } else {
-                    Box::new(Input {
-                        data: Cursor::new(data.clone()),
-                        seekable: fields[2] == "1",
-                        fault: if fault < 0 { None } else { Some(fault as u64) },
-                        error,
-                    })
-                };
-                let mut stream = FastaStream::new(input);
-                // NCBI reference (598d8ae6): c++/src/corelib/stream_utils.cpp:235-236
-                // ```c++
-                //     x_FillBuffer((size_t) m_Sb->in_avail());
-                //     return gptr() < egptr() ? CT_TO_INT_TYPE(*gptr()) : CT_EOF;
-                // ```
-                stream.backend_available = Some(|input| input.available());
-                let empty = fields[3] == "1" && stream_is_empty(&mut stream);
-                assert_eq!(empty, fields[6] == "1", "{} empty error={error}", fields[0]);
-                let lines: Vec<Vec<u8>> = if empty { Vec::new() } else { stream.collect() };
-                if file_backend {
-                    std::fs::remove_file(&temporary).unwrap();
-                }
-                assert_eq!(lines, expected, "{} lines error={error}", fields[0]);
-            }
-        }
-    }
-}
+#[path = "input_stream_tests.rs"]
+mod stream_tests;
 
 #[cfg(test)]
-mod range_tests {
-    use super::*;
-    use std::io::Cursor;
-
-    /// A delivered batch: the ids, letters and placements of its records.
-    type Batch = Vec<(String, Vec<u8>, RecordPlacement)>;
-
-    fn summary(records: &[FastaRecord]) -> Batch {
-        records
-            .iter()
-            .map(|record| {
-                (
-                    record.internal_id.clone(),
-                    record.sequence.clone(),
-                    record.placement(),
-                )
-            })
-            .collect()
-    }
-
-    /// The batches a query file of `data` gives with `range` and `batch_size`, read by
-    /// `parse_fasta_stream_keeping`; and the records the reader keeps.
-    fn batches_kept(
-        data: &[u8],
-        range: Option<&SequenceRange>,
-        batch_size: usize,
-    ) -> (Vec<Batch>, Vec<FastaRecord>) {
-        let mut delivered = Vec::new();
-        let mut stream = FastaStream::new(Cursor::new(data.to_vec()));
-        stream.keep_skipped = true;
-        let kept = parse_fasta_stream_keeping(
-            &mut stream,
-            false,
-            true,
-            batch_size,
-            false,
-            range,
-            &mut |records| {
-                delivered.push(summary(records));
-                Ok(())
-            },
-            &mut |_| Ok(()),
-        )
-        .unwrap();
-        (delivered, kept)
-    }
-
-    /// `batches_kept` with a range.
-    fn batches(
-        data: &[u8],
-        range: &SequenceRange,
-        batch_size: usize,
-    ) -> (Vec<Batch>, Vec<FastaRecord>) {
-        batches_kept(data, Some(range), batch_size)
-    }
-
-    /// The batches of `batches_kept` read by `read_fasta_stream_batches`, which keeps no record.
-    fn batches_unkept(data: &[u8], range: Option<&SequenceRange>, batch_size: usize) -> Vec<Batch> {
-        let mut delivered = Vec::new();
-        read_fasta_stream_batches(
-            &mut FastaStream::new(Cursor::new(data.to_vec())),
-            false,
-            true,
-            batch_size,
-            false,
-            range,
-            &mut |records| {
-                delivered.push(summary(records));
-                Ok(())
-            },
-            &mut |_| Ok(()),
-        )
-        .unwrap();
-        delivered
-    }
-
-    // The read that drops each batch once delivered (the search's queries and the reads of them
-    // before the search) delivers the batches of the read that keeps the records: the same records,
-    // cut the same way, with the same numbers after the dropped batches and the skipped records.
-    #[test]
-    fn a_read_that_keeps_no_record_delivers_the_same_batches() {
-        let range = SequenceRange { from: 4, to: 7 };
-        let data =
-            b">a\nACGTACGTAC\n>b\nACG\n>c\nTTTTGGGG\n>d\nACGT\n>e\nACGTA\n>f\nAC\n>g\nACGTACGT\n";
-        for batch_size in [1, 4, 10, 15, 21, usize::MAX] {
-            for range in [Some(&range), None] {
-                let (kept_batches, kept) = batches_kept(data, range, batch_size);
-                assert_eq!(
-                    batches_unkept(data, range, batch_size),
-                    kept_batches,
-                    "batch size {batch_size}, range {}",
-                    range.is_some()
-                );
-                assert_eq!(kept_batches.iter().map(Vec::len).sum::<usize>(), kept.len());
-            }
-        }
-        let (delivered, kept) = batches_kept(data, None, 10);
-        assert_eq!(kept.len(), 7);
-        assert_eq!(delivered.len(), 4);
-        assert_eq!(delivered[3][0].0, "Query_7");
-    }
-
-    // The read that keeps no record frees each batch's records once it has delivered the batch,
-    // so that it holds one reader batch, not the file; the read that keeps them holds every
-    // record to its end. Under `-parse_deflines` (without the search's ids) a record is the only
-    // owner of its Seq-ids, so a weak reference to them shows whether the record is still held.
-    #[test]
-    fn a_read_that_keeps_no_record_frees_each_batch_once_delivered() {
-        use crate::blastinput::fasta_reader::believed::BelievedIds;
-        use std::sync::{Arc, Weak};
-        let data = b">lcl|q1\nACGT\n>lcl|q2\nACGT\n>lcl|q3\nACGT\n";
-        for keep in [false, true] {
-            let mut stream = FastaStream::new(Cursor::new(data.to_vec()));
-            stream.parse_deflines = true;
-            let mut ids: Vec<Weak<BelievedIds>> = Vec::new();
-            // At each delivery, the records of the earlier batches still held.
-            let mut held_before = Vec::new();
-            let mut deliver = |records: &[FastaRecord]| {
-                held_before.push(ids.iter().filter(|id| id.upgrade().is_some()).count());
-                for record in records {
-                    let believed = record
-                        .source
-                        .as_ref()
-                        .and_then(|source| source.believed.as_ref())
-                        .expect("parsed Seq-ids");
-                    ids.push(Arc::downgrade(believed));
-                }
-                Ok(())
-            };
-            let kept = if keep {
-                parse_fasta_stream_keeping(
-                    &mut stream,
-                    false,
-                    false,
-                    1,
-                    false,
-                    None,
-                    &mut deliver,
-                    &mut |_| Ok(()),
-                )
-                .unwrap()
-            } else {
-                read_fasta_stream_batches(
-                    &mut stream,
-                    false,
-                    false,
-                    1,
-                    false,
-                    None,
-                    &mut deliver,
-                    &mut |_| Ok(()),
-                )
-                .unwrap();
-                Vec::new()
-            };
-            let held_after = ids.iter().filter(|id| id.upgrade().is_some()).count();
-            if keep {
-                assert_eq!(held_before, vec![0, 1, 2]);
-                assert_eq!((kept.len(), held_after), (3, 3));
-            } else {
-                assert_eq!(held_before, vec![0, 0, 0]);
-                assert_eq!(held_after, 0);
-            }
-        }
-    }
-
-    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:144-168
-    // ```c++
-    //         catch (const exception&) {
-    //             continue; //SB-2307. ignore well formed, not found accession
-    //         }
-    //
-    //         CConstRef<CSeq_loc> loc = q->GetQuerySeqLoc();
-    //
-    //         if (loc->IsInt()) {
-    //             size_read += sequence::GetLength(loc->GetInt().GetId(),
-    //                                              q->GetScope());
-    // ```
-    // A batch counts the whole length of each searched record; a skipped record (its interval
-    // starts more than one letter past its end) counts nothing, is not delivered and keeps its
-    // number; the letters delivered are the interval's.
-    #[test]
-    fn a_range_cuts_the_records_and_skips_the_short_ones() {
-        let range = SequenceRange { from: 4, to: 7 };
-        let data = b">a\nACGTACGTAC\n>b\nACG\n>c\nTTTTGGGG\n>d\nACGT\n>e\nACGTA\n";
-        let (delivered, kept) = batches(data, &range, 15);
-        let place = |offset, length| RecordPlacement { offset, length };
-        assert_eq!(
-            delivered,
-            vec![
-                vec![
-                    ("Query_1".to_string(), b"ACGT".to_vec(), place(4, 10)),
-                    ("Query_3".to_string(), b"GGGG".to_vec(), place(4, 8)),
-                ],
-                // `d` starts just past its end: an interval without letters; `e` keeps one letter.
-                vec![
-                    ("Query_4".to_string(), Vec::new(), place(4, 4)),
-                    ("Query_5".to_string(), b"A".to_vec(), place(4, 5)),
-                ],
-            ]
-        );
-        assert_eq!(kept.len(), 4);
-        // The skipped `b` stays in its batch's scope, on the batch's first record (review 2 of
-        // line DBID loadord, H2; blast_fasta_input.cpp:395 adds it to the scope first), in both
-        // readers; the second batch skipped none.
-        let ids = |records: &[FastaRecord]| -> Vec<String> {
-            shown_ids(records).map(|(id, _)| id.to_owned()).collect()
-        };
-        assert_eq!(ids(&kept[..2]), ["Query_1", "Query_3", "Query_2"]);
-        assert_eq!(ids(&kept[2..]), ["Query_4", "Query_5"]);
-        let unkept = |keep_skipped: bool| {
-            let mut unkept = Vec::new();
-            let mut stream = FastaStream::new(Cursor::new(data.to_vec()));
-            stream.keep_skipped = keep_skipped;
-            read_fasta_stream_batches(
-                &mut stream,
-                false,
-                true,
-                15,
-                false,
-                Some(&range),
-                &mut |records| {
-                    unkept.push(ids(records));
-                    Ok(())
-                },
-                &mut |_| Ok(()),
-            )
-            .unwrap();
-            unkept
-        };
-        assert_eq!(
-            unkept(true),
-            [
-                vec!["Query_1", "Query_3", "Query_2"],
-                vec!["Query_4", "Query_5"]
-            ]
-        );
-        // A run whose prefetch cannot stop keeps none of them (review 5 of line DBID loadord,
-        // L2); the numbers stay.
-        assert_eq!(
-            unkept(false),
-            [vec!["Query_1", "Query_3"], vec!["Query_4", "Query_5"]]
-        );
-    }
-
-    // A batch of skipped records alone is delivered empty (NCBI's query factory refuses it), also
-    // at the end of the file.
-    #[test]
-    fn a_last_batch_of_skipped_records_is_delivered_empty() {
-        let range = SequenceRange { from: 4, to: 7 };
-        let (delivered, _) = batches(b">a\nACGTACGTAC\n>b\nACG\n>c\nA\n", &range, 10);
-        assert_eq!(delivered.len(), 2);
-        assert_eq!(delivered[0].len(), 1);
-        assert!(delivered[1].is_empty());
-        let (delivered, kept) = batches(b">a\nACG\n", &range, 10);
-        assert!(kept.is_empty());
-        assert_eq!(delivered, vec![Vec::new()]);
-    }
-
-    // A record whose letter before the interval is lower case keeps its whole letters after the
-    // cut (that letter's run, which a split query's chunks restrict), whether the run ends there
-    // or goes on into the interval; a record with runs only elsewhere, or none, keeps only its
-    // interval.
-    #[test]
-    fn a_cut_record_keeps_its_whole_letters_for_a_lower_case_letter_before_it() {
-        let range = SequenceRange { from: 4, to: 7 };
-        let data = b">a\nACGtACGTAC\n>b\nAcgtaCGTAC\n>c\naCGTaCGTac\n>d\nACGTACGTAC\n";
-        let (_, kept) = batches(data, &range, 100);
-        assert_eq!(kept[0].sequence, b"ACGT");
-        assert!(kept[0].lowercase_masks.is_empty());
-        assert_eq!(kept[0].archive_letters(), b"ACGtACGTAC");
-        assert_eq!(kept[0].archive_lowercase_runs(), vec![(3, 3)]);
-        assert_eq!(kept[1].lowercase_masks, vec![(0, 0)]);
-        assert_eq!(kept[1].archive_letters(), b"AcgtaCGTAC");
-        assert_eq!(kept[2].lowercase_masks, vec![(0, 0)]);
-        assert_eq!(kept[2].archive_letters(), b"ACGT");
-        assert_eq!(kept[3].archive_letters(), b"ACGT");
-    }
-
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:1041-1046
-    // ```c
-    //       seqloc->ssr->left = MAX(0, seqloc->ssr->left - from);
-    //       seqloc->ssr->right = MIN(seqloc->ssr->right, to) - from;
-    //       /* If this mask location does not intersect the [from,to] interval,
-    //          do not add it to the newly constructed list and free its contents. */
-    // ```
-    #[test]
-    fn a_cut_clips_and_moves_the_lower_case_masks() {
-        let mut record = parse_fasta(b">q\nacgTTTTaaaCCgg\n", false, true)
-            .unwrap()
-            .remove(0);
-        assert_eq!(record.lowercase_masks, vec![(0, 2), (7, 9), (12, 13)]);
-        let mut kept = record.clone();
-        record.cut_in_place(2, 9, false);
-        assert_eq!(record.sequence, b"GTTTTAA");
-        assert_eq!(record.lowercase_masks, vec![(0, 0), (5, 6)]);
-        assert_eq!(
-            record.placement(),
-            RecordPlacement {
-                offset: 2,
-                length: 14
-            }
-        );
-        // Only a record that keeps its whole letters has them (and its own runs) after the cut.
-        assert_eq!(record.archive_letters(), b"GTTTTAA");
-        assert_eq!(record.archive_lowercase_runs(), vec![(0, 0), (5, 6)]);
-        kept.cut_in_place(2, 9, true);
-        assert_eq!(kept.sequence, record.sequence);
-        assert_eq!(kept.lowercase_masks, record.lowercase_masks);
-        assert_eq!(kept.placement(), record.placement());
-        assert_eq!(kept.archive_letters(), b"acgTTTTaaaCCgg");
-        assert_eq!(
-            kept.archive_lowercase_runs(),
-            vec![(0, 2), (7, 9), (12, 13)]
-        );
-        let whole = parse_fasta(b">q\nACGT\n", false, true).unwrap().remove(0);
-        assert_eq!(
-            whole.placement(),
-            RecordPlacement {
-                offset: 0,
-                length: 4
-            }
-        );
-    }
-}
+#[path = "input_range_tests.rs"]
+mod range_tests;
 
 #[cfg(test)]
-mod defline_tests {
-    use super::*;
-    use std::io::Cursor;
-
-    /// The records of `data` read as a nucleotide query file, with or without `-parse_deflines`.
-    fn read(data: &[u8], parse_deflines: bool) -> Result<Vec<FastaRecord>> {
-        let mut stream = FastaStream::new(Cursor::new(data.to_vec()));
-        stream.parse_deflines = parse_deflines;
-        parse_fasta_stream_keeping(
-            &mut stream,
-            false,
-            false,
-            100,
-            false,
-            None,
-            &mut |_| Ok(()),
-            &mut |_| Ok(()),
-        )
-    }
-
-    /// `read` with NCBI's data loaders on (`FastaStream::seq_id_role`): the titles and letters.
-    fn read_with_loaders(data: &[u8], parse_deflines: bool) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
-        let mut stream = FastaStream::new(Cursor::new(data.to_vec()));
-        stream.parse_deflines = parse_deflines;
-        stream.seq_id_role = Some("query");
-        let records = parse_fasta_stream_keeping(
-            &mut stream,
-            false,
-            false,
-            100,
-            false,
-            None,
-            &mut |_| Ok(()),
-            &mut |_| Ok(()),
-        )?;
-        Ok(records
-            .into_iter()
-            .map(|record| (record.title, record.sequence))
-            .collect())
-    }
-
-    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:130-133
-    // ```c++
-    //     virtual CRef<CSeq_entry> ReadOneSeq(ILineErrorListener * pMessageListener) {
-    //
-    //         const string line = NStr::TruncateSpaces_Unsafe(*++GetLineReader());
-    //         if ( !line.empty() && isalnum(line.data()[0]&0xff) ) {
-    // ```
-    // With the data loaders on, BLASTX's reader refuses the first lines that the other programs'
-    // reader refuses, with that reader's text, also under `-parse_deflines` (the Seq-id is tried
-    // before `CFastaReader` reads); a first line that NCBI reads as FASTA, and a Seq-id after the
-    // first line, are read as with the data loaders off.
-    #[test]
-    fn a_first_line_ncbi_tries_as_a_seq_id_is_refused_as_the_shared_reader_refuses_it() {
-        use crate::blastinput::fasta_reader::{FastaInputSource, ReadError, ReaderConfig};
-        // The first lines, each before a record with LF line ends, and whole inputs: CR-only and
-        // CRLF line ends, and a file of the line alone without a line end.
-        let first_lines: [&[u8]; 9] = [
-            b"lcl|abc",
-            b"12345",
-            b"AB123456",
-            b"P12345",
-            b"gnl|db|x",
-            b"  lcl|abc  ",
-            b"lcl|abc\r",
-            b"\x0blcl|abc",
-            b"\x0c12345",
-        ];
-        let inputs = first_lines
-            .iter()
-            .map(|first| [*first, b"\n>q1 x\nACGTACGT\n"].concat())
-            .chain([
-                b"lcl|abc\r>q1 x\rACGTACGT\r".to_vec(),
-                b"12345\r\n>q1 x\r\nACGTACGT\r\n".to_vec(),
-                b"lcl|abc".to_vec(),
-            ]);
-        for data in inputs {
-            let config = ReaderConfig::query("BLASTX", false, true);
-            let expected =
-                match FastaInputSource::from_bytes(&data, config).next_sequence(&mut |_| Ok(())) {
-                    Err(ReadError::Unsupported(refusal)) => refusal.to_string(),
-                    other => panic!("{data:?}: {other:?}"),
-                };
-            assert!(
-                expected.contains("not supported by LOSAT's BLASTX"),
-                "{expected}"
-            );
-            for parse_deflines in [false, true] {
-                let error = read_with_loaders(&data, parse_deflines).unwrap_err();
-                assert_eq!(error.to_string(), expected, "{data:?}");
-            }
-            // With the data loaders off the line is data: the letters of a first record without a
-            // defline, or `CheckDataLine`'s error for a line that is not plausible data (`12345`).
-            match read(&data, false) {
-                Ok(records) => assert!(records[0].title.is_empty(), "{data:?}"),
-                Err(error) => assert!(error.is::<FastaParseError>(), "{data:?}: {error}"),
-            }
-        }
-        // The same with CR-only and CRLF line ends and without a line end: the line handed back
-        // keeps the reader's line ends and line numbers.
-        let fasta: [&[u8]; 10] = [
-            b"ACGTACGTAC\n>q1 x\nACGT\n",
-            b"ACGT ACGT\n>q1 x\nACGT\n",
-            b"\nlcl|abc\n>q1 x\nACGT\n",
-            b";c\nlcl|abc\n>q1 x\nACGT\n",
-            b">lcl|abc x\nACGT\n>q1 x\nACGT\n",
-            b"ACGTACGTAC\r>q1 x\rACGT\r",
-            b"ACGTACGTAC\r\n>q1 x\r\nACGT\r\n",
-            b"\r\nlcl|abc\r\n>q1 x\r\nACGT\r\n",
-            b"ACGTACGTAC",
-            b">q1 x",
-        ];
-        for data in fasta {
-            let without: Vec<_> = read(data, false)
-                .unwrap()
-                .into_iter()
-                .map(|record| (record.title, record.sequence))
-                .collect();
-            assert_eq!(read_with_loaders(data, false).unwrap(), without, "{data:?}");
-        }
-    }
-
-    // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:383-398
-    // ```c++
-    //         if (c == '!'  ||  c == '#' || c == ';') {
-    //             // no content, just a comment or blank line
-    //             continue;
-    //         } else if (need_defline) {
-    //             if (TestFlag(fDLOptional)) {
-    //                 ParseDefLine(">", pMessageListener);
-    //                 need_defline = false;
-    //             } else {
-    //                 const auto lineNum = LineNumber();
-    //                 GetLineReader().UngetLine();
-    //                 NCBI_THROW2(CObjReaderParseException, eNoDefline,
-    //                             "CFastaReader: Input doesn't start with"
-    //                             " a defline or comment around line " + NStr::NumericToString(lineNum),
-    //                              lineNum);
-    //             }
-    //         }
-    // ```
-    // Under -parse_deflines a gap line before any defline stops the read at its line, whatever
-    // its size or modifiers; without it, the gap line starts a record without a defline. A gap
-    // line inside a record is that record's letters either way.
-    #[test]
-    fn a_gap_line_before_any_defline_stops_a_parse_deflines_read() {
-        for (data, line) in [
-            (&b">?5\nACGT\n>r1\nACGT\n"[..], 1),
-            (b">?5", 1),
-            (b">?0\nACGT\n", 1),
-            (b">?abc\nACGT\n", 1),
-            (b">?unk100\n>?7\nACGT\n", 1),
-            (b"  >?5\r\nACGT\r\n", 1),
-            (b";c\n\n#x\n>?5\nACGT\n", 4),
-        ] {
-            let error = read(data, true).unwrap_err();
-            assert_eq!(
-                error.downcast_ref::<NoDeflineError>().map(|e| (e.0, e.to_string())),
-                Some((
-                    line,
-                    format!(
-                        "CFastaReader: Input doesn't start with a defline or comment around line {line}"
-                    )
-                )),
-                "{}",
-                String::from_utf8_lossy(data)
-            );
-        }
-        let records = read(b">?5\nACGT\n>r1\nACGT\n", false).unwrap();
-        assert_eq!(records.len(), 2);
-        assert_eq!(records[0].sequence, b"NNNNNACGT");
-        let records = read(b">r0\nAC\n>?5\nGT\n", true).unwrap();
-        assert_eq!(records.len(), 1);
-        assert_eq!(records[0].sequence, b"ACNNNNNGT");
-    }
-    // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:774-780
-    // ```c++
-    // void CFastaReader::ParseDataLine(
-    //     const TStr& s, ILineErrorListener * pMessageListener)
-    // {
-    //     if( NStr::StartsWith(s, ">?") ) {
-    //         ParseGapLine(s, pMessageListener);
-    //         return;
-    //     }
-    // ```
-    // BLASTX's reader reads a gap line as the reader of the other programs reads it
-    // (`fasta_reader::reader::gap_line_size`): the same letters, lower-case runs and warnings,
-    // whatever the size and the modifiers, before any defline, inside a record, as its last line
-    // and inside a lower-case run. NCBI 2.17.0 reads them so in all five programs (probe
-    // `ncbi-parity-20261019/SM/gapline`).
-    #[test]
-    fn a_gap_line_reads_as_the_reader_of_the_other_programs_reads_it() {
-        use crate::blastinput::fasta_reader::{
-            FastaInputSource, ParseErrorCode, ReadError, ReaderConfig,
-        };
-        let gaps: [&[u8]; 23] = [
-            b">?5",
-            b">? 5 ",
-            b">?0",
-            b">?abc",
-            b">?-5",
-            b">?+5",
-            b">?5abc",
-            b">?",
-            b">?unk",
-            b">?unk7",
-            b">?unk 7",
-            b">?99999999999",
-            b">?4294967296",
-            b">?5 [gap-type=short-arm]",
-            b">?5 [gap-type=bogus]",
-            b">?5 [linkage-evidence=paired-ends]",
-            b">?5 [gap-type=within scaffold][linkage-evidence=paired-ends]",
-            b">?5 [gap-type=short-arm][gap-type=centromere]",
-            b">?5 [foo=bar]",
-            b">?5 [gap-type",
-            b">?0 [gap-type=short-arm] x",
-            b">?5 [gap-type=caf\xe9]",
-            b">?5 [gap-type=a\0b] [linkage-evidence=pcr]",
-        ];
-        // BLASTX's records of `input` (a nucleotide query file, `-lcase_masking`): the letters with
-        // the lower-case runs in lower case, as the reader of the other programs gives them, and
-        // the warnings as BLASTX writes them.
-        let blastx = |input: &[u8]| {
-            let mut warnings = Vec::new();
-            let records = parse_fasta_stream_keeping(
-                &mut FastaStream::new(Cursor::new(input.to_vec())),
-                false,
-                true,
-                100,
-                false,
-                None,
-                &mut |_| Ok(()),
-                &mut |warning| {
-                    crate::algorithm::blastx::native::reader_warning(warning, &mut warnings)
-                },
-            )
-            .unwrap();
-            let letters: Vec<Vec<u8>> = records
-                .iter()
-                .map(|record| {
-                    let mut letters = record.sequence.to_ascii_uppercase();
-                    for &(left, right) in &record.lowercase_masks {
-                        letters[left as usize..=right as usize].make_ascii_lowercase();
-                    }
-                    letters
-                })
-                .collect();
-            (letters, warnings)
-        };
-        for gap in gaps {
-            for input in [
-                [gap, b"\nACGT\n>r1\nAC\n"].concat(),
-                [b">r0\nAC\n", gap, b"\nGT\n>r1\nAC\n"].concat(),
-                [b">r0\nAC\n", gap, b"\n>r1\nAC\n"].concat(),
-                [b">r0\nac\n", gap, b"\ngtAC\n>r1\nac\n>?2\n"].concat(),
-            ] {
-                let context = String::from_utf8_lossy(&input).into_owned();
-                let (letters, warnings) = blastx(&input);
-                let mut source = FastaInputSource::from_bytes(
-                    &input,
-                    ReaderConfig::query("BLASTX", false, false),
-                );
-                let (mut messages, mut expected) = (Vec::new(), Vec::new());
-                while !source.end() {
-                    match source.next_sequence(&mut |message: &[u8]| {
-                        messages.extend_from_slice(message);
-                        Ok(())
-                    }) {
-                        Ok(record) => expected.push(record.sequence),
-                        Err(ReadError::Parse {
-                            code: ParseErrorCode::Eof,
-                            ..
-                        }) => break,
-                        Err(error) => panic!("{context}: {error}"),
-                    }
-                }
-                assert_eq!(letters, expected, "{context}");
-                assert_eq!(warnings, messages, "{context}");
-            }
-        }
-        // NCBI 2.17.0's warnings and letters (`blastx -query` with `>?abc` inside a record, probe
-        // case `blastx.q.mid_abc.f6.sub`; `>?5 [gap-type=caf\xe9]` keeps its byte).
-        let (letters, warnings) = blastx(b">r0\nAC\n>?abc\nGT\n>r1\nAC\n>?5 [gap-type=caf\xe9]\n");
-        assert_eq!(letters, vec![b"ACNGT".to_vec(), b"ACNNNNN".to_vec()]);
-        assert_eq!(
-            warnings,
-            b"CFastaReader: Bad gap size at line 3\nCFastaReader: Problem parsing gap mods at line 3\nUnknown gap-type: caf\xe9\n"
-        );
-    }
-}
+#[path = "input_defline_tests.rs"]
+mod defline_tests;
 
 #[cfg(test)]
-mod query_settings_tests {
-    use super::*;
-
-    /// The directory of this test's files (removed at its end).
-    fn dir() -> std::path::PathBuf {
-        crate::utils::test_dir::temp_dir().join(format!(
-            "losat-blastx-query-settings-{}",
-            crate::utils::test_dir::process_id()
-        ))
-    }
-
-    /// A file of this test with the bytes `text`, open for reading.
-    fn file(tag: &str, text: &[u8]) -> std::fs::File {
-        std::fs::create_dir_all(dir()).unwrap();
-        let path = dir().join(tag);
-        std::fs::write(&path, text).unwrap();
-        std::fs::File::open(&path).unwrap()
-    }
-
-    /// The records of `stream`, of the query (`protein` false) or the subject role.
-    fn read(
-        stream: &mut FastaStream<crate::blastinput::input_files::InputFile>,
-        protein: bool,
-    ) -> Result<Vec<FastaRecord>> {
-        parse_fasta_stream_keeping(
-            stream,
-            protein,
-            false,
-            100,
-            false,
-            None,
-            &mut |_| Ok(()),
-            &mut |_| Ok(()),
-        )
-    }
-
-    // The read before the search reads as the search does (under `-parse_deflines` a first line
-    // that is not a defline is the reader's error) and adds its ids to a copy of the search's: a
-    // subject with the id of a query that only that read has read is not refused, and that read
-    // stops at a query with the id of a subject the search has read, as the search does.
-    #[test]
-    fn a_read_before_the_search_reads_as_the_search_and_keeps_the_search_ids() {
-        let settings = QueryStreamSettings {
-            program: crate::algorithm::blastx::args::ProgramName::BLASTX,
-            parse_deflines: true,
-            id_scope: Some(Default::default()),
-            strand: crate::report::archive::bioseq::SeqLocStrand::Both,
-            data_loaders: false,
-        };
-        let error = read(
-            &mut settings.stream_before_search(file("nodef", b"ACGT\n>q1 x\nACGT\n")),
-            false,
-        )
-        .unwrap_err();
-        assert!(error.is::<NoDeflineError>(), "{error}");
-        let queries = read(
-            &mut settings.stream_before_search(file("query", b">q1 x\nACGTACGT\n")),
-            false,
-        )
-        .unwrap();
-        assert_eq!(queries.len(), 1);
-        read(
-            &mut settings.stream(file("subject", b">q1 y\nMKVL\n")),
-            true,
-        )
-        .unwrap();
-        let error = read(
-            &mut settings.stream_before_search(file("again", b">q1 x\nACGTACGT\n")),
-            false,
-        )
-        .unwrap_err();
-        assert!(
-            error
-                .to_string()
-                .contains("a query and a subject record have the Seq-id lcl|q1"),
-            "{error}"
-        );
-        std::fs::remove_dir_all(dir()).unwrap();
-    }
-}
+#[path = "input_query_settings_tests.rs"]
+mod query_settings_tests;
 
 #[cfg(test)]
-mod standard_input_tests {
-    use super::*;
-    use crate::blastinput::input_files::InputFile;
-
-    // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:717-721 (`-` is `cin`) and
-    // c++/src/corelib/stream_utils.cpp:235-236 (a refill asks for `in_avail()` bytes), quoted at
-    // `fasta_reader::stream::InputBackend::of`.
-    /// BLASTX's and RPSTBLASTN's query stream reads standard input as NCBI reads `cin`, by the
-    /// readers' one rule (`InputBackend::of`): the tail that the same bytes lose in a file named by
-    /// its path is kept (NCBI BLAST+ 2.17.0, blastx and rpstblastn: `Length=107` from a pipe and
-    /// from a redirected file, 85 from the path; fixture rows `blastx.stdin_q_lost_g55_pipe`,
-    /// `blastx.stdin_q_lost_g55_file`, `db.rpstbn.g55.*`).
-    #[test]
-    fn standard_input_keeps_the_tail_that_a_named_file_loses() {
-        let text = b">first\r\nTC-TTGGCTCAATCCTAGGTGGGCATGTTTCCTAATGCCC\rTT-TTTAACGTGAGGGTTCGCGTTTTTATCCCACCTAGC\r\r\nACGTACGT\n-ACGTACGTACGTACGTACGTAC";
-        let path = crate::utils::test_dir::temp_dir().join(format!(
-            "losat-blastx-standard-input-{}",
-            crate::utils::test_dir::process_id()
-        ));
-        std::fs::write(&path, text).unwrap();
-        let lengths = |input: InputFile| {
-            let mut stream = FastaStream::from_file(input);
-            let records = parse_fasta_stream_keeping(
-                &mut stream,
-                false,
-                false,
-                usize::MAX,
-                false,
-                None,
-                &mut |_| Ok(()),
-                &mut |_| Ok(()),
-            )
-            .unwrap();
-            records
-                .iter()
-                .map(|record| record.sequence.len())
-                .collect::<Vec<_>>()
-        };
-        let named = lengths(InputFile::from(std::fs::File::open(&path).unwrap()));
-        let standard_input = lengths(InputFile::as_standard_input(
-            std::fs::File::open(&path).unwrap(),
-        ));
-        std::fs::remove_file(&path).unwrap();
-        assert_eq!(named, vec![85]);
-        assert_eq!(standard_input, vec![107]);
-    }
-}
+#[path = "input_standard_input_tests.rs"]
+mod standard_input_tests;

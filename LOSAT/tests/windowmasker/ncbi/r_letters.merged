@@ -1,0 +1,72 @@
+>t_lower some description
+248 - 261
+498 - 512
+1015 - 1029
+2431 - 2445
+2773 - 2785
+3318 - 3331
+3369 - 3389
+3540 - 3560
+3850 - 3864
+4502 - 4516
+4634 - 4654
+4871 - 4883
+5035 - 5050
+5218 - 5239
+5273 - 5312
+5397 - 5411
+5848 - 5861
+5891 - 5904
+>t_nrun
+248 - 261
+498 - 512
+1015 - 1029
+2431 - 2445
+2773 - 2785
+3318 - 3331
+3369 - 3389
+3540 - 3560
+3850 - 3864
+4502 - 4516
+4634 - 4654
+4871 - 4883
+5035 - 5050
+5218 - 5239
+5273 - 5312
+5397 - 5411
+5848 - 5861
+5891 - 5904
+FASTA-Reader: Ignoring invalid residues at position(s): On line 244: 15
+FASTA-Reader: Ignoring invalid residues at position(s): On line 247: 32
+FASTA-Reader: Ignoring invalid residues at position(s): On line 250: 49
+FASTA-Reader: Ignoring invalid residues at position(s): On line 293: 30
+FASTA-Reader: Ignoring invalid residues at position(s): On line 296: 47
+FASTA-Reader: Ignoring invalid residues at position(s): On line 300: 4
+>t_iupac
+248 - 261
+498 - 512
+1015 - 1029
+2430 - 2444
+2771 - 2783
+3315 - 3328
+3366 - 3386
+3537 - 3557
+3847 - 3861
+4499 - 4513
+4631 - 4651
+4868 - 4880
+5032 - 5047
+5215 - 5236
+5270 - 5309
+5393 - 5407
+5842 - 5855
+5885 - 5898
+FASTA-Reader: Start of first data line in seq is about 100% ambiguous nucleotides (shouldn't be over 40%)
+>t_alln
+FASTA-Reader: Start of first data line in seq is about 100% ambiguous nucleotides (shouldn't be over 40%)
+>t_nstart
+328 - 341
+578 - 592
+1095 - 1109
+2511 - 2525
+2853 - 2865

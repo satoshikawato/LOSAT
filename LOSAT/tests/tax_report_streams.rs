@@ -199,24 +199,9 @@ fn under_fsize(command: &Command, room: u64, stdout: Stdio) -> std::process::Out
         };
     }
     let mut output = limited.output().expect("run LOSAT CLI under prlimit");
-    // An instrumented build (cargo llvm-cov, the nightly coverage jobs) writes its profile at the
-    // exit, where the same limit refuses it ("LLVM Profile Error: Failed to write file ...: File
-    // too large"). That line is the instrumentation's, not LOSAT's: it is not compared.
-    if std::env::var_os("LLVM_PROFILE_FILE").is_some() {
-        output.stderr = without_profile_errors(&output.stderr);
-    }
+    // The same limit refuses an instrumented build's profile: not compared.
+    output.stderr = crate::llvm_profile::without_profile_errors(&output.stderr);
     output
-}
-
-/// `stderr` without the lines of LLVM's profile runtime ("LLVM Profile Error: ...").
-#[cfg(target_os = "linux")]
-fn without_profile_errors(stderr: &[u8]) -> Vec<u8> {
-    stderr
-        .split_inclusive(|&byte| byte == b'\n')
-        .filter(|line| !line.starts_with(b"LLVM Profile Error: "))
-        .flatten()
-        .copied()
-        .collect()
 }
 
 /// The bytes of standard output and standard error of `command`, in one pipe (as `2>&1 | cat`),

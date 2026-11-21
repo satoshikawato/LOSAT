@@ -72,7 +72,7 @@ def test_a_path_is_not_an_input_until_it_is_named_one():
 
 
 def test_a_fasta_error_is_the_readers():
-    with pytest.raises(InputError, match="BLAST query error"):
+    with pytest.raises(InputError, match="LOSAT query error"):
         hsps(Sequences.from_text("xyz{}[]|~`^&*()=+\n"), Sequences.from_text(FASTA_TEXT))
 
 

@@ -457,7 +457,7 @@ fn xmlhelp_version(out: &[u8], text: &[u8]) -> Option<usize> {
     }
     let before = out[..out.len() - 1].strip_suffix(b"</name>")?;
     let name = rfind(before, b"<name>")?;
-    if before[name..].iter().any(|b| *b == b'\n')
+    if before[name..].contains(&b'\n')
         || before[name + 1..].contains(&b'<')
         || !line_end(&before[..name])
     {

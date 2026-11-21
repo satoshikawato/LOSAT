@@ -690,6 +690,7 @@ fn the_hsps_of_a_subject_whose_load_throws_are_left_out() {
 /// lookup, which the organism report's `catch` takes as a taxid not found: no row, every HSP
 /// widens the columns, and no error (NCBI BLAST+ 2.17.0 writes the same report as with a taxid
 /// that is not found: review 1 of line WQA D18b, L1, `-subject -outfmt 18`).
+#[cfg(unix)]
 #[test]
 fn a_taxonomy_file_that_does_not_open_leaves_every_hsp_out() {
     use std::os::unix::fs::PermissionsExt;

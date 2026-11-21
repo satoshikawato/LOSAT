@@ -231,17 +231,14 @@ impl SubjectSetNumbers {
         lookup_protein_gumbel_params(spec, self.gumbel_db_length(total_nt))
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_multiseq.cpp:245-266
     /// `BlastSeqSrcGetAvgSeqLen` in nucleotides: a database's (`DatabaseNumbers::average`), or the
-    /// FASTA subjects' total over their number (NCBI's `Uint4`, given back as the `Int4` of the
-    /// sequence source's interface).
+    /// FASTA subjects' (`stats::setup::fasta_average_length`).
     pub(super) fn average_subject_length(&self, subjects: &SubjectLetters<'_>) -> i32 {
         match self.database {
             Some(database) => database.average,
-            None => match subjects.count() {
-                0 => 0,
-                count => (self.total_nt(subjects) / count as i64) as u32 as i32,
-            },
+            None => {
+                crate::stats::setup::fasta_average_length(self.total_nt(subjects), subjects.count())
+            }
         }
     }
 

@@ -283,6 +283,19 @@ pub(crate) fn setup_subject_length(
     (min_subject_length != 0).then_some(min_subject_length as i32)
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_multiseq.cpp:245-266
+/// `BlastSeqSrcGetAvgSeqLen` of a set of FASTA subjects (NCBI's multi-sequence source): their
+/// total length `total` over their number `count`, kept in NCBI's `Uint4` and given back as the
+/// `Int4` of the sequence source's interface (the low 32 bits of the quotient); 0 for no
+/// subject. A database's average is the database's own (`DatabaseNumbers::average`). The one
+/// owner for BLASTX and TBLASTN.
+pub(crate) fn fasta_average_length(total: i64, count: usize) -> i32 {
+    match count {
+        0 => 0,
+        count => (total / count as i64) as u32 as i32,
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:755-760
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_message.c:242-248
 // `BLAST_GapAlignSetUp` returns the status after the "too short" test (blast_setup.c:982-987):

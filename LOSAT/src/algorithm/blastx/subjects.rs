@@ -102,7 +102,7 @@ impl<'a> Subjects<'a> {
                     count: i32::try_from(count).unwrap_or(i32::MAX),
                     gumbel_total: total,
                     shortest,
-                    average: (total / count.max(1)) as i32,
+                    average: crate::stats::setup::fasta_average_length(total, self.len()),
                     request_count: i32::try_from(count).unwrap_or(i32::MAX),
                 }
             }

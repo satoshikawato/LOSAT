@@ -68,6 +68,7 @@ pub mod writer;
 #[cfg(test)]
 mod tests;
 
+use crate::wording::{DATABASE_CREATION_ERROR, DATABASE_ERROR, OPTIONS_ERROR};
 use std::path::PathBuf;
 
 use crate::ncbi_exception::NcbiException;
@@ -143,15 +144,13 @@ impl WriteDbError {
     /// `std::string`.
     pub fn message(&self) -> Vec<u8> {
         let text = |prefix: &str, message: &[u8]| [prefix.as_bytes(), message].concat();
+        // LOSAT's prefixes (`crate::wording`) and a space, as NCBI's `BLAST ... error: `.
+        let losat = |prefix: &str, message: &[u8]| [prefix.as_bytes(), b" ", message].concat();
         match self {
-            WriteDbError::Creation(message) => {
-                text("BLAST Database creation error: ", message.as_bytes())
-            }
-            WriteDbError::CreationBytes(message) => {
-                text("BLAST Database creation error: ", message)
-            }
-            WriteDbError::Options(message) => text("BLAST options error: ", message.as_bytes()),
-            WriteDbError::Database(message) => text("BLAST Database error: ", message.as_bytes()),
+            WriteDbError::Creation(message) => losat(DATABASE_CREATION_ERROR, message.as_bytes()),
+            WriteDbError::CreationBytes(message) => losat(DATABASE_CREATION_ERROR, message),
+            WriteDbError::Options(message) => losat(OPTIONS_ERROR, message.as_bytes()),
+            WriteDbError::Database(message) => losat(DATABASE_ERROR, message.as_bytes()),
             // `what()` ends with a line feed and the message gets one more: the report ends
             // with an empty line.
             WriteDbError::Exception(e) => text("Error: ", &e.what()),

@@ -1953,18 +1953,6 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
             args.evalue
         );
     }
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:43-70 (the
-    // preliminary hit list size through NCBI's `int`; `blastn/hsp.rs`)
-    // A hit list size whose preliminary size is not positive crashes NCBI.
-    // An ungapped search takes the size of NCBI's ungapped case
-    // (`call_setup::prelim_cutoffs`, `get_prelim_hitlist_size`).
-    crate::algorithm::blastn::hsp::check_prelim_hitlist_size(
-        args.max_target_seqs,
-        args.max_target_seqs_given,
-        args.comp_based_stats.is_enabled(),
-        !args.ungapped,
-        program,
-    )?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1486-1487
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:678-686
     // `-use_sw_tback` (item X4): BLASTP runs NCBI's Smith-Waterman redo with composition-based
@@ -2291,7 +2279,7 @@ fn write_blastp_outfmt7_header<W: Write>(
     batch_skipped: bool,
     iteration: Option<u32>,
 ) -> std::io::Result<()> {
-    let version_str = crate::NCBI_BLAST_VERSION;
+    let version_str = crate::wording::REPORT_VERSION;
     writeln!(
         writer,
         "# {} {}",
@@ -4260,7 +4248,10 @@ pub fn run(
     // theirs (probe F04 of line DI-8), and a list error leaves no `-out`, only the error archive
     // that NCBI's `PrintErrorArchive` writes for outfmt 11 (probe E of line DI-8).
     let list = match &args.db {
-        Some(_) => match args.db_filter.resolve(&settings, &mut *diagnostics) {
+        Some(_) => match args
+            .db_filter
+            .resolve(&settings, args.app.ncbi_name(), &mut *diagnostics)
+        {
             Ok(list) => list,
             Err(error) => {
                 write_run_error_archive(&args, archive.as_ref(), &error);
@@ -5189,9 +5180,9 @@ fn search_database(
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
     // The handler of the database arguments reads the list before the other handlers (`run`).
-    let list = args
-        .db_filter
-        .resolve(&settings, &mut *outputs.diagnostics)?;
+    let list =
+        args.db_filter
+            .resolve(&settings, args.app.ncbi_name(), &mut *outputs.diagnostics)?;
     // `-out` (`run_to_file`) is made where the command line opens it (`run`).
     outputs.open_out()?;
     args.matrix_search = Some(settings.matrix_search.clone());
@@ -7344,7 +7335,7 @@ fn write_pairwise_prologs(
             let mut writer = format.sink.open()?;
             crate::report::pairwise::write_blastp_pairwise_prolog(
                 &mut writer,
-                crate::NCBI_BLAST_VERSION,
+                crate::wording::REPORT_VERSION,
                 args.app.ncbi_name(),
                 blastp_database_name(args, subject_label).as_bytes(),
                 num_sequences,
@@ -7444,7 +7435,7 @@ fn write_reports_without_queries(
         match outfmt {
             OutputFormat::Pairwise => {
                 let report = BlastpPairwiseReport {
-                    version: crate::NCBI_BLAST_VERSION.to_string(),
+                    version: crate::wording::REPORT_VERSION.to_string(),
                     database_name: blastp_database_name(args, subject_label).into(),
                     database_num_sequences: num_sequences,
                     database_total_letters: total_db_len,
@@ -7482,6 +7473,7 @@ fn write_reports_without_queries(
                     protein_matrix: args.scoring.matrix,
                     sort: args.sort,
                     view: view.unwrap_or_default(),
+                    unreadable_query: None,
                 };
                 write_blastp_pairwise_report(
                     &[],

@@ -25,7 +25,7 @@ fn a_subject_without_a_first_defline_is_the_input_error_of_get_all_seqs() {
         (native.exit, native.message.as_slice()),
         (
             1,
-            b"BLAST query/options error: Query input doesn't start with a defline or comment, \
+            b"LOSAT query/options error: Query input doesn't start with a defline or comment, \
                   line 4\0\nPlease refer to the LOSAT user manual.\n"
                 .as_slice()
         )
@@ -40,7 +40,7 @@ fn a_subject_without_a_first_defline_is_the_input_error_of_get_all_seqs() {
     assert_eq!(
         texts(&subject),
         [
-            b"BLAST query/options error: Query input doesn't start with a defline or comment, line 4".to_vec(),
+            b"LOSAT query/options error: Query input doesn't start with a defline or comment, line 4".to_vec(),
             b"Please refer to the LOSAT user manual.".to_vec(),
         ]
     );
@@ -50,7 +50,7 @@ fn a_subject_without_a_first_defline_is_the_input_error_of_get_all_seqs() {
         (native.exit, native.message.as_slice()),
         (
             1,
-            b"BLAST query error: CFastaReader: Input doesn't start with a defline or comment \
+            b"LOSAT query error: CFastaReader: Input doesn't start with a defline or comment \
                   around line 4\n"
                 .as_slice()
         )
@@ -59,7 +59,7 @@ fn a_subject_without_a_first_defline_is_the_input_error_of_get_all_seqs() {
     let other = subject_input_error(FastaParseError("CFastaReader: x".into()).into());
     assert_eq!(
         other.downcast_ref::<NativeError>().unwrap().message,
-        b"BLAST query error: CFastaReader: x\n"
+        b"LOSAT query error: CFastaReader: x\n"
     );
 }
 
@@ -194,6 +194,6 @@ fn a_database_error_of_catch_all_is_no_engine_error() {
     assert_eq!(error.exit, 2);
     assert_eq!(
         error.message,
-        b"BLAST Database error: DB contains no accession info.\n"
+        b"LOSAT database error: DB contains no accession info.\n"
     );
 }

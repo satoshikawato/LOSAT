@@ -94,7 +94,11 @@ pub(crate) fn print(program: &str, refused: impl Fn(&str) -> bool) -> Option<Str
         }
         out.push_str(line);
     }
-    Some(out.replace("<dependencies>\n</dependencies>\n", ""))
+    // The description states LOSAT's version (`Protein-Protein BLAST (LOSAT 0.2.0)`).
+    Some(
+        crate::wording::losat_text(&out.replace("<dependencies>\n</dependencies>\n", ""))
+            .into_owned(),
+    )
 }
 
 /// The tag (`key` or `flag`) and the name of the argument whose element starts at `line`

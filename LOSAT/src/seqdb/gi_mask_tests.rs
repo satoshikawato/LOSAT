@@ -147,13 +147,20 @@ fn damaged_index_files() {
     empty_desc[32] = 0;
     let error = open(&empty_desc);
     assert!(
-        matches!(&error, SeqDbError::Integrity { .. } | SeqDbError::Format { .. }),
+        matches!(
+            &error,
+            SeqDbError::Integrity { .. } | SeqDbError::Format { .. }
+        ),
         "{error}"
     );
     std::fs::remove_file(dir.join("x.gno")).unwrap();
     std::fs::write(dir.join("x.gni"), &good).unwrap();
     assert_eq!(
-        GiMaskFiles::open("x", &search).map(|_| ()).unwrap_err().ncbi_message().as_deref(),
+        GiMaskFiles::open("x", &search)
+            .map(|_| ())
+            .unwrap_err()
+            .ncbi_message()
+            .as_deref(),
         Some("Could not open gi-mask index files.")
     );
 }
@@ -163,7 +170,13 @@ fn damaged_index_files() {
 #[test]
 fn missing_data_volume_is_the_memory_map_error() {
     let dir = temp_dir("novol");
-    for file in ["big.gni", "big.gno", "big.00.gnd", "big.02.gnd", "big.03.gnd"] {
+    for file in [
+        "big.gni",
+        "big.gno",
+        "big.00.gnd",
+        "big.02.gnd",
+        "big.03.gnd",
+    ] {
         std::fs::copy(fixture("bigmax").join(file), dir.join(file)).unwrap();
     }
     let search = SearchPath::new(&dir, None, None).unwrap();

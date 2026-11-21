@@ -661,9 +661,11 @@ impl MaskAlgorithms {
     /// masks the id of the `MASKLIST` name (`GiMasks::algorithm_id`, whose text lists them).
     pub fn id_of(&self, name: &str) -> Result<i32, String> {
         match &self.kind {
-            AlgorithmsKind::Columns(table) => table.desc_to_id.get(name).copied().ok_or_else(|| {
-                "Cannot find string algorithm id in algorithm map.".to_string()
-            }),
+            AlgorithmsKind::Columns(table) => table
+                .desc_to_id
+                .get(name)
+                .copied()
+                .ok_or_else(|| "Cannot find string algorithm id in algorithm map.".to_string()),
             AlgorithmsKind::Gi(masks) => masks.algorithm_id(name),
         }
     }
@@ -796,7 +798,6 @@ impl MaskAlgorithms {
         }
         Ok(out)
     }
-
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2344-2378

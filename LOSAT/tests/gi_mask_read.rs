@@ -135,7 +135,10 @@ fn run(root: &Path, case: &Case, extra: &[&str]) -> (i32, Vec<u8>, Vec<u8>) {
         .args(extra);
     for (name, _) in std::env::vars_os() {
         let name = name.to_string_lossy().into_owned();
-        if name.starts_with("LOSAT_") || name.starts_with("NCBI_CONFIG") || name == "BLASTDB" {
+        // `LOSAT_BLASTX_WORKER_LOG` stays: a binary built with the `blastx-worker-probe` feature
+        // (`cargo test --all-features`) writes its worker log there.
+        let losat = name.starts_with("LOSAT_") && name != "LOSAT_BLASTX_WORKER_LOG";
+        if losat || name.starts_with("NCBI_CONFIG") || name == "BLASTDB" {
             command.env_remove(name);
         }
     }
@@ -182,14 +185,29 @@ fn without_dates(bytes: &[u8]) -> Vec<u8> {
         .into_bytes()
 }
 
+/// The first line where `got` and `want` differ: its number, LOSAT's line and NCBI's.
+fn first_difference(got: &[u8], want: &[u8]) -> String {
+    let got = String::from_utf8_lossy(got);
+    let want = String::from_utf8_lossy(want);
+    let mut got_lines = got.split_inclusive('\n');
+    let mut want_lines = want.split_inclusive('\n');
+    for line in 1.. {
+        match (got_lines.next(), want_lines.next()) {
+            (None, None) => break,
+            (a, b) if a != b => return format!("line {line}: {a:?} (NCBI {b:?})"),
+            _ => {}
+        }
+    }
+    "equal".to_string()
+}
+
 fn describe(got: &(i32, Vec<u8>, Vec<u8>), want: &(i32, Vec<u8>, Vec<u8>)) -> String {
     format!(
-        "rc {} (NCBI {}), stdout equal {}, stderr {:?} (NCBI {:?})",
+        "rc {} (NCBI {}), stdout {}, stderr {}",
         got.0,
         want.0,
-        got.1 == want.1,
-        String::from_utf8_lossy(&got.2),
-        String::from_utf8_lossy(&want.2)
+        first_difference(&got.1, &want.1),
+        first_difference(&got.2, &want.2)
     )
 }
 

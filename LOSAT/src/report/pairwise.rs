@@ -2085,7 +2085,8 @@ fn write_blastp_query_footer_spacing<W: crate::report::ostream::ReportWrite>(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2266-2268
-// libstdc++ (GCC 13): include/c++/13/ostream:661-670
+// Observed, not taken from a library's source: inserting a null `const char*` into NCBI's
+// stream sets `badbit` (see `write_matrix_line`).
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_rps_options.cpp:96-103
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:73-83 (cited at
 // `rps_search::volumes::search_sets`: `CreateRpsStructures` names the database's matrix in the

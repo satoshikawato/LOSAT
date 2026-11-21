@@ -952,7 +952,7 @@ fn write_tabular(
             .map(|list| list.hsps.hsps.len())
             .sum();
         if comments {
-            writeln!(writer, "# {program} {}", crate::NCBI_BLAST_VERSION)?;
+            writeln!(writer, "# {program} {}", crate::wording::REPORT_VERSION)?;
             // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1305-1308
             // The title's bytes (`write_outfmt7_query_line`).
             crate::report::outfmt6::write_outfmt7_query_line(writer, &query.query_line())?;
@@ -1427,7 +1427,7 @@ fn write_pairwise(
         anyhow::bail!("TBLASTN pairwise Spouge parameters are unavailable");
     }
     let report = BlastpPairwiseReport {
-        version: crate::NCBI_BLAST_VERSION.into(),
+        version: crate::wording::REPORT_VERSION.into(),
         database_name: shown.name().into(),
         database_num_sequences: num_sequences,
         database_total_letters: total_nt,

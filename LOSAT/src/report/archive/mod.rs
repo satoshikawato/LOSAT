@@ -27,6 +27,9 @@ pub mod writer;
 #[cfg(test)]
 mod option_walk_tests;
 
+use crate::wording::{
+    DATABASE_ERROR, ENGINE_ERROR, OPTIONS_ERROR, QUERY_ERROR, QUERY_OPTIONS_ERROR,
+};
 use std::borrow::Cow;
 use std::ffi::OsStr;
 use std::io::Write;
@@ -751,11 +754,11 @@ pub fn error_lines(error: &anyhow::Error, subject_file: bool) -> Option<Vec<Mess
     // (An exception report, `Error: ` and NCBI's `what()` in LOSAT's words, has exit status 255:
     // `catch_all` below, `cli::NativeError::exception`.)
     const PREFIXES: [&[u8]; 5] = [
-        b"BLAST query error:",
-        b"BLAST Database error:",
-        b"BLAST engine error:",
-        b"BLAST options error:",
-        b"BLAST query/options error:",
+        QUERY_ERROR.as_bytes(),
+        DATABASE_ERROR.as_bytes(),
+        ENGINE_ERROR.as_bytes(),
+        OPTIONS_ERROR.as_bytes(),
+        QUERY_OPTIONS_ERROR.as_bytes(),
     ];
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:252-255
     // The report stream's failure (`ostream::ReportStream::finish`): NCBI's handler saves the

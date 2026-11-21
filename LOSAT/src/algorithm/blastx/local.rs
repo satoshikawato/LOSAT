@@ -1060,7 +1060,7 @@ fn search_database(
     // (`native::run_inner`).
     let list = args
         .db_filter
-        .resolve(&settings, &mut *outputs.diagnostics)?;
+        .resolve(&settings, "blastx", &mut *outputs.diagnostics)?;
     // `-out` (`run_to_file`) is made where the command line opens it (`native::run`).
     outputs.open_out()?;
     check_filtering(args)?;

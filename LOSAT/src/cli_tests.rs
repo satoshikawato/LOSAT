@@ -12,7 +12,7 @@ fn catch_all_reports_a_seqdb_exception_as_a_database_error() {
     assert_eq!(error.exit, 2);
     assert_eq!(
         error.message,
-        b"BLAST Database error: DB contains no accession info.\n"
+        b"LOSAT database error: DB contains no accession info.\n"
     );
     let other = NcbiException::new(
         ThrowSite {
@@ -49,7 +49,7 @@ fn blastn_argv(words: Vec<OsString>) -> Vec<OsString> {
 // No unit test calls `post_errors_in_run`.
 #[test]
 fn a_run_outside_main_posts_no_error_text() {
-    let text = "BLAST query error: Could not construct seq-id from 'gi|abc'\n";
+    let text = "LOSAT query error: Could not construct seq-id from 'gi|abc'\n";
     let error: anyhow::Error = NativeError {
         exit: 1,
         message: text.to_string().into(),

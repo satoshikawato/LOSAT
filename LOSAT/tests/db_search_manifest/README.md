@@ -32,7 +32,8 @@ and for the rows of outfmt 13 and 14 and psiblast's PSSM files two more, files a
   `<program>.device.tsv`): the report goes to a device that fails, and the expectation is NCBI's exit status and
   stderr and the bytes that reached the device (`<row_id>.out`). MODE `stdout-full`: standard output is /dev/full;
   `out-full`: `-out /dev/full`; `fsize=N`: `-out` a temporary file under `RLIMIT_FSIZE` N, SIGXFSZ ignored (the
-  write past N bytes fails with EFBIG). Inputs: each program's base search (blastn nslice, blastp prot_v5, tblastn
+  write past N bytes fails with EFBIG); `check` gives LOSAT's file N plus the bytes that LOSAT's words add to NCBI's
+  frozen bytes (`device_growth`: LOSAT's version statement moves the same point of the report that far). Inputs: each program's base search (blastn nslice, blastp prot_v5, tblastn
   tslice, blastx bslice, tblastx xslice; formats 0, 5-12, 15-18 where LOSAT dev and NCBI agree without a device; SAM
   only for blastn) with stdout-full, out-full and `fsize` of half the report (at most 100000) and of its size minus 1
   (where the report is at most 100001 bytes), and for outfmt 0 inside the last query footer, and just inside and 20

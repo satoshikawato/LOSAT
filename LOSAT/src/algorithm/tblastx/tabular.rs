@@ -39,7 +39,7 @@ use crate::utils::genetic_code::GeneticCode;
 
 const PROGRAM: &str = "TBLASTX";
 /// The `# TBLASTX 2.17.0+` line of outfmt 7 (`NStr::ToUpper(m_Program) + " " + version`).
-const PROGRAM_VERSION: &str = concat!("TBLASTX ", crate::ncbi_blast_version!());
+const PROGRAM_VERSION: &str = concat!("TBLASTX ", crate::wording::report_version!());
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:970-986
 /// The fields that make that block read the two rows, from which it counts the identities and

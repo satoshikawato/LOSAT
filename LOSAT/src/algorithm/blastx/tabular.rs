@@ -38,10 +38,10 @@ use crate::report::tabular::{
 };
 
 /// outfmt 7's `# BLASTX 2.17.0+` line.
-const PROGRAM_VERSION: &str = concat!("BLASTX ", crate::ncbi_blast_version!());
+const PROGRAM_VERSION: &str = concat!("BLASTX ", crate::wording::report_version!());
 
 /// outfmt 7's line of an RPSTBLASTN run (`ResolvedOptions::rpstblastn`).
-const RPSTBLASTN_VERSION: &str = concat!("RPSTBLASTN ", crate::ncbi_blast_version!());
+const RPSTBLASTN_VERSION: &str = concat!("RPSTBLASTN ", crate::wording::report_version!());
 
 /// The program line of the run's tabular reports (`args::ProgramName`).
 fn program_version(program: super::args::ProgramName) -> &'static str {

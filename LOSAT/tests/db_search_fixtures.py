@@ -53,8 +53,10 @@ LOSAT/tests/db_search (README.md there says how they were built).
   device that fails, and the expectation is NCBI's exit status and stderr and the bytes that reached the device,
   frozen as <row_id>.out. MODE `stdout-full`: standard output is /dev/full (nothing reaches it); `out-full`:
   `-out /dev/full`; `fsize=N`: `-out` a file of a temporary directory under `RLIMIT_FSIZE` N with SIGXFSZ ignored
-  (the write past N bytes fails with EFBIG, as `prlimit --fsize`), whose bytes are frozen. Standard output must be
-  empty in the last two (`run_on_device`). `check --library` skips these rows (`library-skip`): the library's
+  (the write past N bytes fails with EFBIG, as `prlimit --fsize`), whose bytes are frozen; `check` limits LOSAT's
+  file to N plus the bytes that LOSAT's words add to those bytes (`device_growth`: LOSAT's version statement,
+  `BLASTN (LOSAT 0.2.0)` where NCBI's is `BLASTN 2.17.0+`, moves the same point of the report that far). Standard
+  output must be empty in the last two (`run_on_device`). `check --library` skips these rows (`library-skip`): the library's
   writers have no NCBI stream; outside Linux they are `device-skip`.
 - a `ncbi` row whose `covers` cell has `ncbi-copies: PATH [NAME=VALUE ...]` (up to a ` | ` or the end; a "copy row",
   `copies_cell`): the expectation is made from NCBI's run on the oracle query file PATH (relative to LOSAT/) in place
@@ -474,21 +476,28 @@ def is_sam_outfmt(outfmt: str) -> bool:
     return outfmt.split()[:1] == ["17"]
 
 
-_SAM_PG = b"\n@PG\tID:0\tVN:2.17.0+"
+# The @PG line's start before its CL tag: NCBI's version (frozen bytes) or LOSAT's (LOSAT's output and
+# NCBI's bytes in LOSAT's words, `losat_wording`).
+_SAM_PGS = tuple(b"\n@PG\tID:0\tVN:" + version for version in (losat_wording.NCBI_VERSION, losat_wording.LOSAT_VERSION))
 
 
 def strip_sam_cl(data: bytes) -> bytes:
     """The SAM document without the CL tag of its @PG line: the bytes from the `\tCL:` that follows
-    `\n@PG\tID:0\tVN:2.17.0+` up to, not including, the first following `\tPN:blastn\n`.
+    `\n@PG\tID:0\tVN:2.17.0+` (NCBI's) or `\n@PG\tID:0\tVN:LOSAT 0.2.0` (LOSAT's) up to, not including,
+    the first following `\tPN:blastn\n`.
 
-    The one rule that the SAM (outfmt 17) rows of every fixture compare with, on the frozen NCBI bytes and on
-    LOSAT's (DECISIONS 7 of the outfmt line): LOSAT writes its own command line (its program path, the `blastn`
-    sub-command word and the arguments a harness adds, such as `-num_threads N`) where NCBI writes its argv.
-    Every other byte must be equal. A document without the tag (no command line) is returned as it is."""
-    head = data.find(_SAM_PG + b"\tCL:")
-    if head < 0:
+    The one rule that the SAM (outfmt 17) rows of every fixture compare with, on the frozen NCBI bytes (as
+    frozen, or in LOSAT's words) and on LOSAT's (DECISIONS 7 of the outfmt line): LOSAT writes its own command
+    line (its program path, the `blastn` sub-command word and the arguments a harness adds, such as
+    `-num_threads N`) where NCBI writes its argv. Every other byte must be equal. A document without the tag
+    (no command line) is returned as it is."""
+    for pg in _SAM_PGS:
+        head = data.find(pg + b"\tCL:")
+        if head >= 0:
+            break
+    else:
         return data
-    start = head + len(_SAM_PG)
+    start = head + len(pg)
     end = data.find(b"\tPN:blastn\n", start + len(b"\tCL:"))
     return data if end < 0 else data[:start] + data[end:]
 
@@ -944,10 +953,11 @@ def device_mode(row: dict[str, str]) -> str | None:
 
 
 def run_on_device(row: dict[str, str], command: list[str], env: dict[str, str],
-                  preexec: Callable[[], None] | None = None) -> subprocess.CompletedProcess:
+                  preexec: Callable[[], None] | None = None, growth: int = 0) -> subprocess.CompletedProcess:
     """The run of `command` with its report on the failing device of `row` (`device_mode`): its `stdout` is the bytes
     that reached the device (the file of `fsize=N`, else none), or a marker and the bytes where the run wrote to its
-    standard output although the device is `-out`."""
+    standard output although the device is `-out`. `growth`: the bytes that LOSAT's words add to the bytes NCBI's run
+    left on the `fsize=N` device (`device_growth`), by which LOSAT's limit is N + growth."""
     import resource  # POSIX: the device rows run on Linux
     import signal
 
@@ -963,7 +973,7 @@ def run_on_device(row: dict[str, str], command: list[str], env: dict[str, str],
                              env=env, preexec_fn=preexec)
         landed = b""
     elif mode is not None and mode.startswith("fsize="):
-        limit = int(mode.removeprefix("fsize="))
+        limit = int(mode.removeprefix("fsize=")) + growth
 
         def limited() -> None:
             if preexec is not None:
@@ -982,6 +992,17 @@ def run_on_device(row: dict[str, str], command: list[str], env: dict[str, str],
         landed = b"STANDARD OUTPUT:\n" + run.stdout
     run.stdout = landed
     return run
+
+
+def device_growth(row: dict[str, str], landed: bytes, losat_words: Callable[[bytes], bytes]) -> int:
+    """The bytes that LOSAT's words (`losat_words`: the mapping of NCBI's frozen output, AGENTS.md rule 8) add to the
+    bytes that NCBI's run left on the `fsize=N` device of `row` (`landed`, its frozen .out): LOSAT's report states
+    LOSAT's version where NCBI's states `2.17.0+` (`BLASTN (LOSAT 0.2.0)`, `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`
+    exception 14), so the same point of the report lies that many bytes further in LOSAT's, and `check` limits
+    LOSAT's file to N plus them: the run fails at the same point of the report as NCBI's, and the bytes on the
+    device are NCBI's in LOSAT's words. 0 for the other devices (nothing reaches them)."""
+    mode = device_mode(row) or ""
+    return len(losat_words(landed)) - len(landed) if mode.startswith("fsize=") else 0
 
 
 def format_number(row: dict[str, str]) -> str:
@@ -1170,6 +1191,17 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
         raise SystemExit(f"{row['row_id']}: a row with files reads no query from standard input")
     command = [str(losat), row["program"], *search_argv(row), "-num_threads", str(threads)]
     db_dir = inflate_rps(row["db"], rps_dir_token(row)) if rps_cell(row["db"]) is not None else None
+
+    def in_losat_words(ncbi: bytes, output: bool = True) -> bytes:
+        """NCBI's frozen bytes in LOSAT's words (AGENTS.md rule 8, `losat_wording`). A row that keeps the
+        database's directory as `{db_dir}` is mapped with this run's directory in the token's place, as
+        NCBI's run wrote it: the mapping re-wraps an ASN.1 text string by its length."""
+        words = losat_wording.losat_output_bytes if output else losat_wording.losat_bytes
+        if db_dir is None or not rps_dir_token(row):
+            return words(ncbi)
+        path = str(db_dir).encode()
+        return words(ncbi.replace(b"{db_dir}", path)).replace(path, b"{db_dir}")
+
     if db_dir is not None:
         try:
             run = run_search(command, row, cwd=ENGINE, timeout=TIMEOUT,
@@ -1188,14 +1220,15 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
                                        env=row_env(row, env), timeout=TIMEOUT)
         run = pssms.run
     elif device_mode(row):
-        run = run_on_device(row, command, row_env(row, env))
+        landed = (FROZEN / f"{frozen_id(row)}.out").read_bytes()
+        run = run_on_device(row, command, row_env(row, env), growth=device_growth(row, landed, in_losat_words))
     else:
         run = run_search(command, row, cwd=ENGINE, env=row_env(row, env), timeout=TIMEOUT)
     if row["kind"] == "losat-rejection":
         # The library reads the whole query before it searches: a reader error ends the call before
         # the batch that the command line refuses, with the reader's message.
-        if library and run.returncode != 0 and run.stdout == b"" and run.stderr.startswith(b"BLAST query error:") \
-                and expected_text(row).encode() not in run.stderr:
+        if library and run.returncode != 0 and run.stdout == b"" \
+                and run.stderr.startswith(losat_wording.QUERY_ERROR) and expected_text(row).encode() not in run.stderr:
             return "library-input-error", ""
         problems = []
         if status_differs(run.returncode, int(row["rc"]), library):
@@ -1208,8 +1241,8 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
             out = expected_stdout(row)
             if sha256(out) != row["stdout_sha256"] or len(out) != int(row["stdout_bytes"]):
                 problems.append("frozen .out does not match the manifest")
-            if run.stdout != out:
-                problems.append("stdout " + first_difference(out, run.stdout))
+            if run.stdout != in_losat_words(out):
+                problems.append("stdout " + first_difference(in_losat_words(out), run.stdout))
         elif run.stdout:
             problems.append(f"stdout is not empty ({len(run.stdout)} bytes)")
         if expected_text(row).encode() not in run.stderr:
@@ -1220,13 +1253,12 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
     out = (FROZEN / f"{frozen_id(row)}.out").read_bytes()
     err_path = FROZEN / f"{frozen_id(row)}.err"
     err = err_path.read_bytes() if row["stderr_sha256"] else b""
-    # LOSAT's words in NCBI's frozen bytes (AGENTS.md rule 8, `losat_wording`).
-    expected_out_losat = losat_wording.losat_output_bytes(out)
-    expected_err_losat = losat_wording.losat_bytes(err)
+    expected_out_losat = in_losat_words(out)
+    expected_err_losat = in_losat_words(err, output=False)
     # The library reads the whole query before it searches: a reader error ends the call there,
     # with the command line's message of it, before the reports of the batches before it.
     if library and run.returncode != 0 and int(row["rc"]) != 0 and run.stdout == b"" \
-            and run.stderr.startswith(b"BLAST query error:") and run.stderr in expected_err_losat:
+            and run.stderr.startswith(losat_wording.QUERY_ERROR) and run.stderr in expected_err_losat:
         return "library-input-error", ""
     # A copy row's expectation is the cut of its frozen whole NCBI output (`copy_row_problems`).
     problems = copy_row_problems(row) if copies_cell(row) is not None else []

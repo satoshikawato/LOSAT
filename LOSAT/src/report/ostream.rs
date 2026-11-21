@@ -1961,22 +1961,29 @@ fn side_file_failure(
         }
     }
     // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:899-907 (`COStreamBuffer::Flush`)
+    // NCBI's chain, written in LOSAT's words (`crate::wording::losat_bytes`: without the
+    // exceptions' classes and codes, `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` exception 12) by the
+    // run's standard error (`CliStderr`, tied to the report).
     let position = end;
     let chain = format!(
         "Error: (802.5) [{program}] CObjectOStream: error at byte {position}: stack is empty: \
          cannot close output stream\n\
-         Error: (CIOException::eFlush) [{program}] COStreamBuffer::Flush: failed\n\
-         Error: (CSerialException::eIoError) [{program}] byte {position}: cannot close output \
-         stream\n\
+         Error: ({FLUSH_FAILED}) [{program}] COStreamBuffer::Flush: failed\n\
+         Error: ({SERIAL_IO_ERROR}) [{program}] byte {position}: cannot close output stream\n\
          Error: (802.4) [{program}] Cannot close serializing output stream \
-         (CSerialException::eIoError) byte {position}: cannot close output stream\n"
+         ({SERIAL_IO_ERROR}) byte {position}: cannot close output stream\n"
     );
-    tie_standard_output()?;
-    let mut stderr = std::io::stderr();
-    stderr.write_all(chain.as_bytes())?;
+    let mut stderr = CliStderr::process();
+    stderr.write_all(&crate::wording::losat_bytes(chain.as_bytes()))?;
     stderr.flush()?;
     Ok(())
 }
+
+/// `GetType()::GetErrCodeString()` of the failed flush of a side file's object stream.
+const FLUSH_FAILED: &str = "CIOException::eFlush";
+
+/// `GetType()::GetErrCodeString()` of the serial stream's error of a failed close.
+const SERIAL_IO_ERROR: &str = "CSerialException::eIoError";
 
 /// `cerr.tie()`: before a write to standard error, the run's report on standard output writes
 /// what it holds (`ReportStream::standard_output`); a report in `-out` makes NCBI's writes so far

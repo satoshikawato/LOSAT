@@ -63,6 +63,8 @@ mod library_examples;
 mod library_out_taxdb;
 #[path = "../library_strategy.rs"]
 mod library_strategy;
+#[path = "../llvm_profile.rs"]
+mod llvm_profile;
 #[path = "../makeblastdb_failed_index.rs"]
 mod makeblastdb_failed_index;
 #[path = "../makeblastdb_ncbi_exceptions.rs"]

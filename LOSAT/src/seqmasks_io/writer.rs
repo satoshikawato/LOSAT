@@ -447,7 +447,8 @@ fn id_to_string(seq: &MaskedBioseq<'_>, parsed_id: bool) -> Result<Vec<u8>, Writ
 /// NCBI reference (598d8ae6): c++/src/objtools/seqmasks_io/mask_writer_fasta.cpp:57-101
 /// `text` is the definition line; it and the lines go to `out` a block of lines at a time
 /// (NCBI writes each line to its buffered stream), so the text of a record is never held
-/// whole.
+/// whole. Each line is copied whole and then masked in place ([`mask_line`]): the loop over
+/// the letters touches only the line, not the growing text.
 fn fasta_letters(
     iupac: &[u8],
     mask: &[(u32, u32)],
@@ -455,7 +456,42 @@ fn fasta_letters(
     mut text: Vec<u8>,
     out: &mut dyn Write,
 ) -> io::Result<()> {
+    const LINE: usize = 60;
     const BLOCK: usize = 1 << 16;
+    let mut imask = 0;
+    let mut pos = 0u64;
+    for letters in iupac.chunks(LINE) {
+        let at = text.len();
+        text.extend_from_slice(letters);
+        mask_line(&mut text[at..], pos, mask, &mut imask, hard_masking);
+        text.push(b'\n');
+        pos += letters.len() as u64;
+        if text.len() >= BLOCK {
+            out.write_all(&text)?;
+            text.clear();
+        }
+    }
+    out.write_all(&text)
+}
+
+/// NCBI's walk over the mask for the letters of one line, the first at `pos`: a letter at or
+/// past the start of interval `imask` is masked while within it; past its end, the walk takes
+/// the next interval (one step per letter) and masks the letter if it is within that one
+/// (NCBI's loop cited at [`fasta_letters`]).
+fn mask_line(
+    line: &mut [u8],
+    pos: u64,
+    mask: &[(u32, u32)],
+    imask: &mut usize,
+    hard_masking: bool,
+) {
+    // A letter before the start of interval `imask` changes neither itself nor `imask`, so a
+    // line that ends before that start is left as it is.
+    match mask.get(*imask) {
+        None => return,
+        Some(&(first, _)) if pos + line.len() as u64 <= u64::from(first) => return,
+        Some(_) => {}
+    }
     let masked = |letter: u8| {
         if hard_masking {
             b'N'
@@ -463,40 +499,24 @@ fn fasta_letters(
             letter.to_ascii_lowercase()
         }
     };
-    let mut imask = 0;
-    let mut line = 0;
-    for (i, &letter) in iupac.iter().enumerate() {
-        let i_pos = i as u64;
-        let mut letter = letter;
-        if let Some(&(first, second)) = mask.get(imask) {
+    let mut i_pos = pos;
+    for letter in line {
+        if let Some(&(first, second)) = mask.get(*imask) {
             if i_pos >= u64::from(first) {
                 if i_pos <= u64::from(second) {
-                    letter = masked(letter);
+                    *letter = masked(*letter);
                 } else {
-                    imask += 1;
-                    if let Some(&(first, second)) = mask.get(imask) {
+                    *imask += 1;
+                    if let Some(&(first, second)) = mask.get(*imask) {
                         if i_pos >= u64::from(first) && i_pos <= u64::from(second) {
-                            letter = masked(letter);
+                            *letter = masked(*letter);
                         }
                     }
                 }
             }
         }
-        text.push(letter);
-        line += 1;
-        if line == 60 {
-            text.push(b'\n');
-            line = 0;
-            if text.len() >= BLOCK {
-                out.write_all(&text)?;
-                text.clear();
-            }
-        }
+        i_pos += 1;
     }
-    if line > 0 {
-        text.push(b'\n');
-    }
-    out.write_all(&text)
 }
 
 #[cfg(test)]

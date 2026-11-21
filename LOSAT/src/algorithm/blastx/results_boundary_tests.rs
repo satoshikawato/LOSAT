@@ -77,3 +77,37 @@ fn pinned_c_heap_threshold_cutoff_tie_and_empty_pop() {
     }
     assert_eq!(actual, expected);
 }
+
+// `-use_sw_tback` in e-value mode (line RG item X4b-2): a window's query context indexes the batch's
+// heaps, one per query. Inside the array the heap's own answer: a full heap turns away a window that
+// is no better than its worst entry. Past the array an empty heap (approved exception 20 of
+// PD-LOSAT-NCBI-DEFECTS), which takes every window, whatever the heaps of the batch hold.
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1465-1474
+#[test]
+fn a_context_past_the_batch_tests_an_empty_heap() {
+    let full = || {
+        let mut heap = CompoHeap::new(1);
+        heap.insert(HeapEntry {
+            list: HspList {
+                query_index: 0,
+                oid: 0,
+                hsps: Vec::new(),
+                best_evalue: 0.1,
+            },
+            best_score: 50,
+        });
+        heap
+    };
+    let mut heaps = vec![full(), full()];
+    // Context 1 reads query 1's full heap: a worse window is turned away, a better one taken.
+    assert!(!CompoHeap::would_insert_at(&mut heaps, 1, 0.5, 40, 1));
+    assert!(CompoHeap::would_insert_at(&mut heaps, 1, 0.05, 60, 1));
+    // Contexts 2 to 11 (frames of the two queries past the array): an empty heap's answer.
+    for context in 2..12 {
+        assert!(
+            CompoHeap::would_insert_at(&mut heaps, context, 0.5, 40, 1),
+            "{context}"
+        );
+    }
+    assert!(heaps.iter().all(|heap| heap.entries.len() == 1));
+}

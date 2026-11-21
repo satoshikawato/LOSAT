@@ -721,6 +721,34 @@ impl CompoHeap {
             .iter()
             .all(|h| h.entries.len() >= h.threshold && h.worst <= h.cutoff && e > 5.0 * h.cutoff)
     }
+
+    /// The heap test of a Smith-Waterman window in e-value mode (`-use_sw_tback`, line RG item
+    /// X4b-2), the one owner of the heap a window's query context reads: NCBI tests the heap that
+    /// the window's query context `context` (6 x query + frame) indexes in the batch's array of
+    /// `heaps`, which holds one heap per query. Below the batch's query count that is the heap of
+    /// the batch's query number `context` (the window's own query only for context 0), whose
+    /// answer this is. At or past it NCBI reads its other memory; LOSAT tests an empty heap there,
+    /// which takes the window (approved exception 20 of PD-LOSAT-NCBI-DEFECTS, the Owner's
+    /// decision Q-HEAP=B of 2026-11-21): NCBI's result for the batch followed by five queries
+    /// without a hit per query, whose heaps are empty and inside the array.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:252-275
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1465-1474
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3282-3296
+    pub fn would_insert_at(
+        heaps: &mut [Self],
+        context: usize,
+        e: f64,
+        score: i32,
+        oid: usize,
+    ) -> bool {
+        match heaps.get_mut(context) {
+            Some(heap) => heap.would_insert(e, score, oid),
+            // An empty heap takes every window: it holds fewer entries than its threshold, the
+            // hit list size, which is at least 1.
+            None => true,
+        }
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:252-275

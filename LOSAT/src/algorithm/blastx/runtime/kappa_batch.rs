@@ -19,7 +19,7 @@ use super::{
 };
 #[cfg(feature = "parallel")]
 use super::{x_bx_par_rule, x_inner_serial, x_kappa_workers, x_speculate_match, XKappaWorker};
-use crate::algorithm::blastx::kappa::{sw_batch_failed, sw_endless, sw_heap_past};
+use crate::algorithm::blastx::kappa::{sw_batch_failed, sw_endless};
 use crate::algorithm::blastx::x_timing::{self, End as XEnd};
 use crate::algorithm::common::database::FetchMarks;
 use crate::core::composition_adjustment::smith_waterman_match::SwBatchStatus;
@@ -52,11 +52,11 @@ impl Runtime<'_> {
     /// one owner): a list whose subject the fetch excludes stays in the stream as a marker that
     /// clears it (`FetchMarks`); a failed last match fails the batch (`sw_batch_failed`). In
     /// e-value mode the redo of a window tests the heap that its query context indexes (NCBI's
-    /// heap of that query of the batch, or a read past the batch's heaps, `sw_heap_past`), so the
-    /// matches are redone one by one in stream order; in cutoff-score mode (sum statistics) a
-    /// match's redo reads no heap and no state of the match before it (every window adjusts its
-    /// own matrix), so the pool redoes them ahead as for the X-drop redo. The result is NCBI's
-    /// `-num_threads 1` at every thread count.
+    /// heap of that query of the batch, or an empty heap past the batch's heaps,
+    /// `CompoHeap::would_insert_at`), so the matches are redone one by one in stream order; in
+    /// cutoff-score mode (sum statistics) a match's redo reads no heap and no state of the match
+    /// before it (every window adjusts its own matrix), so the pool redoes them ahead as for the
+    /// X-drop redo. The result is NCBI's `-num_threads 1` at every thread count.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2980-2981
     pub(super) fn kappa_redo_batch<const SW: bool>(
@@ -173,8 +173,8 @@ impl Runtime<'_> {
                     .iter()
                     .enumerate()
                     .map(|(position, list)| {
-                        !CompoHeap::early(list.best_evalue, heaps)
-                            && !(SW && marks.excluded(match_index + position))
+                        !(CompoHeap::early(list.best_evalue, heaps)
+                            || (SW && marks.excluded(match_index + position)))
                     })
                     .collect();
                 let (options, subjects, db_length) = (self.options, self.subjects, self.db_length);
@@ -253,18 +253,18 @@ impl Runtime<'_> {
                 let encoded = self.subjects.read_searched(list.oid, self.options)?;
                 let input: Vec<_> = list.hsps.iter().map(|h| h.hsp.clone()).collect();
                 let redone = if SW {
-                    // NCBI's heap test in e-value mode: the heap of the batch's query that the
-                    // window's query context indexes, with the subject's OID
-                    // (`matchingSeq->index`); a context at or past the batch's query count reads
-                    // past NCBI's array of heaps (`sw_heap_past`).
-                    let (oid, queries_in_batch) = (list.oid, heaps.len());
+                    // NCBI's heap test in e-value mode, with the subject's OID
+                    // (`matchingSeq->index`), on the heap that the window's query context
+                    // indexes (`CompoHeap::would_insert_at`).
+                    let oid = list.oid;
                     let result = state.redo_list_tested(
                         &input,
                         batch,
                         &encoded,
-                        &mut |context, evalue, score| match heaps.get_mut(context) {
-                            Some(heap) => Ok(heap.would_insert(evalue, score, oid)),
-                            None => Err(sw_heap_past(context, queries_in_batch)),
+                        &mut |context, evalue, score| {
+                            Ok(CompoHeap::would_insert_at(
+                                heaps, context, evalue, score, oid,
+                            ))
                         },
                     );
                     match sw_status.redone(result, || sw_endless(do_link_hsps))? {

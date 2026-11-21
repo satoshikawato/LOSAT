@@ -34,6 +34,21 @@ Query files (`tests/fasta/x4b2/`):
 - `empty_w.fna`, `ac_w.fna` (fix round 1, S3): a record without letters (it adds no letter, so tks_W joins its
   batch) or a two-base query (AC: with BATCH_SIZE=1 a first batch without a valid context, which NCBI reports without a
   search), then tks_W.
+- `qok1.fna`, `qok1_rc.fna` (fix round 2): qok1 alone in frame +1 and in frame -1 (its hits against X4's subjects lie
+  in other frames: contexts past the array of one heap).
+- The padded files of approved exception 20 (fix round 2, the Owner's decision Q-HEAP=B, 2026-11-21): NCBI's heap test
+  in e-value mode reads past its array of the batch's heaps (one per query) for a query context 6 x q + f at or above
+  the batch's query count N; LOSAT tests an empty heap there. Each query batch of the as-is file followed by 5N queries
+  without a hit (`pad001` on, CCCCGGGGAACC repeated) keeps every context of its queries inside NCBI's array, and the
+  added heaps stay empty: NCBI's run of the padded file is the expectation of the as-is file.
+  - `w_pad.fna`, `w_rc_pad.fna`, `qok1_pad.fna`, `qok1_rc_pad.fna`: one query and five pads, in one batch.
+  - `pre20_pad_wrc_pad.fna`: `pre20_pad_wrc.fna` and five pads, which join its second batch with BATCH_SIZE=1644.
+  - `q12_b1_pad.fna` (with BATCH_SIZE=1720 for the as-is BATCH_SIZE=1): m_fam_1k and five pads (1720 letters), m_mix_1k
+    and five pads (1720 letters), then the ten queries without a hit as the last batch (no hit, so no heap test: their
+    batches write no row in either run).
+  - `big12_pad.fna` (with BATCH_SIZE=12040 for the default 10002 of `big12.fna`): m_fam and m_mix (10600 letters, one
+    batch at 10002) and ten pads (12040 letters), then the ten queries without a hit as the last batch. NCBI splits a
+    BLASTX batch of more than one query into no chunks, so both runs search each batch whole.
 
 Subject files: `ok_fail.faa` (sok1, then sfail: the failing match is the stream's last).
 
@@ -111,8 +126,14 @@ slices = read_fasta(os.path.join(TESTS, "db_search", "bslice_q.fna"))
 w = ("tks_W_nt tks_W in frame +1", nt(TKS_W))
 pre20 = ("pre20_nt the first 20 letters of qok1 in frame +1", nt(PRE20))
 nohit = [(f"nohit{i:02d} CCCCGGGGAACC repeated", NOHIT) for i in range(1, 17)]
+pad = [(f"pad{i:03d} CCCCGGGGAACC repeated", NOHIT) for i in range(1, 11)]
 qok1 = ("qok1_nt qok1 in frame +1", nt(QOK1))
+qok1_rc = ("qok1_rc qok1 in frame -1", rc(nt(QOK1)))
 w_rc = ("tks_W_rc tks_W in frame -1", rc(nt(TKS_W)))
+m_fam_1k = ("m_fam_1k bases 1-1000 of m_fam", slices["m_fam"][:1000])
+m_mix_1k = ("m_mix_1k bases 1001-2000 of m_mix", slices["m_mix"][1000:2000])
+m_fam = ("m_fam MelaMJNV 26001-31000", slices["m_fam"])
+m_mix = ("m_mix MelaMJNV 56001-61600", slices["m_mix"])
 m = ("tks_M_nt tks_M in frame +1", nt(TKS_M))
 queries = {
     "w.fna": [w],
@@ -132,10 +153,17 @@ queries = {
     "pre20_pad_m.fna": [pre20] + nohit[:11] + [m],
     "empty_w.fna": [("empty a record without letters", ""), w],
     "ac_w.fna": [("ac two bases", "AC"), w],
-    "q12.fna": [("m_fam_1k bases 1-1000 of m_fam", slices["m_fam"][:1000]),
-                ("m_mix_1k bases 1001-2000 of m_mix", slices["m_mix"][1000:2000])] + nohit[1:11],
-    "big12.fna": [("m_fam MelaMJNV 26001-31000", slices["m_fam"]), ("m_mix MelaMJNV 56001-61600", slices["m_mix"])]
-    + nohit[1:11],
+    "q12.fna": [m_fam_1k, m_mix_1k] + nohit[1:11],
+    "big12.fna": [m_fam, m_mix] + nohit[1:11],
+    "qok1.fna": [qok1],
+    "qok1_rc.fna": [qok1_rc],
+    "w_pad.fna": [w] + pad[:5],
+    "w_rc_pad.fna": [w_rc] + pad[:5],
+    "qok1_pad.fna": [qok1] + pad[:5],
+    "qok1_rc_pad.fna": [qok1_rc] + pad[:5],
+    "pre20_pad_wrc_pad.fna": [pre20] + nohit[:11] + [w_rc] + pad[:5],
+    "q12_b1_pad.fna": [m_fam_1k] + pad[:5] + [m_mix_1k] + pad[5:10] + nohit[1:11],
+    "big12_pad.fna": [m_fam, m_mix] + pad[:10] + nohit[1:11],
     "q240.fna": [("m_fam_240 bases 1-240 of m_fam", slices["m_fam"][:240])],
     "q120.fna": [("m_fam_120 bases 1-120 of m_fam", slices["m_fam"][:120])],
     "ok_fail.faa": [("sok1 BDT63546.1 of PajaWSV", SOK1),
@@ -146,6 +174,33 @@ for name, records in queries.items():
     with open(os.path.join(FA, name), "w") as f:
         f.write(fasta(records))
 assert sum(len(s) for _, s in queries["pre20_pad_w.fna"][:12]) == 1644
+
+
+def batches(records, size):
+    """NCBI's query batches (blast_input.cpp:140-171): a batch closes at the query that brings it to `size` letters."""
+    out, current, letters = [], [], 0
+    for name, seq in records:
+        current.append(name.split()[0])
+        letters += len(seq)
+        if letters >= size:
+            out.append(current)
+            current, letters = [], 0
+    return out + [current] if current else out
+
+
+# Each padded batch is an as-is batch followed by pads (none for the last, whose queries have no hit), enough to keep
+# every context of its queries with a hit inside the batch's array of heaps (5N pads keep all 6N contexts inside).
+for as_is, as_size, padded, pad_size in [("q12.fna", 1, "q12_b1_pad.fna", 1720),
+                                         ("big12.fna", 10002, "big12_pad.fna", 12040),
+                                         ("pre20_pad_wrc.fna", 1644, "pre20_pad_wrc_pad.fna", 1644)]:
+    own, oracle = batches(queries[as_is], as_size), batches(queries[padded], pad_size)
+    stripped = [[name for name in batch if not name.startswith("pad")] for batch in oracle]
+    hits = [batch for batch in own if not all(name.startswith("nohit") for name in batch)]
+    assert stripped[:len(hits)] == hits, (as_is, own, oracle)
+    for batch in oracle[:len(hits)]:
+        last_hit = max(index for index, name in enumerate(batch) if not name.startswith(("nohit", "pad")))
+        assert len(batch) >= 6 * (last_hit + 1), (padded, batch)
+    assert sum(stripped[len(hits):], []) == sum(own[len(hits):], []), (as_is, own, oracle)
 assert sum(len(s) for _, s in queries["pre20_pad_crash.fna"][12:]) <= 1644
 if NCBI:
     base = [("dbj|AB300001.1| sok1 BDT63546.1 of PajaWSV", SOK1), ("dbj|AB300002.1| sfail tks_M with D first, twice", SFAIL)]

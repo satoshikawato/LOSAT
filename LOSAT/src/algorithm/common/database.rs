@@ -12,6 +12,7 @@
 //! errors to NCBI's application errors (`crate::cli::NativeError`) and to LOSAT's
 //! refusals.
 
+use crate::wording::{DATABASE_ERROR, ENGINE_ERROR};
 use anyhow::{bail, Result};
 
 use crate::blastinput::ncbi_environment::ApplicationSettings;
@@ -330,7 +331,7 @@ impl PsiSearchReadFailure {
         match self {
             PsiSearchReadFailure::EmptyDatabase => NativeError {
                 exit: 2,
-                message: "BLAST Database error: OID not found\n".into(),
+                message: format!("{DATABASE_ERROR} OID not found\n").into(),
             }
             .into(),
             PsiSearchReadFailure::Unopenable(error) => database_error(error, program),
@@ -357,7 +358,7 @@ pub(crate) fn database_error_of(error: &SeqDbError, program: &str) -> anyhow::Er
     match error.ncbi_message() {
         Some(text) => NativeError {
             exit: 2,
-            message: [b"BLAST Database error: ".as_slice(), &text, b"\n"].concat(),
+            message: [DATABASE_ERROR.as_bytes(), b" ", &text, b"\n"].concat(),
         }
         .into(),
         None => anyhow::Error::msg(losat_reader_error(error, program)),
@@ -636,7 +637,7 @@ pub(crate) struct PreliminaryReadError(pub(crate) &'static str);
 
 impl std::fmt::Display for PreliminaryReadError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "BLAST engine error: {}", self.0)
+        write!(f, "{ENGINE_ERROR} {}", self.0)
     }
 }
 
@@ -3652,6 +3653,9 @@ pub(crate) struct TaxdbRun {
     /// Whether a prefetch of the run can stop, so that the run keeps `loaded`
     /// ([`TaxdbRun::prefetch_can_stop`]), decided once.
     can_stop: std::sync::OnceLock<bool>,
+    /// Whether every load of a sequence with a positive taxid throws
+    /// ([`TaxdbRun::load_throws`]), decided once.
+    load_throws: std::sync::OnceLock<bool>,
     /// The texts of the loads that the model of the reads placed where NCBI makes no load
     /// ([`TaxdbRun::load_texts`], `report::query_warnings::LoadTexts`).
     load_texts: std::sync::Arc<crate::report::query_warnings::LoadTexts>,
@@ -3991,6 +3995,28 @@ impl TaxdbRun {
         *self.found.get_or_init(|| db.taxdb_found())
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1146-1155 (cited
+    // at `taxdb_error`)
+    /// Whether a file of the run's taxonomy database does not open where NCBI's `CMemoryFile`
+    /// throws (`SeqDbError::TaxdbThrows`, `seqdb::taxdb`'s `throws_at_every_lookup`): every load
+    /// of a sequence with a positive taxid throws then, so psiblast's PSSM reads no letters of
+    /// such a subject (`Failed to retrieve sequence`, `ListedTitles::pssm_reads` of BLASTP), its
+    /// loads write no text ([`pssm_load_texts`]) and the organism report leaves its HSPs out
+    /// (`report::tax_report::SubjectTable::with_loads_that_throw`). Decided once, without
+    /// `taxdb.bti` on the search path as false; the files are opened apart from the run's handle,
+    /// whose texts of opening stay for its first lookup.
+    pub(crate) fn load_throws(&self, db: &SeqDb) -> bool {
+        *self.load_throws.get_or_init(|| {
+            self.found(db)
+                && db.search_path().is_some_and(|search_path| {
+                    matches!(
+                        crate::seqdb::taxdb::TaxDb::open(search_path),
+                        Err(SeqDbError::TaxdbThrows { .. })
+                    )
+                })
+        })
+    }
+
     /// [`PrefetchTexts`] of the run, read once ([`PrefetchTexts::of`]): none without `taxdb.bti`
     /// on the search path.
     fn prefetch_texts(&self, db: &SeqDb) -> PrefetchTexts {
@@ -4090,10 +4116,14 @@ impl TaxdbRun {
         let Some(search_path) = db.search_path() else {
             return Ok(());
         };
-        let texts = self
-            .taxdb(search_path)
-            .open()
-            .map_err(|error| taxdb_error(error, program))?;
+        let texts = match self.taxdb(search_path).open() {
+            Ok(texts) => texts,
+            // A file that does not open throws at each lookup and writes nothing: the rows decide
+            // (the organism report leaves the HSP out, `report::tax_report::TaxLookups::look_up`;
+            // a name field is refused, `tabular_names`).
+            Err(SeqDbError::TaxdbThrows { .. }) => return Ok(()),
+            Err(error) => return Err(taxdb_error(error, program)),
+        };
         self.rows_open()
             .lock()
             .expect("the texts of opening")
@@ -4505,11 +4535,27 @@ fn slot_uncertain_error(db: &SeqDb, volume: usize, last: i32, cause: SlotUncerta
 /// `XmlRefusal::of_taxonomy`); the other errors of the lookups (a read error of a file) are not
 /// refusals, and the held document is written as NCBI writes what it has.
 #[derive(Debug)]
-pub(crate) struct TaxonomyRefusal(String);
+pub(crate) struct TaxonomyRefusal {
+    text: String,
+    /// The refusal is of a load of a subject with a taxid where a file of the taxonomy database
+    /// does not open (`SeqDbError::TaxdbThrows`): NCBI's load throws there, which its prefetch
+    /// catches ([`batch_prefetch`]) and its reports do not read as LOSAT does.
+    load_throws: bool,
+}
+
+impl TaxonomyRefusal {
+    /// Whether `error` is the refusal of a load that throws where a file of the taxonomy database
+    /// does not open ([`TaxonomyRefusal::load_throws`]).
+    fn of_load_that_throws(error: &anyhow::Error) -> bool {
+        error
+            .downcast_ref::<TaxonomyRefusal>()
+            .is_some_and(|refusal| refusal.load_throws)
+    }
+}
 
 impl std::fmt::Display for TaxonomyRefusal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
+        f.write_str(&self.text)
     }
 }
 
@@ -4524,10 +4570,30 @@ pub(crate) fn taxdb_error_for_tests(error: SeqDbError) -> anyhow::Error {
 /// The error of a taxonomy database lookup or open: [`TaxonomyRefusal`] for a refusal of the
 /// reader (`SeqDbError::Unsupported`), [`database_error`] for the others.
 fn taxdb_error(error: SeqDbError, program: &str) -> anyhow::Error {
+    if let SeqDbError::TaxdbThrows { .. } = &error {
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1146-1155
+        // The Bioseq's taxonomy catches only a `CSeqDBException`: the load throws `CMemoryFile`'s
+        // exception, and each report then reads the subject as its own `catch` decides (line WQA
+        // D18b probe 12: `Unknown` ids and titles, `N/A` names, alignments without sequences, or
+        // the exception, exit status 255), which LOSAT does not write. The formats that NCBI
+        // writes the same are not refused (`report::db_subject::unchanged_by_load_throws`); the
+        // words say what the user can do.
+        return anyhow::Error::new(TaxonomyRefusal {
+            text: format!(
+                "{error}; NCBI BLAST+ 2.17.0 then fails at each taxonomy lookup and writes this \
+                 output differently or stops, which LOSAT's {program} does not support; make the \
+                 file readable, or move it off the BLASTDB path"
+            ),
+            load_throws: true,
+        });
+    }
     let refused = matches!(error, SeqDbError::Unsupported { .. });
     let error = database_error(error, program);
     if refused {
-        anyhow::Error::new(TaxonomyRefusal(format!("{error:#}")))
+        anyhow::Error::new(TaxonomyRefusal {
+            text: format!("{error:#}"),
+            load_throws: false,
+        })
     } else {
         error
     }
@@ -4824,7 +4890,8 @@ pub(crate) fn tabular_names<'t>(
                 run.taxdb(search_path),
                 Some(std::sync::Arc::clone(run.rows_open())),
                 taxdb_error,
-            ),
+            )
+            .where_loads_throw(run.load_throws(db)),
             program,
         )));
     }
@@ -5046,7 +5113,8 @@ fn load_read_texts<'s>(
 /// sequence loaded before (the query's report, an earlier query or round) is loaded again or not,
 /// which LOSAT does not model, so such a read is refused where the two give other texts (the slot
 /// then holds another taxid) and else writes nothing. The lookups are the run's from then on. Empty
-/// without `taxdb.bti` on the search path.
+/// without `taxdb.bti` on the search path, and where every such load throws
+/// ([`TaxdbRun::load_throws`]).
 pub(crate) fn pssm_load_texts(
     db: &SeqDb,
     run: &TaxdbRun,
@@ -5054,7 +5122,8 @@ pub(crate) fn pssm_load_texts(
     lookups: &[i32],
     program: &str,
 ) -> Result<Vec<u8>> {
-    if lookups.is_empty() || !run.found(db) {
+    // A load that throws at its first lookup writes nothing ([`TaxdbRun::load_throws`]).
+    if lookups.is_empty() || !run.found(db) || run.load_throws(db) {
         return Ok(Vec::new());
     }
     let Some(search_path) = db.search_path() else {
@@ -5113,6 +5182,9 @@ pub(crate) struct PrefetchQueries<'a> {
     /// The outfmt 5 reports of the queries before the batch, where outfmt 5 is the first format
     /// of a program that writes them after the stop ([`PrefetchQueries::after_xml_reports`]).
     xml_before: Option<&'a XmlReportsBefore<'a>>,
+    /// Whether the reports of the run write the same where every load of a subject with a
+    /// positive taxid throws ([`PrefetchQueries::where_reports_unchanged_by_load_throws`]).
+    reports_unchanged_by_load_throws: bool,
 }
 
 impl<'a> PrefetchQueries<'a> {
@@ -5127,6 +5199,20 @@ impl<'a> PrefetchQueries<'a> {
             scope,
             unrecorded_calls: false,
             xml_before: None,
+            reports_unchanged_by_load_throws: false,
+        }
+    }
+
+    /// The same batch of a run whose formats write the same where every load of a subject with a
+    /// positive taxid throws (`unchanged`: `report::db_subject::unchanged_by_load_throws` of each
+    /// format). Where a file of the taxonomy database does not open, such a load throws at the
+    /// batch's prefetch, which catches it with the warning ([`batch_prefetch`]), and then at the
+    /// loads of the reports, which such a run writes as LOSAT does; another run is refused there
+    /// ([`TaxonomyRefusal`]).
+    pub(crate) fn where_reports_unchanged_by_load_throws(self, unchanged: bool) -> Self {
+        Self {
+            reports_unchanged_by_load_throws: self.reports_unchanged_by_load_throws || unchanged,
+            ..self
         }
     }
 
@@ -5350,7 +5436,11 @@ pub(crate) fn batch_prefetch<'s, 'b>(
             program,
         ));
     }
-    let reads = subject_read_texts(
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:768-790
+    // A load that throws where a file of the taxonomy database does not open ends the prefetch's
+    // loads, which catches it as a `CException` with the warning (line WQA D18b probe 12). The
+    // loads write no text then: the taxonomy database never opens.
+    let reads = match subject_read_texts(
         db,
         run,
         loaded
@@ -5358,7 +5448,16 @@ pub(crate) fn batch_prefetch<'s, 'b>(
             .map(|(ordinal, parsed)| (0, ordinal, parsed)),
         false,
         program,
-    )?;
+    ) {
+        Err(error)
+            if queries.reports_unchanged_by_load_throws
+                && TaxonomyRefusal::of_load_that_throws(&error) =>
+        {
+            fails = true;
+            Vec::new()
+        }
+        reads => reads?,
+    };
     if let Some((ordinal, id)) = &failed_lookup {
         if reads.iter().any(|read| !read.text.is_empty()) {
             return Err(parsed_refusal(
@@ -6186,7 +6285,14 @@ fn prefetch_stop(
         query: queries.error_query,
         error: NativeError {
             exit: 2,
-            message: [text.as_slice(), b"BLAST Database error: ", message, b"\n"].concat(),
+            message: [
+                text.as_slice(),
+                DATABASE_ERROR.as_bytes(),
+                b" ",
+                message,
+                b"\n",
+            ]
+            .concat(),
         }
         .into(),
     })

@@ -766,17 +766,6 @@ impl BlastxArgs {
         let tabular = crate::blastinput::app::ReportFormat::from_number(choice.number)
             .and_then(|format| crate::report::tabular::TabularSpec::of_app(format, choice, app))
             .map(crate::report::tabular::TabularSpec::intern);
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:43-70 (the
-        // preliminary hit list size through NCBI's `int`; `blastn/hsp.rs`)
-        // A hit list size whose preliminary size is not positive crashes NCBI (-max_target_seqs
-        // 1073741799 to 2147483622 with composition-based statistics: SIGSEGV).
-        crate::algorithm::blastn::hsp::check_prelim_hitlist_size(
-            counts.hitlist_size,
-            self.max_target_seqs.is_some(),
-            composition > 0,
-            !self.ungapped,
-            self.program().upper,
-        )?;
         let options = ResolvedOptions {
             word_size,
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_rps_options.cpp:60-67

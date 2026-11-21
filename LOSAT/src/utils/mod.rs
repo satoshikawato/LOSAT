@@ -23,10 +23,6 @@ pub(crate) mod process_id;
 pub(crate) mod same_file;
 pub mod seg;
 mod seg_lnfact;
-// libstdc++ (GCC 13): bits/stl_algo.h:1939-1951 (`std::sort`, cited in the module): the order
-// in which rpsbproc's sorts leave equal elements (RpsbProc/src/common/cdalignproc_base.cpp:200,
-// ptrmap.hpp:171 of the 2025-05-13 package).
-pub(crate) mod std_sort;
 // No NCBI counterpart: test plumbing; the tests' temporary directory and process id
 // (`std::env::temp_dir()` and `std::process::id()` panic on WASI).
 #[cfg(test)]

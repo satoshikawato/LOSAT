@@ -1,5 +1,6 @@
 //! Public CLI v2 boundary. Clap's double-dash representation is internal only.
 
+use crate::wording::{DATABASE_ERROR, QUERY_OPTIONS_ERROR};
 use std::{ffi::OsString, fmt};
 
 use clap::{error::ErrorKind, CommandFactory, Parser, Subcommand};
@@ -265,10 +266,10 @@ where
     try_parse_from_command(T::command(), argv)
 }
 
-/// `try_parse_from` for a caller whose calls run an NCBI application start of their own: the
-/// library API (`api::start`) and LOSAT Web's ABI v2 (`web_adapter::start_run`). `-logfile`,
-/// `-conffile` and `-dryrun` are taken; the versions and `-xmlhelp`, whose texts only the command
-/// line writes, are refused (`version_word_error`, `xml_help_refusal`).
+/// `try_parse_from` for a caller whose calls run an NCBI application start of their own and return
+/// reports: the library API (`api::start`). `-logfile`, `-conffile` and `-dryrun` are taken; the
+/// versions and `-xmlhelp`, whose texts the library has no place for, are refused
+/// (`version_word_error`, `xml_help_refusal`).
 pub(crate) fn try_parse_with_own_start<T, I, S>(argv: I) -> Result<T, clap::Error>
 where
     T: Parser + CommandFactory,
@@ -276,6 +277,22 @@ where
     S: Into<OsString>,
 {
     parse_command(T::command(), argv, Reader::OwnStart)
+}
+
+/// `try_parse_from` for LOSAT Web's ABI v2, whose runs make their own NCBI application start
+/// (`web_adapter::start_run`) and give the host the text that the command line prints in place of
+/// a run (stream 11; line WQA's D14, 2026-11-20): `-logfile`, `-conffile` and `-dryrun` are taken,
+/// and `-xmlhelp` stops the reader with the request whose XML the run prints (`printed_text`), as
+/// on the command line. The versions are printed before the arguments are read
+/// (`ncbi_version_request`, `api::start::CallerStart::version`), so a version word that reaches
+/// this reader is refused (`version_word_error`).
+pub(crate) fn try_parse_with_printing_start<T, I, S>(argv: I) -> Result<T, clap::Error>
+where
+    T: Parser + CommandFactory,
+    I: IntoIterator<Item = S>,
+    S: Into<OsString>,
+{
+    parse_command(T::command(), argv, Reader::PrintingStart)
 }
 
 /// `try_parse_from` after the command line's application start `start` of the program that
@@ -315,17 +332,20 @@ enum Reader<'a> {
     /// A caller that runs no NCBI application start (LOSAT Web's ABI v1): the toolkit's words,
     /// the versions and `-xmlhelp` are refused.
     NoStart,
-    /// The library API and LOSAT Web's ABI v2, whose calls run a start of their own
-    /// (`api::start`, `web_adapter::start_run`): `-logfile`, `-conffile` and `-dryrun` are taken;
-    /// the versions and `-xmlhelp` are refused.
+    /// The library API, whose calls run a start of their own (`api::start`): `-logfile`,
+    /// `-conffile` and `-dryrun` are taken; the versions and `-xmlhelp` are refused.
     OwnStart,
+    /// LOSAT Web's ABI v2, whose runs make a start of their own (`web_adapter::start_run`) and
+    /// print the command line's texts: the toolkit's words are taken, and `-xmlhelp` is the
+    /// request whose XML the run prints, as on the command line.
+    PrintingStart,
     /// The command line's entry with its application start: `-xmlhelp` is the request whose XML
     /// the entry prints.
     CommandLine(&'a crate::blastinput::ncbi_environment::ApplicationStart),
 }
 
-/// The reader of `try_parse_from`, `try_parse_with_own_start`, `try_parse_from_start` and
-/// `try_parse_from_command`.
+/// The reader of `try_parse_from`, `try_parse_with_own_start`, `try_parse_with_printing_start`,
+/// `try_parse_from_start` and `try_parse_from_command`.
 fn parse_command<T, I, S>(
     command: clap::Command,
     argv: I,
@@ -443,9 +463,10 @@ where
         // `ncbi_xmlhelp`)
         // `-xmlhelp` (`s_AutoHelpXml`) stops the reader as `-help` does, the words before it
         // read: the command line's entry prints the program's arguments in NCBI's XML
-        // (`xml_help_program`, `ncbi_xmlhelp::print`; line RG item E2x). The library API and the
-        // Web engine, which write no help of NCBI's, refuse it there, after the words before it
-        // (`xml_help_refusal`).
+        // (`xml_help_program`, `ncbi_xmlhelp::print`; line RG item E2x), and so does a run of
+        // LOSAT Web's ABI v2 (`printed_text`; line WQA's D14, 2026-11-20). The library API and the
+        // Web engine's ABI v1, which write no help of NCBI's, refuse it there, after the words
+        // before it (`xml_help_refusal`).
         if stops_at_help && text == "-xmlhelp" {
             translated.push("--help".into());
             xml_help = Some(scope.get_name().to_string());
@@ -556,7 +577,7 @@ where
         Err(error) if error.kind() == ErrorKind::DisplayHelp && xml_help.is_some() => {
             let program = xml_help.unwrap_or_default();
             return Err(match reader {
-                Reader::CommandLine(_) => xml_help_request(program),
+                Reader::CommandLine(_) | Reader::PrintingStart => xml_help_request(program),
                 Reader::NoStart | Reader::OwnStart => clap::Error::raw(
                     ErrorKind::InvalidValue,
                     xml_help_refusal(&refusal_program_name(&program)),
@@ -757,7 +778,6 @@ const UNPORTED_BLASTN_ARGS: &[&str] = &[
     "gilist",
     "html",
     "import_search_strategy",
-    "index_name",
     "negative_gilist",
     "remote",
 ];
@@ -979,15 +999,9 @@ where
     match crate::blastinput::ncbi_environment::preparse(&tokens[2..]) {
         crate::blastinput::ncbi_environment::Preparsed::Version(request) => {
             // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:388
-            // rpsbproc's own version (0.5.1), not BLAST's; the second line names the BLAST+
-            // toolkit that bioconda builds it on (orchestrator's choice, Owner-delegated
-            // 2026-11-11).
-            let version = if name == "rpsbproc" {
-                crate::rpsbproc::VERSION
-            } else {
-                crate::NCBI_BLAST_VERSION
-            };
-            Some(crate::ncbi_version::print(request, name, version))
+            // Every program prints LOSAT's version (NCBI's rpsbproc its own 0.5.1, the BLAST+
+            // programs 2.17.0+; the Owner 2026-11-21 「Q1=B」).
+            Some(crate::ncbi_version::print(request, name))
         }
         _ => None,
     }
@@ -1122,12 +1136,13 @@ fn toolkit_option_name(word: &str) -> &str {
 
 // No NCBI counterpart: NCBI's application prints the versions before its arguments
 // (ncbiapp.cpp:926-1001, cited at `ncbi_environment::preparse`). The library API of the search
-// programs returns reports, and the Web engine shows them: neither has a place for the text
-// (line RG DECISIONS E3-2; the library's tools print it to their output, `ncbi_app::run_with`,
-// `api::run_makeblastdb`, so their refusal names the Web engine alone).
+// programs returns reports and has no place for the text (line RG DECISIONS E3-2; the library's
+// tools print it to their output, `ncbi_app::run_with`, `api::run_makeblastdb`), nor has the Web
+// engine's ABI v1. A run of the Web engine's ABI v2 prints it on its stream of the command line's
+// standard output (`api::start::CallerStart::version`; line WQA's D14, 2026-11-20).
 /// LOSAT's refusal of the version word `word` (`-version` or a full version) in `program` where
 /// the parser's caller prints no version: the library API of the search programs and the Web
-/// engine.
+/// engine's ABI v1.
 fn version_word_error(program: &str, word: &str) -> clap::Error {
     clap::Error::raw(ErrorKind::InvalidValue, version_word_refusal(program, word))
 }
@@ -1137,6 +1152,9 @@ pub(crate) fn version_word_refusal(program: &str, word: &str) -> String {
     let name = toolkit_option_name(word);
     let shown = refusal_program_name(program);
     let (places, refusers) = match library_part(program) {
+        LibraryPart::Search if WEB_V2_PROGRAMS.contains(&program) => {
+            ("the command line and in LOSAT Web", "the library API does")
+        }
         LibraryPart::Search => ("the command line", "the library API and the Web engine do"),
         LibraryPart::Tool => (
             "the command line and in the library API",
@@ -1159,16 +1177,26 @@ fn refusal_program_name(program: &str) -> String {
 }
 
 // No NCBI counterpart: NCBI has no library API. NCBI's application prints the XML of `-xmlhelp`
-// (ncbiapp.cpp:685-690, cited at `ncbi_xmlhelp`); LOSAT's library and the Web engine refuse it
-// (line RG DECISIONS E2x-1, the Owner's choice of 2026-11-13). Only the command line's entries
-// reach the XML (`xml_help_text`, `ncbi_app::run`), so the library and the Web engine do not carry
-// it (E2x-2).
+// (ncbiapp.cpp:685-690, cited at `ncbi_xmlhelp`); LOSAT's library refuses it (line RG DECISIONS
+// E2x-1, the Owner's choice of 2026-11-13). The command line's entries reach the XML
+// (`xml_help_text`, `ncbi_app::run`), and so does a run of the Web engine's ABI v2, which prints it
+// on its stream of the command line's standard output (`printed_text`; line WQA's D14 and Q-XML=A,
+// the Owner's choice of 2026-11-20, which takes the XML into the Web engine where E2x-1 and E2x-2
+// left it out); the library and the Web engine's ABI v1 refuse it.
 /// LOSAT's refusal of `-xmlhelp` where no command line's entry prints it: the library API and the
-/// Web engine of `shown` (`refusal_program_name`, `ncbi_app::Tool::refusal_name`).
+/// Web engine's ABI v1 of `shown` (`refusal_program_name`, `ncbi_app::Tool::refusal_name`).
 pub(crate) fn xml_help_refusal(shown: &str) -> String {
-    format!(
-        "the option -xmlhelp runs on the command line of LOSAT's {shown} only: the library API and the Web engine do not write NCBI's XML description of the arguments"
-    )
+    let web = WEB_V2_PROGRAMS
+        .iter()
+        .any(|program| program.eq_ignore_ascii_case(shown));
+    match web {
+        true => format!(
+            "the option -xmlhelp runs on the command line and in LOSAT Web of LOSAT's {shown} only: the library API does not write NCBI's XML description of the arguments"
+        ),
+        false => format!(
+            "the option -xmlhelp runs on the command line of LOSAT's {shown} only: the library API and the Web engine do not write NCBI's XML description of the arguments"
+        ),
+    }
 }
 
 /// The help request that `try_parse_from_start` returns where `-xmlhelp` stopped the reader of
@@ -1190,6 +1218,21 @@ pub(crate) fn xml_help_program(error: &clap::Error) -> Option<&str> {
         }
         _ => None,
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:685-697
+// NCBI's application writes the help and the XML of `-xmlhelp` to its standard output and exits
+// with status 0.
+/// What the command line prints to its standard output, exit status 0, where its argument reader
+/// stopped with `error` (`cli::main_entry`): the XML of `-xmlhelp` (`xml_help_program`,
+/// `xml_help_text`), or the help that stopped the reader (`-h`, `-help`, `-help-full`, `--help`;
+/// `command_line_message`, `rpsbproc` as there). `None` for an error, which the command line writes
+/// to its standard error. LOSAT Web's ABI v2 prints the same text (stream 11; line WQA's D14,
+/// 2026-11-20): one producer of the text for both.
+pub fn printed_text(error: &clap::Error, rpsbproc: bool) -> Option<String> {
+    xml_help_program(error)
+        .and_then(xml_help_text)
+        .or_else(|| (!error.use_stderr()).then(|| command_line_message(error, rpsbproc)))
 }
 
 /// What `losat <program> -xmlhelp` prints: NCBI's XML of `program` without the arguments that its
@@ -1359,7 +1402,7 @@ impl NativeError {
         if e.kind().starts_with("CSeqDBException::") {
             return NativeError {
                 exit: 2,
-                message: [b"BLAST Database error: ".as_slice(), e.get_msg(), b"\n"].concat(),
+                message: [DATABASE_ERROR.as_bytes(), b" ", e.get_msg(), b"\n"].concat(),
             };
         }
         NativeError {
@@ -1918,7 +1961,7 @@ pub(crate) fn catch_all_text(message: &[u8]) -> &[u8] {
     if message.is_empty() || !crate::ncbi_exception::main_diag_failbit() {
         return message;
     }
-    if message.starts_with(b"BLAST query/options error: ")
+    if message.starts_with(QUERY_OPTIONS_ERROR.as_bytes())
         && message
             .strip_suffix(b"\n")
             .and_then(|s| s.strip_suffix(crate::wording::USER_MANUAL_FOOTER.as_bytes()))

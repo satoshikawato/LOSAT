@@ -1569,15 +1569,17 @@ impl ListedTitles<'_> {
     /// LOSAT refuses where it does not read as NCBI (`ParsedSubject::pssm_read`, and another
     /// holder of the id that the scope can get instead) where a PSSM is made
     /// (`PssmReads::check`). A subject without parsed Seq-ids is read by its ordinal id
-    /// (`gnl|BL_ORD_ID|n`): its own letters. `prefetch`: whether each query's batch prefetches
-    /// (the round's), which reads them all by their own ids before the PSSM; one whose prefetch is
-    /// off reads them one by one (`ParsedSubject::pssm_read`'s `one_by_one`). `taxids`: whether
-    /// the batches look the subjects' taxids up (`taxdb.bti` on the search path); only then, and
-    /// only for the queries whose batch reads one by one, does `pssm_load_texts` make the PSSM's
-    /// loads of a query, from its hit list after the formatter's cut (`cut`: the length of each
-    /// query's list after it, `prune_by_size`; `usize::MAX` for none), with what that cut drops
-    /// and the blobs of the reads that do not load the subject's own, kept here (`QueryLoads`,
-    /// `PssmReads::other_blobs`).
+    /// (`gnl|BL_ORD_ID|n`): its own letters. Where every load of a sequence with a positive taxid
+    /// throws (`shared::TaxdbRun::load_throws`), a read whose load looks such a taxid up
+    /// (`shared::blob_taxids`) gets none, with parsed Seq-ids or without. `prefetch`: whether
+    /// each query's batch prefetches (the round's), which reads them all by their own ids before
+    /// the PSSM; one whose prefetch is off reads them one by one (`ParsedSubject::pssm_read`'s
+    /// `one_by_one`). `taxids`: whether the batches look the subjects' taxids up (`taxdb.bti` on
+    /// the search path); only then, and only for the queries whose batch reads one by one, does
+    /// `pssm_load_texts` make the PSSM's loads of a query, from its hit list after the
+    /// formatter's cut (`cut`: the length of each query's list after it, `prune_by_size`;
+    /// `usize::MAX` for none), with what that cut drops and the blobs of the reads that do not
+    /// load the subject's own, kept here (`QueryLoads`, `PssmReads::other_blobs`).
     pub(super) fn pssm_reads(
         &self,
         database: &BlastpDatabase,
@@ -1592,13 +1594,18 @@ impl ListedTitles<'_> {
         // (`pssm_load_texts`).
         let keeps_loads = |query: usize| taxids && prefetch.reads_one_by_one(query);
         let any_loads = (0..hit_lists.len()).any(keeps_loads);
-        if self.parsed.is_empty() && !any_loads {
+        // Every load of a sequence with a positive taxid throws (`shared::TaxdbRun::load_throws`):
+        // the read of such a subject gets no letters, with parsed Seq-ids or without.
+        let throws = database.taxdb.load_throws(&database.db);
+        if self.parsed.is_empty() && !any_loads && !throws {
             return Ok(reads);
         }
         // The included subjects with parsed Seq-ids, and of each query whose loads are made the
         // included subjects that the formatter's cut drops from its hit list, in its order (each
         // subject once: its HSPs follow each other).
         let mut read: std::collections::BTreeSet<usize> = std::collections::BTreeSet::new();
+        // The included subjects without them, where such a load throws.
+        let mut by_ordinal: std::collections::BTreeSet<usize> = std::collections::BTreeSet::new();
         // The PSSM's reads one by one are kept for the run's record of loads only where a
         // prefetch of the run can stop (`shared::TaxdbRun::prefetch_can_stop`, asked at the first
         // such read; review 4 of line DBID loadord, M1).
@@ -1616,7 +1623,11 @@ impl ListedTitles<'_> {
                 .enumerate()
                 .filter(|(_, hsp_list)| pssm_includes(hsp_list, inclusion_ethresh))
             {
-                if self.parsed_subject(hsp_list.oid as usize).is_some() {
+                if self.parsed_subject(hsp_list.oid as usize).is_none() {
+                    if throws {
+                        by_ordinal.insert(hsp_list.oid as usize);
+                    }
+                } else {
                     read.insert(hsp_list.oid as usize);
                     if prefetch.reads_one_by_one(query)
                         && *records_loads
@@ -1670,6 +1681,23 @@ impl ListedTitles<'_> {
                     continue;
                 }
                 let scope = shared::scope_bioseq(&database.db, ordinal, subject, self.program)?;
+                if let Some(blob) = scope.taxonomy().filter(|_| throws) {
+                    if !shared::blob_taxids(
+                        &database.db,
+                        ordinal,
+                        Some(subject),
+                        blob,
+                        self.program,
+                    )?
+                    .is_empty()
+                    {
+                        reads.read.insert(rank, None);
+                        if any_loads {
+                            reads.other_blobs.insert(rank, None);
+                        }
+                        continue;
+                    }
+                }
                 if any_loads && scope.taxonomy() != Some(ordinal) {
                     reads.other_blobs.insert(rank, scope.taxonomy());
                 }
@@ -1688,6 +1716,14 @@ impl ListedTitles<'_> {
                         reads.read.insert(rank, None);
                     }
                 }
+            }
+        }
+        // A subject without parsed Seq-ids is read by its ordinal id, which loads its own blob.
+        for rank in by_ordinal {
+            let ordinal = self.listed.ordinals[rank];
+            if !shared::blob_taxids(&database.db, ordinal, None, ordinal, self.program)?.is_empty()
+            {
+                reads.read.insert(rank, None);
             }
         }
         Ok(reads)
@@ -2556,17 +2592,14 @@ fn x_taxids_allow_blocks(
     all_read && !shared::taxdb_may_refuse(db)
 }
 
-#[cfg(test)]
-#[path = "database_tests.rs"]
-mod tests;
-
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:440-450 (cited at
 // `algorithm::psiblast::pssm::input_msa`)
-/// What psiblast's PSSM reads of the subjects with parsed Seq-ids that it includes, by rank,
-/// where that is not the subject's own letters (`ListedTitles::pssm_reads`): another sequence's
-/// letters in NCBIstdaa, or `None` for no sequence (NCBI's warning `Failed to retrieve sequence`,
-/// and the row becomes the query's). `refused`: LOSAT's refusal of the first subject whose read
-/// it does not make as NCBI, which stops a run where a PSSM is made (`check`). `loads`: by query
+/// What psiblast's PSSM reads of the subjects that it includes, by rank, where that is not the
+/// subject's own letters (`ListedTitles::pssm_reads`): for one with parsed Seq-ids another
+/// sequence's letters in NCBIstdaa, or `None` for no sequence (NCBI's warning `Failed to retrieve
+/// sequence`, and the row becomes the query's), which a subject without them also reads where its
+/// load throws (`shared::TaxdbRun::load_throws`). `refused`: LOSAT's refusal of the first subject
+/// whose read it does not make as NCBI, which stops a run where a PSSM is made (`check`). `loads`: by query
 /// (of the call), what `ListedTitles::pssm_load_texts` needs to make the reads of a query whose
 /// batch reads one by one with `taxdb.bti` on the search path (`QueryLoads`), `None` elsewhere;
 /// `other_blobs`: then, the subjects with parsed Seq-ids whose read loads the blob of another
@@ -2644,3 +2677,7 @@ impl PssmReads {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "database_tests.rs"]
+mod tests;

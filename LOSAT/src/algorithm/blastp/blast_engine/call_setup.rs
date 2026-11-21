@@ -1151,18 +1151,12 @@ pub(super) fn prelim_cutoffs(
         .min()
         .unwrap_or(i32::MAX);
 
-    // NCBI computes the size in its `int` (`blastn/hsp.rs` `get_prelim_hitlist_size`): a
-    // -max_target_seqs from 2^31 - 24 wraps to 2..48; a size that is not positive (NCBI
-    // crashes) was rejected with the options (`validate_requested_blastp_support`).
-    let prelim_hitlist_size =
-        usize::try_from(crate::algorithm::blastn::hsp::get_prelim_hitlist_size(
-            args.max_target_seqs,
-            args.comp_based_stats.is_enabled(),
-            !args.ungapped,
-        ))
-        .ok()
-        .filter(|&size| size > 0)
-        .context("BLASTP preliminary hit list size is not positive")?;
+    // Computed without NCBI's `int` overflow (`blastn/hsp.rs` `get_prelim_hitlist_size`).
+    let prelim_hitlist_size = crate::algorithm::blastn::hsp::get_prelim_hitlist_size(
+        args.max_target_seqs,
+        args.comp_based_stats.is_enabled(),
+        !args.ungapped,
+    );
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:1008-1018
     //
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:926-940

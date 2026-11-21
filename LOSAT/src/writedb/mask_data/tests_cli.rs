@@ -191,7 +191,12 @@ fn the_command_line_matches_makeblastdb_on_the_cases_of_the_writer_fixtures() {
 
         let run = run_words(&words, &date, &[&dir, &seqdb]);
         assert_eq!(run.status, rc, "{name}: exit status\n{}", run.stderr);
-        assert_eq!(run.stderr, stderr, "{name}: standard error");
+        // NCBI's frozen text in LOSAT's words (`crate::wording`, AGENTS.md rule 8).
+        assert_eq!(
+            run.stderr,
+            crate::wording::losat_text(&stderr),
+            "{name}: standard error"
+        );
         assert_eq!(run.stdout, stdout, "{name}: standard output");
         if rc == 0 {
             built += 1;
@@ -461,7 +466,11 @@ fn errors_of_makeblastdb_come_before_the_refusal_of_masks_ordered_by_address() {
                 refused += 1;
             } else {
                 assert_eq!(format!("{}\n", run.status), expected("rc"), "{context}");
-                assert_eq!(run.stderr, expected("stderr"), "{stem}: standard error");
+                assert_eq!(
+                    run.stderr,
+                    crate::wording::losat_text(&expected("stderr")),
+                    "{stem}: standard error"
+                );
                 assert_eq!(left, expected("files"), "{stem}: files left");
                 compared += 1;
             }
@@ -487,7 +496,7 @@ fn the_command_line_reads_the_options_as_makeblastdb_does() {
             None,
             None,
             1,
-            "BLAST options error: mask_data option found, but no files were specified.\n".into(),
+            "LOSAT options error: mask_data option found, but no files were specified.\n".into(),
             vec![],
         ),
         (
@@ -511,7 +520,7 @@ fn the_command_line_reads_the_options_as_makeblastdb_does() {
             Some("5"),
             None,
             1,
-            "BLAST options error: mask_id can not be numeric.\n".into(),
+            "LOSAT options error: mask_id can not be numeric.\n".into(),
             vec![],
         ),
         (
@@ -519,7 +528,7 @@ fn the_command_line_reads_the_options_as_makeblastdb_does() {
             Some("a"),
             None,
             1,
-            "BLAST options error: the size of mask_id does not match that of mask_data.\n".into(),
+            "LOSAT options error: the size of mask_id does not match that of mask_data.\n".into(),
             vec![],
         ),
         (
@@ -527,7 +536,7 @@ fn the_command_line_reads_the_options_as_makeblastdb_does() {
             Some("a"),
             Some("x,y"),
             1,
-            "BLAST options error: the size of mask_desc does not match that of mask_data.\n".into(),
+            "LOSAT options error: the size of mask_desc does not match that of mask_data.\n".into(),
             vec![],
         ),
         (
@@ -535,7 +544,7 @@ fn the_command_line_reads_the_options_as_makeblastdb_does() {
             None,
             None,
             1,
-            "BLAST options error: Unknown encoding for mask data in 'empty.txt'\n".into(),
+            "LOSAT options error: Unknown encoding for mask data in 'empty.txt'\n".into(),
             vec![],
         ),
         (

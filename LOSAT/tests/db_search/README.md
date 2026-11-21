@@ -1736,9 +1736,11 @@ The other queries are `taxfilter/q.faa` (BLASTP, TBLASTN, PSIBLAST) and `taxfilt
   variable: a database of three profiles shows no difference, only that the variable is read (a local
   database of 1,700 single-sequence profiles of the same subjects gave rpsblast 351 -> 401 and 551 -> 501,
   too large to commit).
-- `db.acbs.blastx.wrap*` and `db.acbs.blastx.rej*` search `bslice` with a `-max_target_seqs` whose preliminary
-  size NCBI's 32-bit int wraps: 2147483647 (48 with composition-based statistics), 1073741824 without them
-  (10), and 1073741824 with them (negative: NCBI crashes, LOSAT refuses).
+- `db.acbs.blastx.wrap*` and `db.acbs.blastx.crash*` search `bslice` with a `-max_target_seqs` whose
+  preliminary size passes NCBI's 32-bit int: 2147483624 (NCBI keeps 2 subjects per query with
+  composition-based statistics), 1073741824 without them (NCBI keeps 10), and 1073741824 with them (NCBI crashes). LOSAT computes the size
+  without the overflow (approved exception 19 of PD-LOSAT-NCBI-DEFECTS) and keeps every hit: each row is
+  compared with NCBI's run at 1073741798, its `ncbi-near` row `db.acbs.blastx.near*`.
 
 ## Alias-file keys (line RG, series D, D1a)
 

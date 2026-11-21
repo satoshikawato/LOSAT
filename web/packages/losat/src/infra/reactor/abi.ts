@@ -7,11 +7,12 @@
 // i32 as a signed number, so a pointer of 2 GiB or more arrives negative: every pointer
 // and length is converted with `>>> 0` before it is used as an offset into the memory.
 import type { FastaReader, RecordKey, ShownIds } from '../../domain/dataset.js';
+import { isPrintedKind } from '../../domain/run-files.js';
 import { FileReadError, type StartResult, type ValidationResult } from '../../ports/engine.js';
 import type { Compression } from '../../ports/inflate.js';
 
 /** The version of ABI v2 that this host speaks (`losat_web2_abi_version`, ABI v2 §10). */
-export const ABI_VERSION = 8;
+export const ABI_VERSION = 10;
 /** Stream 2: the JSON response of describe, validate, register, register_inputs, scan_end, inflate_begin, start and file_end. */
 export const RESPONSE_STREAM = 2;
 /** Stream 5: the inflated bytes of inflate_chunk and inflate_end. */
@@ -34,6 +35,11 @@ export const DISCARD_STREAM = 9;
  * before its outputs. `messagesSignal` reads it.
  */
 export const MESSAGES_STREAM = 10;
+/**
+ * Stream 11: the text that the command line prints to its standard output in place of a run (its help, the XML of
+ * `-xmlhelp`, or a version), for an argv whose start `prints` (ABI v2 §5, version 10; line WQA's D14, 2026-11-20).
+ */
+export const PRINTED_STREAM = 11;
 /** The place "nowhere" in the signals of streams 9 and 10 (ABI v2 §5): TBLASTX's `-logfile ""` or `-logfile /dev/null`. */
 export const PLACE_NOWHERE = 0xffff_ffff;
 /**
@@ -261,9 +267,9 @@ export class ReactorAbi {
 
   /**
    * The *start* JSON of an argv (ABI v2 §4 `losat_web2_start`, §9): the registry file of its
-   * `-conffile`, the file of its `-logfile`, whether it is a dry run and whether its inputs are read
-   * together (`registerInputs`); or the CLI's message for an argv that the engine cannot start (a
-   * version word, a program that ABI v2 does not run).
+   * `-conffile`, the file of its `-logfile`, whether it is a dry run, whether its inputs are read
+   * together (`registerInputs`) and what it prints in place of a search (`prints`); or the CLI's message
+   * for an argv that the engine cannot start (a program that ABI v2 does not run).
    */
   start(argv: readonly string[]): StartResult {
     const status = this.call(this.exports.losat_web2_start, [encoder.encode(argv.join('\0'))]);
@@ -273,10 +279,18 @@ export class ReactorAbi {
       log_file: string | null;
       dry_run: boolean;
       register_inputs: boolean;
+      prints: string | null;
     };
+    if (json.prints !== null && !isPrintedKind(json.prints)) throw new EngineCallError(`the engine's start says that a run prints ${JSON.stringify(json.prints)}`);
     return {
       ok: true,
-      start: { conffile: json.conffile, logFile: json.log_file, dryRun: json.dry_run, registerInputs: json.register_inputs },
+      start: {
+        conffile: json.conffile,
+        logFile: json.log_file,
+        dryRun: json.dry_run,
+        registerInputs: json.register_inputs,
+        prints: json.prints,
+      },
     };
   }
 
@@ -450,7 +464,10 @@ export class ReactorAbi {
     this.inflating(sink, () => this.check(this.call(this.exports.losat_web2_inflate_end, [inflation])));
   }
 
-  /** Runs one search (ABI v2 §4); the output streams go to `sink` during the call. */
+  /**
+   * Runs one search (ABI v2 §4); the output streams go to `sink` during the call. A run whose start `prints` reads no
+   * input: its handles are 0.
+   */
   run(argv: readonly string[], query: number, subject: number, sink: StreamSink): void {
     this.sink = sink;
     try {

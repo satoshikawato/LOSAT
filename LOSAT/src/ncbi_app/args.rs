@@ -64,14 +64,19 @@ pub(crate) enum Constraint {
     Strings(&'static [&'static str]),
     /// `CArgAllowValuesGreaterThanOrEqual(min)` (blast_input_aux.hpp:101-121).
     AtLeast(i64),
-    /// `CArgAllow_Integers(min, max)`: an integer from `min` to `max`.
+    /// `CArgAllow_Integers(min, max)`: an integer from `min` to `max` (`CArgAllow_Int8s::Verify`
+    /// reads the value with `s_StringToInt8`, as `CArg_Integer` does).
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:4686-4695
     Integers(i64, i64),
+    /// `CArgAllow_Doubles(min, max)`: a number from `min` to `max`, and its usage text
+    /// (`NStr::DoubleToString` of each end: `0..100`).
+    Doubles(f64, f64, &'static str),
 }
 
 impl Constraint {
     fn usage(self) -> String {
         match self {
+            Constraint::Doubles(_, _, usage) => usage.to_string(),
             Constraint::Strings(values) => values
                 .iter()
                 .map(|value| format!("`{value}'"))
@@ -554,9 +559,17 @@ fn process_value(tool: &Tool, desc: &Desc, value: &str) -> Result<Option<Number>
             Some(Number::Double(number)) => number >= min as f64,
             Some(Number::Boolean(_)) | None => false,
         },
-        // `s_StringToInt8(value)` within the range: the integer `integer_value` converted.
+        // `s_StringToInt8(value)` within the range: the integer `integer_value` converted
+        // (hexadecimal included).
+        // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:4686-4695
         Some(Constraint::Integers(min, max)) => match number {
             Some(Number::Integer(number)) => (min..=max).contains(&i64::from(number)),
+            _ => false,
+        },
+        // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:4821-4830
+        // (the conversion of `double_value`; a NaN is in no range.)
+        Some(Constraint::Doubles(min, max, _)) => match number {
+            Some(Number::Double(number)) => min <= number && number <= max,
             _ => false,
         },
     };

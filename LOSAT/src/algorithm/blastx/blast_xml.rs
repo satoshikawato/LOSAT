@@ -1277,6 +1277,7 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
         None,
         options.seg.filter_options(),
         None,
+        None,
         options.soft_masking,
     );
     let run = XmlRun {

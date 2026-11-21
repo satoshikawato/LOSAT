@@ -239,6 +239,37 @@ pub(crate) fn note_archive_database_masking(
     options.set_database_masking(archive_params, strategy_params)
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:140-153 (cited at
+// `blastinput::db_mask::DbMaskOption::resolve`)
+/// The formatter's step of the database masking `option` of a search of `db` (the `-db` value
+/// `db_name`) by `program` (NCBI's upper-case name; series NP, M4b: BLASTP and BLASTX, and the
+/// translated programs that take it): the resolution (`DbMaskOption::resolve`), whose warning goes
+/// to `warning` (one diagnostic, which an archive saves as one message), or whose database error
+/// ends the run before the formatter's other work; then the program options of the archive
+/// `archive` and of the search strategy `strategy` (`note_archive_database_masking`). The result
+/// is the search's masking (`None`: not masked).
+pub(crate) fn resolve_database_masking(
+    db: &SeqDb,
+    db_name: &str,
+    option: &crate::blastinput::db_mask::DbMaskOption,
+    program: &str,
+    archive: Option<&crate::report::archive::ArchiveHandle>,
+    strategy: Option<&crate::report::archive::strategy::StrategyExport>,
+    warning: &mut dyn FnMut(&[u8]) -> std::io::Result<()>,
+) -> Result<Option<crate::blastinput::db_mask::ResolvedMask>> {
+    let resolved = option.resolve(db, db_name, program, warning)?;
+    note_archive_database_masking(
+        archive,
+        strategy,
+        resolved
+            .as_ref()
+            .map(crate::blastinput::db_mask::ResolvedMask::archive_params)
+            .unwrap_or_default(),
+        option.strategy_params(resolved.as_ref()),
+    )?;
+    Ok(resolved)
+}
+
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:185-203
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:153
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbfile.cpp:123-129

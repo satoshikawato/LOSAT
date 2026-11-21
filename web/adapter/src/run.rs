@@ -305,7 +305,7 @@ const START_VARIABLES: &[(&str, &str)] = &[(
 /// `START_VARIABLES`, with the registry files registered now (kind 2, `files::registry_files`) and
 /// the file of `-logfile` going to `run_files`; the messages that the command line writes to its
 /// standard error go to `diagnostics`. `Err` when the start ends the run (a usage report or a
-/// load that LOSAT refuses, a `-logfile` name that LOSAT Web refuses, the error of NCBI's load:
+/// load that LOSAT refuses, the error of NCBI's load:
 /// `-conffile` of a file that is not registered, a registry file that NCBI cannot read), with the
 /// message that the command line writes to its standard error without `-logfile`, and the start
 /// when its file of `-logfile` is open (it has the messages); and for a program that ABI v2 does
@@ -546,6 +546,13 @@ fn blastn_group_check(
     // The host has no database files.
     if args.db.is_some() {
         return Err("-db (a database search) is not supported in the browser yet".to_string());
+    }
+    // Nor a database of repeats (the engine's own refusal, `run_local`).
+    if args.filtering_db.is_some() {
+        return Err(
+            "-filtering_db (a BLAST database of repeats) is not supported in the browser yet"
+                .to_string(),
+        );
     }
     let outfmts: Vec<i32> = group.iter().map(|output| output.number as i32).collect();
     // `process_options` sets the counts that the checks read.
@@ -2577,6 +2584,20 @@ mod tests {
             run(&words, &query, &losat::api::QueryEnd::Input, &subject).unwrap_err(),
             "-db (a database search) is not supported in the browser yet"
         );
+        // BLASTN's database of repeats is refused too (line RG item D4).
+        let repeats = [
+            "blastn",
+            "-query",
+            "q",
+            "-subject",
+            "s",
+            "-filtering_db",
+            "repeats",
+        ];
+        assert_eq!(
+            validate(&repeats).unwrap_err(),
+            "-filtering_db (a BLAST database of repeats) is not supported in the browser yet"
+        );
         // `-db` with `-subject` is the parser's conflict, as on the command line.
         let both = ["blastp", "-query", "q", "-subject", "s", "-db", "swissprot"];
         assert!(validate(&both).unwrap_err().contains("cannot be used with"));
@@ -3125,8 +3146,9 @@ mod tests {
     /// `LOSAT/tests/outfmt0_manifest.tsv`: id and argv, run from LOSAT/): every program in 5, 8, 9,
     /// 12, 15 and 16, 10 and 20 with and without fields, the BLAST archive (11) of four programs
     /// with `-query_loc`, `-subject_loc` and deflines that the title does not give, SAM (17), and
-    /// BLASTP's ungapped search in 8 and 11 (Dense-diag Seq-aligns, line NP item O4b).
-    const FORMAT_ROWS: [(&str, &[&str]); 57] = [
+    /// BLASTP's ungapped search in 8 and 11 (Dense-diag Seq-aligns, line NP item O4b) and with an HSP
+    /// of length 0 in 5, 8 and 15 (`-window_size 0`, also item O4b).
+    const FORMAT_ROWS: [(&str, &[&str]); 60] = [
         (
             "sm1.blastp.x16.soft.5",
             &[
@@ -3918,6 +3940,87 @@ mod tests {
                 "5",
                 "-outfmt",
                 "11",
+            ],
+        ),
+        (
+            "ungapped.blastp.len0.5",
+            &[
+                "blastp",
+                "-query",
+                "tests/fasta/outfmt0/len0_l0015_q.faa",
+                "-subject",
+                "tests/fasta/outfmt0/len0_l0015_s.faa",
+                "-window_size",
+                "0",
+                "-word_size",
+                "7",
+                "-threshold",
+                "9",
+                "-matrix",
+                "PAM30",
+                "-evalue",
+                "1e5",
+                "-seg",
+                "yes",
+                "-ungapped",
+                "-comp_based_stats",
+                "0",
+                "-outfmt",
+                "5",
+            ],
+        ),
+        (
+            "ungapped.blastp.len0.8",
+            &[
+                "blastp",
+                "-query",
+                "tests/fasta/outfmt0/len0_l0015_q.faa",
+                "-subject",
+                "tests/fasta/outfmt0/len0_l0015_s.faa",
+                "-window_size",
+                "0",
+                "-word_size",
+                "7",
+                "-threshold",
+                "9",
+                "-matrix",
+                "PAM30",
+                "-evalue",
+                "1e5",
+                "-seg",
+                "yes",
+                "-ungapped",
+                "-comp_based_stats",
+                "0",
+                "-outfmt",
+                "8",
+            ],
+        ),
+        (
+            "ungapped.blastp.len0.15",
+            &[
+                "blastp",
+                "-query",
+                "tests/fasta/outfmt0/len0_l0015_q.faa",
+                "-subject",
+                "tests/fasta/outfmt0/len0_l0015_s.faa",
+                "-window_size",
+                "0",
+                "-word_size",
+                "7",
+                "-threshold",
+                "9",
+                "-matrix",
+                "PAM30",
+                "-evalue",
+                "1e5",
+                "-seg",
+                "yes",
+                "-ungapped",
+                "-comp_based_stats",
+                "0",
+                "-outfmt",
+                "15",
             ],
         ),
     ];

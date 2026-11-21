@@ -58,6 +58,7 @@ static TOOL: Tool = Tool {
     descs: DESCS,
     dependencies: no_dependencies,
     post_prefix: None,
+    components: &[],
 };
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/convert2blastmask.cpp:259-263

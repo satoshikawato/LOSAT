@@ -256,6 +256,8 @@ fn parse_blastn_args(
         window_masker: None,
         window_masker_counts: None,
         window_masker_registry: None,
+        filtering_db: None,
+        repeat_filter: None,
         // ABI v1 writes no tabular field list.
         tabular_taxdb: None,
         subject_taxdb: None,
@@ -266,6 +268,8 @@ fn parse_blastn_args(
         subject_loc: None,
         subject_besthit: false,
         culling_limit: None,
+        best_hit_overhang: None,
+        best_hit_score_edge: None,
         // The frozen web ABI v1 has no `-ungapped`, X-drops, `-no_greedy`, `-window_size`,
         // `-off_diagonal_range` or `-min_raw_gapped_score` (they are refused below as unknown
         // flags).
@@ -287,6 +291,7 @@ fn parse_blastn_args(
         // The command line's progress bar; a web search writes nothing to standard error.
         progress_bar: false,
         one_query_batch: false,
+        hits_only: false,
         first_query_ordinal: 0,
         scope_refusal: None,
     };
@@ -373,6 +378,8 @@ fn parse_tblastx_args(
         db: None,
         // The Web ABI searches a subject, not a database: no taxid list (line DI-8).
         db_filter: Default::default(),
+        // ... and no database masks (series NP, M4b).
+        db_mask: Default::default(),
         formatting: Default::default(),
         dbsize: None,
         show_gis: false,
@@ -504,6 +511,8 @@ fn parse_blastp_args(
         db: None,
         // The Web ABI searches a subject, not a database: no taxid list (line DI-8).
         db_filter: Default::default(),
+        // ... and no database masks (series NP, M4b).
+        db_mask: Default::default(),
         dbsize: None,
         show_gis: false,
         parse_deflines: false,

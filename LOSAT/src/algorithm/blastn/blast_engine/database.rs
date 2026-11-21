@@ -850,7 +850,11 @@ impl BlastnDatabase {
     /// LOSAT's refusals of the search masked with `mask` (`ResolvedMask::check_losat_limits`),
     /// whose scan reads words of `scanned_word` letters.
     pub(super) fn check_mask_limits(&self, mask: &ResolvedMask, scanned_word: usize) -> Result<()> {
-        mask.check_losat_limits(&self.db, PROGRAM, scanned_word)
+        mask.check_losat_limits(
+            &self.db,
+            PROGRAM,
+            crate::blastinput::db_mask::HardScan::Nucleotide { scanned_word },
+        )
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:197-218 and

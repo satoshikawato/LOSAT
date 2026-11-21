@@ -307,10 +307,35 @@ def test_a_tool_reads_its_input_as_the_command_line_reads_standard_input(losat):
         output = pylosat.segmasker(*words, input=data)
         assert output.bytes == stdout
         assert output.diagnostics == stderr.decode()
+    counts = engine_file("windowmasker/in/nopct.ascii")
+    fasta = engine_file("windowmasker/in/multi.fa")
+    with open(fasta, "rb") as file:
+        data = file.read()
+    for words in (("-ustat", counts), ("-ustat", counts, "-outfmt", "fasta", "-dust", "T")):
+        stdout, stderr = losat("windowmasker", "-in", fasta, *words)
+        output = pylosat.windowmasker(*words, input=data)
+        assert output.bytes == stdout
+        assert output.diagnostics == stderr.decode()
     words = ("-masking_algorithm", "dust", "-masking_options", "o", "-outfmt", "interval")
     output = pylosat.convert2blastmask(*words, input=">a\nACGTacgt\n")
     assert output.bytes == b"4 - 7\n"
     assert output.diagnostics == ""
+
+
+def test_makembindex_writes_the_index_of_fasta_input(tmp_path, losat):
+    base = str(tmp_path / "idx")
+    data = ">a\n" + "ACGTTGCAAGGCTTAACCGGTTAACCGGATCG" * 4 + "\n"
+    words = ("-old_style_index", "true", "-nmer", "8", "-output")
+    output = pylosat.makembindex(*words, base, input=data)
+    assert output.bytes == b""
+    assert output.diagnostics == (
+        f"creating {base}.00.idx...done\ncreating {base}.01.idx...removed (empty)\n"
+    )
+    fasta = tmp_path / "a.fa"
+    fasta.write_text(data)
+    losat("makembindex", *words, base + "_cli", "-input", str(fasta))
+    with open(base + ".00.idx", "rb") as api_file, open(base + "_cli.00.idx", "rb") as cli_file:
+        assert api_file.read() == cli_file.read()
 
 
 def test_a_tool_fails_with_the_command_lines_text(tmp_path):

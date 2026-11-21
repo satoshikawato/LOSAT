@@ -1,0 +1,2 @@
+gnl|BL_ORD_ID|0
+gnl|BL_ORD_ID|3

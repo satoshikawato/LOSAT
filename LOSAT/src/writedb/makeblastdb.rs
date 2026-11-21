@@ -98,14 +98,20 @@ pub struct MakedbArgs {
     /// parsed automatically
     #[arg(long)]
     pub parse_seqids: bool,
+    /// 0x01 Exclude Model
+    // NCBI's integer (`AsInteger`, an `int`: `0x01` is 1, `-1` sets every bit), made an `Uint8`
+    // (makeblastdb.cpp:1227-1230).
+    #[arg(long, value_name = "oid_masks",
+          value_parser = crate::blastinput::value_parsers::ncbi_integer)]
+    pub oid_masks: Option<i32>,
 }
 
 /// The options of makeblastdb 2.17.0 that `losat makeblastdb` refuses
 /// (makeblastdb.cpp:246-333). `-h` and `-version` are served (`crate::cli`);
 /// `-logfile`, `-parse_seqids`, `-hash_index`, `-taxid`, `-taxid_map`, `-mask_data`, `-mask_id`,
-/// `-mask_desc` and `-metadata_output_prefix` are read. `-gi_mask` and `-gi_mask_name` write
-/// GI-indexed mask files (item M4c), which LOSAT does not write yet.
-pub const UNSUPPORTED_OPTIONS: [&str; 4] = ["randomize", "gi_mask", "gi_mask_name", "oid_masks"];
+/// `-mask_desc`, `-metadata_output_prefix` and `-oid_masks` are read. `-gi_mask` and
+/// `-gi_mask_name` write GI-indexed mask files (item M4c), which LOSAT does not write yet.
+pub const UNSUPPORTED_OPTIONS: [&str; 3] = ["randomize", "gi_mask", "gi_mask_name"];
 
 /// How `losat makeblastdb` ends when it does not build a database, or cannot
 /// open the one it built.
@@ -648,6 +654,9 @@ fn build_database_with_log(
             hash: args.hash_index,
         },
     )?;
+    if let Some(oid_masks) = args.oid_masks {
+        db.set_oid_masks(oid_masks as u64);
+    }
     let max_file_size = max_file_size(args)?;
     let _ = writeln!(
         db.log(),

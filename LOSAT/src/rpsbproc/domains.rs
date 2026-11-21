@@ -396,7 +396,7 @@ struct Facility {
 // sorts after every number) and the hit's index as the last key (`sort_ties_in_input_order`;
 // `selected` is in increasing order): hits equal in E-value and bit score keep the order of
 // `selected`, where NCBI's `std::sort` may leave them in another, and so may become the
-// representative or `Specific` hit in NCBI's place (PD-LOSAT-NCBI-DEFECTS 1.62, the order of tied
+// representative or `Specific` hit in NCBI's place (PD-LOSAT-NCBI-DEFECTS 1.66, the order of tied
 // hits).)
 pub(crate) fn calculate(aligns: &mut [DomAlign], selected: &[usize], data: &CddData) -> AlignIndex {
     let mut index = AlignIndex::default();
@@ -548,7 +548,7 @@ pub(crate) fn calculate(aligns: &mut [DomAlign], selected: &[usize], data: &CddD
 /// descending, the numbers compared as C++'s `<` and `>` compare doubles (-0.0 and 0.0 are equal);
 /// a NaN, which NCBI's comparison orders against no number, after every number, and two NaNs
 /// equal. Hits equal in both keep their order (`sort_ties_in_input_order`); NCBI's `std::sort` may
-/// leave them in another (PD-LOSAT-NCBI-DEFECTS 1.62, the order of tied hits).
+/// leave them in another (PD-LOSAT-NCBI-DEFECTS 1.66, the order of tied hits).
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/cdalignproc_base.hpp:62-70
 fn e_value_order(a: &DomAlign, b: &DomAlign) -> Ordering {
     key_order(a.e_value, b.e_value, false).then_with(|| key_order(a.bit_score, b.bit_score, true))

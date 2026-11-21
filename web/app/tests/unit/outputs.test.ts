@@ -47,6 +47,13 @@ class Outputs implements OutputPort {
   exportRunFile(runId: string, index: number): Promise<void> {
     return new Promise((resolve, reject) => this.fileExports.push({ runId, index, resolve, reject }));
   }
+
+  /** The saves of the text that a run printed (RunRecord.printed), by run. */
+  readonly printedExports: Array<{ readonly runId: string; resolve(): void; reject(error: unknown): void }> = [];
+
+  exportPrinted(runId: string): Promise<void> {
+    return new Promise((resolve, reject) => this.printedExports.push({ runId, resolve, reject }));
+  }
 }
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -258,6 +265,25 @@ describe('OutputSaver', () => {
     outputs.fileExports[2]!.resolve();
     await settle();
     outputs.exports[1]!.reject(new Error('y'));
+    await settle();
+    expect(saver.problem.get()).toBe('');
+  });
+
+  // The text that a run printed in place of a search (line WQA's D14, 2026-11-20) is saved as an output is.
+  it('saves the text that a run printed, says why it is not saved, and the latest save wins', async () => {
+    const outputs = new Outputs();
+    const saver = new OutputSaver(outputs);
+    void saver.savePrinted(run(1));
+    expect(outputs.printedExports[0]).toMatchObject({ runId: 'r1' });
+    outputs.printedExports[0]!.reject(new Error('the run printed no text'));
+    await settle();
+    expect(saver.problem.get()).toBe('Not saved: the run printed no text');
+    void saver.savePrinted(run(1));
+    void saver.saveRunFile(run(1), 0);
+    outputs.fileExports[0]!.resolve();
+    await settle();
+    expect(saver.problem.get()).toBe('');
+    outputs.printedExports[1]!.reject(new Error('x'));
     await settle();
     expect(saver.problem.get()).toBe('');
   });

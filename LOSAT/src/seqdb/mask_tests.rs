@@ -1409,10 +1409,12 @@ fn a_block_of_blobs_gives_each_sequence_s_blob_or_the_first_error() {
 /// have a blob of 8 bytes and the others none.
 fn write_edge_column(dir: &TempDir, num_oids: u32, with_blob: &[u32]) -> super::column::Column {
     let base = dir.name("edge");
-    let mut column = crate::writedb::mask_data::column::Column::new(
+    let mut column = crate::writedb::column::Column::new(
         &base,
         false,
         0,
+        0,
+        super::column::MASK_DATA_TITLE,
         &Default::default(),
         b"Fri Nov 14 12:00:00 2026",
         0,

@@ -56,6 +56,8 @@ use crate::stats::{
 };
 use crate::utils::matrix::standard_score;
 
+// `-best_hit_overhang` / `-best_hit_score_edge` (series NP, O6a-2): the best hit writer and pipe.
+mod besthit;
 mod culling;
 mod database;
 // `-db_soft_mask` and `-db_hard_mask` (series NP, M4b): the kernels of a masked database search,
@@ -848,9 +850,10 @@ fn x_prelim_hsplist_count(
 }
 
 // No NCBI counterpart: NCBI's `BlastHSPStreamWrite` writes into the HSP stream's writer, a
-// collector or a culling writer (`CreateHspWriter`). The database search takes the writer as a
-// type, so the default search is the collector's instance of `database::search_blocks` and
-// `-culling_limit` is a second instance (the choice is made once per call, outside the loops).
+// collector, a culling writer or a best hit writer (`CreateHspWriter`). The database search takes
+// the writer as a type, so the default search is the collector's instance of
+// `database::search_blocks` and a filtering option's writer (`PrelimFilter`) is a second instance
+// (the choice is made once per call, outside the loops).
 /// Where a subject's preliminary HSP lists go: the order of the calls is the subject (OID) order.
 trait PrelimSink {
     /// `BlastHSPStreamWrite` of one subject's lists; the subject result is emptied.
@@ -874,9 +877,49 @@ impl PrelimSink for PrelimCollector<'_> {
     }
 }
 
-impl PrelimSink for culling::PrelimCulling {
+/// The writer of a filtering option in place of the collector (`CreateHspWriter`,
+/// setup_factory.cpp:305-342): `-culling_limit`'s culling writer or the best hit writer of
+/// `-best_hit_overhang` / `-best_hit_score_edge`, which exclude each other.
+enum PrelimFilter {
+    Culling(culling::PrelimCulling),
+    BestHit(besthit::PrelimBestHit),
+}
+
+impl PrelimFilter {
+    /// The writer of the call's options, if one of them is given.
+    fn of_options(args: &ResolvedBlastpArgs, prelim_hitlist_size: usize) -> Option<Self> {
+        if args.culling_limit > 0 {
+            Some(Self::Culling(culling::PrelimCulling::new(
+                prelim_hitlist_size,
+                args.culling_limit,
+            )))
+        } else {
+            args.best_hit.map(|params| {
+                Self::BestHit(besthit::PrelimBestHit::new(prelim_hitlist_size, params))
+            })
+        }
+    }
+
+    /// `BlastHSPStreamWrite` of one subject's lists; the subject result is emptied.
     fn add(&mut self, subject_result: &mut BlastpSubjectResult) {
-        culling::PrelimCulling::add(self, subject_result);
+        match self {
+            Self::Culling(culling) => culling.add(subject_result),
+            Self::BestHit(best_hit) => best_hit.add(subject_result),
+        }
+    }
+
+    /// The writer's `Final`: the hit lists of the queries go into `compact_lists`.
+    fn finish(self, compact_lists: &mut [Option<BlastpHitList<XPrelimHsp>>]) {
+        match self {
+            Self::Culling(culling) => culling.finish(compact_lists),
+            Self::BestHit(best_hit) => best_hit.finish(compact_lists),
+        }
+    }
+}
+
+impl PrelimSink for PrelimFilter {
+    fn add(&mut self, subject_result: &mut BlastpSubjectResult) {
+        PrelimFilter::add(self, subject_result);
     }
 }
 
@@ -921,14 +964,14 @@ fn merge_blastp_subject_results_in_order(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1553-1554
-/// `merge_blastp_subject_results_in_order` with the culling writer in place of the collector:
-/// the same order, the subjects by index.
+/// `merge_blastp_subject_results_in_order` with a filtering option's writer in place of the
+/// collector: the same order, the subjects by index.
 #[cfg(all(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
-fn merge_blastp_subject_results_culled(
-    culling: &mut culling::PrelimCulling,
+fn merge_blastp_subject_results_filtered(
+    filter: &mut PrelimFilter,
     subject_results: Vec<Option<BlastpSubjectResult>>,
 ) {
     for (subject_index, subject_result) in subject_results.into_iter().enumerate() {
@@ -936,7 +979,7 @@ fn merge_blastp_subject_results_culled(
             continue;
         };
         debug_assert_eq!(subject_result.subject_index, subject_index);
-        culling.add(&mut subject_result);
+        filter.add(&mut subject_result);
     }
 }
 
@@ -2485,6 +2528,7 @@ fn write_blastp_tabular_hit_lists(
     epilog: bool,
     queries_before: usize,
     iteration: Option<u32>,
+    query_other_coding: Option<i32>,
 ) -> Result<()> {
     let config = OutputConfig::ncbi_compat();
     // Index of the next HSP in the final hit list (collect_hits_from_hit_lists order).
@@ -2531,6 +2575,15 @@ fn write_blastp_tabular_hit_lists(
                 warnings.subject_read(q_idx, first.s_idx, &mut *writer)?;
             }
             for hsp in &hsp_list.hsps {
+                // The default fields read the letters of the query (`pident`, `mismatch`): a query
+                // whose molecule is `other` ends the run at the first row.
+                if let Some(coding) = query_other_coding {
+                    return Err(crate::report::tabular::query_sequence_end(
+                        writer,
+                        &[],
+                        coding,
+                    ));
+                }
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108
                 // One row per HSP; the probe marks the row without changing its bytes.
                 if let Some(probe) = probe.as_mut() {
@@ -9343,7 +9396,7 @@ fn run_call(
         preliminary_exact_spaces,
     );
     let call_setup::BlastpPrelimSinks {
-        mut culling,
+        mut prelim_filter,
         subject_space_overflow,
         mut x_prelim_freed,
         mut redone_matches,
@@ -9497,7 +9550,7 @@ fn run_call(
             &subject_parameters,
             &mut preliminary_hit_lists,
             &mut x_compact_hit_lists,
-            &mut culling,
+            &mut prelim_filter,
             outputs,
         )?,
         Some(masking) => prelim_run::run_preliminary_with(
@@ -9513,7 +9566,7 @@ fn run_call(
             &subject_parameters,
             &mut preliminary_hit_lists,
             &mut x_compact_hit_lists,
-            &mut culling,
+            &mut prelim_filter,
             outputs,
         )?,
     };
@@ -9531,9 +9584,11 @@ fn run_call(
 
     // `-culling_limit`: `s_BlastHSPCullingFinal` makes the hit lists of the queries from the
     // trees (hspfilter_culling.c:516-581; `culling.rs`), where the collector's lists were
-    // updated as the subjects came. A query chunk's lists leave below as the collector's do.
-    if let Some(culling) = culling.take() {
-        culling.finish(&mut x_compact_hit_lists);
+    // updated as the subjects came; `-best_hit_*`: `s_BlastHSPBestHitFinal` from the best hit
+    // lists (hspfilter_besthit.c:190-221; `besthit.rs`). A query chunk's lists leave below as the
+    // collector's do.
+    if let Some(filter) = prelim_filter.take() {
+        filter.finish(&mut x_compact_hit_lists);
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:268-271
     // A query chunk's preliminary stage ends here, before its stream is closed: its hit
@@ -9898,9 +9953,12 @@ fn run_call(
             // `-culling_limit`: the culling pipe is the first step after the traceback
             // (`BlastHSPStreamTBackClose`, blast_traceback.c:1721), before `-max_hsps` and
             // `-qcov_hsp_perc` (blast_traceback.c:1763-1766), before the e-value sort and the
-            // prune, and before the `-query_loc` shift of the coordinates below.
+            // prune, and before the `-query_loc` shift of the coordinates below. The best hit
+            // pipe of `-best_hit_*` is in the same place (the options exclude each other).
             if args.culling_limit > 0 {
                 culling::cull_traceback(hit_list, args.culling_limit);
+            } else if let Some(params) = args.best_hit {
+                besthit::best_hit_traceback(hit_list, params, prelim_hitlist_size);
             }
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:845-865
             // The e-value sort below reads the best e-value and the first HSP of each list,

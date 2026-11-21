@@ -13,8 +13,8 @@ use losat::web_adapter::{
 };
 
 use crate::emit::{
-    emit, StreamWriter, STREAM_CUSTOM, STREAM_DIAGNOSTICS, STREAM_HITS, STREAM_RESPONSE,
-    STREAM_RUN_FILES,
+    emit, StreamWriter, STREAM_CUSTOM, STREAM_DIAGNOSTICS, STREAM_HITS, STREAM_PRINTED,
+    STREAM_RESPONSE, STREAM_RUN_FILES,
 };
 use crate::json;
 
@@ -191,8 +191,40 @@ pub fn parse_run(words: &[&str]) -> Result<(Program, Commands, Requested), Strin
 
 /// The first part of `parse_run`: the adapter's own rules and the engine's CLI parser, without the
 /// reading of `-outfmt`, which NCBI makes in `Run`, after the settings and a dry run's end
-/// (`started_command`).
+/// (`started_command`). An argv whose reader stopped at a help word fails with the text of the
+/// help (`parse_printing` tells it apart).
 fn parse_words(words: &[&str]) -> Result<(Program, Commands), String> {
+    match parse_printing(words)? {
+        Parsed::Command(program, command) => Ok((program, *command)),
+        Parsed::Prints(text) => Err(text),
+    }
+}
+
+/// What the engine's CLI parser makes of an argv (`parse_printing`).
+enum Parsed {
+    /// The program's arguments (boxed: they are far larger than a text).
+    Command(Program, Box<Commands>),
+    /// The text that the command line prints to its standard output in place of a run, where the
+    /// reader stopped at a help word (`-h`, `-help`, `-help-full`, `--help`, `-xmlhelp`, the words
+    /// before it read: `losat::web_adapter::printed_text`).
+    Prints(String),
+}
+
+/// `parse_words`, with the help that stopped the reader as its own outcome (`Parsed::Prints`; line
+/// WQA's D14, 2026-11-20). The help is printed as the command line prints it, whatever the words
+/// around it (`-out` too: line WQA's D14 review, 2026-11-20); any other argv with `-out` is refused.
+fn parse_printing(words: &[&str]) -> Result<Parsed, String> {
+    // The formats come from `Program::formats`, and every program accepts the CLI's
+    // default `-outfmt 0`, so the host's words are parsed exactly as on the command line,
+    // with the CLI's binary name: an error (an unknown program too) is the CLI's message.
+    let argv = std::iter::once("losat").chain(words.iter().copied());
+    let parsed = losat::web_adapter::try_parse_cli(argv);
+    if let Err(error) = &parsed {
+        if let Some(text) = losat::web_adapter::printed_text(error, false) {
+            return Program::parse(words.first().copied().unwrap_or(""))
+                .map(|_| Parsed::Prints(text));
+        }
+    }
     for word in words.iter().skip(1) {
         let key = word.split('=').next().unwrap_or("");
         if matches!(key, "-out" | "--out") {
@@ -201,14 +233,43 @@ fn parse_words(words: &[&str]) -> Result<(Program, Commands), String> {
             ));
         }
     }
-    // The formats come from `Program::formats`, and every program accepts the CLI's
-    // default `-outfmt 0`, so the host's words are parsed exactly as on the command line,
-    // with the CLI's binary name: an error (an unknown program too) is the CLI's message.
-    let argv = std::iter::once("losat").chain(words.iter().copied());
-    let cli: Cli = losat::web_adapter::try_parse_cli(argv)
-        .map_err(|error| losat::web_adapter::command_line_message(&error, false))?;
+    let cli: Cli =
+        parsed.map_err(|error| losat::web_adapter::command_line_message(&error, false))?;
     let program = Program::parse(words.first().copied().unwrap_or(""))?;
-    Ok((program, cli.command))
+    Ok(Parsed::Command(program, Box::new(cli.command)))
+}
+
+/// What a run of `words` (program name first) prints in place of a search (`STREAM_PRINTED`), as the
+/// command line does: `"version"` for a version word (`-version` or a full version), which NCBI's
+/// application reads before the arguments, `"help"` where the arguments' reader stops at a help
+/// word (`-xmlhelp` included); `None` for an argv that runs (or fails). Read without the
+/// configuration, which does not change it.
+pub fn prints(words: &[&str]) -> Option<&'static str> {
+    use losat::web_adapter::Preparsed;
+    match losat::web_adapter::preparse(words.get(1..).unwrap_or(&[])) {
+        Preparsed::Version(_) => Some("version"),
+        Preparsed::Words { .. } => {
+            matches!(parse_printing(words), Ok(Parsed::Prints(_))).then_some("help")
+        }
+    }
+}
+
+/// Whether the argv of `command` names its subjects: `-subject` or `-db`.
+fn names_subjects(command: &Commands) -> bool {
+    match command {
+        Commands::Blastp(a) => a.subject.is_some() || a.db.is_some(),
+        Commands::Tblastn(a) => a.subject.is_some() || a.db.is_some(),
+        Commands::Blastn(a) => a.subject.is_some() || a.db.is_some(),
+        Commands::Tblastx(a) => a.subject.is_some() || a.db.is_some(),
+        Commands::Blastx(a) => a.subject.is_some() || a.db.is_some(),
+        Commands::Psiblast(_)
+        | Commands::Rpsblast(_)
+        | Commands::Rpstblastn(_)
+        | Commands::Makedb(_)
+        | Commands::Rpsbproc(_) => {
+            unreachable!("rejected by Program::parse")
+        }
+    }
 }
 
 /// The second part of `parse_run`: the argv's `-outfmt`, read as the CLI reads it.
@@ -220,6 +281,13 @@ fn read_outfmt(
     let outfmt = std::mem::replace(outfmt_of(&mut command), "0".to_string());
     let choice = losat::web_adapter::parse_formatting_string(&outfmt)
         .map_err(|error| format!("{error:#}"))?;
+    // NCBI's error for an argv without `-subject` (and without `-db`), which the command line
+    // raises after it read `-outfmt`'s number and before its other checks, as it does where the
+    // run has inputs (the registered records are the files of `-query` and `-subject`; line
+    // WQA's D14, 2026-11-21: `blastp -query -h`, whose `-h` is the query's name).
+    if !names_subjects(&command) {
+        return Err(format!("{:#}", losat::web_adapter::missing_subject_error()));
+    }
     // The `@PG` line of SAM (outfmt 17) shows the command line, which `main` gives BLASTN: the
     // run's, `losat` and its argv, each word followed by one space (`cli::command_line_bytes`). Only
     // a run that writes SAM holds it.
@@ -336,20 +404,35 @@ fn start(
     }
 }
 
+/// What a run does after its start (`started_command`).
+enum Next {
+    /// It prints this text to the command line's standard output and ends, exit status 0.
+    Prints(String),
+    /// It ends, exit status 0: a dry run.
+    Ends,
+    /// It searches (boxed: the arguments are far larger than a text).
+    Search(Box<(Program, Commands, Requested)>),
+}
+
 /// The argv `words` after the run's start `started`, in the command line's order (`cli::main_entry`):
-/// the arguments parsed (`parse_words`), the settings that LOSAT refuses (`start.settings()?`), the
-/// end of a dry run (`None`: rc 0), then `-outfmt`, which NCBI reads in `Run` (`read_outfmt`: a dry
-/// run does not read it). `validate` and `run` take the argv here.
-fn started_command(
-    words: &[&str],
-    started: &CallerStart,
-) -> Result<Option<(Program, Commands, Requested)>, String> {
-    let (program, command) = parse_words(words)?;
+/// the version that the start printed (`CallerStart::version`), the arguments parsed
+/// (`parse_printing`: the help that stops the reader is printed), the settings that LOSAT refuses
+/// (`start.settings()?`), the end of a dry run (rc 0), then `-outfmt`, which NCBI reads in `Run`
+/// (`read_outfmt`: a dry run does not read it), with the error of an argv without subjects.
+/// `validate` and `run` take the argv here.
+fn started_command(words: &[&str], started: &CallerStart) -> Result<Next, String> {
+    if let Some(text) = started.version() {
+        return Ok(Next::Prints(text.to_string()));
+    }
+    let (program, command) = match parse_printing(words)? {
+        Parsed::Prints(text) => return Ok(Next::Prints(text)),
+        Parsed::Command(program, command) => (program, *command),
+    };
     started.settings()?;
     if started.dry_run() {
-        return Ok(None);
+        return Ok(Next::Ends);
     }
-    read_outfmt(words, program, command).map(Some)
+    read_outfmt(words, program, command).map(|parsed| Next::Search(Box::new(parsed)))
 }
 
 /// A receiver of the files of a run that keeps none (`validate`, which emits nothing).
@@ -363,11 +446,13 @@ impl losat::web_adapter::FileReceiver for NoFiles {
 
 /// The *start* JSON of `losat_web2_start` (docs/web/abi_v2.md §4, §9): what NCBI's application
 /// reads of the argv `words` (program name first) before its arguments (`preparse`): the file of
-/// the last `-conffile` (which the host registers as kind 2 before it validates), the file of
-/// `-logfile` (NCBI's scan of it, `log_file`: a run gives it on `STREAM_RUN_FILES`), whether
-/// the run is a dry run, and whether the run takes its inputs from `losat_web2_register_inputs`
-/// (`inputs_together`: an argv with `-parse_deflines`). An unknown program, and a version word,
-/// which LOSAT Web refuses, are errors.
+/// the last `-conffile` (which the host registers as kind 2 before it validates; none for a
+/// version word, which the command line prints before it loads the file), the file of `-logfile`
+/// (NCBI's scan of it, `log_file`: a run gives it on `STREAM_RUN_FILES`), whether the run is a dry
+/// run, whether the run takes its inputs from `losat_web2_register_inputs` (`inputs_together`: an
+/// argv with `-parse_deflines`), and whether it prints a text in place of a search (`prints`:
+/// `"help"` or `"version"`, `STREAM_PRINTED`), which needs no inputs. An unknown program is an
+/// error.
 pub fn start_json(words: &[&str]) -> Result<String, String> {
     use losat::web_adapter::Preparsed;
     Program::parse(words.first().copied().unwrap_or(""))?;
@@ -376,14 +461,9 @@ pub fn start_json(words: &[&str]) -> Result<String, String> {
         Preparsed::Words {
             conffile, dryrun, ..
         } => (conffile, dryrun),
-        Preparsed::Version(_) => {
-            let argv = std::iter::once("losat").chain(words.iter().copied());
-            return Err(match losat::web_adapter::try_parse_cli(argv) {
-                Err(error) => losat::web_adapter::command_line_message(&error, false),
-                Ok(_) => unreachable!("the parser refuses a version word"),
-            });
-        }
+        Preparsed::Version(_) => (None, false),
     };
+    let prints = prints(words);
     let mut out = String::from("{\"conffile\":");
     json::optional_string(&mut out, conffile.as_deref().and_then(|name| name.to_str()));
     out.push_str(",\"log_file\":");
@@ -391,11 +471,15 @@ pub fn start_json(words: &[&str]) -> Result<String, String> {
         &mut out,
         losat::web_adapter::log_file(arguments).and_then(|name| name.to_str()),
     );
+    // A run that prints its help ends before the end of a dry run (the reader stops first).
     let _ = write!(
         out,
-        ",\"dry_run\":{dryrun},\"register_inputs\":{}}}",
+        ",\"dry_run\":{},\"register_inputs\":{},\"prints\":",
+        dryrun && prints.is_none(),
         inputs_together(words)
     );
+    json::optional_string(&mut out, prints);
+    out.push('}');
     Ok(out)
 }
 
@@ -455,8 +539,15 @@ pub fn validate_with(words: &[&str], known: &mut dyn FnMut(bool)) -> Result<bool
     if let Ok(settings) = started.settings() {
         known(settings.data_loaders);
     }
-    let Some((program, command, requested)) = started_command(words, &started)? else {
-        return Ok(started.settings()?.data_loaders);
+    let (program, command, requested) = match started_command(words, &started)? {
+        Next::Search(parsed) => *parsed,
+        // A run that prints reads no input; the command line prints before it refuses settings.
+        Next::Prints(_) => {
+            return Ok(started
+                .settings()
+                .is_ok_and(|settings| settings.data_loaders))
+        }
+        Next::Ends => return Ok(started.settings()?.data_loaders),
     };
     let custom = requested.custom.as_deref();
     let settings = started.settings()?;
@@ -1481,9 +1572,19 @@ fn run_started(
     // Where the messages written to the sink end up, which the host is told first (stream 10; line
     // WQA's sweep, D7, 2026-11-20).
     crate::emit::messages(crate::emit::place(started.messages_place()));
-    let Some(parsed) = started_command(words, started)? else {
-        diagnostics.finish();
-        return Ok(());
+    let parsed = match started_command(words, started)? {
+        Next::Search(parsed) => *parsed,
+        // The command line's text on the stream of its standard output (line WQA's D14,
+        // 2026-11-20); no search.
+        Next::Prints(text) => {
+            emit(STREAM_PRINTED, text.as_bytes());
+            diagnostics.finish();
+            return Ok(());
+        }
+        Next::Ends => {
+            diagnostics.finish();
+            return Ok(());
+        }
     };
     let settings = started.settings()?.clone();
     let mut posted = None;
@@ -1900,6 +2001,17 @@ mod tests {
             let error = parse(&["blastp", "-query", "q", "-subject", "s", owned, "6"]).unwrap_err();
             assert!(error.contains("is not accepted"), "{owned}: {error}");
         }
+        // A help word prints the help, as on the command line (line WQA's D14 review).
+        for help in [["blastp", "-out", "x", "-h"], ["blastp", "-h", "-out", "x"]] {
+            assert!(
+                matches!(parse_printing(&help), Ok(Parsed::Prints(_))),
+                "{help:?}"
+            );
+        }
+        assert!(matches!(
+            parse_printing(&["blastp", "-out=x", "-help"]),
+            Ok(Parsed::Prints(_))
+        ));
         // -num_descriptions and -num_alignments are accepted (also as `-x=v`),
         // parsed as on the command line; -max_target_seqs excludes both (clap's conflict).
         for program in ["blastp", "tblastn", "blastn", "tblastx", "blastx"] {
@@ -1942,7 +2054,11 @@ mod tests {
         ));
         assert!(parse(&["psiblast", "-query", "q", "-subject", "s"]).is_err());
         // An unknown program and a parser error are the CLI's messages.
-        for words in [&["nosuch"][..], &["tblastx", "-query", "q"][..]] {
+        for words in [
+            &["nosuch"][..],
+            &["tblastx", "-query"][..],
+            &["tblastx", "-query", "q", "-subject", "s"][..],
+        ] {
             let cli = losat::web_adapter::try_parse_cli(
                 std::iter::once("losat").chain(words.iter().copied()),
             )
@@ -1950,6 +2066,11 @@ mod tests {
             .map_err(|error| losat::web_adapter::command_line_message(&error, false));
             assert_eq!(parse(words).map(|_| ()), cli, "{words:?}");
         }
+        // An argv without subjects is NCBI's error after the parse (line WQA's D14, 2026-11-21).
+        assert_eq!(
+            parse(&["tblastx", "-query", "q"]).map(|_| ()),
+            Err(format!("{:#}", losat::web_adapter::missing_subject_error()))
+        );
         assert_eq!(Program::Tblastx.formats(), &[0, 6, 7]);
         assert_eq!(Program::Blastx.formats(), &[0, 6, 7]);
         // validate rejects BLASTN scoring that NCBI rejects, with NCBI's message.
@@ -2235,12 +2356,12 @@ mod tests {
             assert!(inputs_together(&words), "{program}");
             assert!(start_json(&words)
                 .unwrap()
-                .ends_with(",\"register_inputs\":true}"));
+                .ends_with(",\"register_inputs\":true,\"prints\":null}"));
             let dry = [&words[..], &["-dryrun"]].concat();
             assert!(!inputs_together(&dry), "{program}");
             assert!(start_json(&dry)
                 .unwrap()
-                .ends_with(",\"register_inputs\":false}"));
+                .ends_with(",\"register_inputs\":false,\"prints\":null}"));
             assert!(!inputs_together(&words[..5]), "{program}");
             assert!(!inputs_together(&[&words[..], &["-nosuchoption"]].concat()));
         }
@@ -3048,8 +3169,9 @@ mod tests {
     /// 12, 15 and 16, 10 and 20 with and without fields, the BLAST archive (11) of four programs
     /// with `-query_loc`, `-subject_loc` and deflines that the title does not give, SAM (17), and
     /// BLASTP's ungapped search in 8 and 11 (Dense-diag Seq-aligns, line NP item O4b) and with an HSP
-    /// of length 0 in 5, 8 and 15 (`-window_size 0`, also item O4b).
-    const FORMAT_ROWS: [(&str, &[&str]); 60] = [
+    /// of length 0 in 5, 8 and 15 (`-window_size 0`, also item O4b), and BLASTN's ungapped search in
+    /// SAM (one record per subject, item O4a-2).
+    const FORMAT_ROWS: [(&str, &[&str]); 61] = [
         (
             "sm1.blastp.x16.soft.5",
             &[
@@ -3922,6 +4044,19 @@ mod tests {
                 "0",
                 "-outfmt",
                 "15",
+            ],
+        ),
+        (
+            "ungapped.sam.mb.17q",
+            &[
+                "blastn",
+                "-query",
+                "tests/fixtures/blastn_regression/inputs/sam_ug_q.fa",
+                "-subject",
+                "tests/fixtures/blastn_regression/inputs/sam_ug_s.fa",
+                "-ungapped",
+                "-outfmt",
+                "17 SQ",
             ],
         ),
     ];

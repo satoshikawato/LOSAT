@@ -10,7 +10,7 @@
 //! case gives the bytes of `widened/`, LOSAT's own where NCBI's `int` coordinate arithmetic
 //! overflows (PD-LOSAT-NCBI-DEFECTS exception 12; each beside a `compare` case of its nearby
 //! input, README.md); a `tied` case gives the bytes of `tied/`, LOSAT's own order of hits that
-//! NCBI's `std::sort` leaves in an order of its own (PD-LOSAT-NCBI-DEFECTS 1.62), which differ
+//! NCBI's `std::sort` leaves in an order of its own (PD-LOSAT-NCBI-DEFECTS 1.66), which differ
 //! from NCBI's frozen bytes only as `tied/CLASSES.tsv` counts. NCBI is not run here.
 
 use std::fs;
@@ -290,7 +290,7 @@ fn rpsbproc_gives_ncbis_bytes() {
     assert_eq!(compare_rows("compare", "compare", "oracle"), 375);
 }
 
-// The rows where LOSAT's order of hits is its own (PD-LOSAT-NCBI-DEFECTS 1.62, the Owner's decision
+// The rows where LOSAT's order of hits is its own (PD-LOSAT-NCBI-DEFECTS 1.66, the Owner's decision
 // of 2026-11-20): hits equal in E-value and bit score keep their input order, where NCBI's
 // `std::sort` leaves an order of its own; a NaN E-value or bit score sorts after every number of
 // its key (Owner-delegated, 2026-11-20).
@@ -477,7 +477,7 @@ fn tied_difference(ncbi: &[u8], losat: &[u8]) -> Result<TiedDifference, String> 
     Ok(found)
 }
 
-// Each `tied` row differs from NCBI's frozen bytes only where PD-LOSAT-NCBI-DEFECTS 1.62 says, in
+// Each `tied` row differs from NCBI's frozen bytes only where PD-LOSAT-NCBI-DEFECTS 1.66 says, in
 // the blocks and lines that `tied/CLASSES.tsv` counts (no row is left out, and the table names each
 // `tied` row once): the evidence of the approved difference kept as a check, so that `tied/` cannot
 // drift from NCBI's bytes in any other way.

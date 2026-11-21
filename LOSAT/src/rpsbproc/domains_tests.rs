@@ -344,7 +344,7 @@ fn ends_on_the_plus_strand() {
 
 // `key_order`, one key of `e_value_order`: numbers as C++'s `<` and `>` compare doubles (-0.0 and
 // 0.0 equal, the infinities ordered), a NaN after every number in either direction, two NaNs equal
-// (PD-LOSAT-NCBI-DEFECTS 1.62).
+// (PD-LOSAT-NCBI-DEFECTS 1.66).
 #[test]
 fn a_key_orders_numbers_as_cpp_and_a_nan_last() {
     use std::cmp::Ordering::{Equal, Greater, Less};

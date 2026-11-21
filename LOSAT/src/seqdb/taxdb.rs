@@ -603,9 +603,10 @@ impl LazyTaxDb {
             TaxDb::open(&self.search).map_err(|error| match error {
                 SeqDbError::Unsupported { path, message } => (path, message),
                 // The file that failed, and what the system said of it.
-                SeqDbError::Open { path, source } | SeqDbError::Io { path, source } => {
-                    (path, source.to_string())
-                }
+                SeqDbError::Open { path, source }
+                | SeqDbError::Io { path, source }
+                | SeqDbError::Map { path, source, .. }
+                | SeqDbError::Read { path, source } => (path, source.to_string()),
                 SeqDbError::Format { path, message } => (path, message),
                 other => (PathBuf::from("taxdb.bti"), other.to_string()),
             })

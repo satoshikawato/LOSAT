@@ -2246,7 +2246,7 @@ and after the fix) it keeps the first three where those two builds differ.
 `ps5`, `ph5` and `ph4` have the algorithms 21 (seg, defaults) and 22 (seg `-window 8 -locut 1.8 -hicut 2.1`); `phmv`
 (several volumes) and the `pe_*` databases have 21 only. `ps5` keeps `p4`, masked whole, and `pe_tail` has a masked
 tail: with `-db_hard_mask` both are searched over the part before the mask (the Owner's answer Q1 = B of M4b,
-PD-LOSAT-NCBI-DEFECTS exception 20, M4b-3), and their rows hold NCBI's run of the near input where NCBI's own run
+PD-LOSAT-NCBI-DEFECTS exception 21, M4b-3), and their rows hold NCBI's run of the near input where NCBI's own run
 crashes or differs from it: `ps5n` (`near_ps5.asnt`: `ps5`'s algorithm 21 written out by `segmasker -outfmt interval`,
 with `p4`'s mask one letter shorter, [0, 119)) and `pe_tailn` (`edge_tailn.asnt`: [300, 399)). `pe_e0tail`
 (`edge_e0tail.asnt`: an empty mask at 0, `from 0, to 4294967295`, which makeblastdb stores as [0, 0), then [300, 400))
@@ -2311,7 +2311,7 @@ volumes: `t1` and `t2`, `t3`, `t4`) and `tf4` have 11. `th1` has the hand masks 
 reading frames by its positions divided by 3 (the minus frames from frame -1's length); with `-db_hard_mask` a
 sequence whose masks leave NCBI one part of a frame to search, from the frame's start, that stops before the frame's
 end (`tf4`'s `t5`, `head` for frame -1, `tail` for frame +1, `near` for frames +2 and +3) is searched over that part
-alone (the Owner's answers Q1 = B and Q2 = B of M4b, PD-LOSAT-NCBI-DEFECTS exception 20, M4b-3). TBLASTX's rows of
+alone (the Owner's answers Q1 = B and Q2 = B of M4b, PD-LOSAT-NCBI-DEFECTS exception 21, M4b-3). TBLASTX's rows of
 `tail` and `near`, where NCBI writes an HSP once per seed past the part, hold NCBI's run of the near input `th2tn`
 (`hedge_tailn.asnt`: `t4` [1000, 1196), the fewest bases short of the end after which frames +1 to +3 each keep a
 letter after the mask; `nucl_t4n.fna` stores the 4 freed bases as `N`, so that they stay masked as LOSAT reads them);

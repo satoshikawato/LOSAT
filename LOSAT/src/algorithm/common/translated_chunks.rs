@@ -218,7 +218,7 @@ fn soft_chunk_scan_ranges(
 // before the frame's end at a mask, LOSAT scans the chunk alone, as NCBI's normal chunks do for the
 // near input, the mask shortened by the fewest bases after which a letter follows the chunk in
 // every frame; the masked bases stay masked in the traceback and the statistics (an approved NCBI
-// defect, PD-LOSAT-NCBI-DEFECTS exception 20: the Owner's answers Q1 = B and Q2 = B of M4b,
+// defect, PD-LOSAT-NCBI-DEFECTS exception 21: the Owner's answers Q1 = B and Q2 = B of M4b,
 // 2026-11-21; NCBI's scan past the chunk gives rows that differ from the near input's, in TBLASTX
 // the same row once for each word it reads in the mask, or a crash).
 /// The chunks of frame `frame` (+1..+3, -1..-3, of `frame_length` residues) of a database sequence

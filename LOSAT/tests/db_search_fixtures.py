@@ -31,9 +31,9 @@ LOSAT/tests/db_search (README.md there says how they were built).
 - a `ncbi` row whose `covers` cell has `ncbi-near: ROW_ID` (up to a ` | ` or the end of the cell): the expectation
   is the frozen bytes, exit status and hash columns of the `ncbi` row ROW_ID, NCBI's run of a near input (the same
   search with the mask one letter shorter, in TBLASTN and TBLASTX the fewest bases after which every reading frame
-  keeps a letter after its part; for exception 20 the freed letters stored as `X`, or `N`, so that they stay masked
+  keeps a letter after its part; for exception 21 the freed letters stored as `X`, or `N`, so that they stay masked
   in the alignments and the statistics), where NCBI's own run of the row reaches an approved NCBI defect
-  (PD-LOSAT-NCBI-DEFECTS exceptions 13 and 20: `-db_hard_mask` with a mask that runs to the end, on which NCBI BLAST+
+  (PD-LOSAT-NCBI-DEFECTS exceptions 13 and 21: `-db_hard_mask` with a mask that runs to the end, on which NCBI BLAST+
   2.17.0 crashes, adds rows from the masked letters, drops seeds of the next subject or writes an HSP many times;
   exception 3: a one-hit gapped start whose window reads past the end of a database volume's last memory page, where
   NCBI faults; exception 19: a hit list size whose preliminary size passes NCBI's Int4, with the near size

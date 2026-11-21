@@ -360,7 +360,7 @@ pub enum HardScan {
     /// (`HardMaskShape::FrameStartMask`, on which NCBI crashes). `TailMask` read per frame (the
     /// chunk from the frame's start, shorter than the frame, in NCBI's "no chunking" branch) is
     /// searched over that chunk alone (`common::translated_chunks::translated_db_mask_chunks`;
-    /// PD-LOSAT-NCBI-DEFECTS exception 20, the Owner's answers Q1 = B and Q2 = B of M4b,
+    /// PD-LOSAT-NCBI-DEFECTS exception 21, the Owner's answers Q1 = B and Q2 = B of M4b,
     /// 2026-11-21). Both engines join the chunks of a frame longer than `MAX_DBSEQ_LEN` across
     /// their overlap, as for an unmasked subject (no `LongRange`), and a chunk shorter than a word
     /// gives no hit in either scan, as NCBI's (the one-hit scan reads no word of it,
@@ -456,7 +456,7 @@ pub enum HardMaskShape {
 /// LOSAT's traceback reads the whole mask as `B`, as NCBI's does; everywhere else LOSAT gives
 /// what NCBI's normal chunks give for the near input (the exception's text). The protein and
 /// translated programs search the shape at every word (`HardScan::Protein`, `HardScan::Translated`;
-/// PD-LOSAT-NCBI-DEFECTS exception 20, the Owner's answers Q1 = B and Q2 = B of M4b, 2026-11-21:
+/// PD-LOSAT-NCBI-DEFECTS exception 21, the Owner's answers Q1 = B and Q2 = B of M4b, 2026-11-21:
 /// NCBI BLAST+ 2.17.0 crashes on some of these sequences and gives rows that differ from the near
 /// input's on others, in tblastx the same row many times, M/m4b/SURVEY.md §4).
 pub const TAIL_MASK_SEARCHED_WORD: usize = 11;

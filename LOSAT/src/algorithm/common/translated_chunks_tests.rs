@@ -28,7 +28,7 @@ fn a_whole_frame_scans_to_the_frame_s_end_and_a_tail_masked_one_its_chunk() {
     assert_eq!(hard_chunks(&[], 1200, 2), vec![(0, 400, vec![(0, 399)])]);
     assert_eq!(hard_chunks(&[], 1200, 1), vec![(0, 400, vec![(0, 400)])]);
     // A tail mask [1000, 1200): frame +1's chunk from 0 takes the same branch while it ends at the
-    // mask (333 of 400 residues): it scans its own letters (PD-LOSAT-NCBI-DEFECTS exception 20).
+    // mask (333 of 400 residues): it scans its own letters (PD-LOSAT-NCBI-DEFECTS exception 21).
     assert_eq!(
         hard_chunks(&[(1000, 1200)], 1200, 1),
         vec![(0, 333, vec![(0, 333)])]

@@ -163,7 +163,7 @@ impl BlastpDbMasking<'_> {
 /// word finds nothing in NCBI's one-hit and two-hit scans alike and is passed over
 /// (`SubjectPlan::next_searched_chunk`). Every chunk is searched over its own letters, the chunk
 /// from the start before a mask that runs to the end included, which NCBI scans past its end (its
-/// "no chunking" branch; an approved NCBI defect, PD-LOSAT-NCBI-DEFECTS exception 20, the Owner's
+/// "no chunking" branch; an approved NCBI defect, PD-LOSAT-NCBI-DEFECTS exception 21, the Owner's
 /// answer Q1 = B of M4b). The sequences that LOSAT refuses never come here: a mask past the
 /// sequence's end (`HardMaskShape::PastEnd`) and a range longer than `MAX_DBSEQ_LEN`
 /// (`HardMaskShape::LongRange`).

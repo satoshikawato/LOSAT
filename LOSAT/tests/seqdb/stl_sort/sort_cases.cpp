@@ -1,6 +1,6 @@
-// The permutations of libstdc++'s std::sort (and std::partial_sort over the whole range) under
+// The orders that C++ std::sort (and std::partial_sort over the whole range) of g++ 13 leaves under
 // NCBI's CRange_Less / CRange_ReverseLess on (from, to_open) ranges: six random cases, then each
-// `CASE <reverse> <n> from:to_open ...` line read from the standard input (antiqsort.py).
+// `CASE <reverse> <n> from:to_open ...` line read from the standard input (the last two cases of cases.txt).
 #include <algorithm>
 #include <cstdio>
 #include <cstdint>

@@ -12,6 +12,8 @@ The differences you are most likely to meet in everyday use:
 - [A `-query`, `-subject` or `makeblastdb -in` file named `.gz`, `.bz2` or `.zst` is read through its decompressor](#compressed--query--subject-and--in).
 - [On macOS, the last digit of a full-precision E value can differ by 1](#last-digit-of-a-full-precision-value-on-macos).
 - [SAM output (`-outfmt 17`) records LOSAT's command line](#sam-output-the-cl-tag).
+- [The version line and the error prefixes name LOSAT](#the-version-line-and-the-error-prefixes-name-losat), where NCBI writes its own version and `BLAST`.
+- [`rpsbproc` keeps hits that tie in E-value and bit score in their input order](#rpsbproc-hits-that-tie); NCBI's order of them can differ.
 
 The other items are rare cases in which NCBI BLAST+ crashes, reads outside its memory, or overflows an integer.
 
@@ -33,7 +35,7 @@ The other items are rare cases in which NCBI BLAST+ crashes, reads outside its m
 
 ### One-hit gapped starts past the end of a sequence
 
-- **What you see.** The same output as NCBI where NCBI does not crash, and a result where NCBI sometimes crashes.
+- **What you see.** The same output as NCBI (apart from the version line, which names LOSAT) where NCBI does not crash, and a result where NCBI sometimes crashes.
 - **When.** `blastp`, `blastx` or `tblastn` with `-window_size 0` (one-hit word finder) and a low `-threshold`, when the 11-letter window of a one-hit alignment passes the end of a sequence.
 - **Why.** NCBI reads memory outside its buffer there. LOSAT reads the letters past the end as the end marker. Under valgrind, NCBI's output is LOSAT's output in all the cases of the test.
 - **Record.** [The decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
@@ -66,6 +68,13 @@ The other items are rare cases in which NCBI BLAST+ crashes, reads outside its m
 - **Why.** NCBI's behaviour is a signed overflow, which is undefined in C. LOSAT computes the sum without overflow.
 - **Record.** [The decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
 
+### Hit list sizes from 2^30
+
+- **What you see.** A hit list size (`-max_target_seqs`, `-num_alignments`, or `-num_descriptions` in `-outfmt` 0 to 4) of 2^30 or more, or 2^30 - 25 or more with composition-based statistics, keeps every hit, as 2^30 - 26 does. NCBI computes the preliminary hit list size in a signed 32-bit integer, which overflows there: NCBI keeps 10 hits per query (without composition-based statistics, up to 2^31 - 51) or 2 to 48 (with them, from 2147483624), and crashes at the other sizes. With `-best_hit_overhang` or `-best_hit_score_edge` NCBI's best-hit filter counts twice that size in the same integer, which overflows from 2^30 - 50 (2^29 - 25 with composition-based statistics, 2^30 in ungapped searches): there NCBI keeps some alignments that the filter removes at smaller sizes, and LOSAT gives the result of the size just below.
+- **When.** Gapped `blastn`, `blastp`, `psiblast`, `rpsblast`, `blastx`, `rpstblastn` and `tblastn` searches with such a size, and searches with `-best_hit_overhang` or `-best_hit_score_edge`. Ungapped searches and `tblastx` otherwise keep the size itself, as NCBI does. Every smaller size matches NCBI.
+- **Why.** NCBI's behaviour is a signed overflow, which is undefined in C. LOSAT computes the sizes without overflow.
+- **Record.** [The decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
+
 ### `gb`, `emb` and `dbj` ids
 
 - **What you see.** LOSAT prints the id type that is stored. NCBI can print `gb|AF000002.1|` for a sequence stored as `emb|AF000002.1|`.
@@ -95,15 +104,21 @@ The other items are rare cases in which NCBI BLAST+ crashes, reads outside its m
 - **When.** Only with data that reaches these limits. No CDD release has a PSSM id of 2^31.
 - **Record.** [The decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
 
+### `rpsbproc`: hits that tie
+
+- **What you see.** Hits of one query with equal E-value and bit score keep their order in the archive or XML. NCBI's `rpsbproc` orders them with its C++ library's unstable sort, so the order of such hits can differ, and so can which of two tied hits is `Specific`: `-m std` then prints the other hit's line, and `-m full` swaps their hit types. A hit whose E-value is not a number (`-nan`) comes after every hit whose E-value is a number; among hits of one E-value, one whose bit score is not a number comes last. NCBI's place for such a hit depends on the steps of its library's sort, and in such a query the representative and `Specific` hits, and their sites and motifs, can differ too.
+- **When.** In the DOMAINS lines of `-m std` and `-m full`. In 74 reports of E. coli K-12 proteins and genome pieces against CDD v3.22, 18 differed, by 1 to 6 lines each; in 7 of them one query's `Specific` hit changed. None of them has a `-nan` value.
+- **Record.** [The decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
+
 ### A taxonomy record past NCBI's mapping of `taxdb.btd`
 
-- **What you see.** LOSAT writes what NCBI writes when NCBI completes. Whether NCBI completes depends on its memory map: it may crash on the same files.
+- **What you see.** LOSAT writes what NCBI writes (apart from the version line, which names LOSAT) when NCBI completes. Whether NCBI completes depends on its memory map: it may crash on the same files.
 - **When.** A damaged `taxdb.btd` whose record ends past NCBI's mapping, where the output does not write the bytes read there. Output that would write those bytes is refused (see [What LOSAT refuses](refusals.md)).
 - **Record.** [The decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
 
 ### `-db` output does not depend on `-num_threads`
 
-- **What you see.** LOSAT's `-db` output is NCBI's output for `-num_threads 1`, at every `-num_threads`. NCBI's own `-db` output can depend on the thread count (with composition-based statistics, `blastp` ends the redo of a query early by the hit lists of its batch, and with more threads NCBI keeps one set per thread: 42 rows differed in one test).
+- **What you see.** LOSAT's `-db` output is NCBI's output for `-num_threads 1` (apart from the version line, which names LOSAT), at every `-num_threads`. NCBI's own `-db` output can depend on the thread count (with composition-based statistics, `blastp` ends the redo of a query early by the hit lists of its batch, and with more threads NCBI keeps one set per thread: 42 rows differed in one test).
 - **`-mt_mode`.** `-mt_mode 0`, `1` and `2` are accepted by `blastn`, `blastp`, `blastx` and `tblastn` and do not change the output, which is always that of `-num_threads 1`. NCBI's `-mt_mode 1` writes the end of an outfmt 0 report, or each XML document, once per batch of queries; LOSAT does not.
 - **Record.** [The decision record on database search](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-DATABASE-SEARCH.md).
 
@@ -128,7 +143,7 @@ These cases are about what the program prints around the search, not the search 
 ### Threads with `-subject`
 
 - **What you see.** With `-subject`, NCBI BLAST+ ignores `-num_threads` and writes `'num_threads' is currently ignored when 'subject' is specified.` on the standard error. LOSAT uses the threads you ask for and does not print the line. Above the CPU count NCBI also writes `Number of threads was reduced to N to match the number of available CPUs`; LOSAT does not.
-- **Why.** The output is the same at every thread count, so using the threads only makes the search faster. Every other byte of standard output and standard error equals NCBI's, apart from `blastn`'s progress bar on a terminal (next section).
+- **Why.** The output is the same at every thread count, so using the threads only makes the search faster. Every other byte of standard output and standard error equals NCBI's, apart from the version line and the error prefixes, which name LOSAT, and `blastn`'s progress bar on a terminal (next section).
 
 ### `blastn`'s progress bar on a terminal
 
@@ -138,22 +153,33 @@ These cases are about what the program prints around the search, not the search 
 
 ### Argument errors and help
 
-- **What you see.** An error found while reading the arguments (an unknown option, a missing value, a value outside its range such as `-word_size 3`) prints LOSAT's message and exits with status 2. NCBI prints its USAGE text and the argument exception, and exits with status 1. `-help`, `-help-full` and `-h` print LOSAT's help; `-xmlhelp` prints NCBI's XML for the arguments LOSAT runs.
-- **What does not change.** Errors that NCBI raises after it has read the arguments (`BLAST query/options error: ...`, input errors, engine errors) keep NCBI's condition, error prefix (`BLAST query/options error:`, `BLAST engine error:`, `BLAST Database error:`, `BLAST options error:`), message and exit status.
+- **What you see.** An error found while reading the arguments (an unknown option, a missing value, a value outside its range such as `-word_size 3`) prints LOSAT's message and exits with status 2. NCBI prints its USAGE text and the argument exception, and exits with status 1. `-help`, `-help-full` and `-h` print LOSAT's help; `-xmlhelp` prints NCBI's XML for the arguments LOSAT runs, with LOSAT's name and version in its description line.
+- **What does not change.** Errors that NCBI raises after it has read the arguments (`BLAST query/options error: ...`, input errors, engine errors) keep NCBI's condition, message and exit status. Their prefix names LOSAT (`LOSAT query/options error:`, `LOSAT engine error:`, `LOSAT database error:`, `LOSAT options error:`); see [the version line and the error prefixes](#the-version-line-and-the-error-prefixes-name-losat).
 
 ### Wording of messages
 
 - **What you see.** Messages refer to LOSAT, not to NCBI's product: the last line of a query or options error reads `Please refer to the LOSAT user manual.`, and an error that NCBI reports as a C++ exception shows its message only, without NCBI's `NCBI C++ Exception:` header, source file, line, class name and function (`Error: Cannot convert string 'abc' to Int8 (position 0)`).
-- **What does not change.** The error prefixes, the message texts, NCBI's diagnostic codes such as `(106.15)`, the exit statuses and every search result.
+- **What does not change.** The message texts, NCBI's diagnostic codes such as `(106.15)`, the exit statuses and every search result. The error prefixes name LOSAT, as [the version line and the error prefixes](#the-version-line-and-the-error-prefixes-name-losat) describes.
 - **Record.** [The decision record on command-line behavior outside the search results](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-CLI-NONSEARCH-DIFFERENCES.md), exception 12.
 
 ### Version text
 
-- **What you see.** `-version` writes `blastn: 2.17.0+` and a `Package:` line that names LOSAT (`Package: LOSAT 0.2.0, output compatible with blast 2.17.0`). `-version-full`, `-version-full-xml` and `-version-full-json` give NCBI's forms with LOSAT's package; the lines in which NCBI's build describes itself (configuration, build signature, dates, revisions) are not written.
+- **What you see.** `-version` writes `blastn: LOSAT 0.2.0` and a `Package:` line that names LOSAT (`Package: LOSAT 0.2.0, output compatible with blast 2.17.0`). `-version-full`, `-version-full-xml` and `-version-full-json` give NCBI's forms with LOSAT's version and package; the lines in which NCBI's build describes itself (configuration, build signature, dates, revisions) are not written.
+
+### The version line and the error prefixes name LOSAT
+
+- **What you see.** Where NCBI writes its own version, LOSAT writes its own name and version, and where NCBI starts an error with `BLAST`, LOSAT starts it with `LOSAT`.
+  - After a program's name, `BLASTP (LOSAT 0.2.0)` where NCBI writes `BLASTP 2.17.0+`: in the first line of `-outfmt 0`, in the `# BLASTP (LOSAT 0.2.0)` line of `-outfmt 7`, in `<BlastOutput_version>` of `-outfmt 5`, in the `"version"` of `-outfmt 13` and `15`, in the `<version>` of `-outfmt 14` and `16`, and in the description line of the `-help` texts of `blastdbcmd` and `rpstblastn` and of `-xmlhelp`.
+  - On its own, `LOSAT 0.2.0` where NCBI writes `2.17.0+`: in the `ident` of an `-outfmt 11` archive and of `-export_search_strategy`, in the `VN:` of the `@PG` line of `-outfmt 17`, in the first line of `-version` (`blastn: LOSAT 0.2.0`; also `dustmasker`, `segmasker` and `rpsbproc`, where NCBI writes its own versions 1.0.0 and 0.5.1), and in `BLAST database client, version LOSAT 0.2.0` of `blastdbcmd -help`. The banner that `rpsbproc` writes on the standard error reads `Post-RPSBLAST Processing Utility (LOSAT 0.2.0)`.
+  - As a number, `0.2.0` in the program's `<version>` of `-xmlhelp`, where NCBI writes `2.17.0` (`1.0.0` for `dustmasker` and `segmasker`, `0.5.1` for `rpsbproc`).
+  - The error prefixes are `LOSAT query/options error:`, `LOSAT engine error:`, `LOSAT database error:`, `LOSAT database creation error:`, `LOSAT options error:` and `LOSAT query error:`, where NCBI writes `BLAST query/options error:`, `BLAST engine error:`, `BLAST Database error:`, `BLAST Database creation error:`, `BLAST options error:` and `BLAST query error:`.
+- **When.** In every run that writes one of these lines or errors. Every other byte is NCBI's: `-outfmt 6` and `10` (they have no such line), `8`, `9` and `12`, the output of `dustmasker`, `segmasker` and `convert2blastmask`, what `blastdbcmd` retrieves, the files of `makeblastdb`, the `Reference:` lines, `# BLAST processed N queries`, and the structure of the XML and JSON documents (DOCTYPE, namespaces, schema locations, element names). The messages after the prefix, NCBI's diagnostic codes and the exit statuses are unchanged.
+- **Why.** The outputs of LOSAT name LOSAT, not NCBI's program. The program's name stays first in each line, so a tool that reads the first word as the program (Biopython's reader of `-outfmt 7`, for example) keeps working.
+- **Comparing with NCBI.** To compare LOSAT's output with an NCBI file, map the NCBI file to LOSAT's wording with `python3 -I LOSAT/tests/losat_wording.py map-output <file>` from a LOSAT checkout, or leave these lines out of the comparison.
 
 ### SAM output: the `CL:` tag
 
-- **What you see.** In `blastn -outfmt 17`, the `CL:` tag of the `@PG` line holds LOSAT's own command line, as it was run. The rest of the document is NCBI's, byte for byte. A search run through the library has no command line, so its `@PG` line has no `CL:` tag.
+- **What you see.** In `blastn -outfmt 17`, the `CL:` tag of the `@PG` line holds LOSAT's own command line, as it was run. `VN:` reads `LOSAT 0.2.0` where NCBI writes `2.17.0+` (see [the version line](#the-version-line-and-the-error-prefixes-name-losat)). The rest of the document is NCBI's, byte for byte. A search run through the library has no command line, so its `@PG` line has no `CL:` tag.
 - **Record.** [The decision record on command-line behavior outside the search results](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-CLI-NONSEARCH-DIFFERENCES.md), exception 13. See also [Output formats](output-formats.md).
 
 ### A write that fails, a closed pipe, memory

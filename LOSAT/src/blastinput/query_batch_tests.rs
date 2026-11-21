@@ -246,7 +246,7 @@ fn a_psiblast_batch_holds_one_query() {
     assert_eq!(native.exit, 3);
     assert_eq!(
         native.message,
-        b"BLAST engine error: PSI-BLAST only accepts one protein sequence as query\n"
+        b"LOSAT engine error: PSI-BLAST only accepts one protein sequence as query\n"
     );
     for lengths in [&[4, 0][..], &[0][..]] {
         let alone = records(lengths);

@@ -7,7 +7,7 @@ import type { Coordinator, RunView } from './coordinator';
 import { unreadableResults } from './results';
 import { Store } from './store';
 
-export type OutputPort = Pick<Coordinator, 'readOutput' | 'checkOutput' | 'exportOutput' | 'exportRunFile'>;
+export type OutputPort = Pick<Coordinator, 'readOutput' | 'checkOutput' | 'exportOutput' | 'exportRunFile' | 'exportPrinted'>;
 
 export interface OutputState {
   /** The run and format of `text` ("<number>:<format>") once it is read; '' while it is read, or when it could not be. */
@@ -29,7 +29,7 @@ export class OutputSaver {
   readonly problem = new Store('');
   private saves = 0;
 
-  constructor(private readonly outputs: Pick<OutputPort, 'exportOutput' | 'exportRunFile'>) {}
+  constructor(private readonly outputs: Pick<OutputPort, 'exportOutput' | 'exportRunFile' | 'exportPrinted'>) {}
 
   /** Saves one output of a completed run. The reason shown stays until this save ends; a later save or a reset wins. */
   async save(run: RunView, format: RunOutput): Promise<void> {
@@ -44,6 +44,21 @@ export class OutputSaver {
     let problem = '';
     try {
       await this.outputs.exportRunFile(run.snapshot.runId, index);
+    } catch (error) {
+      problem = `Not saved: ${error instanceof Error ? error.message : String(error)}`;
+    }
+    if (save === this.saves) this.set(problem);
+  }
+
+  /**
+   * Saves the text that a run printed in place of a search (RunRecord.printed: the command line's help or version; line
+   * WQA's D14, 2026-11-20), as `save` saves an output.
+   */
+  async savePrinted(run: RunView): Promise<void> {
+    const save = ++this.saves;
+    let problem = '';
+    try {
+      await this.outputs.exportPrinted(run.snapshot.runId);
     } catch (error) {
       problem = `Not saved: ${error instanceof Error ? error.message : String(error)}`;
     }

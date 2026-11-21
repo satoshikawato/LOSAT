@@ -4,19 +4,7 @@
 //! `OLD_FSC`), Karlin-Altschul's simple forms on the context's effective search space.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:921-923
-//! ```c
-//!     /* FSCOLD: to switch back to original FSC, comment out the following line */
-//!     use_old_fsc = getenv("OLD_FSC");
-//!     if (!use_old_fsc) sbp->gbp = s_BlastGumbelBlkNew();
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:303-307
-//! ```c++
-//!     if (args.Exist(kArgEffSearchSpace) && args[kArgEffSearchSpace]) {
-//!         CNcbiEnvironment env;
-//!         env.Set("OLD_FSC", "true");
-//!         opt.SetEffectiveSearchSpace(args[kArgEffSearchSpace].AsInt8());
-//!     }
-//! ```
 
 use crate::stats::{blast_spouge_etos, blast_spouge_stoe, BlastGumbelBlk, KarlinParams};
 use crate::utils::glibc_fma_libm::GlibcLibm;
@@ -53,28 +41,6 @@ impl<'a> EvalueStats<'a> {
     /// (`kbp_gap`: `kbp_gap_psi` in a PSSM search, the redo copy's scaled block in the redo).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1872-1890
-    /// ```c
-    ///       if (sbp->gbp) {
-    ///           /* Only try Spouge's method if gumbel parameters are available */
-    ///           if (!isRPS) {
-    ///               hsp->evalue =
-    ///                   BLAST_SpougeStoE(score, kbp[kbp_context], sbp->gbp,
-    ///                                query_info->contexts[hsp->context].query_length,
-    ///                                subject_length);
-    ///           } else {
-    ///               /* for RPS blast, query and subject is swapped */
-    ///               hsp->evalue =
-    ///                   BLAST_SpougeStoE(score, kbp[kbp_context], sbp->gbp,
-    ///                                subject_length,
-    ///                                query_info->contexts[hsp->context].query_length);
-    ///           }
-    ///       } else {
-    ///           /* Get effective search space from the query information block */
-    ///           hsp->evalue =
-    ///               BLAST_KarlinStoE_simple(score, kbp[kbp_context],
-    ///                                query_info->contexts[hsp->context].eff_searchsp);
-    ///       }
-    /// ```
     pub(crate) fn e_value(&self, score: i32, kbp: &KarlinParams, m: i32, n: i32) -> f64 {
         match self.gumbel {
             Some(gumbel) => blast_spouge_stoe(score, kbp, gumbel, m, n),
@@ -88,58 +54,13 @@ impl<'a> EvalueStats<'a> {
     /// cutoff (`avg_subject_length`).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:915-945
-    /// ```c
-    ///          Int8 searchsp;
-    ///          Int4 new_cutoff = 1;
-    ///          double evalue = options->expect_value;
-    ///          ...
-    ///          searchsp = query_info->contexts[context].eff_searchsp;
-    ///          ...
-    ///          if (sbp->gbp && sbp->gbp->filled) {
-    ///              ...
-    ///              new_cutoff = BLAST_SpougeEtoS(cbs_stretch*evalue, kbp, sbp->gbp,
-    ///                          query_info->contexts[context].query_length,
-    ///                          avg_subject_length);
-    ///          } else {
-    ///              BLAST_Cutoffs(&new_cutoff, &evalue, kbp, searchsp, FALSE, 0);
-    ///          }
-    /// ```
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4097-4129
-    /// ```c
-    ///    Int4  s = *S, es;
-    ///    ...
-    ///    es = 1;
-    ///    esave = e;
-    ///    if (e > 0.)
-    ///    {
-    ///         ...
-    ///         es = BlastKarlinEtoS_simple(e, kbp, searchsp);
-    ///    }
-    ///    /*
-    ///    Pick the larger cutoff score between the user's choice
-    ///    and that calculated from the value of E.
-    ///    */
-    ///    if (es > s) {
-    ///       s_changed = TRUE;
-    ///       *S = s = es;
-    ///    }
-    /// ```
     /// `BlastKarlinEtoS_simple` is `cutoff_score_from_evalue`; its value is raised to the
     /// `new_cutoff` of 1 (`-evalue` is above 0: NCBI's options validation refuses the others).
     /// A block with a negative value keeps the cutoff of 1:
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4101-4102
-    /// ```c
-    ///    if (kbp->Lambda == -1. || kbp->K == -1. || kbp->H == -1.)
-    ///       return 1;
-    /// ```
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4054-4057
-    /// ```c
-    ///    if (Lambda < 0. || K < 0. || H < 0.0)
-    ///    {
-    ///       return BLAST_SCORE_MIN;
-    ///    }
-    /// ```
     /// (`es` is then `BLAST_SCORE_MIN`, not above the cutoff of 1.)
     pub(crate) fn hit_cutoff(&self, prelim_evalue: f64, kbp: &KarlinParams, m: i32, n: i32) -> i32 {
         match self.gumbel {
@@ -159,24 +80,6 @@ impl<'a> EvalueStats<'a> {
 /// block without valid values.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4156-4171
-/// ```c
-/// double
-/// BLAST_KarlinStoE_simple(Int4 S,
-///       Blast_KarlinBlk* kbp,
-///       Int8  searchsp)   /* size of search space. */
-/// {
-///    double   Lambda, K, H; /* parameters for Karlin statistics */
-///
-///    Lambda = kbp->Lambda;
-///    K = kbp->K;
-///    H = kbp->H;
-///    if (Lambda < 0. || K < 0. || H < 0.) {
-///       return -1.;
-///    }
-///
-///    return (double) searchsp * exp((double)(-Lambda * S) + kbp->logK);
-/// }
-/// ```
 /// `kbp->logK` is `log(kbp->K)` in every block a PSSM search reads (psiblast_aux_priv.cpp:121,
 /// blast_kappa.c:2127).
 fn karlin_stoe_simple(score: i32, kbp: &KarlinParams, searchsp: i64) -> f64 {

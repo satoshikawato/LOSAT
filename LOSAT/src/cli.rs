@@ -5,35 +5,11 @@ use std::{ffi::OsString, fmt};
 use clap::{error::ErrorKind, CommandFactory, Parser, Subcommand};
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:47-49
-// ```c++
-//     static const string kProgram("blastx");
-//     arg.Reset(new CProgramDescriptionArgs(kProgram,
-//                                   "Translated Query-Protein Subject BLAST"));
-// ```
 use crate::algorithm::{blastn, blastp, blastx, psiblast, rpsblast, rpstblastn, tblastn, tblastx};
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46,51,75
-// ```c++
-// const string kArgQuery("query");
-// const string kArgSubject("subject");
-// const string kArgNumThreads("num_threads");
-// ```
 // LOSAT retains its program subcommand; search parameter names are NCBI names.
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3815-3826
-// ```c++
-// string& CArgDescriptions::PrintUsage(string& str, bool detailed) const
-// {
-//     CPrintUsage x(*this);
-//     list<string> arr;
-//
-//     // SYNOPSIS
-//     arr.push_back("USAGE");
-//     x.AddSynopsis(arr, m_UsageName, "    ");
-//
-//     // DESCRIPTION
-//     arr.push_back(kEmptyStr);
-//     x.AddDescription(arr, detailed);
-// ```
 // `-help` and `-h` open with NCBI's two headings, `USAGE` and `DESCRIPTION`: tools that call
 // BLAST+ look for them (BRIG takes a `blastn -help` that prints `USAGE` as BLAST+ found).
 // The options follow in clap's layout.
@@ -229,11 +205,6 @@ pub struct Cli {
 #[derive(Subcommand, Debug)]
 pub enum Commands {
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:47-49
-    // ```c++
-    //     static const string kProgram("blastx");
-    //     arg.Reset(new CProgramDescriptionArgs(kProgram,
-    //                                   "Translated Query-Protein Subject BLAST"));
-    // ```
     /// Translated nucleotide query vs protein subject (blastx)
     #[command(help_template = NCBI_HELP_TEMPLATE)]
     Blastx(blastx::BlastxArgs),
@@ -247,66 +218,35 @@ pub enum Commands {
     /// Pairwise 6-frame translated nucleotide alignment (tblastx)
     #[command(help_template = NCBI_HELP_TEMPLATE)]
     Tblastx(tblastx::TblastxArgs),
-    // NCBI c++/src/algo/blast/blastinput/tblastn_args.cpp:47-52:
-    // static const string kProgram("tblastn"); SetTask("tblastn");
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastn_args.cpp:47-52:
     /// Protein query vs translated nucleotide subject (tblastn)
     #[command(help_template = NCBI_HELP_TEMPLATE)]
     Tblastn(tblastn::TblastnArgs),
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/psiblast_args.cpp:47-51
-    // ```c++
-    //     static const string kProgram("psiblast");
-    //     CRef<IBlastCmdLineArgs> arg;
-    //     arg.Reset(new CProgramDescriptionArgs(kProgram,
-    //                                           "Position-Specific Iterated BLAST"));
-    // ```
     /// Position-Specific Iterated BLAST (psiblast)
     #[command(help_template = NCBI_HELP_TEMPLATE)]
     Psiblast(psiblast::PsiblastArgs),
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpsblast_args.cpp:77-79
-    // ```c++
-    //     static const string kProgram("rpsblast");
-    //     arg.Reset(new CProgramDescriptionArgs(kProgram,
-    //                                           "Reverse Position Specific BLAST"));
-    // ```
     /// Reverse Position Specific BLAST (rpsblast)
     #[command(help_template = NCBI_HELP_TEMPLATE)]
     Rpsblast(rpsblast::RpsblastArgs),
-    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpstblastn_args.cpp:48-50
-    // ```c++
-    //     static const string kProgram("rpstblastn");
-    //     arg.Reset(new CProgramDescriptionArgs(kProgram,
-    //                                "Translated Reverse Position Specific BLAST"));
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpstblastn_args.cpp:48-51
     // `-h`, `-help` and `-help-full` write NCBI's frozen texts (`RpstblastnArgs::ncbi_help`; the
     // reader stops at them, `try_parse_from_command`).
     /// Translated Reverse Position Specific BLAST (rpstblastn)
     #[command(help_template = NCBI_HELP_TEMPLATE)]
     Rpstblastn(rpstblastn::RpstblastnArgs),
     // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:217-219
-    // ```c++
-    //     arg_desc->SetUsageContext(GetArguments().GetProgramBasename(),
-    //                   "Application to create BLAST databases, version "
-    //                   + CBlastVersion().Print());
-    // ```
     /// makeblastdb: create a BLAST database from a FASTA file (format version 5 by default, 4 with -blastdb_version 4)
     #[command(name = "makeblastdb", help_template = NCBI_HELP_TEMPLATE)]
     Makedb(crate::writedb::makeblastdb::MakedbArgs),
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:64-65
-    // ```c++
-    // static const char *PROGRAM_USAGE =	//multiline
-    // "Process output from offline rpsblast to annotate sequence with conserved domain information";
-    // ```
     /// Process output from offline rpsblast to annotate sequence with conserved domain information (rpsbproc; its domain hits, sites and motifs of protein and nucleotide queries)
     #[command(name = "rpsbproc", help_template = NCBI_HELP_TEMPLATE)]
     Rpsbproc(crate::rpsbproc::RpsbprocArgs),
 }
 
-// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:166-170,203-207,332-349
-// ```c++
-// arg_desc.AddOptionalKey(kArgWordSize, "int_value", description, CArgDescriptions::eInteger);
-// arg_desc.AddOptionalKey(kArgMaxHSPsPerSubject, "int_value", ...);
-// arg_desc.AddDefaultKey(kArgSegFiltering, "SEG_options", ..., CArgDescriptions::eString, ...);
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:166-170,203-207,332-349
 // Translate registered canonical keys only. Consume each value once so a path
 // or a quoted filtering specification can never be interpreted as another key.
 /// Parses `argv` (`losat <program> <words>`) for a caller that runs no NCBI application start
@@ -485,26 +425,6 @@ where
             continue;
         }
         // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3020-3023, 2840-2852
-        // ```c++
-        //     const CArgDesc& arg = **it;
-        //
-        //     if ( s_IsFlag(arg) ) {
-        //         x_CheckAutoHelp(arg1);
-        // ...
-        // void CArgDescriptions::x_CheckAutoHelp(const string& arg) const
-        // {
-        //     if (arg.compare(string("-") + s_AutoHelp) == 0) {
-        //         if (m_AutoHelp) {
-        //             NCBI_THROW(CArgHelpException,eHelp,kEmptyStr);
-        //         }
-        //     } else if (arg.compare(string("-") + s_AutoHelpFull) == 0) {
-        //         NCBI_THROW(CArgHelpException,eHelpFull,kEmptyStr);
-        //     } else if (arg.compare(string("-") + s_AutoHelpXml) == 0) {
-        //         NCBI_THROW(CArgHelpException,eHelpXml,kEmptyStr);
-        //     } else if (arg.compare(string("-") + s_AutoHelpShowAll) == 0) {
-        //         NCBI_THROW(CArgHelpException,eHelpShowAll,kEmptyStr);
-        //     }
-        // ```
         // NCBI's reader stops at its help flags, the words before them read first: a word after
         // one is never read (NCBI BLAST+ 2.17.0: `-help -bogus`, `-help ... -out` with no value
         // and `-h -xmlhelp` print the help, exit status 0; line RG item E2). Every program of
@@ -517,7 +437,7 @@ where
         // exception 1), so its text is `-help`'s, as NCBI's other programs write the bytes of
         // `-help` (in every place: line RG, `E/SURVEY_E2.md`).
         let stops_at_help = !std::ptr::eq(scope, &command);
-        // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:685-690 (quoted at
+        // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:685-690 (cited at
         // `ncbi_xmlhelp`)
         // `-xmlhelp` (`s_AutoHelpXml`) stops the reader as `-help` does, the words before it
         // read: the command line's entry prints the program's arguments in NCBI's XML
@@ -538,10 +458,6 @@ where
             continue;
         }
         // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:76-77
-        // ```c++
-        // static const char* s_AutoHelp     = "h";
-        // static const char* s_AutoHelpFull = "help";
-        // ```
         // `-h` is the short usage of every NCBI program (rc 0); clap's `-h` is its short help.
         if text == "-h" {
             translated.push("-h".into());
@@ -556,15 +472,6 @@ where
             continue;
         }
         // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:2866-2872
-        // ```c++
-        //     if (*n_plain == kMax_UInt || m_PositionalMode == ePositionalMode_Loose) {
-        //         // Check for the s_ArgDelimiter delimiter
-        //         if (arg1.compare(s_ArgDelimiter) == 0) {
-        //             if (*n_plain == kMax_UInt) {
-        //                 *n_plain = 0;  // pos.args started
-        //             }
-        //             return false;
-        // ```
         // `--` starts NCBI's positional arguments, which the BLAST programs do not have:
         // a last `--` changes nothing, and a word after it is an extra positional
         // argument (NCBI's USAGE error; LOSAT's parser error, exception 1).
@@ -587,10 +494,6 @@ where
             continue;
         }
         // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/argwrapper.cpp:42-43
-        // ```c++
-        // 				if (TArgDefinition::EMPTYSTR != argdef.alias)
-        // 					pMyArgs->AddAlias(argdef.alias, argdef.name);
-        // ```
         // rpsbproc's aliases (`-infile` of `i`, ...) are its `--infile`, ... (`rpsbproc::args`).
         let alias = (scope.get_name() == "rpsbproc")
             .then(|| crate::rpsbproc::alias_word(text))
@@ -621,14 +524,7 @@ where
                     )
                 })?,
             };
-            // NCBI reference: c++/src/corelib/ncbiargs.cpp:266-270
-            // ```c++
-            // inline CArg_String::CArg_String(const string& name, const string& value)
-            //     : CArgValue(name)
-            // {
-            //     m_StringList.push_back(value);
-            // }
-            // ```
+            // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:266-270
             // NCBI keeps the bytes of an option's value. LOSAT's options are UTF-8 strings,
             // so a value that is not UTF-8 is rejected explicitly, after the parser: NCBI's
             // USAGE errors and `-help` come first, as for any value. The parser reads the
@@ -729,14 +625,7 @@ fn refuses_non_utf8_value(scope: &clap::Command, name: &str) -> bool {
 
 /// The explicit rejection of an option's value that is not UTF-8 (`try_parse_from`).
 ///
-/// NCBI reference: c++/src/corelib/ncbiargs.cpp:266-270
-/// ```c++
-/// inline CArg_String::CArg_String(const string& name, const string& value)
-///     : CArgValue(name)
-/// {
-///     m_StringList.push_back(value);
-/// }
-/// ```
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:266-270
 fn non_utf8_value_error(scope: &clap::Command, name: &str) -> clap::Error {
     clap::Error::raw(
         ErrorKind::InvalidUtf8,
@@ -747,11 +636,7 @@ fn non_utf8_value_error(scope: &clap::Command, name: &str) -> clap::Error {
     )
 }
 
-// NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:107,143
-// ```c++
-// const string kArgWordSize("word_size");
-// const string kArgCompBasedStats("comp_based_stats");
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:107,143
 // Render the same canonical names in help, usage and parser diagnostics.
 /// `text` with each `--{name}` that is a whole word (not followed by a letter, a digit, `-` or `_`)
 /// written `-{name}` (`render_rpsbproc_message`).
@@ -858,24 +743,7 @@ fn render_rpsbproc_text(text: &str) -> String {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastn_args.cpp:63-125
-// ```c++
-// m_BlastDbArgs.Reset(new CBlastDatabaseArgs);
-// arg.Reset(new CGenericSearchArgs(kQueryIsProtein));
-// m_HspFilteringArgs.Reset(new CHspFilteringArgs);
-// m_FormattingArgs.Reset(new CFormattingArgs);
-// m_PsiBlastArgs.Reset(new CPsiBlastArgs(CPsiBlastArgs::eNucleotideDb));
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastn_args.cpp:63-70
-// ```c++
-//     m_BlastDbArgs.Reset(new CBlastDatabaseArgs);
-//     m_BlastDbArgs->SetDatabaseMaskingSupport(true);
-//     arg.Reset(m_BlastDbArgs);
-//     m_Args.push_back(arg);
-//
-//     m_StdCmdLineArgs.Reset(new CStdCmdLineArgs);
-//     arg.Reset(m_StdCmdLineArgs);
-//     m_Args.push_back(arg);
-// ```
 // The options of NCBI blastn 2.17.0+ (-help) that LOSAT's BLASTN does not implement
 // (AGENTS.md rule 2: explicit unsupported errors). `-db` and `-dbsize` are implemented
 // (`blastn/args.rs`), as are the X-drops, `-window_size`, `-off_diagonal_range`, `-no_greedy`
@@ -899,15 +767,6 @@ fn is_unported_blastn_arg(name: &str) -> bool {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastp_args.cpp:44-50
-// ```c++
-// CBlastpAppArgs::CBlastpAppArgs()
-// {
-//     CRef<IBlastCmdLineArgs> arg;
-//     static const string kProgram("blastp");
-//     arg.Reset(new CProgramDescriptionArgs(kProgram, "Protein-Protein BLAST"));
-//     const bool kQueryIsProtein = true;
-//     bool const kFilterByDefault = false;
-// ```
 // The options of NCBI blastp 2.17.0+ (-help) that LOSAT's BLASTP does not implement
 // (AGENTS.md rule 2: explicit unsupported errors).
 const UNPORTED_BLASTP_ARGS: &[&str] = &[
@@ -932,17 +791,6 @@ fn is_unported_blastp_arg(name: &str) -> bool {
 // The rejection of an option that a program does not have: NCBI's options that LOSAT
 // has not ported, the NCBI C++ Toolkit options, and the rest (unknown to NCBI too).
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1156-1164
-// ```c++
-//         // checkpoint file
-//         arg_desc.AddOptionalKey(kArgPSIOutputChkPntFile, "checkpoint_file",
-//
-//                                 "File name to store checkpoint file",
-//                                 CArgDescriptions::eOutputFile);
-//         // ASCII matrix file
-//         arg_desc.AddOptionalKey(kArgAsciiPssmOutputFile, "ascii_mtx_file",
-//                                 "File name to store ASCII version of PSSM",
-//                                 CArgDescriptions::eOutputFile);
-// ```
 /// psiblast's NCBI arguments that LOSAT does not run: PHI-BLAST (PS8; the ASCII and ASN.1 PSSM
 /// files are PS2's and PS3's, `algorithm::psiblast::pssm`, `-in_pssm` PS4's,
 /// `algorithm::psiblast::in_pssm`, the MSA inputs PS6's, `algorithm::psiblast::in_msa`), and the arguments that blastp's engine does
@@ -956,7 +804,7 @@ fn is_unported_psiblast_arg(name: &str) -> bool {
         || (is_unported_blastp_arg(name) && !matches!(name, "db_hard_mask" | "db_soft_mask"))
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpsblast_args.cpp:85-127 (quoted at
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpsblast_args.cpp:85-127 (cited at
 // `algorithm::rpsblast::args`)
 /// rpsblast's NCBI arguments that LOSAT does not run: `-html` (PS15a) and the remote options and
 /// `-import_search_strategy` of every program.
@@ -967,7 +815,7 @@ fn is_unported_rpsblast_arg(name: &str) -> bool {
     UNPORTED_RPSBLAST_ARGS.contains(&name)
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpstblastn_args.cpp:44-110 (quoted at
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpstblastn_args.cpp:44-110 (cited at
 // `algorithm::rpstblastn::args`)
 /// rpstblastn's NCBI arguments that LOSAT does not run: `-html` (PS15a) and the remote options
 /// and `-import_search_strategy` of every program. The composition-based statistics of a later
@@ -1002,11 +850,8 @@ fn refuses_option(scope: &clap::Command, name: &str) -> bool {
             .any(|refusal| refusal.0 == program && refusal.1 == name)
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:917-918 (quoted at
-// tblastn's check, `TblastnArgs::validate`)
-// ```c++
-//     arg_desc.AddFlag(kArgUngapped, "Perform ungapped alignment only?", true);
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:917-918 (cited at
+// blastp's check, `validate_requested_blastp_support`)
 /// NCBI's arguments that a program's parser reads, so that NCBI's own errors about them and the
 /// other arguments come first (tblastn's `-ungapped` with composition-based statistics:
 /// `Composition-adjusted searched are not supported with an ungapped search`), and whose run LOSAT
@@ -1047,28 +892,15 @@ fn named_refusal(program: &str, name: &str) -> Option<clap::Error> {
             format!("the NCBI BLAST+ option -{name} is not supported by LOSAT's {shown}"),
         ))
     };
-    // NCBI c++/src/algo/blast/blastinput/tblastn_args.cpp:64-129:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastn_args.cpp:64-129:
     // m_Args.push_back(arg) registers shared, formatting, DB, and PSI groups.
     // The named NCBI options below have no Stage B Rust behavior.
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:62-66
-    // ```c++
-    //     m_BlastDbArgs.Reset(new CBlastDatabaseArgs);
-    //     m_BlastDbArgs->SetDatabaseMaskingSupport(true);
-    //     m_BlastDbArgs->SetIPGFilteringSupport(true);
-    //     arg.Reset(m_BlastDbArgs);
-    //     m_Args.push_back(arg);
-    // ```
     // Product scope explicitly refuses unported NCBI capabilities.
     if program == "blastx" && is_unported_blastx_arg(name) {
         return refusal("BLASTX");
     }
     // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:246-250
-    // ```c++
-    //     arg_desc->AddFlag("parse_seqids",
-    //                       "Option to parse seqid for FASTA input if set, for all other input types seqids are parsed automatically", true);
-    //     arg_desc->AddFlag("hash_index",
-    //                       "Create index of sequence hash values.",
-    // ```
     // makeblastdb's options that LOSAT's makeblastdb does not serve are named in
     // its refusal (AGENTS.md rule 2: explicit unsupported errors).
     if program == "makeblastdb" && crate::writedb::makeblastdb::UNSUPPORTED_OPTIONS.contains(&name)
@@ -1123,14 +955,6 @@ fn named_refusal(program: &str, name: &str) -> Option<clap::Error> {
 /// is clap's and is not read here.
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:972-977
-/// ```c++
-///             } else if ( NStr::strcmp(argv[i], s_ArgVersion) == 0 ) {
-///                 delete[] v;
-///                 // Print VERSION
-///                 cout << GetFullVersion().Print( appname, CVersionAPI::fVersionInfo | CVersionAPI::fPackageShort );
-///                 diag_context.DiscardMessages();
-///                 return 0;
-/// ```
 pub fn ncbi_version_request<I, S>(argv: I) -> Option<String>
 where
     I: IntoIterator<Item = S>,
@@ -1158,9 +982,6 @@ where
     match crate::blastinput::ncbi_environment::preparse(&tokens[2..]) {
         crate::blastinput::ncbi_environment::Preparsed::Version(request) => {
             // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:388
-            // ```c++
-            // 	SetVersion(CVersionInfo(VER.major, VER.minor, VER.patch_level));
-            // ```
             // rpsbproc's own version (0.5.1), not BLAST's; the second line names the BLAST+
             // toolkit that bioconda builds it on (orchestrator's choice, Owner-delegated
             // 2026-11-11).
@@ -1189,7 +1010,7 @@ const TOOLKIT_PROGRAMS: &[&str] = &[
     "rpsbproc",
 ];
 
-// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:926-1001 (quoted at
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:926-1001 (cited at
 // `ncbi_environment::preparse`: `-version` and the full versions are read before the
 // arguments, anywhere before `--`, also where another option expects its value, but not as the
 // value of `-logfile` or `-conffile`)
@@ -1303,7 +1124,7 @@ fn toolkit_option_name(word: &str) -> &str {
 }
 
 // No NCBI counterpart: NCBI's application prints the versions before its arguments
-// (ncbiapp.cpp:926-1001, quoted at `ncbi_environment::preparse`). The library API of the search
+// (ncbiapp.cpp:926-1001, cited at `ncbi_environment::preparse`). The library API of the search
 // programs returns reports, and the Web engine shows them: neither has a place for the text
 // (line RG DECISIONS E3-2; the library's tools print it to their output, `ncbi_app::run_with`,
 // `api::run_makeblastdb`, so their refusal names the Web engine alone).
@@ -1341,7 +1162,7 @@ fn refusal_program_name(program: &str) -> String {
 }
 
 // No NCBI counterpart: NCBI has no library API. NCBI's application prints the XML of `-xmlhelp`
-// (ncbiapp.cpp:685-690, quoted at `ncbi_xmlhelp`); LOSAT's library and the Web engine refuse it
+// (ncbiapp.cpp:685-690, cited at `ncbi_xmlhelp`); LOSAT's library and the Web engine refuse it
 // (line RG DECISIONS E2x-1, the Owner's choice of 2026-11-13). Only the command line's entries
 // reach the XML (`xml_help_text`, `ncbi_app::run`), so the library and the Web engine do not carry
 // it (E2x-2).
@@ -1382,25 +1203,9 @@ pub(crate) fn xml_help_text(program: &str) -> Option<String> {
     crate::ncbi_xmlhelp::print(program, |name| refuses_option(scope, name))
 }
 
-// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:2337-2357 (`AddDefaultFileArguments`:
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:2229-2242 (`AddDefaultFileArguments`:
 // every NCBI application's arguments have `-logfile` and `-conffile`; the BLAST programs hide
 // them from their `-help`, `HideStdArgs(fHideLogfile | fHideConffile | ...)`, blastn_app.cpp:92)
-// ```c++
-// void CArgDescriptions::AddDefaultFileArguments(const string& default_config)
-// {
-//     if (!Exist(s_ArgLogFile + 1) ) {
-//         AddOptionalKey
-//             (s_ArgLogFile+1, "File_Name",
-//                 "File to which the program log should be redirected",
-//                 CArgDescriptions::eOutputFile);
-//     }
-//     if (!Exist(s_ArgCfgFile + 1) ) {
-//         if (default_config.empty()) {
-//             AddOptionalKey
-//                 (s_ArgCfgFile + 1, "File_Name",
-//                     "Program's configuration (registry) data file",
-//                     CArgDescriptions::eInputFile);
-// ```
 /// `command` with NCBI's two toolkit file arguments, `-logfile` and `-conffile`, in each NCBI
 /// application that runs them (the BLAST programs and makeblastdb), hidden as NCBI hides them.
 /// Their values are read by the application start (`ncbi_environment::log_file` and
@@ -1436,19 +1241,6 @@ fn with_toolkit_file_args(mut command: clap::Command) -> clap::Command {
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:78-88
-// ```c++
-// static const char* s_AutoHelpShowAll  = "help-full";
-// static const char* s_AutoHelpXml  = "xmlhelp";
-// static const char* s_ExtraName    = "....";
-//
-// const char* s_ArgLogFile         = "-logfile";
-// const char* s_ArgCfgFile         = "-conffile";
-// const char* s_ArgVersion         = "-version";
-// const char* s_ArgFullVersion     = "-version-full";
-// const char* s_ArgFullVersionXml  = "-version-full-xml";
-// const char* s_ArgFullVersionJson = "-version-full-json";
-// const char* s_ArgDryRun          = "-dryrun";
-// ```
 // The standard options of an NCBI C++ Toolkit application, which NCBI's BLAST+ programs
 // accept without listing them in -help. `-logfile` and `-conffile` run in the BLAST programs and
 // makeblastdb (line RG item E1), `-dryrun` in them and blastdbcmd (item E1b), the three in
@@ -1457,14 +1249,6 @@ fn with_toolkit_file_args(mut command: clap::Command) -> clap::Command {
 // `-xmlhelp` in every program on the command line (item E2x, `xml_help_program`).
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastn_args.cpp:44-50
-// ```c++
-// CTblastnAppArgs::CTblastnAppArgs()
-// {
-//     CRef<IBlastCmdLineArgs> arg;
-//     static const string kProgram("tblastn");
-//     arg.Reset(new CProgramDescriptionArgs(kProgram,
-//                                   "Protein Query-Translated Subject BLAST"));
-// ```
 // The options of NCBI tblastn 2.17.0+ (-help) that LOSAT's TBLASTN does not implement
 // (AGENTS.md rule 2: explicit unsupported errors).
 const UNPORTED_TBLASTN_ARGS: &[&str] = &[
@@ -1486,15 +1270,6 @@ fn is_unported_tblastn_arg(name: &str) -> bool {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastx_args.cpp:44-50
-// ```c++
-// CTblastxAppArgs::CTblastxAppArgs()
-// {
-//     CRef<IBlastCmdLineArgs> arg;
-//     static const string kProgram("tblastx");
-//     arg.Reset(new CProgramDescriptionArgs(kProgram,
-//                                   "Translated Query-Translated Subject BLAST"));
-//     const bool kQueryIsProtein = false;
-// ```
 // The options of NCBI tblastx 2.17.0+ (-help) that LOSAT's TBLASTX does not implement
 // (AGENTS.md rule 2: explicit unsupported errors).
 const UNPORTED_TBLASTX_ARGS: &[&str] = &[
@@ -1515,13 +1290,6 @@ fn is_unported_tblastx_arg(name: &str) -> bool {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:62-66
-// ```c++
-//     m_BlastDbArgs.Reset(new CBlastDatabaseArgs);
-//     m_BlastDbArgs->SetDatabaseMaskingSupport(true);
-//     m_BlastDbArgs->SetIPGFilteringSupport(true);
-//     arg.Reset(m_BlastDbArgs);
-//     m_Args.push_back(arg);
-// ```
 // Named capabilities exist in NCBI but are explicitly outside the BLASTX product scope.
 const UNPORTED_BLASTX_ARGS: &[&str] = &[
     "html",
@@ -1544,42 +1312,8 @@ fn is_unported_blastx_arg(name: &str) -> bool {
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:177-184
-// ```c++
-//     catch (const CArgException& e) {                                        \
-//         LOG_POST(Error << "Command line argument error: " << e.GetMsg());   \
-//         exit_code = BLAST_INPUT_ERROR;                                      \
-//     }                                                                       \
-//     catch (const CObjReaderParseException& e) {                             \
-//         LOG_POST(Error << "BLAST query error: " << e.GetMsg());             \
-//         exit_code = BLAST_INPUT_ERROR;                                      \
-//     }                                                                       \
-// ```
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:216-230
-// ```c++
-//     catch (const blast::CBlastException& e) {                               \
-//         const string& msg = e.GetMsg();                                     \
-//         if (e.GetErrCode() == CBlastException::eInvalidOptions) {           \
-//             LOG_POST(Error << "BLAST options error: " << e.GetMsg());       \
-//             exit_code = BLAST_INPUT_ERROR;                                  \
-//         } else if ((NStr::Find(msg, "Out of memory") != NPOS) ||            \
-//             (NStr::Find(msg, "Failed to allocate") != NPOS)) {              \
-//             LOG_POST(Error << "BLAST ran out of memory: " << e.GetMsg());   \
-//             exit_code = BLAST_OUT_OF_MEMORY;                                \
-//         } else {                                                            \
-//             LOG_POST(Error << "BLAST engine error: " << e.GetMsg());        \
-//             exit_code = BLAST_ENGINE_ERROR;                                 \
-//         }                                                                   \
-//     }                                                                       \
-//     catch (const blast::CBlastSystemException& e) {                         \
-// ```
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:251-255
-// ```c++
-//     }                                                                       \
-//     catch (const std::ios::failure&) {                                      \
-//         LOG_POST(Error << "BLAST failed to write output");                  \
-//         exit_code = BLAST_OUTPUT_ERROR;                                     \
-//     }                                                                       \
-// ```
 #[derive(Debug)]
 pub struct NativeError {
     pub exit: i32,
@@ -1589,11 +1323,6 @@ pub struct NativeError {
     pub message: Vec<u8>,
 }
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:178-180
-// ```c++
-//         LOG_POST(Error << "Command line argument error: " << e.GetMsg());   \
-//         exit_code = BLAST_INPUT_ERROR;                                      \
-//     }                                                                       \
-// ```
 /// The text of `message`; a byte that is not UTF-8 reads as U+FFFD (`message` keeps it).
 impl fmt::Display for NativeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -1601,16 +1330,6 @@ impl fmt::Display for NativeError {
     }
 }
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:177-184
-// ```c++
-//     catch (const CArgException& e) {                                        \
-//         LOG_POST(Error << "Command line argument error: " << e.GetMsg());   \
-//         exit_code = BLAST_INPUT_ERROR;                                      \
-//     }                                                                       \
-//     catch (const CObjReaderParseException& e) {                             \
-//         LOG_POST(Error << "BLAST query error: " << e.GetMsg());             \
-//         exit_code = BLAST_INPUT_ERROR;                                      \
-//     }                                                                       \
-// ```
 impl std::error::Error for NativeError {}
 
 /// Whether `error` is `NativeError::silent_end`.
@@ -1622,14 +1341,6 @@ pub(crate) fn is_silent_end(error: &anyhow::Error) -> bool {
 
 impl NativeError {
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:242-247
-    // ```c++
-    //     catch (const CIOException& e) {                                         \
-    //         if (e.GetErrCode() == CIOException::eFlush) {                       \
-    //             LOG_POST(Error << "BLAST failed to write output: " << e.GetMsg());\
-    //             exit_code = BLAST_OUTPUT_ERROR;                                 \
-    //         }                                                                   \
-    //     }                                                                       \
-    // ```
     /// The end of a run by a `CIOException` other than `eFlush`, which `CATCH_ALL` ends without a
     /// post and with the run's status, 0 (a `CEofException` of a PSSM file that ends after its
     /// header; the failed write of the object manager's message after the diagnostic stream
@@ -1643,34 +1354,7 @@ impl NativeError {
     }
 
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:248-251
-    // ```c++
-    //     catch (const CException& e) {                                           \
-    //         LOG_POST(Error << "Error: " << e.what());                           \
-    //         exit_code = BLAST_UNKNOWN_ERROR;                                    \
-    //     }                                                                       \
-    // ```
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:185-203
-    // ```c++
-    //     catch (const CSeqDBException& e) {                                      \
-    // 		if (e.GetErrCode() == CSeqDBException::eTooManyOpenFiles) {         \
-    // 			string err_msg =                                                \
-    //                 "Too many open files, please raise the open file limit";    \
-    //         	LOG_POST(Error << "BLAST Database error: " << err_msg);         \
-    //             exit_code = BLAST_DATABASE_ERROR;                               \
-    // 		}                                                                   \
-    // 		else if (e.GetErrCode() == CSeqDBException::eMemoryMappingFailure){ \
-    // 			string err_msg = "Database memory map file error";              \
-    //             if (!e.GetMsg().empty())                                        \
-    //                 err_msg += " - " + e.GetMsg();                              \
-    //         	LOG_POST(Error << "BLAST Database error: " << err_msg);         \
-    //             exit_code = BLAST_DATABASE_ERROR;                               \
-    // 		}                                                                   \
-    //         else {                                                              \
-    //         	LOG_POST(Error << "BLAST Database error: " << e.GetMsg());      \
-    //         	exit_code = BLAST_DATABASE_ERROR;                               \
-    //         }                                                                   \
-    //     }                                                                       \
-    // ```
     /// `CATCH_ALL`'s report of an exception of NCBI's C++ Toolkit (`CException`) that ends a
     /// BLAST program: `Error: `, the exception's `what()` (which ends with a line feed) and the
     /// post's line feed, exit status 255 (`BLAST_UNKNOWN_ERROR`); a `CSeqDBException`, which
@@ -1694,12 +1378,6 @@ impl NativeError {
     }
 
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:260-263
-    // ```c++
-    //     catch (const std::exception& e) {                                       \
-    //         LOG_POST(Error << "Error: " << e.what());                           \
-    //         exit_code = BLAST_UNKNOWN_ERROR;                                    \
-    //     }                                                                       \
-    // ```
     /// `CATCH_ALL`'s report of a `std::exception` (one that is neither a `CException` nor
     /// `bad_alloc` nor `ios::failure`) whose `what()` is `what`: exit status 255.
     pub(crate) fn std_exception(what: &str) -> NativeError {
@@ -1721,11 +1399,7 @@ impl NativeError {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:118-119
-// ```c
-// {
-//     m_Outfile.exceptions(NcbiBadbit);
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:118-119
 /// The report's output stream (the `-out` file or standard output), which records whether
 /// a write to it failed: NCBI's outfmt 0 stream throws there, which the application
 /// reports as "BLAST failed to write output" (blast_app_util.hpp:252-255).
@@ -1762,7 +1436,7 @@ impl std::io::Write for ReportStream {
     }
 }
 
-// libstdc++ (GCC 13): include/c++/13/bits/basic_ios.tcc:39-49
+// C++ standard, [iostate.flags]: `setstate` calls `clear`, which throws `ios_base::failure` when the bit is in `exceptions()`.
 /// NCBI's `ios::failure` of the outfmt 0 to 4 formatter's stream that an insertion of the report
 /// raises itself, not a write that the file or device refused (`ReportStream::failed`): an
 /// insertion that sets `badbit` (`setstate`, which calls `clear`) throws on a stream with
@@ -1853,15 +1527,6 @@ fn lock<T>(mutex: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:317-323
-// ```c++
-// CBlastFormat::~CBlastFormat()
-// {
-//     try {
-//         m_Outfile.exceptions(m_OrigExceptionMask);
-//     } catch (...) {/*ignore exceptions*/}
-//     m_Outfile.flush();
-// }
-// ```
 impl NcbiReportBuffer {
     fn new(inner: Box<dyn std::io::Write + Send>, buffer: NcbiBuffer) -> Self {
         NcbiReportBuffer(std::sync::Arc::new(std::sync::Mutex::new(HeldReport {
@@ -1979,7 +1644,11 @@ impl<W: std::io::Write + ?Sized> Insertion<'_, W> {
         Ok(())
     }
 
-    /// Writes the piece where it may end (`insert_streamed`) once it is `PIECE` bytes long.
+    /// Writes the piece where it may end (`insert_streamed`) once it is `PIECE` bytes long. A
+    /// piece ends only if more than `NCBI_BUFSIZ` bytes follow it, which is at least a block (a
+    /// block never exceeds `NCBI_BUFSIZ`), so the last piece always takes the buffer's branch of
+    /// an insertion longer than the room, as the whole insertion does; a final piece that exactly
+    /// filled a block would differ from the whole.
     fn end_piece(&mut self) -> std::io::Result<()> {
         let n = self.piece.len() as u64;
         if n >= Self::PIECE as u64
@@ -1995,10 +1664,6 @@ impl<W: std::io::Write + ?Sized> Insertion<'_, W> {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:68-93
-// ```c
-// CBlastFormat::CBlastFormat(..., CNcbiOstream& outfile, ...)
-//     : m_FormatType(format_type), ..., m_Outfile(outfile),
-// ```
 /// The stream of a report as NCBI's formatter writes to it (`CBlastFormat::m_Outfile`), with
 /// nothing of a program's before it: each write is one insertion of NCBI's (`out << value`,
 /// `insert`, `insert_streamed`), passed on as one write. The organism report (`tax_report`)
@@ -2159,23 +1824,9 @@ pub fn report_standard_output() -> Box<dyn std::io::Write + Send> {
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:95-99
-// ```c++
-// string s_ArgExptMsg(const string& name, const string& what, const string& attr)
-// {
-//     return string("Argument \"") + (name.empty() ? s_ExtraName : name) +
-//         "\". " + what + (attr.empty() ? attr : ":  `" + attr + "'");
-// }
-// ```
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:615-619
-// ```c++
-// void CArg_Ios::x_Open(CArgValue::TFileFlags /*flags*/) const
-// {
-//     if ( !m_Ios ) {
-//         NCBI_THROW(CArgException,eNoFile, s_ArgExptMsg(GetName(),
-//             "File is not accessible",AsString()));
-// ```
 pub fn inaccessible(name: &str, path: &std::path::Path) -> anyhow::Error {
-    // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:95-99 (`s_ArgExptMsg`, quoted in
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:95-99 (`s_ArgExptMsg`, cited in
     // `utils::os_bytes`): the name's bytes (probe R1 of line LIB-B: BLASTX's `-query`,
     // `-subject` and `-out` of a name that is not UTF-8).
     let mut message =
@@ -2190,12 +1841,7 @@ pub fn inaccessible(name: &str, path: &std::path::Path) -> anyhow::Error {
     NativeError { exit: 1, message }.into()
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3478-3480
-// ```c
-// else {
-//     m_OutputStream = &args[kArgOutput].AsOutputFile();
-// }
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3478-3480
 /// The `-out` file `path` of a search, created where NCBI's argument handling opens it (after the
 /// subjects are read and the query is opened, before the options are processed): `inaccessible`
 /// when it cannot be made. `program` names the program whose file names must be UTF-8
@@ -2213,33 +1859,9 @@ pub(crate) fn create_out_file(
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:177-180
-// ```c++
-//     catch (const CArgException& e) {                                        \
-//         LOG_POST(Error << "Command line argument error: " << e.GetMsg());   \
-//         exit_code = BLAST_INPUT_ERROR;                                      \
-//     }                                                                       \
-// ```
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:225-227
-// ```c++
-//         } else {                                                            \
-//             LOG_POST(Error << "BLAST engine error: " << e.GetMsg());        \
-//             exit_code = BLAST_ENGINE_ERROR;                                 \
-// ```
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:251-255
-// ```c++
-//     }                                                                       \
-//     catch (const std::ios::failure&) {                                      \
-//         LOG_POST(Error << "BLAST failed to write output");                  \
-//         exit_code = BLAST_OUTPUT_ERROR;                                     \
-//     }                                                                       \
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:160-163
-// ```c++
-// CBlastTabularInfo::~CBlastTabularInfo()
-// {
-//     m_Ostream.flush();
-// }
-// ```
 /// Writes the text of the run's `NativeError` to standard error and exits with its code; a text
 /// that the run already wrote (`post_native_error`) is not written again.
 pub fn exit_on_native_error(error: &anyhow::Error) {
@@ -2261,13 +1883,6 @@ pub fn exit_on_native_error(error: &anyhow::Error) {
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:172-176 (`CATCH_ALL`'s one clause
 // of two posts; every other clause posts once)
-// ```c++
-//     catch (const blast::CInputException& e) {                               \
-//         LOG_POST(Error << "BLAST query/options error: " << e.GetMsg());     \
-//         LOG_POST(Error << "Please refer to the BLAST+ user manual.");       \
-//         exit_code = BLAST_INPUT_ERROR;                                      \
-//     }                                                                       \
-// ```
 /// The text that `CATCH_ALL` writes for the `NativeError` text `message`: the text, or, after the
 /// main thread's diagnostic stream failed (`ncbi_exception::main_diag_failbit`), the line feed of
 /// each of its `LOG_POST`s (two for the query/options error of
@@ -2317,23 +1932,7 @@ pub fn post_errors_in_run() {
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:327-332
-// ```c++
-//     } CATCH_ALL(status)
-//
-//     if(!m_Bah.GetMessages().empty()) {
-//     	const CArgs & a = GetArgs();
-//     	PrintErrorArchive(a, m_Bah.GetMessages());
-//     }
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:1155-1160
-// ```c++
-// void CBlastAppDiagHandler::Post(const SDiagMessage & mess)
-// {
-// 	if(m_handler != NULL) {
-// 		m_handler->Post(mess);
-// 	}
-// 	if(m_save) {
-// ```
 /// Writes the text of `error` (a `NativeError`) to standard error now. NCBI's `CATCH_ALL` posts
 /// the error inside `Run` (its handler writes the post at once and saves it for the archive)
 /// before `PrintErrorArchive` writes the error archive; LOSAT's `main` writes the text after the
@@ -2444,9 +2043,10 @@ mod tests {
 
     #[test]
     fn the_organism_reports_standard_output_writes_where_glibc_writes() {
-        // glibc 2.39 `_IO_new_file_xsputn` on a file of `st_blksize` 4096
-        // (`T/t2/fix2/glibc_first_write.log`): the writes end at multiples of the block and the
-        // rest stays held; the first `fwrite` has no buffer yet; a flush empties the buffer.
+        // `std::cout` on a file of `st_blksize` 4096 (observed, glibc 2.35 and 2.39,
+        // `tests/fixtures/stdio_buffer/cout_file.tsv`): the writes end at multiples of the block
+        // and the rest stays held; the first insertion has no buffer yet; a flush empties the
+        // buffer.
         use std::io::Write;
         let run = |pieces: &[usize]| {
             let writes = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -2505,8 +2105,9 @@ mod tests {
 
     #[test]
     fn a_terminals_standard_output_writes_at_its_newlines_as_glibc_does() {
-        // glibc 2.39 on a pty of `st_blksize` 1024 (`T/t2/fix3/glibc_tty_lines.log`): `N` is an
-        // `fwrite` of N bytes, `N:K` with a newline at K, `f` a flush.
+        // `std::cout` on a pty of `st_blksize` 1024 (observed, glibc 2.35 and 2.39,
+        // `tests/fixtures/stdio_buffer/cout_tty.tsv`): `N` is an insertion of N bytes, `N:K` with
+        // a newline at K, `f` a flush.
         let tty = NcbiStdio::Cout {
             block: 1024,
             lines: true,
@@ -2647,7 +2248,7 @@ mod tests {
         assert!(!posted(text.as_bytes()));
     }
 
-    // NCBI c++/src/corelib/ncbiargs.cpp:266-270 keeps the bytes of a string value; LOSAT
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:266-270 keeps the bytes of a string value; LOSAT
     // rejects a value that is not UTF-8 explicitly, in both spellings of an option.
     #[test]
     fn option_values_that_are_not_utf8_are_rejected_explicitly() {
@@ -2829,18 +2430,7 @@ mod tests {
 /// report: every argument (the program name first) followed by one space, as raw bytes where
 /// the system keeps them (Unix), else lossily decoded.
 ///
-/// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:878-885
-/// ```c++
-/// string
-/// GetCmdlineArgs(const CNcbiArguments & a)
-/// {
-/// 	string cmd = kEmptyStr;
-/// 	for(unsigned int i=0; i < a.Size(); i++) {
-/// 		cmd += a[i] + " ";
-/// 	}
-/// 	return cmd;
-/// }
-/// ```
+/// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:877-885
 pub fn command_line_bytes() -> Vec<u8> {
     let mut line = Vec::new();
     for argument in std::env::args_os() {

@@ -11,20 +11,11 @@
 //! overflow, the order of memory addresses) is LOSAT's refusal, each naming its condition
 //! (`Refusal`).
 //!
-//! NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:535-537 (tblastn_app.cpp:222-226)
-//! ```c++
-//! 		_ASSERT(pssm->HasQuery());
-//! 		_ASSERT(pssm->GetQuery().IsSeq());  // single query only!
-//! 		scope->AddTopLevelSeqEntry(pssm->SetQuery());
-//! ```
+//! NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:535-537 (c++/src/app/blast/tblastn_app.cpp:222-226)
 //! NCBI reference (598d8ae6): c++/src/objmgr/scope_impl.cpp:230-238 (`CScope_Impl::AddSeq_entry`:
 //! the TSE is made, each annotation's `CSeq_annot_Info` with it, then `x_ClearCacheOnNewData`
 //! asks for the TSE's annotation Seq-ids, `CTSE_Info::GetAnnotIds`, which indexes them all,
 //! `UpdateAnnotIndex`, tse_info.cpp:709, 1035)
-//! ```c++
-//!     CTSE_Lock tse_lock = ds_lock->GetDataSource().AddStaticTSE(entry);
-//!     x_ClearCacheOnNewData(*tse_lock);
-//! ```
 
 mod align;
 mod bitmagic;
@@ -225,17 +216,6 @@ pub(crate) fn index_entry(
         }
     };
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:248-251, 260-263
-    // ```c++
-    //     catch (const CException& e) {                                           \
-    //         LOG_POST(Error << "Error: " << e.what());                           \
-    //         exit_code = BLAST_UNKNOWN_ERROR;                                    \
-    //     }                                                                       \
-    // ...
-    //     catch (const std::exception& e) {                                       \
-    //         LOG_POST(Error << "Error: " << e.what());                           \
-    //         exit_code = BLAST_UNKNOWN_ERROR;                                    \
-    //     }                                                                       \
-    // ```
     // After the stream failed, the `LOG_POST` writes its line feed alone (`cli::catch_all_text`,
     // which the run applies once the stream is failed; the text kept here is that line feed).
     let abort = error.map(|error| Abort::of(error, ix.muted));
@@ -278,31 +258,9 @@ impl Indexer<'_> {
         );
     }
 
-    // NCBI reference (598d8ae6): c++/src/objmgr/seq_annot_info.cpp:403-427, 474-500 (phase C:
+    // NCBI reference (598d8ae6): c++/src/objmgr/seq_annot_info.cpp:403-427,474-500,646-663 (phase C:
     // `x_InitAnnotList` of each annotation in order makes a Seq-table's `CSeqTableInfo`; the other
     // kinds only list their objects) and :639-668 (phase I, `x_InitAnnotKeys`)
-    // ```c++
-    //     C_Data& data = m_Object->SetData();
-    //     switch ( data.Which() ) {
-    //     case C_Data::e_Ftable:
-    //         x_InitFeatKeys(tse);
-    //         break;
-    //     case C_Data::e_Align:
-    //         x_InitAlignKeys(tse);
-    //         break;
-    //     case C_Data::e_Graph:
-    //         x_InitGraphKeys(tse);
-    //         break;
-    //     case C_Data::e_Locs:
-    //         x_InitLocsKeys(tse);
-    //         break;
-    //     case C_Data::e_Seq_table:
-    //         x_InitFeatTableKeys(tse);
-    //         break;
-    //     default:
-    //         break;
-    //     }
-    // ```
     fn run(&mut self, tse: &entry::Tse<'_>, ids_known: bool) -> Result<(), Stop> {
         let annots = &tse.annots;
         let data: Vec<Option<(&'static str, V<'_>)>> = annots
@@ -359,50 +317,7 @@ impl Indexer<'_> {
     }
 
     // NCBI reference (598d8ae6): c++/src/objmgr/annot_object.cpp:426-447 (`x_ProcessFeat`)
-    // ```c++
-    //     hrmaps.resize(feat.IsSetProduct()? 2: 1);
-    //     ...
-    //     CHandleRangeMap::ETransSplicing mode = CHandleRangeMap::eNoTransSplicing;
-    //     if ( feat.IsSetExcept_text() ) {
-    //         if ( feat.GetExcept_text().find("trans-splicing") != NPOS ) {
-    //             mode = CHandleRangeMap::eTransSplicing;
-    //         }
-    //         else if ( feat.GetExcept_text().find("circular RNA") != NPOS ) {
-    //             mode = CHandleRangeMap::eCircularRNA;
-    //         }
-    //     }
-    //     hrmaps[0].AddLocation(feat.GetLocation(), mode);
-    //     if ( feat.IsSetProduct() ) {
-    //         ...
-    //         hrmaps[1].AddLocation(feat.GetProduct(), mode);
-    //     }
-    // ```
     // NCBI reference (598d8ae6): c++/src/objmgr/seq_annot_info.cpp:741-786 (`x_InitFeatKeys`)
-    // ```c++
-    //         ITERATE ( vector<CHandleRangeMap>, hrmit, hrmaps ) {
-    //             ...
-    //             ITERATE ( CHandleRangeMap, hrit, *hrmit ) {
-    //                 const CHandleRange& hr = hrit->second;
-    //                 key.m_Range = hr.GetOverlappingRange();
-    //                 if ( key.m_Range.Empty() ) {
-    //                     ERR_POST_X(1, "Empty region in "<<GetDescription()<<" "<<
-    //                                MSerial_AsnText<<*info.GetFeatFast());
-    //                     continue;
-    //                 }
-    //                 ...
-    //                 if ( hr.HasGaps() ) {
-    //                     ...
-    //                     if ( hr.IsCircular() ) {
-    //                         key.m_Range = hr.GetCircularRangeStart();
-    //                         x_Map(mapper, key, index);
-    //                         key.m_Range = hr.GetCircularRangeEnd();
-    //                     }
-    //                 }
-    //                 ...
-    //                 x_Map(mapper, key, index);
-    //             }
-    //         }
-    // ```
     fn index_feature(&mut self, feat: V<'_>) -> Result<(), Stop> {
         let except = feat.get("except-text").map(V::str).unwrap_or_default();
         let mode = if contains(except, b"trans-splicing") {
@@ -425,48 +340,6 @@ impl Indexer<'_> {
 
     // NCBI reference (598d8ae6): c++/src/objmgr/seq_annot_info.cpp:845-915 (`x_AddAlignKeys`,
     // `x_AddAlignIndex`)
-    // ```c++
-    //     if ( align.GetSegs().IsDisc() ) {
-    //         // discontinuous alignments should be indexed separately
-    //         // add keys for each sub-alignment
-    //         ...
-    //         for ( auto& align_ref : sub_aligns ) {
-    //             vector<CHandleRangeMap> hrmaps;
-    //             CAnnotObject_Info::x_ProcessAlign(hrmaps, *align_ref, master);
-    //             for ( auto& hrm : hrmaps ) {
-    //                 ITERATE ( CHandleRangeMap, hrit, hrm ) {
-    //                     total_ranges_map[hrit->first] += hrit->second.GetOverlappingRange();
-    //                 }
-    //             }
-    //             all_hrmaps.push_back(hrmaps);
-    //         }
-    //         auto hrmap_iter = all_hrmaps.begin();
-    //         for ( auto& align_ref : sub_aligns ) {
-    //             x_AddAlignIndex(info, *align_ref, mapper, *hrmap_iter++, &total_ranges_map);
-    //         }
-    //     }
-    //     else {
-    //         vector<CHandleRangeMap> hrmaps;
-    //         CAnnotObject_Info::x_ProcessAlign(hrmaps, align, master);
-    //         x_AddAlignIndex(info, align, mapper, hrmaps);
-    //     }
-    // ...
-    //     ITERATE ( vector<CHandleRangeMap>, hrmit, hrmaps ) {
-    //         ITERATE ( CHandleRangeMap, hrit, *hrmit ) {
-    //             const CHandleRange& hr = hrit->second;
-    //             SAnnotObject_Key key;
-    //             key.m_Range = total_ranges_map? total_ranges_map->find(hrit->first)->second: hr.GetOverlappingRange();
-    //             if ( key.m_Range.Empty() ) {
-    //                 ERR_POST_X(3, "Empty region in "<<GetDescription()<<
-    //                            " "<<MSerial_AsnText<<info.GetAlign());
-    //                 continue;
-    //             }
-    //             ...
-    //             x_Map(mapper, key, index);
-    //         }
-    //         ...
-    //     }
-    // ```
     // The mapped range is never empty here (no "Failed to parse location"): an alignment posts
     // only its sizes' warnings, or its empty regions (refused), in any order of its Seq-ids. The
     // Seq-ids of one row, and for a discontinuous alignment of all its rows, are one handle as
@@ -506,39 +379,8 @@ impl Indexer<'_> {
     }
 
     // NCBI reference (598d8ae6): c++/src/objmgr/seq_annot_info.cpp:940-975 (`x_InitLocsKeys`)
-    // ```c++
-    //     // Only one referenced location per annot is allowed
-    //     if ( m_ObjectIndex.GetInfos().size() != 1) {
-    //         return;
-    //     }
-    //     ...
-    //     info.GetMaps(hrmaps, master);
-    //     ...
-    //             if ( key.m_Range.Empty() ) {
-    //                 ERR_POST_X(4, "Empty region in "<<GetDescription()<<" "<<
-    //                            MSerial_AsnText<<info.GetLocs());
-    //                 continue;
-    //             }
-    // ```
     // NCBI reference (598d8ae6): c++/src/objmgr/annot_object.cpp:396-416 (`GetMaps` of `locs`: the
     // first `region` of the annotation's `desc`, not the location itself)
-    // ```c++
-    //         if ( !annot.IsSetDesc() ) {
-    //             break;
-    //         }
-    //         CConstRef<CSeq_loc> region;
-    //         ITERATE(CSeq_annot::TDesc::Tdata, desc_it, annot.GetDesc().Get()) {
-    //             if ( (*desc_it)->IsRegion() ) {
-    //                 region.Reset(&(*desc_it)->GetRegion());
-    //                 break;
-    //             }
-    //         }
-    //         if ( region ) {
-    //             hrmaps.resize(1);
-    //             ...
-    //             hrmaps[0].AddLocation(*region);
-    //         }
-    // ```
     fn index_locs(&mut self, annot: V<'_>, locs: V<'_>) -> Result<(), Stop> {
         if locs.len() != 1 {
             return Ok(());
@@ -612,7 +454,7 @@ impl Indexer<'_> {
         Stop::NullPointer
     }
 
-    // NCBI reference (598d8ae6): c++/src/objmgr/seq_annot_info.cpp:741-786 (quoted at
+    // NCBI reference (598d8ae6): c++/src/objmgr/seq_annot_info.cpp:741-786 (cited at
     // `index_feature`), 1048-1080 and 1119-1150 (a table's location and a table row's location:
     // the same loop with `ERR_POST_X(7, ...)` and `ERR_POST_X(8, "Empty region in "
     // <<GetDescription()<< " Seq-table row "<<row)`)
@@ -621,7 +463,7 @@ impl Indexer<'_> {
     // (`empty_region`: refused before the stream failed, a memory address; after it the object's
     // ASN.1 text, which ends the run), except for a table row after the stream failed, whose post
     // is its header alone, `Error: (1204.8)`. Where NCBI's order is that of memory addresses
-    // (Seq-ids of one `m_Packed`: `m_Info < handle.m_Info`, seq_id_handle.hpp:207, quoted at
+    // (Seq-ids of one `m_Packed`: `m_Info < handle.m_Info`, seq_id_handle.hpp:207, cited at
     // `HandleRangeMap::ncbi_order`), the order changes the messages only when an empty Seq-id's
     // post and another's "Failed to parse location" (`Error: (1204.6)`) are in one group: refused
     // (`om/` cases `s_o09_tie_gi5_acc5_u` and `s_o10_tie_acc5v1_acc5v2_u`: psiblast and tblastn
@@ -671,21 +513,6 @@ impl Indexer<'_> {
     }
 
     // NCBI reference (598d8ae6): c++/src/objmgr/seq_annot_info.cpp:672-700
-    // ```c++
-    // bool CSeq_annot_Info::x_Map(const CTSEAnnotObjectMapper& mapper,
-    //                             const SAnnotObject_Key& key,
-    //                             const SAnnotObject_Index& index)
-    // {
-    //     if ( key.m_Range.Empty() ) {
-    //         ...
-    //         ERR_POST_X(6, "Failed to parse location of "<<s.rdbuf()<<" in "<<GetDescription());
-    //         return false;
-    //     }
-    //     bool new_id = mapper.Map(key, index);
-    //     m_ObjectIndex.AddMap(key, index);
-    //     return new_id;
-    // }
-    // ```
     // The message stops at `s.rdbuf()`, which fails the stream (`ncbi_exception::
     // main_diag_failbit`). `mapper.Map` of a null handle (a table row without a Seq-id) asks
     // `CSeq_id_Handle::HaveMatchingHandles()` of it: `CCoreException::eNullPtr` (`Stop::NullPointer`).

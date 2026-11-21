@@ -2,16 +2,6 @@
 //! `src/algorithm/tblastx/lookup/x_clut_direct.rs` `x_try_build_flat_by_buckets`) on whole searches.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1168-1175
-//! ```c
-//!     for (loc = location; loc; loc = loc->next){
-//!         Int4 from = loc->ssr->left;
-//!         Int4 to = loc->ssr->right - lookup->word_length + 1;
-//!
-//!         for (offset = from; offset <= to; offset++){
-//!             s_CompressedAddWordHits(&info, query->sequence, offset);
-//!         }
-//!     }
-//! ```
 //! The switch is in the strict set (on unless it is `0`). The bucket fill builds the table of the
 //! count-and-fill builder slot for slot (the lib test `x_bucket_fill_is_the_count_and_fill_build`),
 //! so the property under test is that the report does not depend on it, for subjects read from

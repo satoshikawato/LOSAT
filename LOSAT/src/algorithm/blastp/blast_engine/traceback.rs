@@ -2,16 +2,8 @@
 //! each preliminary HSP list, in place of the composition-based redo (`kappa.rs`).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1486-1500
-//! ```c
-//!     if (ext_params->options->compositionBasedStats > 0 ||
-//!         ext_params->options->eTbackExt == eSmithWatermanTbck) {
-//!         status =
-//!             Blast_RedoAlignmentCore_MT(program_number, ...);
-//!     } else {
-//!         BlastSeqSrcGetSeqArg seq_arg;
-//! ```
 //!
-//! NCBI's threads take the OID batches of lists in turn (`blast_traceback.c:1505-1518`), each
+//! NCBI's threads take the OID batches of lists in turn (`c++/src/algo/blast/core/blast_traceback.c:1505-1518`), each
 //! thread with its own results that are merged after the loop (`blast_traceback_mt_priv.c:139-185`).
 //! A list's traceback reads nothing another list writes, and the hit lists' order
 //! (`s_EvalueCompareHSPLists`: e-value, score, OID) is total, so LOSAT inserts every list into one
@@ -76,18 +68,7 @@ impl OrdinaryTraceback<'_> {
     /// lists are full (`preliminary_hit_lists`) or compact (`compact_hit_lists`, which the
     /// traceback reads without expanding them).
     ///
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1690-1699
-    /// ```c
-    ///                 /* Free HSP list if all HSPs have been deleted. */
-    ///                 batch->hsplist_array[hsplist_itr] = NULL;
-    ///                 if (hsp_list->hspcnt == 0) {
-    ///                     hsp_list = Blast_HSPListFree(hsp_list);
-    ///                 }
-    ///                 else {
-    ///                     Blast_HSPResultsInsertHSPList(thread_data->tld[tid]->results, hsp_list,
-    ///                                   hit_params->options->hitlist_size);
-    ///                 }
-    /// ```
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1690-1706
     #[inline(never)]
     pub(super) fn run(
         &self,
@@ -137,15 +118,6 @@ impl OrdinaryTraceback<'_> {
     /// and one subject; `None` when no HSP is left.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:367-373
-    /// ```c
-    ///    /* set up the tree for HSP containment tests. subject_length
-    ///       is zero only for translated subject sequences, whose maximum
-    ///       length is bounded by the length of the first frame */
-    ///
-    ///    tree = Blast_IntervalTreeInit(0, query_blk->length + 1,
-    ///                                  0, (subject_length > 0 ? subject_length :
-    ///                                  subject_blk->length / CODON_LENGTH) + 1);
-    /// ```
     fn trace_list(
         &self,
         q_idx: usize,
@@ -164,11 +136,6 @@ impl OrdinaryTraceback<'_> {
         let mut traced: Vec<Traced> = Vec::new();
         for mut hsp in hsps {
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:402-405
-            // ```c
-            //       if (program_number == eBlastTypeRpsBlast ||
-            //           !BlastIntervalTreeContainsHSP(tree, hsp, query_info,
-            //                                hit_options->min_diag_separation)) {
-            // ```
             if tree.contains_hsp(
                 &preliminary_tree_hsp(&hsp, ctx.frame_base),
                 ctx.frame_base,
@@ -177,20 +144,6 @@ impl OrdinaryTraceback<'_> {
                 continue;
             }
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:436-447
-            // ```c
-            //          if (hsp->query.gapped_start == 0 &&
-            //                               hsp->subject.gapped_start == 0) {
-            //             Boolean retval =
-            //                BlastGetOffsetsForGappedAlignment(query, subject, sbp,
-            //                    hsp, &q_start, &s_start);
-            //             if (!retval)
-            //             {  /* Unable to find start for this HSP */
-            //                hsp_array[index] = Blast_HSPFree(hsp);
-            //                continue;
-            //             }
-            //             hsp->query.gapped_start = q_start;
-            //             hsp->subject.gapped_start = s_start;
-            // ```
             if hsp.gapped_query_start == 0 && hsp.gapped_subject_start == 0 {
                 let Some((q_start, s_start)) =
                     get_offsets_for_gapped_alignment(query, subject, &hsp, self.matrix)
@@ -201,16 +154,6 @@ impl OrdinaryTraceback<'_> {
                 hsp.gapped_subject_start = s_start;
             }
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:463-473
-            // ```c
-            //          if (!kTranslateSubject && !kSmithWaterman) {
-            //              AdjustSubjectRange(&s_start, &adjusted_s_length, q_start,
-            //                                 query_length, &start_shift);
-            //              adjusted_subject = subject + start_shift;
-            //              /* Shift the gapped start in HSP structure, to compensate for
-            //                 a shift in the other direction later. */
-            //              hsp->subject.gapped_start = s_start;
-            //          }
-            // ```
             let (s_start, s_length, shift) = adjust_subject_range(
                 hsp.gapped_subject_start as usize,
                 subject.len(),
@@ -218,12 +161,6 @@ impl OrdinaryTraceback<'_> {
                 ctx.aa_len,
             );
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:509-512
-            // ```c
-            //            BLAST_GappedAlignmentWithTraceback(program_number, query,
-            //                  adjusted_subject, gap_align, score_params, q_start, s_start,
-            //                  query_length, adjusted_s_length,
-            //                  fence_hit);
-            // ```
             let Some(aligned) = blast_gapped_alignment_with_traceback_with_scratch(
                 query,
                 &subject[shift..shift + s_length],
@@ -240,16 +177,6 @@ impl OrdinaryTraceback<'_> {
                 continue;
             };
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:583-601
-            // ```c
-            //            Blast_HSPUpdateWithTraceback(gap_align, hsp);
-            //            ...
-            //                delete_hsp = Blast_HSPTest(hsp, hit_options, align_length);
-            //            ...
-            //            if (!delete_hsp) {
-            //               Blast_HSPAdjustSubjectOffset(hsp, start_shift);
-            //               status = BlastIntervalTreeAddHSP(hsp, tree, query_info,
-            //                                          eQueryAndSubject);
-            // ```
             // `Blast_HSPTest` deletes nothing: BLASTP has no percent identity or minimum hit
             // length (`-perc_identity` is BLASTN's).
             let shift = shift as i32;
@@ -270,31 +197,6 @@ impl OrdinaryTraceback<'_> {
             });
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:634-692
-        // ```c
-        //        /* Remove any HSPs that share a starting or ending diagonal
-        //           with a higher-scoring HSP. */
-        //        Int4 extra_start =
-        //            Blast_HSPListPurgeHSPsWithCommonEndpoints(program_number, hsp_list, FALSE);
-        //        ...
-        //        /* Sort HSPs by score again, as the scores might have changed. */
-        //        Blast_HSPListSortByScore(hsp_list);
-        //
-        //        /* Remove any HSPs that are contained within other HSPs.
-        //           Since the list is sorted by score already, any HSP
-        //           contained by a previous HSP is guaranteed to have a
-        //           lower score, and may be purged. */
-        //        Blast_IntervalTreeReset(tree);
-        //        for (index = 0; index < hsp_list->hspcnt; index++) {
-        //            hsp = hsp_array[index];
-        //
-        //            if (BlastIntervalTreeContainsHSP(tree, hsp, query_info,
-        //                                      hit_options->min_diag_separation)) {
-        //                hsp_array[index] = Blast_HSPFree(hsp);
-        //            }
-        //            else {
-        //                status = BlastIntervalTreeAddHSP(hsp, tree, query_info,
-        //                                        eQueryAndSubject);
-        // ```
         // For BLASTP the purge deletes (`purge |= (program != eBlastTypeBlastn)`,
         // blast_hits.c:2464) and returns the HSP count, so the re-evaluation loop from
         // `extra_start` (blast_traceback.c:647-665) has nothing to do.
@@ -330,30 +232,7 @@ impl OrdinaryTraceback<'_> {
     /// subject's lengths), or with psiblast's `-sum_stats true` the linked sets' e-values (large
     /// gaps only), the e-value reap, the bit scores.
     ///
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:229-250
-    /// ```c
-    ///       double scale_factor =
-    ///          (Blast_ProgramIsRpsBlast(program_number) ?
-    ///          score_params->scale_factor : 1.0);
-    ///       ...
-    ///       Blast_HSPListGetEvalues(program_number, query_info, subject_length,
-    ///                               hsp_list, kGapped, FALSE, sbp, 0,
-    ///                               scale_factor);
-    ///    }
-    ///
-    ///    Blast_HSPListReapByEvalue(hsp_list, hit_params->options);
-    ///
-    ///    /* Rescale the scores by scaling factor, if necessary. This rescaling
-    ///     * should be done for all programs where scaling factor is not 1.
-    ///     */
-    ///    s_HSPListRescaleScores(hsp_list, score_params->scale_factor);
-    ///
-    ///    /** Calculate and fill the bit scores. @todo: This is not the only time
-    ///     * when they are calculated, s_HSPListRescaleScores also does this in
-    ///     * blast_kappa.c.
-    ///     */
-    ///    Blast_HSPListGetBitScores(hsp_list, kGapped, sbp);
-    /// ```
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:224-250
     fn post_traceback_update(
         &self,
         hsp_list: &mut BlastpHspList,
@@ -361,12 +240,6 @@ impl OrdinaryTraceback<'_> {
         subject_length: usize,
     ) {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:213-216
-        // ```c
-        //    /* Relink and rereap the HSP list, if needed. */
-        //    if (hit_params->link_hsp_params) {
-        //       BLAST_LinkHsps(program_number, hsp_list, query_info, subject_length,
-        //                      sbp, hit_params->link_hsp_params, kGapped);
-        // ```
         // psiblast's `-sum_stats true`: the linked sets' e-values (large gaps only,
         // `EvenGapLinkParams::traceback`).
         if let Some(link) = self.link.as_ref() {
@@ -385,11 +258,6 @@ impl OrdinaryTraceback<'_> {
         }
         reap_hsplist_by_evalue(hsp_list, self.expect_value);
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1926-1928
-        // ```c
-        //       hsp->bit_score =
-        //          (hsp->score*kbp[hsp->context]->Lambda -
-        //           kbp[hsp->context]->logK) / NCBIMATH_LN2;
-        // ```
         let log_k = self.karlin.k.glibc_ln();
         for hsp in &mut hsp_list.hsps {
             hsp.bit_score =
@@ -430,11 +298,6 @@ impl OrdinaryTraceback<'_> {
 /// expanded); each with its query index.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1636-1639
-/// ```c
-///             /* process all the hits to this subject sequence, one list at a time */
-///             for (hsplist_itr = 0; hsplist_itr < batch->num_hsplists; hsplist_itr++) {
-///                 BlastHSPList* hsp_list = batch->hsplist_array[hsplist_itr];
-/// ```
 fn prelim_lists_of_queries(
     preliminary_hit_lists: &mut [Option<BlastpHitList>],
     compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
@@ -472,7 +335,7 @@ fn prelim_lists_of_queries(
 /// The final hit list of each of `queries` queries from the final lists of `traced`, inserted as
 /// NCBI's results are (`Blast_HSPResultsInsertHSPList` with `hitlist_size`).
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:591-608 (quoted
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:591-608 (cited
 /// at `HitList::put_in_traceback_order` of BLASTN): the traceback reads the preliminary
 /// lists by OID. Where the results are sorted at the end, the order of insertion changes
 /// nothing (the comparison is total); where they are not, it is the report's order.
@@ -500,19 +363,6 @@ fn hit_lists_of_traced(
 /// What the final stage of an ungapped search reads (`-ungapped`: no traceback).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1685-1704
-/// ```c
-///                 } else {
-///                     /* traceback skipped; compute bit scores for searches
-///                        where the traceback phase is seperated from the
-///                        preliminary search. */
-///                     Blast_HSPListGetBitScores(hsp_list, FALSE, sbp);
-///                 }
-///                 ...
-///                 else {
-///                     Blast_HSPResultsInsertHSPList(thread_data->tld[tid]->results, hsp_list,
-///                                   hit_params->options->hitlist_size);
-///                 }
-/// ```
 pub(super) struct UngappedFinish<'a> {
     pub(super) contexts: &'a [QueryContext],
     pub(super) subjects: XRedoSubjects<'a>,
@@ -530,13 +380,6 @@ impl UngappedFinish<'_> {
     /// context's own block (`kbp_std`).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1918-1928
-    /// ```c
-    ///    kbp = (gapped_calculation ? sbp->kbp_gap : sbp->kbp);
-    ///    ...
-    ///       hsp->bit_score =
-    ///          (hsp->score*kbp[hsp->context]->Lambda -
-    ///           kbp[hsp->context]->logK) / NCBIMATH_LN2;
-    /// ```
     /// An HSP of length 0 has no letter to align: it goes on to the lists of the report, where
     /// `refuse_empty_alignments` stops a search whose shown lists hold one (task O4b, D5).
     pub(super) fn run(
@@ -623,7 +466,7 @@ pub(super) const EMPTY_ALIGNMENT_REFUSAL: &str =
 /// traceback's end have cut them (`-max_hsps`, `-qcov_hsp_perc`, the hit list size): the lists
 /// that reach the reports.
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:845-865 (quoted at
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:845-865 (cited at
 /// `run_call`'s final loop: `Blast_TrimHSPListByMaxHsps`, `Blast_HSPListReapByQueryCoverage`)
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:773-780 (`align_length` of an
 /// ungapped HSP is the length of its query range; an HSP of length 0 is kept, one of a negative
@@ -699,21 +542,7 @@ fn preliminary_hsp(local: &BlastpHsp) -> BlastpPreliminaryHsp {
 /// `Blast_HSPListPurgeHSPsWithCommonEndpoints` with `purge` (BLASTP): of the HSPs that share a
 /// start, then of those that share an end, the first in NCBI's order stays.
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2480-2527
-/// ```c
-///    qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryOffsetCompareHSPs);
-///    i = 0;
-///    while (i < hsp_count) {
-///       j = 1;
-///       while (i+j < hsp_count &&
-///              hsp_array[i] && hsp_array[i+j] &&
-///              hsp_array[i]->context == hsp_array[i+j]->context &&
-///              hsp_array[i]->query.offset == hsp_array[i+j]->query.offset &&
-///              hsp_array[i]->subject.offset == hsp_array[i+j]->subject.offset &&
-///              hsp_array[i]->subject.frame == hsp_array[i+j]->subject.frame) {
-///          ...
-///    qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryEndCompareHSPs);
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2478-2527
 fn purge_hsps_with_common_endpoints(hsps: &mut Vec<Traced>) {
     if hsps.len() <= 1 {
         return;
@@ -731,31 +560,7 @@ fn purge_hsps_with_common_endpoints(hsps: &mut Vec<Traced>) {
 /// the traceback makes for each HSP (blast_traceback.c:586-594), with the gaps and mismatches
 /// that the reports read.
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:806-833
-/// ```c
-///       for (index=0; index<esp->size; index++)
-///       {
-///          switch (esp->op_type[index]) {
-///          case eGapAlignSub:
-///             for (i=0; i<esp->num[index]; i++) {
-///                if (*q == *s) {
-///                   num_ident++;
-///                }
-///                else if (NULL != matrix) {
-///             	   if (matrix[*q][*s] > 0)
-///             		   num_pos ++;
-///                }
-///                q++;
-///                s++;
-///             }
-///             break;
-///          case eGapAlignDel:
-///             s += esp->num[index];
-///             break;
-///          case eGapAlignIns:
-///             q += esp->num[index];
-///             break;
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:796-833
 fn final_hsp(
     hsp: &BlastpPreliminaryHsp,
     edit_script: Vec<GapEditOp>,
@@ -838,31 +643,6 @@ fn op_length(op: &GapEditOp) -> usize {
 /// best-scoring 11-letter window, or the end window, or none when both score 0 or less.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3259-3320
-/// ```c
-///     if (q_length <= HSP_MAX_WINDOW) {
-///         *q_retval = q_start + q_length/2;
-///         *s_retval = s_start + q_length/2;
-///         return TRUE;
-///     }
-///     ...
-///     if (max_score > 0)
-///     {
-///         *q_retval = max_offset;
-///         *s_retval = (max_offset - q_start) + s_start;
-///         return TRUE;
-///     }
-///     else  /* Test the window around the ends of the HSP. */
-///     {
-///         ...
-///         if (score > 0)
-///         {
-///             *q_retval = hsp->query.end - HSP_MAX_WINDOW/2;
-///             *s_retval = hsp->subject.end - HSP_MAX_WINDOW/2;
-///             return TRUE;
-///         }
-///     }
-///     return FALSE;
-/// ```
 ///
 /// The windows read 11 letters from the HSP's starts and ends. An HSP shorter than that in the
 /// subject (only longer in the query, through gaps) would make NCBI read outside the HSP and
@@ -947,7 +727,7 @@ mod tests {
         }
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:806-833 (quoted at
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:806-833 (cited at
     // `final_hsp`) and blast_gapalign.c:4719-4775 (`BLAST_GetUngappedHSPList`: an ungapped HSP is
     // one run of aligned letters from `q_start`, its score the ungapped score). The final record
     // of an ungapped HSP counts the identities and the positives of its one run on the unmasked
@@ -1007,7 +787,7 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1685-1704 and
-    // c++/src/algo/blast/core/blast_hits.c:1918-1928 (quoted at `UngappedFinish`): an ungapped
+    // c++/src/algo/blast/core/blast_hits.c:1918-1928 (cited at `UngappedFinish`): an ungapped
     // search's final HSP is the preliminary one with its bit score from the context's own block
     // and the E-value that the preliminary stage gave it; an HSP of length 0 is kept.
     #[test]

@@ -8,32 +8,8 @@
 //! into the thick backbone and the overflow array.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:461-467
-//! ```c
-//!     for (i = 0; i < lookup->backbone_size; i++) {
-//!         if (exact_backbone[i] != NULL) {
-//!             s_AddWordHits(lookup, matrix, query->sequence,
-//!                           exact_backbone[i], query_bias, row_max);
-//!             sfree(exact_backbone[i]);
-//!         }
-//!     }
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:580-590
-//! ```c
-//!         for (i = 0; i < alphabet_size; i++) {
-//!             if (score + row[i] >= threshold) {
-//!                 subject_word[current_pos] = i;
-//!                 for (j = 0; j < offset_list[1]; j++) {
-//!                     BlastLookupAddWordHit(lookup->thin_backbone, wordsize,
-//!                                           charsize, subject_word,
-//!                                           query_bias + offset_list[j + 2]);
-//!                 }
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:74-76
-//! ```c
-//!     /* add the hit */
-//!     chain[chain[1] + 2] = query_offset;
-//!     chain[1]++;
-//! ```
 //!
 //! This module computes the same table without the chains. For a source word `s` (a cell of
 //! the exact backbone) let T(s) be the list of target cells it appends to, in NCBI's order:
@@ -69,15 +45,6 @@ use std::cell::RefCell;
 // child module so that it uses `x_target_list` and the memos below unchanged (see x_pair_lut.rs).
 //
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:461-467
-// ```c
-//     for (i = 0; i < lookup->backbone_size; i++) {
-//         if (exact_backbone[i] != NULL) {
-//             s_AddWordHits(lookup, matrix, query->sequence,
-//                           exact_backbone[i], query_bias, row_max);
-//             sfree(exact_backbone[i]);
-//         }
-//     }
-// ```
 // The module runs this loop's appends for the exact backbone of a subset of the lookup locations;
 // it is used only when one of its switches is set.
 #[path = "x_pair_lut.rs"]
@@ -348,12 +315,6 @@ fn x_fitting_overflow<C: XVec>(kept: &mut [XAaVectors], own: &mut Vec<C::Hit>, n
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:461-467 (see
 // `x_build_direct_in`)
-// ```c
-//     for (i = 0; i < lookup->backbone_size; i++) {
-//         if (exact_backbone[i] != NULL) {
-//             s_AddWordHits(lookup, matrix, query->sequence,
-//                           exact_backbone[i], query_bias, row_max);
-// ```
 /// [`x_build_direct_in`] with the shared neighbour lists and kept vectors (the pooled build); with
 /// `parts` above 1, its passes on that many tasks of the pool it runs on (`LOSAT_X_BXBUILDPAR`,
 /// [`x_partitioned_passes`]). With `narrow_cutoff` ([`XWidth::Choose`]) the table takes 16-bit
@@ -434,18 +395,6 @@ fn x_take_kept_from<C: XVec>(pool: &mut Vec<XAaVectors>) -> XAaVectors {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:321-336
-// ```c
-//       lookup->thick_backbone =
-//             calloc(lookup->backbone_size, sizeof(AaLookupBackboneCell));
-// ...
-//       pv = lookup->pv = (PV_ARRAY_TYPE *) calloc(
-//             (lookup->backbone_size >> PV_ARRAY_BTS) + 1,
-//              sizeof(PV_ARRAY_TYPE));
-// ...
-//       if (overflow_cells_needed > 0) {
-//           lookup->overflow =
-//                  calloc(overflow_cells_needed, sizeof(Int4));
-// ```
 // NCBI allocates a zeroed table for each search and frees it with the search. Buffer reuse only:
 // the vectors taken are cleared and filled with zeros to the table's sizes before the build writes
 // them, as the C `calloc` gives them.
@@ -681,12 +630,6 @@ impl XAaSpares {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:446-469 (see
     // `build_ncbi_lookup_from_prepared`)
-    // ```c
-    //     for (i = 0; i < lookup->backbone_size; i++) {
-    //         if (exact_backbone[i] != NULL) {
-    //             s_AddWordHits(lookup, matrix, query->sequence,
-    //                           exact_backbone[i], query_bias, row_max);
-    // ```
     /// EXPERIMENT (LOSAT_X_BPLKREUSE): `x_bp_build_lookup(true, queries, threshold, karlin_params,
     /// check_ideal)` (where [`Self::x_applies`]) on the calling thread, with its neighbour lists,
     /// for a block search whose tables are not built ahead: the table built on the vectors the
@@ -715,12 +658,6 @@ impl XAaSpares {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:446-469 (see
     // `build_ncbi_lookup_from_prepared`)
-    // ```c
-    //     for (i = 0; i < lookup->backbone_size; i++) {
-    //         if (exact_backbone[i] != NULL) {
-    //             s_AddWordHits(lookup, matrix, query->sequence,
-    //                           exact_backbone[i], query_bias, row_max);
-    // ```
     /// The in-place build of [`Self::x_build_on_block_spare`] with the cells of width `C`: the
     /// table built on the vectors the block before gave back (`give`, `give16`), each grown in
     /// place where it is short, or `Err(prepared)` where the in-place builder declines (the vectors
@@ -759,12 +696,6 @@ impl XAaSpares {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:446-469 (see
     // `build_ncbi_lookup_from_prepared`)
-    // ```c
-    //     for (i = 0; i < lookup->backbone_size; i++) {
-    //         if (exact_backbone[i] != NULL) {
-    //             s_AddWordHits(lookup, matrix, query->sequence,
-    //                           exact_backbone[i], query_bias, row_max);
-    // ```
     /// EXPERIMENT (LOSAT_X_BPLK16): [`Self::x_build_on_block_spare`] with the width of the table's
     /// hits chosen by the build (`x_bplk16_width`): `u16` where the lookup query is at most 65,535
     /// letters and the in-place builder applies, else `Int4` as before.
@@ -910,12 +841,6 @@ impl XAaSpares {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:446-469 (see
     // `build_ncbi_lookup_from_prepared`)
-    // ```c
-    //     for (i = 0; i < lookup->backbone_size; i++) {
-    //         if (exact_backbone[i] != NULL) {
-    //             s_AddWordHits(lookup, matrix, query->sequence,
-    //                           exact_backbone[i], query_bias, row_max);
-    // ```
     /// `x_bp_build_lookup(queries, threshold, check_ideal)` (where
     /// [`Self::x_applies`]), the table built on the vectors `x_make_room` kept and with the
     /// neighbour lists kept here (both taken while it builds and given back after, the vectors only
@@ -957,12 +882,6 @@ impl XAaSpares {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:446-469 (see
     // `build_ncbi_lookup_from_prepared`)
-    // ```c
-    //     for (i = 0; i < lookup->backbone_size; i++) {
-    //         if (exact_backbone[i] != NULL) {
-    //             s_AddWordHits(lookup, matrix, query->sequence,
-    //                           exact_backbone[i], query_bias, row_max);
-    // ```
     /// EXPERIMENT (LOSAT_X_BPLK16): [`Self::x_build_ahead`] with the width of the table's hits
     /// chosen by the build (`x_bplk16_fits`): `u16` where the lookup query is at most 65,535
     /// letters, else `Int4` as before; `None` where no table was made (the kept vectors of the
@@ -1140,19 +1059,6 @@ pub(crate) fn x_assert_narrow_same_as_wide(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:562-563,580-582,600-604
-// ```c
-//     score -= info->row_max[query_word[current_pos]];
-//     row = info->matrix[query_word[current_pos]];
-// ...
-//         for (i = 0; i < alphabet_size; i++) {
-//             if (score + row[i] >= threshold) {
-//                 subject_word[current_pos] = i;
-// ...
-//     for (i = 0; i < alphabet_size; i++) {
-//         if (score + row[i] >= threshold) {
-//             subject_word[current_pos] = i;
-//             s_AddWordHitsCore(info, score + row[i], current_pos + 1);
-// ```
 // The recursion of `blast_aa_add_word_hits_core` (the port of s_AddWordHitsCore) with the same
 // tests in the same order; where the C code calls BlastLookupAddWordHit for a complete word it
 // records the word's backbone index (blast_lookup.c:46 ComputeTableIndex, the same shifts as
@@ -1205,11 +1111,6 @@ fn x_record_neighbors(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:44-46
-// ```c
-//     /* compute the backbone cell to update */
-//
-//     index = ComputeTableIndex(wordsize, charsize, seq);
-// ```
 // Same shifts as `blast_lookup_add_word_hit`; the caller checks that the index fits 16 bits.
 #[inline(always)]
 fn x_word_index(word: &[u8], wordsize: usize, charsize: usize) -> u16 {
@@ -1221,28 +1122,6 @@ fn x_word_index(word: &[u8], wordsize: usize, charsize: usize) -> u16 {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:490-496,504-509,539-543
-// ```c
-//     w = query + offset_list[2];
-//
-//     /* Compute the self-score of this word */
-//
-//     score = matrix[w[0]][w[0]];
-//     for (i = 1; i < lookup->word_length; i++)
-//         score += matrix[w[i]][w[i]];
-// ...
-//     if (lookup->threshold == 0 || score < lookup->threshold) {
-//         for (i = 0; i < offset_list[1]; i++) {
-//             BlastLookupAddWordHit(lookup->thin_backbone, lookup->word_length,
-//                                   lookup->charsize, w,
-//                                   query_bias + offset_list[i + 2]);
-//         }
-// ...
-//     score = row_max[w[0]];
-//     for (i = 1; i < lookup->word_length; i++)
-//         score += row_max[w[i]];
-//
-//     s_AddWordHitsCore(&info, score, 0);
-// ```
 // T(s) for the word at `query_word`: the exact cell when s_AddWordHits adds the exact offsets,
 // then the neighbour cells in recursion order (none when threshold == 0, lines 518-519).
 #[allow(clippy::too_many_arguments)]
@@ -1382,51 +1261,7 @@ fn x_lean_target_list(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:446-469
-// ```c
-//     exact_backbone = (Int4 **) calloc(lookup->backbone_size, sizeof(Int4 *));
-// ...
-//     BlastLookupIndexQueryExactMatches(exact_backbone, lookup->word_length,
-//                                       lookup->charsize, lookup->word_length,
-//                                       query, location);
-// ...
-//     for (i = 0; i < lookup->backbone_size; i++) {
-//         if (exact_backbone[i] != NULL) {
-//             s_AddWordHits(lookup, matrix, query->sequence,
-//                           exact_backbone[i], query_bias, row_max);
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:283-297,338-358
-// ```c
-//     for (i = 0; i < lookup->backbone_size; i++) {
-//         if (lookup->thin_backbone[i]) {
-// ...
-//             if (lookup->thin_backbone[i][1] > AA_HITS_PER_CELL){
-// ...
-//                 overflow_cells_needed += lookup->thin_backbone[i][1];
-//             }
-//             if (lookup->thin_backbone[i][1] > longest_chain)
-//                 longest_chain = lookup->thin_backbone[i][1];
-// ...
-//       for (i = 0; i < lookup->backbone_size; i++) {
-//         /* if there are hits there, */
-//         if (lookup->thin_backbone[i] ) {
-//             Int4 * dest = NULL;
-//             /* set the corresponding bit in the pv_array */
-//             PV_SET(pv, i, PV_ARRAY_BTS);
-//             bbc[i].num_used = lookup->thin_backbone[i][1];
-//             /* if there are three or fewer hits, */
-//             if (lookup->thin_backbone[i][1] <= AA_HITS_PER_CELL)
-//                 /* copy them into the thick_backbone cell */
-//                 dest = bbc[i].payload.entries;
-//             else /* more than three hits; copy to overflow array */
-//             {
-//                 bbc[i].payload.overflow_cursor = overflow_cursor;
-//                 dest = (Int4 *) lookup->overflow;
-//                 dest += overflow_cursor;
-//                 overflow_cursor += lookup->thin_backbone[i][1];
-//             }
-//             for (j=0; j <lookup->thin_backbone[i][1]; j++)
-//                 dest[j] = lookup->thin_backbone[i][j + 2];
-// ```
 /// The table `build_lookup_from_prepared` returns, built without chains (see the module
 /// comment). `Err(prepared)` when the reference builder must run (diagnostics mode, or a
 /// backbone index wider than 16 bits).
@@ -2403,28 +2238,6 @@ impl<C: XCell> XDisjointOut<C> {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:79-132 (the loop of
 // `blast_lookup_index_query_exact_matches`, backbone.rs, which carries it)
-// ```c
-// for (loc = locations; loc; loc = loc->next) {
-//     Int4 from = loc->ssr->left;
-//     Int4 to = loc->ssr->right;
-//     if (word_length > to - from + 1)
-//         continue;
-//     seq = query->sequence + from;
-//     word_target = seq + lut_word_length;
-//     for (offset = from; offset <= to; offset++, seq++) {
-//         if (seq >= word_target) {
-//             BlastLookupAddWordHit(backbone, lut_word_length, charsize,
-//                                   seq - lut_word_length, offset - lut_word_length);
-//         }
-//         if (*seq & invalid_mask)
-//             word_target = seq + lut_word_length + 1;
-//     }
-//     if (seq >= word_target) {
-//         BlastLookupAddWordHit(backbone, lut_word_length, charsize,
-//                               seq - lut_word_length, offset - lut_word_length);
-//     }
-// }
-// ```
 // The same loop with the same tests; where it calls BlastLookupAddWordHit, `visit` gets the
 // word's backbone index (blast_lookup.c:46 ComputeTableIndex, the shifts of
 // `blast_lookup_add_word_hit`) and the query offset the call appends.
@@ -2835,23 +2648,6 @@ where
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:446-469
-// ```c
-//     /* create an empty backbone */
-//
-//     exact_backbone = (Int4 **) calloc(lookup->backbone_size, sizeof(Int4 *));
-// ...
-//     BlastLookupIndexQueryExactMatches(exact_backbone, lookup->word_length,
-//                                       lookup->charsize, lookup->word_length,
-//                                       query, location);
-// ...
-//     for (i = 0; i < lookup->backbone_size; i++) {
-//         if (exact_backbone[i] != NULL) {
-//             s_AddWordHits(lookup, matrix, query->sequence,
-//                           exact_backbone[i], query_bias, row_max);
-//             sfree(exact_backbone[i]);
-//         }
-//     }
-// ```
 // No NCBI counterpart: the BLASTP choice between the reference builder and the in-place builder
 // (`build_ncbi_lookup_from_prepared` in backbone.rs carries the NCBI code); it changes no value
 // NCBI computes.
@@ -2877,12 +2673,6 @@ pub(super) fn x_bp_build_lookup(
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:446-469 (see
 // `x_build_direct_or_reference`)
-// ```c
-//     for (i = 0; i < lookup->backbone_size; i++) {
-//         if (exact_backbone[i] != NULL) {
-//             s_AddWordHits(lookup, matrix, query->sequence,
-//                           exact_backbone[i], query_bias, row_max);
-// ```
 /// EXPERIMENT (LOSAT_X_BPLK16): [`x_bp_build_lookup`] with the width of the table's hits chosen by
 /// the build: with `narrow`, `u16` hits where the lookup query is at most 65,535 letters
 /// ([`x_bplk16_fits`]) and the in-place builder applies; otherwise `Int4` hits, the table
@@ -2938,12 +2728,6 @@ pub(super) fn x_bp_build_lookup_as(
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:446-469 (see
 // `x_build_direct_or_reference`)
-// ```c
-//     for (i = 0; i < lookup->backbone_size; i++) {
-//         if (exact_backbone[i] != NULL) {
-//             s_AddWordHits(lookup, matrix, query->sequence,
-//                           exact_backbone[i], query_bias, row_max);
-// ```
 /// BLASTP's lookup table of 4-letter words (`-word_size 4`, item SC8b of line NP), whose backbone
 /// index (20 bits) the 16-bit direct builders do not cover, and its contexts: the joint builder of
 /// 32-bit indices (`x_pair_lut_wide.rs`) with all the query's lookup locations as its one table,
@@ -3300,23 +3084,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:504-509,580-590
-    // ```c
-    //     if (lookup->threshold == 0 || score < lookup->threshold) {
-    //         for (i = 0; i < offset_list[1]; i++) {
-    //             BlastLookupAddWordHit(lookup->thin_backbone, lookup->word_length,
-    //                                   lookup->charsize, w,
-    //                                   query_bias + offset_list[i + 2]);
-    //         }
-    // ...
-    //         for (i = 0; i < alphabet_size; i++) {
-    //             if (score + row[i] >= threshold) {
-    //                 subject_word[current_pos] = i;
-    //                 for (j = 0; j < offset_list[1]; j++) {
-    //                     BlastLookupAddWordHit(lookup->thin_backbone, wordsize,
-    //                                           charsize, subject_word,
-    //                                           query_bias + offset_list[j + 2]);
-    //                 }
-    // ```
     #[test]
     fn in_place_table_equals_reference_for_thresholds_masks_and_overflow() {
         let mut seed = 7u64;
@@ -3471,12 +3238,6 @@ mod tests {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:461-467 (module comment:
     // `s_AddWordHits` for every word of the exact backbone, then `BlastAaLookupFinalize`)
-    // ```c
-    //     for (i = 0; i < lookup->backbone_size; i++) {
-    //         if (exact_backbone[i] != NULL) {
-    //             s_AddWordHits(lookup, matrix, query->sequence,
-    //                           exact_backbone[i], query_bias, row_max);
-    // ```
     // Item X2e of line RG: the tables TBLASTX's full-table build (`x_tbx_build_lookup`: the direct
     // builder, 4-letter words the joint builder) and TBLASTN's (`x_lookup_table_for_profile_in`: the
     // lean builder, 4-letter words the joint builder, also on a pool of 4 and 8 threads) give for
@@ -3561,19 +3322,7 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:338-343
-    // ```c
-    //       for (i = 0; i < lookup->backbone_size; i++) {
-    //         /* if there are hits there, */
-    //         if (lookup->thin_backbone[i] ) {
-    //             Int4 * dest = NULL;
-    //             /* set the corresponding bit in the pv_array */
-    //             PV_SET(pv, i, PV_ARRAY_BTS);
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:321-336
-    // ```c
-    //       lookup->thick_backbone =
-    //             calloc(lookup->backbone_size, sizeof(AaLookupBackboneCell));
-    // ```
     // The pooled build: a table built on vectors another table and another build left (cleared
     // and zero-filled as calloc gives them) and with the neighbour lists shared by all threads is
     // the reference table: after a smaller and a larger table, with two tables alive at once, and
@@ -3798,15 +3547,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:461-467
-    // ```c
-    //     for (i = 0; i < lookup->backbone_size; i++) {
-    //         if (exact_backbone[i] != NULL) {
-    //             s_AddWordHits(lookup, matrix, query->sequence,
-    //                           exact_backbone[i], query_bias, row_max);
-    //             sfree(exact_backbone[i]);
-    //         }
-    //     }
-    // ```
     #[test]
     fn bplut_table_and_contexts_equal_build_ncbi_lookup() {
         let mut seed = 23u64;
@@ -3848,19 +3588,7 @@ mod tests {
         })
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:504-518
-    // ```c
-    //     if (lookup->threshold == 0 || score < lookup->threshold) {
-    //         for (i = 0; i < offset_list[1]; i++) {
-    //             BlastLookupAddWordHit(lookup->thin_backbone, lookup->word_length,
-    //                                   lookup->charsize, w,
-    //                                   query_bias + offset_list[i + 2]);
-    //         }
-    //     }
-    //     ...
-    //     if (lookup->threshold == 0)
-    //         return;
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:504-519
     /// LOSAT_X_BPDIAG (`blastp/x_seed_fused.rs`) tests the hits of a cell in batches, which is
     /// exact because a cell lists a query offset at most once (the word itself is added only when
     /// the neighbour enumeration does not return it). Both BLASTP builders, thresholds without
@@ -3944,13 +3672,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:321-336
-    // ```c
-    //       lookup->thick_backbone =
-    //             calloc(lookup->backbone_size, sizeof(AaLookupBackboneCell));
-    // ...
-    //           lookup->overflow =
-    //                  calloc(overflow_cells_needed, sizeof(Int4));
-    // ```
     /// LOSAT_X_BPLKPAHEAD: the table built ahead on vectors kept by `XAaSpares` (a table given back
     /// with other values, then moved to the build by `x_make_room`) is `x_bp_build_lookup(..)`'s;
     /// `x_make_room` allocates only the vectors short of their room, and keeps the calling
@@ -4054,13 +3775,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:321-336
-    // ```c
-    //       lookup->thick_backbone =
-    //             calloc(lookup->backbone_size, sizeof(AaLookupBackboneCell));
-    // ...
-    //           lookup->overflow =
-    //                  calloc(overflow_cells_needed, sizeof(Int4));
-    // ```
     /// LOSAT_X_BPLKREUSE: each block's own build on the block spare (`x_build_on_block_spare`) is
     /// `x_bp_build_lookup(true, ..)`'s table: the first on new vectors; the next ones on the
     /// vectors the block before gave back with other values, the same allocations where they have
@@ -4340,7 +4054,7 @@ mod tests {
         }
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:283-358 (quoted at
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:283-358 (cited at
     // `x_build_direct`)
     // LOSAT_X_BPLK16: the table of 16-bit hits holds, cell by cell, the hits of the table of
     // 32-bit hits of the same block in the same order (the comparison of LOSAT_X_BPLK16SHADOW,
@@ -4616,7 +4330,7 @@ mod tests {
         x_hits_per_cell_hundredths(hits, used)
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:283-358 (quoted at
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:283-358 (cited at
     // `x_build_direct`)
     // BLASTX's table with 16-bit hits: the serial build (not pooled, and pooled) and the partitioned
     // build (2-8 parts, and more parts than cells) give, cell by cell, the table of the reference

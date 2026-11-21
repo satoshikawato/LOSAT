@@ -4,39 +4,7 @@
 //! records as rendered bytes, its `@SQ` lines and the references it has listed; [`SamDocument::finish`]
 //! writes the document.
 //!
-//! NCBI reference (598d8ae6): c++/src/objtools/format/sam_formatter.cpp:313-316, :405-442
-//! ```c++
-//! CSAM_Formatter::~CSAM_Formatter(void)
-//! {
-//!     Flush();
-//! }
-//! ...
-//! void CSAM_Formatter::Flush(void)
-//! {
-//!     if ( !m_Out ) return;
-//!     // Headers
-//!     bool have_data = !m_Header.m_Data.empty() || !m_Body.empty();
-//!     if (have_data) {
-//!         *m_Out << "@HD\tVN:1.2";
-//!         x_PrintSOTag();
-//!         x_PrintGOTag();
-//!         *m_Out << '\n';
-//!     }
-//!     ITERATE(CSAM_Headers::TData, it, m_Header.m_Data) {
-//!         *m_Out << it->second << '\n';
-//!     }
-//!     if (have_data  &&  !m_ProgramInfo.m_Id.empty()) {
-//!         *m_Out << "@PG\tID:" << m_ProgramInfo.m_Id;
-//!         ...
-//!     }
-//!     // Alignments
-//!     ITERATE(TLines, it, m_Body) {
-//!         *m_Out << *it << '\n';
-//!     }
-//!     m_Header.m_Data.clear();
-//!     m_Body.clear();
-//! }
-//! ```
+//! NCBI reference (598d8ae6): c++/src/objtools/format/sam_formatter.cpp:313-316,405-441, :405-442
 //!
 //! The record of an HSP is the one NCBI's `CSAM_CIGAR_Formatter::AddRow` makes from the HSP's
 //! Dense-seg (`CCIGAR_Formatter::x_FormatLine` for the CIGAR); the Dense-seg is the one that
@@ -53,29 +21,6 @@ use super::serial::seqalign::{gapped_segments, seqalign_evalue, Segments, Strand
 /// The words of the custom specification of outfmt 17 that NCBI reads.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/sam.cpp:84-104
-/// ```c++
-/// void CBlast_SAM_Formatter::x_ProcessCustomSpec(const string & custom_spec,
-///                                                const CSAM_Formatter::SProgramInfo & info)
-/// {
-///     vector<string> format_tokens;
-///     NStr::Split(custom_spec, " ", format_tokens);
-///     CSAM_Formatter::SetProgram(info);
-///     m_refRow = 1;
-///     ITERATE (vector<string>, iter, format_tokens) {
-///          if("SR" == *iter) {
-///             m_refRow = 0;
-///          }
-///          if ("SQ" == *iter) {
-///             CSAM_Formatter::SetFlag(CSAM_Formatter::fSAM_SeqData);
-///         }
-///     }
-///
-///     if(m_refRow == 1) {
-///         CSAM_Formatter::SetGroupOrder(eGO_Reference);
-///         CSAM_Formatter::SetSortOrder(eSO_Coordinate);
-///     }
-/// }
-/// ```
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct SamSpec {
     /// `SR`: the subject is the reference and the query the target (`m_refRow` 0).
@@ -233,10 +178,6 @@ impl SamDocument {
     /// CL tag; an empty line is the same).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2460-2466
-    /// ```c++
-    ///     CSAM_Formatter::SProgramInfo info("0", CBlastVersion().Print(), m_Cmdline);
-    ///     info.m_Name = m_Program;
-    /// ```
     pub fn new(spec: SamSpec, version: &str, command_line: Option<Vec<u8>>) -> Self {
         Self {
             spec,
@@ -253,21 +194,7 @@ impl SamDocument {
     /// Seq-align order, `subjects` indexed by `HspRecord::subject`. `run` says whether the
     /// subjects are remapped (`-subject`).
     ///
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/format/sam.cpp:50-61
-    /// ```c++
-    /// void CBlast_SAM_Formatter::x_Print(const CSeq_align_set & aln)
-    /// {
-    ///     if(m_refRow == 1) {
-    ///         CSeq_align_set sorted;
-    ///         sorted.Set() = aln.Get();
-    ///         sorted.Set().sort(align_format::CAlignFormatUtil::SortHspByMasterStartAscending);
-    ///         CSAM_Formatter::Print(sorted, m_refRow);
-    ///     }
-    ///     else {
-    ///         CSAM_Formatter::Print(aln, m_refRow);
-    ///     }
-    /// }
-    /// ```
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/format/sam.cpp:50-63
     pub fn query(
         &mut self,
         run: &RunRecord<'_>,
@@ -332,15 +259,6 @@ impl SamDocument {
     /// Lists `reference` in `@SQ` the first time it is seen.
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/format/sam_formatter.cpp:181-187, :445-452
-    /// ```c++
-    ///     CBioseq_Handle refseq = GetScope()->GetBioseqHandle(GetRefId());
-    ///     if (m_KnownRefSeqs.find(refseq) == m_KnownRefSeqs.end()) {
-    ///         m_Head.AddSequence(CSeq_id_Handle::GetHandle(GetRefId()),
-    ///             "@SQ\tSN:" + x_GetRefIdString() +
-    ///             "\tLN:" + NStr::UInt8ToString(refseq.GetBioseqLength()));
-    ///         m_KnownRefSeqs.insert(refseq);
-    ///     }
-    /// ```
     fn list_reference(&mut self, reference: &SamSequence<'_>, name: &mut Vec<u8>) {
         if !self.seen.insert(reference.key) {
             return;
@@ -619,24 +537,6 @@ fn push_fixed2(out: &mut Vec<u8>, value: f64) {
 /// C's `%g` (precision 6), which `NStr::DoubleToString(value)` prints.
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:2316-2340
-/// ```c++
-/// void NStr::DoubleToString(string& out_str, double value,
-///                           int precision, TNumToStringFlags flags)
-/// {
-///     ...
-///     if (precision >= 0 || ...) {
-///         ...
-///     } else {
-///         const char* format;
-///         switch (flags & fDoubleGeneral) {
-///             ...
-///             case fDoubleGeneral: // default
-///             default:
-///                 format = "%g";
-///                 break;
-///         }
-///         n = ::snprintf(buffer, kMaxDoubleStringSize, format, value);
-/// ```
 pub fn push_g(out: &mut Vec<u8>, value: f64) {
     if value.is_nan() {
         out.extend_from_slice(if value.is_sign_negative() {

@@ -10,41 +10,6 @@ use crate::blastinput::report_counts::FormattingArgs;
 use crate::blastinput::value_parsers::*;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpsblast_args.cpp:70-131
-// ```c++
-// CRPSBlastAppArgs::CRPSBlastAppArgs()
-// {
-//     const bool kQueryIsProtein = true;
-//     const bool kIsRpsBlast = true;
-//     const bool kIsCBS2and3Supported = false;
-//     const bool kFilterByDefault = false;
-//     ...
-//     static const char kDefaultTask[] = "rpsblast";
-//     SetTask(kDefaultTask);
-//
-//     m_BlastDbArgs.Reset(new CBlastDatabaseArgs(false, kIsRpsBlast));
-//     ...
-//     m_StdCmdLineArgs.Reset(new CStdCmdLineArgs);
-//     ...
-//     arg.Reset(new CGenericSearchArgs(kQueryIsProtein, kIsRpsBlast));
-//     ...
-//     arg.Reset(new CFilteringArgs(kQueryIsProtein, kFilterByDefault));
-//     ...
-//     arg.Reset(new CWindowSizeArg);
-//     ...
-//     m_QueryOptsArgs.Reset(new CQueryOptionsArgs(kQueryIsProtein));
-//     ...
-//     m_FormattingArgs.Reset(new CFormattingArgs);
-//     ...
-//     m_MTArgs.Reset(new CRPSBlastMTArgs());
-//     ...
-//     m_RemoteArgs.Reset(new CRemoteArgs);
-//     ...
-//     m_DebugArgs.Reset(new CDebugArgs);
-//     ...
-//     arg.Reset(new CCompositionBasedStatsArgs(kIsCBS2and3Supported,
-//                                              kDfltArgCompBasedStatsRPS,
-//                                              cbs_opt_zero_descr));
-// ```
 // rpsblast's arguments: blastp's search, filtering, query, formatting and composition-based
 // statistics arguments without the matrix, the gap costs, the word size and threshold (the
 // profile database holds them), with RPS-BLAST's thread arguments. LOSAT runs the search with
@@ -57,12 +22,7 @@ use crate::blastinput::value_parsers::*;
 #[derive(Args, Debug, Clone)]
 #[command(rename_all = "snake_case")]
 pub struct RpsblastArgs {
-    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3425-3427
-    // ```c
-    //     arg_desc.AddDefaultKey(kArgQuery, "input_file",
-    //                      "Input file name",
-    //                      CArgDescriptions::eInputFile, kDfltArgQuery);
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3425-3427
     #[arg(long, default_value = "-", value_parser = ncbi_input_path(), value_name = "PATH")]
     pub query: PathBuf,
     #[arg(
@@ -73,49 +33,26 @@ pub struct RpsblastArgs {
     pub db: Option<String>,
     #[arg(long, value_name = "PATH", value_parser = ncbi_output_path())]
     pub out: Option<PathBuf>,
-    /// The search strategy file (`-export_search_strategy`, quoted at
+    /// The search strategy file (`-export_search_strategy`, cited at
     /// `BlastpArgs::export_search_strategy`), created by the search's `run` before the other options
     /// are read.
     #[arg(long, value_name = "filename", value_parser = ncbi_output_path(), help = "File name to record the search strategy used")]
     pub export_search_strategy: Option<PathBuf>,
     #[arg(long, value_parser = rpsblast_real, help = "Expectation value (E) threshold for saving hits [default: 10]")]
     pub evalue: Option<f64>,
-    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2036-2042
-    // ```c++
-    //         arg_desc.AddOptionalKey(kArgDbSize, "num_letters",
-    //                                 "Effective length of the database ",
-    //                                 CArgDescriptions::eInt8);
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2234-2236
     /// `-dbsize`: replaces the database's length in every statistic (`x_AdjustDbSize` then keeps
     /// the volumes' own sequence counts, `rps_hooks::rps_search`).
     #[arg(long, value_parser = ncbi_int8, value_name = "LETTERS", help = "Effective length of the database")]
     pub dbsize: Option<i64>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:234-238
-    // ```c++
-    //     arg_desc.AddOptionalKey(kArgEffSearchSpace, "int_value",
-    //                             "Effective length of the search space",
-    //                             CArgDescriptions::eInt8);
-    //     arg_desc.SetConstraint(kArgEffSearchSpace,
-    //                            new CArgAllowValuesGreaterThanOrEqual(0));
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:303-307
-    // ```c++
-    //     if (args.Exist(kArgEffSearchSpace) && args[kArgEffSearchSpace]) {
-    //         CNcbiEnvironment env;
-    //         env.Set("OLD_FSC", "true");
-    //         opt.SetEffectiveSearchSpace(args[kArgEffSearchSpace].AsInt8());
-    //     }
-    // ```
     /// `-searchsp`: at any value (0 too) the search runs without the Gumbel block
     /// (`ResolvedBlastpArgs::old_fsc`); above 0 it is every query's and volume's effective
     /// search space (`rps_hooks::rps_search`).
     #[arg(long, value_parser = nonnegative_ncbi_int8, value_name = "INT_VALUE", help = "Effective length of the search space")]
     pub searchsp: Option<i64>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:796-797
-    // ```c++
-    //     arg_desc.AddDefaultKey(kArgCompBasedStats, "compo", legend,
-    //                            CArgDescriptions::eString, m_DefaultOpt);
-    // ```
     #[arg(
         long,
         default_value = "1",
@@ -135,7 +72,7 @@ pub struct RpsblastArgs {
     #[arg(long = "num_alignments", value_name = "int_value", value_parser = report_count, help = "Number of database sequences to show alignments for [default: 250]")]
     pub num_alignments: Option<usize>,
     // `-line_length`, `-sorthits` and `-sorthsps` (NCBI's formatting handler,
-    // blast_args.cpp:2683-2721, quoted at `FormattingArgs`): the width of the outfmt 0
+    // blast_args.cpp:2683-2721, cited at `FormattingArgs`): the width of the outfmt 0
     // alignment rows; the sorts are read with NCBI's warnings and sort nothing: NCBI's
     // rpsblast does not hand them to its formatter (`app/rpsblast_app.cpp:187`,
     // `SetLineLength` only).
@@ -148,21 +85,6 @@ pub struct RpsblastArgs {
     #[arg(long = "qcov_hsp_perc", value_parser = rpsblast_query_coverage, help = "Percent query coverage per hsp")]
     pub qcov_hsp_perc: Option<f64>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:209-229
-    // ```c++
-    //         // ungapped X-drop
-    //         // Default values: blastn=20, megablast=10, others=7
-    //         arg_desc.AddOptionalKey(kArgUngappedXDropoff, "float_value",
-    //                             "X-dropoff value (in bits) for ungapped extensions",
-    //                             CArgDescriptions::eDouble);
-    //         ...
-    //             arg_desc.AddOptionalKey(kArgGappedXDropoff, "float_value",
-    //                  "X-dropoff value (in bits) for preliminary gapped extensions",
-    //                  CArgDescriptions::eDouble);
-    //         ...
-    //             arg_desc.AddOptionalKey(kArgFinalGappedXDropoff, "float_value",
-    //                          "X-dropoff value (in bits) for final gapped alignment",
-    //                          CArgDescriptions::eDouble);
-    // ```
     /// `-xdrop_ungap`, `-xdrop_gap`, `-xdrop_gap_final`: the RPS engine's X-drops in bits
     /// (`RpsSearch`); NCBI's checks of their values are made with the options' others.
     #[arg(long = "xdrop_ungap", value_name = "float_value", value_parser = rpsblast_real, help = "X-dropoff value (in bits) for ungapped extensions")]
@@ -172,36 +94,12 @@ pub struct RpsblastArgs {
     #[arg(long = "xdrop_gap_final", value_name = "float_value", value_parser = rpsblast_real, help = "X-dropoff value (in bits) for final gapped alignment")]
     pub xdrop_gap_final: Option<f64>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:240-244
-    // ```c++
-    //     if (!m_SuppressSumStats) {
-    //         arg_desc.AddOptionalKey(kArgSumStats, "bool_value",
-    //                      	 	"Use sum statistics",
-    //                      	 	CArgDescriptions::eBoolean);
-    //     }
-    // ```
     /// `-sum_stats`: `false` is rpsblast's default; `true` is refused where the search starts
     /// (`rps_hooks::rps_search`), after NCBI's errors of the options, the database and the files.
     #[arg(long = "sum_stats", value_name = "bool_value", value_parser = ncbi_boolean, help = "Use sum statistics")]
     pub sum_stats: Option<bool>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:804-806
-    // ```c++
-    //     arg_desc.AddFlag(kArgUseSWTraceback,
-    //                      "Compute locally optimal Smith-Waterman alignments?",
-    //                      true);
-    // ```
-    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:879-885 and 892-899
-    // ```c++
-    //         opt.SetCompositionBasedStats(compo_mode);
-    //         ...
-    //         opt.SetSmithWatermanMode(smith_waterman_value);
-    //     ...
-    //     if (args[kArgCompBasedStats]) {
-    //         ...
-    //         s_SetCompositionBasedStats(opt,
-    //                                    args[kArgCompBasedStats].AsString(),
-    //                                    args[kArgUseSWTraceback],
-    //                                    ungapped.get());
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:879-899 and 892-899
     /// `-use_sw_tback`: the composition-based redo (modes 1 to 3) is NCBI's Smith-Waterman redo
     /// (`RpsSearch::use_sw_tback`); without composition-based statistics it changes nothing.
     #[arg(
@@ -211,19 +109,6 @@ pub struct RpsblastArgs {
     )]
     pub use_sw_tback: bool,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:332-342
-    // ```c++
-    //         arg_desc.AddDefaultKey(kArgSegFiltering, "SEG_options",
-    //                         "Filter query sequence with SEG "
-    //                         "(Format: '" + kDfltArgApplyFiltering + "', " +
-    //                         "'window locut hicut', or '" + kDfltArgNoFiltering +
-    //                         "' to disable)",
-    //                         CArgDescriptions::eString, m_FilterByDefault
-    //                         ? kDfltArgSegFiltering : kDfltArgNoFiltering);
-    //         arg_desc.AddDefaultKey(kArgLookupTableMaskingOnly, "soft_masking",
-    //                         "Apply filtering locations as soft masks",
-    //                         CArgDescriptions::eBoolean,
-    //                         kDfltArgLookupTableMaskingOnlyProt);
-    // ```
     /// `-seg`, `-soft_masking` and `-lcase_masking` are blastp's query encoding: a hard mask
     /// turns the letters into X for the whole search, the reports show the masks in lower case
     /// and count identities on the letters as read; soft masking keeps the letters (it only
@@ -240,11 +125,6 @@ pub struct RpsblastArgs {
     #[arg(long, value_parser = nonnegative_ncbi_integer, help = "Multiple hits window size, use 0 to specify 1-hit algorithm [default: 40]")]
     pub window_size: Option<i32>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1939-1942
-    // ```c++
-    //     // lowercase masking
-    //     arg_desc.AddFlag(kArgUseLCaseMasking,
-    //          "Use lower case filtering in query and subject sequence(s)?", true);
-    // ```
     #[arg(
         long = "lcase_masking",
         default_value_t = false,
@@ -264,25 +144,6 @@ pub struct RpsblastArgs {
     )]
     pub parse_deflines: bool,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpsblast_args.cpp:48-66
-    // ```c++
-    //     const int kDfltRpsThreadingMode = 1;
-    //     arg_desc.AddDefaultKey(kArgNumThreads, "int_value",
-    //                            "Number of threads to use in RPS BLAST search:\n "
-    //                            "0 (auto = num of databases)\n "
-    //                            "1 (disable)\n max number of threads = num of databases",
-    //                            CArgDescriptions::eInteger,
-    //                            NStr::IntToString(kDfltRpsThreadingMode));
-    //     arg_desc.SetConstraint(kArgNumThreads,
-    //                            new CArgAllowValuesGreaterThanOrEqual(0));
-    //     arg_desc.AddDefaultKey(kArgMTMode, "int_value",
-    //                            "Multi-thread mode to use in RPS BLAST search:\n "
-    //                            "0 (auto) split by database vols\n "
-    //                            "1 split by queries",
-    //                             CArgDescriptions::eInteger,
-    //                             NStr::IntToString(0));
-    //        arg_desc.SetConstraint(kArgMTMode,
-    //                               new CArgAllowValuesBetween(0, 1, true));
-    // ```
     /// `-num_threads`: LOSAT's pool size (0: the number of volumes, NCBI's "auto"); the output
     /// is the same at every value.
     #[arg(long, default_value_t = 1, value_parser = nonnegative_ncbi_integer)]
@@ -305,34 +166,7 @@ pub(crate) fn rpsblast_mt_mode(value: &str) -> Result<u8, String> {
 /// The composition-based statistics mode of a `-comp_based_stats` value as RPS-BLAST reads it:
 /// its first letter only, `D`/`d` and any unknown letter as 0, `T`/`t` as 1.
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:839-865
-/// ```c++
-///         ECompoAdjustModes compo_mode = eNoCompositionBasedStats;
-///
-///         switch (comp_stat_string[0]) {
-///             case '0': case 'F': case 'f':
-///                 compo_mode = eNoCompositionBasedStats;
-///                 break;
-///             case '1':
-///                 compo_mode = eCompositionBasedStats;
-///                 break;
-///             case 'D': case 'd':
-///                 if ((program == eRPSBlast) || (program == eRPSTblastn)) {
-///                     compo_mode = eNoCompositionBasedStats;
-///                 }
-///                 ...
-///             case '2':
-///                 compo_mode = eCompositionMatrixAdjust;
-///                 break;
-///             case '3':
-///                 compo_mode = eCompoForceFullMatrixAdjust;
-///                 break;
-///             case 'T': case 't':
-///                 compo_mode = (program == eRPSBlast || program == eRPSTblastn || program == eDeltaBlast) ?
-///                     eCompositionBasedStats : eCompositionMatrixAdjust;
-///                 break;
-///         }
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:836-865
 pub(crate) fn rps_composition_mode(value: &str) -> u8 {
     match value.as_bytes().first() {
         Some(b'1' | b'T' | b't') => 1,
@@ -363,15 +197,6 @@ impl RpsblastArgs {
             id_scope: None,
             searchsp: self.searchsp,
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_rps_options.cpp:60-66
-            // ```c++
-            // CBlastRPSOptionsHandle::SetLookupTableDefaults()
-            // {
-            //     m_Opts->SetLookupTableType(eRPSLookupTable);
-            //     // N.B.: the word threshold is not set because for RPS-BLAST it CANNOT be
-            //     // done, i.e.: the RPS-BLAST databases already have this value encoded in
-            //     // them and therefore this value cannot be changed on an RPS-BLAST run
-            // }
-            // ```
             // blastp's task gives BLOSUM62 11/1 (the profile database's `.aux` must name these,
             // `rps_search`), window 40, word size 3 and no SEG; the threshold is 0 for the
             // reports (`ResolvedBlastpArgs::threshold`).
@@ -405,13 +230,6 @@ impl RpsblastArgs {
             // database has no frequency ratios.
             comp_based_stats: requested_cbs.to_string(),
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_rps_options.cpp:68-73
-            // ```c++
-            // CBlastRPSOptionsHandle::SetQueryOptionDefaults()
-            // {
-            //     SetSegFiltering(false);
-            //     m_Opts->SetStrandOption(objects::eNa_strand_unknown);
-            // }
-            // ```
             // The query masks are blastp's (`blastp_query_frames`, the SEG of the filtering
             // handler and the lower-case letters of the query reader), applied before the score
             // block (`blast_setup.c:601-624`), so the scan, the extensions, the CBS 0 rescale
@@ -611,7 +429,7 @@ mod tests {
         assert!(parse(&["-mt_mode", "2"]).is_err());
     }
 
-    // blast_args.cpp:234-238 and 303-307 (quoted at the field), ncbiargs.cpp:118-129: `-searchsp`
+    // blast_args.cpp:234-238 and 303-307 (cited at the field), ncbiargs.cpp:118-129: `-searchsp`
     // takes NCBI's `Int8` forms at 0 or above and, at any value (0 too), the search runs without
     // the Gumbel block; the same parser as psiblast's and blastp's.
     #[test]
@@ -637,7 +455,7 @@ mod tests {
         }
     }
 
-    // blast_args.cpp:209-244, 332-342, 1939-1942, 2683-2721 (quoted at the fields): the masks, the
+    // blast_args.cpp:209-244, 332-342, 1939-1942, 2683-2721 (cited at the fields): the masks, the
     // X-drops, the formatting options and `-sum_stats false` reach blastp's arguments.
     #[test]
     fn the_options_of_ps11c_1_reach_blastps_arguments() {
@@ -744,7 +562,7 @@ mod tests {
         );
     }
 
-    // blast_options.c:608-618 (quoted at `validate_protein_options`): an ungapped X-drop of 0 or
+    // blast_options.c:608-618 (cited at `validate_protein_options`): an ungapped X-drop of 0 or
     // below is NCBI's options error, made when the options are validated (after the SEG
     // option's own error, which its handler raises).
     #[test]

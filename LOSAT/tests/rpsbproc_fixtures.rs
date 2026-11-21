@@ -149,7 +149,7 @@ fn set_up(dir: &Path, setup: &str) {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/corelib/metareg.cpp:284-303 (quoted at
+// NCBI reference (598d8ae6): c++/src/corelib/metareg.cpp:284-303 (cited at
 // `ncbi_environment::SYSTEM_WIDE_REGISTRY`): the registry file that NCBI's application reads in
 // the current directory is `.ncbirc`, and `ncbi.ini` on Windows (`eName_RcOrIni`). The fixtures were frozen on Linux
 // with `.ncbirc`; a Windows run gives the file the name its NCBI reads.

@@ -3,28 +3,7 @@
 //! taken back in OID order.
 //!
 //! NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:307-344
-//! ```c++
-//!     CSeqDBLockHold locked(m_Atlas);
-//! ...
-//!    	m_Atlas.Lock(locked);
-//!     if (! state_obj) {
-//!         state_obj = & m_NextChunkOID;
-//!     }
-//! ...
-//!     begin_chunk = * state_obj;
-//!
-//!     // fill the cache for all sequence in mmaped slice
-//!     if (m_NumThreads) {
-//!         SSeqResBuffer * buffer = m_CachedSeqs[cacheID];
-//!         x_FillSeqBuffer(buffer, begin_chunk);
-//!         end_chunk = begin_chunk + static_cast<int>(buffer->results.size());
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1411-1413
-//! ```c
-//!     /* iterate over all subject sequences */
-//!     while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-//!            != BLAST_SEQSRC_EOF) {
-//! ```
 //! Each NCBI search thread asks the database for the next chunk, under its lock, as soon as it has
 //! searched the subjects of the last one; no thread waits for another. LOSAT's pool earlier
 //! (`LOSAT_X_TBNOIDNEXT=0`, graduated 2026-10-22) took a few chunks per thread and waited until
@@ -103,16 +82,6 @@ pub(super) fn x_loop_free_on() -> bool {
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1412-1413,1604-1605,1693-1694
-/// ```c
-///     while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-///            != BLAST_SEQSRC_EOF) {
-/// ...
-///     word_params = BlastInitialWordParametersFree(word_params);
-///     s_BlastCoreAuxStructFree(aux_struct);
-/// ...
-///     gap_align->sbp = NULL;
-///     gap_align = BLAST_GapAlignStructFree(gap_align);
-/// ```
 /// NCBI's search thread frees its word-finder state (diagonal table, initial hits, offset pairs)
 /// when its loop over the subjects ends, and its caller then the gapped alignment memory; a
 /// subject's translation is freed after the subject (blast_engine.c:627-631). Here a thread's loop

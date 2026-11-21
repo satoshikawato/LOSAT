@@ -4,23 +4,35 @@
 
 // NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_tables.cpp:1822-1850
 /// NCBIstdaa to ncbieaa, the letters of the FASTA path (`CSeqVector` with `Ncbieaa`): the
-/// table's 28 codes.
-const STDAA_TO_EAA: [u8; 28] = *b"-ABCDEFGHIKLMNPQRSTVWXYZU*OJ";
+/// table's 28 codes ([`all_codes`]).
+const STDAA_TO_EAA: [u8; 256] = all_codes(b"-ABCDEFGHIKLMNPQRSTVWXYZU*OJ");
 
 // NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_tables.cpp:1785-1813
 /// NCBIstdaa to iupacaa, the letters of `GetSequenceAsString` (`-outfmt %s`, `%h`): the gap
-/// (0) and the stop (25) are the byte 255, as NCBI's table has them.
-const STDAA_TO_IUPACAA: [u8; 28] = [
+/// (0) and the stop (25) are the byte 255, as NCBI's table has them ([`all_codes`]).
+const STDAA_TO_IUPACAA: [u8; 256] = all_codes(&[
     255, b'A', b'B', b'C', b'D', b'E', b'F', b'G', b'H', b'I', b'K', b'L', b'M', b'N', b'P', b'Q',
     b'R', b'S', b'T', b'V', b'W', b'X', b'Y', b'Z', b'U', 255, b'O', b'J',
-];
+]);
 
-/// The letter of `code` in `table`; a code that is no NCBIstdaa residue (28 and above, which
-/// makeblastdb does not write) is the byte 255 in both conversions, whatever its low bits (NCBI
-/// BLAST+ 2.17.0 blastdbcmd `%f` and `%s`, segmasker `-outfmt fasta`, with `.psq` bytes 28, 31,
-/// 32, 100, 201 and 255; review of line RG item K2, M1).
-fn letter(table: &[u8; 28], code: u8) -> u8 {
-    table.get(usize::from(code)).copied().unwrap_or(255)
+/// The letters of the 28 NCBIstdaa codes `residues` for every byte: a code that is no NCBIstdaa
+/// residue (28 and above, which makeblastdb does not write) is the byte 255 in both conversions,
+/// whatever its low bits (NCBI BLAST+ 2.17.0 blastdbcmd `%f` and `%s`, segmasker `-outfmt fasta`,
+/// with `.psq` bytes 28, 31, 32, 100, 201 and 255; review of line RG item K2, M1). A table of
+/// every byte makes the letter one load, without a branch per residue.
+const fn all_codes(residues: &[u8; 28]) -> [u8; 256] {
+    let mut table = [255u8; 256];
+    let mut code = 0;
+    while code < residues.len() {
+        table[code] = residues[code];
+        code += 1;
+    }
+    table
+}
+
+/// The letter of `code` in `table`.
+fn letter(table: &[u8; 256], code: u8) -> u8 {
+    table[usize::from(code)]
 }
 
 /// The FASTA letters of a protein's NCBIstdaa residues.

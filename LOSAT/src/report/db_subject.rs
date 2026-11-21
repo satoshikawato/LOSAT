@@ -1908,15 +1908,20 @@ impl FormatThrow {
     }
 
     /// What the `-outfmt` value `outfmt` does in `program`'s reports, as NCBI reads it
-    /// (`app::parse_formatting_string`; a value that NCBI refuses is refused).
-    pub fn of_outfmt(outfmt: &str, program: crate::blastinput::app::Program) -> Self {
+    /// (`app::parse_formatting_string`; a value that NCBI refuses is refused) and `app`'s
+    /// formatter writes it (`TabularSpec::of_app`).
+    pub fn of_outfmt(
+        outfmt: &str,
+        program: crate::blastinput::app::Program,
+        app: crate::report::archive::options::RequestKind,
+    ) -> Self {
         use crate::blastinput::app::{parse_formatting_string, ReportFormat};
         let Some((format, choice)) = parse_formatting_string(outfmt).ok().and_then(|choice| {
             ReportFormat::from_number(choice.number).map(|format| (format, choice))
         }) else {
             return FormatThrow::Refused;
         };
-        let spec = super::tabular::TabularSpec::of(format, &choice);
+        let spec = super::tabular::TabularSpec::of_app(format, &choice, app);
         Self::of(format, spec.as_ref(), program)
     }
 
@@ -1954,15 +1959,17 @@ impl FormatThrow {
         }
     }
 
-    /// [`FormatThrow::of_run`] of the `-outfmt` values `outfmts` of `program`'s run.
+    /// [`FormatThrow::of_run`] of the `-outfmt` values `outfmts` of `program`'s run in `app`'s
+    /// application.
     pub fn of_outfmts<'a>(
         outfmts: impl IntoIterator<Item = &'a str>,
         program: crate::blastinput::app::Program,
+        app: crate::report::archive::options::RequestKind,
     ) -> Option<RunThrow> {
         Self::of_run(
             outfmts
                 .into_iter()
-                .map(|outfmt| Self::of_outfmt(outfmt, program)),
+                .map(|outfmt| Self::of_outfmt(outfmt, program, app)),
         )
     }
 }

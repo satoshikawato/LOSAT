@@ -97,10 +97,12 @@ describe.skipIf(REACTORS === undefined)('a run of -db through the host', () => {
       if (list >= 0) files.push(...(await folder(dirname(row.extra[list + 1]!), paths)).filter(({ name }) => name === row.extra[list + 1]));
       directory.open(files);
       const argv = [row.program, '-db', row.db, '-query', row.query, ...row.extra, '-num_threads', '1'];
-      expect(abi.validate(argv), row.id).toBeUndefined();
+      // The query is read with the data loaders that the verdict on the argv gives (ABI v2 §9).
+      const validation = abi.validate(argv);
+      expect(validation, row.id).toEqual({ ok: true, dataLoaders: true });
       const started = abi.start(argv);
       expect(started.ok && started.start.database, row.id).toBe(true);
-      const query = abi.register(row.program, ROLE_QUERY, readFileSync(join(LOSAT, row.query)));
+      const query = abi.register(row.program, ROLE_QUERY, validation.ok && validation.dataLoaders, readFileSync(join(LOSAT, row.query)));
       const before = reader.bytes();
       reader.byFile.clear();
       let outfmt6: Uint8Array[] = [];
@@ -123,7 +125,7 @@ describe.skipIf(REACTORS === undefined)('a run of -db through the host', () => {
     // A database that the directory does not hold: the CLI's message.
     directory.open([]);
     const argv = ['blastp', '-db', 'tests/db_search/paja', '-query', 'q.faa', '-num_threads', '1'];
-    const query = abi.register('blastp', ROLE_QUERY, new TextEncoder().encode('>q\nMKVLA\n'));
+    const query = abi.register('blastp', ROLE_QUERY, true, new TextEncoder().encode('>q\nMKVLA\n'));
     expect(() => abi.run(argv, query.handle, 0, () => undefined)).toThrow(/BLAST Database error: No alias or index file found for protein database \[tests\/db_search\/paja\]/);
     // With the database in the directory, the names that the CLI run from LOSAT/ does not find either: an absolute
     // name (the CLI's root holds no tests/) and `..` after a name that is no folder. The CLI's message, whose

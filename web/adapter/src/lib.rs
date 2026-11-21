@@ -73,13 +73,16 @@ fn words(argv: &str) -> Vec<&str> {
 
 /// The version of ABI v2 (docs/web/abi_v2.md §10): 9 since a run of `-db`, which takes no subject
 /// handle and reads the database from the run's working directory, which the host preopens as
-/// `/work` (line WQA D12a, 2026-11-20; 8 is taken by an open branch); 7 since a run that fails keeps
-/// the output of the argv up to its error and drops the other outputs with the signal of stream 9
-/// (line WQA's sweep, D15, 2026-11-20; versions 5 and 6 were taken by other open branches); 4 since
-/// `losat_web2_register_inputs`, which reads the inputs of a run with `-parse_deflines`, and the
-/// signal of stream 9 for every output stream that failed (line WQA's sweep, D7, 2026-11-19); 3
-/// since the signal of stream 9, which makes the host discard a stream that failed alone after a
-/// chunk of it was sent (line RG item T7-W).
+/// `/work` (line WQA D12a, 2026-11-20); 8 since the index scan and `register` read as the engine's
+/// reader with the run's data loaders (`scan_begin` and `register` take the program, the role and
+/// the setting, which *validation* gives on stream 2; a `>?` gap line and the lines that NCBI's line
+/// reader joins are indexed, and the reader's refusals come in its words; line WQA's D13 and D16,
+/// 2026-11-20); 7 since a run that fails keeps the output of the argv up to its error and drops the
+/// other outputs with the signal of stream 9 (line WQA's sweep, D15, 2026-11-20; versions 5 and 6
+/// are taken by other open branches); 4 since `losat_web2_register_inputs`, which reads the inputs
+/// of a run with `-parse_deflines`, and the signal of stream 9 for every output stream that failed
+/// (line WQA's sweep, D7, 2026-11-19); 3 since the signal of stream 9, which makes the host discard
+/// a stream that failed alone after a chunk of it was sent (line RG item T7-W).
 #[no_mangle]
 pub extern "C" fn losat_web2_abi_version() -> i32 {
     9
@@ -139,16 +142,45 @@ pub unsafe extern "C" fn losat_web2_start(argv_ptr: *const u8, argv_len: usize) 
     })
 }
 
+/// Checks the argv as the CLI does before it reads its inputs (`run::validate`) and emits the
+/// *validation* JSON on stream 2: whether the run reads its inputs with NCBI's data loaders on
+/// (`{"data_loaders":true}`; docs/web/abi_v2.md §9). It is emitted once the start has read the
+/// argv's registry, before the option checks: a refused argv has it too, unless its start or
+/// LOSAT's settings failed (line WQA's D13 round 3, L1, 2026-11-20).
+///
 /// # Safety
 /// The pointer arguments must describe readable buffers of the given lengths.
 #[no_mangle]
 pub unsafe extern "C" fn losat_web2_validate(argv_ptr: *const u8, argv_len: usize) -> i32 {
     guarded(|| {
-        run::validate(&words(text(argv_ptr, argv_len, "argv")?))?;
+        // The *validation* goes out once the start knows the setting, before the option checks, so
+        // that a host has it also when they refuse the argv (line WQA's D13 round 3, L1).
+        run::validate_with(
+            &words(text(argv_ptr, argv_len, "argv")?),
+            &mut |data_loaders| {
+                emit(
+                    STREAM_RESPONSE,
+                    format!("{{\"data_loaders\":{data_loaders}}}").as_bytes(),
+                );
+            },
+        )?;
         Ok(0)
     })
 }
 
+/// A flag argument of the ABI: `0` or `1`.
+fn flag(value: u32, name: &str) -> Result<bool, String> {
+    match value {
+        0 => Ok(false),
+        1 => Ok(true),
+        other => Err(format!("{name} must be 0 or 1, not {other}")),
+    }
+}
+
+/// Reads the FASTA `bytes` of `program`'s input of `role` (`0` query, `1` subject) with NCBI's
+/// data loaders on (`data_loaders` 1) or off (0), as the run's *validation* gives them
+/// (`store::register`); emits the *register* JSON on stream 2 and returns the handle.
+///
 /// # Safety
 /// The pointer arguments must describe readable buffers of the given lengths.
 #[no_mangle]
@@ -156,12 +188,15 @@ pub unsafe extern "C" fn losat_web2_register(
     program_ptr: *const u8,
     program_len: usize,
     role: u32,
+    data_loaders: u32,
     bytes_ptr: *const u8,
     bytes_len: usize,
 ) -> i32 {
     guarded(|| {
         let program = text(program_ptr, program_len, "program")?;
-        let (handle, response) = store::register(program, role, bytes(bytes_ptr, bytes_len))?;
+        let data_loaders = flag(data_loaders, "data_loaders")?;
+        let (handle, response) =
+            store::register(program, role, data_loaders, bytes(bytes_ptr, bytes_len))?;
         emit(STREAM_RESPONSE, response.as_bytes());
         i32::try_from(handle).map_err(|_| "input handle space exhausted".to_string())
     })
@@ -246,14 +281,25 @@ fn scanners() -> &'static Mutex<(u32, HashMap<u32, scan::Scanner>)> {
     SCANNERS.get_or_init(Mutex::default)
 }
 
-/// Starts an index scan with parser kind `1` (NCBI BLAST+'s reader of nucleotide input:
-/// BLASTN, TBLASTX, the TBLASTN subject, the BLASTX query) or `2` (NCBI BLAST+'s reader of
-/// protein input: BLASTP, the TBLASTN query, the BLASTX subject).
+/// Starts an index scan of `program`'s input of `role` (`0` query, `1` subject) with NCBI's data
+/// loaders on (`data_loaders` 1) or off (0): the engine's reader of that input, as `register`
+/// reads it (NCBI BLAST+'s reader of nucleotide input for BLASTN, TBLASTX, the TBLASTN subject and
+/// the BLASTX query; of protein input for BLASTP, the TBLASTN query and the BLASTX subject).
+///
+/// # Safety
+/// The pointer arguments must describe readable buffers of the given lengths.
 #[no_mangle]
-pub extern "C" fn losat_web2_scan_begin(parser: u32) -> i32 {
+pub unsafe extern "C" fn losat_web2_scan_begin(
+    program_ptr: *const u8,
+    program_len: usize,
+    role: u32,
+    data_loaders: u32,
+) -> i32 {
     guarded(|| {
-        let scanner = scan::Scanner::of_kind(parser)
-            .ok_or_else(|| format!("unknown or unavailable FASTA parser kind {parser}"))?;
+        let program = run::Program::parse(text(program_ptr, program_len, "program")?)?;
+        store::role_name(role)?;
+        let data_loaders = flag(data_loaders, "data_loaders")?;
+        let scanner = scan::Scanner::new(store::reader_config(program, role, data_loaders));
         let mut scanners = scanners().lock().expect("scanners");
         scanners.0 = scanners
             .0
@@ -289,7 +335,9 @@ pub extern "C" fn losat_web2_scan_end(scanner: u32) -> i32 {
             .1
             .remove(&scanner)
             .ok_or_else(|| format!("unknown scanner {scanner}"))?;
-        let records = state.finish()?;
+        let records = state
+            .finish()
+            .map_err(|error| error.message().to_string())?;
         emit(STREAM_RESPONSE, scan::to_json(&records).as_bytes());
         Ok(0)
     })
@@ -375,7 +423,9 @@ pub extern "C" fn losat_web2_inflate_end(handle: u32) -> i32 {
 }
 
 /// Runs the argv on the registered query and subject. A run of `-db` takes the subject handle 0:
-/// the engine opens the database by name from the host's preopened `.` (docs/web/abi_v2.md §3, §4).
+/// the engine opens the database by name in the run's working directory, which the host preopens as
+/// `/work` (docs/web/abi_v2.md §3, §4). The inputs are those read with the argv's data loaders
+/// (`run::data_loaders`, §9).
 ///
 /// # Safety
 /// The pointer arguments must describe readable buffers of the given lengths.
@@ -394,6 +444,7 @@ pub unsafe extern "C" fn losat_web2_run(
             query_handle,
             subject_handle,
             &argv,
+            run::data_loaders(&argv).ok(),
             |queries, subjects| run::run(&argv, queries, subjects),
         )??;
         Ok(0)

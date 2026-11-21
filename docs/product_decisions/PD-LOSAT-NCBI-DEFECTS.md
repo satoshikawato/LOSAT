@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.60
+- Version: 1.61
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -251,6 +251,9 @@
   width; the explicit rejection, rule 2, of an index volume of more than 4 GiB of packed
   sequences, whose sizes NCBI writes wrapped at 32 bits; Owner-delegated, standing instruction
   2026-09-29, restated 2026-10-07)
+  1.61 2026-11-21 (`losat makembindex`, line RG item D5a-t: the explicit rejection, rule 3, of a
+  database sequence without letters, whose null Bioseq NCBI dereferences; Owner-delegated,
+  standing instruction 2026-09-29, restated 2026-10-07)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -2058,6 +2061,14 @@ every query (NCBI's bytes for a query with a next query are deterministic, rule 
   same file on a rerun). Computed in a wider type, the offsets no longer fit the index's 32-bit
   words, so no valid index can be defined. LOSAT refuses (exit 1) at the first sequence of an
   index volume.
+- `losat makembindex` of a database with a sequence without letters (version 1.61, 2026-11-21, line
+  RG item D5a-t, Owner-delegated): `CSeqDB::GetBioseq` gives a null Bioseq for it
+  (`seqdbvol.cpp:1380-1386`) and `CSequenceIStreamBlastDB::next` dereferences it
+  (`sequence_istream_bdb.cpp:105-107`): `CCoreException::eNullPtr`, exit status 3, with a stack
+  trace of the run's memory addresses (probe `remaining-gaps-20261112/D/d5/probe/zero`, a database
+  whose first sequence's offsets were patched to 0 letters; `-idmap` true or false). LOSAT refuses
+  (exit 1) at that sequence. windowmasker skips such a sequence, as NCBI's, and makes no title or
+  taxonomy lookup for it.
 
 ## Explicit rejections of a taxonomy record past NCBI's mapping (rule 3, version 1.43)
 

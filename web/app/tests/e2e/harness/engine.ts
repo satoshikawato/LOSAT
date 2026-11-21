@@ -416,7 +416,7 @@ export async function retention(
     if (cached === undefined) {
       cached = (async () => {
         const source = await data.addSource(await fetchFile(which));
-        const revision = await data.indexSource(source.sourceId, parser);
+        const revision = await data.indexSource(source.sourceId, { program: search.program, role, dataLoaders: true });
         const run = await data.buildRunInput([revision.revisionId]);
         return { bytes: run.bytes, sha256: run.sha256, revisionIds: [revision.revisionId], records: run.records };
       })();
@@ -504,7 +504,7 @@ export async function timed(list: readonly SearchCase[], options: TimedOptions =
     if (cached === undefined) {
       cached = (async () => {
         const source = await data.addSource(await fetchFile(which));
-        const revision = await data.indexSource(source.sourceId, parser);
+        const revision = await data.indexSource(source.sourceId, { program: search.program, role, dataLoaders: true });
         const run = await data.buildRunInput([revision.revisionId]);
         return { bytes: run.bytes, sha256: run.sha256, revisionIds: [revision.revisionId], records: run.records };
       })();
@@ -621,7 +621,8 @@ export async function databaseSearches(list: readonly DatabaseSearch[], picked?:
     let running: number | undefined;
     try {
       const source = await data.addSource(await file(search.query));
-      const revision = await data.indexSource(source.sourceId, fastaParser(programById(search.program), 'query'));
+      // The rows have no registry file: the query is read with the data loaders on, as the CLI reads it (ABI v2 §9).
+      const revision = await data.indexSource(source.sourceId, { program: search.program, role: 'query', dataLoaders: true });
       const run = await data.buildRunInput([revision.revisionId]);
       const query: EngineInput = { bytes: run.bytes, sha256: run.sha256, revisionIds: [revision.revisionId], records: run.records };
       const directory = await Promise.all(search.files.map(async (name) => ({ name, file: await file(name) })));

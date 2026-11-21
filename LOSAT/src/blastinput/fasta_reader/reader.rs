@@ -836,14 +836,11 @@ impl<R: Read> FastaReader<R> {
     }
 
     /// LOSAT's limit: NCBI keeps positions in `TSeqPos` (32 bits) and BLAST's sequence
-    /// lengths in `Int4`; a record longer than that is an explicit rejection.
+    /// lengths in `Int4`; a record longer than that is an explicit rejection
+    /// (`super::record_too_long`).
     fn check_length(&self) -> Result<(), ReadError> {
         if self.seq_data.len() as u64 + self.total_gap_length as u64 > i32::MAX as u64 {
-            return Err(ReadError::Unsupported(anyhow::anyhow!(
-                "a {} record longer than 2147483647 letters is not supported by LOSAT's {}",
-                self.config.role,
-                self.config.program
-            )));
+            return Err(super::record_too_long(&self.config));
         }
         Ok(())
     }

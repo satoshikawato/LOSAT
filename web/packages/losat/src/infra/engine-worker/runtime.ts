@@ -72,6 +72,8 @@ export interface RuntimeOptions {
 
 interface Retained {
   readonly key: string;
+  /** Whether the engine read the subject with NCBI's data loaders on (a run with them on takes no subject read with them off). */
+  readonly dataLoaders: boolean;
   readonly handle: number;
   readonly records: readonly RecordKey[];
 }
@@ -214,8 +216,10 @@ export class EngineRuntime {
     try {
       // The files that the argv names, opened by the engine from here on (validate checks some of them, as the CLI does).
       loaded.directory.open(request.files ?? []);
-      const invalid = abi.validate(argv);
-      if (invalid !== undefined) throw new EngineCallError(invalid);
+      const validation = abi.validate(argv);
+      if (!validation.ok) throw new EngineCallError(validation.message);
+      // The inputs are read with the data loaders of the argv's registry, as the CLI reads them (line WQA's D16, 2026-11-20).
+      const { dataLoaders } = validation;
       const started = abi.start(argv);
       if (!started.ok) throw new EngineCallError(started.message);
       // A run of -db searches the database of its directory: it has no subject, and the engine takes subject handle 0
@@ -234,15 +238,15 @@ export class EngineRuntime {
         together = abi.registerInputs(argv, request.query.bytes, request.subject?.bytes ?? new Uint8Array(0));
         ownSubject = together.subject?.handle;
       }
-      const registered = together?.query ?? abi.register(request.program, ROLE_QUERY, request.query.bytes);
+      const registered = together?.query ?? abi.register(request.program, ROLE_QUERY, dataLoaders, request.query.bytes);
       query = registered.handle;
       const queryMismatch = recordMismatch(request.query.records, registered.records);
       if (queryMismatch !== undefined) throw new InputMismatchError('query', queryMismatch);
       const given = request.subject;
-      const subjectRetained = given !== undefined && together === undefined && loaded.retained?.key === given.key;
+      const subjectRetained = given !== undefined && together === undefined && this.retains(loaded, given, dataLoaders);
       let subjectHandle = 0;
       if (given !== undefined) {
-        const subject = together?.subject ?? this.subject(loaded, given, request.program);
+        const subject = together?.subject ?? this.subject(loaded, given, request.program, dataLoaders);
         const subjectMismatch = recordMismatch(given.records, subject.records);
         if (subjectMismatch !== undefined) throw new InputMismatchError('subject', subjectMismatch);
         subjectHandle = subject.handle;
@@ -421,13 +425,22 @@ export class EngineRuntime {
     return info;
   }
 
-  /** The subject handle: the retained one if its key matches, else a new registration. */
-  private subject(loaded: Loaded, given: WorkerInput, program: string): Retained {
+  /**
+   * Whether the instance retains the run's subject: the same key, read with the data loaders on, or
+   * off as the run has them (a subject read with them on is the one that a reader without them reads).
+   */
+  private retains(loaded: Loaded, given: WorkerInput, dataLoaders: boolean): boolean {
+    const retained = loaded.retained;
+    return retained !== undefined && retained.key === given.key && (retained.dataLoaders || !dataLoaders);
+  }
+
+  /** The subject handle: the retained one if it is the run's (`retains`), else a new registration. */
+  private subject(loaded: Loaded, given: WorkerInput, program: string, dataLoaders: boolean): Retained {
     const abi = loaded.instance.abi;
-    if (loaded.retained?.key === given.key) return loaded.retained;
+    if (this.retains(loaded, given, dataLoaders)) return loaded.retained!;
     this.releaseRetained(loaded);
-    const registered = abi.register(program, ROLE_SUBJECT, given.bytes);
-    loaded.retained = { key: given.key, handle: registered.handle, records: registered.records };
+    const registered = abi.register(program, ROLE_SUBJECT, dataLoaders, given.bytes);
+    loaded.retained = { key: given.key, dataLoaders, handle: registered.handle, records: registered.records };
     return loaded.retained;
   }
 

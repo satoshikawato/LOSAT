@@ -1,16 +1,26 @@
 // The records of an engine input, as the engine's index scan and `register` report them
 // (docs/web/abi_v2.md §9). The fields are those of the ABI v2 responses, so no mapping layer is needed.
+import type { InputRole, ProgramId } from './programs.js';
 
 /**
- * The FASTA reader whose rules the index scan follows (ABI v2 `scan_begin`, plan TD-8): NCBI
- * BLAST+'s reader with the nucleotide flags (1) or the protein flags (2).
+ * The kind of FASTA reader of a program's input (plan TD-8): NCBI BLAST+'s reader with the
+ * nucleotide flags (1) or the protein flags (2). Two readers of one kind read the same records
+ * from the same bytes; only the words of their refusals differ (`FastaReader`).
  */
 export type FastaParserKind = 1 | 2;
 
-/** How to find the byte offset of residue `i` of a record (ABI v2 §9 `line_layout`). */
-export type LineLayout =
-  | { readonly kind: 'uniform'; readonly width: number; readonly eol: number }
-  | { readonly kind: 'checkpoints'; readonly every: number; readonly offsets: readonly number[] };
+/**
+ * The engine's reader of a program's input of a role (ABI v2 `scan_begin` and `register`, version 8):
+ * the reader of the CLI for that input, with NCBI's data loaders on or off as the run's registry sets
+ * them (`[BLAST] DATA_LOADERS` of `-conffile`; the *validation* response's `data_loaders`). With the
+ * loaders on, the reader refuses a first line that may be a Seq-id, in the CLI's words; with them off
+ * it reads that line as data (line WQA's D13 and D16, 2026-11-20).
+ */
+export interface FastaReader {
+  readonly program: ProgramId;
+  readonly role: InputRole;
+  readonly dataLoaders: boolean;
+}
 
 /** One record of the index scan. Offsets are byte offsets in the source and stay below 2^53. */
 export interface IndexedRecord {
@@ -23,10 +33,9 @@ export interface IndexedRecord {
   readonly sequence_offset: number;
   /** Offset of the next defline, or the end of the input. */
   readonly end_offset: number;
-  /** The number of residues that the reader stores. */
+  /** The number of residues that the reader stores, the letters of a `>?` gap line included. */
   readonly length: number;
-  readonly line_layout: LineLayout;
-  /** Count of each stored residue, upper case (kind 1: `U` as `T`): `A`-`Z` and `*`. */
+  /** Count of each stored residue, upper case (kind 1: `U` as `T`): `A`-`Z` and `*`; a gap's letters are `N` (kind 1) or `X` (kind 2). */
   readonly residue_counts: Readonly<Record<string, number>>;
 }
 

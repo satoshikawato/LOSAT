@@ -2863,9 +2863,11 @@ fn run_in_pool(
     // when it sets up a batch; a run without a batch reads no matrix. LOSAT refuses a run with
     // a batch before its first byte.
     if !no_batch && args.scoring_matrix() == TblastxMatrix::Aborts {
-        anyhow::bail!(
-            "-matrix {} is read as IDENTITY without IDENTITY's statistics table (NCBI BLAST+ 2.17.0 aborts); this is not supported by LOSAT's TBLASTX",
-            args.matrix_name()
+        return Err(
+            crate::algorithm::tblastx::args::identity_named_matrix_refusal(
+                args.matrix_name(),
+                "TBLASTX",
+            ),
         );
     }
     // The same abort after NCBI reads the file of a name that its tables do not have
@@ -3358,21 +3360,13 @@ fn run_batch_loop(
         if args.scoring_matrix() == TblastxMatrix::Unknown {
             reports.write_before_failed_batch(outputs, done, &warnings)?;
             batch_warnings.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
-            let mut message = String::from("BLAST engine error: ");
-            for record in batch_queries {
-                message.push_str("Error: Unknown error code -1 ");
-                if record.seq().is_empty() {
-                    message.push_str("Warning: ");
-                    message.push_str(NO_DATA_MESSAGE);
-                    message.push(' ');
-                }
-            }
-            message.push('\n');
-            return Err(crate::cli::NativeError {
-                exit: 3,
-                message: message.into(),
-            }
-            .into());
+            use crate::report::query_warnings::{no_data_warning, unknown_matrix_text};
+            let text = unknown_matrix_text(
+                batch_queries
+                    .iter()
+                    .map(|record| no_data_warning(record.seq().is_empty())),
+            );
+            return Err(crate::blastinput::app::engine_error(&text));
         }
         warnings[start].append(&batch_warnings);
         let mut batch = match take(start..end) {

@@ -689,6 +689,14 @@ fn run_local_entry(
             run_local_blastp(args, query, subject, "", "", outputs)
         }
         Commands::Tblastn(mut args) => {
+            // The file of an ungapped search's `-matrix` that NCBI's tables do not have, first,
+            // as the command line's `run_io` looks it up (`TblastnArgs::find_matrix_file`).
+            if args.unknown_matrix_name()
+                == Some(crate::algorithm::tblastx::args::TblastxMatrix::Unknown)
+            {
+                let settings = start.settings(&mut *outputs.diagnostics)?;
+                args.find_matrix_file(&settings.matrix_search)?;
+            }
             args.taxdb_setting = taxdb_setting(outputs, start)?;
             run_local_tblastn(args, query, subject, outputs)
         }

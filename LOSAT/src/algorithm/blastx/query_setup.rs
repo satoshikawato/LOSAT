@@ -134,16 +134,15 @@ pub(crate) fn matrix_error_message(records: &[FastaRecord], options: &ResolvedOp
 /// One message per query (`TSearchMessages::ToString`), `Error: ` first (`GetMessage`); a query
 /// without letters keeps its `Sequence contains no data` (blast_setup_cxx.cpp:631-638) after the
 /// error, which `RemoveDuplicates` sorts first (`CSearchMessage::operator<`,
-/// blast_types.hpp:295-304), as TBLASTX's (`tblastx/blast_engine/run_impl.rs`).
+/// blast_types.hpp:295-304), as TBLASTX's (`tblastx/blast_engine/run_impl.rs`) and TBLASTN's
+/// (`tblastn/stage_d_pipeline.rs`): the text of `report::query_warnings::unknown_matrix_text`.
 pub(crate) fn unknown_matrix_message(records: &[FastaRecord]) -> String {
-    let mut message = String::new();
-    for record in records {
-        message.push_str("Error: Unknown error code -1 ");
-        if record.sequence.is_empty() {
-            message.push_str("Warning: Sequence contains no data ");
-        }
-    }
-    message
+    use crate::report::query_warnings::{no_data_warning, unknown_matrix_text};
+    unknown_matrix_text(
+        records
+            .iter()
+            .map(|record| no_data_warning(record.sequence.is_empty())),
+    )
 }
 
 pub fn prepare_queries(

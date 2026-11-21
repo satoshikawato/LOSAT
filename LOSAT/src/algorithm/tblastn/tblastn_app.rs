@@ -112,6 +112,10 @@ impl TblastnArgs {
         use crate::blastinput::seq_range;
         let mut args = self;
         args.id_scope = args.parse_deflines.then(Default::default);
+        // NCBI's score block looks for the file of an ungapped search's `-matrix` that its tables
+        // do not have when it sets up a batch (`TblastnArgs::find_matrix_file`); the search
+        // refuses it there (`args::check_search_limits`).
+        args.find_matrix_file(&settings.matrix_search)?;
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3624-3627
         // `ArchiveFormatRequested` parses `-outfmt` (blast_args.cpp:2745-2748) before the
         // option handlers run; a format that NCBI runs and LOSAT does not write is rejected
@@ -1009,6 +1013,8 @@ pub fn run_local_database(
     // NCBI's options factory checks the task first (`TaskParser::check`); the command line's
     // parser has checked it, a caller of `run_local` has not.
     super::args::TBLASTN_TASK.check(&mut args.task)?;
+    // The file of an unknown `-matrix`, as the command line's `run_io` looks it up.
+    args.find_matrix_file(&settings.matrix_search)?;
     report_formats(outputs, args.out.as_deref())?;
     let archive_requested = outputs
         .formats

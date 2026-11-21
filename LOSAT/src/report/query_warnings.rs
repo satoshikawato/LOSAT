@@ -1077,6 +1077,34 @@ pub fn query_messages(
     messages
 }
 
+/// NCBI's error of a query batch whose score block cannot load the `-matrix` of an ungapped
+/// search (`blastx::query_setup::unknown_matrix_message`, which cites NCBI) for its queries given
+/// in their order by the warnings of each query's set-up: each query's error, then its warnings
+/// (`Sequence contains no data`, `no_data_warning`, and a protein query's O read as X,
+/// `query_messages`, sorted). The one producer of that text for BLASTX, RPSTBLASTN, TBLASTX and
+/// TBLASTN.
+pub(crate) fn unknown_matrix_text<Q, W>(queries: impl IntoIterator<Item = Q>) -> String
+where
+    Q: IntoIterator<Item = W>,
+    W: AsRef<str>,
+{
+    let mut message = String::new();
+    for warnings in queries {
+        message.push_str("Error: Unknown error code -1 ");
+        for warning in warnings {
+            message.push_str("Warning: ");
+            message.push_str(warning.as_ref());
+            message.push(' ');
+        }
+    }
+    message
+}
+
+/// The set-up warning of a query without letters (`empty`) for `unknown_matrix_text`.
+pub(crate) fn no_data_warning(empty: bool) -> Option<&'static str> {
+    empty.then_some(crate::blastinput::query_batch::NO_DATA_MESSAGE)
+}
+
 /// The messages of a query in the order of its warning: sorted without repeats (see
 /// `query_warning`), `EMPTY_DATABASE_MESSAGE` last.
 pub fn sorted_query_messages(messages: &[String]) -> Vec<&String> {

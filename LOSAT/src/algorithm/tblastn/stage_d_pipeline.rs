@@ -284,6 +284,9 @@ pub(super) struct LocalStageDScoring {
     /// `!-ungapped` (`gapped_calculation`): a gapped search, else an ungapped one, which has no
     /// gapped Karlin-Altschul blocks and no traceback.
     pub gapped: bool,
+    /// An ungapped search's `-matrix` that NCBI's tables do not have (`matrix` is then BLOSUM62,
+    /// unused): the setup of each batch fails (`SetupEngineError::unknown_matrix`).
+    pub unknown_matrix: bool,
 }
 
 impl Default for LocalStageDScoring {
@@ -299,6 +302,7 @@ impl Default for LocalStageDScoring {
             final_xdrop_bits: 25.0,
             word_xdrop_bits: 7.0,
             gapped: true,
+            unknown_matrix: false,
         }
     }
 }
@@ -1015,31 +1019,59 @@ fn run_local_search(
 /// NCBI's engine error of a query batch's setup (`BLAST_GapAlignSetUp`, c++/src/algo/blast/core/blast_setup.c:888-1000):
 /// NCBI 2.17.0 tblastn writes the start of the outfmt 0 report (and the reports of the batches
 /// before), then `BLAST engine error: <text>`, exit status 3. `tblastn_app::batch_failure` fails
-/// the batch with it, as a read of the database that fails. The text is one of the constants.
+/// the batch with it, as a read of the database that fails. The text is one of the constants, or
+/// the score block's error of an unknown matrix (`unknown_matrix`).
 #[derive(Debug)]
-pub(crate) struct SetupEngineError(pub(crate) &'static str);
+pub(crate) struct SetupEngineError(pub(crate) std::borrow::Cow<'static, str>);
 
 impl SetupEngineError {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:433-437
     /// `BlastExtensionParametersNew` (blast_setup.c:960, before the subject length) finds no valid
     /// `sbp->kbp`: a PSSM query whose file's ungapped values make `kbp_psi` invalid
     /// (`query_set_setup`; probes `x.ungneg.*`, `r3.*ungneg.*` of the PS7 review).
-    pub(crate) const NO_VALID_KARLIN_BLOCK: Self =
-        Self(crate::report::query_warnings::INVALID_QUERY_MESSAGE);
+    pub(crate) const NO_VALID_KARLIN_BLOCK: Self = Self(std::borrow::Cow::Borrowed(
+        crate::report::query_warnings::INVALID_QUERY_MESSAGE,
+    ));
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_message.c:215-217
     /// `BLASTERR_SUBJECT_LENGTH_INVALID` (`run_local_search_with_pool`, blast_setup.c:969-980):
     /// `-subject` of three empty records, or of `A`, `` and ``, with `-searchsp` or `OLD_FSC`
     /// (env parity probe f_probe of 2026-11-12).
-    pub(crate) const SUBJECT_LENGTH_INVALID: Self =
-        Self(crate::stats::setup::SUBJECT_LENGTH_TOO_SHORT);
+    pub(crate) const SUBJECT_LENGTH_INVALID: Self = Self(std::borrow::Cow::Borrowed(
+        crate::stats::setup::SUBJECT_LENGTH_TOO_SHORT,
+    ));
 
     /// `BlastHitSavingParametersNew`'s status 1 (`stats::setup::hit_saving_parameters_fail`):
     /// sum statistics with a setup subject length that is not positive, the average of a negative
     /// `NSEQ` without the Gumbel block (NCBI 2.17.0 `-searchsp` over `NSEQ 4294967295`, probe
     /// run1 of line RG D1a-3).
-    pub(crate) const HIT_SAVING_PARAMETERS: Self =
-        Self(crate::stats::setup::HIT_SAVING_PARAMETERS_ERROR);
+    pub(crate) const HIT_SAVING_PARAMETERS: Self = Self(std::borrow::Cow::Borrowed(
+        crate::stats::setup::HIT_SAVING_PARAMETERS_ERROR,
+    ));
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:158-182
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:498-501
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:1679-1680
+    /// The score block of an ungapped search whose `-matrix` NCBI's matrix loader does not know
+    /// (`LocalStageDScoring::unknown_matrix`) fails with -1, posted for every query of the batch
+    /// with the messages of the queries' set-up: the text of each of `queries`
+    /// (`query_warnings::unknown_matrix_text`), with its warnings of no letters and of O read
+    /// as X (`query_warnings::query_messages`; the score block's own come later; NCBI BLAST+
+    /// 2.17.0, `-matrix FOO -ungapped -comp_based_stats 0`, line O4c).
+    pub(crate) fn unknown_matrix(queries: &[Vec<u8>]) -> Self {
+        use crate::report::query_warnings::{query_messages, sorted_query_messages};
+        let warnings: Vec<Vec<String>> = queries
+            .iter()
+            .map(|query| query_messages(query, true, false, false))
+            .collect();
+        Self(std::borrow::Cow::Owned(
+            crate::report::query_warnings::unknown_matrix_text(
+                warnings
+                    .iter()
+                    .map(|messages| sorted_query_messages(messages)),
+            ),
+        ))
+    }
 }
 
 impl std::fmt::Display for SetupEngineError {
@@ -1115,6 +1147,13 @@ fn run_local_search_with_pool(
         profile.max_target_seqs > 0,
         "TBLASTN hitlist size must be positive"
     );
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:149-185
+    // The score block is made after the batch's queries and before the rest of its setup: an
+    // unknown matrix fails every batch there (`tblastn_app::search` fails the first searched one
+    // with NCBI's engine error).
+    if scoring.unknown_matrix {
+        return Err(SetupEngineError::unknown_matrix(queries).into());
+    }
     let code = GeneticCode::try_from_id(profile.genetic_code).map_err(anyhow::Error::msg)?;
     // The set's numbers: a database's, or those of the FASTA subjects (`SubjectSetNumbers`).
     let total_nt = profile.subject_set.total_nt(&subjects);
@@ -3883,6 +3922,26 @@ fn finish_local_mode0_no_sum_stats(
 mod tests {
     use super::*;
 
+    // NCBI BLAST+ 2.17.0, `tblastn -ungapped -comp_based_stats 0 -matrix FOO` with the queries of
+    // tests/fasta/outfmt0/sc1_q_mix.faa (an empty record, one with O at 77 and 97, one of 480
+    // letters, one of 32 X) against tests/db_search/tn_amb_s.fna, line O4c: each query's error,
+    // then the warnings of its set-up; no Karlin-Altschul message, which comes after the score
+    // block.
+    #[test]
+    fn an_unknown_matrix_fails_each_query_with_the_warnings_of_its_setup() {
+        let mut with_o = vec![b'A'; 100];
+        with_o[77] = b'O';
+        with_o[97] = b'o';
+        let queries = [Vec::new(), with_o, vec![b'M'; 480], vec![b'X'; 32]];
+        assert_eq!(
+            SetupEngineError::unknown_matrix(&queries).0,
+            "Error: Unknown error code -1 Warning: Sequence contains no data \
+             Error: Unknown error code -1 Warning: One or more O characters replaced by X for \
+             alignment score calculations at positions 77, 97 \
+             Error: Unknown error code -1 Error: Unknown error code -1 "
+        );
+    }
+
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:908-922 and :716-735
     // (cited at `SubjectSetNumbers`)
     // A total of 2^32 letters or more is NCBI's `Int8` on every target, wasm32's 32-bit `usize`
@@ -5534,6 +5593,7 @@ mod tests {
                 final_xdrop_bits: 25.0,
                 word_xdrop_bits: 7.0,
                 gapped: true,
+                unknown_matrix: false,
             },
             Some(&mut boundary),
         )

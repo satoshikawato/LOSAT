@@ -242,6 +242,12 @@ pub struct TblastnArgs {
     // line, whose records are the whole input.
     #[arg(skip)]
     pub first_query_ordinal: usize,
+    /// The file that NCBI BLAST+ reads for an ungapped search's `-matrix` that its tables do not
+    /// have (`ncbi_environment::ApplicationSettings::matrix_file`), found before the search by the
+    /// command line and the library (`find_matrix_file`); `None` in LOSAT Web. Not a public
+    /// option.
+    #[arg(skip)]
+    pub matrix_file: Option<PathBuf>,
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:997-1056
@@ -309,6 +315,12 @@ pub struct ResolvedTblastnArgs {
     pub query_range: Option<crate::blastinput::seq_range::SequenceRange>,
     /// `-in_pssm`: the query's PSSM (PSI-TBLASTN, `in_pssm.rs`).
     pub pssm: Option<std::sync::Arc<crate::algorithm::pssm_search::PsiSearch>>,
+    /// What NCBI's score block makes of an ungapped search's `-matrix` that its tables do not
+    /// have (`unknown_matrix_name`); `None` for a matrix of the tables and for a gapped search,
+    /// which refuses such a name first (`validate_protein_options`).
+    pub unknown_matrix: Option<crate::algorithm::tblastx::args::TblastxMatrix>,
+    /// The file that NCBI reads for an `Unknown` matrix (`TblastnArgs::matrix_file`).
+    pub matrix_file: Option<PathBuf>,
 }
 
 impl TblastnArgs {
@@ -316,6 +328,41 @@ impl TblastnArgs {
     /// whether it was given (`culling_limit`).
     pub fn culling_limit_value(&self) -> i32 {
         self.culling_limit.unwrap_or(0)
+    }
+
+    /// What NCBI's score block makes of an ungapped search's `-matrix` name that its tables do
+    /// not have (`tblastx::args::ungapped_matrix`: IDENTITY without a table, or a name that it
+    /// looks for as a file); `None` for a gapped search or a matrix of the tables.
+    pub(crate) fn unknown_matrix_name(
+        &self,
+    ) -> Option<crate::algorithm::tblastx::args::TblastxMatrix> {
+        use crate::algorithm::tblastx::args::{ungapped_matrix, TblastxMatrix};
+        if !self.ungapped {
+            return None;
+        }
+        match ungapped_matrix(self.matrix.as_deref().unwrap_or("BLOSUM62")) {
+            TblastxMatrix::Table(_) => None,
+            other => Some(other),
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:1301-1306
+    /// Looks up the file that NCBI reads for an `Unknown` matrix name (`unknown_matrix_name`)
+    /// with `search` (`MatrixSearch::file`) into `matrix_file`: the first step of the command
+    /// line's run and of the library's searches, as TBLASTX's (`TblastxArgs::find_matrix_file`);
+    /// `check_search_limits` refuses a search with such a file where NCBI sets up its first batch.
+    pub(crate) fn find_matrix_file(
+        &mut self,
+        search: &crate::blastinput::ncbi_environment::MatrixSearch,
+    ) -> Result<()> {
+        if self.unknown_matrix_name()
+            == Some(crate::algorithm::tblastx::args::TblastxMatrix::Unknown)
+        {
+            self.matrix_file = search
+                .file(self.matrix.as_deref().unwrap_or("BLOSUM62"))
+                .map_err(anyhow::Error::msg)?;
+        }
+        Ok(())
     }
 
     /// The `-db` value as NCBI keeps it (white space at its ends removed), `None` for a
@@ -559,6 +606,8 @@ impl TblastnArgs {
             num_threads: self.num_threads,
             query_range,
             pssm,
+            unknown_matrix: self.unknown_matrix_name(),
+            matrix_file: self.matrix_file.clone(),
         })
     }
 }
@@ -575,6 +624,29 @@ pub(super) fn check_search_limits(args: &ResolvedTblastnArgs) -> Result<()> {
     // (fixture `db.tbn.inpssm.rej.ungapped`, line PS7), so no result is defined.
     if !args.gapped && args.pssm.is_some() {
         anyhow::bail!("{}", ungapped_pssm_refusal());
+    }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:3103-3105,3136
+    // An ungapped search's matrix name that NCBI's loader reads as IDENTITY without a table, or
+    // whose file it reads: NCBI 2.17.0 aborts when it sets up the first batch (as TBLASTX's,
+    // `tblastx::args::ungapped_matrix`). A name without a file fails the batch with NCBI's
+    // engine error (`stage_d_pipeline::SetupEngineError::unknown_matrix`).
+    if args.unknown_matrix == Some(crate::algorithm::tblastx::args::TblastxMatrix::Aborts) {
+        return Err(
+            crate::algorithm::tblastx::args::identity_named_matrix_refusal(
+                &args.matrix_name,
+                "TBLASTN",
+            ),
+        );
+    }
+    if let Some(file) = args.matrix_file.as_deref() {
+        anyhow::bail!(
+            "{}",
+            crate::blastinput::ncbi_environment::matrix_file_refusal(
+                &args.matrix_name,
+                file,
+                "TBLASTN"
+            )
+        );
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:449-464
     // NCBI converts the gapped X-drops to raw scores only when the search has gapped Karlin
@@ -680,7 +752,12 @@ pub(super) fn search_settings(args: &ResolvedTblastnArgs) -> Result<SearchSettin
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3152-3187:
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:145-147:
     crate::utils::threading::validate_threads(args.num_threads)?;
-    let matrix: Option<ScoringMatrix> = args.matrix_name.parse().ok();
+    // An ungapped search's name that NCBI's tables do not have scores with BLOSUM62 until the
+    // setup of its first batch fails (`LocalStageDScoring::unknown_matrix`).
+    let matrix: Option<ScoringMatrix> = match args.unknown_matrix {
+        Some(_) => Some(ScoringMatrix::Blosum62),
+        None => args.matrix_name.parse().ok(),
+    };
     let threshold = args.threshold;
     let window = args.window_size;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:137 and
@@ -714,6 +791,7 @@ pub(super) fn search_settings(args: &ResolvedTblastnArgs) -> Result<SearchSettin
             final_xdrop_bits: args.xdrop_gap_final,
             word_xdrop_bits: args.xdrop_ungap,
             gapped: args.gapped,
+            unknown_matrix: args.unknown_matrix.is_some(),
         },
     })
 }
@@ -1339,6 +1417,46 @@ mod tests {
                 .resolve()
                 .unwrap();
             assert!(check_search_limits(&resolved).is_ok());
+        }
+    }
+
+    // NCBI BLAST+ 2.17.0 with `-ungapped -comp_based_stats 0` (line O4c): a `-matrix` name that
+    // NCBI's tables do not have reaches the setup of the first batch, which fails with NCBI's
+    // engine error (`SetupEngineError::unknown_matrix`); one that the matrix loader reads as
+    // IDENTITY without a table aborts there, which LOSAT refuses; a gapped search refuses both
+    // with NCBI's options error first.
+    #[test]
+    fn an_ungapped_search_keeps_a_matrix_of_no_table_for_its_setup() {
+        use crate::algorithm::tblastx::args::TblastxMatrix;
+        let ungapped = |matrix: &str| {
+            parse(&["-ungapped", "-comp_based_stats", "0", "-matrix", matrix])
+                .unwrap()
+                .resolve()
+                .unwrap()
+        };
+        let resolved = ungapped("FOO");
+        assert_eq!(resolved.unknown_matrix, Some(TblastxMatrix::Unknown));
+        assert!(check_search_limits(&resolved).is_ok());
+        let scoring = search_settings(&resolved).unwrap().scoring;
+        assert!(scoring.unknown_matrix);
+        assert_eq!(scoring.matrix, ScoringMatrix::Blosum62);
+        for matrix in ["BLOSUM62", "pam30", "IDENTITY"] {
+            let resolved = ungapped(matrix);
+            assert_eq!(resolved.unknown_matrix, None, "{matrix}");
+            assert!(!search_settings(&resolved).unwrap().scoring.unknown_matrix);
+        }
+        let resolved = ungapped("identityx");
+        assert_eq!(resolved.unknown_matrix, Some(TblastxMatrix::Aborts));
+        let error = check_search_limits(&resolved).unwrap_err().to_string();
+        assert!(
+            error.contains("-matrix identityx is read as IDENTITY") && error.contains("TBLASTN"),
+            "{error}"
+        );
+        for matrix in ["FOO", "IDENTITYX"] {
+            assert!(
+                parse(&["-matrix", matrix]).unwrap().resolve().is_err(),
+                "{matrix}"
+            );
         }
     }
 }

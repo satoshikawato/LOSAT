@@ -1331,6 +1331,7 @@ fn excluded_lists_leave_marks_of_their_places() {
         &settings,
         "BLASTP",
         Some(&negative),
+        None,
         &mut std::io::sink(),
     )
     .unwrap();

@@ -30,17 +30,11 @@ fn the_option_is_read_as_ncbi_reads_it() {
     }
 }
 
-// The best-hit options stay refused (they are not ported), with or without a limit.
+// The best-hit options are read (series NP O6a-3); with a limit the parser refuses the command
+// line, as NCBI does, and not as an option that LOSAT lacks.
 #[test]
-fn the_best_hit_options_stay_refused() {
-    for words in [
-        &["-best_hit_overhang", "0.1"][..],
-        &["-culling_limit", "1", "-best_hit_score_edge", "0.1"],
-    ] {
-        let error = limit(words).unwrap_err();
-        assert!(
-            error.contains("is not supported by LOSAT's TBLASTN"),
-            "{words:?}: {error}"
-        );
-    }
+fn the_best_hit_options_exclude_the_limit() {
+    assert_eq!(limit(&["-best_hit_overhang", "0.1"]), Ok(0));
+    let error = limit(&["-culling_limit", "1", "-best_hit_score_edge", "0.1"]).unwrap_err();
+    assert!(!error.contains("is not supported by"), "{error}");
 }

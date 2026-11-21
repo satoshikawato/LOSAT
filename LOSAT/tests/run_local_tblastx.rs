@@ -307,7 +307,7 @@ fn cli_run(
 // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:375-385
 // NCBI reads the subjects before it finds the query empty (c++/src/app/blast/tblastx_app.cpp:118-132), with
 // its reader: after the lines it skips, a line that is not plausible data stops the
-// reading (`BLAST query error`), and a file of such lines only has no subject.
+// reading (`LOSAT query error` (NCBI's `BLAST query error`)), and a file of such lines only has no subject.
 #[test]
 fn subjects_are_read_before_the_query_is_found_empty() {
     let empty = TempFasta::new("tblastx_no_query.fna", &[]);
@@ -320,7 +320,7 @@ fn subjects_are_read_before_the_query_is_found_empty() {
     assert_eq!(code, Some(1), "{stderr}");
     assert!(stdout.is_empty(), "{stderr}");
     assert!(
-        stderr.starts_with("BLAST query error: CFastaReader: Near line 4, there's a line that doesn't look like plausible data"),
+        stderr.starts_with("LOSAT query error: CFastaReader: Near line 4, there's a line that doesn't look like plausible data"),
         "{stderr}"
     );
     let (code, stdout, stderr) = run(b"\n; comment\n>s1\nACGTACGTAC\n");
@@ -330,7 +330,7 @@ fn subjects_are_read_before_the_query_is_found_empty() {
     let (code, stdout, stderr) = run(b"; only comment\n!x\n");
     assert_eq!(code, Some(3), "{stderr}");
     assert!(stdout.is_empty(), "{stderr}");
-    assert_eq!(stderr, "BLAST engine error: Empty CBlastQueryVector\n");
+    assert_eq!(stderr, "LOSAT engine error: Empty CBlastQueryVector\n");
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:919-935 (CFastaReader: a residue that is
@@ -463,14 +463,14 @@ fn what_ends_the_query_reading_comes_with_its_batch() {
         "{report}"
     );
     assert!(
-        stderr.starts_with("BLAST query error: CFastaReader: "),
+        stderr.starts_with("LOSAT query error: CFastaReader: "),
         "{stderr}"
     );
     let (code, stdout, stderr) = cli_run(&query.0, &subject.0, &["-outfmt", "7"], &[]);
     assert_eq!(code, Some(1), "{stderr}");
     assert!(stdout.is_empty(), "{stderr}");
     assert!(
-        stderr.starts_with("BLAST query error: CFastaReader: "),
+        stderr.starts_with("LOSAT query error: CFastaReader: "),
         "{stderr}"
     );
     let mut blank = text.clone();

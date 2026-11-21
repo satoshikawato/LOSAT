@@ -82,9 +82,13 @@ fn batch_error_repeats_the_text_for_each_query() {
     let error = RepeatError::Posted(b"Database name is required.".to_vec());
     let native = batch_error(&error, 2).expect("NCBI's error");
     assert_eq!(native.exit, 3);
+    // NCBI's bytes in LOSAT's words (AGENTS.md rule 8).
     assert_eq!(
         native.message,
-        b"BLAST engine error: Warning: Database name is required. Warning: Database name is required. \n"
+        crate::wording::losat_bytes(
+            b"BLAST engine error: Warning: Database name is required. Warning: Database name is required. \n"
+        )
+        .as_ref()
     );
     assert!(batch_error(&RepeatError::Search(anyhow::anyhow!("x")), 2).is_none());
 }

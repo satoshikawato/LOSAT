@@ -51,7 +51,6 @@ These refusals apply to `blastn`, `blastp`, `blastx`, `tblastn` and `tblastx`.
 
 | Option or value | What happens |
 | :--- | :--- |
-| `-outfmt 0` with a PSSM query (`-in_pssm` or `-in_msa`) whose molecule type is `other` | Refused: not yet supported. NCBI runs it as a protein search and writes a line (`Sequence with id <id> no longer exists in database...alignment skipped`) in place of each alignment. The tabular formats are as NCBI's. |
 | `-html` | Refused: not yet supported. |
 | `-best_hit_overhang`, `-best_hit_score_edge` | Refused. |
 | `-import_search_strategy` | Refused. `psiblast`, `rpsblast` and `rpstblastn` refuse it too. |
@@ -341,6 +340,7 @@ These refusals apply to every search program that reads databases.
 | `-in_msa` with a `secondary-accession` range that runs backwards (`AB000003-AB000001`) or has a number of more than 18 digits | Refused. NCBI loops without end on a backwards range and reads the numbers into a 32-bit integer that overflows; LOSAT reads 64 bits, so a number past 2147483647 is written with its digits, where NCBI's build wraps it. A range of any length is answered. |
 | `-in_msa` with a master sequence from which no ungapped Karlin-Altschul parameters can be computed (X, O, `*` or lower-case x alone, or X with gaps: no residue that the parameters can be computed from), or with `-matrix IDENTITY` | Refused. NCBI crashes. |
 | `-in_msa` with a master sequence that is the start of a longer sequence above it in the alignment (`-msa_master_idx` names it) | Refused. NCBI reads and writes past its alignment buffers there, and its result depends on the memory allocator. Put the master sequence above the longer one in the file. |
+| `-outfmt 0` with a PSSM query (`-in_pssm` or `-in_msa`) whose molecule type is `other` | Refused: not yet supported. NCBI runs it as a protein search and writes a line (`Sequence with id <id> no longer exists in database...alignment skipped`) in place of each alignment. The tabular formats are as NCBI's. |
 | `-html` | Refused: not yet supported. |
 | `-best_hit_overhang`, `-best_hit_score_edge` | Refused, as in `blastp`. |
 | `-use_sw_tback` | Refused. |

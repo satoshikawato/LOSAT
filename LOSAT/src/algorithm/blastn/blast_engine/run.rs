@@ -9887,6 +9887,14 @@ fn write_reports_untimed(
         }
         None => results.reads.to_vec(),
     };
+    // The kept repeat hits are those of the reported queries, one for each (the archive reads
+    // them by query index and would take a missing one for a query without hits).
+    debug_assert!(
+        results.repeat_hits.is_empty() || results.repeat_hits.len() == query_records.len(),
+        "repeat hits for {} of {} queries",
+        results.repeat_hits.len(),
+        query_records.len()
+    );
     // A subject set's subjects are all loaded (`database_loads`).
     let every_loaded = crate::report::db_subject::HitLoads::default();
     let report_inputs = BlastnReportInputs {

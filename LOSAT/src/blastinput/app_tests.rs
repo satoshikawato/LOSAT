@@ -125,7 +125,7 @@ fn formatting_strings_are_read_as_ncbi_reads_them() {
         .contains("Delimiter format is invalid"));
     assert_eq!(
         message(parse_formatting_string("abc").unwrap_err()),
-        "1 BLAST query/options error: 'abc' is not a valid output format\nPlease refer to the LOSAT user manual.\n"
+        "1 LOSAT query/options error: 'abc' is not a valid output format\nPlease refer to the LOSAT user manual.\n"
     );
     assert_eq!(
         message(parse_formatting_string("22").unwrap_err()),
@@ -303,7 +303,7 @@ fn ncbis_later_format_errors_are_its_messages() {
         delimiter: String::new(),
     };
     let options =
-        |text: &str| format!("1 BLAST query/options error: {text}\n{USER_MANUAL_FOOTER}\n");
+        |text: &str| format!("1 LOSAT query/options error: {text}\n{USER_MANUAL_FOOTER}\n");
     for program in PROGRAMS {
         let sam = formatting_handler_check(&choice(SAM), program);
         if program.is_sam() {

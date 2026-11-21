@@ -227,10 +227,19 @@ impl TaxDb {
         if !super::alias::exists(&index_path) || !super::alias::exists(&data_path) {
             return missing(Vec::new());
         }
-        let index = DbFile::open(&index_path)?;
-        if index.len() < HEADER_LEN + ENTRY_LEN {
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbtax.cpp:154-161
+        // NCBI takes the index's length from the file system before it maps the index: a short
+        // index is missing even where it does not open.
+        let index_len = std::fs::metadata(&index_path)
+            .map_err(|source| SeqDbError::Io {
+                path: index_path.clone(),
+                source,
+            })?
+            .len();
+        if index_len < HEADER_LEN + ENTRY_LEN {
             return missing(Vec::new());
         }
+        let index = DbFile::open(&index_path).map_err(throws_at_every_lookup)?;
         let mut header = [0u8; HEADER_LEN as usize];
         index.read_exact_at(&mut header, 0)?;
         if be32(&header[0..4]) != MAGIC {
@@ -243,7 +252,7 @@ impl TaxDb {
                 "SeqDB: Taxid metadata indicates ({count}) entries but file has room for ({room})."
             )]);
         }
-        let data = DbFile::open(&data_path)?;
+        let data = DbFile::open(&data_path).map_err(throws_at_every_lookup)?;
         Ok(Self {
             files: Some(Files { index, data, count }),
             messages: Vec::new(),
@@ -553,8 +562,49 @@ fn split_record(taxid: i32, record: &[u8]) -> Option<TaxNames> {
     })
 }
 
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbtax.cpp:161
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbtax.cpp:199
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbtax.cpp:217-220
+// NCBI maps each file with `CMemoryFile`, whose exception leaves the constructor of the function's
+// `static` taxonomy file object: the object stays unbuilt, so every later lookup builds it again
+// and throws again (NCBI BLAST+ 2.17.0 with `taxdb.bti` or `taxdb.btd` of mode 000: every load of a
+// subject with a taxid fails; line WQA D18b probe 12, 2026-11-21).
+/// The error of a file of the taxonomy database that does not open or whose first byte cannot be
+/// read: [`SeqDbError::TaxdbThrows`] where NCBI's `CMemoryFile` throws there (a system text), the
+/// error as it is otherwise.
+fn throws_at_every_lookup(error: SeqDbError) -> SeqDbError {
+    let Some(exception) = error.memory_file_exception() else {
+        return error;
+    };
+    match error {
+        SeqDbError::Open { path, source } | SeqDbError::Map { path, source, .. } => {
+            SeqDbError::TaxdbThrows {
+                path,
+                reason: crate::utils::os_error_text::ncbi_strerror(&source)
+                    .map_or_else(|| source.to_string(), |text| text.into_owned()),
+                exception: Box::new(exception),
+            }
+        }
+        other => other,
+    }
+}
+
 fn be32(bytes: &[u8]) -> u32 {
     u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]])
+}
+
+/// Why the taxonomy database of a run did not open, given again at every later call
+/// ([`LazyTaxDb`]).
+#[derive(Debug)]
+enum OpenFailure {
+    /// A file that NCBI's `CMemoryFile` throws on at every lookup ([`SeqDbError::TaxdbThrows`]).
+    Throws {
+        path: PathBuf,
+        reason: String,
+        exception: Box<crate::ncbi_exception::NcbiException>,
+    },
+    /// LOSAT's refusal of the database ([`SeqDbError::Unsupported`]): the file and the reason.
+    Refused(PathBuf, String),
 }
 
 /// The taxonomy database of one run, opened at the first name asked for and
@@ -563,7 +613,7 @@ fn be32(bytes: &[u8]) -> u32 {
 #[derive(Debug)]
 pub struct LazyTaxDb {
     search: SearchPath,
-    db: OnceLock<Result<TaxDb, (PathBuf, String)>>,
+    db: OnceLock<Result<TaxDb, OpenFailure>>,
     /// Whether the next call hands over the texts of opening again ([`LazyTaxDb::restart`]).
     again: std::sync::atomic::AtomicBool,
 }
@@ -601,14 +651,25 @@ impl LazyTaxDb {
         let db = self.db.get_or_init(|| {
             opened = true;
             TaxDb::open(&self.search).map_err(|error| match error {
-                SeqDbError::Unsupported { path, message } => (path, message),
+                SeqDbError::TaxdbThrows {
+                    path,
+                    reason,
+                    exception,
+                } => OpenFailure::Throws {
+                    path,
+                    reason,
+                    exception,
+                },
+                SeqDbError::Unsupported { path, message } => OpenFailure::Refused(path, message),
                 // The file that failed, and what the system said of it.
                 SeqDbError::Open { path, source }
                 | SeqDbError::Io { path, source }
                 | SeqDbError::Map { path, source, .. }
-                | SeqDbError::Read { path, source } => (path, source.to_string()),
-                SeqDbError::Format { path, message } => (path, message),
-                other => (PathBuf::from("taxdb.bti"), other.to_string()),
+                | SeqDbError::Read { path, source } => {
+                    OpenFailure::Refused(path, source.to_string())
+                }
+                SeqDbError::Format { path, message } => OpenFailure::Refused(path, message),
+                other => OpenFailure::Refused(PathBuf::from("taxdb.bti"), other.to_string()),
             })
         });
         match db {
@@ -618,9 +679,18 @@ impl LazyTaxDb {
                 }
                 Ok(db)
             }
-            Err((path, message)) => Err(SeqDbError::Unsupported {
+            Err(OpenFailure::Refused(path, message)) => Err(SeqDbError::Unsupported {
                 path: path.clone(),
                 message: message.clone(),
+            }),
+            Err(OpenFailure::Throws {
+                path,
+                reason,
+                exception,
+            }) => Err(SeqDbError::TaxdbThrows {
+                path: path.clone(),
+                reason: reason.clone(),
+                exception: exception.clone(),
             }),
         }
     }

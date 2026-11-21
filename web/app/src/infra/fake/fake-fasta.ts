@@ -43,7 +43,7 @@ export function fakeRecordKeys(bytes: Uint8Array, program: ProgramId, role: Inpu
 /** The reader's error that ends the records of an input, as the engine's message of a run says it, if one does. */
 export function fakeReaderError(bytes: Uint8Array, program: ProgramId, role: InputRole): string | undefined {
   const stop = fakeScan(bytes, program, role).reader_error;
-  return stop === undefined ? undefined : `BLAST query error: ${stop.message}`;
+  return stop === undefined ? undefined : `LOSAT query error: ${stop.message}`;
 }
 
 /** The reader's own error (`CheckDataLine`), which ends the records (`ScanResponse.reader_error`). */
@@ -255,7 +255,7 @@ export class FakeInputChecker implements InputChecker {
     // The engine's reader error ends a query's records, and a run ends with it (line WQA's D10,
     // 2026-11-19); a subject's fails the input, as the engine's `register` does.
     const stop = scanned.reader_error;
-    if (stop !== undefined && role === 'subject') return { ok: false, message: `BLAST query error: ${stop.message}` };
+    if (stop !== undefined && role === 'subject') return { ok: false, message: `LOSAT query error: ${stop.message}` };
     const refused = records.find((record) => bytes.subarray(record.sequence_offset, record.end_offset).includes(0x21));
     if (refused !== undefined) {
       return {
@@ -264,6 +264,6 @@ export class FakeInputChecker implements InputChecker {
       };
     }
     const keys = records.map(recordKey);
-    return stop === undefined ? { ok: true, records: keys } : { ok: true, records: keys, readerError: `BLAST query error: ${stop.message}` };
+    return stop === undefined ? { ok: true, records: keys } : { ok: true, records: keys, readerError: `LOSAT query error: ${stop.message}` };
   }
 }

@@ -35,7 +35,7 @@ function letters(alphabet: string, seed: number, length: number): string {
 const DNA = letters('ACGT', 7, 300);
 const SUBJECT = `>s1 subject\n${DNA}\n`;
 const NOT_PLAUSIBLE = (line: number) =>
-  `BLAST query error: CFastaReader: Near line ${line}, there's a line that doesn't look like plausible data, but it's not marked as defline or comment.`;
+  `LOSAT query error: CFastaReader: Near line ${line}, there's a line that doesn't look like plausible data, but it's not marked as defline or comment.`;
 /** The warning: a failed run keeps no results, whatever records come before the error (review M-a, 2026-11-20). */
 const WARNING = 'A run of this input ends with this error, as the command line does, and gives no results: ';
 /** What the warning says to do (review L2), with the input's own line where the run's differs (review L-b, 2026-11-20). */
@@ -217,12 +217,12 @@ test('a query of comment lines only has no sequence, and the run ends as the com
   await expect(check).toHaveAttribute('data-sequence', 'none');
   if (!BUILD_HAS_ENGINE) return;
   const status = await failedRun(page, 1);
-  await expect(status).toContainText('BLAST engine error: Empty CBlastQueryVector');
+  await expect(status).toContainText('LOSAT engine error: Empty CBlastQueryVector');
   if (NATIVE === undefined) {
     testInfo.annotations.push({ type: 'skip', description: `The CLI's error: ${NO_NATIVE_REASON}` });
     return;
   }
   const cli = nativeRun(['blastn', '-outfmt', '6'], query, SUBJECT);
   expect(cli.status).toBe(3);
-  expect(cli.stderr).toBe('BLAST engine error: Empty CBlastQueryVector\n');
+  expect(cli.stderr).toBe('LOSAT engine error: Empty CBlastQueryVector\n');
 });

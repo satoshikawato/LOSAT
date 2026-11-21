@@ -13,8 +13,11 @@ use crate::api::{run, run_batches, validate, Program};
 use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::cli::{try_parse_from, Cli, Commands};
 
-/// The command line's message of the bad line of `with_bad_record` (its line number follows).
-const BAD_LINE: &str = "BLAST query error: CFastaReader: Near line ";
+/// The command line's message of the bad line of `with_bad_record` (its line number follows), in
+/// LOSAT's words (`crate::wording::QUERY_ERROR`, line NW2).
+fn bad_line() -> String {
+    format!("{} CFastaReader: Near line ", crate::wording::QUERY_ERROR)
+}
 
 /// A path of its own under the test directory (the counter tells apart two of one test).
 fn temp_path(name: &str) -> PathBuf {
@@ -275,7 +278,7 @@ fn a_reader_error_ends_the_search_in_its_batch_as_on_the_command_line() {
             let (cli_report, cli_error) =
                 command_line_with(case.program, &query, &subject, options, "6");
             let cli_error = cli_error.unwrap_or_else(|| panic!("{name}: the command line fails"));
-            assert!(cli_error.starts_with(BAD_LINE), "{name}: {cli_error}");
+            assert!(cli_error.starts_with(&bad_line()), "{name}: {cli_error}");
             assert!(!cli_report.is_empty(), "{name}: a batch before the error");
             let (report, error) = library_with(case.program, &query, &subject, options, "6");
             assert_eq!(error.as_deref(), Some(cli_error.as_str()), "{name}");
@@ -342,7 +345,7 @@ fn a_scope_holds_the_batches_that_the_reader_delivers() {
                 let (cli_report, cli_error) =
                     command_line_with(case.program, &duplicate, &subject, &options, outfmt);
                 let cli_error = cli_error.unwrap_or_else(|| panic!("{name}: a refusal"));
-                assert!(!cli_error.starts_with(BAD_LINE), "{name}: {cli_error}");
+                assert!(!cli_error.starts_with(&bad_line()), "{name}: {cli_error}");
                 let (report, error) =
                     library_with(case.program, &duplicate, &subject, &options, outfmt);
                 assert_eq!(
@@ -357,7 +360,7 @@ fn a_scope_holds_the_batches_that_the_reader_delivers() {
                     command_line_with(case.program, &failing, &subject, &options, outfmt);
                 let cli_error = cli_error.unwrap_or_else(|| panic!("{name}: the reader's error"));
                 assert!(
-                    cli_error.starts_with(BAD_LINE),
+                    cli_error.starts_with(&bad_line()),
                     "{name} {outfmt}: {cli_error}"
                 );
                 assert!(!cli_report.is_empty(), "{name} {outfmt}: the first batch");
@@ -529,7 +532,9 @@ fn an_error_of_ncbi_before_the_refusal_comes_first() {
     text.extend_from_slice(&named("q1", protein));
     // NCBI's stdout (empty) and stderr of `psiblast -query dup.fa -subject s.fa -parse_deflines
     // -outfmt 6` (exit 3).
-    let ncbi = "BLAST engine error: Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options";
+    // NCBI's text in LOSAT's words (line NW2).
+    let ncbi = crate::wording::losat_text("BLAST engine error: Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options").into_owned();
+    let ncbi = ncbi.as_str();
     let (cli_report, cli_error) =
         command_line_with(Program::Psiblast, &text, &subject, &options, "6");
     assert_eq!(cli_error.as_deref(), Some(ncbi));
@@ -554,7 +559,9 @@ fn an_error_of_ncbi_before_the_refusal_comes_first() {
     // 1000`: `The average subject length is too short`, exit 3, no report; NCBI BLAST+ 2.17.0, probe
     // `fix-reader-error/r4-probe` `bp_avg`, `nuc_avg`): BLASTP before the second `q1` of the next
     // batch, and BLASTX in BLAST XML, whose read before the search met the refusal first.
-    let ncbi = "BLAST engine error: The average subject length is too short";
+    // NCBI's text in LOSAT's words (line NW2).
+    let ncbi = crate::wording::losat_text("BLAST engine error: The average subject length is too short").into_owned();
+    let ncbi = ncbi.as_str();
     let options = ["-parse_deflines", "-searchsp", "1000"];
     let protein = |length| letters(b"ACDEFGHIKLMNPQRSTVWY", length, 7);
     let subjects = b">s1\nMK\n>s2\n>s3\n";
@@ -597,7 +604,9 @@ fn an_error_of_ncbi_before_the_refusal_comes_first() {
 // first's letters, so LOSAT refuses; before, BLASTX gave the subjects' error.
 #[test]
 fn the_batch_of_a_repeated_id_stops_at_one_point_in_every_program() {
-    let ncbi = "BLAST engine error: The average subject length is too short";
+    // NCBI's text in LOSAT's words (line NW2).
+    let ncbi = crate::wording::losat_text("BLAST engine error: The average subject length is too short").into_owned();
+    let ncbi = ncbi.as_str();
     let refusal = "two query records have the Seq-id lcl|q1";
     let options = ["-parse_deflines", "-searchsp", "1000"];
     let protein = |length, seed| letters(b"ACDEFGHIKLMNPQRSTVWY", length, seed);
@@ -671,7 +680,7 @@ fn run_batches_ends_with_the_reader_error_in_its_batch() {
     assert_eq!(first.query_indices, 0..10);
     assert!(!first.hsps.is_empty());
     let error = second.as_ref().expect_err("the batch of the record");
-    assert!(error.message().starts_with(BAD_LINE.as_bytes()), "{error}");
+    assert!(error.message().starts_with(bad_line().as_bytes()), "{error}");
     let (_, cli_error) = command_line(case.program, &query, &case.subject);
     assert_eq!(
         String::from_utf8_lossy(error.message()).trim_end(),
@@ -711,7 +720,7 @@ fn run_batches_counts_a_repeated_id_by_its_first_records_letters() {
                 "{name}: {cli_error}"
             );
         } else {
-            assert!(cli_error.starts_with(BAD_LINE), "{name}: {cli_error}");
+            assert!(cli_error.starts_with(&bad_line()), "{name}: {cli_error}");
         }
         let (rows, error) = batches_with(Program::Blastp, &text, &subject, &options);
         assert_eq!(

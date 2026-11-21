@@ -116,7 +116,7 @@ describe('DataService sources and record tables', () => {
     expect(await data.checkInput(NUCLEOTIDE, [excluded.revisionId])).toEqual({
       ok: true,
       records: [{ id: 'b', length: 2 }],
-      readerError: "BLAST query error: CFastaReader: Near line 4, there's a line that doesn't look like plausible data, but it's not marked as defline or comment.",
+      readerError: "LOSAT query error: CFastaReader: Near line 4, there's a line that doesn't look like plausible data, but it's not marked as defline or comment.",
     });
     expect(await data.checkInput({ program: 'blastn', role: 'subject', dataLoaders: true }, [revision.revisionId])).toMatchObject({ ok: false });
   });

@@ -206,7 +206,7 @@ describe('SearchDraft inputs', () => {
     expect(sourceOf(draft, 'query')).toMatchObject({ status: 'ready', lead: { mark: 'UTF-8' } });
     expect(sourceOf(draft, 'query').base?.records).toEqual([]);
     expect(sourceOf(draft, 'query').base?.readerError?.message).toContain("doesn't look like plausible data");
-    expect(sourceOf(draft, 'query').check).toMatchObject({ state: 'ok', records: 0, readerError: expect.stringContaining('BLAST query error: CFastaReader: Near line 1') });
+    expect(sourceOf(draft, 'query').check).toMatchObject({ state: 'ok', records: 0, readerError: expect.stringContaining('LOSAT query error: CFastaReader: Near line 1') });
     expect(draft.readiness()).toMatch(/^Add the subject/);
     draft.removeByteOrderMark('query');
     await draft.idle();

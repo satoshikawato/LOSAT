@@ -2,10 +2,9 @@
 set -euo pipefail
 
 # Comparison-only NCBI API build. Never call from a LOSAT build/runtime path.
-# NCBI c++/src/algo/blast/api/blast_aux.cpp:588-613,629-646:
-#   FindGeneticCode(id) reads the NCBI genetic-code table;
+# NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:588-613,629-646:
 #   CAutomaticGenCodeSingleton registers the selected code.
-# NCBI c++/src/app/blast/tblastn_app.cpp:189-193,287-305:
+# NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:189-193,287-305:
 #   InitializeSubject -> CLocalBlast::Run -> CBlastFormat::PrintOneResultSet.
 root=$(cd "$(dirname "$0")" && pwd)
 out=${1:?usage: run_api_oracle.sh NEW_OUTPUT_DIRECTORY}
@@ -37,7 +36,7 @@ PREBUILT_DATATOOL_EXE="$datatool_bin" make -C "$work/build/build/objects/seq" so
 PREBUILT_DATATOOL_EXE="$datatool_bin" make -C "$work/build/build/objects" sources > "$out/objects_sources.log" 2>&1
 PREBUILT_DATATOOL_EXE="$datatool_bin" make -C "$work/build/build/objects/genomecoll" sources > "$out/genomecoll_sources.log" 2>&1
 
-# NCBI c++/src/algo/blast/api/blast_setup_cxx.cpp:800-810:
+# NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:800-810:
 #   the subject's genetic-code ID selects FindGeneticCode for translation.
 g++ -std=c++17 -O2 -I"$work/build/inc" -I"$src/include" \
   "$root/oracle/tblastn_code32_oracle.cpp" -L"$blast_lib" -Wl,-rpath,"$blast_lib" \

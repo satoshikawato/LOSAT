@@ -29,7 +29,7 @@ pub enum RunFiles {
 }
 
 impl RunFiles {
-    // NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:7570-7608 (quoted at
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:7570-7608 (cited at
     // `ncbi_environment::diag_target`): no file for `""` and `/dev/null`, `cerr` for `-`, else the
     // file, or `cerr` when its directory does not exist or it cannot be opened (a directory).
     /// The target of the `-logfile` value `name` (`None` without one). On `Disk` the file

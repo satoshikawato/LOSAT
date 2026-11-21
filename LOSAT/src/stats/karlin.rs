@@ -12,7 +12,7 @@ pub fn bit_score(raw_score: i32, params: &KarlinParams) -> f64 {
 
 /// Calculate E-value from raw score and search space (NCBI BLAST_KarlinStoE_simple compatible)
 ///
-/// Reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:4157-4171
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4157-4171
 ///
 /// Formula: E = searchsp * exp(-Lambda * S + logK)
 /// where S is the raw score, searchsp is the effective search space

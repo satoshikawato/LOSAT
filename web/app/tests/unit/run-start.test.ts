@@ -29,6 +29,7 @@ import {
   MESSAGES_STREAM,
   messagesSignal,
   PLACE_NOWHERE,
+  PLACE_RUN,
   ReactorAbi,
   ROLE_QUERY,
   ROLE_SUBJECT,
@@ -664,6 +665,8 @@ describe("the Engine worker's runtime and the files of a run", () => {
       [3, 'diagnostics'],
       [8, 'logfile'],
       [PLACE_NOWHERE, 'nowhere'],
+      // The error that ended the run: an output that a failed run does not keep (ABI version 7; line WQA's sweep, D15, 2026-11-20).
+      [PLACE_RUN, 'run'],
     ] as const) {
       const { abi } = fakeAbi({ discard: signal(6, place) });
       const { run, delivered, close } = workerRun([]);
@@ -677,8 +680,9 @@ describe("the Engine worker's runtime and the files of a run", () => {
       close();
     }
     expect(discardedStream(signal(7, 3))).toBe(7);
-    expect(discardSignal(signal(7, 8))).toEqual({ stream: 7, errorStream: 8 });
-    expect(discardSignal(signal(0, PLACE_NOWHERE))).toEqual({ stream: 0, errorStream: undefined });
+    expect(discardSignal(signal(7, 8))).toEqual({ stream: 7, errorStream: 8, ended: false });
+    expect(discardSignal(signal(0, PLACE_NOWHERE))).toEqual({ stream: 0, errorStream: undefined, ended: false });
+    expect(discardSignal(signal(6, PLACE_RUN))).toEqual({ stream: 6, errorStream: undefined, ended: true });
     expect(() => discardedStream(new Uint8Array([6, 0, 0, 0]))).toThrow('a signal of stream 9 has 4 bytes, not 8');
     // A signal that names a stream which is not an output of a run, or a place that holds no error, breaks the ABI:
     // the run fails.

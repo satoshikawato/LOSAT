@@ -17,14 +17,11 @@ import plot_execution_time as timing
 import plot_overall_trend as overall
 
 
-# NCBI reference: c++/src/objtools/align_format/format_flags.cpp:38-40
-# "qaccver saccver pident length mismatch gapopen qstart qend sstart send "
-# "evalue bitscore";
+# NCBI reference (598d8ae6): c++/src/objtools/align_format/format_flags.cpp:38-40
 ROW = "q\ts\t100.000\t30\t0\t0\t1\t30\t1\t30\t1e-10\t50\n"
 
 
-# NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:50,75
-# const string kArgDb("db"); const string kArgNumThreads("num_threads");
+# NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:50,75
 # Both recorded DB thread variants share the n1 raw-output reference;
 # distributions select their separately recorded subject oracle as needed.
 class SimpleComparisonTests(unittest.TestCase):
@@ -45,8 +42,7 @@ class SimpleComparisonTests(unittest.TestCase):
                 path.parent.mkdir(parents=True, exist_ok=True)
                 self.record(path, row)
 
-    # NCBI reference: c++/src/objtools/align_format/tabular.cpp:1100-1108
-    # x_PrintField(*iter); m_Ostream << "\n";
+    # NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108
     # Synthetic records test evidence integrity, never generate search expectations.
     def record(self, path, row=ROW, log="real\t0.100\nexit_status=0\n"):
         path.with_suffix(".run.json").unlink(missing_ok=True)
@@ -57,8 +53,7 @@ class SimpleComparisonTests(unittest.TestCase):
         data.record_cli(["finish", str(self.root), str(path.with_suffix("")), "0"])
 
 
-    # NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-48
-    # const string kArgQuery("query"); const string kArgSubject("subject");
+    # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-48
     # The executable used for the oracle search supplies its own version identity.
     def test_selected_oracle_version_is_preserved(self):
         oracle = self.root / 'blastn'
@@ -70,8 +65,7 @@ class SimpleComparisonTests(unittest.TestCase):
         self.assertEqual(record['oracle_version'], 'synthetic oracle version')
         self.assertEqual(record['files'][str(oracle.resolve())], data.sha256(oracle))
 
-    # NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-75
-    # const string kArgQuery("query"); const string kArgSubject("subject");
+    # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-75
     # The compilation profile changes only the selected TBLASTX host argv.
     def test_turbofan_profile_is_tblastx_only_and_can_be_disabled(self):
         with patch.dict(os.environ, {"NODE_ARGS_JSON": '["--trace-warnings"]'}, clear=True):
@@ -82,8 +76,7 @@ class SimpleComparisonTests(unittest.TestCase):
             with patch.dict(os.environ, {"NODE_TBLASTX_ARGS_JSON": "[]"}):
                 self.assertEqual(data.node_args("tblastx"), ["--trace-warnings"])
 
-    # NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-75
-    # const string kArgQuery("query"); const string kArgSubject("subject");
+    # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-75
     # Reject malformed host options before any search rather than use a fallback.
     def test_tblastx_profile_rejects_malformed_argv(self):
         for value in ('{}', '[1]', '["bad\\u0000arg"]', 'not-json'):
@@ -91,8 +84,7 @@ class SimpleComparisonTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     data.node_args("tblastx")
 
-    # NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-75
-    # const string kArgQuery("query"); const string kArgSubject("subject");
+    # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-75
     # Persist exactly the same argument array that the shell consumes.
     def test_tblastx_profile_manifest_matches_nul_delimited_argv(self):
         directory = self.root / "profile"
@@ -119,7 +111,7 @@ class SimpleComparisonTests(unittest.TestCase):
         self.assertTrue(str(paths[data.NCBI_MULTI]).endswith(".n4.out"))
         self.assertTrue(str(paths[data.NATIVE_MULTI]).endswith(".n4.out"))
 
-    # NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:1052-1054,3225-3236
+    # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1052-1054,3225-3236
     # Database TBLASTX applies db_gencode; local-subject BLASTN/BLASTP remains
     # a distribution-only oracle and cannot be relabeled as a threaded timing.
     def test_distribution_oracle_target_is_program_specific(self):
@@ -203,7 +195,7 @@ class SimpleComparisonTests(unittest.TestCase):
         path.with_suffix(".run.json").write_text(json.dumps(record))
         self.assertFalse(data.successful_output(path))
 
-    # NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3225-3236
+    # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3225-3236
     # Local-subject searches reduce the requested thread count; database timing
     # is therefore retained independently of output equality with other targets.
     def test_timing_plot_keeps_successful_lexically_different_output(self):
@@ -222,8 +214,7 @@ class SimpleComparisonTests(unittest.TestCase):
             [data.NCBI_SINGLE, data.NCBI_MULTI, data.WASM_SINGLE],
         )
 
-    # NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
-    # CATCH_ALL(status) ... return status;
+    # NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:172-176
     # Preserve search failures and reject successful commands without output.
     def test_runner_failure_and_missing_output_are_retained(self):
         binary = self.root / "fake-losat"
@@ -272,8 +263,7 @@ class SimpleComparisonTests(unittest.TestCase):
         self.assertLess(result.stdout.index("Finished WSSV.PajaWSV.losatp:"),
                         result.stdout.index("Running WSSV.PajaWSV.losatp.n4"))
 
-    # NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:75
-    # const string kArgNumThreads("num_threads");
+    # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:75
     # A synthetic Node process tests harness routing only; actual artifact
     # validation and BLAST output remain covered by the real WASI gates.
     def test_threaded_only_and_serial_compatibility_are_independent(self):
@@ -333,9 +323,7 @@ else:
                     self.assertTrue(data.successful_output(output))
 
 
-# NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:46,48,51,75
-# const string kArgQuery("query"); const string kArgOutput("out");
-# const string kArgSubject("subject"); const string kArgNumThreads("num_threads");
+# NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46,48,51,75
 # Synthetic commands verify directory handoff only, not BLAST output parity.
 class ComparisonDirectoryTests(unittest.TestCase):
     def setUp(self):
@@ -371,9 +359,7 @@ else:
         self.binary.chmod(0o755)
         self.oracle = self.root / "blastp"
         shutil.copy2(self.binary, self.oracle)
-        # NCBI reference: c++/src/app/blastdb/makeblastdb.cpp:236-247
-        # arg_desc->SetConstraint(kArgDbType, &(*new CArgAllow_Strings, "nucl", "prot"));
-        # arg_desc->AddFlag("parse_seqids", ...);
+        # NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:236-247
         # Synthetic DB files test harness routing without an NCBI dependency.
         self.makeblastdb = self.root / "makeblastdb"
         self.makeblastdb.write_text(f'''#!{sys.executable}
@@ -428,17 +414,14 @@ else:
         for name in ["overall_trend_comparison.png", "compare_example_BLASTP.png", "execution_time_comparison_all.png"]:
             self.assertGreater((directory / "plots" / name).stat().st_size, 0)
         table = (directory / "plots/execution_times.tsv").read_text()
-        # NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:75
-        # const string kArgNumThreads("num_threads");
+        # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:75
         self.assertIn("BLAST+ n1", table)
         self.assertIn("BLAST+ n4", table)
         self.assertIn("LOSAT native n4", table)
         self.assertNotIn("LOSAT native n8", table)
 
-    # NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3223-3239,1052-1054
-    # if (args.Exist(kArgSubject) && args[kArgSubject].HasValue() &&
+    # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3223-3239,1052-1054
     #     m_NumThreads != CThreadable::kMinNumThreads) { m_NumThreads = ...; }
-    # opt.SetDbGeneticCode(args[kArgDbGeneticCode].AsInteger());
     # Exercise the shell boundary for every task, preserving translation options.
     def test_distribution_subjects_and_timing_databases_preserve_both_thread_counts(self):
         (self.scripts / "fasta/query.fna").write_text(">q\nACGTACGT\n")
@@ -488,8 +471,7 @@ else:
                     args = record["ordered_argv"]
                     self.assertEqual(args[args.index("-dbtype") + 1], build.parent.name)
                     self.assertGreaterEqual(record["wall_seconds"], 0)
-        # NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:50-51
-        # const string kArgDb("db"); const string kArgSubject("subject");
+        # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:50-51
         # Even a non-TBLASTX timing selection requires a prepared database;
         # the extra -subject output remains distribution-only.
         directory = self.root / "blastn-blastp-db"
@@ -501,13 +483,10 @@ else:
         self.assertTrue((directory / "blast_out/db").exists())
         self.assertEqual(len(list((directory / "blast_out").glob("*.run.json"))), 9)
 
-    # NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
-    # CATCH_ALL(status) ... return status;
+    # NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:172-176
     # A required DB build must fail before any oracle search, without -subject fallback.
     def test_database_failure_stops_before_oracle_search(self):
-        # NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:1052-1054
-        # if (m_Target == eDatabase && args[kArgDbGeneticCode] &&
-        #     (program == eTblastn || program == eTblastx)) { ... }
+        # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1052-1054
         cases = self.scripts / "comparison_cases.tsv"
         cases.write_text(cases.read_text().replace("blastp\t", "tblastx\t"))
         self.makeblastdb.write_text("#!/bin/bash\nexit 9\n")
@@ -517,9 +496,7 @@ else:
         self.assertFalse(list((self.latest() / "blast_out").glob("*.run.json")))
         self.assertNotEqual(json.loads((self.latest() / "run.json").read_text())["status"], "COMPLETE")
 
-    # NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:50-51,75
-    # const string kArgDb("db"); const string kArgSubject("subject");
-    # const string kArgNumThreads("num_threads");
+    # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:50-51,75
     def test_previous_protocols_are_not_relabeled_as_current_targets(self):
         result = self.run_comparison()
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -533,8 +510,7 @@ else:
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("previous target/thread protocol", result.stderr)
 
-    # NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
-    # CATCH_ALL(status) ... return status;
+    # NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:172-176
     # Both a failed search and failed metadata collection must block stale plots.
     def test_latest_failure_does_not_plot_an_older_success(self):
         first = self.run_comparison()

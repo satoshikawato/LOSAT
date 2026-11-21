@@ -6,24 +6,7 @@
 //! `x_seed_release.rs` is).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1409-1413
-//! ```c
-//!     itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
-//!
-//!     /* iterate over all subject sequences */
-//!     while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-//!            != BLAST_SEQSRC_EOF) {
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:519-526
-//! ```c++
-//!     /* If internal iterator is uninitialized/invalid, retrieve the next chunk
-//!        from the BlastSeqSrc */
-//!     if (itr->current_pos == UINT4_MAX) {
-//!         status = s_SeqDbGetNextChunk(seqdb_handle, itr);
-//!         if (status == BLAST_SEQSRC_ERROR || status == BLAST_SEQSRC_EOF) {
-//!             return status;
-//!         }
-//!     }
-//! ```
 //! Each NCBI search thread runs this loop with its own iterator over one shared database: a thread
 //! that has searched its subjects asks for the next ones, so a long subject keeps one thread busy
 //! while the others go on with the rest. Without the switch LOSAT gives the subject indices to

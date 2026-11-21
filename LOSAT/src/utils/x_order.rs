@@ -45,10 +45,6 @@ where
 const ORDER_ON_STACK: usize = 32;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1380-1381
-// ```c
-//         qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
-//               ScoreCompareHSPs);
-// ```
 // NCBI's qsort moves the pointers inside the one array. `source[dst]` names the record that
 // belongs at `dst`; each cycle of that permutation is walked once with swaps
 // (`tblastx/x_hsp_inplace.rs`, module doc, item 1).

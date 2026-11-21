@@ -7,37 +7,7 @@ use crate::utils::dust::{DustMasker, NcbiLfgRandom};
 /// two `TSeqPos`).
 pub(super) type Interval = (u32, u32);
 
-// NCBI reference (598d8ae6): c++/src/app/dustmasker/dust_mask_app.cpp:184-210
-// ```c++
-// CSymDustMasker::TMaskList s_FindSegmentWithLongNs(const unsigned int MAX_Ns, objects::CSeqVector & seq)
-// {
-// 	//Always trim Ns at start and end of seq
-// 	CSymDustMasker::TMaskList  NsRange;
-//     unsigned int pos = 0;
-// 	unsigned int Ns = 0;
-//     for(objects::CSeqVector_CI itr=seq.begin();itr!=seq.end(); ++itr) {
-//         if ((*itr) == 78) {
-//             Ns++;
-//         }
-//         else {
-//             if (Ns > 0) {
-//             	if((Ns > MAX_Ns ) || (pos == 0)) {
-//             		CSymDustMasker::TMaskedInterval r(pos, pos+Ns-1);
-//             		NsRange.push_back(r);
-//             	}
-//                 pos += Ns;
-//                 Ns = 0;
-//             }
-//            	pos++;
-//         }
-//     }
-//     if (Ns > 0) {
-//     	CSymDustMasker::TMaskedInterval r(pos, pos+Ns-1);
-//     	NsRange.push_back(r);
-//     }
-//     return NsRange;
-// }
-// ```
+// NCBI reference (598d8ae6): c++/src/app/dustmasker/dust_mask_app.cpp:184-215
 /// `s_FindSegmentWithLongNs(max_ns, seq)`: the runs of `N` that start the sequence, end it,
 /// or are longer than `max_ns` (dustmasker's `-window` as given, as an unsigned 32-bit number).
 fn long_n_runs(max_ns: u32, seq: &[u8]) -> Vec<Interval> {
@@ -64,17 +34,7 @@ fn long_n_runs(max_ns: u32, seq: &[u8]) -> Vec<Interval> {
     runs
 }
 
-// NCBI reference (598d8ae6): c++/src/app/dustmasker/dust_mask_app.cpp:212-220
-// ```c++
-// void s_InsertMerge(CSymDustMasker::TMaskList & list, CSymDustMasker::TMaskedInterval & new_mask, Uint4 linker)
-// {
-// 	if ((!list.empty()) && (list.back().second + linker == new_mask.first)) {
-// 		list.back().second = new_mask.second;
-// 		return;
-// 	}
-// 	list.push_back(new_mask);
-// }
-// ```
+// NCBI reference (598d8ae6): c++/src/app/dustmasker/dust_mask_app.cpp:212-225
 /// `s_InsertMerge(list, mask, linker)`: `mask` extends the last interval when it starts exactly
 /// `linker` (the `-linker` as given, unsigned 32-bit, the sum wrapping as NCBI's) after its end.
 fn insert_merge(list: &mut Vec<Interval>, mask: Interval, linker: u32) {
@@ -103,53 +63,6 @@ fn dust(
 }
 
 // NCBI reference (598d8ae6): c++/src/app/dustmasker/dust_mask_app.cpp:222-276
-// ```c++
-// std::unique_ptr< CSymDustMasker::TMaskList >
-// GetDustMasks_SkipNs(objects::CSeqVector & seq, Uint4 level, Uint4 window, Uint4 linker)
-// {
-//     CSymDustMasker duster(level, window, linker);
-//     CSymDustMasker::TMaskList NsRange = s_FindSegmentWithLongNs(window, seq);
-//     if(NsRange.empty()){
-//         return duster(seq);
-//     }
-//
-//     std::unique_ptr< CSymDustMasker::TMaskList > rv(new CSymDustMasker::TMaskList);
-//     TSeqPos seq_start =0;
-//     NON_CONST_ITERATE(CSymDustMasker::TMaskList, itr, NsRange) {
-//     	if(itr->first == 0) {
-//     		seq_start = itr->second + 1;
-//     		rv->push_back(*itr);
-//     		continue;
-//     	}
-//     	else {
-//     		std::unique_ptr< CSymDustMasker::TMaskList > s_mask = duster(seq, seq_start, itr->first -1);
-//     		if(s_mask->size() > 0) {
-//     			s_InsertMerge(*rv, s_mask->front(), linker);
-//     			if( s_mask->size() > 1) {
-//     				rv->insert(rv->end(), ++(s_mask->begin()), s_mask->end());
-//     			}
-//     			s_InsertMerge(*rv, *itr, linker);
-//     		}
-//     		else {
-//     			rv->push_back(*itr);
-//     		}
-//    			seq_start = itr->second + 1;
-//     	}
-//     }
-//
-//     if(seq_start < seq.size()){
-//    		std::unique_ptr< CSymDustMasker::TMaskList > s_mask = duster(seq, seq_start, seq.size() -1);
-//    		if(s_mask->size() > 0) {
-//    			s_InsertMerge(*rv, s_mask->front(), linker);
-//    			if( s_mask->size() > 1) {
-//    				rv->insert(rv->end(), ++(s_mask->begin()), s_mask->end());
-//    			}
-//    		}
-//     }
-//
-//     return rv;
-// }
-// ```
 /// `GetDustMasks_SkipNs(seq, level, window, linker)`: the masks of the IUPAC letters `seq`
 /// (not empty). The masker clamps `level`, `window` and `linker` to its ranges
 /// (`DustMasker::new`, as `CSymDustMasker`'s constructor), while the runs of `N` and the merges

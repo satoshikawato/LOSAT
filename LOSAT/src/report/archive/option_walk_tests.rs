@@ -281,6 +281,13 @@ const PSIBLAST: &[Case] = &[
         &["-culling_limit", "2"],
         &[After("WordThreshold", "Culling", "Integer(2)")],
     ),
+    // Recorded where `-culling_limit` is, with a query and with `-in_pssm` (NCBI BLAST+ 2.17.0,
+    // line NP O6b's strategy probe `ps_q_on.ss`, `ps_pssm_on.ss`).
+    (
+        "subject_besthit",
+        &["-subject_besthit"],
+        &[After("WordThreshold", "UseSubjectBestHit", "Boolean(true)")],
+    ),
     // `SetXDropoff` has no remote option (blast_options_cxx.cpp:588-590).
     ("xdrop_ungap", &["-xdrop_ungap", "8"], &[]),
     (
@@ -480,10 +487,6 @@ fn every_psiblast_argument_is_recorded_as_ncbi_records_it() {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1241-1247 (`-in_pssm`
 // excludes `-query` and `-query_loc`)
-// ```c++
-//     arg_desc.SetDependency(kArgPSIInputChkPntFile, CArgDescriptions::eExcludes,
-//                            kArgQuery);
-// ```
 // A PSSM query's request records psiblast's options as a FASTA query's does (the handle and the
 // classes are the same; NCBI BLAST+ 2.17.0 `p9.pp.db.itdef.f6` = `p9.ps.q.db.itdef.f6`, `pp.db.cbs*`,
 // `pp.db.it*`, `pp.db.ssp.f6`): every psiblast argument again, with `-in_pssm` in the base.
@@ -872,6 +875,17 @@ fn every_tblastn_argument_with_a_pssm_query_is_recorded_as_ncbi_records_it() {
             "culling_limit",
             &["-culling_limit", "2"],
             &[After("SegFilteringHicut", "Culling", "Integer(2)")],
+        ),
+        // Recorded where `-culling_limit` is (NCBI BLAST+ 2.17.0, line NP O6b's strategy probe
+        // `tn_pssm_on.ss`).
+        (
+            "subject_besthit",
+            &["-subject_besthit"],
+            &[After(
+                "SegFilteringHicut",
+                "UseSubjectBestHit",
+                "Boolean(true)",
+            )],
         ),
         ("num_threads", &["-num_threads", "2"], &[]),
         ("mt_mode", &["-mt_mode", "1", "-num_threads", "2"], &[]),

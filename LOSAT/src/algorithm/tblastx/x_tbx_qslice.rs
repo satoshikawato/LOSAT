@@ -3,18 +3,6 @@
 //! on the unit's one diagonal table. A child module of x_pair_par.rs.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:500-516
-//! ```c
-//! while (scan_range[1] <= scan_range[2]) {
-//!     /* scan the subject sequence for hits */
-//!     hits = scansub(lookup_wrap, subject,
-//!                               offset_pairs, array_size, scan_range);
-//! ...
-//!     for (i = 0; i < hits; ++i) {
-//!         Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
-//!         Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
-//! ...
-//!         diag_coord = (query_offset - subject_offset) & diag_mask;
-//! ```
 //! A unit scans its subject chunk once, and at each subject position `s` the lookup gives the hits
 //! of every query offset of the group, so the cells it touches, `q - s`, lie anywhere in the
 //! table (the group's span plus the chunk, 4 bytes a cell). Where the group is a long query frame
@@ -326,19 +314,6 @@ fn x_assemble(parts: &[Vec<i32>], tables: Vec<XGroup>) -> Vec<XSliced> {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:105-115
-// ```c
-//         seq = query->sequence + from;
-//         word_target = seq + lut_word_length;
-//
-//         for (offset = from; offset <= to; offset++, seq++) {
-//
-//             if (seq >= word_target) {
-//                 BlastLookupAddWordHit(backbone,
-//                                       lut_word_length, charsize,
-//                                       seq - lut_word_length,
-//                                       offset - lut_word_length);
-//             }
-// ```
 // A location [from, to] adds the words that start at from..=to - word_length + 1 and hold no
 // invalid letter (module doc, item 5). Each location is cut at the slice starts by word start: the
 // piece of slice j is [max(from, a_j), min(last word start, b_j - 1) + word_length - 1], which adds
@@ -369,11 +344,6 @@ fn x_slice_locations(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:454-456
-// ```c
-//     BlastLookupIndexQueryExactMatches(exact_backbone, lookup->word_length,
-//                                       lookup->charsize, lookup->word_length,
-//                                       query, location);
-// ```
 // The slices' tables at the lookup build site (PAIRLUT), each by `x_build_group` from the
 // slice's locations (module doc, item 5), on the calling thread or the pool as the groups are.
 /// The groups of `starts` cut at `parts`, built directly from the query. None when a lookup
@@ -400,14 +370,6 @@ pub(super) fn lut_direct_sliced(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:337-343
-// ```c
-// for (i = 0; i < lookup->backbone_size; i++) {
-//   /* if there are hits there, */
-//   if (lookup->thin_backbone[i] ) {
-//       Int4 * dest = NULL;
-//       /* set the corresponding bit in the pv_array */
-//       PV_SET(pv, i, PV_ARRAY_BTS);
-// ```
 // Where the reference builder made the batch's table: the slices are its chains filtered at the
 // slice bounds, as `build_groups` filters them at the group bounds (`build_tables`).
 /// The groups cut at `parts`, filtered out of the batch's full table.
@@ -566,16 +528,6 @@ impl<M: TbxScore> XPairPar<M> {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:494-516
-    // ```c
-    // scan_range[0] = 0;
-    // scan_range[1] = subject->seq_ranges[0].left;
-    // scan_range[2] = subject->seq_ranges[0].right - wordsize;
-    // ...
-    // while (scan_range[1] <= scan_range[2]) {
-    //     /* scan the subject sequence for hits */
-    //     hits = scansub(lookup_wrap, subject,
-    //                               offset_pairs, array_size, scan_range);
-    // ```
     // The scan loop of `scan_unit` (the reference's, `scan_chunk_plain` with
     // `word_finder::scan_next_hits`, on one unit) once per slice with the slice's table,
     // in slice order, on the unit's one table (module doc, items 1-3), with `x_hit`, or with
@@ -672,7 +624,7 @@ impl<M: TbxScore> XPairPar<M> {
             if sub.longest_chain <= 0 {
                 continue;
             }
-            // NCBI sizes the offset array from the table it scans (lookup_wrap.c:264-266).
+            // NCBI sizes the offset array from the table it scans (c++/src/algo/blast/core/lookup_wrap.c:264-266).
             let offset_array_size: i32 = OFFSET_ARRAY_SIZE + sub.longest_chain;
             // EXPERIMENT (LOSAT_X_TBXHITBF): with `BF` and `PF`, X_PREFETCH_AHEAD entries more, as
             // in `scan_unit_hits`.
@@ -1131,6 +1083,7 @@ mod tests {
                 s_len: 999,
                 failure: &crate::algorithm::tblastx::subjects::XReadFailure::new(),
                 passed: None,
+                subject_besthit: false,
             };
             let mut scratch = XScratch::new(false);
             for (f, s_frame) in s_frames.iter().enumerate() {

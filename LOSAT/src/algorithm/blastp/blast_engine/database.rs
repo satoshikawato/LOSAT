@@ -708,12 +708,15 @@ pub(super) struct ListedSubjects {
 /// A preliminary hit list that NCBI's composition-based redo reaches in its stream and whose
 /// subject the redo's fetch then excludes (`exclude_fetched`): the list leaves the query's hit
 /// list, and this mark keeps its place, `position` kept lists of the query before it, with what
-/// the redo reads of it there (its best e-value, the early termination test's).
+/// the redo reads of it there (its best e-value, the early termination test's). The
+/// Smith-Waterman redo's status reads the marks, in the one-thread loop
+/// (`redo_run::one_thread_redo`) and in the replay of the parallel redo's windows
+/// (`x_redo_par.rs`, `XSwBatch`), both through `redo_run::query_fetch_excluded_reached`.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(super) struct FetchExcludedMatch {
-    pub(super) query: usize,
-    pub(super) position: usize,
-    pub(super) best_evalue: f64,
+pub(in crate::algorithm::blastp) struct FetchExcludedMatch {
+    pub(in crate::algorithm::blastp) query: usize,
+    pub(in crate::algorithm::blastp) position: usize,
+    pub(in crate::algorithm::blastp) best_evalue: f64,
 }
 
 impl ListedSubjects {

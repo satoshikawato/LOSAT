@@ -109,14 +109,17 @@
 //! certain on the heaps where the replay stopped (`x_sw_continued`: the carried matches before it
 //! that keep no list do not count), while its other jobs compute the matches after the carried
 //! ones. The carried results stay valid: a certain answer stays certain, and a deferred one is
-//! asked at its replay. The replay also keeps the batch's status of NCBI's one-thread redo (`XSwBatch`): a
-//! match that the redo reaches sets it, failed or not; a match the early termination test ends
-//! leaves it; a batch whose status says failed at its end fails the search there, and an endless
-//! redo fails it at that match. A continuation is replayed before every match after it, so a batch
-//! ends after its continuations. A Smith-Waterman job is at risk only as an X-drop job is (the early
-//! termination test may end its match). With `LOSAT_TIMING=1` the `[TIMING] x_bpredopar:` line of
-//! such a search ends with `turned=<t> continued=<c>` (the deferred answers that the replay answered
-//! FALSE, and TRUE).
+//! asked at its replay. The replay also keeps the batch's status of NCBI's one-thread redo
+//! (`XSwBatch`): a match that the redo reaches sets it, failed or not; a match the early termination
+//! test ends leaves it; a list whose subject the redo's fetch excludes (line RG X4-excl) sets it to 0
+//! unless the early termination test ends that list, read when the replay passes the list's query,
+//! with the one-thread loop's reader; a batch whose status says failed at its end fails the search
+//! there, and an endless redo fails it at that match. A continuation is replayed before every match
+//! after it, so a batch ends after its continuations. A Smith-Waterman job is at risk only as an
+//! X-drop job is (the early termination test may end its match). With `LOSAT_TIMING=1` the
+//! `[TIMING] x_bpredopar:` line of such a search ends with `turned=<t> continued=<c> rerun_s=<s>`
+//! (the deferred answers that the replay answered FALSE, and TRUE, and the seconds of the continued
+//! matches' first jobs, which their continuations repeat up to the test).
 //!
 //! `LOSAT_X_BPREDOPAR` is a switch of the strict set (on by default since 2026-10-17): on unless it
 //! is `0`. With `LOSAT_TIMING=1` each search the path runs
@@ -165,7 +168,9 @@ use crate::stats::search_space::SearchSpace;
 use crate::stats::{BlastGumbelBlk, KarlinParams};
 use crate::utils::threading::SearchPool;
 
-use super::blast_engine::preliminary_hit_from_local_match_hsp;
+use super::blast_engine::{
+    preliminary_hit_from_local_match_hsp, query_fetch_excluded_reached, FetchExcludedMatch,
+};
 use super::gapalign::{BlastpPreliminaryHsp, GapAlignScratch};
 use super::hsp::{
     blast_compo_early_termination, BlastCompoHeap, BlastpHitList, BlastpHspList,
@@ -253,6 +258,12 @@ pub(crate) struct XRedoParSearch<'a, P> {
     pub engine_positives: bool,
     /// The errors of the Smith-Waterman redo's query batches (`-use_sw_tback`).
     pub sw_errors: XSwErrors,
+    /// The lists of the Smith-Waterman redo's stream whose subjects the redo's fetch excludes (line
+    /// RG X4-excl), by query and place: they left the preliminary hit lists before the redo, each
+    /// leaving a mark of its place (`blast_engine::database::exclude_fetched`), and change the
+    /// status of their query batch (`XSwBatch`); empty without a database or a negative seqid list
+    /// with ids.
+    pub sw_excluded: &'a [FetchExcludedMatch],
 }
 
 /// The errors of a query batch of the Smith-Waterman redo, those of the one-thread loop
@@ -1265,56 +1276,96 @@ where
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3529,3705-3719
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3644-3646,3735-3737,3774-3778
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3540
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3560-3575
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:250-252
 /// The status of a query batch in NCBI's one-thread Smith-Waterman redo (`status_code_tld[0]`),
 /// replayed in stream order (`redo_run::one_thread_redo`'s `sw_last_failed`): a match that the redo
 /// reaches sets it (failed, or 0 for a redo that ends without failing, with alignments or
-/// without, as when its heap test is FALSE); a match the early termination test ends leaves it; at
-/// the batch's end a failed status fails the search there (`XSwErrors::batch_failed`). It is kept
-/// across windows: a window may end inside a batch.
-struct XSwBatch {
+/// without, as when its heap test is FALSE); a match the early termination test ends leaves it; a
+/// list whose subject the redo's fetch excludes sets it to 0 unless the early termination test
+/// ends that list (line RG X4-excl, `XRedoParSearch::sw_excluded`); at the batch's end a failed
+/// status fails the search there (`XSwErrors::batch_failed`). It is kept across windows: a window
+/// may end inside a batch.
+struct XSwBatch<'a> {
     errors: XSwErrors,
-    /// The first query of the batch of the last match replayed, if any.
-    batch_start: Option<usize>,
-    /// The status of that batch says failed.
+    /// The marks of the excluded lists of the queries that the replay has not passed yet.
+    excluded: &'a [FetchExcludedMatch],
+    /// The query of the last match replayed, if any.
+    query: Option<usize>,
+    /// The place of that query's last match whose redo set the status, if any.
+    status_position: Option<usize>,
+    /// The status of that query's batch says failed.
     failed: bool,
 }
 
-impl XSwBatch {
-    fn new(errors: XSwErrors) -> Self {
+impl<'a> XSwBatch<'a> {
+    fn new(errors: XSwErrors, excluded: &'a [FetchExcludedMatch]) -> Self {
         Self {
             errors,
-            batch_start: None,
+            excluded,
+            query: None,
+            status_position: None,
             failed: false,
         }
     }
 
-    /// Before the replay of a match of the batch that starts at `batch_start`: ends the batch of
-    /// the match before if this one is in a later batch (the one-thread loop checks the status at
-    /// each batch's last query; the batches between them have no match the redo reaches, so their
-    /// status stays 0).
-    fn enter(&mut self, batch_start: usize, heaps: &[BlastCompoHeap]) -> Result<()> {
-        if self.batch_start != Some(batch_start) {
-            self.end(heaps)?;
-            self.batch_start = Some(batch_start);
+    /// Before the replay of a match of query `next`, or after the stream's last match (`None`),
+    /// where `next` is in a later query than the last match replayed: the steps of the one-thread
+    /// loop between them. First the excluded lists of the queries passed, from the last match's
+    /// query up to `next` or the end of that query's batch, each query's read with the one-thread
+    /// loop's reader after its loop (`redo_run::query_fetch_excluded_reached`) on the heaps as they
+    /// are now, which are those after the query's loop (the queries after the last match's have no
+    /// match). Then, if `next` is in a later batch or there is none, the end of the last match's
+    /// batch: a failed status fails the search there (the batches between them have no match the
+    /// redo reaches, so their status stays 0). The excluded lists of a batch's queries before its
+    /// first match replayed change nothing (the status is 0 there, and such a list only sets it to
+    /// 0), nor do those of a batch with no match replayed.
+    fn pass(
+        &mut self,
+        next: Option<usize>,
+        query_batches: &[Range<usize>],
+        heaps: &[BlastCompoHeap],
+    ) -> Result<()> {
+        if next.is_some() && next == self.query {
+            return Ok(());
         }
+        let to = next.unwrap_or(query_batches.len());
+        let passed = self.excluded.partition_point(|mark| mark.query < to);
+        let (passed, later) = self.excluded.split_at(passed);
+        self.excluded = later;
+        if let Some(query) = self.query {
+            let batch = query_batches[query].clone();
+            for marks in passed.chunk_by(|a, b| a.query == b.query) {
+                let q_idx = marks[0].query;
+                if (query..batch.end).contains(&q_idx) {
+                    let status_position = if q_idx == query {
+                        self.status_position
+                    } else {
+                        None
+                    };
+                    query_fetch_excluded_reached(
+                        marks,
+                        status_position,
+                        &heaps[batch.clone()],
+                        &mut self.failed,
+                    );
+                }
+            }
+            if self.failed && next.is_none_or(|next| !batch.contains(&next)) {
+                return Err((self.errors.batch_failed)(batch.start, &heaps[batch.start]));
+            }
+        }
+        self.query = next;
+        self.status_position = None;
         Ok(())
     }
 
-    /// A match that the redo reaches sets the batch's status: `failed` or 0.
-    fn reached(&mut self, failed: bool) {
+    /// A match of the query of the last `pass`, at `position` in its preliminary list, that the
+    /// redo reaches sets the batch's status: `failed` or 0.
+    fn reached(&mut self, position: usize, failed: bool) {
+        self.status_position = Some(position);
         self.failed = failed;
-    }
-
-    /// The end of the batch of the last match replayed: the error of a failed status.
-    fn end(&mut self, heaps: &[BlastCompoHeap]) -> Result<()> {
-        match self.batch_start {
-            Some(start) if self.failed => Err((self.errors.batch_failed)(start, &heaps[start])),
-            _ => {
-                self.failed = false;
-                Ok(())
-            }
-        }
     }
 }
 
@@ -1324,7 +1375,8 @@ impl XSwBatch {
 /// deferred heap test on the query's heap (a FALSE replays the match with the job's result, a redo
 /// that stopped at the test; a TRUE stops the replay there and leaves the match and the matches
 /// after it to the next window in `carry`), and the batch's status (`batch`): a failed redo sets
-/// it, an endless one fails the search at that match.
+/// it, an endless one fails the search at that match, and the excluded lists of the queries that
+/// the replay passes are read (`XSwBatch::pass`).
 fn x_replay<const SW: bool>(
     matches: &[XMatch],
     results: XWindowResults,
@@ -1342,7 +1394,7 @@ fn x_replay<const SW: bool>(
         let local_match = x_local_match(lists, matched);
         let batch_start = query_batches[matched.q_idx].start;
         if SW {
-            batch.enter(batch_start, heaps)?;
+            batch.pass(Some(matched.q_idx), query_batches, heaps)?;
         }
         if blast_compo_early_termination(
             local_match.best_evalue,
@@ -1393,13 +1445,13 @@ fn x_replay<const SW: bool>(
         let postprocessed = match result {
             Ok(postprocessed) => {
                 if SW {
-                    batch.reached(false);
+                    batch.reached(matched.position, false);
                 }
                 postprocessed
             }
             // A failed redo leaves the match without alignments and sets the batch's status.
             Err(error) if SW && error.is::<SwRedoFailed>() => {
-                batch.reached(true);
+                batch.reached(matched.position, true);
                 continue;
             }
             Err(error) if SW && error.is::<SwRedoEndless>() => {
@@ -1436,6 +1488,7 @@ fn x_redo_windows<const SW: bool>(
     timing: bool,
     mut expand: Option<&mut XExpandAhead<'_>>,
     sw_errors: XSwErrors,
+    sw_excluded: &[FetchExcludedMatch],
     compute: &mut dyn FnMut(
         &[Option<BlastpHitList>],
         &[BlastCompoHeap],
@@ -1466,7 +1519,7 @@ fn x_redo_windows<const SW: bool>(
     // used before.
     let budget = limits.jobs.max(limits.at_risk_jobs);
     let mut caps = vec![limits.at_risk_jobs; lists.len()];
-    let mut sw_batch = XSwBatch::new(sw_errors);
+    let mut sw_batch = XSwBatch::new(sw_errors, sw_excluded);
     // With `SW`: what the last replay left to the next window.
     let mut carry: Option<XCarry> = None;
     // With a carry and no match of the stream left, the window holds the carry only.
@@ -1573,7 +1626,7 @@ fn x_redo_windows<const SW: bool>(
     // The end of the last batch that the replay reached (the one-thread loop checks its status
     // at the batch's last query; nothing after its last match changes it).
     if SW {
-        if let Err(error) = sw_batch.end(heaps) {
+        if let Err(error) = sw_batch.pass(None, query_batches, heaps) {
             return Err(x_timing_at_error(timing, &counts, error));
         }
     }
@@ -1652,6 +1705,7 @@ where
         search.timing,
         expand,
         search.sw_errors,
+        search.sw_excluded,
         &mut |lists, heaps, window| {
             let (results, lpt_ran) =
                 x_compute_window::<P, SW>(search, lists, heaps, window, &shared, lpt);
@@ -1933,7 +1987,7 @@ mod tests {
             lists,
             heaps,
             batches,
-            &mut XSwBatch::new(TEST_SW_ERRORS),
+            &mut XSwBatch::new(TEST_SW_ERRORS, &[]),
             &mut None,
         )
     }
@@ -2282,6 +2336,7 @@ mod tests {
             false,
             expand,
             TEST_SW_ERRORS,
+            &[],
             &mut |lists, _, window| {
                 window_seen(lists, window);
                 window
@@ -3139,6 +3194,7 @@ mod tests {
                         timing: false,
                         engine_positives: false,
                         sw_errors: TEST_SW_ERRORS,
+                        sw_excluded: &[],
                     };
                     let shared = || Arc::new(XSharedSubjectRanges::new());
                     for window in &windows {
@@ -3271,6 +3327,7 @@ mod tests {
                         timing: false,
                         engine_positives: false,
                         sw_errors: TEST_SW_ERRORS,
+                        sw_excluded: &[],
                     };
                     let kept = Arc::new(XSharedSubjectRanges::new());
                     let emptied = Arc::new(XSharedSubjectRanges::new());
@@ -3419,6 +3476,19 @@ mod tests {
         batches: &[Range<usize>],
         limits: XWindowLimits,
     ) -> (Result<XCounts>, usize) {
+        sw_drive_excluded(lists, cases, heaps, batches, limits, &[])
+    }
+
+    /// `sw_drive` with the marks of the lists that the fetch excludes (`excluded`, by query and
+    /// place).
+    fn sw_drive_excluded(
+        lists: &mut [Option<BlastpHitList>],
+        cases: &[Vec<SwCase>],
+        heaps: &mut [BlastCompoHeap],
+        batches: &[Range<usize>],
+        limits: XWindowLimits,
+        excluded: &[FetchExcludedMatch],
+    ) -> (Result<XCounts>, usize) {
         let mut computed = 0;
         let counts = x_redo_windows::<true>(
             lists,
@@ -3428,6 +3498,7 @@ mod tests {
             false,
             None,
             TEST_SW_ERRORS,
+            excluded,
             &mut |lists, heaps, window| {
                 window
                     .jobs
@@ -3470,17 +3541,47 @@ mod tests {
         heaps: &mut [BlastCompoHeap],
         batches: &[Range<usize>],
     ) -> Result<()> {
+        sw_one_thread_excluded(lists, cases, heaps, batches, &[])
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3540
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3560-3575
+    /// `sw_one_thread` with the lists that the fetch excludes (`excluded`, by query and place) in
+    /// the stream as NCBI's loop reaches them: each one in its place, its early termination test on
+    /// the heaps as they are there, and, where the test does not hold, the status back to 0. This is
+    /// NCBI's order itself, not the reading after each query's loop that `one_thread_redo` and the
+    /// windows share (`redo_run::query_fetch_excluded_reached`).
+    fn sw_one_thread_excluded(
+        lists: &[Option<BlastpHitList>],
+        cases: &[Vec<SwCase>],
+        heaps: &mut [BlastCompoHeap],
+        batches: &[Range<usize>],
+        excluded: &[FetchExcludedMatch],
+    ) -> Result<()> {
         let mut failed = false;
         for q_idx in 0..lists.len() {
             let batch = batches[q_idx].clone();
             if batch.start == q_idx {
                 failed = false;
             }
+            let mut marks = excluded
+                .iter()
+                .filter(|mark| mark.query == q_idx)
+                .peekable();
+            // Whether NCBI's redo reaches an excluded list there (its early termination test does
+            // not hold), so that the excluded fetch sets the status back to 0.
+            let reached = |mark: &FetchExcludedMatch, heaps: &[BlastCompoHeap]| {
+                !blast_compo_early_termination(mark.best_evalue, &heaps[batch.clone()])
+            };
             if let Some(hit_list) = lists[q_idx].as_ref() {
                 for (position, local_match) in hit_list.hsplist_array[..hit_list.hsplist_count]
                     .iter()
                     .enumerate()
                 {
+                    // The excluded lists before this one (`position` kept lists before each).
+                    while let Some(mark) = marks.next_if(|mark| mark.position <= position) {
+                        failed &= !reached(mark, heaps);
+                    }
                     if local_match.hsps.is_empty()
                         || blast_compo_early_termination(
                             local_match.best_evalue,
@@ -3514,6 +3615,10 @@ mod tests {
                         SwKind::NotAsked => unreachable!(),
                     }
                 }
+            }
+            // The excluded lists after the query's last list.
+            for mark in marks {
+                failed &= !reached(mark, heaps);
             }
             if failed && q_idx + 1 == batch.end {
                 return Err(test_batch_failed(batch.start, &heaps[batch.start]));
@@ -3870,14 +3975,123 @@ mod tests {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3540
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3560-3575
+    /// A list that the fetch excludes (line RG X4-excl) after a failed redo clears the batch's
+    /// failure unless the early termination test ends it there; one before the failed redo does
+    /// not count. The replay reads a query's marks when it passes the query: across a window's
+    /// border (one job per window), at the stream's end, and for a query of the batch without a
+    /// match, before the batch ends; a query of another batch does not count.
+    #[test]
+    fn an_excluded_list_after_a_failed_redo_clears_the_failure_unless_the_redo_ends_early_there() {
+        let one_job = XWindowLimits {
+            jobs: 1,
+            at_risk_jobs: 1,
+        };
+        let one_window = XWindowLimits {
+            jobs: 64,
+            at_risk_jobs: 64,
+        };
+        let mark = |query, position, best_evalue| FetchExcludedMatch {
+            query,
+            position,
+            best_evalue,
+        };
+        let run = |lists: &[Option<BlastpHitList>],
+                   cases: &[Vec<SwCase>],
+                   batches: &[Range<usize>],
+                   marks: &[FetchExcludedMatch],
+                   limits: XWindowLimits| {
+            let mut heaps = heaps_of(lists.len(), 1);
+            let (result, _) = sw_drive_excluded(
+                &mut lists.to_vec(),
+                cases,
+                &mut heaps,
+                batches,
+                limits,
+                marks,
+            );
+            let mut model = heaps_of(lists.len(), 1);
+            let reference = sw_one_thread_excluded(lists, cases, &mut model, batches, marks);
+            let result = result.map(|_| ());
+            let at = format!("{marks:?} {limits:?}");
+            assert_eq!(error_text(&result), error_text(&reference), "{at}");
+            assert_eq!(heap_contents(&heaps), heap_contents(&model), "{at}");
+            error_text(&result).is_some()
+        };
+        // Query 0 alone: three kept redos fill its heap to the cutoff, a failed redo at place 3
+        // (the last match of the first job), and a list at place 4 (E 1.0) that the test ends.
+        let lists = vec![hit_list(vec![
+            list(1, 1e-9, false),
+            list(2, 1e-9, false),
+            list(3, 1e-9, false),
+            list(4, 1e-9, false),
+            list(5, 1.0, false),
+        ])];
+        let kept = sw_case(1e-20, SwKind::Kept);
+        let cases = vec![vec![kept, kept, kept, sw_case(1e-20, SwKind::Failed), kept]];
+        for (marks, fails) in [
+            (vec![], true),
+            // Before the failed redo: it sets the status again.
+            (vec![mark(0, 3, 1e-9)], true),
+            // After it, between the windows of one job: the test does not end it (E 1e-9).
+            (vec![mark(0, 4, 1e-9)], false),
+            // After it, but the test ends it (E 1.0, above 5 times the cutoff of the filled heap).
+            (vec![mark(0, 4, 1.0)], true),
+            // After the last list: read at the stream's end.
+            (vec![mark(0, 5, 1e-9)], false),
+            (vec![mark(0, 4, 1.0), mark(0, 5, 0.001)], false),
+            (vec![mark(0, 2, 1e-9), mark(0, 5, 1.0)], true),
+        ] {
+            for limits in [one_job, one_window] {
+                assert_eq!(
+                    run(&lists, &cases, &alone(1), &marks, limits),
+                    fails,
+                    "{marks:?} {limits:?}"
+                );
+            }
+        }
+        // Batch 0..2: query 0's failed redo, then query 1, whose lists the fetch all excludes (no
+        // match); query 2 in the next batch. Query 1's heap is empty, so the test ends none of its
+        // lists: the batch's failure is cleared before it ends, but not by a list of another batch.
+        let lists = vec![
+            hit_list(vec![list(1, 1e-9, false), list(2, 1e-9, false)]),
+            hit_list(Vec::new()),
+            hit_list(vec![list(3, 1e-9, false)]),
+        ];
+        let cases = vec![
+            vec![kept, sw_case(1e-20, SwKind::Failed)],
+            Vec::new(),
+            vec![kept],
+        ];
+        for (batches, marks, fails) in [
+            (vec![0..2, 0..2, 2..3], vec![], true),
+            (vec![0..2, 0..2, 2..3], vec![mark(1, 0, 1.0)], false),
+            (vec![0..1, 1..2, 2..3], vec![mark(1, 0, 1.0)], true),
+            (vec![0..1, 1..3, 1..3], vec![mark(1, 0, 1.0)], true),
+        ] {
+            for limits in [one_job, one_window] {
+                assert_eq!(
+                    run(&lists, &cases, &batches, &marks, limits),
+                    fails,
+                    "{batches:?} {marks:?} {limits:?}"
+                );
+            }
+        }
+    }
+
     /// The windows of the Smith-Waterman redo give the one-thread loop's heaps and its error (the
     /// failed batch, the endless redo, or none) on random searches: queries in batches, matches
     /// whose first-round tests are certain, deferred and turned, failed and endless redos, early
     /// termination, `-max_target_seqs` 1 to 500, windows of one job up to a few, small caps on
-    /// jobs at risk.
+    /// jobs at risk; in every other search, lists that the fetch excludes at random places, which
+    /// NCBI's loop reaches in its order (`sw_one_thread_excluded`).
     #[test]
     fn smith_waterman_windows_give_the_one_thread_heaps_and_error_on_random_searches() {
         let mut rng = XorShift(0x9e37_79b9_7f4a_7c15);
+        // The excluded lists' own sequence, so that the searches are drawn as without them.
+        let mut mark_rng = XorShift(0x2545_f491_4f6c_dd1d);
+        let mut changed_by_excluded = 0;
         let prelim = [1e-30, 1e-5, 0.001, 0.005, 0.02, 1.0];
         let first_round = [1e-30, 1e-5, ECUTOFF, 0.004, 0.01, 0.5, 2.0];
         let (mut turned, mut continued, mut ended) = (0, 0, 0);
@@ -3931,10 +4145,39 @@ mod tests {
                 jobs: 1 + rng.below(6),
                 at_risk_jobs: 1 + rng.below(3),
             };
+            let mut excluded = Vec::new();
+            if run % 2 == 1 {
+                for (q_idx, hit_list) in lists.iter().enumerate() {
+                    let Some(hit_list) = hit_list else {
+                        continue;
+                    };
+                    let mut places: Vec<usize> = (0..mark_rng.below(3))
+                        .map(|_| mark_rng.below(hit_list.hsplist_count + 1))
+                        .collect();
+                    places.sort_unstable();
+                    excluded.extend(places.into_iter().map(|position| FetchExcludedMatch {
+                        query: q_idx,
+                        position,
+                        best_evalue: prelim[mark_rng.below(prelim.len())],
+                    }));
+                }
+            }
             let mut heaps = heaps_of(queries, heap_threshold);
-            let (result, _) = sw_drive(&mut lists.clone(), &cases, &mut heaps, &batches, limits);
+            let (result, _) = sw_drive_excluded(
+                &mut lists.clone(),
+                &cases,
+                &mut heaps,
+                &batches,
+                limits,
+                &excluded,
+            );
             let mut model = heaps_of(queries, heap_threshold);
-            let reference = sw_one_thread(&lists, &cases, &mut model, &batches);
+            let reference = sw_one_thread_excluded(&lists, &cases, &mut model, &batches, &excluded);
+            if !excluded.is_empty() {
+                let mut unmarked = heaps_of(queries, heap_threshold);
+                let without = sw_one_thread(&lists, &cases, &mut unmarked, &batches);
+                changed_by_excluded += usize::from(error_text(&without) != error_text(&reference));
+            }
             let at = format!("run {run}: {limits:?} threshold {heap_threshold} {batches:?}");
             if let Ok(counts) = &result {
                 turned += counts.turned.expect("the Smith-Waterman counts");
@@ -3956,9 +4199,10 @@ mod tests {
                 && ended > 100
                 && batch_failures > 50
                 && endless > 20
-                && clean > 300,
+                && clean > 300
+                && changed_by_excluded > 20,
             "turned {turned} continued {continued} ended {ended} failed batches {batch_failures} \
-             endless {endless} clean {clean}"
+             endless {endless} clean {clean} changed by excluded lists {changed_by_excluded}"
         );
     }
 
@@ -4055,6 +4299,7 @@ mod tests {
                         timing: false,
                         engine_positives: false,
                         sw_errors: TEST_SW_ERRORS,
+                        sw_excluded: &[],
                     };
                     // The one-thread loop's call with fresh scratch, its heap test answered by
                     // `answer`; and the test's E-value and score, if it was asked.

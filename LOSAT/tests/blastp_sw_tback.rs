@@ -359,7 +359,8 @@ fn x5_a_failure_in_the_redo_comes_before_a_later_batchs_refusal() {
 // a tabular row (outfmt 6) of kind `ncbi` must also write the frozen NCBI stdout. Rows
 // `last.kept.*` and `last.q2.*` keep two matches or more, so above one thread they reach a redo
 // with more than one job: a redo path there that does not read the places of the excluded lists
-// (`RedoInputs::fetch_excluded`) fails or refuses them, where NCBI exits 0.
+// (`RedoInputs::fetch_excluded`) fails or refuses them, where NCBI exits 0. With the switch unset
+// that is the windows of `x_redo_par` (line RG X4-mt), whose replay reads them (`XSwBatch::pass`).
 #[test]
 fn x4excl_rows_end_alike_at_every_thread_count_and_redo_path() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));

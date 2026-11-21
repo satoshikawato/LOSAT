@@ -57,6 +57,14 @@ use crate::utils::matrix::standard_score;
 
 mod culling;
 mod database;
+// The marks of the lists that the redo's fetch excludes and the one-thread loop's reader of a
+// query's marks, which the windows of the parallel redo read too (`x_redo_par.rs`, built where
+// they run).
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+pub(super) use {database::FetchExcludedMatch, redo_run::query_fetch_excluded_reached};
 // The kernel of one subject (`BlastpPrelimKernel::search_subject`): its scan and ungapped
 // extensions, then its gapped half, from the subject's letters to its HSP lists.
 mod prelim_kernel;

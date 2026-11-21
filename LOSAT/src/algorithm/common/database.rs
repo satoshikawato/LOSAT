@@ -1075,8 +1075,11 @@ impl<'a> FetchExcluded<'a> {
 /// no heap insert, so a failed Smith-Waterman redo before it no longer fails the batch; where
 /// the test stops the list, nothing changes. BLASTP's `exclude_fetched` reads them: it removes
 /// those lists and keeps their places for the Smith-Waterman redo's status
-/// (`blastp::blast_engine::database::FetchExcludedMatch`). The other programs remove such lists
-/// with `FetchExcluded::retain`.
+/// (`blastp::blast_engine::database::FetchExcludedMatch`), which both of its readers read with
+/// one function (`blastp::blast_engine::redo_run::query_fetch_excluded_reached`): the one-thread
+/// loop after each query's loop, and the replay of the parallel redo's windows when it passes the
+/// query (`blastp::x_redo_par`, `XSwBatch`). The other programs remove such lists with
+/// `FetchExcluded::retain`.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3540
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3560-3575

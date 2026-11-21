@@ -239,8 +239,9 @@ pub(super) struct RedoInputs<'a, P> {
     pub(super) build_redo_align_params: &'a P,
     /// The marks of the lists that the redo reaches and its fetch excludes, by query and place
     /// (`database::exclude_fetched`; empty without a database or a negative seqid list): only the
-    /// status of the Smith-Waterman redo reads them (`one_thread_redo`); the X-drop redo has no
-    /// status, so its paths read the lists without them.
+    /// status of the Smith-Waterman redo reads them (`one_thread_redo`, and the windows of
+    /// `x_windows_redo`); the X-drop redo has no status, so its paths read the lists without
+    /// them.
     pub(super) fetch_excluded: &'a [super::database::FetchExcludedMatch],
     pub(super) x_win_expand: bool,
     pub(super) ordinary_traceback: bool,
@@ -518,6 +519,7 @@ where
         kappa_query_batches,
         evalue_adjust_contexts,
         build_redo_align_params,
+        fetch_excluded,
         x_win_expand,
         blastp_num_threads,
         timing_enabled,
@@ -546,6 +548,9 @@ where
             batch_failed: sw_batch_failed,
             endless: sw_endless,
         },
+        // The excluded lists of `one_thread_redo`'s Smith-Waterman batches, read with its own
+        // reader (`query_fetch_excluded_reached`) when the replay passes each query.
+        sw_excluded: fetch_excluded,
     };
     // The parallel paths read the expanded lists of all queries (`plan_redo_and_expand_lists`
     // expands them before the paths), or the windows expand the compact lists as they reach them.
@@ -1062,10 +1067,11 @@ fn fetch_excluded_reached(
 /// With no such redo the query changed no heap, and every excluded list goes through it.
 ///
 /// No NCBI counterpart: NCBI tests each list in stream order in its loop. The status this gives
-/// is NCBI's one-thread status of the batch.
+/// is NCBI's one-thread status of the batch. The replay of the windows reads each query's marks
+/// with it too, when it passes the query (`x_redo_par.rs`, `XSwBatch::pass`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3774-3779
-fn query_fetch_excluded_reached(
+pub(in crate::algorithm::blastp) fn query_fetch_excluded_reached(
     marks: &[super::database::FetchExcludedMatch],
     status_position: Option<usize>,
     batch_heaps: &[BlastCompoHeap],

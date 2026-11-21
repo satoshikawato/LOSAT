@@ -434,6 +434,7 @@ fn report_batches(run: &RunReports<'_>, outputs: &mut ReportOutputs<'_>) -> Resu
     // (`ReportOutputs::later_warnings`).
     let keeps_later = outputs.keeps_later_query_warnings();
     let ReportOutputs {
+        other_outfmts,
         formats,
         diagnostics,
         later_warnings,

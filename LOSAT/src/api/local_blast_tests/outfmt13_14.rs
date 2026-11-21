@@ -60,6 +60,7 @@ fn run_local_does_not_write_outfmt_13_and_14() {
         let mut diagnostics = Vec::new();
         let mut sink = Vec::new();
         let mut outputs = ReportOutputs {
+            other_outfmts: &[],
             formats: vec![FormatOutput {
                 outfmt: format,
                 refusal: crate::api::local_blast::FormatRefusal::FailsCall,
@@ -155,6 +156,7 @@ fn run_local_does_not_write_outfmt_13_and_14_in_tblastn_tblastx_and_blastx() {
             let mut diagnostics = Vec::new();
             let mut sink = Vec::new();
             let mut outputs = ReportOutputs {
+                other_outfmts: &[],
                 formats: vec![FormatOutput {
                     outfmt: format,
                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,
@@ -337,6 +339,7 @@ fn run_local_writes_outfmt_13_and_14_to_a_receiver_as_the_command_line_writes_fi
             let mut master = Vec::new();
             let mut diagnostics = Vec::new();
             let mut outputs = ReportOutputs {
+                other_outfmts: &[],
                 formats: vec![FormatOutput {
                     outfmt: format,
                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,

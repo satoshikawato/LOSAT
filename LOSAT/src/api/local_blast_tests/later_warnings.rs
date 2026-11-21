@@ -83,6 +83,7 @@ impl Search {
         let mut later = vec![Vec::new(); formats.len()];
         let mut first = Some(first);
         let mut outputs = ReportOutputs {
+            other_outfmts: &[],
             formats: formats
                 .iter()
                 .zip(sinks.iter_mut())

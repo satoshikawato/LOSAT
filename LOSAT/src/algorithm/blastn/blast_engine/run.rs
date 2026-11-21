@@ -7062,6 +7062,7 @@ pub(crate) fn repeat_search_hits(
     let result = {
         let mut on_hits = |hits| collected.push(hits);
         let mut outputs = ReportOutputs {
+            other_outfmts: &[],
             formats: vec![crate::api::local_blast::FormatOutput {
                 outfmt: "6",
                 refusal: crate::api::local_blast::FormatRefusal::FailsCall,

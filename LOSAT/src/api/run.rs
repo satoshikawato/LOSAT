@@ -897,6 +897,7 @@ pub fn run(
             };
             let result = {
                 let mut outputs = ReportOutputs {
+                    other_outfmts: &[],
                     formats: group
                         .iter()
                         .map(|&position| FormatOutput {
@@ -966,6 +967,7 @@ pub fn run_to_file(
         let mut sink = log.sink(&mut *diagnostics, true);
         let result = {
             let mut outputs = ReportOutputs {
+                other_outfmts: &[],
                 formats: vec![FormatOutput {
                     outfmt,
                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,
@@ -1028,6 +1030,7 @@ fn collect_one(
     let result = {
         let mut on_hits = |hits| collected.push(hits);
         let mut outputs = ReportOutputs {
+            other_outfmts: &[],
             formats: positions
                 .iter()
                 .zip(writers.iter_mut())

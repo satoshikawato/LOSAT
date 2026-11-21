@@ -6163,6 +6163,7 @@ fn search(
         use super::x_query_blocks::{XBlockReport, XBlockSink, XOffsetObserver};
         let reader_warnings = &batches.warnings;
         let ReportOutputs {
+            other_outfmts,
             formats,
             diagnostics,
             later_warnings,
@@ -6359,6 +6360,7 @@ fn search(
                         first_query: block.start,
                     });
                     let mut block_outputs = ReportOutputs {
+                        other_outfmts: &[],
                         formats: sinks
                             .iter_mut()
                             .zip(&outfmts)

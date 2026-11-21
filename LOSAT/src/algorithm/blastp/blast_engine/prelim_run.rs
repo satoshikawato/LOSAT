@@ -721,3 +721,65 @@ where
         rps_unlisted,
     })
 }
+
+/// The close of the call's stream after its preliminary stage (`run_call`, after a split batch's
+/// chunks merged their lists into the batch's).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1839-1846
+/// `ADAPTIVE_CBS`: the stream's close trims each query's preliminary hit list
+/// (`core::blast_hspstream`) before the subjects of the lists are read. RPSBLAST's engine
+/// trims each volume's lists itself (`rps_search::engine`); PSIBLAST's traceback size is its
+/// preliminary size, 1500 or more here, so it never trims.
+pub(super) fn close_stream(
+    args: &ResolvedBlastpArgs,
+    preliminary_hit_lists: &mut [Option<BlastpHitList>],
+    x_compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
+) {
+    if args.rps_search.is_none()
+        && crate::core::blast_hspstream::adaptive_cbs_close(
+            args.comp_based_stats.is_enabled(),
+            args.traceback_hitlist_size(),
+        )
+    {
+        let hitlist_size = args.traceback_hitlist_size();
+        for hit_list in preliminary_hit_lists.iter_mut().flatten() {
+            hit_list.cbs_close_trim(hitlist_size);
+        }
+        for hit_list in x_compact_hit_lists.iter_mut().flatten() {
+            hit_list.cbs_close_trim(hitlist_size);
+        }
+    }
+}
+
+/// The lists in the order in which the redo reads them, before a database's subjects are
+/// listed: the lists that its fetch excludes keep their place in that order as marks
+/// (`database::exclude_fetched`, line RG item X4-excl). The sort's last key, the subject, gives
+/// the same order by ordinal id as by rank (ranks are the listed ordinal ids in order).
+pub(super) fn sort_for_redo(
+    args: &ResolvedBlastpArgs,
+    preliminary_hit_lists: &mut [Option<BlastpHitList>],
+    x_compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
+    timing: Option<&BlastpTiming>,
+) {
+    let merge_sort_start = blastp_timing_start(timing.is_some());
+    // (rpsblast: the RPS engine sorted its lists, `rps_search::engine::finish_volume_list`; over
+    // several volumes the merged lists keep `s_MergeAlignSet`'s order, which NCBI sorts nowhere.)
+    if args.rps_search.is_none() {
+        for hit_list_opt in preliminary_hit_lists.iter_mut() {
+            if let Some(hit_list) = hit_list_opt.as_mut() {
+                hit_list.sort_by_evalue();
+            }
+        }
+        // The same sort of the compact lists.
+        for hit_list in x_compact_hit_lists.iter_mut().flatten() {
+            hit_list.sort_by_evalue();
+        }
+    }
+    if let Some(timing) = timing {
+        BlastpTiming::record_call(
+            &timing.prelim_merge_sort_ns,
+            &timing.prelim_merge_sort_calls,
+            merge_sort_start,
+        );
+    }
+}

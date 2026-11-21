@@ -337,6 +337,17 @@ pub fn segmasker<'py>(
     run_tool(py, argv, input, api::run_segmasker)
 }
 
+/// `windowmasker` with the command line's words: `input` is its standard input (`-in -`, and
+/// without `-in`). Returns what it writes to standard output and to standard error.
+#[pyfunction]
+pub fn windowmasker<'py>(
+    py: Python<'py>,
+    argv: Vec<String>,
+    input: PyBackedBytes,
+) -> PyResult<ToolBytes<'py>> {
+    run_tool(py, argv, input, api::run_windowmasker)
+}
+
 /// `convert2blastmask` with the command line's words: `input` is its standard input (`-in -`,
 /// and without `-in`). Returns what it writes to standard output and to standard error.
 #[pyfunction]
@@ -346,6 +357,18 @@ pub fn convert2blastmask<'py>(
     input: PyBackedBytes,
 ) -> PyResult<ToolBytes<'py>> {
     run_tool(py, argv, input, api::run_convert2blastmask)
+}
+
+/// `makembindex` with the command line's words: `input` is its standard input (FASTA input of
+/// `-old_style_index true` without `-input`). Returns what it writes to standard output and to
+/// standard error; the index files are written where the command line writes them.
+#[pyfunction]
+pub fn makembindex<'py>(
+    py: Python<'py>,
+    argv: Vec<String>,
+    input: PyBackedBytes,
+) -> PyResult<ToolBytes<'py>> {
+    run_tool(py, argv, input, api::run_makembindex)
 }
 
 /// `run` without reports.

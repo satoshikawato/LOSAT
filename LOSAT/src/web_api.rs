@@ -266,6 +266,8 @@ fn parse_blastn_args(
         subject_loc: None,
         subject_besthit: false,
         culling_limit: None,
+        best_hit_overhang: None,
+        best_hit_score_edge: None,
         // The frozen web ABI v1 has no `-ungapped`, X-drops, `-no_greedy`, `-window_size`,
         // `-off_diagonal_range` or `-min_raw_gapped_score` (they are refused below as unknown
         // flags).

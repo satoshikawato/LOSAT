@@ -107,6 +107,9 @@ mod report_prep;
 // The reports of a call's final hits, one function per arm of the loop over the formats
 // (`run_call`).
 mod report_write;
+// An ungapped HSP of length 0 in the final hit lists: outfmt 1 to 4's refusal and `-subject`'s
+// exception (`run_call`).
+mod empty_alignments;
 
 use super::alignment::build_alignment_view_with_matrix;
 use super::args::{
@@ -9903,11 +9906,6 @@ fn run_call(
             }
         }
     }
-    // An ungapped search's HSP of length 0 that the cuts above left in a shown list: its report
-    // is not ported yet (`traceback::refuse_empty_alignments`).
-    if args.ungapped {
-        traceback::refuse_empty_alignments(&hit_lists)?;
-    }
     // NCBI's Seq-aligns of the hit lists (`LocalBlastResults2SeqAlign` below): none for a
     // subject that the seqid list keeps without a definition line (line DBID item lineless).
     // psiblast's lists are cut to the preliminary size here; the formatter's cut to
@@ -10148,6 +10146,13 @@ fn run_call(
         &mut query_warning_lines,
         &mut psiblast_pssms,
     )?;
+    // An ungapped HSP of length 0 at the first letter of a `-subject`'s searched part ends the call
+    // with NCBI's exception after the formats' prologs (`empty_alignments`).
+    let subject_start_exception = empty_alignments::subject_start_exception(
+        &hit_lists,
+        ranges.subject_placements,
+        database.is_none(),
+    );
     let unreportable = report_prep::refuse_unreportable(&prep, &rows_of);
     // Outfmt 0's refusal of a query that is also a subject and has masks, each outfmt 0 output's
     // (`believed::refuse_shared_masks_in`; the query-anchored sections draw these masks as NCBI
@@ -10460,6 +10465,7 @@ fn run_call(
         xml_only_xml2,
         x_rows_pool,
         blastp_parallel_pool,
+        prolog_only: subject_start_exception.is_some(),
     };
     for (format_index, (format, &outfmt)) in outputs
         .formats
@@ -10539,6 +10545,15 @@ fn run_call(
             }
         });
         let format_result: Result<()> = match outfmt {
+            _ if report_view.prolog_only => empty_alignments::write_exception_prolog(
+                &report_view,
+                outfmt,
+                format,
+                &mut warnings,
+                &mut probe,
+                &pairwise_shown,
+                &rows_of,
+            ),
             BlastpReport::Seqalign(serial) => {
                 report_write::write_seqalign(&report_view, serial, format, &mut warnings)
             }
@@ -10603,6 +10618,10 @@ fn run_call(
     // Diagnostic (LOSAT_TIMING): the same interval for the common line (utils/xtiming.rs): the
     // formatting and writing of every report, after the search. No NCBI counterpart.
     crate::utils::xtiming::add(crate::utils::xtiming::Phase::Output, output_format_start);
+    if let Some(exception) = subject_start_exception {
+        output_result =
+            output_result.and(Err(crate::cli::NativeError::exception(&exception).into()));
+    }
     output_result?;
     pssm_posts_after.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
     // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:319-321

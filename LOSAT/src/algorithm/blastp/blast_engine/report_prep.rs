@@ -716,6 +716,36 @@ pub(super) fn refuse_unreportable(
         }
         _ => None,
     });
+    // Outfmt 1 to 4 of an `-ungapped` search that shows an HSP of length 0: the merge of NCBI's
+    // query-anchored section can crash on it (`empty_alignments::refuse_merge_frees`), unless
+    // the search ends with an exception first (`-subject`'s mapper).
+    if let Some(view) = anchored_view {
+        let parsed = listed_titles
+            .as_ref()
+            .map_or(&[][..], |titles| titles.parsed.as_slice());
+        super::empty_alignments::refuse_merge_frees(
+            view,
+            args.sort,
+            args.num_alignments,
+            hit_lists,
+            pairwise_hits.as_deref().map(Vec::as_slice),
+            rows_of,
+            subject_titles,
+            &|previous, s_idx| {
+                crate::report::db_subject::rank_joins_as_copy(
+                    parsed,
+                    previous as usize,
+                    s_idx as usize,
+                )
+            },
+            super::empty_alignments::subject_start_exception(
+                hit_lists,
+                ranges.subject_placements,
+                database.is_none(),
+            )
+            .is_some(),
+        )?;
+    }
     if let (Some(view), true, None) = (anchored_view, args.parse_deflines, database) {
         for (q_idx, record) in query_records.iter().enumerate() {
             if record.believed().is_none_or(|ids| ids.shared.is_none()) {

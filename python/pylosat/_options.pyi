@@ -104,6 +104,10 @@ class BlastnOptions(TypedDict, total=False):
     culling_limit: int
     """If the query range of a hit is enveloped by that of at least this many higher-scoring
     hits, delete the hit (default: 0, no culling)"""
+    best_hit_overhang: float
+    """Best Hit algorithm overhang value (recommended value: 0.1)"""
+    best_hit_score_edge: float
+    """Best Hit algorithm score edge value (recommended value: 0.1)"""
     ungapped: bool
     """Perform ungapped alignment only"""
     xdrop_ungap: float

@@ -753,7 +753,11 @@ fn a_taxonomy_file_that_throws_is_a_refusal_that_the_prefetch_alone_catches() {
         (&["15"][..], false),
     ] {
         assert_eq!(
-            FormatThrow::none_reads_outfmts(outfmts.iter().copied(), Program::Blastp),
+            FormatThrow::none_reads_outfmts(
+                outfmts.iter().copied(),
+                Program::Blastp,
+                crate::report::archive::options::RequestKind::Blastp,
+            ),
             none,
             "{outfmts:?}"
         );

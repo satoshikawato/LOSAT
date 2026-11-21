@@ -998,7 +998,7 @@ fn a_taxonomy_file_that_does_not_open_throws_at_every_lookup() {
                 assert_eq!(error.ncbi_message(), None, "{file}");
                 assert!(error.ncbi_exception().is_some(), "{file}");
                 assert_eq!(
-                    error.ncbi_exception_message(),
+                    error.ncbi_request_message(),
                     Some(message.into_bytes()),
                     "{file}"
                 );

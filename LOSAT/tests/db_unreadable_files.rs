@@ -181,7 +181,7 @@ fn run(dir: &Path, set: &str, row: &[String]) -> (String, String, i32) {
 // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:5893-5947
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:185-203
 // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:888-895
-// (cited at `seqdb::SeqDbError::memory_file_exception`, `SeqDbError::ncbi_exception_message`
+// (cited at `seqdb::SeqDbError::memory_file_exception`, `SeqDbError::ncbi_request_message`
 // and `seqdb::filter::lookup_file_error`).
 #[test]
 fn database_files_that_cannot_be_read_give_ncbis_bytes() {

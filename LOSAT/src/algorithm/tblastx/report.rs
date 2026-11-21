@@ -313,10 +313,11 @@ pub(crate) enum SubjectLetters<'a> {
     },
     /// The reported sequences of a `-db` search by rank (`database::ReportedSubjects`): their
     /// lengths, and their stores, read where their batches were reported (empty when no report
-    /// reads letters); a row reads the letters of its HSP's codons as `Stored`.
+    /// reads letters); a row reads the letters of its HSP's codons as `Stored`, the engine's
+    /// counts those of the re-evaluation (`database::ReportedStore`).
     Database {
         lengths: &'a [u32],
-        stores: &'a [std::sync::Arc<PackedNucleotide>],
+        stores: &'a [super::database::ReportedStore],
     },
 }
 
@@ -343,7 +344,7 @@ impl<'a> SubjectLetters<'a> {
                 return;
             }
             Self::Stored { stores, ordinals } => &stores[ordinals[s_idx] as usize],
-            Self::Database { stores, .. } => &*stores[s_idx],
+            Self::Database { stores, .. } => &*stores[s_idx].shown,
         };
         let mut letters = Vec::new();
         store.letters_into(from, to, &mut letters);
@@ -362,12 +363,28 @@ impl<'a> SubjectLetters<'a> {
             Self::Stored { stores, ordinals } => {
                 stored_letters(&stores[ordinals[s_idx] as usize], hsp, window)
             }
-            Self::Database { stores, .. } => stored_letters(&stores[s_idx], hsp, window),
+            Self::Database { stores, .. } => stored_letters(&stores[s_idx].shown, hsp, window),
         }
     }
 
-    /// The engine counts of `hsp` (`hsp_engine_counts`) against its subject; `window` is the
-    /// buffer of a stored subject's letters.
+    /// `letters` as the search's re-evaluation read them, for the engine's counts: a database
+    /// sequence's re-evaluated store (`database::ReportedStore::engine`, `B` over the masked
+    /// bases of `-db_hard_mask`), the rows' letters otherwise.
+    fn engine_letters<'w>(&self, hsp: &TblastxHsp, window: &'w mut Vec<u8>) -> (&'w [u8], usize)
+    where
+        'a: 'w,
+    {
+        match self {
+            Self::Database { stores, .. } => {
+                stored_letters(&stores[hsp.hit.s_idx as usize].engine, hsp, window)
+            }
+            Self::Records(_) | Self::Stored { .. } => self.letters(hsp, window),
+        }
+    }
+
+    /// The engine counts of `hsp` (`hsp_engine_counts`) against its subject's letters as the
+    /// re-evaluation read them (`engine_letters`); `window` is the buffer of a stored subject's
+    /// letters.
     fn engine_counts<S: TbxScore>(
         &self,
         hsp: &TblastxHsp,
@@ -377,7 +394,7 @@ impl<'a> SubjectLetters<'a> {
         window: &mut Vec<u8>,
         sc: S,
     ) -> (usize, usize) {
-        let (subject, subject_first) = self.letters(hsp, window);
+        let (subject, subject_first) = self.engine_letters(hsp, window);
         hsp_engine_counts(hsp, query, subject, subject_first, query_code, db_code, sc)
     }
 
@@ -473,8 +490,8 @@ fn stored_letters<'w>(
 }
 
 /// The engine's identities of `hsp` (`SubjectLetters::engine_identities`) against `store`, its
-/// subject's packed letters: the batch loop's, which names the subjects by ordinal id before the
-/// reports name them by rank.
+/// subject's packed letters as the re-evaluation read them (`database::ReportedStore::engine`):
+/// the batch loop's, which names the subjects by ordinal id before the reports name them by rank.
 pub(crate) fn stored_engine_identities(
     hsp: &TblastxHsp,
     store: &PackedNucleotide,
@@ -623,8 +640,9 @@ fn hsp_engine_counts<S: TbxScore>(
 /// The engine counts of the Seq-aligns of `hits` (outfmt 8, 12), by HSP index: the engine's
 /// `num_ident` (the search's count, which `set_displayed_identities` replaces by the display
 /// count; read before it) and its `num_positives`, which the search does not count
-/// (`hsp_engine_counts`: the same letters give the same identities, checked in debug builds).
-/// Made only when a Seq-align format is requested.
+/// (`hsp_engine_counts` on the letters the re-evaluation read, `SubjectLetters::engine_letters`,
+/// with `B` over the masked bases of `-db_hard_mask`: the same letters give the same identities,
+/// checked in debug builds). Made only when a Seq-align format is requested.
 pub(crate) fn engine_counts<S: TbxScore>(
     hits: &[TblastxHsp],
     queries: &[FastaRecord],
@@ -1425,7 +1443,7 @@ impl TblastxOutputFormat {
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2800-2803
 ///
 /// A tabular format with a field list or a delimiter, and every outfmt 10 and 20, is the custom
-/// tabular report (`report::tabular::TabularSpec::of`); the default outfmt 6 and 7 (the `std`
+/// tabular report (`report::tabular::TabularSpec::of_app`); the default outfmt 6 and 7 (the `std`
 /// fields with a tab) are `Tabular` and `TabularWithComments`.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:770-786
@@ -1436,7 +1454,13 @@ pub(crate) fn output_format(outfmt: &str) -> TblastxOutputFormat {
     if let Ok(choice) = &choice {
         if choice.custom() || matches!(choice.number, 10 | 18 | 20) {
             if let Some(spec) = crate::blastinput::app::ReportFormat::from_number(choice.number)
-                .and_then(|format| crate::report::tabular::TabularSpec::of(format, choice))
+                .and_then(|format| {
+                    crate::report::tabular::TabularSpec::of_app(
+                        format,
+                        choice,
+                        crate::report::archive::options::RequestKind::Tblastx,
+                    )
+                })
             {
                 return TblastxOutputFormat::CustomTabular(spec.intern());
             }

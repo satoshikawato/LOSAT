@@ -353,10 +353,10 @@ def main():
     # through a wrapper that starts the command's runner in the place of the binary, as the psiblast rows above.
     # Then two runs that append to one log file, the second with a warning and an error between the log's lines:
     # each run's stdout, stderr and exit status, and the log file's bytes without the lines of the time and the
-    # path (dropin_corpus.report_without_time), must be the native command's. LOSAT writes the log through the
-    # open file of the diagnostics (LOSAT/src/writedb/makeblastdb.rs `log_of`); before, it wrote through a second
-    # handle of it, which WASI cannot make, and every such run stopped with 'Argument "logfile". File is not
-    # accessible'.
+    # path (dropin_corpus.report_without_time), must be the native command's. LOSAT opens the log a second time
+    # under the name as written, beside the diagnostics' file (LOSAT/src/writedb/makeblastdb.rs `log_of`, line WQA's
+    # D11 round 2, 2026-11-20); a copy of the diagnostics' handle (`try_clone`), which WASI cannot make, stopped
+    # every such run with 'Argument "logfile". File is not accessible'.
     import dropin_corpus
     logfile_rows = [row["row_id"] for row in dropin_corpus.read_manifest()[1]
                     if shlex.split(row["command"])[0] == "makeblastdb" and "-logfile" in shlex.split(row["command"])]

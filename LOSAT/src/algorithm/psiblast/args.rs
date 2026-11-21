@@ -309,7 +309,11 @@ impl PsiblastArgs {
         // input PSSM (item PS5b), and a range of the query (`-query_loc`) runs them as NCBI does:
         // the later rounds search the range with the PSSM of the whole record
         // (`PsiSearch::from_engine`, series Q, Q4a).
-        Self::check_outfmt(&self.outfmt)?;
+        Self::check_outfmt(
+            &self.outfmt,
+            self.out.as_deref(),
+            self.export_search_strategy.is_some(),
+        )?;
         // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:246-248 (cited at
         // `in_pssm_files`: the loop writes the PSSM of each round at its start, the input PSSM of
         // `-in_pssm` in round 1)
@@ -329,6 +333,8 @@ impl PsiblastArgs {
             db: self.db,
             // blastp's database filters (line DI-8), which every round searches with.
             db_filter: self.db_filter,
+            // psiblast has no database masks (NCBI's unknown arguments).
+            db_mask: Default::default(),
             dbsize: self.dbsize,
             show_gis: self.show_gis,
             parse_deflines: self.parse_deflines,
@@ -453,13 +459,27 @@ impl PsiblastArgs {
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2744-2748
     /// NCBI parses `-outfmt` before the option handlers; its own errors come from that parse
     /// and from blastp's (`run`). The formats that NCBI runs and LOSAT's psiblast does not
-    /// write yet are refused here. The tabular reports with a field list, and outfmt 10 and
-    /// 20, are blastp's (`blastp::tabular`), without a custom delimiter, which psiblast's
-    /// formatter does not get (psiblast_app.cpp:482-505, `blast_engine.rs` `run`).
-    pub fn check_outfmt(outfmt: &str) -> Result<()> {
-        let choice = crate::blastinput::app::parse_formatting_string(outfmt)?;
-        if let Some(format) = crate::blastinput::app::ReportFormat::from_number(choice.number) {
-            use crate::blastinput::app::ReportFormat;
+    /// write yet are refused here, with `-out` `out`, but a value that NCBI refuses itself later
+    /// (`app::ncbi_refuses_format`: outfmt 17, a custom delimiter that the field list uses,
+    /// outfmt 13 and 14 without a file name) goes on to NCBI's error at its place (blastp's).
+    /// The tabular reports with a field list, and outfmt 10 and 20, are blastp's
+    /// (`blastp::tabular`), without a custom delimiter, which psiblast's formatter does not get
+    /// (psiblast_app.cpp:482-505, `report::tabular::TabularSpec::of_app`). `strategy`: the run
+    /// writes a search strategy file (`-export_search_strategy`), before which NCBI reads no
+    /// `-outfmt`.
+    pub fn check_outfmt(outfmt: &str, out: Option<&std::path::Path>, strategy: bool) -> Result<()> {
+        use crate::blastinput::app::{Program, ReportFormat};
+        // A value not read yet (`EarlyFormat::Deferred`) is the formatting handler's.
+        let Some(choice) = crate::blastinput::app::early_format_choice(outfmt, strategy)?
+            .parsed()
+            .cloned()
+        else {
+            return Ok(());
+        };
+        if crate::blastinput::app::ncbi_refuses_format(&choice, Program::Blastp, out) {
+            return Ok(());
+        }
+        if let Some(format) = ReportFormat::from_number(choice.number) {
             if !matches!(
                 format,
                 ReportFormat::Pairwise
@@ -467,7 +487,6 @@ impl PsiblastArgs {
                     | ReportFormat::TabularWithComments
                     | ReportFormat::CommaSeparatedValues
                     | ReportFormat::CommaSeparatedValuesWithHeader
-                    | ReportFormat::Sam
             ) {
                 bail!(
                     "output format {} is not supported by LOSAT's PSIBLAST",

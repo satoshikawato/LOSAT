@@ -19,11 +19,13 @@ pub enum WindowMasker<'a> {
 }
 
 /// The filter string of a search: `dust` and `seg` are the options' (level, window, linker)
-/// and (window, locut, hicut) when the filter is on, `window_masker` the window masker option,
-/// `mask_at_hash` whether the filtering is applied at hashing (soft masking).
+/// and (window, locut, hicut) when the filter is on, `repeats` the database of blastn's
+/// `-filtering_db`, `window_masker` the window masker option, `mask_at_hash` whether the
+/// filtering is applied at hashing (soft masking).
 pub fn filter_string(
     dust: Option<(i32, i32, i32)>,
     seg: Option<(i32, f64, f64)>,
+    repeats: Option<&str>,
     window_masker: Option<WindowMasker<'_>>,
     mask_at_hash: bool,
 ) -> Vec<u8> {
@@ -47,6 +49,13 @@ pub fn filter_string(
                 glibc_fixed1(seg.2)
             )));
         }
+    }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:371-388 (the command
+    // line always gives the database: `R -d <name>;`, never the plain `R;`.)
+    if let Some(database) = repeats {
+        text.push_str("R -d ");
+        text.push_str(database);
+        text.push(';');
     }
     match window_masker {
         Some(WindowMasker::Taxid(taxid)) if taxid != 0 => {

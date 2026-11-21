@@ -61,9 +61,12 @@ impl ListedSubjects {
     }
 
     /// The subjects as the redo reads them: the database by rank.
+    /// `hard_mask`: the algorithm of `-db_hard_mask`, whose masks the redo's reads write `X`
+    /// over (`XDbSubjects::mask_hard`).
     pub(in crate::algorithm::blastp::blast_engine) fn redo_subjects<'a>(
         &'a self,
         database: &'a BlastpDatabase,
+        hard_mask: Option<i32>,
     ) -> XRedoSubjects<'a> {
         XRedoSubjects::Database(XDbSubjects {
             db: &database.db,
@@ -71,6 +74,7 @@ impl ListedSubjects {
             lengths: &self.x_lengths,
             recounted: &self.x_recounted,
             program: database.program,
+            hard_mask,
         })
     }
 

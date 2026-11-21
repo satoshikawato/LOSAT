@@ -714,6 +714,13 @@ fn run_local_entry(
                 args.window_masker_registry = Some(settings.window_masker_registry);
                 args.window_masker_counts = Some(Arc::new(crate::utils::winmask::FileCounts));
             }
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/repeats_filter_cxx.cpp:368-372
+            // The database of `-filtering_db` is looked up as the database of `-db` (the call's
+            // settings), by the repeat search of each query batch.
+            if args.filtering_db.is_some() {
+                let settings = start.settings(&mut *outputs.diagnostics)?;
+                args.resolve_repeat_filter(&settings);
+            }
             run_local_blastn(args, query, subject, outputs)
         }
         Commands::Tblastx(mut args) => {

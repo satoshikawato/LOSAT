@@ -1,10 +1,14 @@
 use super::*;
 
 fn chunks(masks: &[(u32, u32)], length: usize) -> Vec<HardChunk> {
+    chunks_of(masks, length, true)
+}
+
+fn chunks_of(masks: &[(u32, u32)], length: usize, nucleotide: bool) -> Vec<HardChunk> {
     let mut ranges = Vec::new();
     complement_masks(masks, length, &mut ranges);
     let mut split = HardSplitState::default();
-    split.start(length, ranges);
+    split.start(length, ranges, nucleotide);
     std::iter::from_fn(|| split.next_chunk(DBSEQ_CHUNK_OVERLAP)).collect()
 }
 
@@ -40,4 +44,28 @@ fn hard_chunks_name_their_range_and_the_overlap_read_past_the_list() {
             (5_000_900, 299_100, 1, 100, true),
         ]
     );
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:221-276, 578-584 (cited
+// at `HardSplitState::next_chunk`)
+// A protein program's chunks start at their hard range's left (`residual` 0), so the overlap
+// that the merge after a chunk reads is the next range's left against that offset; the first
+// mask running to the end takes the "no chunking" branch for the chunk before it.
+#[test]
+fn protein_chunks_start_at_their_range() {
+    let found = chunks_of(&[(150, 190)], 400, false);
+    assert_eq!(
+        found
+            .iter()
+            .map(|c| (c.offset, c.length, c.residual, c.range, c.overlap))
+            .collect::<Vec<_>>(),
+        [(0, 150, 0, 0, 100), (190, 210, 0, 1, 100)]
+    );
+    assert!(!found[0].full_range && !found[1].full_range);
+    let found = chunks_of(&[(300, 400)], 400, false);
+    assert_eq!(found.len(), 1);
+    assert!(found[0].full_range && found[0].length == 300);
+    let found = chunks_of(&[(0, 400)], 400, false);
+    assert_eq!(found.len(), 1);
+    assert!(found[0].full_range && found[0].length == 0);
 }

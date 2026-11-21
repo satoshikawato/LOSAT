@@ -82,22 +82,25 @@ impl BlastxDatabase {
     /// with the command line's errors.
     #[cfg(test)]
     pub(crate) fn open(name: &str, settings: &ApplicationSettings) -> Result<Self> {
-        Self::open_restricted(name, settings, None, &mut std::io::sink(), PROGRAM)
+        Self::open_restricted(name, settings, None, None, &mut std::io::sink(), PROGRAM)
     }
 
     /// `open` with the database restricted to the taxid or seqid list `list` of the command
-    /// line (`shared::restrict_database`, whose warnings go to `diagnostics`).
+    /// line, and with the id of the database mask `mask` checked (`-db_soft_mask`,
+    /// `-db_hard_mask`; series NP, M4b) (`shared::restrict_database`, whose warnings go to
+    /// `diagnostics`).
     pub(crate) fn open_restricted(
         name: &str,
         settings: &ApplicationSettings,
         list: Option<&crate::seqdb::DbList>,
+        mask: Option<&crate::blastinput::db_mask::DbMaskOption>,
         diagnostics: &mut dyn std::io::Write,
         program: &'static str,
     ) -> Result<Self> {
         let mut db = shared::open_database(name, SeqType::Protein, settings, program)?;
         // A database with parsed Seq-ids is read (line DBID, ID2a).
         let parsed_seqids =
-            shared::restrict_database(&mut db, name, list, None, diagnostics, settings, program)?;
+            shared::restrict_database(&mut db, name, list, mask, diagnostics, settings, program)?;
         Ok(Self {
             db,
             name: name.to_string(),
@@ -190,6 +193,51 @@ impl BlastxDatabase {
     /// What the `Database:` lines of outfmt 0 show (title, date, real totals).
     pub(crate) fn pairwise_database(&self) -> PairwiseDatabase {
         shared::pairwise_database(&self.db)
+    }
+
+    /// `pairwise_database` of a search masked with `mask` (`None`: not masked): each name's
+    /// algorithm, which the `Masked using:` lines show (`shared::pairwise_database_masked`).
+    pub(crate) fn pairwise_database_masked(
+        &self,
+        mask: Option<&crate::blastinput::db_mask::ResolvedMask>,
+    ) -> PairwiseDatabase {
+        shared::pairwise_database_masked(&self.db, mask.map(|mask| mask.shown.as_slice()))
+    }
+
+    /// The formatter's step of the database masking `option` (`shared::resolve_database_masking`;
+    /// series NP, M4b): its warning goes to `diagnostics` (as one message of the archive
+    /// `archive`), and the program options to `archive` and `strategy`.
+    pub(crate) fn resolve_mask_option(
+        &self,
+        option: &crate::blastinput::db_mask::DbMaskOption,
+        archive: Option<&crate::report::archive::ArchiveHandle>,
+        strategy: Option<&crate::report::archive::strategy::StrategyExport>,
+        diagnostics: &mut dyn std::io::Write,
+    ) -> Result<Option<crate::blastinput::db_mask::ResolvedMask>> {
+        shared::resolve_database_masking(
+            &self.db,
+            &self.name,
+            option,
+            self.program,
+            archive,
+            strategy,
+            &mut |text| match archive {
+                Some(handle) => handle.write_warning(diagnostics, text),
+                None => diagnostics.write_all(text),
+            },
+        )
+    }
+
+    /// LOSAT's refusals of the search masked with `mask` (`ResolvedMask::check_losat_limits`).
+    pub(crate) fn check_mask_limits(
+        &self,
+        mask: &crate::blastinput::db_mask::ResolvedMask,
+    ) -> Result<()> {
+        mask.check_losat_limits(
+            &self.db,
+            self.program,
+            crate::blastinput::db_mask::HardScan::Protein,
+        )
     }
 
     // A database without sequences (makeblastdb builds none; a volume whose index holds no
@@ -351,6 +399,9 @@ pub(crate) struct ReportedSubjects {
     /// by query ordinal, where the format's writer places them at the reads
     /// (`report::query_warnings::ReadCursor`; `ShownSubjects::query_reads`).
     query_reads: std::collections::BTreeMap<usize, crate::report::query_warnings::QueryReads>,
+    /// `-db_soft_mask` and `-db_hard_mask` with a pairwise report: the stored masks of the
+    /// search's algorithm of each rank (`read_db_masks`); `None` otherwise.
+    db_masks: Option<Vec<Vec<(u32, u32)>>>,
 }
 
 /// The values of a custom tabular report's fields that read more of the reported sequences than
@@ -1159,6 +1210,54 @@ impl ReportedSubjects {
     /// The records by rank.
     pub(crate) fn records(&self) -> &[FastaRecord] {
         &self.records
+    }
+
+    /// With `-db_soft_mask` or `-db_hard_mask` of the algorithm `algo_id` and a pairwise report:
+    /// the stored masks of each rank, which the rows show (`shown_db_masks`). The records'
+    /// letters stay those stored.
+    #[cold]
+    #[inline(never)]
+    pub(crate) fn read_db_masks(&mut self, database: &BlastxDatabase, algo_id: i32) -> Result<()> {
+        let mut reader = crate::algorithm::common::db_mask_search::SubjectMasks::with_window(1);
+        let mut masks = Vec::with_capacity(self.ordinals.len());
+        for &ordinal in &self.ordinals {
+            masks.push(
+                reader
+                    .of(
+                        &database.db,
+                        ordinal,
+                        algo_id,
+                        shared::database_error_of,
+                        database.program,
+                    )?
+                    .to_vec(),
+            );
+        }
+        self.db_masks = Some(masks);
+        Ok(())
+    }
+
+    /// The subject masks that the pairwise rows `hits` show in a search with `-db_soft_mask` or
+    /// `-db_hard_mask` (`read_db_masks`), by (query, rank), inclusive, by NCBI's Seq-id
+    /// (`db_mask_search::shown_db_subject_masks`); `None` for a search without them.
+    #[cold]
+    #[inline(never)]
+    pub(crate) fn shown_db_masks(
+        &self,
+        hits: &[crate::report::pairwise::PairwiseHit],
+    ) -> Option<std::collections::HashMap<(u32, u32), Vec<(i32, i32)>>> {
+        use crate::algorithm::common::db_mask_search as db_mask;
+        let masks = self.db_masks.as_ref()?;
+        Some(db_mask::shown_db_subject_masks(
+            hits,
+            |rank| masks.get(rank as usize).map(Vec::as_slice),
+            |rank| {
+                db_mask::subject_id_keys(
+                    self.parsed_subject(rank as usize),
+                    self.oid(rank as usize),
+                )
+            },
+        ))
     }
 
     /// The ordinal id of rank `rank`.

@@ -362,7 +362,7 @@ fn ncbi_checks_and_losat_limits_are_explicit() {
         assert!(parse(extra).is_err(), "{extra:?}");
     }
     for extra in [
-        &["-db_soft_mask", "1"][..],
+        &["-gilist", "ids.gil"][..],
         &["-remote"],
         &["-use_sw_tback"],
     ] {

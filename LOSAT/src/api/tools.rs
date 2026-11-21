@@ -1,7 +1,8 @@
 //! The tools of the command line besides the searches: `makeblastdb` builds a BLAST database,
 //! `blastdbcmd` reads one, `dustmasker` masks the low-complexity regions of nucleotide
-//! sequences and `segmasker` those of protein sequences, and `convert2blastmask` turns the lower
-//! case letters of FASTA input into masking information. They take the command line's words,
+//! sequences and `segmasker` those of protein sequences, `convert2blastmask` turns the lower
+//! case letters of FASTA input into masking information, and `makembindex` writes the megablast
+//! index of a BLAST database or of FASTA input. They take the command line's words,
 //! read the caller's reader where the command line reads its standard input, and write what it
 //! writes, to the caller's writers; none touches the process's standard streams.
 //!
@@ -42,6 +43,7 @@
 //!     return CConvert2BlastMaskApplication().AppMain(argc, argv);
 //! }
 //! ```
+//! NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/makeindex/main.cpp:51-54
 #![warn(missing_docs, unused)]
 
 use std::ffi::OsString;
@@ -178,6 +180,28 @@ pub fn run_convert2blastmask(
         bytes: Vec::new(),
     };
     let status = crate::convert2blastmask::run_with(&words, input, output, &mut recorded);
+    outcome(status, recorded.bytes)
+}
+
+/// Runs `makembindex` with the words after the program name, as on the command line: as
+/// [`run_dustmasker`], for the index of a BLAST database (`-input`) or of FASTA input
+/// (`-old_style_index true -iformat fasta`). `input` is what the command line reads as standard
+/// input (FASTA input without `-input`), what it writes to standard output (`-show_filters`)
+/// goes to `output`, what it writes to standard error (the `creating ...` lines too) to
+/// `diagnostics`, and a failure is an error whose message is that text. The index files are
+/// written where the command line writes them.
+pub fn run_makembindex(
+    argv: &[&str],
+    input: &mut dyn Read,
+    output: &mut dyn Write,
+    diagnostics: &mut dyn Write,
+) -> Result<(), Error> {
+    let words: Vec<OsString> = argv.iter().map(OsString::from).collect();
+    let mut recorded = Recorded {
+        writer: diagnostics,
+        bytes: Vec::new(),
+    };
+    let status = crate::makembindex::run_with(&words, input, output, &mut recorded);
     outcome(status, recorded.bytes)
 }
 

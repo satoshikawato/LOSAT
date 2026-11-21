@@ -82,10 +82,13 @@ pub(crate) struct ReaderFlags {
     /// `fParseRawID`: an id without a `|` is parsed as an accession (`fParse_RawText`), not as
     /// a local id.
     pub(crate) parse_raw_id: bool,
-    /// The reader of convert2blastmask (`CMaskFromFasta`, a subclass): it keeps the masked
-    /// intervals of each record (`SaveMask` before each record makes `m_CurrentMask`, so lower
-    /// case letters open intervals) and reads a data line that starts with a digit as an
-    /// interval (`FastaReader::take_masks`).
+    /// `SaveMask` before each record (`m_CurrentMask` is set, so lower case letters open
+    /// intervals): the reader keeps the masked intervals of each record
+    /// (`FastaReader::take_masks`). convert2blastmask's reader and makembindex's FASTA input
+    /// (`dbindex::stream`).
+    pub(crate) lower_case_masks: bool,
+    /// The reader of convert2blastmask (`CMaskFromFasta`, a subclass, with
+    /// `lower_case_masks`): it also reads a data line that starts with a digit as an interval.
     pub(crate) mask_from_fasta: bool,
     /// `fParseGaps`: a hyphen of a nucleotide sequence is a gap, and `>?` lines stay gaps.
     pub(crate) parse_gaps: bool,
@@ -155,6 +158,7 @@ impl ReaderFlags {
             },
             parse_ids,
             parse_raw_id: parse_ids,
+            lower_case_masks: false,
             mask_from_fasta: false,
             parse_gaps: !protein,
             require_id: parse_ids,
@@ -203,6 +207,7 @@ impl ReaderFlags {
             },
             parse_ids: parse_seqids,
             parse_raw_id: parse_seqids,
+            lower_case_masks: false,
             mask_from_fasta: false,
             parse_gaps: false,
             require_id: false,
@@ -227,6 +232,7 @@ impl ReaderFlags {
             molecule: Molecule::Guessed,
             parse_ids: parse_seqids,
             parse_raw_id: false,
+            lower_case_masks: true,
             mask_from_fasta: true,
             parse_gaps: false,
             require_id: false,
@@ -234,6 +240,21 @@ impl ReaderFlags {
             disable_no_residues: false,
             ignored_problems: &[],
             build_db_length_limit: false,
+        }
+    }
+
+    /// The flags of makembindex's FASTA input (`CSequenceIStreamFasta`): `fForceType`,
+    /// `fAssumeNuc`, `fNoParseID` and `fAllSeqIds` (no longer used by `CFastaReader`), with
+    /// `SaveMask` before each record (`lower_case_masks`). They read as dustmasker's
+    /// nucleotide reader without `-parse_seqids` (`mask_fasta_reader`: its `fOneSeq` acts on
+    /// `ReadSet` only, and `fParseRawID` on ids that are not parsed).
+    // NCBI reference (598d8ae6): c++/include/objtools/readers/fasta.hpp:90-93
+    // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/sequence_istream_fasta.cpp:47-51
+    // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/sequence_istream_fasta.cpp:116-123
+    pub(crate) const fn dbindex_fasta() -> Self {
+        Self {
+            lower_case_masks: true,
+            ..Self::mask_fasta_reader(false, false)
         }
     }
 }
@@ -948,17 +969,18 @@ impl<R: Read> FastaReader<R> {
     /// none. Without `fDLOptional` data before a definition line is the `eNoDefline`
     /// error. `CBadResiduesException` comes only with `fValidate`, which is not set.
     pub(crate) fn read_one_seq(&mut self, warn: ReaderWarn<'_>) -> Result<Record, ReadError> {
-        if self.state.flags.mask_from_fasta {
-            self.read_one_seq_of::<true>(warn)
-        } else {
-            self.read_one_seq_of::<false>(warn)
+        match (self.state.flags.lower_case_masks, self.state.flags.mask_from_fasta) {
+            (false, _) => self.read_one_seq_of::<false, false>(warn),
+            (true, false) => self.read_one_seq_of::<true, false>(warn),
+            (true, true) => self.read_one_seq_of::<true, true>(warn),
         }
     }
 
-    /// `read_one_seq` with `ReaderFlags::mask_from_fasta` as `MASK_FROM_FASTA`: the records of
-    /// the other readers take no step of convert2blastmask's masks but `close_mask`, which has
-    /// nothing open to close for them (one choice per record).
-    fn read_one_seq_of<const MASK_FROM_FASTA: bool>(
+    /// `read_one_seq` with `ReaderFlags::lower_case_masks` as `MASKS` and
+    /// `ReaderFlags::mask_from_fasta` as `MASK_FROM_FASTA`: the records of the other readers
+    /// take no step of the masks but `close_mask`, which has nothing open to close for them (one
+    /// choice per record).
+    fn read_one_seq_of<const MASKS: bool, const MASK_FROM_FASTA: bool>(
         &mut self,
         warn: ReaderWarn<'_>,
     ) -> Result<Record, ReadError> {
@@ -1026,14 +1048,14 @@ impl<R: Read> FastaReader<R> {
             }
             let raw_length = raw.len();
             match line.strip_prefix(b">?_") {
-                Some(rest) => state.parse_data_line::<MASK_FROM_FASTA>(
+                Some(rest) => state.parse_data_line::<MASKS, MASK_FROM_FASTA>(
                     &[b">".as_slice(), rest].concat(),
                     raw_length,
                     line_number,
                     warn,
                 )?,
                 None => {
-                    state.parse_data_line::<MASK_FROM_FASTA>(line, raw_length, line_number, warn)?
+                    state.parse_data_line::<MASKS, MASK_FROM_FASTA>(line, raw_length, line_number, warn)?
                 }
             }
         }
@@ -1594,7 +1616,7 @@ impl RecordState {
     /// length while the line is read; `x_CloseGap` reads that length (`close_gap`). The
     /// fast copy of `fSkipCheck` is not taken (no `fSkipCheck`). `x_NucOrProt()` is empty:
     /// the molecule is set only in `AssembleSeq`.
-    fn parse_data_line<const MASK_FROM_FASTA: bool>(
+    fn parse_data_line<const MASKS: bool, const MASK_FROM_FASTA: bool>(
         &mut self,
         s: &[u8],
         raw_length: usize,
@@ -1631,7 +1653,7 @@ impl RecordState {
                 SPACE => {}
                 COMMENT => break,
                 GAP => {
-                    if MASK_FROM_FASTA {
+                    if MASKS {
                         self.close_mask();
                     }
                     let run = 1 + s[pos + 1..]
@@ -1651,7 +1673,7 @@ impl RecordState {
                         .iter()
                         .position(|&byte| actions[byte as usize] < RESIDUE_MIN)
                         .unwrap_or(s.len() - pos - 1);
-                    if MASK_FROM_FASTA {
+                    if MASKS {
                         self.mask_run(&s[pos..pos + run]);
                     }
                     self.seq_data

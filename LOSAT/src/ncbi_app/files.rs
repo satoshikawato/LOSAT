@@ -279,6 +279,13 @@ pub(crate) fn open_input_file<'a>(
     Ok(InputFile { source })
 }
 
+/// The file `path` opened as a program's own `CNcbiIfstream(path)` opens it (not an argument's
+/// stream): read in the text mode of LOSAT's platform; `Err` when it does not open (on Linux a
+/// directory opens, and its reads fail).
+pub(crate) fn open_text_file(path: &str) -> std::io::Result<Box<dyn Read>> {
+    Ok(Box::new(TextReader::new(File::open(path)?, LineEnds::HOST)))
+}
+
 /// The bytes of the input file `value` of the argument `name` (`AsInputFile`, `-` is `stdin`)
 /// as the loops of `NcbiGetlineEOL` over its stream read them (blastdbcmd's batch files,
 /// `input_lines`): `Err` with NCBI's message (`File is not accessible`) when it does not open or

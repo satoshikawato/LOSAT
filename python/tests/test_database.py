@@ -219,6 +219,22 @@ def test_a_tool_reads_its_input_as_the_command_line_reads_standard_input(losat):
     assert output.diagnostics == ""
 
 
+def test_makembindex_writes_the_index_of_fasta_input(tmp_path, losat):
+    base = str(tmp_path / "idx")
+    data = ">a\n" + "ACGTTGCAAGGCTTAACCGGTTAACCGGATCG" * 4 + "\n"
+    words = ("-old_style_index", "true", "-nmer", "8", "-output")
+    output = pylosat.makembindex(*words, base, input=data)
+    assert output.bytes == b""
+    assert output.diagnostics == (
+        f"creating {base}.00.idx...done\ncreating {base}.01.idx...removed (empty)\n"
+    )
+    fasta = tmp_path / "a.fa"
+    fasta.write_text(data)
+    losat("makembindex", *words, base + "_cli", "-input", str(fasta))
+    with open(base + ".00.idx", "rb") as api_file, open(base + "_cli.00.idx", "rb") as cli_file:
+        assert api_file.read() == cli_file.read()
+
+
 def test_a_tool_fails_with_the_command_lines_text(tmp_path):
     with pytest.raises(pylosat.SearchError, match="No alias or index file found"):
         pylosat.blastdbcmd("-db", str(tmp_path / "none"), "-info")

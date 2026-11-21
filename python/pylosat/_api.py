@@ -635,3 +635,16 @@ def convert2blastmask(*words: str, input: bytes | str = b"") -> ToolOutput:
     """
     data = input.encode() if isinstance(input, str) else bytes(input)
     return ToolOutput(*_pylosat.convert2blastmask(list(words), data))
+
+
+def makembindex(*words: str, input: bytes | str = b"") -> ToolOutput:
+    """Runs `makembindex` with the command line's words, which writes the megablast index of a
+    BLAST database (`-input`) or, with `-old_style_index true`, of FASTA input.
+
+    `input` is what the command line reads as standard input (FASTA input without `-input`).
+    The index files are written where the command line writes them; `diagnostics` holds its
+    `creating ...` lines. A failure raises `SearchError` with what the command line writes to its
+    standard error. The GIL is released.
+    """
+    data = input.encode() if isinstance(input, str) else bytes(input)
+    return ToolOutput(*_pylosat.makembindex(list(words), data))

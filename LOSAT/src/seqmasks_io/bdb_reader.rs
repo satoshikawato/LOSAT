@@ -139,6 +139,39 @@ impl MaskBdbReader {
         })
     }
 
+    /// The OID that `next_record` reads next (makembindex's `CSequenceIStreamBlastDB::oid_`).
+    pub(crate) fn next_oid(&self) -> u32 {
+        self.oid
+    }
+
+    /// `CSequenceIStreamBlastDB::putback()`: the last OID is read again (`--oid_` unless at 0).
+    // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/sequence_istream_bdb.cpp:138-139
+    pub(crate) fn putback(&mut self) {
+        self.oid = self.oid.saturating_sub(1);
+    }
+
+    /// The database (its mask algorithms and mask data: makembindex's `-db_mask`).
+    pub(crate) fn db(&self) -> &SeqDb {
+        &self.db
+    }
+
+    /// `FindVolumePaths(paths, true)` of the database opened as `name`: the paths of its
+    /// volumes (without extension), each once, in NCBI's order.
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:929-966
+    pub(crate) fn volume_paths(&self, name: &str) -> Result<Vec<String>, BdbError> {
+        let path = self.db.search_path().ok_or_else(|| {
+            BdbError::Unsupported("a database opened without a search path".to_string())
+        })?;
+        SeqDb::volume_and_alias_paths(name, self.molecule, path)
+            .map(|(volumes, _)| volumes)
+            .map_err(|error| database_error(error, self.program))
+    }
+
+    /// The exception or refusal of `error`, as `next_record` reports it.
+    pub(crate) fn database_error(&self, error: SeqDbError) -> BdbError {
+        database_error(error, self.program)
+    }
+
     /// `GetNextSequence`: the sequence of the next OID, `None` after the last.
     pub(crate) fn next_record(&mut self) -> Result<Option<BdbRecord>, BdbError> {
         if self.oid >= self.db.num_seqs() {

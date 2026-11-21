@@ -1212,7 +1212,9 @@ impl SeqDb {
     // ```
     /// `FindVolumePaths(paths, alias, true)` of the database that [`SeqDb::open_in`] opens
     /// with the same arguments: every volume path (without extension) and every alias file
-    /// of its alias tree, each once, sorted. No volume file is opened.
+    /// of its alias tree, each once, in NCBI's order (`SeqDB_CompareVolume`:
+    /// [`SeqDb::compare_volume_paths`]). No volume file is opened.
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:952-966
     pub fn volume_and_alias_paths(
         name: &str,
         seqtype: SeqType,
@@ -1222,10 +1224,14 @@ impl SeqDb {
         let volumes: std::collections::BTreeSet<String> = tree.volumes.into_iter().collect();
         let mut alias_files = std::collections::BTreeSet::new();
         alias::collect_alias_files(&tree.root, &mut alias_files);
-        Ok((
-            volumes.into_iter().collect(),
-            alias_files.into_iter().collect(),
-        ))
+        // `std::sort` of the set's (distinct) members: no two compare equal, so the order is
+        // that of the comparison alone.
+        let sorted = |set: std::collections::BTreeSet<String>| {
+            let mut paths: Vec<String> = set.into_iter().collect();
+            paths.sort_by(|a, b| Self::compare_volume_paths(Path::new(a), Path::new(b)));
+            paths
+        };
+        Ok((sorted(volumes), sorted(alias_files)))
     }
 
     /// The order in which NCBI searches and numbers the volumes of a database

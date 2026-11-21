@@ -34,6 +34,7 @@ from ._api import (
     describe,
     dustmasker,
     makeblastdb,
+    makembindex,
     segmasker,
 )
 from ._pylosat import (
@@ -82,5 +83,6 @@ __all__ = [
     "describe",
     "dustmasker",
     "makeblastdb",
+    "makembindex",
     "segmasker",
 ]

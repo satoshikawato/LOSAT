@@ -297,7 +297,7 @@ fn mask_record(record: Record, parsed_ids: bool) -> MaskRecord {
 /// A virtual sequence (`fDisableNoResidues`) and a record above makeblastdb's length limit do
 /// not come from this reader's flags, and a record past NCBI's `TSeqPos` is refused before
 /// (`MaskFastaReader::next`).
-fn iupac_letters(inst: SeqInst) -> Vec<u8> {
+pub(crate) fn iupac_letters(inst: SeqInst) -> Vec<u8> {
     match inst {
         SeqInst::Raw { length, seq_data } => match seq_data {
             SeqData::Ncbieaa(residues) => residues.iter().map(|&c| ncbieaa_to_iupacaa(c)).collect(),

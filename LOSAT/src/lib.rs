@@ -120,8 +120,12 @@ pub(crate) mod dustmasker;
 pub(crate) mod segmasker;
 // NCBI app/blastdb/convert2blastmask.cpp: the masking information of lower case FASTA input.
 pub(crate) mod convert2blastmask;
+// NCBI algo/blast/dbindex: the megablast database index (CDbIndex) and its sequence streams.
+pub(crate) mod dbindex;
+// NCBI algo/blast/dbindex/makeindex/mkindex_app.cpp: the writer of megablast indices.
+pub(crate) mod makembindex;
 // NCBI corelib/ncbiapp.cpp and corelib/ncbiargs.cpp: the application and argument reader of
-// blastdbcmd, dustmasker, segmasker and convert2blastmask.
+// blastdbcmd, dustmasker, segmasker, convert2blastmask and makembindex.
 pub(crate) mod ncbi_app;
 // NCBI corelib/ncbiexpt.cpp: the reports of NCBI's exceptions (`CException::what()`).
 pub(crate) mod ncbi_exception;

@@ -189,7 +189,7 @@ fn without_room_for_held_hsps_the_loop_starts_every_batch() {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:632-652 (a query without
 // letters gets a message; a batch whose queries all lack a valid context then stops the search
-// after the reports of the batches before, `BLAST engine error:`, exit 3).
+// after the reports of the batches before, `LOSAT engine error:`, exit 3).
 #[test]
 fn a_batch_that_fails_its_checks_stops_the_search_where_the_loop_stopped_it() {
     let query = queries("four_then_empty.fa", &[("empty".to_string(), &[][..])]);

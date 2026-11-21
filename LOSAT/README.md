@@ -1,6 +1,6 @@
 # LOSAT
 
-LOSAT is a pure-Rust reimplementation of NCBI BLAST+ 2.17.0. It runs BLAST+ command lines and matches NCBI BLAST+ 2.17.0 on its [release test set](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/release/v0.2.0.md). This crate builds the `losat` command line and the library `losat::api`.
+LOSAT is a pure-Rust reimplementation of NCBI BLAST+ 2.17.0. It runs BLAST+ command lines and matches NCBI BLAST+ 2.17.0 on its [release test set](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/release/v0.2.0.md) (apart from the version line, which names LOSAT). This crate builds the `losat` command line and the library `losat::api`.
 
 - **User manual:** [satoshikawato.github.io/LOSAT](https://satoshikawato.github.io/LOSAT/)
 - **Repository:** [github.com/satoshikawato/LOSAT](https://github.com/satoshikawato/LOSAT)

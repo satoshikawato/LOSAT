@@ -524,8 +524,9 @@ fn write_search_archive<E: Encoder, A: AlignSource>(
     out.enc.member("request", 0);
     out.enc.begin_sequence("Blast4-request");
     out.enc.member("ident", 0);
-    // The request's `ident` is `CBlastVersion::Print()` (`crate::NCBI_BLAST_VERSION`).
-    out.enc.visible_str(crate::NCBI_BLAST_VERSION.as_bytes());
+    // The request's `ident`: NCBI's `CBlastVersion::Print()`, LOSAT's version (`wording::LOSAT_VERSION`).
+    out.enc
+        .visible_str(crate::wording::LOSAT_VERSION.as_bytes());
     out.enc.end_member();
     write_request_body(out, request, &batch.request, sets, database_params);
     out.enc.end_sequence();

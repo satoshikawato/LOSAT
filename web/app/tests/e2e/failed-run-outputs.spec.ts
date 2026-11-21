@@ -29,7 +29,7 @@ const FIXTURES = join(REPOSITORY, 'web/adapter/tests/fixtures/failed_outputs');
 /** Two query batches: a protein of 12,000 letters that hits the subject, then a record without residues. */
 const QUERY = readFileSync(join(FIXTURES, 'later_batch.q.faa'), 'utf8');
 const SUBJECT = readFileSync(join(FIXTURES, 'later_batch.s.faa'), 'utf8');
-const ERROR = 'BLAST engine error: Warning: Sequence contains no data';
+const ERROR = 'LOSAT engine error: Warning: Sequence contains no data';
 
 /** The bytes of the file that `click` downloads. */
 async function downloaded(page: Page, click: () => Promise<void>): Promise<Buffer> {
@@ -110,7 +110,7 @@ test('a failed run that wrote no output keeps none, and says so', async ({ page 
   await waitStatus(page, 1, 'failed');
   await pickRun(page, 1);
   const status = page.getByTestId('results-status');
-  await expect(status).toContainText('Run 1 failed: BLAST engine error: The average subject length is too short.');
+  await expect(status).toContainText('Run 1 failed: LOSAT engine error: The average subject length is too short.');
   await expect(status).toContainText('It keeps the warnings written before the error.');
   await expect(status).not.toContainText('It keeps the outputs written before the error.');
   await expect(page.getByTestId('results-failed-outputs')).toHaveCount(0);

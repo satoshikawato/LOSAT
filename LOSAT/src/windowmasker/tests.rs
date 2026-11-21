@@ -23,13 +23,15 @@ fn the_short_usage_is_the_head_of_the_help() {
 }
 
 #[test]
-fn the_version_is_windowmasker_s() {
+fn the_version_is_losat_s() {
+    // LOSAT's version where NCBI's windowmasker states its own `1.0.0` (AGENTS.md rule 8).
     assert_eq!(
         run_words(&["-version"]),
         (
             0,
             format!(
-                "windowmasker: 1.0.0\n Package: LOSAT {}, output compatible with blast {}\n",
+                "windowmasker: LOSAT {}\n Package: LOSAT {}, output compatible with blast {}\n",
+                env!("CARGO_PKG_VERSION"),
                 env!("CARGO_PKG_VERSION"),
                 crate::NCBI_BLAST_RELEASE
             ),

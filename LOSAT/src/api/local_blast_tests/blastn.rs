@@ -466,7 +466,7 @@ fn a_word_size_below_four_is_ncbis_core_error() {
             native_error(result),
             (
                 1,
-                format!("BLAST query/options error: {message}\nPlease refer to the LOSAT user manual.\n")
+                format!("LOSAT query/options error: {message}\nPlease refer to the LOSAT user manual.\n")
             ),
             "-task {task} word size {word}"
         );
@@ -601,14 +601,15 @@ fn a_batch_of_queries_without_residues_stops_after_the_prolog() {
         native_error(result),
         (
             3,
-            "BLAST engine error: Warning: Sequence contains no data Warning: Sequence contains no data \n"
+            "LOSAT engine error: Warning: Sequence contains no data Warning: Sequence contains no data \n"
                 .to_string()
         )
     );
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     let prolog = String::from_utf8_lossy(&outputs[0]);
     assert!(
-        prolog.starts_with("BLASTN 2.17.0+") && !prolog.contains("Query="),
+        prolog.starts_with(&format!("BLASTN (LOSAT {})", env!("CARGO_PKG_VERSION")))
+            && !prolog.contains("Query="),
         "{prolog}"
     );
     assert!(outputs[1].is_empty());
@@ -636,13 +637,14 @@ fn a_query_without_residues_keeps_its_warning_in_a_table_error() {
         native_error(result),
         (
             3,
-            format!("BLAST engine error: {error}{warning}{error}{error}{warning}\n")
+            format!("LOSAT engine error: {error}{warning}{error}{error}{warning}\n")
         )
     );
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     let prolog = String::from_utf8_lossy(&outputs[0]);
     assert!(
-        prolog.starts_with("BLASTN 2.17.0+") && !prolog.contains("Query="),
+        prolog.starts_with(&format!("BLASTN (LOSAT {})", env!("CARGO_PKG_VERSION")))
+            && !prolog.contains("Query="),
         "{prolog}"
     );
     assert!(outputs[1].is_empty());
@@ -677,11 +679,12 @@ fn subjects_with_fewer_letters_than_subjects_stop_the_search() {
             native_error(result),
             (
                 3,
-                "BLAST engine error: The average subject length is too short\n".to_string()
+                "LOSAT engine error: The average subject length is too short\n".to_string()
             )
         );
         assert_eq!(String::from_utf8_lossy(&diagnostics), warnings);
-        assert!(String::from_utf8_lossy(&outputs[0]).starts_with("BLASTN 2.17.0+"));
+        assert!(String::from_utf8_lossy(&outputs[0])
+            .starts_with(&format!("BLASTN (LOSAT {})", env!("CARGO_PKG_VERSION"))));
         assert!(outputs[1].is_empty());
     }
 }

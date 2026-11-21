@@ -755,6 +755,112 @@ fn object_id_number(tag: &ObjectId) -> Option<i64> {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:486-522
+// NCBI reference (598d8ae6): c++/src/objects/seqloc/Textseq_id.cpp:178-224
+// NCBI reference (598d8ae6): c++/src/objects/general/Object_id.cpp:145-161
+// NCBI reference (598d8ae6): c++/src/objects/general/Dbtag.cpp:176-183
+// NCBI reference (598d8ae6): c++/src/objects/seqloc/Patent_seq_id.cpp:60-67
+// NCBI reference (598d8ae6): c++/src/objects/biblio/Id_pat.cpp:55-79
+// NCBI reference (598d8ae6): c++/src/objects/seqloc/PDB_seq_id.cpp:70-91
+/// A key of `id` that two Seq-ids share exactly when `CSeq_id::CompareOrdered` finds them equal,
+/// as a map keyed by Seq-ids does (`SSeqIdKey`): the alternative, then its members as the
+/// comparison reads them. Letters compared with `PNocase` go in lower case. A Textseq-id is its
+/// accession and version where it has both (its name is not read then), else its accession,
+/// version and name as far as each is set; an Object-id is its integer where `GetIdType` reads
+/// one (`object_id_number`), else its string; a `general` id its database and tag; a `patent` id
+/// its sequence number, country and number (`CId_pat::Match`; the document type is not read); a
+/// `pdb` id its molecule and its chain id, or the chain's letter (case kept); a `giim` id its id.
+pub(crate) fn ordered_key(id: &ParsedSeqId) -> Vec<u8> {
+    fn text(key: &mut Vec<u8>, bytes: &[u8], nocase: bool) {
+        key.extend_from_slice(&(bytes.len() as u64).to_le_bytes());
+        key.extend(
+            bytes
+                .iter()
+                .map(|&b| if nocase { b.to_ascii_lowercase() } else { b }),
+        );
+    }
+    fn set_text(key: &mut Vec<u8>, bytes: Option<&Vec<u8>>) {
+        match bytes {
+            Some(bytes) => {
+                key.push(1);
+                text(key, bytes, true);
+            }
+            None => key.push(0),
+        }
+    }
+    fn tag(key: &mut Vec<u8>, tag: &ObjectId) {
+        match (object_id_number(tag), tag) {
+            (Some(value), _) => {
+                key.push(0);
+                key.extend_from_slice(&value.to_le_bytes());
+            }
+            (None, ObjectId::Str(string)) => {
+                key.push(1);
+                text(key, string, true);
+            }
+            // `object_id_number` reads every `id` as its integer.
+            (None, ObjectId::Id(value)) => {
+                key.push(0);
+                key.extend_from_slice(&i64::from(*value).to_le_bytes());
+            }
+        }
+    }
+    let mut key = vec![id.alternative()];
+    match id {
+        ParsedSeqId::Local(local) => tag(&mut key, local),
+        ParsedSeqId::Gibbsq(value) | ParsedSeqId::Gibbmt(value) => {
+            key.extend_from_slice(&value.to_le_bytes())
+        }
+        ParsedSeqId::Giim(giim) => key.extend_from_slice(&giim.id.to_le_bytes()),
+        ParsedSeqId::Gi(gi) => key.extend_from_slice(&gi.to_le_bytes()),
+        ParsedSeqId::General(dbtag) => {
+            text(&mut key, &dbtag.db, true);
+            tag(&mut key, &dbtag.tag);
+        }
+        ParsedSeqId::Patent(patent) => {
+            key.extend_from_slice(&patent.seqid.to_le_bytes());
+            text(&mut key, &patent.cit.country, true);
+            match &patent.cit.id {
+                PatentNumber::Number(number) => {
+                    key.push(0);
+                    text(&mut key, number, true);
+                }
+                PatentNumber::AppNumber(number) => {
+                    key.push(1);
+                    text(&mut key, number, true);
+                }
+            }
+        }
+        ParsedSeqId::Pdb(pdb) => {
+            text(&mut key, &pdb.mol, true);
+            // `s_GetEffectiveChain_id`: the chain id, else the chain as one letter, else nothing.
+            let chain = pdb.chain.map(|chain| [chain as u8]);
+            let effective: &[u8] = match (&pdb.chain_id, &chain) {
+                (Some(chain_id), _) => chain_id,
+                (None, Some(chain)) => chain,
+                (None, None) => &[],
+            };
+            text(&mut key, effective, false);
+        }
+        _ => {
+            if let Some(textseq) = id.textseq() {
+                set_text(&mut key, textseq.accession.as_ref());
+                match textseq.version {
+                    Some(version) => {
+                        key.push(1);
+                        key.extend_from_slice(&version.to_le_bytes());
+                    }
+                    None => key.push(0),
+                }
+                if textseq.accession.is_none() || textseq.version.is_none() {
+                    set_text(&mut key, textseq.name.as_ref());
+                }
+            }
+        }
+    }
+    key
+}
+
 // NCBI reference (598d8ae6): c++/src/objects/seqloc/PDB_seq_id.cpp:53-67
 fn pdb_match(a: &PdbSeqId, b: &PdbSeqId) -> bool {
     if let (Some(x), Some(y)) = (a.chain, b.chain) {
@@ -813,6 +919,72 @@ impl Iterator for TaxonomyOrder<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:486-522 (cited at
+    // `ordered_key`)
+    // The Seq-ids that a map keyed by Seq-ids holds once: the case of compared letters, an integer
+    // string tag, a Textseq-id's name beside its accession and version, a pdb chain's letter.
+    #[test]
+    fn ordered_keys_are_equal_where_compare_ordered_is() {
+        let text = |acc: Option<&str>, version: Option<i32>, name: Option<&str>| TextseqId {
+            name: name.map(|name| name.as_bytes().to_vec()),
+            accession: acc.map(|acc| acc.as_bytes().to_vec()),
+            release: None,
+            version,
+        };
+        let same = |a: &ParsedSeqId, b: &ParsedSeqId| ordered_key(a) == ordered_key(b);
+        let local = |s: &str| ParsedSeqId::Local(ObjectId::Str(s.as_bytes().to_vec()));
+        assert!(same(&local("p5"), &local("P5")));
+        assert!(same(&local("5"), &ParsedSeqId::Local(ObjectId::Id(5))));
+        assert!(!same(&local("05"), &ParsedSeqId::Local(ObjectId::Id(5))));
+        assert!(!same(&local("p5"), &local("p6")));
+        let other = |acc, version, name| ParsedSeqId::Other(text(acc, version, name));
+        assert!(same(
+            &other(Some("NP_1"), Some(1), Some("a")),
+            &other(Some("np_1"), Some(1), Some("b"))
+        ));
+        assert!(!same(
+            &other(Some("NP_1"), Some(1), None),
+            &other(Some("NP_1"), Some(2), None)
+        ));
+        assert!(!same(
+            &other(Some("NP_1"), None, Some("a")),
+            &other(Some("NP_1"), None, Some("b"))
+        ));
+        assert!(!same(
+            &other(Some("NP_1"), Some(1), None),
+            &other(Some("NP_1"), None, None)
+        ));
+        assert!(!same(
+            &other(Some("X"), Some(1), None),
+            &ParsedSeqId::Genbank(text(Some("X"), Some(1), None))
+        ));
+        let general = |db: &str, tag: ObjectId| {
+            ParsedSeqId::General(Dbtag {
+                db: db.as_bytes().to_vec(),
+                tag,
+            })
+        };
+        assert!(same(
+            &general("BL_ORD_ID", ObjectId::Id(7)),
+            &general("bl_ord_id", ObjectId::Str(b"7".to_vec()))
+        ));
+        assert!(!same(
+            &general("BL_ORD_ID", ObjectId::Id(7)),
+            &general("BL_ORD_ID", ObjectId::Id(8))
+        ));
+        let pdb = |chain: Option<i32>, chain_id: Option<&str>| {
+            ParsedSeqId::Pdb(PdbSeqId {
+                mol: b"1ABC".to_vec(),
+                chain,
+                rel: None,
+                chain_id: chain_id.map(|id| id.as_bytes().to_vec()),
+            })
+        };
+        assert!(same(&pdb(Some(65), None), &pdb(None, Some("A"))));
+        assert!(!same(&pdb(None, Some("a")), &pdb(None, Some("A"))));
+        assert!(!same(&ParsedSeqId::Gi(5), &ParsedSeqId::Gibbsq(5)));
+    }
 
     // `CObject_id::GetIdType` (Object_id.cpp:93-161): the strings that are integers, and those
     // that stay strings (an error of `StringToInt8`, a `+`, leading zeros, `-0`). The conversion

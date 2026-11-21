@@ -281,8 +281,9 @@ struct BlastpSubjectScratch {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3830-3831
     preliminary_interval_tree: BlastIntervalTree,
     // `-db_soft_mask` and `-db_hard_mask`: the masked kernels' reader, plan and buffers
-    // (`db_masked.rs`); untouched by a search without them.
-    db_mask: db_masked::BlastpMaskScratch,
+    // (`db_masked.rs`), made at a worker's first masked sequence; a search without them keeps
+    // `None` (one word in the scratch).
+    db_mask: Option<Box<db_masked::BlastpMaskScratch>>,
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1633-1681
@@ -487,7 +488,7 @@ impl BlastpSubjectScratch {
             preliminary_gap_scratch: GapAlignScratch::new(),
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3830-3831
             preliminary_interval_tree: BlastIntervalTree::new(0, query_span, 0, 1),
-            db_mask: Default::default(),
+            db_mask: None,
         }
     }
 

@@ -87,7 +87,7 @@ impl BlastpDbMasking<'_> {
             kernel.search_subject(scratch, s_idx, subject, subject_result, values);
             return;
         }
-        let mut masked = std::mem::take(&mut scratch.db_mask);
+        let mut masked = scratch.db_mask.take().unwrap_or_default();
         let ordinal = s_idx as u32;
         match masked.reader.of(
             self.db,
@@ -103,35 +103,36 @@ impl BlastpDbMasking<'_> {
             Err(error) => {
                 subject_result.reset(s_idx);
                 self.note_error(ordinal, error);
-                scratch.db_mask = masked;
+                scratch.db_mask = Some(masked);
                 return;
             }
         }
         if masked.stored.is_empty() {
             kernel.search_subject(scratch, s_idx, subject, subject_result, values);
         } else if !self.mask.hard() {
-            let BlastpMaskScratch { stored, plan, .. } = &mut masked;
+            let BlastpMaskScratch { stored, plan, .. } = &mut *masked;
             let ranges = plan.soft(stored, subject.aa_len);
-            kernel.search_subject_in::<false>(
+            kernel.search_subject_in(
                 scratch,
                 s_idx,
                 subject,
                 subject_result,
                 values,
                 Some(ranges),
+                false,
             );
         } else {
             hard_chunks(
                 kernel,
                 scratch,
-                &mut masked,
+                &mut *masked,
                 s_idx,
                 subject,
                 subject_result,
                 values,
             );
         }
-        scratch.db_mask = masked;
+        scratch.db_mask = Some(masked);
     }
 }
 
@@ -184,13 +185,14 @@ fn hard_chunks(
             aa_seq: &masked.letters,
             aa_len: chunk.length,
         };
-        kernel.search_subject_in::<true>(
+        kernel.search_subject_in(
             scratch,
             s_idx,
             chunk_subject,
             subject_result,
             values,
             None,
+            true,
         );
         let offset = chunk.offset as i32;
         let chunk_hits = !scratch.preliminary_hsp_list.is_empty();

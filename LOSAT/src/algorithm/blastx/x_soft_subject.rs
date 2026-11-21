@@ -257,6 +257,19 @@ pub(super) fn x_subject_masks(
 /// where they lie in the record.
 fn x_shifted_subject_rows(hits: &mut [PairwiseHit], subjects: &[FastaRecord]) {
     let kept = x_subject_masks(hits, subjects);
+    x_kept_subject_rows(hits, &kept);
+}
+
+/// The rows `hits` with each subject letter in the runs `kept` of its query and subject
+/// (inclusive, in the subject's coordinates) in lower case: [`x_shifted_subject_rows`], and the
+/// stored masks of a search with `-db_soft_mask` or `-db_hard_mask`
+/// (`ReportedSubjects::shown_db_masks`).
+#[cold]
+#[inline(never)]
+pub(super) fn x_kept_subject_rows(
+    hits: &mut [PairwiseHit],
+    kept: &std::collections::HashMap<(u32, u32), Vec<(i32, i32)>>,
+) {
     for hit in hits.iter_mut() {
         let Some(runs) = kept.get(&(hit.hit.q_idx, hit.hit.s_idx)) else {
             continue;

@@ -1,0 +1,1 @@
+- TBLASTX: the two-hit ungapped extension takes the same walks as BLASTP and BLASTX, which keep the score and the step in one value. TODO-AB2 Reports do not change.

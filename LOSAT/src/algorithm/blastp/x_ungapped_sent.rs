@@ -59,6 +59,10 @@
 
 use super::extension::{BlastpTwoHitUngappedResult, BlastpUngappedData};
 use super::x_ungapped_fast::Table;
+// The key walks (`walk`, `best_of`) and the query codes they read (`XQueryCode`) are in
+// algorithm/common (`x_key_walk.rs`), where TBLASTX's sentinel walks take them too.
+pub(crate) use crate::algorithm::common::x_key_walk::XQueryCode;
+use crate::algorithm::common::x_key_walk::{best_of, walk};
 use std::sync::OnceLock;
 
 /// The key of a step for every pair of codes below 32 (`q << 5 | s`): `(t << 32) - 1`, `t` the
@@ -96,34 +100,6 @@ pub(crate) fn blosum62_keys() -> Option<Box<KeyTable>> {
         }
     }
     Some(keys)
-}
-
-/// The score and the length of a best key (module comment).
-#[inline(always)]
-fn best_of(best: i64) -> (i32, i32) {
-    let len = (best.wrapping_neg() as u64 & 0xffff_ffff) as i64;
-    (((best + len) >> 32) as i32, len as i32)
-}
-
-/// A query code as the walks read it: the row of the keys (`code << 5`). blastp's block is kept
-/// shifted (`u16`), BLASTX's buffers are bytes.
-pub(crate) trait XQueryCode: Copy {
-    /// `code << 5`.
-    fn row(self) -> usize;
-}
-
-impl XQueryCode for u8 {
-    #[inline(always)]
-    fn row(self) -> usize {
-        (self as usize) << 5
-    }
-}
-
-impl XQueryCode for u16 {
-    #[inline(always)]
-    fn row(self) -> usize {
-        self as usize
-    }
 }
 
 /// `[0, query.., 0]` with each code shifted by 5 (module comment).
@@ -304,54 +280,6 @@ impl<'a> XSentSubject<'a> {
     pub(crate) fn with_sentinels(self) -> &'a [u8] {
         self.aa_seq
     }
-}
-
-/// One walk of `s_BlastAaExtendRight` (`RIGHT`) or `s_BlastAaExtendLeft` from `qp`, `sp`, until
-/// the X-drop test (or, right, `score <= 0`) holds: (best, length, steps before the stop), on the
-/// keys of the module comment.
-///
-/// SAFETY: walking from `qp`, `sp` in the direction, both sequences reach a sentinel (code 0)
-/// with every position up to it readable and fewer than `2^32 - 1` positions before it, all codes
-/// up to it are below 32, `keys` is the table's keys and `1 <= dropoff <= 127`.
-// NCBI reference: aa_ungapped.c:804-883 (see the module comment).
-#[inline(always)]
-unsafe fn walk<const RIGHT: bool, Q: XQueryCode>(
-    keys: *const i64,
-    qp: *const Q,
-    sp: *const u8,
-    dropoff: i32,
-    maxscore: i32,
-) -> (i32, i32, usize) {
-    let mut key = (maxscore as i64) << 32;
-    let mut best = key;
-    let drop = (dropoff as i64) << 32;
-    let mut off: isize = 0;
-    let dir: isize = if RIGHT { 1 } else { -1 };
-    macro_rules! step {
-        ($l:lifetime) => {{
-            let row = (*qp.offset(off)).row();
-            let sc = *sp.offset(off) as usize;
-            key += *keys.add(row | sc);
-            if key > best {
-                best = key;
-            }
-            let stop = if RIGHT {
-                key <= 0 || key + drop <= best
-            } else {
-                key + drop <= best
-            };
-            if stop {
-                break $l;
-            }
-            off += dir;
-        }};
-    }
-    'w: loop {
-        step!('w);
-        step!('w);
-    }
-    let (best, len) = best_of(best);
-    (best, len, off.unsigned_abs())
 }
 
 /// `s_BlastAaExtendTwoHit` for word size 3 on a checked query block and subject (`subject_raw`

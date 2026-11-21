@@ -1293,16 +1293,15 @@ fn filter_final_hitlists(
         || resolved.best_hit.is_some()
         || resolved.subject_besthit
     {
-        let best_hit = match resolved.best_hit {
-            Some(params) => Some((
+        let best_hit = resolved.best_hit.map(|params| {
+            (
                 params,
                 super::stage_d_pipeline::preliminary_hitlist_size(
                     resolved.hitlist_size,
                     compo_adjust_mode,
                 ),
-            )),
-            None => None,
-        };
+            )
+        });
         for (hitlist, query) in batch_results.iter_mut().zip(queries) {
             if resolved.culling_limit > 0 {
                 hitlist.cull(resolved.culling_limit, query.len())?;

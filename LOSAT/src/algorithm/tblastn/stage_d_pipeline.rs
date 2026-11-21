@@ -3077,11 +3077,13 @@ fn run_preliminary_subjects_into(
                 super::score::PssmScore(rows),
             )?,
         };
-        // The cutoffs of an ungapped search's linking with even gaps, set for each subject before
-        // its search (`UngappedSubjectSteps::even_gap`).
-        let even_gap = match (inputs.ungapped, inputs.link) {
-            (Some(steps), Some(link)) => steps.even_gap(&link, subject.len()),
-            _ => None,
+        // How the subject's HSPs are linked (`SubjectLinking`), set for each subject before its
+        // search (an ungapped search's even gaps take cutoffs of the subject's length,
+        // `UngappedSubjectSteps::linking`).
+        let linking = match (inputs.link, inputs.ungapped) {
+            (None, _) => SubjectLinking::EValues,
+            (Some(link), None) => SubjectLinking::UnevenGaps(link),
+            (Some(link), Some(steps)) => steps.linking(&link, subject.len()),
         };
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:870-905:
         // Even an allocated empty subject list enters link/E-value. The query contexts of a
@@ -3089,9 +3091,18 @@ fn run_preliminary_subjects_into(
         // `stat_length` is the e-values' subject length without the linking.
         let link_or_evalues =
             |input: &[(usize, GappedHsp)], stat_length: usize| -> Result<LinkedHspList> {
-                match (inputs.link, even_gap.as_ref()) {
-                    // An ungapped search's `longest_intron` of 0 (`-max_intron_length` 4 or less).
-                    (Some(_), Some(params)) => link_even_gap_translated(
+                let evalues = || -> Result<LinkedHspList> {
+                    Ok(direct_local_evalues(
+                        input,
+                        inputs.query_lengths,
+                        i32::try_from(stat_length)?,
+                        inputs.gapped_by_context,
+                        inputs.lengths,
+                        inputs.gumbel,
+                    ))
+                };
+                match &linking {
+                    SubjectLinking::EvenGaps(params) => link_even_gap_translated(
                         input,
                         inputs.query_lengths,
                         inputs.lengths,
@@ -3099,7 +3110,7 @@ fn run_preliminary_subjects_into(
                         inputs.gapped_by_context,
                         params,
                     ),
-                    (Some(link), None) => link_preliminary_hsps_on(
+                    SubjectLinking::UnevenGaps(link) => link_preliminary_hsps_on(
                         x_pool,
                         input,
                         inputs.query_lengths,
@@ -3107,16 +3118,16 @@ fn run_preliminary_subjects_into(
                         i32::try_from(subject.len())?,
                         inputs.gapped_by_context,
                         inputs.gumbel,
-                        &link,
+                        link,
                     ),
-                    (None, _) => Ok(direct_local_evalues(
-                        input,
-                        inputs.query_lengths,
-                        i32::try_from(stat_length)?,
-                        inputs.gapped_by_context,
-                        inputs.lengths,
-                        inputs.gumbel,
-                    )),
+                    SubjectLinking::EValues => evalues(),
+                    SubjectLinking::NoValidContext => {
+                        ensure!(
+                            input.is_empty(),
+                            "TBLASTN HSPs of a batch without a valid query context"
+                        );
+                        evalues()
+                    }
                 }
             };
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:728-729,804-813,882-887
@@ -3432,29 +3443,54 @@ impl<'a> UngappedSubjectSteps<'a> {
         }
     }
 
-    /// The parameters of the linking with even gaps (a `longest_intron` of 0) on a subject of
-    /// `subject_nt` bases: `CalculateLinkHSPCutoffs` with the smallest cutoff of the initial words
+    /// The linking of an ungapped search's HSPs with `link` on a subject of `subject_nt` bases:
+    /// uneven gaps for a `longest_intron` above 0, which read no cutoff; else even gaps with
+    /// `CalculateLinkHSPCutoffs` and the smallest cutoff of the initial words
     /// (`word_params->cutoff_score_min`, the link parameters' `cutoff_small_gap` that
-    /// `BlastLinkHSPParametersUpdate` set); `None` for the uneven gaps' linking, which reads no
-    /// cutoff.
-    fn even_gap(
+    /// `BlastLinkHSPParametersUpdate` set), which reads the smallest Lambda of the valid
+    /// contexts. A batch without a valid context has none: NCBI searches no subject there
+    /// (`SubjectLinking::NoValidContext`).
+    fn linking(
         &self,
         link: &super::stage_d_stats::LocalLinkParameters,
         subject_nt: usize,
-    ) -> Option<crate::core::link_hsps::EvenGapLinkParams> {
+    ) -> SubjectLinking {
         if link.longest_intron > 0 {
-            return None;
+            return SubjectLinking::UnevenGaps(*link);
         }
+        let Some(smallest_lambda) = self.smallest_lambda.as_ref() else {
+            return SubjectLinking::NoValidContext;
+        };
         let cutoffs = crate::core::link_hsps::calculate_link_hsp_cutoffs(
-            &self.smallest_lambda?,
+            smallest_lambda,
             self.avg_query_length,
             subject_nt as i64,
             self.db_length,
             true,
             || link.cutoff_small_gap,
         );
-        Some(crate::core::link_hsps::EvenGapLinkParams::ungapped_translated_subject(cutoffs))
+        SubjectLinking::EvenGaps(
+            crate::core::link_hsps::EvenGapLinkParams::ungapped_translated_subject(cutoffs),
+        )
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1779-1800
+/// How a subject's HSPs get their e-values (`link_or_evalues` of `run_preliminary_subjects_into`),
+/// chosen once for the subject: NCBI links them with sum statistics (with even gaps for a
+/// `longest_intron` of 0, else with uneven gaps) or gives each its own e-value.
+enum SubjectLinking {
+    /// Without sum statistics: each HSP's own e-value (`direct_local_evalues`).
+    EValues,
+    /// Sum statistics with uneven gaps: a positive `longest_intron` (every gapped search that
+    /// links, an ungapped one with `-max_intron_length` above 4).
+    UnevenGaps(super::stage_d_stats::LocalLinkParameters),
+    /// An ungapped search's sum statistics with even gaps (a `longest_intron` of 0), with the
+    /// cutoffs of the subject (`UngappedSubjectSteps::linking`).
+    EvenGaps(crate::core::link_hsps::EvenGapLinkParams),
+    /// An ungapped search whose batch has no valid context: no smallest Lambda, so NCBI searches
+    /// no subject and the list has no HSP (e-values of no HSP).
+    NoValidContext,
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1491-1541

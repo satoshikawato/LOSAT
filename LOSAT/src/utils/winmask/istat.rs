@@ -1154,7 +1154,7 @@ fn check_pct_lines(metadata: &[Vec<u8>], stat_type: StatType) -> Result<(), WinM
         if extract_uint(&line[7..], &mut at).is_some_and(|(max, _)| max == u32::MAX) {
             return Err(WinMaskError::PctLine {
                 line: String::from_utf8_lossy(line).into_owned(),
-                why: super::pct::MAX_COUNT_WRAPS,
+                why: super::pct::PctWhy::MaxCountWraps,
             });
         }
     }

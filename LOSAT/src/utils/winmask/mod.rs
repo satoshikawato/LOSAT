@@ -33,7 +33,7 @@ pub use istat::{
     discover_stat_type, discover_stat_type_in, FormatSite, StatFile, StatType, UnitCounts,
 };
 pub use ostat::{convert_counts, CountsFormat, CountsWriter, FinalizeError};
-pub use pct::PctSettings;
+pub use pct::{PctSettings, PctWhy};
 pub use taxid::taxid_stat_file;
 
 use score::ScoreMean;
@@ -113,8 +113,13 @@ pub enum WinMaskError {
     BadIndex { key: u32, value: u32 },
     /// A `##pct:` line whose reading by NCBI (`pct::count_map`) depends on the C++ library or
     /// is undefined, `why` (a verb phrase): LOSAT refuses it.
-    PctLine { line: String, why: &'static str },
+    PctLine { line: String, why: PctWhy },
 }
+
+// The masker's count lookup (`UnitCounts::at`, for every unit of every window of blastn
+// `-window_masker_db`) returns `Result<u32, WinMaskError>`: a larger error makes every lookup
+// return a larger value and cost instructions (a 16-byte field here cost 0.16 %).
+const _: () = assert!(std::mem::size_of::<WinMaskError>() <= 32);
 
 impl WinMaskError {
     pub(crate) fn format(site: FormatSite) -> Self {
@@ -158,7 +163,11 @@ impl fmt::Display for WinMaskError {
             // NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_uset_hash.cpp:95-99
             Self::BadIndex { key, value } => write!(f, "bad index at key {key} : {value}"),
             Self::PctLine { line, why } => {
-                write!(f, "the percentage line '{line}' of the counts file {why}")
+                write!(
+                    f,
+                    "the percentage line '{line}' of the counts file {}",
+                    why.text()
+                )
             }
         }
     }

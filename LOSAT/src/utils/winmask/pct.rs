@@ -35,15 +35,32 @@ fn count_by_pct(pct: f64, count_map: &[f64]) -> u32 {
         .unwrap_or(count_map.len() - 1) as u32
 }
 
-/// Why LOSAT refuses a `##pct:` line whose words C++ libraries read differently.
-const RUNTIME_WORD: &str = "holds a number that C++ libraries read differently (an infinity, a NaN, a hexadecimal number, a number with letters after it, or one beyond the range of a normal double), so LOSAT does not read it";
-/// Why LOSAT refuses a binary `##pct:` line whose largest count is `u32::MAX`.
-pub(super) const MAX_COUNT_WRAPS: &str = "names 4294967295 as its largest count, for which NCBI BLAST+ makes room for 0 percentages (the count plus one, in 32 bits) and reads past them (undefined behaviour in C++)";
-/// Why LOSAT refuses a binary `##pct:` line whose table does not fit the memory.
-const NO_MEMORY: &str = "names more percentages than the memory holds";
+/// Why LOSAT refuses a `##pct:` line. One byte, so that `WinMaskError` stays as small as the
+/// `Result` of the masker's count lookup (`UnitCounts::at`) needs: a `&'static str` here made
+/// every lookup of blastn `-window_masker_db` return a larger value.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PctWhy {
+    /// Its words are numbers that C++ libraries read differently.
+    RuntimeWord,
+    /// A binary line whose largest count is `u32::MAX`.
+    MaxCountWraps,
+    /// A binary line whose table does not fit the memory.
+    NoMemory,
+}
+
+impl PctWhy {
+    /// The words of the refusal that follow "the percentage line '<line>' of the counts file".
+    pub(super) fn text(self) -> &'static str {
+        match self {
+            PctWhy::RuntimeWord => "holds a number that C++ libraries read differently (an infinity, a NaN, a hexadecimal number, a number with letters after it, or one beyond the range of a normal double), so LOSAT does not read it",
+            PctWhy::MaxCountWraps => "names 4294967295 as its largest count, for which NCBI BLAST+ makes room for 0 percentages (the count plus one, in 32 bits) and reads past them (undefined behaviour in C++)",
+            PctWhy::NoMemory => "names more percentages than the memory holds",
+        }
+    }
+}
 
 /// LOSAT's refusal of the `##pct:` line `line`, `why`.
-fn refusal(line: &[u8], why: &'static str) -> WinMaskError {
+fn refusal(line: &[u8], why: PctWhy) -> WinMaskError {
     WinMaskError::PctLine {
         line: String::from_utf8_lossy(line).into_owned(),
         why,
@@ -157,7 +174,7 @@ pub(super) fn count_map(
     let mut pct_lines = metadata.iter().filter(|line| line.starts_with(b"##pct:"));
     let mut map = Vec::new();
     let read = |line: &[u8], text: &[u8], at: &mut usize| {
-        extract_double(text, at).map_err(|()| refusal(line, RUNTIME_WORD))
+        extract_double(text, at).map_err(|()| refusal(line, PctWhy::RuntimeWord))
     };
     match stat_type {
         StatType::Ascii | StatType::OAscii => {
@@ -185,11 +202,11 @@ pub(super) fn count_map(
                     None => (0, false),
                 };
                 if max == u32::MAX {
-                    return Err(refusal(line, MAX_COUNT_WRAPS));
+                    return Err(refusal(line, PctWhy::MaxCountWraps));
                 }
                 let size = max as usize + 1;
                 map.try_reserve_exact(size)
-                    .map_err(|_| refusal(line, NO_MEMORY))?;
+                    .map_err(|_| refusal(line, PctWhy::NoMemory))?;
                 map.resize(size, 0.0);
                 for value in map.iter_mut() {
                     if !going {

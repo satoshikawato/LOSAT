@@ -6,7 +6,7 @@
 // The real implementation is the adapter's serial reactor inside the Data worker (S09);
 // the development build and the tests use the FakeScanner. Every implementation must pass
 // web/app/tests/contract/record-scanner.contract.ts.
-import type { FastaParserKind, IndexedRecord } from '../domain/dataset.js';
+import type { FastaReader, IndexedRecord } from '../domain/dataset.js';
 
 /**
  * The reader's own error on the record after the records of a scan (NCBI's `CheckDataLine`): the
@@ -34,8 +34,10 @@ export interface ScanResponse {
 
 export interface RecordScanner {
   /**
-   * Scans one input, given as chunks of any size in order. The reader's own error ends the records
-   * (`reader_error`); LOSAT Web's rejection (for example of a gap line) rejects the scan.
+   * Scans one input with the engine's reader of it (`reader`), given as chunks of any size in
+   * order. The reader's own error ends the records (`reader_error`); its refusal in the CLI's words
+   * (a first line that may be a Seq-id with the data loaders on, a record longer than LOSAT reads)
+   * rejects the scan.
    */
-  scan(parser: FastaParserKind, chunks: AsyncIterable<Uint8Array>): Promise<ScanResponse>;
+  scan(reader: FastaReader, chunks: AsyncIterable<Uint8Array>): Promise<ScanResponse>;
 }

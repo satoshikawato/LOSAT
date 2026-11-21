@@ -40,7 +40,9 @@ pub(crate) fn open_search_database(
     let path = SearchPath::from_environment(registry).map_err(DatabaseOpenError::Reader)?;
     // The errors of the alias files' counts depend on the list, and those of the headers come
     // after them (`restrict_database`).
-    SeqDb::open_search_in(name, seqtype, &path).map_err(DatabaseOpenError::Reader)
+    let mut db = SeqDb::open_search_in(name, seqtype, &path).map_err(DatabaseOpenError::Reader)?;
+    db.fail_search_reads_with_oid_list();
+    Ok(db)
 }
 
 /// Why `open_search_database` could not open a database.

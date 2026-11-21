@@ -80,7 +80,8 @@ export class FakeEngine implements EngineGateway {
       if (option === undefined) return { ok: false, message: `error: unknown option or argument '${word}'; use -help to list the options\n` };
       if (option.takesValue && value === undefined) i++;
     }
-    return { ok: true };
+    // The fake reads no registry: its runs have the data loaders on, as the CLI's without one.
+    return { ok: true, dataLoaders: true };
   }
 
   async run(request: EngineRunRequest, output: MessagePort, onPhase: (phase: EnginePhase) => void): Promise<RuntimeInfo> {

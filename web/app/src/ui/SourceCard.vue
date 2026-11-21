@@ -107,14 +107,13 @@ const readerErrorText = (message: string) => {
 const followsNotText = computed(() => `This input ${cannotFollowText(props.source)}`);
 /**
  * The input cannot be read from its start: the scan failed, or the reader's error comes before its first record. The hints that
- * make its first line readable (a defline, '>', the byte order mark) are for such an input, with the reader's message.
+ * make its first line readable (a defline, the byte order mark) are for such an input, with the reader's message.
  */
 const stopsAtStart = computed(
   () =>
     (props.source.status === 'failed' && !unread.value) ||
     (props.source.status === 'ready' && props.source.base?.readerError !== undefined && records.value.length === 0),
 );
-const readMessage = computed(() => props.source.error ?? props.source.base?.readerError?.message);
 /**
  * A pasted text of accessions only that are not one per line (WA2-OP-04): Fetch takes them one per line, so the card offers
  * to put each on its own line. It does not depend on the reader: a list with no versions (AB000001 MH011443) reads as a
@@ -133,28 +132,37 @@ const unread = computed(() => props.source.status === 'failed' && props.source.u
 const UNREAD = 'Not read.';
 const UNCHECKED = 'Not checked.';
 /**
+ * Why the engine does not take the input, in its words: its reader's refusal when the input was read, or its check's
+ * refusal of an input that was read before the reader changed (a `-conffile` taken away turns the data loaders on). The
+ * card's remedies for a Seq-id first line answer either (line WQA's D13 round 2, L2, 2026-11-20).
+ */
+const refusal = computed(() => {
+  const source = props.source;
+  if (source.status === 'failed') return unread.value ? undefined : source.error;
+  return source.status === 'ready' && source.check?.state === 'refused' ? source.check.message : undefined;
+});
+/**
  * The first line of a pasted text is an accession that the engine reads as a Seq-id: Fetch takes accessions only (WA2-OP-04).
  * Not when the box is a list of accessions, whose button puts them one per line, and so says the same.
  */
 const fetchHint = computed(
-  () =>
-    props.source.origin === 'paste' &&
-    stopsAtStart.value &&
-    !splitsAccessions.value &&
-    pointsToFetch(readMessage.value, props.state[props.role].paste),
+  () => props.source.origin === 'paste' && !splitsAccessions.value && pointsToFetch(refusal.value, props.state[props.role].paste),
 );
 /**
- * A pasted text whose first line the engine reads as a Seq-id (which NCBI BLAST+ would fetch) and cannot read (WA2-OP-04): the
+ * A pasted text whose first line the engine reads as a Seq-id (which NCBI BLAST+ would fetch) and refuses (WA2-OP-04): the
  * line is not data, and "Add the line >pasted_..." would make it the first data line, so the card puts ">" before it instead.
  */
 const seqIdFirstLine = computed(
-  () =>
-    props.source.origin === 'paste' &&
-    stopsAtStart.value &&
-    !hasMark.value &&
-    !splitsAccessions.value &&
-    isSeqIdReason(readMessage.value),
+  () => props.source.origin === 'paste' && !hasMark.value && !splitsAccessions.value && isSeqIdReason(refusal.value),
 );
+/**
+ * The other remedy of the engine's sentence on a Seq-id first line is the CLI's: `DATA_LOADERS=none` in `.ncbirc`, which
+ * the browser has not. The search reads the setting from the file of `-conffile`, so the card says where it goes there
+ * (line WQA's D13 round 2, L3, 2026-11-20). Not for a list of accessions, which its own press answers.
+ */
+const loadersHint = computed(() => !splitsAccessions.value && isSeqIdReason(refusal.value));
+const LOADERS_HINT =
+  'In the browser, LOSAT reads this setting from the file of -conffile, not from .ncbirc: add -conffile NAME to Additional options, and choose a file whose [BLAST] section has DATA_LOADERS=none.';
 /** A pasted text that does not start with a defline and cannot be read; a byte order mark, a Seq-id and accessions on a line have their own hints. */
 const needsDefline = computed(() => {
   const text = props.state[props.role].paste.trimStart();
@@ -226,8 +234,13 @@ const verdict = computed(() => {
     formatName.value,
   ]);
   // The hints that make the first line readable come with the card's first sentence whatever the check says, as on the
-  // screen (review L1, 2026-11-20).
-  const hints = stopsAtStart.value ? [...(fetchHint.value ? [FETCH_HINT] : []), ...(markHint.value ? [markHint.value] : [])] : [];
+  // screen (review L1, 2026-11-20): the engine's refusal of a Seq-id first line (`refusal`), and a byte order mark
+  // before the reader's first record (`stopsAtStart`).
+  const hints = [
+    ...(fetchHint.value ? [FETCH_HINT] : []),
+    ...(loadersHint.value ? [LOADERS_HINT] : []),
+    ...(markHint.value ? [markHint.value] : []),
+  ];
   if (unread.value) {
     parts.push(UNREAD);
   } else if (source.status === 'failed') {
@@ -374,6 +387,7 @@ watch(verdict, (now) => {
           Put '&gt;' before the first line
         </button>
       </p>
+      <p v-if="loadersHint" class="hint" :data-testid="`${testid}-loaders-hint`">{{ LOADERS_HINT }}</p>
       <p v-if="needsDefline" class="hint">
         <button type="button" class="link" :data-testid="`${testid}-add-defline`" @click="rewrite(() => draft.addDefline(role))">
           Add the line "&gt;pasted_{{ role }}" before the sequence

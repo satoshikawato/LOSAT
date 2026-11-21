@@ -76,6 +76,9 @@ pub(super) struct BlastpTabular<'a> {
     /// (`recount_shown_identities`): NCBI's formatter opens its alignment block, and reads the
     /// subject for `nident`, on the Seq-align's count (`TabularSpec::opens_counts`).
     pub engine_counts: &'a super::seqalign::EngineCounts,
+    /// The query's molecule is `other` (`PsiSearch::query_other_coding`): the first row that reads
+    /// the query's letters ends the run (`report::tabular::query_sequence_end`).
+    pub query_other_coding: Option<i32>,
 }
 
 /// The subjects as the report shows them, by subject index (a subject set) or rank (the
@@ -396,12 +399,14 @@ pub(super) fn needs_rows(rows: bool, spec: &TabularSpec, app: BlastpApp) -> bool
 }
 
 /// The spec of a tabular report with a field list or a delimiter, or of outfmt 10 or 20, of a
-/// `-outfmt` value read as NCBI reads it (`app::parse_formatting_string`); `None` for the other
-/// formats and for the default outfmt 6 and 7 (`TabularSpec::of`).
-pub(super) fn custom_tabular_spec(outfmt: &str) -> Option<&'static TabularSpec> {
+/// `-outfmt` value read as NCBI reads it (`app::parse_formatting_string`), as `app`'s formatter
+/// writes it (`TabularSpec::of_app`: psiblast's and rpsblast's without the custom delimiter);
+/// `None` for the other formats and for the default outfmt 6 and 7. Every report of the blastp
+/// engine reads its spec here, from the value of the command line or the library's as given.
+pub(super) fn custom_tabular_spec(outfmt: &str, app: BlastpApp) -> Option<&'static TabularSpec> {
     let choice = crate::blastinput::app::parse_formatting_string(outfmt).ok()?;
     let format = crate::blastinput::app::ReportFormat::from_number(choice.number)?;
-    TabularSpec::of(format, &choice).map(TabularSpec::intern)
+    TabularSpec::of_app(format, &choice, app.request_kind()).map(TabularSpec::intern)
 }
 
 /// Writes the warning of the formatter that NCBI makes for outfmt 20's header line, which it
@@ -746,6 +751,11 @@ fn write_tabular_rows<const RPS: bool>(
                 .zip(table_rows.last_found())
                 .map(|(values, kept)| values.subject(tab.names, -1, kept));
             for (index_in_list, hsp) in hsp_list.hsps.iter().enumerate() {
+                if let Some(coding) = tab.query_other_coding.filter(|_| spec.reads_sequences()) {
+                    return Err(crate::report::tabular::query_sequence_end(
+                        writer, &buf, coding,
+                    ));
+                }
                 // The Seq-align's `num_ident` (the engine's count where the reports' recount
                 // replaced it, `BlastpTabular::engine_counts`).
                 let seqalign_num_ident = tab.engine_counts.num_ident(

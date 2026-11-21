@@ -2,15 +2,16 @@
 // `scan_end`, docs/web/abi_v2.md §4, §9; plan TD-8): the RecordScanner of the Data worker.
 // The response is the *scan* JSON as the adapter writes it, and a failure is the parser's
 // error text.
+import type { FastaReader } from '../../domain/dataset.js';
 import type { RecordScanner, ScanResponse } from '../../ports/scan.js';
 import type { ReactorAbi } from './abi.js';
 
 export class ReactorScanner implements RecordScanner {
   constructor(private readonly reactor: () => Promise<ReactorAbi>) {}
 
-  async scan(parser: number, chunks: AsyncIterable<Uint8Array>): Promise<ScanResponse> {
+  async scan(reader: FastaReader, chunks: AsyncIterable<Uint8Array>): Promise<ScanResponse> {
     const abi = await this.reactor();
-    const scanner = abi.scanBegin(parser);
+    const scanner = abi.scanBegin(reader);
     let ended = false;
     try {
       for await (const chunk of chunks) abi.scanChunk(scanner, chunk);

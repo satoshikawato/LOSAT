@@ -240,3 +240,8 @@ s_fa_access_mi	-ustat ../winmask/counts/dm2L_u9.binary -in in/access.fa -parse_s
 s_wmb_ids_ord8	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in "db/wm db/wm_b" -ids in/ids_ord8.txt -text_match F
 s_bwm_ids_ord8	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in "db/wm_b db/wm" -ids in/ids_ord8.txt -text_match F
 s_ps_ids_warn	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm_ps -ids in/ids_warn.txt -text_match F
+# -ids and -exclude_ids matched as text against sequence::GetTitle of database sequences with a tax id (db/wm_tx): an empty title is made from the scientific name of the first source in the taxonomy database (BLASTDB=: ../seqdb/taxdb/t5), else it is "No definition line found"; no HTML decoding (line RG item D5a-t, 2026-11-21; frozen with the local official NCBI BLAST+ 2.17.0 release by make_fixtures.py --only).
+t_wm_tx_ids	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm_tx -ids in/ids_tx.txt
+t_wm_tx_ids_taxdb	BLASTDB=../seqdb/taxdb/t5 -ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm_tx -ids in/ids_tx.txt
+t_wm_tx_excl_taxdb	BLASTDB=../seqdb/taxdb/t5 -ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm_tx -exclude_ids in/ids_tx.txt
+t_wm_tx_ids_taxdb_sl	BLASTDB=../seqdb/taxdb/t5 -ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm_tx -ids in/ids_tx.txt -outfmt seqloc_asn1_text

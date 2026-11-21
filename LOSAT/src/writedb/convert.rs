@@ -354,12 +354,6 @@ fn convert_1_to_1(src: &[u8], table: &[u8; 256]) -> Vec<u8> {
 /// `SeqDB_SequenceHash(bioseq)`: the hash of `-hash_index` over `length` residues of
 /// `seq_data`, `None` for a coding the writer cannot write (it stops before the hash is used).
 pub(crate) fn sequence_hash(seq_data: &SeqData, length: u64) -> Option<u32> {
-    fn hash(codes: impl Iterator<Item = u8>) -> u32 {
-        codes.fold(0u32, |h, code| {
-            h.wrapping_mul(1_103_515_245)
-                .wrapping_add(u32::from(code).wrapping_add(12345))
-        })
-    }
     let length = length as usize;
     Some(match seq_data {
         SeqData::Ncbieaa(v) => hash(
@@ -373,6 +367,32 @@ pub(crate) fn sequence_hash(seq_data: &SeqData, length: u64) -> Option<u32> {
         SeqData::Ncbi4na(v) => hash((0..length).map(|i| (v[i / 2] >> (4 - 4 * (i % 2))) & 0x0f)),
         SeqData::Other => return None,
     })
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbobj.cpp:47-60
+/// `SeqDB_SequenceHash(sequence, length)` of the codes of a sequence.
+fn hash(codes: impl Iterator<Item = u8>) -> u32 {
+    codes.fold(0u32, |h, code| {
+        h.wrapping_mul(1_103_515_245)
+            .wrapping_add(u32::from(code).wrapping_add(12345))
+    })
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1690-1700
+/// `x_ComputeHash(sequence, ambiguities)`: the hash of `-hash_index` of a sequence given in the
+/// form of the sequence file (`AddSequence(seq, ambig)`): a protein's NCBIstdaa bytes, a
+/// nucleotide's bases as NCBI4na codes (`SeqDB_UnpackAmbiguities`). The error is the message of
+/// a malformed nucleotide.
+pub(crate) fn raw_sequence_hash(
+    protein: bool,
+    seq: &[u8],
+    ambig: &[u8],
+) -> Result<u32, &'static str> {
+    if protein {
+        return Ok(hash(seq.iter().copied()));
+    }
+    let na8 = crate::seqdb::volume::unpack_ambiguities(seq, ambig)?;
+    Ok(hash(na8.into_iter()))
 }
 
 /// The `Seq-data` choices CWriteDB cannot write.

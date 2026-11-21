@@ -308,7 +308,7 @@ fn build_version(
     let result = (|| {
         let mut db = BuildDatabase::new(
             out_base,
-            title,
+            title.as_bytes(),
             is_protein,
             &mut log,
             &time_of(date),

@@ -51,7 +51,7 @@ For every option: `losat windowmasker -help`.
 | --- | --- |
 | `interval` | For each sequence, its definition line, then one line `START - END` per masked interval. Positions count from 0 and include both ends. |
 | `fasta` | The sequences with masked letters in lower case. |
-| `seqloc_asn1_text`, `seqloc_asn1_bin`, `seqloc_xml` | The intervals as Seq-loc objects. A sequence with several Seq-ids is named, here and in `maskinfo_*`, by its gi, else its first accession-type id (GenBank, RefSeq, Swiss-Prot, ...), else its first Seq-id, as NCBI's does. |
+| `seqloc_asn1_text`, `seqloc_asn1_bin`, `seqloc_xml` | The intervals as Seq-loc objects. A sequence with several Seq-ids is named, here and in `maskinfo_*`, by its gi (not gi 0), else its first accession-type id (GenBank, RefSeq, Swiss-Prot, ...), else its first Seq-id, as NCBI's does. |
 | `maskinfo_asn1_text`, `maskinfo_asn1_bin`, `maskinfo_xml` | The intervals as masking information. The `maskinfo_asn1_*` files are the input of `makeblastdb -mask_data`. |
 
 Warnings about the input, such as a counts file without percentages when a `-t_*_pct` option is given, are written to the standard error, as NCBI writes them.

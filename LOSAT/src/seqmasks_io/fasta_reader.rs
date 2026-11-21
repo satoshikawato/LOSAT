@@ -16,12 +16,12 @@
 //!   the input, also for input of blank and comment lines only (`eEOF`, which `ReadSet`
 //!   catches). After `None` or an error the reader returns `Ok(None)`.
 //! - [`MaskRecord`]: `ids: Vec<ParsedSeqId>` (`bsh.GetId()`; without `-parse_seqids` one
-//!   `ParsedSeqId::Local(ObjectId::Id(n))`, `n` counting every record from 1; the first id
-//!   is `bsh.GetSeqId()`), `title: Option<Vec<u8>>` (the Seq-descr title for
-//!   `CDeflineGenerator`, as the reader stores it) and `letters: Vec<u8>` (upper-case
-//!   IUPACna or IUPACaa; a hyphen or a `>?` gap of a nucleotide sequence is `N`, of a
-//!   protein `X`). A record has at least one letter: an empty one is the `eNoResidues`
-//!   error.
+//!   `ParsedSeqId::Local(ObjectId::Id(n))`, `n` counting every record from 1; the writers name
+//!   the sequence by `writer::access_seq_id` of them, `bsh.GetSeqId()`), `title:
+//!   Option<Vec<u8>>` (the Seq-descr title for `CDeflineGenerator`, as the reader stores it)
+//!   and `letters: Vec<u8>` (upper-case IUPACna or IUPACaa; a hyphen or a `>?` gap of a
+//!   nucleotide sequence is `N`, of a protein `X`). A record has at least one letter: an empty
+//!   one is the `eNoResidues` error.
 //! - [`MaskReadError`]: `Ncbi(NcbiException)`, a `CObjReaderParseException` (dustmasker
 //!   writes `e.report_default_ex(106, 16, "Application's execution failed")` and exits with
 //!   3; segmasker writes `e.what()` and a line feed and exits with 1); `Read(std::io::Error)`,
@@ -287,7 +287,11 @@ fn iupac_letters<R: Read>(inst: SeqInst, reader: &mut FastaReader<R>) -> Vec<u8>
 /// residues that the reader packed, read back in place.
 fn raw_letters<R: Read>(reader: &mut FastaReader<R>, length: u64, coding: Coding) -> Vec<u8> {
     let mut letters = reader.take_raw_residues();
-    debug_assert_eq!(letters.len() as u64, length);
+    assert_eq!(
+        letters.len() as u64,
+        length,
+        "the reader's residues are the record's"
+    );
     read_back(&mut letters, coding);
     letters
 }

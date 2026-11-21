@@ -31,7 +31,9 @@
 //! residues= buffers= freed=` when a plan without residues was made.
 
 use super::search_seed::XSubjectPlan;
-use crate::algorithm::common::translated_chunks::{translated_chunk_scan_ranges, TranslatedChunk};
+use crate::algorithm::common::translated_chunks::{
+    translated_chunk_scan_ranges, translated_db_mask_chunks, TranslatedChunk,
+};
 use crate::algorithm::common::x_db_stream::x_frames_pooled;
 use crate::algorithm::tblastx::constants::SENTINEL_BYTE;
 use crate::algorithm::tblastx::translation::QueryFrame;
@@ -872,11 +874,30 @@ fn x_packed_plan(
     store: &crate::sequence::packed_subject::PackedNucleotide,
     db_gencode: u8,
 ) -> Result<XSubjectPlan> {
-    x_bytes_plan(store.packed(), store.len(), db_gencode)
+    x_bytes_plan(store.packed(), store.len(), db_gencode, None)
 }
 
-/// EXPERIMENT (LOSAT_X_TBNSTORE): [`x_packed_plan`] of a subject's packed bytes and length.
-fn x_bytes_plan(packed: &[u8], length: usize, db_gencode: u8) -> Result<XSubjectPlan> {
+/// The database masking of a subject's plan (`-db_soft_mask`, `-db_hard_mask`; series NP, M4b
+/// PR 2): the sequence's ranges in bases (`XDbStream::mask_ranges`, the complement of its stored
+/// masks) and whether the masking is hard.
+#[derive(Clone, Copy)]
+pub(super) struct XDbMaskRanges<'r> {
+    pub(super) ranges: &'r [(i32, i32)],
+    pub(super) hard: bool,
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:805-830
+// In a masked search the frames' ranges are mapped from the sequence's ranges in bases, once per
+// strand, and each frame's chunks and scan ranges follow from them as for a protein subject
+// (`translated_db_mask_chunks`).
+/// EXPERIMENT (LOSAT_X_TBNSTORE): [`x_packed_plan`] of a subject's packed bytes and length, with
+/// the units of its database masking `db_mask` (`None`: a search without the options).
+fn x_bytes_plan(
+    packed: &[u8],
+    length: usize,
+    db_gencode: u8,
+    db_mask: Option<XDbMaskRanges<'_>>,
+) -> Result<XSubjectPlan> {
     let tables = x_codon_tables(db_gencode)?;
     let frames = x_packed_frames(packed, length, tables);
     let negative_first_length = frames
@@ -885,15 +906,27 @@ fn x_bytes_plan(packed: &[u8], length: usize, db_gencode: u8) -> Result<XSubject
         .map(|frame| frame.aa_len)
         .unwrap_or(0);
     let mut units = Vec::new();
+    let mut split = crate::core::subject_split::HardSplitState::default();
     for (index, frame) in frames.iter().enumerate() {
         // Without lowercase masking the ranges read no letter of the subject.
-        for (chunk, ranges) in translated_chunk_scan_ranges(
-            &[],
-            frame.frame,
-            frame.aa_len,
-            negative_first_length,
-            false,
-        )? {
+        let calls = match db_mask {
+            None => translated_chunk_scan_ranges(
+                &[],
+                frame.frame,
+                frame.aa_len,
+                negative_first_length,
+                false,
+            )?,
+            Some(mask) => translated_db_mask_chunks(
+                mask.ranges,
+                mask.hard,
+                frame.frame,
+                frame.aa_len,
+                negative_first_length,
+                &mut split,
+            )?,
+        };
+        for (chunk, ranges) in calls {
             units.push((index, chunk, ranges));
         }
     }
@@ -918,8 +951,9 @@ pub(super) fn x_packed_bytes_plan(
     packed: &[u8],
     length: usize,
     db_gencode: u8,
+    db_mask: Option<XDbMaskRanges<'_>>,
 ) -> Result<Arc<XSubjectPlan>> {
-    x_bytes_plan(packed, length, db_gencode).map(Arc::new)
+    x_bytes_plan(packed, length, db_gencode, db_mask).map(Arc::new)
 }
 
 // No NCBI counterpart: reads LOSAT_X_TBNUNITXLATE once; it does not change any value NCBI

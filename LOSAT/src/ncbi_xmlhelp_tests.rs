@@ -183,7 +183,6 @@ fn the_filter_leaves_whole_elements() {
             "{program}"
         );
     }
-    assert_eq!(print("windowmasker", |_| false), None);
 }
 
 // One refused name: its element and the dependencies naming it go, the rest stays (NCBI blastn:
@@ -237,11 +236,13 @@ fn the_library_refuses_xmlhelp() {
         &mut dyn std::io::Write,
         &mut dyn std::io::Write,
     ) -> i32;
-    let readers: [(&str, RunWith); 4] = [
+    let readers: [(&str, RunWith); 6] = [
         ("BLASTDBCMD", crate::blastdbcmd::run_with),
         ("DUSTMASKER", crate::dustmasker::run_with),
         ("SEGMASKER", crate::segmasker::run_with),
+        ("WINDOWMASKER", crate::windowmasker::run_with),
         ("CONVERT2BLASTMASK", crate::convert2blastmask::run_with),
+        ("MAKEMBINDEX", crate::makembindex::run_with),
     ];
     for (shown, run_with) in readers {
         let (mut out, mut err) = (Vec::new(), Vec::new());
@@ -260,9 +261,10 @@ fn the_library_refuses_xmlhelp() {
     }
 }
 
-// The readers of blastdbcmd, dustmasker, segmasker and convert2blastmask (`ncbi_app`) read every
-// argument of NCBI's XML (none is refused by name, so their XML is NCBI's whole): the argument
-// with a value `1` for a key, then `-h`, writes the usage or an error of the value, never NCBI's
+// The readers of blastdbcmd, dustmasker, segmasker, windowmasker, convert2blastmask and
+// makembindex (`ncbi_app`) read every argument of NCBI's XML (none is refused by name, so their
+// XML is NCBI's whole): the argument with a value `1` for a key, then `-h`, writes the usage or an
+// error of the value, never NCBI's
 // `Unknown argument` or a refusal.
 #[test]
 fn the_ncbi_readers_read_every_argument_of_the_xml() {
@@ -272,11 +274,13 @@ fn the_ncbi_readers_read_every_argument_of_the_xml() {
         &mut dyn std::io::Write,
         &mut dyn std::io::Write,
     ) -> i32;
-    let readers: [(&str, RunWith); 4] = [
+    let readers: [(&str, RunWith); 6] = [
         ("blastdbcmd", crate::blastdbcmd::run_with),
         ("dustmasker", crate::dustmasker::run_with),
         ("segmasker", crate::segmasker::run_with),
+        ("windowmasker", crate::windowmasker::run_with),
         ("convert2blastmask", crate::convert2blastmask::run_with),
+        ("makembindex", crate::makembindex::run_with),
     ];
     for (program, run_with) in readers {
         for (name, flag) in ncbi_argument_names(program) {

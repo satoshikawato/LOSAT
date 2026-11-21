@@ -25,7 +25,7 @@
 use std::ops::Range;
 use std::sync::Arc;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 
 use super::database::BlastpDatabase;
 use super::x_lookup_ahead::{XAheadBlock, XAheadLookup};
@@ -37,13 +37,13 @@ use super::{
     blastp_concatenated_query_length, blastp_context_lookup_bounds, blastp_is_archive,
     blastp_is_xml, blastp_offset_array_size, blastp_prelim_cutoffs, blastp_prelim_cutoffs_of,
     blastp_prelim_evalue, blastp_preliminary_cutoff_subject_length, blastp_query_anchored_view,
-    blastp_query_frames_marked, blastp_seqalign_format, blastp_x_dropoff_init_for_context,
-    blastp_xml2_kind, build_blastp_concatenated_query, build_redone_match_heaps,
-    compute_blosum62_ideal_karlin_params, compute_diag_table_shape, culling, database,
-    prepare_blastp_subjects_preserving_order, psi_round, pssm_hooks, rps_hooks, split_option_space,
-    x_blocks_contexts, x_ih_pool, x_lookup_ahead, x_prelim_block_plan, x_soft_subject,
-    BlastpContextLookupBounds, BlastpPrelimCutoffs, BlastpRanges, BlastpReport, BlastpReports,
-    BlastpRuntimeLookup, BlastpSubjectParameters, BlastpSumStats, PrelimOnly,
+    blastp_query_frames_marked, blastp_seqalign_format, blastp_text_format,
+    blastp_x_dropoff_init_for_context, blastp_xml2_kind, build_blastp_concatenated_query,
+    build_redone_match_heaps, compute_blosum62_ideal_karlin_params, compute_diag_table_shape,
+    culling, database, prepare_blastp_subjects_preserving_order, psi_round, pssm_hooks, rps_hooks,
+    split_option_space, x_blocks_contexts, x_ih_pool, x_lookup_ahead, x_prelim_block_plan,
+    x_soft_subject, BlastpContextLookupBounds, BlastpPrelimCutoffs, BlastpRanges, BlastpReport,
+    BlastpReports, BlastpRuntimeLookup, BlastpSubjectParameters, BlastpSumStats, PrelimOnly,
 };
 use crate::algorithm::blastp::args::{
     BlastpCompositionMode, BlastpLookupTableType, ResolvedBlastpArgs,
@@ -115,7 +115,7 @@ pub(super) fn requested_reports(
         .iter()
         .map(|format| -> Result<BlastpReport> {
             // The tabular reports with a field list or a delimiter, and outfmt 10 and 20.
-            if let Some(spec) = tabular::custom_tabular_spec(format.outfmt) {
+            if let Some(spec) = tabular::custom_tabular_spec(format.outfmt, args.app) {
                 return Ok(BlastpReport::CustomTabular(spec));
             }
             if let Some(serial) = blastp_seqalign_format(format.outfmt) {
@@ -132,15 +132,14 @@ pub(super) fn requested_reports(
             }
             // The query-anchored outfmt 1 to 4: BLASTP's (`Program::writes`; psiblast and rpsblast
             // refuse them, line RG PS15).
-            if let Some(view) = blastp_query_anchored_view(args.app, format.outfmt)? {
+            if let Some(view) = blastp_query_anchored_view(args.app, format.outfmt) {
                 return Ok(BlastpReport::Pairwise(view));
             }
-            // Outfmt 0, and outfmt 6 and 7 of the `std` fields and a tab (`TabularSpec::of`).
-            let (outfmt, custom_fields) =
-                OutputFormat::parse(format.outfmt).map_err(anyhow::Error::msg)?;
-            if outfmt == OutputFormat::Pairwise && custom_fields.is_some() {
-                bail!("blastp outfmt 0 does not accept custom field lists");
-            }
+            // Outfmt 0, and outfmt 6 and 7 of the `std` fields and a tab (`custom_tabular_spec`
+            // is `None`), their number as NCBI reads it (`blastp_text_format`); the words after
+            // outfmt 0's number (the library's value as given) are dropped, as NCBI drops them
+            // (`parse_formatting_string`).
+            let outfmt = blastp_text_format(format.outfmt).map_err(anyhow::Error::msg)?;
             Ok(match outfmt {
                 OutputFormat::Pairwise => {
                     BlastpReport::Pairwise(crate::report::pairwise::PairwiseView::Pairwise)

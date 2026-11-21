@@ -231,3 +231,54 @@ fn test_subject_is_optional_for_the_parser() {
     let args = parse_args(&["-query", "query.fasta"]);
     assert_eq!(args.subject, None);
 }
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3304-3328: the two best
+// hit options take a value above 0 and below 0.5 (NCBI BLAST+ 2.17.0 refuses 0 and 0.5), the one
+// not given is 0.1, and neither goes with `-culling_limit` (also 0).
+#[test]
+fn the_best_hit_options_take_their_range_and_exclude_culling() {
+    use crate::core::hspfilter_besthit::BestHitParams;
+    let base = ["-query", "q.fa", "-subject", "s.fa"];
+    let with = |extra: &[&str]| {
+        let mut words = base.to_vec();
+        words.extend_from_slice(extra);
+        parse_args(&words)
+    };
+    assert_eq!(with(&[]).best_hit(), None);
+    assert_eq!(
+        with(&["-best_hit_overhang", "0.25"]).best_hit(),
+        Some(BestHitParams {
+            overhang: 0.25,
+            score_edge: 0.1
+        })
+    );
+    assert_eq!(
+        with(&["-best_hit_score_edge", "1e-300"]).best_hit(),
+        Some(BestHitParams {
+            overhang: 0.1,
+            score_edge: 1e-300
+        })
+    );
+    let refused = |extra: &[&str]| {
+        let mut argv = vec!["losat", "blastn"];
+        argv.extend_from_slice(&base);
+        argv.extend_from_slice(extra);
+        crate::cli::try_parse_from::<crate::cli::Cli, _, _>(argv).is_err()
+    };
+    for value in ["0", "0.5", "0.6", "-0.1", "nan", "abc"] {
+        assert!(refused(&["-best_hit_overhang", value]), "{value}");
+        assert!(refused(&["-best_hit_score_edge", value]), "{value}");
+    }
+    assert!(refused(&[
+        "-culling_limit",
+        "0",
+        "-best_hit_overhang",
+        "0.1"
+    ]));
+    assert!(refused(&[
+        "-best_hit_score_edge",
+        "0.1",
+        "-culling_limit",
+        "2"
+    ]));
+}

@@ -79,7 +79,7 @@ function setup(
         return { ok: true, start: { conffile: null, logFile: null, dryRun: false, registerInputs: false, prints: null } };
       }, hold.start === true);
     },
-    validate: async () => ({ ok: true }) as const,
+    validate: async () => ({ ok: true, dataLoaders: true }) as const,
     prepare: () => undefined,
   };
   const draft = new SearchDraft({
@@ -118,7 +118,7 @@ describe('a part of LOSAT that is unavailable, in the search form', () => {
 
   it('an input that the engine cannot read is still the input\'s', async () => {
     const { draft } = setup();
-    draft.setPaste('query', '>q\nACGT\n>?10\n');
+    draft.setPaste('query', '>q\n$$$$$$\n');
     await draft.idle();
     expect(sourceOf(draft, 'query').status).toBe('failed');
     expect('unavailable' in sourceOf(draft, 'query')).toBe(false);

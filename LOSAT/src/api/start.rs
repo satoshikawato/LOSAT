@@ -60,7 +60,7 @@ fn open_with<S: AsRef<OsStr> + Clone>(
         Err(reason) => return Err(Error::Search(reason.into())),
     }
     let mut target = files.log_target(log_file(words));
-    start.write_log_setup(&mut target);
+    start.write_log_setup(&mut target, diagnostics);
     Ok(Opened { start, target })
 }
 
@@ -489,14 +489,6 @@ impl CallerStart {
     /// Whether the run is a dry run, which ends after its arguments and settings.
     pub fn dry_run(&self) -> bool {
         self.dry_run
-    }
-
-    /// The caller's refusal of the file of `-logfile` (`RunFiles::log_refusal`: LOSAT Web's of a
-    /// name with a directory), which the caller makes when the run searches, after the steps that
-    /// the command line takes before its search: the command line prints its help and its
-    /// version whatever the name (line WQA's D14, 2026-11-21).
-    pub fn log_refusal(&self) -> Option<String> {
-        self.files.log_refusal(self.log_name.as_deref())
     }
 
     /// The text that the run prints to the command line's standard output in place of everything

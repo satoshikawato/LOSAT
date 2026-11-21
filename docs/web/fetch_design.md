@@ -104,6 +104,9 @@ WF-2 で確定した中身と持ち方は §9（表に SHA-256 は持たない�
    「Fetching 1 of 2 from NCBI…」と送り先を出す。
    accession だけでない欄（線 WA の WA2-OP-04、2026-11-07）：1 行目が Seq-id として読まれる欄（accession や数字だけの行の後に
    別の文字）の読めない理由は adapter の文のまま（「…which is not supported in the browser (start the input with a '>' defline)」。
+   2026-11-20 の線 WQA の D13 から、この文は CLI と同じ engine の文「…which is not supported by LOSAT's BLASTN (start the query with a '>' defline, or set
+   DATA_LOADERS=none in the [BLAST] section of .ncbirc)」で、`-conffile` の `[BLAST] DATA_LOADERS=none` では CLI と同じに data として読む（D16）。
+   この案内（下のボタンと一文）は、`-conffile` を外して engine の check が拒んだ欄にも出る（D13 の 2 回目、2026-11-20）。
    engine が Seq-id と見ても Fetch が取らない GI、PDB の id、`sp|…|` があるので、adapter には Fetch の案内を持たせない）。
    card は、貼った文の先頭の空白と空行を除いて 1 行目の頭に `>` を足すだけのボタン「Put '>' before the first line」を出し（Seq-id の場面では「Add the line」を出さない。
    1 行目が最初の data 行になって読めない）、1 行目が `ACCESSION` に合う時だけ一文「To fetch accessions, put only the

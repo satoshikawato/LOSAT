@@ -59,6 +59,12 @@ impl WinMaskError {
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_factory.cpp:332-340
     pub fn create_report(&self) -> Option<Vec<u8>> {
+        self.create_exception().map(|exception| exception.what())
+    }
+
+    /// The exception whose report is [`WinMaskError::create_report`], for the windowmasker
+    /// application, which reports it as its own (`CNcbiApplication`'s catch).
+    pub fn create_exception(&self) -> Option<NcbiException> {
         let exception = match self {
             Self::Open { name } => rethrown(open_exception(name)),
             Self::Format { site, .. } => {
@@ -79,9 +85,10 @@ impl WinMaskError {
             | Self::UnsetHashParameter { .. }
             | Self::EmptyCacheBitArray { .. }
             | Self::SequenceTooLong { .. }
-            | Self::BadIndex { .. } => return None,
+            | Self::BadIndex { .. }
+            | Self::PctLine { .. } => return None,
         };
-        Some(exception.what())
+        Some(exception)
     }
 
     /// The warnings that NCBI posts while it reads the file, before the error.

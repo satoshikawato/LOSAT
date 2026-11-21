@@ -324,9 +324,12 @@ pub(super) fn batch_lookup<S: TbxScore>(inputs: &LookupInputs<'_, S>) -> BatchLo
     // `-lcase_masking` with a lower-case letter in a subject: only the reference frame loop scans
     // ranges (`x_soft_subject_calls`), so the batch takes it as a debugging run does. A `-db`
     // subject has no case.
-    let x_soft_subjects = args.lcase_masking
+    // A masked `-db` search (`-db_soft_mask`, `-db_hard_mask`; series NP, M4b PR 2) takes it too:
+    // every subject's frames have their own ranges or chunks (`x_db_mask_calls`).
+    let x_soft_subjects = (args.lcase_masking
         && matches!(subjects, Subjects::Fasta(records)
-            if records.iter().any(|record| record.seq().iter().any(u8::is_ascii_lowercase)));
+            if records.iter().any(|record| record.seq().iter().any(u8::is_ascii_lowercase))))
+        || matches!(subjects, Subjects::Stream(stream) if stream.mask().is_some());
     // EXPERIMENT (PAIRLUT, graduated on 2026-10-22), dispatch point 0 (per batch, at the
     // lookup build): when PAIRPAR will run the seed stage of every subject of this batch
     // as units, the units' tables (one per query-context group) are built directly from the

@@ -6,14 +6,14 @@
 // Pointers and lengths are unsigned 32-bit values (ABI v2 §6). JavaScript receives a Wasm
 // i32 as a signed number, so a pointer of 2 GiB or more arrives negative: every pointer
 // and length is converted with `>>> 0` before it is used as an offset into the memory.
-import type { RecordKey, ShownIds } from '../../domain/dataset.js';
+import type { FastaReader, RecordKey, ShownIds } from '../../domain/dataset.js';
 import { isPrintedKind } from '../../domain/run-files.js';
-import { FileReadError, type StartResult } from '../../ports/engine.js';
+import { FileReadError, type StartResult, type ValidationResult } from '../../ports/engine.js';
 import type { Compression } from '../../ports/inflate.js';
 
 /** The version of ABI v2 that this host speaks (`losat_web2_abi_version`, ABI v2 §10). */
 export const ABI_VERSION = 10;
-/** Stream 2: the JSON response of describe, register, register_inputs, scan_end, inflate_begin, start and file_end. */
+/** Stream 2: the JSON response of describe, validate, register, register_inputs, scan_end, inflate_begin, start and file_end. */
 export const RESPONSE_STREAM = 2;
 /** Stream 5: the inflated bytes of inflate_chunk and inflate_end. */
 export const INFLATED_STREAM = 5;
@@ -294,14 +294,23 @@ export class ReactorAbi {
     };
   }
 
-  /** Undefined if the argv is valid, else the CLI's error text. */
-  validate(argv: readonly string[]): string | undefined {
+  /**
+   * The verdict on an argv: the CLI's error text, or whether its run reads the inputs with NCBI's
+   * data loaders on (the *validation* JSON, ABI v2 §9, version 8), which `register` and `scanBegin`
+   * then take.
+   */
+  validate(argv: readonly string[]): ValidationResult {
     const status = this.call(this.exports.losat_web2_validate, [encoder.encode(argv.join('\0'))]);
-    return status < 0 ? this.lastError() : undefined;
+    // The *validation* comes before the option checks, so a refused argv may have it too (line WQA's D13 round 3, L1):
+    // it is read before the error, whose call drops the responses.
+    const known = status < 0 && this.responses.length === 0 ? undefined : (this.response() as { data_loaders: boolean }).data_loaders;
+    if (status < 0) return { ok: false, message: this.lastError(), ...(known === undefined ? {} : { dataLoaders: known }) };
+    return { ok: true, dataLoaders: known! };
   }
 
-  register(program: string, role: number, bytes: Uint8Array): RegisteredInput {
-    const handle = this.check(this.call(this.exports.losat_web2_register, [encoder.encode(program), role, bytes]));
+  /** Reads `bytes` with the engine's reader of `program`'s input of `role`, NCBI's data loaders on or off (ABI v2 §4, version 8). */
+  register(program: string, role: number, dataLoaders: boolean, bytes: Uint8Array): RegisteredInput {
+    const handle = this.check(this.call(this.exports.losat_web2_register, [encoder.encode(program), role, dataLoaders ? 1 : 0, bytes]));
     try {
       const response = this.response() as { handle: number; records: Array<{ id: string; length: number }> };
       return { handle, records: Object.freeze(response.records.map(({ id, length }) => ({ id, length }))) };
@@ -350,8 +359,15 @@ export class ReactorAbi {
     this.check(this.call(this.exports.losat_web2_release, [handle]));
   }
 
-  scanBegin(parser: number): number {
-    return this.check(this.call(this.exports.losat_web2_scan_begin, [parser]));
+  /** Starts an index scan with the engine's reader `reader` (ABI v2 §4, version 8). */
+  scanBegin(reader: FastaReader): number {
+    return this.check(
+      this.call(this.exports.losat_web2_scan_begin, [
+        encoder.encode(reader.program),
+        reader.role === 'query' ? ROLE_QUERY : ROLE_SUBJECT,
+        reader.dataLoaders ? 1 : 0,
+      ]),
+    );
   }
 
   scanChunk(scanner: number, bytes: Uint8Array): void {

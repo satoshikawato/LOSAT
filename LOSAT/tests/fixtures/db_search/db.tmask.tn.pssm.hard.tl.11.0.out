@@ -1,0 +1,157 @@
+PSITBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: long masks
+Masked using: 'dust', options: 'hedge3 long'
+           2 sequences; 10,000 total letters
+
+
+
+Query= pl1 l1 3000-3599 frame +1
+
+Length=200
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+l1 long subject with two coding stretches                             369     8e-122
+l2 second long subject                                                16.2    7.4   
+
+
+>l1 long subject with two coding stretches
+Length=7000
+
+ Score = 369 bits (946),  Expect = 8e-122
+ Identities = 200/200 (100%), Positives = 200/200 (100%), Gaps = 0/200 (0%)
+ Frame = +1
+
+Query  1     YNTIIPAITNQYSRDAPVVNGMRRRDSDAELPHPKYSPLNNVNSAVSQVPLRQNWRDSTL  60
+             YNTIIPAITNQYSRDAPVVNGMRRRDSDAELPHPKYSPLNNVNSAVSQVPLRQNWRDSTL
+Sbjct  3001  YNTIIPAITNQYSRDAPVVNGMRRRDSDAELPHPKYSPLNNVNSAVSQVPLRQNWRDSTL  3180
+
+Query  61    ELVYPQCLERRRGKAPTARSVYSISTDNRYHLELQPLGLTVTMSMMASGNLALPTVRANQ  120
+             ELVYPQCLERRRGKAPTARSVYSISTDNRYHLELQPLGLTVTMSMMASGNLALPTVRANQ
+Sbjct  3181  ELVYPQCLERRRGKAPTARSVYSISTDNRYHLELQPLGLTVTMSMMASGNLALPTVRANQ  3360
+
+Query  121   FRARQRYSSVEGVSTDITWKCRMSYAPYNGFQGQNIKWALTCMATPRTRIWWLRDHHRLS  180
+             FRARQRYSSVEGVSTDITWKCRMSYAPYNGFQGQNIKWALTCMATPRTRIWWLRDHHRLS
+Sbjct  3361  FRARQRYSSVEGVSTDITWKCRMSYAPYNGFQGQNIKWALTCMATPRTRIWWLRDHHRLS  3540
+
+Query  181   RVTPPTSLFVVHRLSTRRGY  200
+             RVTPPTSLFVVHRLSTRRGY
+Sbjct  3541  RVTPPTSLFVVHRLSTRRGY  3600
+
+
+ Score = 23.5 bits (49),  Expect = 0.036
+ Identities = 14/40 (35%), Positives = 19/40 (48%), Gaps = 9/40 (23%)
+ Frame = -3
+
+Query  25    RDSDAELPHPKYSPLNNVNSAVSQVPLRQNWRDSTLELVY  64
+             RD     PH +Y PL  +      VPL     D T++L+Y
+Sbjct  2963  RD*STHSPHCRYEPLTVI------VPLMS---DGTIQLIY  2871
+
+
+ Score = 20.4 bits (41),  Expect = 0.35
+ Identities = 8/28 (29%), Positives = 14/28 (50%), Gaps = 0/28 (0%)
+ Frame = -2
+
+Query  170   IWWLRDHHRLSRVTPPTSLFVVHRLSTR  197
+             ++WL   HRL     P++ + V R   +
+Sbjct  5340  VYWLARSHRLVLTVRPSTNYSVCRFQCK  5257
+
+
+ Score = 18.1 bits (35),  Expect = 1.9
+ Identities = 7/11 (64%), Positives = 8/11 (73%), Gaps = 0/11 (0%)
+ Frame = -2
+
+Query  55    WRDSTLELVYP  65
+             +RD  LEL YP
+Sbjct  4875  YRDHKLELDYP  4843
+
+
+ Score = 17.7 bits (34),  Expect = 2.5
+ Identities = 6/17 (35%), Positives = 13/17 (76%), Gaps = 0/17 (0%)
+ Frame = +2
+
+Query  94   LQPLGLTVTMSMMASGN  110
+            +QP G  +T++ +++GN
+Sbjct  896  IQPWGHLLTVADISTGN  946
+
+
+ Score = 17.0 bits (32),  Expect = 4.3
+ Identities = 6/17 (35%), Positives = 9/17 (53%), Gaps = 0/17 (0%)
+ Frame = -2
+
+Query  158   WALTCMATPRTRIWWLR  174
+             W LT +   + R +W R
+Sbjct  6780  WTLTNLTPCQ*RFFWKR  6730
+
+
+ Score = 17.0 bits (32),  Expect = 4.3
+ Identities = 5/12 (42%), Positives = 8/12 (67%), Gaps = 0/12 (0%)
+ Frame = +3
+
+Query  136   DITWKCRMSYAP  147
+             D+T  CR+  +P
+Sbjct  6588  DVTRACRVGISP  6623
+
+
+ Score = 16.6 bits (31),  Expect = 5.7
+ Identities = 4/8 (50%), Positives = 5/8 (63%), Gaps = 0/8 (0%)
+ Frame = +3
+
+Query  50    PLRQNWRD  57
+             P+R  W D
+Sbjct  2889  PIRHKWND  2912
+
+
+>l2 second long subject
+Length=3000
+
+ Score = 16.2 bits (30),  Expect = 7.4
+ Identities = 4/6 (67%), Positives = 6/6 (100%), Gaps = 0/6 (0%)
+ Frame = +2
+
+Query  50   PLRQNW  55
+            PLR++W
+Sbjct  500  PLRESW  517
+
+
+ Score = 16.2 bits (30),  Expect = 7.4
+ Identities = 6/7 (86%), Positives = 6/7 (86%), Gaps = 0/7 (0%)
+ Frame = +1
+
+Query  175   DHHRLSR  181
+             DH RLSR
+Sbjct  1993  DHARLSR  2013
+
+
+
+Lambda      K        H        a         alpha
+   0.320    0.131    0.412    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0404    0.140     1.90     42.6     43.6 
+
+Effective search space used: 520480
+
+
+  Database: long masks
+  Masked using: 'dust', options: 'hedge3 long'
+    Posted date:  Nov 21, 2026  11:10 AM
+  Number of letters in database: 10,000
+  Number of sequences in database:  2
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 13
+Window for multiple hits: 40

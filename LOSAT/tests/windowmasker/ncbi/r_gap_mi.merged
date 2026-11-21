@@ -1,0 +1,251 @@
+FASTA-Reader: This gap-type cannot have any linkage-evidence specified, so any will be ignored.
+CFastaReader: Gap mods are ignored because gaps are becoming N's or X's in this case.
+Blast-db-mask-info ::= {
+  algo-id 3,
+  algo-program windowmasker,
+  algo-options "",
+  masks {
+    masks {
+      packed-int {
+        {
+          from 122,
+          to 138,
+          id local id 1
+        },
+        {
+          from 318,
+          to 332,
+          id local id 1
+        },
+        {
+          from 2154,
+          to 2168,
+          id local id 1
+        },
+        {
+          from 2339,
+          to 2358,
+          id local id 1
+        },
+        {
+          from 2438,
+          to 2458,
+          id local id 1
+        },
+        {
+          from 2499,
+          to 2515,
+          id local id 1
+        },
+        {
+          from 2530,
+          to 2566,
+          id local id 1
+        },
+        {
+          from 2737,
+          to 2758,
+          id local id 1
+        },
+        {
+          from 2798,
+          to 2810,
+          id local id 1
+        },
+        {
+          from 2963,
+          to 2997,
+          id local id 1
+        },
+        {
+          from 3144,
+          to 3172,
+          id local id 1
+        },
+        {
+          from 3501,
+          to 3517,
+          id local id 1
+        },
+        {
+          from 3606,
+          to 3618,
+          id local id 1
+        },
+        {
+          from 3715,
+          to 3732,
+          id local id 1
+        },
+        {
+          from 3887,
+          to 3902,
+          id local id 1
+        },
+        {
+          from 4084,
+          to 4115,
+          id local id 1
+        },
+        {
+          from 4177,
+          to 4244,
+          id local id 1
+        },
+        {
+          from 4437,
+          to 4451,
+          id local id 1
+        },
+        {
+          from 4523,
+          to 4584,
+          id local id 1
+        },
+        {
+          from 4725,
+          to 4740,
+          id local id 1
+        },
+        {
+          from 4745,
+          to 4758,
+          id local id 1
+        },
+        {
+          from 4771,
+          to 4789,
+          id local id 1
+        },
+        {
+          from 5220,
+          to 5244,
+          id local id 1
+        },
+        {
+          from 5351,
+          to 5380,
+          id local id 1
+        },
+        {
+          from 5532,
+          to 5546,
+          id local id 1
+        },
+        {
+          from 5554,
+          to 5567,
+          id local id 1
+        },
+        {
+          from 5603,
+          to 5619,
+          id local id 1
+        },
+        {
+          from 5832,
+          to 5848,
+          id local id 1
+        },
+        {
+          from 5934,
+          to 5947,
+          id local id 1
+        },
+        {
+          from 6046,
+          to 6062,
+          id local id 1
+        }
+      },
+      packed-int {
+        {
+          from 122,
+          to 138,
+          id local id 2
+        },
+        {
+          from 318,
+          to 332,
+          id local id 2
+        },
+        {
+          from 2005,
+          to 2012,
+          id local id 2
+        },
+        {
+          from 2204,
+          to 2218,
+          id local id 2
+        },
+        {
+          from 2389,
+          to 2408,
+          id local id 2
+        },
+        {
+          from 2488,
+          to 2508,
+          id local id 2
+        },
+        {
+          from 2549,
+          to 2565,
+          id local id 2
+        },
+        {
+          from 2580,
+          to 2616,
+          id local id 2
+        },
+        {
+          from 2787,
+          to 2808,
+          id local id 2
+        },
+        {
+          from 2848,
+          to 2860,
+          id local id 2
+        },
+        {
+          from 3013,
+          to 3079,
+          id local id 2
+        },
+        {
+          from 3094,
+          to 3122,
+          id local id 2
+        },
+        {
+          from 3451,
+          to 3467,
+          id local id 2
+        },
+        {
+          from 3556,
+          to 3568,
+          id local id 2
+        },
+        {
+          from 3665,
+          to 3682,
+          id local id 2
+        },
+        {
+          from 3837,
+          to 3852,
+          id local id 2
+        },
+        {
+          from 4034,
+          to 4049,
+          id local id 2
+        }
+      }
+    },
+    more FALSE
+  }
+}

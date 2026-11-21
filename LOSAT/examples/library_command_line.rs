@@ -10,7 +10,8 @@
 //! `run_to_file` with `-out`, and writes the search's warnings and a failure's message to standard
 //! error, so that a run compares with `losat <program>` with the same arguments
 //! (`tests/db_search_fixtures.py check --library`). `makeblastdb`, `blastdbcmd`, `dustmasker`,
-//! `segmasker` and `convert2blastmask` go to their functions, with the standard streams of this process
+//! `segmasker`, `windowmasker`, `convert2blastmask` and `makembindex` go to their functions, with
+//! the standard streams of this process
 //! (`tests/masker_fixtures.rs`). A failure ends with status 1, whatever the command line's
 //! status for it.
 
@@ -20,7 +21,8 @@ use std::process::ExitCode;
 
 use losat::api::{
     read_input_file, read_inputs, run, run_blastdbcmd, run_convert2blastmask, run_dustmasker,
-    run_makeblastdb, run_segmasker, run_to_file, validate, Error, Inputs, Program, Role,
+    run_makeblastdb, run_makembindex, run_segmasker, run_to_file, run_windowmasker, validate,
+    Error, Inputs, Program, Role,
 };
 
 fn main() -> ExitCode {
@@ -60,7 +62,9 @@ fn search() -> Result<(), Error> {
         "makeblastdb" => run_makeblastdb,
         "dustmasker" => run_dustmasker,
         "segmasker" => run_segmasker,
+        "windowmasker" => run_windowmasker,
         "convert2blastmask" => run_convert2blastmask,
+        "makembindex" => run_makembindex,
         _ => return search_program(program, words),
     };
     let (mut stdin, mut stdout, mut stderr) =

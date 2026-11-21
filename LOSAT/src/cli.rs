@@ -155,9 +155,11 @@ fn entry_program_description(name: &str) -> &'static str {
         "blastdbcmd" => "BLAST database client",
         "dustmasker" => "Low complexity region masker based on Symmetric DUST algorithm",
         "segmasker" => "Low complexity region masker based on the SEG algorithm",
+        "windowmasker" => "Window based sequence masker",
         "convert2blastmask" => {
             "Convert masking information in lower-case masked FASTA input to file formats suitable for makeblastdb"
         }
+        "makembindex" => "Create a BLAST database index.",
         _ => "",
     }
 }
@@ -767,13 +769,11 @@ fn render_rpsbproc_text(text: &str) -> String {
 // The options of NCBI blastn 2.17.0+ (-help) that LOSAT's BLASTN does not implement
 // (AGENTS.md rule 2: explicit unsupported errors). `-db` and `-dbsize` are implemented
 // (`blastn/args.rs`), as are the X-drops, `-window_size`, `-off_diagonal_range`, `-no_greedy`
-// (DI-6), `-min_raw_gapped_score` (DI-6b) and the database masks (`blastinput::db_mask`, series
-// NP M4a-2).
+// (DI-6), `-min_raw_gapped_score` (DI-6b), the database masks (`blastinput::db_mask`, series
+// NP M4a-2), `-filtering_db` (`algorithm::blastn::repeat_filter`, line RG item D4) and
+// `-best_hit_overhang` / `-best_hit_score_edge` (series NP O6a).
 const UNPORTED_BLASTN_ARGS: &[&str] = &[
-    "best_hit_overhang",
-    "best_hit_score_edge",
     "entrez_query",
-    "filtering_db",
     "gilist",
     "html",
     "import_search_strategy",
@@ -792,8 +792,6 @@ fn is_unported_blastn_arg(name: &str) -> bool {
 const UNPORTED_BLASTP_ARGS: &[&str] = &[
     "best_hit_overhang",
     "best_hit_score_edge",
-    "db_hard_mask",
-    "db_soft_mask",
     "entrez_query",
     "gilist",
     "html",
@@ -814,14 +812,14 @@ fn is_unported_blastp_arg(name: &str) -> bool {
 /// psiblast's NCBI arguments that LOSAT does not run: PHI-BLAST (PS8; the ASCII and ASN.1 PSSM
 /// files are PS2's and PS3's, `algorithm::psiblast::pssm`, `-in_pssm` PS4's,
 /// `algorithm::psiblast::in_pssm`, the MSA inputs PS6's, `algorithm::psiblast::in_msa`), and the arguments that blastp's engine does
-/// not run either (`is_unported_blastp_arg`; psiblast has no database masks and no `-mt_mode`).
+/// not run either (`is_unported_blastp_arg`; psiblast has no database masks, NCBI's unknown
+/// arguments of its parser, and no `-mt_mode`).
 /// The search strategy file is written, of a FASTA query and of `-in_pssm` (items F1b-1 and F1b-2
 /// of line RG).
 const UNPORTED_PSIBLAST_OWN_ARGS: &[&str] = &["phi_pattern"];
 
 fn is_unported_psiblast_arg(name: &str) -> bool {
-    UNPORTED_PSIBLAST_OWN_ARGS.contains(&name)
-        || (is_unported_blastp_arg(name) && !matches!(name, "db_hard_mask" | "db_soft_mask"))
+    UNPORTED_PSIBLAST_OWN_ARGS.contains(&name) || is_unported_blastp_arg(name)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpsblast_args.cpp:85-127 (cited at
@@ -1303,8 +1301,6 @@ fn with_toolkit_file_args(mut command: clap::Command) -> clap::Command {
 const UNPORTED_TBLASTN_ARGS: &[&str] = &[
     "best_hit_overhang",
     "best_hit_score_edge",
-    "db_hard_mask",
-    "db_soft_mask",
     "entrez_query",
     "gilist",
     "html",
@@ -1324,8 +1320,6 @@ fn is_unported_tblastn_arg(name: &str) -> bool {
 const UNPORTED_TBLASTX_ARGS: &[&str] = &[
     "best_hit_overhang",
     "best_hit_score_edge",
-    "db_hard_mask",
-    "db_soft_mask",
     "entrez_query",
     "gilist",
     "html",
@@ -1345,8 +1339,6 @@ const UNPORTED_BLASTX_ARGS: &[&str] = &[
     "gilist",
     "negative_gilist",
     "entrez_query",
-    "db_soft_mask",
-    "db_hard_mask",
     "ipglist",
     "negative_ipglist",
     "best_hit_overhang",
@@ -1459,12 +1451,18 @@ pub struct ReportStream {
 
 impl ReportStream {
     /// The command line's report stream: the `-out` file `out_file` (`None`: standard output),
-    /// behind NCBI's buffer for the organism report (`tax_report`, `report_destination`).
-    pub fn of_cli(out_file: Option<std::io::BufWriter<std::fs::File>>, tax_report: bool) -> Self {
+    /// behind NCBI's buffer for the organism report (`tax_report`, `report_destination`) and the
+    /// hold of a run whose strategy file `strategy` LOSAT refuses (`report_destination`).
+    pub fn of_cli(
+        out_file: Option<std::io::BufWriter<std::fs::File>>,
+        tax_report: bool,
+        strategy: Option<&crate::report::archive::strategy::StrategyExport>,
+    ) -> Self {
         ReportStream {
             inner: report_destination(
                 out_file.map(|file| Box::new(file) as Box<dyn std::io::Write + Send>),
                 tax_report,
+                strategy,
             ),
             failed: false,
         }
@@ -1745,14 +1743,19 @@ impl<'a> NcbiOstream<'a> {
     /// The organism report's standard output on blastx's command line: NCBI's buffer of `cout`
     /// (`NcbiReportBuffer::standard_output`) before the process's standard output
     /// (`report_standard_output`). Nothing comes before the buffer or between it and the device.
-    pub(crate) fn standard_output() -> Self {
-        Self::new(report_destination(None, true))
+    pub(crate) fn standard_output(
+        strategy: Option<&crate::report::archive::strategy::StrategyExport>,
+    ) -> Self {
+        Self::new(report_destination(None, true, strategy))
     }
 
     /// The organism report's `-out` file `file` on blastx's command line: NCBI's `basic_filebuf`
     /// (`NcbiReportBuffer::file`) before the file, as `standard_output`'s.
-    pub(crate) fn file(file: std::fs::File) -> Self {
-        Self::new(report_destination(Some(Box::new(file)), true))
+    pub(crate) fn file(
+        file: std::fs::File,
+        strategy: Option<&crate::report::archive::strategy::StrategyExport>,
+    ) -> Self {
+        Self::new(report_destination(Some(Box::new(file)), true, strategy))
     }
 
     /// The stream of a format other than the organism report on blastx's command line
@@ -1809,8 +1812,25 @@ pub fn tie_standard_output() -> std::io::Result<()> {
 /// `write_all` of the stream, which `std::io::Stderr` writes under one lock of standard error, so
 /// that no other thread's message comes inside it. An empty write is no write of NCBI's to `cerr`
 /// (a query without warnings, whose `ERR_POST` NCBI does not make): it writes nothing of the
-/// report.
+/// report. Where the standard error is the file of `-logfile` (tblastx's, rpsblast's and
+/// rpstblastn's run, `DiagTarget::into_standard_error`), a failed write is dropped, as NCBI's
+/// handler of that file drops it: `CFileHandleDiagHandler::Post` ignores what the write returns
+/// (NCBI BLAST+ 2.17.0 tblastx `-logfile /dev/full` runs and writes its report; line WQA's D11
+/// round 2, 2026-11-20).
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:6695-6696
 pub struct CliStderr(std::io::Stderr);
+
+impl CliStderr {
+    /// `result` of a write, dropped where the standard error is the file of `-logfile`.
+    fn logged<T: Default>(result: std::io::Result<T>) -> std::io::Result<T> {
+        match result {
+            Err(_) if crate::blastinput::ncbi_environment::terminal_stderr().is_some() => {
+                Ok(T::default())
+            }
+            result => result,
+        }
+    }
+}
 
 impl CliStderr {
     /// The process's standard error.
@@ -1825,7 +1845,7 @@ impl std::io::Write for CliStderr {
             return Ok(0);
         }
         tie_standard_output()?;
-        self.0.write(buf)
+        Self::logged(self.0.write_all(buf)).map(|()| buf.len())
     }
 
     fn write_all(&mut self, buf: &[u8]) -> std::io::Result<()> {
@@ -1833,7 +1853,7 @@ impl std::io::Write for CliStderr {
             return Ok(());
         }
         tie_standard_output()?;
-        self.0.write_all(buf)
+        Self::logged(self.0.write_all(buf))
     }
 
     fn write_fmt(&mut self, args: std::fmt::Arguments<'_>) -> std::io::Result<()> {
@@ -1846,16 +1866,23 @@ impl std::io::Write for CliStderr {
 }
 
 /// The report stream's writer of a run: the `-out` file `file` (`None`: standard output), behind
-/// NCBI's buffer for the organism report (`tax_report`, `NcbiReportBuffer`).
+/// NCBI's buffer for the organism report (`tax_report`, `NcbiReportBuffer`) and, nearest the
+/// destination, the hold of a run whose strategy file `strategy` LOSAT refuses
+/// (`strategy::hold_report_send`).
 pub fn report_destination(
     file: Option<Box<dyn std::io::Write + Send>>,
     tax_report: bool,
+    strategy: Option<&crate::report::archive::strategy::StrategyExport>,
 ) -> Box<dyn std::io::Write + Send> {
+    use crate::report::archive::strategy::hold_report_send;
     match (file, tax_report) {
-        (Some(file), true) => Box::new(NcbiReportBuffer::file(file)),
-        (Some(file), false) => file,
-        (None, true) => Box::new(NcbiReportBuffer::standard_output(report_standard_output())),
-        (None, false) => report_standard_output(),
+        (Some(file), true) => Box::new(NcbiReportBuffer::file(hold_report_send(strategy, file))),
+        (Some(file), false) => hold_report_send(strategy, file),
+        (None, true) => Box::new(NcbiReportBuffer::standard_output(hold_report_send(
+            strategy,
+            report_standard_output(),
+        ))),
+        (None, false) => hold_report_send(strategy, report_standard_output()),
     }
 }
 
@@ -1912,16 +1939,15 @@ pub(crate) fn create_out_file(
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:251-255
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:160-163
 /// Writes the text of the run's `NativeError` to standard error and exits with its code; a text
-/// that the run already wrote (`post_native_error`) is not written again.
+/// that the run already wrote (`post_native_error`) is not written again. A failed write is
+/// dropped, as NCBI's post drops it (`eprint!` would abort: tblastx `-evalue 0 -logfile /dev/full`
+/// exits with 1 and writes nothing in NCBI BLAST+ 2.17.0; line WQA's D11 round 2, 2026-11-20).
 pub fn exit_on_native_error(error: &anyhow::Error) {
     if let Some(e) = error.downcast_ref::<NativeError>() {
         if !posted(&e.message) {
-            // `eprint!` of the bytes: a failed write panics as `eprint!`'s does.
-            if let Err(error) =
-                std::io::Write::write_all(&mut std::io::stderr(), catch_all_text(&e.message))
-            {
-                panic!("failed printing to stderr: {error}");
-            }
+            let mut stderr = std::io::stderr();
+            let _ = std::io::Write::write_all(&mut stderr, catch_all_text(&e.message));
+            let _ = std::io::Write::flush(&mut stderr);
         }
         if e.exit < 0 {
             std::process::abort();

@@ -71,6 +71,8 @@ export interface RuntimeOptions {
 
 interface Retained {
   readonly key: string;
+  /** Whether the engine read the subject with NCBI's data loaders on (a run with them on takes no subject read with them off). */
+  readonly dataLoaders: boolean;
   readonly handle: number;
   readonly records: readonly RecordKey[];
 }
@@ -209,8 +211,10 @@ export class EngineRuntime {
       }
     };
     try {
-      const invalid = abi.validate(argv);
-      if (invalid !== undefined) throw new EngineCallError(invalid);
+      const validation = abi.validate(argv);
+      if (!validation.ok) throw new EngineCallError(validation.message);
+      // The inputs are read with the data loaders of the argv's registry, as the CLI reads them (line WQA's D16, 2026-11-20).
+      const { dataLoaders } = validation;
       const started = abi.start(argv);
       if (!started.ok) throw new EngineCallError(started.message);
 
@@ -230,12 +234,12 @@ export class EngineRuntime {
       let handles: readonly [number, number] = [0, 0];
       let subjectRetained = false;
       if (!prints) {
-        const registered = together?.query ?? abi.register(request.program, ROLE_QUERY, request.query.bytes);
+        const registered = together?.query ?? abi.register(request.program, ROLE_QUERY, dataLoaders, request.query.bytes);
         query = registered.handle;
         const queryMismatch = recordMismatch(request.query.records, registered.records);
         if (queryMismatch !== undefined) throw new InputMismatchError('query', queryMismatch);
-        subjectRetained = together === undefined && loaded.retained?.key === request.subject.key;
-        const subject = together?.subject ?? this.subject(loaded, request);
+        subjectRetained = together === undefined && this.retains(loaded, request, dataLoaders);
+        const subject = together?.subject ?? this.subject(loaded, request, dataLoaders);
         const subjectMismatch = recordMismatch(request.subject.records, subject.records);
         if (subjectMismatch !== undefined) throw new InputMismatchError('subject', subjectMismatch);
         handles = [registered.handle, subject.handle];
@@ -412,13 +416,22 @@ export class EngineRuntime {
     return info;
   }
 
-  /** The subject handle: the retained one if its key matches, else a new registration. */
-  private subject(loaded: Loaded, request: WorkerRun): Retained {
+  /**
+   * Whether the instance retains the run's subject: the same key, read with the data loaders on, or
+   * off as the run has them (a subject read with them on is the one that a reader without them reads).
+   */
+  private retains(loaded: Loaded, request: WorkerRun, dataLoaders: boolean): boolean {
+    const retained = loaded.retained;
+    return retained !== undefined && retained.key === request.subject.key && (retained.dataLoaders || !dataLoaders);
+  }
+
+  /** The subject handle: the retained one if it is the run's (`retains`), else a new registration. */
+  private subject(loaded: Loaded, request: WorkerRun, dataLoaders: boolean): Retained {
     const abi = loaded.instance.abi;
-    if (loaded.retained?.key === request.subject.key) return loaded.retained;
+    if (this.retains(loaded, request, dataLoaders)) return loaded.retained!;
     this.releaseRetained(loaded);
-    const registered = abi.register(request.program, ROLE_SUBJECT, request.subject.bytes);
-    loaded.retained = { key: request.subject.key, handle: registered.handle, records: registered.records };
+    const registered = abi.register(request.program, ROLE_SUBJECT, dataLoaders, request.subject.bytes);
+    loaded.retained = { key: request.subject.key, dataLoaders, handle: registered.handle, records: registered.records };
     return loaded.retained;
   }
 

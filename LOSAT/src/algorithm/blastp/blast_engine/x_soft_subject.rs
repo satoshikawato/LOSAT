@@ -340,7 +340,8 @@ pub(super) fn x_scan_two_hit_ranges<F>(
 /// meet the closed range `[offset, end]` of one of the query's HSPs with it in the searched letters
 /// (the end is one past the HSP): with `-subject_loc` the two coordinates differ by the interval's
 /// start, so a run is kept by where it would lie in the interval and shown where it lies in the
-/// record. A `-db` subject has no records here and no masks. The outfmt 0 rows show them
+/// record. A `-db` subject has no records here: a masked database search's masks are
+/// `db_mask_search::shown_db_subject_masks`'s. The outfmt 0 rows show them
 /// ([`x_masked_subject_rows`]), the query-anchored reports map them to their columns
 /// (`report::query_anchored`).
 #[cold]
@@ -388,6 +389,17 @@ pub(super) fn x_masked_subject_rows(
     placements: &Placements,
 ) -> Vec<PairwiseHit> {
     let masks = x_subject_masks(hits, subject_records, placements);
+    lower_case_subject_rows(hits, &masks)
+}
+
+/// The outfmt 0 copies of `hits` with each subject row's letters in the runs `masks` of its query
+/// and subject (inclusive, in the subject's coordinates) in lower case.
+#[cold]
+#[inline(never)]
+pub(super) fn lower_case_subject_rows(
+    hits: &[PairwiseHit],
+    masks: &HashMap<(u32, u32), Vec<(i32, i32)>>,
+) -> Vec<PairwiseHit> {
     let mut hits = hits.to_vec();
     for hit in &mut hits {
         let Some(runs) = masks.get(&(hit.hit.q_idx, hit.hit.s_idx)) else {

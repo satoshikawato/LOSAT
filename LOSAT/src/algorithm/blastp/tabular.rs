@@ -396,12 +396,14 @@ pub(super) fn needs_rows(rows: bool, spec: &TabularSpec, app: BlastpApp) -> bool
 }
 
 /// The spec of a tabular report with a field list or a delimiter, or of outfmt 10 or 20, of a
-/// `-outfmt` value read as NCBI reads it (`app::parse_formatting_string`); `None` for the other
-/// formats and for the default outfmt 6 and 7 (`TabularSpec::of`).
-pub(super) fn custom_tabular_spec(outfmt: &str) -> Option<&'static TabularSpec> {
+/// `-outfmt` value read as NCBI reads it (`app::parse_formatting_string`), as `app`'s formatter
+/// writes it (`TabularSpec::of_app`: psiblast's and rpsblast's without the custom delimiter);
+/// `None` for the other formats and for the default outfmt 6 and 7. Every report of the blastp
+/// engine reads its spec here, from the value of the command line or the library's as given.
+pub(super) fn custom_tabular_spec(outfmt: &str, app: BlastpApp) -> Option<&'static TabularSpec> {
     let choice = crate::blastinput::app::parse_formatting_string(outfmt).ok()?;
     let format = crate::blastinput::app::ReportFormat::from_number(choice.number)?;
-    TabularSpec::of(format, &choice).map(TabularSpec::intern)
+    TabularSpec::of_app(format, &choice, app.request_kind()).map(TabularSpec::intern)
 }
 
 /// Writes the warning of the formatter that NCBI makes for outfmt 20's header line, which it
@@ -720,10 +722,12 @@ fn write_tabular_rows<const RPS: bool>(
             // subject once); `qcovus` is blastn's only (blast_format.cpp:818-820).
             let qcovs = if needs.qcovs {
                 query_ranges.clear();
+                // An HSP of length 0 has no letter to cover (its range is empty).
                 query_ranges.extend(
                     hsp_list
                         .hsps
                         .iter()
+                        .filter(|hsp| hsp.length > 0)
                         .map(|hsp| (hsp.q_start as u64 - 1, hsp.q_end as u64 - 1)),
                 );
                 coverage_percent(union_length(&mut query_ranges), query_length)
@@ -908,7 +912,7 @@ fn tabular_hsp<'r>(
         // `Blast_HSPGetQueryCoverage` of the HSP's context, which has the searched length.
         end_gaps: true,
         stored_gaps: [&[], &[]],
-        qcovhsp: hsp_coverage((hsp.q_end - hsp.q_start + 1) as i32, searched_length as i32),
+        qcovhsp: hsp_coverage((hsp.q_end + 1 - hsp.q_start) as i32, searched_length as i32),
     }
 }
 

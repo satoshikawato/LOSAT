@@ -93,6 +93,9 @@ fn values_written_by_ncbis_writer_read_back() {
 
 /// White space, comments and processing instructions between tags, attributes NCBI does not
 /// know, a self-closed tag of a string (the empty string) and the `value` attribute among others.
+/// NCBI's blast_formatter read a processing instruction of the forms `<?pi?>` and `<?pi a="1"?>`
+/// between tags (probe D3, 2026-11-20); a word without `=` in it (`<?pi x?>`) ended its input
+/// as a serial error (`SkipQDecl` reads the words as attributes).
 #[test]
 fn layout_attributes_and_empty_tags() {
     let document = xml(named::DBTAG, "NCBI-General", DBTAG);
@@ -100,12 +103,14 @@ fn layout_attributes_and_empty_tags() {
         &replace(
             &document,
             "<Dbtag_tag>",
-            "<!-- a comment -->\n<?pi x?><Dbtag_tag  >",
+            "<!-- a comment -->\n<?pi a=\"1\"?><?pi?><Dbtag_tag  >",
         ),
         "<Object-id>",
         "<Object-id x=\"1\" y='2'>",
     );
     assert_eq!(outcome(&spaced, named::DBTAG), Ok(DBTAG.into()));
+    let word = replace(&document, "<Dbtag_tag>", "<?pi x?><Dbtag_tag>");
+    assert_eq!(outcome(&word, named::DBTAG), serial("'=' expected"));
     let empty = replace(&document, "<Dbtag_db>abc</Dbtag_db>", "<Dbtag_db/>");
     assert_eq!(
         outcome(&empty, named::DBTAG),
@@ -259,7 +264,8 @@ fn the_end_of_the_input_is_an_error_below_the_root() {
 }
 
 /// A control character in character data: `#`, posted with the line it was read on and no
-/// string (`x_VerifyChar`, `ReplaceVisibleChar` with `kEmptyStr`).
+/// string (`x_VerifyChar`, `ReplaceVisibleChar` with `kEmptyStr`); NCBI's standard error of
+/// `blast_formatter` is the post's one line (probe D3: 0x01 posted, 0x7F not).
 #[test]
 fn control_characters_are_replaced_and_posted_with_their_line() {
     let document = xml(named::DBTAG, "NCBI-General", DBTAG);
@@ -284,8 +290,7 @@ fn control_characters_are_replaced_and_posted_with_their_line() {
     assert_eq!(posts, vec![replaced(0x01), replaced(0x07)]);
     assert_eq!(
         posts[0].line(None),
-        format!("Error: (803.7) Dbtag.db\nBad char [0x1] in string at line {line}\n\n")
-            .into_bytes()
+        format!("Error: (803.7) Dbtag.db\nBad char [0x1] in string at line {line}\n").into_bytes()
     );
 }
 

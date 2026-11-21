@@ -415,6 +415,148 @@ fn binary_posts_are_ncbis() {
     );
 }
 
+/// An XML archive (`blastp -subject`, `ARCHIVE_FORMAT=xml`, the fixture `blastp_subject.xml`)
+/// changed as impl D's probe D3 of 2026-11-20 changed it, formatted by NCBI's blast_formatter
+/// 2.17.0 (`F3/ncbi/D3/out3*`): a control character in the query's title is posted once for 0x01
+/// and not for 0x7F, with the line it is on (the second archive's from the start of the stream),
+/// unknown attributes, comments, a processing instruction of the forms `<?pi?>` and
+/// `<?pi a="1"?>` and a self-closed title read; a processing instruction with a word that is no
+/// attribute (`<?pi x?>`, `<?pi hello world?>`) ends the input as a serial error before any
+/// archive.
+#[test]
+fn xml_variants_read_as_ncbi_read_them() {
+    let archive = fixture("blastp_subject.xml");
+    let title: &[u8] = b"<Seqdesc_title>q1 small query</Seqdesc_title>";
+    let with = |bytes: &[u8], to: &[u8]| -> Vec<u8> {
+        let at = bytes
+            .windows(title.len())
+            .position(|window| window == title)
+            .expect("the title");
+        [&bytes[..at], to, &bytes[at + title.len()..]].concat()
+    };
+    let line = archive[..archive
+        .windows(title.len())
+        .position(|window| window == title)
+        .expect("the title")]
+        .iter()
+        .filter(|&&c| c == b'\n')
+        .count()
+        + 1;
+    assert_eq!(line, 56);
+    let lines = archive.iter().filter(|&&c| c == b'\n').count();
+    let bad = with(
+        &archive,
+        b"<Seqdesc_title>q1 sm\x01ll\x7fquery</Seqdesc_title>",
+    );
+    let post = |line: usize| {
+        format!(
+            "Error: (803.7) Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.\
+             seq.descr.title\nBad char [0x1] in string at line {line}\n"
+        )
+        .into_bytes()
+    };
+    assert_eq!(posted(&bad), (post(line), 1));
+    assert_eq!(
+        posted(&[&bad[..], &bad].concat()),
+        ([post(line), post(line + lines)].concat(), 2)
+    );
+    use End::{Data, Serial};
+    let cases: Vec<(&str, Vec<u8>, End)> = vec![
+        (
+            "attributes",
+            with(
+                &archive,
+                b"<Seqdesc_title a=\"1\" b='2'>q1 small query</Seqdesc_title>",
+            ),
+            Data,
+        ),
+        (
+            "comment",
+            with(
+                &archive,
+                b"<!-- c -->\n<Seqdesc_title>q1 small query</Seqdesc_title>",
+            ),
+            Data,
+        ),
+        (
+            "comment after",
+            with(
+                &archive,
+                b"<Seqdesc_title>q1 small query</Seqdesc_title><!-- c -->",
+            ),
+            Data,
+        ),
+        (
+            "two comments with a hyphen",
+            with(
+                &archive,
+                b"<!-- a --><!-- a-b --><Seqdesc_title>q1 small query</Seqdesc_title>",
+            ),
+            Data,
+        ),
+        (
+            "PI without words",
+            with(
+                &archive,
+                b"<?pi?><Seqdesc_title>q1 small query</Seqdesc_title>",
+            ),
+            Data,
+        ),
+        (
+            "PI with an attribute",
+            with(
+                &archive,
+                b"<?pi a=\"1\"?><Seqdesc_title>q1 small query</Seqdesc_title>",
+            ),
+            Data,
+        ),
+        (
+            "PI after",
+            with(
+                &archive,
+                b"<Seqdesc_title>q1 small query</Seqdesc_title><?pi a=\"1\"?>",
+            ),
+            Data,
+        ),
+        (
+            "comment and PI",
+            with(
+                &archive,
+                b"<!-- c -->\n<?pi a=\"1\"?><Seqdesc_title>q1 small query</Seqdesc_title>",
+            ),
+            Data,
+        ),
+        (
+            "self-closed title",
+            with(&archive, b"<Seqdesc_title/>"),
+            Data,
+        ),
+        (
+            "PI with a word",
+            with(
+                &archive,
+                b"<?pi x?><Seqdesc_title>q1 small query</Seqdesc_title>",
+            ),
+            Serial,
+        ),
+        (
+            "PI with words",
+            with(
+                &archive,
+                b"<?pi hello world?><Seqdesc_title>q1 small query</Seqdesc_title>",
+            ),
+            Serial,
+        ),
+    ];
+    for (name, bytes, end) in cases {
+        assert_eq!(
+            outcome(&bytes),
+            Ok((usize::from(end == Data), end)),
+            "{name}"
+        );
+    }
+}
+
 /// How the objects of an archive text end.
 #[derive(Debug, PartialEq)]
 enum End {

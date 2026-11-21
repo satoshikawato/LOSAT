@@ -964,7 +964,8 @@ fn boolean_value(desc: &Desc, value: &str) -> Result<Number, ArgsError> {
         None => Err(ArgsError::Invalid(ArgException {
             code: "eConvert",
             messages: vec![
-                "String cannot be converted to bool (m_Pos = 0)".to_string(),
+                crate::wording::losat_text("String cannot be converted to bool (m_Pos = 0)")
+                    .into_owned(),
                 arg_message(desc.name, "Argument cannot be converted", value),
             ],
         })),

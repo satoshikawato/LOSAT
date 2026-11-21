@@ -1412,16 +1412,12 @@ impl NativeError {
             return if e.kind() == "CBlastException::eInvalidOptions" {
                 NativeError {
                     exit: 1,
-                    message: [b"BLAST options error: ".as_slice(), e.get_msg(), b"\n"]
-                        .concat()
-                        .into(),
+                    message: [b"BLAST options error: ".as_slice(), e.get_msg(), b"\n"].concat(),
                 }
             } else {
                 NativeError {
                     exit: 3,
-                    message: [b"BLAST engine error: ".as_slice(), e.get_msg(), b"\n"]
-                        .concat()
-                        .into(),
+                    message: [b"BLAST engine error: ".as_slice(), e.get_msg(), b"\n"].concat(),
                 }
             };
         }

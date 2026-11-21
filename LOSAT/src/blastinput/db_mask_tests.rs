@@ -284,7 +284,9 @@ fn each_name_of_the_list_needs_the_id_in_its_own_database() {
     // The search's table puts `a5` first (NCBI sorts the volumes by name): its 11 is `a5`'s
     // dust, which `b5`'s volume does not have (NCBI's stale volume-algorithm cache, M/DECISIONS
     // 9): LOSAT refuses the search (decision D5).
-    let error = resolved.check_losat_limits(&db, "BLASTN", 11).unwrap_err();
+    let error = resolved
+        .check_losat_limits(&db, "BLASTN", HardScan::Nucleotide { scanned_word: 11 })
+        .unwrap_err();
     assert!(
         format!("{error:#}")
             .contains("the volume has mask data without the filtering algorithm 11"),
@@ -336,7 +338,7 @@ fn the_archive_writes_the_key_of_a_name_or_the_id() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:241-268 and 579-584 (quoted
-// at `HardMaskShape::of`)
+// at `HardMaskShape::of_scan`)
 // A search with `-db_hard_mask` is refused, before anything is written, at the first searched
 // sequence whose masks NCBI's hard chunks do not handle (series NP, M4a-2b decisions H3-H5): a5's
 // s4 (OID 3) is masked whole ([0, 300): the "no chunking" branch scans the full range of a chunk
@@ -355,7 +357,7 @@ fn a_hard_masked_search_refuses_the_masks_that_ncbi_s_chunks_do_not_handle() {
     };
     let refusal = |db: &SeqDb, id, word| {
         mask(MaskKind::Hard, id)
-            .check_losat_limits(db, "BLASTN", word)
+            .check_losat_limits(db, "BLASTN", HardScan::Nucleotide { scanned_word: word })
             .map_err(|error| error.to_string())
     };
     let (a5, _) = open(&[dbmask("a5")]);
@@ -376,7 +378,7 @@ fn a_hard_masked_search_refuses_the_masks_that_ncbi_s_chunks_do_not_handle() {
         refusal(&a5, 11, word).unwrap();
     }
     mask(MaskKind::Soft, 11)
-        .check_losat_limits(&a5, "BLASTN", 7)
+        .check_losat_limits(&a5, "BLASTN", HardScan::Nucleotide { scanned_word: 7 })
         .unwrap();
     let (edge1, _) = open(&[dbmask("edge1")]);
     for word in [7, 11] {
@@ -408,12 +410,12 @@ fn a_hard_masked_search_refuses_the_masks_that_ncbi_s_chunks_do_not_handle() {
     }
     for id in 11..=16 {
         mask(MaskKind::Soft, id)
-            .check_losat_limits(&edge2, "BLASTN", 7)
+            .check_losat_limits(&edge2, "BLASTN", HardScan::Nucleotide { scanned_word: 7 })
             .unwrap();
     }
 }
 
-// The shapes of `HardMaskShape::of`, read off the chunks (blast_engine.c:221-276, 579-584, 1354,
+// The shapes of `HardMaskShape::of_scan`, read off the chunks (blast_engine.c:221-276, 579-584, 1354,
 // 1368-1370; na_ungapped.c:1647-1668): a mask that runs to the end after the chunk from 0 (empty
 // masks at 0 or at the end around it; the first range at or below MAX_DBSEQ_LEN), in a subject of
 // a word or more (`min_subj_seq_length` is 1 for BLASTN: 4 letters at word 4, review F2), at a
@@ -434,10 +436,7 @@ fn the_hard_mask_shapes_follow_ncbi_s_chunks() {
             reads.set(reads.get() + 1);
             Some(length)
         };
-        (
-            HardMaskShape::of(masks, None, &read, word).unwrap(),
-            reads.get(),
-        )
+        (shape_of(masks, None, &read, word).unwrap(), reads.get())
     };
     let shape = |masks: &[(u32, u32)], length: usize| shape_at(masks, length, 11);
     let tail = |start, end| Some(HardMaskShape::TailMask { start, end });
@@ -512,31 +511,22 @@ fn the_hard_mask_shapes_follow_ncbi_s_chunks() {
     assert_eq!(shape(&[(101, 102), (102, 103)], 1200), (short(102, 103), 1));
     // The final chunk (1000-1012, scanned from 1002) holds a word of 10 letters, not of 11.
     assert_eq!(
-        HardMaskShape::of(&[(1001, 1002)], None, &|| Some(1012), 11),
+        shape_of(&[(1001, 1002)], None, &|| Some(1012), 11),
         Ok(None)
     );
     assert_eq!(
-        HardMaskShape::of(&[(1001, 1002)], None, &|| Some(1012), 10),
+        shape_of(&[(1001, 1002)], None, &|| Some(1012), 10),
         Ok(short(1001, 1002))
     );
     // A subject that the scan reads no word of: shorter than the word.
     assert_eq!(shape_at(&[(0, 6)], 6, 7), (None, 1));
     assert_eq!(shape_at(&[(0, 7)], 7, 7), (tail(0, 7), 1));
-    assert_eq!(HardMaskShape::of(&[(0, 4)], None, &|| Some(4), 5), Ok(None));
-    assert_eq!(
-        HardMaskShape::of(&[(2, 4)], None, &|| Some(4), 4),
-        Ok(tail(2, 4))
-    );
-    assert_eq!(
-        HardMaskShape::of(&[(0, 4)], None, &|| Some(4), 4),
-        Ok(tail(0, 4))
-    );
-    assert_eq!(HardMaskShape::of(&[(1, 3)], None, &|| Some(3), 4), Ok(None));
+    assert_eq!(shape_of(&[(0, 4)], None, &|| Some(4), 5), Ok(None));
+    assert_eq!(shape_of(&[(2, 4)], None, &|| Some(4), 4), Ok(tail(2, 4)));
+    assert_eq!(shape_of(&[(0, 4)], None, &|| Some(4), 4), Ok(tail(0, 4)));
+    assert_eq!(shape_of(&[(1, 3)], None, &|| Some(3), 4), Ok(None));
     // The length that cannot be read ends the check.
-    assert_eq!(
-        HardMaskShape::of(&[(100, 300)], None, &|| None, 11),
-        Err(())
-    );
+    assert_eq!(shape_of(&[(100, 300)], None, &|| None, 11), Err(()));
     // The bounds of the length that the index gives (review 2 S4): the length is read only where
     // the shape differs between them (a mask that runs to the end, here at 300 or at 1201 of
     // 1200-1203), not where it is the same at all four (none, or a refusal read off the chunks).
@@ -547,7 +537,7 @@ fn the_hard_mask_shapes_follow_ncbi_s_chunks() {
             Some(length)
         };
         (
-            HardMaskShape::of(masks, Some(bounds), &read, word).unwrap(),
+            shape_of(masks, Some(bounds), &read, word).unwrap(),
             reads.get(),
         )
     };
@@ -649,7 +639,7 @@ fn a_volume_without_the_algorithm_is_refused_only_where_the_search_reads_its_mas
             ]
         );
         resolved
-            .check_losat_limits(db, "BLASTN", 11)
+            .check_losat_limits(db, "BLASTN", HardScan::Nucleotide { scanned_word: 11 })
             .err()
             .map(|error| format!("{error:#}"))
     };
@@ -719,4 +709,88 @@ fn a_masked_using_list_of_another_length_than_the_names_is_a_bug() {
     let (resolved, _) = resolve(&soft("11"), &db, &name);
     let resolved = resolved.unwrap().unwrap();
     crate::algorithm::common::database::pairwise_database_masked(&db, Some(&resolved.shown[..1]));
+}
+
+/// `HardMaskShape::of_scan` of BLASTN's scan, whose words have `scanned_word` letters.
+fn shape_of(
+    masks: &[(u32, u32)],
+    bounds: Option<(usize, usize)>,
+    length: &dyn Fn() -> Option<usize>,
+    scanned_word: usize,
+) -> Result<Option<HardMaskShape>, ()> {
+    HardMaskShape::of_scan(masks, bounds, length, HardScan::Nucleotide { scanned_word })
+}
+
+/// `HardMaskShape::of_scan` of the protein programs' scan (series NP, M4b): LOSAT's refusals that
+/// NCBI BLAST+ cannot freeze (a range longer than its chunks; a mask past the sequence, review L1
+/// of PR 1, which makeblastdb does not write), the ones that the rows db.pmask.*.rej.* also hold,
+/// and masks that the search takes, chunks shorter than the word included (rows
+/// db.pmask.*.pshort.*, db.pmask.*.pe_tiny.w0.*).
+#[test]
+fn protein_shapes_of_the_hard_masks() {
+    let protein = HardScan::Protein;
+    let of = |masks: &[(u32, u32)], length: usize, scan: HardScan| {
+        HardMaskShape::of_scan(masks, Some((length, length)), &|| Some(length), scan).unwrap()
+    };
+    // Masks within the sequence: searched, also where a chunk is shorter than the word (NCBI's
+    // one-hit scan reads no word of it, its two-hit scan one word that extends nothing).
+    assert_eq!(of(&[(10, 20), (50, 60)], 100, protein), None);
+    assert_eq!(of(&[(10, 20), (22, 60)], 100, protein), None);
+    assert_eq!(of(&[(10, 20), (20, 60)], 100, protein), None);
+    assert_eq!(of(&[(1, 10)], 100, protein), None);
+    // A mask that ends at the end after another chunk: the last chunk is not the first.
+    assert_eq!(of(&[(10, 20), (50, 100)], 100, protein), None);
+    // A mask that runs to the end after the chunk from the start (Q1), at every word.
+    assert_eq!(
+        of(&[(10, 100)], 100, protein),
+        Some(HardMaskShape::TailMask {
+            start: 10,
+            end: 100
+        })
+    );
+    // A mask that ends past the sequence, or starts past it: its own shape, not a long range.
+    let past = of(&[(10, 20), (90, 120)], 100, protein);
+    assert_eq!(
+        past,
+        Some(HardMaskShape::PastEnd {
+            start: 90,
+            end: 120,
+            length: 100
+        })
+    );
+    assert!(past
+        .unwrap()
+        .text(protein)
+        .starts_with("has a mask, [90, 120), ending past its 100 letters"));
+    assert_eq!(
+        of(&[(150, 160)], 100, protein),
+        Some(HardMaskShape::PastEnd {
+            start: 150,
+            end: 160,
+            length: 100
+        })
+    );
+    // A hard range longer than NCBI's chunks.
+    let long = crate::core::subject_split::MAX_DBSEQ_LEN + 100;
+    let shape = of(&[(10, 20)], long, protein);
+    assert_eq!(
+        shape,
+        Some(HardMaskShape::LongRange {
+            left: 20,
+            right: long as i32
+        })
+    );
+    assert!(shape
+        .unwrap()
+        .text(protein)
+        .contains("longer than the 5,000,000 letters"));
+    // At exactly MAX_DBSEQ_LEN letters the range is one chunk.
+    assert_eq!(
+        of(
+            &[(10, 20)],
+            crate::core::subject_split::MAX_DBSEQ_LEN + 20,
+            protein
+        ),
+        None
+    );
 }

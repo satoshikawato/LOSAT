@@ -26,7 +26,7 @@ Choose a task with `-task`. Options you leave out take the default of the task.
 - **Query.** `-query` takes a protein FASTA file with one or more records. The default is the standard input, so `-query -` and no `-query` at all read the standard input. A name ending in `.gz`, `.bz2` or `.zst` is decompressed for you.
 - **Subject.** `-subject` takes a protein FASTA file in the same forms. LOSAT compares each query with each record, with no database to build first.
 - **Database.** `-db` searches a protein BLAST database written by `makeblastdb` or `losat makeblastdb`, or one of NCBI's downloaded databases such as `swissprot`. Name several databases in one string (`-db "a b"`). `-db` and `-subject` cannot be used together. See [BLAST databases](../databases.md).
-- **Database filters.** With `-db` you can restrict the search with `-taxids`, `-taxidlist`, `-negative_taxids`, `-negative_taxidlist`, `-seqidlist` and `-negative_seqidlist` (`-no_taxid_expansion` keeps a taxid from reaching its descendants).
+- **Database filters.** With `-db` you can restrict the search with `-taxids`, `-taxidlist`, `-negative_taxids`, `-negative_taxidlist`, `-seqidlist` and `-negative_seqidlist` (`-no_taxid_expansion` keeps a taxid from reaching its descendants). `-db_soft_mask` and `-db_hard_mask` use the masks stored in a database that was built with `makeblastdb -mask_data` (see [Masks](../databases.md#masks)).
 - **Locations.** `-query_loc START-STOP` searches part of the query, and `-subject_loc START-STOP` part of the subject (with `-subject` only). Positions are 1-based and inclusive.
 - **Masking.** SEG is off by default (`-seg yes` or `-seg "WINDOW LOCUT HICUT"` turns it on). `-lcase_masking` treats lower-case letters of the query as masked.
 
@@ -95,7 +95,7 @@ LOSAT stops with an error for these `blastp` settings instead of running somethi
 - `-threshold` values that overflow NCBI's word-table buffers when the word size is 5 to 7.
 - `-html`, `-remote`, `-entrez_query`, `-gilist` and `-ipglist`.
 - A hit list size (`-max_target_seqs`, `-num_descriptions`, `-num_alignments`) of 2^31 - 50 or more.
-- `-db_soft_mask` and `-db_hard_mask`.
+- `-db_hard_mask` on a database with a sequence whose first mask runs to its end (a masked tail, for example).
 
 ## Examples
 

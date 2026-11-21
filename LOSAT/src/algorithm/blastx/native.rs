@@ -1374,7 +1374,14 @@ pub(super) fn reported_batch(
             // A lookup that fails on a file stops the run here, after the reports of the
             // batches before and this batch's reader messages (`shared::batch_prefetch`).
             let messages = reported
-                .batch_prefetch(database, results, options.gapped, prefetch_queries)
+                .batch_prefetch(
+                    database,
+                    results,
+                    options.gapped,
+                    &prefetch_queries.where_reports_read_no_subject(
+                        crate::report::db_subject::FormatThrow::none_reads([asks.throw]),
+                    ),
+                )
                 .map_err(reported_error)?;
             messages.write(diagnostics, None)?;
         }

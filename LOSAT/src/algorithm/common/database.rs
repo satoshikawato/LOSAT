@@ -4460,11 +4460,27 @@ fn slot_uncertain_error(db: &SeqDb, volume: usize, last: i32, cause: SlotUncerta
 /// `XmlRefusal::of_taxonomy`); the other errors of the lookups (a read error of a file) are not
 /// refusals, and the held document is written as NCBI writes what it has.
 #[derive(Debug)]
-pub(crate) struct TaxonomyRefusal(String);
+pub(crate) struct TaxonomyRefusal {
+    text: String,
+    /// The refusal is of a load of a subject with a taxid where a file of the taxonomy database
+    /// does not open (`SeqDbError::TaxdbThrows`): NCBI's load throws there, which its prefetch
+    /// catches ([`batch_prefetch`]) and its reports do not read as LOSAT does.
+    load_throws: bool,
+}
+
+impl TaxonomyRefusal {
+    /// Whether `error` is the refusal of a load that throws where a file of the taxonomy database
+    /// does not open ([`TaxonomyRefusal::load_throws`]).
+    fn of_load_that_throws(error: &anyhow::Error) -> bool {
+        error
+            .downcast_ref::<TaxonomyRefusal>()
+            .is_some_and(|refusal| refusal.load_throws)
+    }
+}
 
 impl std::fmt::Display for TaxonomyRefusal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
+        f.write_str(&self.text)
     }
 }
 
@@ -4479,10 +4495,28 @@ pub(crate) fn taxdb_error_for_tests(error: SeqDbError) -> anyhow::Error {
 /// The error of a taxonomy database lookup or open: [`TaxonomyRefusal`] for a refusal of the
 /// reader (`SeqDbError::Unsupported`), [`database_error`] for the others.
 fn taxdb_error(error: SeqDbError, program: &str) -> anyhow::Error {
+    if let SeqDbError::TaxdbThrows { .. } = &error {
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1146-1155
+        // The Bioseq's taxonomy catches only a `CSeqDBException`: the load throws `CMemoryFile`'s
+        // exception, and each report then reads the subject as its own `catch` decides (line WQA
+        // D18b probe 12: `Unknown` ids and titles, `N/A` names, alignments without sequences, or
+        // the exception, exit status 255), which LOSAT does not write.
+        return anyhow::Error::new(TaxonomyRefusal {
+            text: format!(
+                "{error}, where NCBI BLAST+ 2.17.0 fails to load each database sequence with a \
+                 taxid and reports such a sequence without its ids, titles and names, or ends; \
+                 this is not supported by LOSAT's {program}"
+            ),
+            load_throws: true,
+        });
+    }
     let refused = matches!(error, SeqDbError::Unsupported { .. });
     let error = database_error(error, program);
     if refused {
-        anyhow::Error::new(TaxonomyRefusal(format!("{error:#}")))
+        anyhow::Error::new(TaxonomyRefusal {
+            text: format!("{error:#}"),
+            load_throws: false,
+        })
     } else {
         error
     }
@@ -5068,6 +5102,9 @@ pub(crate) struct PrefetchQueries<'a> {
     /// The outfmt 5 reports of the queries before the batch, where outfmt 5 is the first format
     /// of a program that writes them after the stop ([`PrefetchQueries::after_xml_reports`]).
     xml_before: Option<&'a XmlReportsBefore<'a>>,
+    /// Whether no report of the run reads a subject
+    /// ([`PrefetchQueries::where_reports_read_no_subject`]).
+    reports_read_no_subject: bool,
 }
 
 impl<'a> PrefetchQueries<'a> {
@@ -5082,6 +5119,20 @@ impl<'a> PrefetchQueries<'a> {
             scope,
             unrecorded_calls: false,
             xml_before: None,
+            reports_read_no_subject: false,
+        }
+    }
+
+    /// The same batch of a run none of whose formats reads a subject (`none`:
+    /// `report::db_subject::FormatThrow::none_reads` of the run's formats, a table of fields that
+    /// read nothing of the subject). NCBI's reports of such a run load nothing, so a load that
+    /// throws where a file of the taxonomy database does not open fails the batch's prefetch
+    /// alone, which catches it with the warning ([`batch_prefetch`]); a run whose reports read the
+    /// subjects is refused there ([`TaxonomyRefusal`]).
+    pub(crate) fn where_reports_read_no_subject(self, none: bool) -> Self {
+        Self {
+            reports_read_no_subject: self.reports_read_no_subject || none,
+            ..self
         }
     }
 
@@ -5305,7 +5356,11 @@ pub(crate) fn batch_prefetch<'s, 'b>(
             program,
         ));
     }
-    let reads = subject_read_texts(
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:768-790
+    // A load that throws where a file of the taxonomy database does not open ends the prefetch's
+    // loads, which catches it as a `CException` with the warning (line WQA D18b probe 12). The
+    // loads write no text then: the taxonomy database never opens.
+    let reads = match subject_read_texts(
         db,
         run,
         loaded
@@ -5313,7 +5368,15 @@ pub(crate) fn batch_prefetch<'s, 'b>(
             .map(|(ordinal, parsed)| (0, ordinal, parsed)),
         false,
         program,
-    )?;
+    ) {
+        Err(error)
+            if queries.reports_read_no_subject && TaxonomyRefusal::of_load_that_throws(&error) =>
+        {
+            fails = true;
+            Vec::new()
+        }
+        reads => reads?,
+    };
     if let Some((ordinal, id)) = &failed_lookup {
         if reads.iter().any(|read| !read.text.is_empty()) {
             return Err(parsed_refusal(

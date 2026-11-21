@@ -2233,7 +2233,13 @@ fn search(
                             span.start, &scope,
                         )
                         .after_unrecorded_calls(args.first_query_ordinal > 0)
-                        .after_xml_reports(xml_before.as_ref()),
+                        .after_xml_reports(xml_before.as_ref())
+                        .where_reports_read_no_subject(
+                            crate::report::db_subject::FormatThrow::none_reads_outfmts(
+                                outputs.formats.iter().map(|format| format.outfmt),
+                                crate::blastinput::app::Program::Tblastn,
+                            ),
+                        ),
                     )?;
                     rows_open(hitlists)?;
                     // After the reader's messages of the batch, in its first query

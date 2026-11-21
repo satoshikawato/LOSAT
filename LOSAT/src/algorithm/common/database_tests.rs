@@ -698,3 +698,64 @@ fn the_check_accepts_what_the_check_before_it_accepted() {
         );
     }
 }
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1146-1155
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:768-790
+/// A load of a subject with a taxid where a file of the taxonomy database does not open
+/// (`SeqDbError::TaxdbThrows`) is LOSAT's refusal, in words that say what NCBI does, which the
+/// batch's prefetch alone catches (`batch_prefetch`, in a run whose formats read no subject:
+/// `FormatThrow::none_reads`); any other refusal of the taxonomy database is not caught there
+/// (line WQA D18b, 2026-11-21).
+#[test]
+fn a_taxonomy_file_that_throws_is_a_refusal_that_the_prefetch_alone_catches() {
+    use crate::blastinput::app::Program;
+    use crate::report::db_subject::FormatThrow;
+    let path = std::path::PathBuf::from("/d/taxdb.bti");
+    let exception = SeqDbError::Open {
+        path: path.clone(),
+        source: std::io::Error::from_raw_os_error(13),
+    }
+    .memory_file_exception()
+    .unwrap();
+    let error = taxdb_error(
+        SeqDbError::TaxdbThrows {
+            path: path.clone(),
+            reason: "Permission denied".to_owned(),
+            exception,
+        },
+        "BLASTP",
+    );
+    assert!(error.is::<TaxonomyRefusal>());
+    assert!(TaxonomyRefusal::of_load_that_throws(&error));
+    assert_eq!(
+        format!("{error:#}"),
+        "/d/taxdb.bti cannot be opened: Permission denied, where NCBI BLAST+ 2.17.0 fails to \
+         load each database sequence with a taxid and reports such a sequence without its ids, \
+         titles and names, or ends; this is not supported by LOSAT's BLASTP"
+    );
+    let other = taxdb_error(
+        SeqDbError::Unsupported {
+            path,
+            message: "Permission denied (os error 13)".to_owned(),
+        },
+        "BLASTP",
+    );
+    assert!(other.is::<TaxonomyRefusal>());
+    assert!(!TaxonomyRefusal::of_load_that_throws(&other));
+    // The formats that read no subject: a table of fields of the alignment alone, the Seq-annots.
+    for (outfmts, none) in [
+        (&["6 qseqid evalue bitscore"][..], true),
+        (&["8"][..], true),
+        (&["6 qseqid sseqid"][..], false),
+        (&["6"][..], false),
+        (&["6 qseqid evalue bitscore", "0"][..], false),
+        (&["5"][..], false),
+        (&["15"][..], false),
+    ] {
+        assert_eq!(
+            FormatThrow::none_reads_outfmts(outfmts.iter().copied(), Program::Blastp),
+            none,
+            "{outfmts:?}"
+        );
+    }
+}

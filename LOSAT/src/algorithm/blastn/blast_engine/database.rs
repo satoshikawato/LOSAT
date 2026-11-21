@@ -1837,6 +1837,14 @@ pub(super) fn after_throw(
     )
 }
 
+/// Whether no format of `output_formats` reads a subject (`FormatThrow::none_reads`, for the
+/// batch's prefetch, `shared::PrefetchQueries::where_reports_read_no_subject`).
+pub(super) fn reports_read_no_subject(output_formats: &[BlastnOutputFormat]) -> bool {
+    crate::report::db_subject::FormatThrow::none_reads(
+        output_formats.iter().map(BlastnOutputFormat::format_throw),
+    )
+}
+
 /// What the XML2 and JSON reports of `hit_lists` (final hit lists by query, in the order of the
 /// reports; the subjects named by `key`, an ordinal id or a rank) do at each subject's `Hit`
 /// (`HitLoads::of`, the one answer): `prefetch` tells by query whether its batch reads one by

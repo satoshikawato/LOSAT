@@ -234,6 +234,18 @@ pub enum SeqDbError {
     /// `alias::compute_masks`). NCBI's programs report it as `Error: <what()>` with exit
     /// status 255 ([`SeqDbError::ncbi_exception`]).
     Ncbi(crate::ncbi_exception::NcbiException),
+    /// A file of the taxonomy database (`taxdb.bti`, `taxdb.btd`) that does not open or whose
+    /// first byte cannot be read (`taxdb::TaxDb::open`), with the system's text `reason`: NCBI's
+    /// taxonomy file object throws `CMemoryFile`'s exception `exception`
+    /// ([`SeqDbError::memory_file_exception`]) at every name lookup of the run, and so does every
+    /// load of a database sequence with a positive taxid (line WQA D18b, 2026-11-21). Where
+    /// nothing catches it, NCBI's programs report it as `Error: <what()>` with exit status 255
+    /// ([`SeqDbError::ncbi_exception`]).
+    TaxdbThrows {
+        path: PathBuf,
+        reason: String,
+        exception: crate::ncbi_exception::NcbiException,
+    },
 }
 
 impl std::fmt::Display for SeqDbError {
@@ -261,6 +273,9 @@ impl std::fmt::Display for SeqDbError {
             ),
             SeqDbError::Ncbi(exception) => {
                 f.write_str(String::from_utf8_lossy(&exception.what()).trim_end())
+            }
+            SeqDbError::TaxdbThrows { path, reason, .. } => {
+                write!(f, "{} cannot be opened: {reason}", path.display())
             }
         }
     }
@@ -307,7 +322,9 @@ impl SeqDbError {
     /// program or blastdbcmd writes `Error: <what()>` and ends with exit status 255.
     pub fn ncbi_exception(&self) -> Option<&crate::ncbi_exception::NcbiException> {
         match self {
-            SeqDbError::Ncbi(exception) => Some(exception),
+            SeqDbError::Ncbi(exception) | SeqDbError::TaxdbThrows { exception, .. } => {
+                Some(exception)
+            }
             _ => None,
         }
     }
@@ -426,7 +443,8 @@ impl SeqDbError {
             | SeqDbError::Unsupported { .. }
             | SeqDbError::NcbiCrashes { .. }
             | SeqDbError::Range(_)
-            | SeqDbError::Ncbi(_) => None,
+            | SeqDbError::Ncbi(_)
+            | SeqDbError::TaxdbThrows { .. } => None,
         }
     }
 
@@ -495,7 +513,9 @@ impl SeqDbError {
             SeqDbError::Open { .. } | SeqDbError::Map { .. } => self
                 .memory_file_exception()
                 .map(|exception| exception.get_msg().to_vec()),
-            SeqDbError::Ncbi(exception) => Some(exception.get_msg().to_vec()),
+            SeqDbError::Ncbi(exception) | SeqDbError::TaxdbThrows { exception, .. } => {
+                Some(exception.get_msg().to_vec())
+            }
             _ => self.ncbi_message(),
         }
     }

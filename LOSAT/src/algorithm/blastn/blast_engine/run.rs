@@ -8812,7 +8812,10 @@ fn run_in_pool(
             // batches before with a database of its own, whose loads nothing here records.
             let prefetch_queries =
                 crate::algorithm::common::database::PrefetchQueries::new(start, &scope)
-                    .after_unrecorded_calls(args.first_query_ordinal > 0);
+                    .after_unrecorded_calls(args.first_query_ordinal > 0)
+                    .where_reports_read_no_subject(database::reports_read_no_subject(
+                        &output_formats,
+                    ));
             let prefetch = if run_loads.ended() {
                 None
             } else if output_formats

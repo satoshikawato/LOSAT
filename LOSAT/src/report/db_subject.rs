@@ -1955,6 +1955,28 @@ impl FormatThrow {
         }
     }
 
+    /// Whether no format of a run (`formats`) reads a subject ([`FormatThrow::Unread`] of each):
+    /// NCBI's reports then never load one, so the batch's prefetch is the only load that can
+    /// throw (`common::database::batch_prefetch`).
+    pub fn none_reads(formats: impl IntoIterator<Item = Self>) -> bool {
+        formats
+            .into_iter()
+            .fold(FormatThrow::Unread, FormatThrow::and)
+            == FormatThrow::Unread
+    }
+
+    /// [`FormatThrow::none_reads`] of the `-outfmt` values `outfmts` of `program`'s run.
+    pub fn none_reads_outfmts<'a>(
+        outfmts: impl IntoIterator<Item = &'a str>,
+        program: crate::blastinput::app::Program,
+    ) -> bool {
+        Self::none_reads(
+            outfmts
+                .into_iter()
+                .map(|outfmt| Self::of_outfmt(outfmt, program)),
+        )
+    }
+
     /// [`FormatThrow::of_run`] of the `-outfmt` values `outfmts` of `program`'s run.
     pub fn of_outfmts<'a>(
         outfmts: impl IntoIterator<Item = &'a str>,

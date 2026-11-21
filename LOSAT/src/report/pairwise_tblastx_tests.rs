@@ -1198,7 +1198,7 @@ fn an_unreadable_query_writes_one_line_for_each_hsp_with_the_subjects_id() {
     };
     let hits = [hit(0, 120.5), hit(0, 80.5), hit(1, 100.5)];
     let report = BlastpPairwiseReport {
-        version: "PSIBLAST 2.17.0+".to_string(),
+        version: "PSIBLAST (test)".to_string(),
         database_name: b"db".to_vec(),
         database_num_sequences: 2,
         database_total_letters: 370,

@@ -269,7 +269,11 @@ fn the_crafted_files_of_the_survey_end_as_ncbis() {
                     String::from_utf8_lossy(&error.what_in(PROBE_BUILD_ROOT))
                 )
             };
-            assert_eq!(report, crate::wording::losat_text(&ncbi), "{case}");
+            assert_eq!(
+                crate::wording::losat_text(&report),
+                crate::wording::losat_text(&ncbi),
+                "{case}"
+            );
             checked += 1;
             continue;
         }

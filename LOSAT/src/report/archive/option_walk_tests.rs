@@ -761,6 +761,12 @@ fn every_tblastn_argument_with_a_pssm_query_is_recorded_as_ncbi_records_it() {
             &["-export_search_strategy", "s.asn"],
             &[],
         ),
+        // An imported strategy is read by the run (`archive::apply_strategy`), not recorded.
+        (
+            "import_search_strategy",
+            &["-import_search_strategy", "s.asn"],
+            &[],
+        ),
         (
             "evalue",
             &["-evalue", "0.001"],

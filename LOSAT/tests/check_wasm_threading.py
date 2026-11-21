@@ -16,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[2]
 TESTS = ROOT / "LOSAT/tests"
 sys.path.insert(0, str(TESTS))
 import db_search_fixtures
+import losat_wording  # noqa: E402  (LOSAT's words in NCBI's bytes, AGENTS.md rule 8)
 from wasm_performance import validate_thread_evidence
 
 # The output formats in which blastx reads its query file before the search (BLAST XML 5, and XML2 and JSON 13 to
@@ -480,6 +481,8 @@ def main():
             format_label = task or program
             oracle = str(args.oracle_dir.resolve() / program) if args.oracle_dir else program
             reference, _ = execute(f"format/{format_label}-{query}-{index}/oracle", [oracle, *common])
+            # NCBI's output in LOSAT's words: its version line and prefixes (AGENTS.md rule 8).
+            reference = losat_wording.losat_output_bytes(reference)
             for kind, prefix in prefixes.items():
                 for n in ([1] if kind in ["serial", "native-serial"] else [1, 4, 8, 16]):
                     data, _ = execute(f"format/{format_label}-{query}-{index}/{kind}-n{n}", [*prefix, program, *common, "-num_threads", str(n)])

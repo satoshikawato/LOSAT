@@ -1155,7 +1155,7 @@ pub(super) fn write_custom_tabular(
             hit_lists,
             &mut writer,
             warnings.as_mut(),
-            args.html.is_some(),
+            args.is_html,
         )?;
         writer.flush()?;
         return Ok(());

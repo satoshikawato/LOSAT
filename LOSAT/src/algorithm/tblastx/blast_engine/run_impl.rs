@@ -1476,11 +1476,15 @@ fn check_ncbi_options(
         formatting_handler_check(choice, Program::Tblastx)?;
         crate::blastinput::app::html_format_check(choice.number, Program::Tblastx, args.html)?;
     }
-    let html =
-        crate::blastinput::app::html_links(args.html, Program::Tblastx, args.database_name())?;
     // The hit list size and the counts of the pairwise report
     // (`blastinput::report_counts`), with the handler's warnings.
     let outfmts: Vec<i32> = choices.iter().map(|choice| choice.number).collect();
+    let html = crate::blastinput::app::html_links(
+        args.html,
+        Program::Tblastx,
+        args.database_name(),
+        &outfmts,
+    )?;
     let (counts, warnings) = crate::blastinput::report_counts::run_report_counts_with(
         "tblastx",
         &outfmts,

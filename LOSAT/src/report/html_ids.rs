@@ -15,8 +15,9 @@ use crate::seqid::rank::{find_best, text_score};
 
 /// The `-html` links of a run (`PairwiseConfig::html` holds them through `HtmlReport`): NCBI's
 /// formatter registry (`CAlignFormatUtil::InitConfig`, `m_Reg`, `m_Protocol`: statics, one per
-/// run), read once at the program's setup and only with `-html` (`blastinput::app::html_links`,
-/// so that LOSAT's refusal of the file comes before the first byte); the `-db` text as NCBI keeps
+/// run), read once at the program's setup and only with `-html` and outfmt 0, whose ids link
+/// (`blastinput::app::html_links`, so that LOSAT's refusal of the file comes before the first
+/// byte; outfmt 18 takes no links); the `-db` text as NCBI keeps
 /// it (`CBlastFormat::m_DbName`, `NStr::TruncateSpaces` of `-db`; empty for `-subject`), the
 /// `<@db_name@>` of a local id's link; and whether the database holds nucleotides (`m_IsDbNa`).
 #[derive(Debug)]

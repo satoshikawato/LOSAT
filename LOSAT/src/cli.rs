@@ -398,7 +398,7 @@ where
             "the start of another program"
         );
     }
-    let command = with_toolkit_file_args(command);
+    let command = with_html_help_place(with_toolkit_file_args(command));
     // NCBI's application reads its own toolkit words before the program's arguments; the
     // argument reader gets the words that are left (`ncbi_environment::preparse`).
     if let Some(program) = tokens
@@ -1428,6 +1428,46 @@ fn with_toolkit_file_args(mut command: clap::Command) -> clap::Command {
                 }
             }
             sub
+        });
+    }
+    command
+}
+
+/// `command` with `-html` listed in each search program's `-help` right after `-line_length`, as
+/// NCBI BLAST+ 2.17.0's `-help` lists it (`-line_length`, `-html`, `-sorthits`). The field order
+/// of a program's options gives the other places; `-line_length` and `-sorthits` come from the
+/// one `FormattingArgs` that psiblast and rpsblast flatten in too, which have no `-html`, so the
+/// place is given here: the options listed after `-line_length` move down by one.
+fn with_html_help_place(mut command: clap::Command) -> clap::Command {
+    let names: Vec<String> = command
+        .get_subcommands()
+        .filter(|sub| {
+            sub.get_arguments()
+                .any(|arg| arg.get_long() == Some("html"))
+        })
+        .map(|sub| sub.get_name().to_string())
+        .collect();
+    for name in names {
+        command = command.mut_subcommand(name, |mut sub| {
+            let order_of = |sub: &clap::Command, long: &str| {
+                sub.get_arguments()
+                    .find(|arg| arg.get_long() == Some(long))
+                    .map(|arg| (arg.get_id().clone(), arg.get_display_order()))
+            };
+            let (Some((_, line_length)), Some((html, _))) =
+                (order_of(&sub, "line_length"), order_of(&sub, "html"))
+            else {
+                return sub;
+            };
+            let later: Vec<(clap::Id, usize)> = sub
+                .get_arguments()
+                .filter(|arg| arg.get_id() != &html && arg.get_display_order() > line_length)
+                .map(|arg| (arg.get_id().clone(), arg.get_display_order()))
+                .collect();
+            for (id, order) in later {
+                sub = sub.mut_arg(id, |arg| arg.display_order(order + 1));
+            }
+            sub.mut_arg(html, |arg| arg.display_order(line_length + 1))
         });
     }
     command

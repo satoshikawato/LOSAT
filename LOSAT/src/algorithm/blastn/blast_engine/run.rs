@@ -6516,9 +6516,12 @@ struct BlastnReportInputs<'a> {
     epilog: bool,
     /// `-show_gis` (the labels of the query-anchored sections, outfmt 1 to 4).
     show_gis: bool,
-    /// `-html` (`BlastnArgs::html`): the HTML form of the outfmt 0 and 18 reports. The run's
-    /// `-html` links; None: plain.
+    /// The `-html` links of the outfmt 0 report (`blastinput::app::html_links`); None without
+    /// `-html` or outfmt 0.
     html: Option<Arc<crate::report::html_ids::HtmlLinks>>,
+    /// `-html` (`BlastnArgs::html`, NCBI's `m_IsHTML`): the HTML form of the outfmt 0 and 18
+    /// reports (the organism report takes no links).
+    is_html: bool,
     /// Whether the outfmt 0 report starts with the prolog, which is otherwise written
     /// before the search (`write_pairwise_prologs`).
     prolog: bool,
@@ -7986,7 +7989,7 @@ fn write_custom_tabular(
             &queries,
             writer,
             warnings,
-            report.html.is_some(),
+            report.is_html,
         );
     }
     let tab = BlastnTabular {
@@ -8956,7 +8959,7 @@ fn process_options(args: &mut BlastnArgs, outputs: &mut ReportOutputs<'_>) -> Re
         }
         outfmts.push(choice.number);
     }
-    args.html_links = app::html_links(args.html, Program::Blastn, args.database_name())?;
+    args.html_links = app::html_links(args.html, Program::Blastn, args.database_name(), &outfmts)?;
     // The hit list size and the counts of the pairwise report, with the formatting
     // handler's warnings (`ExtractAlgorithmOptions`), once for the run.
     let (counts, warnings) = crate::algorithm::blastn::scoring::report_counts_of(args, &outfmts)?;
@@ -12372,6 +12375,7 @@ fn write_reports_untimed(
         epilog,
         show_gis: args.show_gis,
         html: args.html_links.clone(),
+        is_html: args.html,
         prolog: outputs
             .formats
             .iter()

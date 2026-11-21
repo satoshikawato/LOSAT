@@ -2733,6 +2733,7 @@ fn search(
                 .as_ref()
                 .map(crate::blastinput::seq_range::SequenceRange::length),
             html: resolved.html.clone(),
+            is_html: args.html,
         };
         // The records of a subject set whose ids `-parse_deflines` read, by subject index.
         let records_parsed = if args.parse_deflines && reported.is_none() {

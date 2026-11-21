@@ -1359,8 +1359,8 @@ fn check_resolutions(
         app::formatting_handler_check(choice, Program::Blastx)?;
         app::html_format_check(choice.number, Program::Blastx, args.html)?;
     }
-    let html = app::html_links(args.html, Program::Blastx, args.database_name())?;
     let outfmts: Vec<i32> = choices.iter().map(|choice| choice.number).collect();
+    let html = app::html_links(args.html, Program::Blastx, args.database_name(), &outfmts)?;
     let (_, warnings) = crate::blastinput::report_counts::run_report_counts_with(
         "blastx",
         &outfmts,

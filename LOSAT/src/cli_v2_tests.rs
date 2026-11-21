@@ -1625,6 +1625,27 @@ fn html_is_a_flag_of_the_five_search_programs_and_psiblast_refuses_it() {
     );
 }
 
+// NCBI BLAST+ 2.17.0's `blastp -help` (probe of 2026-11-13, line RG item E2) lists `-line_length`,
+// `-html`, `-sorthits` in that order, as do the other four search programs: LOSAT's `-help` lists
+// `-html` right after `-line_length` (`cli::with_html_help_place`).
+#[test]
+fn help_lists_html_right_after_line_length() {
+    for program in ["blastn", "blastp", "blastx", "tblastn", "tblastx"] {
+        let error = parse(program, &["-help"]).unwrap_err();
+        let help = crate::cli::render_message(&error);
+        let at = |option: &str| {
+            help.find(&format!("\n      {option}"))
+                .unwrap_or_else(|| panic!("{program}: {option}"))
+        };
+        let (line_length, html, sorthits) = (at("-line_length "), at("-html\n"), at("-sorthits "));
+        assert!(line_length < html && html < sorthits, "{program}");
+        assert!(
+            !help[line_length + 1..html].contains("\n      -"),
+            "{program}"
+        );
+    }
+}
+
 // NCBI blastp 2.17.0+ -help options that LOSAT's BLASTP does not implement, and the NCBI C++
 // Toolkit's standard options (ncbiargs.cpp:78-87), are rejected explicitly.
 #[test]

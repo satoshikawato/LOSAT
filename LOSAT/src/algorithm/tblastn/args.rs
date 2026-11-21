@@ -753,6 +753,7 @@ impl TblastnArgs {
             self.html,
             crate::blastinput::app::Program::Tblastn,
             self.database_name(),
+            outfmts.unwrap_or(&own_outfmt),
         )?;
         let (counts, warnings) = crate::blastinput::report_counts::run_report_counts_with(
             "tblastn",

@@ -576,7 +576,12 @@ fn run_inner(
     )?;
     app::formatting_handler_check(&choice, Program::Blastx)?;
     app::html_format_check(choice.number, Program::Blastx, args.html)?;
-    let html = app::html_links(args.html, Program::Blastx, args.database_name())?;
+    let html = app::html_links(
+        args.html,
+        Program::Blastx,
+        args.database_name(),
+        &[choice.number],
+    )?;
     // The warnings of the hit list size and of an ignored -num_descriptions
     // (`blastinput::report_counts`).
     stderr.write_all(&warnings_of(args, choice.number))?;

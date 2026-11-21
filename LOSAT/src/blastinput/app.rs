@@ -672,18 +672,22 @@ pub fn html_format_check(number: i32, program: Program, html: bool) -> anyhow::R
     Ok(())
 }
 
-/// The `-html` links of a run (`report::html_ids::HtmlLinks`), `None` without `-html`: NCBI's
-/// formatter registry (`InitConfig::read`: `FMTCFG`, `NCBI`, `GETURL_DEBUG` and the file),
-/// read once per run where each program checks its formats (`html_format_check`), so that
-/// LOSAT's refusal of the file comes before the first byte; `database` is the `-db` value as NCBI
-/// keeps it (`database_name()`, `None` for `-subject`). One function for the five programs; the
-/// links go where the option went (`PairwiseConfig::html`).
+/// The `-html` links of a run (`report::html_ids::HtmlLinks`), `None` without `-html` or when
+/// none of the run's formats `formats` links ids: NCBI's formatter registry (`InitConfig::read`:
+/// `FMTCFG`, `NCBI`, `GETURL_DEBUG` and the file), read once per run where each program checks
+/// its formats (`html_format_check`), so that LOSAT's refusal of the file comes before the first
+/// byte; `database` is the `-db` value as NCBI keeps it (`database_name()`, `None` for
+/// `-subject`). One function for the five programs; the links go where the option went
+/// (`PairwiseConfig::html`). NCBI calls `InitConfig` only from the id links of the pairwise
+/// report (outfmt 0; 1 to 4 are refused with `-html`, `html_format_check`): the organism report
+/// (outfmt 18) takes the option alone (`CBlastFormat::m_IsHTML`), so a run of it reads no file.
 pub(crate) fn html_links(
     html: bool,
     program: Program,
     database: Option<&str>,
+    formats: &[i32],
 ) -> anyhow::Result<Option<std::sync::Arc<crate::report::html_ids::HtmlLinks>>> {
-    if !html {
+    if !html || !formats.contains(&output_format::PAIRWISE) {
         return Ok(None);
     }
     let registry =
@@ -1652,5 +1656,19 @@ mod tests {
                 "{text:?}"
             );
         }
+    }
+
+    #[test]
+    fn only_the_pairwise_report_reads_the_html_links() {
+        // NCBI calls `CAlignFormatUtil::InitConfig` only from the id links of outfmt 0; the
+        // organism report (18) and the formats that ignore -html read no registry file.
+        for formats in [&[18][..], &[6, 18], &[5], &[]] {
+            assert!(html_links(true, Program::Blastp, None, formats)
+                .unwrap()
+                .is_none());
+        }
+        assert!(html_links(false, Program::Blastn, Some("db"), &[0])
+            .unwrap()
+            .is_none());
     }
 }

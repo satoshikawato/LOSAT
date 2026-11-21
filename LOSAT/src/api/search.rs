@@ -5,11 +5,6 @@
 //! exactly as on the command line (LOSAT Web ABI v2 §7 does the same).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46,51,75
-//! ```c++
-//! const string kArgQuery("query");
-//! const string kArgSubject("subject");
-//! const string kArgNumThreads("num_threads");
-//! ```
 #![warn(missing_docs, unused)]
 
 use super::error::Error;
@@ -17,19 +12,8 @@ use super::input::Inputs;
 use super::program::Program;
 use crate::cli::{Cli, Commands};
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3441-3443
-// ```c
-// arg_desc.AddDefaultKey(kArgOutput, "output_file",
-//                "Output file name",
-//                CArgDescriptions::eOutputFile, "-");
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3441-3443
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2657-2660
-// ```c++
-//     arg_desc.AddDefaultKey(kArgOutputFormat, "format",
-//                            kOutputFormatDescription,
-//                            CArgDescriptions::eString,
-//                            NStr::IntToString(dft_outfmt));
-// ```
 /// The options that the library API sets itself and does not take in an argv: the inputs
 /// (`Inputs` gives the records and their names, a database's name, and the PSSM file of a PSSM
 /// query, `-in_pssm` of psiblast and tblastn), the output file and the output format (arguments
@@ -125,7 +109,7 @@ impl Search {
     }
 
     // NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_input_aux.hpp:79-87
-    // (quoted at `blastinput::value_parsers::blastn_output_path`)
+    // (cited at `blastinput::value_parsers::blastn_output_path`)
     /// The search of `run_to_file`, whose `-out` is `path`: the parser checks it as the command
     /// line's `-out` (a file name of 256 bytes or more is NCBI's `Illegal value`, dry run or not),
     /// and the arguments carry it to the search, which makes the file where the command line makes
@@ -138,16 +122,6 @@ impl Search {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1241-1248
-    // ```c++
-    //     if (!m_IsDeltaBlast) {
-    //         arg_desc.SetDependency(kArgPSIInputChkPntFile,
-    //                                CArgDescriptions::eExcludes,
-    //                                kArgQuery);
-    //         arg_desc.SetDependency(kArgPSIInputChkPntFile,
-    //                                CArgDescriptions::eExcludes,
-    //                                kArgQueryLocation);
-    //     }
-    // ```
     /// The parsed arguments of the search of `inputs`: the command line's `-query` (or `-in_pssm`
     /// for a PSSM query, `Inputs::pssm`) and `-subject` or `-db` values, and `-out` for
     /// `run_to_file` (`Search::writing_to`). An option can hold for one kind of input only
@@ -307,13 +281,6 @@ pub fn validate(program: Program, argv: &[&str]) -> Result<Search, Error> {
     }
     let argv: Vec<String> = argv.iter().map(|word| word.to_string()).collect();
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2377-2381
-    // ```c++
-    //         ITERATE(vector<string>, dbarg, database_args) {
-    //             arg_desc.SetDependency(kArgSubjectLocation,
-    //                                    CArgDescriptions::eExcludes,
-    //                                    *dbarg);
-    //         }
-    // ```
     // An argv is checked before the inputs are known: it holds if it holds for one kind of
     // subject, and the search parses it again for the kind it has (`Search::command`).
     let query = (QUERY, std::ffi::OsStr::new("query"));
@@ -585,7 +552,7 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_input_aux.hpp:79-87
-    // (quoted at `blastinput::value_parsers::blastn_output_path`)
+    // (cited at `blastinput::value_parsers::blastn_output_path`)
     /// `run_to_file`'s file is the parser's `-out` (`Search::writing_to`): any name, one that looks
     /// like a toolkit word (`-dryrun`, `--`) or is not UTF-8 among them, is the file and leaves the
     /// argv as it is; a name of 256 bytes or more is NCBI's error.

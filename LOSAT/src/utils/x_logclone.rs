@@ -5,11 +5,6 @@
 //! `__log_fma` behind `LOSAT_X_LOGCLONE` (see that patch's README).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:636,679
-//! ```c
-//! temp = log(x[k] / q[k]);
-//! ...
-//!     scores[k] = log(target_freqs[k] / (row_freqs[i] * col_freqs[j]));
-//! ```
 //! NCBI calls libm `log` element by element in EvaluateReFunctions and ComputeScoresFromProbs.
 //! In this branch `log_slice` calls the same libm function (`f64::ln`) on the same arguments in
 //! the same order, so each result is the one NCBI gets on this machine.
@@ -21,11 +16,6 @@ use crate::utils::glibc_fma_libm::GlibcLibm;
 pub fn print_shadow_stats() {}
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:636,679
-// ```c
-// temp = log(x[k] / q[k]);
-// ...
-//     scores[k] = log(target_freqs[k] / (row_freqs[i] * col_freqs[j]));
-// ```
 // Same libm call as the C `log` above, one element at a time.
 /// `out[k] = ln(src[k])`.
 #[inline]

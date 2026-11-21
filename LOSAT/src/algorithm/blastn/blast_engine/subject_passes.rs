@@ -7,19 +7,8 @@
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1409-1427 (the loop of
 //! `BLAST_PreliminarySearchEngine` on the subjects)
-//! ```c
-//!     itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
-//!     while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-//!            != BLAST_SEQSRC_EOF) {
-//!        if (BlastSeqSrcGetSequence(seq_src, &seq_arg) < 0) {
-//!            continue;
-//!        }
-//! ```
 //! and c++/src/algo/blast/core/blast_traceback.c:1521-1523 (the loop of `BLAST_ComputeTraceback_MT`
 //! on the subjects' batches)
-//! ```c
-//!         for (i = 0; i < batches->num_batches; i++) {
-//! ```
 //!
 //! This module is a child of `run` for the types it keeps private (`SubjectSource`,
 //! `PreparedSubjects`, `PrelimHit`, `SubjectHits`, `SubjectScratch`, `SubjectCtx`, the hit-list
@@ -46,17 +35,6 @@ use crate::algorithm::blastn::coordination::subject_trace_id;
 use anyhow::Result;
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_args.hpp:1290-1298
-// ```c
-//     CMTArgs(size_t default_num_threads = CThreadable::kMinNumThreads, EMTMode mt_mode = eNotSupported) :
-//         m_NumThreads(default_num_threads), m_MTMode(mt_mode)
-//     {
-// #ifdef NCBI_NO_THREADS
-//         // No threads can be set in NON-MT mode
-//         m_NumThreads = CThreadable::kMinNumThreads;
-//         m_MTMode = eNotSupported;
-// #endif
-//     }
-// ```
 #[cfg(all(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -77,7 +55,7 @@ pub(super) type SubjectStatisticsFn<'a> =
 /// setup's (a statistics' total of 0 or less) are the batch's (`PrelimBatch`), not these.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1434-1443 and
-/// c++/src/algo/blast/core/blast_traceback.c:1598-1628 (quoted at `stats::setup::subject_eff_lengths`):
+/// c++/src/algo/blast/core/blast_traceback.c:1598-1628 (cited at `stats::setup::subject_eff_lengths`):
 /// once per subject, the preliminary stage reads the subject's own cutoffs and spaces, the
 /// traceback the subject's hit-saving cutoffs and the setup's spaces.
 pub(super) struct SpecialStatistics<'a> {
@@ -109,21 +87,6 @@ struct UngappedStage<'a> {
 /// `prelim_hitlist_size` subjects (a split batch merges those of its query chunks), and
 /// its traceback reads only those.
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1675-1681,1782-1786
-/// ```c
-/// BLAST_PreliminarySearchEngine(program, query, query_info,
-///                               seq_src, gap_align, score_params,
-///                               lookup_wrap, word_options,
-///                               ext_params, hit_params, eff_len_params,
-///                               psi_options, db_options, hsp_stream,
-///                               local_diagnostics, interrupt_search,
-///                               progress_info)) != 0) {
-/// ...
-/// BLAST_ComputeTraceback(program_number, hsp_stream, query, query_info,
-///                        seq_src, gap_align, score_params, ext_params,
-///                        hit_params, eff_len_params, db_options,
-///                        psi_options, rps_info, pattern_blk, results,
-///                        interrupt_search, progress_info))
-/// ```
 /// A database has its own drivers of the two passes (`database::search_blocks`,
 /// `database::traceback_listed`), with a scratch per worker made as the subject set's
 /// parallel pass makes them.
@@ -156,7 +119,7 @@ impl SubjectPasses<'_> {
     /// and trace lines (a database's sequences are "unknown" there).
     ///
     /// No NCBI counterpart: an accessor of LOSAT's subject set; NCBI reads each subject through a
-    /// `BlastSeqSrc` (the loop of `BLAST_PreliminarySearchEngine` quoted at the head of this module).
+    /// `BlastSeqSrc` (the loop of `BLAST_PreliminarySearchEngine` cited at the head of this module).
     fn subject_records(&self) -> &[FastaRecord] {
         self.subjects
             .prepared()
@@ -171,10 +134,6 @@ impl SubjectPasses<'_> {
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1469-1470 (the subject's
     /// preliminary search) and c++/src/algo/blast/core/blast_traceback.c:1521,1632-1633 (its traceback)
-    /// ```c
-    ///       status =
-    ///           s_BlastSearchEngineCore(program_number, query, query_info,
-    /// ```
     fn search_subject<const UNGAPPED: bool>(
         &self,
         s_idx: usize,
@@ -193,35 +152,14 @@ impl SubjectPasses<'_> {
             (prelim_batch.blastn_debug, prelim_batch.blastn_trace_enabled);
         let (gap_scratch, subject_scratch) = state;
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-180
-        // ```c
-        //     int status = m_PrelimSearch->CheckInternalData();
-        //     if (status != 0)
-        //     {
-        //          // Search was not run, but we send back an empty CSearchResultSet.
-        // ```
         // With no valid context, NCBI does not search.
         if !any_valid_context {
             return (None, Vec::new());
         }
 
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:488-491
-        // ```c
-        // hsp_list = Blast_HSPListFree(hsp_list);
-        // ...
-        // BlastInitHitListReset(init_hitlist);
-        // ```
         let s_len_full = subject.length;
         // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:153-166
-        // ```c
-        // typedef struct BlastHSPList {
-        //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
-        //    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
-        //                         Set to 0 if not applicable */
-        //    BlastHSP** hsp_array; /**< Array of pointers to individual HSPs */
-        //    Int4 hspcnt; /**< Number of HSPs saved */
-        // ...
-        // } BlastHSPList;
-        // ```
         // Made only for the debug and trace lines, which alone read it.
         let s_id_trace = if blastn_debug || blastn_trace_enabled {
             self.subject_records().get(s_idx).map_or_else(
@@ -242,12 +180,6 @@ impl SubjectPasses<'_> {
         };
         if let Some(kept) = prelim_source {
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1521,1632-1633
-            // ```c
-            //         for (i = 0; i < batches->num_batches; i++) {
-            // ...
-            //             /* process all the hits to this subject sequence, one list at a time */
-            //             for (hsplist_itr = 0; hsplist_itr < batch->num_hsplists; hsplist_itr++) {
-            // ```
             // The traceback of the HSPs that the preliminary stage kept
             // (`traceback_subject::traceback_subject`).
             let mut subject_hits: Option<SubjectHits> = None;
@@ -263,10 +195,6 @@ impl SubjectPasses<'_> {
             (subject_hits, Vec::new())
         } else {
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1469-1470
-            // ```c
-            //       status =
-            //           s_BlastSearchEngineCore(program_number, query, query_info,
-            // ```
             // The preliminary search of the subject (`prelim_subject::prelim_subject`).
             // The preliminary stage gives the subject's HSPs to the collector (`search_subjects`).
             (
@@ -294,7 +222,7 @@ impl SubjectPasses<'_> {
     /// (`stats::setup::apart`), so that the default path keeps its code.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1434-1443 and
-    /// c++/src/algo/blast/core/blast_traceback.c:1598-1628 (quoted at `stats::setup::subject_eff_lengths`)
+    /// c++/src/algo/blast/core/blast_traceback.c:1598-1628 (cited at `stats::setup::subject_eff_lengths`)
     fn special_subject<const UNGAPPED: bool>(
         &self,
         s_idx: usize,
@@ -375,27 +303,7 @@ impl SubjectPasses<'_> {
     /// preliminary HSPs in the final hit lists of `hitlist_size` subjects
     /// (`Blast_HSPResultsInsertHSPList`).
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1409-1427
-    /// ```c
-    /// itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
-    /// ...
-    /// while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-    ///        != BLAST_SEQSRC_EOF) {
-    /// ...
-    ///    if (BlastSeqSrcGetSequence(seq_src, &seq_arg) < 0) {
-    ///        continue;
-    ///    }
-    /// ```
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1700-1707
-    /// ```c
-    ///                 batch->hsplist_array[hsplist_itr] = NULL;
-    ///                 if (hsp_list->hspcnt == 0) {
-    ///                     hsp_list = Blast_HSPListFree(hsp_list);
-    ///                 }
-    ///                 else {
-    ///                     Blast_HSPResultsInsertHSPList(thread_data->tld[tid]->results, hsp_list,
-    ///                                   hit_params->options->hitlist_size);
-    ///                 }
-    /// ```
     /// Each subject's results go to `sink` in OID order, which fills the hit lists as NCBI's
     /// `Blast_HitListUpdate` does, one HSP list at a time. One thread hands each subject over as
     /// soon as it is searched, so only the HSPs the hit lists keep stay in memory. Two or more
@@ -475,12 +383,6 @@ impl SubjectPasses<'_> {
     }
 
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:991-1041
-    /// ```c
-    /// Int4 offset_array_size = GetOffsetArraySize(lookup_wrap);
-    /// ...
-    /// aux_struct->offset_pairs =
-    ///   (BlastOffsetPair*) malloc(offset_array_size * sizeof(BlastOffsetPair));
-    /// ```
     fn new_scratch(&self) -> SubjectState {
         (
             GapAlignScratch::new(),
@@ -496,9 +398,6 @@ impl SubjectPasses<'_> {
     /// the subject), the last step of the finish that NCBI's preliminary stage makes of an ungapped list.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1538
-    /// ```c
-    ///            Blast_HSPListReapByQueryCoverage(hsp_list,hit_params->options, query_info, program_number);
-    /// ```
     fn x_ungapped_query_coverage(&self, hits: &mut Vec<PrelimHit>) {
         ungapped_reap_query_coverage(
             hits,
@@ -516,28 +415,7 @@ impl SubjectPasses<'_> {
     /// smallest ordinal stays) and the sequence has no HSPs.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1480,1490-1493
-    /// ```c
-    /// if (hsp_list && hsp_list->hspcnt > 0) {
-    /// ...
-    ///       /* The following must be performed for any ungapped
-    ///          search with a nucleotide database. */
-    ///          status =
-    ///             Blast_HSPListReevaluateUngapped(
-    /// ```
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2651-2665
-    /// ```c
-    ///       	seq_arg.oid = subject_blk->oid;
-    /// ...
-    ///         seq_arg.check_oid_exclusion = TRUE;
-    /// ...
-    ///       	if (( BLAST_SEQSRC_EXCLUDED == BlastSeqSrcGetSequence(seq_src, &seq_arg))) {
-    ///       		for (index = 0; index < hspcnt; ++index) {
-    ///       			 hsp_array[index] = Blast_HSPFree(hsp_array[index]);
-    ///       		}
-    ///       		Blast_HSPListPurgeNullHSPs(hsp_list);
-    ///       		return 0;
-    ///       	}
-    /// ```
     fn x_ungapped_database_stage(
         &self,
         stage: &UngappedStage<'_>,
@@ -621,22 +499,9 @@ impl SubjectPasses<'_> {
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1674-1679 (the preliminary search
     /// of a batch in `Blast_RunPreliminarySearchWithInterrupt`, into the batch's HSP stream)
-    /// ```c
-    ///     if ((status=
-    ///         BLAST_PreliminarySearchEngine(program, query, query_info,
-    ///                                       seq_src, gap_align, score_params,
-    /// ...
-    ///                                       psi_options, db_options, hsp_stream,
-    /// ```
     /// NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:351-357 (the stream's writer
     /// without a filtering option: the HSP collector, `PrelimHitCollector` here; `-culling_limit` chooses
     /// the culling writer in the body below, and NCBI's other choice, `-best_hit_*`, is not ported)
-    /// ```c
-    ///         /* Use the collector filtering algorithm as the default */
-    ///         BlastHSPCollectorParams * params =
-    /// ...
-    ///         writer_info = BlastHSPCollectorInfoNew(params);
-    /// ```
     pub(super) fn prelim_pass<const UNGAPPED: bool>(
         &self,
         split_prelim_lists: Option<PrelimHitLists>,
@@ -650,14 +515,6 @@ impl SubjectPasses<'_> {
         // (a chunk's queries are its parts, so the lengths are the chunk's). Chosen once;
         // the default `else` arm below is unchanged.
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:318-342
-        // ```c
-        //     else if (filt_opts) {
-        //         if (filt_opts->best_hit && (filt_opts->best_hit_stage & ePrelimSearch))
-        //         ...
-        //         else if (filt_opts->culling_opts &&
-        //                  (filt_opts->culling_stage & ePrelimSearch))
-        //         {
-        // ```
         if self.args.culling_limit_value() > 0 {
             let mut writer = culling::PrelimCulling::new(
                 self.prelim_batch.query_lengths,
@@ -687,12 +544,6 @@ impl SubjectPasses<'_> {
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1409-1413 (the loop on the subjects,
     /// which `search_subjects` and `database::search_blocks` replace)
-    /// ```c
-    /// itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
-    /// ...
-    /// while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-    ///        != BLAST_SEQSRC_EOF) {
-    /// ```
     fn prelim_into<const UNGAPPED: bool, M: FnMut(usize, Vec<PrelimHit>) + Send>(
         &self,
         lookup_tables: &LookupTables,
@@ -715,12 +566,6 @@ impl SubjectPasses<'_> {
                 // The subjects come one at a time in the order of their ordinal ids
                 // (`database::search_blocks`), as the subject set's come in OID order.
                 // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-180
-                // ```c
-                //     int status = m_PrelimSearch->CheckInternalData();
-                //     if (status != 0)
-                //     {
-                //          // Search was not run, but we send back an empty CSearchResultSet.
-                // ```
                 // With no valid context NCBI does not search, and reads no sequence.
                 if !self.any_valid_context {
                     return Ok(());
@@ -823,16 +668,6 @@ impl SubjectPasses<'_> {
     /// error is returned as it is (the caller reports it with `database_search_error`).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1700-1707
-    /// ```c
-    ///                 batch->hsplist_array[hsplist_itr] = NULL;
-    ///                 if (hsp_list->hspcnt == 0) {
-    ///                     hsp_list = Blast_HSPListFree(hsp_list);
-    ///                 }
-    ///                 else {
-    ///                     Blast_HSPResultsInsertHSPList(thread_data->tld[tid]->results, hsp_list,
-    ///                                   hit_params->options->hitlist_size);
-    ///                 }
-    /// ```
     pub(super) fn traceback_pass<const UNGAPPED: bool>(
         &self,
         prelim_lists: PrelimHitLists,
@@ -859,19 +694,6 @@ impl SubjectPasses<'_> {
                 let new_scratch = || self.new_scratch();
                 let mut listed = listed_prelim_hits(prelim_lists);
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1567-1577
-                // ```c
-                //                 seq_arg.oid = batch->hsplist_array[0]->oid;
-                //                 seq_arg.encoding = encoding;
-                //                 seq_arg.check_oid_exclusion = TRUE;
-                //                 seq_arg.reset_ranges = FALSE;
-                //                 seq_arg.ranges = ranges;
-                //
-                //                 if (BlastSeqSrcGetSequence(seqsrc, &seq_arg) < 0) {
-                //                     batches->array_of_batches[i] = Blast_HSPStreamResultBatchReset(batch);
-                //                     seq_arg.ranges = BlastSeqSrcSetRangesArgFree(ranges);
-                //                     continue;
-                //                 }
-                // ```
                 // The gapped traceback's fetch excludes a listed sequence that the negative
                 // seqid list keeps without a line (`database::fetch_excluded`): the lists of
                 // every query on it leave before the final hit lists (an `-ungapped` search

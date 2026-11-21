@@ -19,14 +19,6 @@ pub(super) fn x_tbn_store() -> bool {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:515-520
-// ```c
-//     virtual SBlastSequence GetCompressedPlusStrand() {
-//         SBlastSequence retval(size());
-//         string ncbi4na = kEmptyStr;
-//         m_SeqVector.GetSeqData(m_SeqVector.begin(), m_SeqVector.end(), ncbi4na);
-//         s_Ncbi4naToNcbi2na(ncbi4na, size(), retval.data.get());
-//         return retval;
-// ```
 // NCBI keeps the subjects in its scope and makes each one's search forms from it. Both variants
 // give the same letters for every subject; only where they are held differs.
 /// The subjects of one search, by OID.
@@ -264,13 +256,6 @@ pub(super) fn x_read_subject_stores<R: std::io::Read>(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:515-520
-// ```c
-//     virtual SBlastSequence GetCompressedPlusStrand() {
-//         SBlastSequence retval(size());
-//         string ncbi4na = kEmptyStr;
-//         m_SeqVector.GetSeqData(m_SeqVector.begin(), m_SeqVector.end(), ncbi4na);
-//         s_Ncbi4naToNcbi2na(ncbi4na, size(), retval.data.get());
-// ```
 // NCBI makes the compressed subject of every search from its scope. A subject the search reads
 // as letters (the records a caller gives `run_local`: LOSAT Web, the library; the records of a set
 // that keeps its letters because one of them holds a byte without an ncbi4na code) was made into
@@ -357,13 +342,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:427-431
-    // ```c
-    //     static void
-    //     s_Ncbi4naToNcbi2na(const string& ncbi4na, size_t base_length, Uint1* ncbi2na)
-    //     {
-    //         ...
-    //         CRandom random(base_length);
-    // ```
     // NCBI packs the subject it searches, the interval of `-subject_loc`, and seeds the resolution
     // of its ambiguous bases with the interval's length. With a range the reader packs the records
     // `cut_subjects` makes (at one thread and on the packing thread): their letters, deflines,

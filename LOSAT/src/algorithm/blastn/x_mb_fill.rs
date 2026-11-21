@@ -5,31 +5,6 @@
 //! whose cells are read first, as its `Batch` queue does (wasm32).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1032-1091
-//! ```c
-//!       for (index = from; index <= last_offset; index++) {
-//!          val = *++seq;
-//!          /* if an ambiguity is encountered, do not add
-//!             any words that would contain it */
-//!          if ((val & BLAST2NA_MASK) != 0) {
-//!             ecode = 0;
-//!             pos = seq + kLutWordLength;
-//!             continue;
-//!          }
-//!
-//!          /* get next base */
-//!          ecode = ((ecode << BITS_PER_NUC) & kLutMask) + val;
-//!          if (seq < pos)
-//!             continue;
-//! ...
-//!          if (mb_lt->hashtable[ecode] == 0) {
-//!             PV_SET(pv_array, ecode, pv_array_bts);
-//!          }
-//!          else {
-//!             helper_array[ecode/kCompressionFactor]++;
-//!          }
-//!          mb_lt->next_pos[index] = mb_lt->hashtable[ecode];
-//!          mb_lt->hashtable[ecode] = index;
-//! ```
 //!
 //! Where it runs. `build_mb_lookup` calls `fill` where it would call `x_fill_mb_queued`: the
 //! table is built on one thread (no pool of two threads or more: PAIRPAR fills the others), without

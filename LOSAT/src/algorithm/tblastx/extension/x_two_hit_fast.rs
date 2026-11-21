@@ -4,15 +4,6 @@
 //! flat byte table.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:846-866
-//! ```c
-//! for (i = 0; i < n; i++) {
-//!     score += matrix[q[i]][s[i]];
-//!     if (score > maxscore) { maxscore = score; best_i = i; }
-//!     if (score <= 0 || (maxscore - score) >= dropoff) break;
-//! }
-//! *length = best_i + 1;
-//! *s_last_off = s_off + i;
-//! ```
 //! (right walk; the left walk, aa_ungapped.c:886-921, counts `i` down from `n`, has no
 //! `score <= 0` test, and returns `n - best_i + 1`.)
 //!
@@ -193,7 +184,7 @@ struct State {
 /// `tab[i]`. wasm32 reads `FIXED_TABLE` (where `tab` points) at its static address.
 ///
 /// SAFETY: `i < TABLE_LEN`.
-// NCBI reference: aa_ungapped.c:846-921 `matrix[q[i]][s[i]]` (the table of `build_table`).
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:846-921 `matrix[q[i]][s[i]]` (the table of `build_table`).
 #[inline(always)]
 unsafe fn score_at(
     #[cfg_attr(
@@ -278,7 +269,7 @@ fn left_walk_parts(w: LeftWalk) -> (i32, usize) {
 
 /// The table of the walks, `None` if a score other than `BLAST_SCORE_MIN` is outside
 /// -127..=`MAX_WORD_SCORE`.
-// NCBI reference: aa_ungapped.c:846-921 `matrix[q[i]][s[i]]`; the scores are those of the function
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:846-921 `matrix[q[i]][s[i]]`; the scores are those of the function
 // the reference walks call.
 fn build_table() -> Option<Box<Table>> {
     let mut t: Box<Table> = vec![0i8; TABLE_LEN].into_boxed_slice().try_into().ok()?;
@@ -345,7 +336,7 @@ static MATRIX_TABLES: MatrixTables = MatrixTables(
 /// The byte table of `matrix`, a matrix other than BLOSUM62 whose scores are `score(q, s)`: a
 /// static written at the first call for the matrix, or `None` (the reference walks run) if a score
 /// other than `BLAST_SCORE_MIN` is outside -127..=`MAX_MATRIX_SCORE`.
-// NCBI reference: aa_ungapped.c:846-921 `matrix[q[i]][s[i]]`; the scores are those the reference
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:846-921 `matrix[q[i]][s[i]]`; the scores are those the reference
 // walks read (`TbxScore::score` of the search's matrix).
 pub(crate) fn matrix_walk_table(
     matrix: ScoringMatrix,
@@ -391,7 +382,7 @@ fn state() -> &'static State {
 /// `sp[-i]`. Returns the best score and its length.
 ///
 /// SAFETY: the `n` positions before `qp` and before `sp` are readable.
-// NCBI reference: aa_ungapped.c:886-921 (module comment). Step `i` reads index `n - i` of the
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:886-921 (module comment). Step `i` reads index `n - i` of the
 // `n` positions before the pointers, so one counter runs the loop and the length is
 // `n - (the index of the best step)`.
 #[inline(never)]
@@ -429,7 +420,7 @@ unsafe fn walk_left<T: WalkTable>(
 /// (`n` if it ran out).
 ///
 /// SAFETY: the `n` positions from `qp` and from `sp` are readable.
-// NCBI reference: aa_ungapped.c:846-866 (module comment). Inlined on wasm32 (module comment).
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:846-866 (module comment). Inlined on wasm32 (module comment).
 #[cfg_attr(not(target_arch = "wasm32"), inline(never))]
 #[cfg_attr(target_arch = "wasm32", inline(always))]
 unsafe fn walk_right<T: WalkTable>(
@@ -462,7 +453,7 @@ unsafe fn walk_right<T: WalkTable>(
 
 /// `extend_hit_two_hit_fitting(q_seq, s_seq, s_left_off, s_right_off, q_right_off, x_drop, false)`, or
 /// `None` when the reference has to run (an X-drop outside 1..=127, a word that does not fit).
-// NCBI reference: aa_ungapped.c:1089-1158 `s_BlastAaExtendTwoHit` (two_hit.rs follows it).
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1089-1158 `s_BlastAaExtendTwoHit` (two_hit.rs follows it).
 #[inline(never)]
 pub(super) fn two_hit(
     q_seq: &[u8],
@@ -563,7 +554,7 @@ pub(super) fn two_hit(
 /// function there makes the walks it calls (`walk_left`, `walk_right`) exported symbols of the
 /// library, which BLOSUM62's `two_hit` then calls through the GOT (no-LTO build); out of line and
 /// not generic, the walks stay local as before.
-// NCBI reference: aa_ungapped.c:1089-1158 `s_BlastAaExtendTwoHit` (two_hit.rs follows it).
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1089-1158 `s_BlastAaExtendTwoHit` (two_hit.rs follows it).
 #[inline(never)]
 pub(crate) fn two_hit_in(
     t: &MatrixWalkTable,
@@ -586,7 +577,7 @@ pub(crate) fn two_hit_in(
 }
 
 /// [`two_hit_in`] with words of 2 letters (`-word_size 2`).
-// NCBI reference: aa_ungapped.c:1089-1158 `s_BlastAaExtendTwoHit` (`word_size` 2).
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1089-1158 `s_BlastAaExtendTwoHit` (`word_size` 2).
 #[inline(never)]
 pub(crate) fn two_hit_in2(
     t: &MatrixWalkTable,
@@ -609,7 +600,7 @@ pub(crate) fn two_hit_in2(
 }
 
 /// [`two_hit_in`] with words of 4 letters (`-word_size 4`).
-// NCBI reference: aa_ungapped.c:1089-1158 `s_BlastAaExtendTwoHit` (`word_size` 4).
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1089-1158 `s_BlastAaExtendTwoHit` (`word_size` 4).
 #[inline(never)]
 pub(crate) fn two_hit_in4(
     t: &MatrixWalkTable,
@@ -633,7 +624,7 @@ pub(crate) fn two_hit_in4(
 
 /// The body of [`two_hit_in`], [`two_hit_in2`] and [`two_hit_in4`]: the table walks with words of
 /// `W` letters, or `None` when the reference has to run.
-// NCBI reference: aa_ungapped.c:1089-1158 `s_BlastAaExtendTwoHit` (two_hit.rs follows it; `W` is
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1089-1158 `s_BlastAaExtendTwoHit` (two_hit.rs follows it; `W` is
 // its `word_size`).
 #[inline(always)]
 fn two_hit_in_word<const W: usize>(
@@ -680,7 +671,7 @@ fn fits<const W: usize>(
 /// The word loop (over `W` letters) and the two walks of `two_hit` (the same statements) on a
 /// matrix's table `tab`. `two_hit` keeps its own copy, so that BLOSUM62's machine code stays as it
 /// was; the tests compare both with the reference walks.
-// NCBI reference: aa_ungapped.c:1089-1158 `s_BlastAaExtendTwoHit` (two_hit.rs follows it).
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1089-1158 `s_BlastAaExtendTwoHit` (two_hit.rs follows it).
 #[inline(always)]
 fn two_hit_on<const W: usize>(
     tab: &MatrixWalkTable,
@@ -806,7 +797,7 @@ pub(crate) fn sent_subject(batch: bool, frame: &[u8], offset: usize, len: usize)
 /// most `MAX_MATRIX_SCORE`; `1 <= x_drop <= 127`; and the score cannot wrap before the nearer sentinel
 /// (`start` plus `MAX_MATRIX_SCORE` for every step up to it stays below `i32::MAX`: `two_hit_sent_on`
 /// takes frames of at most `MAX_SENT_LEN` bytes).
-// NCBI reference: aa_ungapped.c:846-866 and 886-921 (module comment).
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:846-866 and 886-921 (module comment).
 #[inline(always)]
 unsafe fn walk_sent<const RIGHT: bool, const SHIFT: u32>(
     tab: *const i8,
@@ -868,7 +859,7 @@ unsafe fn walk_sent<const RIGHT: bool, const SHIFT: u32>(
 /// SAFETY: `q_full` is `[0, residues.., 0]` (a context of a batch [`sent_contexts`] accepted) and
 /// `s_full` the buffer of a subject frame [`sent_subject`] accepted (`[0, residues.., 0]`, at most
 /// `MAX_SENT_LEN` bytes).
-// NCBI reference: aa_ungapped.c:1089-1158 `s_BlastAaExtendTwoHit` (two_hit.rs follows it).
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1089-1158 `s_BlastAaExtendTwoHit` (two_hit.rs follows it).
 #[inline(always)]
 #[cfg_attr(
     target_arch = "wasm32",
@@ -904,7 +895,7 @@ pub(super) unsafe fn two_hit_sent(
 /// `two_hit_sent`.
 ///
 /// SAFETY: those of `two_hit_sent`, and `t.x_sentinels_stop()`.
-// NCBI reference: aa_ungapped.c:1089-1158 `s_BlastAaExtendTwoHit` (two_hit.rs follows it; `W` is
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1089-1158 `s_BlastAaExtendTwoHit` (two_hit.rs follows it; `W` is
 // its `word_size`).
 #[inline(always)]
 pub(crate) unsafe fn two_hit_sent_in<const W: usize>(
@@ -932,7 +923,7 @@ pub(crate) unsafe fn two_hit_sent_in<const W: usize>(
 /// BLOSUM62's table).
 ///
 /// SAFETY: those of `two_hit_sent` and `walk_sent`.
-// NCBI reference: aa_ungapped.c:1089-1158 `s_BlastAaExtendTwoHit` (two_hit.rs follows it; `W` is
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1089-1158 `s_BlastAaExtendTwoHit` (two_hit.rs follows it; `W` is
 // its `word_size`).
 #[inline(always)]
 unsafe fn two_hit_sent_on<const SHIFT: u32, const W: usize>(

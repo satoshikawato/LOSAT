@@ -65,15 +65,6 @@ fn params_from_flags(flags: &str) -> MaskerParams {
 }
 
 /// NCBI reference (598d8ae6): c++/src/objtools/seqmasks_io/mask_writer_int.cpp:40-54
-/// ```c
-///     PrintId( bsh, parsed_id );
-///     os << endl;
-///     PrintMasks(os, mask);
-/// ...
-///     ITERATE(TMaskList, i, mask) {
-///         os << i->first << " - " << i->second << "\n";
-///     }
-/// ```
 fn interval_text(records: &[(String, Vec<u8>)], masker: &SeqMasker) -> String {
     let mut out = String::new();
     for (title, seq) in records {

@@ -22,16 +22,6 @@
 //! set `LOSAT_X_BPQBLOCK=0`.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3447-3449,3525-3529
-//! ```c
-//! #pragma omp for schedule(static)
-//!         for (b = 0; b < numMatches; ++b) {
-//! ...
-//!                 if (BlastCompo_EarlyTermination(
-//!                         localMatch->best_evalue,
-//!                         redoneMatches,
-//!                         numQueries
-//!                 )) {
-//! ```
 
 use std::path::{Path, PathBuf};
 use std::process::Command;

@@ -365,6 +365,36 @@ fn x_soft_subject_calls(
     )
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:805-830 (the frames' ranges
+// mapped once per strand from the sequence's ranges in bases) and :221-311 (each frame chunked as
+// a protein subject; with soft masks the ranges cut per chunk of the whole frame).
+/// A masked `-db` search (`-db_soft_mask`, `-db_hard_mask`; series NP, M4b PR 2): the chunks of
+/// frame `frame` of a subject whose ranges in bases are `ranges`, with their scan ranges
+/// (`translated_db_mask_chunks`). Cold and out of line (no NCBI counterpart: code placement only).
+#[cold]
+#[inline(never)]
+fn x_db_mask_calls(
+    ranges: &[(i32, i32)],
+    hard: bool,
+    frame: &QueryFrame,
+    frames: &[QueryFrame],
+) -> Vec<(TranslatedChunk, Vec<(i32, i32)>)> {
+    debug_assert_eq!(tblastx_max_dbseq_len_for_run(), MAX_DBSEQ_LEN);
+    let negative_first_length = frames
+        .iter()
+        .find(|frame| frame.frame == -1)
+        .map_or(0, |frame| frame.aa_len);
+    crate::algorithm::common::translated_chunks::translated_db_mask_chunks(
+        ranges,
+        hard,
+        frame.frame,
+        frame.aa_len,
+        negative_first_length,
+        &mut crate::core::subject_split::HardSplitState::default(),
+    )
+    .expect("the ranges of a masked subject have their sentinel")
+}
+
 // No NCBI counterpart: looks up what `x_soft_subject_calls` computed.
 /// The ranges of `chunk`; `None` for a chunk without ranges (SUBJECT_SPLIT_NO_RANGE).
 #[cold]
@@ -410,6 +440,9 @@ struct SubjectSplitState {
     hm_index: usize,
     offset: i32,
     next: i32,
+    /// `-db_hard_mask` (series NP, M4b PR 2): the frame's chunks, listed in order
+    /// (`x_db_mask_calls`), given instead of the cut of the whole frame.
+    x_listed: Option<std::vec::IntoIter<SubjectChunk>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -449,11 +482,39 @@ impl SubjectSplitState {
             hm_index: 0,
             offset: 0,
             next: 0,
+            x_listed: None,
         }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:221-311 (the hard chunks
+    // of `s_GetNextSubjectChunk`, cut in `translated_db_mask_chunks`) and :578-584 (the merge's
+    // overlap of each).
+    /// The state of a frame of `subject_len` residues whose chunks are `calls`' (a hard-masked
+    /// frame), each cut to the frame: a chunk that runs onto the frame's end sentinel (a shorter
+    /// frame reads its strand's ranges, mapped by the longest frame) scans and extends as the chunk
+    /// that ends at the frame's end, since a word or an extension stops at the sentinel
+    /// (`BLAST_SCORE_MIN`).
+    fn listed(subject_len: usize, calls: &[(TranslatedChunk, Vec<(i32, i32)>)]) -> Self {
+        let chunks: Vec<SubjectChunk> = calls
+            .iter()
+            .map(|(chunk, _)| SubjectChunk {
+                offset: chunk.offset,
+                length: chunk.length.min(subject_len.saturating_sub(chunk.offset)),
+                overlap: chunk.overlap,
+            })
+            .collect();
+        let mut state = Self::new(subject_len);
+        state.x_listed = Some(chunks.into_iter());
+        state
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:221-310
     fn next_chunk(&mut self, max_dbseq_len: usize, chunk_overlap: usize) -> SubjectChunkStatus {
+        if let Some(listed) = &mut self.x_listed {
+            return listed
+                .next()
+                .map_or(SubjectChunkStatus::Done, SubjectChunkStatus::Ok);
+        }
         if self.next >= self.full_right {
             return SubjectChunkStatus::Done;
         }
@@ -1205,6 +1266,7 @@ fn open_search_database(
                 name,
                 settings,
                 list,
+                args.db_mask.option().as_ref(),
                 outputs.diagnostics,
             )?
             .showing_gis(args.show_gis);
@@ -1626,7 +1688,26 @@ fn search(
     // The XInclude formats written to standard output fail after the formatter is made
     // (`check_report_formats`: `xinclude_check`), as the other format checks of each
     // requested format.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:140-153 (cited at
+    // `blastinput::db_mask::DbMaskOption::resolve`)
+    // The formatter resolves the database masking (`-db_soft_mask`, `-db_hard_mask`; series NP,
+    // M4b PR 2) before its other work: its warning (one message of the archive) or its database
+    // error; the archive and the search strategy write the result's program options.
+    let db_mask = match (&source, args.db_mask.option()) {
+        (SubjectSource::Database(database), Some(option)) => database.resolve_mask_option(
+            &option,
+            args.archive.as_ref(),
+            args.strategy.as_ref(),
+            outputs.diagnostics,
+        )?,
+        _ => None,
+    };
     check_report_formats(outputs, args.out.as_deref())?;
+    // LOSAT's refusals of the masked search (`-db_hard_mask`) come where NCBI starts the search,
+    // after its checks.
+    if let (SubjectSource::Database(database), Some(mask)) = (&source, db_mask.as_ref()) {
+        database.check_mask_limits(mask, usize::try_from(args.word_size())?)?;
+    }
     crate::blastinput::app::check_search_environment(
         "TBLASTX",
         !matches!(source, SubjectSource::Database(_)),
@@ -1664,7 +1745,7 @@ fn search(
                 )
                 .into())
             } else {
-                database.x_stream(args.num_threads)
+                database.x_stream(args.num_threads, db_mask.as_ref())
             };
             match opened {
                 Ok(stream) => (Some(stream), None),
@@ -1730,7 +1811,7 @@ fn search(
                 numbers: database.numbers(args.dbsize).with_searchsp(args.searchsp),
                 shown: ShownSubjects::Database {
                     database,
-                    pairwise: database.pairwise_database(),
+                    pairwise: database.pairwise_database_masked(db_mask.as_ref()),
                     stream: stream.as_ref(),
                 },
             },
@@ -4708,6 +4789,7 @@ fn search_query_batch<S: TbxScore>(
             s_len,
             s_frames,
             s_frames_preliminary_owned,
+            x_db_mask,
         } = match subject_prep::subject_frames(subjects, s_idx, &db_code, wordsize) {
             Ok(Some(made)) => made,
             Ok(None) => {
@@ -4845,6 +4927,7 @@ fn search_query_batch<S: TbxScore>(
             &frame_chunks::SubjectScan {
                 subjects,
                 x_soft_subjects,
+                x_db_mask: x_db_mask.as_deref(),
                 use_serial_scan_chunks,
                 use_parallel_chunks,
                 num_threads,

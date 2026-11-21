@@ -1,0 +1,2 @@
+FASTA-Reader: This gap-type cannot have any linkage-evidence specified, so any will be ignored.
+CFastaReader: Gap mods are ignored because gaps are becoming N's or X's in this case.

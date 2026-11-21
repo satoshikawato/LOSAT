@@ -169,7 +169,33 @@ impl Drop for Registered {
 // the `-logfile` file in TBLASTX and to the standard error in the other programs; the file is made
 // in every program and the outputs are the same as without it. In LOSAT Web the file comes in the
 // archive of the run's files (stream 8), `""` and `/dev/null` make none, `-` is the standard error
-// (stream 3), and a name with a directory is refused.
+// (stream 3). A name with a directory is a file of the run under its whole name, as the command line
+// makes it where the directory exists; so is `/dev/stdout`, whose bytes the command line writes into
+// its standard output, and so are `logs/` and ` run.log`, which NCBI reads as `logs` and `run.log`.
+// The names of the standard error, of a directory and of what the system does not open (a file
+// descriptor that the run has not opened, `/proc/self/status`, a terminal's `/dev/pts/0` in a run
+// without one, a name in a device) send the messages to stream 3, as NCBI sends a log it cannot open
+// to `cerr`; another spelling of `/dev/null` and `/dev/stdin` (the null device in a run without a
+// standard input) send them nowhere, as a file in a file system that reports no free space does
+// (`/dev/fd/2`, `/proc/self/fd/2`, `/proc/self/comm`: NCBI writes nothing to a log file with less
+// than 20 KiB free). NCBI BLAST+ 2.17.0 and LOSAT's command line: `fix-logfile-dir/native` and
+// `fix-logfile-dir/r2` of line WQA, D11, 2026-11-20; a name with a directory was refused before,
+// and round 2 read the last ones as NCBI does. Round 3 (`fix-logfile-dir/r3`): `//run.log` has no
+// directory (stream 3), a user's command line makes no file in a directory of root's (`/run.log`,
+// `/etc/run.log`, `/var/log/run.log`, `/dev/run.log`) and opens none of its devices
+// (`/dev/kmsg`), but a new terminal's master (`/dev/ptmx`), whose messages are lost. Round 4
+// (`fix-logfile-dir/r4`): a user makes files only in the working directory, a home and the
+// directories where every user does (`/var/lock` is `/run/lock`), every other directory is root's
+// (`/data/run.log`), and the system refuses a component of more than 255 bytes.
+/// A name of 256 bytes, one more than a component may have.
+const LONG_NAME: &str = concat!(
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+);
+const _: () = assert!(LONG_NAME.len() == 256);
+
 #[test]
 fn the_logfile_is_a_file_of_the_run() {
     for (program, _, _) in SEARCHES {
@@ -209,7 +235,10 @@ fn the_logfile_is_a_file_of_the_run() {
         };
         assert_eq!(
             (stream_text(&logged, STREAM_DIAGNOSTICS), run_files(&logged)),
-            (stderr, Some(vec![("run.log".to_string(), file)])),
+            (
+                stderr.clone(),
+                Some(vec![("run.log".to_string(), file.clone())])
+            ),
             "{program}"
         );
         let place = match to_log {
@@ -221,7 +250,83 @@ fn the_logfile_is_a_file_of_the_run() {
         let mut joined = plain_words.clone();
         joined.push("-logfile=run.log");
         assert_eq!(run_of(&joined).1, logged, "{program}");
-        for (value, quiet) in [("", to_log), ("/dev/null", to_log), ("-", false)] {
+        for name in [
+            "logs/run.log",
+            "./run.log",
+            "a/b/run.log",
+            "/tmp/run.log",
+            "/dev/stdout",
+            "logs/",
+            "run.log/",
+            "a/b/",
+            "/tmp/abs/run.log/",
+            " run.log",
+            "run.log ",
+            "/var/lock/run.log",
+            "/var/crash/run.log",
+            "/home/me/run.log",
+            "/etc/default/../../tmp/run.log",
+            "/run/user/1000/run.log",
+        ] {
+            let mut words = plain_words.clone();
+            words.extend(["-logfile", name]);
+            validate(&words).unwrap();
+            let (result, streams) = run_of(&words);
+            result.unwrap();
+            for stream in [0, 6, 7, 1] {
+                assert_eq!(
+                    streams.get(&stream),
+                    plain.get(&stream),
+                    "{program} {name} {stream}"
+                );
+            }
+            assert_eq!(
+                (
+                    stream_text(&streams, STREAM_DIAGNOSTICS),
+                    run_files(&streams)
+                ),
+                (stderr.clone(), Some(vec![(name.to_string(), file.clone())])),
+                "{program} {name}"
+            );
+            assert_eq!(messages_place(&streams), Some(place), "{program} {name}");
+        }
+        for (value, quiet) in [
+            ("", to_log),
+            ("/dev/null", to_log),
+            ("//dev/null", to_log),
+            ("/dev/fd/2", to_log),
+            ("/dev/fd/1", to_log),
+            ("/proc/self/fd/2", to_log),
+            ("/proc/thread-self/fd/2", to_log),
+            ("/dev/fd/../stderr", to_log),
+            ("/dev/stdin", to_log),
+            ("/proc/self/comm", to_log),
+            ("-", false),
+            ("/dev/stderr", false),
+            ("//dev/stderr", false),
+            (".", false),
+            ("..", false),
+            ("logs/.", false),
+            ("/tmp/", false),
+            ("  ", false),
+            ("/dev/fd/3", false),
+            ("/proc/self/status", false),
+            ("/dev/pts/0", false),
+            ("/dev/null/x", false),
+            ("/dev/ptmx", to_log),
+            ("//run.log", false),
+            ("/run.log", false),
+            ("/etc/run.log", false),
+            ("/var/log/run.log", false),
+            ("/dev/run.log", false),
+            ("/dev/kmsg", false),
+            ("/data/run.log", false),
+            ("/proc/thread-self/../../../tmp/run.log", false),
+            ("/bin/../tmp/run.log", false),
+            ("/etc/default/../tmp/run.log", false),
+            ("/root/../tmp/run.log", false),
+            (LONG_NAME, false),
+        ] {
             let mut words = plain_words.clone();
             words.extend(["-logfile", value]);
             let (result, streams) = run_of(&words);
@@ -243,14 +348,6 @@ fn the_logfile_is_a_file_of_the_run() {
             assert_eq!(messages_place(&streams), Some(place), "{program} {value:?}");
             assert_eq!(streams.get(&6), plain.get(&6), "{program} {value:?}");
         }
-        let mut words = plain_words.clone();
-        words.extend(["-logfile", "d/run.log"]);
-        let refusal = "the -logfile name d/run.log has a directory, which LOSAT Web does not have: give a file name without one";
-        assert_eq!(validate(&words).unwrap_err(), refusal, "{program}");
-        let (result, streams) = run_of(&words);
-        assert_eq!(result.unwrap_err(), refusal, "{program}");
-        assert_eq!(run_files(&streams), None, "{program}");
-        assert_eq!(messages_place(&streams), None, "{program}");
     }
 }
 
@@ -394,8 +491,8 @@ fn the_start_json_tells_the_files_and_the_dry_run() {
 // the argv: in a run of two searches what the other search adds goes to stream 3, as without
 // `-logfile` (`the_error_of_an_output_that_fails_alone_is_where_its_signal_says`; line WQA's sweep,
 // D3 review r2, 2026-11-19: the file had the other search's warning and error). The command line's
-// file of the failed run (ws, the gate's build of this branch, NCBI's text): `BLAST query/options
-// error: expect value ...`.
+// file of the failed run (a Linux host, the gate's build of this branch, NCBI's text):
+// `BLAST query/options error: expect value ...`.
 #[test]
 fn tblastx_writes_its_run_and_its_error_to_the_logfile() {
     let failed = argv("tblastx", &["-evalue", "0", "-logfile", "run.log"]);

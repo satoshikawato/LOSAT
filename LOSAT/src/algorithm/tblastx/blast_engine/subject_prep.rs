@@ -38,6 +38,10 @@ pub(super) struct SubjectFrames {
     pub(super) s_frames_preliminary_owned: Option<Vec<QueryFrame>>,
     pub(super) x_kept: XKept,
     pub(super) x_letter_frames_later: bool,
+    /// A `-db` search with `-db_soft_mask` or `-db_hard_mask` (series NP, M4b PR 2): the
+    /// subject's ranges in bases (`XDbStream::mask_ranges`), from which its frames' scan ranges
+    /// or hard chunks follow (`frame_chunks::search_subject_frames`); `None` otherwise.
+    pub(super) x_db_mask: Option<Vec<(i32, i32)>>,
 }
 
 /// The preliminary frames of subject `s_idx` (`Subjects::x_preliminary_frames`, the genetic code
@@ -86,12 +90,19 @@ pub(super) fn subject_frames(
             (Vec::new(), Some(frames))
         }
     };
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:315-320, 393-402
+    // In a masked search every fetched sequence carries the complement of its masks.
+    let x_db_mask = match subjects {
+        Subjects::Stream(stream) => stream.mask_ranges(s_idx, s_len)?,
+        _ => None,
+    };
     Ok(Some(SubjectFrames {
         s_len,
         s_frames,
         s_frames_preliminary_owned,
         x_kept,
         x_letter_frames_later,
+        x_db_mask,
     }))
 }
 

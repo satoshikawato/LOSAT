@@ -34,6 +34,9 @@ pub(super) struct FormatSpec {
     separators: Vec<Vec<u8>>,
     /// `m_GetDefline`: a specifier reads the definition lines.
     get_defline: bool,
+    /// `m_DeflineFields.asn_defline`: `%d`, the ASN.1 text of the definition lines (which the
+    /// request makes the whole format, `retrieve::init_search_request`).
+    asn_defline: bool,
     /// `m_OtherFields & (1 << e_seq)`, `(1 << e_hash)`.
     need_seq: bool,
     need_hash: bool,
@@ -74,6 +77,7 @@ impl FormatSpec {
         Ok(FormatSpec {
             need_seq: types.contains(&b's'),
             need_hash: types.contains(&b'h'),
+            asn_defline: types.contains(&b'd'),
             types,
             mask_algos,
             separators,
@@ -90,12 +94,6 @@ impl FormatSpec {
     /// Whether a specifier writes the letters of the sequence (`%s`).
     pub fn writes_letters(&self) -> bool {
         self.need_seq
-    }
-
-    /// Whether a specifier asks for the ASN.1 text of the definition lines (`%d`, which the
-    /// request makes the whole format, `retrieve::init_search_request`).
-    fn asks_asn_text(&self) -> bool {
-        self.types.contains(&b'd')
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/seq_formatter.cpp:315-358
@@ -148,7 +146,7 @@ impl FormatSpec {
         let Some(set) = source.deflines(oid)? else {
             return Ok(());
         };
-        if self.asks_asn_text() {
+        if self.asn_defline {
             return write_asn_deflines(&set, target, out);
         }
         match target {

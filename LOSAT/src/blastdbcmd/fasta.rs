@@ -50,9 +50,20 @@ impl FastaFormatter {
         target: Option<&str>,
         out: &mut Output<'_, '_>,
     ) -> Result<(), Stop> {
-        let Some(bioseq) = DbBioseq::load(source, oid, false, target, target_id, out)? else {
-            return Ok(());
-        };
+        DbBioseq::with(source, oid, false, target, target_id, out, |bioseq, out| {
+            self.write_bioseq(source, oid, config, bioseq, out)
+        })
+    }
+
+    /// The FASTA of the Bioseq `bioseq` of sequence `oid` (`write`).
+    fn write_bioseq(
+        &mut self,
+        source: &Source,
+        oid: u32,
+        config: &Config,
+        bioseq: &DbBioseq,
+        out: &mut Output<'_, '_>,
+    ) -> Result<(), Stop> {
         let (set, shown, length) = (&bioseq.set, bioseq.shown(), bioseq.length);
         let target_seqid = bioseq.target.as_ref();
         let range = config.range.clipped(length);

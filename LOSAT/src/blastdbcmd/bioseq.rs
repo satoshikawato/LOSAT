@@ -18,7 +18,7 @@ use crate::seqid::{DeflineSet, ParsedSeqId};
 use super::retrieve::{parse_target_with, Output, Source, Stop};
 
 /// What NCBI's two `GetBioseq` calls of one `Write(oid, config, target)` read of the sequence
-/// `oid` (`load`): the first `GetBioseq(oid)`, then `GetBioseq(oid, gi, seqid)` for a
+/// `oid` (`with`): the first `GetBioseq(oid)`, then `GetBioseq(oid, gi, seqid)` for a
 /// `-target_only` target or `GetBioseq(oid)` again.
 pub(super) struct DbBioseq {
     /// `GetHdr(oid)`: every definition line the database keeps.
@@ -44,16 +44,21 @@ impl DbBioseq {
     /// NCBI's two `GetBioseq` calls for the sequence `oid` and the target text `target`, whose
     /// Seq-id `target_id` reads: the texts of each call's taxonomy lookups posted to `out` for a
     /// Bioseq that NCBI makes (one with definition lines and letters), before any byte of the
-    /// sequence. `None`: NCBI gives no Bioseq (no definition line, or no letters). With
-    /// `with_header` the user object's header is read too (`%b`).
-    pub fn load(
+    /// sequence, then `write` of that Bioseq; nothing where NCBI gives no Bioseq (no definition
+    /// line, or no letters). With `with_header` the user object's header is read too (`%b`).
+    /// The Bioseq is lent to `write`, not returned: each formatter's copy of this function
+    /// builds it in place (a returned one cost a copy and a call per sequence, +2 % of the
+    /// instructions of a protein FASTA run against dev, line RG-Dbc).
+    #[inline]
+    pub fn with<'a, 'b>(
         source: &Source,
         oid: u32,
         with_header: bool,
         target: Option<&str>,
         target_id: fn(&str) -> Result<ParsedSeqId, Stop>,
-        out: &mut Output<'_, '_>,
-    ) -> Result<Option<DbBioseq>, Stop> {
+        out: &mut Output<'a, 'b>,
+        write: impl FnOnce(&DbBioseq, &mut Output<'a, 'b>) -> Result<(), Stop>,
+    ) -> Result<(), Stop> {
         let read = if with_header {
             source.deflines_with_header(oid)?
         } else {
@@ -67,7 +72,7 @@ impl DbBioseq {
                 target_id(target)?;
                 return Err(super::retrieve::null_pointer());
             }
-            return Ok(None);
+            return Ok(());
         };
         // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1362-1386
         // `GetBioseq` looks the taxids up for a Bioseq it gives, one with definition lines and
@@ -97,7 +102,7 @@ impl DbBioseq {
         }
         let shown = kept.as_ref().unwrap_or(&set);
         let Some(defline) = shown.deflines.first() else {
-            return Ok(None);
+            return Ok(());
         };
         if defline.ids.is_empty() {
             return Err(Stop::Refused(format!(
@@ -106,15 +111,16 @@ impl DbBioseq {
             )));
         }
         if !made {
-            return Ok(None);
+            return Ok(());
         }
-        Ok(Some(DbBioseq {
+        let bioseq = DbBioseq {
             set,
             header,
             kept,
             target,
             length,
-        }))
+        };
+        write(&bioseq, out)
     }
 }
 
@@ -160,58 +166,73 @@ impl BioseqFormatter {
         target: Option<&str>,
         out: &mut Output<'_, '_>,
     ) -> Result<(), Stop> {
-        let Some(bioseq) = DbBioseq::load(source, oid, true, target, bioseq_target_id, out)? else {
-            return Ok(());
-        };
-        let shown = bioseq.shown();
-        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:955-1018
-        let title = shown.bioseq_title();
-        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1099-1189
-        // `x_GetTaxonomy`: a source for each positive taxid of the lines, the target's first,
-        // with the names of the taxonomy database where its lookup finds the taxid.
-        let sources = bioseq
-            .set
-            .taxonomy_lookups(bioseq.target.as_ref())
-            .into_iter()
-            .map(|taxid| Ok((taxid, source.tax_names(taxid)?)))
-            .collect::<Result<Vec<(i32, Arc<SourceNames>)>, Stop>>()?;
-        let data = source.seq_data(oid)?;
-        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1269-1303
-        // `x_GetAsnDefline`: the header is never empty here (a Bioseq is made of a stored header
-        // with bytes, `DbBioseq::load`), so the user object is always written.
-        let mut descr = vec![
-            Seqdesc::Title(&title),
-            Seqdesc::User(UserObject {
-                type_str: ASN_DEFLINE_LABEL,
-                label: ASN_DEFLINE_LABEL,
-                num: Some(1),
-                data: UserData::Oss(&bioseq.header),
-            }),
-        ];
-        for (taxid, names) in &sources {
-            let names = names.names();
-            descr.push(Seqdesc::Source(OrgSource {
-                taxname: names.map(|names| names.scientific_name.as_slice()),
-                common: names.map(|names| names.common_name.as_slice()),
-                taxid: *taxid,
-            }));
-        }
-        let ids: Vec<SeqId<'_>> = shown.deflines[0].ids.iter().map(SeqId::Db).collect();
-        let inst = SeqInst {
-            protein: source.protein,
-            length: bioseq.length,
-            data: Some(match &data {
-                DbSeqData::Ncbi2na(bytes) => SeqData::Ncbi2na(bytes),
-                DbSeqData::Ncbi4na(bytes) => SeqData::Ncbi4na(bytes),
-                DbSeqData::Ncbistdaa(bytes) => SeqData::Ncbistdaa(bytes),
-            }),
-        };
-        out.asn_text(&BioseqDocument {
-            ids: &ids,
-            descr: &descr,
-            inst: &inst,
-        })
+        DbBioseq::with(
+            source,
+            oid,
+            true,
+            target,
+            bioseq_target_id,
+            out,
+            |bioseq, out| write_db_bioseq(source, oid, bioseq, out),
+        )
     }
+}
+
+/// The ASN.1 text document of the Bioseq `bioseq` of sequence `oid` (`BioseqFormatter::write`).
+fn write_db_bioseq(
+    source: &Source,
+    oid: u32,
+    bioseq: &DbBioseq,
+    out: &mut Output<'_, '_>,
+) -> Result<(), Stop> {
+    let shown = bioseq.shown();
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:955-1018
+    let title = shown.bioseq_title();
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1099-1189
+    // `x_GetTaxonomy`: a source for each positive taxid of the lines, the target's first,
+    // with the names of the taxonomy database where its lookup finds the taxid.
+    let sources = bioseq
+        .set
+        .taxonomy_lookups(bioseq.target.as_ref())
+        .into_iter()
+        .map(|taxid| Ok((taxid, source.tax_names(taxid)?)))
+        .collect::<Result<Vec<(i32, Arc<SourceNames>)>, Stop>>()?;
+    let data = source.seq_data(oid)?;
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1269-1303
+    // `x_GetAsnDefline`: the header is never empty here (a Bioseq is made of a stored header
+    // with bytes, `DbBioseq::with`), so the user object is always written.
+    let mut descr = vec![
+        Seqdesc::Title(&title),
+        Seqdesc::User(UserObject {
+            type_str: ASN_DEFLINE_LABEL,
+            label: ASN_DEFLINE_LABEL,
+            num: Some(1),
+            data: UserData::Oss(&bioseq.header),
+        }),
+    ];
+    for (taxid, names) in &sources {
+        let names = names.names();
+        descr.push(Seqdesc::Source(OrgSource {
+            taxname: names.map(|names| names.scientific_name.as_slice()),
+            common: names.map(|names| names.common_name.as_slice()),
+            taxid: *taxid,
+        }));
+    }
+    let ids: Vec<SeqId<'_>> = shown.deflines[0].ids.iter().map(SeqId::Db).collect();
+    let inst = SeqInst {
+        protein: source.protein,
+        length: bioseq.length,
+        data: Some(match &data {
+            DbSeqData::Ncbi2na(bytes) => SeqData::Ncbi2na(bytes),
+            DbSeqData::Ncbi4na(bytes) => SeqData::Ncbi4na(bytes),
+            DbSeqData::Ncbistdaa(bytes) => SeqData::Ncbistdaa(bytes),
+        }),
+    };
+    out.asn_text(&BioseqDocument {
+        ids: &ids,
+        descr: &descr,
+        inst: &inst,
+    })
 }
 
 /// `kAsnDeflineObjLabel`, the type and the field label of the user object that holds the

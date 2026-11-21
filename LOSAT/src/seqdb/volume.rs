@@ -544,10 +544,21 @@ impl Volume {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2202-2212
+    /// `defline_set`, `None` for a stored header of no bytes, which NCBI's read gives as no set
+    /// (`x_GetHdrAsn1`), where `defline_set` gives a set of no lines (`SeqDb::header_set_at`).
+    pub fn header_set(&self, oid: u32) -> Result<Option<crate::seqid::DeflineSet>, SeqDbError> {
+        let (record, path) = self.header_record(oid)?;
+        if record.is_empty() {
+            return Ok(None);
+        }
+        self.decode_kept_set(oid, &record, path).map(Some)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2202-2212
     /// `defline_set` and the stored record it was decoded from, `None` in place of the record
     /// when the definition-line rule dropped a line of it (`x_GetFilteredHeader`'s `changed`,
-    /// `SeqDb::defline_set_with_header_at`). `None` for a stored header of no bytes, which NCBI's
-    /// read gives as no set (`x_GetHdrAsn1`), where `defline_set` gives a set of no lines.
+    /// `SeqDb::defline_set_with_header_at`). `None` for a stored header of no bytes, as
+    /// [`Volume::header_set`].
     pub fn defline_set_with_record(
         &self,
         oid: u32,

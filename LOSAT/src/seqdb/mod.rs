@@ -2017,11 +2017,10 @@ impl SeqDb {
     }
 
     /// [`SeqDb::defline_set_at`] as NCBI's `GetHdr` gives it: `None` where the stored header has
-    /// no bytes, which `defline_set_at` gives as a set of no lines
-    /// (`Volume::defline_set_with_record`).
+    /// no bytes, which `defline_set_at` gives as a set of no lines (`Volume::header_set`).
     pub fn header_set_at(&self, at: SeqLocation) -> Result<Option<DeflineSet>, SeqDbError> {
-        match self.volumes[at.volume].defline_set_with_record(at.vol_oid)? {
-            Some((set, _)) => self
+        match self.volumes[at.volume].header_set(at.vol_oid)? {
+            Some(set) => self
                 .ordinal_set(at.volume, self.location_oid(&at), set)
                 .map(Some),
             None => Ok(None),

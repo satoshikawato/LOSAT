@@ -6,12 +6,12 @@ LOSAT runs as a native program on five platforms, as a WebAssembly (WASI) comman
 
 | Platform | File | Status in v0.2.0 |
 |:---|:---|:---|
-| Linux x86_64 | `LOSAT-0.2.0-x86_64-unknown-linux-gnu.tar.gz` | Supported: matches NCBI BLAST+ 2.17.0 on the release test set |
+| Linux x86_64 | `LOSAT-0.2.0-x86_64-unknown-linux-gnu.tar.gz` | Supported: matches NCBI BLAST+ 2.17.0 on the release test set (apart from the version line, which names LOSAT) |
 | Linux aarch64 | `LOSAT-0.2.0-aarch64-unknown-linux-gnu.tar.gz` | Supported |
 | Windows x86_64 | `LOSAT-0.2.0-x86_64-pc-windows-msvc.zip` | Supported |
 | macOS arm64 | `LOSAT-0.2.0-aarch64-apple-darwin.tar.gz` | Supported |
 | macOS x86_64 | `LOSAT-0.2.0-x86_64-apple-darwin.tar.gz` | Supported |
-| WASI serial (`wasm32-wasip1`) | `LOSAT-0.2.0-wasm32-wasip1.tar.gz` | Supported: matches NCBI BLAST+ 2.17.0 on the release test set |
+| WASI serial (`wasm32-wasip1`) | `LOSAT-0.2.0-wasm32-wasip1.tar.gz` | Supported: matches NCBI BLAST+ 2.17.0 on the release test set (apart from the version line, which names LOSAT) |
 | WASI threads (`wasm32-wasip1-threads`) | `LOSAT-0.2.0-wasm32-wasip1-threads.tar.gz` | Supported: tested in CI, outside the release's NCBI parity claim |
 | Web GUI (browser) | not a release file | Preview: outside the release's NCBI parity claim |
 

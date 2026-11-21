@@ -59,7 +59,7 @@ fn the_checks_of_the_file_are_ncbis() {
         assert_eq!(directory.exit, 1);
         assert_eq!(
             directory.message,
-            b"BLAST query/options error: Only optimized binary windowmasker stat files are supported\nPlease refer to the LOSAT user manual.\n"
+            b"LOSAT query/options error: Only optimized binary windowmasker stat files are supported\nPlease refer to the LOSAT user manual.\n"
         );
     } else {
         assert_eq!(directory.exit, 255);
@@ -213,7 +213,7 @@ fn a_counts_file_that_fails_stops_the_batch_with_one_message_per_query() {
     .unwrap();
     assert_eq!(
         bad_index.message,
-        b"BLAST engine error: Warning: bad index at key 8764 : 14779 \n"
+        b"LOSAT engine error: Warning: bad index at key 8764 : 14779 \n"
     );
     assert!(batch_error(&WinMaskError::EmptyCacheBitArray { unit: 2 }, 1, none, none).is_none());
 }

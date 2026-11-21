@@ -142,7 +142,9 @@ describe("the reader of the engine's archive of a run's files", () => {
 // --- the ABI binding -------------------------------------------------------------------------------
 
 /** Exports of a fake engine for `start`, `validate` and the file calls, which log what they are given. */
-function fakeExports(options: { start?: string | 'fail'; validate?: string; trapValidate?: boolean; failEnd?: boolean } = {}) {
+function fakeExports(
+  options: { start?: string | 'fail'; validate?: string; validation?: string; trapValidate?: boolean; failEnd?: boolean } = {},
+) {
   const memory = new WebAssembly.Memory({ initial: 4 });
   const log: string[] = [];
   let next = 4096;
@@ -180,7 +182,12 @@ function fakeExports(options: { start?: string | 'fail'; validate?: string; trap
     losat_web2_validate: (ptr: number, len: number) => {
       log.push(`validate ${text(ptr, len).split('\0').join(' ')}`);
       if (options.trapValidate) throw new WebAssembly.RuntimeError('unreachable');
-      if (options.validate === undefined) return 0;
+      if (options.validate === undefined) {
+        respond('{"data_loaders":true}');
+        return 0;
+      }
+      // The *validation* that the engine sends before an option check refuses the argv (line WQA's D13 round 3, L1).
+      if (options.validation !== undefined) respond(options.validation);
       error = options.validate;
       return -1;
     },
@@ -320,7 +327,10 @@ function fakeInstance(label: string, log: string[]): ReactorAbi {
     },
     fileRelease: (file: number) => void held.delete(loading.get(file)!),
     freeChunkBuffer: () => undefined,
-    validate: (argv: readonly string[]) => void log.push(`${label} validate ${argv.join(' ')} held=[${[...held].join(',')}]`),
+    validate: (argv: readonly string[]) => {
+      log.push(`${label} validate ${argv.join(' ')} held=[${[...held].join(',')}]`);
+      return { ok: true, dataLoaders: true };
+    },
     describe: () => {
       log.push(`${label} describe held=[${[...held].join(',')}]`);
       return { program: 'blastn', formats: [0, 6, 7], parameters: [] };
@@ -338,8 +348,8 @@ describe("the Data worker's validate with the registry file of -conffile", () =>
     const shared = fakeInstance('shared', log);
     let opened = 0;
     const control = reactorControl(async () => shared, async () => fakeInstance(`own${++opened}`, log));
-    expect(await control.validate(['blastp', '-conffile', 'c.ini'], { name: 'c.ini', file: new Blob(['[BLAST]\n']) })).toEqual({ ok: true });
-    expect(await control.validate(['blastp', '-conffile', 'c.ini'], { name: 'c.ini', file: new Blob(['[BLAST]\n']) })).toEqual({ ok: true });
+    expect(await control.validate(['blastp', '-conffile', 'c.ini'], { name: 'c.ini', file: new Blob(['[BLAST]\n']) })).toEqual({ ok: true, dataLoaders: true });
+    expect(await control.validate(['blastp', '-conffile', 'c.ini'], { name: 'c.ini', file: new Blob(['[BLAST]\n']) })).toEqual({ ok: true, dataLoaders: true });
     // Without a file, the shared instance validates.
     await control.validate(['blastp']);
     expect(log).toEqual([
@@ -358,6 +368,20 @@ describe("the Data worker's validate with the registry file of -conffile", () =>
       message: 'BLAST query/options error: bad',
     });
     expect(await engine.start(['blastp', '-dryrun'])).toEqual({ ok: true, start: { conffile: 'c.ini', logFile: 'run.log', dryRun: true, registerInputs: false } });
+  });
+
+  // line WQA's D13 round 3, L1, 2026-11-20: the engine sends the data loaders of the argv's registry before its option
+  // checks; a refused argv gives them with its message, which the host reads after them.
+  it("gives the data loaders of a refused argv's registry with its message", async () => {
+    const refused = fakeExports({ validate: 'Unexpected extra argument: -x', validation: '{"data_loaders":false}' });
+    const engine = reactorControl(async () => refused.abi, async () => refused.abi);
+    expect(await engine.validate(['blastp', '-x'])).toEqual({ ok: false, message: 'Unexpected extra argument: -x', dataLoaders: false });
+    // An argv whose start failed before the registry has none.
+    const failed = fakeExports({ validate: 'BLAST query/options error: bad' });
+    expect(await reactorControl(async () => failed.abi, async () => failed.abi).validate(['blastp'])).toEqual({
+      ok: false,
+      message: 'BLAST query/options error: bad',
+    });
   });
 
   it('keeps the file away from every call of the shared instance, also from calls that wait with it for one opening of that instance', async () => {
@@ -383,7 +407,7 @@ describe("the Data worker's validate with the registry file of -conffile", () =>
       control.validate(['blastn', '-conffile', '.ncbirc'], { name: '.ncbirc', file }),
       control.validate(['blastn']),
     ]);
-    expect(results.filter((result) => 'ok' in result)).toEqual([{ ok: true }, { ok: true }, { ok: true }, { ok: true }, { ok: true }]);
+    expect(results.filter((result) => 'ok' in result)).toEqual(Array(5).fill({ ok: true, dataLoaders: true }));
     const of = (label: string) => log.filter((line) => line.startsWith(`${label} `)).sort();
     expect(of('shared')).toEqual(['shared describe held=[]', 'shared validate blastn held=[]', 'shared validate blastn held=[]']);
     expect([of('own1'), of('own2'), of('own3')].flat().sort()).toEqual(
@@ -461,6 +485,8 @@ function fakeAbi(
     discard?: Uint8Array;
     warnings?: readonly Uint8Array[];
     messages?: Uint8Array | 'none';
+    /** The data loaders that `validate` finds in the argv's registry (on when not given). */
+    dataLoaders?: () => boolean;
   } = {},
 ) {
   const calls: string[] = [];
@@ -481,7 +507,7 @@ function fakeAbi(
     freeChunkBuffer: () => void calls.push('free buffer'),
     validate: (argv: readonly string[]) => {
       calls.push(`validate ${argv.join(' ')}`);
-      return undefined;
+      return { ok: true, dataLoaders: options.dataLoaders?.() ?? true };
     },
     // The start of an argv: -parse_deflines reads the inputs of the run together (line WQA's sweep, D7, 2026-11-19).
     start: (argv: readonly string[]) => ({
@@ -489,7 +515,7 @@ function fakeAbi(
       start: { conffile: null, logFile: null, dryRun: false, registerInputs: argv.includes('-parse_deflines') },
     }),
     memoryBytes: () => 1,
-    register: (_program: string, role: number, bytes: Uint8Array) => {
+    register: (_program: string, role: number, _dataLoaders: boolean, bytes: Uint8Array) => {
       calls.push(`register ${role === ROLE_QUERY ? 'query' : 'subject'}`);
       return { handle: ++handle, records: [{ id: role === ROLE_SUBJECT ? 's' : 'q', length: bytes.length }] };
     },
@@ -650,6 +676,35 @@ describe("the Engine worker's runtime and the files of a run", () => {
     expect((await runtime.run(again.run, () => undefined)).subjectRetained).toBe(false);
     again.close();
     expect(calls.slice(-5)).toEqual(['validate tblastx -query q.fa -subject s.fa -num_threads 1', 'register query', 'register subject', 'run', 'release 105']);
+  });
+
+  // line WQA's D13 round 2, L1, 2026-11-20: the instance keeps a subject for the next run of the same subject only when
+  // it was read as that run reads it. Read with the data loaders off, it is not what a run with them on reads (that
+  // reader refuses a first line that is not a definition line), so the run registers it again; read with them on, it
+  // serves a run without them.
+  it('serves a retained subject read with the data loaders off only to runs without them', async () => {
+    let loaders = false;
+    const { abi, calls } = fakeAbi({ dataLoaders: () => loaders });
+    const runtime = runtimeWith(abi);
+    const once = async () => {
+      const one = workerRun([]);
+      const { subjectRetained } = await runtime.run(one.run, () => undefined);
+      one.close();
+      return subjectRetained;
+    };
+    const subjects = () => calls.filter((call) => call === 'register subject').length;
+    expect(await once()).toBe(false);
+    expect(await once()).toBe(true);
+    expect(subjects()).toBe(1);
+    expect(calls).not.toContain('release 102');
+    loaders = true;
+    expect(await once()).toBe(false);
+    expect(subjects()).toBe(2);
+    // The subject read with the loaders off (handle 102) was let go before the new one was read.
+    expect(calls.slice(calls.lastIndexOf('register query'))).toEqual(['register query', 'release 102', 'register subject', 'run', 'release 104']);
+    loaders = false;
+    expect(await once()).toBe(true);
+    expect(subjects()).toBe(2);
   });
 
   it("forwards the engine's discard of an output (stream 9) to the Data worker with where its error is, between the chunks in their order", async () => {
@@ -917,6 +972,12 @@ describe('the name of a downloaded file of a run', () => {
     // A file named as an output's file (-logfile outfmt6.txt) is not saved under that output's name.
     expect(runFileName(run, 'outfmt6.txt')).not.toBe(outputFileName(run, 6));
     expect(runFileName(run, 'outfmt6.txt')).toBe('losat-run3-tblastx-20261104T111530Z.logfile.outfmt6.txt');
+    // A name with a directory is saved as a name: each `/` is `_` (line WQA's sweep, D11, 2026-11-20).
+    expect(runFileName(run, 'logs/run.log')).toBe('losat-run3-tblastx-20261104T111530Z.logfile.logs_run.log');
+    expect(runFileName(run, '/tmp/run.log')).toBe('losat-run3-tblastx-20261104T111530Z.logfile._tmp_run.log');
+    expect(runFileName(run, '/dev/stdout')).toBe('losat-run3-tblastx-20261104T111530Z.logfile._dev_stdout');
+    expect(runFileName(run, 'logs/')).toBe('losat-run3-tblastx-20261104T111530Z.logfile.logs');
+    expect(runFileName(run, 'a/b//')).toBe('losat-run3-tblastx-20261104T111530Z.logfile.a_b');
   });
 });
 
@@ -931,8 +992,8 @@ describe.skipIf(reactors === undefined)('the start and the files of a run in the
 
   /** The streams of a TBLASTX run of `words` on the inputs of the adapter's tests (run_start_tests.rs). */
   function run(abi: ReactorAbi, words: readonly string[], subject = fasta('arch_tbx_s.fna')) {
-    const q = abi.register('tblastx', ROLE_QUERY, fasta('arch_tbx_q.fna'));
-    const s = abi.register('tblastx', ROLE_SUBJECT, subject);
+    const q = abi.register('tblastx', ROLE_QUERY, true, fasta('arch_tbx_q.fna'));
+    const s = abi.register('tblastx', ROLE_SUBJECT, true, subject);
     const streams = new Map<number, Uint8Array[]>();
     let error: unknown;
     try {
@@ -999,12 +1060,14 @@ describe.skipIf(reactors === undefined)('the start and the files of a run in the
     const missing = { ok: false, message: 'Critical: (106.23) Registry file "settings.ini" not found, aborting.' };
     expect(await control.validate(argv)).toEqual(missing);
     const before = shared.memoryBytes();
-    expect(await control.validate(argv, { name: 'settings.ini', file: new Blob(['[BLAST]\n']) })).toEqual({ ok: true });
+    expect(await control.validate(argv, { name: 'settings.ini', file: new Blob(['[BLAST]\n']) })).toEqual({ ok: true, dataLoaders: true });
+    // The registry's `[BLAST] DATA_LOADERS=none` turns the data loaders off, as the CLI reads it (line WQA's D16, 2026-11-20).
+    expect(await control.validate(argv, { name: 'settings.ini', file: new Blob(['[BLAST]\nDATA_LOADERS=none\n']) })).toEqual({ ok: true, dataLoaders: false });
     expect((await control.validate(argv, { name: 'settings.ini', file: new Blob(['[x\n']) })).ok).toBe(false);
     // A file of 24 MiB and 26 bytes (four chunks, the last of 26 bytes): a section and comment lines.
     const large = new Blob(['[BLAST]\n', '; a comment line of the registry file\n'.repeat(Math.ceil((24 * 1024 * 1024) / 38))]);
     expect(large.size).toBe(3 * FILE_CHUNK_BYTES + 26);
-    expect(await control.validate(argv, { name: 'settings.ini', file: large })).toEqual({ ok: true });
+    expect(await control.validate(argv, { name: 'settings.ini', file: large })).toEqual({ ok: true, dataLoaders: true });
     expect(shared.memoryBytes()).toBe(before);
     expect(await control.validate(argv)).toEqual(missing);
   }, 120_000);

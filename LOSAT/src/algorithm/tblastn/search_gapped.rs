@@ -320,10 +320,7 @@ impl XOneHitBuffers {
                         store,
                         db_gencode,
                         next,
-                        TranslatedChunk {
-                            offset: 0,
-                            length: n,
-                        },
+                        TranslatedChunk::new(0, n),
                         &mut held,
                     )?;
                     after_frame.extend_from_slice(&held[range][..n]);
@@ -1010,13 +1007,16 @@ fn x_preliminary_protein_hsps_by_unit<S: super::score::TbnScore, const ONE_HIT: 
     // searched as the packed subject of the copy is: its units translate the store they read.
     let x_store;
     let subject = match subject {
+        // A masked search (`-db_soft_mask`, `-db_hard_mask`) makes every plan from its ranges
+        // (`x_scan_plan`), with residues.
         XPrelimSubject::Stream(stream, oid, length)
-            if super::search_seed::x_lean_subject(
-                x_subject,
-                length,
-                db_gencode,
-                profile.mask_lowercase,
-            ) =>
+            if stream.mask().is_none()
+                && super::search_seed::x_lean_subject(
+                    x_subject,
+                    length,
+                    db_gencode,
+                    profile.mask_lowercase,
+                ) =>
         {
             x_store = stream.read_shared(oid)?;
             XPrelimSubject::Nt(SubjectNt::Packed(&x_store))
@@ -1832,7 +1832,9 @@ fn merge_adjusted_chunk(
             .checked_add(offset)
             .context("subject gapped start overflow")?;
     }
-    let overlap = if chunk.offset == 0 { 0 } else { 100 };
+    // The chunk's overlap (`TranslatedChunk::overlap`: 0 where it starts the hard range at
+    // `hm_index`, else DBSEQ_CHUNK_OVERLAP).
+    let overlap = i32::try_from(chunk.overlap)?;
     Ok(merge_subject_chunk_hsps(
         per_frame,
         incoming,

@@ -121,15 +121,14 @@ impl IdLookup<'_> {
     /// order, inside a file the order of LMDB's duplicates (`memcmp` of the 4 little-endian
     /// bytes). NCBI sets its OID list up first, so its check keeps the included OIDs.
     pub fn accession_to_oids(&self, acc: &[u8]) -> Result<Vec<u32>, SeqDbError> {
-        self.db.set_up_oid_list();
+        self.db.build_oid_list()?;
         let mut oids = Vec::new();
         for entry in &self.entries {
             for oid in entry.oids(acc)? {
-                if let Some(oid) = entry
-                    .database_oid(oid)
-                    .filter(|&oid| self.db.check_oid(oid))
-                {
-                    oids.push(oid);
+                if let Some(oid) = entry.database_oid(oid) {
+                    if self.db.check_oid(oid)? {
+                        oids.push(oid);
+                    }
                 }
             }
         }
@@ -149,8 +148,10 @@ impl IdLookup<'_> {
     ) -> Result<(), SeqDbError> {
         entries_accessions_to_oids(&self.entries, accs, oids)?;
         for slot in oids.iter_mut() {
-            if slot.is_some_and(|oid| !self.db.check_oid(oid)) {
-                *slot = None;
+            if let Some(oid) = *slot {
+                if !self.db.check_oid(oid)? {
+                    *slot = None;
+                }
             }
         }
         Ok(())
@@ -172,14 +173,13 @@ impl IdLookup<'_> {
         acc: &[u8],
         simplified: &SimplifiedAccession,
     ) -> Result<Option<Vec<u32>>, SeqDbError> {
-        self.db.set_up_oid_list();
+        self.db.build_oid_list()?;
         if simplified.id_type == SeqDbIdType::Oid {
             let oid = u32::try_from(simplified.num_id).ok();
-            return Ok(Some(
-                oid.filter(|&oid| self.db.check_oid(oid))
-                    .into_iter()
-                    .collect(),
-            ));
+            return Ok(Some(match oid {
+                Some(oid) if self.db.check_oid(oid)? => vec![oid],
+                _ => Vec::new(),
+            }));
         }
         let mut oids = Vec::new();
         for at in 0..self.db.volumes.len() {
@@ -190,12 +190,12 @@ impl IdLookup<'_> {
             }
             let vol_start = i64::from(self.db.volume_starts[at]);
             for oid in vol_oids {
-                let Some(oid) = u32::try_from(i64::from(oid) + vol_start)
-                    .ok()
-                    .filter(|&oid| self.db.check_oid(oid))
-                else {
+                let Ok(oid) = u32::try_from(i64::from(oid) + vol_start) else {
                     continue;
                 };
+                if !self.db.check_oid(oid)? {
+                    continue;
+                }
                 if !oids.contains(&oid) {
                     oids.push(oid);
                 }
@@ -362,7 +362,7 @@ impl IdLookup<'_> {
                 continue;
             };
             let mut oid = found;
-            if self.db.check_or_find_oid(&mut oid) && oid == found {
+            if self.db.check_or_find_oid(&mut oid)? && oid == found {
                 return Ok(Some(oid));
             }
             left = Some(oid);

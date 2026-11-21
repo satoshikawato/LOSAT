@@ -5,9 +5,9 @@
 //! reads the field list, writes the comment lines of outfmt 7, the header line of outfmt 20 and
 //! the rows.
 //!
-//! `TabularSpec::of` returns `None` for the default reports (outfmt 6 and 7 with the `std` fields
-//! and a tab): BLASTX writes them here too (`TabularSpec::std`), the other programs with their
-//! own writers.
+//! `TabularSpec::of_app` returns `None` for the default reports (outfmt 6 and 7 with the `std`
+//! fields and a tab): BLASTX writes them here too (`TabularSpec::std`), the other programs with
+//! their own writers.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:770-786
 
@@ -393,10 +393,42 @@ impl TabularNeeds {
 }
 
 impl TabularSpec {
-    /// The tabular report of `format` with the custom specification of `choice`, or `None` for
-    /// a format that is not tabular and for the default outfmt 6 and 7 (the `std` fields and a
-    /// tab), which BLASTX writes with `std`'s spec and the other programs with their own writers.
-    pub fn of(format: ReportFormat, choice: &FormatChoice) -> Option<Self> {
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:245-249
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:501-505
+    // NCBI reference (598d8ae6): c++/src/app/blast/rpsblast_app.cpp:186-189
+    // NCBI reference (598d8ae6): c++/src/app/blast/rpstblastn_app.cpp:183-186
+    /// The tabular report of `format` with the custom specification of `choice` as the formatter
+    /// of `app`'s application writes it, or `None` for a format that is not tabular and for the
+    /// default outfmt 6 and 7 (the `std` fields and a tab), which BLASTX writes with `std`'s spec
+    /// and the other programs with their own writers. The applications of blastn, blastp, blastx, tblastn (PSI-TBLASTN too) and
+    /// tblastx hand `-outfmt`'s custom delimiter to their formatter (`SetCustomDelimiter`,
+    /// blastn_app.cpp:254, blastx_app.cpp:250, tblastn_app.cpp:266, tblastx_app.cpp:169);
+    /// psiblast's, rpsblast's and rpstblastn's never do, so their reports keep the format's own
+    /// delimiter, the tab or the comma (blast_format.cpp:783-785 above), and a `delim=` with the
+    /// `std` fields leaves the default outfmt 6 and 7 (`None`). Their `delim=` is still checked
+    /// against the fields (`custom_delimiter_conflict`). The one reading of a tabular `-outfmt`
+    /// value, of the command line and the library, for every program: no other function makes a
+    /// spec of a format choice.
+    pub fn of_app(
+        format: ReportFormat,
+        choice: &FormatChoice,
+        app: crate::report::archive::options::RequestKind,
+    ) -> Option<Self> {
+        use crate::report::archive::options::RequestKind;
+        let delimiter = match app {
+            RequestKind::Psiblast | RequestKind::Rpsblast | RequestKind::Rpstblastn => "",
+            RequestKind::Blastn
+            | RequestKind::Blastp
+            | RequestKind::Blastx
+            | RequestKind::Tblastn
+            | RequestKind::PsiTblastn
+            | RequestKind::Tblastx => &choice.delimiter,
+        };
+        Self::of_fields(format, &choice.spec, delimiter)
+    }
+
+    /// [`TabularSpec::of_app`] with the delimiter `delimiter` (empty: the format's own).
+    fn of_fields(format: ReportFormat, spec: &str, delimiter: &str) -> Option<Self> {
         let (kind, default_delimiter) = match format {
             ReportFormat::Tabular => (TabularKind::Tabular, "\t"),
             ReportFormat::TabularWithComments => (TabularKind::Commented, "\t"),
@@ -412,12 +444,13 @@ impl TabularSpec {
             }
             _ => return None,
         };
-        let fields = parse_fields(&choice.spec);
-        let delimiter = if choice.delimiter.is_empty() {
-            default_delimiter.to_string()
+        let fields = parse_fields(spec);
+        let delimiter = if delimiter.is_empty() {
+            default_delimiter
         } else {
-            choice.delimiter.clone()
-        };
+            delimiter
+        }
+        .to_string();
         let default_report = matches!(kind, TabularKind::Tabular | TabularKind::Commented)
             && fields == STD_FIELDS
             && delimiter == "\t";
@@ -429,7 +462,7 @@ impl TabularSpec {
     }
 
     /// The default report of outfmt 6 or 7 (`commented`): the `std` fields and a tab, for which
-    /// `of` gives `None` (BLASTX writes it with this module as any field list,
+    /// `of_app` gives `None` (BLASTX writes it with this module as any field list,
     /// `algorithm::blastx::args::ResolvedOptions::tabular_report`). Made once per process.
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:78-81

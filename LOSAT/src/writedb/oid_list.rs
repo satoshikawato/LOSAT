@@ -1,6 +1,7 @@
 //! `-oid_masks` of makeblastdb: the OID mask file of each volume (`CWriteDB_OidList`) and the
-//! test of a model sequence; the mask types, the file's name and layout belong to
-//! `seqdb::oid_mask`, which the reader of the alias key `OID_MASK_TYPE` shares.
+//! test of a model sequence; the mask types and the file's name belong to `seqdb::oid_mask`,
+//! which the reader of the alias key `OID_MASK_TYPE` shares, and the file's layout to
+//! `seqdb::oid_list`, its reader.
 
 use super::files::WriteDbFile;
 use super::WriteDbError;

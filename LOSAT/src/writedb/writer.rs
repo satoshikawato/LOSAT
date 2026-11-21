@@ -58,7 +58,8 @@ pub struct WriteDb {
     indices: Indices,
     /// `m_OidMasks` (`-oid_masks`): the OID mask files each volume writes.
     oid_masks: u64,
-    /// `m_Deflines` of the kept sequence (`SetDeflines`, with `-parse_seqids`).
+    /// `m_Deflines` of the kept sequence (`SetDeflines`: makeblastdb's with `-parse_seqids`,
+    /// makeprofiledb's with or without its `-index`).
     pending_deflines: Option<DeflineSet>,
     /// The taxid of the kept sequence's definition line without `-parse_seqids`
     /// (`FixTaxId` of `CBuildDatabase::x_EditHeaders`, `set_taxid`).
@@ -417,6 +418,9 @@ impl WriteDb {
     /// indices or OID masks) and `m_TaxIds`.
     fn cook_header(&mut self, title: &[u8]) -> Vec<u8> {
         let oid = self.volumes.last().map_or(0, Volume::oid);
+        if self.pending_deflines.is_some() {
+            return self.cook_given_header(oid);
+        }
         let mut bad = Vec::new();
         let binhdr = defline_set(title, oid, self.pending_taxid, &mut bad);
         post_bad_title_chars(&mut self.diagnostics, title, &bad);
@@ -430,6 +434,44 @@ impl WriteDb {
                 db: b"BL_ORD_ID".to_vec(),
                 tag: ObjectId::Id(oid as i32),
             }));
+        }
+        binhdr
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:779-781,866-893,925-952
+    // Definition lines given by `SetDeflines` without `eFullIndex` (makeprofiledb `-index
+    // false`): every cooking takes the given lines with the first id of the first line
+    // replaced by `gnl|BL_ORD_ID|<oid>` and serializes them; `m_Ids` (every line's ids after
+    // the replacement) and `m_TaxIds` are set by the first cooking only. `set_deflines` keeps
+    // only sets whose first line has an id (`deflines_have_first_id`).
+    /// `x_CookHeader` and `x_CookIds` of given definition lines without `-parse_seqids`.
+    fn cook_given_header(&mut self, oid: u32) -> Vec<u8> {
+        let mut deflines = self
+            .pending_deflines
+            .clone()
+            .expect("the caller checked the given definition lines");
+        if let Some(first) = deflines
+            .deflines
+            .first_mut()
+            .and_then(|defline| defline.ids.first_mut())
+        {
+            *first = ParsedSeqId::General(Dbtag {
+                db: b"BL_ORD_ID".to_vec(),
+                tag: ObjectId::Id(oid as i32),
+            });
+        }
+        let mut bad = Vec::new();
+        let binhdr = encode_defline_set(&deflines, &mut bad);
+        post_bad_chars(&mut self.diagnostics, &bad);
+        if self.tax_ids.is_empty() {
+            self.tax_ids = union_of_tax_ids(&deflines.deflines);
+        }
+        if self.ids.is_empty() {
+            self.ids = deflines
+                .deflines
+                .into_iter()
+                .flat_map(|defline| defline.ids)
+                .collect();
         }
         binhdr
     }

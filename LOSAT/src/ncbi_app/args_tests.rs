@@ -21,6 +21,7 @@ static TOOL: Tool = Tool {
     dependencies: no_dependencies,
     post_prefix: None,
     components: &[],
+    dry_run: None,
 };
 
 fn parse_words(line: &[&str]) -> Result<Args, ArgsError> {

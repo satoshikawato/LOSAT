@@ -15,6 +15,7 @@ fn the_versions_come_before_the_refusal_of_a_word_that_is_not_utf8() {
         dependencies: no_dependencies,
         post_prefix: None,
         components: &[],
+        dry_run: None,
     };
     fn body(
         _: &Args,
@@ -76,6 +77,7 @@ fn a_run_s_arg_exception_is_reported_after_the_usage_with_its_backlog() {
         dependencies: no_dependencies,
         post_prefix: None,
         components: &[],
+        dry_run: None,
     };
     let mut stderr = Vec::new();
     let mut diag = Diag {

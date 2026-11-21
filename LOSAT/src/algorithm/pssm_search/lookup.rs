@@ -53,11 +53,17 @@ impl ThinBackbone {
     /// when their score reaches `threshold` (`lookup->threshold`).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:413-426
+    /// NCBI's threshold and the recursion's sums are `Int4`. A search's threshold is an `Int4` and
+    /// its PSSM scores stay within `BLAST_SCORE_MIN..=BLAST_SCORE_MAX` (`in_pssm`, the PSSM engine),
+    /// so their sums never leave `Int4`; makeprofiledb's profiles may hold any `Int4` score and
+    /// its scaled threshold any value, where NCBI's sums overflow and its threshold's conversion
+    /// is undefined: LOSAT adds and compares in 64 bits, the mathematical values (a proposed
+    /// exception of `PD-LOSAT-NCBI-DEFECTS`, psiblast line DECISIONS 80).
     pub(crate) fn add_pssm_words<R: PssmRows>(
         &mut self,
         rows: &R,
         query_bias: i32,
-        threshold: i32,
+        threshold: i64,
         locations: &[(i64, i64)],
     ) {
         let word_length = self.word_length;
@@ -94,9 +100,9 @@ struct PssmNeighbors<'a, R: PssmRows> {
     stored_offset: i32,
     wordsize: usize,
     charsize: usize,
-    threshold: i32,
+    threshold: i64,
     /// `row_max` of the word's `wordsize` positions.
-    row_max: &'a [i32],
+    row_max: &'a [i64],
     subject_word: [u8; 32],
 }
 
@@ -127,7 +133,7 @@ pub(crate) fn build_pssm_lookup_in<R: PssmRows>(
     locations: &[(i64, i64)],
 ) -> BlastAaLookupTable<BackboneCell> {
     let mut thin = ThinBackbone::new(word_length);
-    thin.add_pssm_words(rows, 0, threshold, locations);
+    thin.add_pssm_words(rows, 0, i64::from(threshold), locations);
     thin.finalize(rows.len(), threshold)
 }
 
@@ -140,19 +146,19 @@ fn add_pssm_neighboring_words<R: PssmRows>(
     rows: &R,
     wordsize: usize,
     charsize: usize,
-    threshold: i32,
+    threshold: i64,
     query_bias: i32,
     locations: &[(i64, i64)],
 ) {
-    let row_max_of = |pos: usize| -> i32 {
+    let row_max_of = |pos: usize| -> i64 {
         let row = rows.row(pos);
         let mut max = row[0];
         for &score in &row[1..BLASTAA_SIZE] {
             max = max.max(score);
         }
-        max
+        i64::from(max)
     };
-    let mut row_max = vec![0i32; wordsize];
+    let mut row_max = vec![0i64; wordsize];
     for &(from, right) in locations {
         let to = right - wordsize as i64 + 1;
         if to < from {
@@ -189,8 +195,8 @@ fn add_pssm_word_hits<R: PssmRows>(
     (offset, query_bias): (usize, i32),
     wordsize: usize,
     charsize: usize,
-    threshold: i32,
-    row_max: &[i32],
+    threshold: i64,
+    row_max: &[i64],
 ) {
     let mut info = PssmNeighbors {
         rows,
@@ -218,14 +224,14 @@ fn add_pssm_word_hits<R: PssmRows>(
 fn add_pssm_word_hits_core<R: PssmRows>(
     thin: &mut ThinBackbone,
     info: &mut PssmNeighbors<'_, R>,
-    score: i32,
+    score: i64,
     current_pos: usize,
 ) {
     let score = score - info.row_max[current_pos];
     let row = info.rows.row(info.offset + current_pos);
     if current_pos == info.wordsize - 1 {
         for (i, &cell) in row.iter().enumerate() {
-            if score + cell >= info.threshold {
+            if score + i64::from(cell) >= info.threshold {
                 info.subject_word[current_pos] = i as u8;
                 blast_lookup_add_word_hit(
                     thin,
@@ -239,6 +245,7 @@ fn add_pssm_word_hits_core<R: PssmRows>(
         return;
     }
     for (i, &cell) in row.iter().enumerate() {
+        let cell = i64::from(cell);
         if score + cell >= info.threshold {
             info.subject_word[current_pos] = i as u8;
             add_pssm_word_hits_core(thin, info, score + cell, current_pos + 1);

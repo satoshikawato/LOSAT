@@ -253,7 +253,10 @@ impl Volume {
             let num = ids.len();
             if !(indices.acc.as_ref().is_none_or(|acc| acc.can_fit(num))
                 && indices.gi.can_fit(num)
-                && indices.trace.as_ref().is_none_or(|trace| trace.can_fit(num)))
+                && indices
+                    .trace
+                    .as_ref()
+                    .is_none_or(|trace| trace.can_fit(num)))
             {
                 overfull = true;
             }

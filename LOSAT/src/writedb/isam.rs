@@ -927,10 +927,11 @@ impl NumericIsam {
                 256,
                 0,
             )?;
-            self.table.sort_unstable();
+            let mut table = std::mem::take(&mut self.table);
+            table.sort_unstable();
             let mut prev: Option<(i64, i32)> = None;
             let mut row_index: u32 = 0;
-            for &(id, oid) in &self.table {
+            for &(id, oid) in &table {
                 if prev == Some((id, oid)) {
                     continue;
                 }
@@ -994,9 +995,7 @@ pub(crate) fn trace_id(id: &ParsedSeqId) -> Option<i64> {
     }
     match &tag.tag {
         crate::seqid::model::ObjectId::Id(number) => Some(i64::from(*number)),
-        crate::seqid::model::ObjectId::Str(text) => {
-            crate::ncbi_str::string_to_int8(text, 0).ok()
-        }
+        crate::seqid::model::ObjectId::Str(text) => crate::ncbi_str::string_to_int8(text, 0).ok(),
     }
 }
 

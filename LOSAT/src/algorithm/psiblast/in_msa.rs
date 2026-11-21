@@ -15,10 +15,9 @@ use anyhow::Result;
 
 use crate::blastinput::aln_reader::{read_alignment, Alignment, AlnBioseq, AlnError, Mol, SetMol};
 use crate::blastinput::app::{engine_error, query_error};
-use crate::config::{ProteinScoringSpec, ScoringMatrix};
+use crate::config::ScoringMatrix;
 use crate::core::psi::{
-    create_pssm_with_options, KarlinBlk, PsiDiagnosticsRequest, PsiError, PsiMsa, PsiOptions,
-    PsiScoreBlk,
+    create_pssm_with_options, PsiDiagnosticsRequest, PsiError, PsiMsa, PsiOptions, PsiScoreBlk,
 };
 use crate::ncbi_exception::{NcbiException, ThrowSite};
 use crate::report::serial::pssm::{PssmQuery, SeqData, SeqEntry, SeqInst, Seqdesc};

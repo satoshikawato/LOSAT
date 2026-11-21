@@ -70,6 +70,7 @@ static TOOL: Tool = Tool {
     dependencies: no_dependencies,
     post_prefix: None,
     components: &[],
+    dry_run: None,
 };
 
 // NCBI reference (598d8ae6): c++/src/app/segmasker/segmasker.cpp:265-272

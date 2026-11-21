@@ -7,14 +7,14 @@
 
 use super::bioseq::{Bioseq, ParsedIds};
 use super::fasta_source::{fasta_reader_fasta, post_seq_id_warning, Warn};
+use crate::report::serial::asn_types::table::named;
+use crate::report::serial::asn_types::{member_index, members, Value};
+use crate::report::serial::pssm::Seqdesc;
 use crate::seqid::accguide::{identify_seq_id, parse_flags, F_NUC, F_PROT};
 use crate::seqid::label::content;
 use crate::seqid::model::ParsedSeqId;
 use crate::seqid::parse::{parse_ids, seq_id_from_text, set_typed, SeqIdError};
 use crate::seqid::rank::{best_rank_score, find_best};
-use crate::report::serial::asn_types::table::named;
-use crate::report::serial::asn_types::{member_index, members, Value};
-use crate::report::serial::pssm::Seqdesc;
 use crate::seqid::{BlastDefline, DeflineSet};
 
 /// `GetSeqIdString(true)`.
@@ -398,9 +398,8 @@ fn has_binary_header(descr: &[Seqdesc]) -> bool {
         let Some(object) = seqdesc_variant(descriptor, "user") else {
             continue;
         };
-        let is_label = |value: Option<&Value>| {
-            value.and_then(object_id_str) == Some(ASN_DEFLINE_OBJ_LABEL)
-        };
+        let is_label =
+            |value: Option<&Value>| value.and_then(object_id_str) == Some(ASN_DEFLINE_OBJ_LABEL);
         if !is_label(object.member(member_index(named::USER_OBJECT, "type"))) {
             continue;
         }

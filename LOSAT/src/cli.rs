@@ -161,6 +161,7 @@ fn entry_program_description(name: &str) -> &'static str {
             "Convert masking information in lower-case masked FASTA input to file formats suitable for makeblastdb"
         }
         "makembindex" => "Create a BLAST database index.",
+        "makeprofiledb" => "Application to create databases for rpsblast, cobalt and deltablast",
         _ => "",
     }
 }

@@ -1,6 +1,36 @@
 use super::*;
 use crate::blastinput::ncbi_environment::DiagTarget;
 
+/// The refusals of an index file that NCBI cannot read as a database are LOSAT's own, printed
+/// with makeblastdb's prefix and ended with exit status 1, and their text is the one of
+/// `SeqDbError` (one producer: `NCBI_CRASHES_ON_IT` ends the one where NCBI crashes).
+#[test]
+fn a_refused_index_file_is_printed_as_a_refusal() {
+    let path = std::path::PathBuf::from("o/db.pin");
+    let crashes = MakedbError::Database(SeqDbError::NcbiCrashes {
+        path: path.clone(),
+        message: "the index file has no bytes".to_string(),
+    });
+    assert_eq!(crashes.exit_code(), 1);
+    let text = crashes.to_string();
+    assert!(text.starts_with("losat makeblastdb: o/db.pin: "), "{text}");
+    assert!(text.ends_with(crate::seqdb::NCBI_CRASHES_ON_IT), "{text}");
+    let depends = MakedbError::Database(SeqDbError::Unsupported {
+        path,
+        message: "a field past the mapping".to_string(),
+    });
+    assert_eq!(depends.exit_code(), 1);
+    assert!(depends
+        .to_string()
+        .starts_with("losat makeblastdb: o/db.pin: "));
+    // NCBI's own error stays NCBI's: exit status 2, "BLAST Database error: ".
+    let ncbi = MakedbError::Database(SeqDbError::Format {
+        path: std::path::PathBuf::from("o/db.pin"),
+        message: "Error: Not a valid version 4 or 5 database.".to_string(),
+    });
+    assert_eq!(ncbi.exit_code(), 2);
+}
+
 // makedb-v5 DECISIONS 12: `[BLAST] MAX_SEQID_LENGTH` is refused with `-parse_seqids`
 // (build_db.cpp:739-747, cited at `check_registry_settings`), the library's argument
 // rules are makeblastdb's (makeblastdb.cpp:322-329, cited at `check_arguments`).

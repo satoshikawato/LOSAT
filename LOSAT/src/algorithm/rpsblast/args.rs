@@ -179,7 +179,7 @@ pub(crate) fn rps_composition_mode(value: &str) -> u8 {
 impl RpsblastArgs {
     /// blastp's arguments of the RPS-BLAST search, after NCBI's reading of `-outfmt`.
     pub fn into_blastp_args(self) -> Result<BlastpArgs> {
-        Self::check_outfmt(&self.outfmt)?;
+        Self::check_outfmt(&self.outfmt, self.export_search_strategy.is_some())?;
         let requested_cbs = rps_composition_mode(&self.comp_based_stats);
         let request_inputs = Some(Box::new(self.option_inputs()));
         Ok(BlastpArgs {
@@ -289,21 +289,25 @@ impl RpsblastArgs {
         inputs
     }
 
-    /// NCBI parses `-outfmt` before the option handlers (`app::parse_formatting_string`, its
-    /// errors are NCBI's; `check_rps_outfmt`).
-    pub fn check_outfmt(outfmt: &str) -> Result<()> {
-        check_rps_outfmt(outfmt)
+    /// NCBI reads `-outfmt` before the option handlers, with its own errors (`check_rps_outfmt`;
+    /// `strategy`: the run writes a search strategy file).
+    pub fn check_outfmt(outfmt: &str, strategy: bool) -> Result<()> {
+        check_rps_outfmt(outfmt, strategy)
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2744-2748
-/// NCBI's reading of `-outfmt` before the option handlers of its RPS programs (rpsblast,
-/// rpstblastn), whose errors are NCBI's (`app::parse_formatting_string`). Every format that they
-/// run is written (items PS15a-1 and PS15a-2): RPSBLAST's through BLASTP's reports, RPSTBLASTN's
-/// through BLASTX's. Outfmt 17 goes on to NCBI's own error (`formatting_handler_check`), outfmt 13
-/// and 14 to the standard output to NCBI's "Please provide a file name" (`app::xinclude_check_for`).
-pub(crate) fn check_rps_outfmt(outfmt: &str) -> Result<()> {
-    crate::blastinput::app::parse_formatting_string(outfmt)?;
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3624-3627
+/// NCBI's early reading of `-outfmt` before the option handlers of its RPS programs (rpsblast,
+/// rpstblastn), whose errors are NCBI's (`app::early_format_choice`; `strategy`: the run writes a
+/// search strategy file, before which NCBI reads no `-outfmt`, so a value that does not parse
+/// goes on to the formatting handler's error, line RG F/d36). Every format that they run is
+/// written (items PS15a-1 and PS15a-2): RPSBLAST's through BLASTP's reports, RPSTBLASTN's through
+/// BLASTX's. A value that NCBI refuses later (outfmt 17, a custom delimiter that the field list
+/// uses, outfmt 13 and 14 without a file name in `-out`) goes on to NCBI's error at its place,
+/// after the arguments' own errors and before the database is opened (line RG F/d36 probes
+/// rps.conf20, rps.conf20.q, rps.conf20.nodb, rpst.conf20, rps.o14, rpst.o14).
+pub(crate) fn check_rps_outfmt(outfmt: &str, strategy: bool) -> Result<()> {
+    crate::blastinput::app::early_format_choice(outfmt, strategy)?;
     Ok(())
 }
 

@@ -501,6 +501,7 @@ pub(super) fn write_xml(
         None,
         args.seg.filter_options(),
         None,
+        None,
         args.soft_masking,
     );
     let xml = blast_xml::BlastpXml {

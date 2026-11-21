@@ -73,6 +73,8 @@ To change the separator, add `delim=` right after the number (before the field n
 losat blastn -query query.fna -subject genome.fna -outfmt "10 delim=@ qacc sacc score"
 ```
 
+As in NCBI BLAST+, `psiblast`, `rpsblast` and `rpstblastn` read and check `delim=` but keep the tab or comma. In every program, a separator that a listed field uses between its entries (`;` with `sallseqid`, `staxids`, `sscinames`, `scomnames`, `sblastnames` or `sskingdoms`, `/` with `frames`, `<>` with `salltitles`) gets NCBI's error.
+
 LOSAT ignores a word that is not a field name; a list with no known field gives the default columns.
 
 ### Field names

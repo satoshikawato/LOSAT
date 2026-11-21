@@ -54,8 +54,8 @@ These refusals apply to `blastn`, `blastp`, `blastx`, `tblastn` and `tblastx`.
 | `-html` | Refused: not yet supported. |
 | `-best_hit_overhang`, `-best_hit_score_edge` with `blastp`, `blastx`, `tblastn` or `tblastx` | Refused: not yet supported. `blastn` runs them. |
 | `-import_search_strategy` | Refused. `psiblast`, `rpsblast` and `rpstblastn` refuse it too. |
-| `-export_search_strategy -` (standard output) | Refused. A file name works. |
-| `-export_search_strategy` into the file of `-out`, or into standard output | Refused. NCBI writes each batch's request into the report or over it. |
+| `-export_search_strategy -` (standard output) | Refused where NCBI writes its request into the report: LOSAT holds the report's bytes from NCBI's formatter until NCBI's first request (after its prolog and the first batch of queries is read, before the search), refuses there and writes none of them. A file name works. A run that NCBI ends before that point (an empty query, a database error, an error of an option or of `-outfmt`, a first query record it cannot read, a `-query_loc` past the end, `BATCH_SIZE=abc`, a PSSM run with `-subject`) ends as in NCBI: the held bytes (its prolog) are written, then its error and exit status. NCBI's warnings from before its formatter come before the refusal. |
+| `-export_search_strategy` into the file of `-out`, or into standard output | Refused where NCBI writes its request into the report or over it, at the same point as the row above, with no byte written to the stream. A run that NCBI ends before its first request ends as in NCBI, including the held prolog. |
 | `-export_search_strategy` with a file that cannot be written to the end | Refused. NCBI writes a message and exits with status 0. |
 | `-export_search_strategy` with a file name that is not UTF-8 | Refused. |
 | `-export_search_strategy` with `-dbsize` and a list that keeps no sequence of the database | Refused. |
@@ -144,7 +144,8 @@ Strategy files:
 | `-reward 0 -penalty 0` with `-task megablast` and its greedy extension (without `-no_greedy`; also with `-ungapped` when the gap costs are 0 and 0) | Refused. NCBI divides by zero (exit status 136) or does not finish. |
 | `-gapopen` or `-gapextend` above 32767 with `-task megablast` | Refused. |
 | `-ungapped` with `-outfmt 17` (SAM) | Refused. |
-| `-filtering_db`, `-index_name` | Refused. |
+| `-index_name` | Refused. |
+| `-filtering_db` in LOSAT Web | Refused. LOSAT Web does not read BLAST databases yet. |
 | `-use_index true` with a megablast search of a database that has a MegaBLAST index (made by `makembindex`) | Refused. |
 | `-use_index true` with a `-db` value that has a comma (old-style index volumes) | Refused. |
 | A hit list size of 2^31 - 50 or more (`-max_target_seqs`, or what `-num_descriptions` and `-num_alignments` set) | Refused. NCBI crashes. |
@@ -351,7 +352,7 @@ These refusals apply to every search program that reads databases.
 | `-html` | Refused: not yet supported. |
 | `-best_hit_overhang`, `-best_hit_score_edge` | Refused, as in `blastp`. |
 | `-use_sw_tback` | Refused. |
-| `-outfmt` other than 0, 6, 7, 10 and 20 | Refused: not yet supported. With `-in_pssm` or `-in_msa`, only 0, 6 and 7 work. |
+| `-outfmt` other than 0, 6, 7, 10 and 20 | Refused: not yet supported. With `-in_pssm` or `-in_msa`, only 0, 6 and 7 work. `-outfmt` 17, 19 and 21, and 13 and 14 without `-out`, get NCBI's own errors. |
 | `-threshold` with the compressed lookup table | Refused, as in `blastp`. |
 | A hit list size that overflows NCBI's 32-bit integer | Refused, as in `blastp`. |
 | A gapped X-drop that overflows NCBI's kernels | Refused, as in `blastp`. This includes later rounds, and `-in_pssm` with the PSSM's Lambda. |
@@ -359,7 +360,7 @@ These refusals apply to every search program that reads databases.
 | `-in_pssm` or `-in_msa` with a matrix or gap cost other than BLOSUM62 11/1 | Refused. |
 | `-in_pssm` with a binary or XML PSSM | Refused. |
 | `-out_pssm` or `-out_ascii_pssm` with a file that cannot be written | Refused. |
-| `-out_pssm` or `-out_ascii_pssm` into the standard output, the standard error or the `-out` file | Refused. |
+| `-out_pssm` or `-out_ascii_pssm` into the standard output, the standard error or the `-out` file | Refused. Where NCBI stops first with its own error of `-outfmt` (13 or 14 without `-out`, for example), you get that error. |
 | `-out_pssm` into a named pipe, a block device or a symbolic link to a missing file | Refused. |
 | The library calls `run` or `run_collect` with formats that take two searches, `-num_descriptions` or `-num_alignments`, and PSSM files | Refused. One call per format writes the command line's output. |
 
@@ -406,7 +407,7 @@ A PSSM given with `-in_pssm` is refused when its input or content is one of thes
 | `-outfmt 11` | Refused. NCBI searches with it. |
 | `-mt_mode 1` with more than one thread and `-db` | Refused. |
 | A PSSM query that `-seg` masks completely | Refused. |
-| `-outfmt` other than 0 to 4, 6, 7 and 10 | Refused. |
+| `-outfmt` other than 0 to 4, 6, 7 and 10 | Refused. `-outfmt` 17, 19 and 21, and 13 and 14 without `-out`, get NCBI's own errors. |
 | `-db_gencode 32` | Refused. It is not one of NCBI's codes; LOSAT's `tblastn` takes it for its own translations. |
 | `-in_pssm` in LOSAT Web | Refused. The library API and pylosat take it as an input. |
 
@@ -424,7 +425,7 @@ A PSSM given with `-in_pssm` is refused when its input or content is one of thes
 
 | Option or value | What happens |
 | :--- | :--- |
-| `-outfmt 17` | NCBI's own error (SAM is for `blastn` only). |
+| `-outfmt` 17, 19 and 21, and 13 and 14 without `-out` | NCBI's own errors. |
 | `-html`, `-entrez_query`, `-remote`, `-import_search_strategy` | Refused. |
 | `-sum_stats true` | Refused. NCBI's output then depends on memory contents, or it crashes. |
 | `-subject` | Refused by the parser (exit status 2; NCBI prints its usage). It is not an `rpsblast` option. |
@@ -455,7 +456,7 @@ NCBI's errors for a missing `.aux`, `.loo` or `.rps` file, a wrong magic number 
 
 | Option or value | What happens |
 | :--- | :--- |
-| `-outfmt 17`, and 13 and 14 without `-out` | NCBI's own errors. |
+| `-outfmt` 17, 19 and 21, and 13 and 14 without `-out` | NCBI's own errors. |
 | `-use_sw_tback` with composition-based statistics | Refused. |
 | `-ungapped` without composition-based statistics | Refused. NCBI's `rpstblastn` crashes after the search. With composition-based statistics it gets NCBI's own error. |
 | `-sum_stats true` | Refused. NCBI's output then depends on memory contents, or it crashes. |
@@ -522,6 +523,7 @@ NCBI's errors for a missing `.aux`, `.loo` or `.rps` file and for an empty `.aux
 | `[BLAST] LONG_SEQID`, or a `[BLAST] MAX_SEQID_LENGTH` that `makeblastdb` would use with `-parse_seqids` | Refused. They change which ids are parsed. |
 | `DIAG_*` variables and other `NCBI_CONFIG_*` entries outside the accepted list | Refused. |
 | A non-empty `NCBI_MAKEBLASTDB_DONT_SCAN_BIOSEQ_FOR_CFASTAREADER_USER_OBJECTS` | Refused. It changes which titles are stored. |
+| An index file (`.pin`, `.nin`) of a finished build that a failed write (a full disk) left with no bytes, or with a header field that reaches past the end of the file's last 4 KiB page | Refused. NCBI maps an empty file as a null pointer and crashes. What NCBI reads past its mapping depends on its memory. A file cut short inside that page is read as NCBI reads it, with zeros past its end. |
 
 Example:
 
@@ -602,7 +604,6 @@ error: the NCBI BLAST+ option -randomize is not supported by LOSAT's makeblastdb
 
 - An optimized ascii counts file is refused when the third line, which holds the hash parameters, leaves a value unread that NCBI then checks uninitialised.
 - An `obinary` counts file with units of 1 or 2 letters is refused: NCBI reads past an empty array.
-- `-ids` or `-exclude_ids` matched as text (without `-text_match F`) with a database sequence that has no title and a tax id is refused. NCBI matches the ids against a title made from the taxonomy names.
 - The database and serial-writer refusals of `dustmasker` apply to `windowmasker` too.
 
 </details>
@@ -649,7 +650,8 @@ error: the NCBI BLAST+ option -randomize is not supported by LOSAT's makeblastdb
 | `-legacy false` with a `-stride` above `-ws_hint` − `-nmer` + 1 (`-stride 20` with the defaults) | Refused when the first sequence of an index volume is read. NCBI's `makembindex` never finishes such a volume. |
 | `-legacy false` with a `-stride` of 32768 or more | Refused when the first sequence of an index volume is read. NCBI's index has no defined result. |
 | A command-line word that is not UTF-8 | Refused. |
-| The database sequences, definition lines and titles that `dustmasker` refuses | Refused, as for `dustmasker`. |
+| The database sequences, definition lines and damaged taxonomy records that `dustmasker` refuses | Refused, as for `dustmasker`. |
+| A database sequence without letters (only a damaged database has one) | Refused. NCBI's `makembindex` stops with a null-pointer report. |
 | A FASTA record of 4,294,967,296 letters or more (`-old_style_index true`) | Refused. |
 | An index volume of more than 4 GiB of packed sequences, which needs a `-volsize` of about 18,000 or more and more than 16 Gbp of sequences in one index volume | Refused when the sequence that passes 4 GiB is read. NCBI writes an index whose sizes and positions wrap at 32 bits. |
 

@@ -155,8 +155,9 @@ impl RpstblastnArgs {
     /// before the first byte, after NCBI's own errors of the options and the database
     /// (`TranslatedRpsSearch::check_options`; review A of PS12a, N1).
     pub(crate) fn rps_search(&self) -> Result<TranslatedRpsSearch> {
-        // NCBI parses `-outfmt` before the option handlers (`app::parse_formatting_string`).
-        check_rps_outfmt(&self.outfmt)?;
+        // NCBI reads `-outfmt` before the option handlers (`rpsblast::args::check_rps_outfmt`);
+        // outfmt 13 and 14 to the standard output get NCBI's own error (BLASTX's).
+        check_rps_outfmt(&self.outfmt, self.export_search_strategy.is_some())?;
         let requested_cbs = rps_composition_mode(&self.comp_based_stats);
         Ok(TranslatedRpsSearch {
             search: RpsSearch {

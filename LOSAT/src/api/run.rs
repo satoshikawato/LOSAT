@@ -32,6 +32,7 @@ use crate::blastinput::seq_range::{
     parse_optional_range, record_interval, RangeRole, RecordInterval, SequenceRange,
 };
 use crate::cli::Commands;
+use crate::report::archive::options::RequestKind;
 use crate::report::blast_xml::XmlStats;
 use crate::report::PairwiseHit;
 
@@ -582,18 +583,21 @@ pub(crate) fn search_groups(command: &Commands, numbers: &[i32]) -> Vec<Vec<usiz
 // the taxonomy database up themselves, through the search path of NCBI's databases: a search of
 // records reads the application settings for them, as the command line does, and the search asks
 // where the command line asks (`common::database::subject_taxonomy`).
-/// The `[BLAST] BLASTDB` setting of the call (`start`) when a report of `outputs` looks every
-/// taxid up (the plural names of the taxonomy database, the organism report); `None` otherwise,
-/// without reading the settings.
+/// The `[BLAST] BLASTDB` setting of the call (`start`) when a report of `outputs` (as `app`'s
+/// formatter writes it, `TabularSpec::of_app`) looks every taxid up (the plural names of the
+/// taxonomy database, the organism report); `None` otherwise, without reading the settings.
 fn taxdb_setting(
     outputs: &mut ReportOutputs<'_>,
     start: &mut CallStart,
+    app: RequestKind,
 ) -> anyhow::Result<Option<crate::algorithm::common::database::TaxdbSetting>> {
     use crate::blastinput::app::{parse_formatting_string, ReportFormat};
     let looks_up = outputs.formats.iter().any(|format| {
         parse_formatting_string(format.outfmt).is_ok_and(|choice| {
             ReportFormat::from_number(choice.number)
-                .and_then(|report| crate::report::tabular::TabularSpec::of(report, &choice))
+                .and_then(|report| {
+                    crate::report::tabular::TabularSpec::of_app(report, &choice, app)
+                })
                 .is_some_and(|spec| spec.looks_up_every_taxid())
         })
     });
@@ -685,7 +689,7 @@ fn run_local_entry(
     }
     match command {
         Commands::Blastp(mut args) => {
-            args.taxdb_setting = taxdb_setting(outputs, start)?;
+            args.taxdb_setting = taxdb_setting(outputs, start, RequestKind::Blastp)?;
             // The file of an ungapped search's `-matrix` that NCBI's tables do not have, looked up
             // where the options are resolved, as on the command line (`BlastpArgs::matrix_search`).
             if args.unknown_matrix_name() {
@@ -694,11 +698,11 @@ fn run_local_entry(
             run_local_blastp(args, query, subject, "", "", outputs)
         }
         Commands::Tblastn(mut args) => {
-            args.taxdb_setting = taxdb_setting(outputs, start)?;
+            args.taxdb_setting = taxdb_setting(outputs, start, RequestKind::Tblastn)?;
             run_local_tblastn(args, query, subject, outputs)
         }
         Commands::Blastn(mut args) => {
-            args.taxdb_setting = taxdb_setting(outputs, start)?;
+            args.taxdb_setting = taxdb_setting(outputs, start, RequestKind::Blastn)?;
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:446-448
             // The counts file of `-window_masker_db` is read from the file system, as on the
             // command line (LOSAT Web's host gives its own source).
@@ -714,6 +718,13 @@ fn run_local_entry(
                 args.window_masker_registry = Some(settings.window_masker_registry);
                 args.window_masker_counts = Some(Arc::new(crate::utils::winmask::FileCounts));
             }
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/repeats_filter_cxx.cpp:368-372
+            // The database of `-filtering_db` is looked up as the database of `-db` (the call's
+            // settings), by the repeat search of each query batch.
+            if args.filtering_db.is_some() {
+                let settings = start.settings(&mut *outputs.diagnostics)?;
+                args.resolve_repeat_filter(&settings);
+            }
             run_local_blastn(args, query, subject, outputs)
         }
         Commands::Tblastx(mut args) => {
@@ -723,11 +734,11 @@ fn run_local_entry(
                 let settings = start.settings(&mut *outputs.diagnostics)?;
                 args.find_matrix_file(&settings.matrix_search)?;
             }
-            args.taxdb_setting = taxdb_setting(outputs, start)?;
+            args.taxdb_setting = taxdb_setting(outputs, start, RequestKind::Tblastx)?;
             run_local_tblastx(args, query, subject, outputs)
         }
         Commands::Blastx(mut args) => {
-            args.taxdb_setting = taxdb_setting(outputs, start)?;
+            args.taxdb_setting = taxdb_setting(outputs, start, RequestKind::Blastx)?;
             // The file of a `-matrix` that NCBI's tables do not have, looked up after the options
             // are resolved, as on the command line (`ResolvedOptions::find_matrix_file`).
             if args.unknown_matrix_name() {
@@ -737,7 +748,7 @@ fn run_local_entry(
         }
         Commands::Psiblast(args) => {
             let mut args = psiblast_args(args, outputs)?;
-            args.taxdb_setting = taxdb_setting(outputs, start)?;
+            args.taxdb_setting = taxdb_setting(outputs, start, RequestKind::Psiblast)?;
             run_local_blastp(args, query, subject, "", "", outputs)
         }
         Commands::Rpsblast(_)
@@ -757,7 +768,12 @@ fn psiblast_args(
     outputs: &ReportOutputs<'_>,
 ) -> anyhow::Result<crate::algorithm::blastp::args::BlastpArgs> {
     for format in &outputs.formats {
-        crate::algorithm::psiblast::PsiblastArgs::check_outfmt(format.outfmt)?;
+        // The library writes no search strategy file (`search::validate`).
+        crate::algorithm::psiblast::PsiblastArgs::check_outfmt(
+            format.outfmt,
+            format.side_out(args.out.as_deref()),
+            false,
+        )?;
     }
     args.into_blastp_args()
 }

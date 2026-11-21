@@ -1,0 +1,1 @@
+Warning: [blastn] Query_4 wm_mq02 len77: Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options 

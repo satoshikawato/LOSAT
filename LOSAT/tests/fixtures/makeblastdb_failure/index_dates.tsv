@@ -1,0 +1,100 @@
+# NCBI BLAST+ 2.17.0 official Linux build (ncbi-blast-2.17.0+-x64-linux; sha256 of its bin/blastdbcmd 7b7985134ac696b2f28428baf8a210554c4e2d6c38cc1dfdd46d207dc4cc762f), `blastdbcmd -db db -metadata`, on a version 5 protein
+# database whose index file's date string was replaced by the string in column 1 (what a failed write of the index leaves:
+# a prefix of the date, the rest reads as zeros). Host: the Owner's WSL2 machine (Ubuntu), run under the oracle lock, 2026-11-21.
+# Column 2: `ok` and the `last-updated` NCBI writes, or `err`, the line of ncbitime.cpp / ncbistr.cpp that throws, the exception
+# (class::code), the function and the message (exit status 255 in every `err` row). Tab separated; the date string may end in a space.
+	ok	
+N	err	865	CTimeException::eFormat	ncbi::CTime::x_Init	Time string 'N' is too short for time format 'b d, Y  H:m P'
+No	err	865	CTimeException::eFormat	ncbi::CTime::x_Init	Time string 'No' is too short for time format 'b d, Y  H:m P'
+Nov	err	865	CTimeException::eFormat	ncbi::CTime::x_Init	Time string 'Nov' is too short for time format 'b d, Y  H:m P'
+Nov 	err	861	CStringException::eConvert	ncbi::NStr::StringToInt8	Cannot convert string '' to Int8
+Nov 2	err	865	CTimeException::eFormat	ncbi::CTime::x_Init	Time string 'Nov 2' is too short for time format 'b d, Y  H:m P'
+Nov 21	err	865	CTimeException::eFormat	ncbi::CTime::x_Init	Time string 'Nov 21' is too short for time format 'b d, Y  H:m P'
+Nov 21,	err	865	CTimeException::eFormat	ncbi::CTime::x_Init	Time string 'Nov 21,' is too short for time format 'b d, Y  H:m P'
+Nov 21, 	err	861	CStringException::eConvert	ncbi::NStr::StringToInt8	Cannot convert string '' to Int8
+Nov 21, 2	err	751	CTimeException::eArgument	ncbi::CTime::x_Init	Year value '2' is out of range
+Nov 21, 20	err	751	CTimeException::eArgument	ncbi::CTime::x_Init	Year value '20' is out of range
+Nov 21, 202	err	751	CTimeException::eArgument	ncbi::CTime::x_Init	Year value '202' is out of range
+Nov 21, 2026	err	865	CTimeException::eFormat	ncbi::CTime::x_Init	Time string 'Nov 21, 2026' is too short for time format 'b d, Y  H:m P'
+Nov 21, 2026 	err	861	CStringException::eConvert	ncbi::NStr::StringToInt8	Cannot convert string '' to Int8
+Nov 21, 2026  	err	861	CStringException::eConvert	ncbi::NStr::StringToInt8	Cannot convert string '' to Int8
+Nov 21, 2026  4	err	865	CTimeException::eFormat	ncbi::CTime::x_Init	Time string 'Nov 21, 2026  4' is too short for time format 'b d, Y  H:m P'
+Nov 21, 2026  4:	err	861	CStringException::eConvert	ncbi::NStr::StringToInt8	Cannot convert string '' to Int8
+Nov 21, 2026  4:0	err	865	CTimeException::eFormat	ncbi::CTime::x_Init	Time string 'Nov 21, 2026  4:0' is too short for time format 'b d, Y  H:m P'
+Nov 21, 2026  4:06	err	865	CTimeException::eFormat	ncbi::CTime::x_Init	Time string 'Nov 21, 2026  4:06' is too short for time format 'b d, Y  H:m P'
+Nov 21, 2026  4:06 	ok	2026-11-21T04:06:00
+Nov 21, 2026  4:06 A	err	870	CTimeException::eFormat	ncbi::CTime::x_Init	Time string 'Nov 21, 2026  4:06 A' is too long for time format 'b d, Y  H:m P'
+Nov 21, 2026  4:06 AM	ok	2026-11-21T04:06:00
+Nov 21, 2026  1	err	865	CTimeException::eFormat	ncbi::CTime::x_Init	Time string 'Nov 21, 2026  1' is too short for time format 'b d, Y  H:m P'
+Nov 21, 2026  12	err	865	CTimeException::eFormat	ncbi::CTime::x_Init	Time string 'Nov 21, 2026  12' is too short for time format 'b d, Y  H:m P'
+Nov 21, 2026  12:	err	861	CStringException::eConvert	ncbi::NStr::StringToInt8	Cannot convert string '' to Int8
+Nov 21, 2026  12:2	err	865	CTimeException::eFormat	ncbi::CTime::x_Init	Time string 'Nov 21, 2026  12:2' is too short for time format 'b d, Y  H:m P'
+Nov 21, 2026  12:22	err	865	CTimeException::eFormat	ncbi::CTime::x_Init	Time string 'Nov 21, 2026  12:22' is too short for time format 'b d, Y  H:m P'
+Nov 21, 2026  12:22 	ok	2026-11-21T00:22:00
+Nov 21, 2026  12:22 P	err	870	CTimeException::eFormat	ncbi::CTime::x_Init	Time string 'Nov 21, 2026  12:22 P' is too long for time format 'b d, Y  H:m P'
+Nov 21, 2026  12:22 PM	ok	2026-11-21T12:22:00
+Nov 1	err	865	CTimeException::eFormat	ncbi::CTime::x_Init	Time string 'Nov 1' is too short for time format 'b d, Y  H:m P'
+Nov 1,	err	865	CTimeException::eFormat	ncbi::CTime::x_Init	Time string 'Nov 1,' is too short for time format 'b d, Y  H:m P'
+Nov 1, 	err	861	CStringException::eConvert	ncbi::NStr::StringToInt8	Cannot convert string '' to Int8
+Nov 1, 2	err	751	CTimeException::eArgument	ncbi::CTime::x_Init	Year value '2' is out of range
+Nov 1, 20	err	751	CTimeException::eArgument	ncbi::CTime::x_Init	Year value '20' is out of range
+Nov 1, 202	err	751	CTimeException::eArgument	ncbi::CTime::x_Init	Year value '202' is out of range
+Nov 1, 2026	err	865	CTimeException::eFormat	ncbi::CTime::x_Init	Time string 'Nov 1, 2026' is too short for time format 'b d, Y  H:m P'
+Nov 1, 2026 	err	861	CStringException::eConvert	ncbi::NStr::StringToInt8	Cannot convert string '' to Int8
+Nov 1, 2026  	err	861	CStringException::eConvert	ncbi::NStr::StringToInt8	Cannot convert string '' to Int8
+Nov 1, 2026  9	err	865	CTimeException::eFormat	ncbi::CTime::x_Init	Time string 'Nov 1, 2026  9' is too short for time format 'b d, Y  H:m P'
+Nov 1, 2026  9:	err	861	CStringException::eConvert	ncbi::NStr::StringToInt8	Cannot convert string '' to Int8
+Nov 1, 2026  9:0	err	865	CTimeException::eFormat	ncbi::CTime::x_Init	Time string 'Nov 1, 2026  9:0' is too short for time format 'b d, Y  H:m P'
+Nov 1, 2026  9:05	err	865	CTimeException::eFormat	ncbi::CTime::x_Init	Time string 'Nov 1, 2026  9:05' is too short for time format 'b d, Y  H:m P'
+Nov 1, 2026  9:05 	ok	2026-11-01T09:05:00
+Nov 1, 2026  9:05 P	err	870	CTimeException::eFormat	ncbi::CTime::x_Init	Time string 'Nov 1, 2026  9:05 P' is too long for time format 'b d, Y  H:m P'
+Nov 1, 2026  9:05 PM	ok	2026-11-01T21:05:00
+D	err	865	CTimeException::eFormat	ncbi::CTime::x_Init	Time string 'D' is too short for time format 'b d, Y  H:m P'
+De	err	865	CTimeException::eFormat	ncbi::CTime::x_Init	Time string 'De' is too short for time format 'b d, Y  H:m P'
+Dec	err	865	CTimeException::eFormat	ncbi::CTime::x_Init	Time string 'Dec' is too short for time format 'b d, Y  H:m P'
+Dec 	err	861	CStringException::eConvert	ncbi::NStr::StringToInt8	Cannot convert string '' to Int8
+Dec 3	err	865	CTimeException::eFormat	ncbi::CTime::x_Init	Time string 'Dec 3' is too short for time format 'b d, Y  H:m P'
+Dec 31	err	865	CTimeException::eFormat	ncbi::CTime::x_Init	Time string 'Dec 31' is too short for time format 'b d, Y  H:m P'
+Dec 31,	err	865	CTimeException::eFormat	ncbi::CTime::x_Init	Time string 'Dec 31,' is too short for time format 'b d, Y  H:m P'
+Dec 31, 	err	861	CStringException::eConvert	ncbi::NStr::StringToInt8	Cannot convert string '' to Int8
+Dec 31, 2	err	751	CTimeException::eArgument	ncbi::CTime::x_Init	Year value '2' is out of range
+Dec 31, 20	err	751	CTimeException::eArgument	ncbi::CTime::x_Init	Year value '20' is out of range
+Dec 31, 202	err	751	CTimeException::eArgument	ncbi::CTime::x_Init	Year value '202' is out of range
+Dec 31, 2026	err	865	CTimeException::eFormat	ncbi::CTime::x_Init	Time string 'Dec 31, 2026' is too short for time format 'b d, Y  H:m P'
+Dec 31, 2026 	err	861	CStringException::eConvert	ncbi::NStr::StringToInt8	Cannot convert string '' to Int8
+Dec 31, 2026  	err	861	CStringException::eConvert	ncbi::NStr::StringToInt8	Cannot convert string '' to Int8
+Dec 31, 2026  1	err	865	CTimeException::eFormat	ncbi::CTime::x_Init	Time string 'Dec 31, 2026  1' is too short for time format 'b d, Y  H:m P'
+Dec 31, 2026  11	err	865	CTimeException::eFormat	ncbi::CTime::x_Init	Time string 'Dec 31, 2026  11' is too short for time format 'b d, Y  H:m P'
+Dec 31, 2026  11:	err	861	CStringException::eConvert	ncbi::NStr::StringToInt8	Cannot convert string '' to Int8
+Dec 31, 2026  11:5	err	865	CTimeException::eFormat	ncbi::CTime::x_Init	Time string 'Dec 31, 2026  11:5' is too short for time format 'b d, Y  H:m P'
+Dec 31, 2026  11:59	err	865	CTimeException::eFormat	ncbi::CTime::x_Init	Time string 'Dec 31, 2026  11:59' is too short for time format 'b d, Y  H:m P'
+Dec 31, 2026  11:59 	ok	2026-12-31T11:59:00
+Dec 31, 2026  11:59 P	err	870	CTimeException::eFormat	ncbi::CTime::x_Init	Time string 'Dec 31, 2026  11:59 P' is too long for time format 'b d, Y  H:m P'
+Dec 31, 2026  11:59 PM	ok	2026-12-31T23:59:00
+J	err	865	CTimeException::eFormat	ncbi::CTime::x_Init	Time string 'J' is too short for time format 'b d, Y  H:m P'
+Ja	err	865	CTimeException::eFormat	ncbi::CTime::x_Init	Time string 'Ja' is too short for time format 'b d, Y  H:m P'
+Jan	err	865	CTimeException::eFormat	ncbi::CTime::x_Init	Time string 'Jan' is too short for time format 'b d, Y  H:m P'
+Jan 	err	861	CStringException::eConvert	ncbi::NStr::StringToInt8	Cannot convert string '' to Int8
+Jan 2	err	865	CTimeException::eFormat	ncbi::CTime::x_Init	Time string 'Jan 2' is too short for time format 'b d, Y  H:m P'
+Jan 2,	err	865	CTimeException::eFormat	ncbi::CTime::x_Init	Time string 'Jan 2,' is too short for time format 'b d, Y  H:m P'
+Jan 2, 	err	861	CStringException::eConvert	ncbi::NStr::StringToInt8	Cannot convert string '' to Int8
+Jan 2, 2	err	751	CTimeException::eArgument	ncbi::CTime::x_Init	Year value '2' is out of range
+Jan 2, 20	err	751	CTimeException::eArgument	ncbi::CTime::x_Init	Year value '20' is out of range
+Jan 2, 202	err	751	CTimeException::eArgument	ncbi::CTime::x_Init	Year value '202' is out of range
+Jan 2, 2027	err	865	CTimeException::eFormat	ncbi::CTime::x_Init	Time string 'Jan 2, 2027' is too short for time format 'b d, Y  H:m P'
+Jan 2, 2027 	err	861	CStringException::eConvert	ncbi::NStr::StringToInt8	Cannot convert string '' to Int8
+Jan 2, 2027  	err	861	CStringException::eConvert	ncbi::NStr::StringToInt8	Cannot convert string '' to Int8
+Jan 2, 2027  1	err	865	CTimeException::eFormat	ncbi::CTime::x_Init	Time string 'Jan 2, 2027  1' is too short for time format 'b d, Y  H:m P'
+Jan 2, 2027  10	err	865	CTimeException::eFormat	ncbi::CTime::x_Init	Time string 'Jan 2, 2027  10' is too short for time format 'b d, Y  H:m P'
+Jan 2, 2027  10:	err	861	CStringException::eConvert	ncbi::NStr::StringToInt8	Cannot convert string '' to Int8
+Jan 2, 2027  10:0	err	865	CTimeException::eFormat	ncbi::CTime::x_Init	Time string 'Jan 2, 2027  10:0' is too short for time format 'b d, Y  H:m P'
+Jan 2, 2027  10:00	err	865	CTimeException::eFormat	ncbi::CTime::x_Init	Time string 'Jan 2, 2027  10:00' is too short for time format 'b d, Y  H:m P'
+Jan 2, 2027  10:00 	ok	2027-01-02T10:00:00
+Jan 2, 2027  10:00 A	err	870	CTimeException::eFormat	ncbi::CTime::x_Init	Time string 'Jan 2, 2027  10:00 A' is too long for time format 'b d, Y  H:m P'
+Jan 2, 2027  10:00 AM	ok	2027-01-02T10:00:00
+Nov 21, 2026  4:06 AMx	err	870	CTimeException::eFormat	ncbi::CTime::x_Init	Time string 'Nov 21, 2026  4:06 AMx' is too long for time format 'b d, Y  H:m P'
+Xyz 21, 2026  4:06 AM	err	865	CTimeException::eFormat	ncbi::CTime::x_Init	Time string 'Xyz 21, 2026  4:06 AM' is too short for time format 'b d, Y  H:m P'
+Nov 21, 2026  4:06 am	ok	2026-11-21T04:06:00
+Nov 32, 2026  4:06 AM	err	772	CTimeException::eArgument	ncbi::CTime::x_Init	Day value '32' is out of range
+Nov 21, 2026  13:06 AM	err	782	CTimeException::eArgument	ncbi::CTime::x_Init	Hour value '13' is out of range
+Nov 21, 2026  4:66 AM	err	788	CTimeException::eArgument	ncbi::CTime::x_Init	Minute value '66' is out of range

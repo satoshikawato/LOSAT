@@ -750,10 +750,10 @@ fn render_rpsbproc_text(text: &str) -> String {
 // (AGENTS.md rule 2: explicit unsupported errors). `-db` and `-dbsize` are implemented
 // (`blastn/args.rs`), as are the X-drops, `-window_size`, `-off_diagonal_range`, `-no_greedy`
 // (DI-6), `-min_raw_gapped_score` (DI-6b), the database masks (`blastinput::db_mask`, series
-// NP M4a-2) and `-best_hit_overhang` / `-best_hit_score_edge` (series NP O6a).
+// NP M4a-2), `-filtering_db` (`algorithm::blastn::repeat_filter`, line RG item D4) and
+// `-best_hit_overhang` / `-best_hit_score_edge` (series NP O6a).
 const UNPORTED_BLASTN_ARGS: &[&str] = &[
     "entrez_query",
-    "filtering_db",
     "gilist",
     "html",
     "import_search_strategy",
@@ -1402,12 +1402,18 @@ pub struct ReportStream {
 
 impl ReportStream {
     /// The command line's report stream: the `-out` file `out_file` (`None`: standard output),
-    /// behind NCBI's buffer for the organism report (`tax_report`, `report_destination`).
-    pub fn of_cli(out_file: Option<std::io::BufWriter<std::fs::File>>, tax_report: bool) -> Self {
+    /// behind NCBI's buffer for the organism report (`tax_report`, `report_destination`) and the
+    /// hold of a run whose strategy file `strategy` LOSAT refuses (`report_destination`).
+    pub fn of_cli(
+        out_file: Option<std::io::BufWriter<std::fs::File>>,
+        tax_report: bool,
+        strategy: Option<&crate::report::archive::strategy::StrategyExport>,
+    ) -> Self {
         ReportStream {
             inner: report_destination(
                 out_file.map(|file| Box::new(file) as Box<dyn std::io::Write + Send>),
                 tax_report,
+                strategy,
             ),
             failed: false,
         }
@@ -1688,14 +1694,19 @@ impl<'a> NcbiOstream<'a> {
     /// The organism report's standard output on blastx's command line: NCBI's buffer of `cout`
     /// (`NcbiReportBuffer::standard_output`) before the process's standard output
     /// (`report_standard_output`). Nothing comes before the buffer or between it and the device.
-    pub(crate) fn standard_output() -> Self {
-        Self::new(report_destination(None, true))
+    pub(crate) fn standard_output(
+        strategy: Option<&crate::report::archive::strategy::StrategyExport>,
+    ) -> Self {
+        Self::new(report_destination(None, true, strategy))
     }
 
     /// The organism report's `-out` file `file` on blastx's command line: NCBI's `basic_filebuf`
     /// (`NcbiReportBuffer::file`) before the file, as `standard_output`'s.
-    pub(crate) fn file(file: std::fs::File) -> Self {
-        Self::new(report_destination(Some(Box::new(file)), true))
+    pub(crate) fn file(
+        file: std::fs::File,
+        strategy: Option<&crate::report::archive::strategy::StrategyExport>,
+    ) -> Self {
+        Self::new(report_destination(Some(Box::new(file)), true, strategy))
     }
 
     /// The stream of a format other than the organism report on blastx's command line
@@ -1806,16 +1817,23 @@ impl std::io::Write for CliStderr {
 }
 
 /// The report stream's writer of a run: the `-out` file `file` (`None`: standard output), behind
-/// NCBI's buffer for the organism report (`tax_report`, `NcbiReportBuffer`).
+/// NCBI's buffer for the organism report (`tax_report`, `NcbiReportBuffer`) and, nearest the
+/// destination, the hold of a run whose strategy file `strategy` LOSAT refuses
+/// (`strategy::hold_report_send`).
 pub fn report_destination(
     file: Option<Box<dyn std::io::Write + Send>>,
     tax_report: bool,
+    strategy: Option<&crate::report::archive::strategy::StrategyExport>,
 ) -> Box<dyn std::io::Write + Send> {
+    use crate::report::archive::strategy::hold_report_send;
     match (file, tax_report) {
-        (Some(file), true) => Box::new(NcbiReportBuffer::file(file)),
-        (Some(file), false) => file,
-        (None, true) => Box::new(NcbiReportBuffer::standard_output(report_standard_output())),
-        (None, false) => report_standard_output(),
+        (Some(file), true) => Box::new(NcbiReportBuffer::file(hold_report_send(strategy, file))),
+        (Some(file), false) => hold_report_send(strategy, file),
+        (None, true) => Box::new(NcbiReportBuffer::standard_output(hold_report_send(
+            strategy,
+            report_standard_output(),
+        ))),
+        (None, false) => hold_report_send(strategy, report_standard_output()),
     }
 }
 

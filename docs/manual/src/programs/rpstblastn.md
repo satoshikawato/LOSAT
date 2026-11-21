@@ -60,7 +60,7 @@ The output is the same at every `-num_threads` value. It is the output of NCBI's
 
 ## Output
 
-Supported `-outfmt` values: 0 to 16, 18 and 20, every format that NCBI's `rpstblastn` writes. Formats 6, 7, 10 and 20 take a custom field list, including the frame fields such as `qframe`, and 6, 7 and 10 `delim=`. The reports are those of [blastx](blastx.md), with frames, nucleotide coordinates and NCBI's `RPSTBLASTN` header lines. As in NCBI's `rpstblastn`, `positive` and `ppos` count the identities. See [Output formats](../output-formats.md).
+Supported `-outfmt` values: 0 to 16, 18 and 20, every format that NCBI's `rpstblastn` writes. Formats 6, 7, 10 and 20 take a custom field list, including the frame fields such as `qframe`. As in NCBI's `rpstblastn`, `delim=` is read and checked but the columns keep their tab or comma. The reports are those of [blastx](blastx.md), with frames, nucleotide coordinates and NCBI's `RPSTBLASTN` header lines. As in NCBI's `rpstblastn`, `positive` and `ppos` count the identities. See [Output formats](../output-formats.md).
 
 Every format is the bytes of NCBI BLAST+ 2.17.0 `rpstblastn -num_threads 1`, at any thread count, except that a message stored in the archive carries LOSAT's wording where LOSAT words it as its own (the same as `blastp`'s archive). The archive is the input that [rpsbproc](rpsbproc.md) reads.
 

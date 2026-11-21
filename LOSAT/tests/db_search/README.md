@@ -243,6 +243,19 @@ makeblastdb also writes was deleted). Run from `LOSAT/`:
     makeblastdb -in tests/fixtures/blastn_regression/inputs/s60k.fa -dbtype nucl -out tests/db_search/wm_s60k \
         -title "s60k Sakai 2000001-2060000 mutated" -blastdb_version 4
 
+`rpt_d4` (rows `db.rpt.*` and the `rpt.*` cases of `LOSAT/tests/blastn_regression_fixtures.py`, line RG item D4:
+blastn `-filtering_db`) is a database of repeats: pieces of the queries of `wm_query.fa` (some with changed letters
+or indels, some reverse-complemented, two 4 and 7 letters apart) and 500 random letters, written by
+`tests/db_search/make_rpt_d4.py` (a fixed pseudo-random generator, Python 3 only; it also writes the queries
+`rpt_query_lc.fa` and `rpt_edge.fa` of `tests/fixtures/blastn_regression/inputs/`), with only `.nin .nsq .nhr` kept:
+
+    python3 -I tests/db_search/make_rpt_d4.py
+    makeblastdb -in tests/db_search/rpt_d4.fna -dbtype nucl -out tests/db_search/rpt_d4 \
+        -title "rpt_d4 repeats" -blastdb_version 4
+
+`rpt_d4_badcount.nal` (row `db.rpt.badcount.6`) is an alias file of `rpt_d4` whose `STATS_NSEQ` (`2e1`) NCBI cannot
+convert to a number, written by hand.
+
 `txrand.fna` (rows `db.cnt.l0txr.*` through `dbcounts/l0txr.nal`, review 6 R6-M1 of D1a-3): two subjects of 12,000 random
 nucleotides each, with two to five pieces of `tests/db_search/taxfilter/q.fna` (60-250 letters, 20-35 % of them changed,
 half reverse-complemented) written over them (records `g2_3_12000` and `g5_2_12000` of review 6's generator; a fixed

@@ -1009,7 +1009,10 @@ fn a_taxonomy_file_that_does_not_open_throws_at_every_lookup() {
             }
             other => panic!("{file}: {other:?}"),
         };
-        expect(TaxDb::open(&search).err().expect(file));
+        match TaxDb::open(&search) {
+            Err(error) => expect(error),
+            Ok(_) => panic!("{file}: opened"),
+        }
         let lazy = LazyTaxDb::new(search.search.clone());
         for _ in 0..2 {
             let mut messages = Vec::new();

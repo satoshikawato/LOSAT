@@ -859,9 +859,9 @@ fn a_later_read_of_an_lmdb_or_lookup_file_is_losats_own_error() {
         ("pos", 8, None, b"AAA00001.1\n", true),
     ];
     for (ext, keep, taxid_list, seqids, negative) in cases {
-        let dir = std::env::temp_dir().join(format!(
+        let dir = crate::utils::test_dir::temp_dir().join(format!(
             "losat-filter-later-read-{ext}-{}",
-            std::process::id()
+            crate::utils::test_dir::process_id()
         ));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();

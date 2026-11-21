@@ -582,7 +582,7 @@ fn throws_at_every_lookup(error: SeqDbError) -> SeqDbError {
                 path,
                 reason: crate::utils::os_error_text::ncbi_strerror(&source)
                     .map_or_else(|| source.to_string(), |text| text.into_owned()),
-                exception,
+                exception: Box::new(exception),
             }
         }
         other => other,
@@ -601,7 +601,7 @@ enum OpenFailure {
     Throws {
         path: PathBuf,
         reason: String,
-        exception: crate::ncbi_exception::NcbiException,
+        exception: Box<crate::ncbi_exception::NcbiException>,
     },
     /// LOSAT's refusal of the database ([`SeqDbError::Unsupported`]): the file and the reason.
     Refused(PathBuf, String),

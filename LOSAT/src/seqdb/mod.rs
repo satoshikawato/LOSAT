@@ -240,11 +240,11 @@ pub enum SeqDbError {
     /// ([`SeqDbError::memory_file_exception`]) at every name lookup of the run, and so does every
     /// load of a database sequence with a positive taxid (line WQA D18b, 2026-11-21). Where
     /// nothing catches it, NCBI's programs report it as `Error: <what()>` with exit status 255
-    /// ([`SeqDbError::ncbi_exception`]).
+    /// ([`SeqDbError::ncbi_exception`]). The exception is boxed: the error stays small.
     TaxdbThrows {
         path: PathBuf,
         reason: String,
-        exception: crate::ncbi_exception::NcbiException,
+        exception: Box<crate::ncbi_exception::NcbiException>,
     },
 }
 
@@ -322,9 +322,8 @@ impl SeqDbError {
     /// program or blastdbcmd writes `Error: <what()>` and ends with exit status 255.
     pub fn ncbi_exception(&self) -> Option<&crate::ncbi_exception::NcbiException> {
         match self {
-            SeqDbError::Ncbi(exception) | SeqDbError::TaxdbThrows { exception, .. } => {
-                Some(exception)
-            }
+            SeqDbError::Ncbi(exception) => Some(exception),
+            SeqDbError::TaxdbThrows { exception, .. } => Some(exception.as_ref()),
             _ => None,
         }
     }
@@ -513,9 +512,8 @@ impl SeqDbError {
             SeqDbError::Open { .. } | SeqDbError::Map { .. } => self
                 .memory_file_exception()
                 .map(|exception| exception.get_msg().to_vec()),
-            SeqDbError::Ncbi(exception) | SeqDbError::TaxdbThrows { exception, .. } => {
-                Some(exception.get_msg().to_vec())
-            }
+            SeqDbError::Ncbi(exception) => Some(exception.get_msg().to_vec()),
+            SeqDbError::TaxdbThrows { exception, .. } => Some(exception.get_msg().to_vec()),
             _ => self.ncbi_message(),
         }
     }

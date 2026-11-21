@@ -721,7 +721,7 @@ fn a_taxonomy_file_that_throws_is_a_refusal_that_the_prefetch_alone_catches() {
         SeqDbError::TaxdbThrows {
             path: path.clone(),
             reason: "Permission denied".to_owned(),
-            exception,
+            exception: Box::new(exception),
         },
         "BLASTP",
     );

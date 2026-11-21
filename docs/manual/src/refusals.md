@@ -493,7 +493,6 @@ NCBI's errors for a missing `.aux`, `.loo` or `.rps` file and for an empty `.aux
 - Residues in NCBI8aa and NCBIstdaa codes from 28 are refused.
 - A query without a title but with `annot` is refused.
 - A mask location other than a `packed-int` of one Seq-id is refused.
-- Hits whose NaN E-values or bit scores would make NCBI's sort of them read outside its vector are refused. Other NaN E-values and bit scores are kept, sorted as NCBI's `std::sort` sorts them, and printed `-nan`.
 - Data lines on which NCBI's loader reads outside the line are refused: `cdtrack.txt` lines that end without a root or after a field it skips.
 - For nucleotide queries, a first `Std-seg` with fewer than 2 ids is refused.
 - A `Std-seg` without locations, or whose only location is not `null`, is refused. One whose only location is `null` is skipped, as in NCBI.

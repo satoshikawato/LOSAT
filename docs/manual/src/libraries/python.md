@@ -59,7 +59,7 @@ search = pylosat.Search.from_argv("blastn", ["-task", "dc-megablast", "-evalue",
 
 An unknown keyword, or a value of the wrong Python type, raises `TypeError`. The command line's parser checks everything else, so an option means, and fails, as it does there (`ArgumentError`, with the parser's message).
 
-`-query`, `-subject`, `-db`, `-in_pssm`, `-out` and `-outfmt` are not options here: the inputs, the formats and the output file are arguments of `run`, `batches` and `run_to_file`. `psiblast` runs its rounds (`num_iterations`) as on the command line, and its PSSM files (`out_pssm` and `out_ascii_pssm`, with `save_pssm_after_last_round` and `save_each_pssm`) are written where the command line writes them. `psiblast`'s `-in_msa`, `-msa_master_idx` and `-ignore_msa_master` (a PSSM made from a Clustal alignment) are not accepted either: the query of a search is its sequences or a `Pssm`; make the PSSM on the command line with `losat psiblast -in_msa ... -out_pssm`, then read it with `Pssm.from_file`.
+`-query`, `-subject`, `-db`, `-in_pssm`, `-in_msa`, `-out` and `-outfmt` are not options here: the inputs, the formats and the output file are arguments of `run`, `batches` and `run_to_file`. `psiblast` runs its rounds (`num_iterations`) as on the command line, and its PSSM files (`out_pssm` and `out_ascii_pssm`, with `save_pssm_after_last_round` and `save_each_pssm`) are written where the command line writes them. `psiblast` starts from a Clustal alignment as `-in_msa` does: give an `Alignment` as the query, and choose its master with `msa_master_idx` or `ignore_msa_master`, which are options of `Search` like the others (the command line takes them with `-in_msa` only: a search of another query fails with the parser's message).
 
 ## Inputs
 
@@ -67,6 +67,7 @@ An unknown keyword, or a value of the wrong Python type, raises `TypeError`. The
 - **`Sequences.from_text(text)`** and **`Sequences.from_pairs([(title, sequence), ...])`** make FASTA input in memory.
 - **`Database(name)`** is `-db name`. It is found as the command line finds it (`BLASTDB`, `.ncbirc`; see [BLAST databases](../databases.md)). The options of a database search (`taxids`, `seqidlist`, ...) go to `Search` with the others. In a database search, `hsp.s_idx` is the sequence's ordinal id, the same in every search of that database.
 - **`Pssm.from_file(path)`** is `-in_pssm path` of `psiblast` and `tblastn`: a PSSM file as `psiblast -out_pssm` writes it. Its one query is the PSSM's sequence (query 0).
+- **`Alignment.from_file(path)`** is `-in_msa path` of `psiblast`: a multiple sequence alignment, which the search reads as the command line reads it (a file it cannot read fails with the command line's message). Its one query is the alignment's master (query 0), the first row or the one `msa_master_idx` names; the PSSM is built from the alignment as NCBI BLAST+ builds it.
 
 ```python
 search = pylosat.Search("blastn", taxids="9606", evalue=1e-5, num_threads=4)

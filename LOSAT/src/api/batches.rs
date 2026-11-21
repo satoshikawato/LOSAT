@@ -209,8 +209,9 @@ pub fn run_batches<'a>(search: &'a Search, inputs: Inputs<'a>) -> Result<Batches
     let mut start = CallStart::new(search, inputs, &mut start_messages)?;
     // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:534-543 (the PSSM's query
     // searched without a `CBlastInput`, cited at `blastp::blast_engine::search_pssm_query`)
-    // A PSSM query (`Inputs::pssm`) is one batch of its own: NCBI reads no query batches then.
-    let lengths: Vec<usize> = match inputs.pssm {
+    // A PSSM or alignment query (`Inputs::pssm`, `Inputs::msa`) is one batch of its own: NCBI
+    // reads no query batches then.
+    let lengths: Vec<usize> = match inputs.query_file {
         Some(_) => vec![0],
         None => inputs
             .query
@@ -260,7 +261,7 @@ pub fn run_batches<'a>(search: &'a Search, inputs: Inputs<'a>) -> Result<Batches
     let command = search.command(inputs)?;
     // A PSSM query is one batch, whose size NCBI does not read (`BATCH_SIZE`; tblastn_app.cpp:
     // 208-221 reads it for a FASTA query only).
-    let sizes = match inputs.pssm {
+    let sizes = match inputs.query_file {
         Some(_) => BatchSizes::Fixed(1),
         None => batch_sizes(&command, inputs, &mut start, &mut start_messages)
             .map_err(|error| Error::search(&error))?,
@@ -292,8 +293,8 @@ pub fn run_batches<'a>(search: &'a Search, inputs: Inputs<'a>) -> Result<Batches
 }
 
 impl Batches<'_> {
-    /// How many queries the inputs hold (the records, or the one sequence of a PSSM file,
-    /// `Inputs::pssm`): with `Batch::query_indices`, how far the search is.
+    /// How many queries the inputs hold (the records, or the one sequence of a PSSM or alignment
+    /// file, `Inputs::pssm`, `Inputs::msa`): with `Batch::query_indices`, how far the search is.
     pub fn query_count(&self) -> usize {
         self.lengths.len()
     }
@@ -308,7 +309,7 @@ impl Batches<'_> {
 
     /// Searches the batch `range`, as the command line's loop searches it.
     fn search_batch(&mut self, range: Range<usize>) -> Result<Batch, Error> {
-        let inputs = match self.inputs.pssm {
+        let inputs = match self.inputs.query_file {
             Some(_) => self.inputs,
             None => Inputs {
                 query: &self.inputs.query[range.clone()],

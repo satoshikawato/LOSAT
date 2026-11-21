@@ -8,7 +8,7 @@
 #![warn(missing_docs, unused)]
 
 use super::error::Error;
-use super::input::Inputs;
+use super::input::{Inputs, QueryFile};
 use super::program::Program;
 use crate::cli::{Cli, Commands};
 
@@ -17,7 +17,8 @@ use crate::cli::{Cli, Commands};
 /// The options that the library API sets itself and does not take in an argv: the inputs
 /// (`Inputs` gives the records and their names, a database's name, and the PSSM file of a PSSM
 /// query, `-in_pssm` of psiblast and tblastn), the output file and the output format (arguments
-/// of `run_collect`, `run` and `run_to_file`).
+/// of `run_collect`, `run` and `run_to_file`). psiblast's `-in_msa` is owned the same way for that
+/// program only (`Inputs::msa`; `alignment_owned`), and so is not in this list.
 pub const API_OWNED: &[&str] = &["query", "subject", "db", "in_pssm", "out", "outfmt"];
 
 // No NCBI counterpart: the search strategy file (`-export_search_strategy`,
@@ -37,16 +38,21 @@ pub(crate) fn file_options(_program: Program) -> &'static [&'static str] {
     STRATEGY_FILES
 }
 
-/// The options of `program`'s command line that give the query as an alignment (psiblast's
-/// `-in_msa` with `-msa_master_idx` and `-ignore_msa_master`): the library API gives the query as
-/// records or `Inputs::pssm`, no `Inputs` holds an alignment yet, so `validate` refuses them and
-/// `describe` leaves them out.
-pub(crate) fn alignment_options(program: Program) -> &'static [&'static str] {
+/// The option of `program`'s command line that gives the query as an alignment (psiblast's
+/// `-in_msa`): the library API gives the alignment as the inputs (`Inputs::msa`), so `validate`
+/// refuses the option and `describe` leaves it out. Its `-msa_master_idx` and
+/// `-ignore_msa_master` are argv options (`ALIGNMENT_ARGUMENTS`), as on the command line.
+pub(crate) fn alignment_owned(program: Program) -> &'static [&'static str] {
     match program {
-        Program::Psiblast => &["in_msa", "msa_master_idx", "ignore_msa_master"],
+        Program::Psiblast => &["in_msa"],
         _ => &[],
     }
 }
+
+/// The options that choose the master of the query alignment: the command line takes them with
+/// `-in_msa` only (`-msa_master_idx` and `-ignore_msa_master`, psiblast's), which the parser
+/// excludes from `-query`. An argv that holds one is checked with the alignment as the query.
+const ALIGNMENT_ARGUMENTS: &[&str] = &["msa_master_idx", "ignore_msa_master"];
 
 /// A program and an argv that the command line's parser accepted.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -97,10 +103,7 @@ impl Search {
     /// reader's options come from here before the search refuses what the API does not take
     /// (`parse`).
     pub(super) fn any_subject(&self) -> Commands {
-        let query = (QUERY, std::ffi::OsStr::new("query"));
-        parse_words(self.program, &self.argv, query, [SUBJECT, "subject"], None)
-            .or_else(|_| parse_words(self.program, &self.argv, query, [DATABASE, "subject"], None))
-            .expect("validated argv")
+        parse_for_some_inputs(self.program, &self.argv).expect("validated argv")
     }
 
     /// Whether the search's argv has `-parse_deflines` (`read_inputs`).
@@ -123,30 +126,53 @@ impl Search {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1241-1248
     /// The parsed arguments of the search of `inputs`: the command line's `-query` (or `-in_pssm`
-    /// for a PSSM query, `Inputs::pssm`) and `-subject` or `-db` values, and `-out` for
-    /// `run_to_file` (`Search::writing_to`). An option can hold for one kind of input only
-    /// (`-subject_loc` excludes `-db`, `-seqidlist` excludes `-subject`, `-query_loc` excludes
-    /// `-in_pssm`), so this can fail with the parser's message where `validate`, which knows no
-    /// inputs, could not. A PSSM query is psiblast's and tblastn's only, and a file (not `-`).
+    /// for a PSSM query, `Inputs::pssm`, or `-in_msa` for an alignment, `Inputs::msa`) and
+    /// `-subject` or `-db` values, and `-out` for `run_to_file` (`Search::writing_to`). An option
+    /// can hold for one kind of input only (`-subject_loc` excludes `-db`, `-seqidlist` excludes
+    /// `-subject`, `-query_loc` excludes `-in_pssm` and `-in_msa`, `-msa_master_idx` needs
+    /// `-in_msa`), so this can fail with the parser's message where `validate`, which knows no
+    /// inputs, could not. A PSSM query is psiblast's and tblastn's only, an alignment query
+    /// psiblast's, and each a file (not `-`).
     pub(crate) fn command(&self, inputs: Inputs<'_>) -> Result<Commands, Error> {
         let subject_flag = if inputs.database { DATABASE } else { SUBJECT };
-        let query = match inputs.pssm {
-            Some(path) => {
-                if !matches!(self.program, Program::Psiblast | Program::Tblastn) {
-                    return Err(Error::Argv(format!(
-                        "a PSSM query (Inputs::pssm) is searched by psiblast and tblastn, not by {}",
-                        self.program.name()
-                    ).into()));
-                }
-                // `-in_pssm -` reads the command line's standard input, which the library does
-                // not read (`run_to_file` does not write it either).
-                if path.as_os_str() == "-" {
+        let query = match inputs.query_file {
+            Some(file) => {
+                let (flag, programs, what) = match file {
+                    QueryFile::Pssm(_) => {
+                        (PSSM, "psiblast and tblastn", "a PSSM query (Inputs::pssm)")
+                    }
+                    QueryFile::Alignment(_) => (MSA, "psiblast", "a query alignment (Inputs::msa)"),
+                };
+                let takes = match file {
+                    QueryFile::Pssm(_) => {
+                        matches!(self.program, Program::Psiblast | Program::Tblastn)
+                    }
+                    QueryFile::Alignment(_) => self.program == Program::Psiblast,
+                };
+                if !takes {
                     return Err(Error::Argv(
-                        "Inputs::pssm reads a file: `-` is the command line's standard input"
-                            .into(),
+                        format!(
+                            "{what} is searched by {programs}, not by {}",
+                            self.program.name()
+                        )
+                        .into(),
                     ));
                 }
-                (PSSM, path.as_os_str())
+                // `-in_pssm -` and `-in_msa -` read the command line's standard input, which the
+                // library does not read (`run_to_file` does not write it either).
+                if file.path().as_os_str() == "-" {
+                    return Err(Error::Argv(
+                        format!(
+                            "Inputs::{} reads a file: `-` is the command line's standard input",
+                            match file {
+                                QueryFile::Pssm(_) => "pssm",
+                                QueryFile::Alignment(_) => "msa",
+                            }
+                        )
+                        .into(),
+                    ));
+                }
+                (flag, file.path().as_os_str())
             }
             None => (QUERY, std::ffi::OsStr::new(inputs.query_name)),
         };
@@ -163,6 +189,7 @@ impl Search {
 /// The flags of the two kinds of query and of subject.
 const QUERY: &str = "-query";
 const PSSM: &str = "-in_pssm";
+const MSA: &str = "-in_msa";
 const SUBJECT: &str = "-subject";
 const DATABASE: &str = "-db";
 
@@ -175,6 +202,36 @@ fn key(word: &str) -> &str {
 fn option_name(key: &str) -> Option<&str> {
     let name = key.strip_prefix('-')?;
     Some(name.strip_prefix('-').unwrap_or(name))
+}
+
+/// The parsed arguments of an argv that `validate` checks or a search reads before it knows its
+/// inputs: they hold if they hold for one kind of query (`-query`; psiblast's `-in_msa`, which
+/// the options of the alignment need) and one kind of subject (`-subject` or `-db`). The error is
+/// that of the kind the argv's options name (the alignment's, when it has `-msa_master_idx` or
+/// `-ignore_msa_master`), else that of the records.
+fn parse_for_some_inputs(program: Program, argv: &[String]) -> Result<Commands, Error> {
+    let aligned = argv
+        .iter()
+        .any(|word| option_name(key(word)).is_some_and(|name| ALIGNMENT_ARGUMENTS.contains(&name)));
+    let records = (QUERY, std::ffi::OsStr::new("query"));
+    let alignment = (MSA, std::ffi::OsStr::new("alignment"));
+    let queries = match (program, aligned) {
+        (Program::Psiblast, true) => vec![alignment, records],
+        (Program::Psiblast, false) => vec![records, alignment],
+        _ => vec![records],
+    };
+    let mut first_error = None;
+    for query in queries {
+        for subject_flag in [SUBJECT, DATABASE] {
+            match parse(program, argv, query, [subject_flag, "subject"], None) {
+                Ok(commands) => return Ok(commands),
+                Err(error) => {
+                    first_error.get_or_insert(error);
+                }
+            }
+        }
+    }
+    Err(first_error.expect("at least one kind of inputs"))
 }
 
 /// `parse_words` after the refusal of the options that the library API does not take
@@ -240,8 +297,9 @@ fn parse_words(
 /// option means, and fails, exactly as there; the error is the parser's message.
 ///
 /// The library API sets the inputs and the outputs itself, so `-query`, `-subject`, `-db`,
-/// `-in_pssm`, `-out` and `-outfmt` are refused (`API_OWNED`; a PSSM query of psiblast and
-/// tblastn is given as `Inputs::pssm`). It writes no search strategy file
+/// `-in_pssm`, `-in_msa`, `-out` and `-outfmt` are refused (`API_OWNED`; a PSSM query of psiblast
+/// and tblastn is given as `Inputs::pssm`, psiblast's alignment query as `Inputs::msa`, whose
+/// `-msa_master_idx` and `-ignore_msa_master` are options of the argv). It writes no search strategy file
 /// (`-export_search_strategy` is refused, here and by every search). psiblast's PSSM files (`-out_pssm`,
 /// `-out_ascii_pssm`, with `-save_pssm_after_last_round` and `-save_each_pssm`) are written by
 /// every search where the command line writes them, with its names. The checks of the options that the command line makes before it
@@ -265,12 +323,11 @@ pub fn validate(program: Program, argv: &[&str]) -> Result<Search, Error> {
             ).into()));
         }
         // `-in_msa` is the command line's alternative to a query (psiblast's alignment, series PS
-        // item PS6): the library API gives the query as records or `Inputs::pssm`, and no
-        // `Inputs` holds an alignment yet, so the three options of the alignment are refused
-        // (`-msa_master_idx` and `-ignore_msa_master` need `-in_msa`).
-        if alignment_options(program).contains(&name) {
+        // item PS6), given as the inputs (`Inputs::msa`); the other programs' parser knows no
+        // such option.
+        if alignment_owned(program).contains(&name) {
             return Err(Error::Argv(format!(
-                "{key} is not accepted by the library API: the query is given as records or a PSSM (Inputs::pssm), and an alignment as the query is not supported"
+                "{key} is not accepted by the library API: a query alignment is given as the inputs (Inputs::msa)"
             ).into()));
         }
         if API_OWNED.contains(&name) {
@@ -282,11 +339,8 @@ pub fn validate(program: Program, argv: &[&str]) -> Result<Search, Error> {
     let argv: Vec<String> = argv.iter().map(|word| word.to_string()).collect();
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2377-2381
     // An argv is checked before the inputs are known: it holds if it holds for one kind of
-    // subject, and the search parses it again for the kind it has (`Search::command`).
-    let query = (QUERY, std::ffi::OsStr::new("query"));
-    if let Err(error) = parse(program, &argv, query, [SUBJECT, "subject"], None) {
-        parse(program, &argv, query, [DATABASE, "subject"], None).map_err(|_| error)?;
-    }
+    // query and subject, and the search parses it again for the kind it has (`Search::command`).
+    parse_for_some_inputs(program, &argv)?;
     Ok(Search {
         program,
         argv,
@@ -384,16 +438,16 @@ mod tests {
         }
     }
 
-    // N5 of the PS6 review: the three options of psiblast's alignment query are refused by
-    // `validate`, in the words below, and only for psiblast (another program's parser rejects
-    // them as unknown options).
+    // Line LIB item 1.6: psiblast's alignment query is an input (`Inputs::msa`), which the search
+    // gives the parser as `-in_msa` in place of `-query`; in an argv the option is the API's, and
+    // only for psiblast (another program's parser rejects it as an unknown option).
     #[test]
-    fn the_alignment_options_are_refused_by_validate() {
+    fn the_alignment_option_is_refused_by_validate() {
         for argv in [
             &["-in_msa", "m.aln"][..],
             &["-in_msa=m.aln"],
-            &["-evalue", "1", "--msa_master_idx", "2"],
-            &["-ignore_msa_master"],
+            &["-evalue", "1", "--in_msa", "m.aln"],
+            &["-evalue", "1", "-in_msa", "m.aln"],
         ] {
             let word = argv
                 .iter()
@@ -403,7 +457,7 @@ mod tests {
             assert_eq!(
                 validate(Program::Psiblast, argv),
                 Err(Error::Argv(format!(
-                    "{} is not accepted by the library API: the query is given as records or a PSSM (Inputs::pssm), and an alignment as the query is not supported",
+                    "{} is not accepted by the library API: a query alignment is given as the inputs (Inputs::msa)",
                     key(word)
                 ).into())),
                 "{argv:?}"
@@ -412,10 +466,113 @@ mod tests {
         for program in [Program::Blastp, Program::Tblastn] {
             let error = validate(program, &["-in_msa", "m.aln"]).unwrap_err();
             assert!(
-                !error
-                    .to_string_lossy()
-                    .contains("an alignment as the query"),
+                !error.to_string_lossy().contains("library API"),
                 "{program}: {error}"
+            );
+        }
+    }
+
+    // Line LIB item 1.6: `-msa_master_idx` and `-ignore_msa_master` are options of the argv that
+    // `validate` takes, although the parser takes them with `-in_msa` only; the search gives the
+    // parser the alignment as the query (`Inputs::msa`), and any other inputs fail with the
+    // parser's own message, as the command line without `-in_msa`.
+    #[test]
+    fn the_alignment_master_options_go_with_the_alignment_input() {
+        let path = std::path::Path::new("m.aln");
+        let records = crate::api::read_fasta(Program::Psiblast, Role::Query, b">q\nMKT\n").unwrap();
+        for argv in [
+            &["-msa_master_idx", "2"][..],
+            &["-msa_master_idx=2", "-evalue", "1"],
+            &["-msa_master_idx", "3", "-num_iterations", "2"],
+            &["-ignore_msa_master"],
+        ] {
+            let search = validate(Program::Psiblast, argv).unwrap();
+            // The reader's options come from the argv before the inputs are known.
+            assert!(!search.parse_deflines());
+            for inputs in [
+                Inputs::msa(path, &records),
+                Inputs::msa_database(path, "db"),
+            ] {
+                assert_eq!(inputs.query_count(), 1);
+                match search.command(inputs.named("q.faa", "s.faa")).unwrap() {
+                    Commands::Psiblast(args) => {
+                        assert_eq!(args.in_msa.as_deref(), Some(path), "{argv:?}");
+                        assert_eq!(args.msa_master_idx.is_some(), argv[0].contains("idx"));
+                        assert_eq!(args.ignore_msa_master, argv[0].contains("ignore"));
+                    }
+                    other => panic!("{other:?}"),
+                }
+            }
+            // Without the alignment the parser's message: the options need `-in_msa`.
+            let error = search.command(Inputs::new(&records, &records)).unwrap_err();
+            assert!(matches!(error, Error::Argv(_)), "{argv:?}: {error:?}");
+            assert!(!error.to_string().contains("library API"), "{error}");
+            let error = search.command(Inputs::pssm(path, &records)).unwrap_err();
+            assert!(matches!(error, Error::Argv(_)), "{argv:?}: {error:?}");
+        }
+        // A value the parser refuses is its message, with the alignment as the query.
+        let error = validate(Program::Psiblast, &["-msa_master_idx", "0"]).unwrap_err();
+        assert!(matches!(error, Error::Argv(_)), "{error:?}");
+        assert!(!error.to_string().contains("library API"), "{error}");
+        // The two options exclude each other; `-query_loc` excludes the alignment.
+        assert!(validate(
+            Program::Psiblast,
+            &["-msa_master_idx", "2", "-ignore_msa_master"]
+        )
+        .is_err());
+        let ranged = validate(Program::Psiblast, &["-query_loc", "1-10"]).unwrap();
+        let error = ranged.command(Inputs::msa(path, &[])).unwrap_err();
+        assert!(
+            matches!(&error, Error::Argv(_)) && error.to_string().contains("cannot be used with"),
+            "{error}"
+        );
+        // The other programs have no such options: the parser's message.
+        for program in [Program::Blastn, Program::Blastp, Program::Tblastn] {
+            let error = validate(program, &["-msa_master_idx", "2"]).unwrap_err();
+            assert!(
+                !error.to_string().contains("library API"),
+                "{program}: {error}"
+            );
+        }
+    }
+
+    // Line LIB item 1.6: an alignment query is psiblast's (a PSSM query is psiblast's and
+    // tblastn's), and a file, not the standard input.
+    #[test]
+    fn an_alignment_query_is_psiblasts_and_a_file() {
+        let path = std::path::Path::new("m.aln");
+        let search = validate(Program::Psiblast, &["-evalue", "1"]).unwrap();
+        for inputs in [Inputs::msa(path, &[]), Inputs::msa_database(path, "db")] {
+            let in_msa = match search.command(inputs.named("q.faa", "s.faa")).unwrap() {
+                Commands::Psiblast(args) => args.in_msa,
+                other => panic!("{other:?}"),
+            };
+            assert_eq!(in_msa.as_deref(), Some(path));
+        }
+        let standard_input = std::path::Path::new("-");
+        let error = search
+            .command(Inputs::msa(standard_input, &[]))
+            .unwrap_err();
+        assert!(matches!(error, Error::Argv(_)), "{error:?}");
+        assert!(error.to_string().contains("standard input"), "{error}");
+        for program in [
+            Program::Blastn,
+            Program::Blastp,
+            Program::Blastx,
+            Program::Tblastn,
+            Program::Tblastx,
+        ] {
+            let search = validate(program, &[]).unwrap();
+            assert_eq!(
+                search.command(Inputs::msa(path, &[])).unwrap_err(),
+                Error::Argv(
+                    format!(
+                        "a query alignment (Inputs::msa) is searched by psiblast, not by {}",
+                        program.name()
+                    )
+                    .into()
+                ),
+                "{program}"
             );
         }
     }

@@ -2319,6 +2319,237 @@ fn a_pssm_query_is_the_command_lines() {
     std::fs::remove_dir_all(&directory).unwrap();
 }
 
+/// A query alignment (line LIB item 1.6): `Inputs::msa` and `Inputs::msa_database`, the command
+/// line's `-in_msa` of psiblast, against records and a database. The PS6 alignments are those
+/// `tests/db_search_manifest/psiblast.tsv` freezes from NCBI 2.17.0; the whole set of them
+/// through the API is `tests/db_search_fixtures.py check --library` (rows `db.ps.inmsa.*`).
+struct MsaCase {
+    /// Under `tests/fixtures/msa`.
+    alignment: &'static str,
+    /// Under `tests/`: a FASTA subject set (`-subject`), or a database (`-db`).
+    subject: &'static str,
+    database: bool,
+    options: &'static [&'static str],
+    /// The frozen NCBI bytes of the outfmt 6 report, a row of the manifest (`db.ps.inmsa.*`), when
+    /// the case is that row's.
+    frozen: Option<&'static str>,
+}
+
+const MSA_CASES: &[MsaCase] = &[
+    MsaCase {
+        alignment: "ps6_b_db_0.aln",
+        subject: "db_search/paja",
+        database: true,
+        options: &[],
+        frozen: Some("db.ps.inmsa.b.db.6"),
+    },
+    MsaCase {
+        alignment: "ps6_b_db_0.aln",
+        subject: "fasta/PajaWSV.faa",
+        database: false,
+        options: &[],
+        frozen: None,
+    },
+    MsaCase {
+        alignment: "ps6_b_db_0.aln",
+        subject: "db_search/paja",
+        database: true,
+        options: &["-msa_master_idx", "2"],
+        frozen: None,
+    },
+    MsaCase {
+        alignment: "ps6_b_db_0.aln",
+        subject: "db_search/paja",
+        database: true,
+        options: &["-ignore_msa_master"],
+        frozen: None,
+    },
+    // The rounds of an alignment query, with the master chosen.
+    MsaCase {
+        alignment: "ps6_nc_db_0.aln",
+        subject: "db_search/paja",
+        database: true,
+        options: &["-msa_master_idx", "2", "-num_iterations", "2"],
+        frozen: None,
+    },
+];
+
+impl MsaCase {
+    fn file(&self) -> PathBuf {
+        PathBuf::from(engine_tests("fixtures/msa")).join(self.alignment)
+    }
+
+    /// The command line's report for one `-outfmt`, and its standard error.
+    fn cli(&self, extra: &[&str], outfmt: &str) -> (Vec<u8>, Vec<u8>) {
+        let output = command(env!("CARGO_BIN_EXE_losat"))
+            .args(["psiblast", "-in_msa"])
+            .arg(self.file())
+            .arg(if self.database { "-db" } else { "-subject" })
+            .arg(engine_tests(self.subject))
+            .args(self.options)
+            .args(extra)
+            .arg("-outfmt")
+            .arg(outfmt)
+            .output()
+            .expect("run the command line");
+        assert!(
+            output.status.success(),
+            "{} {:?} -outfmt {outfmt}: {}",
+            self.alignment,
+            self.options,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        (output.stdout, output.stderr)
+    }
+}
+
+/// The command line's standard error for a psiblast `-in_msa` run that fails, with `words`.
+fn msa_cli_error(alignment: &Path, words: &[&str]) -> Vec<u8> {
+    let output = command(env!("CARGO_BIN_EXE_losat"))
+        .args(["psiblast", "-in_msa"])
+        .arg(alignment)
+        .arg("-subject")
+        .arg(fixture("PajaWSV.faa"))
+        .args(words)
+        .args(["-outfmt", "6"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success(), "{alignment:?} {words:?}");
+    output.stderr
+}
+
+#[test]
+fn a_query_alignment_is_the_command_lines() {
+    for case in MSA_CASES {
+        let context = format!("{} {} {:?}", case.alignment, case.subject, case.options);
+        let alignment = case.file();
+        let search = validate(Program::Psiblast, case.options).unwrap();
+        let subject = engine_tests(case.subject);
+        let subjects = match case.database {
+            true => Vec::new(),
+            false => read_fasta(
+                Program::Psiblast,
+                Role::Subject,
+                &std::fs::read(&subject).unwrap(),
+            )
+            .unwrap(),
+        };
+        let inputs = match case.database {
+            true => Inputs::msa_database(&alignment, &subject),
+            false => Inputs::msa(&alignment, &subjects).named("ignored", &subject),
+        };
+        let formats = ["6", "0", "7", COLUMNS];
+        let outcome = run_collect(&search, inputs, &formats)
+            .unwrap_or_else(|error| panic!("{context}: {error}"));
+        for (report, outfmt) in outcome.reports.iter().zip(formats) {
+            let (stdout, stderr) = case.cli(&[], outfmt);
+            assert!(report.bytes == stdout, "{context} -outfmt {outfmt}");
+            if outfmt == "6" {
+                assert_eq!(
+                    outcome.diagnostics, stderr,
+                    "{context}: the diagnostics are the command line's"
+                );
+            }
+        }
+        // The report NCBI 2.17.0 wrote for the row of the manifest.
+        if let Some(row) = case.frozen {
+            let frozen = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/db_search")
+                .join(format!("{row}.out"));
+            assert!(
+                outcome.reports[0].bytes == std::fs::read(frozen).unwrap(),
+                "{context}: NCBI's bytes"
+            );
+        }
+        // One query, the alignment's master: query 0, with its statistics and rounds.
+        assert!(!outcome.hsps.is_empty(), "{context}");
+        assert!(outcome.hsps.iter().all(|hsp| hsp.q_idx == 0), "{context}");
+        assert_eq!(outcome.query_stats.len(), 1, "{context}");
+        assert!(outcome.query_stats[0].is_some(), "{context}");
+        let rounds = outcome.hsps.iter().map(|hsp| hsp.round).max().unwrap();
+        assert_eq!(outcome.rounds[0].stats.len() as u32, rounds, "{context}");
+        if case.options.contains(&"-num_iterations") {
+            assert!(rounds > 1, "{context}");
+        }
+        // One batch with the same records.
+        let batches = run_batches(&search, inputs).unwrap();
+        assert_eq!(batches.query_count(), 1, "{context}");
+        let batches: Vec<_> = batches.map(Result::unwrap).collect();
+        assert_eq!(batches.len(), 1, "{context}");
+        assert_eq!(batches[0].query_indices, 0..1, "{context}");
+        assert_eq!(batches[0].hsps, outcome.hsps, "{context}");
+        assert_eq!(batches[0].rounds, outcome.rounds, "{context}");
+    }
+    // `-ignore_msa_master` and `-msa_master_idx` change the PSSM, so they change the report.
+    let report = |options: &[&str]| {
+        let search = validate(Program::Psiblast, options).unwrap();
+        let alignment = MSA_CASES[0].file();
+        let database = engine_tests("db_search/paja");
+        run_collect(&search, Inputs::msa_database(&alignment, &database), &["0"])
+            .unwrap()
+            .reports
+            .remove(0)
+            .bytes
+    };
+    let plain = report(&[]);
+    assert!(plain != report(&["-msa_master_idx", "2"]));
+    assert!(plain != report(&["-ignore_msa_master"]));
+}
+
+#[test]
+fn a_query_alignment_that_fails_gives_the_command_lines_message() {
+    let directory = PathBuf::from(engine_tests("fixtures/msa"));
+    let subjects = read_fasta(
+        Program::Psiblast,
+        Role::Subject,
+        &std::fs::read(fixture("PajaWSV.faa")).unwrap(),
+    )
+    .unwrap();
+    let missing = temp_path("none.aln");
+    for (alignment, words) in [
+        // A file that is none of the formats, a master index past the rows, a missing file.
+        (directory.join("ps6_f_unknown.aln"), &[][..]),
+        (
+            directory.join("ps6_nc_db_0.aln"),
+            &["-msa_master_idx", "27"][..],
+        ),
+        (missing, &[][..]),
+    ] {
+        let search = validate(Program::Psiblast, words).unwrap();
+        let error = run_collect(&search, Inputs::msa(&alignment, &subjects), &["6"]).unwrap_err();
+        assert_eq!(
+            error.message().trim_ascii_end(),
+            msa_cli_error(&alignment, words).trim_ascii_end(),
+            "{alignment:?} {words:?}: {error}"
+        );
+    }
+    // The alignment is psiblast's: another program refuses it, as it refuses a PSSM it cannot take.
+    let alignment = directory.join("ps6_b_db_0.aln");
+    for program in [
+        Program::Blastp,
+        Program::Blastn,
+        Program::Blastx,
+        Program::Tblastn,
+        Program::Tblastx,
+    ] {
+        let search = validate(program, &[]).unwrap();
+        let error = run_collect(&search, Inputs::msa(&alignment, &[]), &["6"]).unwrap_err();
+        assert!(
+            matches!(error, Error::Argv(_))
+                && error
+                    .to_string()
+                    .contains(&format!("is searched by psiblast, not by {program}")),
+            "{program}: {error}"
+        );
+    }
+    // The master options need the alignment, as `-in_msa` is their option on the command line.
+    let search = validate(Program::Psiblast, &["-msa_master_idx", "2"]).unwrap();
+    let error = run_collect(&search, Inputs::new(&subjects, &subjects), &["6"]).unwrap_err();
+    assert!(matches!(error, Error::Argv(_)), "{error:?}");
+    let error = validate(Program::Psiblast, &["-in_msa", "m.aln"]).unwrap_err();
+    assert!(error.to_string().contains("(Inputs::msa)"), "{error}");
+}
+
 /// Each round's `Gapped` Karlin-Altschul values (lambda, K, H) and effective search space in
 /// psiblast's pairwise report of one query, round 1 first.
 fn round_footers(report: &str) -> Vec<([f64; 3], i64)> {

@@ -1023,6 +1023,7 @@ fn search(
             message,
             native: None,
             fault: true,
+            kept: Vec::new(),
         });
     }
     let mut writers: Vec<StreamWriter> = formats

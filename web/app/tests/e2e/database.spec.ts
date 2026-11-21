@@ -9,7 +9,7 @@
 // and the thread workers read from the disk with FileReaderSync, and one of them changed after its pick, which the
 // browser no longer reads (review of D12a, low 5).
 import { createHash } from 'node:crypto';
-import { appendFileSync, copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { appendFileSync, copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { Page } from '@playwright/test';
@@ -150,10 +150,16 @@ test('a database file changed or removed after its pick fails the run with the e
       return target;
     });
     await pick(page, paths);
-    // The sequences change after the pick. Chromium and WebKit no longer read the picked File (NotReadableError, which
-    // the host gives the engine as EIO); Firefox reads the file's bytes as they are now (observed 2026-11-21), so its
-    // run completes.
+    // The sequences change after the pick, and their modification time moves to a later whole second. Chromium and
+    // WebKit then no longer read the picked File (NotReadableError, which the host gives the engine as EIO). WebKit
+    // compares the times in whole seconds: a change written within the second of the time that the pick saw is read
+    // as the file is now, up to the picked size, without an error (observed 2026-11-21: CI's WebKit appended within
+    // that second and its run completed), so the test sets the time. Firefox reads the file's bytes as they are now
+    // whatever the time (observed 2026-11-21), so its run completes.
+    const picked = statSync(sequences).mtimeMs;
     appendFileSync(sequences, Buffer.from([0]));
+    const later = new Date((Math.floor(picked / 1000) + 2) * 1000);
+    utimesSync(sequences, later, later);
     const changed = await run();
     console.log(`${browserName} changed ${search.id}: ${changed.error ?? `ran, outfmt 6 ${changed.sha256}`}`);
     if (browserName === 'firefox') expect(changed.error, browserName).toBeUndefined();

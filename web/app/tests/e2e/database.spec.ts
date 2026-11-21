@@ -25,9 +25,11 @@ test.skip(ENGINE === undefined, NO_ENGINE_REASON);
 test.setTimeout(600_000);
 
 const LOSAT = join(REPOSITORY, 'LOSAT');
-// LOSAT's error for a database file whose read fails (seqdb's SeqDbError::Io: the file's path, then the C library's
-// words for the EIO that the host gives for the browser's NotReadableError), as the command line reports a read error.
-const CHANGED_FILE_ERROR = /tests\/db_search\/paja\.psq: I\/O error/;
+// The error of a database's sequence file that cannot be read where the search opens it (the host gives the browser's
+// NotReadableError as EIO): NCBI's error of a sequence file that it cannot map, as the command line reports it, since
+// LOSAT reads the first byte of each file where NCBI maps it (line WQA D18, #1441). The engine's prefix of the error is
+// left out.
+const CHANGED_FILE_ERROR = /engine error: Database memory map file error/;
 const ROWS = ['db.blastn.mega.6', 'db.d1.6', 'db.blastx.default.6', 'db.tblastn.default.6', 'db.tblastx.default.6', 'db.sl.bp.bsl.6', 'db.tf.bp.nosql.6'];
 
 interface Row {

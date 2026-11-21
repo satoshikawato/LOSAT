@@ -12,9 +12,10 @@
 //! (`Range`): empty ranges (`to < from`, and `to` = 4294967295 whose open end wraps to 0) and the
 //! whole range (`0..4294967295`) take part in the sort and the merge exactly as in NCBI, an empty
 //! result becomes an `empty` Seq-loc that the final `CSeq_loc_CI` skips, a whole one a `whole`
-//! Seq-loc that the writer's bounds check then refuses as NCBI's does. The sort is libstdc++'s
-//! `std::sort` (`stl_sort`), because the order in which it leaves equivalent empty ranges can
-//! change the merge.
+//! Seq-loc that the writer's bounds check then refuses as NCBI's does. The order in which the sort
+//! leaves different empty ranges, which the comparators do not order, can change the merge, so the
+//! sort (`sort_as_observed`) makes the comparator calls and leaves the order that the C++ `sort` of
+//! NCBI's build was observed to (`tests/unit/sort_observed/README.md`).
 //!
 //! Handles of `giim` Seq-ids are kept in a list per number, as NCBI's `CSeq_id_Giim_Tree`
 //! (seq_id_tree.hpp:966-967, seq_id_tree.cpp:2926-2964): a Seq-id finds the first stored handle of
@@ -191,6 +192,179 @@ fn merge_ranges(rg1: &mut Range, rg2: Range, reverse: bool) -> bool {
         return true;
     }
     false
+}
+
+// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_loc.cpp:4565-4572
+// NCBI sorts the ranges of a group with the C++ library's `sort`, whose order of the elements that
+// the comparator leaves unordered is not specified. The functions below were written from what the
+// `sort` of g++ 13.3 was seen to do with a comparator that recorded each call (the two elements it
+// was handed, in argument order, and its answer) and with the order it left: every answer sequence
+// of a strict weak order for 0 to 9 elements, random strict weak orders with many ties, NCBI's range
+// comparators, and comparators that decide lazily to force long chains of splits
+// (`tests/unit/sort_observed/`). They make the same calls, in the same order, and leave the same
+// order; no library source was read.
+
+/// Stretches of at most this many elements are not split; the closing insertion pass orders them.
+const SPLIT_ABOVE: usize = 16;
+
+/// Sorts `v` by `less` as observed: stretches longer than [`SPLIT_ABOVE`] are split around a pivot
+/// (`split_stretch`) at most `2 * floor(log2(len))` times along any chain of splits, a stretch that
+/// would need more is ordered through a heap (`heap_order`), and an insertion pass over the whole
+/// slice finishes (`insertion_pass`). Fewer than two elements: no call.
+fn sort_as_observed<T: Copy>(v: &mut [T], less: &mut impl FnMut(&T, &T) -> bool) {
+    let len = v.len();
+    if len < 2 {
+        return;
+    }
+    split_stretch(v, 2 * len.ilog2() as usize, less);
+    insertion_pass(v, less);
+}
+
+/// While `v` is longer than [`SPLIT_ABOVE`]: with no split left, orders it through a heap; else
+/// moves a pivot to its front, splits it, handles the part right of the cut first (with the splits
+/// left at this level) and then goes on with the part left of it.
+fn split_stretch<T: Copy>(v: &mut [T], mut splits: usize, less: &mut impl FnMut(&T, &T) -> bool) {
+    let mut end = v.len();
+    while end > SPLIT_ABOVE {
+        if splits == 0 {
+            heap_order(&mut v[..end], less);
+            return;
+        }
+        splits -= 1;
+        pivot_to_front(&mut v[..end], less);
+        let cut = split_around_front(&mut v[..end], less);
+        split_stretch(&mut v[cut..end], splits, less);
+        end = cut;
+    }
+}
+
+/// Swaps into `v[0]` the middle one of `v[1]`, `v[len / 2]` and `v[len - 1]`. The calls: first
+/// `(v[1], v[len / 2])`; if true, `(v[len / 2], v[len - 1])` (true: `v[len / 2]`), then
+/// `(v[1], v[len - 1])` (true: `v[len - 1]`, false: `v[1]`); if false, `(v[1], v[len - 1])` (true:
+/// `v[1]`), then `(v[len / 2], v[len - 1])` (true: `v[len - 1]`, false: `v[len / 2]`).
+fn pivot_to_front<T: Copy>(v: &mut [T], less: &mut impl FnMut(&T, &T) -> bool) {
+    let (a, b, c) = (1, v.len() / 2, v.len() - 1);
+    let chosen = if less(&v[a], &v[b]) {
+        if less(&v[b], &v[c]) {
+            b
+        } else if less(&v[a], &v[c]) {
+            c
+        } else {
+            a
+        }
+    } else if less(&v[a], &v[c]) {
+        a
+    } else if less(&v[b], &v[c]) {
+        c
+    } else {
+        b
+    };
+    v.swap(0, chosen);
+}
+
+/// Splits `v[1..]` around the pivot `v[0]`, which stays in place, and returns the cut. A left
+/// mark from 1 moves right while `(element, pivot)` is true; a right mark from the end moves left,
+/// one step first and then while `(pivot, element)` is true. When the left mark is not before the
+/// right one, the left mark is the cut; else the two elements are swapped, the left mark steps
+/// right and the scan goes on. A strict weak order always stops both marks inside `v`.
+fn split_around_front<T: Copy>(v: &mut [T], less: &mut impl FnMut(&T, &T) -> bool) -> usize {
+    let mut left = 1;
+    let mut right = v.len();
+    loop {
+        while less(&v[left], &v[0]) {
+            left += 1;
+        }
+        right -= 1;
+        while less(&v[0], &v[right]) {
+            right -= 1;
+        }
+        if left >= right {
+            return left;
+        }
+        v.swap(left, right);
+        left += 1;
+    }
+}
+
+/// Orders `v` through a heap with its greatest element at the front, the way `sort` did on a
+/// stretch it could not split any more and `partial_sort` does over a whole range: the heap is
+/// built by sinking the elements from position `(len - 2) / 2` down to 0, then the front is swapped
+/// to the end of the heap, which shrinks by one, until one element is left.
+fn heap_order<T: Copy>(v: &mut [T], less: &mut impl FnMut(&T, &T) -> bool) {
+    let len = v.len();
+    if len < 2 {
+        return;
+    }
+    let mut top = (len - 2) / 2;
+    loop {
+        let value = v[top];
+        sink(v, top, value, less);
+        if top == 0 {
+            break;
+        }
+        top -= 1;
+    }
+    for end in (1..len).rev() {
+        let value = v[end];
+        v[end] = v[0];
+        sink(&mut v[..end], 0, value, less);
+    }
+}
+
+/// Puts `value` into the heap `heap` whose position `top` is free: the free position moves down,
+/// each step to the greater child (the right one unless `(right, left)` is true), until it has no
+/// two children; at an even length a free position whose only child is the last element takes that
+/// child. Then `value` climbs from there towards `top` while `(parent, value)` is true.
+fn sink<T: Copy>(heap: &mut [T], top: usize, value: T, less: &mut impl FnMut(&T, &T) -> bool) {
+    let len = heap.len();
+    let mut free = top;
+    let mut child = top;
+    while child < (len - 1) / 2 {
+        child = 2 * (child + 1);
+        if less(&heap[child], &heap[child - 1]) {
+            child -= 1;
+        }
+        heap[free] = heap[child];
+        free = child;
+    }
+    if len.is_multiple_of(2) && child == (len - 2) / 2 {
+        child = 2 * (child + 1);
+        heap[free] = heap[child - 1];
+        free = child - 1;
+    }
+    while free > top {
+        let parent = (free - 1) / 2;
+        if !less(&heap[parent], &value) {
+            break;
+        }
+        heap[free] = heap[parent];
+        free = parent;
+    }
+    heap[free] = value;
+}
+
+/// Inserts each element, from the second on, into the ordered elements before it. Among the
+/// first [`SPLIT_ABOVE`] positions an element is first compared with the front, `(element,
+/// v[0])`, and goes to the front if that is true; otherwise (and always from position
+/// [`SPLIT_ABOVE`] on) it moves left past its neighbours while `(element, neighbour)` is true.
+/// After the splits a least element is among the first [`SPLIT_ABOVE`] positions, so under a
+/// strict weak order the walk left stops inside `v`.
+fn insertion_pass<T: Copy>(v: &mut [T], less: &mut impl FnMut(&T, &T) -> bool) {
+    let head = v.len().min(SPLIT_ABOVE);
+    for i in 1..v.len() {
+        let value = v[i];
+        if i < head && less(&value, &v[0]) {
+            v.copy_within(0..i, 1);
+            v[0] = value;
+            continue;
+        }
+        let mut place = i;
+        while less(&value, &v[place - 1]) {
+            v[place] = v[place - 1];
+            place -= 1;
+        }
+        v[place] = value;
+    }
 }
 
 /// What `CSeq_id_Handle::GetHandle` makes of a Seq-id.
@@ -440,7 +614,9 @@ fn add_locs(tree: &mut GiimTree, l1: &Loc, l2: &Loc) -> Loc {
                     reverse: false,
                 });
             } else {
-                stl_sort(ranges, &|a: &Range, b: &Range| range_less(a, b, reverse));
+                sort_as_observed(ranges, &mut |a: &Range, b: &Range| {
+                    range_less(a, b, reverse)
+                });
                 let id = id_index[index];
                 let mut push = |rg: Range| {
                     pushed.push(if rg.is_whole() {

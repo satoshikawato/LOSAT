@@ -1,4 +1,4 @@
-//! Tests of `CSeq_loc::Add` as ported (`range_set`): libstdc++'s sort, empty and whole ranges,
+//! Tests of `CSeq_loc::Add` as ported (`range_set`): the sort as observed, empty and whole ranges,
 //! the handles that the address orders, `giim` handles. The answers are NCBI's: the review probes
 //! of M4a-1 (`p1`, `p1b`, `p4`, makeblastdb 2.17.0), `tests/seqdb/mask_ids/cases.tsv` and the
 //! `seqloc_*` files of `tests/seqdb/mask_parse` (run end to end in `tests_e2e.rs`).
@@ -59,6 +59,136 @@ fn parse_ranges(text: &str) -> Vec<Range> {
             }
         })
         .collect()
+}
+
+/// One line of `tests/unit/sort_observed/sort_calls.txt` (fields in its README): `sort` (`s`) or
+/// `partial_sort` over the whole range (`p`), the length, the answers, the calls (the positions
+/// handed as first and second argument), the order after the sort, and the ranges of a line made
+/// with NCBI's comparators (`G`: whether the comparator was the reverse one, and the ranges).
+struct ObservedSort {
+    whole_sort: bool,
+    len: usize,
+    answers: Vec<bool>,
+    calls: Vec<(usize, usize)>,
+    order: Vec<usize>,
+    ranges: Option<(bool, Vec<Range>)>,
+}
+
+fn observed_sort(line: &str) -> ObservedSort {
+    let fields: Vec<&str> = line.split(' ').collect();
+    let list = |field: &str| -> Vec<&str> {
+        if field == "-" {
+            Vec::new()
+        } else {
+            field.split(',').collect()
+        }
+    };
+    let answers = if fields[3] == "-" {
+        Vec::new()
+    } else {
+        fields[3].bytes().map(|answer| answer == b'1').collect()
+    };
+    let calls = list(fields[4])
+        .iter()
+        .map(|call| {
+            let (first, second) = call.split_once(':').unwrap();
+            (first.parse().unwrap(), second.parse().unwrap())
+        })
+        .collect();
+    let order = list(fields[5]).iter().map(|k| k.parse().unwrap()).collect();
+    assert_eq!(fields[6], "0", "a read outside the range: {line}");
+    let ranges = (fields[0] == "G").then(|| {
+        let (reverse, ranges) = fields[7].split_once('/').unwrap();
+        let ranges = list(ranges).join(" ");
+        (reverse == "1", parse_ranges(&ranges))
+    });
+    ObservedSort {
+        whole_sort: fields[1] == "s",
+        len: fields[2].parse().unwrap(),
+        answers,
+        calls,
+        order,
+        ranges,
+    }
+}
+
+// For each recorded sort (every answer sequence of a strict weak order for 0 to 5 elements, random
+// strict weak orders with ties, NCBI's comparators on NCBI-shaped ranges, comparators that decide
+// lazily and so reach the heap, and `partial_sort` over whole ranges), `sort_as_observed` (or
+// `heap_order` for `partial_sort`) hands the comparator the positions that g++ 13 handed it, in the
+// same argument order and sequence, and leaves the same order. The lines made with NCBI's
+// comparators also give the same answers when the comparator is `range_less` itself.
+#[test]
+fn the_sort_makes_the_observed_calls() {
+    let records = include_str!("../../../tests/unit/sort_observed/sort_calls.txt");
+    let (mut sorts, mut all_calls, mut by_ranges) = (0, 0, 0);
+    for line in records.lines() {
+        let observed = observed_sort(line);
+        let mut order: Vec<usize> = (0..observed.len).collect();
+        let mut asked = Vec::new();
+        let mut less = |&first: &usize, &second: &usize| {
+            asked.push((first, second));
+            observed
+                .answers
+                .get(asked.len() - 1)
+                .copied()
+                .unwrap_or(false)
+        };
+        if observed.whole_sort {
+            sort_as_observed(&mut order, &mut less);
+        } else {
+            heap_order(&mut order, &mut less);
+        }
+        assert_eq!(asked, observed.calls, "{line}");
+        assert_eq!(order, observed.order, "{line}");
+        if let Some((reverse, ranges)) = &observed.ranges {
+            let mut sorted = ranges.clone();
+            let mut answers = Vec::new();
+            sort_as_observed(&mut sorted, &mut |a: &Range, b: &Range| {
+                answers.push(range_less(a, b, *reverse));
+                answers[answers.len() - 1]
+            });
+            assert_eq!(answers, observed.answers, "{line}");
+            let expected: Vec<Range> = observed.order.iter().map(|&k| ranges[k]).collect();
+            assert_eq!(sorted, expected, "{line}");
+            by_ranges += 1;
+        }
+        sorts += 1;
+        all_calls += observed.calls.len();
+    }
+    assert_eq!((sorts, all_calls, by_ranges), (391, 24798, 20));
+}
+
+// `tests/seqdb/stl_sort/cases.txt`: the order in which g++ 13's `sort` (`SORTED`) and
+// `partial_sort` over all of them (`HEAP`) left eight lists of ranges under NCBI's comparators,
+// with many different empty ranges; the last two lists make the sort order a stretch through the
+// heap.
+#[test]
+fn the_ranges_take_the_observed_orders() {
+    let text = include_str!("../../../tests/seqdb/stl_sort/cases.txt");
+    let lines: Vec<&str> = text.lines().collect();
+    let mut cases = 0;
+    for (k, line) in lines.iter().enumerate() {
+        let Some(case) = line.strip_prefix("CASE ") else {
+            continue;
+        };
+        let mut words = case.splitn(3, ' ');
+        let reverse = words.next() == Some("1");
+        let len: usize = words.next().unwrap().parse().unwrap();
+        let input = parse_ranges(words.next().unwrap());
+        assert_eq!(input.len(), len);
+        let sorted = parse_ranges(lines[k + 1].strip_prefix("SORTED").unwrap());
+        let heap = parse_ranges(lines[k + 2].strip_prefix("HEAP").unwrap());
+        let mut less = |a: &Range, b: &Range| range_less(a, b, reverse);
+        let mut by_sort = input.clone();
+        sort_as_observed(&mut by_sort, &mut less);
+        assert_eq!(by_sort, sorted, "{line}");
+        let mut by_heap = input.clone();
+        heap_order(&mut by_heap, &mut less);
+        assert_eq!(by_heap, heap, "{line}");
+        cases += 1;
+    }
+    assert_eq!(cases, 8);
 }
 
 /// Empty ranges (`to < from`, `to` = 4294967295) are merged into the next range or written as an

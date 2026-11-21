@@ -571,7 +571,6 @@ fn hit_records_keep_the_query_masks_in_lower_case() {
         whole.subject_seq.as_deref(),
         Some(shown.to_ascii_uppercase().as_str())
     );
-    assert!(whole.masks.is_some());
     // An HSP after the mask shows none.
     for hit in run.hits.iter().filter(|hit| hit.hit.q_start > 26) {
         let row = hit.query_seq.as_deref().expect("a query row");
@@ -579,7 +578,6 @@ fn hit_records_keep_the_query_masks_in_lower_case() {
             !row.bytes().any(|letter| letter.is_ascii_lowercase()),
             "{row}"
         );
-        assert!(hit.masks.is_none());
     }
     let report = String::from_utf8(run.outputs[0].clone()).expect("UTF-8 report");
     assert!(

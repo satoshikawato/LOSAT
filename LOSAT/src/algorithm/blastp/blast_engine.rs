@@ -3479,12 +3479,13 @@ fn query_nomask_sequence(ctx: &QueryContext) -> &[u8] {
 //                         actualSeq[i-start]=tolower((unsigned char) actualSeq[i-start]);
 //                     }
 // ```
-/// The masks of the outfmt 0 rows of `hits` (`PairwiseHit::masks`): a query row's SEG masks of
+/// The outfmt 0 rows `hits` (the report's copies; the library API's records keep their letters)
+/// with their masks in lower case (`HspMasks::lower_row`): a query row's SEG masks of
 /// `query_masks` (`query_record_masks`), a subject row's lower-case runs of `subject_masks`
 /// (`-lcase_masking`, `x_soft_subject::x_subject_masks`), at the columns of `x_FillLocList`
 /// (`query_anchored::fill_row_loc_list`: a mask position outside the aligned range is the row's
 /// first or last residue), which `x_OutputSeq` puts in lower case when it writes the row. The
-/// hits' letters stay as they are (the library API's records).
+/// lists are dropped (`query_anchored::output_seq`).
 fn set_row_masks(
     hits: &mut [PairwiseHit],
     query_masks: Option<&[Vec<(i32, i32)>]>,
@@ -3493,8 +3494,9 @@ fn set_row_masks(
     for hit in hits {
         let mut masks = crate::report::query_anchored::HspMasks::default();
         let query = query_masks.map_or(&[][..], |masks| &masks[hit.hit.q_idx as usize][..]);
-        if let Some(row) = hit.query_seq.as_deref().filter(|_| !query.is_empty()) {
-            let row = row.as_bytes();
+        if let Some(shown) = hit.query_seq.as_mut().filter(|_| !query.is_empty()) {
+            let mut letters = std::mem::take(shown).into_bytes();
+            let row = &letters;
             masks.set_row(
                 0,
                 0,
@@ -3513,10 +3515,13 @@ fn set_row_masks(
                 1,
                 query.iter().map(|&(from, to)| (from as u32, to as u32, 0)),
             );
+            masks.lower_row(0, &mut letters);
+            *shown = String::from_utf8(letters).expect("ASCII alignment row");
         }
         let runs = subject_masks.get(&(hit.hit.q_idx, hit.hit.s_idx));
-        if let Some((row, runs)) = hit.subject_seq.as_deref().zip(runs) {
-            let row = row.as_bytes();
+        if let Some((shown, runs)) = hit.subject_seq.as_mut().zip(runs) {
+            let mut letters = std::mem::take(shown).into_bytes();
+            let row = &letters;
             // A stored `-` is a residue of the subject (`PairwiseHit::subject_stored_gaps`).
             let stored = &hit.subject_stored_gaps;
             masks.set_row(
@@ -3529,8 +3534,9 @@ fn set_row_masks(
                 1,
                 runs.iter().map(|&(from, to)| (from as u32, to as u32, 0)),
             );
+            masks.lower_row(1, &mut letters);
+            *shown = String::from_utf8(letters).expect("ASCII alignment row");
         }
-        hit.masks = (!masks.is_empty()).then(|| Box::new(masks));
     }
 }
 
@@ -4362,7 +4368,6 @@ fn build_pairwise_hits(
             // engine's, which `hit.num_ident` holds unless the display recount replaced it
             // (`recount_shown_identities`).
             seqalign_num_ident,
-            masks: None,
         })
     };
     // EXPERIMENT (LOSAT_X_PAIRWISEPAR): the rows of the final list as an indexed map on the

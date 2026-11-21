@@ -221,13 +221,14 @@ pub(super) fn x_scan(
 //                         actualSeq[i-start]=tolower((unsigned char) actualSeq[i-start]);
 //                     }
 // ```
-/// The subject rows' masks of `hits` (the outfmt 0 rows, `PairwiseHit::masks`): NCBI keeps the
+/// The subject rows' masks of `hits` (the outfmt 0 rows' `HspMasks`): NCBI keeps the
 /// lower-case runs of the subject's record that meet one of the HSP ranges of the query and the
 /// subject (`[offset, end]`, the end one past the HSP; [`x_subject_masks`], which the
 /// query-anchored reports read too), and each row places the kept runs that meet its own range
 /// at its columns (`x_FillLocList`, `query_anchored::fill_row_loc_list`), which `x_OutputSeq`
 /// puts in lower case. The rows come back so, as the hit records that the library API and LOSAT
-/// Web hand out show them (`HspMasks::lower_row`). Only records of `-subject` read with
+/// Web hand out show them (`HspMasks::lower_row`); the lists are dropped
+/// (`query_anchored::output_seq`). Only records of `-subject` read with
 /// `-lcase_masking` have runs; the caller calls this when one has. With `-subject_loc` the runs
 /// lie where they lie in the record, as the hits' positions.
 #[cold]
@@ -243,7 +244,7 @@ pub(super) fn x_set_subject_row_masks(hits: &mut [PairwiseHit], subjects: &[Fast
             continue;
         };
         let mut letters = std::mem::take(row).into_bytes();
-        let mut masks = hit.masks.take().map(|masks| *masks).unwrap_or_default();
+        let mut masks = crate::report::query_anchored::HspMasks::default();
         // A stored `-` is a residue of the subject (`PairwiseHit::subject_stored_gaps`, in order).
         let stored = &hit.subject_stored_gaps;
         masks.set_row(
@@ -258,7 +259,6 @@ pub(super) fn x_set_subject_row_masks(hits: &mut [PairwiseHit], subjects: &[Fast
         );
         masks.lower_row(1, &mut letters);
         *row = String::from_utf8(letters).expect("ASCII alignment row");
-        hit.masks = (!masks.is_empty()).then(|| Box::new(masks));
     }
 }
 

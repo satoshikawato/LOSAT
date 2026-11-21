@@ -1075,13 +1075,14 @@ pub(crate) fn xml_query_masks(
     }
 }
 
-/// The masks of a displayed query row `row` (`PairwiseHit::masks`): the shown masks (record
+/// The masks of a displayed query row `row` (`HspMasks`): the shown masks (record
 /// coordinates, `shown_query_masks`, as the query-anchored sections show them) labelled with the
 /// row's frame `frame` (`s_GetStdsegMasterFrame`, the frame `x_OutputSeq` matches) that meet the
 /// row, at its columns (`HspMasks::set_row`, `x_FillLocList`: width 3, `[low, high]` the 0-based
 /// nucleotide range of the row on the plus strand of the record, a residue for each codon), in
 /// the masks' order; and the row with them in lower case (`HspMasks::lower_row`), as the hit
-/// records of the library API and the Web adapter show it. `None` when no mask meets the row. With
+/// records of the library API and the Web adapter show it (and outfmt 0, which gets no lists,
+/// `query_anchored::output_seq`). `None` when no mask meets the row. With
 /// `-query_loc` a mask's label is the frame of the searched letters, which can differ from the
 /// frame the record gives the same letters: NCBI then shows a mask of another frame on the row
 /// (`locFrame == frame`), and so does LOSAT.
@@ -1098,7 +1099,7 @@ fn query_row_masks(
     low: i32,
     high: i32,
     masks: &[FrameMasks],
-) -> Option<Box<crate::report::query_anchored::HspMasks>> {
+) -> Option<crate::report::query_anchored::HspMasks> {
     let mut shown: Vec<(u32, crate::report::query_anchored::Mask)> = Vec::new();
     for frame_masks in masks.iter().filter(|masks| masks.frame == frame) {
         let start = shown.len();
@@ -1129,7 +1130,7 @@ fn query_row_masks(
         return None;
     }
     row_masks.lower_row(0, row);
-    Some(Box::new(row_masks))
+    Some(row_masks)
 }
 
 /// Every HSP of the final hit list (in the order of all formats) with its displayed rows,
@@ -1364,7 +1365,9 @@ impl<'a> PairwiseRows<'a> {
         let query_frame = record_frame(hit.query_frame > 0, hit.q_start - 1, query_length) as i8;
         let subject_frame =
             record_frame(hsp.subject_frame > 0, hit.s_start - 1, subject_length) as i8;
-        let masks = query_row_masks(
+        // The row holds its masks in lower case; the lists are dropped
+        // (`query_anchored::output_seq`).
+        query_row_masks(
             &mut query_row,
             query_frame,
             low,
@@ -1395,7 +1398,6 @@ impl<'a> PairwiseRows<'a> {
             query_stored_gaps: Vec::new(),
             query_case: Default::default(),
             seqalign_num_ident: seqalign_num_ident.map_or(hsp.hit.num_ident, |n| n as usize),
-            masks,
         }
     }
 }

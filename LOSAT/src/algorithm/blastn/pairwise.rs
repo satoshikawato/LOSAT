@@ -267,8 +267,9 @@ impl Rows<'_> {
                 .zip(&subject_row)
                 .filter(|(query, subject)| query == subject)
                 .count();
-            // The masks of the rows (`x_FillLocList`), whose letters the hit records show in
-            // lower case (the library API, the Web adapter) as outfmt 0 does (`x_OutputSeq`).
+            // The masks of the rows (`x_FillLocList`), whose letters the rows hold in lower
+            // case as outfmt 0 shows them (`x_OutputSeq`), and so the hit records of the library
+            // API and the Web adapter; the lists are dropped (`query_anchored::output_seq`).
             let mut masks = crate::report::query_anchored::HspMasks::default();
             set_query_row_masks(
                 &mut masks,
@@ -313,7 +314,6 @@ impl Rows<'_> {
                 // The Seq-align's `num_ident` (`seqalign::query_records` writes the same
                 // `hsp.num_ident`): the engine's count, which "Max ident" and the sorts read.
                 seqalign_num_ident: hsp.num_ident,
-                masks: (!masks.is_empty()).then(|| Box::new(masks)),
             });
         }
         Ok(())

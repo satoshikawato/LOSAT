@@ -291,9 +291,6 @@ pub struct PairwiseHit {
     /// TBLASTX's rows translated by the display's tables count others. Every count is at least
     /// 0, so every Seq-align carries it.
     pub(crate) seqalign_num_ident: usize,
-    /// The masks of the rows that outfmt 0 shows (`query_anchored::HspMasks`, the columns of
-    /// `x_FillLocList`); `None` when no mask meets the HSP's rows.
-    pub(crate) masks: Option<Box<super::query_anchored::HspMasks>>,
 }
 
 impl PairwiseHit {
@@ -466,7 +463,6 @@ impl From<Hit> for PairwiseHit {
             query_stored_gaps: Vec::new(),
             query_case: Default::default(),
             seqalign_num_ident,
-            masks: None,
         }
     }
 }
@@ -1295,7 +1291,8 @@ pub fn write_alignment<W: Write>(
             sseq,
             [&hit.query_stored_gaps, &hit.subject_stored_gaps],
             hit.query_case,
-            hit.masks.as_deref(),
+            // The rows hold their masks in lower case (`query_anchored::output_seq`).
+            None,
             config,
         )?;
     } else {
@@ -1323,7 +1320,8 @@ pub fn write_alignment<W: Write>(
 /// from high to low), rows of letters (`write_hsp_rows`). `stored_gaps` are the columns of the
 /// query's and the subject's rows whose `-` is a residue (`PairwiseHit::query_stored_gaps`,
 /// `PairwiseHit::subject_stored_gaps`), `query_case` how the query row's letters compare
-/// (`PairwiseHit::query_case`), `masks` the rows' masks (`PairwiseHit::masks`).
+/// (`PairwiseHit::query_case`), `masks` the rows' masks for `query_anchored::output_seq` (`None`:
+/// the rows hold them in lower case).
 fn write_alignment_with_sequences<W: Write>(
     writer: &mut W,
     hit: &Hit,
@@ -5196,7 +5194,8 @@ fn write_tblastx_alignment<W: Write>(
         [3, 3],
         config.line_length,
         [q, s],
-        hit.masks.as_deref(),
+        // The rows hold their masks in lower case (`query_anchored::output_seq`).
+        None,
         width,
         |writer, columns| {
             write_protein_middle(
@@ -5647,6 +5646,19 @@ impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // No NCBI counterpart: the size of LOSAT's record of an outfmt 0 HSP, one per reported HSP
+    // until the report is written. It is not larger than on dev ed9178f49 (376 bytes on 64-bit
+    // targets): the masks of the rows are not kept per HSP (line RG T4a1; the rows hold them in
+    // lower case, `query_anchored::output_seq`). A boxed list per masked HSP had made it 384 bytes
+    // and raised max RSS by up to 2 % (3,000 BLASTX HSPs). On 32-bit targets (wasm32) nothing is
+    // pinned.
+    #[cfg(target_pointer_width = "64")]
+    #[test]
+    fn pairwise_hit_is_no_larger_than_on_dev() {
+        let size = std::mem::size_of::<PairwiseHit>();
+        assert!(size <= 376, "{size}");
+    }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:533-538
     // (quoted at `write_blastp_database_header_spacing`)
@@ -7362,7 +7374,8 @@ fn write_tblastn_alignment<W: Write>(
         [1, 3],
         config.line_length,
         [q, s],
-        hit.masks.as_deref(),
+        // The rows hold their masks in lower case (`query_anchored::output_seq`).
+        None,
         width,
         |writer, columns| {
             write_protein_middle(
@@ -8170,7 +8183,8 @@ fn write_blastx_alignment(
         [3, 1],
         config.line_length,
         [q, s],
-        hit.masks.as_deref(),
+        // The rows hold their masks in lower case (`query_anchored::output_seq`).
+        None,
         width,
         |writer, columns| {
             write_protein_middle(
@@ -8399,7 +8413,6 @@ mod tblastx_tests {
             query_stored_gaps: Vec::new(),
             query_case: Default::default(),
             seqalign_num_ident: 60,
-            masks: None,
         }
     }
 

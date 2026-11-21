@@ -696,7 +696,6 @@ fn hit_records_keep_the_query_masks_in_lower_case() {
             Some(shown.to_ascii_uppercase().as_str()),
             "frame {frame}"
         );
-        assert!(hit.masks.is_some(), "frame {frame}");
         assert!(report.contains(shown), "frame {frame}: {report}");
     }
 }

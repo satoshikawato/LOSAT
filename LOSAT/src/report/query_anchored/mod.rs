@@ -1358,7 +1358,8 @@ fn fill_loc_list(
 /// the masks' order, not merged, each with its frame) and the row's frame (`x_OutputSeq`'s
 /// `frame`), which `output_seq` reads. A translated query's row (BLASTX, TBLASTX) holds only the
 /// masks of its frame: `x_OutputSeq` passes over a mask of another frame, so the list without
-/// them writes the same row. A `PairwiseHit` holds one only when such a mask meets a row.
+/// them writes the same row. A row's builder makes one, puts the row's masked letters in lower
+/// case (`lower_row`) and drops it: no `PairwiseHit` holds one (`output_seq`).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct HspMasks {
     lists: [Vec<(i64, i64, i8)>; 2],
@@ -1537,8 +1538,9 @@ fn lower_masked(letters: &mut [u8], start: i64, masks: &[(i64, i64, i8)], row_fr
 }
 
 /// `x_OutputSeq` of an outfmt 0 row's line (`report::pairwise::write_hsp_rows`) written to
-/// `writer`: `output_seq` in `buffer`, or, for a row that no mask meets (`masks` `None`), its
-/// letters as they are, what `output_seq` makes of them.
+/// `writer`: `output_seq` in `buffer`, or, without masks (`masks` `None`: a row that no mask
+/// meets, or one that holds its masks in lower case), its letters as they are, what
+/// `output_seq` makes of them.
 #[inline(always)]
 pub(crate) fn write_output_seq<W: io::Write + ?Sized>(
     writer: &mut W,
@@ -1881,6 +1883,9 @@ fn display_sequence_line(
 /// (The row's masks are those of its own sequence with its frame, `prepare_rows`. The
 /// mismatch colours of the first branch need `eColorDifferentBases`, which no BLAST program
 /// sets: blast_format.cpp, survey T4 §1.1.)
+///
+/// Outfmt 0 rows come without masks (their builders lowercase the letters, `HspMasks::lower_row`);
+/// `-html` (T4a2) keeps the lists in a side table indexed like the hits, only under `-html`.
 fn output_seq(
     out: &mut Vec<u8>,
     sequence: &[u8],

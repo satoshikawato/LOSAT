@@ -1372,7 +1372,9 @@ fn pairwise_hits(
                     hsp.s_end,
                     &payload.edit_script,
                 )?;
-                let (qseq, masks) = query_row_masks(qseq, &report_masks, hsp.q_start, hsp.q_end)?;
+                // The row holds its masks in lower case; the lists are dropped
+                // (`query_anchored::output_seq`).
+                let (qseq, _) = query_row_masks(qseq, &report_masks, hsp.q_start, hsp.q_end)?;
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2120-2154
                 // ```c++
                 // void CDisplaySeqalign::x_FillIdentityInfo(const string& sequence_standard,
@@ -1532,7 +1534,6 @@ fn pairwise_hits(
                     // SEG-masked letter is a mismatch there and an identity in the rows
                     // (`report_num_ident`).
                     seqalign_num_ident: usize::try_from(payload.num_ident)?,
-                    masks,
                 });
                 // The model of the reads sorts by `hsp_scores` without the rows
                 // (`TblastnDatabase::subject_read_texts`): the row's values where the records'
@@ -1723,13 +1724,14 @@ fn write_pairwise(
     Ok(())
 }
 
-/// The masks of the outfmt 0 query row `row` of an HSP (`PairwiseHit::masks`), which holds the
+/// The masks of the outfmt 0 query row `row` of an HSP (`HspMasks`), which holds the
 /// searched letters `q_start..q_end` (0-based, `q_end` excluded): the query's masks
 /// `report_masks` (half-open in the searched letters, frame 0: the list `pairwise_hits` hands to
 /// the query-anchored sections, which show the same masks) at the row's columns
 /// (`HspMasks::set_row`, `x_FillLocList`), which `x_OutputSeq` puts in lower case when it writes
 /// the row; and the row with them in lower case (`HspMasks::lower_row`), as the hit records of
-/// the library API and the Web adapter show it. `None` when no mask meets the row. A query with
+/// the library API and the Web adapter show it (and outfmt 0, which gets no lists,
+/// `query_anchored::output_seq`). `None` when no mask meets the row. A query with
 /// masks is a FASTA record, which holds no `-` (a PSSM query's search sets none). The subject
 /// row has no masks: it is a translation (width 3, a frame of ±1 to 3), and the subjects' masks
 /// have no frame (`anchored`), so NCBI shows none of them there.
@@ -1738,7 +1740,7 @@ fn query_row_masks(
     report_masks: &[(usize, usize)],
     q_start: i32,
     q_end: i32,
-) -> Result<(String, Option<Box<crate::report::query_anchored::HspMasks>>)> {
+) -> Result<(String, Option<crate::report::query_anchored::HspMasks>)> {
     if report_masks.is_empty() {
         return Ok((row, None));
     }
@@ -1766,7 +1768,7 @@ fn query_row_masks(
     }
     let mut row = row.into_bytes();
     masks.lower_row(0, &mut row);
-    Ok((String::from_utf8(row)?, Some(Box::new(masks))))
+    Ok((String::from_utf8(row)?, Some(masks)))
 }
 
 /// Whether the reports of the PSSM query `pssm` (`-in_pssm`) read other letters than its search

@@ -1491,7 +1491,9 @@ pub(super) fn pairwise_hits(
                         gap_info: Some(hsp.edit_script.clone()),
                         num_positives: counts.positive,
                     };
-                    let (query_seq, masks) =
+                    // The row holds its masks in lower case; the lists are dropped
+                    // (`query_anchored::output_seq`).
+                    let (query_seq, _) =
                         query_row_masks(a.qseq, (a.qstart, a.qend), a.frame, &query_masks);
                     hits.push(PairwiseHit {
                         hit,
@@ -1540,7 +1542,6 @@ pub(super) fn pairwise_hits(
                         // not those of the rows (`a.identity`), which the display's translation
                         // and the subject's stored gap characters make.
                         seqalign_num_ident: hsp.identity,
-                        masks,
                     });
                     // The model of the reads sorts by `hsp_scores` of the batch's query length
                     // without the rows (`ReportedSubjects::fetch_by_query`): the row's values
@@ -1590,8 +1591,8 @@ pub(super) fn pairwise_hits(
 //         + (plus ? delta : m_Lens[raw_seg] - 1 - delta);
 // ```
 /// The outfmt 0 query row `row` of a display alignment (`DisplayAlignment::qseq`, of the 1-based
-/// record positions `ends`, `qstart` and `qend`, on the frame `frame`) and the HSP's masks
-/// (`PairwiseHit::masks`, `None` when none meets the row): the query's masks of the row's frame
+/// record positions `ends`, `qstart` and `qend`, on the frame `frame`) and the row's masks
+/// (`HspMasks`, `None` when none meets the row): the query's masks of the row's frame
 /// (`query_masks`, `masks_by_frame`; record positions) at the row's columns of `x_FillLocList`
 /// (`query_anchored::fill_row_loc_list`: the row's nucleotides from its first to its last, three
 /// a residue, on the frame's strand), in the masks' order, which `x_OutputSeq` puts in lower
@@ -1604,7 +1605,7 @@ fn query_row_masks(
     ends: (i32, i32),
     frame: i8,
     query_masks: &[(i8, MaskSeek<u32>)],
-) -> (String, Option<Box<crate::report::query_anchored::HspMasks>>) {
+) -> (String, Option<crate::report::query_anchored::HspMasks>) {
     let Some((_, seek)) = query_masks
         .iter()
         .find(|(masks_frame, _)| *masks_frame == frame)
@@ -1638,7 +1639,7 @@ fn query_row_masks(
     );
     masks.lower_row(0, &mut row);
     let row = String::from_utf8(row).expect("ASCII alignment row");
-    (row, (!masks.is_empty()).then(|| Box::new(masks)))
+    (row, (!masks.is_empty()).then_some(masks))
 }
 
 /// The masks `masks` of a query (every frame's, `anchored::query_record_masks`) by frame, each

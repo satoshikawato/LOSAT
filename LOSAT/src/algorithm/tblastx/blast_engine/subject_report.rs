@@ -61,16 +61,13 @@ pub(super) fn linked_hits_to_report<S: TbxScore>(
     let mut output_snapshot_pairs: Vec<(Hit, UngappedHit)> = Vec::new();
     let mut filtered_by_evalue = 0usize;
     for h in linked {
-        // NCBI reference (verbatim, link_hsps.c:1018-1020):
-        //   /* If this is not a single piece or the start of a chain, then Skip it. */
-        //   if (H->linked_set == TRUE && H->start_of_chain == FALSE)
-        //       continue;
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1018-1020
         // NOTE: This "continue" in NCBI is NOT a filter - NCBI then walks the link
         // pointer from each chain head to include all chain members (lines 1047-1059).
         // LOSAT's linking already produces a flat list of ALL HSPs (including chain
         // members) so we output everything without this skip logic.
 
-        // NCBI reference: E-value filtering is applied during output conversion
+        // NCBI: E-value filtering is applied during output conversion
         // The exact timing may differ, but the threshold check is standard
         if h.e_value > evalue_threshold {
             filtered_by_evalue += 1;
@@ -99,12 +96,7 @@ pub(super) fn linked_hits_to_report<S: TbxScore>(
         let q0 = h.q_aa_start as usize;
         let s0 = h.s_aa_start as usize;
 
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2708-2720
-        // ```c
-        // Blast_HSPGetNumIdentitiesAndPositives(query_nomask,
-        //     subject_start, hsp, score_params->options, &align_length, sbp);
-        // delete_hsp = Blast_HSPTest(hsp, ...);
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2708-2720
         // `reevaluate_ungapped_hsp_list` already performs this NCBI step
         // using the unmasked query and reporting subject buffers, then stores
         // the identity count on the HSP. Reuse it here instead of rescanning
@@ -117,13 +109,7 @@ pub(super) fn linked_hits_to_report<S: TbxScore>(
             0.0
         };
 
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1918-1928
-        // ```c
-        // kbp = (gapped_calculation ? sbp->kbp_gap : sbp->kbp);
-        // hsp->bit_score =
-        //    (hsp->score*kbp[hsp->context]->Lambda - kbp[hsp->context]->logK) /
-        //    NCBIMATH_LN2;
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1918-1928
         let bit_params = &contexts_ref[h.ctx_idx as usize].karlin_params;
         let bit = calc_bit_score(h.raw_score, bit_params);
         let (q_start, q_end) = convert_coords(
@@ -160,14 +146,7 @@ pub(super) fn linked_hits_to_report<S: TbxScore>(
             );
         }
 
-        // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
-        // ```c
-        // typedef struct BlastHSPList {
-        //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
-        //    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
-        //                       Set to 0 if not applicable */
-        // } BlastHSPList;
-        // ```
+        // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:153-166
         let out_hit = Hit {
             identity,
             length: len,
@@ -180,39 +159,15 @@ pub(super) fn linked_hits_to_report<S: TbxScore>(
             e_value: h.e_value,
             bit_score: bit,
             num_ident: matches,
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1122-1132
-            // ```c
-            // if (hsp->query.frame != hsp->subject.frame) {
-            //    *q_end = query_length - hsp->query.offset;
-            //    *q_start = *q_end - hsp->query.end + hsp->query.offset + 1;
-            // }
-            // ```
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1122-1132
             query_frame: ctx.frame as i32,
             query_length: 0,
             q_idx: ctx.q_idx,
             s_idx: h.s_idx,
             raw_score: h.raw_score,
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4754-4767
-            // ```c
-            // s_AdjustInitialHSPOffsets(init_hsp,
-            //                           query_info->contexts[context].query_offset);
-            // Blast_HSPInit(ungapped_data->q_start, ...,
-            //               ungapped_data->s_start, ...,
-            //               context, query_info->contexts[context].frame,
-            //               subject->frame, ungapped_data->score, NULL, &new_hsp);
-            // ```
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:808-812
-            // ```c
-            // subject->sequence = translation_buffer + frame_offsets[context] + 1;
-            // subject->length = frame_offsets[context+1] - frame_offsets[context] - 1;
-            // ```
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1347-1353
-            // ```c
-            // BLAST_CMP(hsp1->subject.offset, hsp2->subject.offset)
-            // BLAST_CMP(hsp2->subject.end,    hsp1->subject.end)
-            // BLAST_CMP(hsp1->query  .offset, hsp2->query  .offset)
-            // BLAST_CMP(hsp2->query.end, hsp1->query.end)
-            // ```
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4754-4767
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:808-812
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1347-1353
             // TBLASTX ScoreCompareHSPs uses the context/frame-relative
             // BlastSeg offsets stored in Blast_HSPInit, not formatted
             // nucleotide coordinates or LOSAT's concatenated frame bases.
@@ -228,14 +183,7 @@ pub(super) fn linked_hits_to_report<S: TbxScore>(
         if dump_output_stage {
             output_snapshot_pairs.push((out_hit.clone(), h.clone()));
         }
-        // NCBI reference: c++/src/algo/blast/core/blast_gapalign.c:4760-4767
-        // ```c
-        //       Blast_HSPInit(ungapped_data->q_start,
-        //                     ungapped_data->length+ungapped_data->q_start,
-        //     ...
-        //                     context, query_info->contexts[context].frame,
-        //                     subject->frame, ungapped_data->score, NULL, &new_hsp);
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4760-4767
         // The HSP keeps its subject frame and its linked-set size (`num`) for the
         // pairwise report.
         final_hits.push(TblastxHsp {
@@ -245,14 +193,7 @@ pub(super) fn linked_hits_to_report<S: TbxScore>(
         });
     }
     x_lap.lap(XStage::Convert);
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/link_hsps.c:1018-1059
-    // ```c
-    // if (H->linked_set == TRUE && H->start_of_chain == FALSE)
-    //     continue;
-    // ...
-    //             link = H->hsp_link.link[ordering_method];
-    //             while (link)
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1018-1059
     // The converted output hits are represented here by their original
     // internal HSP rows after e-value filtering and before common.rs
     // applies final HSP-list sorting for the selected output format.
@@ -298,21 +239,9 @@ pub(super) struct SubjectReportArgs<'a> {
 /// subject's final HSPs in `hits` (the worker's, sent at the end of the subject); then the `Emit`
 /// lap of LOSAT_TIMING.
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1515-1520 and 1539-1541
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1515-1541 and 1539-1541
 /// (after `Blast_HSPListReevaluateUngapped` in `BLAST_PreliminarySearchEngine`; the write of the
 /// list that follows at :1553-1554 is `SubjectEmit::emit`'s)
-/// ```c
-///                if (hit_params->link_hsp_params) {
-///                    status =
-///                        BLAST_LinkHsps(program_number, hsp_list, query_info,
-///                                       seq_arg.seq->length, sbp,
-///                                       hit_params->link_hsp_params,
-///                                       gapped_calculation);
-/// ...
-///             /* Calculate and fill the bit scores, since there will be no
-///                traceback stage where this can be done. */
-///             Blast_HSPListGetBitScores(hsp_list, gapped_calculation, sbp);
-/// ```
 pub(super) fn report_subject_hits<S: TbxScore>(
     sc: S,
     ungapped_hits: Vec<UngappedHit>,

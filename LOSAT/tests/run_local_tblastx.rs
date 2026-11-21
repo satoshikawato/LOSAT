@@ -90,20 +90,8 @@ impl Inputs {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/app/blast/blast_formatter.cpp:429-467
-// ```c
-// CRef<CSearchResultSet> results = m_RmtBlast->GetResultSet();
-// formatter.PrintProlog();
-// ...
-// ITERATE(CSearchResultSet, result, *results) {
-//     ...
-//         formatter.PrintOneResultSet(**result, queries);
-//     ...
-// }
-// ```
-// NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:145-188
-// TBlastThreads the_threads(GetNumberOfThreads());
-// (*thread)->Run(); (*thread)->Join(&result);
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:429-467
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:145-188
 #[test]
 fn every_format_of_one_search_matches_the_cli_run_of_that_format() {
     let inputs = Inputs::new();
@@ -160,11 +148,6 @@ fn every_format_of_one_search_matches_the_cli_run_of_that_format() {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:85-91 (the query
 // batch size, read where `CBlastInput` is made, before the formatter: tblastx_app.cpp:136-137)
-// ```c++
-//     char* batch_sz_str = getenv("BATCH_SIZE");
-//     if (batch_sz_str) {
-//         retval = NStr::StringToInt(batch_sz_str);
-// ```
 // A value that NCBI cannot convert ends the program with its `CStringException` (`CATCH_ALL`,
 // exit 255) before anything is written (env parity probe h_probe of 2026-11-12, cases
 // `BATCH_SIZE.*.tblastx-*`), also before the records without a title are searched.
@@ -215,7 +198,7 @@ fn a_batch_size_that_ncbi_cannot_convert_stops_before_anything() {
     }
 }
 
-// NCBI reference: c++/src/algo/blast/api/local_blast.cpp:54-62,
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:54-62,
 // c++/src/algo/blast/api/split_query_aux_priv.cpp:53-60 and
 // c++/src/app/blast/blast_app_util.cpp:206-210,732-737: NCBI converts CHUNK_SIZE and
 // OVERLAP_CHUNK_SIZE in the first batch's query splitter and PRE_FETCH_SEQS_LIMIT before the
@@ -321,18 +304,8 @@ fn cli_run(
     )
 }
 
-// NCBI reference: c++/src/objtools/readers/fasta.cpp:375-384
-// ```c
-//         if (line.empty()) {
-//             continue; // ignore lines containing only whitespace
-//         }
-//         c = line[0];
-//
-//         if (c == '!'  ||  c == '#' || c == ';') {
-//             // no content, just a comment or blank line
-//             continue;
-// ```
-// NCBI reads the subjects before it finds the query empty (tblastx_app.cpp:118-132), with
+// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:375-385
+// NCBI reads the subjects before it finds the query empty (c++/src/app/blast/tblastx_app.cpp:118-132), with
 // its reader: after the lines it skips, a line that is not plausible data stops the
 // reading (`BLAST query error`), and a file of such lines only has no subject.
 #[test]
@@ -360,7 +333,7 @@ fn subjects_are_read_before_the_query_is_found_empty() {
     assert_eq!(stderr, "BLAST engine error: Empty CBlastQueryVector\n");
 }
 
-// NCBI reference: c++/src/objtools/readers/fasta.cpp:919-935 (CFastaReader: a residue that is
+// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:919-935 (CFastaReader: a residue that is
 // not an IUPAC nucleotide letter is removed with a warning).
 // This is the command line's half: the warning for the invalid residue and the rows. The
 // entry's half (NCBI's check of the hit saving options, blast_options.c:1518-1523, before
@@ -381,24 +354,8 @@ fn residues_are_read_as_ncbis_reader_reads_them() {
     assert!(stdout.starts_with(b"digit\t"), "{stderr}");
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:773-788
-// ```c
-//         catch(CBlastException & e ) {
-//         	// Skip bad subject sequence
-//         	if(e.GetErrCode() == CBlastException::eInvalidArgument) {
-//         		seqblk_vec->push_back(subj);
-//         ...
-//         		warning += "Subject sequence contains no data";
-//         		ERR_POST(Warning << warning);
-// ```
-// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:632-636
-// ```c
-//         } catch (const CException& e) {
-//             // FIXME: is index this the right value for the 2nd arg? Also, how
-//             // to determine whether the message should contain a warning or
-//             // error?
-//             CRef<CSearchMessage> m
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:773-788
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:632-636
 // A record without residues stays in its role: a subject gets its warning before the
 // search, counts in the database statistics and is never searched; a query gets its
 // warning before its report, which has no hits and no valid context, and is counted.
@@ -455,20 +412,6 @@ fn records_without_residues_are_kept_with_ncbis_warnings() {
         "{commented}"
     );
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1431-1452
-    // ```c++
-    //     if (m_FormatType == CFormattingArgs::eAsnText
-    //       ...
-    //       || m_FormatType == CFormattingArgs::eJsonSeqalign
-    //       || m_FormatType == CFormattingArgs::eSAM)
-    //     {
-    //         x_PrintStructuredReport(results, queries);
-    //         return;
-    //     }
-    //     ...
-    //     if (results.HasWarnings()) {
-    //         ERR_POST(Warning << results.GetWarningStrings());
-    //     }
-    // ```
     // The warnings go with the first format (outfmt 0 here); outfmt 5, 8, 9, 11, 12, 15 and 16 write
     // no query result warnings, so their CLI runs equal the library's run with that format alone.
     for (index, outfmt) in FORMATS.into_iter().enumerate() {
@@ -487,16 +430,7 @@ fn records_without_residues_are_kept_with_ncbis_warnings() {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_input.cpp:146-152
-// ```c
-//         try { q.Reset(m_Source->GetNextSequence(scope)); }
-//         catch (const CObjReaderParseException& e) {
-//             if (e.GetErrCode() == CObjReaderParseException::eEOF) {
-//                 break;
-//             }
-//             throw;
-//         }
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:146-152
 // What ends the reading of the queries comes in the batch where NCBI reads it: a reader
 // error in a later batch after the reports of the batches before (without the epilog), in
 // the first batch before any report. Blank and comment lines after the last record end

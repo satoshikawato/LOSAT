@@ -2,12 +2,6 @@
 //! write, sign-extended on read) and a 1-bit flag.
 //!
 //! NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_extend.h:57-60
-//! ```c
-//! typedef struct DiagStruct {
-//!    signed int last_hit   : 31; /**< Offset of the last hit */
-//!    unsigned int flag      : 1 ; /**< Reset the next extension? */
-//! } DiagStruct;
-//! ```
 //!
 //! The diagonal offset grows by the subject's length plus the window after each subject until it
 //! reaches INT4_MAX / 4 (blast_extend.c:167-174). At `-window_size 536870000` the second

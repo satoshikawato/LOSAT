@@ -10,26 +10,7 @@
 //! element on `next_pos` (indexed by query offset, so in no order).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1081-1091
-//! ```c
-//!          if (mb_lt->hashtable[ecode] == 0) {
-//!             PV_SET(pv_array, ecode, pv_array_bts);
-//!          }
-//!          else {
-//!             helper_array[ecode/kCompressionFactor]++;
-//!          }
-//!          mb_lt->next_pos[index] = mb_lt->hashtable[ecode];
-//!          mb_lt->hashtable[ecode] = index;
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:1406-1418
-//! ```c
-//!     Int4 q_off = lookup->hashtable[index];
-//!
-//!     while (q_off) {
-//!         offset_pairs[i].qs_offsets.q_off   = q_off - 1;
-//!         offset_pairs[i++].qs_offsets.s_off = s_off;
-//!         q_off = lookup->next_pos[q_off];
-//!     }
-//! ```
 //!
 //! Why the runs are the chains. The CSR is built from the words of the fill's loop in the loop's
 //! order (`each_word`: the loop of `build_mb_lookup` and `x_mb_lookup_par::fill_part`, the same

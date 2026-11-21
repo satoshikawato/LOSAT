@@ -658,7 +658,7 @@ impl TaxSubjects for ThrowingSubjects {
     }
 }
 
-// NCBI taxFormat.cpp:995-1023 (`x_InitTaxInfoMap`: the `catch` of each HSP's load, `continue`)
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:995-1023 (`x_InitTaxInfoMap`: the `catch` of each HSP's load, `continue`)
 // where the load of a subject throws (`DB contains no accession info.`, a batch whose prefetch is
 // off; review 2 of line DBID pfoff-2, M2, probe `bp.fmt.U2.18`): the report leaves out each HSP of
 // that subject before any read or lookup, and the subject is not the previous id, so the report

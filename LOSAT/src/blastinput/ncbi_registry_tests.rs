@@ -35,7 +35,7 @@ fn failure(read: &RegistryRead) -> (String, u32, &'static str, String) {
     )
 }
 
-// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:694-777 (quoted at `read_lines`). NCBI
+// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:694-777 (cited at `read_lines`). NCBI
 // BLAST+ 2.17.0 (the official Linux x64 release, `blastn -version` with each `.ncbirc`, g_reg
 // probes of 2026-11-11: cases noeq, nobracket, emptybr, spacesec, badsec, badentry, eqonly,
 // midquote, badesc, hexov, trail2, cont3, sect): every error, its line and its position.
@@ -182,7 +182,7 @@ fn entries_before_an_error_stay() {
     assert!(read.error.is_some());
 }
 
-// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:652-680, 719-801 (quoted at
+// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:652-680, 719-801 (cited at
 // `read_lines`): comments, blank lines and spaces; sections and names without case are kept as
 // written; an entry before any section is dropped; a later entry comes after an earlier one (g_reg
 // probes `multi`, `nosection`, `quoted`).
@@ -211,7 +211,7 @@ fn entries_are_read_as_ncbi_reads_them() {
     );
 }
 
-// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:753-781 (quoted at `read_lines`): an
+// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:753-781 (cited at `read_lines`): an
 // unescaped `"` at either end is removed, an escaped one stays (g_reg probe `quote3`: no error).
 #[test]
 fn quotes_at_the_ends_are_removed() {
@@ -271,7 +271,7 @@ fn escapes_are_read() {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:740-751 (quoted at `read_lines`). NCBI
+// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:740-751 (cited at `read_lines`). NCBI
 // BLAST+ 2.17.0, g_reg probe `cont` (`BLASTDB=<dir>\` then an empty line: the search path holds
 // the directory and a line feed).
 #[test]
@@ -291,7 +291,7 @@ fn a_backslash_at_the_end_continues_the_value() {
     assert_eq!(failure(&unix(b"[S]\nA=1\\\n2\n\nbad\n")).3, "5");
 }
 
-// NCBI reference (598d8ae6): c++/src/corelib/ncbistre.cpp:196-208 (`NcbiGetlineEOL`, quoted at
+// NCBI reference (598d8ae6): c++/src/corelib/ncbistre.cpp:196-208 (`NcbiGetlineEOL`, cited at
 // `Lines`). NCBI BLAST+ 2.17.0 for Linux, g_reg probe `cr`: a `\r` is part of the line there.
 #[test]
 fn line_ends_are_the_platforms() {
@@ -454,7 +454,7 @@ fn the_notice_and_the_last_value_are_ncbis() {
     assert_eq!(read.last_value("BLAST", "DATA_LOADERS"), None);
 }
 
-// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:783-799 (quoted at `RepeatedEntry`).
+// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:783-799 (cited at `RepeatedEntry`).
 // NCBI BLAST+ 2.17.0 on 2026-11-12 (line NP M3c review `d1`): `[WINDOW_MASKER]
 // WINDOW_MASKER_PATH` at lines 2 and 3 gives `Found multiple [WINDOW_MASKER] WINDOW_MASKER_PATH
 // settings; using the one from line 3`. An entry repeats the section and the name without case,

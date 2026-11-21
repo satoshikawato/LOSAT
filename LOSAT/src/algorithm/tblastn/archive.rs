@@ -1,13 +1,7 @@
 //! TBLASTN's BLAST archive (outfmt 11): the request options from the arguments, the archive of
 //! each query batch from the batch's report data, and the error archive.
 //!
-//! NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:295
-//! ```c++
-//!                 if (fmt_args->ArchiveFormatRequested(args)) {
-//!                     formatter.WriteArchive(*query_factory, *m_OptsHndl, *results, 0, m_Bah.GetMessages());
-//!                     m_Bah.ResetMessages();
-//!                 } else {
-//! ```
+//! NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:294-297
 //! One archive per query batch (the reader's batch, `BATCH_SIZE` letters, 20000 by default),
 //! written after the batch's search. LOSAT's TBLASTN searches the batches first and writes every
 //! format at the end, from the hit lists it holds (`stage_e_report::render`), so the archives are
@@ -74,15 +68,6 @@ pub(crate) fn option_inputs(args: &TblastnArgs) -> OptionInputs {
     // as the x86-64 build does (`INT_MIN` past `Int4`, as the lookup table takes it:
     // `ncbi_int4_from_double`).
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_cxx.cpp:884-892
-    // ```c++
-    // CBlastOptions::SetWordThreshold(double w)
-    // {
-    //     ...
-    //     if (m_Remote) {
-    //         m_Remote->SetValue(eBlastOpt_WordThreshold, static_cast<int>(w));
-    //     }
-    // }
-    // ```
     inputs.threshold = args.threshold.map(ncbi_int4_from_double);
     inputs.window_size = args.window_size;
     inputs.ungapped = args.ungapped;
@@ -139,23 +124,7 @@ pub(super) fn requests(subjects: Option<&[FastaRecord]>, mask_lowercase: bool) -
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_local_priv.hpp:1718-1725
-// ```c++
-// inline Int8
-// CBlastOptionsLocal::GetEffectiveSearchSpace() const
-// {
-//     if (m_EffLenOpts->num_searchspaces == 0)
-//         return 0;
-//
-//     return m_EffLenOpts->searchsp_eff[0];
-// }
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-180
-// ```c++
-//     int status = m_PrelimSearch->CheckInternalData();
-//     if (status != 0)
-//     {
-//          // Search was not run, but we send back an empty CSearchResultSet.
-// ```
 /// The `EffectiveSearchSpace` option of a batch (`BatchArchive::searched_space`,
 /// `StrategyExport::note_searched`): the search space of its first query's context, `first`
 /// (`-searchsp` in an invalid context too), when NCBI searched the batch (`searched`: a query of

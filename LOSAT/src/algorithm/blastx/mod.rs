@@ -62,6 +62,10 @@ pub mod runtime;
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:386-394
 mod culling;
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:305-329,377-385
+// `-best_hit_overhang` / `-best_hit_score_edge` (series NP, O6a-3): the best hit writer and pipe.
+mod besthit;
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1777-1784
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:279-297

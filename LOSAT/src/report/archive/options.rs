@@ -242,6 +242,8 @@ pub struct OptionInputs {
     pub seg: Option<Filter>,
     /// `-dust` (BLASTN), only when given.
     pub dust: Option<Filter>,
+    /// `-filtering_db` (BLASTN) as given.
+    pub filtering_db: Option<String>,
     /// `-window_masker_db` (BLASTN) as given.
     pub window_masker_db: Option<String>,
     /// `-window_masker_taxid` (BLASTN) as given.
@@ -249,6 +251,9 @@ pub struct OptionInputs {
     pub threshold: Option<i32>,
     /// `-culling_limit` (also 0), when given.
     pub culling_limit: Option<i32>,
+    /// `-best_hit_overhang` and `-best_hit_score_edge`, each when given.
+    pub best_hit_overhang: Option<f64>,
+    pub best_hit_score_edge: Option<f64>,
     pub subject_besthit: bool,
     pub window_size: Option<i32>,
     pub ungapped: bool,
@@ -307,10 +312,13 @@ impl OptionInputs {
             soft_masking: None,
             seg: None,
             dust: None,
+            filtering_db: None,
             window_masker_db: None,
             window_masker_taxid: None,
             threshold: None,
             culling_limit: None,
+            best_hit_overhang: None,
+            best_hit_score_edge: None,
             subject_besthit: false,
             window_size: None,
             ungapped: false,
@@ -719,6 +727,13 @@ pub fn algorithm_options(inputs: &OptionInputs) -> Vec<Param> {
                         Filter::Seg { .. } => {}
                     }
                 }
+                // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:432-435
+                // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_cxx.cpp:1332-1339
+                // (`SetRepeatFilteringDB`: the name as given, an empty one too; the handler sets
+                // no `RepeatFiltering` boolean.)
+                if let Some(database) = &inputs.filtering_db {
+                    list.set("RepeatFilteringDB", Str(database.clone()));
+                }
                 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_cxx.cpp:1357-1363
                 // (`SetWindowMaskerTaxId`, called by the filtering handler before it reads
                 // `-window_masker_db`, blast_args.cpp:437-444: the taxid 0 is no parameter.)
@@ -770,6 +785,15 @@ pub fn algorithm_options(inputs: &OptionInputs) -> Vec<Param> {
             Class::Hsp => {
                 if let Some(limit) = inputs.culling_limit {
                     list.set("Culling", Integer(limit));
+                }
+                // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3338-3349
+                // Each when given, after `Culling` (they exclude each other) and before
+                // `UseSubjectBestHit` (NCBI BLAST+ 2.17.0, line NP O6a's probe).
+                if let Some(overhang) = inputs.best_hit_overhang {
+                    list.set("BestHitOverhang", Real(overhang));
+                }
+                if let Some(score_edge) = inputs.best_hit_score_edge {
+                    list.set("BestHitScoreEdge", Real(score_edge));
                 }
                 if inputs.subject_besthit {
                     list.set("UseSubjectBestHit", Boolean(true));

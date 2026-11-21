@@ -13,6 +13,13 @@ LMDB check refuses a version 5 volume named `b.nin`). `al.nal` is an alias of `m
 `al2.nal` of `s1db/s1` and `adb/zz`, whose volumes NCBI indexes in the order of their base names (`s1` before `zz`),
 not of their paths; `al3.nal` of `ext/b.nin` and `ext/b-2`, where the base name drops the `.nin` (`b` before `b-2`).
 
+The `-idmap` titles (line RG item D5a-t): `titles.fa` (titles with HTML entities, end punctuation, leading spaces, a tab,
+`TPA:`), `titlesdb/t` of it; `titlespdb/p` with `-parse_seqids` (`tpg`, `pat`, `lcl` and `gb` ids with and without
+titles); `txdb/tx` with `-parse_seqids -taxid 9606`; and `ttdb/tt` of `tt.fa` with `-parse_seqids -taxid_map
+tt_taxid.txt` (the taxids of `taxt5/`, a copy of `../seqdb/taxdb/t5`: a lower case name, a name with spaces around it, one
+with entities, one starting `TPA: `, an empty name, and a taxid it does not hold). The rows with `BLASTDB=taxt5` find
+that taxonomy database.
+
 `gen/` is made by the test: `big.fa` (one record of 5,100,000 letters with lower case runs, which the index splits into
 chunks, and one of 20,000) and `many.fa` (600 records) from the generator of `makembindex_fixtures.rs`, the databases
 `gen/bigdb/big` and `gen/manydb/many` of them, and `gen/mbigdb/big` with the lower case masks of `big.fa`

@@ -1,0 +1,1079 @@
+Blast-db-mask-info ::= {
+  algo-id 3,
+  algo-program windowmasker,
+  algo-options "",
+  masks {
+    masks {
+      packed-int {
+        {
+          from 115,
+          to 133,
+          id local str "rec1"
+        },
+        {
+          from 186,
+          to 199,
+          id local str "rec1"
+        },
+        {
+          from 324,
+          to 337,
+          id local str "rec1"
+        },
+        {
+          from 573,
+          to 591,
+          id local str "rec1"
+        },
+        {
+          from 644,
+          to 657,
+          id local str "rec1"
+        },
+        {
+          from 782,
+          to 795,
+          id local str "rec1"
+        },
+        {
+          from 1031,
+          to 1049,
+          id local str "rec1"
+        },
+        {
+          from 1102,
+          to 1115,
+          id local str "rec1"
+        },
+        {
+          from 1240,
+          to 1253,
+          id local str "rec1"
+        },
+        {
+          from 1489,
+          to 1507,
+          id local str "rec1"
+        },
+        {
+          from 1560,
+          to 1573,
+          id local str "rec1"
+        },
+        {
+          from 1698,
+          to 1711,
+          id local str "rec1"
+        },
+        {
+          from 1947,
+          to 1965,
+          id local str "rec1"
+        },
+        {
+          from 2018,
+          to 2031,
+          id local str "rec1"
+        },
+        {
+          from 2156,
+          to 2169,
+          id local str "rec1"
+        },
+        {
+          from 2405,
+          to 2423,
+          id local str "rec1"
+        },
+        {
+          from 2476,
+          to 2489,
+          id local str "rec1"
+        },
+        {
+          from 2614,
+          to 2627,
+          id local str "rec1"
+        },
+        {
+          from 2863,
+          to 2881,
+          id local str "rec1"
+        },
+        {
+          from 2934,
+          to 2947,
+          id local str "rec1"
+        },
+        {
+          from 3072,
+          to 3085,
+          id local str "rec1"
+        },
+        {
+          from 3321,
+          to 3339,
+          id local str "rec1"
+        },
+        {
+          from 3392,
+          to 3405,
+          id local str "rec1"
+        },
+        {
+          from 3530,
+          to 3543,
+          id local str "rec1"
+        },
+        {
+          from 3779,
+          to 3797,
+          id local str "rec1"
+        },
+        {
+          from 3850,
+          to 3863,
+          id local str "rec1"
+        }
+      },
+      packed-int {
+        {
+          from 237,
+          to 255,
+          id local str "rec2"
+        },
+        {
+          from 308,
+          to 321,
+          id local str "rec2"
+        },
+        {
+          from 446,
+          to 459,
+          id local str "rec2"
+        },
+        {
+          from 695,
+          to 713,
+          id local str "rec2"
+        },
+        {
+          from 766,
+          to 779,
+          id local str "rec2"
+        },
+        {
+          from 904,
+          to 917,
+          id local str "rec2"
+        },
+        {
+          from 1158,
+          to 1171,
+          id local str "rec2"
+        },
+        {
+          from 1250,
+          to 1263,
+          id local str "rec2"
+        },
+        {
+          from 1341,
+          to 1354,
+          id local str "rec2"
+        },
+        {
+          from 1381,
+          to 1395,
+          id local str "rec2"
+        },
+        {
+          from 1404,
+          to 1420,
+          id local str "rec2"
+        },
+        {
+          from 1426,
+          to 1439,
+          id local str "rec2"
+        },
+        {
+          from 2002,
+          to 2020,
+          id local str "rec2"
+        },
+        {
+          from 2143,
+          to 2172,
+          id local str "rec2"
+        },
+        {
+          from 2196,
+          to 2214,
+          id local str "rec2"
+        },
+        {
+          from 2287,
+          to 2304,
+          id local str "rec2"
+        },
+        {
+          from 2330,
+          to 2343,
+          id local str "rec2"
+        },
+        {
+          from 2400,
+          to 2414,
+          id local str "rec2"
+        },
+        {
+          from 2766,
+          to 2778,
+          id local str "rec2"
+        },
+        {
+          from 2808,
+          to 2828,
+          id local str "rec2"
+        },
+        {
+          from 2944,
+          to 2962,
+          id local str "rec2"
+        }
+      },
+      packed-int {
+        {
+          from 2,
+          to 18,
+          id genbank {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 41,
+          to 67,
+          id genbank {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 92,
+          to 106,
+          id genbank {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 130,
+          to 143,
+          id genbank {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 360,
+          to 374,
+          id genbank {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 405,
+          to 420,
+          id genbank {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 1115,
+          to 1135,
+          id genbank {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 1666,
+          to 1687,
+          id genbank {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 2379,
+          to 2394,
+          id genbank {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 2463,
+          to 2477,
+          id genbank {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 2530,
+          to 2547,
+          id genbank {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 2661,
+          to 2677,
+          id genbank {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 2837,
+          to 2853,
+          id genbank {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 3023,
+          to 3035,
+          id genbank {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 3049,
+          to 3064,
+          id genbank {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 3094,
+          to 3109,
+          id genbank {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 3190,
+          to 3207,
+          id genbank {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 3319,
+          to 3332,
+          id genbank {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 3345,
+          to 3358,
+          id genbank {
+            accession "AB000001",
+            version 1
+          }
+        },
+        {
+          from 3362,
+          to 3377,
+          id genbank {
+            accession "AB000001",
+            version 1
+          }
+        }
+      },
+      packed-int {
+        {
+          from 21,
+          to 78,
+          id local str "rec4."
+        },
+        {
+          from 83,
+          to 99,
+          id local str "rec4."
+        },
+        {
+          from 204,
+          to 231,
+          id local str "rec4."
+        },
+        {
+          from 307,
+          to 322,
+          id local str "rec4."
+        },
+        {
+          from 442,
+          to 459,
+          id local str "rec4."
+        },
+        {
+          from 486,
+          to 515,
+          id local str "rec4."
+        },
+        {
+          from 547,
+          to 573,
+          id local str "rec4."
+        },
+        {
+          from 677,
+          to 691,
+          id local str "rec4."
+        },
+        {
+          from 850,
+          to 868,
+          id local str "rec4."
+        },
+        {
+          from 1037,
+          to 1053,
+          id local str "rec4."
+        },
+        {
+          from 1078,
+          to 1092,
+          id local str "rec4."
+        },
+        {
+          from 1098,
+          to 1112,
+          id local str "rec4."
+        },
+        {
+          from 1151,
+          to 1163,
+          id local str "rec4."
+        },
+        {
+          from 1199,
+          to 1213,
+          id local str "rec4."
+        },
+        {
+          from 1229,
+          to 1243,
+          id local str "rec4."
+        },
+        {
+          from 1257,
+          to 1270,
+          id local str "rec4."
+        },
+        {
+          from 1320,
+          to 1334,
+          id local str "rec4."
+        },
+        {
+          from 1491,
+          to 1505,
+          id local str "rec4."
+        },
+        {
+          from 1747,
+          to 1767,
+          id local str "rec4."
+        }
+      },
+      packed-int {
+        {
+          from 33,
+          to 55,
+          id swissprot {
+            name "ABC_HUMAN",
+            accession "P12345",
+            release "reviewed"
+          }
+        },
+        {
+          from 74,
+          to 88,
+          id swissprot {
+            name "ABC_HUMAN",
+            accession "P12345",
+            release "reviewed"
+          }
+        },
+        {
+          from 146,
+          to 163,
+          id swissprot {
+            name "ABC_HUMAN",
+            accession "P12345",
+            release "reviewed"
+          }
+        },
+        {
+          from 336,
+          to 370,
+          id swissprot {
+            name "ABC_HUMAN",
+            accession "P12345",
+            release "reviewed"
+          }
+        },
+        {
+          from 384,
+          to 396,
+          id swissprot {
+            name "ABC_HUMAN",
+            accession "P12345",
+            release "reviewed"
+          }
+        },
+        {
+          from 461,
+          to 479,
+          id swissprot {
+            name "ABC_HUMAN",
+            accession "P12345",
+            release "reviewed"
+          }
+        },
+        {
+          from 636,
+          to 651,
+          id swissprot {
+            name "ABC_HUMAN",
+            accession "P12345",
+            release "reviewed"
+          }
+        },
+        {
+          from 1342,
+          to 1360,
+          id swissprot {
+            name "ABC_HUMAN",
+            accession "P12345",
+            release "reviewed"
+          }
+        },
+        {
+          from 1722,
+          to 1734,
+          id swissprot {
+            name "ABC_HUMAN",
+            accession "P12345",
+            release "reviewed"
+          }
+        },
+        {
+          from 1849,
+          to 1863,
+          id swissprot {
+            name "ABC_HUMAN",
+            accession "P12345",
+            release "reviewed"
+          }
+        }
+      },
+      packed-int {
+        {
+          from 711,
+          to 735,
+          id other {
+            accession "NC_000099",
+            version 1
+          }
+        },
+        {
+          from 960,
+          to 993,
+          id other {
+            accession "NC_000099",
+            version 1
+          }
+        },
+        {
+          from 1129,
+          to 1159,
+          id other {
+            accession "NC_000099",
+            version 1
+          }
+        },
+        {
+          from 1251,
+          to 1265,
+          id other {
+            accession "NC_000099",
+            version 1
+          }
+        },
+        {
+          from 1429,
+          to 1446,
+          id other {
+            accession "NC_000099",
+            version 1
+          }
+        },
+        {
+          from 1468,
+          to 1482,
+          id other {
+            accession "NC_000099",
+            version 1
+          }
+        },
+        {
+          from 1500,
+          to 1514,
+          id other {
+            accession "NC_000099",
+            version 1
+          }
+        },
+        {
+          from 1553,
+          to 1570,
+          id other {
+            accession "NC_000099",
+            version 1
+          }
+        },
+        {
+          from 1810,
+          to 1822,
+          id other {
+            accession "NC_000099",
+            version 1
+          }
+        },
+        {
+          from 1885,
+          to 1913,
+          id other {
+            accession "NC_000099",
+            version 1
+          }
+        },
+        {
+          from 1929,
+          to 1945,
+          id other {
+            accession "NC_000099",
+            version 1
+          }
+        },
+        {
+          from 1955,
+          to 1969,
+          id other {
+            accession "NC_000099",
+            version 1
+          }
+        },
+        {
+          from 2001,
+          to 2024,
+          id other {
+            accession "NC_000099",
+            version 1
+          }
+        },
+        {
+          from 2035,
+          to 2047,
+          id other {
+            accession "NC_000099",
+            version 1
+          }
+        },
+        {
+          from 2212,
+          to 2267,
+          id other {
+            accession "NC_000099",
+            version 1
+          }
+        },
+        {
+          from 2272,
+          to 2286,
+          id other {
+            accession "NC_000099",
+            version 1
+          }
+        },
+        {
+          from 2304,
+          to 2318,
+          id other {
+            accession "NC_000099",
+            version 1
+          }
+        },
+        {
+          from 2385,
+          to 2399,
+          id other {
+            accession "NC_000099",
+            version 1
+          }
+        },
+        {
+          from 2536,
+          to 2552,
+          id other {
+            accession "NC_000099",
+            version 1
+          }
+        },
+        {
+          from 2602,
+          to 2622,
+          id other {
+            accession "NC_000099",
+            version 1
+          }
+        },
+        {
+          from 2659,
+          to 2680,
+          id other {
+            accession "NC_000099",
+            version 1
+          }
+        },
+        {
+          from 2731,
+          to 2757,
+          id other {
+            accession "NC_000099",
+            version 1
+          }
+        },
+        {
+          from 2791,
+          to 2805,
+          id other {
+            accession "NC_000099",
+            version 1
+          }
+        },
+        {
+          from 2838,
+          to 2852,
+          id other {
+            accession "NC_000099",
+            version 1
+          }
+        }
+      },
+      packed-int {
+        {
+          from 81,
+          to 95,
+          id tpg {
+            accession "BK000001",
+            version 1
+          }
+        },
+        {
+          from 312,
+          to 327,
+          id tpg {
+            accession "BK000001",
+            version 1
+          }
+        },
+        {
+          from 406,
+          to 420,
+          id tpg {
+            accession "BK000001",
+            version 1
+          }
+        },
+        {
+          from 533,
+          to 546,
+          id tpg {
+            accession "BK000001",
+            version 1
+          }
+        },
+        {
+          from 593,
+          to 607,
+          id tpg {
+            accession "BK000001",
+            version 1
+          }
+        },
+        {
+          from 681,
+          to 695,
+          id tpg {
+            accession "BK000001",
+            version 1
+          }
+        },
+        {
+          from 732,
+          to 749,
+          id tpg {
+            accession "BK000001",
+            version 1
+          }
+        },
+        {
+          from 994,
+          to 1014,
+          id tpg {
+            accession "BK000001",
+            version 1
+          }
+        },
+        {
+          from 1088,
+          to 1100,
+          id tpg {
+            accession "BK000001",
+            version 1
+          }
+        },
+        {
+          from 1265,
+          to 1280,
+          id tpg {
+            accession "BK000001",
+            version 1
+          }
+        },
+        {
+          from 1304,
+          to 1320,
+          id tpg {
+            accession "BK000001",
+            version 1
+          }
+        },
+        {
+          from 1325,
+          to 1339,
+          id tpg {
+            accession "BK000001",
+            version 1
+          }
+        },
+        {
+          from 1378,
+          to 1395,
+          id tpg {
+            accession "BK000001",
+            version 1
+          }
+        },
+        {
+          from 1449,
+          to 1463,
+          id tpg {
+            accession "BK000001",
+            version 1
+          }
+        },
+        {
+          from 1642,
+          to 1654,
+          id tpg {
+            accession "BK000001",
+            version 1
+          }
+        },
+        {
+          from 1717,
+          to 1745,
+          id tpg {
+            accession "BK000001",
+            version 1
+          }
+        },
+        {
+          from 1761,
+          to 1777,
+          id tpg {
+            accession "BK000001",
+            version 1
+          }
+        },
+        {
+          from 1787,
+          to 1801,
+          id tpg {
+            accession "BK000001",
+            version 1
+          }
+        },
+        {
+          from 1831,
+          to 1851,
+          id tpg {
+            accession "BK000001",
+            version 1
+          }
+        },
+        {
+          from 1862,
+          to 1878,
+          id tpg {
+            accession "BK000001",
+            version 1
+          }
+        },
+        {
+          from 2020,
+          to 2074,
+          id tpg {
+            accession "BK000001",
+            version 1
+          }
+        },
+        {
+          from 2079,
+          to 2093,
+          id tpg {
+            accession "BK000001",
+            version 1
+          }
+        },
+        {
+          from 2111,
+          to 2125,
+          id tpg {
+            accession "BK000001",
+            version 1
+          }
+        },
+        {
+          from 2192,
+          to 2206,
+          id tpg {
+            accession "BK000001",
+            version 1
+          }
+        },
+        {
+          from 2345,
+          to 2382,
+          id tpg {
+            accession "BK000001",
+            version 1
+          }
+        },
+        {
+          from 2407,
+          to 2427,
+          id tpg {
+            accession "BK000001",
+            version 1
+          }
+        },
+        {
+          from 2464,
+          to 2485,
+          id tpg {
+            accession "BK000001",
+            version 1
+          }
+        }
+      },
+      packed-int {
+        {
+          from 36,
+          to 62,
+          id local str "rec8"
+        },
+        {
+          from 96,
+          to 110,
+          id local str "rec8"
+        },
+        {
+          from 143,
+          to 157,
+          id local str "rec8"
+        },
+        {
+          from 386,
+          to 400,
+          id local str "rec8"
+        },
+        {
+          from 617,
+          to 632,
+          id local str "rec8"
+        },
+        {
+          from 711,
+          to 725,
+          id local str "rec8"
+        },
+        {
+          from 838,
+          to 851,
+          id local str "rec8"
+        },
+        {
+          from 898,
+          to 912,
+          id local str "rec8"
+        },
+        {
+          from 986,
+          to 1000,
+          id local str "rec8"
+        },
+        {
+          from 1039,
+          to 1062,
+          id local str "rec8"
+        },
+        {
+          from 1321,
+          to 1356,
+          id local str "rec8"
+        },
+        {
+          from 1385,
+          to 1413,
+          id local str "rec8"
+        },
+        {
+          from 1531,
+          to 1549,
+          id local str "rec8"
+        }
+      }
+    },
+    more FALSE
+  }
+}

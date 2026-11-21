@@ -31,27 +31,6 @@ impl OutputFormat {
             None => (s, None),
         }
     }
-
-    /// Parse output format from string (e.g., "0", "6", "7")
-    /// Returns the format and any custom field specifications
-    pub fn parse(s: &str) -> Result<(Self, Option<String>), String> {
-        let (fmt_str, fields) = Self::split_fields(s);
-        let fields = fields.map(str::to_string);
-
-        let format = match fmt_str {
-            "0" => OutputFormat::Pairwise,
-            "6" => OutputFormat::Tabular,
-            "7" => OutputFormat::TabularWithComments,
-            _ => {
-                return Err(format!(
-                    "Unsupported output format: {}. Supported: 0, 6, 7",
-                    fmt_str
-                ))
-            }
-        };
-
-        Ok((format, fields))
-    }
 }
 
 /// Output format configuration

@@ -201,7 +201,7 @@ impl Runtime<'_> {
             } else {
                 x_serial += 1;
                 let x_t = x_timing::lap();
-                let encoded = self.subjects.read_encoded(list.oid)?;
+                let encoded = self.subjects.read_searched(list.oid, self.options)?;
                 let input: Vec<_> = list.hsps.iter().map(|h| h.hsp.clone()).collect();
                 let redone = state.redo_list_observed(&input, batch, &encoded)?;
                 let finalized = finalize_redone(

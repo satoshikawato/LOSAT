@@ -41,6 +41,7 @@ With the NCBI names installed (see [Coming from NCBI BLAST+](../from-ncbi-blast.
 | `-max_file_sz` | `3000000000` | Largest size of one database file, in bytes. A larger database is split into volumes. |
 | `-logfile` | standard output and error | Write the log and messages to this file (appended). |
 | `-metadata_output_prefix` | none | Path written before each file name in the JSON metadata (`.pjs`, `.njs`), for a database that will be read from another directory. The path separator (`/`, `\` on Windows) is added when the value does not end with one. |
+| `-oid_masks` | none | `1` also writes an OID mask file per volume (`.pxm`, `.nxm`) that marks the sequences whose ids are all predicted RefSeq accessions (`XP_`, `XM_`, `XR_`, ...), which NCBI BLAST+ reads for an alias file with `OID_MASK_TYPE 1` (LOSAT refuses that alias key for now). |
 
 For every option: `losat makeblastdb -help`.
 
@@ -65,7 +66,7 @@ Tax ids are what `-taxids` and `-taxidlist` filters, the tabular `staxid` field 
 
 To search a database with `-db_soft_mask` or `-db_hard_mask`, or to read masked FASTA with `blastdbcmd -mask_sequence_with`, add masks when you build it:
 
-1. Make a mask file with [`dustmasker`](dustmasker.md) (nucleotides), [`segmasker`](segmasker.md) (proteins) or [`convert2blastmask`](convert2blastmask.md) (FASTA that another tool has masked). Use `-outfmt maskinfo_asn1_bin` or `maskinfo_asn1_text`, and `-parse_seqids` if the database will have parsed ids.
+1. Make a mask file with [`dustmasker`](dustmasker.md) (nucleotides), [`segmasker`](segmasker.md) (proteins), [`windowmasker`](windowmasker.md) (repeats of nucleotides, with a counts file) or [`convert2blastmask`](convert2blastmask.md) (FASTA that another tool has masked). Use `-outfmt maskinfo_asn1_bin` or `maskinfo_asn1_text`, and `-parse_seqids` if the database will have parsed ids.
 2. Give it to `makeblastdb` with `-mask_data`. Add `-mask_id` to name the algorithm and `-mask_desc` to describe it.
 3. Look up the numeric algorithm id with `blastdbcmd -db DB -info` (the table "Available filtering algorithms").
 
@@ -124,7 +125,7 @@ The full list is on [Differences from NCBI BLAST+](../differences.md).
 
 ## What LOSAT refuses
 
-- `-randomize` and `-oid_masks`: each stops with an error that names the option.
+- `-randomize`: it stops with an error that names the option.
 - `-gi_mask` with two mask files whose GI-mask files would be the same files (one `-gi_mask_name` twice, or two names of one path). NCBI writes both into the same files at once, and what they then hold depends on its C++ library.
 - `-input_type blastdb`, `asn1_txt` and `asn1_bin`. Only `fasta` works.
 - A FASTA record of 4,294,967,296 letters or more whose letters NCBI would build into a sequence.
@@ -181,5 +182,5 @@ losat blastdbcmd -db split_db -entry all -outfmt "%o %l" | tail -n 3
 
 - [BLAST databases](../databases.md)
 - [blastdbcmd](blastdbcmd.md): read sequences and information back
-- [dustmasker](dustmasker.md), [segmasker](segmasker.md), [convert2blastmask](convert2blastmask.md): make masks
+- [dustmasker](dustmasker.md), [segmasker](segmasker.md), [windowmasker](windowmasker.md), [convert2blastmask](convert2blastmask.md): make masks
 - [What LOSAT refuses](../refusals.md)

@@ -2,26 +2,6 @@
 //! (outfmt 11).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:1155-1172
-//! ```c++
-//! void CBlastAppDiagHandler::Post(const SDiagMessage & mess)
-//! {
-//! 	if(m_handler != NULL) {
-//! 		m_handler->Post(mess);
-//! 	}
-//! 	if(m_save) {
-//! 		CRef<CBlast4_error> d(new CBlast4_error);
-//! 		string m;
-//! 		mess.Write(m);
-//! 		d->SetMessage(NStr::Sanitize(m));
-//! 		d->SetCode((int)mess.m_Severity);
-//! 		{
-//! 			DEFINE_STATIC_MUTEX(mx);
-//! 			CMutexGuard guard(mx);
-//! 			m_messages.push_back(d);
-//! 		}
-//! 	}
-//! }
-//! ```
 //! Every diagnostic that the application posts is printed (the handler it wraps) and, when
 //! the application writes an archive, saved with its severity (`eDiag_Warning` 1,
 //! `eDiag_Error` 2, `eDiag_Critical` 3) and its text with the white space cleaned. LOSAT prints the same lines
@@ -85,13 +65,6 @@ impl Posts {
     }
 
     // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:277-282
-    // ```c++
-    //         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup() ) {
-    //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
-    //             CRef<IQueryFactory> queries(new CObjMgr_QueryFactory(*query_batch));
-    //
-    //             SaveSearchStrategy(args, m_CmdLineArgs, queries, m_OptsHndl);
-    // ```
     /// The place where NCBI writes the search strategy request of `export`'s batch whose first
     /// query (the run's) is `first`: writing these posts there (`write`) marks the requests through
     /// that batch as NCBI's (`StrategyExport::release_through`; those after the last place reached
@@ -122,21 +95,6 @@ impl Posts {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1432-1452
-    // ```c++
-    //     if (m_FormatType == CFormattingArgs::eAsnText
-    //       || m_FormatType == CFormattingArgs::eAsnBinary
-    //       || m_FormatType == CFormattingArgs::eXml
-    //     ...
-    //       || m_FormatType == CFormattingArgs::eSAM)
-    //     {
-    //         x_PrintStructuredReport(results, queries);
-    //         return;
-    //     }
-    //     ...
-    //     if (results.HasWarnings()) {
-    //         ERR_POST(Warning << results.GetWarningStrings());
-    //     }
-    // ```
     /// Adds `lines`, the query's result warnings, where the call's first format is a structured
     /// one, which returns before them, and the caller takes those of the formats after it
     /// (`ReportOutputs::later_warnings`): the command line's run of such a format posts them when
@@ -169,13 +127,6 @@ impl Posts {
     }
 
     // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:284-288
-    // ```c++
-    //                 BlastFormatter_PreFetchSequenceData(*results, scope,
-    //                 		                            fmt_args->GetFormattedOutputChoice());
-    //                 ITERATE(CSearchResultSet, result, *results) {
-    //                     formatter.PrintOneResultSet(**result, query_batch);
-    //                 }
-    // ```
     /// Adds the texts of the loads of a batch's prefetch (`reads`, in the order of the loads;
     /// `common::database::batch_prefetch`), each line a warning. NCBI's prefetch loads the batch's
     /// subjects after the reports of the batches before, whose loads a BLAST XML stream that cut
@@ -386,87 +337,5 @@ pub fn sanitize(line: &[u8]) -> Vec<u8> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn sanitize_cleans_white_space_like_ncbi() {
-        assert_eq!(sanitize(b"  a  b\t\tc \r"), b"a b c");
-        assert_eq!(sanitize(b"x\x01\x02y"), b"x y");
-        assert_eq!(sanitize(b"caf\xc3\xa9!"), b"caf !");
-        assert_eq!(sanitize(b" \t "), b"");
-        assert_eq!(
-            sanitize(b"File is not accessible:  `a b'"),
-            b"File is not accessible: `a b'"
-        );
-        assert_eq!(sanitize(b"\"quoted\""), b"\"quoted\"");
-    }
-
-    #[test]
-    fn lines_are_saved_when_complete() {
-        let mut log = DiagLog::default();
-        log.feed(b"Warning: [blastn] one\nWar");
-        log.feed(b"ning: [blastn]  two\n\n");
-        log.post(ERROR, b"BLAST query error: x\n");
-        assert_eq!(
-            log.take(),
-            vec![
-                (WARNING, b"Warning: [blastn] one".to_vec()),
-                (WARNING, b"Warning: [blastn] two".to_vec()),
-                (ERROR, b"BLAST query error: x".to_vec()),
-            ]
-        );
-        assert!(log.is_empty());
-    }
-
-    // The later formats' lines of a query (`Posts::later`) are not the diagnostics': they are
-    // written to a later format's receiver alone, before the query's report
-    // (`QueryWarnings::with_later`), and kept by the copies of the posts.
-    #[test]
-    fn later_lines_go_to_a_later_format_s_receiver_alone() {
-        use crate::report::query_warnings::QueryWarnings;
-        let mut first = Posts::of_lines(b"Warning: [blastn] reader\n".to_vec());
-        first.later(b"Warning: [blastn] Query_1 q: Sequence contains no data \n");
-        let mut second = Posts::new();
-        second.later(b"");
-        assert!(second.is_empty());
-        second.later(b"Warning: [blastn] Query_2 r: Sequence contains no data \n");
-        assert!(!second.has_text() && second.text().is_empty());
-        let posts = Posts::with_later(vec![first, second, Posts::new()], &[Vec::new()]);
-        let copies: Vec<Posts> = posts.iter().map(Posts::placed).collect();
-        assert_eq!(copies, posts);
-        // The first format: the diagnostics get the reader's line, no receiver anything.
-        let (mut report, mut diagnostics) = (Vec::new(), Vec::new());
-        let mut warnings = QueryWarnings::of_posts(&posts, None, &mut diagnostics);
-        for query in 0..3 {
-            warnings.before_query(query, &mut report).unwrap();
-        }
-        drop(warnings);
-        assert_eq!(diagnostics, b"Warning: [blastn] reader\n");
-        // A later format whose report stops after the first query: the diagnostics get nothing,
-        // its receiver the first query's line.
-        let (mut diagnostics, mut later) = (Vec::new(), Vec::new());
-        let mut warnings = QueryWarnings::of_posts(&[], None, &mut diagnostics)
-            .with_later(&posts, Some(&mut later));
-        warnings.before_query(0, &mut report).unwrap();
-        drop(warnings);
-        assert!(diagnostics.is_empty() && report.is_empty());
-        assert_eq!(
-            later,
-            b"Warning: [blastn] Query_1 q: Sequence contains no data \n"
-        );
-        // One that writes every query's report: both lines, in the order of the queries.
-        let mut later = Vec::new();
-        let mut warnings = QueryWarnings::of_posts(&[], None, &mut diagnostics)
-            .with_later(&posts, Some(&mut later));
-        for query in 0..3 {
-            warnings.before_query(query, &mut report).unwrap();
-        }
-        drop(warnings);
-        assert_eq!(
-            later,
-            b"Warning: [blastn] Query_1 q: Sequence contains no data \n\
-              Warning: [blastn] Query_2 r: Sequence contains no data \n"
-        );
-    }
-}
+#[path = "diag_log_tests.rs"]
+mod tests;

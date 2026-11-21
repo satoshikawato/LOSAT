@@ -382,9 +382,9 @@ pub(crate) fn unadjusted_square_matrix(
 /// (`redone`) or by the fetch that excludes its subject (`excluded_at_fetch`,
 /// `algorithm::common::database::FetchMarks`), and a match that early termination stops leaves
 /// it. The status left at the end of the batch fails it (`failed`, `sw_batch_failed_error`). One
-/// owner of the rule for every program's redo loop (TBLASTN's `match_redo::match_outcome`;
-/// BLASTP's one-thread loop, `redo_run.rs`, keeps its own copy of the rule until it reads this
-/// one).
+/// owner of the rule for every program's redo loop: TBLASTN's (`match_redo::match_outcome`,
+/// `stage_d_pipeline`) and BLASTP's one-thread loop (`blastp::blast_engine::redo_run`, which reads
+/// the lists its fetch excludes after each query's loop).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3644-3646
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3775-3779 (cited at

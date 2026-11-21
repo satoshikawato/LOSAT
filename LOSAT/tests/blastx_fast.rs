@@ -111,10 +111,6 @@ fn formats_that_read_the_query_twice_refuse_standard_input() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2536-2537
-// ```c++
-//         else {
-//             subj_input_stream = &args[kArgSubject].AsInputFile();
-// ```
 // `-subject -` is `cin`, read to its end before the query (`ReadSequencesToBlast`). The query
 // `-` is the same stream, which then has failed: no position, so not "Query is Empty!" even
 // when the standard input is a regular file, and no query batch (blast_app_util.cpp:856-859).

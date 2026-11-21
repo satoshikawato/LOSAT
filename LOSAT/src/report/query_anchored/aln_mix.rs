@@ -1,6 +1,6 @@
 //! NCBI's `CAlnMix` (`objtools/alnmgr`) for the flags of the query-anchored reports: `Add` with
 //! `fPreserveRows` or `fForceTranslation` (`super::AddFlags`), `Merge` with `fMinGap |
-//! fQuerySeqMergeOnly | fFillUnalignedRegions` (showalign.cpp:2058-2083, quoted at
+//! fQuerySeqMergeOnly | fFillUnalignedRegions` (showalign.cpp:2058-2083, cited at
 //! `super::write_section`), on Dense-segs of two rows whose first row is the query. The result is
 //! the merged Dense-seg of `x_CreateDenseg`.
 //!
@@ -44,18 +44,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use super::{AddFlags, Denseg, Hsps, SeqKey};
 use crate::ncbi_exception::{NcbiException, ThrowSite};
 
-// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmerger.cpp:787-794 (quoted at
+// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmerger.cpp:787-794 (cited at
 // `Mix::merge_match`)
-// ```c++
-//                         if (start_i->second->m_StartIts.find(seq2) !=
-//                             start_i->second->m_StartIts.end()) {
-//                             // consistency check fails
-//                             NCBI_THROW(CAlnException, eMergeFailure,
-//                                        "CAlnMixMerger::x_Merge(): "
-//                                        "Internal error: "
-//                                        "Start iterator already exists for seq2.");
-//                         }
-// ```
 // NCBI BLAST+ 2.17.0 reports it as `Error: NCBI C++ Exception:\n    T0 "<build
 // tree>/src/objtools/alnmgr/alnmerger.cpp", line 790: Error: (CAlnException::eMergeFailure)
 // ncbi::objects::CAlnMixMerger::x_Merge() - CAlnMixMerger::x_Merge(): Internal error: Start
@@ -74,18 +64,8 @@ const X_MERGE_START_ITERATOR: ThrowSite = ThrowSite {
 const X_MERGE_START_ITERATOR_MESSAGE: &str =
     "CAlnMixMerger::x_Merge(): Internal error: Start iterator already exists for seq2.";
 
-// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnsegments.cpp:162-169 (quoted at
+// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnsegments.cpp:162-169 (cited at
 // `Mix::build`)
-// ```c++
-//                         // If the segment is already in the set, we have infinite loop
-//                         // and must terminate it.
-//                         if (!seg_set.insert(row->GetStarts().current->second).second) {
-//                             string errstr =
-//                                 string("CAlnMixSegments::Build():")
-//                                 + " Internal error: Infinite loop detected.";
-//                             NCBI_THROW(CAlnException, eMergeFailure, errstr);
-//                         }
-// ```
 // NCBI BLAST+ 2.17.0 reports it at line 168, in `ncbi::objects::CAlnMixSegments::Build()` (exit
 // 255; the review of line RG T3c fix 1, case `mg0.sx.f1` of `T/t3/review2_t3c/cases_mg.tsv`).
 /// Where `Build` throws when the segments on the left of a refseq segment lead back to a segment
@@ -150,25 +130,6 @@ pub(crate) enum MixError {
 }
 
 /// NCBI reference (598d8ae6): c++/include/objtools/alnmgr/alnseq.hpp:139-185
-/// ```c++
-/// class NCBI_XALNMGR_EXPORT CAlnMixSeq : public CObject
-/// {
-///     ...
-///     int                   m_DsCnt;
-///     const CBioseq_Handle* m_BioseqHandle;
-///     ...
-///     bool                  m_PositiveStrand;
-///     CAlnMixSeq *          m_RefBy;
-///     CAlnMixSeq *          m_ExtraRow;
-///     int                   m_ExtraRowIdx;
-///     CAlnMixSeq *          m_AnotherRow;
-///     int                   m_DsIdx; // used by the truncate algorithm
-///     int                   m_SeqIdx;
-///     int                   m_ChildIdx;
-///     int                   m_RowIdx;
-///     TMatchList            m_MatchList;
-///     ...
-/// ```
 /// `m_Score` and `m_ChainScore` sort and check nothing under these flags.
 struct MixSeq {
     /// `m_BioseqHandle`: the sequence (`x_IdentifyAlnMixSeq`).
@@ -276,7 +237,7 @@ struct Mix {
     single_refseq: bool,
     /// `x_Merge`'s `CRef<CAlnMixSegment> seg` (alnmerger.cpp:161): the segment that the merge
     /// created last (`Mix::merge_segment`), which that `CRef` holds until `x_CreateDenseg` has
-    /// returned (alnmerger.cpp:822-830, quoted at `Mix::held`).
+    /// returned (alnmerger.cpp:822-830, cited at `Mix::held`).
     merge_seg: Option<SegIx>,
 }
 
@@ -320,7 +281,7 @@ impl Mix {
         self.segs.len() - 1
     }
 
-    /// `seg = new CAlnMixSegment()` of `x_Merge` (alnmerger.cpp:492, 528, 589, 654, quoted at
+    /// `seg = new CAlnMixSegment()` of `x_Merge` (alnmerger.cpp:492, 528, 589, 654, cited at
     /// `Mix::place`): a new segment, which `seg` now holds (`merge_seg`).
     fn merge_segment(&mut self, len: u32) -> SegIx {
         let seg = self.new_segment(len);
@@ -351,19 +312,6 @@ impl Mix {
     /// fill starts at one there. Only `seg` can keep a segment of length 0.
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmerger.cpp:161,822-830
-    /// ```c++
-    ///     CRef<CAlnMixSegment> seg;
-    ///     ...
-    ///     m_AlnMixSequences->BuildRows();
-    ///     m_AlnMixSegments->Build(m_MergeFlags & fGapJoin,
-    ///                             m_MergeFlags & fMinGap,
-    ///                             m_MergeFlags & fRemoveLeadTrailGaps);
-    ///     if (m_MergeFlags & fFillUnalignedRegions) {
-    ///         m_AlnMixSegments->FillUnalignedRegions();
-    ///     }
-    ///     x_CreateDenseg();
-    /// }
-    /// ```
     fn held(&self, seg: SegIx) -> bool {
         self.merge_seg == Some(seg)
             || self
@@ -372,14 +320,7 @@ impl Mix {
                 .any(|seq| seq.starts.values().any(|&held| held == seg))
     }
 
-    // NCBI reference (598d8ae6): c++/include/objtools/alnmgr/alnsegments.hpp:108-112
-    // ```c++
-    //     void SetStartIterator(CAlnMixSeq* seq, CAlnMixStarts::iterator iter)
-    //     {
-    //         m_StartIts.insert(TStartIterators::value_type(seq, iter))
-    //             .first->second = iter;
-    //     }
-    // ```
+    // NCBI reference (598d8ae6): c++/include/objtools/alnmgr/alnsegments.hpp:108-115
     fn set_start_iterator(&mut self, seg: SegIx, seq: SeqIx, at: u32) {
         let key = (self.seqs[seq].seq_idx, self.seqs[seq].child_idx);
         self.segs[seg].start_its.insert(key, (seq, at));
@@ -388,22 +329,6 @@ impl Mix {
     /// `x_IdentifyAlnMixSeq`: the sequence of `key`, added to `m_Seqs` when new.
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnseq.cpp:230-262
-    /// ```c++
-    ///     TBioseqHandleMap::iterator it = m_BioseqHandles.find(bioseq_handle);
-    ///     if (it == m_BioseqHandles.end()) {
-    ///         // add this bioseq handle
-    ///         aln_seq = new CAlnMixSeq();
-    ///         m_BioseqHandles[bioseq_handle] = aln_seq;
-    ///         ...
-    ///         aln_seq->m_DsCnt = 0;
-    ///
-    ///         // add this sequence
-    ///         m_Seqs.push_back(aln_seq);
-    ///         ...
-    ///     } else {
-    ///         aln_seq = it->second;
-    ///     }
-    /// ```
     fn identify(&mut self, key: SeqKey) -> SeqIx {
         if let Some(&seq) = self.by_key.get(&key) {
             return seq;
@@ -418,33 +343,7 @@ impl Mix {
     /// `CAlnMix::Add(ds, fPreserveRows)`: `CAlnMixSequences::Add` and `CAlnMixMatches::Add` of
     /// one HSP (`subject`, `segments`; the query is row 0, the subject row 1).
     ///
-    /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnseq.cpp:105-112,158-195
-    /// ```c++
-    /// CAlnMixSequences::Add(const CDense_seg& ds, TAddFlags flags)
-    /// {
-    ///     m_DsCnt++;
-    ///
-    ///     vector<CRef<CAlnMixSeq> >& ds_seq = m_DsSeq[&ds];
-    ///
-    ///     for (CAlnMap::TNumrow row = 0;  row < ds.GetDim();  row++) {
-    ///         ...
-    ///             x_IdentifyAlnMixSeq(aln_seq, *(ds.GetIds())[row]);
-    ///         ...
-    ///         if (flags & fPreserveRows) {
-    ///             int row_index = aln_seq->m_RowIdx;
-    ///             if (row_index == -1) {
-    ///                 // initialization
-    ///                 aln_seq->m_RowIdx = row;
-    ///             } else while (row_index != row) {
-    ///                 ...
-    ///             }
-    ///         }
-    ///
-    ///         aln_seq->m_DsCnt++;
-    ///         ds_seq.push_back(aln_seq);
-    ///     }
-    /// }
-    /// ```
+    /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnseq.cpp:105-208
     /// `strand1` and `strand2` are the rows' strands in the Dense-seg (`strands_exist` holds for
     /// BLAST's Dense-segs and `CreateDensegFromStdseg`'s): `Hsp::strands_differ` (a match of one row
     /// has `m_StrandsDiffer` false).
@@ -456,101 +355,9 @@ impl Mix {
     /// it, where another subject's is 0 until its first match (`x_SecondRowFits`): the first HSP
     /// added keeps the subject's first row, not the HSP of the longest segment.
     ///
-    /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnseq.cpp:165-186
-    /// ```c++
-    ///             } else while (row_index != row) {
-    ///                 if (aln_seq->m_AnotherRow) {
-    ///                     aln_seq   = aln_seq->m_AnotherRow;
-    ///                     row_index = aln_seq->m_RowIdx;
-    ///                 } else {
-    ///                     CRef<CAlnMixSeq> another_row (new CAlnMixSeq);
+    /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnseq.cpp:165-202
     ///
-    ///                     another_row->m_BioseqHandle = aln_seq->m_BioseqHandle;
-    ///                     another_row->m_SeqId        = aln_seq->m_SeqId;
-    ///                     another_row->m_Width        = aln_seq->m_Width;
-    ///                     another_row->m_SeqIdx       = aln_seq->m_SeqIdx;
-    ///                     another_row->m_ChildIdx     = aln_seq->m_ChildIdx + 1;
-    ///                     another_row->m_DsIdx        = int(m_DsCnt);
-    ///                     another_row->m_RowIdx       = row;
-    ///
-    ///                     m_Seqs.push_back(another_row);
-    ///
-    ///                     aln_seq = aln_seq->m_AnotherRow = another_row;
-    ///
-    ///                     break;
-    ///                 }
-    ///             }
-    /// ```
-    ///
-    /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmatch.cpp:120-252
-    /// ```c++
-    ///     for (CAlnMap::TNumseg seg =0;  seg < ds.GetNumseg();  seg++) {
-    ///         len = ds.GetLens()[seg];
-    ///         single_chunk = true;
-    ///
-    ///         for (CAlnMap::TNumrow row1 = 0;  row1 < ds.GetDim();  row1++) {
-    ///             if ((start1 = ds.GetStarts()[seg_off + row1]) >= 0) {
-    ///                 ...
-    ///                 for (CAlnMap::TNumrow row2 = row1+1;
-    ///                      row2 < ds.GetDim();  row2++) {
-    ///                     if ((start2 = ds.GetStarts()[seg_off + row2]) >= 0) {
-    ///                         //match found
-    ///                         if (single_chunk) {
-    ///                             single_chunk = false;
-    ///                             first_non_gapped_row_found = row1;
-    ///                         }
-    ///                         ...
-    ///                         } else {
-    ///                             score = len;
-    ///                         }
-    ///                         ...
-    ///                         if (row1 == first_non_gapped_row_found) {
-    ///                             CRef<CAlnMixMatch> match(new CAlnMixMatch);
-    ///                             match->m_AlnSeq1 = ds_seq[row1];
-    ///                             ...
-    ///                             match->m_Start1 = start1;
-    ///                             match->m_AlnSeq2 = ds_seq[row2];
-    ///                             ...
-    ///                             match->m_Start2 = start2;
-    ///                             match->m_Len = len;
-    ///                             match->m_DsIdx = int(m_DsCnt);
-    ///                             match->m_StrandsDiffer = false;
-    ///                             if (strands_exist) {
-    ///                                 if ((strand1 == eNa_strand_minus  &&
-    ///                                      strand2 != eNa_strand_minus)  ||
-    ///                                     (strand1 != eNa_strand_minus  &&
-    ///                                      strand2 == eNa_strand_minus)) {
-    ///
-    ///                                     match->m_StrandsDiffer = true;
-    ///                                 }
-    ///                             }
-    ///                             match->m_Score = score;
-    ///                             ...
-    ///                             m_Matches.push_back(match);
-    ///                             ...
-    ///                         }
-    ///                     }
-    ///                 }
-    ///                 if (single_chunk) {
-    ///                     //record it
-    ///                     CRef<CAlnMixMatch> match(new CAlnMixMatch);
-    ///                     match->m_Score = 0;
-    ///                     match->m_AlnSeq1 = ds_seq[row1];
-    ///                     ...
-    ///                     match->m_Start1 = start1;
-    ///                     match->m_AlnSeq2 = 0;
-    ///                     match->m_Start2 = 0;
-    ///                     match->m_Len = len;
-    ///                     ...
-    ///                     match->m_DsIdx = int(m_DsCnt);
-    ///                     ...
-    ///                     m_Matches.push_back(match);
-    ///                 }
-    ///             }
-    ///         }
-    ///         seg_off += ds.GetDim();
-    ///     }
-    /// ```
+    /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmatch.cpp:116-256
     ///
     /// With `fForceTranslation` (`flags`) the rows are not preserved (no `m_AnotherRow`), and each
     /// match of two rows first compares its strands with the strand scores of its sequences: a
@@ -562,53 +369,8 @@ impl Mix {
     /// the throwing segment's scores are added. Returns whether the Dense-seg was added whole
     /// (false: left out).
     ///
-    /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmatch.cpp:150-210
-    /// ```c++
-    ///                         // determine the strand
-    ///                         ENa_strand strand1 = eNa_strand_plus;
-    ///                         ENa_strand strand2 = eNa_strand_plus;
-    ///                         if (strands_exist) {
-    ///                             if (ds.GetStrands()[seg_off + row1]
-    ///                                 == eNa_strand_minus) {
-    ///                                 strand1 = eNa_strand_minus;
-    ///                             }
-    ///                             if (ds.GetStrands()[seg_off + row2]
-    ///                                 == eNa_strand_minus) {
-    ///                                 strand2 = eNa_strand_minus;
-    ///                             }
-    ///                         }
-    ///                         ...
-    ///                         // in case of fForceTranslation,
-    ///                         // check if strands are not mixed by
-    ///                         // comparing current strand to the prevailing one
-    ///                         if (flags & fForceTranslation  &&
-    ///                             (aln_seq1->m_StrandScore > 0  &&
-    ///                              strand1 == eNa_strand_minus ||
-    ///                              aln_seq1->m_StrandScore < 0  &&
-    ///                              strand1 != eNa_strand_minus ||
-    ///                              aln_seq2->m_StrandScore > 0  &&
-    ///                              strand2 == eNa_strand_minus ||
-    ///                              aln_seq2->m_StrandScore < 0  &&
-    ///                              strand2 != eNa_strand_minus)) {
-    ///                             NCBI_THROW(CAlnException, eMergeFailure,
-    ///                                        "CAlnMixMatches::Add(): "
-    ///                                        "Unable to mix strands when "
-    ///                                        "forcing translation!");
-    ///                         }
-    ///
-    ///                         // add to the prevailing strand
-    ///                         aln_seq1->m_StrandScore += (strand1 == eNa_strand_minus ?
-    ///                                                     - score : score);
-    ///                         aln_seq2->m_StrandScore += (strand2 == eNa_strand_minus ?
-    ///                                                     - score : score);
-    /// ```
+    /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmatch.cpp:145-210
     /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2073-2076
-    /// ```c++
-    ///                 } catch (const CException& e){
-    ///                     _TRACE("Warning: " << e.what());
-    ///                     continue;
-    ///                 }
-    /// ```
     /// So a TBLASTX subject's HSP of the other strand than the subject's first HSP in the same query
     /// frame is not shown in formats 1 to 4, where the description table and outfmt 0 show it (a
     /// deterministic result of NCBI BLAST+ 2.17.0, written as it is: PD-LOSAT-NCBI-DEFECTS rule 2,
@@ -634,40 +396,14 @@ impl Mix {
         let mut ds_seq = [0; 2];
         for (row, key) in [SeqKey::Query, subject_key].into_iter().enumerate() {
             let seq = self.identify(key);
-            // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnseq.cpp:157-160
-            // ```c++
-            //         // Set the width
-            //         if (ds.IsSetWidths()) {
-            //             aln_seq->m_Width = ds.GetWidths()[row];
-            //         }
-            // ```
+            // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnseq.cpp:168-170
             // (The widths of `CreateDensegFromStdseg`'s Dense-seg of a TBLASTN or BLASTX HSP: 1 for
             // the protein row, 3 for the nucleotide row; of a TBLASTX HSP none, which
             // `x_ExtendDSWithWidths` sets to 3 for `fForceTranslation`, its lengths in residues;
             // `x_Merge` sets the same, alnmerger.cpp:138-145, `m_IsAA ? 1 : 3`. A Dense-seg of
             // two untranslated rows has none: 1.)
-            // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmix.cpp:133-143
-            // ```c++
-            //     // translate (extend with widths) the dense-seg if necessary
-            //     if (flags & fForceTranslation  && !dsp->IsSetWidths()) {
-            //         if ( !m_Scope ) {
-            //             ...
-            //         } else {
-            //             m_InputDSs.push_back(x_ExtendDSWithWidths(*dsp));
-            //             dsp = m_InputDSs.back();
-            //         }
-            // ```
+            // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmix.cpp:132-143
             // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmix.cpp:198-220
-            // ```c++
-            //     if (contains_NA) {
-            //         // fix the lengths
-            //         ...
-            //                 new_lens[numseg] = lens[numseg] / 3;
-            //         ...
-            //     // add the widths
-            //     CDense_seg::TWidths&  new_widths  = new_ds->SetWidths();
-            //     new_widths.resize(ds.GetDim(), contains_NA ? 3 : 1);
-            // ```
             self.seqs[seq].width = if row == 0 {
                 self.query_width
             } else {
@@ -745,25 +481,6 @@ impl Mix {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmerger.cpp:835-860
-    // ```c++
-    //     // subject sequences go on separate rows if requested
-    //     if (m_MergeFlags & fQuerySeqMergeOnly) {
-    //         if (seq2->m_DsIdx) {
-    //             if ( !(m_MergeFlags & fTruncateOverlaps) ) {
-    //                 if (seq2->m_DsIdx == match->m_DsIdx) {
-    //                     return result;
-    //                 } else {
-    //                     return eForceSeparateRow;
-    //                 }
-    //             }
-    //         } else {
-    //             seq2->m_DsIdx = match->m_DsIdx;
-    //             if ( !(m_MergeFlags & fTruncateOverlaps) ) {
-    //                 return result;
-    //             }
-    //         }
-    //     }
-    // ```
     /// `x_SecondRowFits` under `fQuerySeqMergeOnly` without `fTruncateOverlaps`: whether row
     /// `seq2` is the row of Dense-seg `ds_idx` (`eSecondRowFitsOk`; a row of none takes it),
     /// else `eForceSeparateRow`. The rest of the function (strand, frame and overlap checks)
@@ -784,203 +501,11 @@ impl Mix {
     /// of the match (where the second row's walk starts).
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmerger.cpp:466-702
-    /// ```c++
-    ///             if (!starts.size()) {
-    ///                 // no starts exist yet
-    ///                 ...
-    ///                 // this seq has not yet been used, set the strand
-    ///                 if (m_AlnMixMatches->m_AddFlags & CAlnMixMatches::fForceTranslation) {
-    ///                     seq1->m_PositiveStrand = (seq1->m_StrandScore >= 0);
-    ///                 } else {
-    ///                     seq1->m_PositiveStrand = ! (m_MergeFlags & fNegativeStrand);
-    ///                 }
-    ///
-    ///                 //create the first one
-    ///                 seg = new CAlnMixSegment();
-    ///                 seg->m_Len = len;
-    ///                 seg->m_DsIdx = match->m_DsIdx;
-    ///                 starts[start1] = seg;
-    ///                 seg->SetStartIterator
-    ///                     (seq1, lo_start_i = hi_start_i = starts.begin());
-    ///
-    ///                 if (m_MergeFlags & fQuerySeqMergeOnly) {
-    ///                     seq2->m_DsIdx = match->m_DsIdx;
-    ///                 }
-    ///                 // DONE!
-    ///             } else {
-    ///                 // some starts exist already
-    ///
-    ///                 // look ahead
-    ///                 if ((lo_start_i = start_i = starts.lower_bound(start1))
-    ///                     == starts.end()  ||
-    ///                     start1 < start_i->first) {
-    ///                     // the start position does not exist
-    ///                     if (lo_start_i != starts.begin()) {
-    ///                         --lo_start_i;
-    ///                     }
-    ///                 }
-    ///
-    ///                 // look back
-    ///                 if (hi_start_i == starts.end()  &&  start_i != lo_start_i) {
-    ///                     CAlnMixSegment * prev_seg = lo_start_i->second;
-    ///                     if (lo_start_i->first + prev_seg->m_Len * width1 >
-    ///                         start1) {
-    ///                         // x----..   becomes  x-x--..
-    ///                         //   x--..
-    ///
-    ///                         TSeqPos len1 = (start1 - lo_start_i->first) / width1;
-    ///                         TSeqPos len2 = prev_seg->m_Len - len1;
-    ///
-    ///                         // create the second seg
-    ///                         seg = new CAlnMixSegment();
-    ///                         seg->m_Len = len2;
-    ///                         seg->m_DsIdx = match->m_DsIdx;
-    ///                         starts[start1] = seg;
-    ///
-    ///                         // create rows info
-    ///                         ITERATE (CAlnMixSegment::TStartIterators, it,
-    ///                                  prev_seg->m_StartIts) {
-    ///                             CAlnMixSeq * seq = it->first;
-    ///                             tmp_start_i = it->second;
-    ///                             if (seq->m_PositiveStrand ==
-    ///                                 seq1->m_PositiveStrand) {
-    ///                                 seq->SetStarts()
-    ///                                     [tmp_start_i->first + len1 * seq->m_Width]
-    ///                                     = seg;
-    ///                                 if (tmp_start_i != seq->SetStarts().end()) {
-    ///                                     seg->SetStartIterator(seq, ++tmp_start_i);
-    ///                                 } else {
-    ///                                     ...
-    ///                                 }
-    ///                             } else {
-    ///                                 ...
-    ///                             }
-    ///                         }
-    ///
-    ///                         // truncate the first seg
-    ///                         prev_seg->m_Len = len1;
-    ///
-    ///                         if (start_i != starts.begin()) {
-    ///                             start_i--; // point to the newly created start
-    ///                         }
-    ///                     }
-    ///                     if (lo_start_i != starts.end()) {
-    ///                         lo_start_i++;
-    ///                     }
-    ///                 }
-    ///             }
-    ///
-    ///             // loop through overlapping segments
-    ///             start = start1;
-    ///             while (hi_start_i == starts.end()) {
-    ///                 if (start_i != starts.end()  &&  start_i->first == start) {
-    ///                     CAlnMixSegment * prev_seg = start_i->second;
-    ///                     if (prev_seg->m_Len > curr_len) {
-    ///                         // x-------)  becomes  x----)x--)
-    ///                         // x----)
-    ///
-    ///                         // create the second seg
-    ///                         seg = new CAlnMixSegment();
-    ///                         TSeqPos len1 =
-    ///                             seg->m_Len = prev_seg->m_Len - curr_len;
-    ///                         start += curr_len * width1;
-    ///
-    ///                         // truncate the first seg
-    ///                         prev_seg->m_Len = curr_len;
-    ///
-    ///                         // create rows info
-    ///                         ITERATE (CAlnMixSegment::TStartIterators, it,
-    ///                                 prev_seg->m_StartIts) {
-    ///                             CAlnMixSeq * seq = it->first;
-    ///                             tmp_start_i = it->second;
-    ///                             if (seq->m_PositiveStrand ==
-    ///                                 seq1->m_PositiveStrand) {
-    ///                                 seq->SetStarts()[tmp_start_i->first +
-    ///                                              curr_len * seq->m_Width]
-    ///                                     = seg;
-    ///                                 if (tmp_start_i != seq->SetStarts().end()) {
-    ///                                     seg->SetStartIterator(seq, ++tmp_start_i);
-    ///                                 } else {
-    ///                                     ...
-    ///                                 }
-    ///                             } else{
-    ///                                 ...
-    ///                             }
-    ///                         }
-    ///                         ...
-    ///                         hi_start_i = start_i; // DONE!
-    ///                     } else if (curr_len == prev_seg->m_Len) {
-    ///                         // x----)
-    ///                         // x----)
-    ///                         hi_start_i = start_i; // DONE!
-    ///                     } else {
-    ///                         // x----)     becomes  x----)x--)
-    ///                         // x-------)
-    ///                         start += prev_seg->m_Len * width1;
-    ///                         curr_len -= prev_seg->m_Len;
-    ///                         if (start_i != starts.end()) {
-    ///                             start_i++;
-    ///                         }
-    ///                     }
-    ///                 } else {
-    ///                     seg = new CAlnMixSegment();
-    ///                     starts[start] = seg;
-    ///                     tmp_start_i = start_i;
-    ///                     if (tmp_start_i != starts.begin()) {
-    ///                         tmp_start_i--;
-    ///                     }
-    ///                     seg->SetStartIterator(seq1, tmp_start_i);
-    ///                     if (start_i != starts.end()  &&
-    ///                         start + curr_len * width1 > start_i->first) {
-    ///                         //       x--..
-    ///                         // x--------..
-    ///                         seg->m_Len = (start_i->first - start) / width1;
-    ///                         seg->m_DsIdx = match->m_DsIdx;
-    ///                     } else {
-    ///                         //       x-----)
-    ///                         // x---)
-    ///                         seg->m_Len = curr_len;
-    ///                         seg->m_DsIdx = match->m_DsIdx;
-    ///                         hi_start_i = start_i;
-    ///                         if (hi_start_i != starts.begin()) {
-    ///                             hi_start_i--; // DONE!
-    ///                         }
-    ///                     }
-    ///                     start += seg->m_Len * width1;
-    ///                     curr_len -= seg->m_Len;
-    ///                     if (lo_start_i == start_i) {
-    ///                         if (lo_start_i != starts.begin()) {
-    ///                             lo_start_i--;
-    ///                         }
-    ///                     }
-    ///                 }
-    ///             }
-    /// ```
     /// The `else` branches of the two splits (a row of the other strand than `seq1`, whose letters
     /// run the other way: the first part of the segment is its end):
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmerger.cpp:550-557 (the look back)
-    /// ```c++
-    ///                             } else {
-    ///                                 seq->SetStarts()
-    ///                                     [tmp_start_i->first + len2 * seq->m_Width]
-    ///                                     = prev_seg;
-    ///                                 seq->SetStarts()[tmp_start_i->first] = seg;
-    ///                                 seg->SetStartIterator(seq, tmp_start_i);
-    ///                                 if (tmp_start_i != seq->SetStarts().end()) {
-    ///                                     prev_seg->SetStartIterator(seq, ++tmp_start_i);
-    /// ```
     /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmerger.cpp:614-621 (the overlap loop)
-    /// ```c++
-    ///                             } else{
-    ///                                 seq->SetStarts()[tmp_start_i->first +
-    ///                                              len1 * seq->m_Width]
-    ///                                     = prev_seg;
-    ///                                 seq->SetStarts()[tmp_start_i->first] = seg;
-    ///                                 seg->SetStartIterator(seq, tmp_start_i);
-    ///                                 if (tmp_start_i != seq->SetStarts().end()) {
-    ///                                     prev_seg->SetStartIterator(seq, ++tmp_start_i);
-    /// ```
     /// Returns `(lo_start_i, hi_start_i)`: the first and the last segment of the match on `seq1`,
     /// where the second row's walk starts (`hi_start_i` when the strands differ). The `m_DsIdx` of
     /// a segment is read only by the truncation (`fTruncateOverlaps`), which these flags leave out.
@@ -1010,7 +535,7 @@ impl Mix {
         let mut lo_start_i: It;
         let mut hi_start_i: It = None;
         if self.seqs[seq1].starts.is_empty() {
-            // alnmerger.cpp:483-489, quoted above: the sign of the strand score with
+            // alnmerger.cpp:483-489, cited above: the sign of the strand score with
             // `fForceTranslation`, else `! (m_MergeFlags & fNegativeStrand)`, which no merge flag
             // here has (module doc).
             self.seqs[seq1].positive_strand = match self.add_flags {
@@ -1023,7 +548,7 @@ impl Mix {
             lo_start_i = Some(start1);
             hi_start_i = Some(start1);
             // `if (m_MergeFlags & fQuerySeqMergeOnly) { seq2->m_DsIdx = match->m_DsIdx; }`
-            // (alnmerger.cpp:499-501, quoted above).
+            // (alnmerger.cpp:499-501, cited above).
             let seq2 = seq2.ok_or(MixError::Internal(
                 "the first match of a row has no second row",
             ))?;
@@ -1062,17 +587,6 @@ impl Mix {
                     let prev_len = self.segs[prev_seg].len;
                     if prev_len > curr_len && curr_len == 0 {
                         // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmerger.cpp:598-606
-                        // ```c++
-                        //                         ITERATE (CAlnMixSegment::TStartIterators, it,
-                        //                                 prev_seg->m_StartIts) {
-                        //                             CAlnMixSeq * seq = it->first;
-                        //                             tmp_start_i = it->second;
-                        //                             if (seq->m_PositiveStrand ==
-                        //                                 seq1->m_PositiveStrand) {
-                        //                                 seq->SetStarts()[tmp_start_i->first +
-                        //                                              curr_len * seq->m_Width]
-                        //                                     = seg;
-                        // ```
                         // A match of length 0 at a longer segment's start (`NcbiFreesSegment`):
                         // `curr_len * seq->m_Width` is 0, so each row's `CRef` of `prev_seg` is
                         // replaced. Only rows of the first row's strand reach this (a row of the
@@ -1113,8 +627,8 @@ impl Mix {
                     let seg_len = match start_i {
                         Some(key) if start + curr_len * width1 > key => (key - start) / width1,
                         _ => {
-                            // `hi_start_i = start_i; if (hi_start_i != starts.begin())
-                            // hi_start_i--;`: the new start, which is before `start_i`.
+                            // `hi_start_i` takes `start_i` and steps back by one unless it is
+                            // the first start: the new start, which is before `start_i`.
                             hi_start_i = Some(tmp_key);
                             curr_len
                         }
@@ -1162,127 +676,14 @@ impl Mix {
     /// `x_Merge` for these flags, then `BuildRows`, `Build(false, true, false)`,
     /// `FillUnalignedRegions` and `x_CreateDenseg` (alnmerger.cpp:822-830).
     ///
-    /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmerger.cpp:101-130
-    /// ```c++
-    ///     // Find the refseq (if such exists)
-    ///     {{
-    ///         m_SingleRefseq = false;
-    ///         m_IndependentDSs = m_DsCnt > 1;
-    ///
-    ///         unsigned int ds_cnt;
-    ///         NON_CONST_ITERATE (TSeqs, it, m_Seqs){
-    ///             ds_cnt = (*it)->m_DsCnt;
-    ///             if (ds_cnt > 1) {
-    ///                 m_IndependentDSs = false;
-    ///             }
-    ///             if (ds_cnt == m_DsCnt) {
-    ///                 m_SingleRefseq = true;
-    ///                 if ( !first_refseq ) {
-    ///                     CRef<CAlnMixSeq> refseq = *it;
-    ///                     m_Seqs.erase(it);
-    ///                     m_Seqs.insert(m_Seqs.begin(), refseq);
-    ///                 }
-    ///                 break;
-    ///             }
-    ///             first_refseq = false;
-    ///         }
-    ///     }}
-    ///
-    ///     // Index the sequences
-    ///     {{
-    ///         int seq_idx=0;
-    ///         NON_CONST_ITERATE (TSeqs, seq_i, m_Seqs) {
-    ///             (*seq_i)->m_SeqIdx = seq_idx++;
-    ///         }
-    ///     }}
-    /// ```
+    /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmerger.cpp:101-133
     /// The query is the first sequence and in every Dense-seg: it is the single refseq, unless a
     /// TBLASTX HSP of the query's own Bioseq counted it twice (`Mix::add`); then no sequence is
     /// the single refseq and the query, first in `m_Seqs`, stays the refseq of the first pass. Its
     /// `m_DsCnt` is above 1 whenever the mix has more than one Dense-seg (and also with one
     /// Dense-seg of its own Bioseq), so the Dense-segs are never independent.
     ///
-    /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmerger.cpp:160-252
-    /// ```c++
-    ///     while (true) {
-    ///         ...
-    ///         // reached the end?
-    ///         if (first_refseq ?
-    ///             match_i == m_Matches.end()  &&  m_Matches.size() :
-    ///             refseq->m_MatchList.empty()  ||
-    ///             match_list_i == refseq->m_MatchList.end()) {
-    ///
-    ///             // move on to the next refseq
-    ///             refseq->m_RefBy = 0;
-    ///
-    ///             // try to find the best scoring 'connected' candidate
-    ///             NON_CONST_ITERATE (TSeqs, it, m_Seqs){
-    ///                 if ( !((*it)->m_MatchList.empty())  &&
-    ///                      (*it)->m_RefBy == refseq) {
-    ///                     ...
-    ///                     refseq = *it;
-    ///                     break;
-    ///                 }
-    ///             }
-    ///             if (refseq->m_RefBy == 0) {
-    ///                 // no candidate was found 'connected' to the refseq
-    ///                 // continue with the highest scoring candidate
-    ///                 NON_CONST_ITERATE (TSeqs, it, m_Seqs){
-    ///                     if ( !((*it)->m_MatchList.empty()) ) {
-    ///                         ...
-    ///                         refseq = *it;
-    ///                         break;
-    ///                     }
-    ///                 }
-    ///             }
-    ///
-    ///             if (refseq->m_MatchList.empty()) {
-    ///                 break; // done
-    ///             } else {
-    ///                 first_refseq = false;
-    ///                 match_list_i = refseq->m_MatchList.begin();
-    ///             }
-    ///             continue;
-    ///         } else {
-    ///             // iterate
-    ///             if (first_refseq) {
-    ///                 match = *match_i;
-    ///                 ++match_i;
-    ///             } else {
-    ///                 match = *match_list_i;
-    ///                 ++match_list_i;
-    ///                 ...
-    ///             }
-    ///         }
-    ///
-    ///         curr_len = len = match->m_Len;
-    ///
-    ///         // is it a match with this refseq?
-    ///         if (match->m_AlnSeq1 == refseq) {
-    ///             seq1 = match->m_AlnSeq1;
-    ///             start1 = match->m_Start1;
-    ///             ...
-    ///             seq2 = match->m_AlnSeq2;
-    ///             start2 = match->m_Start2;
-    ///             ...
-    ///         } else if (match->m_AlnSeq2 == refseq) {
-    ///             ...
-    ///         } else {
-    ///             seq1 = match->m_AlnSeq1;
-    ///             seq2 = match->m_AlnSeq2;
-    ///
-    ///             // mark the two refseqs, they are candidates for next refseq(s)
-    ///             _ASSERT(seq1);
-    ///             match->m_MatchIter1 =
-    ///                 seq1->m_MatchList.insert(seq1->m_MatchList.end(), match);
-    ///             if (seq2) {
-    ///                 ...
-    ///             }
-    ///             ...
-    ///             // mark that there's no match with this refseq
-    ///             seq1 = 0;
-    ///         }
-    /// ```
+    /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmerger.cpp:160-277
     /// The query's pass takes every match in score order; a match of a subject's letters alone
     /// (an insertion) goes to that subject's `m_MatchList`, which the next passes take, one
     /// subject at a time in the order of `m_Seqs`. `m_AlnSeq2` is never the refseq: the query is
@@ -1293,41 +694,15 @@ impl Mix {
     /// have no gaps, so no match of one row).
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmerger.cpp:470-481
-    /// ```c++
-    ///                 if ( !m_IndependentDSs ) {
-    ///                     // Stop the algorithm after merging with respect to the first refseq.
-    ///                     // Clear all MatchLists and exit
-    ///                     if ( !(m_SingleRefseq  ||  first_refseq) ) {
-    ///                         NON_CONST_ITERATE (TSeqs, it, m_Seqs){
-    ///                             if ( !((*it)->m_MatchList.empty()) ) {
-    ///                                 (*it)->m_MatchList.clear();
-    ///                             }
-    ///                         }
-    ///                         break;
-    ///                     }
-    ///                 }
-    /// ```
     /// (In the `!starts.size()` branch of a later pass: not reached, as above; an internal error
     /// if it were.)
     fn merge(&mut self) -> Result<(), MixError> {
-        // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmix.cpp:279-284
-        // ```c++
-        //     if (flags & fSortInputByScore) {
-        //         m_AlnMixMatches->SortByChainScore();
-        //     } else {
-        //         m_AlnMixMatches->SortByScore();
-        //     }
-        // ```
+        // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmix.cpp:279-286
         // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmatch.cpp:62-87
-        // ```c++
-        //     return match1->m_Score > match2->m_Score;
-        //     ...
-        //     stable_sort(m_Matches.begin(), m_Matches.end(), x_CompareScores);
-        // ```
         // (A stable sort of indices: `sort_by_key` keeps equal scores in input order.)
         let mut order: Vec<usize> = (0..self.matches.len()).collect();
         order.sort_by_key(|&index| std::cmp::Reverse(self.matches[index].score));
-        // `Find the refseq (if such exists)`, quoted above.
+        // `Find the refseq (if such exists)`, cited above.
         // (`m_IndependentDSs`, false here, is left out.)
         self.single_refseq = false;
         let mut first = true;
@@ -1420,140 +795,8 @@ impl Mix {
     /// One match of the refseq (`seq1`), from `// save the match info into the segments map`.
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmerger.cpp:349-380
-    /// ```c++
-    ///             // if a subject sequence place it in the proper row
-    ///             if ( !first_refseq  &&  m_MergeFlags & fQuerySeqMergeOnly) {
-    ///                 bool proper_row_found = false;
-    ///                 while (true) {
-    ///                     if (seq1->m_DsIdx == match->m_DsIdx) {
-    ///                         proper_row_found = true;
-    ///                         break;
-    ///                     } else {
-    ///                         if (seq1->m_ExtraRow) {
-    ///                             seq1 = match->m_AlnSeq1 = seq1->m_ExtraRow;
-    ///                         } else {
-    ///                             break;
-    ///                         }
-    ///                     }
-    ///                 }
-    ///                 if ( !proper_row_found   &&
-    ///                      !(m_MergeFlags & fTruncateOverlaps)) {
-    ///                     NCBI_THROW(CAlnException, eMergeFailure,
-    ///                                "CAlnMixMerger::x_Merge(): "
-    ///                                "Proper row not found for the match. "
-    ///                                "Cannot use fQuerySeqMergeOnly?");
-    ///                 }
-    ///             }
-    /// ```
-    /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmerger.cpp:381-416
-    /// ```c++
-    ///             CAlnMixStarts& starts = seq1->SetStarts();
-    ///             if (seq2) {
-    ///                 // mark it, it is linked to the refseq
-    ///                 seq2->m_RefBy = refseq;
-    ///                 ...
-    ///             }
-    ///             ...
-    ///             if (seq2) {
-    ///                 if (width2 == 3) {
-    ///                     // Set the frame if necessary
-    ///                     x_SetSeqFrame(match, match->m_AlnSeq2);
-    ///                 }
-    ///                 // check if the second row fits
-    ///                 // this will truncate the match if
-    ///                 // there's an inconsistent overlap
-    ///                 // and truncation was requested
-    ///                 second_row_fits = x_SecondRowFits(match);
-    ///                 ...
-    /// ```
-    /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmerger.cpp:705-818
-    /// ```c++
-    ///             // try to resolve the second row
-    ///             if (seq2) {
-    ///
-    ///                 while (second_row_fits != eSecondRowFitsOk  &&
-    ///                        second_row_fits != eIgnoreMatch) {
-    ///                     if (!seq2->m_ExtraRow) {
-    ///                         // create an extra row
-    ///                         CRef<CAlnMixSeq> row (new CAlnMixSeq);
-    ///                         row->m_BioseqHandle = seq2->m_BioseqHandle;
-    ///                         row->m_SeqId = seq2->m_SeqId;
-    ///                         row->m_Width = seq2->m_Width;
-    ///                         row->m_Frame = start2 % 3;
-    ///                         row->m_SeqIdx = seq2->m_SeqIdx;
-    ///                         row->m_ChildIdx = seq2->m_ChildIdx + 1;
-    ///                         if (m_MergeFlags & fQuerySeqMergeOnly) {
-    ///                             row->m_DsIdx = match->m_DsIdx;
-    ///                         }
-    ///                         m_ExtraRows.push_back(row);
-    ///                         row->m_ExtraRowIdx = seq2->m_ExtraRowIdx + 1;
-    ///                         seq2 = match->m_AlnSeq2 = seq2->m_ExtraRow = row;
-    ///                         break;
-    ///                     }
-    ///                     seq2 = match->m_AlnSeq2 = seq2->m_ExtraRow;
-    ///
-    ///                     second_row_fits = x_SecondRowFits(match);
-    ///                     ...
-    ///                 }
-    ///                 ...
-    ///                 // set the strand if first time
-    ///                 if (seq2->GetStarts().empty()) {
-    ///                     seq2->m_PositiveStrand =
-    ///                         (seq1->m_PositiveStrand ?
-    ///                          !match->m_StrandsDiffer :
-    ///                          match->m_StrandsDiffer);
-    ///                 }
-    ///
-    ///                 // create row info
-    ///                 CAlnMixStarts& starts2 = match->m_AlnSeq2->SetStarts();
-    ///                 start = start2;
-    ///                 CAlnMixStarts::iterator start2_i
-    ///                     = starts2.lower_bound(start2);
-    ///                 start_i = match->m_StrandsDiffer ? hi_start_i : lo_start_i;
-    ///
-    ///                 while(start < start2 + len * width2) {
-    ///                     if (start2_i != starts2.end() &&
-    ///                         start2_i->first == start) {
-    ///                         // this position already exists
-    ///                         ...
-    ///                     } else {
-    ///                         // this position does not exist, create it
-    ///                         seq2->SetStarts()[start] = start_i->second;
-    ///
-    ///                         // start2_i != starts.begin() because we just
-    ///                         // made an insertion, so decrement is ok
-    ///                         start2_i--;
-    ///
-    ///                         // point this segment's row start iterator
-    ///                         if (start_i->second->m_StartIts.find(seq2) !=
-    ///                             start_i->second->m_StartIts.end()) {
-    ///                             // consistency check fails
-    ///                             NCBI_THROW(CAlnException, eMergeFailure,
-    ///                                        "CAlnMixMerger::x_Merge(): "
-    ///                                        "Internal error: "
-    ///                                        "Start iterator already exists for seq2.");
-    ///                         }
-    ///                         start_i->second->SetStartIterator(seq2, start2_i);
-    ///                         ...
-    ///                     }
-    ///
-    ///                     // increment values
-    ///                     start += start_i->second->m_Len * width2;
-    ///                     if (start2_i != starts2.end()) {
-    ///                         start2_i++;
-    ///                     }
-    ///                     if (match->m_StrandsDiffer) {
-    ///                         if (start_i != starts.begin()) {
-    ///                             start_i--;
-    ///                         }
-    ///                     } else {
-    ///                         if (start_i != starts.end()) {
-    ///                             start_i++;
-    ///                         }
-    ///                     }
-    ///                 }
-    ///             }
-    /// ```
+    /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmerger.cpp:379-416
+    /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmerger.cpp:687-818
     /// A width-3 refseq (a TBLASTN subject's row in a later pass, its insertions) first goes to the
     /// row of its frame (alnmerger.cpp:335-349, `x_SetSeqFrame(match, match->m_AlnSeq1)`), from
     /// which the proper row is looked for. Every row of a TBLASTN HSP has its frame (`start % 3`
@@ -1597,7 +840,7 @@ impl Mix {
             self.seqs[row].ref_by = Some(self.order[0]);
             if self.seqs[row].width == 3 {
                 // `frame = (seq == match->m_AlnSeq1 ? m_Start1 : m_Start2) % 3` (alnmerger.cpp:
-                // 1272-1276, quoted at `set_seq_frame`): the query's start where the second row
+                // 1272-1276, cited at `set_seq_frame`): the query's start where the second row
                 // is the first row's sequence (its own Bioseq, `Mix::add`).
                 let start = if row == seq1 {
                     matched.start1
@@ -1658,27 +901,6 @@ impl Mix {
             ))?];
             if start2_i == Some(start) {
                 // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmerger.cpp:753-771
-                // ```c++
-                //                     if (start2_i != starts2.end() &&
-                //                         start2_i->first == start) {
-                //                         // this position already exists
-                //
-                //                         if (start2_i->second != start_i->second) {
-                //                             // merge the two segments
-                //
-                //                             // store the seg in a CRef to delay its deletion
-                //                             // until after the iteration on it is finished
-                //                             CRef<CAlnMixSegment> tmp_seg(start2_i->second);
-                //
-                //                             ITERATE (CAlnMixSegment::TStartIterators,
-                //                                      it,
-                //                                      tmp_seg->m_StartIts) {
-                //                                 CAlnMixSeq * tmp_seq = it->first;
-                //                                 tmp_start_i = it->second;
-                //                                 tmp_start_i->second = start_i->second;
-                //                                 start_i->second->SetStartIterator(tmp_seq, tmp_start_i);
-                //                             }
-                // ```
                 // (Only a row of the query's own Bioseq has the start: the query's row, whose
                 // walk meets the starts of the query's matches. The segment left without rows
                 // is in no list.)
@@ -1721,44 +943,7 @@ impl Mix {
     /// match at `start` of Dense-seg `ds_idx`: `seq` itself while it has no start (it takes that
     /// frame), else the first row of the chain in that frame, else a new row at the chain's end.
     ///
-    /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmerger.cpp:1269-1302
-    /// ```c++
-    /// void
-    /// CAlnMixMerger::x_SetSeqFrame(CAlnMixMatch* match, CAlnMixSeq*& seq)
-    /// {
-    ///     unsigned frame;
-    ///     if (seq == match->m_AlnSeq1) {
-    ///         frame = match->m_Start1 % 3;
-    ///     } else {
-    ///         frame = match->m_Start2 % 3;
-    ///     }
-    ///     if (seq->GetStarts().empty()) {
-    ///         seq->m_Frame = frame;
-    ///     } else {
-    ///         while ((unsigned)seq->m_Frame != frame) {
-    ///             if (!seq->m_ExtraRow) {
-    ///                 // create an extra frame
-    ///                 CRef<CAlnMixSeq> new_seq (new CAlnMixSeq);
-    ///                 new_seq->m_BioseqHandle = seq->m_BioseqHandle;
-    ///                 new_seq->m_SeqId = seq->m_SeqId;
-    ///                 new_seq->m_PositiveStrand = seq->m_PositiveStrand;
-    ///                 new_seq->m_Width = seq->m_Width;
-    ///                 new_seq->m_Frame = frame;
-    ///                 new_seq->m_SeqIdx = seq->m_SeqIdx;
-    ///                 new_seq->m_ChildIdx = seq->m_ChildIdx + 1;
-    ///                 if (m_MergeFlags & fQuerySeqMergeOnly) {
-    ///                     new_seq->m_DsIdx = match->m_DsIdx;
-    ///                 }
-    ///                 m_ExtraRows.push_back(new_seq);
-    ///                 new_seq->m_ExtraRowIdx = seq->m_ExtraRowIdx + 1;
-    ///                 seq = seq->m_ExtraRow = new_seq;
-    ///                 break;
-    ///             }
-    ///             seq = seq->m_ExtraRow;
-    ///         }
-    ///     }
-    /// }
-    /// ```
+    /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmerger.cpp:1268-1302
     /// (`match` is the merge's copy of the match, alnmerger.cpp:417-422: the row it moves to is
     /// that copy's `m_AlnSeq2`.)
     fn set_seq_frame(&mut self, mut seq: SeqIx, start: u32, ds_idx: u32) -> SeqIx {
@@ -1789,28 +974,7 @@ impl Mix {
         seq
     }
 
-    /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnseq.cpp:266-283
-    /// ```c++
-    /// void
-    /// CAlnMixSequences::BuildRows()
-    /// {
-    ///     m_Rows.clear();
-    ///
-    ///     int count = 0;
-    ///     NON_CONST_ITERATE (TSeqs, i, m_Seqs) {
-    ///         CRef<CAlnMixSeq>& seq = *i;
-    ///
-    ///         if ( !seq->GetStarts().empty() ) {
-    ///             m_Rows.push_back(seq);
-    ///             seq->m_RowIdx = count++;
-    ///             while ((seq = seq->m_ExtraRow) != NULL ) {
-    ///                 seq->m_RowIdx = count++;
-    ///                 m_Rows.push_back(seq);
-    ///             }
-    ///         }
-    ///     }
-    /// }
-    /// ```
+    /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnseq.cpp:265-283
     fn build_rows(&mut self) {
         self.rows.clear();
         let mut count = 0;
@@ -1832,164 +996,10 @@ impl Mix {
 
     /// `Build(gap_join = false, min_gap = true, remove_leading_and_trailing_gaps = false)`.
     ///
-    /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnsegments.cpp:58-115,171-271
-    /// ```c++
-    ///     m_AlnMixSequences->InitRowsStartIts();
-    ///     m_AlnMixSequences->InitExtraRowsStartIts();
-    ///     ...
-    ///     TSegmentsContainer gapped_segs;
-    ///
-    ///     CAlnMixSequences::TSeqs::iterator refseq_it = m_Rows.begin();
-    ///     bool orig_refseq = true;
-    ///     while (true) {
-    ///         CAlnMixSeq * refseq = 0;
-    ///         while (refseq_it != m_Rows.end()) {
-    ///             refseq = *(refseq_it++);
-    ///             if (refseq->GetStarts().current != refseq->GetStarts().end()) {
-    ///                 break;
-    ///             } else {
-    ///                 refseq = 0;
-    ///             }
-    ///         }
-    ///         if ( !refseq ) {
-    ///             // Done
-    ///
-    ///             // add the gapped segments if any
-    ///             if (gapped_segs.size()) {
-    ///                 if (gap_join) {
-    ///                     ...
-    ///                 } else if (min_gap) {
-    ///                     // request to try to align
-    ///                     // all gapped segments
-    ///                     x_MinimizeGaps(gapped_segs);
-    ///                 }
-    ///                 NON_CONST_ITERATE (TSegmentsContainer,
-    ///                                    seg_i, gapped_segs) {
-    ///                     m_Segments.push_back(&**seg_i);
-    ///                 }
-    ///                 gapped_segs.clear();
-    ///             }
-    ///             break; // from the main loop
-    ///         }
-    ///         ...
-    ///         // for each refseq segment
-    ///         while (refseq->GetStarts().current != refseq->GetStarts().end()) {
-    ///             stack< CRef<CAlnMixSegment> > seg_stack;
-    ///             // To prevent infinite loop, remember all segments already on the stack.
-    ///             set< CRef<CAlnMixSegment> > seg_set;
-    ///             seg_stack.push(refseq->GetStarts().current->second);
-    ///             seg_set.insert(refseq->GetStarts().current->second);
-    ///             ...
-    ///             while ( !seg_stack.empty() ) {
-    ///
-    ///                 bool pop_seg = true;
-    ///                 // check the gapped segments on the left
-    ///                 ITERATE (CAlnMixSegment::TStartIterators, start_its_i,
-    ///                          seg_stack.top()->m_StartIts) {
-    ///
-    ///                     CAlnMixSeq * row = start_its_i->first;
-    ///
-    ///                     if (row->GetStarts().current != start_its_i->second) {
-    ///                         ...
-    ///                         seg_stack.push(row->GetStarts().current->second);
-    ///                         // If the segment is already in the set, we have infinite loop
-    ///                         // and must terminate it.
-    ///                         if (!seg_set.insert(row->GetStarts().current->second).second) {
-    ///                             string errstr =
-    ///                                 string("CAlnMixSegments::Build():")
-    ///                                 + " Internal error: Infinite loop detected.";
-    ///                             NCBI_THROW(CAlnException, eMergeFailure, errstr);
-    ///                         }
-    ///                         ...
-    ///                         pop_seg = false;
-    ///                         break;
-    ///                     }
-    ///                 }
-    ///
-    ///                 if (pop_seg) {
-    ///
-    ///                     // inc/dec iterators for each row of the seg
-    ///                     ITERATE (CAlnMixSegment::TStartIterators, start_its_i,
-    ///                              seg_stack.top()->m_StartIts) {
-    ///                         CAlnMixSeq * row = start_its_i->first;
-    ///                         ...
-    ///                         if (row->m_PositiveStrand) {
-    ///                             row->SetStarts().current++;
-    ///                         } else {
-    ///                             ...
-    ///                         }
-    ///                     }
-    ///
-    ///                     if (seg_stack.size() > 1) {
-    ///                         // add to the gapped segments
-    ///                         gapped_segs.push_back(seg_stack.top());
-    ///                         seg_stack.pop();
-    ///                         ...
-    ///                     } else {
-    ///                         // add the gapped segments if any
-    ///                         if (gapped_segs.size()) {
-    ///                             if (gap_join) {
-    ///                                 ...
-    ///                             } else if (min_gap) {
-    ///                                 // request to try to align
-    ///                                 // all gapped segments
-    ///                                 x_MinimizeGaps(gapped_segs);
-    ///                             }
-    ///                             if (orig_refseq) {
-    ///                                 NON_CONST_ITERATE (TSegmentsContainer,
-    ///                                                    seg_i, gapped_segs) {
-    ///                                     m_Segments.push_back(&**seg_i);
-    ///                                 }
-    ///                                 gapped_segs.clear();
-    ///                             }
-    ///                         }
-    ///                         // add the refseq segment
-    ///                         if (orig_refseq) {
-    ///                             m_Segments.push_back(seg_stack.top());
-    ///                         } else {
-    ///                             gapped_segs.push_back(seg_stack.top());
-    ///                         }
-    ///                         seg_stack.pop();
-    ///                         ...
-    ///                     } // if (seg_stack.size() > 1)
-    ///                 } // if (popseg)
-    ///             } // while ( !seg_stack.empty() )
-    ///         } // while (refseq->GetStarts().current != refseq->GetStarts().end())
-    ///         orig_refseq = false;
-    ///     } // while (true)
-    /// ```
-    /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnseq.cpp:286-293
-    /// ```c++
-    ///     NON_CONST_ITERATE (TSeqs, row_i, m_Rows) {
-    ///         CAlnMixSeq * row = *row_i;
-    ///         if ( !row->GetStarts().empty() ) {
-    ///             if (row->m_PositiveStrand) {
-    ///                 row->SetStarts().current = row->GetStarts().begin();
-    ///             } else {
-    /// ```
+    /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnsegments.cpp:58-271
+    /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnseq.cpp:286-294
     /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnseq.cpp:286-296
-    /// ```c++
-    ///             if (row->m_PositiveStrand) {
-    ///                 row->SetStarts().current = row->GetStarts().begin();
-    ///             } else {
-    ///                 row->SetStarts().current = row->GetStarts().end();
-    ///                 row->SetStarts().current--;
-    ///             }
-    ///         } else {
-    ///             row->SetStarts().current = row->GetStarts().end();
-    /// ```
     /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnsegments.cpp:216-224
-    /// ```c++
-    ///                         if (row->m_PositiveStrand) {
-    ///                             row->SetStarts().current++;
-    ///                         } else {
-    ///                             if (row->SetStarts().current == row->GetStarts().begin()) {
-    ///                                 row->SetStarts().current = row->GetStarts().end();
-    ///                             } else {
-    ///                                 row->SetStarts().current--;
-    ///                             }
-    ///                         }
-    /// ```
     /// A minus-strand row is read from its last start down. `InitExtraRowsStartIts` sets the same
     /// of every extra row (`m_ExtraRows`), also of one that `BuildRows` left out with the sequence
     /// of its first row (`MixError::NcbiAborts`).
@@ -2035,7 +1045,7 @@ impl Mix {
                                 .ok_or(MixError::Internal("a row's segments ended early"))?];
                             stack.push(left);
                             if !on_stack.insert(left) {
-                                // NCBI's throw (quoted above), which only the query's own Bioseq
+                                // NCBI's throw (cited above), which only the query's own Bioseq
                                 // with `fForceTranslation` can reach (`merge_match`).
                                 return Err(MixError::NcbiThrows(NcbiException::new(
                                     BUILD_INFINITE_LOOP,
@@ -2098,108 +1108,7 @@ impl Mix {
         }
     }
 
-    /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnsegments.cpp:438-523
-    /// ```c++
-    ///     seg_i_begin = seg_i_end = seg_i = gapped_segs.begin();
-    ///
-    ///     typedef map<TSeqPos, CRef<CAlnMixSegment> > TLenMap;
-    ///     TLenMap len_map;
-    ///
-    ///     while (seg_i_end != gapped_segs.end()) {
-    ///
-    ///         len_map[(*seg_i_end)->m_Len];
-    ///
-    ///         // check if this seg can possibly be minimized
-    ///         bool possible = true;
-    ///
-    ///         seg_i = seg_i_begin;
-    ///         while (seg_i != seg_i_end) {
-    ///             seg1 = *seg_i;
-    ///             seg2 = *seg_i_end;
-    ///
-    ///             ITERATE (CAlnMixSegment::TStartIterators,
-    ///                      st_it,
-    ///                      seg2->m_StartIts) {
-    ///                 seq = st_it->first;
-    ///                 // check if this seq was already used
-    ///                 if (seg1->m_StartIts.find(seq) != seg1->m_StartIts.end()) {
-    ///                     possible = false;
-    ///                     break;
-    ///                 }
-    ///             }
-    ///             if ( !possible ) {
-    ///                 break;
-    ///             }
-    ///             seg_i++;
-    ///         }
-    ///         seg_i_end++;
-    ///
-    ///         if ( !possible  ||  seg_i_end == gapped_segs.end()) {
-    ///             // use the accumulated len info to create the new segs
-    ///
-    ///             // create new segs with appropriate len
-    ///             TSeqPos len_so_far = 0;
-    ///             TLenMap::iterator len_i = len_map.begin();
-    ///             while (len_i != len_map.end()) {
-    ///                 len_i->second = new CAlnMixSegment();
-    ///                 len_i->second->m_Len = len_i->first - len_so_far;
-    ///                 len_so_far += len_i->second->m_Len;
-    ///                 len_i++;
-    ///             }
-    ///
-    ///             // loop through the accumulated orig segs.
-    ///             // copy info from them into the new segs
-    ///             TLenMap::iterator len_i_end;
-    ///             seg_i = seg_i_begin;
-    ///             while (seg_i != seg_i_end) {
-    ///                 TSeqPos orig_len = (*seg_i)->m_Len;
-    ///
-    ///                 // determine the span of the current seg
-    ///                 len_i_end = len_map.find(orig_len);
-    ///                 len_i_end++;
-    ///
-    ///                 // loop through its sequences
-    ///                 NON_CONST_ITERATE (CAlnMixSegment::TStartIterators,
-    ///                                    st_it,
-    ///                                    (*seg_i)->m_StartIts) {
-    ///
-    ///                     seq = st_it->first;
-    ///                     TSeqPos orig_start = st_it->second->first;
-    ///
-    ///                     len_i = len_map.begin();
-    ///                     len_so_far = 0;
-    ///                     // loop through the new segs
-    ///                     while (len_i != len_i_end) {
-    ///                         seg = len_i->second;
-    ///
-    ///                         // calc the start
-    ///                         TSeqPos this_start = orig_start +
-    ///                             (seq->m_PositiveStrand ?
-    ///                              len_so_far :
-    ///                              orig_len - len_so_far - seg->m_Len) *
-    ///                             seq->m_Width;
-    ///
-    ///                         // create the bindings:
-    ///                         seq->SetStarts()[this_start] = seg;
-    ///                         seg->SetStartIterator(seq, seq->SetStarts().find(this_start));
-    ///                         len_i++;
-    ///                         len_so_far += seg->m_Len;
-    ///                     }
-    ///                 }
-    ///                 seg_i++;
-    ///             }
-    ///             NON_CONST_ITERATE (TLenMap, len_it, len_map) {
-    ///                 new_segs.push_back(len_it->second);
-    ///             }
-    ///             len_map.clear();
-    ///             seg_i_begin = seg_i_end;
-    ///         }
-    ///     }
-    ///     gapped_segs.clear();
-    ///     ITERATE (TSegmentsContainer, new_seg_i, new_segs) {
-    ///         gapped_segs.push_back(*new_seg_i);
-    ///     }
-    /// ```
+    /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnsegments.cpp:438-543
     /// The run of segments that ends at a segment sharing a row with an earlier one includes that
     /// segment (`seg_i_end` is advanced before the run is cut), as NCBI's does.
     fn minimize_gaps(&mut self, gapped: &mut Vec<SegIx>) {
@@ -2254,60 +1163,6 @@ impl Mix {
     }
 
     /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnsegments.cpp:286-338
-    /// ```c++
-    ///     vector<TSignedSeqPos> starts;
-    ///     vector<TSeqPos> lens;
-    ///     starts.resize(m_Rows.size(), -1);
-    ///     lens.resize(m_Rows.size(), 0);
-    ///
-    ///     TSeqPos len = 0;
-    ///     CAlnMap::TNumrow rowidx;
-    ///
-    ///     TSegments::iterator seg_i = m_Segments.begin();
-    ///     while (seg_i != m_Segments.end()) {
-    ///         len = (*seg_i)->m_Len;
-    ///         ITERATE (CAlnMixSegment::TStartIterators, start_its_i,
-    ///                  (*seg_i)->m_StartIts) {
-    ///             CAlnMixSeq * row = start_its_i->first;
-    ///             rowidx = row->m_RowIdx;
-    ///             TSignedSeqPos& prev_start = starts[rowidx];
-    ///             TSeqPos& prev_len = lens[rowidx];
-    ///             TSeqPos start = start_its_i->second->first;
-    ///             const bool plus = row->m_PositiveStrand;
-    ///             const int& width = row->m_Width;
-    ///             TSeqPos prev_start_plus_len = prev_start + prev_len * width;
-    ///             TSeqPos start_plus_len = start + len * width;
-    ///             if (prev_start >= 0) {
-    ///                 if (plus  &&  prev_start_plus_len < start  ||
-    ///                     !plus  &&  start_plus_len < (TSeqPos) prev_start) {
-    ///                     // create a new seg
-    ///                     CRef<CAlnMixSegment> seg (new CAlnMixSegment);
-    ///                     TSeqPos new_start;
-    ///                     if (row->m_PositiveStrand) {
-    ///                         new_start = prev_start + prev_len * width;
-    ///                         seg->m_Len = (start - new_start) / width;
-    ///                     } else {
-    ///                         new_start = start_plus_len;
-    ///                         seg->m_Len = (prev_start - new_start) / width;
-    ///                     }
-    ///                     row->SetStarts()[new_start] = seg;
-    ///                     CAlnMixStarts::iterator start_i =
-    ///                         start_its_i->second;
-    ///                     seg->SetStartIterator(row,
-    ///                                           row->m_PositiveStrand ?
-    ///                                           --start_i :
-    ///                                           ++start_i);
-    ///
-    ///                     seg_i = m_Segments.insert(seg_i, seg);
-    ///                     seg_i++;
-    ///                 }
-    ///             }
-    ///             prev_start = start;
-    ///             prev_len = len;
-    ///         }
-    ///         seg_i++;
-    ///     }
-    /// ```
     /// The new segment's start iterator (`--start_i`, or `++start_i` on the minus strand) is its own
     /// start: no start of the row lies between it and the segment being read. The fill of a row's
     /// stretch goes before the segment being read, whose own rows are then
@@ -2317,7 +1172,7 @@ impl Mix {
     /// start (`prev_start + prev_len * width`), so the write into the row's map replaces the row's
     /// `CRef` of it. Where that was its last (`Mix::held`: it is not `x_Merge`'s `seg`, the only
     /// other `CRef` that a segment of length 0 has there), NCBI frees it there, and
-    /// `x_CreateDenseg` reads it through `m_Segments` (alnmerger.cpp:1196-1210, quoted at
+    /// `x_CreateDenseg` reads it through `m_Segments` (alnmerger.cpp:1196-1210, cited at
     /// `create_denseg`): a read of freed memory, `MixError::NcbiFreesSegment`, at the first such
     /// replacement (official NCBI BLAST+ 2.17.0 crashed with SIGSEGV in our runs; valgrind names
     /// the block "free'd by `FillUnalignedRegions`", the review 3 of line RG T3c, case r11_001). A
@@ -2333,9 +1188,10 @@ impl Mix {
     /// A row that `BuildRows` left out keeps the `m_RowIdx` of -1 of `CAlnMixSeq()`: the extra
     /// rows of a sequence without starts, the query's own Bioseq whose `m_AnotherRow` kept none
     /// (`place`). NCBI's `starts[rowidx]` and `lens[rowidx]` then write before their vectors'
-    /// buffers (`prev_start = start; prev_len = len;`, a length of at least 1), and glibc stops
-    /// NCBI when it frees them (`double free or corruption (out)`, exit 134): no section to
-    /// write, `MixError::NcbiAborts` (line RG T3a, PD-LOSAT-NCBI-DEFECTS rule 3).
+    /// buffers (the stores of the previous start and the previous length, a length of at least
+    /// 1), and glibc stops NCBI when it frees them (`double free or corruption (out)`, exit
+    /// 134): no section to write, `MixError::NcbiAborts` (line RG T3a, PD-LOSAT-NCBI-DEFECTS
+    /// rule 3).
     fn fill_unaligned_regions(&mut self) -> Result<(), MixError> {
         let mut starts = vec![-1i64; self.rows.len()];
         let mut lens = vec![0u32; self.rows.len()];
@@ -2382,75 +1238,7 @@ impl Mix {
     }
 
     /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmerger.cpp:1156-1252
-    /// ```c++
-    ///     ids.resize(numrows);
-    ///     lens.resize(numsegs);
-    ///     starts.resize(num, -1);
-    ///     strands.resize(num, eNa_strand_minus);
-    ///
-    ///     vector<bool> row_empty(numrows, true);
-    ///
-    ///     // ids
-    ///     numrow = 0;
-    ///     ITERATE(TSeqs, row_i, m_Rows) {
-    ///         ids[numrow++] = (*row_i)->m_SeqId;
-    ///     }
-    ///
-    ///     int offset = 0;
-    ///     numseg = 0;
-    ///
-    ///     ITERATE(CAlnMixSegments::TSegments,
-    ///             seg_i,
-    ///             m_AlnMixSegments->m_Segments) {
-    ///
-    ///         // lens
-    ///         lens[numseg] = (*seg_i)->m_Len;
-    ///
-    ///         // starts
-    ///         ITERATE (CAlnMixSegment::TStartIterators, start_its_i,
-    ///                 (*seg_i)->m_StartIts) {
-    ///             starts[offset + start_its_i->first->m_RowIdx] =
-    ///                 start_its_i->second->first;
-    ///
-    ///             if (start_its_i->second->first != kInvalidSeqPos) {
-    ///                 row_empty[start_its_i->first->m_RowIdx] = false;
-    ///             }
-    ///         }
-    ///         ...
-    ///         // next segment
-    ///         numseg++; offset += numrows;
-    ///         ...
-    ///     }
-    ///     ...
-    ///     //remove empty rows
-    ///     for(int row = numrows-1; row >=0; --row) {
-    ///         if (row_empty[row]) {
-    ///             ids.erase(ids.begin()+row);
-    ///             ...
-    /// ```
     /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmerger.cpp:1215-1240
-    /// ```c++
-    ///         // strands
-    ///         numrow = 0;
-    ///         ITERATE(TSeqs, row_i, m_Rows) {
-    ///             if ((*row_i)->m_PositiveStrand) {
-    ///                 strands[offset + numrow] = eNa_strand_plus;
-    ///             }
-    ///             numrow++;
-    ///         }
-    ///         ...
-    ///     // widths
-    ///     CDense_seg::TWidths*  widths = NULL;
-    ///     if ((m_AlnMixMatches->m_ContainsNA  &&  m_AlnMixMatches->m_ContainsAA)  ||
-    ///         (m_AlnMixMatches->m_AddFlags & CAlnMixMatches::fForceTranslation)) {
-    ///         widths = &m_DS->SetWidths();
-    ///         widths->resize(numrows);
-    ///         numrow = 0;
-    ///         ITERATE (TSeqs, row_i, m_Rows) {
-    ///             (*widths)[numrow++] = (*row_i)->m_Width;
-    ///         }
-    ///     }
-    /// ```
     /// A row's strand is the same in every segment (kept once per row). Every row of a segment
     /// has a row index here (`fill_unaligned_regions` stops at one without).
     fn create_denseg(&self) -> Result<Denseg, MixError> {
@@ -2471,7 +1259,7 @@ impl Mix {
         // The rows of the query's own Bioseq after the first (`fForceTranslation`, `Mix::add`)
         // hold the record's subject positions: shown as that subject (its letters, label and
         // genetic code: `CAlnVec::SetGenCode` gives `m_SlaveGeneticCode` to every row but row 0,
-        // showalign.cpp:2100-2101, quoted at `super::write_section`). The query's first row is
+        // showalign.cpp:2100-2101, cited at `super::write_section`). The query's first row is
         // row 0: it is the first sequence and has starts.
         let ids: Vec<SeqKey> = keep
             .iter()

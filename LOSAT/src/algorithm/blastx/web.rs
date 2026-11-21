@@ -5,11 +5,6 @@ use anyhow::{bail, Result};
 use std::{cell::RefCell, io::Write, path::Path};
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:277-279
-// ```c++
-//                 CLocalBlast lcl_blast(queries, m_OptsHndl, db_adapter);
-//                 lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
-//                 results = lcl_blast.Run();
-// ```
 // The existing CLI v2 parser owns all defaults, lexical/scope validation and
 // code32 rejection. Synthetic paths identify memory input; no file is opened.
 pub(crate) fn parse_args(extra: &[&str]) -> Result<BlastxArgs> {
@@ -51,27 +46,6 @@ pub(crate) fn parse_args(extra: &[&str]) -> Result<BlastxArgs> {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2827-2845
-// ```c++
-//         }
-//         int val = 0;
-//         try { val = NStr::StringToInt(fmt_choice); }
-//         catch (const CStringException&) {   // probably a conversion error
-//             CNcbiOstrstream os;
-//             os << "'" << fmt_choice << "' is not a valid output format";
-//             string msg = CNcbiOstrstreamToString(os);
-//             NCBI_THROW(CInputException, eInvalidInput, msg);
-//         }
-//         if (val < 0 || val >= static_cast<int>(eEndValue)) {
-//             string msg("Formatting choice is out of range");
-//             throw std::out_of_range(msg);
-//         }
-//         if (m_IsIgBlast && (val != 3 && val != 4 && val != 7 && val != eAirrRearrangement)) {
-//             string msg("Formatting choice is not valid");
-//             throw std::out_of_range(msg);
-//         }
-//         fmt_type = static_cast<EOutputFormat>(val);
-//         if ( !(fmt_type == eTabular ||
-// ```
 /// ABI v1's reading of a BLASTX `-outfmt` value, which is frozen (plan TD-1): the values
 /// and the errors of the CLI's BLASTX parser before it read `-outfmt` as NCBI.
 fn v1_outfmt(value: &str) -> std::result::Result<String, String> {
@@ -108,21 +82,6 @@ fn v1_resolve(args: &BlastxArgs) -> Result<super::args::ResolvedOptions> {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:302-314
-// ```c++
-// CBlastFastaInputSource::CBlastFastaInputSource(const string& user_input,
-//                                        const CBlastInputSourceConfig& iconfig)
-//     : m_Config(iconfig),
-//       m_ReadProteins(iconfig.IsProteinInput())
-// {
-//     if (user_input.empty()) {
-//         NCBI_THROW(CInputException, eEmptyUserInput,
-//                    "No sequence input was provided");
-//     }
-//     m_LineReader.Reset(new CMemoryLineReader(user_input.c_str(),
-//                                              user_input.size()));
-//     x_InitInputReader();
-// }
-// ```
 // Original bytes are reparsed on each call with this role's gencode/mask
 // options; generic FASTA handles never cache translated or masked search state.
 #[cfg_attr(
@@ -146,11 +105,6 @@ pub(crate) fn run_pair(
         &mut |warning| native::reader_warning(warning, &mut *diagnostics.borrow_mut()),
     )?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2975-2977
-    // ```c++
-    //     if(hitlist_size < 5){
-    //    		ERR_POST(Warning << "Examining 5 or more matches is recommended");
-    //     }
-    // ```
     // (The same bytes as before for the options ABI v1 had: a hit list size below 5 from
     // -max_target_seqs; `native::warnings_of` also reads -num_descriptions / -num_alignments,
     // which the CLI parser now accepts.)
@@ -181,18 +135,8 @@ pub(crate) fn run_pair(
     // (`blast_xml::xml_matrix_failure`): none, as ABI v1 writes outfmt 0, 6 and 7 (`v1_outfmt`).
     let xml_matrix = super::blast_xml::xml_matrix_failure(std::slice::from_ref(&options), true);
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:784-788
-    // ```c++
-    //         		if(warning != kEmptyStr){
-    //         			warning += ": ";
-    //         		}
-    //         		warning += "Subject sequence contains no data";
-    //         		ERR_POST(Warning << warning);
-    // ```
     super::native::write_empty_subject_warnings(&subjects, &mut *diagnostics.borrow_mut())?;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:254-254
-    // ```c++
-    //         formatter.PrintProlog();
-    // ```
     report::write_prolog(
         &mut output,
         &mut *diagnostics.borrow_mut(),
@@ -202,27 +146,8 @@ pub(crate) fn run_pair(
     )?;
     let mut processed = 0;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:259-262
-    // ```c++
-    //         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
-    // 	    BLAST_PROF_START( APP.LOOP.PRE );
-    //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
-    //             CRef<IQueryFactory> queries(new CObjMgr_QueryFactory(*query_batch));
-    // ```
     // One pool for the whole run at 2+ threads: see native.rs.
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:259-291
-    // ```c
-    //         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
-    // ...
-    //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
-    // ...
-    //                 CLocalBlast lcl_blast(queries, m_OptsHndl, db_adapter);
-    //                 lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
-    //                 results = lcl_blast.Run();
-    // ...
-    //             	ITERATE(CSearchResultSet, result, *results) {
-    //                	    formatter.PrintOneResultSet(**result, query_batch);
-    //             	}
-    // ```
     // Same batch loop as in native.rs, as a closure over the pool its searches run on (see
     // native.rs).
     let mut x_run_batches = |x_pool: Option<&crate::utils::threading::SearchPool<'_>>| {
@@ -241,19 +166,6 @@ pub(crate) fn run_pair(
                 queries.iter().map(|q| q.sequence.len()).sum::<usize>() > 2 * BATCH_SIZE
             };
             // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:259-291
-            // ```c
-            //         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
-            // ...
-            //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
-            // ...
-            //                 CLocalBlast lcl_blast(queries, m_OptsHndl, db_adapter);
-            //                 lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
-            //                 results = lcl_blast.Run();
-            // ...
-            //             	ITERATE(CSearchResultSet, result, *results) {
-            //                	    formatter.PrintOneResultSet(**result, query_batch);
-            //             	}
-            // ```
             // As in native.rs: search the queued batches, then write warnings and results in reader
             // order.
             let mut x_flush = |events: Vec<XEvent>| -> Result<()> {
@@ -369,11 +281,6 @@ pub(crate) fn run_pair(
                     bail!("Empty CBlastQueryVector");
                 }
                 // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:277-279
-                // ```c
-                //                 CLocalBlast lcl_blast(queries, m_OptsHndl, db_adapter);
-                //                 lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
-                //                 results = lcl_blast.Run();
-                // ```
                 // Dispatch point: a kept pool or search_internal; same result either way.
                 let mut results = match x_pool {
                     Some(pool) => {
@@ -382,10 +289,6 @@ pub(crate) fn run_pair(
                     None => runtime::search_internal(queries, &subjects, &options),
                 }?;
                 // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:289-290
-                // ```c++
-                //             	ITERATE(CSearchResultSet, result, *results) {
-                //                	    formatter.PrintOneResultSet(**result, query_batch);
-                // ```
                 report::render_queries(
                     &mut crate::cli::NcbiOstream::sink(&mut OutputSink::Writer(&mut output))?,
                     &mut *diagnostics.borrow_mut(),
@@ -408,11 +311,6 @@ pub(crate) fn run_pair(
         )
     };
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:277-279
-    // ```c
-    //                 CLocalBlast lcl_blast(queries, m_OptsHndl, db_adapter);
-    //                 lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
-    //                 results = lcl_blast.Run();
-    // ```
     // Dispatch point: with 2+ threads one pool for the whole run instead of one per batch, as
     // NCBI's CLocalBlast has per batch. Reuse of threads only.
     if options.num_threads > 1 {
@@ -425,9 +323,6 @@ pub(crate) fn run_pair(
         x_run_batches(None)?;
     }
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:297-297
-    // ```c++
-    //         formatter.PrintEpilog(opt);
-    // ```
     report::write_epilog(
         &mut output,
         &mut *diagnostics.borrow_mut(),
@@ -442,47 +337,5 @@ pub(crate) fn run_pair(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    // ABI v1 is frozen (plan TD-1): its BLASTX `-outfmt` keeps the values and the parser
-    // errors of the CLI parser before BLASTX read `-outfmt` as NCBI (dev 0797cc40, whose
-    // `losat blastx -outfmt 5` wrote these lines with exit status 2).
-    #[test]
-    fn web_v1_keeps_its_outfmt_values_and_errors() {
-        let error = |outfmt: &str| {
-            let error = parse_args(&["-outfmt", outfmt]).unwrap_err();
-            crate::cli::render_message(error.downcast_ref::<clap::Error>().unwrap())
-        };
-        for (outfmt, reason) in [
-            ("5", "unsupported BLASTX outfmt: use 0, 6 or 7"),
-            ("abc", "unsupported BLASTX outfmt: use 0, 6 or 7"),
-            ("13", "unsupported BLASTX outfmt: use 0, 6 or 7"),
-            ("0 std", "custom fields require outfmt 6/7"),
-            ("6 delim=", "unsupported BLASTX outfmt field 'delim='"),
-            ("7 qaccver foo", "unsupported BLASTX outfmt field 'foo'"),
-        ] {
-            assert_eq!(
-                error(outfmt),
-                format!(
-                    "error: invalid value '{outfmt}' for '-outfmt <OUTFMT>': {reason}\n\nFor more information, try '--help'.\n"
-                )
-            );
-        }
-        // White space between the words, read as ABI v1 read it.
-        for (outfmt, number, fields) in [
-            ("6\tqseqid", 6, &["qseqid"][..]),
-            (" 7 ", 7, &[]),
-            ("0", 0, &[]),
-        ] {
-            let args = parse_args(&["-outfmt", outfmt]).unwrap();
-            let options = v1_resolve(&args).unwrap();
-            assert_eq!(options.outfmt, number, "{outfmt:?}");
-            if !fields.is_empty() {
-                let spec = options.tabular.expect("a field list");
-                let names: Vec<&str> = spec.fields.iter().map(|f| f.name()).collect();
-                assert_eq!(names, fields, "{outfmt:?}");
-            }
-        }
-    }
-}
+#[path = "web_tests.rs"]
+mod tests;

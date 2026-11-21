@@ -2,21 +2,7 @@
 //! set; `src/algorithm/blastx/x_seed_scan.rs` module header, tblastn's
 //! `src/algorithm/tblastx/x_scan_byte.rs` for the scan) on whole searches.
 //!
-//! NCBI reference: c++/src/algo/blast/core/blast_aascan.c:75-127
-//! ```c
-//! for (s = s_first; s <= s_last; s++) {
-//!     index = ComputeTableIndexIncremental(word_length, lookup->charsize, lookup->mask, s, index);
-//!     if (PV_TEST(pv, index, PV_ARRAY_BTS)) {
-//!         numhits = bbc[index].num_used;
-//!         if (numhits <= (array_size - totalhits)) {
-//!             ...
-//!         } else {
-//!             s_range[1] = (Int4)(s - subject->sequence);
-//!             return totalhits;
-//!         }
-//!     }
-//! }
-//! ```
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:75-127
 //! The switch's scan returns NCBI's offset pairs and scan range on every call (the unit test
 //! `x_scan_byte_gives_ncbi_scan_calls_on_blastx_tables` compares the calls of both forms on
 //! blastx's tables), so a search with it gives the report of the scans before it

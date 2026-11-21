@@ -22,6 +22,7 @@ import {
   WINDOW_MASKER_FLAG,
   WINDOW_MASKER_TAXID_FLAG,
   type FastaParserKind,
+  type FastaReader,
   type InputRole,
   type ProgramId,
   type RegistryFile,
@@ -52,7 +53,7 @@ import { describedSections, formControlOf, formParameters, setFields, type Field
 import { fastaParser, programById, PROGRAMS, sequenceKind } from '../domain/programs';
 import { regionProblem, regionValue, type RegionText } from '../domain/region';
 import { withUnit } from '../domain/units';
-import type { DataGateway } from '../ports/data';
+import type { DataGateway, SourceRef } from '../ports/data';
 import { failureText, withRemedy } from './availability';
 import type { AccessionFetcher, FetchResult } from '../ports/fetch';
 import { registryName, unreadableConffile } from './conffile';
@@ -210,6 +211,12 @@ export interface DraftState {
   /** The engine's `validate` of the argv that the draft makes now. */
   readonly validation: Validation;
   /**
+   * Whether the run of the draft's argv reads its inputs with NCBI's data loaders on, as the latest
+   * validation that the engine answered says (`[BLAST] DATA_LOADERS` of the argv's registry; on before
+   * one): the engine's readers of the sources' index and check have them so (line WQA's D16, 2026-11-20).
+   */
+  readonly dataLoaders: boolean;
+  /**
    * What the engine's start read of the argv of the latest validation (`EngineGateway.start`): the
    * name of its `-conffile`, for which the form asks for a file; undefined before it, or when the
    * engine could not start the argv.
@@ -309,6 +316,7 @@ export class SearchDraft {
       fetchSource: 'fastest',
       race: {},
       validation: { state: 'idle' },
+      dataLoaders: true,
       submitting: false,
     });
     void this.loadDescription('blastn');
@@ -332,8 +340,9 @@ export class SearchDraft {
     for (const role of ROLES) {
       const parser = fastaParser(next, role);
       for (const source of this.role(role).sources) {
-        if (source.parser !== parser) {
-          // A program that reads the role with another FASTA reader kind needs another record table (plan TD-8).
+        if (source.parser !== parser || source.status === 'failed') {
+          // A program that reads the role with another FASTA reader kind needs another record table (plan TD-8); a
+          // refusal of the reader names its program (line WQA's D13, 2026-11-20), so a source that failed is read again.
           this.reindex(role, source.key, parser);
         } else {
           this.scheduleCheck(role, source.key, 0);
@@ -928,9 +937,10 @@ export class SearchDraft {
   }
 
   private async prepareAndEnqueue(): Promise<EnqueueAllResult> {
-    // Run never fetches, nor waits for a fetch that is running (fetchAccessions).
+    // Run never fetches, nor waits for a fetch that is running (fetchAccessions). A run that prints the command line's
+    // help or version reads no input (the engine's start says so, `prints`; line WQA's D14, 2026-11-20).
     for (const role of ROLES) {
-      const problem = this.accessionProblem(role);
+      const problem = this.printsText() ? undefined : this.accessionProblem(role);
       if (problem !== undefined) return { ok: false, message: problem };
     }
     // What the engine could not answer while a part of LOSAT could not be loaded is asked again first: Run LOSAT was
@@ -945,6 +955,7 @@ export class SearchDraft {
       await this.idle();
     }
     const { program, threads, title } = this.state.get();
+    if (this.printsText()) return this.enqueuePrinting();
     for (const role of ROLES) {
       const problem = this.inputProblem(role);
       if (problem !== undefined) return { ok: false, message: problem };
@@ -998,6 +1009,44 @@ export class SearchDraft {
     return this.deps.enqueueAll(requests);
   }
 
+  /**
+   * Whether the run of the draft's argv prints the command line's help or version in place of a search, as the engine's
+   * start says (`StartInfo.prints`; line WQA's D14, 2026-11-20): it needs no inputs, files or fetches, as the command
+   * line reads none for it.
+   */
+  private printsText(): boolean {
+    const { start, validation } = this.state.get();
+    return validation.state === 'ok' && (start?.prints ?? null) !== null;
+  }
+
+  /**
+   * The one run of an argv that prints the command line's help or version (`printsText`): without inputs (the
+   * coordinator gives it none), with the registry file of its -conffile, which the command line reads before the help.
+   */
+  private enqueuePrinting(): Promise<EnqueueAllResult> {
+    const { program, threads, title } = this.state.get();
+    let extra: readonly string[];
+    try {
+      extra = this.extraWords();
+    } catch (error) {
+      return Promise.resolve({ ok: false, message: messageOf(error) });
+    }
+    const state = this.state.get();
+    const conffile = registryName(state.start) === undefined ? undefined : state.conffiles[program];
+    return this.deps.enqueueAll([
+      {
+        program,
+        query: { text: '' },
+        subject: { text: '' },
+        parameters: this.parameters(),
+        ...(extra.length === 0 ? {} : { extra }),
+        requestedThreads: threads,
+        ...(conffile === undefined ? {} : { conffile }),
+        ...(title.trim() === '' ? {} : { title }),
+      },
+    ]);
+  }
+
   /** Why the role cannot be searched as it is (the full message), or undefined. */
   private inputProblem(role: InputRole): string | undefined {
     return this.problemOf(role)?.message;
@@ -1008,6 +1057,7 @@ export class SearchDraft {
    * undefined when nothing does. "Run LOSAT" reports the full message.
    */
   readiness(): string | undefined {
+    if (this.printsText()) return undefined;
     for (const role of ROLES) {
       const problem = this.problemOf(role);
       if (problem !== undefined) return problem.short;
@@ -1229,6 +1279,28 @@ export class SearchDraft {
     return fastaParser(programById(this.state.get().program), role);
   }
 
+  /** The engine's reader of the role's input now: the program's, with the data loaders of the latest validation. */
+  private readerOf(role: InputRole): FastaReader {
+    const { program, dataLoaders } = this.state.get();
+    return { program, role, dataLoaders };
+  }
+
+  /**
+   * The validation says that the run reads its inputs with the data loaders on or off (`dataLoaders`), as the CLI
+   * reads them under the argv's registry (line WQA's D16, 2026-11-20): where that changes, the sources that the reader
+   * refused are read again (a first line that may be a Seq-id is data with the loaders off), and the rest checked again.
+   */
+  private setDataLoaders(dataLoaders: boolean): void {
+    if (this.state.get().dataLoaders === dataLoaders) return;
+    this.set({ dataLoaders });
+    for (const role of ROLES) {
+      for (const source of this.role(role).sources) {
+        if (source.status === 'failed') this.reindex(role, source.key, this.parserOf(role));
+        else this.scheduleCheck(role, source.key, 0);
+      }
+    }
+  }
+
   /** Reads a source again with `parser`; settles once it is read (or once its table of that kind is back). */
   private reindex(role: InputRole, key: string, parser: FastaParserKind): Promise<void> {
     const source = this.role(role).sources.find((s) => s.key === key);
@@ -1266,7 +1338,14 @@ export class SearchDraft {
   private async index(role: InputRole, key: string, file: File, parser: FastaParserKind, known?: string): Promise<void> {
     const task = `${role}:${key}`;
     const generation = this.nextGeneration(task);
+    // The engine's reader of the input now. What it finds (the records, or its refusal) stands only while it is the
+    // reader in force: an index that ends after the program or the data loaders changed reads the input again
+    // (`readAgain`), whatever the order of the change and the index (line WQA's D13 round 2, M1, 2026-11-20).
+    const reader = this.readerOf(role);
     const current = () => this.generations.get(task) === generation;
+    let ref: SourceRef | undefined;
+    let sourceId: string | undefined;
+    let head: string | undefined;
     // The index holds its source until the form shows it; a superseded or failed index lets it go.
     const holder = `index:${task}:${generation}`;
     const started = this.deps.now();
@@ -1274,20 +1353,23 @@ export class SearchDraft {
     let lead: InputLead | undefined;
     try {
       // The source is added once: its other kind's index reads the same data (no second inflation of a .gz).
-      const ref = known === undefined ? await this.deps.data.addSource(file) : undefined;
-      const sourceId = known ?? ref!.sourceId;
-      this.refs.set(holder, [sourceId]);
+      ref = known === undefined ? await this.deps.data.addSource(file) : undefined;
+      const id = known ?? ref!.sourceId;
+      sourceId = id;
+      this.refs.set(holder, [id]);
       const preview =
-        ref === undefined ? undefined : await this.deps.data.previewSource(sourceId, HEAD_BYTES).catch(() => undefined);
-      const head = preview === undefined ? undefined : headText(preview);
+        ref === undefined ? undefined : await this.deps.data.previewSource(id, HEAD_BYTES).catch(() => undefined);
+      head = preview === undefined ? undefined : headText(preview);
       lead = preview === undefined ? undefined : inputLead(preview, preview.length >= ref!.size);
-      const base = await this.deps.data.indexSource(sourceId, parser);
+      const base = await this.deps.data.indexSource(id, reader);
       if (!current()) return;
+      if (this.readAgain(role, key, file, parser, reader, { ref, sourceId, head, lead })) return;
+      const added = ref;
       this.updateSource(role, key, (source) => ({
         ...source,
         // A file named .gz is inflated by addSource: the card shows its plain name and inflated size.
-        ...(ref === undefined ? {} : { name: ref.name, size: ref.size }),
-        sourceId,
+        ...(added === undefined ? {} : { name: added.name, size: added.size }),
+        sourceId: id,
         status: 'ready',
         base,
         excluded: [],
@@ -1296,11 +1378,12 @@ export class SearchDraft {
         ...(head === undefined ? {} : { head }),
         ...(lead === undefined ? {} : { lead }),
       }));
-      this.noteRevision(sourceId, base.revisionId);
+      this.noteRevision(id, base.revisionId);
       this.scheduleCheck(role, key, 0);
       void this.askAgain();
     } catch (error) {
       if (!current()) return;
+      if (this.readAgain(role, key, file, parser, reader, { ref, sourceId, head, lead })) return;
       this.updateSource(role, key, (source) => ({
         ...source,
         status: 'failed',
@@ -1312,6 +1395,34 @@ export class SearchDraft {
       this.refs.release(holder);
       this.scheduleValidation();
     }
+  }
+
+  /**
+   * Reads the input of a source again when the reader that an index of it used (`reader`) is no longer the reader in
+   * force: the program or the data loaders changed while it was read, and what that reader found (its records or its
+   * refusal) is not what the run's reader finds. The name, the first lines and the lead of the first read stay with the
+   * source; the data layer's source (`sourceId`) is read again, or added again if the first read could not add it.
+   */
+  private readAgain(
+    role: InputRole,
+    key: string,
+    file: File,
+    parser: FastaParserKind,
+    reader: FastaReader,
+    first: { ref: SourceRef | undefined; sourceId: string | undefined; head: string | undefined; lead: InputLead | undefined },
+  ): boolean {
+    const inForce = this.readerOf(role);
+    if (inForce.program === reader.program && inForce.dataLoaders === reader.dataLoaders) return false;
+    const { ref, sourceId, head, lead } = first;
+    this.updateSource(role, key, (source) => ({
+      ...source,
+      ...(ref === undefined ? {} : { name: ref.name, size: ref.size }),
+      ...(head === undefined ? {} : { head }),
+      ...(lead === undefined ? {} : { lead }),
+    }));
+    // The new index holds the data layer's source before this one lets it go (its holder is set synchronously).
+    this.track(this.index(role, key, file, parser, sourceId));
+    return true;
   }
 
   private scheduleCheck(role: InputRole, key: string, delay?: number): void {
@@ -1340,17 +1451,18 @@ export class SearchDraft {
       this.updateSource(role, key, (s) => ({ ...s, check: { state: 'ok', records: 0 } }));
       return;
     }
-    const program = this.state.get().program;
+    const reader = this.readerOf(role);
+    const { program, dataLoaders } = reader;
     const started = this.deps.now();
     let check: SourceCheck;
     try {
       const revisionId = await this.revisionFor(source);
       // A source removed meanwhile is not checked (nor cached).
       if (source.sourceId === undefined || !this.formSources.has(source.sourceId)) return;
-      const key = `${program}|${role}|${revisionId}`;
+      const key = `${program}|${role}|${dataLoaders}|${revisionId}`;
       let verdict = this.verdicts.get(key);
       if (verdict === undefined) {
-        verdict = this.deps.data.checkInput(program, role, [revisionId]);
+        verdict = this.deps.data.checkInput(reader, [revisionId]);
         this.verdicts.set(key, verdict);
         // A check that could not run is tried again next time.
         verdict.catch(() => this.verdicts.delete(key));
@@ -1359,7 +1471,7 @@ export class SearchDraft {
     } catch (error) {
       check = { state: 'error', message: messageOf(error), ...(isUnavailable(error) ? { unavailable: true as const } : {}) };
     }
-    if (this.generations.get(task) !== generation || this.state.get().program !== program) return;
+    if (this.generations.get(task) !== generation || this.state.get().program !== program || this.state.get().dataLoaders !== dataLoaders) return;
     const checkMs = this.deps.now() - started;
     this.updateSource(role, key, (s) =>
       s.excluded === source.excluded && s.base === source.base ? { ...s, check, checkMs } : s,
@@ -1439,12 +1551,14 @@ export class SearchDraft {
     let validation: Validation;
     let start: StartInfo | undefined;
     let registry: ChosenRegistryFile | undefined;
+    // The data loaders of the argv's run, where the engine found the argv valid.
+    let dataLoaders: boolean | undefined;
     // Whether the engine answered (its start did), whatever the verdict.
     let answered = false;
     try {
       // NCBI's application start first (line RG E1w-3b): the name of the registry file that the argv
-      // reads, under which the chosen file is checked. An argv that it cannot start (a version word)
-      // has the parser's message, as validate gives it.
+      // reads, under which the chosen file is checked. An argv that it cannot start (a program that
+      // ABI v2 does not run) has the engine's message, as validate gives it.
       const started = await this.deps.engine.start(argv);
       answered = true;
       // A newer change came meanwhile: its validation follows, and this one reads no file.
@@ -1456,6 +1570,9 @@ export class SearchDraft {
         registry = this.registryFile(program, start);
         const result = await this.deps.engine.validate(argv, registry);
         validation = result.ok ? { state: 'ok' } : { state: 'invalid', message: result.message };
+        // Also from a refused argv whose registry the engine read (line WQA's D13 round 3, L1): the setting does not depend
+        // on the option that it refuses.
+        if (result.dataLoaders !== undefined) dataLoaders = result.dataLoaders;
       }
     } catch (error) {
       // The chosen file changed or went after it was chosen: the browser no longer reads it.
@@ -1467,6 +1584,7 @@ export class SearchDraft {
     if (this.generations.get('validate') !== generation) return;
     this.validArgv = validation.state === 'ok' ? argv : undefined;
     this.set({ validation, start });
+    if (dataLoaders !== undefined) this.setDataLoaders(dataLoaders);
     this.prepareEngine();
     if (answered) void this.askOptionsAgain();
   }

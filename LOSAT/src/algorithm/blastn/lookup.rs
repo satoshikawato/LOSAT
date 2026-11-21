@@ -9,52 +9,30 @@ use crate::core::blast_encoding::{
 use crate::utils::dust::MaskedInterval;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1090-1091
-// ```c
-//          mb_lt->next_pos[index] = mb_lt->hashtable[ecode];
-//          mb_lt->hashtable[ecode] = index;
-// ```
 // EXPERIMENT (PAIRPAR, graduated on 2026-10-22: no variable): the megablast table filled by the
 // pool threads.
 #[path = "x_mb_lookup_par.rs"]
 pub(crate) mod x_mb_lookup_par;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1090-1091
-// ```c
-//          mb_lt->next_pos[index] = mb_lt->hashtable[ecode];
-//          mb_lt->hashtable[ecode] = index;
-// ```
 // EXPERIMENT (LOSAT_X_MBLUTONCE): the pool fill of `x_mb_lookup_par` with each query position
 // read once and each word applied by the owner of its cell.
 #[path = "x_mb_lookup_once.rs"]
 mod x_mb_lookup_once;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1262,1376
-// ```c
-//    mb_lt->hashtable = (Int4*)calloc(mb_lt->hashsize, sizeof(Int4));
-// ...
-//    sfree(mb_lt->hashtable);
-// ```
 // EXPERIMENT (LOSAT_X_MBLUTKEEP): the megablast hashtable kept from batch to batch of the batch
 // loop and zeroed, instead of allocated and freed per batch.
 #[path = "x_mb_lut_keep.rs"]
 pub(crate) mod x_mb_lut_keep;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1081-1091
-// ```c
-//          if (mb_lt->hashtable[ecode] == 0) {
-//             PV_SET(pv_array, ecode, pv_array_bts);
-//          }
-// ```
 // EXPERIMENT (LOSAT_X_MBFILL): the one-thread fill of the megablast table with the words read
 // run by run and the update queued 64 words.
 #[path = "x_mb_fill.rs"]
 mod x_mb_fill;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1090-1091
-// ```c
-//          mb_lt->next_pos[index] = mb_lt->hashtable[ecode];
-//          mb_lt->hashtable[ecode] = index;
-// ```
 // EXPERIMENT (LOSAT_X_MB24): the heads and chains of a 4^12-cell megablast table with 3-byte
 // elements.
 #[path = "x_mb_narrow.rs"]
@@ -71,13 +49,6 @@ pub fn x_mb_lookup_print_summary() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:785-786,803-804
-// ```c
-//          mb_lt->next_pos[index] = mb_lt->hashtable[ecode1];
-//          mb_lt->hashtable[ecode1] = index;
-// ...
-//          mb_lt->next_pos2[index] = mb_lt->hashtable2[ecode2];
-//          mb_lt->hashtable2[ecode2] = index;
-// ```
 // EXPERIMENT (LOSAT_X_DISCLUTPAR): the discontiguous megablast tables filled by the pool threads.
 // `pub(crate)` for the summary line that `main` prints at exit (`cli::main_entry`).
 #[path = "x_disc_lookup_par.rs"]
@@ -89,39 +60,18 @@ pub(crate) mod x_disc_lookup_par;
 pub(crate) mod x_dc_csr;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1090-1091
-// ```c
-//          mb_lt->next_pos[index] = mb_lt->hashtable[ecode];
-//          mb_lt->hashtable[ecode] = index;
-// ```
 // EXPERIMENT (LOSAT_X_BNCSR): the chains of a contiguous blastn table laid out as CSR.
 #[path = "x_bn_csr.rs"]
 mod x_bn_csr;
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:37-43
-// ```c
-// /** bitfield used to detect ambiguities in uncompressed
-//  *  nucleotide letters
-//  */
-// #define BLAST2NA_MASK 0xfc
-// #define BITS_PER_NUC 2
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:37-43
 const BLAST2NA_MASK: u8 = 0xFC;
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_encoding.c:80-103
-// ```c
-// const char NCBI4NA_TO_IUPACNA[BLASTNA_SIZE] = {
-//     '-', 'A', 'C', 'M', 'G', 'R', 'S', 'V',
-//     'T', 'W', 'Y', 'H', 'K', 'D', 'B', 'N'
-// };
-// const Uint1 IUPACNA_TO_NCBI4NA[128]={ ... };
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_encoding.c:80-103
 const NCBI4NA_TO_IUPACNA: [u8; 16] = [
     b'-', b'A', b'C', b'M', b'G', b'R', b'S', b'V', b'T', b'W', b'Y', b'H', b'K', b'D', b'B', b'N',
 ];
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_encoding.c:95-103
-// ```c
-// const Uint1 IUPACNA_TO_NCBI4NA[128]={ ... };
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_encoding.c:95-103
 const IUPACNA_TO_NCBI4NA: [u8; 128] = [
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -129,26 +79,13 @@ const IUPACNA_TO_NCBI4NA: [u8; 128] = [
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0,
 ];
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_util.c:812-819
-// ```c
-// Uint1 conversion_table[16] = {
-//   0,  8, 4, 12,
-//   2, 10, 6, 14,
-//   1,  9, 5, 13,
-//   3, 11, 7, 15
-// };
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:812-819
 const NCBI4NA_REV_COMP: [u8; 16] = [0, 8, 4, 12, 2, 10, 6, 14, 1, 9, 5, 13, 3, 11, 7, 15];
 
 /// Generate the reverse complement of a DNA sequence in IUPACNA.
 /// Uses NCBI4NA bitmask mapping to preserve ambiguous base complements.
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:977,989
-/// ```c
-///     sv.SetCoding(CSeq_data::e_Ncbi4na);
-///     ...
-///     sv.GetStrandData(strand, buffer);
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:977,989
 /// NCBI takes both strands, in NCBI4NA, from sequence data that has no letter case
 /// (the reader records lowercase as masks), so a lowercase input letter is the same
 /// base as its uppercase form. `IUPACNA_TO_NCBI4NA` maps only uppercase letters, so
@@ -202,12 +139,7 @@ pub fn encode_reverse_complement_blastna_into(seq: &[u8], out: &mut [u8]) {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_nalookup.h:109-156
-// ```c
-// #define NA_HITS_PER_CELL 3
-// typedef struct NaLookupBackboneCell { ... } NaLookupBackboneCell;
-// typedef struct BlastNaLookupTable { ... } BlastNaLookupTable;
-// ```
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_nalookup.h:109-156
 const NA_HITS_PER_CELL: usize = 3;
 
 #[repr(C)]
@@ -239,16 +171,7 @@ pub struct NaLookupTable {
 }
 
 impl NaLookupTable {
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:41-79
-    // ```c
-    // if (PV_TEST(pv, index, PV_ARRAY_BTS))
-    //     return lookup->thick_backbone[index].num_used;
-    // ...
-    // if (num_hits <= NA_HITS_PER_CELL)
-    //     lookup_pos = lookup->thick_backbone[index].payload.entries;
-    // else
-    //     lookup_pos = lookup->overflow + lookup->thick_backbone[index].payload.overflow_cursor;
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:41-79
     #[inline(always)]
     pub fn get_hits_checked(&self, idx: u64) -> &[u32] {
         let idx = idx as usize;
@@ -285,13 +208,7 @@ impl NaLookupTable {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_nalookup.h:251-258
-// ```c
-// Int4* hashtable;   /**< Array of positions              */
-// Int4* next_pos;    /**< Extra positions stored here     */
-// PV_ARRAY_TYPE *pv_array;/**< Presence vector, used for quick presence
-//                            check */
-// ```
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_nalookup.h:251-258
 /// Direct address table for k-mer lookup - packed offsets + hits.
 /// Hits store 1-based query offsets (q_off + 1), matching NCBI lookup chains.
 /// Used for small word sizes (<=13) where 4^word_size fits in memory.
@@ -301,15 +218,7 @@ pub struct DirectKmerLookup {
 }
 
 impl DirectKmerLookup {
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:1406-1418
-    // ```c
-    // Int4 q_off = lookup->hashtable[index];
-    // while (q_off) {
-    //     offset_pairs[i].qs_offsets.q_off   = q_off - 1;
-    //     offset_pairs[i++].qs_offsets.s_off = s_off;
-    //     q_off = lookup->next_pos[q_off];
-    // }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:1406-1418
     #[inline(always)]
     pub fn get(&self, idx: usize) -> &[u32] {
         if idx + 1 >= self.offsets.len() {
@@ -321,10 +230,7 @@ impl DirectKmerLookup {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_util.h:51-55
-// ```c
-// #define NCBI2NA_UNPACK_BASE(x, N) (((x)>>(2*(N))) & NCBI2NA_MASK)
-// ```
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_util.h:51-55
 #[inline(always)]
 fn packed_base_at(packed: &[u8], pos: usize) -> u8 {
     let byte = packed[pos / COMPRESSION_RATIO];
@@ -344,12 +250,7 @@ fn packed_kmer_at(packed: &[u8], start: usize, k: usize) -> u64 {
 
 /// Compute database word counts for lookup filtering (limit_lookup).
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1122-1177
-/// ```c
-/// word = (w >> shift) & mask;
-/// if (!PV_TEST(pv, word, pv_array_bts)) continue;
-/// if ((counts[index] & 0xf) < max_word_count) counts[index]++;
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1122-1177
 pub fn build_db_word_counts<R: InputRecord>(
     queries_blastna: &[&[u8]],
     query_masks: &[Vec<MaskedInterval>],
@@ -363,17 +264,10 @@ pub fn build_db_word_counts<R: InputRecord>(
     if lut_word_length == 0 {
         return Vec::new();
     }
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1250-1254
-    // ```c
-    // mb_lt->hashsize = 1ULL << (BITS_PER_NUC * mb_lt->lut_word_length);
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1260
     let hashsize = 1usize << (2 * lut_word_length);
     let mut counts = vec![0u8; hashsize / 2];
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:865-868
-    // ```c
-    // if (full_word_size > (loc->ssr->right - loc->ssr->left + 1))
-    //     continue;
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:865-868
     let (pv, pv_array_bts) = build_query_pv(
         queries_blastna,
         query_masks,
@@ -382,12 +276,7 @@ pub fn build_db_word_counts<R: InputRecord>(
         approx_table_entries,
     );
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1122-1177
-    // ```c
-    // word = (w >> shift) & mask;
-    // if (!PV_TEST(pv, word, pv_array_bts)) continue;
-    // if ((counts[index] & 0xf) < max_word_count) counts[index]++;
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1122-1177
     let mut scan_subject = |seq_len: usize, packed: &[u8]| {
         let mask = (1u64 << (2 * lut_word_length)) - 1;
         let mut pos = 0usize;
@@ -414,20 +303,7 @@ pub fn build_db_word_counts<R: InputRecord>(
         if seq.len() < lut_word_length {
             continue;
         }
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:836-847
-        // ```c
-        // if (subj_is_na) {
-        //     BlastSeqBlkSetSequence(subj, sequence.data.release(),
-        //        ((sentinels == eSentinels) ? sequence.length - 2 :
-        //         sequence.length));
-        //     ...
-        //     SBlastSequence compressed_seq =
-        //         subjects.GetBlastSequence(i, eBlastEncodingNcbi2na,
-        //                                   eNa_strand_plus, eNoSentinels);
-        //     BlastSeqBlkSetCompressedSequence(subj,
-        //                               compressed_seq.data.release());
-        // }
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:836-847
         if let Some(packed_cache) = subjects_packed {
             if let Some(packed) = packed_cache.get(subject_idx) {
                 scan_subject(seq.len(), packed.as_slice());
@@ -457,11 +333,7 @@ type PvArrayType = u32;
 /// Bits-to-shift from lookup index to PV array index (matches NCBI BLAST's PV_ARRAY_BTS)
 const PV_ARRAY_BTS: usize = 5;
 /// Bytes per PV array element (matches NCBI BLAST's PV_ARRAY_BYTES)
-/// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_lookup.h:42-43
-/// ```c
-/// #define PV_ARRAY_BYTES 4
-/// #define PV_ARRAY_BTS 5
-/// ```
+/// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_lookup.h:42-43
 const PV_ARRAY_BYTES: usize = 4;
 
 /// Mask for extracting bit position within a PV array element
@@ -491,13 +363,7 @@ fn pv_set(pv: &mut [PvArrayType], index: usize) {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_lookup.h:51-57
-// ```c
-// #define PV_SET(lookup, index, shift) \
-//     lookup[(index) >> (shift)] |= (PV_ARRAY_TYPE)1 << ((index) & PV_ARRAY_MASK)
-// #define PV_TEST(lookup, index, shift) \
-//     ( lookup[(index) >> (shift)] & ((PV_ARRAY_TYPE)1 << ((index) & PV_ARRAY_MASK)) )
-// ```
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_lookup.h:49-57
 #[inline(always)]
 fn pv_test_shift(pv: &[PvArrayType], index: usize, shift: usize) -> bool {
     let array_idx = index >> shift;
@@ -518,16 +384,7 @@ fn pv_set_shift(pv: &mut [PvArrayType], index: usize, shift: usize) {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/lookup_util.c:71-83
-// ```c
-// Int4 ilog2(Int8 x)
-// {
-//     Int4 lg = 0;
-//     if (x == 0) return 0;
-//     while ((x = x >> 1)) lg++;
-//     return lg;
-// }
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_util.c:71-83
 #[inline]
 fn ilog2(mut x: usize) -> usize {
     let mut lg = 0usize;
@@ -543,23 +400,7 @@ fn ilog2(mut x: usize) -> usize {
     lg
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1270-1306
-// ```c
-// if (mb_lt->lut_word_length <= 12) {
-//     if (mb_lt->hashsize <= 8 * kTargetPVSize)
-//         pv_size = (Int4)(mb_lt->hashsize >> PV_ARRAY_BTS);
-//     else
-//         pv_size = kTargetPVSize / PV_ARRAY_BYTES;
-// } else {
-//     pv_size = kTargetPVSize * 64 / PV_ARRAY_BYTES;
-// }
-// if(!lookup_options->db_filter &&
-//    (approx_table_entries <= kSmallQueryCutoff ||
-//     approx_table_entries >= kLargeQueryCutoff)) {
-//     pv_size = pv_size / 2;
-// }
-// mb_lt->pv_array_bts = ilog2(mb_lt->hashsize / pv_size);
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1270-1306
 fn compute_mb_pv_params(
     hashsize: usize,
     approx_table_entries: usize,
@@ -594,18 +435,7 @@ fn compute_mb_pv_params(
     (pv_size, pv_array_bts)
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:878-893
-// ```c
-// val = *++seq;
-// if ((val & BLAST2NA_MASK) != 0) {
-//     ecode = 0;
-//     pos = seq + kLutWordLength;
-//     continue;
-// }
-// ecode = ((ecode << BITS_PER_NUC) & kLutMask) + val;
-// if (seq < pos) continue;
-// PV_SET(pv_array, ecode, pv_array_bts);
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:878-893
 fn build_query_pv(
     queries_blastna: &[&[u8]],
     query_masks: &[Vec<MaskedInterval>],
@@ -616,10 +446,7 @@ fn build_query_pv(
     if lut_word_length == 0 {
         return (Vec::new(), PV_ARRAY_BTS);
     }
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1250-1254
-    // ```c
-    // mb_lt->hashsize = 1ULL << (BITS_PER_NUC * mb_lt->lut_word_length);
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1260
     let hashsize = 1usize << (2 * lut_word_length);
     let (pv_size, pv_array_bts) =
         compute_mb_pv_params(hashsize, approx_table_entries, true, lut_word_length);
@@ -634,22 +461,7 @@ fn build_query_pv(
         let masks = query_masks.get(q_idx).map(|v| v.as_slice()).unwrap_or(&[]);
         let ranges = build_unmasked_ranges(seq.len(), masks);
 
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:856-889
-        // ```c
-        // for (loc = location; loc; loc = loc->next) {
-        //     if (full_word_size > (loc->ssr->right - loc->ssr->left + 1))
-        //         continue;
-        //     ...
-        //     if ((val & BLAST2NA_MASK) != 0) {
-        //         ecode = 0;
-        //         pos = seq + kLutWordLength;
-        //         continue;
-        //     }
-        //     ecode = ((ecode << BITS_PER_NUC) & kLutMask) + val;
-        //     if (seq < pos) continue;
-        //     PV_SET(pv_array, ecode, pv_array_bts);
-        // }
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:852-893
         for (range_start, range_end) in ranges {
             let range_len = range_end.saturating_sub(range_start);
             if full_word_size > range_len {
@@ -671,14 +483,7 @@ fn build_query_pv(
     (pv, pv_array_bts)
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1047-1059
-// ```c
-// if (!(ecode & 1)) {
-//     if ((counts[ecode / 2] >> 4) >= max_word_count) continue;
-// } else {
-//     if ((counts[ecode / 2] & 0xf) >= max_word_count) continue;
-// }
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1047-1059
 #[inline(always)]
 fn db_word_count_exceeds(counts: &[u8], word: u64, max_word_count: u8) -> bool {
     let idx = word as usize;
@@ -694,15 +499,7 @@ fn db_word_count_exceeds(counts: &[u8], word: u64, max_word_count: u8) -> bool {
     count >= max_word_count
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1166-1177
-// ```c
-// index = word / 2;
-// if (word & 1) {
-//     if ((counts[index] & 0xf) < max_word_count) counts[index]++;
-// } else {
-//     if ((counts[index] >> 4) < max_word_count) counts[index] += 1 << 4;
-// }
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1166-1177
 #[inline(always)]
 fn db_word_count_increment(counts: &mut [u8], word: u64, max_word_count: u8) {
     let idx = word as usize;
@@ -721,15 +518,7 @@ fn db_word_count_increment(counts: &mut [u8], word: u64, max_word_count: u8) {
 
 /// Optimized lookup table with Presence-Vector for fast filtering.
 /// Combines DirectKmerLookup with a bit vector for O(1) presence checking.
-// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_nalookup.h:251-260
-// ```c
-// Int4* hashtable;   /**< Array of positions              */
-// Int4* next_pos;    /**< Extra positions stored here     */
-// PV_ARRAY_TYPE *pv_array;/**< Presence vector, used for quick presence
-//                            check */
-// Int4 pv_array_bts; /**< The exponent of 2 by which pv_array is smaller than
-//                        the backbone */
-// ```
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_nalookup.h:251-260
 pub struct PvDirectLookup {
     /// The actual lookup table storing 1-based query offsets (q_off + 1)
     lookup: DirectKmerLookup,
@@ -737,13 +526,7 @@ pub struct PvDirectLookup {
     pv: Vec<PvArrayType>,
     /// Log2 compression factor for the PV array (pv_array_bts)
     pv_array_bts: usize,
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1088-1108
-    // ```c
-    // longest_chain = 2;
-    // for (index = 0; index < mb_lt->hashsize / kCompressionFactor; index++)
-    //     longest_chain = MAX(longest_chain, helper_array[index]);
-    // mb_lt->longest_chain = longest_chain;
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1088-1108
     /// Longest chain length for any lookup bucket (used to size offset buffers).
     longest_chain: usize,
     /// Word size used for this lookup table
@@ -753,26 +536,14 @@ pub struct PvDirectLookup {
 
 impl PvDirectLookup {
     /// Check if a k-mer has any hits using the presence vector (O(1))
-    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_lookup.h:51-57
-    // ```c
-    // #define PV_TEST(lookup, index, shift) \
-    //     ( lookup[(index) >> (shift)] & ((PV_ARRAY_TYPE)1 << ((index) & PV_ARRAY_MASK)) )
-    // ```
+    // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_lookup.h:51-57
     #[inline(always)]
     pub fn has_hits(&self, kmer: u64) -> bool {
         pv_test_shift(&self.pv, kmer as usize, self.pv_array_bts)
     }
 
     /// Get hits for a k-mer (only call after has_hits returns true)
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:1406-1418
-    // ```c
-    // Int4 q_off = lookup->hashtable[index];
-    // while (q_off) {
-    //     offset_pairs[i].qs_offsets.q_off   = q_off - 1;
-    //     offset_pairs[i++].qs_offsets.s_off = s_off;
-    //     q_off = lookup->next_pos[q_off];
-    // }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:1406-1418
     #[inline(always)]
     pub fn get_hits(&self, kmer: u64) -> &[u32] {
         let idx = kmer as usize;
@@ -780,13 +551,7 @@ impl PvDirectLookup {
     }
 
     /// Get hits for a k-mer with PV check (combined operation)
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:1386-1394
-    // ```c
-    // if (PV_TEST(pv, index, pv_array_bts))
-    //     return 1;
-    // else
-    //     return 0;
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:1386-1395
     #[inline(always)]
     pub fn get_hits_checked(&self, kmer: u64) -> &[u32] {
         if self.has_hits(kmer) {
@@ -822,22 +587,7 @@ pub struct TwoStageLookup {
 
 /// The templates of a discontiguous megablast table and the second template's chains.
 ///
-/// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_nalookup.h:238-256
-/// ```c
-/// typedef struct BlastMBLookupTable {
-///     ...
-///     Boolean discontiguous; /**< Are discontiguous words used? */
-///     Int4 template_length; /**< Length of the discontiguous word template */
-///     EDiscTemplateType template_type; /**< Type of the discontiguous
-///                                          word template */
-///     Boolean two_templates; /**< Use two templates simultaneously */
-///     EDiscTemplateType second_template_type; /**< Type of the second
-///                                                 discontiguous word template */
-///     ...
-///     Int4* hashtable2;  /**< Array of positions for second template */
-///     ...
-///     Int4* next_pos2;   /**< Extra positions for the second template */
-/// ```
+/// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_nalookup.h:238-256
 pub struct DiscTemplates {
     pub template_type: DiscTemplateType,
     /// The second template (`two_templates`), or `Contiguous` for one template.
@@ -860,20 +610,7 @@ impl DiscTemplates {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_nalookup.h:238-269
-// ```c
-// typedef struct BlastMBLookupTable {
-//     Int4 word_length;
-//     Int4 lut_word_length;
-//     Int8 hashsize;
-//     ...
-//     Int4* hashtable;
-//     Int4* next_pos;
-//     PV_ARRAY_TYPE *pv_array;
-//     Int4 pv_array_bts;
-//     Int4 longest_chain;
-// } BlastMBLookupTable;
-// ```
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_nalookup.h:238-269
 struct MbLookupTable {
     hashtable: Vec<u32>,
     next_pos: Vec<u32>,
@@ -894,9 +631,6 @@ struct MbLookupTable {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1376
-// ```c
-//    sfree(mb_lt->hashtable);
-// ```
 // EXPERIMENT (LOSAT_X_MBLUTKEEP): the hashtable goes back to the batch loop's keep instead (with
 // LOSAT_X_MB24 the words of the 3-byte heads).
 impl Drop for MbLookupTable {
@@ -912,28 +646,13 @@ impl Drop for MbLookupTable {
 }
 
 impl MbLookupTable {
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:1386-1395
-    // ```c
-    // if (PV_TEST(pv, index, pv_array_bts))
-    //     return 1;
-    // else
-    //     return 0;
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:1386-1395
     #[inline(always)]
     fn has_hits(&self, index: u64) -> bool {
         pv_test_shift(&self.pv_array, index as usize, self.pv_array_bts)
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:1406-1418
-    // ```c
-    // Int4 q_off = lookup->hashtable[index];
-    //
-    // while (q_off) {
-    //     offset_pairs[i].qs_offsets.q_off   = q_off - 1;
-    //     offset_pairs[i++].qs_offsets.s_off = s_off;
-    //     q_off = lookup->next_pos[q_off];
-    // }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:1406-1418
     // EXPERIMENT (LOSAT_X_BNCSR): a table laid out as CSR has an empty `hashtable`: the bounds
     // check of the chain's head, which the walk needs anyway, sends it to `x_csr_each`, so a table
     // with chains runs the same statements as before.
@@ -1230,32 +949,8 @@ impl TwoStageLookup {
     /// Visits the second template's query offsets (1-based) of a discontiguous word; the
     /// presence vector is shared by both templates.
     ///
-    /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:1465-1469
-    /// ```c
-    ///    if (s_BlastMBLookupHasHits(mb_lt, index2)) {         \
-    ///        total_hits += s_BlastMBLookupRetrieve2(mb_lt,    \
-    ///                   index2, offset_pairs + total_hits,    \
-    ///                   scan_range[0]);                               \
-    ///    }
-    /// ```
-    /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:1428-1444
-    /// ```c
-    /// static NCBI_INLINE Int4 s_BlastMBLookupRetrieve2(BlastMBLookupTable * lookup,
-    ///                                                  Int8 index,
-    ///                                                  BlastOffsetPair * offset_pairs,
-    ///                                                  Int4 s_off)
-    /// {
-    ///     Int4 i=0;
-    ///     Int4 q_off = lookup->hashtable2[index];
-    ///
-    ///     while (q_off) {
-    ///         offset_pairs[i].qs_offsets.q_off   = q_off - 1;
-    ///         offset_pairs[i++].qs_offsets.s_off = s_off;
-    ///         q_off = lookup->next_pos2[q_off];
-    ///     }
-    ///     return i;
-    /// }
-    /// ```
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:1465-1469
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:1428-1444
     #[inline(always)]
     pub fn for_each_hit2(&self, index: u64, mut callback: impl FnMut(u32)) {
         let Some(disc) = self.disc.as_ref() else {
@@ -1356,19 +1051,7 @@ impl TwoStageLookup {
     /// Get lookup word length. A discontiguous table scans and extends template-length
     /// words.
     ///
-    /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1624-1634
-    /// ```c
-    ///     else if (lookup_wrap->lut_type == eMBLookupTable) {
-    ///         BlastMBLookupTable *lookup =
-    ///                                 (BlastMBLookupTable *) lookup_wrap->lut;
-    ///         if (lookup->discontiguous) {
-    ///             word_length = lookup->template_length;
-    ///             lut_word_length = lookup->template_length;
-    ///         } else {
-    ///             word_length = lookup->word_length;
-    ///             lut_word_length = lookup->lut_word_length;
-    ///         }
-    /// ```
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1624-1634
     #[inline(always)]
     pub fn lut_word_length(&self) -> usize {
         match &self.disc {
@@ -1387,31 +1070,14 @@ impl TwoStageLookup {
     }
 
     /// Get the longest chain length for sizing offset buffers.
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/lookup_wrap.c:255-288
-    // ```c
-    // switch (lookup->lut_type) {
-    // case eMBLookupTable:
-    //     offset_array_size = OFFSET_ARRAY_SIZE +
-    //         ((BlastMBLookupTable*)lookup->lut)->longest_chain;
-    //     break;
-    // ...
-    // }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:255-288
     #[inline(always)]
     pub fn longest_chain(&self) -> usize {
         self.mb_lookup.longest_chain()
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_lookup.c:91-132
-// ```c
-// for (loc = locations; loc; loc = loc->next) {
-//     Int4 from = loc->ssr->left;
-//     Int4 to = loc->ssr->right;
-//     if (word_length > to - from + 1) continue;
-//     ...
-// }
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:91-132
 pub(crate) fn build_unmasked_ranges(
     seq_len: usize,
     masks: &[MaskedInterval],
@@ -1423,12 +1089,7 @@ pub(crate) fn build_unmasked_ranges(
         return vec![(0, seq_len)];
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/dust_filter.cpp:121-126
-    // ```c
-    // const int kTopFlags = CSeq_loc::fStrand_Ignore|CSeq_loc::fMerge_All|CSeq_loc::fSort;
-    // ...
-    // query_masks->Merge(kTopFlags, 0);
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/dust_filter.cpp:121-126
     // Dust/lowercase masks are merged and sorted before lookup building.
     debug_assert!(masks.windows(2).all(|w| w[0].start <= w[1].start));
 
@@ -1463,22 +1124,6 @@ pub(crate) fn build_unmasked_ranges(
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1032-1048
 /// (`s_FillContigMBTable`; `s_FillDiscMBTable` and `BlastLookupIndexQueryExactMatches` read
 /// their words the same way, with `accum` / `ecode` and `word_length`)
-/// ```c
-///       for (index = from; index <= last_offset; index++) {
-///          val = *++seq;
-///          /* if an ambiguity is encountered, do not add
-///             any words that would contain it */
-///          if ((val & BLAST2NA_MASK) != 0) {
-///             ecode = 0;
-///             pos = seq + kLutWordLength;
-///             continue;
-///          }
-///
-///          /* get next base */
-///          ecode = ((ecode << BITS_PER_NUC) & kLutMask) + val;
-///          if (seq < pos)
-///             continue;
-/// ```
 #[inline(always)]
 pub(crate) fn x_range_words(
     letters: &[u8],
@@ -1535,23 +1180,7 @@ pub fn build_pv_direct_lookup(
     let safe_word_size = word_size.min(MAX_DIRECT_LOOKUP_WORD_SIZE);
     let full_word_size = full_word_size.max(safe_word_size);
     let table_size = 1usize << (2 * safe_word_size); // 4^word_size
-                                                     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1270-1306
-                                                     // ```c
-                                                     // if (mb_lt->lut_word_length <= 12) {
-                                                     //     if (mb_lt->hashsize <= 8 * kTargetPVSize)
-                                                     //         pv_size = (Int4)(mb_lt->hashsize >> PV_ARRAY_BTS);
-                                                     //     else
-                                                     //         pv_size = kTargetPVSize / PV_ARRAY_BYTES;
-                                                     // } else {
-                                                     //     pv_size = kTargetPVSize * 64 / PV_ARRAY_BYTES;
-                                                     // }
-                                                     // if(!lookup_options->db_filter &&
-                                                     //    (approx_table_entries <= kSmallQueryCutoff ||
-                                                     //     approx_table_entries >= kLargeQueryCutoff)) {
-                                                     //     pv_size = pv_size / 2;
-                                                     // }
-                                                     // mb_lt->pv_array_bts = ilog2(mb_lt->hashsize / pv_size);
-                                                     // ```
+                                                     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1270-1306
     let (pv_size, pv_array_bts) = if use_mb_pv {
         compute_mb_pv_params(
             table_size,
@@ -1590,26 +1219,16 @@ pub fn build_pv_direct_lookup(
     // K-mer mask for rolling window
     let kmer_mask: u64 = (1u64 << (2 * safe_word_size)) - 1;
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:979-1091
-    // ```c
-    // mb_lt->next_pos = (Int4 *)calloc(query->length + 1, sizeof(Int4));
-    // ...
-    // if (mb_lt->hashtable[ecode] == 0) {
-    //     PV_SET(pv_array, ecode, pv_array_bts);
-    // }
-    // mb_lt->next_pos[index] = mb_lt->hashtable[ecode];
-    // mb_lt->hashtable[ecode] = index;
-    // ```
-    // NCBI reference: blast_lookup.c:BlastLookupIndexQueryExactMatches (lines 79-132)
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:979-1091
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:BlastLookupIndexQueryExactMatches (lines 79-132)
     // NCBI processes only unmasked regions (locations parameter)
     // For each location, it iterates through positions and adds k-mers
-    // Reference: blast_nalookup.c:402-406, 571-575 (calls BlastLookupIndexQueryExactMatches)
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:402-406, 571-575 (calls BlastLookupIndexQueryExactMatches)
     //
     // LOSAT mirrors this by iterating unmasked ranges derived from query masks.
     for (q_idx, seq_blastna) in queries_blastna.iter().enumerate() {
         let seq = seq_blastna;
-        // NCBI reference: blast_lookup.c:99-100
-        // if (word_length > to - from + 1) continue;
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:99-100
         if seq.len() < safe_word_size {
             continue;
         }
@@ -1617,25 +1236,17 @@ pub fn build_pv_direct_lookup(
         let masks = query_masks.get(q_idx).map(|v| v.as_slice()).unwrap_or(&[]);
         let ranges = build_unmasked_ranges(seq.len(), masks);
 
-        // NCBI reference: blast_lookup.c:108-121
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:108-121
         // Rolling window approach: word_target points to position where complete k-mer can be formed
-        // Ambiguous bases reset the window: if (*seq & invalid_mask) word_target = seq + lut_word_length + 1;
+        // An ambiguous base restarts the window: the next complete word ends `lut_word_length` bases after it.
         for (range_start, range_end) in ranges {
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1001-1034
-            // ```c
-            // if (full_word_size > (loc->ssr->right - loc->ssr->left + 1))
-            //     continue;
-            // ```
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1001-1034
             let range_len = range_end.saturating_sub(range_start);
             if full_word_size > range_len {
                 continue;
             }
 
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_lookup.c:117-120
-            // ```c
-            // if (*seq & invalid_mask)
-            //     word_target = seq + lut_word_length + 1;
-            // ```
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:117-120
             x_range_words(
                 &seq[range_start..range_end],
                 safe_word_size,
@@ -1644,24 +1255,17 @@ pub fn build_pv_direct_lookup(
                 |current_kmer, _| {
                     total_positions += 1;
 
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1047-1059
-                    // ```c
-                    // if (kDbFilter) {
-                    //    if ((counts[ecode / 2] >> 4) >= max_word_count) continue;
-                    //    ...
-                    // }
-                    // ```
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1047-1059
                     if let Some(counts_filter) = db_word_counts {
                         if db_word_count_exceeds(counts_filter, current_kmer, max_db_word_count) {
                             return;
                         }
                     }
 
-                    // NCBI reference: blast_lookup.c:BlastLookupAddWordHit (lines 33-77)
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:BlastLookupAddWordHit (lines 33-77)
                     // Adds ALL hits without any frequency limit - no query-side filtering
                     // if (backbone[index] == NULL) { initialize new chain }
                     // else { use existing chain, realloc if full }
-                    // chain[chain[1] + 2] = query_offset; chain[1]++;
                     let idx = current_kmer as usize;
                     if idx < table_size {
                         counts[idx] = counts[idx].saturating_add(1);
@@ -1671,31 +1275,9 @@ pub fn build_pv_direct_lookup(
         }
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:1406-1418
-    // ```c
-    // Int4 q_off = lookup->hashtable[index];
-    // while (q_off) {
-    //     offset_pairs[i].qs_offsets.q_off   = q_off - 1;
-    //     offset_pairs[i++].qs_offsets.s_off = s_off;
-    //     q_off = lookup->next_pos[q_off];
-    // }
-    // ```
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:1406-1418
-    // ```c
-    // Int4 q_off = lookup->hashtable[index];
-    // while (q_off) {
-    //     offset_pairs[i].qs_offsets.q_off   = q_off - 1;
-    //     offset_pairs[i++].qs_offsets.s_off = s_off;
-    //     q_off = lookup->next_pos[q_off];
-    // }
-    // ```
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1088-1108
-    // ```c
-    // longest_chain = 2;
-    // for (index = 0; index < mb_lt->hashsize / kCompressionFactor; index++)
-    //     longest_chain = MAX(longest_chain, helper_array[index]);
-    // mb_lt->longest_chain = longest_chain;
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:1406-1418
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:1406-1418
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1088-1108
     let longest_chain = counts.iter().copied().max().unwrap_or(0).max(2) as usize;
 
     let mut offsets: Vec<u32> = vec![0; table_size + 1];
@@ -1709,13 +1291,7 @@ pub fn build_pv_direct_lookup(
     let mut hits: Vec<u32> = vec![0u32; total_hits as usize];
     let mut write_pos: Vec<u32> = offsets[..table_size].to_vec();
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_lookup.c:33-77
-    // ```c
-    // if (backbone[index] == NULL) { ... }
-    // ...
-    // chain[chain[1] + 2] = query_offset;
-    // chain[1]++;
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:33-77
     for (q_idx, seq_blastna) in queries_blastna.iter().enumerate() {
         let seq = seq_blastna;
         if seq.len() < safe_word_size {
@@ -1727,21 +1303,13 @@ pub fn build_pv_direct_lookup(
         let query_offset = query_offsets[q_idx] as usize;
 
         for (range_start, range_end) in ranges {
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1001-1034
-            // ```c
-            // if (full_word_size > (loc->ssr->right - loc->ssr->left + 1))
-            //     continue;
-            // ```
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1001-1034
             let range_len = range_end.saturating_sub(range_start);
             if full_word_size > range_len {
                 continue;
             }
 
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_lookup.c:117-120
-            // ```c
-            // if (*seq & invalid_mask)
-            //     word_target = seq + lut_word_length + 1;
-            // ```
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:117-120
             x_range_words(
                 &seq[range_start..range_end],
                 safe_word_size,
@@ -1758,13 +1326,7 @@ pub fn build_pv_direct_lookup(
 
                     let idx = current_kmer as usize;
                     if idx < table_size {
-                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1027-1034
-                        // ```c
-                        // /* Also add 1 to all indices, because lookup table indices count
-                        //    from 1. */
-                        // mb_lt->next_pos[index] = mb_lt->hashtable[ecode];
-                        // mb_lt->hashtable[ecode] = index;
-                        // ```
+                        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1027-1034
                         let q_off_1 = (query_offset + kmer_start + 1) as u32;
                         let pos_idx = write_pos[idx] as usize;
                         hits[pos_idx] = q_off_1;
@@ -1775,11 +1337,7 @@ pub fn build_pv_direct_lookup(
         }
     }
 
-    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_lookup.h:51-57
-    // ```c
-    // #define PV_SET(lookup, index, shift) \
-    //     lookup[(index) >> (shift)] |= (PV_ARRAY_TYPE)1 << ((index) & PV_ARRAY_MASK)
-    // ```
+    // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_lookup.h:49-57
     let mut pv: Vec<PvArrayType> = vec![0; pv_size];
     let mut non_empty_count = 0usize;
     for idx in 0..table_size {
@@ -1818,16 +1376,7 @@ pub fn build_pv_direct_lookup(
 
 /// Build standard NCBI BlastNaLookupTable (array-backed with PV + overflow).
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:548-583
-/// ```c
-/// lookup->word_length = opt->word_size;
-/// lookup->lut_word_length = lut_width;
-/// lookup->backbone_size = 1 << (BITS_PER_NUC * lookup->lut_word_length);
-/// lookup->mask = lookup->backbone_size - 1;
-/// lookup->scan_step = lookup->word_length - lookup->lut_word_length + 1;
-/// BlastLookupIndexQueryExactMatches(...);
-/// s_BlastNaLookupFinalize(thin_backbone, lookup);
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:548-583
 pub fn build_na_lookup(
     queries_blastna: &[&[u8]],
     query_offsets: &[i32],
@@ -1864,9 +1413,9 @@ pub fn build_na_lookup(
 
     let kmer_mask: u64 = (1u64 << (2 * lut_word_length)) - 1;
 
-    // NCBI reference: blast_lookup.c:BlastLookupIndexQueryExactMatches (lines 79-132)
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:BlastLookupIndexQueryExactMatches (lines 79-132)
     // NCBI processes only unmasked regions (locations parameter)
-    // Reference: blast_nalookup.c:571-575 (calls BlastLookupIndexQueryExactMatches)
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:571-575 (calls BlastLookupIndexQueryExactMatches)
     for (q_idx, seq_blastna) in queries_blastna.iter().enumerate() {
         let seq = seq_blastna;
         if seq.len() < lut_word_length {
@@ -1877,21 +1426,13 @@ pub fn build_na_lookup(
         let ranges = build_unmasked_ranges(seq.len(), masks);
 
         for (range_start, range_end) in ranges {
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1001-1022
-            // ```c
-            // if (full_word_size > (loc->ssr->right - loc->ssr->left + 1))
-            //     continue;
-            // ```
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1001-1022
             let range_len = range_end.saturating_sub(range_start);
             if word_length > range_len {
                 continue;
             }
 
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_lookup.c:117-120
-            // ```c
-            // if (*seq & invalid_mask)
-            //     word_target = seq + lut_word_length + 1;
-            // ```
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:117-120
             x_range_words(
                 &seq[range_start..range_end],
                 lut_word_length,
@@ -1900,13 +1441,7 @@ pub fn build_na_lookup(
                 |current_kmer, _| {
                     total_positions += 1;
 
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1047-1059
-                    // ```c
-                    // if (kDbFilter) {
-                    //    if ((counts[ecode / 2] >> 4) >= max_word_count) continue;
-                    //    ...
-                    // }
-                    // ```
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1047-1059
                     if let Some(counts_filter) = db_word_counts {
                         if db_word_count_exceeds(counts_filter, current_kmer, max_db_word_count) {
                             return;
@@ -1920,16 +1455,7 @@ pub fn build_na_lookup(
         }
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:456-533
-    // ```c
-    // lookup->thick_backbone = (NaLookupBackboneCell *)calloc(...);
-    // pv = lookup->pv = (PV_ARRAY_TYPE *)calloc(...);
-    // if (num_hits > NA_HITS_PER_CELL) overflow_cells_needed += num_hits;
-    // ...
-    // PV_SET(pv, i, PV_ARRAY_BTS);
-    // if (num_hits <= NA_HITS_PER_CELL) { ... entries ... }
-    // else { ... overflow ... }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:456-533
     let mut backbone: Vec<NaLookupBackboneCell> = vec![NaLookupBackboneCell::default(); table_size];
     let mut pv: Vec<PvArrayType> = vec![0; (table_size >> PV_ARRAY_BTS) + 1];
     let mut overflow_size = 0usize;
@@ -1957,7 +1483,7 @@ pub fn build_na_lookup(
     let mut overflow: Vec<u32> = vec![0u32; overflow_size];
     let mut write_pos: Vec<u32> = vec![0; table_size];
 
-    // NCBI reference: blast_lookup.c:BlastLookupAddWordHit (lines 33-77)
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:BlastLookupAddWordHit (lines 33-77)
     // Adds ALL hits without any frequency limit - no query-side filtering
     for (q_idx, seq_blastna) in queries_blastna.iter().enumerate() {
         let seq = seq_blastna;
@@ -1975,11 +1501,7 @@ pub fn build_na_lookup(
                 continue;
             }
 
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_lookup.c:117-120
-            // ```c
-            // if (*seq & invalid_mask)
-            //     word_target = seq + lut_word_length + 1;
-            // ```
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:117-120
             x_range_words(
                 &seq[range_start..range_end],
                 lut_word_length,
@@ -2121,9 +1643,6 @@ fn build_mb_lookup(
         (None, x_keep)
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1262
-    // ```c
-    //    mb_lt->hashtable = (Int4*)calloc(mb_lt->hashsize, sizeof(Int4));
-    // ```
     // Dispatch point of LOSAT_X_MBLUTKEEP: the batch loop's kept table when it has at least
     // `table_size` cells, with every cell 0 (`x_resident`: its pages are mapped; the table is its
     // first `table_size` cells, `hashtable[..table_size]` below), otherwise a fresh zeroed table
@@ -2148,46 +1667,8 @@ fn build_mb_lookup(
     let mut total_positions = 0usize;
     let mut ambiguous_skipped = 0usize;
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:979-1108
-    // ```c
-    // mb_lt->next_pos = (Int4 *)calloc(query->length + 1, sizeof(Int4));
-    // ...
-    // for (loc = location; loc; loc = loc->next) {
-    //     if (full_word_size > (loc->ssr->right - loc->ssr->left + 1))
-    //         continue;
-    //     ...
-    //     if ((val & BLAST2NA_MASK) != 0) {
-    //         ecode = 0;
-    //         pos = seq + kLutWordLength;
-    //         continue;
-    //     }
-    //     ecode = ((ecode << BITS_PER_NUC) & kLutMask) + val;
-    //     if (seq < pos)
-    //         continue;
-    //     ...
-    //     if (mb_lt->hashtable[ecode] == 0) {
-    //         PV_SET(pv_array, ecode, pv_array_bts);
-    //     } else {
-    //         helper_array[ecode/kCompressionFactor]++;
-    //     }
-    //     mb_lt->next_pos[index] = mb_lt->hashtable[ecode];
-    //     mb_lt->hashtable[ecode] = index;
-    // }
-    // longest_chain = 2;
-    // for (index = 0; index < mb_lt->hashsize / kCompressionFactor; index++)
-    //     longest_chain = MAX(longest_chain, helper_array[index]);
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:979-1108
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1081-1091
-    // ```c
-    //          if (mb_lt->hashtable[ecode] == 0) {
-    //             PV_SET(pv_array, ecode, pv_array_bts);
-    //          }
-    //          else {
-    //             helper_array[ecode/kCompressionFactor]++;
-    //          }
-    //          mb_lt->next_pos[index] = mb_lt->hashtable[ecode];
-    //          mb_lt->hashtable[ecode] = index;
-    // ```
     // NCBI applies this update to each word as soon as the word is read. `x_fill_mb_queued`
     // runs that loop with a queue that only touches the table cell earlier (a prefetch, or a
     // read loop) and applies the same update to the same words in the same order, so the result
@@ -2297,28 +1778,9 @@ fn build_mb_lookup(
             }
         }
     }
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_lookup.c:74-76
-    // ```c
-    // /* add the hit */
-    // chain[chain[1] + 2] = query_offset;
-    // chain[1]++;
-    // ```
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:289-293
-    // ```c
-    // lookup->final_backbone[i] = -overflow_cursor;
-    // for (j = 0; j < num_hits; j++) {
-    //     lookup->overflow[overflow_cursor++] =
-    //         thin_backbone[i][j + 2];
-    // }
-    // ```
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:522-526
-    // ```c
-    // for (j = 0; j < num_hits; j++) {
-    //     lookup->overflow[overflow_cursor] =
-    //         thin_backbone[i][j + 2];
-    //     overflow_cursor++;
-    // }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:74-76
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:289-293
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:522-526
     // The small (`eSmallNaLookupTable`) and standard (`eNaLookupTable`) tables
     // append each word to its cell and keep that order, so a cell lists query
     // offsets in the order of indexing; the megablast chain above lists them newest
@@ -2457,18 +1919,6 @@ pub(crate) fn build_two_stage_lookup_kept(
 /// the queries, their offsets in the concatenated query and their masks, and the templates.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:699-701,711-715,729
-/// ```c
-///    template_type = s_GetDiscTemplateType(lookup_options->word_size,
-///                       lookup_options->mb_template_length,
-///                       (EDiscWordType)lookup_options->mb_template_type);
-/// ...
-///    if (kTwoTemplates) {
-///       int temp_int = template_type + 1;
-///       second_template_type =
-///            mb_lt->second_template_type = (EDiscTemplateType) temp_int;
-/// ...
-///    template_length = lookup_options->mb_template_length;
-/// ```
 struct DiscWords<'a> {
     queries_blastna: &'a [&'a [u8]],
     query_offsets: &'a [i32],
@@ -2484,20 +1934,6 @@ struct DiscWords<'a> {
 /// `helper_array`, `helper_array2`. The second template's tables are empty for one template.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:685,690-691,717-720,730-731
-/// ```c
-///    mb_lt->next_pos = (Int4 *)calloc(query->length + 1, sizeof(Int4));
-/// ...
-///    helper_array = (Uint4*) calloc(mb_lt->hashsize/kCompressionFactor,
-///                                   sizeof(Uint4));
-/// ...
-///       mb_lt->hashtable2 = (Int4*)calloc(mb_lt->hashsize, sizeof(Int4));
-///       mb_lt->next_pos2 = (Int4*)calloc(query->length + 1, sizeof(Int4));
-///       helper_array2 = (Uint4*) calloc(mb_lt->hashsize/kCompressionFactor,
-///                                       sizeof(Uint4));
-/// ...
-///    pv_array = mb_lt->pv_array;
-///    pv_array_bts = mb_lt->pv_array_bts;
-/// ```
 struct DiscTables<'a> {
     hashtable: &'a mut [u32],
     next_pos: &'a mut [u32],
@@ -2513,56 +1949,6 @@ struct DiscTables<'a> {
 /// `build_mb_lookup`; `left`/`right` are offsets in the concatenated query.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:733-806
-/// ```c
-///    for (loc = location; loc; loc = loc->next) {
-/// ...
-///       from = loc->ssr->left - (template_length - 2);
-///       to = loc->ssr->right - (template_length - 2);
-///       seq = query->sequence_start + loc->ssr->left;
-///       pos = seq + template_length;
-///
-///       for (index = from; index <= to; index++) {
-///          val = *++seq;
-///          /* if an ambiguity is encountered, do not add
-///             any words that would contain it */
-///          if ((val & BLAST2NA_MASK) != 0) {
-///             accum = 0;
-///             pos = seq + template_length;
-///             continue;
-///          }
-///
-///          /* get next base */
-///          accum = (accum << BITS_PER_NUC) | val;
-///          if (seq < pos)
-///             continue;
-/// ...
-///          ecode1 = ComputeDiscontiguousIndex(accum, template_type);
-///          if (mb_lt->hashtable[ecode1] == 0) {
-///             PV_SET(pv_array, ecode1, pv_array_bts);
-///          }
-///          else {
-///             helper_array[ecode1/kCompressionFactor]++;
-///          }
-///          mb_lt->next_pos[index] = mb_lt->hashtable[ecode1];
-///          mb_lt->hashtable[ecode1] = index;
-///
-///          if (!kTwoTemplates)
-///             continue;
-///
-///          /* repeat for the second template, if applicable */
-///
-///          ecode2 = ComputeDiscontiguousIndex(accum, second_template_type);
-///          if (mb_lt->hashtable2[ecode2] == 0) {
-///             PV_SET(pv_array, ecode2, pv_array_bts);
-///          }
-///          else {
-///             helper_array2[ecode2/kCompressionFactor]++;
-///          }
-///          mb_lt->next_pos2[index] = mb_lt->hashtable2[ecode2];
-///          mb_lt->hashtable2[ecode2] = index;
-///       }
-///    }
-/// ```
 fn fill_disc_mb_tables(words: &DiscWords<'_>, t: DiscTables<'_>) {
     const K_COMPRESSION_FACTOR: usize = 2048;
     let DiscWords {
@@ -2628,25 +2014,6 @@ fn fill_disc_mb_tables(words: &DiscWords<'_>, t: DiscTables<'_>) {
 /// The estimate of the longest chain of both templates' tables, from the compressed counters.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:808-824
-/// ```c
-///    longest_chain = 2;
-///    for (index = 0; index < mb_lt->hashsize / kCompressionFactor; index++)
-///        longest_chain = MAX(longest_chain, helper_array[index]);
-///     /* +1 because helper_array is not incremented for the first position of a
-///       word */
-///    mb_lt->longest_chain = longest_chain + 1;
-///    sfree(helper_array);
-///
-///    if (kTwoTemplates) {
-///       longest_chain = 2;
-///       for (index = 0; index < mb_lt->hashsize / kCompressionFactor; index++)
-///          longest_chain = MAX(longest_chain, helper_array2[index]);
-///       /* +1 because helper_array2 is not incremented for the first position of a
-///          word */
-///       mb_lt->longest_chain += longest_chain + 1;
-///       sfree(helper_array2);
-///    }
-/// ```
 fn disc_longest_chain(helper_array: &[u32], helper_array2: &[u32], two_templates: bool) -> usize {
     let mut longest_chain = 2u32;
     for &value in helper_array {
@@ -2667,147 +2034,9 @@ fn disc_longest_chain(helper_array: &[u32], helper_array2: &[u32], two_templates
 /// words of the first template (and of the second one, which shares the presence
 /// vector), `lut_width` = the word size.
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1253-1260
-/// ```c
-///    ASSERT(lut_width >= 9);
-///    mb_lt->word_length = lookup_options->word_size;
-/// /*   mb_lt->skip = lookup_options->skip; */
-///    mb_lt->stride = lookup_options->stride > 0;
-///    mb_lt->lut_word_length = lut_width;
-///    mb_lt->hashsize = 1ULL << (BITS_PER_NUC * mb_lt->lut_word_length);
-/// ```
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1327-1331
-/// ```c
-///    if (lookup_options->mb_template_length > 0) {
-///         /* discontiguous megablast */
-///         mb_lt->scan_step = 1;
-///         status = s_FillDiscMBTable(query, location, mb_lt, lookup_options);
-///    }
-/// ```
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:645-827
-/// ```c
-/// static Int2
-/// s_FillDiscMBTable(BLAST_SequenceBlk* query, BlastSeqLoc* location,
-///         BlastMBLookupTable* mb_lt,
-///         const LookupTableOptions* lookup_options)
-///
-/// {
-///    ...
-///    const Int4 kCompressionFactor=2048; /* compress helper_array by this much */
-///    ...
-///    mb_lt->next_pos = (Int4 *)calloc(query->length + 1, sizeof(Int4));
-///    ...
-///    helper_array = (Uint4*) calloc(mb_lt->hashsize/kCompressionFactor,
-///                                   sizeof(Uint4));
-///    ...
-///    template_type = s_GetDiscTemplateType(lookup_options->word_size,
-///                       lookup_options->mb_template_length,
-///                       (EDiscWordType)lookup_options->mb_template_type);
-///    ...
-///    if (kTwoTemplates) {
-///       /* Use the temporaray to avoid annoying ICC warning. */
-///       int temp_int = template_type + 1;
-///       second_template_type =
-///            mb_lt->second_template_type = (EDiscTemplateType) temp_int;
-///
-///       mb_lt->hashtable2 = (Int4*)calloc(mb_lt->hashsize, sizeof(Int4));
-///       mb_lt->next_pos2 = (Int4*)calloc(query->length + 1, sizeof(Int4));
-///       helper_array2 = (Uint4*) calloc(mb_lt->hashsize/kCompressionFactor,
-///                                       sizeof(Uint4));
-///       ...
-///    }
-///
-///    mb_lt->discontiguous = TRUE;
-///    mb_lt->template_length = lookup_options->mb_template_length;
-///    template_length = lookup_options->mb_template_length;
-///    pv_array = mb_lt->pv_array;
-///    pv_array_bts = mb_lt->pv_array_bts;
-///
-///    for (loc = location; loc; loc = loc->next) {
-///       Int4 from;
-///       Int4 to;
-///       Uint8 accum = 0;
-///       Int4 ecode1 = 0;
-///       Int4 ecode2 = 0;
-///       Uint1* pos;
-///       Uint1* seq;
-///       Uint1 val;
-///
-///       /* A word is added to the table after the last base
-///          in the word is read in. At that point, the start
-///          offset of the word is (template_length-1) positions
-///          behind. This index is also incremented, because
-///          lookup table indices are 1-based (offset 0 is reserved). */
-///
-///       from = loc->ssr->left - (template_length - 2);
-///       to = loc->ssr->right - (template_length - 2);
-///       seq = query->sequence_start + loc->ssr->left;
-///       pos = seq + template_length;
-///
-///       for (index = from; index <= to; index++) {
-///          val = *++seq;
-///          /* if an ambiguity is encountered, do not add
-///             any words that would contain it */
-///          if ((val & BLAST2NA_MASK) != 0) {
-///             accum = 0;
-///             pos = seq + template_length;
-///             continue;
-///          }
-///
-///          /* get next base */
-///          accum = (accum << BITS_PER_NUC) | val;
-///          if (seq < pos)
-///             continue;
-///          ...
-///          ecode1 = ComputeDiscontiguousIndex(accum, template_type);
-///          if (mb_lt->hashtable[ecode1] == 0) {
-///             ...
-///             PV_SET(pv_array, ecode1, pv_array_bts);
-///          }
-///          else {
-///             helper_array[ecode1/kCompressionFactor]++;
-///          }
-///          mb_lt->next_pos[index] = mb_lt->hashtable[ecode1];
-///          mb_lt->hashtable[ecode1] = index;
-///
-///          if (!kTwoTemplates)
-///             continue;
-///
-///          /* repeat for the second template, if applicable */
-///
-///          ecode2 = ComputeDiscontiguousIndex(accum, second_template_type);
-///          if (mb_lt->hashtable2[ecode2] == 0) {
-///             ...
-///             PV_SET(pv_array, ecode2, pv_array_bts);
-///          }
-///          else {
-///             helper_array2[ecode2/kCompressionFactor]++;
-///          }
-///          mb_lt->next_pos2[index] = mb_lt->hashtable2[ecode2];
-///          mb_lt->hashtable2[ecode2] = index;
-///       }
-///    }
-///
-///    longest_chain = 2;
-///    for (index = 0; index < mb_lt->hashsize / kCompressionFactor; index++)
-///        longest_chain = MAX(longest_chain, helper_array[index]);
-///     /* +1 because helper_array is not incremented for the first position of a
-///       word */
-///    mb_lt->longest_chain = longest_chain + 1;
-///    sfree(helper_array);
-///
-///    if (kTwoTemplates) {
-///       longest_chain = 2;
-///       for (index = 0; index < mb_lt->hashsize / kCompressionFactor; index++)
-///          longest_chain = MAX(longest_chain, helper_array2[index]);
-///       /* +1 because helper_array2 is not incremented for the first position of a
-///          word */
-///       mb_lt->longest_chain += longest_chain + 1;
-///       sfree(helper_array2);
-///    }
-///    return 0;
-/// }
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1253-1260
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1327-1331
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:645-827
 /// The locations are the unmasked ranges of each context, in the order of
 /// `build_mb_lookup`; `left`/`right` are offsets in the concatenated query.
 /// Only the tests call it (with checked word sizes and disjoint contexts); searches go through
@@ -2972,17 +2201,6 @@ pub(crate) fn build_disc_mb_lookup_kept(
     let mut pv_array = vec![0u32; pv_size];
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:775-786
-    // ```c
-    //          ecode1 = ComputeDiscontiguousIndex(accum, template_type);
-    //          if (mb_lt->hashtable[ecode1] == 0) {
-    //             PV_SET(pv_array, ecode1, pv_array_bts);
-    //          }
-    //          else {
-    //             helper_array[ecode1/kCompressionFactor]++;
-    //          }
-    //          mb_lt->next_pos[index] = mb_lt->hashtable[ecode1];
-    //          mb_lt->hashtable[ecode1] = index;
-    // ```
     // Dispatch point: NCBI applies the update of each template to each word as soon as the word
     // is read, as `fill_disc_mb_tables` does (the original LOSAT loop, unchanged). With
     // LOSAT_X_DISCLUTPAR and a search pool of two threads or more,
@@ -3037,16 +2255,6 @@ pub(crate) fn build_disc_mb_lookup_kept(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1081-1091
-// ```c
-//          if (mb_lt->hashtable[ecode] == 0) {
-//             PV_SET(pv_array, ecode, pv_array_bts);
-//          }
-//          else {
-//             helper_array[ecode/kCompressionFactor]++;
-//          }
-//          mb_lt->next_pos[index] = mb_lt->hashtable[ecode];
-//          mb_lt->hashtable[ecode] = index;
-// ```
 // No NCBI counterpart: how `x_fill_mb_queued` queues the update above, by CPU. `Delay`
 // (x86_64, once `LOSAT_X_MBDELAY`) prefetches the cell of each word and applies the update
 // sixteen words later, in the same order; only where a prefetch instruction exists (without
@@ -3088,16 +2296,6 @@ struct XMbTables<'a> {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1081-1091
-// ```c
-//          if (mb_lt->hashtable[ecode] == 0) {
-//             PV_SET(pv_array, ecode, pv_array_bts);
-//          }
-//          else {
-//             helper_array[ecode/kCompressionFactor]++;
-//          }
-//          mb_lt->next_pos[index] = mb_lt->hashtable[ecode];
-//          mb_lt->hashtable[ecode] = index;
-// ```
 // The update of one word, as in the loop of `build_mb_lookup` (same statements, same
 // compression factor). EXPERIMENT (LOSAT_X_MB24): `H24`, the same statements on 3-byte elements,
 // the link stored with the next element's first byte (`x_mb_narrow::set_spill`: the words come in
@@ -3137,16 +2335,6 @@ fn x_mb_apply<const H24: bool>(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1081-1091
-// ```c
-//          if (mb_lt->hashtable[ecode] == 0) {
-//             PV_SET(pv_array, ecode, pv_array_bts);
-//          }
-//          else {
-//             helper_array[ecode/kCompressionFactor]++;
-//          }
-//          mb_lt->next_pos[index] = mb_lt->hashtable[ecode];
-//          mb_lt->hashtable[ecode] = index;
-// ```
 // No NCBI counterpart: the word loop of `build_mb_lookup` that queues each update (`XMbQueue`)
 // instead of applying it at once. The queue is first in, first out and is drained at the end, so
 // every word is applied once, in the original order: the table is the one NCBI's loop builds.
@@ -3269,202 +2457,16 @@ fn x_fill_mb_queued<const H24: bool>(
 }
 
 #[cfg(test)]
-mod reverse_complement_tests {
-    use super::{
-        blastna_reverse_complement_table, encode_reverse_complement_blastna_into,
-        reverse_complement,
-    };
-    use crate::core::blast_encoding::{encode_iupac_to_blastna, encode_iupac_to_blastna_into};
-
-    // The table is the composition of the two functions for every byte.
-    #[test]
-    fn blastna_reverse_complement_table_is_the_composition() {
-        let table = blastna_reverse_complement_table();
-        for b in 0..=255u8 {
-            assert_eq!(
-                table[b as usize],
-                encode_iupac_to_blastna(&reverse_complement(&[b]))[0],
-                "byte {b}"
-            );
-        }
-    }
-
-    // The BLASTNA table gives an uppercase and a lowercase letter the same code, so the
-    // karlin counts need no uppercase copy of the query.
-    #[test]
-    fn blastna_encoding_ignores_letter_case() {
-        for b in 0..=255u8 {
-            assert_eq!(
-                encode_iupac_to_blastna(&[b]),
-                encode_iupac_to_blastna(&[b.to_ascii_uppercase()]),
-                "byte {b}"
-            );
-        }
-    }
-
-    #[test]
-    fn strand_encodings_into_equal_the_copying_forms() {
-        let mut seqs: Vec<Vec<u8>> = vec![
-            Vec::new(),
-            b"ACGT".to_vec(),
-            b"acgt".to_vec(),
-            b"ACgtRYKMSWBDHVNrykmswbdhvnUu-*0123456789".to_vec(),
-            b"ACGTRYKMSWBDHVNUacgtrykmswbdhvnu-*".to_vec(),
-            vec![b'A', 128, 200, 255, b'c', 0, 127],
-        ];
-        // Every byte alone and between letters.
-        for b in 0..=255u8 {
-            seqs.push(vec![b]);
-            seqs.push(vec![b'A', b, b'g']);
-        }
-        for seq in &seqs {
-            let mut plus = vec![0u8; seq.len()];
-            encode_iupac_to_blastna_into(seq, &mut plus);
-            assert_eq!(plus, encode_iupac_to_blastna(seq), "plus {seq:?}");
-            let mut minus = vec![0u8; seq.len()];
-            encode_reverse_complement_blastna_into(seq, &mut minus);
-            assert_eq!(
-                minus,
-                encode_iupac_to_blastna(&reverse_complement(seq)),
-                "minus {seq:?}"
-            );
-        }
-    }
-
-    // A lowercase (soft-masked) letter is the same base on the minus strand.
-    #[test]
-    fn lowercase_letters_are_complemented_like_uppercase() {
-        assert_eq!(reverse_complement(b"ACgtRn-"), b"-NYACGT");
-    }
-}
+#[path = "lookup_reverse_complement_tests.rs"]
+mod reverse_complement_tests;
 
 #[cfg(test)]
-mod chain_order_tests {
-    use super::build_two_stage_lookup;
-
-    fn hits(ascending_cells: bool) -> Vec<u32> {
-        // "ACGTACGT" repeated: the 4-letter word ACGT occurs at offsets 0, 4, 8, ...
-        // of the first context and of the second (offset 21 in the block).
-        let unit = [0u8, 1, 2, 3];
-        let context: Vec<u8> = unit.iter().cycle().take(20).copied().collect();
-        let lookup = build_two_stage_lookup(
-            &[&context, &context],
-            &[0, 21],
-            8,
-            4,
-            &[Vec::new(), Vec::new()],
-            None,
-            0,
-            40,
-            ascending_cells,
-        );
-        let acgt = 0b00_01_10_11u64;
-        let mut found = Vec::new();
-        lookup.for_each_hit(acgt, |q_off_1| found.push(q_off_1 - 1));
-        found
-    }
-
-    #[test]
-    fn small_and_standard_cells_list_offsets_in_indexing_order() {
-        let ascending = hits(true);
-        assert_eq!(ascending, vec![0, 4, 8, 12, 16, 21, 25, 29, 33, 37]);
-        let mut newest_first = hits(false);
-        assert_eq!(newest_first.first(), Some(&37));
-        newest_first.reverse();
-        assert_eq!(newest_first, ascending);
-    }
-}
+#[path = "lookup_chain_order_tests.rs"]
+mod chain_order_tests;
 
 #[cfg(test)]
-mod disc_lookup_tests {
-    use super::build_disc_mb_lookup;
-    use crate::algorithm::blastn::disc_lookup::{
-        compute_discontiguous_index, DiscTemplateType, DiscWordType,
-    };
-    use crate::utils::dust::MaskedInterval;
-
-    fn index_at(seq: &[u8], start: usize, len: usize, t: DiscTemplateType) -> u64 {
-        let mut accum = 0u64;
-        for &b in &seq[start..start + len] {
-            accum = (accum << 2) | b as u64;
-        }
-        compute_discontiguous_index(accum, t) as u64
-    }
-
-    fn chain(lookup: &super::TwoStageLookup, index: u64, second: bool) -> Vec<u32> {
-        let mut hits = Vec::new();
-        if second {
-            lookup.for_each_hit2(index, |q| hits.push(q));
-        } else {
-            lookup.for_each_hit(index, |q| hits.push(q));
-        }
-        hits
-    }
-
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:741-813
-    // ```c
-    //       from = loc->ssr->left - (template_length - 2);
-    //       to = loc->ssr->right - (template_length - 2);
-    //       seq = query->sequence_start + loc->ssr->left;
-    //       pos = seq + template_length;
-    //
-    //       for (index = from; index <= to; index++) {
-    //          val = *++seq;
-    //          /* if an ambiguity is encountered, do not add
-    //             any words that would contain it */
-    //          if ((val & BLAST2NA_MASK) != 0) {
-    //             accum = 0;
-    //             pos = seq + template_length;
-    //             continue;
-    //          }
-    // ...
-    //          mb_lt->next_pos[index] = mb_lt->hashtable[ecode1];
-    //          mb_lt->hashtable[ecode1] = index;
-    // ```
-    #[test]
-    fn words_are_indexed_newest_first_with_one_based_starts() {
-        // Two contexts in the concatenated query (offsets 0 and 41); the second repeats
-        // the first's 18-mer at 0 and has an ambiguity code (14) inside its copy at 20.
-        let word: Vec<u8> = (0..18).map(|i| (i * 7 % 4) as u8).collect();
-        let mut first = word.clone();
-        first.extend([1, 2, 3]);
-        let mut second = word.clone();
-        second.extend([0, 0]);
-        second.extend(&word);
-        second[20 + 5] = 14;
-        let lookup = build_disc_mb_lookup(
-            &[&first, &second],
-            &[0, 41],
-            11,
-            18,
-            DiscWordType::TwoTemplates,
-            &[Vec::new(), Vec::new()],
-            1000,
-        );
-        let disc = lookup.disc().expect("discontiguous table");
-        assert_eq!(disc.template_type, DiscTemplateType::T11_18Coding);
-        assert_eq!(disc.second_template_type, DiscTemplateType::T11_18Optimal);
-        assert_eq!((lookup.word_length(), lookup.lut_word_length()), (18, 18));
-        let coding = index_at(&word, 0, 18, DiscTemplateType::T11_18Coding);
-        let optimal = index_at(&word, 0, 18, DiscTemplateType::T11_18Optimal);
-        // The word at 0 of each context; the copy at 20 holds the ambiguity code.
-        assert_eq!(chain(&lookup, coding, false), vec![42, 1]);
-        assert_eq!(chain(&lookup, optimal, true), vec![42, 1]);
-        // A masked range is not indexed.
-        let masked = build_disc_mb_lookup(
-            &[&first, &second],
-            &[0, 41],
-            11,
-            18,
-            DiscWordType::Coding,
-            &[vec![MaskedInterval::new(3, 4)], Vec::new()],
-            1000,
-        );
-        assert_eq!(chain(&masked, coding, false), vec![42]);
-        assert!(masked.disc().is_some_and(|d| !d.two_templates));
-        assert!(chain(&masked, optimal, true).is_empty());
-    }
-}
+#[path = "lookup_disc_lookup_tests.rs"]
+mod disc_lookup_tests;
 
 #[cfg(test)]
 #[path = "lookup_tests.rs"]

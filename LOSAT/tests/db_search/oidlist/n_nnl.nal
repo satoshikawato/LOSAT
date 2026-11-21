@@ -1,0 +1,5 @@
+TITLE oidlist n walk
+DBLIST ../taxfilter/tfn
+OIDLIST n.msk
+NSEQ 30
+LENGTH 30000

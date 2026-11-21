@@ -2,62 +2,6 @@
 //! (`report::record`), one query at a time, written by `report::serial::write_query`.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1549-1649
-//! ```c++
-//! CRef<CSeq_align_set>
-//! BlastHitList2SeqAlign_OMF(const BlastHitList     * hit_list,
-//!                           EBlastProgramType        prog,
-//!                           const CSeq_loc         & query_loc,
-//!                           TSeqPos                  query_length,
-//!                           const IBlastSeqInfoSrc * seqinfo_src,
-//!                           bool                     is_gapped,
-//!                           bool                     is_ooframe,
-//!                           TSeqLocInfoVector      & subj_masks)
-//! {
-//!     ...
-//!     for (int index = 0; index < hit_list->hsplist_count; index++) {
-//!         BlastHSPList* hsp_list = hit_list->hsplist_array[index];
-//!         if (!hsp_list)
-//!             continue;
-//!
-//!         // Sort HSPs with e-values as first priority and scores as
-//!         // tie-breakers, since that is the order we want to see them in
-//!         // in Seq-aligns.
-//!         Blast_HSPListSortByEvalue(hsp_list);
-//!
-//!         const Uint4 kOid = hsp_list->oid;
-//!         TSeqPos subj_length = 0;
-//!         CRef<CSeq_id> subject_id;
-//!         GetSequenceLengthAndId(seqinfo_src, kOid, subject_id, &subj_length);
-//!         ...
-//!         if (is_gapped) {
-//!                 BLASTHspListToSeqAlign(prog,
-//!                                        hsp_list,
-//!                                        query_id,
-//!                                        subject_id,
-//!                                        query_length,
-//!                                        subj_length,
-//!                                        is_ooframe,
-//!                                        seqid_list,
-//!                                        hit_align);
-//!         ...
-//! 	if (seqinfo_src->CanReturnPartialSequence() == true)
-//! 	{
-//!         	CConstRef<CSeq_loc> subj_loc = seqinfo_src->GetSeqLoc(kOid);
-//!         	NON_CONST_ITERATE(vector<CRef<CSeq_align > >, iter, hit_align) {
-//!              	   RemapToQueryLoc(*iter, query_loc);
-//!              	   if ( !is_ooframe )
-//!                    	s_RemapToSubjectLoc(*iter, *subj_loc);
-//!              	   seq_aligns->Set().push_back(*iter);
-//! 		}
-//!         }
-//! 	else
-//! 	{
-//! 		NON_CONST_ITERATE(vector<CRef<CSeq_align > >, iter, hit_align) {
-//!            	    RemapToQueryLoc(*iter, query_loc);
-//!            	    seq_aligns->Set().push_back(*iter);
-//! 		}
-//! 	}
-//! ```
 //! The final hit lists are in that order already: the tabular formats walk the same
 //! Seq-aligns (blast_format.cpp:772-800), and BLASTN writes its rows from these lists in this
 //! order (`write_output_blastn_hitlists_to_writer`).

@@ -359,6 +359,7 @@ export class WasmEngine implements EngineGateway {
       ...(result.shownIds === undefined ? {} : { shownIds: result.shownIds }),
       ...(result.windowMasker === undefined ? {} : { windowMasker: result.windowMasker }),
       ...(result.runFiles === undefined ? {} : { runFiles: result.runFiles }),
+      ...(result.printed === undefined ? {} : { printed: result.printed }),
     });
   }
 

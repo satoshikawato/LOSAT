@@ -57,14 +57,6 @@ pub(crate) struct ReportRound<'a> {
 /// `pairwise::write_blastp_pairwise_window`): the prolog when `prolog` is set (the run's first
 /// round) and the window starts the report, each query's warnings, then its section. No epilog.
 // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:278-286
-// ```c++
-//                 	   //BlastFormatter_PreFetchSequenceData(*results, scope);
-// 	                   ITERATE(CSearchResultSet, result, *results) {
-//  	                      formatter.PrintOneResultSet(**result, query,
-// 	                                                itr.GetIterationNumber(),
-// 	                                                itr.GetPreviouslyFoundSeqIds());
-// 	                   }
-// ```
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn write_psiblast_round_report(
     hits: &[PairwiseHit],
@@ -196,11 +188,6 @@ impl RoundSections<'_> {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1474-1476
-    // ```c++
-    //     if (itr_num != numeric_limits<unsigned int>::max()) {
-    //         m_Outfile << "Results from round " << itr_num << "\n";
-    //     }
-    // ```
     /// `Results from round N`, `\n\n`, the query's header, then "No hits found" and the footer,
     /// or the description table (in two parts after a round whose inclusion set is not empty)
     /// and the blank line after it.
@@ -235,6 +222,7 @@ impl RoundSections<'_> {
                     query.ungapped_karlin,
                     report.gapped_karlin,
                     report.gumbel,
+                    report.gapped,
                     query.effective_search_space,
                     false,
                 )?;
@@ -256,61 +244,12 @@ impl RoundSections<'_> {
             )?,
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1520-1528
-        // ```c++
-        //         x_DisplayDeflines(aln_set, itr_num, prev_seqids);
-        //     }
-        //
-        //     //-------------------------------------------------
-        //     // print the alignments
-        //     m_Outfile << "\n";
-        // ```
         writeln!(writer)
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:529-557
-    // ```c++
-    //     unsigned int count = 0;
-    //     ITERATE(CSeq_align_set::Tdata, alignment, full_alignment->Get()) {
-    //         CSeq_id_Handle subj_id =
-    //             CSeq_id_Handle::GetHandle((*alignment)->GetSeq_id(kSubjRow));
-    //         if (prev_seqids.find(subj_id) != prev_seqids.end()) {
-    //             // if found among previously seen Seq-ids...
-    //             repeated_seqs.Set().push_back(*alignment);
-    //         } else {
-    //             // ... else add them as new
-    //             new_seqs.Set().push_back(*alignment);
-    //         }
-    //         count++;
-    //         if(count >= (unsigned int)m_NumSummary)
-    //         	break;
-    //     }
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:578-602
-    // ```c++
-    //         // Show deflines for 'repeat' sequences
-    //         {{
-    //             CShowBlastDefline showdef(repeated_seqs, *m_Scope,
-    //                                       kFormatLineLength,
-    //                               	  repeated_seqs.Size());
-    //             x_ConfigCShowBlastDefline(showdef);
-    //             showdef.SetupPsiblast(NULL, CShowBlastDefline::eRepeatPass);
-    //             showdef.DisplayBlastDefline(m_Outfile);
-    //         }}
-    //         m_Outfile << "\n";
-    //
-    //         // Show deflines for 'new' sequences
-    //         {{
-    //             CShowBlastDefline showdef(new_seqs, *m_Scope, kFormatLineLength,
-    //                               	  	  new_seqs.Size());
-    //             x_ConfigCShowBlastDefline(showdef);
-    //             showdef.SetupPsiblast(NULL, CShowBlastDefline::eNewPass);
-    //             showdef.DisplayBlastDefline(m_Outfile);
-    //         }}
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:613
-    // ```c++
-    //     m_Outfile << "\n";
-    // ```
     /// The two-part table: the Seq-aligns (HSPs) in the report's order, each in the part of its
     /// subject, counted after it is put there, up to `-num_descriptions` (so the bound counts
     /// HSPs, and `-num_descriptions 0` keeps the first: `QueryGroup::first_hsps`, which also
@@ -350,47 +289,7 @@ impl RoundSections<'_> {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:756-848
-    // ```c++
-    //     if(!(m_Option & eNoShowHeader)) {
-    //         if((m_PsiblastStatus == eFirstPass) ||
-    //            (m_PsiblastStatus == eRepeatPass)){
-    //             CAlignFormatUtil::AddSpace(out, m_LineLen + kTwoSpaceMargin_size);
-    //             ...
-    //             out << kScore;
-    //             CAlignFormatUtil::AddSpace(out, m_MaxScoreLen - kScore_size);
-    //             CAlignFormatUtil::AddSpace(out, kTwoSpaceMargin_size);
-    //             ...
-    //             CAlignFormatUtil::AddSpace(out, 2); //E align to l of value
-    //             out << kE;
-    //             ...
-    //             out << "\n";
-    //             out << kHeader;
-    //             ...
-    //             CAlignFormatUtil::AddSpace(out, m_LineLen - kHeader_size);
-    //             CAlignFormatUtil::AddSpace(out, kOneSpaceMargin_size);
-    //             out << kBits;
-    //             //in case m_MaxScoreLen > kBits.size()
-    //             CAlignFormatUtil::AddSpace(out, m_MaxScoreLen - kBits_size);
-    //             CAlignFormatUtil::AddSpace(out, kTwoSpaceMargin_size);
-    //             ...
-    //             out << kValue;
-    //             ...
-    //             out << "\n";
-    //         }
-    //         if(m_PsiblastStatus == eRepeatPass){
-    //             out << kRepeatHeader << "\n";
-    //         }
-    //         if(m_PsiblastStatus == eNewPass){
-    //             out << kNewSeqHeader << "\n";
-    //         }
-    //         out << "\n";
-    //     }
-    // ```
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:85-87
-    // ```c++
-    // static const string kRepeatHeader = "Sequences used in model and found again:";
-    // static const string kNewSeqHeader = "Sequences not found previously or not previously below threshold:";
-    // ```
     /// One part: for the repeat pass the two lines of the Score/E header, then the part's line
     /// and a blank line, then its rows (`write_description_table`'s rows and widths, every row of
     /// the part counted: its `m_NumToShow` is the number of its Seq-aligns). A part without rows
@@ -415,7 +314,7 @@ impl RoundSections<'_> {
                 (*s_idx, best, hits.iter().map(|hit| hit.hit.bit_score).sum())
             })
             .collect();
-        // `write_description_table`'s widths (showdefline.cpp:1059-1142, quoted there).
+        // `write_description_table`'s widths (showdefline.cpp:1059-1142, cited there).
         let mut max_score = super::ncbi_k_bits().len();
         let mut max_evalue = "Value".len();
         let mut max_total = "Total".len();
@@ -472,6 +371,18 @@ impl RoundSections<'_> {
     ) -> io::Result<()> {
         let config = self.config;
         let hsps = group.subject_hits[&s_idx].len();
+        if let Some(id) = config.unreadable_query_id(self.parsed_subjects, s_idx) {
+            return write_database_subject_alignments_part(
+                writer,
+                probe,
+                DatabaseHeading::Skipped(&id),
+                true,
+                &group.subject_hits[&s_idx],
+                &group.subject_hit_indices[&s_idx],
+                0..hsps,
+                |_, _| unreachable!("a skipped alignment is written by its line"),
+            );
+        }
         let parsed = self.parsed(s_idx);
         if self.database.is_some() || parsed.is_some() {
             let heading = match parsed {
@@ -520,6 +431,7 @@ impl RoundSections<'_> {
             query.ungapped_karlin,
             self.report.gapped_karlin,
             self.report.gumbel,
+            self.report.gapped,
             query.effective_search_space,
             false,
         )
@@ -529,10 +441,6 @@ impl RoundSections<'_> {
 /// psiblast's outfmt 0 epilog after the last round (`PrintEpilog`): the blank lines and the
 /// footer of `write_blastp_pairwise_report`'s epilog.
 // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:561-562
-// ```c++
-//         // finish up
-//         formatter.PrintEpilog(opt);
-// ```
 pub(crate) fn write_psiblast_epilog(
     writer: &mut dyn Write,
     report: &BlastpPairwiseReport,

@@ -272,6 +272,10 @@ const windowMaskerTaxid: ParameterField = {
 const lcaseMasking: ParameterField = { flag: '-lcase_masking', label: 'Mask lower case letters', kind: 'flag', row: 'Mask' };
 // Other Parameters: LOSAT's options that NCBI's page does not show.
 const maxHsps: ParameterField = { flag: '-max_hsps', label: 'Max HSPs per subject', ...integer };
+const subjectBestHit: ParameterField = { flag: '-subject_besthit', label: 'Subject best hit', kind: 'flag' };
+// BLAST+'s Best Hit algorithm (-best_hit_overhang, -best_hit_score_edge): either turns it on, the other is then 0.1.
+const bestHitOverhang: ParameterField = { flag: '-best_hit_overhang', label: 'Best hit overhang', ...decimal };
+const bestHitScoreEdge: ParameterField = { flag: '-best_hit_score_edge', label: 'Best hit score edge', ...decimal };
 const threshold: ParameterField = { flag: '-threshold', label: 'Neighboring words threshold', ...decimal };
 const windowSize: ParameterField = { flag: '-window_size', label: 'Two-hit window size', ...integer };
 const xdropUngap: ParameterField = { flag: '-xdrop_ungap', label: 'X-dropoff, ungapped (bits)', ...decimal };
@@ -417,7 +421,9 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
           sortHsps,
           maxHsps,
           { flag: '-perc_identity', label: 'Percent identity', ...decimal },
-          { flag: '-subject_besthit', label: 'Subject best hit', kind: 'flag' },
+          subjectBestHit,
+          bestHitOverhang,
+          bestHitScoreEdge,
         ],
       },
     ],
@@ -470,6 +476,9 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
           xdropGap,
           xdropGapFinal,
           maxHsps,
+          subjectBestHit,
+          bestHitOverhang,
+          bestHitScoreEdge,
         ],
       },
     ],
@@ -554,6 +563,7 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
           xdropGap,
           xdropGapFinal,
           sumStats,
+          subjectBestHit,
         ],
       },
     ],
@@ -596,6 +606,7 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
           xdropUngap,
           { flag: '-strand', label: 'Query strand', kind: 'choice' },
           sumStats,
+          subjectBestHit,
         ],
       },
     ],

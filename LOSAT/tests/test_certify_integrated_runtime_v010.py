@@ -11,8 +11,8 @@ import tempfile
 import unittest
 
 
-# NCBI reference:
-# ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:770-832
+# NCBI reference (598d8ae6):
+# c++/src/algo/blast/format/blast_format.cpp:770-832
 # The integrated gate delegates raw-output acceptance to the existing program
 # authorities. These tests freeze orchestration counts and command identity;
 # they do not add a second output classifier.

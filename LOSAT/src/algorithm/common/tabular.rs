@@ -7,21 +7,6 @@
 //! and warning are its own, DECISIONS 6), TBLASTN and TBLASTX (PR 2) use it.
 //!
 //! NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-851
-//! ```c++
-//!        		const CBioseq_Handle& subject_bh =
-//!                 scope.GetBioseqHandle(align.GetSeq_id(1));
-//!             if(setSubjectId) {
-//!             	SetSubjectId(subject_bh);
-//!             }
-//!             m_SubjectLength = subject_bh.GetBioseqLength();
-//!
-//!             if(setSubjectIds || setSubjectTaxInfo || setSubjectTitle || setSubjectTaxInfoAll) {
-//!             	CRef<CBlast_def_line_set> bdlRef =
-//!             			CSeqDB::ExtractBlastDefline(subject_bh);
-//!             	if(setSubjectIds) {
-//!             		x_SetSubjectIds(subject_bh, bdlRef);
-//!             	}
-//! ```
 
 use std::borrow::Cow;
 use std::io::Write;
@@ -38,17 +23,6 @@ use crate::report::tabular::{
 use crate::seqdb::SeqDb;
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:900-908
-// ```c++
-//     if (x_IsFieldRequested(eQueryStart) || x_IsFieldRequested(eQueryEnd) ||
-//         x_IsFieldRequested(eSubjectStart) || x_IsFieldRequested(eSubjectEnd) ||
-//         x_IsFieldRequested(eAlignmentLength) || x_IsFieldRequested(eGaps) ||
-//         x_IsFieldRequested(eGapOpenings) || x_IsFieldRequested(eQuerySeq) ||
-//         x_IsFieldRequested(eSubjectSeq) || (x_IsFieldRequested(eNumIdentical) && num_ident > 0 ) ||
-//         x_IsFieldRequested(ePositives) || x_IsFieldRequested(eMismatches) ||
-//         x_IsFieldRequested(ePercentPositives) || x_IsFieldRequested(ePercentIdentical) ||
-//         x_IsFieldRequested(eQueryFrame) || x_IsFieldRequested(eBTOP) ||
-//         x_IsFieldRequested(eSubjectStrand)) {
-// ```
 /// The fields that enter `SetFields`' block of the coordinates, the rows and the counts
 /// (`SetCounts`), besides `nident` with a positive engine count (`num_ident` of the Seq-align).
 pub(crate) const COUNTS_BLOCK: [TabularField; 16] = [
@@ -409,15 +383,7 @@ impl<'a> TabularSubjects<'a> {
     ) -> Result<SubjectValues<'a>> {
         let needs = spec.needs();
         match *self {
-            // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:577-582
-            // ```c++
-            //         list<CRef<objects::CSeq_id> > subject_id_list;
-            //         ITERATE(CBioseq_Handle::TId, itr, bh.GetId()) {
-            //             CRef<CSeq_id> next_id = s_ReplaceLocalId(bh, itr->GetSeqId(), m_ParseLocalIds);
-            //             subject_id_list.push_back(next_id);
-            //         }
-            //         m_SubjectIds.push_back(subject_id_list);
-            // ```
+            // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:560-565
             // A FASTA subject has no definition lines: its `sall*` are its own ids after
             // `s_ReplaceLocalId` (the title's first word, `FastaRecord::shown_id`, not the word of
             // `GetSeqIdList`), its title and taxonomy are empty (`N/A`).
@@ -610,16 +576,6 @@ impl<'a> TabularSubjects<'a> {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:844-851
-// ```c++
-//             	CRef<CBlast_def_line_set> bdlRef =
-//             			CSeqDB::ExtractBlastDefline(subject_bh);
-//             	if(setSubjectIds) {
-//             		x_SetSubjectIds(subject_bh, bdlRef);
-//             	}
-//             	if(setSubjectTaxInfoAll) {
-//             		x_SetTaxInfoAll(subject_bh, bdlRef);
-//             	}
-// ```
 /// The taxonomy of the tabular fields (`staxid`, `staxids`;
 /// `report::tabular::TabularTaxonomy::of_deflines`) of the reported sequences `ordinals` of `db`,
 /// by rank: from the definition lines of a sequence with parsed Seq-ids (`parsed[rank]`), else
@@ -665,17 +621,6 @@ pub(crate) fn tabular_taxonomy(
 /// LOSAT's refusals (made before) come before the line.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:348-357
-/// ```c++
-///     if (m_FormatType == CFormattingArgs::eCommaSeparatedValuesWithHeader) {
-///         const CBlastTabularInfo::EFieldDelimiter kDelim = CBlastTabularInfo::eComma;
-///         CBlastTabularInfo tabinfo(m_Outfile, m_CustomOutputFormatSpec, kDelim);
-///         if(!m_CustomDelim.empty()) {
-///             tabinfo.SetCustomDelim(m_CustomDelim);
-///         }
-///         tabinfo.PrintFieldSpecs();
-///         return;
-///     }
-/// ```
 pub(crate) fn write_tabular_prolog(
     spec: &TabularSpec,
     taxdb_found: bool,

@@ -2,20 +2,6 @@
 //! array of their positions, not copied into one vector per query that each thread keeps.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_collector.c:112-132
-//! ```c
-//!       hsp_list_array = calloc(results->num_queries, sizeof(BlastHSPList*));
-//! ...
-//!       for (index = 0; index < hsp_list->hspcnt; index++) {
-//!          Int4 query_index;
-//!          hsp = hsp_list->hsp_array[index];
-//!          query_index = Blast_GetQueryIndexFromContext(hsp->context, program);
-//!
-//!          if (!(tmp_hsp_list = hsp_list_array[query_index])) {
-//!             hsp_list_array[query_index] = tmp_hsp_list =
-//!                Blast_HSPListNew(params->hsp_num_max);
-//! ...
-//!          Blast_HSPListSaveHSP(tmp_hsp_list, hsp);
-//! ```
 //! NCBI makes the per-query lists for each subject and hands them to the hit lists, so a thread
 //! keeps nothing of them between subjects. The subject scratch kept one vector per query
 //! (`BlastpSubjectScratch::preliminary_hits_by_query`, cleared, never shrunk), each as long as
@@ -45,14 +31,6 @@ pub(super) fn x_bphitsflat() -> bool {
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_collector.c:116-132
-/// ```c
-///       for (index = 0; index < hsp_list->hspcnt; index++) {
-///          Int4 query_index;
-///          hsp = hsp_list->hsp_array[index];
-///          query_index = Blast_GetQueryIndexFromContext(hsp->context, program);
-/// ...
-///          Blast_HSPListSaveHSP(tmp_hsp_list, hsp);
-/// ```
 /// The positions in `hits` of the HSPs of each query, in the order of `hits` (a stable counting
 /// sort): query `q` has `order[starts[q]..starts[q + 1]]`. A query index at or past
 /// `num_queries` is left out, as `split_preliminary_hits_by_query_into` leaves it out.
@@ -91,16 +69,6 @@ pub(super) fn order_by_query(
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_collector.c:143-151
-/// ```c
-///       for (index = 0; index < results->num_queries; index++) {
-///          if (hsp_list_array[index]) {
-///             if (!results->hitlist_array[index]) {
-///                results->hitlist_array[index] =
-///                   Blast_HitListNew(params->prelim_hitlist_size);
-///             }
-///             Blast_HitListUpdate(results->hitlist_array[index],
-///                                 hsp_list_array[index]);
-/// ```
 /// The subject's compact lists, query by query, from the HSPs of `preliminary_hits` (emptied):
 /// the loop over `preliminary_hits_by_query` in `run_resolved_in_pool` with the per-query vectors
 /// replaced by [`order_by_query`].
@@ -140,12 +108,6 @@ pub(super) fn x_lists_by_query(
             link,
         );
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:654-663
-        // ```c
-        //    cutoff = hit_params->prelim_evalue;
-        // ...
-        //          if (hsp->evalue > cutoff) {
-        //             hsp_array[index] = Blast_HSPFree(hsp_array[index]);
-        // ```
         // The reap by the preliminary E-value, as in the per-query loop.
         reap_hsplist_by_evalue(&mut compact_hsp_list, prelim_evalue);
         if !compact_hsp_list.hsps.is_empty() {

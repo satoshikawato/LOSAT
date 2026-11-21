@@ -5,9 +5,8 @@ const { performance } = require("perf_hooks");
 const crypto = require("crypto");
 const { unsignedWasiImports, blockingStdioWrite } = require("./wasi_artifact");
 
-// NCBI c++/src/algo/blast/core/blast_engine.c:1410-1413:
-// while ((seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr)) != BLAST_SEQSRC_EOF)
-// NCBI c++/src/algo/blast/format/blast_format.cpp:828-832:
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1410-1413:
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:828-832:
 // ITERATE(CSeq_align_set::Tdata, itr, copy_aln_set.Get()) { ... tabinfo.Print(); }
 // Each command performs a complete unchanged search. Only the compiled module
 // is shared: every job gets a fresh instance, WASI object, and linear memory.
@@ -29,7 +28,7 @@ const { unsignedWasiImports, blockingStdioWrite } = require("./wasi_artifact");
       version: "preview1", args: job.argv, env: process.env,
       preopens: { "/": "/" }, returnOnExit: true,
     });
-    // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:68-93
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:68-93
     // CBlastFormat::CBlastFormat(..., CNcbiOstream& outfile, ...) : ..., m_Outfile(outfile),
     // Standard output and error wait for a full pipe as the native write blocks
     // (blockingStdioWrite, wasi_artifact.js).

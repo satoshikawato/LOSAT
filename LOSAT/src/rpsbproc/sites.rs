@@ -2,17 +2,6 @@
 //! list.
 //!
 //! NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/basedata.cpp:669-740
-//! ```c++
-//! int TDomSite::MotifCheck(const vector<TSeg_base::TResiduePos> &rMappedRes, const string &aaSeq) const
-//! {
-//! 	static vector<SeqPos_t> st_motif_pos;
-//!
-//! 	if (!m_strMotif.empty())
-//! 	{
-//! 		if (st_motif_pos.empty())
-//! 			GetMotifResPos(st_motif_pos);
-//! 		...
-//! ```
 //! `st_motif_pos` is a function-static: the positions of the first motif-bearing site that is
 //! checked in a process serve every later check of any site, domain and query of that process
 //! (survey 8.1). In LOSAT a process is one `losat rpsbproc` run, which may share a process
@@ -57,66 +46,6 @@ impl MotifState {
     /// `TDomSite::MotifCheck`: 0 = the site passes (or has no motif), 1 = the essential
     /// positions are not complete, 2 = they are but the residues do not fit the motif.
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/basedata.cpp:669-740
-    // ```c++
-    // 	if (!m_strMotif.empty())
-    // 	{
-    // 		if (st_motif_pos.empty())
-    // 			GetMotifResPos(st_motif_pos);
-    //
-    // 		CProSite ps;
-    // 		size_t errPos;
-    // 		CProSite::EParseError err = ps.Parse(m_strMotif, errPos);
-    // 		if (CProSite::eNoError != err)
-    // 		{
-    // 			THROW_SIMPLE("Motif string parse error -- Motif = " << m_strMotif << ", error position: " << errPos);
-    // 		}
-    // 		string minMap(k_strEmptyString);
-    // 		ps.GetMinimalXMap(minMap);
-    //
-    // 		size_t mtfIdx = 0, mtfLen = minMap.size();
-    // 		size_t mapIdx = 0, mappedLen = rMappedRes.size();
-    //
-    // 		while (mtfIdx < mtfLen)
-    // 		{
-    // 			while (mapIdx < mappedLen)
-    // 			{
-    // 				if (rMappedRes[mapIdx].ori > st_motif_pos[mtfIdx])	//failed
-    // 					return 1;
-    // 				else if (rMappedRes[mapIdx].ori == st_motif_pos[mtfIdx])
-    // 				{
-    // 					++mapIdx;
-    // 					goto labelContinue;
-    // 				}
-    // 				++mapIdx;
-    //
-    // 			}
-    // 			// -- exhausted, fail
-    // 			return 1;
-    // 		labelContinue:
-    // 			++mtfIdx;
-    // 		}
-    //
-    // 		size_t seqLen = aaSeq.size();
-    // 		if (!aaSeq.empty())
-    // 		{
-    // 			minMap.clear();	//borrow this for other use
-    //
-    // 			for (size_t i = 0; i < mappedLen; ++i)
-    // 				if ((size_t)rMappedRes[i].curr < seqLen)
-    // 				{
-    // 					minMap.push_back(aaSeq[rMappedRes[i].curr]);
-    // 				}
-    //
-    // 			size_t endPos = ps.Match(minMap, seqLen, 0);
-    // 			if (string::npos == endPos)
-    // 			{
-    // 				return 2;
-    // 			}
-    // 		}
-    // 	}
-    //
-    // 	return 0;
-    // ```
     // `GetMotifResPos` (basedata.cpp:605-625) lists the positions of the site's ranges.
     //
     // Owner's rule, DECISIONS 25 Q2 = A (2026-11-11): `st_motif_pos[mtfIdx]` is read past the

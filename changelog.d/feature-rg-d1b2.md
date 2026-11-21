@@ -12,3 +12,5 @@
   removes it, as NCBI writes its error for such a line before it removes it. In an RPS database of several volumes, which NCBI
   searches without the alias files, a reported profile left with no line is refused, as NCBI's report does not
   find it (it writes `Unknown` or stops with a null-pointer report); with one volume its hits are dropped, as NCBI's.
+  `makeblastdb -input_type blastdb` copies such an alias with the lines it keeps, as NCBI does, and refuses a sequence
+  left with no line, where NCBI's `makeblastdb` stops with a null-pointer report.

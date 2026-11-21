@@ -87,6 +87,7 @@ A mask file that is damaged stops with makeblastdb's own error and exit status. 
 - `-in` names one database or several, separated by spaces, as `-db` does for the search programs. Alias names work. `-out` is required and must not be the `-in` value.
 - Without `-title` the new database takes the title of the input database. With several input databases, give `-title`.
 - The sequences keep their definition lines (ids, tax ids, membership and leaf tax ids), their PIGs, the masks of every algorithm and the data of other columns. The ids are always indexed, as with `-parse_seqids`.
+- An alias name keeps the sequences its OID ranges and lists keep. Under `OID_MASK_TYPE 1` the definition lines with a predicted RefSeq accession are left out, as in NCBI; a sequence left with no line is refused (NCBI's `makeblastdb` stops with a null-pointer report).
 - `-taxid`, `-taxid_map`, `-mask_data`, `-hash_index` and `-oid_masks` work as for FASTA input. `-taxid_map` still needs `-parse_seqids` on the command line.
 - With `-title` or several names, an input name that is not a database is reported (`Unable to open input NAME as BLAST db`), and the build stops with the database error. A single name without `-title` that is not a database stops the build earlier, when its title is read, with the database error alone. Both are as in `makeblastdb`.
 

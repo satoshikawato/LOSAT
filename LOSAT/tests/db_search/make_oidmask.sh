@@ -76,6 +76,8 @@ python3 - <<'PY'
 import struct
 open("ones.msk", "wb").write(struct.pack(">I", 7) + b"\xff")
 open("onesn.msk", "wb").write(struct.pack(">I", 3) + b"\xff")
+# OIDs 0, 3, 4, 6 and 7: every sequence keeps a line under the type (ompart.pal, makeblastdb -input_type blastdb)
+open("nol.msk", "wb").write(struct.pack(">I", 7) + b"\x9b")
 PY
 
 # --- hand-written alias files over the protein database
@@ -100,6 +102,7 @@ al ompy.pal "DBLIST omp" "OIDLIST ones.msk" "NSEQ 8" "LENGTH 1133"
 al j5.pal "DBLIST ompx ompy"
 al j1.pal "DBLIST omp" "FIRST_OID 2" "LAST_OID 6" "OIDLIST omp.pxm" "OID_MASK_TYPE 1"
 al tall.pal "DBLIST omp" "OIDLIST ones.msk" "OID_MASK_TYPE 1" "NSEQ 8" "LENGTH 1133"
+al ompart.pal "TITLE omp partly erased" "DBLIST omp" "OIDLIST nol.msk" "OID_MASK_TYPE 1"
 # --- over the nucleotide database: a per-volume list (bits past each volume's end are ignored)
 al ntall.nal "DBLIST omn" "OIDLIST onesn.msk" "OID_MASK_TYPE 1"
 # --- omb (version 4, -oid_masks 1) and ombx (blastdb_aliastool -oid_masks 1): OID 0 has a normal line and a

@@ -36,7 +36,7 @@ import { countsName, parseTaxid, type CountsOrigin } from '../domain/counts';
 import { outputFileName, outputMediaType, printedFileName, printedFileType, runFileName, runOutputs } from '../domain/output-format';
 import { fastaParser, programById } from '../domain/programs';
 import { isTerminal, type ConffileSnapshot, type InputSnapshot, type RunRecord, type RunSnapshot, type RunStatus } from '../domain/run';
-import type { DataGateway, ResultSetRef, RunInput, StorageInfo } from '../ports/data';
+import type { DataGateway, KeptRun, ResultSetRef, RunInput, StorageInfo } from '../ports/data';
 import type { Downloader } from '../ports/download';
 import { failureText } from './availability';
 import { registryName, unreadableConffile } from './conffile';
@@ -323,10 +323,13 @@ export class Coordinator {
     this.deps.engine.cancel(runId);
   }
 
-  /** Saves one compatibility output of a completed run, byte for byte, named by outputFileName, with its format's media type. */
+  /**
+   * Saves one compatibility output of a run that kept its outputs (a completed run, or a failed run: the bytes that the
+   * CLI leaves before its error), byte for byte, named by outputFileName, with its format's media type.
+   */
   async exportOutput(runId: string, output: RunOutput): Promise<void> {
     const view = this.find(runId);
-    if (view?.status !== 'completed') throw new Error('only completed runs can be exported');
+    if (view?.result === undefined) throw new Error('only runs that kept their outputs can be exported');
     const { number, program, argv, queuedAt } = view.snapshot;
     const [bytes, task] = await Promise.all([this.deps.data.readOutput(runId, output), this.taskOf(view.snapshot)]);
     this.deps.downloader.save(outputFileName({ number, program, task, queuedAt, argv }, output), bytes, outputMediaType(argv, output));
@@ -381,14 +384,15 @@ export class Coordinator {
     return description === undefined ? optionValue(snapshot.argv, '-task') : taskOf(snapshot.argv, description).task;
   }
 
-  /** Opens one output of a completed run without reading it (a binary one, which is not shown): rejects as `readOutput` when it cannot be read. */
+  /** Opens one output of a run that kept its outputs without reading it (a binary one, which is not shown): rejects as `readOutput` when it cannot be read. */
   async checkOutput(runId: string, output: RunOutput): Promise<void> {
-    if (this.find(runId)?.status !== 'completed') throw new Error('run is not completed');
+    if (this.find(runId)?.result === undefined) throw new Error('run has no outputs');
     await this.deps.data.readOutputRange(runId, output, 0, 0);
   }
 
+  /** One output of a run that kept its outputs (a completed run, or a failed run: what the CLI leaves before its error). */
   async readOutput(runId: string, output: RunOutput): Promise<string> {
-    if (this.find(runId)?.status !== 'completed') throw new Error('run is not completed');
+    if (this.find(runId)?.result === undefined) throw new Error('run has no outputs');
     return new TextDecoder().decode(await this.deps.data.readOutput(runId, output));
   }
 
@@ -550,21 +554,27 @@ export class Coordinator {
       });
     } catch (error) {
       const cancelled = error instanceof RunCancelledError || this.cancelRequested.has(runId);
-      // A failed run keeps the warnings that it wrote before its error (stream 3, docs/web/abi_v2.md §5;
-      // line WQA's sweep, D3, 2026-11-19), which the data layer reads as it discards the run. A stop (Cancel, the end
-      // of the Data worker) ends that wait, and the other discards are not waited for: a Data worker that does not
-      // answer must not keep the run from ending (line WQA's sweep, D2).
-      let diagnostics: string | undefined;
+      // A failed run keeps the outputs that the CLI leaves before its error, and the warnings that it wrote before it
+      // (stream 3), which the data layer commits as it commits a completed run's (docs/web/abi_v2.md §5; line WQA's
+      // sweep, D3, 2026-11-19, and D15, 2026-11-20). A stop (Cancel, the end of the Data worker) ends that wait, and the
+      // other discards are not waited for: a Data worker that does not answer must not keep the run from ending (line
+      // WQA's sweep, D2). What was kept after the wait ended is deleted.
+      let kept: KeptRun | undefined;
       if (staged && outputFailed && !cancelled && stop === undefined) {
-        diagnostics = await Promise.race([this.deps.data.discardFailedRun(runId), stopped]).catch(() => undefined);
+        const keeping = this.deps.data.keepFailedRun(runId);
+        kept = await Promise.race([keeping, stopped]).catch(() => {
+          void keeping.then((late) => (late === undefined ? undefined : this.deps.data.deleteRun(runId))).catch(() => undefined);
+          return undefined;
+        });
       } else if (staged) void this.deps.data.discardRun(runId).catch(() => undefined);
       this.update(runId, {
         status: cancelled ? 'cancelled' : 'failed',
+        ...(kept?.result === undefined ? {} : { result: kept.result }),
         record: {
           endedAt: this.deps.now(),
           ...(cancelled ? {} : { error: failureText(error) }),
           ...(cancelled || runFiles === undefined ? {} : { runFiles }),
-          ...(cancelled || !diagnostics ? {} : { diagnostics }),
+          ...(cancelled || !kept?.diagnostics ? {} : { diagnostics: kept.diagnostics }),
         },
       });
     } finally {

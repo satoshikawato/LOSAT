@@ -12,6 +12,7 @@ import { COMPOSITION_MODES, MATRICES, PROTEIN_GAP_COSTS, PROTEIN_WORD_SIZES } fr
 import { RESULTS_REMOVED_MESSAGE } from '../../src/infra/data/block-store';
 import { TMP_DIRECTORY } from '../../src/infra/data/session';
 import { BUILD_HAS_ENGINE, sessionDirectories, sessionFiles } from './support/browser';
+import { focused } from './support/live';
 import { NATIVE, NO_NATIVE_REASON } from './support/native';
 import { reload } from './support/navigate';
 import {
@@ -570,6 +571,7 @@ test("the selects of the protein modes offer NCBI's values that the engine reads
       testInfo.annotations.push({ type: 'skip', description: `Compositional adjustments of ${id}: ${NO_NATIVE_REASON}` });
       return;
     }
+    // Test protein: N-terminal part of E. coli AsnA (RefSeq NP_418200.1), Cys51 changed to Ala.
     const protein = 'MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQ';
     const nucleotide = 'ATGAAAACCGCGTATATTGCGAAACAGCGCCAGATTAGCTTTGTGAAAAGCCAT';
     const query = testInfo.outputPath(`${id}-query.fa`);
@@ -1100,6 +1102,9 @@ test.describe('leaving and returning', () => {
     await expect(page.getByTestId('keep-awake').locator('xpath=..')).not.toHaveAttribute('data-wake-lock', 'held');
     await page.getByTestId('resume-dismiss').click();
     await expect(page.getByTestId('resume-notice')).toHaveCount(0);
+    // A click on Dismiss, as Enter (announce.spec.ts), leaves the focus on the tab shown (WA2-AX-04): what the click
+    // does is not held as the press is (ui/press-hold.ts).
+    expect(await focused(page)).toMatch(/^tab-/);
     const log = await page.evaluate(() => (window as unknown as { __wakeLog: string[] }).__wakeLog);
     expect(log[0]).toBe('request');
     expect(log.at(-1)).toBe('release');
@@ -1119,7 +1124,7 @@ test('the header, and the "?" help that shows on hover or keyboard focus and sta
   await expect(help).toHaveCount(0);
   // Pointed at: shown; pointed away: gone (as NCBI's helpbox).
   await toggle.hover();
-  await expect(help).toHaveText('Task to execute: megablast, blastn, dc-megablast or blastn-short');
+  await expect(help).toHaveText('Task to execute: megablast, blastn, dc-megablast, blastn-short or rmblastn');
   await expect(help).toHaveAttribute('data-pinned', 'false');
   await expect(toggle).toHaveAttribute('aria-expanded', 'true');
   await page.mouse.move(0, 0);
@@ -1189,13 +1194,14 @@ test("the search screen in NCBI's order and words (W4b)", async ({ page }) => {
 
   // Task Selection: BLASTN's "Optimize for", the engine's default task checked.
   await expect(page.getByTestId('param-task-field')).toContainText('Optimize for');
-  await expect(page.getByTestId('param-task').getByRole('radio')).toHaveCount(4);
+  await expect(page.getByTestId('param-task').getByRole('radio')).toHaveCount(5);
   await expect(page.getByTestId('param-task')).toHaveAccessibleName(/^Optimize for -task/);
   for (const [value, label] of [
     ['megablast', 'Highly similar sequences (megablast)'],
     ['dc-megablast', 'More dissimilar sequences (discontiguous megablast)'],
     ['blastn', 'Somewhat similar sequences (blastn)'],
     ['blastn-short', 'Short sequences (blastn-short)'],
+    ['rmblastn', 'Scores from the matrix alone (rmblastn)'],
   ] as const) {
     await expect(page.getByTestId('param-task').locator('label', { has: page.getByTestId(`param-task-${value}`) })).toHaveText(label);
   }

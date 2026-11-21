@@ -513,6 +513,7 @@ pub(super) fn pssm_prelim(
         stats,
         prelim_evalue: run.prelim_evalue,
         link,
+        subject_besthit: args.subject_besthit,
     };
     let diag_mask = run.diag_mask;
     let subject_space_overflow = crate::stats::setup::SubjectSpaceOverflow::default();

@@ -55,7 +55,8 @@
 //!   database that cannot be read, a header file that cannot be read) comes after the reports of
 //!   the batches before, without the epilog, in both: here they were written when the loop took
 //!   them, so the error paths write only what follows them (`BatchReports::queries_written`). So
-//!   do LOSAT's refusals of what a batch's search meets (`ErrorAfterBatchReports`: an ungapped
+//!   do LOSAT's refusals of what a batch's search meets (`ErrorAfterBatchReports`: a statistics
+//!   count of 0 in the setup of the first batch with a valid context, `search_query_batch`, an ungapped
 //!   extension that scores higher past the end of its query frame, `extension::query_batch`, a
 //!   one-hit merge of lengths that add up to 0, the ungapped re-evaluation of HSPs on a subject (or
 //!   its `-subject_loc` range) of fewer than 12 bases, `SubjectEmit::refuse_untranslated_frame`, and

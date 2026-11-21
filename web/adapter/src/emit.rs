@@ -38,6 +38,10 @@ pub const STREAM_PRINTED: u32 = 11;
 /// The place "nowhere" in the signals of `STREAM_DISCARD` and `STREAM_MESSAGES` (`place`): the
 /// messages of TBLASTX's `-logfile ""` or `-logfile /dev/null`, which the run writes nowhere.
 pub const PLACE_NOWHERE: u32 = u32::MAX;
+/// The place "the error that ended the run" in the signals of `STREAM_DISCARD`: an output that a run
+/// which failed does not keep, because the command line's run of the argv does not write it (`discard`;
+/// docs/web/abi_v2.md §5, version 7; line WQA's sweep, D15, 2026-11-20).
+pub const PLACE_RUN: u32 = u32::MAX - 1;
 
 #[cfg(target_arch = "wasm32")]
 #[link(wasm_import_module = "losat_host")]

@@ -7,7 +7,9 @@ use super::*;
 /// `Error: `; NCBI's `Error: (CStringException::eConvert) ` in LOSAT's words, compared with
 /// `losat_text` of NCBI's text).
 fn message(e: NcbiException) -> String {
-    let report = e.report_default_ex(106, 15, "Application's initialization failed");
+    let report =
+        String::from_utf8(e.report_default_ex(106, 15, "Application's initialization failed"))
+            .unwrap();
     let first = report.lines().next().unwrap();
     first.strip_prefix("Error: ").unwrap().to_string()
 }

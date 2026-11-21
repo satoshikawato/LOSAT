@@ -654,10 +654,7 @@ where
             // USAGE errors and `-help` come first, as for any value. The parser reads the
             // value with U+FFFD in place of the bytes. The file names keep their bytes and
             // have their own check where the files are opened (`check_utf8_file_name`).
-            let value = if value.to_str().is_none()
-                && !matches!(name, "query" | "subject" | "out")
-                && is_ncbi_search_program(scope)
-            {
+            let value = if value.to_str().is_none() && refuses_non_utf8_value(scope, name) {
                 non_utf8_value.get_or_insert_with(|| (scope, name.to_string()));
                 OsString::from(value.to_string_lossy().into_owned())
             } else {
@@ -739,6 +736,15 @@ fn is_ncbi_search_program(scope: &clap::Command) -> bool {
             | "rpsblast"
             | "rpstblastn"
     )
+}
+
+/// Whether an option's value that is not UTF-8 is rejected after the parser
+/// ([`non_utf8_value_error`]): each option of makeblastdb, whose values are all UTF-8 strings,
+/// and each option of the NCBI search programs but the file names that keep their bytes
+/// (`check_utf8_file_name`).
+fn refuses_non_utf8_value(scope: &clap::Command, name: &str) -> bool {
+    scope.get_name() == "makeblastdb"
+        || (is_ncbi_search_program(scope) && !matches!(name, "query" | "subject" | "out"))
 }
 
 /// The explicit rejection of an option's value that is not UTF-8 (`try_parse_from`).
@@ -937,7 +943,6 @@ const UNPORTED_BLASTP_ARGS: &[&str] = &[
     "negative_gilist",
     "negative_ipglist",
     "remote",
-    "subject_besthit",
 ];
 
 fn is_unported_blastp_arg(name: &str) -> bool {
@@ -958,18 +963,13 @@ fn is_unported_blastp_arg(name: &str) -> bool {
 //                                 "File name to store ASCII version of PSSM",
 //                                 CArgDescriptions::eOutputFile);
 // ```
-/// psiblast's NCBI arguments that LOSAT does not run: the MSA inputs (series PS6; the ASCII and
-/// ASN.1 PSSM files are PS2's and PS3's, `algorithm::psiblast::pssm`, `-in_pssm` PS4's,
-/// `algorithm::psiblast::in_pssm`), PHI-BLAST (PS8), and the arguments that blastp's engine does
+/// psiblast's NCBI arguments that LOSAT does not run: PHI-BLAST (PS8; the ASCII and ASN.1 PSSM
+/// files are PS2's and PS3's, `algorithm::psiblast::pssm`, `-in_pssm` PS4's,
+/// `algorithm::psiblast::in_pssm`, the MSA inputs PS6's, `algorithm::psiblast::in_msa`), and the arguments that blastp's engine does
 /// not run either (`is_unported_blastp_arg`; psiblast has no database masks and no `-mt_mode`).
 /// The search strategy file is written, of a FASTA query and of `-in_pssm` (items F1b-1 and F1b-2
 /// of line RG).
-const UNPORTED_PSIBLAST_OWN_ARGS: &[&str] = &[
-    "ignore_msa_master",
-    "in_msa",
-    "msa_master_idx",
-    "phi_pattern",
-];
+const UNPORTED_PSIBLAST_OWN_ARGS: &[&str] = &["phi_pattern"];
 
 fn is_unported_psiblast_arg(name: &str) -> bool {
     UNPORTED_PSIBLAST_OWN_ARGS.contains(&name)
@@ -1529,7 +1529,6 @@ const UNPORTED_TBLASTN_ARGS: &[&str] = &[
     "import_search_strategy",
     "negative_gilist",
     "remote",
-    "subject_besthit",
     "use_sw_tback",
 ];
 
@@ -1558,12 +1557,8 @@ const UNPORTED_TBLASTX_ARGS: &[&str] = &[
     "gilist",
     "html",
     "import_search_strategy",
-    "max_intron_length",
     "negative_gilist",
     "remote",
-    "strand",
-    "subject_besthit",
-    "sum_stats",
 ];
 
 fn is_unported_tblastx_arg(name: &str) -> bool {
@@ -1639,7 +1634,10 @@ fn is_unported_blastx_arg(name: &str) -> bool {
 #[derive(Debug)]
 pub struct NativeError {
     pub exit: i32,
-    pub message: String,
+    /// The text NCBI's `CATCH_ALL` writes, as bytes: a name of the command line or of a file
+    /// keeps the bytes NCBI's `std::string` keeps (a name that is not UTF-8: probes R1, R3 and R8
+    /// of line LIB-B).
+    pub message: Vec<u8>,
 }
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:178-180
 // ```c++
@@ -1647,9 +1645,10 @@ pub struct NativeError {
 //         exit_code = BLAST_INPUT_ERROR;                                      \
 //     }                                                                       \
 // ```
+/// The text of `message`; a byte that is not UTF-8 reads as U+FFFD (`message` keeps it).
 impl fmt::Display for NativeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.message)
+        f.write_str(&String::from_utf8_lossy(&self.message))
     }
 }
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:177-184
@@ -1690,7 +1689,7 @@ impl NativeError {
     pub(crate) fn silent_end() -> Self {
         Self {
             exit: 0,
-            message: String::new(),
+            message: Vec::new(),
         }
     }
 
@@ -1736,12 +1735,12 @@ impl NativeError {
         if e.kind().starts_with("CSeqDBException::") {
             return NativeError {
                 exit: 2,
-                message: format!("BLAST Database error: {}\n", e.get_msg()),
+                message: [b"BLAST Database error: ".as_slice(), e.get_msg(), b"\n"].concat(),
             };
         }
         NativeError {
             exit: 255,
-            message: format!("Error: {}\n", e.what()),
+            message: [b"Error: ".as_slice(), &e.what(), b"\n"].concat(),
         }
     }
 
@@ -1757,7 +1756,7 @@ impl NativeError {
     pub(crate) fn std_exception(what: &str) -> NativeError {
         NativeError {
             exit: 255,
-            message: format!("Error: {what}\n"),
+            message: format!("Error: {what}\n").into(),
         }
     }
 
@@ -1814,7 +1813,7 @@ impl std::io::Write for ReportStream {
     }
 }
 
-// libstdc++ (GCC 13): include/c++/13/bits/basic_ios.tcc:39-49
+// C++ standard, [iostate.flags]: `setstate` calls `clear`, which throws `ios_base::failure` when the bit is in `exceptions()`.
 /// NCBI's `ios::failure` of the outfmt 0 to 4 formatter's stream that an insertion of the report
 /// raises itself, not a write that the file or device refused (`ReportStream::failed`): an
 /// insertion that sets `badbit` (`setstate`, which calls `clear`) throws on a stream with
@@ -2031,7 +2030,11 @@ impl<W: std::io::Write + ?Sized> Insertion<'_, W> {
         Ok(())
     }
 
-    /// Writes the piece where it may end (`insert_streamed`) once it is `PIECE` bytes long.
+    /// Writes the piece where it may end (`insert_streamed`) once it is `PIECE` bytes long. A
+    /// piece ends only if more than `NCBI_BUFSIZ` bytes follow it, which is at least a block (a
+    /// block never exceeds `NCBI_BUFSIZ`), so the last piece always takes the buffer's branch of
+    /// an insertion longer than the room, as the whole insertion does; a final piece that exactly
+    /// filled a block would differ from the whole.
     fn end_piece(&mut self) -> std::io::Result<()> {
         let n = self.piece.len() as u64;
         if n >= Self::PIECE as u64
@@ -2227,18 +2230,19 @@ pub fn report_standard_output() -> Box<dyn std::io::Write + Send> {
 //             "File is not accessible",AsString()));
 // ```
 pub fn inaccessible(name: &str, path: &std::path::Path) -> anyhow::Error {
-    let value = if path.as_os_str().is_empty() {
-        String::new()
-    } else {
-        format!(":  `{}'", path.display())
-    };
-    NativeError {
-        exit: 1,
-        message: format!(
-            "Command line argument error: Argument \"{name}\". File is not accessible{value}\n"
-        ),
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:95-99 (`s_ArgExptMsg`, quoted in
+    // `utils::os_bytes`): the name's bytes (probe R1 of line LIB-B: BLASTX's `-query`,
+    // `-subject` and `-out` of a name that is not UTF-8).
+    let mut message =
+        format!("Command line argument error: Argument \"{name}\". File is not accessible")
+            .into_bytes();
+    if !path.as_os_str().is_empty() {
+        message.extend_from_slice(b":  `");
+        message.extend_from_slice(&crate::utils::os_bytes::path_bytes(path));
+        message.push(b'\'');
     }
-    .into()
+    message.push(b'\n');
+    NativeError { exit: 1, message }.into()
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3478-3480
@@ -2296,7 +2300,12 @@ pub(crate) fn create_out_file(
 pub fn exit_on_native_error(error: &anyhow::Error) {
     if let Some(e) = error.downcast_ref::<NativeError>() {
         if !posted(&e.message) {
-            eprint!("{}", catch_all_text(&e.message));
+            // `eprint!` of the bytes: a failed write panics as `eprint!`'s does.
+            if let Err(error) =
+                std::io::Write::write_all(&mut std::io::stderr(), catch_all_text(&e.message))
+            {
+                panic!("failed printing to stderr: {error}");
+            }
         }
         if e.exit < 0 {
             std::process::abort();
@@ -2320,19 +2329,19 @@ pub fn exit_on_native_error(error: &anyhow::Error) {
 /// `blastinput::app::options_error`, one for the others; NCBI BLAST+ 2.17.0, line RG D3-1 `om/`
 /// cases k02, k03, k06 and `om/mute/` e05, e11). A text without a post (the end of the PSSM file
 /// directly in its root object, exit status 0) stays empty.
-pub(crate) fn catch_all_text(message: &str) -> std::borrow::Cow<'_, str> {
+pub(crate) fn catch_all_text(message: &[u8]) -> &[u8] {
     if message.is_empty() || !crate::ncbi_exception::main_diag_failbit() {
-        return std::borrow::Cow::Borrowed(message);
+        return message;
     }
-    if message.starts_with("BLAST query/options error: ")
+    if message.starts_with(b"BLAST query/options error: ")
         && message
-            .strip_suffix('\n')
-            .and_then(|s| s.strip_suffix(crate::wording::USER_MANUAL_FOOTER))
-            .is_some_and(|s| s.ends_with('\n'))
+            .strip_suffix(b"\n")
+            .and_then(|s| s.strip_suffix(crate::wording::USER_MANUAL_FOOTER.as_bytes()))
+            .is_some_and(|s| s.ends_with(b"\n"))
     {
-        std::borrow::Cow::Borrowed("\n\n")
+        b"\n\n"
     } else {
-        std::borrow::Cow::Borrowed("\n")
+        b"\n"
     }
 }
 
@@ -2345,10 +2354,10 @@ static POST_ERRORS_IN_RUN: std::sync::atomic::AtomicBool =
 
 /// The text that the run wrote (`post_native_error`), which `exit_on_native_error` does not write
 /// again.
-static POSTED_TEXT: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+static POSTED_TEXT: std::sync::Mutex<Option<Vec<u8>>> = std::sync::Mutex::new(None);
 
 /// Whether the run already wrote `text` (`post_native_error`).
-fn posted(text: &str) -> bool {
+fn posted(text: &[u8]) -> bool {
     POSTED_TEXT
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -2393,10 +2402,7 @@ pub fn post_native_error(error: &anyhow::Error) {
         return;
     }
     if let Some(native) = error.downcast_ref::<NativeError>() {
-        let _ = std::io::Write::write_all(
-            &mut std::io::stderr(),
-            catch_all_text(&native.message).as_bytes(),
-        );
+        let _ = std::io::Write::write_all(&mut std::io::stderr(), catch_all_text(&native.message));
         *POSTED_TEXT
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(native.message.clone());
@@ -2432,13 +2438,13 @@ mod tests {
     #[test]
     fn catch_all_reports_a_seqdb_exception_as_a_database_error() {
         use crate::ncbi_exception::{NcbiException, ThrowSite};
-        let site = crate::seqdb::lookup_throw_site("DB contains no accession info.").unwrap();
+        let site = crate::seqdb::lookup_throw_site(b"DB contains no accession info.").unwrap();
         let error =
             NativeError::exception(&NcbiException::new(site, "DB contains no accession info."));
         assert_eq!(error.exit, 2);
         assert_eq!(
             error.message,
-            "BLAST Database error: DB contains no accession info.\n"
+            b"BLAST Database error: DB contains no accession info.\n"
         );
         let other = NcbiException::new(
             ThrowSite {
@@ -2451,7 +2457,10 @@ mod tests {
         );
         let error = NativeError::exception(&other);
         assert_eq!(error.exit, 255);
-        assert_eq!(error.message, format!("Error: {}\n", other.what()));
+        assert_eq!(
+            error.message,
+            [b"Error: ".as_slice(), &other.what(), b"\n"].concat()
+        );
     }
 
     #[test]
@@ -2490,9 +2499,10 @@ mod tests {
 
     #[test]
     fn the_organism_reports_standard_output_writes_where_glibc_writes() {
-        // glibc 2.39 `_IO_new_file_xsputn` on a file of `st_blksize` 4096
-        // (`T/t2/fix2/glibc_first_write.log`): the writes end at multiples of the block and the
-        // rest stays held; the first `fwrite` has no buffer yet; a flush empties the buffer.
+        // `std::cout` on a file of `st_blksize` 4096 (observed, glibc 2.35 and 2.39,
+        // `tests/fixtures/stdio_buffer/cout_file.tsv`): the writes end at multiples of the block
+        // and the rest stays held; the first insertion has no buffer yet; a flush empties the
+        // buffer.
         use std::io::Write;
         let run = |pieces: &[usize]| {
             let writes = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -2551,8 +2561,9 @@ mod tests {
 
     #[test]
     fn a_terminals_standard_output_writes_at_its_newlines_as_glibc_does() {
-        // glibc 2.39 on a pty of `st_blksize` 1024 (`T/t2/fix3/glibc_tty_lines.log`): `N` is an
-        // `fwrite` of N bytes, `N:K` with a newline at K, `f` a flush.
+        // `std::cout` on a pty of `st_blksize` 1024 (observed, glibc 2.35 and 2.39,
+        // `tests/fixtures/stdio_buffer/cout_tty.tsv`): `N` is an insertion of N bytes, `N:K` with
+        // a newline at K, `f` a flush.
         let tty = NcbiStdio::Cout {
             block: 1024,
             lines: true,
@@ -2686,11 +2697,11 @@ mod tests {
         let text = "BLAST query error: Could not construct seq-id from 'gi|abc'\n";
         let error: anyhow::Error = NativeError {
             exit: 1,
-            message: text.to_string(),
+            message: text.to_string().into(),
         }
         .into();
         post_native_error(&error);
-        assert!(!posted(text));
+        assert!(!posted(text.as_bytes()));
     }
 
     // NCBI c++/src/corelib/ncbiargs.cpp:266-270 keeps the bytes of a string value; LOSAT
@@ -2718,6 +2729,40 @@ mod tests {
                     "{message}"
                 );
             }
+        }
+    }
+
+    // makeblastdb keeps its values as UTF-8 strings: a value that is not UTF-8 (a file name of
+    // `-in`, `-out`, `-mask_data`, `-taxid_map`, `-logfile`, a `-title`) is LOSAT's explicit
+    // rejection, where the parser's own error named no option (line LIB-B, probe 2026-11-21).
+    #[test]
+    fn makeblastdb_rejects_values_that_are_not_utf8_explicitly() {
+        for option in [
+            "-in",
+            "-out",
+            "-mask_data",
+            "-taxid_map",
+            "-logfile",
+            "-title",
+        ] {
+            let argv = vec![
+                OsString::from("losat"),
+                OsString::from("makeblastdb"),
+                OsString::from("-dbtype"),
+                OsString::from("nucl"),
+                // `-taxid_map` requires it: the parser's errors come before the rejection.
+                OsString::from("-parse_seqids"),
+                OsString::from(option),
+                OsString::from_vec(b"n\xe9.x".to_vec()),
+            ];
+            let error = try_parse_from::<Cli, _, _>(argv).unwrap_err();
+            let message = render_message(&error);
+            assert_eq!(error.kind(), ErrorKind::InvalidUtf8, "{option}: {message}");
+            assert!(
+                message.contains(&format!("the value of {option} is not UTF-8"))
+                    && message.contains("not supported by LOSAT's MAKEBLASTDB"),
+                "{message}"
+            );
         }
     }
 
@@ -2856,13 +2901,7 @@ mod tests {
 pub fn command_line_bytes() -> Vec<u8> {
     let mut line = Vec::new();
     for argument in std::env::args_os() {
-        #[cfg(unix)]
-        {
-            use std::os::unix::ffi::OsStrExt;
-            line.extend_from_slice(argument.as_bytes());
-        }
-        #[cfg(not(unix))]
-        line.extend_from_slice(argument.to_string_lossy().as_bytes());
+        line.extend_from_slice(&crate::utils::os_bytes::os_str_bytes(&argument));
         line.push(b' ');
     }
     line

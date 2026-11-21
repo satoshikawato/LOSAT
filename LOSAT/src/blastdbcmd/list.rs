@@ -29,8 +29,27 @@ impl FoundDb {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb.cpp:1366-1427
+// (`CBlastDbFinder`, quoted at `find_files`): the names found are `std::string`s, opened and
+// listed as their bytes.
+/// The path of the bytes of a name found in a directory (`utils::os_bytes::path_from_bytes`): a
+/// directory or database whose name is not UTF-8 is entered and listed as NCBI does (probe R6b of
+/// line LIB-B).
 fn path_of(bytes: &[u8]) -> std::path::PathBuf {
-    std::path::PathBuf::from(String::from_utf8_lossy(bytes).into_owned())
+    crate::utils::os_bytes::path_from_bytes(bytes)
+}
+
+/// The name of the listed database `db` in its quotes, as the database reader takes it, which
+/// keeps the names of database files as UTF-8 strings (`seqdb::alias::SearchPath::new`): a
+/// name that is not UTF-8 is LOSAT's refusal of the letters that open the database (`%t %n %l
+/// %d %U`; NCBI BLAST+ 2.17.0 opens it, probe R6a of line LIB-B).
+fn reader_name(db: &FoundDb) -> Result<&str, ListStop> {
+    std::str::from_utf8(&db.quoted).map_err(|_| {
+        ListStop::Refused(refusal(&format!(
+            "{}: the name of the database is not valid UTF-8 (LOSAT keeps the names of database files as UTF-8 strings)",
+            String::from_utf8_lossy(&db.file_name())
+        )))
+    })
 }
 
 // NCBI reference (598d8ae6): c++/include/corelib/ncbifile.hpp:3019-3066
@@ -455,10 +474,10 @@ impl From<SeqDbError> for ListStop {
     // alias file's value that does not convert is `Error: <what()>`, exit status 255.
     fn from(error: SeqDbError) -> Self {
         if let Some(exception) = error.ncbi_exception() {
-            return ListStop::Ncbi(format!("Error: {}", exception.what()).into_bytes(), 255);
+            return ListStop::Ncbi([b"Error: ".as_slice(), &exception.what()].concat(), 255);
         }
         match error.ncbi_message() {
-            Some(text) => ListStop::Ncbi(format!("BLAST Database error: {text}").into_bytes(), 2),
+            Some(text) => ListStop::Ncbi([b"BLAST Database error: ".as_slice(), &text].concat(), 2),
             None => ListStop::Refused(refusal(&error.to_string())),
         }
     }
@@ -566,8 +585,8 @@ fn file_length(path: &str) -> Option<u64> {
 // J161 of line BDC). The volumes are those of the whole alias tree, each once.
 /// `GetDiskUsage` of the listed database `db` (of version 5 when `version5`).
 fn disk_usage(db: &FoundDb, version5: bool, path: &SearchPath) -> Result<u64, ListStop> {
-    let name = String::from_utf8_lossy(&db.quoted).into_owned();
-    let (volumes, _) = SeqDb::volume_and_alias_paths(&name, db.seqtype, path)?;
+    let name = reader_name(db)?;
+    let (volumes, _) = SeqDb::volume_and_alias_paths(name, db.seqtype, path)?;
     let mol = match db.seqtype {
         SeqType::Protein => 'p',
         SeqType::Nucleotide => 'n',
@@ -659,8 +678,7 @@ fn open<'a>(
     path: &SearchPath,
 ) -> Result<&'a SeqDb, ListStop> {
     if opened.is_none() {
-        let name = String::from_utf8_lossy(&db.quoted).into_owned();
-        *opened = Some(SeqDb::open_in(&name, db.seqtype, path)?);
+        *opened = Some(SeqDb::open_in(reader_name(db)?, db.seqtype, path)?);
     }
     Ok(opened.as_ref().expect("opened above"))
 }

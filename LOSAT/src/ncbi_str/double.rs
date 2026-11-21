@@ -820,10 +820,11 @@ fn strtod_prefix(text: &[u8]) -> (f64, usize) {
     (value, pos)
 }
 
-/// The payload of glibc's `nan(n-char-sequence)` (`__strtod_nan`): the sequence read by
-/// `strtoull` in base 0 (`0x` hexadecimal, a leading `0` octal, else decimal; the largest value
-/// on overflow), its low 51 bits put below the quiet bit, when the whole sequence is that number;
-/// 0 otherwise.
+/// The payload of `nan(n-char-sequence)`: the sequence read as by `strtoull` with base 0 (C
+/// standard: `0x` hexadecimal, a leading `0` octal, else decimal; the largest value on
+/// overflow), its low 51 bits kept below the quiet bit, when the whole sequence is that number;
+/// 0 otherwise. These are the bits of NCBI 2.17.0's `NStr::StringToDouble` as measured
+/// (`LOSAT/tests/unit/string_to_double_posix_vectors.tsv`, which has every case above).
 fn nan_payload(sequence: &[u8]) -> u64 {
     let (digits, radix) = match sequence {
         [b'0', b'x' | b'X', rest @ ..] if !rest.is_empty() => (rest, 16),
@@ -961,12 +962,16 @@ mod tests {
     /// The message, the line and the position of an error (NCBI's `(m_Pos = <n>)`, which LOSAT
     /// writes as `(position <n>)`).
     fn failure(e: NcbiException) -> (String, u32, String) {
-        let what = e.what();
+        let what = String::from_utf8(e.what()).unwrap();
         let pos = what
             .rsplit_once(crate::wording::POSITION)
             .map(|(_, rest)| rest.trim_end_matches(")\n").to_string())
             .unwrap_or_default();
-        (e.get_msg().to_string(), e.site().line, pos)
+        (
+            String::from_utf8(e.get_msg().to_vec()).unwrap(),
+            e.site().line,
+            pos,
+        )
     }
 
     // NCBI's rpsbproc printed `Cannot convert string 'abc' to double (m_Pos = 0)` for a bit score
@@ -1080,7 +1085,7 @@ mod tests {
             );
             rows += 1;
         }
-        assert_eq!(rows, 564);
+        assert_eq!(rows, 590);
         // Texts of their own: white space first (`StringToDoublePosix` skips it, `StringToDouble`
         // refuses it), the empty text, and long mantissas, whose x87 value passes the largest
         // 80-bit value from 4,933 digits on (the infinity; scaled by at least 10^-614 it stays

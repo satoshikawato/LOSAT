@@ -3,5 +3,5 @@
   BLASTX, TBLASTN and TBLASTX, where they were refused ("-help is not available in the browser", "the option
   -version runs on the command line of LOSAT's BLASTN only: ..."). Run LOSAT needs no query or
   subject for them; the run searches nothing, its results say so, and the Outputs show the text under "Help" or
-  "Version" and save it. ABI v2 is version 5 (stream 11). In the library API and pylosat these words stay refused;
+  "Version" and save it. ABI v2 is version 10 (stream 11). In the library API and pylosat these words stay refused;
   the refusal now names LOSAT Web among the places that run them.

@@ -1,3 +1,29 @@
+// Code of Microsoft's C runtime (UCRT), from the sources that Microsoft publishes under the
+// MIT License in the NuGet package Microsoft.Windows.SDK.CRTSource 10.0.22621.3
+// (ucrt/...; also in THIRD_PARTY_NOTICES, section 6 (UCRT)). The package's LICENSE:
+//
+// MIT License
+//
+// Copyright (c) Microsoft Corporation.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE
+
 //! Local UTC offset on Windows, as Microsoft's C runtime (UCRT) gives it to NCBI's Windows
 //! build (`localtime`, see `super::local_offset`): `TZ` in UCRT's own form
 //! (`tzn[+|-]hh[:mm[:ss]][dzn]`, with the United States DST rules), else the system zone of
@@ -676,8 +702,9 @@ mod tests {
         }
     }
 
-    /// Windows zones and the POSIX rule strings of the same changes, which the glibc reader
-    /// above takes (it matches glibc, `glibc_tsv`).
+    /// Windows zones and the POSIX rule strings of the same changes, as jiff reads them
+    /// (`offset_from_posix_tz`; jiff reads these strings as glibc does,
+    /// LOSAT/tests/unit/local_time_glibc_vectors.tsv).
     fn system_zones() -> Vec<(&'static str, WinZone, &'static str)> {
         vec![
             (
@@ -728,8 +755,8 @@ mod tests {
         ]
     }
 
-    // UCRT places the changes of the year of the local standard time, glibc those of the UTC
-    // year: they meet for zones whose changes are not at the turn of the year.
+    // UCRT places the changes of the year of the local standard time, glibc (and jiff) those of
+    // the UTC year: they meet for zones whose changes are not at the turn of the year.
     #[test]
     fn ucrt_system_zones_change_as_their_rules_say() {
         for (name, info, posix) in system_zones() {

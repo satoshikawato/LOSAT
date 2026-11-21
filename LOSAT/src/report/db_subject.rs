@@ -227,7 +227,7 @@ pub enum Prefetched {
 /// side), else LOSAT's text of an error NCBI does not have.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LookupFailure {
-    message: String,
+    message: Vec<u8>,
     ncbi: NcbiFailure,
 }
 
@@ -256,7 +256,7 @@ impl LookupFailure {
         "NCBI BLAST+ 2.17.0 crashes where its lookup reads that file";
 
     /// NCBI's own message.
-    pub fn ncbi(message: impl Into<String>) -> Self {
+    pub fn ncbi(message: impl Into<Vec<u8>>) -> Self {
         Self {
             message: message.into(),
             ncbi: NcbiFailure::Message,
@@ -266,7 +266,7 @@ impl LookupFailure {
     /// LOSAT's text of an error that NCBI does not have.
     pub fn losat(message: impl Into<String>) -> Self {
         Self {
-            message: message.into(),
+            message: message.into().into_bytes(),
             ncbi: NcbiFailure::Other,
         }
     }
@@ -278,7 +278,7 @@ impl LookupFailure {
         match error.ncbi_message() {
             Some(message) => Self::ncbi(message),
             None if error.ncbi_crashes() => Self {
-                message: error.to_string(),
+                message: error.to_string().into_bytes(),
                 ncbi: NcbiFailure::Crashes,
             },
             None => Self::losat(error.to_string()),
@@ -286,8 +286,8 @@ impl LookupFailure {
     }
 
     /// The text NCBI writes after `BLAST Database error: `, where the message is NCBI's own.
-    pub fn ncbi_message(&self) -> Option<&str> {
-        (self.ncbi == NcbiFailure::Message).then_some(self.message.as_str())
+    pub fn ncbi_message(&self) -> Option<&[u8]> {
+        (self.ncbi == NcbiFailure::Message).then_some(self.message.as_slice())
     }
 
     /// The `CSeqDBException` that NCBI's lookup throws, where the message is NCBI's own
@@ -316,7 +316,7 @@ impl LookupFailure {
 
 impl std::fmt::Display for LookupFailure {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.message)
+        f.write_str(&String::from_utf8_lossy(&self.message))
     }
 }
 
@@ -996,7 +996,7 @@ impl ParsedSubject {
     /// a batch that reports the subject rethrows it, which stops the run with `BLAST Database
     /// error: <message>` (exit status 2) before the batch's reports
     /// (`common::database::batch_prefetch`).
-    pub fn prefetch_stops(&self) -> Option<&str> {
+    pub fn prefetch_stops(&self) -> Option<&[u8]> {
         match &self.found_instead {
             Some(FoundInstead::Failed(failure)) => failure.ncbi_message(),
             _ => None,
@@ -3165,9 +3165,9 @@ mod tests {
     fn only_the_lookup_text_ncbi_was_seen_to_throw_gives_its_exception() {
         let failed = LookupFailure::ncbi(crate::seqdb::tax_files::NO_ACCESSION_INFO);
         let exception = failed.exception().unwrap();
-        assert_eq!(exception.get_msg(), "DB contains no accession info.");
+        assert_eq!(exception.get_msg(), b"DB contains no accession info.");
         assert_eq!(
-            exception.what(),
+            String::from_utf8(exception.what()).unwrap(),
             // NCBI's report in LOSAT's words (`crate::wording::losat_text`).
             crate::wording::losat_text(&format!(
                 "NCBI C++ Exception:\n    T0 \"{}/src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp\", line 142: Error: (CSeqDBException::eInvalid) BLASTDB::ncbi::CBlastLMDBManager::CBlastEnv::GetDbi() - DB contains no accession info.\n",
@@ -3241,7 +3241,7 @@ mod tests {
             loads
                 .thrown(0)
                 .map(crate::ncbi_exception::NcbiException::get_msg),
-            Some("DB contains no accession info.")
+            Some(b"DB contains no accession info.".as_slice())
         );
         for unread in [2, 3, 4] {
             assert_eq!(loads.load(unread), HitLoad::Unread, "{unread}");

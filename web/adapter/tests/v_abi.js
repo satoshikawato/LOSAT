@@ -173,7 +173,8 @@ function nativeFiles(directory, outfmt) {
   for (let n = 1; fs.existsSync(path.join(directory, `results_${n}.${extension}`)); n++) {
     files.push([`results_${n}.${extension}`, fs.readFileSync(path.join(directory, `results_${n}.${extension}`))]);
   }
-  files.push([`results.${extension}`, fs.readFileSync(path.join(directory, "results"))]);
+  // A run that failed leaves the master file (`results`) empty, after the side files written before the error.
+  if (fs.existsSync(path.join(directory, "results"))) files.push([`results.${extension}`, fs.readFileSync(path.join(directory, "results"))]);
   return files;
 }
 
@@ -365,14 +366,6 @@ function nativeEnv(search) {
   return env;
 }
 
-// The formatting handler's warnings (blast_args.cpp:2947-2989): the CLI writes those of
-// -num_descriptions, -line_length and -sorthits for formats above 4 only, that of -sorthsps for
-// formats other than 0, and that of the few matches for the hit list size of the format.
-const HANDLER = /^Warning: \[\w+\] (The parameter -num_descriptions is ignored|Examining 5 or more matches|The parameter -line_length is not applicable|The parameter -sorthits is ignored|The parameter -sorthsps is ignored)/;
-// The structured formats, whose writers do not write the queries' warnings (abi_v2.md §5,
-// `ReportFormat::writes_query_warnings`).
-const STRUCTURED = new Set([5, 8, 9, 11, 12, 13, 14, 15, 16, 17]);
-
 // The hit list size that the CLI derives for the output format `number` from the options of `argv`
 // (`report_counts`, NCBI blast_args.cpp:2894-2973): the formats of a run with the same size are one
 // search (abi_v2.md §7).
@@ -388,12 +381,18 @@ function hitListSize(argv, number) {
 }
 
 // The lines of `text` (each with its line end) that it has more times than `held` (line -> copies),
-// in order, of those that `keep` keeps; `held` then holds them (the adapter's `Diagnostics`).
-function linesAfter(held, text, keep = () => true) {
+// in order; `held` then holds them (the adapter's `Diagnostics`). The adapter compares the error
+// of a format that failed alone as one text (`Diagnostics::error`), and this compares its lines
+// too: the two agree while no line of an error is a line that stream 3 already holds from another
+// text. NCBI's exception reports and posts end with an empty line, so a case where two such texts
+// meet (BLASTX's HSPs of length 0 with -outfmt 5: the post of the XML and the refusals of 6, 7 and
+// 0, the adapter's test `formats_that_stop_after_a_query_warning_add_it_once`) is not one for this
+// harness (reviews r2 L2 and r3 L5 of 2026-11-20).
+function linesAfter(held, text) {
   const copies = new Map();
   let added = "";
   for (const line of text.split(/(?<=\n)/)) {
-    if (line === "" || !keep(line)) continue;
+    if (line === "") continue;
     const copy = (copies.get(line) || 0) + 1;
     copies.set(line, copy);
     if (copy > (held.get(line) || 0)) added += line;
@@ -419,10 +418,11 @@ function searchOrder(formats) {
 // `stderr` is stream 3 of a run that completes (§5): `own`, then the lines of the other formats'
 // standard error that it does not hold, each line as many times as one of them has it more often
 // than stream 3 holds it, the formats of the argv's own search first (the tabular ones, then those
-// up to 4); for a structured -outfmt, whose writer does not write the queries' warnings, only the
-// formatting handler's lines of the formats of its search, and the error of one that fails alone
-// (the lines of its standard error that are not warnings: LOSAT's refusal of outfmt 0 of a record
-// that is both a query and a subject and has masks, line WQA's sweep, D7, 2026-11-19).
+// up to 4). A structured -outfmt's run does not write the queries' warnings, which the other
+// formats' runs add (line WQA's sweep, D3 review r3 M2, 2026-11-19: this harness kept only the
+// formatting handler's lines of the other formats there, and so took their loss), as they add the
+// error of a format that fails alone (LOSAT's refusal of outfmt 0 of a record that is both a query
+// and a subject and has masks, line WQA's sweep, D7, 2026-11-19).
 function nativeOutputs(native, search, scratch) {
   const outputs = new Map();
   const stderrs = new Map(), failed = new Map();
@@ -462,7 +462,10 @@ function nativeOutputs(native, search, scratch) {
     if ((result.status !== 0) !== failure) {
       throw new Error(`native ${argv.join(" ")} ${failure ? "succeeded" : "failed"} (exit ${result.status}): ${result.error ?? result.stderr}`);
     }
-    if (!failure) outputs.set(CUSTOM_STREAM, search.files ? nativeFiles(directory, search.outfmt) : fs.readFileSync(out));
+    // The file of a CLI run that failed holds what it wrote before the error (line WQA's sweep, D15, 2026-11-20).
+    if (!failure || fs.existsSync(out) || search.files) {
+      outputs.set(CUSTOM_STREAM, search.files ? nativeFiles(directory, search.outfmt) : (fs.existsSync(out) ? fs.readFileSync(out) : Buffer.alloc(0)));
+    }
     fs.rmSync(directory, { recursive: true, force: true });
     [own, status] = [result.stderr, result.status];
   }
@@ -473,17 +476,12 @@ function nativeOutputs(native, search, scratch) {
   if (!failure) {
     const number = parseInt(outfmt, 10);
     const size = hitListSize(search.argv, number);
-    const structured = ownFormat === null && STRUCTURED.has(number);
     const others = FORMATS[search.program].filter((format) => format !== ownFormat);
     const same = searchOrder(others.filter((format) => hitListSize(search.argv, format) === size));
     const other = searchOrder(others.filter((format) => hitListSize(search.argv, format) !== size));
     const held = new Map();
     let text = linesAfter(held, own.toString());
-    for (const format of same) {
-      const keep = structured ? (line) => HANDLER.test(line) || (failed.get(format) && !line.startsWith("Warning: ")) : undefined;
-      text += linesAfter(held, stderrs.get(format).toString(), keep);
-    }
-    for (const format of other) text += linesAfter(held, stderrs.get(format).toString());
+    for (const format of [...same, ...other]) text += linesAfter(held, stderrs.get(format).toString());
     stderr = Buffer.from(text);
     failedStreams = others.filter((format) => failed.get(format)).sort((a, b) => a - b);
   }
@@ -511,11 +509,14 @@ function cliError(error) {
 // error, and the warnings that the CLI writes before it are stream 3, which a failed run sends
 // (abi_v2.md §5): stream 3 then the error are the CLI's standard error for the run's argv, byte
 // for byte (line WQA's sweep, D3, 2026-11-19), also in a run of two searches, whose outcome is
-// that of the argv's own search (§7). Whatever the run sent of an output before it failed is the
-// start of the CLI's file. A search with `"prolog": false` fails before any output (an error of
-// the options or of their files), so the CLI's outfmt 0 file is empty; the others fail after the
-// CLI wrote the outfmt 0 prolog, or the CLI's outfmt 0 completes (the other search of a run whose
-// own -outfmt is a tabular one).
+// that of the argv's own search (§7). The output of the argv's own -outfmt (stream 4 for one of its
+// own, else the stream of its format, 0 without one) is exactly the CLI's file for the argv: what
+// it wrote before the error (version 7; line WQA's sweep, D15, 2026-11-20). Every other output of
+// the run is dropped, each with a signal of stream 9 whose place is 0xFFFFFFFE, the error that ended
+// the run (the run failed before its search made them: none, and then they are empty). A search with
+// `"prolog": false` fails before any output (an error of the options or of their files), so the CLI's
+// outfmt 0 file is empty; the others fail after the CLI wrote the outfmt 0 prolog, or the CLI's
+// outfmt 0 completes (the other search of a run whose own -outfmt is a tabular one).
 function checkFailure(run, expected, search, label) {
   const program = search.program;
   assert.equal(run.status, -1, `${label}: the run fails as the CLI (exit ${expected.status})`);
@@ -523,10 +524,31 @@ function checkFailure(run, expected, search, label) {
   const diagnostics = run.streams.get(3) || Buffer.alloc(0);
   assert.equal(diagnostics.toString() + cliError(run.error), expected.own.toString(),
                `${label}: stream 3 and the error are the CLI's standard error`);
-  for (const format of FORMATS[program]) {
-    const sent = run.streams.get(format) || Buffer.alloc(0);
-    assert.ok(expected.outputs.get(format).subarray(0, sent.length).equals(sent), `${label}: outfmt ${format} before the failure`);
+  const outfmt = search.outfmt === undefined ? "0" : search.outfmt.trim();
+  const own = customStream(search) ? CUSTOM_STREAM : Number(outfmt);
+  const sent = run.streams.get(own) || Buffer.alloc(0);
+  const cli = expected.outputs.get(own);
+  if (search.files) {
+    // The side files written before the error and the master file as the CLI leaves it (empty), with a
+    // central directory (D15 review round 2, 2026-11-21).
+    const entries = sent.length === 0 ? [] : storedZipEntries(sent);
+    assert.deepEqual(entries.map(([name]) => name), cli.map(([name]) => name), `${label}: -outfmt ${search.outfmt} files before the failure`);
+    for (const [index, [name, bytes]] of entries.entries()) assert.equal(sha256(bytes), sha256(cli[index][1]), `${label}: ${name}`);
+  } else if (search.sam) {
+    assert.equal(sha256(withoutCl(sent)), sha256(withoutCl(cli)), `${label}: -outfmt ${search.outfmt} before the failure`);
+  } else {
+    assert.equal(sha256(sent), sha256(cli), `${label}: the bytes of ${customStream(search) ? `-outfmt ${search.outfmt}` : `outfmt ${own}`} are the CLI's file (${sent.length} of ${cli.length} bytes)`);
   }
+  const signals = run.streams.get(9) || Buffer.alloc(0);
+  assert.equal(signals.length % 8, 0, `${label}: signals of 8 bytes (stream 9)`);
+  const dropped = Array.from({ length: signals.length / 8 }, (_, i) => {
+    assert.equal(signals.readUInt32LE(8 * i + 4), 0xfffffffe, `${label}: the place of the error of a dropped output is the run's`);
+    return signals.readUInt32LE(8 * i);
+  }).sort((a, b) => a - b);
+  const others = FORMATS[program].filter((format) => format !== own);
+  if (dropped.length > 0) assert.deepEqual(dropped, others, `${label}: the outputs that the failed run drops (stream 9)`);
+  for (const format of others) assert.ok(!run.streams.has(format), `${label}: nothing of the dropped outfmt ${format}`);
+  assert.ok(!run.streams.has(1), `${label}: no HSP records`);
   if (search.prolog === false) {
     assert.equal(expected.outputs.get(0).length, 0, `${label}: the CLI writes no outfmt 0 before the failure`);
   } else {
@@ -541,6 +563,10 @@ function checkHits(streams, program, label, queryIds, shownIds) {
   const rows = out6.toString().split("\n").filter(Boolean);
   assert.equal(records.length, rows.length, `${label}: one record per outfmt 6 row`);
   const ranks = new Map();
+  // BLASTN's matrix-only scoring (`-task rmblastn`, reward 0 and penalty 0) opens its report with
+  // RMBLASTN and shows the raw score alone (` Score = 27204`; blast_format.cpp:168-177,
+  // showalign.cpp:3586-3591,3605); the other searches show `<bits> bits (<raw>),`.
+  const rawScoreOnly = out0.subarray(0, 9).toString() === "RMBLASTN ";
   records.forEach((record, index) => {
     assert.equal(record.index, index, `${label}: index`);
     const rank = ranks.get(record.q_idx) || 0;
@@ -577,7 +603,8 @@ function checkHits(streams, program, label, queryIds, shownIds) {
       return;
     }
     assert.ok(section.startsWith(" Score ="), `${label}: out0 of HSP ${index}`);
-    assert.ok(section.includes(`bits (${record.raw_score}),`), `${label}: raw score in out0 of HSP ${index}`);
+    const score = rawScoreOnly ? section.startsWith(` Score = ${record.raw_score}\n`) : section.includes(`bits (${record.raw_score}),`);
+    assert.ok(score, `${label}: raw score in out0 of HSP ${index}`);
     const heading = out0.subarray(record.out0_subject[0], record.out0_subject[1]).toString();
     // A local id that is not shown leaves "> " before the title; under -parse_deflines the
     // heading starts with the subject's id (`>BK000001.1 TPA: third party`; line WQA's sweep, D7, 2026-11-19).
@@ -603,7 +630,8 @@ function checkSurface(reactor, native) {
       assert.ok(flags.includes("-template_type") && flags.includes("-template_length"), "blastn: dc-megablast templates");
       assert.ok(flags.includes("-window_masker_db"), "blastn: -window_masker_db");
       const task = description.parameters.find((parameter) => parameter.flag === "-task");
-      assert.ok(task.help.includes("dc-megablast") && task.help.includes("blastn-short"), "blastn: tasks in -task's help");
+      assert.ok(task.help.includes("dc-megablast") && task.help.includes("blastn-short") && task.help.includes("rmblastn"),
+                "blastn: tasks in -task's help");
     }
   }
   // validate: accepted argv, and CLI errors with the CLI's words.
@@ -630,8 +658,7 @@ function checkSurface(reactor, native) {
                       ["blastn", "-query", "q", "-subject", "s", "-nosuchoption", "1"],
                       ["blastn", "-query", "q", "-subject", "s", "-task", "dc-megablast", "-template_type", "coding"],
                       ["blastn", "-query", "q", "-subject", "s", "-task", "dc-megablast", "-template_type", "coding",
-                       "-template_length", "17"],
-                      ["blastn", "-query", "q", "-subject", "s", "-task", "rmblastn"]]) {
+                       "-template_length", "17"]]) {
     const validated = reactor.call("losat_web2_validate", argv.join("\0"));
     assert.equal(validated.status, -1, argv.join(" "));
     const cli = require("node:child_process").spawnSync(native, argv);
@@ -673,8 +700,9 @@ function checkSurface(reactor, native) {
     assert.equal(validated.error, cli.stderr.toString(), `-outfmt ${outfmt}: the CLI's message`);
   }
   assert.match(reactor.call("losat_web2_validate", ["blastp", "-query", "q", "-subject", "s", "-out", "x"].join("\0")).error, /not accepted/);
-  // The tasks of Session SD and NCBI's option check of a template (blast_options.c:1247-1261).
-  for (const task of ["dc-megablast", "blastn-short"]) {
+  // The tasks of Session SD and line RG X6, and NCBI's option check of a template
+  // (blast_options.c:1247-1261).
+  for (const task of ["dc-megablast", "blastn-short", "rmblastn"]) {
     assert.equal(reactor.call("losat_web2_validate", ["blastn", "-query", "q", "-subject", "s", "-task", task].join("\0")).status, 0, task);
   }
   assert.match(reactor.call("losat_web2_validate", ["blastn", "-query", "q", "-subject", "s", "-task", "dc-megablast",
@@ -879,7 +907,7 @@ async function main() {
   const all = JSON.parse(fs.readFileSync(options.cases, "utf8"));
   for (const engine of engines) {
     const { reactor, close, waitForWorkers } = await engine.open();
-    assert.equal(reactor.exports.losat_web2_abi_version(), 5);
+    assert.equal(reactor.exports.losat_web2_abi_version(), 10);
     checkSurface(reactor, options.native);
     console.log(`ok ${engine.name} describe, validate, register, scan`);
     console.log(`ok ${engine.name} help and version: ${checkPrints(reactor, options.native)} argvs as the CLI`);

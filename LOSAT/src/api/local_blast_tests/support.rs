@@ -203,6 +203,7 @@ pub(super) fn run_formats_with(
                 })
                 .collect(),
             diagnostics: &mut diagnostics,
+            later_warnings: None,
             hits: hits.then_some(&mut on_hits as _),
             observer: if observe { Some(&mut observer) } else { None },
         };

@@ -42,6 +42,18 @@ export function isPrintedKind(value: unknown): value is PrintedKind {
 export type MessagePlace = 'diagnostics' | 'logfile' | 'nowhere';
 export const MESSAGE_PLACES: readonly MessagePlace[] = Object.freeze(['diagnostics', 'logfile', 'nowhere']);
 
+/**
+ * Where the error of an output that a run could not write is (its signal of stream 9, ABI v2 §5): a place of messages, or
+ * `run`, the error that ended the run, for an output that a run which failed does not keep: the CLI's run of the argv does
+ * not write it (line WQA's sweep, D15, 2026-11-20).
+ */
+export type OutputPlace = MessagePlace | 'run';
+
+/** Whether `value` is the place of the error of an output (`OutputPlace`). */
+export function isOutputPlace(value: unknown): value is OutputPlace {
+  return value === 'run' || isMessagePlace(value);
+}
+
 /** Whether `value` is a place of messages of a run (`MessagePlace`). */
 export function isMessagePlace(value: unknown): value is MessagePlace {
   return MESSAGE_PLACES.includes(value as MessagePlace);

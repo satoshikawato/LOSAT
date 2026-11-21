@@ -225,6 +225,7 @@ test('two "?" helps are not open by the pointer at once, where one "?" is inside
 
 /** A run of the FakeEngine (or the engine) with HSPs on three subjects, shown on the results page. */
 async function threeSubjects(page: Page): Promise<void> {
+  // Test protein: N-terminal part of E. coli AsnA (RefSeq NP_418200.1), Cys51 changed to Ala.
   const protein = 'MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQFEVVHSLAKWKRQTLGQHDFSAGEGLYTHMKALRPDEDRLSPLHSVYVDQWDWERVMGDGERQFSTLKSTVEAIWAGIKATEAAVSEEFGLAPFLPDQIHFVHSQELLSRYPDLDAKGRERAIAKDLGAVFLVGIGGKLSDGHRHDVRAPDYDDWEAVTLGEQ';
   await openSearch(page);
   await program(page, 'blastp');

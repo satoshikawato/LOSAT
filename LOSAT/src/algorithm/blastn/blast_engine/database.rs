@@ -491,9 +491,9 @@ impl BlastnDatabase {
         // A database with parsed Seq-ids is read (line DBID, ID2b).
         let parsed_seqids =
             shared::restrict_database(&mut db, name, list, mask, diagnostics, settings, PROGRAM)?;
-        // BLASTN has no Gumbel block: NCBI's average subject length divides by the statistics'
-        // number of sequences (`shared::check_statistics_count`).
-        shared::check_statistics_count(&db, PROGRAM)?;
+        // BLASTN has no Gumbel block: the setup of a batch with a valid context divides by the
+        // statistics' number of sequences, a count of 0 LOSAT's refusal there
+        // (`context_statistics`, `shared::check_setup_count`).
         // The setup's total is not negative (`DbStatistics::setup_total`).
         let (db_len_total, num_seqs) = db.statistics_numbers();
         let metadata = SubjectMetadata {
@@ -2862,7 +2862,10 @@ mod tests {
             let native = error
                 .downcast_ref::<NativeError>()
                 .unwrap_or_else(|| panic!("not a native error: {error:#}"));
-            (native.exit, native.message.clone())
+            (
+                native.exit,
+                String::from_utf8(native.message.clone()).unwrap(),
+            )
         };
         let settings = ApplicationSettings::default();
         let Err(error) = BlastnDatabase::open("", &settings) else {
@@ -3246,7 +3249,7 @@ mod tests {
         // The volume is recorded under its directory normalised with symbolic links
         // followed (seqdbalias.cpp:851-862), as in BLASTP's test.
         assert_eq!(
-            native.message,
+            String::from_utf8(native.message.clone()).unwrap(),
             format!(
                 "BLAST Database error: Error: File ({}) not found.\n",
                 dir.canonicalize().unwrap().join(&missing[1]).display()

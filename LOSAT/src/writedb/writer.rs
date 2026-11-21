@@ -51,6 +51,8 @@ pub struct WriteDb {
     platform: Platform,
     /// `m_Indices`; `indices.full` is `m_ParseIDs` (`-parse_seqids`).
     indices: Indices,
+    /// `m_OidMasks` (`-oid_masks`): the OID mask files each volume writes.
+    oid_masks: u64,
     /// `m_Deflines` of the kept sequence (`SetDeflines`, with `-parse_seqids`).
     pending_deflines: Option<DeflineSet>,
     /// The taxid of the kept sequence's definition line without `-parse_seqids`
@@ -169,6 +171,7 @@ impl WriteDb {
             lmdb_oid: 0,
             platform,
             indices,
+            oid_masks: 0,
             pending_deflines: None,
             pending_taxid: 0,
             pending_hash: 0,
@@ -307,10 +310,11 @@ impl WriteDb {
     // volume: makeblastdb 2.17.0 indexes `gnl|bl_ord_id|<that oid>` for OID 0 of the new
     // volume and checks it for duplicates there (s3b/probe: `-hash_index -max_file_sz 4000`
     // on 3 long and 20 short proteins stops with "Duplicate seq_ids are found:
-    // GNL|BL_ORD_ID|6"). The ids are needed by a volume with indices only.
+    // GNL|BL_ORD_ID|6"). The ids are needed by a volume with indices and by the OID mask of
+    // `-oid_masks` (`writedb::oid_list::is_model`).
     /// `x_CookHeader`: the header record with the number the sequence gets
     /// in the current volume; the first cooking of a sequence also sets `m_Ids` (with
-    /// indices) and `m_TaxIds`.
+    /// indices or OID masks) and `m_TaxIds`.
     fn cook_header(&mut self, title: &[u8]) -> Vec<u8> {
         let oid = self.volumes.last().map_or(0, Volume::oid);
         let mut bad = Vec::new();
@@ -319,7 +323,9 @@ impl WriteDb {
         if self.tax_ids.is_empty() {
             self.tax_ids.push(self.pending_taxid);
         }
-        if self.indices.any() && self.ids.is_empty() {
+        // The OID mask reads the ids too (`m_Ids` of every definition line, makeblastdb 2.17.0
+        // probe `p_nops1`: a sequence without `-parse_seqids` is no model).
+        if (self.indices.any() || self.oid_masks != 0) && self.ids.is_empty() {
             self.ids.push(ParsedSeqId::General(Dbtag {
                 db: b"BL_ORD_ID".to_vec(),
                 tag: ObjectId::Id(oid as i32),
@@ -368,6 +374,7 @@ impl WriteDb {
                 &self.ids,
                 hash,
                 self.mask.blobs(),
+                &mut self.diagnostics,
             )?;
             if done {
                 self.insert_lmdb_entries()?;
@@ -402,6 +409,7 @@ impl WriteDb {
                 arrays,
                 self.indices,
                 scratch,
+                self.oid_masks,
             )?);
             if let (Some(meta), Some(date)) = (self.mask.column_meta(), &column_date) {
                 if let Some(volume) = self.volumes.last_mut() {
@@ -419,6 +427,7 @@ impl WriteDb {
                 &self.ids,
                 hash,
                 self.mask.blobs(),
+                &mut self.diagnostics,
             )?;
             if done {
                 self.insert_lmdb_entries()?;
@@ -675,6 +684,11 @@ impl WriteDb {
     #[cfg(test)]
     pub fn set_column_date(&mut self, index: usize, date: &[u8]) {
         self.mask.set_column_date(index, date);
+    }
+
+    /// `oid_masks` of the `CWriteDB` constructor (`-oid_masks`), before the first sequence.
+    pub fn set_oid_masks(&mut self, oid_masks: u64) {
+        self.oid_masks = oid_masks;
     }
 
     /// The date for a mask column when the clock cannot be read (the time of the build).

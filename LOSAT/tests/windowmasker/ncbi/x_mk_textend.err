@@ -1,0 +1,23 @@
+USAGE
+  windowmasker [-h] [-help] [-xmlhelp] [-ustat unit_counts]
+    [-in input_file_name] [-out output_file_name] [-checkdup check_duplicates]
+    [-fa_list input_is_a_list] [-mem available_memory] [-meta info_string]
+    [-unit unit_length] [-genome_size genome_size] [-window window_size]
+    [-t_extend T_extend] [-t_thres T_threshold] [-set_t_high score_value]
+    [-set_t_low score_value] [-parse_seqids] [-outfmt output_format]
+    [-t_high T_high] [-t_high_pct T_high_pct] [-t_thres_pct T_threshold_pct]
+    [-t_extend_pct T_extend_pct] [-t_low T_low] [-t_low_pct T_low_pct]
+    [-infmt input_format] [-exclude_ids exclude_id_list] [-ids id_list]
+    [-text_match text_match_ids] [-sformat unit_counts_format]
+    [-smem available_memory] [-dust use_dust] [-dust_level dust_level]
+    [-mk_counts] [-convert] [-version-full] [-version-full-xml]
+    [-version-full-json]
+
+DESCRIPTION
+   Window based sequence masker
+
+Use '-help' to print detailed descriptions of command line arguments
+========================================================================
+
+Error: Argument "t_extend". Incompatible with argument:  `mk_counts'
+Error:  (CArgException::eConstraint) Argument "t_extend". Incompatible with argument:  `mk_counts'

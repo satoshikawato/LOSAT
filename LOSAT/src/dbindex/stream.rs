@@ -472,6 +472,7 @@ impl<'a> FastaStream<'a> {
         Ok(Some(SeqData {
             bases: Bases::of_letters(&crate::seqmasks_io::fasta_reader::iupac_letters(
                 record.inst,
+                &mut self.reader,
             )),
             masks: if masks.is_empty() {
                 Vec::new()

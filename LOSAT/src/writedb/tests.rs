@@ -520,6 +520,7 @@ fn makedb_runs_as_makeblastdb_on_edge_inputs() {
             out: Some(base.clone()),
             blastdb_version: 4,
             max_file_sz: case.max_file_sz.unwrap_or("3GB").to_string(),
+            metadata_output_prefix: None,
             logfile: None,
             parse_seqids: false,
             hash_index: false,
@@ -619,6 +620,7 @@ fn makedb_version(
         out: Some(out.to_string()),
         blastdb_version: version,
         max_file_sz: max_file_sz.to_string(),
+        metadata_output_prefix: None,
         logfile: None,
         parse_seqids: false,
         hash_index: false,
@@ -1572,6 +1574,24 @@ fn several_input_files_run_as_makeblastdb() {
 )]
 fn the_metadata_files_of_version_5_are_makeblastdb_s() {
     run_v5_cases("J_");
+}
+
+/// `-metadata_output_prefix` as makeblastdb 2.17.0 has it: the prefix before each name of the
+/// metadata's `files`, with a separator added when it has none (`x`) and not when it has one
+/// (`/data/blast/`), nothing for the empty value, every volume and the alias file of a database
+/// of several volumes, version 4, a nucleotide database, and a quote, a backslash, a tab and
+/// UTF-8 in the value (line RG item D3a).
+#[test]
+#[cfg_attr(
+    target_os = "wasi",
+    ignore = "runs makeblastdb on files named from the working directory (tests/...): a WASI module has none, the runner preopens /"
+)]
+#[cfg_attr(
+    windows,
+    ignore = "the separator added is `\\` on Windows (makeblastdb's too); the runs recorded are Linux's"
+)]
+fn metadata_output_prefix_runs_as_makeblastdb() {
+    run_v5_cases("P_");
 }
 
 /// `-in` files that exist and cannot be opened, as makeblastdb 2.17.0 has them (also a compressed

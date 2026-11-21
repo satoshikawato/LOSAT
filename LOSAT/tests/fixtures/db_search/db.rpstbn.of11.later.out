@@ -1,0 +1,182 @@
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "tblastn",
+      service "rpsblast",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_1"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">stopq"
+                  }
+                }
+              },
+              title "stopq"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 600,
+              seq-data ncbi2na 'E32E38CB2C30CB8CB2C30E38C30CB2CB0CB8E32CB2CB0C
+B0CB0C30C30CB0E38E32C32C32E38C32C38CB8E32C32E38C32E30C32C38C38E30C32C30C30E38C
+B8E30CB2C32E38C38E30E30C30CB0C30E38C32CB0E32C32C38CB8C38E30C38CB8C30C38CB2CB0C
+30C38E30CB8E38C30C30CB2C30CB8E32E30CB8CB0E30CB0E30CB0CB0C32CB2C32E38CB0E30C30C
+32E30CB2E38E32E38CB0'H
+            }
+          },
+          seq {
+            id {
+              local str "Query_2"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">len3"
+                  }
+                }
+              },
+              title "len3"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 3,
+              seq-data ncbi2na '38'H
+            }
+          },
+          seq {
+            id {
+              local str "Query_3"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">YP_009220476.1 bt strand=+ flank=0"
+                  }
+                }
+              },
+              title "YP_009220476.1 bt strand=+ flank=0"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 637,
+              seq-data ncbi2na '6E83933BAAEFC6794FF26ABC17C31DBEF3C932FB870CF8
+1F04001C8400230A39F356E8B488C3417C53C3AEC998A814FF07FB03A86F10118071A80BF1BA7A
+D2A84261262F2E08002A8CF37E17675DAE3AA1445741B810A5837020FA0F31958B330C11026633
+46BA1DAFD9ED97A7C0E616B620FF79430BFBFEC7F09412EF0008168D047FAFF68985FE38A33238
+470484737FE2CE2BF2D5A418FEF42BEB8821D9C0'H
+            }
+          }
+        }
+      },
+      subject database "rps_mini",
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, -3 }
+        },
+        {
+          name "QueryGeneticCode",
+          value integer 1
+        },
+        {
+          name "MaskAtHash",
+          value boolean FALSE
+        },
+        {
+          name "SegFiltering",
+          value boolean FALSE
+        },
+        {
+          name "UngappedMode",
+          value boolean FALSE
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "CompositionBasedStats",
+          value integer 0
+        },
+        {
+          name "SmithWatermanMode",
+          value boolean FALSE
+        },
+        {
+          name "MatrixName",
+          value string "BLOSUM62"
+        },
+        {
+          name "GapOpeningCost",
+          value integer 11
+        },
+        {
+          name "GapExtensionCost",
+          value integer 1
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 0
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+    },
+    masks {
+    },
+    ka-blocks {
+      {
+        lambda { 27299762333239, 10, -14 },
+        k { 10082437233059, 10, -14 },
+        h { 252837057217981, 10, -15 },
+        gapped FALSE
+      },
+      {
+        lambda { 267, 10, -3 },
+        k { 41, 10, -3 },
+        h { 14, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 82388",
+      "Effective search space used: 82388",
+      "Length adjustment: 27"
+    }
+  }
+}
+Blast4-archive ::= {
+  request {
+    body get-request-info {
+      request-id "Error"
+    }
+  },
+  results {
+  },
+  messages {
+    {
+      code 2,
+      message "BLAST Database error: Error: File
+ ({db_dir}/rps_mini.psq) not found."
+    }
+  }
+}

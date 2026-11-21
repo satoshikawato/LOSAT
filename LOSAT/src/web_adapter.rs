@@ -109,7 +109,8 @@ pub use crate::wording::{losat_bytes, losat_text};
 pub use crate::blastinput::app::output_format::{ARCHIVE_FORMAT, SAM as SAM_FORMAT};
 pub use crate::blastinput::app::Program as EngineProgram;
 pub use crate::blastinput::app::{
-    engine_error, formatting_handler_check, parse_formatting_string, report_format,
+    engine_error, formatting_handler_check, missing_subject_error, parse_formatting_string,
+    report_format,
 };
 
 // The hit list sizes of the formats (`blastinput/report_counts.rs`), the scoring matrices that

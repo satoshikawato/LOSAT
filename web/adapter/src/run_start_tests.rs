@@ -250,7 +250,55 @@ fn the_logfile_is_a_file_of_the_run() {
         let (result, streams) = run_of(&words);
         assert_eq!(result.unwrap_err(), refusal, "{program}");
         assert_eq!(run_files(&streams), None, "{program}");
-        assert_eq!(messages_place(&streams), None, "{program}");
+        // The refusal comes after the start, whose messages go to stream 3 (NCBI's `cerr` for a
+        // name whose directory does not exist).
+        assert_eq!(
+            messages_place(&streams),
+            Some(STREAM_DIAGNOSTICS),
+            "{program}"
+        );
+        // The command line, which refuses no name, prints its help and its version and ends its
+        // dry run with that name (line WQA's D14, 2026-11-21).
+        for (word, kind) in [("-h", "help"), ("-version", "version"), ("-dryrun", "")] {
+            let mut ending = words.clone();
+            ending.push(word);
+            assert_eq!(prints(&ending), Some(kind).filter(|kind| !kind.is_empty()));
+            validate(&ending).unwrap();
+            let (result, streams) = run_of(&ending);
+            result.unwrap();
+            assert_eq!(
+                streams.contains_key(&crate::emit::STREAM_PRINTED),
+                !kind.is_empty(),
+                "{program} {word}"
+            );
+            assert_eq!(run_files(&streams), None, "{program} {word}");
+        }
+    }
+}
+
+/// NCBI's error for an argv without `-subject` and `-db`, which the command line raises after
+/// `-outfmt`'s number and before its other checks (the ranges, the options, the formats that the
+/// program does not write); a dry run ends before it. `blastp -query -h` is such an argv: `-h` is
+/// the query's name (line WQA's D14, 2026-11-21).
+#[test]
+fn an_argv_without_subjects_fails_as_on_the_command_line() {
+    let error = "BLAST query/options error: Either a BLAST database or subject sequence(s) must be specified\nPlease refer to the LOSAT user manual.\n";
+    for (program, query, _) in SEARCHES {
+        for words in [
+            vec![program, "-query", "-h"],
+            vec![program, "-query", query, "-evalue", "0"],
+            vec![program, "-query", query, "-subject_loc", "x"],
+            vec![program, "-query", query, "-outfmt", "17"],
+        ] {
+            assert_eq!(prints(&words), None, "{words:?}");
+            assert_eq!(validate(&words).unwrap_err(), error, "{words:?}");
+            assert_eq!(run_of(&words).0.unwrap_err(), error, "{words:?}");
+        }
+        assert_eq!(
+            validate(&[program, "-query", query, "-outfmt", "x"]).unwrap_err(),
+            "BLAST query/options error: 'x' is not a valid output format\nPlease refer to the LOSAT user manual.\n"
+        );
+        validate(&[program, "-query", query, "-dryrun"]).unwrap();
     }
 }
 

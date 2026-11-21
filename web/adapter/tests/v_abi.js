@@ -834,7 +834,19 @@ function checkPrints(reactor, native) {
   const made = fs.readFileSync(path.join(dir, "v.log"));
   assert.deepEqual(storedZipEntries(logged.run.streams.get(8)).map(([name, bytes]) => [name, sha256(bytes)]), [["v.log", sha256(made)]],
                    "the file of -logfile (stream 8) is the CLI's");
-  count += 6;
+  fs.rmSync(path.join(dir, "v.log"));
+  // A -logfile name with a directory, which a run that searches refuses: the CLI, which opens the file of -logfile
+  // before it prints, writes to its standard error where the directory does not exist and prints its help and its
+  // version (line WQA's D14, 2026-11-21). LOSAT Web has no directory, and no file.
+  for (const [word, kind] of [["-h", "help"], ["-version", "version"]]) {
+    const run = prints(["blastp", ...inputs, word, "-logfile", "a/b.log", "-num_threads", "1"], kind).run;
+    assert.ok(!run.streams.get(8)?.length, `${word} -logfile a/b.log: no file of -logfile`);
+  }
+  // A help or version word as the value of an option that takes one is that value, as the CLI's parser reads it; only
+  // NCBI's scan of the versions before the arguments reads every word (`-subject -version`).
+  prints(["blastp", "-query", "q.fa", "-subject", "-version", "-num_threads", "1"], "version");
+  prints(["tblastn", ...inputs, "-outfmt", "-version-full", "-num_threads", "1"], "version");
+  count += 10;
   // What stops the CLI before its help: a value before the help word, and the registry file of -conffile, which the
   // command line reads before it reads its arguments.
   for (const argv of [["blastn", ...inputs, "-evalue", "abc", "-h", "-num_threads", "1"],
@@ -848,6 +860,38 @@ function checkPrints(reactor, native) {
     assert.equal(validated.error.trimEnd(), expected.stderr.toString().trimEnd(), `${label}: the CLI's message`);
     count++;
   }
+  // The help words that are an option's value (line WQA's D14, 2026-11-21): the run is the CLI's, which fails, given the
+  // registered inputs: `-query -h` names no subject (NCBI's error before the query is read), `-outfmt -h` and
+  // `-evalue -h` are values that the CLI rejects.
+  const sequences = { blastp: ["MKVLAAGIVG", "MKVLAAGIVG"], blastx: ["ACGTACGTAC", "MKVLAAGIVG"], tblastn: ["MKVLAAGIVG", "ACGTACGTAC"],
+                      tblastx: ["ACGTACGTAC", "ACGTACGTAC"], blastn: ["ACGTACGTAC", "ACGTACGTAC"] };
+  const fails = (argv) => {
+    const label = argv.join(" ");
+    assert.equal(start(argv).prints, null, `${label}: not a run that prints`);
+    const expected = cli(argv);
+    assert.notEqual(expected.status, 0, `${label}: the CLI fails`);
+    const message = expected.stderr.toString().trimEnd();
+    const validated = reactor.call("losat_web2_validate", argv.join("\0"));
+    assert.equal(validated.status, -1, `${label}: validate fails`);
+    assert.equal(validated.error.trimEnd(), message, `${label}: validate gives the CLI's message`);
+    const [query, subject] = sequences[argv[0]].map((residues, kind) =>
+      reactor.call("losat_web2_register", argv[0], kind, Buffer.from(`>r${kind}\n${residues}\n`)).status);
+    assert.ok(query > 0 && subject > 0, `${label}: the inputs are registered`);
+    const run = reactor.call("losat_web2_run", argv.join("\0"), query, subject);
+    for (const handle of [query, subject]) assert.equal(reactor.call("losat_web2_release", handle).status, 0);
+    assert.equal(run.status, -1, `${label}: run fails`);
+    assert.equal(run.error.trimEnd(), message, `${label}: run gives the CLI's message`);
+    assert.ok(!run.streams.get(3)?.length && !run.streams.get(11)?.length, `${label}: nothing on streams 3 and 11`);
+    count++;
+  };
+  for (const program of Object.keys(FORMATS)) fails([program, "-query", "-h", "-num_threads", "1"]);
+  fails(["blastp", ...inputs, "-outfmt", "-h", "-num_threads", "1"]);
+  fails(["blastn", ...inputs, "-evalue", "-xmlhelp", "-num_threads", "1"]);
+  // `-out -h` is the file `-h` of -out, which a run refuses whatever its name (abi_v2.md §4): not the help.
+  const out = ["blastp", ...inputs, "-out", "-h", "-num_threads", "1"];
+  assert.equal(start(out).prints, null, "-out -h: not a run that prints");
+  assert.equal(reactor.call("losat_web2_validate", out.join("\0")).error.trimEnd(), "-out is not accepted: a run writes every output format of the program");
+  count++;
   fs.rmSync(dir, { recursive: true });
   return count;
 }

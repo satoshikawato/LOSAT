@@ -5,3 +5,7 @@
   subject for them; the run searches nothing, its results say so, and the Outputs show the text under "Help" or
   "Version" and save it. ABI v2 is version 10 (stream 11). In the library API and pylosat these words stay refused;
   the refusal now names LOSAT Web among the places that run them.
+- LOSAT Web's ABI v2: an argv without `-subject` (for example `blastp -query -h`, whose `-h` is the query's name)
+  fails with the command line's error ("Either a BLAST database or subject sequence(s) must be specified") where it
+  searched the registered subject; a `-logfile` name with a directory no longer stops the help, the version or a dry
+  run, which the command line prints or ends (the name is still refused when the run searches).

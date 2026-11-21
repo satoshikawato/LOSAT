@@ -254,6 +254,24 @@ pub fn prints(words: &[&str]) -> Option<&'static str> {
     }
 }
 
+/// Whether the argv of `command` names its subjects: `-subject` or `-db`.
+fn names_subjects(command: &Commands) -> bool {
+    match command {
+        Commands::Blastp(a) => a.subject.is_some() || a.db.is_some(),
+        Commands::Tblastn(a) => a.subject.is_some() || a.db.is_some(),
+        Commands::Blastn(a) => a.subject.is_some() || a.db.is_some(),
+        Commands::Tblastx(a) => a.subject.is_some() || a.db.is_some(),
+        Commands::Blastx(a) => a.subject.is_some() || a.db.is_some(),
+        Commands::Psiblast(_)
+        | Commands::Rpsblast(_)
+        | Commands::Rpstblastn(_)
+        | Commands::Makedb(_)
+        | Commands::Rpsbproc(_) => {
+            unreachable!("rejected by Program::parse")
+        }
+    }
+}
+
 /// The second part of `parse_run`: the argv's `-outfmt`, read as the CLI reads it.
 fn read_outfmt(
     words: &[&str],
@@ -263,6 +281,13 @@ fn read_outfmt(
     let outfmt = std::mem::replace(outfmt_of(&mut command), "0".to_string());
     let choice = losat::web_adapter::parse_formatting_string(&outfmt)
         .map_err(|error| format!("{error:#}"))?;
+    // NCBI's error for an argv without `-subject` (and without `-db`), which the command line
+    // raises after it read `-outfmt`'s number and before its other checks, as it does where the
+    // run has inputs (the registered records are the files of `-query` and `-subject`; line
+    // WQA's D14, 2026-11-21: `blastp -query -h`, whose `-h` is the query's name).
+    if !names_subjects(&command) {
+        return Err(format!("{:#}", losat::web_adapter::missing_subject_error()));
+    }
     // The `@PG` line of SAM (outfmt 17) shows the command line, which `main` gives BLASTN: the
     // run's, `losat` and its argv, each word followed by one space (`cli::command_line_bytes`). Only
     // a run that writes SAM holds it.
@@ -348,7 +373,7 @@ const START_VARIABLES: &[(&str, &str)] = &[(
 /// `START_VARIABLES`, with the registry files registered now (kind 2, `files::registry_files`) and
 /// the file of `-logfile` going to `run_files`; the messages that the command line writes to its
 /// standard error go to `diagnostics`. `Err` when the start ends the run (a usage report or a
-/// load that LOSAT refuses, a `-logfile` name that LOSAT Web refuses, the error of NCBI's load:
+/// load that LOSAT refuses, the error of NCBI's load:
 /// `-conffile` of a file that is not registered, a registry file that NCBI cannot read), with the
 /// message that the command line writes to its standard error without `-logfile`, and the start
 /// when its file of `-logfile` is open (it has the messages); and for a program that ABI v2 does
@@ -392,7 +417,9 @@ enum Next {
 /// the version that the start printed (`CallerStart::version`), the arguments parsed
 /// (`parse_printing`: the help that stops the reader is printed), the settings that LOSAT refuses
 /// (`start.settings()?`), the end of a dry run (rc 0), then `-outfmt`, which NCBI reads in `Run`
-/// (`read_outfmt`: a dry run does not read it). `validate` and `run` take the argv here.
+/// (`read_outfmt`: a dry run does not read it), with the error of an argv without subjects, and
+/// LOSAT Web's refusal of a `-logfile` name (`CallerStart::log_refusal`). `validate` and `run`
+/// take the argv here.
 fn started_command(words: &[&str], started: &CallerStart) -> Result<Next, String> {
     if let Some(text) = started.version() {
         return Ok(Next::Prints(text.to_string()));
@@ -405,7 +432,14 @@ fn started_command(words: &[&str], started: &CallerStart) -> Result<Next, String
     if started.dry_run() {
         return Ok(Next::Ends);
     }
-    read_outfmt(words, program, command).map(|parsed| Next::Search(Box::new(parsed)))
+    let parsed = read_outfmt(words, program, command)?;
+    // LOSAT Web's refusal of a `-logfile` name with a directory, which the command line does not
+    // make: after its steps before the search, so that their outcome is the command line's (its
+    // help, its version, a dry run, its errors; line WQA's D14, 2026-11-21).
+    if let Some(refusal) = started.log_refusal() {
+        return Err(refusal);
+    }
+    Ok(Next::Search(Box::new(parsed)))
 }
 
 /// A receiver of the files of a run that keeps none (`validate`, which emits nothing).

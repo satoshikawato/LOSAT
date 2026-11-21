@@ -34,25 +34,39 @@ impl RunFiles {
     // file, or `cerr` when its directory does not exist.
     /// The target of the `-logfile` value `name` (`None` without one). On `Disk` the file
     /// system's (`diag_target`). For a `Receiver`: NCBI's special names as there
-    /// (`special_log_target`), `cerr` for `.` and `..` (directories, which NCBI cannot open), and a
-    /// file in memory for any other name without a directory, which `deliver_log` hands over; a
-    /// name with a directory is LOSAT Web's refusal (its host has no directories, where NCBI would
-    /// write the messages to `cerr` instead).
-    pub fn log_target(&self, name: Option<&OsStr>) -> Result<DiagTarget, String> {
+    /// (`special_log_target`), `cerr` for `.` and `..` (directories, which NCBI cannot open) and
+    /// for a name with a directory (its host has none, and NCBI writes to `cerr` where the
+    /// directory does not exist), and a file in memory for any other name, which `deliver_log`
+    /// hands over. A run that searches refuses a name with a directory after the command line's
+    /// steps before its search (`log_refusal`), so the help and the version of an argv with one
+    /// are printed, as on the command line (line WQA's D14, 2026-11-21).
+    pub fn log_target(&self, name: Option<&OsStr>) -> DiagTarget {
         match self {
-            RunFiles::Disk => Ok(diag_target(name)),
+            RunFiles::Disk => diag_target(name),
             RunFiles::Receiver(_) => match (special_log_target(name), name) {
-                (Some(target), _) => Ok(target),
-                (None, None) => Ok(DiagTarget::Stderr),
-                // The working directory and its parent, which NCBI cannot open as a file: `cerr`.
-                (None, Some(name)) if name == "." || name == ".." => Ok(DiagTarget::Stderr),
-                (None, Some(name)) if name.as_encoded_bytes().contains(&b'/') => Err(format!(
-                    "the -logfile name {} has a directory, which LOSAT Web does not have: give a file name without one",
-                    name.to_string_lossy()
-                )),
-                (None, Some(_)) => Ok(DiagTarget::Memory(Default::default())),
+                (Some(target), _) => target,
+                (None, None) => DiagTarget::Stderr,
+                // The working directory and its parent, which NCBI cannot open as a file, and a
+                // file in a directory: `cerr`.
+                (None, Some(name)) if name == "." || name == ".." || has_directory(name) => {
+                    DiagTarget::Stderr
+                }
+                (None, Some(_)) => DiagTarget::Memory(Default::default()),
             },
         }
+    }
+
+    /// LOSAT Web's refusal of the `-logfile` value `name` of a run that searches: a name with a
+    /// directory, which its host does not have (a `Receiver`'s; `None` on `Disk`, for NCBI's
+    /// special names, `.` and `..`).
+    pub fn log_refusal(&self, name: Option<&OsStr>) -> Option<String> {
+        let name = name.filter(|name| special_log_target(Some(name)).is_none())?;
+        (matches!(self, RunFiles::Receiver(_)) && has_directory(name)).then(|| {
+            format!(
+                "the -logfile name {} has a directory, which LOSAT Web does not have: give a file name without one",
+                name.to_string_lossy()
+            )
+        })
     }
 
     /// Hands the file of the `-logfile` value `name`, which `target` holds (`log_target`), to the
@@ -69,6 +83,11 @@ impl RunFiles {
             _ => Ok(()),
         }
     }
+}
+
+/// A `-logfile` name that names a file in a directory (`.` and `..` are directories themselves).
+fn has_directory(name: &OsStr) -> bool {
+    name != "." && name != ".." && name.as_encoded_bytes().contains(&b'/')
 }
 
 #[cfg(test)]

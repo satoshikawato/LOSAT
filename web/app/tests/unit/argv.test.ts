@@ -98,13 +98,17 @@ describe('buildArgv', () => {
     ).toThrow(message);
   });
 
-  // WA-FM-04 and WA-FM-05: the CLI prints its help for these words, and its message for the
-  // others names -subject or -num_threads, which the browser sets itself.
+  // WA-FM-04: the CLI's message for these words names -subject or -num_threads, which the browser sets itself.
   const extra = (program: ProgramId, words: readonly string[]) => () =>
     buildArgv({ program, queryName: 'q.fa', subjectName: 's.fa', parameters: [], extra: words });
-  it.each(['-h', '-help', '-help-full', '-xmlhelp', '--help'])('refuses %s, which asks the CLI for its help, in a few words', (word) => {
-    for (const program of PROGRAMS) expect(extra(program.id, ['-evalue', '1', word]), program.id).toThrow(`${word} is not available in the browser`);
-  });
+  // Line WQA's D14, 2026-11-20: the engine prints the command line's help or version for these words, as the CLI does
+  // (WA-FM-05 refused the help words).
+  it.each(['-h', '-help', '-help-full', '-xmlhelp', '--help', '-version', '-version-full', '-version-full-xml', '-version-full-json'])(
+    'passes %s, which asks the CLI for its help or version, to the engine',
+    (word) => {
+      for (const program of PROGRAMS) expect(extra(program.id, ['-evalue', '1', word])(), program.id).toContain(word);
+    },
+  );
 
   it('refuses the database options, also written -flag=value, as the browser build cannot search a database', () => {
     for (const program of PROGRAMS) {
@@ -268,7 +272,7 @@ describe('refusedFields', () => {
       extra: false,
       flags: ['-word_size'],
     });
-    expect(fields('BLAST query/options error: Invalid discontiguous template parameters: word size must be either 11 or 12')).toEqual({
+    expect(fields('LOSAT query/options error: Invalid discontiguous template parameters: word size must be either 11 or 12')).toEqual({
       extra: false,
       flags: [],
     });

@@ -1,4 +1,4 @@
-import { CUSTOM_OUTPUT, OUTPUT_FORMATS, type RunOutput } from 'losat/domain';
+import { CUSTOM_OUTPUT, OUTPUT_FORMATS, type PrintedKind, type RunOutput } from 'losat/domain';
 // The compatibility outputs that LOSAT Web stores and exports byte for byte: the formats that every
 // run writes, and the output of the argv's own -outfmt: any other format that the CLI writes, and
 // 6 or 7 with fields (WA2-OP-03 and W11, Owner 2026-11-05; docs/web/abi_v2.md §5, §7).
@@ -171,6 +171,27 @@ function exportPrefix(run: ExportedRun): string {
   const time = new Date(run.queuedAt).toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z');
   const task = run.task === undefined ? '' : `-${run.task}`;
   return `losat-run${run.number}-${run.program}${task}-${time}`;
+}
+
+/**
+ * The file type of the text that a run printed (line WQA's D14 review, 2026-11-20), as its producer writes it: NCBI's
+ * XML (`-xmlhelp`, `-version-full-xml`) begins with the XML declaration, the JSON of `-version-full-json` with `{`; the
+ * help and the other versions are text.
+ */
+export function printedFileType(bytes: Uint8Array): { readonly extension: string; readonly type: string } {
+  const start = new TextDecoder().decode(bytes.subarray(0, 5));
+  if (start === '<?xml') return FILE_TYPES[5]!;
+  return start.startsWith('{') ? FILE_TYPES[12]! : TEXT_FILE;
+}
+
+/**
+ * The file name of the text that a run printed in place of a search (the command line's help or version; line WQA's
+ * D14, 2026-11-20): the run's start of the names of its files, then `help` or `version` and the text's file type
+ * (`printedFileType`: `losat-run3-blastn-megablast-20261104T111530Z.help.txt`, `….help.xml` for `-xmlhelp`,
+ * `….version.json` for `-version-full-json`).
+ */
+export function printedFileName(run: ExportedRun, kind: PrintedKind, bytes: Uint8Array): string {
+  return `${exportPrefix(run)}.${kind}.${printedFileType(bytes).extension}`;
 }
 
 /**

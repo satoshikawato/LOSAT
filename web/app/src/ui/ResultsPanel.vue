@@ -79,15 +79,18 @@ const emptyPlot = computed(() => (state.value.hsps.length > 0 ? undefined : noHs
 type DownloadItem = { readonly key: string; readonly label: string; readonly testid: string } & (
   | { readonly format: RunOutput }
   | { readonly runFile: number }
+  | { readonly printed: true }
 );
 const downloads = computed(() => {
-  const items: DownloadItem[] = ([0, 6, 7] as const).map((format) => ({
+  // A run that printed the command line's help or version has that text alone, and the files of the run (line WQA's D14).
+  const prints = loaded.value?.run.snapshot.prints;
+  const items: DownloadItem[] = prints !== undefined ? [{ key: 'printed', printed: true, label: prints === 'help' ? 'Help' : 'Version', testid: 'results-download-printed' }] : ([0, 6, 7] as const).map((format) => ({
     key: `format-${format}`,
     format,
     label: `${FORMAT_NAMES[format]} (outfmt ${format})`,
     testid: `results-download-${format}`,
   }));
-  const custom = customOutfmt(loaded.value?.run.snapshot.argv ?? []);
+  const custom = prints === undefined ? customOutfmt(loaded.value?.run.snapshot.argv ?? []) : undefined;
   if (custom !== undefined) {
     const name = FORMAT_NAMES[formatNumber(custom) ?? 0];
     items.push({ key: 'format-custom', format: CUSTOM_OUTPUT, label: `${name} (outfmt ${custom})`, testid: 'results-download-custom' });
@@ -111,6 +114,7 @@ function download(item: DownloadItem): void {
   const run = loaded.value?.run;
   if (run === undefined) return;
   if ('format' in item) void saver.save(run, item.format);
+  else if ('printed' in item) void saver.savePrinted(run);
   else void saver.saveRunFile(run, item.runFile);
 }
 
@@ -347,8 +351,8 @@ async function toAlignments(id: HspId): Promise<void> {
       />
 
       <template v-if="state.phase === 'ready' && loaded">
-        <!-- A dry run (-dryrun) searched no query: its notice says so. -->
-        <QueryPicker v-if="multiQuery && !loaded.run.snapshot.dryRun" :results="results" :state="state" />
+        <!-- A dry run (-dryrun), and a run that printed the command line's help or version, searched no query: its notice says so. -->
+        <QueryPicker v-if="multiQuery && !loaded.run.snapshot.dryRun && !loaded.run.snapshot.prints" :results="results" :state="state" />
         <ResultNotices :state="state" @clear="results.setFilters({ queriesWithHitsOnly: state.filters.queriesWithHitsOnly ?? false })" />
 
         <TabList v-model="view" class="results-tabs" label="Results view" :tabs="TABS" />

@@ -48,7 +48,7 @@ function setup(
   const engine = {
     describe: fake.describe.bind(fake),
     start: async (argv: readonly string[]): Promise<StartResult> =>
-      options.start?.(argv) ?? { ok: true, start: { conffile: null, logFile: null, dryRun: false, registerInputs: false } },
+      options.start?.(argv) ?? { ok: true, start: { conffile: null, logFile: null, dryRun: false, registerInputs: false, prints: null } },
     validate: async (argv: readonly string[], registry?: RegistryFile): Promise<ValidationResult> => {
       validated.push(argv);
       registries.push(registry);
@@ -437,7 +437,7 @@ describe('SearchDraft inputs', () => {
   // The validation says which; the draft reads a refused source again, and checks the others again, with that reader.
   it("reads and checks the sources with the data loaders of the argv's registry, as the CLI reads them", async () => {
     const { draft, data } = setup({
-      start: (argv) => ({ ok: true, start: { conffile: argv.includes('-conffile') ? 'nol.ini' : null, logFile: null, dryRun: false, registerInputs: false } }),
+      start: (argv) => ({ ok: true, start: { conffile: argv.includes('-conffile') ? 'nol.ini' : null, logFile: null, dryRun: false, registerInputs: false, prints: null } }),
       validate: (argv, registry) => ({ ok: true, dataLoaders: !(argv.includes('-conffile') && registry !== undefined) }),
     });
     const readers: string[] = [];
@@ -483,7 +483,7 @@ describe('SearchDraft inputs', () => {
   // DATA_LOADERS=none that the chosen file already sets while the argv is invalid.
   it('reads the sources with the data loaders of the registry while another option is refused', async () => {
     const { draft, data } = setup({
-      start: (argv) => ({ ok: true, start: { conffile: argv.includes('-conffile') ? 'nol.ini' : null, logFile: null, dryRun: false, registerInputs: false } }),
+      start: (argv) => ({ ok: true, start: { conffile: argv.includes('-conffile') ? 'nol.ini' : null, logFile: null, dryRun: false, registerInputs: false, prints: null } }),
       validate: (argv, registry) => {
         const dataLoaders = !(argv.includes('-conffile') && registry !== undefined);
         return argv.includes('-unknown_option') ? { ok: false, message: 'Unexpected extra argument: -unknown_option', dataLoaders } : { ok: true, dataLoaders };
@@ -518,7 +518,7 @@ describe('SearchDraft inputs', () => {
 
     it('-conffile turns the data loaders off while a refused first line is read with them on', async () => {
       const { draft, data } = setup({
-        start: (argv) => ({ ok: true, start: { conffile: argv.includes('-conffile') ? 'nol.ini' : null, logFile: null, dryRun: false, registerInputs: false } }),
+        start: (argv) => ({ ok: true, start: { conffile: argv.includes('-conffile') ? 'nol.ini' : null, logFile: null, dryRun: false, registerInputs: false, prints: null } }),
         validate: (argv, registry) => ({ ok: true, dataLoaders: !(argv.includes('-conffile') && registry !== undefined) }),
       });
       const readers: string[] = [];
@@ -568,7 +568,7 @@ describe('SearchDraft inputs', () => {
 
     it('records read with the loaders off, ending after they turned on again, are read again (and refused)', async () => {
       const { draft, data } = setup({
-        start: (argv) => ({ ok: true, start: { conffile: argv.includes('-conffile') ? 'nol.ini' : null, logFile: null, dryRun: false, registerInputs: false } }),
+        start: (argv) => ({ ok: true, start: { conffile: argv.includes('-conffile') ? 'nol.ini' : null, logFile: null, dryRun: false, registerInputs: false, prints: null } }),
         validate: (argv, registry) => ({ ok: true, dataLoaders: !(argv.includes('-conffile') && registry !== undefined) }),
       });
       draft.setExtra('-conffile nol.ini');
@@ -1449,9 +1449,9 @@ describe('SearchDraft submit', () => {
     expect(await refusal('-qcov_hsp_perc 50 -use_sw_tback')).toBe('ok');
   });
 
-  // WA-FM-04, WA-FM-05: the CLI prints its help for -h, and its messages for these name
-  // -subject and -num_threads, which the browser sets itself.
-  it("refuses in Additional options the CLI's help and the options that a search in the browser cannot have, in the browser's words", async () => {
+  // WA-FM-04: the CLI's messages for these name -subject and -num_threads, which the browser sets itself. The CLI's help
+  // words are not refused: the engine prints the command line's help (line WQA's D14, 2026-11-20).
+  it("refuses in Additional options the options that a search in the browser cannot have, in the browser's words", async () => {
     const { draft } = setup({ useCoordinator: true });
     draft.setPaste('query', '>q\nACGT\n');
     draft.setPaste('subject', '>s\nACGT\n');
@@ -1462,8 +1462,6 @@ describe('SearchDraft submit', () => {
       const validation = draft.state.get().validation;
       return validation.state === 'invalid' ? validation.message : validation.state;
     };
-    expect(await refusal('-help')).toBe('-help is not available in the browser');
-    expect(await refusal('-ungapped -h')).toBe('-h is not available in the browser');
     expect(await refusal('-db nt')).toBe('-db (a database search) is not supported in the browser yet');
     expect(await refusal('-taxids 9606')).toBe('-taxids (a database search filter) is not supported in the browser yet');
     expect(await refusal('-mt_mode 1')).toBe('-mt_mode is managed by LOSAT');
@@ -1518,13 +1516,13 @@ describe('SearchDraft submit', () => {
 
   it("validates the draft's argv with the engine and shows its message", async () => {
     const { draft, validated } = setup({
-      validate: (argv) => (argv.includes('-word_size') ? { ok: false, message: 'BLAST query/options error: bad' } : { ok: true, dataLoaders: true }),
+      validate: (argv) => (argv.includes('-word_size') ? { ok: false, message: 'LOSAT query/options error: bad' } : { ok: true, dataLoaders: true }),
     });
     await draft.idle();
     expect(draft.state.get().validation).toEqual({ state: 'ok' });
     draft.setField('-word_size', '3');
     await draft.idle();
-    expect(draft.state.get().validation).toEqual({ state: 'invalid', message: 'BLAST query/options error: bad' });
+    expect(draft.state.get().validation).toEqual({ state: 'invalid', message: 'LOSAT query/options error: bad' });
     expect(validated.at(-1)).toEqual(['blastn', '-query', 'query.fa', '-subject', 'subject.fa', '-word_size', '3']);
   });
 
@@ -1534,13 +1532,13 @@ describe('SearchDraft submit', () => {
   it("asks for the file of the argv's -conffile, validates with its bytes under the argv's name, and runs with it", async () => {
     const missing = 'Critical: (106.23) Registry file "settings.ini" not found, aborting.';
     const { draft, registries, requests } = setup({
-      start: (argv) => ({ ok: true, start: { conffile: argv.includes('-conffile') ? 'settings.ini' : null, logFile: null, dryRun: false, registerInputs: false } }),
+      start: (argv) => ({ ok: true, start: { conffile: argv.includes('-conffile') ? 'settings.ini' : null, logFile: null, dryRun: false, registerInputs: false, prints: null } }),
       validate: (argv, registry) => (argv.includes('-conffile') && registry === undefined ? { ok: false, message: missing } : { ok: true, dataLoaders: true }),
     });
     draft.setPaste('query', '>q\nACGT\n');
     draft.setPaste('subject', '>s\nACGT\n');
     await draft.idle();
-    expect(draft.state.get().start).toEqual({ conffile: null, logFile: null, dryRun: false, registerInputs: false });
+    expect(draft.state.get().start).toEqual({ conffile: null, logFile: null, dryRun: false, registerInputs: false, prints: null });
     draft.setExtra('-conffile settings.ini');
     await draft.idle();
     expect(draft.state.get().start?.conffile).toBe('settings.ini');
@@ -1593,7 +1591,7 @@ describe('SearchDraft submit', () => {
       start: (argv) => {
         const at = argv.findIndex((word) => word === '-conffile' || word.startsWith('-conffile='));
         const name = at < 0 ? null : argv[at] === '-conffile' ? argv[at + 1]! : argv[at]!.slice('-conffile='.length);
-        return { ok: true, start: { conffile: name, logFile: null, dryRun: false, registerInputs: false } };
+        return { ok: true, start: { conffile: name, logFile: null, dryRun: false, registerInputs: false, prints: null } };
       },
     });
     draft.setConffile(file('my.ini', '[BLAST]\n'));
@@ -1664,7 +1662,7 @@ describe('SearchDraft submit', () => {
   // -conffile, the argv's name and the file, and says what to do.
   it('says that the file chosen for -conffile could not be read, and asks to choose it again', async () => {
     const { draft } = setup({
-      start: (argv) => ({ ok: true, start: { conffile: argv.includes('-conffile') ? 'settings.ini' : null, logFile: null, dryRun: false, registerInputs: false } }),
+      start: (argv) => ({ ok: true, start: { conffile: argv.includes('-conffile') ? 'settings.ini' : null, logFile: null, dryRun: false, registerInputs: false, prints: null } }),
       validate: (_argv, registry) => {
         if (registry === undefined) return { ok: true, dataLoaders: true };
         // As the Data worker's error arrives: its name and message (rpc.ts).
@@ -1683,15 +1681,43 @@ describe('SearchDraft submit', () => {
     });
   });
 
+  // Line WQA's D14, 2026-11-20: an argv with a help or version word prints the command line's text, which reads no input:
+  // Run LOSAT goes without inputs and queues one run whose inputs are empty, as the command line needs none.
+  it("runs an argv that prints the command line's help or version without inputs", async () => {
+    const { draft, requests, coordinator } = setup({
+      useCoordinator: true,
+      start: (argv) => ({
+        ok: true,
+        start: { conffile: null, logFile: null, dryRun: false, registerInputs: false, prints: argv.includes('-h') ? 'help' : argv.includes('-version') ? 'version' : null },
+      }),
+    });
+    await draft.idle();
+    expect(draft.readiness()).toBeDefined();
+    draft.setExtra('-h');
+    await draft.idle();
+    expect(draft.state.get().validation.state).toBe('ok');
+    expect(draft.readiness()).toBeUndefined();
+    const result = await draft.submit();
+    expect(result).toMatchObject({ ok: true });
+    expect(requests).toEqual([[expect.objectContaining({ query: { text: '' }, subject: { text: '' }, extra: ['-h'] })]]);
+    const runId = (result as { runIds: readonly string[] }).runIds[0]!;
+    expect(coordinator.state.get().runs.find((run) => run.snapshot.runId === runId)!.snapshot.prints).toBe('help');
+    // A search needs its inputs again.
+    draft.setExtra('-evalue 1');
+    await draft.idle();
+    expect(draft.readiness()).toBeDefined();
+    expect(await draft.submit()).toMatchObject({ ok: false });
+  });
+
   it('shows the message of an argv that the engine cannot start, and validates nothing of it', async () => {
     const { draft, validated } = setup({
-      start: (argv) => (argv.includes('-version') ? { ok: false, message: "error: unexpected argument '-version' found" } : { ok: true, start: { conffile: null, logFile: null, dryRun: false, registerInputs: false } }),
+      start: (argv) => (argv.includes('-unstartable') ? { ok: false, message: 'the engine cannot start this argv' } : { ok: true, start: { conffile: null, logFile: null, dryRun: false, registerInputs: false, prints: null } }),
     });
     await draft.idle();
     const before = validated.length;
-    draft.setExtra('-version');
+    draft.setExtra('-unstartable');
     await draft.idle();
-    expect(draft.state.get().validation).toEqual({ state: 'invalid', message: "error: unexpected argument '-version' found" });
+    expect(draft.state.get().validation).toEqual({ state: 'invalid', message: 'the engine cannot start this argv' });
     expect(draft.state.get().start).toBeUndefined();
     expect(validated).toHaveLength(before);
   });

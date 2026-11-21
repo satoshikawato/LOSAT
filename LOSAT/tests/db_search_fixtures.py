@@ -952,6 +952,16 @@ def freeze(args: argparse.Namespace) -> int:
             if xinclude.wants_pssm(row):
                 run = xinclude.run_with_pssm(command, row["row_id"], xinclude.files_kind(row), cwd=ENGINE,
                                              timeout=TIMEOUT, env=row_env(row, env), preexec_fn=ncbi_stack(row)).run
+            elif rps_cell(row["db"]) is not None:
+                # An RPS row: NCBI's run with BLASTDB the inflated database (`freeze_rps`).
+                if rps_dir_token(row):
+                    raise SystemExit(f"{row['row_id']}: a rejection row with NCBI's stdout writes no {{db_dir}}")
+                db_dir = inflate_rps(row["db"], False)
+                try:
+                    run = run_search(command, row, cwd=ENGINE, timeout=TIMEOUT,
+                                     env={**row_env(row, env), "BLASTDB": str(db_dir)})
+                finally:
+                    shutil.rmtree(db_dir, ignore_errors=True)
             else:
                 run = run_search(command, row, cwd=ENGINE, timeout=TIMEOUT, env=row_env(row, env),
                                  preexec_fn=ncbi_stack(row))

@@ -20,17 +20,7 @@ impl SeqRange {
         self.from > self.to
     }
 
-    // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/seq_formatter.cpp:477-483
-    // ```c++
-    //     CRef<CSeq_loc> range;
-    //     if(config.m_SeqRange.NotEmpty()) {
-    //     	TSeqPos length = m_BlastDb.GetSeqLength(oid);
-    //     	TSeqRange r = config.m_SeqRange;
-    //         if((TSeqPos)length <= config.m_SeqRange.GetTo()) {
-    //         	r.SetTo(length-1);
-    //     	}
-    //         if(!r.Empty()) {
-    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/seq_formatter.cpp:477-486
     /// The range clipped to a sequence of `length` letters: `None` where NCBI then takes the
     /// whole sequence (no range, or a range whose start is at or past the end).
     pub fn clipped(self, length: u32) -> Option<(u32, u32)> {
@@ -53,66 +43,15 @@ pub(super) const NO_RANGE: SeqRange = SeqRange {
 };
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:635-643
-// ```c++
-// int NStr::StringToInt(const CTempString str, TStringToNumFlags flags, int base)
-// {
-//     S2N_CONVERT_GUARD_EX(flags);
-//     Int8 value = StringToInt8(str, flags, base);
-//     if ( value < kMin_Int  ||  value > kMax_Int ) {
-//         S2N_CONVERT_ERROR(int, "overflow", ERANGE, 0);
-//     }
-//     return (int) value;
-// }
-// ```
 /// `NStr::StringToInt(text)` (`ncbi_str::string_to_int`): the number, or the message of NCBI's
 /// exception as `GetMsg` gives it (`Int8` for the text that is not a number or passes a 64-bit
 /// integer, `int` for one that fits 64 bits but not 32).
 fn string_to_int(text: &str) -> Result<i32, String> {
-    crate::ncbi_str::string_to_int(text.as_bytes(), 0).map_err(|error| error.get_msg().to_string())
+    crate::ncbi_str::string_to_int(text.as_bytes(), 0)
+        .map_err(|error| String::from_utf8_lossy(error.get_msg()).into_owned())
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:181-219
-// ```c++
-// TSeqRange
-// ParseSequenceRangeOpenEnd(const string& range_str,
-//                    	   	  const char* error_prefix /* = NULL */)
-// {
-//     static const char* kDfltErrorPrefix = "Failed to parse sequence range";
-//     static const string kDelimiters("-");
-//     string error_msg(error_prefix ? error_prefix : kDfltErrorPrefix);
-//
-//     vector<string> tokens;
-//     NStr::Split(range_str, kDelimiters, tokens);
-//     if (tokens.front().empty()) {
-//         error_msg += " (start cannot be empty)";
-//         NCBI_THROW(CBlastException, eInvalidArgument, error_msg);
-//     }
-//
-//     TSeqRange retval;
-//     int from = NStr::StringToInt(tokens.front());
-//     int to = 0;
-//
-//     if(!tokens.back().empty()) {
-//     	to = NStr::StringToInt(tokens.back());
-//
-//     	if (from <= 0 || to <= 0) {
-//     		error_msg += " (range elements cannot be less than or equal to 0)";
-//     		NCBI_THROW(CBlastException, eInvalidArgument, error_msg);
-//     	}
-//     	if (from > to) {
-//     	    error_msg += " (start cannot be larger than stop)";
-//     	    NCBI_THROW(CBlastException, eInvalidArgument, error_msg);
-//     	}
-//     	to--;
-//     	retval.SetTo(to);
-//     }
-//     //Note: TSeqRange is defaulted to max value.
-//
-//     from--;
-//     retval.SetFrom(from);
-//     return retval;
-// }
-// ```
 /// `ParseSequenceRangeOpenEnd(text)`: the range, or the message of the exception NCBI
 /// throws (a `CBlastException` of its own, or the `CStringException` of `StringToInt`).
 /// The first and the last `-`-separated pieces are the start and the end (a middle piece is

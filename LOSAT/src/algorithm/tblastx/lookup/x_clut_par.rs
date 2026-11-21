@@ -4,23 +4,8 @@
 //! the matrix's words, item SC2b), slot for slot, at every thread count.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1168-1175
-//! ```c
-//!     for (loc = location; loc; loc = loc->next){
-//!         Int4 from = loc->ssr->left;
-//!         Int4 to = loc->ssr->right - lookup->word_length + 1;
-//!
-//!         for (offset = from; offset <= to; offset++){
-//!             s_CompressedAddWordHits(&info, query->sequence, offset);
-//!         }
-//!     }
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:787-849 (`add_word_hit`, in
 //! the header of `x_clut_direct.rs`)
-//! ```c
-//!     Int4 num_entries = backbone_cell->num_used;
-//!     ...
-//!     backbone_cell->num_used++;
-//! ```
 //!
 //! The serial builder makes the reference's appends (a query offset's cells, in the order of
 //! `add_word_hits`, or of `LOSAT_X_CLUTPAIRS`' pair rows within an offset: `x_clut_direct.rs` header)
@@ -257,15 +242,6 @@ const X_WAVE_CELLS: usize = 1 << 20;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:800-806,825-836
 // (`x_takes_overflow_cell`)
-// ```c
-//     case 5:
-//         ...
-//         CompressedOverflowCell * new_cell = s_CompressedListGetNewCell(lookup);
-//     ...
-//         Int4 cell_index = (num_entries -3) & COMPRESSED_HITS_CELL_MASK ;
-//
-//         if (cell_index == 0 ) { /* can't be empty => it's full  */
-// ```
 /// The overflow cells that the appends to a cell take in the reference's table when the cell ends
 /// with `n` offsets: the appends that find the counts 0..n, of which the one that finds 5 and each
 /// that finds 3 more than a multiple of 4 past it take one (`x_takes_overflow_cell`): none for at
@@ -440,11 +416,6 @@ impl<'r> XAppendsScratch<'r> {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1352-1354
-// ```c
-//     s_CompressedAddNeighboringWords(lookup, new_alphabet->matrix->data,
-//                                     query, locations);
-//     s_CompressedLookupFinalize(lookup);
-// ```
 // NCBI builds the table on one thread before the search threads start
 // (c++/src/algo/blast/api/prelim_stage.cpp:145-188 starts them for the search); here the pool that
 // will search builds it, the same table (module header).
@@ -510,11 +481,6 @@ pub(super) fn x_try_build_flat_in_pool(
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1352-1354 (see
 // `x_try_build_flat_in_pool`)
-// ```c
-//     s_CompressedAddNeighboringWords(lookup, new_alphabet->matrix->data,
-//                                     query, locations);
-//     s_CompressedLookupFinalize(lookup);
-// ```
 /// `x_try_build_flat_in_pool` with the words of the search matrix `matrix`, any but BLOSUM62 (items
 /// SC2b, SC2d-2): the same passes, spare vectors and build ahead (`x_flat_args`; another matrix's
 /// build has no extra tasks, its contexts' Karlin blocks are computed before it); `pool` has more
@@ -581,11 +547,6 @@ pub(super) fn x_try_build_flat_in_pool_of(
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1352-1354 (see
 // `x_try_build_flat_in_pool`)
-// ```c
-//     s_CompressedAddNeighboringWords(lookup, new_alphabet->matrix->data,
-//                                     query, locations);
-//     s_CompressedLookupFinalize(lookup);
-// ```
 // NCBI builds a query chunk's table on one thread before the search threads start
 // (c++/src/algo/blast/api/prelim_stage.cpp:145-188 starts them for the search); here a BLASTX unit
 // builds it on the threads the unit cap leaves it, the same table (module header).
@@ -640,11 +601,6 @@ pub(super) fn x_try_build_flat_in_parts<H: XQueryOffset>(
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1352-1354 (see
 // `x_try_build_flat_in_pool`)
-// ```c
-//     s_CompressedAddNeighboringWords(lookup, new_alphabet->matrix->data,
-//                                     query, locations);
-//     s_CompressedLookupFinalize(lookup);
-// ```
 /// Item SC2d (LOSAT_X_BPLKPAHEAD): the first part of `x_try_build_flat_in_pool` (of
 /// `x_try_build_flat_in_pool_of` for another search matrix `matrix`, item SC2d-2) for a build ahead
 /// of its block (`x_flat_args.x_ahead`, the switch's mode on): the one-latch appends pass with the
@@ -717,9 +673,6 @@ pub(super) fn x_flat_ahead_appends_in_pool(
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1352-1354 (see
 // `x_try_build_flat_in_pool`)
-// ```c
-//     s_CompressedLookupFinalize(lookup);
-// ```
 /// Item SC2d (LOSAT_X_BPLKPAHEAD): the second part of a build ahead of its block, after
 /// `x_flat_ahead_appends_in_pool` gave `appends` (of `matrix`, `query` and `locations`): the stripes
 /// pass on `pool`'s threads, on the vectors that `spare` holds, all of them (without their room no
@@ -829,12 +782,7 @@ impl<H> XFlatSpare<H> {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1224-1226 (`finalize`)
-// ```c
-//     pv = lookup->pv = (PV_ARRAY_TYPE *)calloc(
-//                               (lookup->backbone_size >> pv_array_bts) + 1,
-//                               sizeof(PV_ARRAY_TYPE));
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1217-1219 (`finalize`)
 // Buffer reuse (LOSAT_X_BPLKPAHEAD): the PV array is zeroed as `calloc` zeroes NCBI's.
 /// `len` zeroed entries in `pv`'s buffer, which has the room (`XFlatSpare::x_room_for`).
 fn x_zeroed_in(mut pv: Vec<u32>, len: usize) -> Vec<u32> {
@@ -1289,11 +1237,7 @@ struct XParallelCuts<'a, H = i32> {
 
 // No NCBI counterpart: the largest PV shift that `finalize` (blast_aalookup.c:1219-1222, below)
 // chooses for a backbone of this size; the stripes are whole PV words at any shift up to it.
-// ```c
-//     if (count <= 0.01 * lookup->backbone_size) {
-//         pv_array_bts += ilog2(lookup->backbone_size / (8 * kTargetPVBytes));
-//     }
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1213-1214
 fn x_largest_pv_shift(backbone_size: usize) -> usize {
     PV_ARRAY_BTS + ilog2(backbone_size / (8 * X_TARGET_PV_BYTES))
 }
@@ -1310,12 +1254,6 @@ fn x_stripe_shift(backbone_size: usize, stripes: usize, smallest: usize) -> usiz
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1168-1175
-// ```c
-//         Int4 from = loc->ssr->left;
-//         Int4 to = loc->ssr->right - lookup->word_length + 1;
-//
-//         for (offset = from; offset <= to; offset++){
-// ```
 // No NCBI counterpart: how the appends pass is divided among the pool's threads. Scheduling only.
 /// The chunks' sizes in query offsets (`x_chunks`).
 #[derive(Clone, Copy)]
@@ -1400,11 +1338,6 @@ fn x_chunks(
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1168-1175 (`x_chunks`) and
 // :1075-1121 (`s_CompressedAddWordHits`, `XWords::for_each_word`)
-// ```c
-//         for (offset = from; offset <= to; offset++){
-//             s_CompressedAddWordHits(&info, query->sequence, offset);
-//         }
-// ```
 /// A chunk's appends (the serial count pass's statements) in pieces of `piece_appends` appends (the
 /// last one fewer; none for a chunk of no appends), each sorted by stripe into the task's segment as
 /// soon as it is full, so that the scratch holds at most a piece (item SC2d-2); the pieces in order
@@ -1614,23 +1547,10 @@ struct XStripeCounts {
     cells: Vec<usize>,
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:787-849 (`add_word_hit`,
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:787-849,1224-1230 (`add_word_hit`,
 // module header of `x_clut_direct.rs`), :1197-1235 (`finalize`) and
 // c++/src/algo/blast/core/blast_aascan.c:348-396 (the scan order, module header of
 // `x_clut_direct.rs`)
-// ```c
-//     Int4 num_entries = backbone_cell->num_used;
-//     ...
-//     backbone_cell->num_used++;
-//     ...
-//     for (i = 0; i < lookup->backbone_size; i++) {
-//         count = lookup->backbone[i].num_used;
-//
-//         if (count > 0) {
-//             /* set the corresponding bit in the pv_array */
-//             PV_SET(pv, i, pv_array_bts);
-//             longest_chain = MAX(count, longest_chain);
-// ```
 /// The count, layout and fill of one stripe (module header).
 #[allow(clippy::too_many_arguments)]
 fn x_stripe_build<H: XQueryOffset>(
@@ -1768,12 +1688,7 @@ fn x_next_count_range(
 /// the cells' counts (then cursors), the cells of more than 5 offsets.
 type XFillScratch = (Vec<u32>, Vec<u32>, Vec<u32>);
 
-// NCBI reference (598d8ae6): as `x_stripe_build` (blast_aalookup.c:787-849, :1197-1235)
-// ```c
-//     Int4 num_entries = backbone_cell->num_used;
-//     ...
-//     backbone_cell->num_used++;
-// ```
+// NCBI reference (598d8ae6): as `x_stripe_build` (c++/src/algo/blast/core/blast_aalookup.c:787-849, :1197-1235)
 /// LOSAT_X_BPSTRIPEFILL: `x_stripe_build` with the stripe's parts of the chunks read once, in chunk
 /// order, into a copy while the cells are counted; the layout and the fill from the copy (module
 /// header).
@@ -1892,11 +1807,6 @@ fn x_stripe_fill<H: XQueryOffset>(
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1352-1354 (the passes) and
 // :1197-1235 (`finalize`, the statements of `x_try_build_flat_with_capacity`'s layout)
-// ```c
-//     s_CompressedAddNeighboringWords(lookup, new_alphabet->matrix->data,
-//                                     query, locations);
-//     s_CompressedLookupFinalize(lookup);
-// ```
 /// The parallel build (module header) in the current rayon pool, with the cuts of `cuts`.
 fn x_try_build_flat_parallel_with<H: XQueryOffset>(
     word_size: usize,
@@ -1932,11 +1842,6 @@ fn x_try_build_flat_parallel_with<H: XQueryOffset>(
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1303-1310 (see
 // `x_clut_direct::x_tbn_build_compressed_lookup_of`)
-// ```c
-//     new_alphabet = SCompressedAlphabetNew(sbp,
-//                                 lookup->compressed_alphabet_size,
-//                                 kMatrixScale);
-// ```
 /// `x_try_build_flat_parallel_with` with the words of the search matrix `matrix`, any but BLOSUM62
 /// (`build_compressed_score_matrix`, item SC2b): the same passes, and the serial builder of the
 /// matrix's words (`x_try_build_flat_of`) where the parallel build takes the serial one.
@@ -2220,11 +2125,6 @@ fn x_wave(wave: usize, letters: usize, header: &XHeader, shift: usize) -> XWave 
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1168-1175 (`x_chunks`)
-// ```c
-//         for (offset = from; offset <= to; offset++){
-//             s_CompressedAddWordHits(&info, query->sequence, offset);
-//         }
-// ```
 /// The appends pass of one wave: the chunks' appends to the wave's cells (`x_chunk_appends`), sorted
 /// by stripe, on `threads` tasks (`passes`: the extra tasks of the one-latch passes run in the first
 /// wave's pass), and each of the wave's stripes' hits. `None` when the appends of all chunks of all
@@ -2661,28 +2561,6 @@ fn x_flat_stripes_on<S: CompressedScores, H: XQueryOffset>(
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1197-1235
-    // ```c
-    //     for (i = count = 0; i < lookup->backbone_size; i++) {
-    //         if (lookup->backbone[i].num_used)
-    //             count++;
-    //     }
-    //     ...
-    //     pv_array_bts = PV_ARRAY_BTS;
-    //     if (count <= 0.01 * lookup->backbone_size) {
-    //         pv_array_bts += ilog2(lookup->backbone_size / (8 * kTargetPVBytes));
-    //     }
-    //
-    //     pv = lookup->pv = (PV_ARRAY_TYPE *)calloc(
-    //                               (lookup->backbone_size >> pv_array_bts) + 1,
-    //                               sizeof(PV_ARRAY_TYPE));
-    //     ...
-    //     for (i = 0; i < lookup->backbone_size; i++) {
-    //         count = lookup->backbone[i].num_used;
-    //
-    //         if (count > 0) {
-    //             /* set the corresponding bit in the pv_array */
-    //             PV_SET(pv, i, pv_array_bts);
-    // ```
     let nonempty_count: usize = stripe_counts.iter().map(|count| count.nonempty).sum();
     let longest_chain = stripe_counts
         .iter()
@@ -3036,11 +2914,6 @@ mod tests {
     const SHIFTS: [Option<usize>; 4] = [None, Some(5), Some(11), Some(16)];
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1168-1175
-    // ```c
-    //     for (loc = location; loc; loc = loc->next){
-    //         Int4 from = loc->ssr->left;
-    //         Int4 to = loc->ssr->right - lookup->word_length + 1;
-    // ```
     // Random queries (few letters and low thresholds, so that cells overflow; all letters, with
     // letters outside the compressed alphabet), SEG-masked runs (several segments per query), several
     // NCBI tables and split batches (segments outside every table), threshold 0: at 1, 2, 3 and 7
@@ -3107,11 +2980,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1303-1310
-    // ```c
-    //     new_alphabet = SCompressedAlphabetNew(sbp,
-    //                                 lookup->compressed_alphabet_size,
-    //                                 kMatrixScale);
-    // ```
     // Every search matrix but BLOSUM62 and IDENTITY (item SC2b): random queries of few letters, NCBI's
     // tables of several batches and split batches, word size 5 with capacities around each table's
     // overflow cells, at 2, 3 and 7 threads with even and uneven chunks. The pool's build of the
@@ -3284,11 +3152,6 @@ mod tests {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1352-1354 (see
     // `x_try_build_flat_in_pool`)
-    // ```c
-    //     s_CompressedAddNeighboringWords(lookup, new_alphabet->matrix->data,
-    //                                     query, locations);
-    //     s_CompressedLookupFinalize(lookup);
-    // ```
     // The entry of blastp-fast with another matrix (`x_bp_build_compressed_lookup_of`, items SC2b,
     // SC2d-2): the serial builders at one thread and the pool's build at 3 threads give the matrix's
     // serial table, with rayon's passes and with the one-latch passes (LOSAT_X_BPLKPFLAT) on a spare
@@ -3537,12 +3400,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:759-768
-    // ```c
-    //     if (lookup->curr_overflow_cell ==
-    //                         COMPRESSED_OVERFLOW_CELLS_IN_BANK) {
-    //         /* need a new bank */
-    //         Int4 bank_idx = lookup->curr_overflow_bank + 1;
-    // ```
     // The refusal at small capacities (around each table's own cells and its cells of the table of
     // all batches, as the serial builder's test): at 2, 3 and 7 threads and uneven chunks the
     // parallel builder refuses exactly when the reference does, and otherwise builds its table.

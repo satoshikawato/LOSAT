@@ -7,23 +7,6 @@
 //! §4, reads them the same way).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:316-361
-//! ```c++
-//! void
-//! CBlastFastaInputSource::x_InitInputReader()
-//! {
-//!     CFastaReader::TFlags flags = m_Config.GetBelieveDeflines() ?
-//!                                     CFastaReader::fParseRawID:
-//!                                     (CFastaReader::fNoParseID |
-//!                                      CFastaReader::fDLOptional);
-//!
-//!     // Allow CFastaReader fSkipCheck flag to be set based
-//!     // on new CBlastInputSourceConfig property - GetSkipSeqCheck() -RMH-
-//!     flags += ( m_Config.GetSkipSeqCheck() ? CFastaReader::fSkipCheck : 0 );
-//!
-//!     flags += (m_ReadProteins
-//!               ? CFastaReader::fAssumeProt
-//!               : CFastaReader::fAssumeNuc);
-//! ```
 #![warn(missing_docs, unused)]
 
 use std::io::Read;
@@ -46,21 +29,7 @@ pub enum Role {
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:202-216
-// ```c++
-//         SDataLoaderConfig dlconfig =
-//             InitializeQueryDataLoaderConfiguration(query_opts->QueryIsProtein(),
-//                                                    db_adapter);
-//         CBlastInputSourceConfig iconfig(dlconfig, query_opts->GetStrand(),
-//                                      query_opts->UseLowercaseMasks(),
-//                                      query_opts->GetParseDeflines(),
-//                                      query_opts->GetRange());
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_scope_src.cpp:78-80
-// ```c++
-//     static const string kDataLoadersConfig("DATA_LOADERS");
-//
-//     if (registry.HasEntry("BLAST", kDataLoadersConfig)) {
-// ```
 /// Whether the program reads the input of `role` as protein (`fAssumeProt`) or nucleotide
 /// (`fAssumeNuc`) sequences.
 pub(super) fn is_protein(program: Program, role: Role) -> bool {
@@ -96,16 +65,6 @@ fn reader_config(program: Program, role: Role, writes_archive: Option<bool>) -> 
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:633-640
-// ```c++
-//     if (has_range) {
-//         auto old_id = FindBestChoice(GetIDs(), CSeq_id::BestRank);
-//         // generate a new ID, and record its relation to the given one(s).
-//         SetIDs().clear();
-//         GenerateID();
-//
-//         CRef<CSeq_align> align = xCreateAlignment(old_id,
-//             GetIDs().front(), range_start, range_end);
-// ```
 // LOSAT's archive does not write this Seq-hist alignment of a record with a range; the command
 // line's reader refuses such a record as it reads it.
 /// The refusal of a search that writes the BLAST archive of records with a range in their first
@@ -136,15 +95,6 @@ pub(super) fn check_archive_inputs(program: Program, inputs: Inputs<'_>) -> Resu
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:146-152
-// ```c++
-//         try { q.Reset(m_Source->GetNextSequence(scope)); }
-//         catch (const CObjReaderParseException& e) {
-//             if (e.GetErrCode() == CObjReaderParseException::eEOF) {
-//                 break;
-//             }
-//             throw;
-//         }
-// ```
 /// Reads every record of a FASTA input, as the command line reads the file named by `-query`
 /// or `-subject` of `program`: the same reader, the same flags, the same generated local IDs.
 ///
@@ -165,18 +115,6 @@ pub fn read_fasta(program: Program, role: Role, bytes: &[u8]) -> Result<Vec<Fast
 /// queries ends (`ReadError::into_app_error`, `GetNextSeqBatch` rethrows the reader's exception).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:205-214
-/// ```c++
-///         catch (const CObjReaderParseException& e) {
-///             auto err = e.GetErrCode();
-///             if (err == CObjReaderParseException::eEOF) {
-///                 break;
-///             } else if (err == CObjReaderParseException::eNoDefline) {
-///                 CNcbiStrstream ss;
-///                 ss << "Query input doesn't start with "
-///                     "a defline or comment, line " << e.GetPos() << ends;
-///                 NCBI_THROW(CInputException, eInvalidInput, ss.str());
-///             }
-/// ```
 fn read_source<R: std::io::Read>(
     mut source: FastaInputSource<R>,
     role: Role,
@@ -191,13 +129,6 @@ fn read_source<R: std::io::Read>(
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:615-619
-// ```c++
-// void CArg_Ios::x_Open(CArgValue::TFileFlags /*flags*/) const
-// {
-//     if ( !m_Ios ) {
-//         NCBI_THROW(CArgException,eNoFile, s_ArgExptMsg(GetName(),
-//             "File is not accessible",AsString()));
-// ```
 /// The bytes of the file `path`, as the command line opens its `-query` or `-subject` argument:
 /// the same message for a file that does not open (`Error::Input`), and a file named `.gz`,
 /// `.bz2` or `.zst` is inflated (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`, exception 8). `read_fasta`
@@ -215,13 +146,7 @@ pub fn read_input_file(role: Role, path: &std::path::Path) -> Result<Vec<u8>, Er
     Ok(bytes)
 }
 
-// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:188-207
-// ```c++
-//         InitializeSubject(db_args, m_OptsHndl, m_CmdLineArgs->ExecuteRemotely(),
-//                           db_adapter, scope);
-//         ...
-//         CBlastFastaInputSource fasta(m_CmdLineArgs->GetInputStream(), iconfig);
-// ```
+// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:188-213
 /// Reads the query and subject FASTA bytes of `search`, as the command line reads its `-query`
 /// and `-subject` files: the records that `read_fasta` gives, and with `-parse_deflines` in the
 /// search's argv the ids of their deflines. The subjects come first, in one scope of ids with the
@@ -261,19 +186,12 @@ pub fn parse_deflines_of(command: &Commands) -> bool {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:67-72
-// ```c++
-//     // Set an appropriate default for the strand
-//     if (m_Strand == eNa_strand_other) {
-//         m_Strand = (m_DLConfig.m_IsLoadingProteins)
-//             ? eNa_strand_unknown
-//             : eNa_strand_both;
-//     }
-// ```
 /// The `-strand` value of the arguments `command`, for the programs that have the option.
 fn strand_of(command: &Commands) -> Option<&str> {
     match command {
         Commands::Blastn(args) => Some(args.strand.as_str()),
         Commands::Blastx(args) => Some(args.strand.as_str()),
+        Commands::Tblastx(args) => Some(args.strand.as_str()),
         _ => None,
     }
 }
@@ -315,11 +233,6 @@ pub fn read_search_inputs(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:797-799
-// ```c++
-// 	    string dbname;
-// 	    if (m_IsDbScan)
-// 		dbname = string("User specified sequence set (Input: ") + m_SubjectTag + string(")");
-// ```
 /// The inputs of one search: the query and subject records, and the names that the reports
 /// show for them where the command line shows its `-query` and `-subject` file names (the
 /// `Database:` line of a `-subject` search, `User specified sequence set (Input: NAME)`).
@@ -361,13 +274,6 @@ impl<'a> Inputs<'a> {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2472-2476
-    // ```c++
-    //     if (args.Exist(kArgDb) && args[kArgDb]) {
-    // 	std::string local_dblist = NStr::TruncateSpaces( args[kArgDb].AsString() );
-    //
-    //         m_SearchDb.Reset(new CSearchDatabase( local_dblist,
-    //                                              mol_type));
-    // ```
     /// The query records against the BLAST database `name`: the command line's `-db name`, one
     /// or more space-separated names, resolved as there (the `BLASTDB` search path). The search
     /// opens the database.
@@ -383,15 +289,7 @@ impl<'a> Inputs<'a> {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1338-1340
-    // ```c++
-    //     if (args.Exist(kArgPSIInputChkPntFile) && args[kArgPSIInputChkPntFile]) {
-    //         CNcbiIstream& in = args[kArgPSIInputChkPntFile].AsInputFile();
-    //         _ASSERT(m_Pssm.Empty());
-    // ```
     // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:450
-    // ```c++
-    //         CRef<CPssmWithParameters> pssm = m_CmdLineArgs->GetInputPssm();
-    // ```
     /// The query of the PSSM file `path` (psiblast's checkpoint file, as `-out_pssm` writes it)
     /// against the subject records: the command line's `-in_pssm path` of psiblast and of tblastn
     /// (PSI-TBLASTN), in place of `-query`. The search reads the file as the command line reads

@@ -160,16 +160,6 @@ impl<'h> QueryGroup<'h> {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1523-1530
-    // ```c++
-    //     //invoke sorting only for m_HitsSortOption > CAlignFormatUtil::eEvalue or m_HspsSortOption > CAlignFormatUtil::eHspEvalue
-    //     if(m_HitsSortOption > 0 || m_HspsSortOption > 0) {
-    //         aln_set = CBlastFormatUtil::SortSeqalignForSortableFormat(
-    //                                       *(const_cast<CSeq_align_set*>(aln_set.GetPointer())),
-    //                                       (m_Program == "tblastx") ? true : false,
-    //                                       m_HitsSortOption,
-    //                                       m_HspsSortOption);
-    //     }
-    // ```
     /// The group of `query_hits` as `new` makes it, in the order of `sections`' `-sorthits` and
     /// `-sorthsps` (`sort`): NCBI sorts one query's Seq-align set before its description table
     /// and its alignments.
@@ -206,29 +196,6 @@ impl<'h> QueryGroup<'h> {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1743-1781
-    // ```c++
-    // void CAlignFormatUtil::HspListToHitList(list< CRef<CSeq_align_set> >& target,
-    //                                         const CSeq_align_set& source)
-    // {
-    //     ...
-    //         } else if (cur_id.Match(*previous_id)){
-    //             temp->Set().push_back(*iter);
-    //
-    //         } else {
-    //             temp =  new CSeq_align_set;
-    //             temp->Set().push_back(*iter);
-    //             target.push_back(temp);
-    //         }
-    //     ...
-    // CAlignFormatUtil::HitListToHspList(list< CRef<CSeq_align_set> >& source)
-    // {
-    //     ...
-    //     for (list<CRef<CSeq_align_set> >::iterator iter = source.begin(); iter != source.end(); iter ++) {
-    //         ITERATE(CSeq_align_set::Tdata, iter2, (*iter)->Get()) {
-    //             align_set->Set().push_back(*iter2);
-    //         }
-    //     }
-    // ```
     /// Puts the subjects and each subject's HSPs (with their indices) in the order of NCBI's
     /// `SortSeqalignForSortableFormat` (`hit_sort::sort_query_hits`): a hit of NCBI is one
     /// subject of the group (the HSPs of the subjects shown in its hit too, whose Seq-ids
@@ -275,17 +242,6 @@ impl<'h> QueryGroup<'h> {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:541-554
-    // ```c++
-    //     unsigned int count = 0;
-    //     ITERATE(CSeq_align_set::Tdata, alignment, full_alignment->Get()) {
-    //         ...
-    //             new_seqs.Set().push_back(*alignment);
-    //         }
-    //         count++;
-    //         if(count >= (unsigned int)m_NumSummary)
-    //         	break;
-    //     }
-    // ```
     /// The HSPs of psiblast's two-part description table (`x_SplitSeqAlign`), each with the
     /// subject whose hit shows it: the first `num_descriptions` in the group's order, and the first
     /// alone for 0 (the count is checked after an HSP is put in its part).
@@ -305,22 +261,13 @@ impl<'h> QueryGroup<'h> {
 
     /// The subjects with alignments (the first `num_alignments`).
     ///
-    /// NCBI reference: c++/src/objtools/align_format/align_format_util.cpp:1014-1040
+    /// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1014-1040
     /// (PruneSeqalign keeps the alignments of the first `m_NumAlignments` subjects).
     pub(crate) fn aligned(&self, num_alignments: usize) -> &[u32] {
         &self.subject_order[..self.subject_order.len().min(num_alignments)]
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1523-1530
-    // ```c++
-    //     if(m_HitsSortOption > 0 || m_HspsSortOption > 0) {
-    //         aln_set = CBlastFormatUtil::SortSeqalignForSortableFormat(
-    //                                       *(const_cast<CSeq_align_set*>(aln_set.GetPointer())),
-    //                                       (m_Program == "tblastx") ? true : false,
-    //                                       m_HitsSortOption,
-    //                                       m_HspsSortOption);
-    //     }
-    // ```
     /// The subjects of one query's pairwise report in the order its description lines and
     /// alignment headings read them, for the models of the reads that make the texts of those
     /// reads before the rows exist (`common::database::subject_read_texts`): `hits`, each HSP of
@@ -471,16 +418,6 @@ pub(crate) trait QuerySections: Sync {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2002-2009
-    // ```c++
-    //             const CBioseq_Handle& subj_handle =
-    //                 m_Scope.GetBioseqHandle((*alnIter)->GetSeq_id(1));
-    //             if(subj_handle){
-    //                 //need to convert to denseg for stdseg
-    //                 if((*alnIter)->GetSegs().Which() == CSeq_align::C_Segs::e_Std) {
-    //                     CTypeConstIterator<CStd_seg> ss = ConstBegin(**alnIter);
-    //                     CRef<CSeq_align> convertedDs =
-    //                         (*alnIter)->CreateDensegFromStdseg();
-    // ```
     /// Where `merges_alignments`: the merge's work on aligned subject `s_idx` of the query
     /// (`group`) after it reads the subject and before it reads the next one, all before the
     /// section's first byte. NCBI makes the Dense-segs of the subject's Std-segs there, which can
@@ -512,15 +449,6 @@ pub(crate) trait QuerySections: Sync {
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:286-304 (each app's `Run`)
-// ```c++
-//                 ITERATE(CSearchResultSet, result, *results) {
-//                     formatter.PrintOneResultSet(**result, query_batch);
-//                 }
-//     ...
-//         formatter.PrintEpilog(opt);
-//     ...
-//     } CATCH_ALL(status)
-// ```
 /// Writes the per-query reports of `hits_by_query` (each query's hits with their indices in
 /// the report's hit list; the first is query `first_query`) between a writer's prolog and
 /// epilog: on `pool` (`pool`) without a `probe`, else by the serial writer. An error of the
@@ -602,16 +530,7 @@ fn write_serial<S: QuerySections, W: Write>(
         sections.head(writer, q_idx, group.as_ref(), &mut read)?;
         if let Some(group) = &group {
             if sections.merges_alignments() {
-                // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1998-2003
-                // ```c++
-                //         for (CSeq_align_set::Tdata::const_iterator
-                //                  alnIter = actual_aln_list.Get().begin();
-                //              alnIter != actual_aln_list.Get().end()
-                //                  && num_align<m_NumAlignToShow; alnIter ++, num_align++) {
-                //
-                //             const CBioseq_Handle& subj_handle =
-                //                 m_Scope.GetBioseqHandle((*alnIter)->GetSeq_id(1));
-                // ```
+                // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1997-2003
                 // The merge loads every aligned subject before the section's first byte
                 // (`merged_subject` after each load); without one (`-num_alignments 0`) there is
                 // no section (`DisplaySeqalign` returns at once).
@@ -1353,7 +1272,7 @@ mod tests {
         }
     }
 
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1998-2003 (quoted at
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1998-2003 (cited at
     // `write_serial`): the query-anchored reports load every aligned subject before the section.
     #[test]
     #[cfg_attr(

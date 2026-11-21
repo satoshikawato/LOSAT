@@ -8,8 +8,7 @@ const path = require("node:path");
 const { test } = require("node:test");
 const { guardSharedMemory, guardRecord, verifyGuarded, GUARD_SECTION } = require("./wasi_shared_memory");
 
-// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
-// m_NumThreads = num_threads;
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
 // Check the host memory boundary independently of the parallel BLAST search.
 // Fixtures use the WebAssembly Core binary encoding and original bulk-memory
 // operations as the oracle, including traps; no alignment behavior is simulated.
@@ -123,8 +122,7 @@ test("opcode-looking constants, SIMD immediates, locals and memargs are not rewr
   instance(guarded.bytes).exports.extra0(0, 0, 0);
 });
 
-// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
-// m_NumThreads = num_threads;
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
 // Host memory boundary only. LOSAT's threaded modules declare 65,535 pages
 // (LOSAT/.cargo/config.toml). The guard's ranges are unsigned 64-bit, so fills and
 // copies across 2 GiB and up to the last byte behave as in the original module.
@@ -176,8 +174,7 @@ test("invalid modules and unsupported memory layout fail explicitly", () => {
   assert.throws(() => guardSharedMemory(fixture({ shared: false })), /shared wasm32 memory/);
 });
 
-// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
-// m_NumThreads = num_threads;
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
 // Build step (`wasi_shared_memory.js guard`, release v0.2.0 DECISIONS 52): the guarded module
 // carries its record, is never guarded twice, verifies, and a module that cannot be guarded
 // fails the build without an output.
@@ -286,8 +283,7 @@ test("the guard command writes a verified module; a decline or nothing to guard 
   }
 });
 
-// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
-// m_NumThreads = num_threads;
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
 // Atomic memory instructions: the guarded helper is the original instruction, and refreshes a
 // stale bound first (the header of wasi_shared_memory.js).
 const I32 = 0x7f, I64 = 0x7e;
@@ -408,8 +404,7 @@ test("verifyGuarded rejects an unguarded atomic, a forged helper and a wrong ato
   assert.throws(() => guardSharedMemory(recount({ ...guarded.record, atomic_helpers: 3 })), /unsupported losat\.shared_memory_guard record/);
 });
 
-// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
-// m_NumThreads = num_threads;
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
 // A wait keeps its timeout while the host has not ended the memory's workers, and records its address
 // in the guard's table; once the host set WAITS_ENDING (or while the table is full) it waits in slices
 // and calls sched_yield between them, where WebKit ends a worker (the header of wasi_shared_memory.js).

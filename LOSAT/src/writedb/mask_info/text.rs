@@ -35,14 +35,14 @@ pub(super) struct TextIn<S: AsnSource> {
 }
 
 // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1455-1463 (`BeginChoiceVariant`,
-// quoted at `begin_variant`)
+// cited at `begin_variant`)
 const BEGIN_CHOICE_VARIANT: ThrowSite = ThrowSite {
     file: "src/serial/objistrasn.cpp",
     line: 1463,
     kind: "CSerialException::eFormatError",
     function: Some("ncbi::CObjectIStreamAsn::BeginChoiceVariant"),
 };
-// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1488-1491 (`ReadChoiceSimple`, quoted at
+// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1488-1491 (`ReadChoiceSimple`, cited at
 // `Rd::read_choice`)
 const READ_CHOICE_SIMPLE: ThrowSite = ThrowSite {
     file: "src/serial/objistr.cpp",
@@ -72,7 +72,7 @@ impl<S: AsnSource> TextIn<S> {
                 let eof = NcbiException::new(FILL_BUFFER_EOF, "end of file").what();
                 Fail::serial(NcbiException::new(
                     SKIP_WHITE_SPACE_EOF,
-                    format!("line {line}: {eof}"),
+                    [format!("line {line}: ").as_bytes(), &eof].concat(),
                 ))
             }
             (AsnTextErrorKind::Eof, _) => Fail::Eof,
@@ -98,42 +98,7 @@ impl<S: AsnSource> TextIn<S> {
     }
 
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:389-424
-    // ```c++
-    // TMemberIndex CObjectIStreamAsn::GetMemberIndex
-    //     (const CClassTypeInfo* classType,
-    //      const CTempString& id,
-    //      const TMemberIndex pos)
-    // {
-    //     TMemberIndex idx;
-    //     if (!id.empty()  &&  isdigit((unsigned char) id[0])) {
-    //         idx = classType->GetMembers().Find
-    //             (CMemberId::TTag(NStr::StringToInt(id)), CAsnBinaryDefs::eContextSpecific, pos);
-    //     }
-    //     else {
-    //         idx = classType->GetMembers().Find(id, pos);
-    //         if (idx == kInvalidMember) {
-    //             idx = GetAltItemIndex(classType,id,pos);
-    //         }
-    //     }
-    //     return idx;
-    // }
-    // ```
     // NCBI reference (598d8ae6): c++/src/serial/memberlist.cpp:432-439,462-473
-    // ```c++
-    // TMemberIndex CItemsInfo::Find(const CTempString& name, TMemberIndex pos) const
-    // {
-    //     for ( CIterator i(*this, pos); i.Valid(); ++i ) {
-    //         if ( name == GetItemInfo(i)->GetId().GetName() )
-    //             return *i;
-    //     }
-    //     return kInvalidMember;
-    // }
-    // ...
-    //         TMemberIndex index = tag + zero_index;
-    //         if ( index < pos || index > LastIndex() )
-    //             return kInvalidMember;
-    //         return index;
-    // ```
     // (The members and variants of these types have the automatic tags 0, 1, ... in module
     // order. Their names start with a lower case letter, so `GetAltItemIndex`, which looks up the
     // name with an upper case first letter, finds nothing.)
@@ -141,19 +106,7 @@ impl<S: AsnSource> TextIn<S> {
     /// (`count` of them, by position) from `pos` on; one that is not there is an error
     /// (`UnexpectedMember`, which lists them all). `choice`: an empty name is `BeginChoiceVariant`'s
     /// error.
-    // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1306-1314
-    // ```c++
-    // void CObjectIStreamAsn::UnexpectedMember(const CTempString& id,
-    //                                          const CItemsInfo& items)
-    // {
-    //     string message =
-    //         "\""+string(id)+"\": unexpected member, should be one of: ";
-    //     for ( CItemsInfo::CIterator i(items); i.Valid(); ++i ) {
-    //         message += '\"' + items.GetItemInfo(i)->GetId().ToString() + "\" ";
-    //     }
-    //     ThrowError(fFormatError, message);
-    // }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1305-1314
     fn find_member(
         &mut self,
         count: usize,
@@ -196,12 +149,9 @@ impl<S: AsnSource> TextIn<S> {
     #[cold]
     #[inline(never)]
     fn unexpected_member(&self, id: &[u8], names: impl Iterator<Item = &'static str>) -> Fail {
-        let mut message = format!(
-            "\"{}\": unexpected member, should be one of: ",
-            String::from_utf8_lossy(id)
-        );
+        let mut message = [b"\"", id, b"\": unexpected member, should be one of: "].concat();
         for name in names {
-            message.push_str(&format!("\"{name}\" "));
+            message.extend_from_slice(format!("\"{name}\" ").as_bytes());
         }
         throw_error(UNEXPECTED_MEMBER, &self.position(), message)
     }
@@ -236,29 +186,7 @@ impl<S: AsnSource> Input for TextIn<S> {
         Ok(())
     }
 
-    // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1337-1362
-    // ```c++
-    // TMemberIndex
-    // CObjectIStreamAsn::BeginClassMember(const CClassTypeInfo* classType,
-    //                                     TMemberIndex pos)
-    // {
-    //     if ( !NextElement() )
-    //         return kInvalidMember;
-    //
-    //     CTempString id = ReadMemberId(SkipWhiteSpace());
-    //     TMemberIndex index = GetMemberIndex(classType, id, pos);
-    //     if ( index == kInvalidMember ) {
-    //         if (m_TypeAlias && classType->GetMembers().GetItemInfo(pos)->GetId().HasNotag()) {
-    //             ...
-    //         } else if (CanSkipUnknownMembers()) {
-    //             ...
-    //         } else {
-    //             UnexpectedMember(id, classType->GetMembers());
-    //         }
-    //     }
-    //     return index;
-    // }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1329-1362
     // (`CanSkipUnknownMembers()` is false by default, `m_TypeAlias` is null.)
     fn begin_member(&mut self, def: &'static ClassDef, pos: usize) -> R<Option<usize>> {
         let more = self.r.next_element(&mut self.block_start);
@@ -282,45 +210,6 @@ impl<S: AsnSource> Input for TextIn<S> {
     }
 
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1436-1478
-    // ```c++
-    // void CObjectIStreamAsn::BeginChoice(const CChoiceTypeInfo* choiceType)
-    // {
-    //     if (choiceType->GetVariantInfo(kFirstMemberIndex)->GetId().IsAttlist()) {
-    //         ...
-    //     }
-    //     m_BlockStart = true;
-    // }
-    // ...
-    // TMemberIndex CObjectIStreamAsn::BeginChoiceVariant(const CChoiceTypeInfo* choiceType)
-    // {
-    //     bool skipname = !m_BlockStart;
-    //     if ( !NextElement() )
-    //         return kInvalidMember;
-    //     CTempString id = ReadMemberId(SkipWhiteSpace());
-    //     if (skipname) {
-    //         id = ReadMemberId(SkipWhiteSpace());
-    //     }
-    //     if ( id.empty() )
-    //         ThrowError(fFormatError, "choice variant id expected");
-    //
-    //     TMemberIndex index = GetChoiceIndex(choiceType, id);
-    //     if ( index == kInvalidMember ) {
-    //         if (CanSkipUnknownVariants()) {
-    //             SetFailFlags(fUnknownValue);
-    //         } else {
-    //             UnexpectedMember(id, choiceType->GetVariants());
-    //         }
-    //     }
-    //
-    //     return index;
-    // }
-    // ...
-    // void CObjectIStreamAsn::EndChoice(void)
-    // {
-    //     ...
-    //     m_BlockStart = false;
-    // }
-    // ```
     // (BeginChoice has just set `m_BlockStart`, so `skipname` is false. A `}` there is no
     // variant: `ReadChoiceSimple`'s "choice variant id expected".)
     fn begin_choice(&mut self) -> R<()> {
@@ -420,14 +309,6 @@ impl<S: AsnSource> Input for TextIn<S> {
     }
 
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1631-1640
-    // ```c++
-    // CObjectIStream::TObjectIndex CObjectIStreamAsn::ReadObjectPointer(void)
-    // {
-    //     if ( sizeof(TObjectIndex) == sizeof(Int4) )
-    //         return ReadInt4();
-    //     else if ( sizeof(TObjectIndex) == sizeof(Int8) )
-    //         return TObjectIndex(ReadInt8());
-    // ```
     // (`TObjectIndex` is `size_t`, objistr.hpp:1029.)
     fn read_object_pointer(&mut self) -> R<()> {
         let value = self.r.int8();
@@ -435,12 +316,6 @@ impl<S: AsnSource> Input for TextIn<S> {
     }
 
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1643-1646
-    // ```c++
-    // string CObjectIStreamAsn::ReadOtherPointer(void)
-    // {
-    //     return ReadTypeId(SkipWhiteSpace());
-    // }
-    // ```
     /// `ReadOtherPointer` (`Reader::type_id`). The name of `[]` is the `std::string` of
     /// `(size_t)-1` bytes that `CTempString::operator string` asks for: `std::length_error`.
     fn read_other_pointer(&mut self) -> R<Vec<u8>> {

@@ -1,7 +1,5 @@
 #!/bin/bash
-# NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-75
-# const string kArgQuery("query");
-# const string kArgSubject("subject");
+# NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-75
 # Reuse exactly the native comparison's inputs/options for command-Wasm.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

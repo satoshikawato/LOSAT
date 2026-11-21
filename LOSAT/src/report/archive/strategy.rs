@@ -1,34 +1,8 @@
 //! The search strategy file (`-export_search_strategy`): the `Blast4-request` of each query
 //! batch, in ASN.1 text.
 //!
-//! NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:636-651
-//! ```c++
-//! void
-//! SaveSearchStrategy(const CArgs& args,
-//!                    blast::CBlastAppArgs* cmdline_args,
-//!                    CRef<blast::IQueryFactory> queries,
-//!                    CRef<blast::CBlastOptionsHandle> opts_hndl,
-//!                    CRef<objects::CPssmWithParameters> pssm
-//!                      /* = CRef<objects::CPssmWithParameters>() */,
-//!                     unsigned int num_iters /* =0 */)
-//! {
-//!     CNcbiOstream* out = cmdline_args->GetExportSearchStrategyStream(args);
-//!     if ( !out ) {
-//!         return;
-//!     }
-//!
-//!     s_ExportSearchStrategy(out, queries, opts_hndl,
-//!                            cmdline_args->GetBlastDatabaseArgs(),
-//!                            pssm, num_iters);
-//! }
-//! ```
+//! NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:635-651
 //! NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:366-369
-//! ```c++
-//! void CExportStrategy::ExportSearchStrategy_ASN1(CNcbiOstream* out)
-//! {
-//! 	*out << MSerial_AsnText << *GetSearchStrategy();
-//! }
-//! ```
 //! The applications call `SaveSearchStrategy` for every query batch, before the batch's
 //! search (blastp_app.cpp:262, blastn_app.cpp:282, blastx_app.cpp:264, tblastn_app.cpp:280,
 //! tblastx_app.cpp:181): the file holds one `Blast4-request` per batch. `CExportStrategy` also
@@ -178,25 +152,7 @@ impl std::fmt::Debug for StrategyExport {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3560-3569
-// ```c++
-// CNcbiOstream*
-// CSearchStrategyArgs::GetExportStream(const CArgs& args) const
-// {
-//     CNcbiOstream* retval = NULL;
-//     if (args.Exist(kArgOutputSearchStrategy) &&
-//         args[kArgOutputSearchStrategy].HasValue()) {
-//         retval = &args[kArgOutputSearchStrategy].AsOutputFile();
-//     }
-//     return retval;
-// }
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3624-3627
-// ```c++
-//     if (GetExportSearchStrategyStream(args) ||
-//            m_FormattingArgs->ArchiveFormatRequested(args)) {
-//         locality = CBlastOptions::eBoth;
-//     }
-// ```
 /// Creates (and empties) the strategy file where NCBI's `SetOptions` does: after the argument
 /// parser accepted the command line and before any option handler runs, so before the
 /// `-outfmt` text is read, the database list is resolved, and `-subject`, `-query` and `-out`
@@ -389,18 +345,6 @@ impl StrategyExport {
     }
 
     // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:259-288
-    // ```c++
-    //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
-    //             CRef<IQueryFactory> queries(new CObjMgr_QueryFactory(*query_batch));
-    //
-    //             SaveSearchStrategy(args, m_CmdLineArgs, queries, m_OptsHndl);
-    //             ...
-    //                 results = lcl_blast.Run();
-    //             ...
-    //                 ITERATE(CSearchResultSet, result, *results) {
-    //                     formatter.PrintOneResultSet(**result, query_batch);
-    //                 }
-    // ```
     /// Makes the request of the batch of the run's searched queries `queries`, where NCBI writes
     /// it: after the batch is read and made a query factory, before its search. `make` builds the
     /// request (from the batch's records, `requests::RunRequests`) and hands it to its argument,
@@ -440,6 +384,9 @@ impl StrategyExport {
             let mut made_one = false;
             let made = make(&mut |request| {
                 let sets = shared.options.request_sets(&state.carry);
+                // A big integer of -2^63 (RPS-BLAST's `DbLength` that a batch before set,
+                // `-dbsize`), which NCBI writes as `-0`, is written as its digits
+                // (PD-LOSAT-NCBI-DEFECTS approved exception 17, Int8 -2^63 written as digits).
                 // A sink that cannot be cut gets the request where the run reaches its batch.
                 let mut held = Vec::new();
                 let mut counted = Counted {
@@ -518,14 +465,6 @@ impl StrategyExport {
     }
 
     // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:277-282
-    // ```c++
-    //         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup() ) {
-    // 	    BLAST_PROF_START( APP.LOOP.PRE );
-    //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
-    //             CRef<IQueryFactory> queries(new CObjMgr_QueryFactory(*query_batch));
-    //
-    //             SaveSearchStrategy(args, m_CmdLineArgs, queries, m_OptsHndl);
-    // ```
     /// Takes the posts of the requests written for the batches whose first query (the run's) is
     /// below `before`, in the run's order, each with that query: the request's mark (which marks the
     /// request reached where the run writes it, `release_through`) and NCBI's posts of its replaced
@@ -563,13 +502,6 @@ impl StrategyExport {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:177-181
-    // ```c++
-    //     vector<Int8> eff_searchsp;
-    //     for (size_t index = 0; index <= (size_t)qinfo->last_context; index++) {
-    //         eff_searchsp.push_back(calc.GetEffSearchSpaceForContext(index));
-    //     }
-    //     options->SetEffectiveSearchSpace(eff_searchsp);
-    // ```
     /// Moves what the requests after the batch of the run's searched queries `queries` hold of the
     /// options handle past that batch, once the batch's set-up has written it into the handle
     /// (above; `OptionsHandle::pass`: the set-up's parameters, then the search space): `searched`
@@ -598,14 +530,6 @@ impl StrategyExport {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xmlformat.cpp:213-218
-    // ```c++
-    //     else {
-    //         string prog_name = Blast_ProgramNameFromType(
-    //                                            m_Options.GetProgramType());
-    //         if (prog_name != "blastn" && prog_name != "megablast") {
-    //             NCBI_THROW(blast::CBlastException, eInvalidArgument,
-    //                         "unsupported score matrix");
-    // ```
     /// NCBI stops the run when it formats the batch whose queries end at `queries_end`, after
     /// that batch's request (the BLAST XML report data of a matrix name it does not know,
     /// `blast_xml::matrix::XmlMatrixFailure`, `QueryBatches::xml_matrix_request_end`): no request
@@ -683,19 +607,6 @@ pub fn end_run(strategy: Option<&StrategyExport>, result: Result<()>) -> Result<
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:1155-1172
-// ```c++
-// void CBlastAppDiagHandler::Post(const SDiagMessage & mess)
-// {
-// 	if(m_handler != NULL) {
-// 		m_handler->Post(mess);
-// 	}
-// 	if(m_save) {
-// 		CRef<CBlast4_error> d(new CBlast4_error);
-// 		string m;
-// 		mess.Write(m);
-// 		d->SetMessage(NStr::Sanitize(m));
-// 		d->SetCode((int)mess.m_Severity);
-// ```
 /// NCBI's posts of the bytes that ASN.1 text replaced in a request of a run of the application
 /// `application` (`encoder::ReplacedChar`, with its prefix, `ArchiveRequest::application`): one
 /// error post each, which the
@@ -716,7 +627,7 @@ fn replaced_posts(
 
 impl State {
     // No NCBI counterpart: NCBI writes each request to its file before the batch's search
-    // (blastp_app.cpp:259-262, quoted at `StrategyExport::write_with`); LOSAT, which may search
+    // (blastp_app.cpp:259-262, cited at `StrategyExport::write_with`); LOSAT, which may search
     // later batches before an earlier batch's report ends the run, holds them for a sink it
     // cannot cut back.
     /// Writes to a sink that cannot be cut its held requests whose batches' first queries pass
@@ -915,6 +826,47 @@ mod tests {
         assert!(docs[0].contains("program-options {\n      {\n        name \"LCaseMask\","));
         assert!(!docs[1].contains("program-options"));
         assert!(!docs[0].contains("ident"));
+    }
+
+    /// PD-LOSAT-NCBI-DEFECTS approved exception 17, Int8 -2^63 written as digits (review C of
+    /// line RG D1a-4, SF1): a big integer of -2^63 in a request, which NCBI writes as `big-integer -0` (probes q1-q12 of
+    /// review C), is written as its digits: BLASTP's `-dbsize` in every request, RPS-BLAST's
+    /// `DbLength` (`x_AdjustDbSize`, `rps_search::volumes::search_sets`) in the requests after the
+    /// first.
+    #[test]
+    fn a_big_integer_of_minus_two_to_the_63_is_written_as_its_digits() {
+        let digits = "name \"DbLength\",\n        value big-integer -9223372036854775808\n";
+        let queries = [protein("Query_1", b"MWCHWCMWCHWC")];
+        let sink = Sink::default();
+        let mut inputs = OptionInputs::new(Program::Blastp, "blastp");
+        inputs.dbsize = Some(i64::MIN);
+        let dbsize = StrategyExport::new(
+            Box::new(sink.clone()),
+            &inputs,
+            Some("in/db/bp"),
+            OptionsHandle::default(),
+        );
+        assert!(dbsize.write_request(0..1, &request(&queries, &[])).unwrap());
+        let text = sink.text();
+        assert!(text.contains(digits), "{text}");
+        let (rps, sink) = export(None);
+        rps.options()
+            .set_search_sets(
+                Vec::new(),
+                crate::algorithm::rps_search::volumes::search_sets(Some(i64::MIN), None),
+            )
+            .unwrap();
+        for at in 0..2 {
+            assert!(rps
+                .write_request(at..at + 1, &request(&queries, &[]))
+                .unwrap());
+            rps.note_searched(at..at + 1, searched(5)).unwrap();
+        }
+        let all = sink.text();
+        let docs: Vec<&str> = all.split("Blast4-request ::= ").skip(1).collect();
+        assert_eq!(docs.len(), 2);
+        assert!(!docs[0].contains("DbLength"), "{all}");
+        assert!(docs[1].contains(digits), "{all}");
     }
 
     /// A batch searched again (a later part of a batch, a call that searches the batches before

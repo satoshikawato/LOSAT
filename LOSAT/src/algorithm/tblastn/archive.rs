@@ -1,13 +1,7 @@
 //! TBLASTN's BLAST archive (outfmt 11): the request options from the arguments, the archive of
 //! each query batch from the batch's report data, and the error archive.
 //!
-//! NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:295
-//! ```c++
-//!                 if (fmt_args->ArchiveFormatRequested(args)) {
-//!                     formatter.WriteArchive(*query_factory, *m_OptsHndl, *results, 0, m_Bah.GetMessages());
-//!                     m_Bah.ResetMessages();
-//!                 } else {
-//! ```
+//! NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:294-297
 //! One archive per query batch (the reader's batch, `BATCH_SIZE` letters, 20000 by default),
 //! written after the batch's search. LOSAT's TBLASTN searches the batches first and writes every
 //! format at the end, from the hit lists it holds (`stage_e_report::render`), so the archives are
@@ -68,20 +62,12 @@ pub(crate) fn option_inputs(args: &TblastnArgs) -> OptionInputs {
     inputs.qcov_hsp_perc = args.qcov_hsp_perc;
     inputs.max_hsps = args.max_hsps.map(|count| count as i32);
     inputs.culling_limit = args.culling_limit;
+    inputs.subject_besthit = args.subject_besthit;
     inputs.sum_stats = args.sum_stats;
     // `-threshold` is read as a double and recorded as an `int` (`static_cast<int>`), converted
     // as the x86-64 build does (`INT_MIN` past `Int4`, as the lookup table takes it:
     // `ncbi_int4_from_double`).
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_cxx.cpp:884-892
-    // ```c++
-    // CBlastOptions::SetWordThreshold(double w)
-    // {
-    //     ...
-    //     if (m_Remote) {
-    //         m_Remote->SetValue(eBlastOpt_WordThreshold, static_cast<int>(w));
-    //     }
-    // }
-    // ```
     inputs.threshold = args.threshold.map(ncbi_int4_from_double);
     inputs.window_size = args.window_size;
     inputs.ungapped = args.ungapped;
@@ -138,23 +124,7 @@ pub(super) fn requests(subjects: Option<&[FastaRecord]>, mask_lowercase: bool) -
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_local_priv.hpp:1718-1725
-// ```c++
-// inline Int8
-// CBlastOptionsLocal::GetEffectiveSearchSpace() const
-// {
-//     if (m_EffLenOpts->num_searchspaces == 0)
-//         return 0;
-//
-//     return m_EffLenOpts->searchsp_eff[0];
-// }
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-180
-// ```c++
-//     int status = m_PrelimSearch->CheckInternalData();
-//     if (status != 0)
-//     {
-//          // Search was not run, but we send back an empty CSearchResultSet.
-// ```
 /// The `EffectiveSearchSpace` option of a batch (`BatchArchive::searched_space`,
 /// `StrategyExport::note_searched`): the search space of its first query's context, `first`
 /// (`-searchsp` in an invalid context too), when NCBI searched the batch (`searched`: a query of
@@ -444,8 +414,8 @@ mod tests {
     // archive adds: the name, the options given besides the inputs, and the list as
     // `Name=variant:value`. LOSAT's TBLASTN refuses many of these options at the command line or
     // in its limits (word sizes 2 and 4, matrices, gap costs,
-    // `-comp_based_stats 1` and `3`, `-ungapped`, `-max_intron_length`, `-subject_besthit`,
-    // `-use_sw_tback`): the list that NCBI would record is what the archive's model knows
+    // `-comp_based_stats 1` and `3`, `-ungapped`, `-max_intron_length`, `-use_sw_tback`): the
+    // list that NCBI would record is what the archive's model knows
     // about them, pinned here.
     const CASES: &[(&str, &[&str], &str)] = &[
         ("def", &[], "EvalueThreshold=cutoff:e-value:10 DbGeneticCode=integer:1 UngappedMode=boolean:False LongestIntronLength=integer:0 MaskAtHash=boolean:False SegFilteringWindow=integer:12 SegFilteringLocut=real:2.2 SegFilteringHicut=real:2.5 WordThreshold=integer:13 WindowSize=integer:40 HitlistSize=integer:500 CompositionBasedStats=integer:2 SmithWatermanMode=boolean:False"),
@@ -560,7 +530,7 @@ mod tests {
         let mut index = 0;
         while index < extra.len() {
             match extra[index] {
-                "-subject_besthit" | "-use_sw_tback" => {
+                "-use_sw_tback" => {
                     by_hand.push((extra[index], ""));
                     index += 1;
                 }
@@ -579,11 +549,8 @@ mod tests {
             return None;
         };
         let mut inputs = option_inputs(&args);
-        for (name, _) in by_hand {
-            match name {
-                "-subject_besthit" => inputs.subject_besthit = true,
-                _ => inputs.use_sw_tback = true,
-            }
+        for _ in by_hand {
+            inputs.use_sw_tback = true;
         }
         Some(inputs)
     }

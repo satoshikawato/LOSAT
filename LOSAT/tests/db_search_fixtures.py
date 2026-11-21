@@ -287,7 +287,8 @@ def is_env_token(token: str) -> bool:
 
 def rps_cell(cell: str) -> tuple[list[str], set[str], dict[str, str], str | None] | None:
     """The profile databases of an rpsblast `db` cell `rps-gz:NAME[+NAME2...][!EXT...][!EXT=FILE...][@ALIAS]`:
-    the names (`-db "NAME NAME2"`), the extensions left out (`!aux`, `!freq`), the files put in their
+    the names (`-db "NAME NAME2"`; `DIR/NAME`: NAME's files inflated into the subdirectory DIR, a copy of a
+    volume under its own base name), the extensions left out (`!aux`, `!freq`), the files put in their
     place (`!aux=FILE`: LOSAT/tests/db_search/rps/FILE as each NAME.aux, inflated when FILE ends in .gz) and
     the alias file the run searches (`@ALIAS`: LOSAT/tests/db_search/rps/ALIAS.pal beside the inflated files,
     `-db ALIAS`; its DBLIST names them); None for another cell."""
@@ -308,6 +309,9 @@ def inflate_rps(cell: str) -> Path:
     rps_dir = TESTS / "db_search" / "rps"
     target = Path(tempfile.mkdtemp(prefix="rps_db_")).resolve()
     for name in names:
+        sub, _, name = name.rpartition("/")
+        into = target / sub
+        into.mkdir(parents=True, exist_ok=True)
         sources = sorted(rps_dir.glob(f"{name}.*.gz"))
         if not sources:
             raise SystemExit(f"no files LOSAT/tests/db_search/rps/{name}.*.gz")
@@ -315,10 +319,10 @@ def inflate_rps(cell: str) -> Path:
             inflated = source.name.removesuffix(".gz")
             if inflated[len(name):] in dropped or inflated[len(name):] in replaced:
                 continue
-            (target / inflated).write_bytes(gzip.decompress(source.read_bytes()))
+            (into / inflated).write_bytes(gzip.decompress(source.read_bytes()))
         for extension, file in replaced.items():
             data = (rps_dir / file).read_bytes()
-            (target / f"{name}{extension}").write_bytes(gzip.decompress(data) if file.endswith(".gz") else data)
+            (into / f"{name}{extension}").write_bytes(gzip.decompress(data) if file.endswith(".gz") else data)
     if alias is not None:
         (target / f"{alias}.pal").write_bytes((rps_dir / f"{alias}.pal").read_bytes())
     return target
@@ -409,7 +413,7 @@ def clean_env(base: dict[str, str], home: str) -> dict[str, str]:
     return env
 
 
-# NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_usage_report.cpp:195-220 (the
+# NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_usage_report.cpp:195-220 (the
 # report's parameters, sent to NCBI's server when the application ends unless BLAST_USAGE_REPORT, in the
 # environment or the registry, is a false value)
 NCBI_RUN_ENV = {"BLAST_USAGE_REPORT": "false"}
@@ -555,12 +559,6 @@ def expected_stdout(row: dict[str, str]) -> bytes:
 COPY_PREFIX = "COPY"
 COPY_OUTFMTS = ("0", "5", "6", "7")
 # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:86-88, 135-137
-#     char* batch_sz_str = getenv("BATCH_SIZE");
-#     if (batch_sz_str) {
-#         retval = NStr::StringToInt(batch_sz_str);
-#     case eBlastp:
-#     default:
-#         retval = 10000;
 BLASTP_BATCH_SIZE = 10000
 # A full hit list does not limit a copy row. The composition-based redo ends the remaining matches early only while
 # the heap of every query of the batch is full (below), and it takes the matches in the order of their queries
@@ -568,25 +566,9 @@ BLASTP_BATCH_SIZE = 10000
 # match of an original query is ended early, only the copy's can be (the batch's last query), and its report is cut
 # out. LOSAT ends no match early with unified P-values (`BlastCompoHeap::without_early_end`).
 # NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1565-1566, 1575-1577
-#     for (i = 0;  i < numQueries;  i++) {
-#         if (BlastCompo_HeapFilledToCutoff(&significantMatches[i])) {
-#         } else {
-#             return FALSE;
-#         }
 # The query chunks of a BLASTP batch: CHUNK_SIZE (else 10000) and OVERLAP_CHUNK_SIZE (else 100) residues.
 # NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:59-61, 91-93
-#     char* chunk_sz_str = getenv("CHUNK_SIZE");
-#     if (chunk_sz_str && !NStr::IsBlank(chunk_sz_str)) {
-#         retval = NStr::StringToInt(chunk_sz_str);
-#         case eBlastp:
-#         default:
-#             retval = 10000;
 # NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:53-57
-#     size_t retval = 100;
-#     // used for experimentation purposes
-#     char* overlap_sz_str = getenv("OVERLAP_CHUNK_SIZE");
-#     if (overlap_sz_str && !NStr::IsBlank(overlap_sz_str)) {
-#         retval = NStr::StringToInt(overlap_sz_str);
 BLASTP_CHUNK_SIZE = 10000
 QUERY_CHUNK_OVERLAP = 100
 # The variables that a copy row's oracle run may set in place of the row's own: only those that place the queries in
@@ -635,9 +617,7 @@ def query_batches(lengths: list[int], batch_size: int) -> list[list[int]]:
     their lengths is below `batch_size`; the query that brings it to `batch_size` or more is the batch's last.
 
     NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:140, 163, 170
-        while (size_read < GetBatchSize()) {
-                size_read += sequence::GetLength(loc->GetWhole(), q->GetScope());
-            retval->AddQuery(q);"""
+            """
     batches: list[list[int]] = []
     current: list[int] = []
     size = 0
@@ -661,14 +641,8 @@ def query_chunks(length: int, env: dict[str, str]) -> int:
     100), and 1 when that is 1 or less (19,799 residues and fewer by default).
 
     NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:124-131
-        if ((*chunk_size) > overlap_size) {
-           num_chunks = concatenated_query_length / ((*chunk_size) - overlap_size);
-        }
 
-        // Only one chunk, just return;
-        if (num_chunks <= 1) {
-           *chunk_size = concatenated_query_length;
-           return 1;"""
+           """
     chunk, overlap = (int(env.get(name, "").strip() or default) for name, default in
                       (("CHUNK_SIZE", BLASTP_CHUNK_SIZE), ("OVERLAP_CHUNK_SIZE", QUERY_CHUNK_OVERLAP)))
     return max(length // (chunk - overlap) if chunk > overlap else 0, 1)

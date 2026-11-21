@@ -52,12 +52,6 @@ pub(super) use crate::core::subject_split::MAX_DBSEQ_LEN;
 const X_LENGTHS_PER_READ: u32 = 16_384;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_encoding.c:115-119
-// ```c
-// const char NCBISTDAA_TO_AMINOACID[BLASTAA_SIZE] = {
-// '-','A','B','C','D','E','F','G','H','I','K','L','M',
-// 'N','P','Q','R','S','T','V','W','X','Y','Z','U','*',
-// 'O', 'J'};
-// ```
 /// The letter of each NCBIstdaa byte.
 const NCBISTDAA_TO_AMINOACID: &[u8; 28] = b"-ABCDEFGHIKLMNPQRSTVWXYZU*OJ";
 
@@ -203,7 +197,7 @@ impl BlastxDatabase {
     // fails in that batch's preliminary search, where its reader cannot map the sequence
     // file (BLASTP's `-db`, fixture `LOSAT/tests/seqdb/db/empty`).
     // No NCBI counterpart for the lengths (NCBI takes the longest from the volumes' index headers,
-    // seqdbimpl.cpp:128-136, quoted at `SeqDb::max_length`): the choices that read the longest
+    // seqdbimpl.cpp:128-136, cited at `SeqDb::max_length`): the choices that read the longest
     // (`x_subject_flow::offsets_stay_below_2_30`, `search_core`'s limit, `x_bx_mem`) take the
     // value the check counted, also where a damaged header says less (with a `-window_size` near
     // 2^28 that header chose the kept tables of 2 GiB a thread).
@@ -272,10 +266,6 @@ fn x_check_whole_named(db: &SeqDb, program: &str) -> Result<usize> {
         }
     })?;
     // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_gapalign.h:53-54
-    // ```c
-    // /** Split subject sequences if longer than this */
-    // #define MAX_DBSEQ_LEN 5000000
-    // ```
     // NCBI searches a longer subject in overlapping parts, which BLASTX does not port (the
     // same limit stops `-subject` in `search::search_core`); the refusal belongs to the
     // first batch with a valid context, as the reader's errors.
@@ -409,20 +399,6 @@ impl ReportedSubjects {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:264-275
-    // ```c++
-    //     CRef<ILocalQueryData> qdata = m_QueryFactory->MakeLocalQueryData(m_Options);
-    //
-    //     vector<TSeqLocInfoVector> subj_masks;
-    //     TSeqAlignVector aligns =
-    //         LocalBlastResults2SeqAlign(hsp_results,
-    //                                    *qdata,
-    //                                    *m_SeqInfoSrc,
-    //                                    m_OptsMemento->m_ProgramType,
-    //                                    m_Options->GetGappedMode(),
-    //                                    m_Options->GetOutOfFrameMode(),
-    //                                    subj_masks,
-    //                                    m_ResultType);
-    // ```
     /// The titles of the reported sequences of the batches `batches` (one query batch), read
     /// query by query in hit-list order where NCBI's traceback makes the batch's Seq-aligns
     /// (their Seq-ids), before the batch's prefetch: NCBI's reader error stops the run at this
@@ -496,13 +472,6 @@ impl ReportedSubjects {
     }
 
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:286-291
-    // ```c++
-    //                 BlastFormatter_PreFetchSequenceData(*results, scope,
-    //                 		                            fmt_args->GetFormattedOutputChoice());
-    //             	ITERATE(CSearchResultSet, result, *results) {
-    //                	    formatter.PrintOneResultSet(**result, query_batch);
-    //             	}
-    // ```
     /// The reported sequences of the batches `batches` (one query batch: the results of
     /// one search), with their hit lists renamed from ordinal ids to ranks, from their titles
     /// (`titles`, `read_titles`), before any report of the batch: a title LOSAT does not show as
@@ -524,11 +493,16 @@ impl ReportedSubjects {
     /// formats, whose taxonomy texts come at each `Hit`), which stops the run where it reads a
     /// subject whose lookup fails on a file with NCBI's exception (`shared::batch_prefetch_stop`).
     /// `one_by_one`: whether the batch's prefetch is off, so that its reports read the subjects
-    /// one by one (`shared::ParsedShown::one_by_one`). `after`: what the reports do after a
-    /// subject whose lookup throws (`FormatThrow::of_run`; `None`: a report refuses it), for
-    /// `HitLoads::of` (where `one_by_one`, which subjects throw and which no report loads; the
-    /// refusals, the names, the tables' rows, the taxonomy reads and the run's record of the
-    /// loads, `note_loaded`, take that one answer).
+    /// one by one (`shared::ParsedShown::one_by_one`). `cut`: the formatter's cut of each query's
+    /// lists to the hit list size where RPSTBLASTN merges several volumes
+    /// (`ResolvedOptions::shown_lists`; `usize::MAX` for every other search), which counts
+    /// following lists whose Seq-align ids match as one subject (`BatchResults::shown`, which
+    /// every report that NCBI cuts reads, `ResolvedOptions::shown_lists`: BLAST XML, XML2 and
+    /// JSON too, whose `Hit`s `HitLoads` reads from the same lists, `BatchResults::cut_lists`).
+    /// `after`: what the reports do after a subject whose lookup throws (`FormatThrow::of_run`;
+    /// `None`: a report refuses it), for `HitLoads::of` (where `one_by_one`, which subjects throw
+    /// and which no report loads; the refusals, the names, the tables' rows, the taxonomy reads
+    /// and the run's record of the loads, `note_loaded`, take that one answer).
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn for_batch(
         database: &BlastxDatabase,
@@ -547,6 +521,7 @@ impl ReportedSubjects {
         prefetched: bool,
         prefetch_runs: bool,
         one_by_one: bool,
+        cut: usize,
         after: Option<crate::report::db_subject::RunThrow>,
     ) -> Result<Self> {
         let BatchTitles {
@@ -579,12 +554,43 @@ impl ReportedSubjects {
                 }
             }
         }
+        // RPSTBLASTN's merged lists of several volumes, longer than the hit list size: NCBI's
+        // formatter keeps the Seq-aligns of its first `cut` subjects, counting following ones
+        // whose Seq-ids match as one (`PruneSeqalign`, cited at `shared::joined_cut`): a copy of
+        // one record that follows another is kept with it, as RPSBLAST's lists are
+        // (`blastp::blast_engine::database::ListedTitles::joined_cut`); two other profiles that
+        // the count reaches with matching Seq-align ids are LOSAT's refusal.
+        if reports && cut != usize::MAX {
+            for batch in batches.iter_mut() {
+                let shown = batch
+                    .queries
+                    .iter()
+                    .enumerate()
+                    .map(|(qidx, lists)| {
+                        if parsed.is_empty() || lists.len() <= cut {
+                            return Ok(cut);
+                        }
+                        shared::joined_cut(
+                            batch.query_ordinal + qidx,
+                            cut,
+                            lists.iter().map(|list| {
+                                let ordinal = u32::try_from(list.oid).ok()?;
+                                Some((ordinal, parsed.get(&list.oid)?.as_ref()))
+                            }),
+                            database.db.oid_map(),
+                            database.program,
+                        )
+                    })
+                    .collect::<Result<Vec<usize>>>()?;
+                batch.shown = shown;
+            }
+        }
         // What the reports do at each subject's `Hit`, by ordinal id (renamed to ranks below),
         // with the `Hit`s that the writer makes (`blast_xml::write_blastx_xml`: the reported lists
-        // of each query, `report::reported`).
+        // of each query that the cut above keeps, `report::reported`).
         let report_lists: Vec<&[super::results::HspList]> = batches
             .iter()
-            .flat_map(|batch| batch.queries.iter().map(Vec::as_slice))
+            .flat_map(|batch| (0..batch.queries.len()).map(move |qidx| batch.cut_lists(qidx, cut)))
             .collect();
         let loads = HitLoads::of(
             after,
@@ -1051,19 +1057,6 @@ impl ReportedSubjects {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:844-857
-    // ```c++
-    //             	CRef<CBlast_def_line_set> bdlRef =
-    //             			CSeqDB::ExtractBlastDefline(subject_bh);
-    //             	if(setSubjectIds) {
-    //             		x_SetSubjectIds(subject_bh, bdlRef);
-    //             	}
-    //             	if(setSubjectTaxInfoAll) {
-    //             		x_SetTaxInfoAll(subject_bh, bdlRef);
-    //             	}
-    //             	if(setSubjectTaxInfo) {
-    //             		x_SetTaxInfo(subject_bh, bdlRef);
-    //             	}
-    // ```
     /// Reads what the custom tabular report `spec` shows of the batch's reported sequences
     /// beyond the default report's ids, before the batch's first byte: the ids of every
     /// definition line of a sequence with parsed Seq-ids (`sall*`, with LOSAT's refusal of
@@ -1434,8 +1427,34 @@ mod tests {
             .unwrap(),
             parameters: Vec::new(),
             search_skipped: false,
+            request_space: None,
+            unlisted: Vec::new(),
+            shown: Vec::new(),
             gapped_k: None,
         }]
+    }
+
+    // Line RG D1a-4 (fix round 7, review F N2): the one owner of the formatter's cut of a query's
+    // lists, which every report that NCBI cuts reads (`BatchResults::shown_lists`) and the loads
+    // of `ReportedSubjects::for_batch`: `shown` (RPSTBLASTN's count over several volumes, which
+    // joins following lists of one Seq-align id) wins over the cut, the cut keeps at most the
+    // lists there are, and `usize::MAX` (every other search) keeps every list.
+    #[test]
+    fn the_cut_of_a_querys_lists_reads_shown_before_the_cut() {
+        let mut batches = one_query(&[(0, 90), (1, 80), (2, 70), (3, 60)]);
+        let batch = &mut batches[0];
+        let oids = |lists: &[super::super::results::HspList]| {
+            lists.iter().map(|list| list.oid).collect::<Vec<_>>()
+        };
+        assert_eq!(oids(batch.cut_lists(0, usize::MAX)), [0, 1, 2, 3]);
+        assert_eq!(oids(batch.cut_lists(0, 2)), [0, 1]);
+        assert_eq!(oids(batch.cut_lists(0, 9)), [0, 1, 2, 3]);
+        assert!(batch.cut_lists(0, 0).is_empty());
+        batch.shown = vec![3];
+        assert_eq!(oids(batch.cut_lists(0, 2)), [0, 1, 2]);
+        assert_eq!(oids(batch.cut_lists(0, usize::MAX)), [0, 1, 2]);
+        batch.shown = vec![9];
+        assert_eq!(oids(batch.cut_lists(0, 2)), [0, 1, 2, 3]);
     }
 
     // DBID item T: a batch's prefetch looks up the sequences that its reports show (an HSP with a
@@ -1476,6 +1495,7 @@ mod tests {
                 false,
                 false,
                 false,
+                usize::MAX,
                 None,
             )
             .unwrap();
@@ -1551,6 +1571,7 @@ mod tests {
                 false,
                 false,
                 false,
+                usize::MAX,
                 None,
             )
             .unwrap();

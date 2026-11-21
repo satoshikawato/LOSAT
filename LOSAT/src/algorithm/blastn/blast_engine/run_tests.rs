@@ -1256,16 +1256,9 @@ fn output_formats_raise_ncbis_errors_where_ncbi_does() {
             }
         }
     }
-    // An ungapped search writes the Seq-aligns (8, 9, 11, 12: Dense-diags) and refuses only
-    // SAM (17), whose line of a subject joins its HSPs.
-    for (outfmt, refused) in [
-        ("8", false),
-        ("9", false),
-        ("11", false),
-        ("12", false),
-        ("17", true),
-        ("17 SR", true),
-    ] {
+    // An ungapped search writes the Seq-aligns (8, 9, 11, 12: Dense-diags) and SAM (17, a
+    // subject's HSPs joined into one record).
+    for outfmt in ["8", "9", "11", "12", "17", "17 SR"] {
         let mut diagnostics = Vec::new();
         let mut sink = Vec::new();
         let mut outputs =
@@ -1275,15 +1268,7 @@ fn output_formats_raise_ncbis_errors_where_ncbi_does() {
             &mut outputs,
         );
         drop(outputs);
-        if refused {
-            assert_eq!(
-                result.unwrap_err().to_string(),
-                "output format 17 with -ungapped (an ungapped search) is not supported by LOSAT's BLASTN",
-                "{outfmt}"
-            );
-        } else {
-            result.unwrap();
-        }
+        result.unwrap_or_else(|error| panic!("{outfmt}: {error}"));
     }
     // `run_local`'s formats that NCBI rejects later are left out, as the command line's
     // (`cli_output_formats`): NCBI's formatting handler (`process_options`, above) and

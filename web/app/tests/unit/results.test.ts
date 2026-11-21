@@ -845,6 +845,19 @@ describe('ResultsBrowser', () => {
     expect(noHspReason(searched.results.state.get())).toBe('no-hits');
   });
 
+  // Line WQA's D14, 2026-11-20: a run of a help or version word completes without a search: its notice says so and where
+  // the text is, in place of "no hits", also when the argv has -dryrun (the command line prints the text first).
+  it("says that a completed run printed the command line's help or version and searched nothing", async () => {
+    for (const prints of ['help', 'version'] as const) {
+      const { results } = setup({ specs: [], snapshot: { prints, dryRun: true } });
+      await results.open('r1');
+      expect(results.state.get().phase).toBe('ready');
+      expect(noHspReason(results.state.get())).toBe(`printed-${prints}`);
+    }
+    expect(NO_HSP_TEXT['printed-help']).toBe("This run printed the command line's help and ran no search. The text is in Outputs.");
+    expect(NO_HSP_TEXT['printed-version']).toBe("This run printed the command line's version and ran no search. The text is in Outputs.");
+  });
+
   // WA-FM-07: the command of a run without results is read with the grammar too.
   it("gives the grammar of the run's mode, for its command, also for a run without results", async () => {
     for (const options of [{ status: 'failed' }, { status: 'completed' }, { unreadable: true }] as const) {

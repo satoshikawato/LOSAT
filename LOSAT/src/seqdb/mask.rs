@@ -893,7 +893,7 @@ impl MaskBlock {
     }
 
     /// The read error that [`MaskBlock::ranges`] gives the sequence `vol_oid` (`Read`), owned.
-    fn into_read_error(self, vol_oid: u32) -> SeqDbError {
+    pub(crate) fn into_read_error(self, vol_oid: u32) -> SeqDbError {
         match self.error {
             Some(error) => error,
             None => self.blobs.into_error(vol_oid),

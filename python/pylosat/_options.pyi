@@ -48,8 +48,10 @@ class BlastnOptions(TypedDict, total=False):
     """Multi-thread mode: 0 auto, 1 split by queries, 2 split by database (accepted; the output
     does not depend on it)"""
     use_index: bool
-    """Use MegaBLAST database index (a database that has one is not supported) [default:
+    """Use MegaBLAST database index (an index that would be used is not supported) [default:
     false]"""
+    index_name: str
+    """MegaBLAST database index name (deprecated; use only for old style indices)"""
     evalue: float
     """Expectation value (E) threshold for saving hits (default: 10; 1000 for blastn-short)"""
     perc_identity: float
@@ -198,6 +200,10 @@ class BlastpOptions(TypedDict, total=False):
     culling_limit: int
     """If the query range of a hit is enveloped by that of at least this many higher-scoring
     hits, delete the hit (default: 0, no culling)"""
+    best_hit_overhang: float
+    """Best Hit algorithm overhang value (recommended value: 0.1)"""
+    best_hit_score_edge: float
+    """Best Hit algorithm score edge value (recommended value: 0.1)"""
     subject_besthit: bool
     """Return only the best HSP for each non overlapping query region"""
     ungapped: bool
@@ -585,6 +591,10 @@ class PsiblastOptions(TypedDict, total=False):
     culling_limit: int
     """If the query range of a hit is enveloped by that of at least this many higher-scoring
     hits, delete the hit"""
+    best_hit_overhang: float
+    """Best Hit algorithm overhang value (recommended value: 0.1)"""
+    best_hit_score_edge: float
+    """Best Hit algorithm score edge value (recommended value: 0.1)"""
     subject_besthit: bool
     """Return only the best HSP for each non overlapping query region"""
     xdrop_ungap: float

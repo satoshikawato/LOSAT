@@ -1,0 +1,1 @@
+- `blastn -ungapped` now writes `-outfmt 17` (SAM, also with `SQ` and `SR`), byte for byte as NCBI BLAST+ 2.17.0 does except the `CL:` tag of `@PG`: each subject has one line that joins all of its alignments with the query, for `-subject` and `-db`, in every task, with `-query_loc`, `-subject_loc` and `-strand`. Before, SAM was refused with `-ungapped`.

@@ -10,7 +10,7 @@
   line is not a defline cannot follow another input in a Combined query, as before: its card now
   says so, also when the reader stops at that line (a byte order mark), and the inputs after it no
   longer say that the search stops there. Such an input under `-parse_deflines` is no longer
-  refused when its reader stops before the end of the index scan. ABI v2 is version 9 (*register*,
+  refused when its reader stops before the end of the index scan. ABI v2 is version 11 (*register*,
   *inputs* and *scan* give `reader_error`).
 - Library: `read_input_records` keeps the query records read before a reader's error and the error
   (`QueryEnd`), and `run` and `run_batches` of them end with it in its batch, after the reports of

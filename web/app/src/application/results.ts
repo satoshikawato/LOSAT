@@ -705,16 +705,27 @@ export function failedOutput(run: RunView, output: RunOutput): OutputPlace | und
 }
 
 /** Why the selected query shows no HSP, in the order of the notices of the results (ResultNotices). */
-export type NoHspReason = 'dry-run' | 'empty-query' | 'no-tabular-hits' | 'no-tabular-output' | 'no-queries' | 'no-hits' | 'filtered-out';
+export type NoHspReason =
+  | 'printed-help'
+  | 'printed-version'
+  | 'dry-run'
+  | 'empty-query'
+  | 'no-tabular-hits'
+  | 'no-tabular-output'
+  | 'no-queries'
+  | 'no-hits'
+  | 'filtered-out';
 
 /**
  * Why the loaded run's selected query shows no HSP; undefined while it shows some, or nothing is
- * loaded. A dry run (-dryrun; line RG E1w-3b) searched nothing. A run that could not write outfmt 6
+ * loaded. A run that printed the command line's help or version (line WQA's D14, 2026-11-20) and a
+ * dry run (-dryrun; line RG E1w-3b) searched nothing. A run that could not write outfmt 6
  * (`LoadedRun.tabularError`) has no HSP records, whatever its queries found.
  */
 export function noHspReason(state: ResultsState): NoHspReason | undefined {
   const loaded = state.loaded;
   if (loaded === undefined) return undefined;
+  if (loaded.run.snapshot.prints !== undefined) return `printed-${loaded.run.snapshot.prints}`;
   if (loaded.run.snapshot.dryRun === true) return 'dry-run';
   if (loaded.run.snapshot.query.records.length === 0) return 'empty-query';
   if (loaded.limits.maxTargetSeqs === 0) return 'no-tabular-hits';

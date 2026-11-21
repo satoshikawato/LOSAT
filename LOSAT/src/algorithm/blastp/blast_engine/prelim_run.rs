@@ -77,6 +77,10 @@ pub(super) struct PrelimRun<'a> {
     pub(super) query_batches: &'a [RangedBatch],
     pub(super) query_batch_skipped: &'a [bool],
     pub(super) query_chunk: bool,
+    /// rpsblast: whether the engine counts each HSP's identities again for the reports
+    /// (`rps_hooks::RpsSearchRun::recount_identities`), decided from the reports that the call's
+    /// formats are (`call_setup::requested_reports`): none is a custom table.
+    pub(super) rps_recount_identities: bool,
     // The subjects, the query blocks and the queries' contexts.
     pub(super) database: Option<&'a database::BlastpDatabase>,
     pub(super) subjects: &'a [EncodedProtein],
@@ -249,6 +253,7 @@ where
         query_batches,
         query_batch_skipped,
         query_chunk,
+        rps_recount_identities,
         database,
         subjects,
         x_soft_subjects,
@@ -328,6 +333,7 @@ where
                 .iter()
                 .map(|batch| batch.searched.clone())
                 .collect(),
+            recount_identities: rps_recount_identities,
         };
         let searched = rps_hooks::rps_search(
             rps,

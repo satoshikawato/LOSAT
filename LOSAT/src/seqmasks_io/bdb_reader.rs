@@ -38,10 +38,12 @@ pub(crate) struct BdbRecord {
     /// (`report::defline::BioseqFacts::has_source`); asked only for a title as `taxname` (else
     /// `false`, which writes the same title).
     pub has_source: bool,
-    /// Whether the Bioseq has a source at all (a definition line with a positive taxid,
-    /// seqdbvol.cpp:1126-1176, whatever the taxonomy database holds), from which
-    /// `sequence::GetTitle` makes an empty title (windowmasker's `-ids`).
-    pub any_source: bool,
+    /// `sequence::GetTitle` of the Bioseq (`sequence::title::get_title`) of a sequence with letters,
+    /// when the reader was asked for it (`MaskBdbReader::ask_get_title`: windowmasker's `-ids` matched as text,
+    /// makembindex's `-idmap`). An empty title is made from the Bioseq's first source, which it
+    /// has for a definition line with a positive taxid whatever the taxonomy database holds
+    /// (seqdbvol.cpp:1126-1176).
+    pub get_title: Option<Vec<u8>>,
     /// IUPACna letters of a nucleotide, NCBIstdaa codes of a protein.
     pub residues: Vec<u8>,
     /// The `ERR_POST` texts of the taxonomy database that NCBI's `GetBioseq` writes while it
@@ -83,6 +85,8 @@ pub(crate) struct MaskBdbReader {
     source_names: crate::seqdb::taxdb::TaxCache,
     /// The search path the database was opened on (`volume_paths`).
     path: SearchPath,
+    /// Whether the records carry `sequence::GetTitle` (`BdbRecord::get_title`).
+    get_title: bool,
 }
 
 /// Whether the writer of `outfmt` prints the title of a sequence (`CMaskWriter::IdToString`).
@@ -120,7 +124,14 @@ impl MaskBdbReader {
             taxdb: crate::algorithm::common::database::TaxdbRun::sequential(),
             source_names: Default::default(),
             path,
+            get_title: false,
         })
+    }
+
+    /// From now on the records carry `sequence::GetTitle` of their Bioseq
+    /// (`BdbRecord::get_title`).
+    pub(crate) fn ask_get_title(&mut self) {
+        self.get_title = true;
     }
 
     /// The OID that `next_record` reads next (makembindex's `CSequenceIStreamBlastDB::oid_`).
@@ -183,6 +194,8 @@ impl MaskBdbReader {
         self.oid += 1;
         let program = self.program;
         let error = |error| database_error(error, program);
+        // `GetBioseq` builds NCBI's OID list first (`SeqDb::build_oid_list`).
+        self.db.build_oid_list().map_err(error)?;
         let set = self.db.defline_set(oid).map_err(error)?;
         if set
             .deflines
@@ -248,13 +261,25 @@ impl MaskBdbReader {
         } else {
             None
         };
+        // `GetBioseq` gives no Bioseq for a sequence without letters, before its lookups: none
+        // is made, and the callers skip the record (windowmasker) or refuse it (makembindex).
+        let get_title = if self.get_title && has_letters {
+            Some(crate::sequence::title::get_title(
+                &ids,
+                &title,
+                any_source,
+                || self.source_taxname(oid, &set),
+            )?)
+        } else {
+            None
+        };
         Ok(Some((
             BdbRecord {
                 ids,
                 title,
                 taxname,
                 has_source,
-                any_source,
+                get_title,
                 residues,
                 texts,
             },
@@ -317,14 +342,14 @@ fn database_error(error: SeqDbError, program: &str) -> BdbError {
     if let Some(exception) = error.ncbi_exception() {
         return BdbError::Ncbi(exception.clone());
     }
-    match error.ncbi_message() {
+    match error.ncbi_request_message() {
         Some(text) => {
             let site = crate::seqdb::throw_site(&text)
                 .unwrap_or(ThrowSite::generated("CSeqDBException::eInvalid"));
             BdbError::Ncbi(NcbiException::new(site, text))
         }
-        None => BdbError::Refused(
-            crate::algorithm::common::database::refusal(&error.to_string(), program).to_string(),
-        ),
+        None => BdbError::Refused(crate::algorithm::common::database::losat_reader_error(
+            &error, program,
+        )),
     }
 }

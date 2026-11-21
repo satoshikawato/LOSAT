@@ -1487,3 +1487,61 @@ fn a_value_of_another_type_is_refused() {
 fn ber_tagged(tag: &[u8], content: &[u8]) -> Vec<u8> {
     [tag, &[0x80][..], content, &[0, 0][..]].concat()
 }
+
+/// The bytes of a file, one per read.
+struct OneByteReads(std::io::Cursor<Vec<u8>>);
+
+impl std::io::Read for OneByteReads {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let n = buf.len().min(1);
+        self.0.read(&mut buf[..n])
+    }
+}
+
+/// `read_all` and the posts of a text file whose bytes come in blocks or one per read.
+fn read_text(data: &[u8], by_byte: bool) -> String {
+    let path = Path::new("text.asnt");
+    let reader = if by_byte {
+        MaskFileReader::from_read(
+            path,
+            Box::new(OneByteReads(std::io::Cursor::new(data.to_vec()))),
+        )
+    } else {
+        MaskFileReader::from_bytes(path, data.to_vec())
+    };
+    match reader {
+        Ok(mut reader) => {
+            let objects = read_all(&mut reader);
+            format!("{objects:?} {:?}", reader.take_posts())
+        }
+        Err(error) => format!("open {error:?}"),
+    }
+}
+
+/// The text mask files read with one byte per read are read as with blocks: the same objects,
+/// posts and errors, whole and cut at every length up to 4 KiB and at 64 lengths beyond.
+#[test]
+fn text_files_read_one_byte_per_read() {
+    let mut paths: Vec<PathBuf> = std::fs::read_dir(parse_dir())
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| path.extension().is_some_and(|e| e == "asnt"))
+        .collect();
+    paths.sort();
+    assert!(paths.len() > 20, "{}", paths.len());
+    for path in paths {
+        let data = read_file(&path);
+        let mut cuts: Vec<usize> = (0..=data.len().min(4096)).collect();
+        cuts.extend((1..=64).map(|k| data.len() * k / 64));
+        cuts.sort_unstable();
+        cuts.dedup();
+        for cut in cuts {
+            assert_eq!(
+                read_text(&data[..cut], false),
+                read_text(&data[..cut], true),
+                "{} cut {cut}",
+                path.display()
+            );
+        }
+    }
+}

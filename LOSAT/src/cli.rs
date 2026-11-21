@@ -757,7 +757,6 @@ const UNPORTED_BLASTN_ARGS: &[&str] = &[
     "gilist",
     "html",
     "import_search_strategy",
-    "index_name",
     "negative_gilist",
     "remote",
 ];

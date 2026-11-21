@@ -726,21 +726,21 @@ fn shape_of(
 // (the "no chunking" branch of a chunk from 0 whose next range starts at the frame's end) and
 // :145-215 (the subject's list of ranges restored after the frame).
 // A mask is refused where, after the mapping, a frame's last range that starts at 0 (not cut at
-// `MAX_DBSEQ_LEN`, with no range after it or one at the frame's end) is not the frame's first
-// range (`FrameStartMask`: NCBI frees memory that it did not allocate and crashes): a mask within
-// the first two bases or within the one or two bases after the last whole codon (with no other
-// mask in the frame). Where that range is the frame's first and shorter than the frame (a tail
-// mask in frame +1, a head mask in frame -1, a mask that ends 2 or 3 bases before the end in
-// frame +2: NCBI's "no chunking" branch) the chunk is searched alone since M4b-3 (the Owner's
-// answers Q1 = B and Q2 = B of M4b, 2026-11-21; the assertions of those masks give `None`); a
-// mask inside and a sequence shorter than the shortest searched one are searched. The bounds of the length
-// are read where they agree, the length otherwise. The second block holds the cases of review
-// F2 of M4b PR 2, where the manual's earlier words (an only mask, of 3 bases or more, within 4
-// bases of the end) were wrong both ways (`M/m4b/scripts3/rule_check4.py`: the manual's rule and a
-// model of NCBI's chunks with the crash agree on every sorted set of 1 to 3 masks of sequences
-// of 9 to 44 bases; NCBI BLAST+ 2.17.0 crashed on [0, 1), [1, 2), [0, 2) of 1,200 bases,
-// [1200, 1202) and [1201, 1202) of 1,202, [0, 1) with [1199, 1200) of 1,200 and [0, 3) with
-// [1200, 1201) of 1,201, and searched [0, 1) with [600, 700) and [300, 400) with [1200, 1202)).
+// `MAX_DBSEQ_LEN`, with no range after it or one at the frame's end) is not the frame's first range
+// (`FrameStartMask`: NCBI frees memory that it did not allocate and crashes): a mask within the
+// first two bases or within the one or two bases after the last whole codon (with no other mask in
+// the frame). Where that range is the frame's first and shorter than the frame (a tail mask in
+// frame +1, a head mask in frame -1, a mask that ends 2 or 3 bases before the end in frame +2:
+// NCBI's "no chunking" branch) the chunk is searched alone since M4b-3 (the Owner's answers Q1 = B
+// and Q2 = B of M4b, 2026-11-21; the assertions of those masks give `None`); a mask inside and a
+// sequence shorter than the shortest searched one are searched. The bounds of the length are read
+// where they agree, the length otherwise. The second block holds the cases of review F2 of M4b PR
+// 2, where the manual's earlier words (an only mask, of 3 bases or more, within 4 bases of the end)
+// were wrong both ways (`M/m4b/scripts3/rule_check4.py`: the manual's rule and a model of NCBI's
+// chunks with the crash agree on every sorted set of 1 to 3 masks of sequences of 9 to 44 bases;
+// NCBI BLAST+ 2.17.0 crashed on [0, 1), [1, 2), [0, 2) of 1,200 bases, [1200, 1202) and [1201,
+// 1202) of 1,202, [0, 1) with [1199, 1200) of 1,200 and [0, 3) with [1200, 1201) of 1,201, and
+// searched [0, 1) with [600, 700) and [300, 400) with [1200, 1202)).
 #[test]
 fn translated_hard_masks_are_refused_where_a_frame_restarts_at_its_start() {
     use std::cell::Cell;

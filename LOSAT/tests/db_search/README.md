@@ -2193,10 +2193,26 @@ makeblastdb -in prot.faa -dbtype prot -parse_seqids -out pl3b -title "parsed ids
 blastdb_aliastool -dblist "ph5 phmv" -dbtype prot -out pal -title "alias of ph5 and phmv"
 python3 ../make_dbmaskp_pbh.py --ncbi-only WORK $NCBI_BIN .   # pbh.faa, edge_pbh.asnt, qbh.fna, qbh.faa, pbh
 makeblastdb -in pshort.faa -dbtype prot -out pshort -title "short pieces between masks" -mask_data edge_short.asnt
-makeblastdb -in prot.faa -dbtype prot -out ps5n -title "seg masks v5, p4 one shorter" -mask_data near_ps5.asnt
-makeblastdb -in prot.faa -dbtype prot -out pe_tailn -title "edge tail, one shorter" -mask_data edge_tailn.asnt
+python3 - <<'PY'   # prot_p4x.faa, prot_p5x.faa: prot.faa with p4[119], p5[399] stored as X (the near inputs' freed letters)
+def put(src, dst, name, pos):
+    recs, cur = [], None
+    for line in open(src):
+        if line.startswith('>'):
+            cur = [line, '']; recs.append(cur)
+        else:
+            cur[1] += line.strip()
+    with open(dst, 'w') as f:
+        for head, seq in recs:
+            if head[1:].split()[0] == name:
+                seq = seq[:pos] + 'X' + seq[pos + 1:]
+            f.write(head + '\n'.join(seq[i:i + 60] for i in range(0, len(seq), 60)) + '\n')
+put('prot.faa', 'prot_p4x.faa', 'p4', 119)
+put('prot.faa', 'prot_p5x.faa', 'p5', 399)
+PY
+makeblastdb -in prot_p4x.faa -dbtype prot -out ps5n -title "seg masks v5, p4 one shorter" -mask_data near_ps5.asnt
+makeblastdb -in prot_p5x.faa -dbtype prot -out pe_tailn -title "edge tail, one shorter" -mask_data edge_tailn.asnt
 makeblastdb -in prot.faa -dbtype prot -out pe_e0tail -title "edge e0tail" -mask_data edge_e0tail.asnt
-makeblastdb -in prot.faa -dbtype prot -out pe_e0tailn -title "edge e0tail, one shorter" -mask_data edge_e0tailn.asnt
+makeblastdb -in prot_p5x.faa -dbtype prot -out pe_e0tailn -title "edge e0tail, one shorter" -mask_data edge_e0tailn.asnt
 rm -f *.pjs
 ```
 
@@ -2218,7 +2234,9 @@ PD-LOSAT-NCBI-DEFECTS exception 18, M4b-3), and their rows hold NCBI's run of th
 crashes or differs from it: `ps5n` (`near_ps5.asnt`: `ps5`'s algorithm 21 written out by `segmasker -outfmt interval`,
 with `p4`'s mask one letter shorter, [0, 119)) and `pe_tailn` (`edge_tailn.asnt`: [300, 399)). `pe_e0tail`
 (`edge_e0tail.asnt`: an empty mask at 0, `from 0, to 4294967295`, which makeblastdb stores as [0, 0), then [300, 400))
-is searched the same way, as BLASTN's `edge4`; its near input is `pe_e0tailn` ([0, 0) and [300, 399)). `ph5`, `ph4` and
+is searched the same way, as BLASTN's `edge4`; its near input is `pe_e0tailn` ([0, 0) and [300, 399)). The near
+inputs store the letter that the shorter mask frees as `X` (`prot_p4x.faa`, `prot_p5x.faa`), so that it stays masked in
+the alignments and the composition-based statistics, as LOSAT reads the masked letters. `ph5`, `ph4` and
 `phmv` are the other hard-mask databases; `pe_unsorted` (masks out of order) is refused.
 
 `pshort` (resume 2 of PR 1, 2026-11-21; `pshort.faa`, `edge_short.asnt`, `qshort.faa`, `qshort.fna`, written by
@@ -2264,7 +2282,8 @@ makeblastdb -in nucl.fna -dbtype nucl -out th1 -title "hand masks 1" -blastdb_ve
   -mask_data hedge_mid0.asnt,hedge_mid1.asnt,hedge_mid2.asnt,hedge_adjacent.asnt,hedge_overlap.asnt,hedge_mid.asnt
 makeblastdb -in nucl.fna -dbtype nucl -out th2 -title "hand masks 2" -blastdb_version 4 \
   -mask_data hedge_unsorted.asnt,hedge_head.asnt,hedge_tail.asnt,hedge_near.asnt
-makeblastdb -in nucl.fna -dbtype nucl -out th2tn -title "hand mask tail, 4 bases shorter" -blastdb_version 4 \
+sed '164s/....$/NNNN/' nucl.fna > nucl_t4n.fna   # t4's bases 1196-1199, which hedge_tailn frees, stored as N
+makeblastdb -in nucl_t4n.fna -dbtype nucl -out th2tn -title "hand mask tail, 4 bases shorter" -blastdb_version 4 \
   -mask_data hedge_tailn.asnt
 rm -f *.njs
 ```
@@ -2279,7 +2298,8 @@ end (`tf4`'s `t5`, `head` for frame -1, `tail` for frame +1, `near` for frames +
 alone (the Owner's answers Q1 = B and Q2 = B of M4b, PD-LOSAT-NCBI-DEFECTS exception 18, M4b-3). TBLASTX's rows of
 `tail` and `near`, where NCBI writes an HSP once per seed past the part, hold NCBI's run of the near input `th2tn`
 (`hedge_tailn.asnt`: `t4` [1000, 1196), the fewest bases short of the end after which frames +1 to +3 each keep a
-letter after the mask); the other rows are NCBI's own, which equal its run of the near input there. Masks out of
+letter after the mask; `nucl_t4n.fna` stores the 4 freed bases as `N`, so that they stay masked as LOSAT reads them);
+the other rows are NCBI's own, which equal its run of the near input there. Masks out of
 order (`unsorted`, `overlap`) are refused, as for the other programs.
 
 The review rows of PR 2 (2026-11-21; `db.tmask.*.te.*`, `*.tl.*`, `*.th1.*`, `*.tm5.*.w0.*`, `*.3f`, `*.1a`) read

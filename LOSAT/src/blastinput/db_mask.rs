@@ -340,15 +340,15 @@ pub enum HardScan {
     /// blastp and blastx (protein subjects, series NP, M4b): chunks from their hard range's left
     /// (`residual` 0). A mask that runs to the end after the chunk from the start (after empty
     /// masks at 0 too) is searched over that chunk alone, at every word (`HardMaskShape::TailMask`
-    /// is never refused here: the approved NCBI defect of [`TAIL_MASK_SEARCHED_WORD`] for these
-    /// programs, PD-LOSAT-NCBI-DEFECTS exception 18; the Owner's answer Q1 = B of M4b,
-    /// 2026-11-21). A hard range longer than `MAX_DBSEQ_LEN`, which NCBI cuts into chunks
-    /// that its merge joins across their overlap, is refused (`HardMaskShape::LongRange`), as is
-    /// a mask that ends past the sequence (`HardMaskShape::PastEnd`). A chunk shorter than the
-    /// word is searched as NCBI searches it, in both scans: the one-hit scan (`-window_size 0`)
-    /// reads no word of it, and the one word that the two-hit scan reads at its start has no
-    /// other hit on its diagonal, so it extends nothing
-    /// (`algorithm::common::db_mask_search::SubjectPlan::next_searched_chunk`).
+    /// is never refused here: the same NCBI defect as BLASTN's [`TAIL_MASK_SEARCHED_WORD`]
+    /// (PD-LOSAT-NCBI-DEFECTS exception 13), approved for these programs at every word as exception
+    /// 18; the Owner's answer Q1 = B of M4b, 2026-11-21). A hard range longer than `MAX_DBSEQ_LEN`,
+    /// which NCBI cuts into chunks that its merge joins across their overlap, is refused
+    /// (`HardMaskShape::LongRange`), as is a mask that ends past the sequence
+    /// (`HardMaskShape::PastEnd`). A chunk shorter than the word is searched as NCBI searches it,
+    /// in both scans: the one-hit scan (`-window_size 0`) reads no word of it, and the one word
+    /// that the two-hit scan reads at its start has no other hit on its diagonal, so it extends
+    /// nothing (`algorithm::common::db_mask_search::SubjectPlan::next_searched_chunk`).
     Protein,
     /// tblastn and tblastx (translated nucleotide subjects; series NP, M4b PR 2): the complement
     /// of a sequence's stored masks is mapped to each of its six frames (`x / 3`, the minus

@@ -17,9 +17,11 @@ and for the rows of outfmt 13 and 14 and psiblast's PSSM files two more, files a
 - `kind ncbi`: stdout, stderr and exit status (rc) equal the frozen bytes of NCBI BLAST+ 2.17.0
   `PROGRAM -db ... -num_threads 1` (`LOSAT/tests/fixtures/db_search/<row_id>.out`, `.err` when stderr is not empty).
 - `kind ncbi` with `ncbi-near: ROW_ID` in covers (after a ` | `): the expectation is the frozen bytes and columns of the
-  `ncbi` row ROW_ID, NCBI's run of a near input (the mask one letter shorter; for exception 3 the same volume with zero
-  bytes after its last memory page), where NCBI's own run of the row reaches an approved NCBI defect
-  (PD-LOSAT-NCBI-DEFECTS exceptions 13 and 3); `freeze` copies ROW_ID's columns and runs nothing.
+  `ncbi` row ROW_ID, NCBI's run of a near input (the mask one letter shorter, in TBLASTN and TBLASTX the fewest bases
+  after which every reading frame keeps a letter after its part, for exception 18 with the freed letters stored as `X`
+  or `N`; for exception 3 the same volume with zero bytes after its last memory page), where NCBI's own run of the row
+  reaches an approved NCBI defect (PD-LOSAT-NCBI-DEFECTS exceptions 13, 18 and 3); `freeze` copies ROW_ID's columns
+  and runs nothing.
 - `kind ncbi` with a part ` | ncbi-valgrind` of covers: the frozen bytes are NCBI's run under valgrind memcheck, where
   NCBI's native run reads past its buffers (PD-LOSAT-NCBI-DEFECTS exception 3) and may crash or vary; `freeze` runs
   such a row only with `--valgrind CMD` (for example `--valgrind "valgrind -q --log-file=/dev/null"`) and otherwise

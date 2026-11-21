@@ -264,7 +264,7 @@
   of line NP's M4b, 「すべて推奨通りで」: with `-db_hard_mask`, BLASTP, BLASTX, TBLASTN and TBLASTX
   search a sequence whose first mask runs to its end (in TBLASTN and TBLASTX, a reading frame whose
   first part runs into such a mask) over the part before the mask, as NCBI's normal chunks search the
-  near input; the refusals of those shapes removed; line NP item M4b-3; numbered after 1.62)
+  near input, the masked letters staying masked; the refusals of those shapes removed; line NP item M4b-3; numbered after 1.62)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1006,7 +1006,7 @@ every query (NCBI's bytes for a query with a next query are deterministic, rule 
     (`LOSAT/src/algorithm/blastp/kappa.rs`), `a_heap_without_early_end_is_never_filled_to_its_cutoff`
     (`LOSAT/src/algorithm/blastp/hsp.rs`).
 
-## Approved exception 18 (BLASTP, BLASTX, TBLASTN and TBLASTX `-db_hard_mask`, a mask that runs to the end)
+## Approved exception 18 (BLASTP, BLASTX, TBLASTN and TBLASTX `-db_hard_mask`, a mask that runs to the end, version 1.63)
 
 The Owner decided on 2026-11-21 (words 「すべて推奨通りで」, line NP `M/m4b/OWNER_QUESTIONS.md`) questions
 Q1 and Q2 of M4b: option B of each, the search over the part before the mask as a normal chunk for
@@ -1025,8 +1025,8 @@ a crash. Its version is in the list at the top; elsewhere it is cited by its num
     reading frame by its positions divided by 3 (the minus frames from frame -1's length) and cut
     each frame as a protein subject (`blast_engine.c:805-830`). A sequence (or a frame) whose first
     chunk, from 0 and with at most 5,000,000 letters, is followed by a mask that runs to its end
-    (masked whole, a masked tail, also after empty masks at 0; in a frame, masks at or near either end
-    of the sequence) takes the "no chunking" branch (`blast_engine.c:264-268`), as in exception 13:
+    (masked whole or a masked tail; in BLASTP and BLASTX also after empty masks at 0; in a frame,
+    masks at or near either end of the sequence) takes the "no chunking" branch (`blast_engine.c:264-268`), as in exception 13:
     its `seq_ranges` are the full range (`:162`) while `subject->length` is the chunk's. The protein
     scan reads the ranges (`masksubj.inl:43-59`, `blast_aascan.c:75`) and so the stored letters under
     the mask, while the right extensions (`aa_ungapped.c:841`), the diagonal offset
@@ -1041,19 +1041,26 @@ a crash. Its version is in the list at the top; elsewhere it is cited by its num
       the mask;
     - in TBLASTX (and TBLASTN with `-ungapped`), extends each seed read past the part to the left
       only and writes the same ungapped HSP, which ends where the mask starts, once per such seed.
-    LOSAT scans that part as every other hard chunk, over its own letters (`[0, length)`), with the
-    extensions, the diagonal state and the HSP tree of that one length: the result of NCBI's normal
-    chunks for the near input, the same database with the mask shortened until a letter follows the
-    part (one letter in BLASTP and BLASTX; in TBLASTN and TBLASTX the fewest bases after which every
-    frame of the sequence keeps a letter after its part: 2 to 6 bases at an end in the fixtures). Its traceback
-    reads every masked letter as `X` (the masked bases as any base in the translated programs), as
-    NCBI's does. Where a mask of one or two bases at an end of the sequence leaves the frame no part
-    after its first part (no near input keeps that part), the result is the part's alone, which NCBI's
-    own run gives in the fixtures (its scan reads the masked letter, the extensions stop at the part's
-    end). Masks within a frame's first part (`FrameStartMask`: an empty first part of a frame, then a
-    part that NCBI searches as the whole frame) stay refused (rule 3) until the Owner's question Q4 of
-    M4b is answered, as do masks out of order, overlapping masks, a mask that ends past its sequence,
-    and in BLASTP and BLASTX a range longer than 5,000,000 letters. `blastinput::db_mask::HardScan`,
+    LOSAT scans that part as every other hard chunk, over its own letters (`[0, length)`; the chunk
+    of a whole frame over the frame's, `[0, frame length)`), with the extensions, the diagonal state
+    and the HSP tree of that one length: the chunks that NCBI searches in the near input, the same
+    database with the mask shortened until a letter follows the part (one letter in BLASTP and
+    BLASTX; in TBLASTN and TBLASTX the fewest bases after which every frame of the sequence keeps a
+    letter after its part: 2 to 6 bases at an end in the fixtures). The masked letters stay masked:
+    the traceback and the composition-based statistics read them as `X` (the masked bases as any
+    base in the translated programs), as NCBI's do. So LOSAT's result is NCBI's result for the near
+    input with the freed letters stored as `X` (`N`); the near input with those letters unmasked
+    gives other rows where its alignments reach them (a tail mask of 1 or 2 letters) or under
+    composition-based statistics (the default of BLASTP, BLASTX and TBLASTN). Where a mask of one or
+    two bases at an end of the sequence leaves the frame no part after its first part (no near
+    input keeps that part), the result is the part's alone, which NCBI's own run gives in the
+    fixtures (its scan reads the masked letter, the extensions stop at the part's end). A mask that
+    leaves a frame an empty first part (`FrameStartMask`: an empty first part of a frame, then a part
+    that NCBI searches as the whole frame; in TBLASTN and TBLASTX this includes an empty mask at 0
+    before a tail mask, which BLASTP and BLASTX search under Q1 as BLASTN does under exception 13)
+    stays refused (rule 3) until the Owner's question Q4 of M4b is answered, as do masks out of
+    order, overlapping masks, a mask that ends past its sequence, and in BLASTP and BLASTX a range
+    longer than 5,000,000 letters. `blastinput::db_mask::HardScan`,
     `HardMaskShape::of_scan`, `algorithm::common::translated_chunks::translated_db_mask_chunks`,
     `algorithm::blastp::blast_engine::db_masked::hard_chunks`.
     Evidence (NCBI BLAST+ 2.17.0, each run capped; line NP's task folder `M/m4b` (SURVEY.md §4.1,
@@ -1082,9 +1089,19 @@ a crash. Its version is in the list at the top; elsewhere it is cited by its num
     and `db.tmask.*.hard.te.{16,17,18,19,33,34,35}.6` of `LOSAT/tests/db_search_manifest/{blastp,blastx}.pmask.tsv`
     and `{tblastn,tblastx}.tmask.tsv`: NCBI's bytes, or with `ncbi-near:` those of NCBI's run of the
     near input (the rows `db.pmask.*.hard.near.*`, `db.tmask.tx.hard.near.th2tn.11.6`; databases
-    `ps5n`, `pe_tailn`, `pe_e0tailn`, `th2tn`). Unit tests `protein_shapes_of_the_hard_masks` and
+    `ps5n`, `pe_tailn`, `pe_e0tailn`, `th2tn`, built from copies of the FASTA files with the freed
+    letters stored as `X` or `N`: `prot_p4x.faa`, `prot_p5x.faa`, `nucl_t4n.fna`). With the near
+    input's own letters BLASTP and BLASTX give other E-values at the default composition-based
+    statistics (`pe_tail`), and a 60-letter protein whose last 2 letters are masked aligns 1-58 with
+    the tail mask (NCBI's own run, LOSAT the same) but 1-60 with the near input's mask of one letter.
+    TBLASTN with `-ungapped -comp_based_stats 0` and with `-window_size 0` on `th2`'s tail
+    (`db.tmask.tn.hard.th2.13.{ung,w0}.6`): NCBI's own bytes, the same as its run of the near input;
+    BLASTP with `-window_size 0` on `pe_tail` (`db.pmask.bp.hard.tail.pe_tail.w0.6`): the near
+    input's. Unit tests `protein_shapes_of_the_hard_masks` and
     `translated_hard_masks_are_refused_where_a_frame_restarts_at_its_start`
-    (`LOSAT/src/blastinput/db_mask_tests.rs`).
+    (`LOSAT/src/blastinput/db_mask_tests.rs`),
+    `a_whole_frame_scans_to_the_frame_s_end_and_a_tail_masked_one_its_chunk`
+    (`LOSAT/src/algorithm/common/translated_chunks_tests.rs`).
 
 ## Reproduced as NCBI (rule 2)
 

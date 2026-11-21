@@ -569,7 +569,8 @@ impl<S: AsnSource> Reader<S> {
     // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:213-253
     #[inline(never)]
     fn white_space_from(&mut self, mut pos: usize) -> Result<(usize, u8)> {
-        let mut line = self.line;
+        // The line ends found, added to `line` at the end (when there are any).
+        let mut lines = 0;
         let found = 'skip: loop {
             // Spaces, tabs and line ends are read from the kept bytes in locals; the source is
             // asked for more only at their end.
@@ -586,7 +587,7 @@ impl<S: AsnSource> Reader<S> {
                     b'\t' => i += 1,
                     b'\r' | b'\n' => {
                         i += 1;
-                        line += 1;
+                        lines += 1;
                         match rest.get(i) {
                             Some(&next) => {
                                 if c as u32 + next as u32 == b'\r' as u32 + b'\n' as u32 {
@@ -611,8 +612,8 @@ impl<S: AsnSource> Reader<S> {
                 Some(b'-') => match self.src.byte_at(pos + 1) {
                     // The end of the text after a `-`: `PeekChar(1)` fails at the `-`.
                     None => break None,
-                    Some(b'-') => match self.comment_at(pos + 2, line) {
-                        Some((end, end_line)) => (pos, line) = (end, end_line),
+                    Some(b'-') => match self.comment_at(pos + 2) {
+                        Some((end, end_lines)) => (pos, lines) = (end, lines + end_lines),
                         None => {
                             pos = self.pos;
                             break 'skip None;
@@ -623,7 +624,9 @@ impl<S: AsnSource> Reader<S> {
                 Some(c) => break Some(c),
             }
         };
-        self.line = line;
+        if lines != 0 {
+            self.line += lines;
+        }
         match found {
             Some(c) => Ok((pos, c)),
             None => {
@@ -633,12 +636,12 @@ impl<S: AsnSource> Reader<S> {
         }
     }
 
-    /// The rest of a comment from `pos` (after its `--`) on line `line`: up to the end of the
-    /// line or the next `--`. The position and the line after it, or `None` at the end of the
+    /// The rest of a comment from `pos` (after its `--`): up to the end of the line or the next
+    /// `--`. The position after it and the line ends taken (0 or 1), or `None` at the end of the
     /// text (`pos` set there).
     #[cold]
     #[inline(never)]
-    fn comment_at(&mut self, mut pos: usize, line: usize) -> Option<(usize, usize)> {
+    fn comment_at(&mut self, mut pos: usize) -> Option<(usize, usize)> {
         loop {
             let (at, c) = self.src.scan(pos, |c| !matches!(c, b'\r' | b'\n' | b'-'));
             pos = at;
@@ -654,12 +657,12 @@ impl<S: AsnSource> Reader<S> {
                 };
                 pos += 1;
                 if next == b'-' {
-                    return Some((pos, line));
+                    return Some((pos, 0));
                 }
                 c = next;
             }
             if matches!(c, b'\r' | b'\n') {
-                return Some((self.end_of_line_at(pos, c), line + 1));
+                return Some((self.end_of_line_at(pos, c), 1));
             }
         }
     }

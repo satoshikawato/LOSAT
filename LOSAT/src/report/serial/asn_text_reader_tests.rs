@@ -62,7 +62,7 @@ fn value<S: AsnSource>(
             let v = r.real()?;
             note(r, log, format!("real {:x}", v.to_bits()));
         }
-        b'{' if *step % 11 == 0 => {
+        b'{' if step.is_multiple_of(11) => {
             r.skip_value()?;
             note(r, log, "skipped".into());
         }
@@ -100,7 +100,7 @@ fn value<S: AsnSource>(
             note(r, log, format!("uint4 {n}"));
         }
         b'-' | b'+' | b'0'..=b'9' => {
-            if *step % 3 == 0 {
+            if step.is_multiple_of(3) {
                 let n = r.int8()?;
                 note(r, log, format!("int8 {n}"));
             } else {

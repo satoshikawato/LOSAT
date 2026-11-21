@@ -3,26 +3,7 @@
 //! megablast table of 4^12 cells (`build_mb_lookup`) with elements of 3 bytes instead of 4.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1081-1091
-//! ```c
-//!          if (mb_lt->hashtable[ecode] == 0) {
-//!             PV_SET(pv_array, ecode, pv_array_bts);
-//!          }
-//!          else {
-//!             helper_array[ecode/kCompressionFactor]++;
-//!          }
-//!          mb_lt->next_pos[index] = mb_lt->hashtable[ecode];
-//!          mb_lt->hashtable[ecode] = index;
-//! ```
-//! NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:1406-1418
-//! ```c
-//! Int4 q_off = lookup->hashtable[index];
-//!
-//! while (q_off) {
-//!     offset_pairs[i].qs_offsets.q_off   = q_off - 1;
-//!     offset_pairs[i++].qs_offsets.s_off = s_off;
-//!     q_off = lookup->next_pos[q_off];
-//! }
-//! ```
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:1406-1418
 //!
 //! What it changes. NCBI's `hashtable` and `next_pos` are `Int4` arrays: one head per cell and one
 //! link per query offset, each a 1-based query offset or 0 (the end of a chain). A table whose

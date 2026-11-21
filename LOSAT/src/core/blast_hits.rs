@@ -1,6 +1,6 @@
 //! HSP Storage and Management
 //!
-//! Reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c
 //!
 //! The filters of `s_FilterBlastResults` that every program shares (`-max_hsps`,
 //! `-qcov_hsp_perc`), `Blast_HSPTest` (NCBI's `Int4` counts, widened to `i64`), and the frames
@@ -18,30 +18,9 @@
 /// `min_hit_length` of 0 that NCBI's applications always leave (`calloc`, no option), both are
 /// false for every length of 0 or more.
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1446
-/// ```c
-///    *options = (BlastHitSavingOptions*) calloc(1, sizeof(BlastHitSavingOptions));
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1446,1448
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:993-1001,1027-1032
-/// ```c
-/// static Boolean s_HSPTest(const BlastHSP* hsp,
-///                          const BlastHitSavingOptions* hit_options,
-///                          Int4 align_length)
-/// {
-/// 	   return ((hsp->num_ident * 100.0 <
-/// 			   align_length * hit_options->percent_identity) ||
-/// 			   align_length < hit_options->min_hit_length) ;
-///
-/// }
-/// ...
-/// Boolean Blast_HSPTest(BlastHSP* hsp,
-/// 		 	 	 	  const BlastHitSavingOptions* hit_options,
-/// 		 	 	 	  Int4 align_length)
-/// {
-/// 	return s_HSPTest(hsp, hit_options, align_length);
-/// }
-/// ```
 pub fn hsp_test(
     num_ident: i64,
     align_length: i64,
@@ -57,19 +36,7 @@ pub fn hsp_test(
 /// exclusive, in the letters of its context) over the length of its context, plus 0.5 below
 /// 99 (`Blast_HSPGetQueryCoverage`).
 ///
-/// NCBI reference: c++/src/algo/blast/core/blast_hits.c:1034-1044
-/// ```c
-/// double Blast_HSPGetQueryCoverage(const BlastHSP* hsp, Int4 query_length)
-/// {
-/// 	double pct = 0;
-///     if(query_length > 0) {
-///             pct = 100.0 * (double) (hsp->query.end - hsp->query.offset)/ (double) query_length;
-///             if(pct < 99)
-///             	pct +=0.5;
-///     }
-///     return pct;
-/// }
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1034-1044
 pub fn hsp_query_coverage(offset: i64, end: i64, query_length: i64) -> f64 {
     let mut pct = 0.0;
     if query_length > 0 {
@@ -84,16 +51,7 @@ pub fn hsp_query_coverage(offset: i64, end: i64, query_length: i64) -> f64 {
 /// Whether an HSP covers less than `min_pct` percent of its query context
 /// (`Blast_HSPQueryCoverageTest`: the HSP is deleted).
 ///
-/// NCBI reference: c++/src/algo/blast/core/blast_hits.c:1046-1051
-/// ```c
-/// Boolean Blast_HSPQueryCoverageTest(BlastHSP* hsp,
-///         						   double min_query_coverage_pct,
-///         						   Int4 query_length)
-/// {
-///      double hsp_coverage = Blast_HSPGetQueryCoverage( hsp, query_length);
-///      return (hsp_coverage < min_query_coverage_pct);
-/// }
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1045-1051
 pub fn hsp_query_coverage_test(min_pct: f64, offset: i64, end: i64, query_length: i64) -> bool {
     hsp_query_coverage(offset, end, query_length) < min_pct
 }
@@ -104,32 +62,7 @@ pub fn hsp_query_coverage_test(min_pct: f64, offset: i64, end: i64, query_length
 /// 0 is NCBI's unset option and removes nothing. Returns whether an HSP was removed (the
 /// caller then sets the list's best e-value again, and frees a list left empty).
 ///
-/// NCBI reference: c++/src/algo/blast/core/blast_hits.c:2010-2045
-/// ```c
-///    if ((hsp_list == NULL) || (hsp_list->hspcnt == 0) || (hit_options->query_cov_hsp_perc == 0))
-///       return 0;
-///
-///    hsp_array = hsp_list->hsp_array;
-///    for (index = 0; index < hsp_list->hspcnt; index++) {
-///       hsp = hsp_array[index];
-///       ASSERT(hsp != NULL);
-///       if ( Blast_HSPQueryCoverageTest(hsp, hit_options->query_cov_hsp_perc,
-/// 			                          query_info->contexts[hsp->context].query_length)) {
-///          hsp_array[index] = Blast_HSPFree(hsp_array[index]);
-///          removed = TRUE;
-///       } else {
-///          if (index > hsp_cnt)
-///             hsp_array[hsp_cnt] = hsp_array[index];
-///          hsp_cnt++;
-///       }
-///    }
-///
-///    hsp_list->hspcnt = hsp_cnt;
-///
-///    if (removed) {
-///        hsp_list->best_evalue = s_BlastGetBestEvalue(hsp_list);
-///    }
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2010-2045
 pub fn reap_by_query_coverage<T>(
     hsps: &mut Vec<T>,
     min_pct: f64,
@@ -149,27 +82,7 @@ pub fn reap_by_query_coverage<T>(
 /// `Blast_TrimHSPListByMaxHsps`: the first `max_hsps` HSPs of a list, in its order, are
 /// kept (0 keeps all). The list's best e-value is not set again.
 ///
-/// NCBI reference: c++/src/algo/blast/core/blast_hits.c:2049-2069
-/// ```c
-/// Int2 Blast_TrimHSPListByMaxHsps(BlastHSPList* hsp_list,
-///                                 const BlastHitSavingOptions* hit_options)
-/// {
-///    ...
-///    if ((hsp_list == NULL) ||
-/// 	   (hit_options->max_hsps_per_subject == 0) ||
-/// 	   (hsp_list->hspcnt <= hit_options->max_hsps_per_subject))
-///       return 0;
-///
-///    hsp_max = hit_options->max_hsps_per_subject;
-///    hsp_array = hsp_list->hsp_array;
-///    for (index = hsp_max; index < hsp_list->hspcnt; index++) {
-///       hsp_array[index] = Blast_HSPFree(hsp_array[index]);
-///    }
-///
-///    hsp_list->hspcnt = hsp_max;
-///    return 0;
-/// }
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2049-2069
 pub fn trim_by_max_hsps<T>(hsps: &mut Vec<T>, max_hsps: usize) {
     if max_hsps == 0 || hsps.len() <= max_hsps {
         return;
@@ -279,16 +192,6 @@ fn retain_unremoved<T>(items: &mut Vec<T>, removed: &[bool]) {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:1284;
 // c++/src/algo/blast/core/blast_hits.c:1162-1164,1234-1235
-// ```c
-//       retval->translations = (Uint1**) calloc(num_frames, sizeof(Uint1*));
-// ...
-//     /* skip translation if full translation has already been done */
-//     if (target_t->partial && (start ||
-//         (stop < target_t->subject_blk->length / CODON_LENGTH -3)))
-// ...
-//     /* +1 as the first byte is a sentinel. */
-//     return target_t->translations[context] - target_t->range[2*context] + 1;
-// ```
 /// Whether NCBI's `Blast_HSPGetTargetTranslation` never translates a frame of a subject of
 /// `subject_length` bases (the searched range, `-subject_loc`: NCBI's `subject_blk->length`): its
 /// test is false at the first call (`start` and `stop` 0) for fewer than 12 bases and stays so,

@@ -2,12 +2,8 @@
 
 use std::sync::OnceLock;
 
-// NCBI reference: c++/src/algo/blast/api/blast_aux.cpp:588-603
-// ```c++
-// const string kGenCode = CGen_code_table::GetNcbieaa(genetic_code);
-// if (kGenCode == kEmptyStr) { return retval; }
-// ```
-// NCBI reference: c++/src/objects/seqfeat/gc.prt:105-357
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:588-603
+// NCBI reference (598d8ae6): c++/src/objects/seqfeat/gc.prt:105-357
 // Each row below copies its pinned ncbieaa entry.
 const TABLES: &[(u8, &[u8; 64])] = &[
     // NCBI gc.prt:109: id 1, ncbieaa "FFLLSSSSYY**CC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG"
@@ -160,11 +156,7 @@ static DISPLAY_TABLES: [OnceLock<Box<[u8; 4096]>>; TABLES.len()] =
     [const { OnceLock::new() }; TABLES.len()];
 
 impl GeneticCode {
-    // NCBI reference: c++/src/algo/blast/api/blast_aux.cpp:588-600
-    // ```c++
-    // const string kGenCode = CGen_code_table::GetNcbieaa(genetic_code);
-    // if (kGenCode == kEmptyStr) { return retval; }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:588-600
     // A missing ID is an error at this boundary, never an implicit code-1 table.
     pub fn try_from_id(id: u8) -> Result<Self, String> {
         TABLES
@@ -183,27 +175,13 @@ impl GeneticCode {
         self.display
     }
 
-    // NCBI reference: c++/src/algo/blast/core/gencode_singleton.c:65-69
-    // ```c
-    // Uint1* GenCodeSingletonFind(Uint4 gen_code_id) {
-    //     return DynamicSGenCodeNodeArray_Find(g_theInstance, gen_code_id);
-    // }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/gencode_singleton.c:65-69
     // Existing internal TBLASTX callers pass CLI-validated IDs; invalid direct calls fail.
     pub fn from_id(id: u8) -> Self {
         Self::try_from_id(id).unwrap_or_else(|error| panic!("{error}"))
     }
 
-    // NCBI reference: c++/src/algo/blast/core/blast_util.c:369-424
-    // ```c
-    // static Uint1 mapping[4] = { 8, 2, 1, 4 };
-    // for (i = 0; i < 4; i++) if (codon[0] & mapping[i])
-    //   for (j = 0; j < 4; j++) if (codon[1] & mapping[j])
-    //     for (k = 0; k < 4; k++) if (codon[2] & mapping[k]) {
-    //       taa = codes[i*16+j*4+k];
-    //       if (!aa) aa = taa; else if (taa != aa) aa = kXResidue;
-    //     }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:369-424
     pub fn get(&self, codon: &[u8]) -> u8 {
         if codon.len() != 3 {
             return b'X';
@@ -211,23 +189,6 @@ impl GeneticCode {
         // Fast path (was LOSAT_X_CODONFAST): three unambiguous bases select exactly
         // one (i, j, k) of the loops below, so the answer is that one table entry.
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:375-379,394-403
-        // ```c
-        //    static Uint1 mapping[4] = { 8,     /* T in ncbi4na */
-        //                                2,     /* C */
-        //                                1,     /* A */
-        //                                4 };   /* G */
-        // ...
-        //    for (i = 0; i < 4; i++) {
-        //       if (codon[0] & mapping[i]) {
-        //          index0 = i * 16;
-        //          for (j = 0; j < 4; j++) {
-        //             if (codon[1] & mapping[j]) {
-        //                index1 = index0 + (j * 4);
-        //                for (k = 0; k < 4; k++) {
-        //                   if (codon[2] & mapping[k]) {
-        //                      index2 = index1 + k;
-        //                      taa = codes[index2];
-        // ```
         // The path below ports this nested loop, for codons with an ambiguous base. When all three
         // bases are unambiguous, only one (i, j, k) passes the `&` tests, so the loop would end
         // with `aa = codes[i*16+j*4+k]` and the table is read once instead.
@@ -271,23 +232,6 @@ impl GeneticCode {
 
 impl GeneticCode {
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:375-379,394-403
-    /// ```c
-    ///    static Uint1 mapping[4] = { 8,     /* T in ncbi4na */
-    ///                                2,     /* C */
-    ///                                1,     /* A */
-    ///                                4 };   /* G */
-    /// ...
-    ///    for (i = 0; i < 4; i++) {
-    ///       if (codon[0] & mapping[i]) {
-    ///          index0 = i * 16;
-    ///          for (j = 0; j < 4; j++) {
-    ///             if (codon[1] & mapping[j]) {
-    ///                index1 = index0 + (j * 4);
-    ///                for (k = 0; k < 4; k++) {
-    ///                   if (codon[2] & mapping[k]) {
-    ///                      index2 = index1 + k;
-    ///                      taa = codes[index2];
-    /// ```
     /// This is the one (i, j, k) that `s_CodonToAA` reaches when every codon byte has a single
     /// bit set: `mapping[]` gives the index of that bit. Ambiguous bases return `None` and use
     /// the loop in `get`.
@@ -306,15 +250,6 @@ impl GeneticCode {
 // `mapping[4] = { 8, 2, 1, 4 }` (T, C, A, G) when `base_mask` has exactly that
 // one bit, 4 otherwise.
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:375-379,395-396
-// ```c
-//    static Uint1 mapping[4] = { 8,     /* T in ncbi4na */
-//                                2,     /* C */
-//                                1,     /* A */
-//                                4 };   /* G */
-// ...
-//       if (codon[0] & mapping[i]) {
-//          index0 = i * 16;
-// ```
 // The table holds i (0..3) for T/U, C, A, G in either case. Any other byte, including
 // an ambiguity code, maps to 4 so that `(i | j | k) < 4` fails.
 const X_BASE_INDEX: [u8; 256] = {
@@ -330,12 +265,7 @@ const X_BASE_INDEX: [u8; 256] = {
     table
 };
 
-// NCBI reference: c++/src/algo/blast/core/blast_encoding.c:94-103
-// ```c
-// const Uint1 IUPACNA_TO_NCBI4NA[128]={
-//  0, 1,14, 2,13, 0, 0, 4,11, 0, 0,12, 0, 3,15, 0,
-//  0, 0, 5, 6, 8, 0, 7, 9, 0,10, 0, 0, 0, 0, 0,
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_encoding.c:94-103
 pub(crate) fn base_mask(base: u8) -> u8 {
     match base.to_ascii_uppercase() {
         b'A' => 1,
@@ -361,16 +291,6 @@ pub(crate) fn base_mask(base: u8) -> u8 {
 const NCBI4NA_LETTERS: &[u8; 16] = b"-ACMGRSVTWYHKDBN";
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:812-819
-// ```c
-//    /* Conversion table from forward to reverse strand residue in the blastna
-//       encoding */
-//    Uint1 conversion_table[16] = {
-//      0,  8, 4, 12,
-//      2, 10, 6, 14,
-//      1,  9, 5, 13,
-//      3, 11, 7, 15
-//    };
-// ```
 const NCBI4NA_COMPLEMENT: [u8; 16] = [0, 8, 4, 12, 2, 10, 6, 14, 1, 9, 5, 13, 3, 11, 7, 15];
 
 /// NCBI's `conversion_table` on the letters of the ncbi4na codes, in either case. Any other
@@ -402,14 +322,6 @@ pub(crate) fn complement(base: u8) -> u8 {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:828-833
-// ```c
-//    for (index = 0; index < length; ++index) {
-//         if (sequence[index] == FENCE_SENTRY)
-//                 rev_sequence[length-index] = FENCE_SENTRY;
-//         else
-//                 rev_sequence[length-index] = conversion_table[sequence[index]];
-//    }
-// ```
 /// The letters of the reverse strand, last to first, without NCBI's sentinels (the callers
 /// add their own) and its `FENCE_SENTRY` (a letter here is never one).
 pub(crate) fn revcomp(sequence: &[u8]) -> Vec<u8> {
@@ -453,25 +365,6 @@ mod tests {
 
     // EXPERIMENT: the table path of `get` against NCBI's nested loops.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:375-379,394-405
-    // ```c
-    //    static Uint1 mapping[4] = { 8,     /* T in ncbi4na */
-    //                                2,     /* C */
-    //                                1,     /* A */
-    //                                4 };   /* G */
-    // ...
-    //    for (i = 0; i < 4; i++) {
-    //       if (codon[0] & mapping[i]) {
-    //          index0 = i * 16;
-    //          for (j = 0; j < 4; j++) {
-    //             if (codon[1] & mapping[j]) {
-    //                index1 = index0 + (j * 4);
-    //                for (k = 0; k < 4; k++) {
-    //                   if (codon[2] & mapping[k]) {
-    //                      index2 = index1 + k;
-    //                      taa = codes[index2];
-    //                      if (! aa)
-    //                         aa = taa;
-    // ```
     // The test compares the table with `base_mask` and with a copy of this loop for all
     // codes and for 25 symbols per codon position.
     #[test]
@@ -591,8 +484,7 @@ mod tests {
         assert_eq!(code32.get(b"TAG"), b'W');
         assert_eq!(code32.get(b"TAR"), b'X');
         // Stage A comparison-only C++ API oracle uses FindGeneticCode(32).
-        // NCBI c++/src/algo/blast/api/blast_aux.cpp:588-600:
-        // const string kGenCode = CGen_code_table::GetNcbieaa(genetic_code);
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:588-600:
         let oracle = include_str!(
             "../../../docs/evidence/tlosan_stage_a/api_20260923_verified/code32_fmt6.out"
         );

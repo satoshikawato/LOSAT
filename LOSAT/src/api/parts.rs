@@ -3,7 +3,7 @@
 //! has its own hit list, HSP numbers, statistics and database ranks; this is where `run_collect`
 //! and `run_batches` turn them into the records of the whole search.
 //!
-//! NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:250-285 (quoted at
+//! NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:250-285 (cited at
 //! `local_blast::FormatObserver::round_begin`: each round's `CSearchResultSet`, formatted with its
 //! iteration number)
 #![warn(missing_docs, unused)]

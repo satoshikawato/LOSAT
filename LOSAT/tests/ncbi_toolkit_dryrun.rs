@@ -10,8 +10,8 @@
 //! command line writes to its standard error (the example ends every failure with exit status
 //! 1). rpsblast and rpstblastn are not in the library (`api::Program`).
 //!
-//! NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:705-707, 292-296 (quoted at
-//! `cli::main_entry`) and 926-1001 (quoted at `ncbi_environment::preparse`).
+//! NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:705-707, 292-296 (cited at
+//! `cli::main_entry`) and 926-1001 (cited at `ncbi_environment::preparse`).
 
 #![cfg(unix)]
 

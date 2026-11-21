@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Focused tests for the pure-Rust runtime boundary checker.
 
-NCBI references:
-- ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1379-1381
+NCBI references (598d8ae6):
+- c++/src/algo/blast/core/blast_hits.c:1379-1381
   qsort(..., ScoreCompareHSPs);
-- ncbi-blast/c++/src/algo/blast/core/link_hsps.c:483-486
+- c++/src/algo/blast/core/link_hsps.c:483-486
   qsort(..., s_RevCompareHSPsTbx);
 
 The tests freeze LOSAT's ownership boundary around those external calls; they
@@ -158,8 +158,7 @@ pub fn program_name() -> &'static str { "blastn" }
             {finding.key for finding in report.findings},
         )
 
-    # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
-    # (*thread)->Run(); (*thread)->Join(&result);
+    # NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:145-188
     # Only the reviewed Rust CRT startup is accepted; an added native route fails.
     def test_reviewed_wasi_crt_is_exact_and_cannot_hide_added_code(self) -> None:
         source = (Path(__file__).resolve().parents[1] / "build.rs").read_text()

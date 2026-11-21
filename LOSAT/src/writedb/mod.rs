@@ -114,20 +114,6 @@ pub enum WriteDbError {
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:248-259
-// ```c++
-//     catch (const CException& e) {                                           \
-//         LOG_POST(Error << "Error: " << e.what());                           \
-//         exit_code = BLAST_UNKNOWN_ERROR;                                    \
-//     }                                                                       \
-//     catch (const std::ios::failure&) {                                      \
-//         LOG_POST(Error << "BLAST failed to write output");                  \
-//         exit_code = BLAST_OUTPUT_ERROR;                                     \
-//     }                                                                       \
-//     catch (const std::bad_alloc&) {                                         \
-//         LOG_POST(Error << "BLAST ran out of memory");                       \
-//         exit_code = BLAST_OUT_OF_MEMORY;                                    \
-//     }                                                                       \
-// ```
 // NCBI's writer does not test whether an output file opened, a write succeeded or a
 // rename took place, so makeblastdb has no message for these failures, and LOSAT's writer
 // does not test them either (`ofstream`, `dir_entry`). An input file that cannot be opened

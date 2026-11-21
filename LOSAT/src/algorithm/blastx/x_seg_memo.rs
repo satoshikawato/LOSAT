@@ -4,36 +4,7 @@
 //! for a subject range, i.e. for every window of every query context of a match:
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1626-1638
-//! ```c
-//!         if (compo_adjust_mode
-//!             && (!subject_maybe_biased || *subject_maybe_biased)) {
-//!
-//!             if ( (!shouldTestIdentical)
-//!                  || (shouldTestIdentical
-//!                      && (!s_TestNearIdentical(seqData, 0, queryData,
-//!                                               q_range->begin, query_words,
-//!                                               align)))) {
-//!
-//!                 status = s_DoSegSequenceData(seqData, eBlastTypeBlastp,
-//!                                              subject_maybe_biased);
-//!             }
-//!         }
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1440-1451
-//! ```c
-//!         status = BlastSetUp_Filter(program_name, seqData->data,
-//!                                    seqData->length, 0, filter_options,
-//!                                    &mask_seqloc, NULL);
-//!         filter_options = SBlastFilterOptionsFree(filter_options);
-//!     }
-//!     if (is_seq_biased) {
-//!         *is_seq_biased = (mask_seqloc != NULL);
-//!     }
-//!     if (status == 0) {
-//!         Blast_MaskTheResidues(seqData->data, seqData->length,
-//!                               FALSE, mask_seqloc, FALSE, 0);
-//!     }
-//! ```
 //!
 //! The SEG intervals are a pure function of the subject bytes (the masker parameters are the
 //! constants of `kappa::get_range`). This module keeps, per thread, the bytes of the last
@@ -98,10 +69,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1635-1636
-    // ```c
-    //                 status = s_DoSegSequenceData(seqData, eBlastTypeBlastp,
-    //                                              subject_maybe_biased);
-    // ```
     #[test]
     fn memo_of_the_redo_masker_equals_the_masker() {
         use crate::utils::matrix::aa_char_to_ncbistdaa;

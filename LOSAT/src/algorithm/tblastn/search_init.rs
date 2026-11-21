@@ -7,14 +7,14 @@ use crate::algorithm::blastp::extension::extend_two_hit;
 use crate::algorithm::blastp::x_ungapped_fast;
 use crate::config::ScoringMatrix;
 
-// NCBI reference: c++/include/algo/blast/core/blast_extend.h:142-163
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_extend.h:142-163
 // typedef struct BlastUngappedData { Int4 q_start, s_start, length, score; } ...;
 // typedef struct BlastInitHSP { BlastOffsetPair offsets;
 //                              BlastUngappedData* ungapped_data; } ...;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct InitHsp {
     pub frame: i8,
-    // NCBI c++/src/algo/blast/core/blast_engine.c:241-250,572-586:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:241-250,572-586:
     // backup.offset is retained until HSP offsets are adjusted before merge.
     pub chunk_offset: u32,
     pub q_seed: u32,
@@ -25,11 +25,7 @@ pub(super) struct InitHsp {
     pub score: i32,
 }
 
-// NCBI reference: c++/src/algo/blast/core/blast_extend.c:46-65,162-175
-// while (diag_array_length < (qlen+window_size)) diag_array_length <<= 1;
-// diag_table->offset = window_size;
-// if (ewp->diag_table->offset >= INT4_MAX / 4) { ... clear ... }
-// else ewp->diag_table->offset += subject_length + ewp->diag_table->window;
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:46-65,162-175
 pub(super) struct Diagonals {
     entries: XDiagCells,
     mask: i32,
@@ -38,12 +34,6 @@ pub(super) struct Diagonals {
 }
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_extend.h:51-55
-// ```c
-// typedef struct DiagStruct {
-//    Int4 last_hit : 31; /**< Offset of the last hit */
-//    Uint4 flag : 1; /**< Reset this hit? */
-// } DiagStruct;
-// ```
 /// The cells of a diagonal table: NCBI's `DiagStruct` in four bytes (`LOSAT_X_TBNDIAGPACK`: last_hit
 /// in bits 0-30, flag in bit 31, `x_tbn_hitbf::XDiagCell`), or the eight of `(last_hit, flag)`.
 #[derive(Debug, PartialEq)]
@@ -126,30 +116,7 @@ impl Diagonals {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516-547
-// ```c
-//             diag_coord = (query_offset - subject_offset) & diag_mask;
-// ...
-//             if (diag_array[diag_coord].flag) {
-//                 /* If we've already extended past this hit, skip it. */
-//                 if ((Int4) (subject_offset + diag_offset) <
-//                     diag_array[diag_coord].last_hit) {
-//                     continue;
-//                 }
-// ...
-//                 if (diff >= window) {
-//                     /* We are beyond the window for this diagonal; start a
-//                        new hit */
-//                     diag_array[diag_coord].last_hit =
-//                         subject_offset + diag_offset;
-//                     continue;
-//                 }
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:162-173
-// ```c
-//     if (ewp->diag_table) {
-// ...
-//             ewp->diag_table->offset += subject_length + ewp->diag_table->window;
-// ```
 // XTwoHit is the two-hit pass of NCBI's word finder with its own diagonal array per (frame, chunk)
 // unit. Each unit starts from the state of a fresh table, which is what the offset update at the
 // end of the previous WordFinder call gives (see the comment above), so units can run in any order
@@ -179,17 +146,6 @@ pub(super) struct XTwoHit<'a> {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1088-1096
-// ```c
-// static Int4
-// s_BlastAaExtendTwoHit(Int4 ** matrix,
-//                       const BLAST_SequenceBlk * subject,
-//                       const BLAST_SequenceBlk * query,
-//                       Int4 s_left_off, Int4 s_right_off,
-//                       Int4 q_right_off, Int4 dropoff,
-//                       Int4 * hsp_q, Int4 * hsp_s, Int4 * hsp_len,
-//                       Boolean use_pssm, Int4 word_size,
-//                       Boolean * right_extend, Int4 * s_last_off)
-// ```
 // EXPERIMENT (LOSAT_X_TBNUNGAP): the two-hit extension of tblastn's word finder (`XTwoHit::pairs`)
 // with BLASTP's byte-table walks (`blastp/x_ungapped_fast.rs`, whose module doc
 // gives why the result is the reference's): the same statements in the same order, a residue pair
@@ -294,16 +250,6 @@ impl XUngapWalks for &'static x_ungapped_fast::MatrixTable {
 
 impl<'a> XTwoHit<'a> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1002-1003,1377-1379,1412-1413
-    // ```c
-    //     if ((status = BlastExtendWordNew(query->length, word_params,
-    //                                     &aux_struct->ewp)) != 0)
-    // ...
-    //        s_BlastSetUpAuxStructures(seq_src, lookup_wrap, word_params,
-    //           ext_options, hit_options, query, query_info, &aux_struct)) != 0)
-    // ...
-    //     while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-    //            != BLAST_SEQSRC_EOF) {
-    // ```
     // NCBI's search thread makes its diagonal table once, before its loop over the subjects, and
     // keeps it for every subject. A table of the same length, window and layout is taken over as
     // it is: `exit` after each unit leaves every entry older than a full window (see `exit`).
@@ -374,19 +320,7 @@ impl<'a> XTwoHit<'a> {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:608-609
-    // ```c
-    //     /* increment the offset in the diagonal array */
-    //     Blast_ExtendWordExit(ewp, subject->length);
-    // ```
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:166-171
-    // ```c
-    //         if (ewp->diag_table->offset >= INT4_MAX / 4) {
-    //             ewp->diag_table->offset = ewp->diag_table->window;
-    //             s_BlastDiagClear(ewp->diag_table);
-    //         } else {
-    //             ewp->diag_table->offset += subject_length + ewp->diag_table->window;
-    //         }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:166-172
     // The end of NCBI's WordFinder call for one (frame, chunk). Every entry the unit wrote holds
     // at most `offset + subject_length - 1`, so after the step each one lies more than a window
     // behind any hit of the next unit: its first hit on a diagonal only records `last_hit` and
@@ -439,19 +373,6 @@ impl<'a> XTwoHit<'a> {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516-606
-    // ```c
-    //             diag_coord = (query_offset - subject_offset) & diag_mask;
-    // ...
-    //                 score = s_BlastAaExtendTwoHit(matrix, subject, query,
-    // ...
-    //                 if (score >= cutoffs->cutoff_score)
-    //                     BlastSaveInitHsp(ungapped_hsps, hsp_q, hsp_s,
-    // ...
-    //                 if (right_extend) {
-    //                     diag_array[diag_coord].flag = 1;
-    //                     diag_array[diag_coord].last_hit =
-    //                         s_last_off - (wordsize - 1) + diag_offset;
-    // ```
     // The body is the per-hit loop of the two-hit word finder (the same tests, extension and HSP
     // saving of aa_ungapped.c:516-606), run on one filled offset array.
     /// The loop body of the two-hit word finder for one filled offset array.
@@ -537,7 +458,7 @@ impl<'a> XTwoHit<'a> {
         for pair in pairs {
             let q = pair.q_off as i32;
             let s = pair.s_off as i32;
-            // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:516-547
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516-547
             let index = ((q - s) & diagonals.mask) as usize;
             let cell = &mut cells[index];
             let (last_hit, flag) = cell.get();
@@ -557,17 +478,13 @@ impl<'a> XTwoHit<'a> {
             if diff < word_size_i32 {
                 continue;
             }
-            // NCBI c++/src/algo/blast/core/aa_ungapped.c:562-579:
-            // curr_context = BSearchContextInfo(query_offset, query_info);
-            // if (query_offset - diff <
-            //     query_info->contexts[curr_context].query_offset) continue;
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:560-579:
             let context = self.context_offsets.partition_point(|&offset| offset <= q) - 1;
             if q - diff < self.context_offsets[context] {
                 cell.set_last_hit(s + diagonals.offset);
                 continue;
             }
-            // NCBI c++/src/algo/blast/core/aa_ungapped.c:570-583,1089-1155:
-            // s_BlastAaExtendTwoHit(matrix, ..., wordsize, ...);
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:570-583,1089-1155:
             let reference = || {
                 extend_two_hit(
                     self.matrix,
@@ -600,8 +517,7 @@ impl<'a> XTwoHit<'a> {
             let Some(result) = result else {
                 continue;
             };
-            // NCBI c++/src/algo/blast/core/aa_ungapped.c:570-590:
-            // if (score >= cutoffs->cutoff_score) BlastSaveInitHsp(...);
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:570-590:
             if result.ungapped_data.score >= self.cutoff_scores[context] {
                 hits.push(InitHsp {
                     frame,
@@ -614,7 +530,7 @@ impl<'a> XTwoHit<'a> {
                     score: result.ungapped_data.score,
                 });
             }
-            // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:588-607
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:588-607
             if result.right_extend {
                 cell.set(
                     result.s_last_off - (word_size_i32 - 1) + diagonals.offset,
@@ -827,53 +743,9 @@ impl<'a> XTwoHit<'a> {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:274-309
-    // ```c
-    //     if (0 == (result = BLAST_CMP(h2->ungapped_data->score,
-    //                                  h1->ungapped_data->score)) &&
-    //         0 == (result = BLAST_CMP(h1->ungapped_data->s_start,
-    //                                  h2->ungapped_data->s_start)) &&
-    //         0 == (result = BLAST_CMP(h2->ungapped_data->length,
-    //                                  h1->ungapped_data->length)) &&
-    //         0 == (result = BLAST_CMP(h1->ungapped_data->q_start,
-    //                                  h2->ungapped_data->q_start))) {
-    // ...
-    //     qsort(init_hitlist->init_hsp_array, init_hitlist->total,
-    //           sizeof(BlastInitHSP), score_compare_match);
-    // ```
     // Same order as Blast_InitHitListSortByScore: score descending, then s_start, length
     // descending, q_start. The sort is stable, as glibc's qsort is under the pinned NCBI build.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:773-803
-    // ```c
-    //             Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
-    //             Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
-    //             diag_coord = (subject_offset - query_offset) & diag_mask;
-    //             diff = subject_offset -
-    //                 (diag_array[diag_coord].last_hit - diag_offset);
-    //
-    //             /* do an extension, but only if we have not already extended this
-    //                far */
-    //             if (diff >= 0) {
-    //                 Int4 curr_context = BSearchContextInfo(query_offset,
-    //                                                        query_info);
-    //                 BlastUngappedCutoffs *cutoffs = word_params->cutoffs +
-    //                                                         curr_context;
-    //                 score = s_BlastAaExtendOneHit(matrix, subject, query,
-    //                                               subject_offset, query_offset,
-    //                                               cutoffs->x_dropoff,
-    //                                               &hsp_q, &hsp_s, &hsp_len,
-    //                                               wordsize, use_pssm, &s_last_off);
-    //
-    //                 /* if the hsp meets the score threshold, report it */
-    //                 if (score >= cutoffs->cutoff_score) {
-    //                     BlastSaveInitHsp(ungapped_hsps, hsp_q, hsp_s,
-    //                                      query_offset, subject_offset, hsp_len,
-    //                                      score);
-    //                 }
-    //                 diag_array[diag_coord].last_hit =
-    //                     s_last_off - (wordsize - 1) + diag_offset;
-    //                 ++hits_extended;
-    //             }
-    // ```
     // The per-hit loop of `s_BlastAaWordFinder_OneHit` (`-window_size 0`; `BlastAaWordFinder`
     // takes it when the table has no `multiple_hits`, aa_ungapped.c:214-224) on one filled offset
     // array: the diagonal is `s - q` (the two-hit loop's is `q - s`), no flag is read or set, and
@@ -982,7 +854,7 @@ impl<'a> XTwoHit<'a> {
         Ok(())
     }
 
-    /// NCBI c++/src/algo/blast/core/blast_extend.c:273-313 (stable, as glibc's
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:273-313 (stable, as glibc's
     /// qsort under the pinned NCBI BLAST+).
     pub(super) fn sort(hits: &mut [InitHsp]) {
         hits.sort_by(|a, b| {
@@ -1004,7 +876,7 @@ mod tests {
     use crate::sequence::packed_subject::SubjectNt;
     use std::fs;
 
-    // NCBI c++/src/algo/blast/core/blast_engine.c:259-310,478-487:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:259-310,478-487:
     // subject->seq_ranges and subject->length are filled before WordFinder.
     // The comparison-only probe records those exact input rows at the call.
     fn ncbi_chunk_range_rows(path: &str) -> Vec<(i8, usize, Vec<(i32, i32)>)> {
@@ -1049,7 +921,7 @@ mod tests {
         records
     }
 
-    // NCBI c++/src/algo/blast/core/aa_ungapped.c:516-614:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516-614:
     // the selected matrix, wordsize, x-dropoff, and per-context cutoff
     // determine two-hit extension before frame-local score sorting.
     #[test]
@@ -1122,10 +994,10 @@ mod tests {
         }
     }
 
-    // NCBI c++/src/algo/blast/core/aa_ungapped.c:562-583:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:562-583:
     // BSearchContextInfo finds the query context before two-hit extension;
     // the left word must remain within that context's query_offset.
-    // NCBI c++/src/algo/blast/core/aa_ungapped.c:200-234:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:200-234:
     // Blast_InitHitListSortByScore(init_hitlist) fixes frame-local HSP order.
     #[test]
     fn multi_query_wordfinder_hsps_match_ncbi_in_order() {
@@ -1191,9 +1063,7 @@ mod tests {
         }
     }
 
-    // NCBI c++/src/algo/blast/core/aa_ungapped.c:570-590:
-    // cutoffs = word_params->cutoffs + curr_context;
-    // if (score >= cutoffs->cutoff_score) BlastSaveInitHsp(...);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:570-590:
     // The saved natural multi-query fixture has score 20 in context 0 and
     // score 393 in context 1, so equality and just-above cutoffs are distinct.
     #[test]
@@ -1249,9 +1119,7 @@ mod tests {
             .any(|h| h.score == 393 && (121..192).contains(&h.q_seed)));
     }
 
-    // NCBI c++/src/algo/blast/core/aa_ungapped.c:562-590:
-    // cutoffs = word_params->cutoffs + curr_context;
-    // s_BlastAaExtendTwoHit(..., cutoffs->x_dropoff, ...);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:562-590:
     // The comparison-only real call changes context 1 x-drop from 16 to 1.
     #[test]
     fn real_wordfinder_distinct_context_xdrop_matches_ncbi() {
@@ -1319,10 +1187,9 @@ mod tests {
         }
     }
 
-    // NCBI reference: c++/src/algo/blast/core/blast_engine.c:816-831
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:816-831
     // subject->seq_ranges[i].left = CONV_NUCL2PROT_COORDINATES(...);
-    // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:575-614
-    // if (score >= cutoffs->cutoff_score) BlastSaveInitHsp(...);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:575-614
     #[test]
     fn lowercase_mask_init_hsps_match_ncbi_scores_and_internal_offsets() {
         let root = concat!(
@@ -1369,9 +1236,8 @@ mod tests {
         assert_eq!(actual, expected);
     }
 
-    // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:575-614
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:575-614
     // score = s_BlastAaExtendTwoHit(...);
-    // if (score >= cutoffs->cutoff_score) BlastSaveInitHsp(...);
     #[test]
     fn ambiguity_spectrum_init_hsp_matches_ncbi() {
         let root = concat!(
@@ -1409,12 +1275,9 @@ mod tests {
         assert_eq!(actual, expected);
     }
 
-    // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:200-234,575-614
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:200-234,575-614
     // status = s_BlastAaWordFinder_TwoHit(..., init_hitlist, ...);
-    // if (score >= cutoffs->cutoff_score) BlastSaveInitHsp(...);
-    // Blast_InitHitListSortByScore(init_hitlist);
-    // NCBI reference: c++/src/algo/blast/core/blast_engine.c:747-775
-    // BLAST_GetAllTranslations(..., subject->gen_code_string, ...);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:747-775
     #[test]
     fn code32_api_oracle_init_hsps_match_scores_internal_offsets_and_order() {
         let fixture = concat!(
@@ -1465,10 +1328,8 @@ mod tests {
         assert_eq!(actual, expected);
     }
 
-    // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:200-234,575-614
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:200-234,575-614
     // score = s_BlastAaExtendTwoHit(..., cutoffs->x_dropoff, ...);
-    // if (score >= cutoffs->cutoff_score) BlastSaveInitHsp(...);
-    // Blast_InitHitListSortByScore(init_hitlist);
     #[test]
     fn saved_init_hsps_match_ncbi_fixture_scores_and_internal_offsets() {
         let root = concat!(
@@ -1570,16 +1431,14 @@ mod tests {
         (query, subject, expected)
     }
 
-    // NCBI c++/src/algo/blast/core/blast_engine.c:478-552:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:478-552:
     // s_GetNextSubjectChunk precedes each WordFinder call and the hit list
     // is reset before the next chunk. Subject offsets stay chunk-local.
     #[test]
     fn long_subject_chunk_wordfinder_hsps_match_ncbi() {
         let (query, subject, expected) = long_chunk_case();
         let query = &query;
-        // NCBI c++/src/algo/blast/core/aa_ungapped.c:570-590:
-        // cutoffs = word_params->cutoffs + curr_context;
-        // if (score >= cutoffs->cutoff_score) BlastSaveInitHsp(...);
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:570-590:
         // Retained long-fixture PARAM rows give cutoff 28.
         let actual = preliminary_stages(
             &[query],
@@ -1601,7 +1460,7 @@ mod tests {
         assert_eq!(actual, expected);
     }
 
-    // NCBI c++/src/algo/blast/core/blast_engine.c:478-552,805-812 (above)
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:478-552,805-812 (above)
     // The same subject packed, as every `-db` sequence is: with LOSAT_X_TBNUNITXLATE its plan has
     // no residues (its first frame has more than 1 MiB), and each unit translates its chunk and
     // 4,096 residues past it (the first chunk of a frame) or to the end sentinel (the second) when
@@ -1636,7 +1495,7 @@ mod tests {
             .iter()
             .all(|frame| frame.aa_seq.is_empty() == lean));
         drop(plan);
-        // NCBI c++/src/algo/blast/core/aa_ungapped.c:570-590 (above): cutoff 28.
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:570-590 (above): cutoff 28.
         let actual = preliminary_stages_of(
             &[&query],
             SubjectNt::Packed(&store),
@@ -1656,7 +1515,7 @@ mod tests {
         .initial;
         assert_eq!(actual, expected);
     }
-    // NCBI c++/src/algo/blast/core/blast_engine.c:283-310:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:283-310:
     // a soft range ending at the second chunk's start is included, then
     // clipped to zero width before aa_ungapped.c:495-500 scans range zero.
     #[test]
@@ -1735,9 +1594,7 @@ mod tests {
                 }
             })
             .collect();
-        // NCBI c++/src/algo/blast/core/aa_ungapped.c:570-590:
-        // cutoffs = word_params->cutoffs + curr_context;
-        // if (score >= cutoffs->cutoff_score) BlastSaveInitHsp(...);
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:570-590:
         // Retained long-fixture PARAM rows give cutoff 28.
         let actual = preliminary_stages(
             &[query],
@@ -1749,7 +1606,7 @@ mod tests {
         .initial;
         assert_eq!(actual, expected);
     }
-    // NCBI c++/src/algo/blast/core/blast_engine.c:283-310,478-500:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:283-310,478-500:
     // SUBJECT_SPLIT_NO_RANGE skips the middle positive-frame chunk; the
     // later chunk still runs WordFinder with its chunk-local offsets.
     #[test]
@@ -1840,9 +1697,7 @@ mod tests {
                 }
             })
             .collect();
-        // NCBI c++/src/algo/blast/core/aa_ungapped.c:570-590:
-        // cutoffs = word_params->cutoffs + curr_context;
-        // if (score >= cutoffs->cutoff_score) BlastSaveInitHsp(...);
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:570-590:
         // Retained long-fixture PARAM rows give cutoff 30.
         let actual = preliminary_stages(
             &[query],
@@ -1887,15 +1742,7 @@ mod tests {
         pairs
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:166-171
-    // ```c
-    //         if (ewp->diag_table->offset >= INT4_MAX / 4) {
-    //             ewp->diag_table->offset = ewp->diag_table->window;
-    //             s_BlastDiagClear(ewp->diag_table);
-    //         } else {
-    //             ewp->diag_table->offset += subject_length + ewp->diag_table->window;
-    //         }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:166-172
     // The unit path's kept state: one table carried through many units with `exit` after each, as
     // NCBI's thread carries it through its subjects, gives every unit the hits of a cleared table
     // (a table made afresh): from a new table, across the clear near INT4_MAX / 4, and when
@@ -2285,12 +2132,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1088-1091
-    // ```c
-    // static Int4
-    // s_BlastAaExtendTwoHit(Int4 ** matrix,
-    //                       const BLAST_SequenceBlk * subject,
-    //                       const BLAST_SequenceBlk * query,
-    // ```
     // EXPERIMENT (LOSAT_X_TBNUNGAP): the word finder with the byte-table walks gives, unit after
     // unit on one kept table (`exit` after each), the init HSPs and the diagonal table of the word
     // finder with the reference extension: on whole units and on units cut short (a chunk that ends

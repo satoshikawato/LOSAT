@@ -13,21 +13,6 @@
 //! `BLAST_GetGappedScore`, c++/src/algo/blast/core/blast_gapalign.c:3664-4114, with its loop on
 //! the initial hits at :3850; the purge and the sort; or `BLAST_GetUngappedHSPList`,
 //! blast_gapalign.c:4719-4775; the offsets)
-//! ```c
-//!         if (score_options->gapped_calculation) {
-//! ...
-//!         if (aux_struct->GetGappedScore) {
-//!             status = aux_struct->GetGappedScore(program_number, query,
-//! ...
-//!             Blast_HSPListPurgeHSPsWithCommonEndpoints(program_number, hsp_list, TRUE);
-//! ...
-//!         Blast_HSPListSortByScore(hsp_list);
-//! ...
-//!         } else {
-//!             BLAST_GetUngappedHSPList(init_hitlist, query_info, subject,
-//! ...
-//!         Blast_HSPListAdjustOffsets(hsp_list, backup.offset);
-//! ```
 //!
 //! This module is a child of `run` for the types it keeps private (`UngappedHit`, `PrelimHit`,
 //! `SubjectChunk`, `XAheadScratch`, the sorts). Its functions are the code of
@@ -55,40 +40,7 @@ use std::sync::atomic::AtomicU64;
 /// by score.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:503,522-526,560-563
-/// ```c
-///         if (score_options->gapped_calculation) {
-/// ...
-///         if (aux_struct->GetGappedScore) {
-///             status = aux_struct->GetGappedScore(program_number, query,
-///                     query_info,
-///                     subject, gap_align, score_params, ext_params, hit_params,
-///                     word_params, init_hitlist, &hsp_list, gapped_stats, NULL);
-/// ...
-///         } else {
-///             BLAST_GetUngappedHSPList(init_hitlist, query_info, subject,
-///                     hit_params->options, &hsp_list);
-///         }
-/// ```
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4719,4742,4760-4772
-/// ```c
-/// Int2 BLAST_GetUngappedHSPList(BlastInitHitList* init_hitlist,
-/// ...
-///    for (index = 0; index < init_hitlist->total; ++index) {
-/// ...
-///       Blast_HSPInit(ungapped_data->q_start,
-///                     ungapped_data->length+ungapped_data->q_start,
-///                     ungapped_data->s_start,
-///                     ungapped_data->length+ungapped_data->s_start,
-///                     init_hsp->offsets.qs_offsets.q_off,
-///                     init_hsp->offsets.qs_offsets.s_off,
-///                     context, query_info->contexts[context].frame,
-///                     subject->frame, ungapped_data->score, NULL, &new_hsp);
-///       Blast_HSPListSaveHSP(hsp_list, new_hsp);
-///    }
-///
-///    /* Sort the HSP array by score */
-///    Blast_HSPListSortByScore(hsp_list);
-/// ```
 /// An ungapped (`-ungapped`) search sorts the initial hits by score first, as a gapped
 /// search does (`BlastNaWordFinder` ends with `if (word_params->ungapped_extension)
 /// Blast_InitHitListSortByScore(init_hitlist)`, na_ungapped.c:1691-1692, and
@@ -133,12 +85,6 @@ pub(super) fn ungapped_hsp_list(
         .iter()
         .map(|uh| {
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4760-4767
-            // ```c
-            //       Blast_HSPInit(ungapped_data->q_start,
-            //                     ungapped_data->length+ungapped_data->q_start,
-            //                     ungapped_data->s_start,
-            //                     ungapped_data->length+ungapped_data->s_start,
-            // ```
             // NCBI's HSP of a hit that passes an end of its context (`UngappedHit::saved`) has
             // the hit's `Int4` offsets, outside the context.
             PrelimHit {
@@ -168,13 +114,6 @@ pub(super) fn ungapped_hsp_list(
 /// is `Some` only when the loop then runs per query (`x_qgroup_par::plan`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1688-1692
-/// ```c
-///     Blast_UngappedStatsUpdate(ungapped_stats, total_hits, hits_extended,
-///                               init_hitlist->total);
-///
-///     if (word_params->ungapped_extension)
-///         Blast_InitHitListSortByScore(init_hitlist);
-/// ```
 /// The end of NCBI's word finder (`BlastNaWordFinder`): the hits counted, then sorted. No NCBI
 /// counterpart for the query groups (scheduling only).
 pub(super) fn sort_ungapped_hits_for_gapped(
@@ -187,19 +126,12 @@ pub(super) fn sort_ungapped_hits_for_gapped(
     // ============================================================
     // NCBI ARCHITECTURE: Batch process ungapped hits in score order
     // ============================================================
-    // NCBI reference: blast_gapalign.c:3824 - ASSERT(Blast_InitHitListIsSortedByScore(init_hitlist))
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3824 - ASSERT(Blast_InitHitListIsSortedByScore(init_hitlist))
     // NCBI processes init_hsp_array sorted by score DESCENDING
     // High-score HSPs are processed first, their GAPPED HSPs added to interval tree
     // Lower-score HSPs are then checked for containment against these GAPPED HSPs
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:306-310
-    // ```c
-    // void Blast_InitHitListSortByScore(BlastInitHitList * init_hitlist)
-    // {
-    //     qsort(init_hitlist->init_hsp_array, init_hitlist->total,
-    //           sizeof(BlastInitHSP), score_compare_match);
-    // }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:306-310
     // The oracle's qsort (glibc 2.39) is a stable merge sort: hits that
     // compare equal keep the order in which they were saved. `sort_by`
     // is stable too.
@@ -235,18 +167,8 @@ pub(super) fn sort_ungapped_hits_for_gapped(
     }
 
     let total_ungapped = ungapped_hits.len();
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1688-1689
-    // ```c
-    //     Blast_UngappedStatsUpdate(ungapped_stats, total_hits, hits_extended,
-    //                               init_hitlist->total);
-    // ```
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_diagnostics.c:106-112
-    // ```c
-    //    if (!ungapped_stats || total_hits == 0)
-    //       return;
-    //    ...
-    //    ungapped_stats->good_init_extends += saved_hits;
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1688-1689
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_diagnostics.c:106-112
     good_init_extends.fetch_add(total_ungapped as u64, std::sync::atomic::Ordering::Relaxed);
     (x_counts, x_order, total_ungapped)
 }
@@ -262,19 +184,6 @@ pub(super) fn sort_ungapped_hits_for_gapped(
 /// look-ahead helpers on the pool.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3664-3675
-/// ```c
-/// Int2 BLAST_GetGappedScore (EBlastProgramType program_number,
-///         BLAST_SequenceBlk* query, BlastQueryInfo* query_info,
-///         BLAST_SequenceBlk* subject,
-///         BlastGapAlignStruct* gap_align,
-///         const BlastScoringParameters* score_params,
-///         const BlastExtensionParameters* ext_params,
-///         const BlastHitSavingParameters* hit_params,
-///         const BlastInitialWordParameters* word_params,
-///         BlastInitHitList* init_hitlist,
-///         BlastHSPList** hsp_list_ptr, BlastGappedStats* gapped_stats,
-///         Boolean * fence_hit)
-/// ```
 /// NCBI's function takes the query, the subject and the parameters; the look-ahead's fields
 /// have no NCBI counterpart (scheduling only).
 pub(super) struct GappedPrelim<'a> {
@@ -308,15 +217,6 @@ pub(super) struct GappedPrelim<'a> {
 /// task's tree and scratch come from its state, its list from the task.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3830-3831,4084-4088
-/// ```c
-///       tree = Blast_IntervalTreeInit(0, query->length+1,
-///                                     0, subject->length+1);
-/// ...
-///              status = Blast_HSPListSaveHSP(hsp_list, new_hsp);
-/// ...
-///              status = BlastIntervalTreeAddHSP(new_hsp, tree, query_info,
-///                                      eQueryAndSubject);
-/// ```
 /// NCBI's loop works on its `tree`, the `gap_align` of its call and its `hsp_list`; the helpers'
 /// scratch has no NCBI counterpart (scheduling only).
 pub(super) struct GappedListState<'s> {
@@ -333,25 +233,6 @@ pub(super) struct GappedListState<'s> {
 /// (`Ahead::take`) or computes itself.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2959-2963,4012-4025,4041-4046
-/// ```c
-///    Int4 x_dropoff =  gap_align->gap_x_dropoff;
-///
-///    if(init_hsp->ungapped_data->score < x_dropoff) {
-///           x_dropoff = init_hsp->ungapped_data->score;
-///    }
-/// ...
-///          } else if (is_greedy) {
-///             if (init_hsp->ungapped_data) {
-///                 init_hsp->offsets.qs_offsets.q_off =
-///                     init_hsp->ungapped_data->q_start + init_hsp->ungapped_data->length/2;
-/// ...
-///             status = BLAST_GreedyGappedAlignment(
-/// ...
-///             if (s_end >= (Int4)init_hsp->offsets.qs_offsets.s_off + 8) {
-///                init_hsp->offsets.qs_offsets.s_off += 3;
-/// ...
-///             status = s_BlastDynProgNtGappedAlignment(&query_tmp, subject,
-/// ```
 /// This function is what each branch of the ordered loop (`gapped_score_list`) computes for hit
 /// `x_index`, as a function of the index alone: the seed shift by 3, the X-drop limited by the
 /// ungapped score, and the aligner call, for the dynamic-programming branch and the greedy branch.
@@ -452,9 +333,6 @@ pub(super) fn x_prelim_extend(
 /// the alignments run and the hits the tree held.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3850
-/// ```c
-///    for (index=0; index<init_hitlist->total; index++)
-/// ```
 /// Look-ahead for the preliminary loop. When the conditions below do not hold,
 /// `x_ahead` is `None` and the loop runs as ported.
 /// Only the caller's own (single-chunk) loop gets helpers; chunk
@@ -537,24 +415,12 @@ pub(super) fn gapped_score_list(
         .map(|(gap, greedy)| XAheadScratch { gap, greedy });
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3850,4087-4088
-    // ```c
-    //    for (index=0; index<init_hitlist->total; index++)
-    // ...
-    //              status = BlastIntervalTreeAddHSP(new_hsp, tree, query_info,
-    //                                      eQueryAndSubject);
-    // ```
     // `with_helpers` runs the closure on this thread. The closure is the port of this NCBI loop, in
     // NCBI order; the other threads of the pool only evaluate values ahead (`utils/xahead.rs`).
     // Process each ungapped hit in score order
     crate::utils::xahead::with_helpers(x_ahead.as_ref(), x_helpers, &x_prelim_compute, || {
         for (idx, uh) in ungapped_hits.iter().enumerate() {
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3850,3918-3919
-            // ```c
-            //    for (index=0; index<init_hitlist->total; index++)
-            // ...
-            //       if (!BlastIntervalTreeContainsHSP(tree, &tmp_hsp, query_info,
-            //                                         hit_options->min_diag_separation))
-            // ```
             // The owner offers later indexes to the helpers, leaving out the ones the tree already contains.
             // The tree is only read here. A wrong guess costs time only, because the loop decides each index
             // itself.
@@ -579,7 +445,7 @@ pub(super) fn gapped_score_list(
                         .is_none()
                 });
             }
-            // NCBI reference: blast_gapalign.c:3886-4090 (no per-HSP logging)
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3886-4090 (no per-HSP logging)
             if verbose && idx % 100 == 0 {
                 eprintln!("[INFO] Gapped extension: {}/{}", idx, total_ungapped);
             }
@@ -588,30 +454,14 @@ pub(super) fn gapped_score_list(
             let q_seq_blastna = encoded_queries_blastna[uh.context_idx as usize];
             let subject_len = s_len;
 
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2762-2793
-            // ```c
-            // if (!compressed_subject) {
-            //    s = subject + s_off;
-            //    rem = 4;
-            // } else {
-            //    s = subject + s_off/4;
-            //    rem = s_off % 4;
-            // }
-            // ```
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:503-507 (traceback uses uncompressed subject)
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2762-2793
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:503-507 (traceback uses uncompressed subject)
             // The dynamic-programming score-only call below reads the packed subject
             // (`s_seq_score`); the greedy one runs on the bases one per byte
             // (`x_prelim_subject`), NCBI's `compressed_subject = FALSE` form.
             let s_seq_score = s_seq_packed;
 
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3908-3913
-            // ```c
-            // tmp_hsp.query.offset = q_start;
-            // tmp_hsp.query.end = q_end;
-            // tmp_hsp.query.frame = query_info->contexts[context].frame;
-            // tmp_hsp.subject.offset = s_start;
-            // tmp_hsp.subject.end = s_end;
-            // ```
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3908-3914
             // NCBI uses 0-based coordinates internally for the tree: the `Int4` offsets in the
             // context, outside it for a hit that passes an end of it (`UngappedHit::saved`), and
             // so for a greedy alignment from such a hit (`x_prelim_extend`); the tree holds them
@@ -629,7 +479,7 @@ pub(super) fn gapped_score_list(
                 subject_frame_sign,
             };
 
-            // NCBI reference: blast_gapalign.c:3918 BlastIntervalTreeContainsHSP
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3918 BlastIntervalTreeContainsHSP
             // Check if UNGAPPED HSP is contained in existing GAPPED HSPs
             let containing_hsp = interval_tree.containing_hsp(
                 &ungapped_tree_hsp,
@@ -638,15 +488,7 @@ pub(super) fn gapped_score_list(
             );
             let is_contained = containing_hsp.is_some();
 
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3908-3919
-            // ```c
-            // tmp_hsp.query.offset = q_start;
-            // tmp_hsp.query.end = q_end;
-            // tmp_hsp.subject.offset = s_start;
-            // tmp_hsp.subject.end = s_end;
-            // if (!BlastIntervalTreeContainsHSP(tree, &tmp_hsp, query_info,
-            //                                   hit_options->min_diag_separation))
-            // ```
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3908-3919
             if blastn_trace_enabled
                 && blastn_trace::should_trace_range(
                     "prelim",
@@ -684,11 +526,6 @@ pub(super) fn gapped_score_list(
                 // NCBI: Skip gapped extension if ungapped HSP is contained
                 dbg_containment_skipped += 1;
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3918-3921
-                // ```c
-                //       if (!BlastIntervalTreeContainsHSP(tree, &tmp_hsp, query_info,
-                //                                         hit_options->min_diag_separation))
-                //       {
-                // ```
                 // When the tree contains the hit, NCBI skips the aligner call for this index. The helpers are
                 // told that nobody needs its value.
                 if let Some(x_ahead) = x_ahead.as_ref() {
@@ -698,17 +535,9 @@ pub(super) fn gapped_score_list(
             }
 
             // Select gapped-start seed within the ungapped HSP.
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4012-4046
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4012-4046
             //
-            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3924-3927,4058
-            // ```c
-            // if (is_rpsblast)
-            //    cutoff = hit_params->cutoffs[rps_cutoff_index].cutoff_score;
-            // else
-            //    cutoff = hit_params->cutoffs[context].cutoff_score;
-            // ...
-            // if (gap_align->score >= cutoff) {
-            // ```
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3924-3927,4058
             // The score-only gapped HSP enters the preliminary HSP list and
             // interval tree only if it reaches the hit-saving cutoff, not
             // the lower BlastInitialWordParameters cutoff used for saving
@@ -717,19 +546,6 @@ pub(super) fn gapped_score_list(
             let (prelim_qs, prelim_qe, prelim_ss, prelim_se, prelim_score, seed_qs, seed_ss) =
                 if let Some(x_ahead) = x_ahead.as_ref() {
                     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4012-4025,4041-4046
-                    // ```c
-                    //          } else if (is_greedy) {
-                    //             if (init_hsp->ungapped_data) {
-                    //                 init_hsp->offsets.qs_offsets.q_off =
-                    //                     init_hsp->ungapped_data->q_start + init_hsp->ungapped_data->length/2;
-                    // ...
-                    //             status = BLAST_GreedyGappedAlignment(
-                    // ...
-                    //             if (s_end >= (Int4)init_hsp->offsets.qs_offsets.s_off + 8) {
-                    //                init_hsp->offsets.qs_offsets.s_off += 3;
-                    // ...
-                    //             status = s_BlastDynProgNtGappedAlignment(&query_tmp, subject,
-                    // ```
                     // Look-ahead: the value of the aligner call comes from a helper or is
                     // computed here with `x_prelim_compute`. Without helpers the `else if use_dp` branch and the greedy
                     // branch below port these calls.
@@ -749,20 +565,8 @@ pub(super) fn gapped_score_list(
                     }
                 } else if use_dp {
                     // DP seed selection (blastn)
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4033-4045
-                    // ```c
-                    // if (s_end >= (Int4)init_hsp->offsets.qs_offsets.s_off + 8) {
-                    //    init_hsp->offsets.qs_offsets.s_off += 3;
-                    //    init_hsp->offsets.qs_offsets.q_off += 3;
-                    // }
-                    // status = s_BlastDynProgNtGappedAlignment(...);
-                    // ```
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4071-4076
-                    // ```c
-                    // status = Blast_HSPInit(...,
-                    //        init_hsp->offsets.qs_offsets.q_off,
-                    //        init_hsp->offsets.qs_offsets.s_off, ...);
-                    // ```
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4033-4045
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4071-4076
                     let mut seed_qs = uh.seed_q_off as usize;
                     let mut seed_ss = uh.seed_s_off as usize;
                     if uh.se as usize >= (uh.seed_s_off as usize).saturating_add(8) {
@@ -770,18 +574,9 @@ pub(super) fn gapped_score_list(
                         seed_ss = seed_ss.saturating_add(3);
                     }
 
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2959-2963 (x_dropoff limited by ungapped score)
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2959-2963 (x_dropoff limited by ungapped score)
                     let x_drop_score_only = x_drop_gapped.min(uh.score);
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2973-3003
-                    // ```c
-                    // offset_adjustment = COMPRESSION_RATIO -
-                    //      (init_hsp->offsets.qs_offsets.s_off % COMPRESSION_RATIO);
-                    // q_length = init_hsp->offsets.qs_offsets.q_off + offset_adjustment;
-                    // s_length = init_hsp->offsets.qs_offsets.s_off + offset_adjustment;
-                    // score_left = s_BlastAlignPackedNucl(query, subject, q_length, s_length, ...);
-                    // score_right = s_BlastAlignPackedNucl(query+q_length-1,
-                    //    subject+(s_length+3)/COMPRESSION_RATIO - 1, ...);
-                    // ```
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2973-3003
                     if blastn_trace_enabled
                         && blastn_trace::should_trace_seed(
                             "prelim",
@@ -820,7 +615,7 @@ pub(super) fn gapped_score_list(
                     }
 
                     // Preliminary DP gapped extension (score-only)
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_nucl_options.cpp:176-183
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_nucl_options.cpp:176-183
                     let (p_qs, p_qe, p_ss, p_se, p_score, _, _, _, _, _) =
                         extend_gapped_heuristic_with_scratch(
                             q_seq_blastna,
@@ -851,7 +646,7 @@ pub(super) fn gapped_score_list(
                     )
                 } else {
                     // Greedy seed selection (megablast)
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4012-4017
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4012-4017
                     // (`UngappedHit::greedy_seed`: NCBI's `Int4` seed, outside the context for a
                     // hit that passes an end of it).
                     let (seed_qs, seed_ss) = uh.greedy_seed();
@@ -881,17 +676,7 @@ pub(super) fn gapped_score_list(
                 };
 
             dbg_gapped_calls += 1;
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4058-4091
-            // ```c
-            // if (gap_align->score >= cutoff) {
-            //     status = Blast_HSPInit(gap_align->query_start,
-            //                           gap_align->query_stop,
-            //                           gap_align->subject_start,
-            //                           gap_align->subject_stop, ...);
-            //     status = BlastIntervalTreeAddHSP(new_hsp, tree, query_info,
-            //                                      eQueryAndSubject);
-            // }
-            // ```
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4058-4091
             let trace_prelim_seed = blastn_trace_enabled
                 && blastn_trace::should_trace_seed(
                     "prelim",
@@ -941,14 +726,7 @@ pub(super) fn gapped_score_list(
             }
 
             // Add preliminary GAPPED HSP to interval tree for containment checks
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3908-3913
-            // ```c
-            // tmp_hsp.query.offset = q_start;
-            // tmp_hsp.query.end = q_end;
-            // tmp_hsp.query.frame = query_info->contexts[context].frame;
-            // tmp_hsp.subject.offset = s_start;
-            // tmp_hsp.subject.end = s_end;
-            // ```
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3908-3914
             let gapped_tree_hsp = TreeHsp {
                 query_offset: prelim_qs,
                 query_end: prelim_qe,
@@ -966,27 +744,8 @@ pub(super) fn gapped_score_list(
                 IndexMethod::QueryAndSubject,
             );
 
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4012-4031
-            // ```c
-            // if (init_hsp->ungapped_data) {
-            //    init_hsp->offsets.qs_offsets.q_off =
-            //        init_hsp->ungapped_data->q_start + init_hsp->ungapped_data->length/2;
-            //    init_hsp->offsets.qs_offsets.s_off =
-            //        init_hsp->ungapped_data->s_start + init_hsp->ungapped_data->length/2;
-            // }
-            // ```
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4058-4076
-            // ```c
-            // if (gap_align->score >= cutoff) {
-            //    status = Blast_HSPInit(gap_align->query_start,
-            //              gap_align->query_stop, gap_align->subject_start,
-            //              gap_align->subject_stop,
-            //              init_hsp->offsets.qs_offsets.q_off,
-            //              init_hsp->offsets.qs_offsets.s_off, context,
-            //              query_frame, subject->frame, gap_align->score,
-            //              &(gap_align->edit_script), &new_hsp);
-            // }
-            // ```
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4012-4031
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4058-4077
             prelim_hits.push(PrelimHit {
                 context_idx: uh.context_idx,
                 query_idx: uh.query_idx,
@@ -1044,10 +803,6 @@ pub(super) fn verbose_gapped_line(
 /// (`GappedPrelim::batch`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3830-3831
-/// ```c
-///       tree = Blast_IntervalTreeInit(0, query->length+1,
-///                                     0, subject->length+1);
-/// ```
 /// The bounds of each query group task's tree are those of the chunk's tree. No NCBI counterpart
 /// for the query groups themselves and the clock (scheduling and diagnostics only).
 pub(super) struct GappedDrive<'d> {
@@ -1066,19 +821,6 @@ pub(super) struct GappedDrive<'d> {
 /// coordinates.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:522-526,545,555,578
-/// ```c
-///         if (aux_struct->GetGappedScore) {
-///             status = aux_struct->GetGappedScore(program_number, query,
-///                     query_info,
-///                     subject, gap_align, score_params, ext_params, hit_params,
-///                     word_params, init_hitlist, &hsp_list, gapped_stats, NULL);
-/// ...
-///             Blast_HSPListPurgeHSPsWithCommonEndpoints(program_number, hsp_list, TRUE);
-/// ...
-///         Blast_HSPListSortByScore(hsp_list);
-/// ...
-///         Blast_HSPListAdjustOffsets(hsp_list, backup.offset);
-/// ```
 /// No NCBI counterpart: the query groups on the pool (LOSAT_X_QGROUPPAR), scheduling only; NCBI
 /// runs the loop of one chunk on one thread (blast_gapalign.c:3850).
 pub(super) fn gapped_hsp_list(
@@ -1176,15 +918,6 @@ pub(super) fn gapped_hsp_list(
         x_purged = true;
     } else {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3706-3707,3826-3831
-        // ```c
-        //    if (init_hitlist->total == 0)
-        //       return 0;
-        // ...
-        //    else {
-        //       tree = Blast_IntervalTreeInit(0, query->length+1,
-        //                                     0, subject->length+1);
-        //    }
-        // ```
         // query->length is the concatenated length for both strands (2*len + 1). The tree is
         // the subject scratch's (`x_tree`), given this chunk's ranges here, inside the gapped
         // stage of a chunk with initial hits (a chunk without one returns before it,
@@ -1215,13 +948,7 @@ pub(super) fn gapped_hsp_list(
     let gapped_elapsed = gapped_start_time
         .map(|start| start.elapsed())
         .unwrap_or_default();
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3917-3922
-    // ```c
-    // if (!BlastIntervalTreeContainsHSP(tree, &tmp_hsp, query_info,
-    //                                   hit_options->min_diag_separation))
-    // {
-    //    BlastHSP* new_hsp;
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3917-3922
     if let Some(timing) = timing_ref {
         timing.gapped_ns.fetch_add(
             gapped_elapsed.as_nanos() as u64,
@@ -1241,13 +968,7 @@ pub(super) fn gapped_hsp_list(
         );
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:488-491
-    // ```c
-    // /* Delete if not done in last loop iteration to prevent memory leak. */
-    // hsp_list = Blast_HSPListFree(hsp_list);
-    //
-    // BlastInitHitListReset(init_hitlist);
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:488-491
     #[expect(
         clippy::drain_collect,
         reason = "without reuse the scratch keeps its buffer for the next chunk; mem::take would hand the buffer away and allocate again"
@@ -1258,22 +979,8 @@ pub(super) fn gapped_hsp_list(
         prelim_hits.drain(..).collect()
     };
     if !chunk_prelim_hits.is_empty() {
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4058-4085
-        // ```c
-        // if (gap_align->score >= cutoff) {
-        //     status = Blast_HSPInit(..., &new_hsp);
-        //     status = Blast_HSPListSaveHSP(hsp_list, new_hsp);
-        //     status = BlastIntervalTreeAddHSP(new_hsp, tree, query_info,
-        //                                      eQueryAndSubject);
-        // }
-        // ```
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:540-557
-        // ```c
-        // if (aux_struct->GetGappedScore) {
-        //     Blast_HSPListPurgeHSPsWithCommonEndpoints(program_number, hsp_list, TRUE);
-        // }
-        // Blast_HSPListSortByScore(hsp_list);
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4058-4088
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:540-557
         // NCBI purges redundant preliminary score-only gapped HSPs
         // before subject chunk offset adjustment and final traceback.
         // With LOSAT_X_QGROUPPAR the queries' lists were purged by their tasks, and the

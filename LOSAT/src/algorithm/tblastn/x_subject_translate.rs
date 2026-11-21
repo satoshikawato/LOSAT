@@ -3,24 +3,6 @@
 //! gone, this is the only translation).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:1071-1074,1080-1090
-//! ```c
-//!    } else {
-//!       translation_table = s_BlastGetTranslationTable(genetic_code, FALSE);
-//!       translation_table_rc = s_BlastGetTranslationTable(genetic_code, TRUE);
-//!    }
-//! ...
-//!    for (context = 0; context < NUM_FRAMES; ++context) {
-//!       frame = BLAST_ContextToFrame(eBlastTypeBlastx, context);
-//!       if (encoding == eBlastEncodingNcbi2na) {
-//!          if (frame > 0) {
-//!             length =
-//!                BLAST_TranslateCompressedSequence(translation_table,
-//!                   nucl_length, nucl_seq, frame, translation_buffer+offset);
-//!          } else {
-//!             length =
-//!                BLAST_TranslateCompressedSequence(translation_table_rc,
-//!                   nucl_length, nucl_seq, frame, translation_buffer+offset);
-//! ```
 //! The preliminary search reads the subject in ncbi2na, so `BLAST_GetAllTranslations` takes this
 //! branch: one table of 64 residues per strand and one table read per codon. The subject is turned
 //! into ncbi2na in one pass and the frames are read from the two tables. The tables are filled
@@ -108,16 +90,6 @@ const X_NOT_A_LETTER: u8 = 0xFF;
 const X_AMBIGUOUS: u8 = 0x10;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:424-425,441-445
-// ```c++
-// static unsigned char ctable[16] = {0xFF, 0x00, 0x01, 0xFF, 0x02, 0xFF, 0xFF, 0xFF,
-// 		                           0x03, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
-// ...
-//         unsigned char c = ctable[b];
-//
-//         if (c  != 0xFF) {
-//             // No ambiguities, so we can do this the easy way.
-//         	ncbi2na[i] = c;
-// ```
 // NCBI reads the ncbi2na value of an unambiguous ncbi4na value from `ctable`. This table joins
 // that read to the one that precedes it in LOSAT, letter to ncbi4na: per byte, the ncbi2na
 // value of `A`, `C`, `G`, `T` (either case), the flagged ncbi4na value of a gap or an ambiguous
@@ -146,32 +118,6 @@ fn x_letter_table() -> &'static [u8; 256] {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:448-455,461-475
-// ```c++
-//             if (b == 0 || b == 0x0F) {
-//             	//gap or N
-//                 ncbi2na[i] = random.GetRand() & 0x3;
-//             }
-//             else {
-//
-//             	int bitcount = ((b & 1) + ((b >> 1) & 1) +
-//             	               ((b >> 2) & 1) + ((b >> 3) & 1));
-// ...
-//             	int pick = random.GetRand() % bitcount;
-//
-//             	for(int j = 0; j < 4; j++) {
-//             		// skip 0 bits in input.
-//             	    if ((b & (1 << j)) == 0)
-//             	    	continue;
-//
-//             	    // If the bitcount is zero, this is the bit we want.
-//             	    if (! pick) {
-//             	    	ncbi2na[i] = j;
-//             	    	break;
-//             	    }
-//             	    // Else, decrement.
-//             	    pick--;
-//             	}
-// ```
 // One draw per gap or ambiguous letter: two bits of it for a gap or `N`, otherwise the set bit
 // of the ncbi4na value that the draw picks.
 /// The ncbi2na value drawn for a gap or an ambiguous letter
@@ -194,27 +140,6 @@ fn x_draw_base(mask: u8, random: &mut NcbiRandom) -> u8 {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:427-445
-// ```c++
-// void s_Ncbi4naToNcbi2na(const string & ncbi4na, int base_length,
-//                         unsigned char * ncbi2na)
-// {
-//     int inp_bytes   = base_length;
-//     CRandom random(base_length);
-//
-//     for(int i = 0; i < inp_bytes; i++) {
-//         // one input byte
-//         unsigned char inp = ncbi4na[i];
-//
-//         // represents 2 bases
-//         unsigned char b = inp & 0xF;
-//
-//         // compress each to 2 bits
-//         unsigned char c = ctable[b];
-//
-//         if (c  != 0xFF) {
-//             // No ambiguities, so we can do this the easy way.
-//         	ncbi2na[i] = c;
-// ```
 // The subject in ncbi2na, one value per byte, in one pass over its letters. The generator is
 // seeded with the length of the subject, as `CRandom random(base_length)`, and is made when the
 // first gap or ambiguous letter asks for a draw: its values depend on the seed and on the
@@ -223,7 +148,7 @@ fn x_draw_base(mask: u8, random: &mut NcbiRandom) -> u8 {
 // every letter before its first draw; this loop may have drawn for the letters before the
 // byte it stops at. The error is the same one, for the first such byte of the subject, and
 // the draws made before it are dropped with the generator, which belongs to this call.
-// NCBI c++/src/algo/blast/api/blast_objmgr_tools.cpp:428-473 resolves the ambiguities during
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:428-473 resolves the ambiguities during
 // the ncbi2na encoding; c++/src/algo/blast/api/blast_setup_cxx.cpp:742-745,830-853 keeps the
 // ncbi4na sequence for the later reevaluation.
 /// `resolve_local_subject_ncbi2na` as ncbi2na values (0 A, 1 C,
@@ -262,29 +187,6 @@ struct XCodonTables {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:999-1002,1022-1037
-// ```c
-//   	static Uint1 mapping[4] = {2, /* A in ncbi2na */
-//                               1, /* C in ncbi2na. */
-//                               3, /* G in ncbi2na. */
-//                               0 /* T in ncbi2na. */ };
-// ...
-// 			   if (reverse_complement)
-//             {
-//                bp1 = 3 - index1;
-//                bp2 = 3 - index2;
-//                bp3 = 3 - index3;
-// 			   	codon = (mapping[bp1]<<4) + (mapping[bp2]<<2) + (mapping[bp3]);
-// 			   	translation[(index3<<4) + (index2<<2) + index1] =
-//                   genetic_code[codon];
-// 			   }
-// 			   else
-// 			   {
-// 			   	codon = (mapping[index1]<<4) + (mapping[index2]<<2) +
-//                   (mapping[index3]);
-// 			   	translation[(index1<<4) + (index2<<2) + index3] =
-//                   genetic_code[codon];
-// 			   }
-// ```
 // `s_BlastGetTranslationTable`: the forward table is indexed by the three ncbi2na values of a
 // codon, and the reverse-complement table by the three values as they stand on the plus strand
 // (the codon of the minus strand is their complements, 3 - value, in the opposite order). NCBI
@@ -327,9 +229,6 @@ fn x_codon_tables(db_gencode: u8) -> Result<&'static XCodonTables> {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:1035
-// ```c
-// 			   	translation[(index1<<4) + (index2<<2) + index3] =
-// ```
 // The index of three ncbi2na values in a codon table. The values are below 4, so the mask
 // changes nothing; it tells the compiler that the index is below 64.
 /// Where a codon is in a table of `XCodonTables`.
@@ -339,30 +238,7 @@ fn x_codon_index(codon: &[u8]) -> usize {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:521-526,800-802
-// ```c
-//    if (nt_seq == NULL || prot_seq == NULL ||
-//        (length-ABS(frame)+1) < CODON_LENGTH)
-//       return prot_length;
-//
-//    *prot_seq = NULLB;
-//    prot_seq++;
-// ...
-//    *prot_seq = NULLB;
-//
-//    return (Int4)(prot_seq - prot_seq_start);
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:544-547,704-707
-// ```c
-//          case 0:
-//             codon = (byte_value >> 2);
-//             *prot_seq = translation[codon];
-//             prot_seq++;
-// ...
-//          case 3:
-//             codon = (byte_value & 63);
-//             *prot_seq = translation[codon];
-//             prot_seq++;
-// ```
 // `BLAST_TranslateCompressedSequence` once per frame: a sentinel, one table read per codon, a
 // sentinel. A plus frame reads the codons from its first base on; a minus frame reads the
 // reverse-complement table from the last base of the frame back. NCBI takes the six bits of a
@@ -403,14 +279,6 @@ fn x_generate_frames(ncbi2na: &[u8], tables: &XCodonTables) -> Vec<QueryFrame> {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:525-526,800-802
-// ```c
-//    *prot_seq = NULLB;
-//    prot_seq++;
-// ...
-//    *prot_seq = NULLB;
-//
-//    return (Int4)(prot_seq - prot_seq_start);
-// ```
 // One translated frame: the sentinel, the residues, the sentinel, and the fields that
 // `generate_frames` gives a frame (`translate_sequence` for the bytes and the length).
 /// A frame of `aa_len` residues.
@@ -436,12 +304,6 @@ fn x_frame(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:772-775
-// ```c
-//             BLAST_GetAllTranslations(backup.sequence, eBlastEncodingNcbi2na,
-//                                      backup.full_range.right,
-//                                      subject->gen_code_string, &translation_buffer,
-//                                      &frame_offsets, NULL);
-// ```
 // The subject plan as `x_scan_plan` makes it, with the frames from the tables. The chunks and
 // scan ranges of the frames come from the same function as there
 // (`translated_chunk_scan_ranges`), in the same order.
@@ -457,7 +319,7 @@ fn x_table_plan(subject: &[u8], db_gencode: u8, mask_lowercase: bool) -> Result<
         .unwrap_or(0);
     let mut units = Vec::new();
     for (index, frame) in frames.iter().enumerate() {
-        // NCBI c++/src/algo/blast/core/blast_engine.c:478-500:
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:478-500:
         // SUBJECT_SPLIT_NO_RANGE skips WordFinder for this chunk.
         for (chunk, ranges) in translated_chunk_scan_ranges(
             subject,
@@ -537,12 +399,6 @@ pub(super) fn x_plan_fields_difference(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:772-775
-// ```c
-//             BLAST_GetAllTranslations(backup.sequence, eBlastEncodingNcbi2na,
-//                                      backup.full_range.right,
-//                                      subject->gen_code_string, &translation_buffer,
-//                                      &frame_offsets, NULL);
-// ```
 // The translation of one subject is made from the tables (`x_table_plan`).
 /// The plan of one subject.
 pub(super) fn x_subject_plan(
@@ -554,12 +410,6 @@ pub(super) fn x_subject_plan(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:1058,1063-1064
-// ```c
-//    Uint4 buffer_length =2*(nucl_length+1)+2;
-// ...
-//    if ((translation_buffer =
-//         (Uint1*) malloc(buffer_length)) == NULL)
-// ```
 // No NCBI counterpart for the size: NCBI holds the six frames of a subject in one buffer of
 // about two bytes per base, which glibc maps for a chromosome and unmaps when NCBI frees it.
 // Here each frame is an allocation of a third of a byte per base. glibc maps an allocation of
@@ -678,19 +528,6 @@ pub(super) fn x_reuse_frame(mut frame: Vec<u8>) {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:1080-1090
-// ```c
-//    for (context = 0; context < NUM_FRAMES; ++context) {
-//       frame = BLAST_ContextToFrame(eBlastTypeBlastx, context);
-//       if (encoding == eBlastEncodingNcbi2na) {
-//          if (frame > 0) {
-//             length =
-//                BLAST_TranslateCompressedSequence(translation_table,
-//                   nucl_length, nucl_seq, frame, translation_buffer+offset);
-//          } else {
-//             length =
-//                BLAST_TranslateCompressedSequence(translation_table_rc,
-//                   nucl_length, nucl_seq, frame, translation_buffer+offset);
-// ```
 // NCBI translates the six frames from the packed subject, holding nothing but the frames.
 // `x_generate_frames` on the ncbi2na values of the store, read from the packed bytes: the codon
 // that starts at base `p` is residue `p / 3` of frame `p % 3 + 1`, and, read on the minus strand,
@@ -746,18 +583,6 @@ fn x_packed_frames_with(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:544-553
-// ```c
-//          case 0:
-//             codon = (byte_value >> 2);
-//             *prot_seq = translation[codon];
-//             prot_seq++;
-//             /* do state = 3 now, break is NOT missing. */
-//          case 3:
-//             codon = ((byte_value & 3) << 4);
-//             nt_seq++;
-//             byte_value = *nt_seq;
-//             codon += (byte_value >> 4);
-// ```
 // The six bits of the codon at base `p`, from the packed bytes (4 bases per byte from the high
 // bits): bits `2 * (p % 4)` on of byte `p / 4`, running into the next byte when `p % 4 >= 2`
 // (which then holds base `p + 2`).
@@ -771,16 +596,6 @@ fn x_packed_codon(packed: &[u8], p: usize) -> usize {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:584-596
-// ```c
-//          while (nt_seq < (nt_seq_end-10)) {
-//             byte_value1 = *(++nt_seq);
-//             byte_value2 = *(++nt_seq);
-//             byte_value3 = *(++nt_seq);
-//             /* case 0: */
-//             codon = (byte_value >> 2);
-//             *prot_seq = translation[codon];
-//             prot_seq++;
-// ```
 // NCBI's fast loop reads three bytes for four codons. Here one phase's codons `j..j + 8` are
 // the 48 bits after bit `2 * phase` of the eight bytes from byte `6 * j / 8` (24 bases per six
 // bytes), read as one big-endian word; the vector loop (`x_phase_residues_avx2`) does 32 at a
@@ -1048,12 +863,6 @@ unsafe fn x_phase_residues_avx2(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:772-775
-// ```c
-//             BLAST_GetAllTranslations(backup.sequence, eBlastEncodingNcbi2na,
-//                                      backup.full_range.right,
-//                                      subject->gen_code_string, &translation_buffer,
-//                                      &frame_offsets, NULL);
-// ```
 // The plan of a packed subject as `x_table_plan` makes it from the subject's letters. Only a
 // stage that does not read the case of the letters, or a subject without lower-case letters,
 // takes the store (`-lcase_masking` gives the letters of the others), so every frame has one unit
@@ -1093,12 +902,6 @@ fn x_bytes_plan(packed: &[u8], length: usize, db_gencode: u8) -> Result<XSubject
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:772-775
-// ```c
-//             BLAST_GetAllTranslations(backup.sequence, eBlastEncodingNcbi2na,
-//                                      backup.full_range.right,
-//                                      subject->gen_code_string, &translation_buffer,
-//                                      &frame_offsets, NULL);
-// ```
 // A packed subject is translated from its codes (`x_packed_plan`).
 /// EXPERIMENT (LOSAT_X_TBNSTORE): the plan of one packed subject.
 pub(super) fn x_packed_subject_plan(
@@ -1147,15 +950,6 @@ pub(super) fn x_units_translate(length: usize) -> bool {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:772-775,805-812
-// ```c
-//             BLAST_GetAllTranslations(backup.sequence, eBlastEncodingNcbi2na,
-//                                      backup.full_range.right,
-//                                      subject->gen_code_string, &translation_buffer,
-//                                      &frame_offsets, NULL);
-// ...
-//             subject->sequence = translation_buffer + frame_offsets[context] + 1;
-//             subject->length = frame_offsets[context+1] - frame_offsets[context] - 1;
-// ```
 // The frames and units of `x_packed_plan`, without residues: a frame's length is that of the
 // frame `x_packed_frames` makes, `(length - i) / 3` for frames `i + 1` and `-(i + 1)`, and the
 // units follow from the lengths alone (no lowercase masking).
@@ -1236,10 +1030,6 @@ pub(super) fn x_count_unit_buffers(made: u64, freed: u64) {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:805-812
-// ```c
-//             subject->sequence = translation_buffer + frame_offsets[context] + 1;
-//             subject->length = frame_offsets[context+1] - frame_offsets[context] - 1;
-// ```
 // The part of `subject->sequence` a unit reads, made when the unit runs.
 /// EXPERIMENT (LOSAT_X_TBNUNITXLATE): the residues of `frame` (of a plan without residues) that
 /// the unit of `chunk` reads, made into `buffer`; returns the range of `buffer` that holds them,
@@ -1593,9 +1383,6 @@ impl XW128 {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:595 (see `x_phase_words`)
-    // ```c
-    //             *prot_seq = translation[codon];
-    // ```
     /// Entry `index` (0..64) of the 64-byte table `table`, held as four registers of 16 entries,
     /// for every byte of `index`.
     #[inline(always)]
@@ -1763,12 +1550,8 @@ mod tests {
     use crate::algorithm::tblastx::translation::generate_frames;
     use crate::config::ScoringMatrix;
 
-    // NCBI reference: c++/src/algo/blast/core/blast_encoding.c:95-103 and
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_encoding.c:95-103 and
     // c++/src/algo/blast/api/blast_objmgr_tools.cpp:427-474,515-520
-    // static unsigned char ctable[16] = {0xFF,0,1,0xFF,2,0xFF,0xFF,0xFF,
-    //                                    3,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
-    // CRandom random(base_length);
-    // if (b == 0 || b == 0x0F) ncbi2na[i] = random.GetRand() & 0x3;
     // else { int pick = random.GetRand() % bitcount; /* pick a set bit */ }
     // The uncompressed ncbi4na sequence is retained by SetupSubjects_OMF for
     // traceback reevaluation; these resolved bases are preliminary-search input.
@@ -1880,18 +1663,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:441-450
-    // ```c++
-    //         unsigned char c = ctable[b];
-    //
-    //         if (c  != 0xFF) {
-    //             // No ambiguities, so we can do this the easy way.
-    //         	ncbi2na[i] = c;
-    //
-    //         } else {
-    //             if (b == 0 || b == 0x0F) {
-    //             	//gap or N
-    //                 ncbi2na[i] = random.GetRand() & 0x3;
-    // ```
     // Every byte as a subject of one letter: the ncbi2na value is the letter the reference path
     // resolves it to, and a byte that is no subject letter (`U` among them) gives the reference
     // path's error text.
@@ -1937,29 +1708,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:999-1002,1022-1037
-    // ```c
-    //   	static Uint1 mapping[4] = {2, /* A in ncbi2na */
-    //                               1, /* C in ncbi2na. */
-    //                               3, /* G in ncbi2na. */
-    //                               0 /* T in ncbi2na. */ };
-    // ...
-    // 			   if (reverse_complement)
-    //             {
-    //                bp1 = 3 - index1;
-    //                bp2 = 3 - index2;
-    //                bp3 = 3 - index3;
-    // 			   	codon = (mapping[bp1]<<4) + (mapping[bp2]<<2) + (mapping[bp3]);
-    // 			   	translation[(index3<<4) + (index2<<2) + index1] =
-    //                   genetic_code[codon];
-    // 			   }
-    // 			   else
-    // 			   {
-    // 			   	codon = (mapping[index1]<<4) + (mapping[index2]<<2) +
-    //                   (mapping[index3]);
-    // 			   	translation[(index1<<4) + (index2<<2) + index3] =
-    //                   genetic_code[codon];
-    // 			   }
-    // ```
     // The two tables of every genetic code against this loop over the genetic-code string
     // (`GeneticCode::table`, in ncbieaa), and against frames 1 and -1 of the reference path's
     // `generate_frames` on the codon as letters.
@@ -2014,24 +1762,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:1080-1091,1100-1102
-    // ```c
-    //    for (context = 0; context < NUM_FRAMES; ++context) {
-    //       frame = BLAST_ContextToFrame(eBlastTypeBlastx, context);
-    //       if (encoding == eBlastEncodingNcbi2na) {
-    //          if (frame > 0) {
-    //             length =
-    //                BLAST_TranslateCompressedSequence(translation_table,
-    //                   nucl_length, nucl_seq, frame, translation_buffer+offset);
-    //          } else {
-    //             length =
-    //                BLAST_TranslateCompressedSequence(translation_table_rc,
-    //                   nucl_length, nucl_seq, frame, translation_buffer+offset);
-    //          }
-    // ...
-    //       offset += length + 1;
-    //       frame_offsets[context+1] = offset;
-    //    }
-    // ```
     // The plan from the tables against the reference plan: every length from 0 to 40 bases (the
     // subjects too short for a frame, and every remainder of the three frames on both strands)
     // and longer ones, of the four bases, of the bases with lowercase runs, of every IUPAC
@@ -2110,11 +1840,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:431,461
-    // ```c++
-    //     CRandom random(base_length);
-    // ...
-    //             	int pick = random.GetRand() % bitcount;
-    // ```
     // The generator is seeded with the length of the subject and drawn from once per gap or
     // ambiguous letter, in subject order. A subject whose only such letter is its last one, and
     // subjects that differ in length only, draw as the reference path does.
@@ -2138,12 +1863,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:772-775
-    // ```c
-    //             BLAST_GetAllTranslations(backup.sequence, eBlastEncodingNcbi2na,
-    //                                      backup.full_range.right,
-    //                                      subject->gen_code_string, &translation_buffer,
-    //                                      &frame_offsets, NULL);
-    // ```
     // `x_subject_plan` gives the reference plan, and `x_scan_plan` gives it too. A subject with a
     // byte that is no letter gives the reference path's error.
     #[test]
@@ -2240,15 +1959,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:1080-1090
-    // ```c
-    //    for (context = 0; context < NUM_FRAMES; ++context) {
-    //       frame = BLAST_ContextToFrame(eBlastTypeBlastx, context);
-    //       if (encoding == eBlastEncodingNcbi2na) {
-    //          if (frame > 0) {
-    //             length =
-    //                BLAST_TranslateCompressedSequence(translation_table,
-    //                   nucl_length, nucl_seq, frame, translation_buffer+offset);
-    // ```
     // The plan of a packed subject against the reference plan of its letters without lowercase
     // masking: every length from 0 to 40 bases, lengths around the blocks of `x_packed_frames`
     // (every remainder of a block and of a frame), of the four bases, with lowercase runs, of

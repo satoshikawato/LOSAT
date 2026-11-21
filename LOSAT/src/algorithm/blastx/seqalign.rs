@@ -26,20 +26,6 @@
 //!   `s_RemapToSubjectLoc` add to the rows (`FastaRecord::placement`).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:518-531
-//! ```c
-//!             query = query_blk->sequence +
-//!                 query_info->contexts[hsp->context].query_offset;
-//!             query_nomask = query_blk->sequence_nomask +
-//!                 query_info->contexts[hsp->context].query_offset;
-//!         }
-//!
-//!         /* Translate subject if needed. */
-//!         if (program_number == eBlastTypeTblastn) {
-//!             ...
-//!         }
-//!         else
-//!             status = Blast_HSPGetNumIdentitiesAndPositives(query_nomask, subject, hsp, scoring_options, 0, sbp);
-//! ```
 
 use std::io::Write;
 

@@ -4,78 +4,7 @@
 //! and the scans read a cell as that slice.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:787-849
-//! ```c
-//!     CompressedLookupBackboneCell *backbone_cell = lookup->backbone + index;
-//!     Int4 num_entries = backbone_cell->num_used;
-//!
-//!     switch (num_entries) {
-//!     case 0:
-//!     	backbone_cell->query_offset = query_offset;
-//!     	break;
-//!     case 1:
-//!     case 2:
-//!     case 3:
-//!     case 4:
-//!         backbone_cell->payload.query_offsets[num_entries-1] = query_offset;
-//!         break;
-//!     case 5:
-//!     {
-//!         Int4 tmp_offset_0 = backbone_cell->payload.query_offsets[0];
-//!         Int4 tmp_offset_1 = backbone_cell->payload.query_offsets[1];
-//!         ...
-//!         CompressedOverflowCell * new_cell = s_CompressedListGetNewCell(lookup);
-//!         new_cell->next = NULL;
-//!         new_cell->query_offsets[0] = backbone_cell->payload.query_offsets[2];
-//!         new_cell->query_offsets[1] = backbone_cell->payload.query_offsets[3];
-//!         new_cell->query_offsets[2] = query_offset;
-//!         backbone_cell->payload.overflow_list.query_offsets[0] = tmp_offset_0;
-//!         backbone_cell->payload.overflow_list.query_offsets[1] = tmp_offset_1;
-//!         backbone_cell->payload.overflow_list.head = new_cell;
-//!     }
-//!     break;
-//!     default:
-//!     {
-//!         Int4 cell_index = (num_entries -3) & COMPRESSED_HITS_CELL_MASK ;
-//!         if (cell_index == 0 ) { /* can't be empty => it's full  */
-//!         	CompressedOverflowCell * new_cell = s_CompressedListGetNewCell(lookup);
-//!             new_cell->next = backbone_cell->payload.overflow_list.head;
-//!             backbone_cell->payload.overflow_list.head = new_cell;
-//!         }
-//!         backbone_cell->payload.overflow_list.head->query_offsets[cell_index] = query_offset;
-//!     }
-//!     break;
-//!     }
-//!     backbone_cell->num_used++;
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:348-396
-//! ```c
-//!              dest[0].qs_offsets.q_off = backbone_cell->query_offset;
-//!              ...
-//!              if (numhits <= COMPRESSED_HITS_PER_BACKBONE_CELL+1) {
-//!             	 dest ++;
-//!                 for (i = 0; i < numhits-1; i++) {
-//!                    dest[i].qs_offsets.q_off = backbone_cell->payload.query_offsets[i];
-//!                 ...
-//!              else {
-//!                 CompressedOverflowCell* curr_cell =
-//!                                     backbone_cell->payload.overflow_list.head;
-//!                 Int4 first_cell_entries = (numhits - 3) & COMPRESSED_HITS_CELL_MASK;
-//!                 dest[1].qs_offsets.q_off = backbone_cell->payload.overflow_list.query_offsets[0];
-//!                 dest[2].qs_offsets.q_off = backbone_cell->payload.overflow_list.query_offsets[1];
-//!                 dest += 3;
-//!                 for (i = 0; i < first_cell_entries; i++) {
-//!                    dest[i].qs_offsets.q_off =  curr_cell->query_offsets[i];
-//!                 ...
-//!                 if (first_cell_entries) {
-//!                    curr_cell = curr_cell->next;
-//!                 }
-//!                    while (curr_cell != NULL) {
-//!                       dest += i;
-//!                       for (i = 0; i < COMPRESSED_HITS_PER_OVERFLOW_CELL; i++) {
-//!                          dest[i].qs_offsets.q_off =  curr_cell->query_offsets[i];
-//!                       ...
-//!                       curr_cell = curr_cell->next;    /* prefetch */
-//! ```
 //!
 //! The reference (`try_build_blosum62_compressed_lookup`) runs `add_word_hits` for every query offset
 //! of every lookup segment, in order: each call appends the offset to the cells of its words (the word
@@ -136,7 +65,6 @@
 //! The refusal. The reference tests NCBI's tables (`tables`, ranges of the segments) while it adds the
 //! words: after each query offset of a table, while the table's appends have taken no more cells of the
 //! table of all batches than NCBI's banks hold, the table passes (a batch's n offsets of a cell take
-//! cells(c + n) - cells(c) >= cells(n) of them, cells(n) = 0 for n <= 5 and floor(n / 4) from 6 on);
 //! past that, once, it refuses when no words come before the table (the table so far is the batch's
 //! own, and its cells only grow) or when the batch's own table fills the banks
 //! (`compressed_table_fills_banks`, built from all the batch's segments). So it refuses exactly when
@@ -285,17 +213,6 @@ pub fn x_bplkpflat_print_summary() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1318-1320,1359-1373
-// ```c
-//     lookup->backbone = (CompressedLookupBackboneCell* )calloc(
-//                                     lookup->backbone_size,
-//                                     sizeof(CompressedLookupBackboneCell));
-// ...
-// BlastCompressedAaLookupTable *BlastCompressedAaLookupTableDestruct(
-//                                  BlastCompressedAaLookupTable * lookup)
-// {
-//     ...
-//     sfree(lookup->backbone);
-// ```
 // NCBI allocates a zeroed table for each search and frees it with the search; a block search makes
 // a table per block. Buffer reuse only: the parallel build writes every entry of the vectors it keeps
 // before any entry is read (`x_clut_par.rs`), so the values left in them do not matter.
@@ -528,9 +445,6 @@ pub(crate) struct XFlatArgs<'a> {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1189
-// ```c
-//     const Int4 kTargetPVBytes = 262144;
-// ```
 const X_TARGET_PV_BYTES: usize = 262_144;
 
 // No NCBI counterpart: the callers of `XFlatCompressedLookup::scan_subject` and
@@ -553,20 +467,6 @@ pub(crate) const X_BLASTP_MATRIX: u8 = 4;
 /// `hits` (`starts[index]..starts[index + 1]`), in NCBI's scan order. The other fields are those of
 /// `BlastCompressedAaLookupTable` that the scans read.
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_aalookup.h:236-267
-// ```c
-// typedef struct BlastCompressedAaLookupTable {
-//     Int4 threshold;
-//     Int4 word_length;
-//     Int4 alphabet_size;
-//     Int4 compressed_alphabet_size;
-//     Int4 reciprocal_alphabet_size;
-//     ...
-//     PV_ARRAY_TYPE *pv;
-//     Int4 pv_array_bts;
-//     Uint1* compress_table;
-//     Int4* scaled_compress_table;
-// } BlastCompressedAaLookupTable;
-// ```
 pub(crate) struct XFlatCompressedLookup<H: XQueryOffset = i32> {
     pub(crate) word_length: i32,
     pub(crate) compressed_alphabet_size: i32,
@@ -652,11 +552,6 @@ impl XFlatBuild {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:787-849 and
 // c++/src/algo/blast/core/blast_aascan.c:348-396 (module header)
-// ```c
-//         Int4 cell_index = (num_entries -3) & COMPRESSED_HITS_CELL_MASK ;
-//         ...
-//                 Int4 first_cell_entries = (numhits - 3) & COMPRESSED_HITS_CELL_MASK;
-// ```
 /// The position in NCBI's scan order of the offset appended with rank `k` (0-based) to a cell that
 /// ends with `n` offsets (module header). The builders put a cell in that order with
 /// `x_to_scan_order`; this is the statement of the order that the unit tests check it against.
@@ -677,11 +572,6 @@ pub(crate) fn x_emission_position(k: u32, n: u32) -> u32 {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:787-849 and
 // c++/src/algo/blast/core/blast_aascan.c:348-396 (module header, `x_emission_position`)
-// ```c
-//         Int4 cell_index = (num_entries -3) & COMPRESSED_HITS_CELL_MASK ;
-//         ...
-//                 Int4 first_cell_entries = (numhits - 3) & COMPRESSED_HITS_CELL_MASK;
-// ```
 /// A cell's offsets, given in the order of their appends (o_0..o_{n-1}), put in NCBI's scan order in
 /// place: o_k at `x_emission_position(k, n)`. That order keeps o_0..o_2 and takes the n >> 2 groups
 /// after them (groups of four, the last one of (n & 3) + 1 offsets) last group first, each group in
@@ -708,22 +598,6 @@ pub(crate) fn x_to_scan_order<T>(cell: &mut [T]) {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:800-806,825-836
-// ```c
-//     case 5:
-//     {
-//         ...
-//         CompressedOverflowCell * new_cell = s_CompressedListGetNewCell(lookup);
-//     ...
-//     default:
-//     {
-//         ...
-//         Int4 cell_index = (num_entries -3) & COMPRESSED_HITS_CELL_MASK ;
-//
-//         if (cell_index == 0 ) { /* can't be empty => it's full  */
-//
-//             /* fetch next vacant cell */
-//         	CompressedOverflowCell * new_cell = s_CompressedListGetNewCell(lookup);
-// ```
 /// Whether the append to a cell that holds `c` offsets takes an overflow cell.
 #[inline(always)]
 fn x_takes_overflow_cell(c: u32) -> bool {
@@ -1210,38 +1084,7 @@ impl<'a> XWords<'a> {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1075-1121
-    // ```c
-    //     score = 0;
-    //     for (i = 0; i < lookup->word_length; i++) {
-    //         int c = lookup->compress_table[w[i]];
-    //
-    //         if (c >= lookup->compressed_alphabet_size) /* "non-20 aa": skip it*/
-    //             return;
-    //
-    //         score += info->matrix[w[i]][c];
-    //     }
-    //     ...
-    //     if (lookup->threshold == 0 || score < lookup->threshold) {
-    //         s_CompressedLookupAddUnencoded(lookup, w, query_offset);
-    //     }
-    //     ...
-    //     if (lookup->threshold == 0)
-    //         return;
-    //     ...
-    //     score = info->row_max[w[0]];
-    //     for (i = 1; i < lookup->word_length; i++)
-    //         score += info->row_max[w[i]];
-    //
-    //     s_CompressedAddWordHitsCore(info, score, 0);
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:919-929
-    // ```c
-    //     index = s_ComputeCompressedIndex(lookup->word_length, w,
-    //                                      lookup->compressed_alphabet_size,
-    //                                      &skip, lookup);
-    //     if (skip == 0)
-    //         s_CompressedLookupAddWordHit(lookup, index, query_offset);
-    // ```
     /// Gives `sink` every cell that `add_word_hits` appends the offset of `word` to, in its order
     /// (with `pairs`, the cells of the last two positions in their pair row's order: module
     /// header).
@@ -1286,36 +1129,7 @@ impl<'a> XWords<'a> {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1019-1053
-    // ```c
-    //     score -= info->row_max[currQueryChar];
-    //     rowSorted = info->matrixSorted[currQueryChar];
-    //     charSorted = info->matrixSortedChar[currQueryChar];
-    //
-    //     if (current_pos == info->wordsize - 1) {
-    //         ...
-    //         for (i = 0; i < info->compressed_alphabet_size &&
-    //                (score + rowSorted[i] >= info->threshold); i++) {
-    //             subject_word[current_pos] = charSorted[i];
-    //             s_CompressedLookupAddEncoded(lookup, subject_word,
-    //                                          query_offset);
-    //         ...
-    //         return;
-    //     }
-    //     ...
-    //     for (i = 0; i < info->compressed_alphabet_size &&
-    //            (score + rowSorted[i] >= info->threshold); i++) {
-    //         subject_word[current_pos] = charSorted[i];
-    //         s_CompressedAddWordHitsCore(info, score + rowSorted[i],
-    //                                     current_pos + 1);
-    //     }
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:894-896
-    // ```c
-    //     case 5:
-    //         index = w[0] + W6p1[w[1]] + W6p2[w[2]] +
-    //                 W6p3[w[3]] + W6p4[w[4]];
-    //         break;
-    // ```
     // `partial` is the index of the letters chosen so far, sum c[i] * A^i over i < current_pos (the
     // terms of `compute_encoded_compressed_index`). At the last position the loop's letters are the
     // prefix of the sorted row up to the first score below the threshold (`partition_point`; the row
@@ -1376,13 +1190,6 @@ impl<'a> XWords<'a> {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1075-1121 and :1019-1053
     // (`for_each_word`, `neighbors`)
-    // ```c
-    //     if (lookup->threshold == 0 || score < lookup->threshold) {
-    //         s_CompressedLookupAddUnencoded(lookup, w, query_offset);
-    //     }
-    //     ...
-    //     s_CompressedAddWordHitsCore(info, score, 0);
-    // ```
     /// Item SC9i of line NP: the cells of `for_each_word` whose last letter (the index's most
     /// significant digit, of weight `A^(word_length - 1)`) is in `letters`, each once, in another
     /// order: the last letter first, only among `letters`, then the others as `neighbors` chooses
@@ -1421,21 +1228,6 @@ impl<'a> XWords<'a> {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1075-1121 (as
     // `for_each_word`)
-    // ```c
-    //     score = 0;
-    //     for (i = 0; i < lookup->word_length; i++) {
-    //         int c = lookup->compress_table[w[i]];
-    //
-    //         if (c >= lookup->compressed_alphabet_size) /* "non-20 aa": skip it*/
-    //             return;
-    //
-    //         score += info->matrix[w[i]][c];
-    //     }
-    //     ...
-    //     if (lookup->threshold == 0 || score < lookup->threshold) {
-    //         s_CompressedLookupAddUnencoded(lookup, w, query_offset);
-    //     }
-    // ```
     /// What `for_each_word_in` reads of the word at `offset` before its last letter's loop, the same
     /// for every range of last letters (item SC9i of line NP: the parallel builder's first wave keeps
     /// it for the later waves, `x_clut_par.rs`); `None` when the word has a letter outside the
@@ -1551,16 +1343,6 @@ impl<'a> XWords<'a> {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1019-1053 (`neighbors`)
-    // ```c
-    //     score -= info->row_max[currQueryChar];
-    //     ...
-    //     for (i = 0; i < info->compressed_alphabet_size &&
-    //            (score + rowSorted[i] >= info->threshold); i++) {
-    //         subject_word[current_pos] = charSorted[i];
-    //         s_CompressedAddWordHitsCore(info, score + rowSorted[i],
-    //                                     current_pos + 1);
-    //     }
-    // ```
     /// `for_each_word_in`'s recursion: `neighbors` with the last letter chosen (in `partial`, the
     /// index of the letters chosen, and in `score`, the bound of the word: the letters chosen, and
     /// `row_max` of the positions left), its positions from `pos` to the one before the last.
@@ -1628,16 +1410,6 @@ impl<'a> XWords<'a> {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1019-1053 (`neighbors`)
-    // ```c
-    //     score -= info->row_max[currQueryChar];
-    //     ...
-    //     for (i = 0; i < info->compressed_alphabet_size &&
-    //            (score + rowSorted[i] >= info->threshold); i++) {
-    //         subject_word[current_pos] = charSorted[i];
-    //         s_CompressedAddWordHitsCore(info, score + rowSorted[i],
-    //                                     current_pos + 1);
-    //     }
-    // ```
     /// EXPERIMENT (LOSAT_X_CLUTPAIRS): `neighbors` with the cells of the last two positions (w - 2
     /// and w - 1) from `row`, the row of their query letters (a, b) (`XPairTable::row`, read by
     /// `for_each_word` once for the word). `neighbors`' two loops
@@ -1688,16 +1460,6 @@ impl<'a> XWords<'a> {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1019-1053 (`neighbors`)
-    // ```c
-    //     score -= info->row_max[currQueryChar];
-    //     ...
-    //     for (i = 0; i < info->compressed_alphabet_size &&
-    //            (score + rowSorted[i] >= info->threshold); i++) {
-    //         subject_word[current_pos] = charSorted[i];
-    //         s_CompressedAddWordHitsCore(info, score + rowSorted[i],
-    //                                     current_pos + 1);
-    //     }
-    // ```
     /// EXPERIMENT (LOSAT_X_CLUTPAIRS): `neighbors_below_last` with the cells of its two innermost
     /// positions (w - 3 and w - 2) from `row`, the row of their query letters (read by
     /// `for_each_word_from` once for the word), as `neighbors_paired` takes the last two: the
@@ -1762,19 +1524,6 @@ struct XHeader {
 
 impl XHeader {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1294-1317
-    // ```c
-    //     if (word_size == 6 || word_size == 5) {
-    //         lookup->compressed_alphabet_size = 15;
-    //         lookup->reciprocal_alphabet_size = 286331154;
-    //     }
-    //     else {
-    //         lookup->compressed_alphabet_size = 10;
-    //         lookup->reciprocal_alphabet_size = 429496730;
-    //     }
-    //
-    //     lookup->backbone_size = (Int4)pow(lookup->compressed_alphabet_size,
-    //                                       word_size) + 1;
-    // ```
     // The expressions of `BlastCompressedAaLookupTable::new`.
     fn new(word_size: usize) -> Option<Self> {
         let (alphabet, reciprocal_alphabet_size) = compressed_lookup_parameters(word_size)?;
@@ -1794,16 +1543,6 @@ impl XHeader {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1168-1175
-// ```c
-//     for (loc = location; loc; loc = loc->next){
-//         Int4 from = loc->ssr->left;
-//         Int4 to = loc->ssr->right - lookup->word_length + 1;
-//
-//         for (offset = from; offset <= to; offset++){
-//             s_CompressedAddWordHits(&info, query->sequence, offset);
-//         }
-//     }
-// ```
 /// The loop of `add_location_words`: calls `visit(query_offset, word)` for every query offset that it
 /// passes to `add_word_hits`, in order, and stops when `visit` returns `false` (then `false`).
 #[inline]
@@ -1829,16 +1568,6 @@ fn x_for_each_offset(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:759-768
-// ```c
-//     if (lookup->curr_overflow_cell ==
-//                         COMPRESSED_OVERFLOW_CELLS_IN_BANK) {
-//         /* need a new bank */
-//         Int4 bank_idx = lookup->curr_overflow_bank + 1;
-//         lookup->overflow_banks[bank_idx] = (CompressedOverflowCell*) malloc(
-//                                            COMPRESSED_OVERFLOW_CELLS_IN_BANK *
-//                                            sizeof(CompressedOverflowCell));
-//         ASSERT(bank_idx < COMPRESSED_OVERFLOW_MAX_BANKS);
-// ```
 /// `compressed_table_fills_banks` without the table: whether the appends of the words of `locations`,
 /// in one table of their own, take more than `overflow_cell_capacity` overflow cells (module header).
 fn x_table_fills_banks(
@@ -1897,11 +1626,6 @@ fn x_max_appends(backbone_size: usize) -> usize {
 /// EXPERIMENT (LOSAT_X_BPCLUT): `try_build_blosum62_compressed_lookup` as a flat table. With
 /// LOSAT_X_BPFFILL the bucket fill builds it (the count-and-fill builder where it declines).
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1352-1354
-// ```c
-//     s_CompressedAddNeighboringWords(lookup, new_alphabet->matrix->data,
-//                                     query, locations);
-//     s_CompressedLookupFinalize(lookup);
-// ```
 // The builds use `x_try_build_flat_reserving`; the tests build without a count.
 #[cfg(test)]
 pub(crate) fn x_try_build_flat_compressed_lookup(
@@ -1916,10 +1640,6 @@ pub(crate) fn x_try_build_flat_compressed_lookup(
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1352-1354 (see
 // `x_try_build_flat_compressed_lookup`)
-// ```c
-//     s_CompressedAddNeighboringWords(lookup, new_alphabet->matrix->data,
-//                                     query, locations);
-// ```
 /// `x_try_build_flat_compressed_lookup` with `appends`, the most appends the build makes as its
 /// caller counted them (0 where it did not): the builders reserve their record of the appends
 /// once instead of growing it (the same table).
@@ -1974,9 +1694,6 @@ const X_COUNT_CHUNK: usize = 1 << 20;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1168-1175 (the loop over the
 // segments, see `x_for_each_offset`)
-// ```c
-//     for (loc = location; loc; loc = loc->next){
-// ```
 /// The segments (ranges of `locations`) before, inside and between NCBI's tables, in order, each with
 /// whether it is one of NCBI's tables (the words between tables, a split query batch, are added
 /// without a test of the overflow banks).
@@ -2008,11 +1725,6 @@ struct XCount {
 
 impl XCount {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:787-849 (module header)
-    // ```c
-    //     Int4 num_entries = backbone_cell->num_used;
-    //     ...
-    //     backbone_cell->num_used++;
-    // ```
     /// Counts the appends recorded since the last call, in order.
     fn count_new(&mut self) {
         let new = &self.targets[self.counted..];
@@ -2030,11 +1742,6 @@ impl XCount {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1168-1175 (the loop, see
 // `x_for_each_offset`), :787-849 (the appends, module header), :1182-1242 (`finalize`, below)
-// ```c
-//         for (offset = from; offset <= to; offset++){
-//             s_CompressedAddWordHits(&info, query->sequence, offset);
-//         }
-// ```
 // The passes of the module header; the tests of NCBI's tables are those of
 // `try_build_compressed_lookup_with_capacity`, made after each chunk of appends and at the end
 // of a table instead of after each query offset (the reference tests a table once, at the first query
@@ -2182,29 +1889,6 @@ fn x_flat_with_capacity_of<S: CompressedScores>(
 
     // Layout.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1197-1235
-    // ```c
-    //     for (i = count = 0; i < lookup->backbone_size; i++) {
-    //         if (lookup->backbone[i].num_used)
-    //             count++;
-    //     }
-    //     ...
-    //     pv_array_bts = PV_ARRAY_BTS;
-    //     if (count <= 0.01 * lookup->backbone_size) {
-    //         pv_array_bts += ilog2(lookup->backbone_size / (8 * kTargetPVBytes));
-    //     }
-    //
-    //     pv = lookup->pv = (PV_ARRAY_TYPE *)calloc(
-    //                               (lookup->backbone_size >> pv_array_bts) + 1,
-    //                               sizeof(PV_ARRAY_TYPE));
-    //     ...
-    //     for (i = 0; i < lookup->backbone_size; i++) {
-    //         count = lookup->backbone[i].num_used;
-    //
-    //         if (count > 0) {
-    //             /* set the corresponding bit in the pv_array */
-    //             PV_SET(pv, i, pv_array_bts);
-    //             longest_chain = MAX(count, longest_chain);
-    // ```
     // The statements of `finalize` on the counts (`num_used`); then each cell's start (the sum of the
     // counts before it) goes to the entry after the cell's, where the fill pass uses it as the cell's
     // cursor, and the first entry becomes 0.
@@ -2316,11 +2000,6 @@ enum XBucketBuild<H: XQueryOffset = i32> {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1168-1175 (the loop, see
 // `x_for_each_offset`), :787-849 (the appends, module header), :1182-1242 (`finalize`, below)
-// ```c
-//         for (offset = from; offset <= to; offset++){
-//             s_CompressedAddWordHits(&info, query->sequence, offset);
-//         }
-// ```
 /// EXPERIMENT (LOSAT_X_BPFFILL): `x_try_build_flat_with_capacity`'s outcome with the appends sorted
 /// by buckets of 2^`X_BUCKET_SHIFT` cells before they are counted and placed (module header).
 /// Declined where a table's appends pass `overflow_cell_capacity`, where the query has 2^22 letters
@@ -2350,17 +2029,6 @@ fn x_try_build_flat_by_buckets(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1318-1320,1359-1373
-// ```c
-//     lookup->backbone = (CompressedLookupBackboneCell* )calloc(
-//                                     lookup->backbone_size,
-//                                     sizeof(CompressedLookupBackboneCell));
-// ...
-// BlastCompressedAaLookupTable *BlastCompressedAaLookupTableDestruct(
-//                                  BlastCompressedAaLookupTable * lookup)
-// {
-//     ...
-//     sfree(lookup->backbone);
-// ```
 // NCBI allocates a zeroed table for each query chunk and frees it with the chunk. Buffer reuse only:
 // the kept pv is cleared and zero-filled as calloc gives it; the kept starts and hits, every entry of
 // which the bucket fill writes before any is read, are only sized (`x_sized_on`).
@@ -2544,11 +2212,6 @@ fn x_take_arena_sized<T>(vector: &mut Vec<T>) -> Vec<T> {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1168-1175 (see
 // `x_try_build_flat_by_buckets`)
-// ```c
-//         for (offset = from; offset <= to; offset++){
-//             s_CompressedAddWordHits(&info, query->sequence, offset);
-//         }
-// ```
 /// `x_try_build_flat_by_buckets`, with `pooled` on vectors kept between builds
 /// (`LOSAT_X_BXCLUTPOOL`); the table is the same.
 #[allow(clippy::too_many_arguments)]
@@ -2739,29 +2402,6 @@ fn x_buckets_with<S: CompressedScores>(
     // starts, the PV bits and `finalize`'s statistics, the fill, then the scan order of the cells
     // of more than 5 offsets.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1197-1235
-    // ```c
-    //     for (i = count = 0; i < lookup->backbone_size; i++) {
-    //         if (lookup->backbone[i].num_used)
-    //             count++;
-    //     }
-    //     ...
-    //     pv_array_bts = PV_ARRAY_BTS;
-    //     if (count <= 0.01 * lookup->backbone_size) {
-    //         pv_array_bts += ilog2(lookup->backbone_size / (8 * kTargetPVBytes));
-    //     }
-    //
-    //     pv = lookup->pv = (PV_ARRAY_TYPE *)calloc(
-    //                               (lookup->backbone_size >> pv_array_bts) + 1,
-    //                               sizeof(PV_ARRAY_TYPE));
-    //     ...
-    //     for (i = 0; i < lookup->backbone_size; i++) {
-    //         count = lookup->backbone[i].num_used;
-    //
-    //         if (count > 0) {
-    //             /* set the corresponding bit in the pv_array */
-    //             PV_SET(pv, i, pv_array_bts);
-    //             longest_chain = MAX(count, longest_chain);
-    // ```
     // `pv_array_bts` is `PV_ARRAY_BTS` whatever `count` (the larger shift is the same, tested
     // above), so the bits are set as the counts are read.
     let mut cell_slots = vec![0u32; 1 << X_BUCKET_SHIFT];
@@ -2957,11 +2597,6 @@ impl XSink for XBucketChunks {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1168-1175 (see
 // `x_try_build_flat_by_buckets`)
-// ```c
-//         for (offset = from; offset <= to; offset++){
-//             s_CompressedAddWordHits(&info, query->sequence, offset);
-//         }
-// ```
 /// BLASTX's bucket fill: `x_buckets_on`'s table with `u16` offsets, with `pooled` on vectors kept
 /// between builds (`LOSAT_X_BXCLUTPOOL`), in `parts` (`x_bx_buckets_with`). `WORD` is the word
 /// length (`x_bx_build_compressed_lookup`'s), a constant of the instance down to the neighbouring
@@ -3080,11 +2715,6 @@ const X_BUCKET_RANGES_PER_PART: usize = 4;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1168-1175 (the loop),
 // :787-849 (the appends), :1182-1242 (`finalize`; see `x_buckets_with`)
-// ```c
-//         for (offset = from; offset <= to; offset++){
-//             s_CompressedAddWordHits(&info, query->sequence, offset);
-//         }
-// ```
 // NCBI builds a query chunk's table on one thread before the search threads start
 // (c++/src/algo/blast/api/prelim_stage.cpp:145-188 starts them for the search).
 /// BLASTX's bucket fill: `x_buckets_with`'s table with offsets of type `H`, the words of `scores`,
@@ -3439,36 +3069,6 @@ impl<H: XQueryOffset> XFlatCompressedLookup<H> {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:264-409
-    // ```c
-    // while (s_DetermineScanningOffsets(subject, word_length, word_length, s_range)) {
-    //     for(s = s_first; s <= s_last; s++){
-    //         index = s_ComputeCompressedIndex(word_length - 1, s, ...);
-    //         if(!skip) break;
-    //     }
-    //     next_char = ((s <= s_last)? s[word_length-1] : 0);
-    //     preshift = (Int4)((((Int8)index) * recip) >> 32);
-    //     for (; s <= s_last; s++) {
-    //         compressed_char = scaled_compress_table[next_char];
-    //         next_char = s[word_length];
-    //         ...
-    //         if (PV_TEST(pv, index, pv_array_bts)) {
-    //            ...
-    //            numhits = backbone_cell->num_used;
-    //            if (numhits) {
-    //            if (numhits <= (array_size - totalhits)) {
-    //               /* copy the hits to the destination */
-    //               ...
-    //            else
-    //            {
-    //               s_range[1] = (Int4)(s - subject->sequence);
-    //               return totalhits;
-    //            }
-    //            }
-    //         }
-    //     }
-    //     s_range[1] = (Int4)(s - subject->sequence);
-    // }
-    // ```
     /// `BlastCompressedAaLookupTable::scan_subject` on the flat table: the same statements, a cell's
     /// hits copied from its slice. `CALLER` gives each caller a copy of its own (`X_BLASTP`,
     /// `X_TBLASTN`, `X_BLASTX`, `X_BLASTP_SOFT`, `X_BLASTP_MATRIX`), so that the compiler inlines
@@ -3504,13 +3104,6 @@ impl<H: XQueryOffset> XFlatCompressedLookup<H> {
             let mut index = 0i32;
 
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:496-500
-            // ```c
-            //     scan_range[1] = subject->seq_ranges[0].left;
-            //     scan_range[2] = subject->seq_ranges[0].right - wordsize;
-            //
-            //     if (scan_range[2] < scan_range[1])
-            //         scan_range[2] = scan_range[1];
-            // ```
             // As in `scan_subject`: letters past the subject are read as NULLB.
             let mut padded_word = [0u8; 8];
             while s <= s_last {
@@ -3553,17 +3146,6 @@ impl<H: XQueryOffset> XFlatCompressedLookup<H> {
 
                 if compressed_char < 0 {
                     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:293-312
-                    // ```c
-                    //        if(compressed_char < 0){ /* flush (rare) "bad" character(s) */
-                    //          preshift = 0;
-                    //          s++;
-                    //          for(skip = word_length-1; skip && (s <= s_last) ; s++){
-                    //            ...
-                    //          }
-                    //          s--; /*undo the following increment*/
-                    //          continue;
-                    //        }
-                    // ```
                     preshift = 0;
                     s += 1;
                     let mut skip = self.word_length - 1;
@@ -3627,33 +3209,7 @@ impl<H: XQueryOffset> XFlatCompressedLookup<H> {
 
 impl XFlatCompressedLookup {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:495-503
-    // ```c
-    //     scan_range[0] = 0;
-    //     scan_range[1] = subject->seq_ranges[0].left;
-    //     scan_range[2] = subject->seq_ranges[0].right - wordsize;
-    //
-    //     if (scan_range[2] < scan_range[1])
-    //         scan_range[2] = scan_range[1];
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:274-341
-    // ```c
-    //     /* prime the index */
-    //     for(s = s_first; s <= s_last; s++){
-    //         index = s_ComputeCompressedIndex(word_length - 1, s,
-    //                                          compressed_alphabet_size,
-    //                                          &skip, lookup);
-    //         if(!skip)
-    //           break;
-    //     }
-    //     ...
-    //        index = preshift + compressed_char;
-    //        preshift = (Int4)((((Int8)( index )) * recip) >> 32);
-    //
-    //        /* if there are hits */
-    //        if (PV_TEST(pv, index, pv_array_bts)) {
-    //           ...
-    //           numhits = backbone_cell->num_used;
-    // ```
     /// The scan of `x_seed_fused_compressed::x_scan_cells` (the rounds of the two-hit scan of a
     /// subject's one range, without the offset-pair array) on the flat table: calls
     /// `visit(subject_offset, hits)` for every cell found, with its slice. `cells` is scratch.
@@ -3766,7 +3322,7 @@ impl XFlatCompressedLookup {
 
             // index = preshift + compressed_char >= 0: both terms are (from) non-negative letters.
             if BRANCH_FREE {
-                // NCBI reference: c++/include/algo/blast/core/blast_lookup.h:55-57 (PV_TEST)
+                // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_lookup.h:55-57 (PV_TEST)
                 let ix = index as usize;
                 let bit = (pv[ix >> pv_array_bts] >> (ix & PV_ARRAY_MASK)) & 1;
                 // SAFETY: each offset tested adds at most one to `listed`, so with `s0` the offset
@@ -3834,7 +3390,7 @@ impl XFlatCompressedLookup {
             && (self.pv.len() as u64) << PV_ARRAY_BTS >= indices
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:274-341 (quoted at
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:274-341 (cited at
     // `for_each_cell`)
     /// EXPERIMENT (LOSAT_X_BPCLUTSCANBF): the list of `for_each_cell::<true, _>` (each offset whose
     /// index has its presence bit, with the index, in order) for a subject where
@@ -3979,7 +3535,7 @@ struct XPairsAt {
     next_char: u8,
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:274-341 (quoted at
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:274-341 (cited at
 // `XFlatCompressedLookup::for_each_cell`)
 /// EXPERIMENT (LOSAT_X_BPCLUTSCANBF): the two-offset steps of
 /// [`XFlatCompressedLookup::x_list_pairs_lean`] from `at`, until fewer than two offsets up to
@@ -4085,11 +3641,6 @@ pub(crate) enum XBxCompressedLookup {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1352-1354
-// ```c
-//     s_CompressedAddNeighboringWords(lookup, new_alphabet->matrix->data,
-//                                     query, locations);
-//     s_CompressedLookupFinalize(lookup);
-// ```
 /// EXPERIMENT (LOSAT_X_BPCLUT): `try_build_blosum62_compressed_lookup` for BLASTP. With the switch
 /// off it calls it; on, it builds the flat table (the reference builder where it declines), on
 /// `pool`'s threads when it has more than one (`x_clut_par.rs`). `x_flat_args` goes to the pool's
@@ -4132,11 +3683,6 @@ pub(crate) fn x_bp_build_compressed_lookup(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1352-1354
-// ```c
-//     s_CompressedAddNeighboringWords(lookup, new_alphabet->matrix->data,
-//                                     query, locations);
-//     s_CompressedLookupFinalize(lookup);
-// ```
 /// Item SC2d (LOSAT_X_BPLKPAHEAD): the first part of `x_bp_build_compressed_lookup` (of
 /// `x_bp_build_compressed_lookup_of` for another search matrix `matrix`, item SC2d-2) for a build
 /// ahead of its block (`XFlatArgs::x_ahead`): the appends pass of the pool's flat table, with the
@@ -4175,9 +3721,6 @@ pub(crate) fn x_bp_flat_ahead_appends(
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1352-1354 (see
 // `x_bp_flat_ahead_appends`)
-// ```c
-//     s_CompressedLookupFinalize(lookup);
-// ```
 /// Item SC2d (LOSAT_X_BPLKPAHEAD): the second part of a build ahead of its block: the flat table of
 /// `appends` (`x_bp_flat_ahead_appends` of `matrix`, `query` and `locations`) on the vectors that
 /// `spare` holds (`XFlatSpare::x_make_room`). `None` where they lack the room (the spare keeps them)
@@ -4205,11 +3748,6 @@ pub(crate) fn x_bp_flat_ahead_table(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1352-1354
-// ```c
-//     s_CompressedAddNeighboringWords(lookup, new_alphabet->matrix->data,
-//                                     query, locations);
-//     s_CompressedLookupFinalize(lookup);
-// ```
 /// TBLASTN's compressed lookup table (word sizes 5 to 7, `tblastn/search_seed.rs`): what
 /// `x_bp_build_compressed_lookup` builds on one thread, the reference table with the switch off and
 /// otherwise the flat one (the bucket fill, the count-and-fill builder where it declines, the
@@ -4236,14 +3774,6 @@ pub(crate) fn x_tbn_build_compressed_lookup(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1303-1310,1352-1354
-// ```c
-//     new_alphabet = SCompressedAlphabetNew(sbp,
-//                                 lookup->compressed_alphabet_size,
-//                                 kMatrixScale);
-//     ...
-//     s_CompressedAddNeighboringWords(lookup, new_alphabet->matrix->data,
-//                                     query, locations);
-// ```
 /// `x_tbn_build_compressed_lookup` with the words of the search matrix `matrix`, any but BLOSUM62
 /// (`build_compressed_score_matrix`): the same builders in the same order, the reference table with
 /// the switch off. Out of line, so that BLOSUM62's build keeps its code.
@@ -4320,14 +3850,6 @@ pub(crate) fn x_tbn_build_compressed_lookup_of(
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1303-1310,1352-1354 (see
 // `x_tbn_build_compressed_lookup_of`)
-// ```c
-//     new_alphabet = SCompressedAlphabetNew(sbp,
-//                                 lookup->compressed_alphabet_size,
-//                                 kMatrixScale);
-//     ...
-//     s_CompressedAddNeighboringWords(lookup, new_alphabet->matrix->data,
-//                                     query, locations);
-// ```
 /// BLASTX's compressed table of a query batch with the words of the search matrix `matrix`, any but
 /// BLOSUM62 (items SC2b, SC9 of line NP): as `x_bx_build_compressed_lookup`, its bucket fill
 /// (`x_bx_buckets_with`, word size 5) in `parts` and where it declines the count-and-fill builder's
@@ -4415,14 +3937,6 @@ pub(crate) fn x_bx_build_compressed_lookup_of(
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1303-1310,1352-1354 (see
 // `x_tbn_build_compressed_lookup_of`)
-// ```c
-//     new_alphabet = SCompressedAlphabetNew(sbp,
-//                                 lookup->compressed_alphabet_size,
-//                                 kMatrixScale);
-//     ...
-//     s_CompressedAddNeighboringWords(lookup, new_alphabet->matrix->data,
-//                                     query, locations);
-// ```
 /// blastp-fast's compressed lookup table with the words of the search matrix `matrix`, any but
 /// BLOSUM62 (items SC2b, SC2d-2): `x_bp_build_compressed_lookup` with the matrix's words. The flat
 /// table by `pool`'s threads where `x_pool_builds` (`x_try_build_flat_in_pool_of`, with
@@ -4491,11 +4005,6 @@ pub(crate) fn x_bp_build_compressed_lookup_of(
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1352-1354 (see
 // `x_tbn_build_compressed_lookup`)
-// ```c
-//     s_CompressedAddNeighboringWords(lookup, new_alphabet->matrix->data,
-//                                     query, locations);
-//     s_CompressedLookupFinalize(lookup);
-// ```
 /// BLASTX's compressed lookup table: `x_tbn_build_compressed_lookup`'s with `u16` offsets
 /// (`x_bx_buckets_on`; the count-and-fill builder's table narrowed where the bucket fill declines),
 /// on vectors kept between builds with `LOSAT_X_BXCLUTPOOL` (`blastx::seed::Lookup`'s drop gives
@@ -4591,11 +4100,6 @@ pub(crate) fn x_bx_build_compressed_lookup<const WORD: usize>(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1352-1354
-// ```c
-//     s_CompressedAddNeighboringWords(lookup, new_alphabet->matrix->data,
-//                                     query, locations);
-//     s_CompressedLookupFinalize(lookup);
-// ```
 // NCBI builds a query chunk's table on one thread before the search threads start
 // (c++/src/algo/blast/api/prelim_stage.cpp:145-188 starts them for the search).
 /// Item SC9b (2) of line NP: the count-and-fill builder's table of `matrix`'s words built by `parts`
@@ -4656,11 +4160,6 @@ fn x_flat_in_parts<H: XQueryOffset + XPooledOffset>(
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1352-1354 (see
 // `x_tbn_build_compressed_lookup`)
-// ```c
-//     s_CompressedAddNeighboringWords(lookup, new_alphabet->matrix->data,
-//                                     query, locations);
-//     s_CompressedLookupFinalize(lookup);
-// ```
 /// `x_tbn_build_compressed_lookup`, with `pooled` the builds on vectors kept between builds
 /// (`LOSAT_X_BXCLUTPOOL`) and, at more than one part, the count-and-fill builder's table in `parts`
 /// (`x_flat_in_parts`; 1: the bucket fill, or the count-and-fill builder where it declines, on this
@@ -4730,9 +4229,6 @@ fn x_build_compressed_on(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:145-149
-// ```c
-//     TBlastThreads the_threads(GetNumberOfThreads());
-// ```
 /// Whether the flat table is built by `pool`'s threads: a pool of more than one thread, in a build
 /// with threads.
 pub(crate) fn x_pool_builds(pool: &SearchPool<'_>) -> bool {
@@ -4744,11 +4240,6 @@ pub(crate) fn x_pool_builds(pool: &SearchPool<'_>) -> bool {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1352-1354
-// ```c
-//     s_CompressedAddNeighboringWords(lookup, new_alphabet->matrix->data,
-//                                     query, locations);
-//     s_CompressedLookupFinalize(lookup);
-// ```
 /// EXPERIMENT (LOSAT_X_BPCLUT): the flat table, by `pool`'s threads when `x_pool_builds` (the same
 /// table, `x_clut_par.rs`; `x_flat_args` as LOSAT_X_BPLKPFLAT gives it), else by the serial builder
 /// (which uses only `x_flat_args.appends`: it runs none of the extra tasks and takes no vectors).
@@ -4835,11 +4326,6 @@ pub(crate) fn x_assert_same_flat_tables_as(
 /// Panics unless `flat` is `reference` (every cell's hits in the reference's scan order, the PV
 /// array, the scan's parameters).
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:337-348
-// ```c
-//           numhits = backbone_cell->num_used;
-//           ...
-//              dest[0].qs_offsets.q_off = backbone_cell->query_offset;
-// ```
 #[cfg(test)]
 pub(crate) fn x_assert_same_compressed_table(
     flat: &XFlatCompressedLookup,
@@ -5249,14 +4735,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:825-841
-    // ```c
-    //     default:
-    //     {
-    //         ...
-    //         Int4 cell_index = (num_entries -3) & COMPRESSED_HITS_CELL_MASK ;
-    //
-    //         if (cell_index == 0 ) { /* can't be empty => it's full  */
-    // ```
     // The permutation for cells of 1 to 40 offsets: the reference's scan order of a cell
     // (`query_offsets_in_scan_order`, and the hits of the reference's `scan_subject` over a subject
     // with every word once) puts the offset of rank k at `x_emission_position(k, n)`, which is a
@@ -5352,16 +4830,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1168-1175
-    // ```c
-    //     for (loc = location; loc; loc = loc->next){
-    //         Int4 from = loc->ssr->left;
-    //         Int4 to = loc->ssr->right - lookup->word_length + 1;
-    //
-    //         for (offset = from; offset <= to; offset++){
-    //             s_CompressedAddWordHits(&info, query->sequence, offset);
-    //         }
-    //     }
-    // ```
     // Random queries (few letters and low thresholds, so that cells overflow; all letters with letters
     // outside the compressed alphabet), SEG-masked runs (several segments per query), several NCBI
     // tables and a split batch (segments outside every table), threshold 0 (the words themselves
@@ -5419,11 +4887,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1303-1310
-    // ```c
-    //     new_alphabet = SCompressedAlphabetNew(sbp,
-    //                                 lookup->compressed_alphabet_size,
-    //                                 kMatrixScale);
-    // ```
     // Every search matrix but IDENTITY at word size 5 (BLOSUM45 also at 6, PAM30 at 7), random queries
     // with NCBI's tables and a split batch, the word sizes' thresholds and lower ones: the bucket fill (word size 5) and the
     // count-and-fill builder of the matrix's words build the reference table of those words
@@ -5525,13 +4988,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:759-768
-    // ```c
-    //     if (lookup->curr_overflow_cell ==
-    //                         COMPRESSED_OVERFLOW_CELLS_IN_BANK) {
-    //         /* need a new bank */
-    //         Int4 bank_idx = lookup->curr_overflow_bank + 1;
-    //         lookup->overflow_banks[bank_idx] = (CompressedOverflowCell*) malloc(
-    // ```
     // The refusal at small capacities: on random queries and tables (with split batches), at
     // capacities around each table's own cells and its cells of the table of all batches, the flat
     // builder refuses exactly when the reference does, and otherwise builds the reference's table;
@@ -5643,11 +5099,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:787-849 (module header)
-    // ```c
-    //     Int4 num_entries = backbone_cell->num_used;
-    //     ...
-    //     backbone_cell->num_used++;
-    // ```
     // The bucket fill (LOSAT_X_BPFFILL): on random queries (few letters and low thresholds, so that
     // cells overflow; letters outside the compressed alphabet), SEG-masked runs, NCBI's tables with
     // split batches, threshold 0, and capacities from 1 to NCBI's, it builds the count-and-fill
@@ -5749,17 +5200,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:340-404
-    // ```c
-    //           if (numhits) {
-    //           if (numhits <= (array_size - totalhits)) {
-    //              ...
-    //           else
-    //               /* not enough space in the destination array */
-    //           {
-    //               s_range[1] = (Int4)(s - subject->sequence);
-    //               return totalhits;
-    //           }
-    // ```
     // The scans: on random subjects (letters outside the alphabet none, rare, frequent; short
     // subjects), the flat `scan_subject` gives the reference's hits and rounds for arrays from the
     // longest cell up, and `for_each_cell` gives the same hits, with the branch-free list too

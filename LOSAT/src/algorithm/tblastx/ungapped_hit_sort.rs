@@ -4,29 +4,9 @@ use super::chaining::UngappedHit;
 use super::sum_stats_linking::x_hsp_inplace;
 use std::cmp::Ordering;
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1374-1381
-// ```c
-// void Blast_HSPListSortByScore(BlastHSPList* hsp_list)
-// {
-//     if (!Blast_HSPListIsSortedByScore(hsp_list)) {
-//         qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
-//               ScoreCompareHSPs);
-// ```
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:476-486
-// ```c
-// for (index = 0; index < total_number_of_hsps; ++index) {
-//    link_hsp_array[index]->hsp = hsp_array[index];
-// }
-// qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
-//       s_RevCompareHSPsTbx);
-// ```
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:990-994
-// ```c
-// qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
-//       s_RevCompareHSPsTransl);
-// qsort(link_hsp_array, total_number_of_hsps,sizeof(LinkHSPStruct*),
-//       s_FwdCompareHSPsTransl);
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1374-1381
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:476-486
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:990-994
 // LOSAT owns complete UngappedHit values rather than NCBI pointer arrays.
 // Stable-sort their original indices with the unchanged NCBI comparator, then
 // replay complete original records. Comparator-equal records retain incoming
@@ -43,10 +23,6 @@ where
     // and cloned back (tblastx/x_hsp_inplace.rs, item 1 of its header).
     //
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1380-1381
-    // ```c
-    //         qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
-    //               ScoreCompareHSPs);
-    // ```
     // NCBI's qsort also moves the entries inside the one array.
     x_hsp_inplace::sort_dispatch(hits, compare);
 }
@@ -87,15 +63,7 @@ mod tests {
 
     #[test]
     fn comparator_equal_hits_preserve_incoming_order_without_an_extra_key() {
-        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1347-1355
-        // ```c
-        // if (0 == (result = BLAST_CMP(hsp2->score,          hsp1->score)) &&
-        //     0 == (result = BLAST_CMP(hsp1->subject.offset, hsp2->subject.offset)) &&
-        //     0 == (result = BLAST_CMP(hsp2->subject.end,    hsp1->subject.end)) &&
-        //     0 == (result = BLAST_CMP(hsp1->query.offset,   hsp2->query.offset))) {
-        //     result = BLAST_CMP(hsp2->query.end, hsp1->query.end);
-        // }
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1347-1355
         let mut hits = vec![hit(20, 0), hit(30, 2), hit(30, 1), hit(10, 3)];
 
         sort_ungapped_hits_by_index_replay(&mut hits, |a, b| b.raw_score.cmp(&a.raw_score));
@@ -109,14 +77,7 @@ mod tests {
 
     #[test]
     fn index_replay_preserves_each_complete_original_record() {
-        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:476-486
-        // ```c
-        // for (index = 0; index < total_number_of_hsps; ++index) {
-        //    link_hsp_array[index]->hsp = hsp_array[index];
-        // }
-        // qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
-        //       s_RevCompareHSPsTbx);
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:476-486
         let mut hits = vec![hit(20, 1), hit(30, 2), hit(10, 3)];
         let expected = [1, 0, 2]
             .into_iter()
@@ -135,12 +96,7 @@ mod tests {
 
     #[test]
     fn index_replay_preserves_link_relation_fields() {
-        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:960-974
-        // ```c
-        // H->linked_set = linked_set;
-        // H->ordering_method = ordering_method;
-        // H->hsp->evalue = prob[ordering_method];
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:960-974
         let mut hits = vec![hit(10, 1), hit(20, 2)];
 
         sort_ungapped_hits_by_index_replay(&mut hits, |a, b| b.raw_score.cmp(&a.raw_score));

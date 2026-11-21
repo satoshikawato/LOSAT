@@ -6,17 +6,6 @@
 //! `-matrix` the walks with that matrix's table (`x_ungapped_fast::matrix_table`).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1088-1096
-//! ```c
-//! static Int4
-//! s_BlastAaExtendTwoHit(Int4 ** matrix,
-//!                       const BLAST_SequenceBlk * subject,
-//!                       const BLAST_SequenceBlk * query,
-//!                       Int4 s_left_off, Int4 s_right_off,
-//!                       Int4 q_right_off, Int4 dropoff,
-//!                       Int4 * hsp_q, Int4 * hsp_s, Int4 * hsp_len,
-//!                       Boolean use_pssm, Int4 word_size,
-//!                       Boolean * right_extend, Int4 * s_last_off)
-//! ```
 //! The walks give the reference's result for every extension (the unit test of `search_init.rs`
 //! compares them with the reference in one process), so the property under test is that the report
 //! does not depend on the switch; that reports equal NCBI's is the business of the fixture

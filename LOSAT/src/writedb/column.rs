@@ -1,8 +1,8 @@
 //! The files of a column of a volume (`CWriteDB_Column`,
 //! `c++/src/objtools/blast/seqdb_writer/writedb_column.cpp`): the index file
-//! (`.?aa`), the data file (`.?ab`) and, for a column with two byte orders,
-//! the second data file (`.?ac`). The mask column has both byte orders; the
-//! columns that `makeblastdb -input_type blastdb` copies (`CreateUserColumn`) have one.
+//! (`.?aa`), the data file (`.?ab`) and the second data file (`.?ac`). Every column of a
+//! volume has both byte orders; only the mask column writes its second blobs, so the columns
+//! that `makeblastdb -input_type blastdb` copies (`CreateUserColumn`) never create their `.?ac`.
 
 use std::collections::BTreeMap;
 
@@ -13,25 +13,39 @@ use crate::writedb::WriteDbError;
 /// `std::map<string, string>`.
 pub(crate) type ColumnMeta = BTreeMap<Vec<u8>, Vec<u8>>;
 
-/// The title of the mask column (`x_GetMaskDataColumnId`).
-pub(crate) const MASK_COLUMN_TITLE: &[u8] = b"BlastDb/MaskData";
-
 /// The two blobs of one column for one sequence (`m_Blobs[2 * col_id]` and
 /// `m_Blobs[2 * col_id + 1]`): the mask column's offsets in big-endian and in little-endian byte
-/// order, or a copied column's blob and an empty second one. Empty for a sequence without data in
-/// the column.
+/// order, or a copied column's blob and its second one (`SetBlobData` called twice), which the
+/// volume checks against the column's size limit and does not write. Empty for a sequence
+/// without data in the column.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct ColumnBlobs<'a> {
+pub(crate) struct BlobPair<'a> {
     pub(crate) blob: &'a [u8],
     pub(crate) blob2: &'a [u8],
 }
 
-impl ColumnBlobs<'_> {
+impl BlobPair<'_> {
     /// No data for the sequence.
-    pub(crate) const EMPTY: ColumnBlobs<'static> = ColumnBlobs {
+    pub(crate) const EMPTY: BlobPair<'static> = BlobPair {
         blob: &[],
         blob2: &[],
     };
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1493-1535
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_volume.cpp:547-552
+// NCBI makes a column (the mask column too) in the open volume as well, with an empty blob for
+// each sequence already written there, and adds metadata to the open volume's column.
+// makeblastdb makes its columns and their metadata before the first sequence.
+/// LOSAT's refusal of a column, of the mask column or of a column's metadata made after the
+/// first volume was created.
+pub(crate) fn unsupported_late_column() -> WriteDbError {
+    WriteDbError::Unsupported(
+        "the columns of a database (the mask column too) and their metadata are made before \
+         its first volume is written; LOSAT does not add a column, a masking algorithm or \
+         column metadata to an open volume"
+            .to_string(),
+    )
 }
 
 /// The creation dates of the columns' index files.
@@ -57,7 +71,7 @@ impl ColumnDates {
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_column.cpp:199-199
     /// The date stored in the index file of a column of volume `index`: the one a test set, or
-    /// `CTime(CTime::eCurrent).AsString()`.
+    /// the current local time in NCBI's `CTime` text form.
     pub(crate) fn date(&self, index: usize) -> Result<Vec<u8>, WriteDbError> {
         if let Some(date) = self.dates.get(&index) {
             return Ok(date.clone());
@@ -218,14 +232,18 @@ impl ColumnIndex {
     }
 }
 
-/// `CWriteDB_Column`: the files of a column, the second data file for a column with
-/// `AddByteOrder` (`mbo`).
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_volume.hpp:258-261
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1206-1210
+// A new volume makes each column with the default of `CreateColumn`, both byte orders: every
+// column has `m_DFile2`. A column with one byte order is made only in an open volume, which
+// LOSAT refuses (`unsupported_late_column`).
+/// `CWriteDB_Column`: the files of a column with both byte orders (`AddByteOrder`).
 #[derive(Debug)]
 pub(crate) struct Column {
     index: ColumnIndex,
     data: ColumnData,
-    /// `m_DFile2` when `m_UseBothByteOrder`.
-    data2: Option<ColumnData>,
+    /// `m_DFile2`.
+    data2: ColumnData,
     closed: bool,
 }
 
@@ -237,11 +255,10 @@ impl Column {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_column.cpp:45-78
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_volume.cpp:505-543
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_column.cpp:199-199
-    // The files are `.<p|n><letter of col_id><a|b|c>`. No file is created here. `date` is
-    // `CTime(CTime::eCurrent).AsString()`. The caller has checked `col_id < 36`
+    // The files are `.<p|n><letter of col_id><a|b|c>`. No file is created here. `date` is the
+    // current local time in NCBI's `CTime` text form. The caller has checked `col_id < 36`
     // (`COLUMN_LETTERS`).
-    /// The column `col_id` of volume `index`, titled `title`, with the second byte order when
-    /// `mbo`.
+    /// The column `col_id` of volume `index`, titled `title`, with both byte orders.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         dbname: &str,
@@ -252,7 +269,6 @@ impl Column {
         meta: &ColumnMeta,
         date: &[u8],
         max_file_size: u64,
-        mbo: bool,
     ) -> Self {
         let extension = |last: u8| -> String {
             let bytes = [
@@ -276,10 +292,10 @@ impl Column {
                 file: WriteDbFile::lazy(dbname, &extension(b'b'), index, max_file_size),
                 data_length: 0,
             },
-            data2: mbo.then(|| ColumnData {
+            data2: ColumnData {
                 file: WriteDbFile::lazy(dbname, &extension(b'c'), index, max_file_size),
                 data_length: 0,
-            }),
+            },
             closed: false,
         }
     }
@@ -289,14 +305,12 @@ impl Column {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_column.cpp:93-107
-    /// `AddBlob(blob, blob2)`, or `AddBlob(blob)` for a column of one byte order (`blob2` is not
-    /// read); an empty blob adds an entry without data.
+    /// `AddBlob(blob, blob2)` (`AddBlob(blob)` is the call with an empty `blob2`); an empty blob
+    /// adds an entry without data, and an empty `blob2` writes nothing.
     pub(crate) fn add_blob(&mut self, blob: &[u8], blob2: &[u8]) -> Result<(), WriteDbError> {
         let data_size = self.data.write_blob(blob)?;
         self.index.write_blob_index(data_size);
-        if let Some(data2) = &mut self.data2 {
-            data2.write_blob(blob2)?;
-        }
+        self.data2.write_blob(blob2)?;
         Ok(())
     }
 
@@ -308,9 +322,7 @@ impl Column {
         self.closed = true;
         self.index.close(self.data.data_length)?;
         self.data.file.close();
-        if let Some(data2) = &mut self.data2 {
-            data2.file.close();
-        }
+        self.data2.file.close();
         Ok(())
     }
 
@@ -318,17 +330,13 @@ impl Column {
     pub(crate) fn rename_single(&mut self) {
         self.index.file.rename_single();
         self.data.file.rename_single();
-        if let Some(data2) = &mut self.data2 {
-            data2.file.rename_single();
-        }
+        self.data2.file.rename_single();
     }
 
     pub(crate) fn rename_file_index(&mut self, num_digits: u32) {
         self.index.file.rename_file_index(num_digits);
         self.data.file.rename_file_index(num_digits);
-        if let Some(data2) = &mut self.data2 {
-            data2.file.rename_file_index(num_digits);
-        }
+        self.data2.file.rename_file_index(num_digits);
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_column.cpp:84-91
@@ -337,9 +345,7 @@ impl Column {
         if self.data.data_length != 0 {
             files.push(self.index.file.filename().to_string());
             files.push(self.data.file.filename().to_string());
-            if let Some(data2) = &self.data2 {
-                files.push(data2.file.filename().to_string());
-            }
+            files.push(self.data2.file.filename().to_string());
         }
     }
 }

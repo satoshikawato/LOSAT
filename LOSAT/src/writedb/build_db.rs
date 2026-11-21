@@ -485,7 +485,7 @@ impl<'a> BuildDatabase<'a> {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1165-1177
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1270-1273
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1094
-    /// The constructor, then `SetMembBits(no_bits, true)` as makeblastdb
+    /// The constructor, then `SetMembBits` with no bits and the lines' own kept, as makeblastdb
     /// calls it. `now` is the time of the build, `version` the format version
     /// (`dbver`), `platform` the platform whose makeblastdb the files follow,
     /// `indices` `indexing` (`eFullIndex` for `-parse_seqids`, `eAddHash` for
@@ -839,8 +839,8 @@ impl<'a> BuildDatabase<'a> {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:428-442
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1478-1512
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1562-1575
-    // makeblastdb gives no membership bits and keeps a line's own (`SetMembBits(no_bits, true)`),
-    // and removes no GI: those edits change nothing. A line some of whose keys
+    // makeblastdb gives no membership bits and keeps a line's own (`SetMembBits`), and removes
+    // no GI: those edits change nothing. A line some of whose keys
     // (`GetDeflineKeys`, `GetSeqIdKey` of each Seq-id) are in the map of leaf taxids gets the
     // ascending union of its own leaf taxids and the map's; any other keeps its own as stored.
     /// `x_EditHeaders` of a copied sequence: `FixTaxId`, then the leaf taxids.
@@ -916,7 +916,8 @@ impl<'a> BuildDatabase<'a> {
                 )
                 .into());
             }
-            // "no headers provided" (build_db.cpp:979-983) is NCBI's empty header, which LOSAT's
+            // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:979-983
+            // NCBI's error for a sequence without header is its empty header, which LOSAT's
             // reader gives as a set without lines and the scan of the leaf taxids refused.
             let mut headers = raw.deflines;
             self.edit_raw_headers(&mut headers);

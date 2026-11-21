@@ -57,7 +57,7 @@ mod tests_ids;
 #[cfg(test)]
 mod tests_ncbi_unit;
 
-use super::column::{ColumnBlobs, ColumnMeta};
+use super::column::{unsupported_late_column, BlobPair, ColumnMeta};
 pub(crate) use range_set::{ranges_are_empty, MaskedRangeSet, MaskedRanges};
 pub(crate) use registry::MaskInfoRegistry;
 
@@ -82,15 +82,6 @@ pub(crate) struct MaskWriter {
     /// `m_Blobs` of the mask column for the sequence being written, `Some`
     /// once `SetMaskData` has filled both (`m_HaveBlob`).
     blobs: Option<(Vec<u8>, Vec<u8>)>,
-}
-
-fn unsupported_late_column() -> WriteDbError {
-    WriteDbError::Unsupported(
-        "the mask column of a database is created before its first volume is written; register \
-         the masking algorithms before the first sequence is published (NCBI adds blank records \
-         to the open volume, which LOSAT does not)"
-            .to_string(),
-    )
 }
 
 impl MaskWriter {
@@ -247,10 +238,10 @@ impl MaskWriter {
 
     /// The blobs `x_Publish` hands to `WriteSequence`: empty when the
     /// sequence has no mask data.
-    pub(crate) fn blobs(&self) -> ColumnBlobs<'_> {
+    pub(crate) fn blobs(&self) -> BlobPair<'_> {
         match &self.blobs {
-            Some((blob, blob2)) => ColumnBlobs { blob, blob2 },
-            None => ColumnBlobs::EMPTY,
+            Some((blob, blob2)) => BlobPair { blob, blob2 },
+            None => BlobPair::EMPTY,
         }
     }
 

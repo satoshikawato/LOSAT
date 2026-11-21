@@ -1,7 +1,7 @@
 //! One volume of a database being written (`CWriteDB_Volume`,
 //! `c++/src/objtools/blast/seqdb_writer/writedb_volume.cpp`).
 
-use super::column::{Column, ColumnBlobs, ColumnMeta, COLUMN_LETTERS};
+use super::column::{BlobPair, Column, ColumnMeta, COLUMN_LETTERS};
 use super::convert::find_sequence_length;
 use super::fasta_source::post_seq_id_warning;
 use super::files::{
@@ -161,16 +161,14 @@ impl Volume {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1206-1210
     // `date` is the creation date of the column's index file. The column files are the same in
     // version 4 and version 5: the LMDB files of version 5 belong to the database, not to a
-    // volume. A column made after the volume's first sequence gets an empty blob for each
-    // sequence before it.
-    /// `CreateColumn(title, meta, max_sz, mbo)`: the next column of the volume.
+    // volume. Columns are made only with a new volume, before its first sequence.
+    /// `CreateColumn(title, meta, max_sz)`: the next column of the volume, with both byte orders.
     pub(crate) fn create_column(
         &mut self,
         title: &[u8],
         meta: &ColumnMeta,
         date: &[u8],
         max_file_size: u64,
-        mbo: bool,
     ) -> Result<(), WriteDbError> {
         let col_id = self.columns.len();
         if col_id >= COLUMN_LETTERS.len() {
@@ -178,7 +176,11 @@ impl Volume {
                 "Error: Cannot have more than 36 columns.".to_string(),
             ));
         }
-        let mut column = Column::new(
+        debug_assert_eq!(
+            self.oid, 0,
+            "a column is made before the volume's first sequence"
+        );
+        self.columns.push(Column::new(
             &self.dbname,
             self.protein,
             self.index,
@@ -187,12 +189,7 @@ impl Volume {
             meta,
             date,
             max_file_size,
-            mbo,
-        );
-        for _ in 0..self.oid {
-            column.add_blob(&[], &[])?;
-        }
-        self.columns.push(column);
+        ));
         Ok(())
     }
 
@@ -226,7 +223,8 @@ impl Volume {
     /// volume already holds a sequence and this one does not fit a file. `ids` is the
     /// sequence's id list (`m_Ids`), `pig` its PIG (`m_Pig`) and `hash` its sequence hash
     /// (`m_Hash`), read when the volume has indices; `blobs` holds the blobs of each column, in
-    /// the order of the columns.
+    /// the order of the columns, and `mask_column` the index of the mask column
+    /// (`maskcol_id`), the only one whose second blob is written.
     pub(crate) fn write_sequence(
         &mut self,
         seq: &[u8],
@@ -235,7 +233,8 @@ impl Volume {
         ids: &[ParsedSeqId],
         pig: i32,
         hash: u32,
-        blobs: &[ColumnBlobs<'_>],
+        blobs: &[BlobPair<'_>],
+        mask_column: Option<usize>,
         diagnostics: &mut Vec<u8>,
     ) -> Result<bool, WriteDbError> {
         if seq.is_empty() || binhdr.is_empty() {
@@ -324,9 +323,15 @@ impl Volume {
             }
         }
         // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_volume.cpp:311-318
-        // Every sequence adds its blobs to each column, empty ones too.
-        for (column, blobs) in self.columns.iter_mut().zip(blobs) {
-            column.add_blob(blobs.blob, blobs.blob2)?;
+        // Every sequence adds its blobs to each column, empty ones too; a column other than the
+        // mask column gets its first blob alone.
+        for (col_id, (column, blobs)) in self.columns.iter_mut().zip(blobs).enumerate() {
+            let blob2 = if mask_column == Some(col_id) {
+                blobs.blob2
+            } else {
+                &[]
+            };
+            column.add_blob(blobs.blob, blob2)?;
         }
         self.oid += 1;
         Ok(true)

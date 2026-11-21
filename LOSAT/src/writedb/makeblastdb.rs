@@ -430,8 +430,9 @@ fn check_arguments(args: &MakedbArgs) -> Result<DbVersion, MakedbError> {
             )));
         }
     }
+    // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1005-1014
     // `-taxid_map` requires `-parse_seqids` on the command line for every input type, although
-    // an input other than FASTA always has its Seq-ids parsed (makeblastdb.cpp:1005-1014).
+    // an input other than FASTA always has its Seq-ids parsed.
     if args.taxid_map.is_some() {
         if !args.parse_seqids {
             return Err(MakedbError::Argument(

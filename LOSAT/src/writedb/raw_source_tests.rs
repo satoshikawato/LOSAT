@@ -306,3 +306,134 @@ fn the_errors_before_the_copy_are_makeblastdb_s() {
     );
     assert_eq!(files_of(&tmp.0), Vec::<String>::new());
 }
+
+/// Writes with LOSAT's writer the protein database `base` of three sequences (no `-parse_seqids`,
+/// ids `<prefix>1` to `<prefix>3`) with a user column `comedy` whose blobs the first and third
+/// sequences have; `masks` first registers a seg algorithm (the mask column is then the first
+/// column) and masks the second sequence.
+fn write_column_db(base: &str, prefix: &str, masks: bool) {
+    use crate::writedb::bioseq::{Bioseq, SeqData};
+    use crate::writedb::mask_data::registry::FILTER_PROGRAM_SEG;
+    use crate::writedb::mask_data::MaskedRanges;
+    use crate::writedb::writer::{DbVersion, Indices, WriteDb};
+
+    let mut db = WriteDb::new(
+        base,
+        true,
+        b"T",
+        b"Nov 21, 2026  9:00 AM",
+        3_000_000_000,
+        DbVersion::V5,
+        LINUX,
+        Indices::default(),
+    );
+    let algorithm_id = masks.then(|| {
+        db.register_mask_algorithm(FILTER_PROGRAM_SEG, b"window=12", b"seg")
+            .unwrap()
+    });
+    let column = db.create_user_column(b"comedy").unwrap();
+    for i in 1..=3 {
+        let bioseq = Bioseq {
+            local_id: format!("{prefix}{i}"),
+            title: format!("protein {i}").into_bytes(),
+            is_aa: true,
+            length: 8,
+            seq_data: Some(SeqData::Ncbieaa(b"MKVLAAGW".to_vec())),
+            parsed: None,
+            past_seq_pos: None,
+        };
+        db.extract_bioseq_deflines(&bioseq);
+        db.add_sequence(bioseq).unwrap();
+        if let (Some(algorithm_id), 2) = (algorithm_id, i) {
+            db.set_mask_data(&[MaskedRanges {
+                algorithm_id,
+                offsets: vec![(1, 4)],
+            }])
+            .unwrap();
+        }
+        if i != 2 {
+            db.set_blob_data(column, format!("row {i}").as_bytes())
+                .unwrap();
+        }
+    }
+    db.close().unwrap();
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2531-2547
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:3276-3292
+/// The masks of the input are read, in every volume, from its first column (the database's id of
+/// the mask column, 0): an input with masks one of whose volumes has another first column (here
+/// a volume with a user column and no masks, before or after the masked one) is refused before
+/// anything is copied, naming that volume's column. A volume whose mask column comes first is
+/// copied, and the user column of the copy, as of the source, has no second data file (`.pbc`):
+/// only the mask column writes one (`.pac`).
+#[test]
+#[cfg_attr(
+    target_os = "wasi",
+    ignore = "runs makeblastdb on files of a temporary directory named from the working directory"
+)]
+fn masks_are_read_from_each_volume_s_first_column() {
+    let tmp = TempDir::new("raw-first-column");
+    let (user, masked) = (tmp.base("u"), tmp.base("m"));
+    write_column_db(&user, "u", false);
+    write_column_db(&masked, "m", true);
+    // The column files (`.pa?` and `.pb?`) of the two sources.
+    let column_files = |dir: &Path| -> Vec<String> {
+        files_of(dir)
+            .into_iter()
+            .filter(|name| {
+                name.rsplit_once('.')
+                    .is_some_and(|(_, ext)| ext.len() == 3 && ["pa", "pb"].contains(&&ext[..2]))
+            })
+            .collect()
+    };
+    assert_eq!(
+        column_files(&tmp.0),
+        ["m.paa", "m.pab", "m.pac", "m.pba", "m.pbb", "u.paa", "u.pab"]
+    );
+    for names in [format!("{user} {masked}"), format!("{masked} {user}")] {
+        let out = tmp.base(&format!("c{}", names.len()));
+        let (status, _, err) = makeblastdb(&[
+            "-in",
+            &names,
+            "-input_type",
+            "blastdb",
+            "-dbtype",
+            "prot",
+            "-out",
+            &out,
+            "-title",
+            "C",
+        ]);
+        assert_eq!(status, 1, "{names}: {err}");
+        assert!(
+            err.starts_with("losat makeblastdb: ")
+                && err.contains(&format!(
+                    "{user}.paa: unsupported database: the first column of"
+                ))
+                && err.contains("not its mask data"),
+            "{names}: {err}"
+        );
+    }
+
+    let out = tmp.base("copy");
+    let (status, _, err) = makeblastdb(&[
+        "-in",
+        &masked,
+        "-input_type",
+        "blastdb",
+        "-dbtype",
+        "prot",
+        "-out",
+        &out,
+    ]);
+    assert_eq!((status, err.as_str()), (0, ""));
+    let copied: Vec<String> = column_files(&tmp.0)
+        .into_iter()
+        .filter(|name| name.starts_with("copy."))
+        .collect();
+    assert_eq!(
+        copied,
+        ["copy.paa", "copy.pab", "copy.pac", "copy.pba", "copy.pbb"]
+    );
+}

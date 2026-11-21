@@ -1367,7 +1367,7 @@ fn ncbi4na_by_base(packed: &[u8], runs: &[AmbiguityRun], seq: &mut [u8]) {
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1716-1771
 // The ambiguity words are read whole (a last partial word is not read, as
 // `SequenceBlock::ambiguity_runs`), and a count that passes their end is an error where NCBI
-// reads past its vector.
+// reads past its vector. A sequence of no base gives no base before its ambiguity data are read.
 /// `SeqDB_UnpackAmbiguities`: the bases of a stored nucleotide (`packed`: four bases per byte,
 /// the last byte holding the count of its bases; `ambig`: the stored ambiguity data) as NCBI4na
 /// codes, one byte per base. The error is the message of a malformed sequence.
@@ -1376,6 +1376,9 @@ pub(crate) fn unpack_ambiguities(packed: &[u8], ambig: &[u8]) -> Result<Vec<u8>,
         return Err("Error: packed sequence data is not valid.");
     };
     let base_length = (packed.len() - 1) * 4 + usize::from(last & 3);
+    if base_length == 0 {
+        return Ok(Vec::new());
+    }
     let words: Vec<u32> = ambig
         .chunks_exact(4)
         .map(|word| u32::from_be_bytes([word[0], word[1], word[2], word[3]]))

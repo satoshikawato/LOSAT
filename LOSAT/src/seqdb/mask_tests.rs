@@ -1414,11 +1414,10 @@ fn write_edge_column(dir: &TempDir, num_oids: u32, with_blob: &[u32]) -> super::
         false,
         0,
         0,
-        crate::writedb::column::MASK_COLUMN_TITLE,
+        super::column::MASK_DATA_TITLE,
         &Default::default(),
         b"Fri Nov 14 12:00:00 2026",
         0,
-        true,
     );
     for oid in 0..num_oids {
         let blob: &[u8] = if with_blob.contains(&oid) {

@@ -8,7 +8,7 @@ use std::collections::BTreeSet;
 use std::path::Path;
 
 use super::bioseq::Bioseq;
-use super::column::{ColumnBlobs, ColumnDates, ColumnMeta, MASK_COLUMN_TITLE};
+use super::column::{unsupported_late_column, BlobPair, ColumnDates, ColumnMeta};
 use super::convert::{
     find_sequence_length, raw_sequence_hash, seq_data_to_binary, sequence_hash, BinarySequence,
 };
@@ -24,6 +24,7 @@ use super::platform::Platform;
 pub use super::volume::Indices;
 use super::volume::{IndexScratch, Volume};
 use super::WriteDbError;
+use crate::seqdb::column::MASK_DATA_TITLE;
 use crate::seqid::model::{Dbtag, ObjectId};
 use crate::seqid::{DeflineSet, ParsedSeqId};
 
@@ -111,24 +112,14 @@ enum Pending {
 enum ColumnSlot {
     /// The mask column (`m_MaskDataColumn`): its metadata and blobs are the mask writer's.
     Mask,
-    /// A column of `CreateUserColumn`, with one byte order: its title, its metadata, and the
-    /// blobs of the sequence being written (`SetBlobData`; `have` is `m_HaveBlob`).
+    /// A column of `CreateUserColumn`: its title, its metadata, and the blobs of the sequence
+    /// being written (`SetBlobData`; `have` is `m_HaveBlob`), of which a volume writes the first.
     User {
         title: Vec<u8>,
         meta: ColumnMeta,
         blobs: [Vec<u8>; 2],
         have: u8,
     },
-}
-
-/// The refusal of a column made or changed after the first volume was created (NCBI adds blank
-/// records to the open volume; makeblastdb makes its columns before the first sequence).
-fn unsupported_late_column() -> WriteDbError {
-    WriteDbError::Unsupported(
-        "the columns of a database are made before its first volume is written; LOSAT does not \
-         add a column or its metadata to an open volume"
-            .to_string(),
-    )
 }
 
 /// "Error: provided column ID is not valid" (`AddColumnMetaData`, `SetBlobData`).
@@ -356,9 +347,16 @@ impl WriteDb {
                     .to_string(),
             ));
         }
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1690-1700
+        // NCBI reads the ambiguity data of the hash past the end of its vector where they are
+        // malformed, which LOSAT refuses.
         if self.indices.hash {
-            self.pending_hash = raw_sequence_hash(self.protein, seq, ambig)
-                .map_err(|message| WriteDbError::Other(message.to_string()))?;
+            self.pending_hash = raw_sequence_hash(self.protein, seq, ambig).map_err(|message| {
+                WriteDbError::Unsupported(format!(
+                    "the ambiguity data of a copied sequence cannot be read for its hash \
+                         (-hash_index): {message}; NCBI makeblastdb reads past them there"
+                ))
+            })?;
         }
         self.pending = Some(Pending::Raw(BinarySequence {
             seq: seq.to_vec(),
@@ -400,12 +398,7 @@ impl WriteDb {
         let mut bad = Vec::new();
         let binhdr = encode_defline_set(&deflines, &mut bad);
         post_bad_chars(&mut self.diagnostics, &bad);
-        let tax_ids: BTreeSet<i32> = deflines
-            .deflines
-            .iter()
-            .flat_map(|defline| defline.tax_ids())
-            .collect();
-        self.tax_ids = tax_ids.into_iter().collect();
+        self.tax_ids = union_of_tax_ids(&deflines.deflines);
         self.ids = deflines
             .deflines
             .into_iter()
@@ -526,16 +519,10 @@ impl WriteDb {
                 match slot {
                     ColumnSlot::Mask => {
                         let meta = self.mask.column_meta().cloned().unwrap_or_default();
-                        volume.create_column(
-                            MASK_COLUMN_TITLE,
-                            &meta,
-                            date,
-                            self.max_file_size,
-                            true,
-                        )?;
+                        volume.create_column(MASK_DATA_TITLE, &meta, date, self.max_file_size)?;
                     }
                     ColumnSlot::User { title, meta, .. } => {
-                        volume.create_column(title, meta, date, self.max_file_size, false)?;
+                        volume.create_column(title, meta, date, self.max_file_size)?;
                     }
                 }
             }
@@ -560,17 +547,21 @@ impl WriteDb {
         binary: &BinarySequence,
         binhdr: &[u8],
     ) -> Result<bool, WriteDbError> {
-        let blobs: Vec<ColumnBlobs<'_>> = self
+        let blobs: Vec<BlobPair<'_>> = self
             .columns
             .iter()
             .map(|slot| match slot {
                 ColumnSlot::Mask => self.mask.blobs(),
-                ColumnSlot::User { blobs, .. } => ColumnBlobs {
+                ColumnSlot::User { blobs, .. } => BlobPair {
                     blob: &blobs[0],
                     blob2: &blobs[1],
                 },
             })
             .collect();
+        let mask_column = self
+            .columns
+            .iter()
+            .position(|slot| matches!(slot, ColumnSlot::Mask));
         let volume = self.volumes.last_mut().expect("a volume is open");
         let done = volume.write_sequence(
             &binary.seq,
@@ -580,6 +571,7 @@ impl WriteDb {
             self.pending_pig,
             self.pending_hash,
             &blobs,
+            mask_column,
             &mut self.diagnostics,
         )?;
         drop(blobs);
@@ -857,7 +849,7 @@ impl WriteDb {
     /// `FindColumn`: the id of the column titled `title`, the mask column's included.
     pub fn find_column(&self, title: &[u8]) -> Option<usize> {
         self.columns.iter().position(|slot| match slot {
-            ColumnSlot::Mask => title == MASK_COLUMN_TITLE,
+            ColumnSlot::Mask => title == MASK_DATA_TITLE,
             ColumnSlot::User { title: own, .. } => own == title,
         })
     }
@@ -866,8 +858,8 @@ impl WriteDb {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb.cpp:180-183
     // A volume has at most 36 columns: the error comes when the volume makes them
     // (`Volume::create_column`).
-    /// `CreateUserColumn`: a new column of one byte order titled `title` (not one that
-    /// `find_column` finds), and its id.
+    /// `CreateUserColumn`: a new column titled `title` (not one that `find_column` finds), and
+    /// its id.
     pub fn create_user_column(&mut self, title: &[u8]) -> Result<usize, WriteDbError> {
         if !self.volumes.is_empty() {
             return Err(unsupported_late_column());
@@ -1058,6 +1050,37 @@ pub(crate) fn build_lmdb_file_name(basename: &str, is_protein: bool) -> String {
     format!("{basename}{}", if is_protein { ".pdb" } else { ".ndb" })
 }
 
+// NCBI reference (598d8ae6): c++/src/objects/blastdb/Blast_def_line.cpp:97-125
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:895-900
+// Each line's values are those of `BlastDefline::tax_ids`, gathered in one vector for the whole
+// set (no set per line or per sequence): a line drops its 0s only when it has another value.
+/// `m_TaxIds` of a sequence with `-parse_seqids`: the union of `GetTaxIds` of each definition
+/// line, ascending.
+fn union_of_tax_ids(deflines: &[crate::seqid::BlastDefline]) -> Vec<i32> {
+    let mut tax_ids = Vec::new();
+    for defline in deflines {
+        let start = tax_ids.len();
+        tax_ids.extend(defline.taxid);
+        if let Some(links) = &defline.links {
+            tax_ids.extend_from_slice(links);
+        }
+        let line = &tax_ids[start..];
+        if line.iter().any(|&id| id != line[0]) {
+            let mut kept = start;
+            for at in start..tax_ids.len() {
+                if tax_ids[at] != 0 {
+                    tax_ids[kept] = tax_ids[at];
+                    kept += 1;
+                }
+            }
+            tax_ids.truncate(kept);
+        }
+    }
+    tax_ids.sort_unstable();
+    tax_ids.dedup();
+    tax_ids
+}
+
 /// `CDirEntry(path).GetName()`: the part after the last path separator.
 fn file_name(path: &str) -> &str {
     let is_separator = |c: char| c == '/' || (cfg!(windows) && (c == '\\' || c == ':'));
@@ -1066,3 +1089,7 @@ fn file_name(path: &str) -> &str {
         None => path,
     }
 }
+
+#[cfg(test)]
+#[path = "writer_tests.rs"]
+mod tests;

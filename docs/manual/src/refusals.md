@@ -526,7 +526,8 @@ error: the NCBI BLAST+ option -randomize is not supported by LOSAT's makeblastdb
 - Some records of that size are handled as NCBI handles them, not refused: the error for a sequence longer than 2,147,483,647 bases, and the record skipped when the length modulo 2^32 is 0, when it has a gi above 4294967295 or when it starts with a gap of unknown length.
 - A protein whose `>?` lines sum to a multiple of 2^32 gets NCBI's error.
 - With `-input_type blastdb`, these input sequences are refused: one without a definition line, one whose definition lines have bytes that NCBI reads as `#`, a definition line with leaf tax ids and no id, and a first definition line whose `other-info` (where NCBI reads the PIG) is an empty list. NCBI reads past them or writes errors for each read.
-- With `-input_type blastdb`, an input database with one masking algorithm, two of whose masked sequences are in volumes that do not list the algorithm, is refused. NCBI then reads the masks of another algorithm id.
+- With `-input_type blastdb`, an input database with one masking algorithm is refused when one of its volumes does not list the algorithm and has two sequences with masks. For the second one NCBI reuses the algorithm id it kept from an earlier lookup and reads the masks of that id.
+- With `-input_type blastdb`, an input database with masks is refused when the first column of one of its volumes is not the mask column (for example, a volume with another column and no masks). NCBI reads the first column of every volume as its masks. The error names that column's file in the volume.
 - With `-input_type blastdb`, an input database that LOSAT's reader refuses (see [Alias files and database arithmetic](#alias-files-and-database-arithmetic) and [blastdbcmd](#blastdbcmd)) is refused.
 
 </details>

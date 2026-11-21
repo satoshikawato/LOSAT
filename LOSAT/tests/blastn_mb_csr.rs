@@ -10,7 +10,9 @@
 //! and a database (`-db`), at one, four, eight and sixteen threads.
 //! That those bytes equal NCBI's is the business of the fixture suites.
 //! `-task blastn` of 50 kb against 2 Mb has a packed table of 4^11 cells, whose scan tests each
-//! word once (`LOSAT_X_BNPVONCE`); the report does not depend on that either.
+//! word once (`LOSAT_X_BNPVONCE`); the report does not depend on that either. The 4^12-cell
+//! packed head is larger than that rule's bound: its scans read each word's presence late, in its
+//! bits (`LOSAT_X_BNAHEAD`), and the report is the same with `LOSAT_X_BNAHEAD=0`.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -21,6 +23,10 @@ const SWITCH: &str = "LOSAT_X_MBCSR";
 const SWITCH_OFF: (&str, &str) = ("LOSAT_X_MBCSR", "0");
 /// The query prefetch of the loop over the offset pairs (`LOSAT_X_MBHITPF`, strict set).
 const HIT_PREFETCH_OFF: (&str, &str) = ("LOSAT_X_MBHITPF", "0");
+/// The late presence test of a packed head larger than `x_bn_pv_once`'s bound (`LOSAT_X_BNAHEAD`,
+/// strict set).
+const AHEAD: &str = "LOSAT_X_BNAHEAD";
+const AHEAD_OFF: (&str, &str) = ("LOSAT_X_BNAHEAD", "0");
 
 fn fasta(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -158,6 +164,21 @@ fn check(dir: &TestDir, copies: usize, taken: bool) {
                 (taken, !taken),
                 "{what} threads {threads}: the size rule's side"
             );
+            // The 4^12-cell packed head is larger than `x_bn_pv_once`'s bound: its scans read each
+            // word's presence late (`LOSAT_X_BNAHEAD`); with `=0`, the presence vector first.
+            assert_eq!(
+                reach.sides(AHEAD),
+                (taken, false),
+                "{what} threads {threads}: the late presence test"
+            );
+            let off = reach_support::Reach::new("mbcsr-ahead-off");
+            let (report, stderr) = search(query, subjects, threads, &[AHEAD_OFF, off.var()]);
+            assert!(
+                report == expected,
+                "{what} threads {threads}: late presence test off differs"
+            );
+            assert_eq!(stderr, expected_stderr, "{what} threads {threads} ahead off");
+            assert_eq!(off.sides(AHEAD), (false, taken), "{what} threads {threads}");
         }
     }
 }

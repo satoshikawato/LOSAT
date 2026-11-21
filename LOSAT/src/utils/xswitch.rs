@@ -284,6 +284,7 @@ use std::ops::RangeInclusive;
 /// the time and raised the max RSS by 9.1 %. It left `STRICT_SET` and its code was deleted; a run
 /// ignores the variable and searches the blocks one at a time, as it did with `=0`.
 pub(crate) const STRICT_SET: &[&str] = &[
+    "LOSAT_X_BNAHEAD",
     "LOSAT_X_BNCSR",
     "LOSAT_X_BNCSRPACK",
     "LOSAT_X_BNDBCUT",

@@ -604,6 +604,11 @@ fn scan_strip_from<O: SeedOut, const PIECE: bool>(
             Some(packed) if super::x_bn_pv_once(&packed) => {
                 scan_strip_csr::<O, _, false, PIECE>(x, &packed, job, from, out)
             }
+            // EXPERIMENT (LOSAT_X_BNAHEAD): a head larger than the caches is tested once per word
+            // too, in its bits, read late (`x_dc_csr::XRingAhead`).
+            Some(packed) if crate::algorithm::blastn::lookup::x_dc_csr::x_ahead_on() => {
+                scan_strip_csr::<O, _, true, PIECE>(x, &packed.x_ahead(), job, from, out)
+            }
             Some(packed) => scan_strip_csr::<O, _, true, PIECE>(x, &packed, job, from, out),
             None => scan_strip_csr::<O, _, true, PIECE>(x, csr, job, from, out),
         };

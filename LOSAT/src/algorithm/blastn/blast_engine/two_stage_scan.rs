@@ -833,6 +833,9 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
         }
         match csr.x_packed() {
             Some(packed) if x_bn_pv_once(&packed) => x_scan_csr!(packed, false),
+            // EXPERIMENT (LOSAT_X_BNAHEAD): a head larger than the caches is tested once per
+            // word too, in its bits, read late (`x_dc_csr::XRingAhead`).
+            Some(packed) if x_dc_csr::x_ahead_on() => x_scan_csr!(packed.x_ahead(), true),
             Some(packed) => x_scan_csr!(packed, true),
             None => x_scan_csr!(csr, true),
         }

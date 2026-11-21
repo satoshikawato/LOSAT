@@ -843,6 +843,155 @@ impl SpinBarrier {
 /// No NCBI counterpart (scheduling only): the depth of the scans' FIFO of words (module comment).
 pub(crate) const RING: usize = 32;
 
+/// No NCBI counterpart (scheduling only): reads LOSAT_X_BNAHEAD once (a switch of the strict set:
+/// on unless `LOSAT_X_BNAHEAD=0`). It changes when the scan of a packed head larger than
+/// `x_bn_pv_once`'s bound reads each word's presence (`XRingAhead`) and changes no value NCBI
+/// computes. Asked only for such a head (once per scan), so its side is recorded there.
+pub(crate) fn x_ahead_on() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    let on = *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BNAHEAD"));
+    crate::utils::xreach::x_reach!("LOSAT_X_BNAHEAD", on);
+    on
+}
+
+/// No NCBI counterpart (scheduling only): EXPERIMENT (LOSAT_X_BNAHEAD) a packed head (`XPacked`)
+/// whose scans read each word's presence `X_RANK_AT` words after the word entered their FIFO
+/// (`XRingAhead`), with no presence-vector test before it.
+#[derive(Clone, Copy)]
+pub(crate) struct XPackedAhead<'a>(XPacked<'a>);
+
+impl<'a> XPacked<'a> {
+    /// EXPERIMENT (LOSAT_X_BNAHEAD): this head, read late (`XPackedAhead`).
+    #[inline(always)]
+    pub(crate) fn x_ahead(self) -> XPackedAhead<'a> {
+        XPackedAhead(self)
+    }
+}
+
+impl XHead for XPackedAhead<'_> {
+    type Ring<'a, T: Copy + Default>
+        = XRingAhead<'a, T>
+    where
+        Self: 'a;
+
+    #[inline(always)]
+    fn run(&self, cell: usize) -> &[u32] {
+        XPacked::run(self.0, cell)
+    }
+
+    #[inline(always)]
+    fn ring<T: Copy + Default>(&self) -> XRingAhead<'_, T> {
+        XRingAhead {
+            buf: [MaybeUninit::uninit(); RING],
+            cells: [MaybeUninit::uninit(); RING],
+            ranks: [MaybeUninit::uninit(); RING],
+            n: 0,
+            head: self.0,
+        }
+    }
+}
+
+/// No NCBI counterpart (scheduling only): the word this many places back in `XRingAhead` gets its
+/// rank (its bits prefetched when it entered) and its run's start prefetched.
+const X_RANK_AT: usize = 8;
+/// No NCBI counterpart (scheduling only): the word this many places back in `XRingAhead` reads its
+/// two offsets and gets the first and the last line of its run prefetched.
+const X_RUN_AT: usize = 20;
+/// No NCBI counterpart: the rank `XRingAhead` stores for a word of an empty cell.
+const X_EMPTY: u32 = u32::MAX;
+const _: () = assert!(X_RANK_AT < X_RUN_AT && X_RUN_AT < RING);
+
+/// No NCBI counterpart (scheduling only): EXPERIMENT (LOSAT_X_BNAHEAD) the FIFO of a scan over a
+/// packed head that reads a word's presence late. `XRingPacked` reads the word's bits and rank
+/// as the word enters, so on a head larger than the caches (4 MiB for 4^12 cells) every word waits
+/// for a miss, and the presence branch, which a word of a dense query takes about half of the
+/// time, keeps the next words' misses from overlapping; with a presence-vector test before it
+/// (`x_bn_pv_once` false) the word waits for that line first. Here every word enters with its
+/// bits' line prefetched; `X_RANK_AT` words later it gets its rank (`X_EMPTY` for an empty cell)
+/// and its run's start prefetched; `X_RUN_AT` words later its run's lines; and `RING` words later
+/// a word of a non-empty cell leaves, unchanged and in order. The presence bits are the
+/// presence vector's (module comment), so the words that leave are those the test before the
+/// ring let in, in the same order. Slots start uninitialised, as `Ring`'s.
+pub(crate) struct XRingAhead<'a, T: Copy> {
+    /// `Ring::buf`, each word's cell and, once it has one, its rank, in the same slot.
+    buf: [MaybeUninit<T>; RING],
+    cells: [MaybeUninit<usize>; RING],
+    ranks: [MaybeUninit<u32>; RING],
+    n: usize,
+    head: XPacked<'a>,
+}
+
+impl<T: Copy + Default> XRing<T> for XRingAhead<'_, T> {
+    /// `Ring::push`: whether a word left through `emit`.
+    #[inline(always)]
+    fn push(&mut self, w: T, cell: impl Fn(&T) -> usize, emit: &mut impl FnMut(T)) -> bool {
+        const MASK: usize = RING - 1;
+        let XPacked { bits, offsets, qs } = self.head;
+        let c = cell(&w);
+        prefetch(bits.as_ptr().wrapping_add((c >> 6) << 1));
+        if self.n >= X_RANK_AT {
+            let s = (self.n - X_RANK_AT) & MASK;
+            // SAFETY: word `n - X_RANK_AT` was pushed and its slot written; the
+            // `X_RANK_AT - 1` words pushed since then wrote other slots.
+            let r = match x_rank(bits, unsafe { self.cells[s].assume_init() }) {
+                Some(r) => {
+                    prefetch(offsets.as_ptr().wrapping_add(r));
+                    r as u32
+                }
+                None => X_EMPTY,
+            };
+            self.ranks[s] = MaybeUninit::new(r);
+        }
+        if self.n >= X_RUN_AT {
+            // SAFETY: word `n - X_RUN_AT` was pushed and, `X_RANK_AT` words after it, ranked;
+            // the words pushed since then wrote other slots.
+            let r = unsafe { self.ranks[(self.n - X_RUN_AT) & MASK].assume_init() };
+            if r != X_EMPTY {
+                let k = r as usize;
+                let a = offsets[k] as usize;
+                let b = offsets[k + 1] as usize;
+                let pa = qs.as_ptr().wrapping_add(a);
+                let pb = qs.as_ptr().wrapping_add(b.max(a + 1) - 1);
+                prefetch(pa);
+                if (pa as usize >> 6) != (pb as usize >> 6) {
+                    prefetch(pb);
+                }
+            }
+        }
+        let slot = self.n & MASK;
+        // SAFETY: `n >= RING`, so word `n - RING`, whose slot this is, was pushed and ranked
+        // (`RING > X_RANK_AT`); the words pushed since then wrote other slots.
+        let leaves = self.n >= RING && unsafe { self.ranks[slot].assume_init() } != X_EMPTY;
+        if leaves {
+            // SAFETY: as above.
+            emit(unsafe { self.buf[slot].assume_init() });
+        }
+        self.buf[slot] = MaybeUninit::new(w);
+        self.cells[slot] = MaybeUninit::new(c);
+        self.n += 1;
+        leaves
+    }
+
+    /// `Ring::flush`: the words of non-empty cells still in the FIFO leave, in order.
+    fn flush(&mut self, emit: &mut impl FnMut(T)) {
+        for m in self.n.saturating_sub(RING)..self.n {
+            let slot = m & (RING - 1);
+            // SAFETY: `m < n` and `m >= n - RING`: word `m` was pushed, and no later word wrote
+            // its slot; it was ranked when `m + X_RANK_AT < n`.
+            let present = if m + X_RANK_AT < self.n {
+                (unsafe { self.ranks[slot].assume_init() }) != X_EMPTY
+            } else {
+                x_rank(self.head.bits, unsafe { self.cells[slot].assume_init() }).is_some()
+            };
+            if present {
+                // SAFETY: as above.
+                emit(unsafe { self.buf[slot].assume_init() });
+            }
+        }
+        self.n = 0;
+    }
+}
+
 /// No NCBI counterpart (scheduling only): the FIFO of a CSR scan's words (module comment). A
 /// word is any `Copy` value whose cell `push` gets from `cell`.
 pub(crate) struct Ring<'a, T: Copy> {
@@ -1383,6 +1532,74 @@ mod tests {
         };
         assert!(dense.x_packed().is_none());
         assert_eq!(dense.x_run_any(2), dense.run(2));
+    }
+
+    // LOSAT_X_BNAHEAD: over random packed heads, the ring that reads a word's presence late
+    // emits the same words in the same order as `XRingPacked` (the words of non-empty cells), for
+    // any number of words (below and above `X_RANK_AT`, `X_RUN_AT` and `RING`), and its `push`
+    // says when a word left; the head read late gives the same runs.
+    #[test]
+    fn the_late_ring_emits_what_the_packed_ring_emits() {
+        let mut rng = Rng(0x2545_f491_4f6c_dd1d);
+        for cells in [64usize, 200, 4096] {
+            for fill in [1u64, 3, 8] {
+                let present: Vec<bool> = (0..cells).map(|_| rng.below(fill + 1) != 0).collect();
+                let words = cells.div_ceil(64);
+                let mut bits = vec![0u64; 2 * words];
+                let mut offsets = vec![0u32];
+                let mut qs = Vec::new();
+                let mut rank = 0u64;
+                for j in 0..words {
+                    bits[2 * j + 1] = rank;
+                    for k in 0..64 {
+                        let c = 64 * j + k;
+                        if c < cells && present[c] {
+                            bits[2 * j] |= 1 << k;
+                            rank += 1;
+                            for _ in 0..=rng.below(3) {
+                                qs.push(1 + rng.below(1000) as u32);
+                            }
+                            offsets.push(qs.len() as u32);
+                        }
+                    }
+                }
+                let csr = Csr {
+                    offsets,
+                    x_bits: bits,
+                    qs,
+                    x_keep: None,
+                };
+                let packed = csr.x_packed().expect("a packed head");
+                let late = packed.x_ahead();
+                for c in 0..cells {
+                    assert_eq!(late.run(c), packed.run(c), "cell {c}");
+                }
+                for n in [0usize, 1, 7, 8, 9, 19, 20, 21, 31, 32, 33, 64, 500] {
+                    let ws: Vec<(u32, usize)> = (0..n)
+                        .map(|i| (i as u32, rng.below(cells as u64) as usize))
+                        .collect();
+                    let mut want = Vec::new();
+                    let mut ring: XRingPacked<'_, (u32, usize)> = packed.ring();
+                    for &w in &ws {
+                        ring.push(w, |w| w.1, &mut |w| want.push(w));
+                    }
+                    ring.flush(&mut |w| want.push(w));
+                    let mut got = Vec::new();
+                    let mut left = 0;
+                    let mut ring: XRingAhead<'_, (u32, usize)> = late.ring();
+                    for &w in &ws {
+                        let before = got.len();
+                        let leaves = ring.push(w, |w| w.1, &mut |w| got.push(w));
+                        assert_eq!(leaves, got.len() > before, "cells {cells} n {n}");
+                        left += usize::from(leaves);
+                    }
+                    assert_eq!(left, got.len());
+                    ring.flush(&mut |w| got.push(w));
+                    assert_eq!(got, want, "cells {cells} fill {fill} n {n}");
+                    assert!(got.iter().all(|w| present[w.1]));
+                }
+            }
+        }
     }
 
     #[test]

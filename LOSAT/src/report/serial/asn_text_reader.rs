@@ -339,10 +339,14 @@ impl<R: Read> AsnSource for StreamSource<R> {
 /// `Reader::white_space_from`'s byte at the end of the text: more than any byte.
 const END_OF_TEXT: u32 = 0x100;
 
-/// The number of `' '` at the start of `bytes`.
+/// The index of the first byte of `bytes` from `i` (at most its length) on that is not `' '`,
+/// or its length when the bytes from `i` on are all spaces.
 #[inline]
-fn spaces_at_start(bytes: &[u8]) -> usize {
-    bytes.iter().position(|&c| c != b' ').unwrap_or(bytes.len())
+fn after_spaces(bytes: &[u8], mut i: usize) -> usize {
+    while bytes.get(i) == Some(&b' ') {
+        i += 1;
+    }
+    i
 }
 
 /// `FirstIdChar` (objistrasn.cpp:118-121).
@@ -589,18 +593,32 @@ impl<S: AsnSource> Reader<S> {
             let rest = self.src.rest(pos);
             let mut i = 0;
             // What ends the white space in `rest` when it needs another look: the end of `rest`
-            // (`None`), a `-` (a comment, or a value), or a line end that is the last byte of
-            // `rest` (its complement may be in the next block).
+            // (`None`), a `-` that starts a comment or is the last byte of `rest`, or a line end
+            // that is the last byte of `rest` (its complement may be in the next block).
             let c = loop {
                 // A run of spaces (the indentation of a text written with line ends) in one
                 // tight loop.
-                i += spaces_at_start(&rest[i..]);
+                i = after_spaces(rest, i);
                 let Some(&c) = rest.get(i) else {
                     break None;
                 };
+                if !matches!(c, b'\t' | b'\r' | b'\n' | b'-') {
+                    // The byte found.
+                    self.add_lines(lines);
+                    return (pos + i, c.into());
+                }
                 match c {
                     b'\t' => i += 1,
-                    b'\r' | b'\n' => {
+                    b'-' => match rest.get(i + 1) {
+                        // A `-` that does not start a comment (a negative number).
+                        Some(&next) if next != b'-' => {
+                            self.add_lines(lines);
+                            return (pos + i, b'-'.into());
+                        }
+                        _ => break Some(c),
+                    },
+                    // A line end.
+                    _ => {
                         i += 1;
                         lines += 1;
                         match rest.get(i) {
@@ -611,12 +629,6 @@ impl<S: AsnSource> Reader<S> {
                             }
                             None => break Some(c),
                         }
-                    }
-                    b'-' => break Some(c),
-                    // The byte found.
-                    _ => {
-                        self.add_lines(lines);
-                        return (pos + i, c.into());
                     }
                 }
             };

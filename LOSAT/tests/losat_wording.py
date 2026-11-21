@@ -68,6 +68,7 @@ VERSION_NUMBER = LOSAT_CRATE_VERSION.encode()  # `wording::VERSION_NUMBER`
 REPORT_VERSION = b"(" + LOSAT_VERSION + b")"
 NCBI_VERSION = f"{NCBI_RELEASE}+".encode()
 ERROR_PREFIXES = [(_C[f"NCBI_{name}_ERROR"].encode(), _C[f"{name}_ERROR"].encode()) for name in _PREFIX_NAMES]
+QUERY_ERROR = _C["QUERY_ERROR"].encode()  # `wording::QUERY_ERROR`, the query reader's prefix
 _RPSBPROC_TITLE = _C["RPSBPROC_TITLE"].encode()
 _NCBI_RPSBPROC_BANNER = _RPSBPROC_TITLE + b" v" + _C["NCBI_RPSBPROC_VERSION"].encode()
 
@@ -379,17 +380,19 @@ def _ncbi_xmlhelp_version(name: bytes) -> bytes:
     return m.group(1) if m else VERSION_NUMBER
 
 
-def ncbi_hash_form(losat: bytes) -> bytes:
+def ncbi_hash_form(losat: bytes, positions: bool = True) -> bytes:
     """LOSAT's output read back in NCBI's words, for a harness that holds only the hash of NCBI's bytes
     (no freeze to map with `losat_output_bytes`): the version statement, the error prefixes, rpsbproc's
     banner, the user-manual footer and `-xmlhelp`'s program version (NCBI's, from the program's frozen
     `LOSAT/src/ncbi_xmlhelp/<name>.xml`) become NCBI's again. Exact for those rules (each LOSAT text stands
     for one NCBI text); an exception report cannot be read back, so a harness with its freeze compares
     `losat_output_bytes(freeze)` instead. Pair it with `names_ncbi` so that an output that still writes
-    NCBI's words is not taken for LOSAT's."""
+    NCBI's words is not taken for LOSAT's. Without `positions`, the positions of a binary archive's byte
+    posts stay LOSAT's (`_output_words`, a run whose shorter title takes up the bytes the version adds)."""
     out = losat.replace(_RPSBPROC_TITLE + b" " + REPORT_VERSION, _NCBI_RPSBPROC_BANNER)
     out = _XMLHELP_LOSAT.sub(lambda m: m.group(1) + _ncbi_xmlhelp_version(m.group(2)) + m.group(3), out)
-    out = _ARCHIVE_BYTE_POST.sub(lambda m: m.group(1) + _BYTE_POSITION + str(int(m.group(2)) - IDENT_GROWTH).encode(), out)
+    if positions:
+        out = _ARCHIVE_BYTE_POST.sub(lambda m: m.group(1) + _BYTE_POSITION + str(int(m.group(2)) - IDENT_GROWTH).encode(), out)
     out = out.replace(bytes([_BER_VISIBLE_STRING, len(LOSAT_VERSION)]) + LOSAT_VERSION,
                       bytes([_BER_VISIBLE_STRING, len(NCBI_VERSION)]) + NCBI_VERSION)
     out = out.replace(REPORT_VERSION, NCBI_VERSION).replace(LOSAT_VERSION, NCBI_VERSION)

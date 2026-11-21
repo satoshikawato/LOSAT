@@ -657,7 +657,7 @@ fn the_estimate_at_the_default_line_length_is_400_plus_4_per_column() {
 // DBID pfoff-3 (DECISIONS 62 (13)): the writers end the run before the load of the aligned
 // subject whose lookup throws where the report's writer ends there (`aligned_end`): outfmt 0
 // at its first alignment only, outfmt 1 to 4 at any; the error carries NCBI's exception
-// (`NativeError::of_writer`: `BLAST Database error: ...`, exit status 2).
+// (`NativeError::of_writer`: the application's report of the database error, exit status 2).
 #[test]
 fn the_writers_end_the_run_at_an_aligned_subject_whose_load_throws() {
     use crate::report::db_subject::AfterThrow;

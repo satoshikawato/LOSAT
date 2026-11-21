@@ -431,7 +431,7 @@ fn a_damaged_mask_column_is_ncbi_s_error() {
         );
         assert_eq!(
             String::from_utf8_lossy(&stderr),
-            format!("BLAST Database error: {message}\n"),
+            format!("LOSAT database error: {message}\n"),
             "{name}"
         );
         assert_eq!(code, 2, "{name}");
@@ -482,7 +482,7 @@ fn damaged_metadata_and_masks_are_ncbi_s_errors() {
     let (_, stderr, code) = blastdbcmd(&["-db", &db, "-info"], &config.0);
     assert_eq!(
         String::from_utf8_lossy(&stderr),
-        "BLAST Database error: CSeqDBColumn: Error; duplicate metadata key.\n"
+        "LOSAT database error: CSeqDBColumn: Error; duplicate metadata key.\n"
     );
     assert_eq!(code, 2);
 

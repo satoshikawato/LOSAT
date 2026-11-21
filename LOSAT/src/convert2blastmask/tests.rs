@@ -29,13 +29,13 @@ fn the_short_usage_is_the_head_of_the_help() {
 }
 
 #[test]
-fn the_version_is_blast_s() {
+fn the_version_is_losat_s() {
     let (status, out, err) = run_words(&["-version"], b"");
     assert_eq!((status, err), (0, String::new()));
     assert!(
         out.starts_with(&format!(
             "convert2blastmask: {}\n Package: LOSAT ",
-            crate::NCBI_BLAST_VERSION
+            crate::wording::LOSAT_VERSION
         )),
         "{out}"
     );
@@ -53,11 +53,7 @@ fn the_full_versions_are_blast_s() {
     ] {
         assert_eq!(
             run_words(&["-out", word], b""),
-            (
-                0,
-                print(request, "convert2blastmask", crate::NCBI_BLAST_VERSION),
-                String::new()
-            ),
+            (0, print(request, "convert2blastmask"), String::new()),
             "{word}"
         );
     }

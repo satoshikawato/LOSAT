@@ -272,7 +272,7 @@ describe('refusedFields', () => {
       extra: false,
       flags: ['-word_size'],
     });
-    expect(fields('BLAST query/options error: Invalid discontiguous template parameters: word size must be either 11 or 12')).toEqual({
+    expect(fields('LOSAT query/options error: Invalid discontiguous template parameters: word size must be either 11 or 12')).toEqual({
       extra: false,
       flags: [],
     });

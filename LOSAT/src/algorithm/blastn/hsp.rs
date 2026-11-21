@@ -150,6 +150,23 @@ impl BlastnOutputFormat {
         }
     }
 
+    /// Whether the format writes the same where every load of a subject with a positive taxid
+    /// throws (`report::db_subject::unchanged_by_load_throws`, of which this is BLASTN's form).
+    pub(crate) fn unchanged_by_load_throws(&self) -> bool {
+        match *self {
+            BlastnOutputFormat::CustomTabular(spec) => {
+                spec.unchanged_by_load_throws(crate::blastinput::app::Program::Blastn)
+            }
+            BlastnOutputFormat::Seqalign(_) | BlastnOutputFormat::Archive => true,
+            BlastnOutputFormat::Tabular
+            | BlastnOutputFormat::TabularWithComments
+            | BlastnOutputFormat::Xml2(_)
+            | BlastnOutputFormat::Pairwise(_)
+            | BlastnOutputFormat::Xml
+            | BlastnOutputFormat::Sam(_) => false,
+        }
+    }
+
     /// Whether NCBI prefetches the subjects that each query batch reports before the batch's
     /// reports and the report shows no taxonomy of them (outfmt 0, 5, 6, 7 and 17; with
     /// `PRE_FETCH_SEQS_LIMIT=2147483647` also 8, 9 and 12, `database::prefetches_subjects`): as
@@ -240,7 +257,7 @@ fn write_blastn_outfmt7_header<W: Write>(
     subject_title: &str,
     num_hits: Option<usize>,
 ) -> io::Result<()> {
-    writeln!(writer, "# BLASTN {}", crate::NCBI_BLAST_VERSION)?;
+    writeln!(writer, "# BLASTN {}", crate::wording::REPORT_VERSION)?;
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1305-1308
     // The title's bytes (`write_outfmt7_query_line`).
     crate::report::outfmt6::write_outfmt7_query_line(writer, query_title)?;

@@ -6,6 +6,7 @@
 use crate::api::local_blast::{FormatOutput, FormatProbe, OutputSink, ReportOutputs};
 use crate::common::GapEditOp;
 use crate::utils::glibc_fma_libm::GlibcLibm;
+use crate::wording::{ENGINE_ERROR, QUERY_OPTIONS_ERROR};
 use anyhow::{Context, Result};
 use std::sync::Arc;
 
@@ -4778,8 +4779,9 @@ struct BlastnReportInputs<'a> {
     /// The DUST-only masks of every query (outfmt 11's `LCaseMask`), or with
     /// `-window_masker_db` the WindowMasker masks; empty without outfmt 11.
     archive_dust: &'a [Vec<MaskedInterval>],
-    /// With `-filtering_db`, the repeat hits of every query (outfmt 11's `LCaseMask`,
-    /// `repeat_filter::RepeatFilter::hits`); empty without outfmt 11 or without the option.
+    /// With `-filtering_db`, the repeat hits of every query that its batch's set-up found
+    /// (outfmt 11's `LCaseMask`, `BatchResults::repeat_hits`); empty without outfmt 11 or without
+    /// the option.
     archive_repeats: &'a [Vec<(usize, usize)>],
     lcase_masking: bool,
     /// Per query context (the plus strand of query `q` is context `2 * q`).
@@ -4965,7 +4967,7 @@ fn blastn_pairwise_report(
     // The defaults are 500 descriptions and 250 alignments (format_flags.cpp:219,221).
     let (num_descriptions, num_alignments) = (report.num_descriptions, report.num_alignments);
     let pairwise_report = BlastnPairwiseReport {
-        version: crate::NCBI_BLAST_VERSION.to_string(),
+        version: crate::wording::REPORT_VERSION.to_string(),
         intro: BlastnIntro {
             megablast: report.megablast,
             matrix_only: report.matrix_only,
@@ -6173,7 +6175,10 @@ pub fn run(
     // theirs (probe F04 of line DI-8), and a list error leaves no `-out`, only the error archive
     // that NCBI's `PrintErrorArchive` writes for outfmt 11 (probe E of line DI-8).
     let list = match args.database_name() {
-        Some(_) => match args.db_filter.resolve(&settings, &mut *diagnostics) {
+        Some(_) => match args
+            .db_filter
+            .resolve(&settings, "blastn", &mut *diagnostics)
+        {
             Ok(list) => list,
             Err(error) => {
                 write_run_error_archive(&args, archive.as_ref(), &error);
@@ -6362,7 +6367,7 @@ fn read_cli_subjects(
         return Err(crate::cli::NativeError {
             exit: 1,
             message: format!(
-                "BLAST query/options error: Either a BLAST database or subject sequence(s) must be specified\n{}\n",
+                "{QUERY_OPTIONS_ERROR} Either a BLAST database or subject sequence(s) must be specified\n{}\n",
                 crate::wording::USER_MANUAL_FOOTER
             ).into(),
         }
@@ -6754,7 +6759,7 @@ pub(crate) fn check_subjects_not_empty<R>(subjects: &[R]) -> Result<()> {
     if subjects.is_empty() {
         return Err(crate::cli::NativeError {
             exit: 3,
-            message: "BLAST engine error: Empty CBlastQueryVector\n".into(),
+            message: format!("{ENGINE_ERROR} Empty CBlastQueryVector\n").into(),
         }
         .into());
     }
@@ -7081,10 +7086,11 @@ pub(crate) fn repeat_search_hits(
     result.map_err(|error| match error.downcast::<crate::cli::NativeError>() {
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:650-651
         // The search's set-up that finds no valid query stops with its messages, which the
-        // command line writes after `BLAST engine error: `.
+        // command line writes after its prefix (`ENGINE_ERROR`, NCBI's `BLAST engine error:`).
         Ok(native) => match native
             .message
-            .strip_prefix(b"BLAST engine error: ")
+            .strip_prefix(ENGINE_ERROR.as_bytes())
+            .and_then(|text| text.strip_prefix(b" "))
             .and_then(|text| text.strip_suffix(b"\n"))
         {
             Some(text) if native.exit == 3 => RepeatError::Posted(text.to_vec()),
@@ -7108,7 +7114,7 @@ fn search_database(
     // The handler of the database arguments reads the list before the other handlers (`run`).
     let list = args
         .db_filter
-        .resolve(&settings, &mut *outputs.diagnostics)?;
+        .resolve(&settings, "blastn", &mut *outputs.diagnostics)?;
     // `-out` (`run_to_file`) is made where the command line opens it (`run`).
     outputs.open_out()?;
     args.resolve_dust()?;
@@ -8058,6 +8064,7 @@ fn run_in_pool(
                 lengths: &[],
                 unsearched: Vec::new(),
                 query_masks: &[],
+                repeat_hits: &[],
                 context_karlin: &[],
                 query_eff_searchsp: &[],
                 batches: &[],
@@ -8072,7 +8079,7 @@ fn run_in_pool(
         write_pairwise_prologs(outputs, &output_formats, intro, &shown, false)?;
         return Err(crate::cli::NativeError {
             exit: 3,
-            message: "BLAST engine error: Empty CBlastQueryVector\n".into(),
+            message: format!("{ENGINE_ERROR} Empty CBlastQueryVector\n").into(),
         }
         .into());
     }
@@ -8110,6 +8117,12 @@ fn run_in_pool(
     let mut batch_spans: Vec<std::ops::Range<usize>> = Vec::new();
     let mut unsearched = Vec::with_capacity(lengths.len());
     let mut query_masks = Vec::with_capacity(lengths.len());
+    // With `-filtering_db` and the BLAST archive, the repeat hits of each query that its batch's
+    // set-up found (`repeat_batch_masks`), which the archive's masks join
+    // (`BatchResults::repeat_hits`).
+    let keeps_repeat_hits =
+        args.repeat_filter.is_some() && output_formats.contains(&BlastnOutputFormat::Archive);
+    let mut repeat_hits: Vec<Vec<(usize, usize)>> = Vec::new();
     let mut context_karlin = Vec::with_capacity(2 * lengths.len());
     // The warnings written before each query's report (`QueryWarnings`).
     let mut warnings: Vec<Posts> = vec![Posts::new(); lengths.len()];
@@ -8223,6 +8236,7 @@ fn run_in_pool(
                             lengths: &lengths[..start],
                             unsearched,
                             query_masks: &query_masks,
+                            repeat_hits: &repeat_hits,
                             context_karlin: &context_karlin,
                             query_eff_searchsp: &query_eff_searchsp,
                             batches: &batch_spans,
@@ -8267,6 +8281,7 @@ fn run_in_pool(
                         lengths: &lengths[..start],
                         unsearched,
                         query_masks: &query_masks,
+                        repeat_hits: &repeat_hits,
                         context_karlin: &context_karlin,
                         query_eff_searchsp: &query_eff_searchsp,
                         batches: &batch_spans,
@@ -8283,7 +8298,7 @@ fn run_in_pool(
             batch_title_warnings.write(&mut *outputs.diagnostics, archive)?;
             return Err(crate::cli::NativeError {
                 exit: 3,
-                message: "BLAST engine error: Empty CBlastQueryVector\n".into(),
+                message: format!("{ENGINE_ERROR} Empty CBlastQueryVector\n").into(),
             }
             .into());
         }
@@ -8328,6 +8343,7 @@ fn run_in_pool(
                         lengths: &lengths[..start],
                         unsearched,
                         query_masks: &query_masks,
+                        repeat_hits: &repeat_hits,
                         context_karlin: &context_karlin,
                         query_eff_searchsp: &query_eff_searchsp,
                         batches: &batch_spans,
@@ -8383,6 +8399,8 @@ fn run_in_pool(
         // that they join go on to the chunks of a split batch (`BatchStage::Search`'s
         // `masks_outside`).
         let mut masks_outside: Vec<MasksOutside> = Vec::new();
+        // The batch's repeat hits, kept for the BLAST archive (`BatchResults::repeat_hits`).
+        let mut batch_repeat_hits: Vec<Vec<(usize, usize)>> = Vec::new();
         if let Some(filter) = &args.repeat_filter {
             let ranged = (args.lcase_masking && query_input.placements.ranged()).then(|| {
                 (start..end)
@@ -8394,9 +8412,12 @@ fn run_in_pool(
             });
             let searched = batch_records.searched();
             match repeat_batch_masks(&args, filter, searched, ranged, parallel_pool)? {
-                Ok((masks, outside)) => {
+                Ok((masks, outside, hits)) => {
                     window_masker_masks = Some(masks);
                     masks_outside = outside;
+                    if keeps_repeat_hits {
+                        batch_repeat_hits = hits;
+                    }
                 }
                 Err(failure) => mask_failure = Some((Posts::new(), failure)),
             }
@@ -8423,6 +8444,7 @@ fn run_in_pool(
                         lengths: &lengths[..start],
                         unsearched,
                         query_masks: &query_masks,
+                        repeat_hits: &repeat_hits,
                         context_karlin: &context_karlin,
                         query_eff_searchsp: &query_eff_searchsp,
                         batches: &batch_spans,
@@ -8473,6 +8495,7 @@ fn run_in_pool(
                         lengths: &lengths[..start],
                         unsearched,
                         query_masks: &query_masks,
+                        repeat_hits: &repeat_hits,
                         context_karlin: &context_karlin,
                         query_eff_searchsp: &query_eff_searchsp,
                         batches: &batch_spans,
@@ -8487,7 +8510,7 @@ fn run_in_pool(
                 before(outputs)?;
             }
             batch_title_warnings.write(&mut *outputs.diagnostics, archive)?;
-            let mut message = String::from("BLAST engine error: ");
+            let mut message = format!("{ENGINE_ERROR} ");
             for _ in start..end {
                 message.push_str("Warning: ");
                 message.push_str(NO_DATA_MESSAGE);
@@ -8602,6 +8625,7 @@ fn run_in_pool(
                                 lengths: &lengths[..start],
                                 unsearched,
                                 query_masks: &query_masks,
+                                repeat_hits: &repeat_hits,
                                 context_karlin: &context_karlin,
                                 query_eff_searchsp: &query_eff_searchsp,
                                 batches: &batch_spans,
@@ -8702,6 +8726,7 @@ fn run_in_pool(
                             lengths: &lengths[..start],
                             unsearched,
                             query_masks: &query_masks,
+                            repeat_hits: &repeat_hits,
                             context_karlin: &context_karlin,
                             query_eff_searchsp: &query_eff_searchsp,
                             batches: &batch_spans,
@@ -8786,6 +8811,7 @@ fn run_in_pool(
                     lengths: &lengths[..start],
                     unsearched,
                     query_masks: &query_masks,
+                    repeat_hits: &repeat_hits,
                     context_karlin: &context_karlin,
                     query_eff_searchsp: &query_eff_searchsp,
                     batches: &batch_spans,
@@ -8874,7 +8900,10 @@ fn run_in_pool(
             // batches before with a database of its own, whose loads nothing here records.
             let prefetch_queries =
                 crate::algorithm::common::database::PrefetchQueries::new(start, &scope)
-                    .after_unrecorded_calls(args.first_query_ordinal > 0);
+                    .after_unrecorded_calls(args.first_query_ordinal > 0)
+                    .where_reports_unchanged_by_load_throws(
+                        database::reports_unchanged_by_load_throws(&output_formats),
+                    );
             let prefetch = if run_loads.ended() {
                 None
             } else if output_formats
@@ -9065,6 +9094,7 @@ fn run_in_pool(
         batch_spans.push(start..end);
         unsearched.extend(std::iter::repeat_n(!batch.searched, end - start));
         query_masks.extend(batch.query_masks);
+        repeat_hits.extend(batch_repeat_hits);
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1450-1452
         // The warning of an invalid query comes with its report (`PrintOneResultSet`),
         // before its preamble (`QueryWarnings`): a query without letters has the message of
@@ -9152,6 +9182,9 @@ fn run_in_pool(
             }
             let batch_unsearched = take(&mut unsearched, at);
             let batch_masks = take(&mut query_masks, at);
+            // (Empty without the archive: nothing kept.)
+            let repeats_at = at.min(repeat_hits.len());
+            let batch_repeats = take(&mut repeat_hits, repeats_at);
             let batch_karlin = take(&mut context_karlin, 2 * at);
             let batch_searchsp = take(&mut query_eff_searchsp, 2 * at);
             let batch_input = x_rpt_stream::batch_input(query_input, start..end);
@@ -9181,6 +9214,7 @@ fn run_in_pool(
                         lengths: &lengths[start..end],
                         unsearched: batch_unsearched,
                         query_masks: &batch_masks,
+                        repeat_hits: &batch_repeats,
                         context_karlin: &batch_karlin,
                         query_eff_searchsp: &batch_searchsp,
                         batches: &[],
@@ -9235,6 +9269,7 @@ fn run_in_pool(
                 lengths: &lengths,
                 unsearched,
                 query_masks: &query_masks,
+                repeat_hits: &repeat_hits,
                 context_karlin: &context_karlin,
                 query_eff_searchsp: &query_eff_searchsp,
                 batches: &batch_spans,
@@ -9268,6 +9303,7 @@ fn run_in_pool(
                 lengths: &[],
                 unsearched: Vec::new(),
                 query_masks: &[],
+                repeat_hits: &[],
                 context_karlin: &[],
                 query_eff_searchsp: &[],
                 batches: &[],
@@ -9405,7 +9441,7 @@ fn write_format_prolog(
         let mut writer = format.sink.open()?;
         write_blastn_pairwise_prolog(
             &mut writer,
-            crate::NCBI_BLAST_VERSION,
+            crate::wording::REPORT_VERSION,
             intro,
             shown.name.as_bytes(),
             // Printed for a subject set only (a database prints `database`).
@@ -9441,6 +9477,10 @@ struct BatchResults<'a> {
     lengths: &'a [usize],
     unsearched: Vec<bool>,
     query_masks: &'a [Vec<MaskedInterval>],
+    /// With `-filtering_db` and the BLAST archive, each query's repeat hits that its batch's
+    /// set-up found (`repeat_batch_masks`; 0-based, inclusive, in the searched letters), which
+    /// the archive's masks join (`archive::CallBatches::repeat_hits`); empty otherwise.
+    repeat_hits: &'a [Vec<(usize, usize)>],
     context_karlin: &'a [Option<ContextKarlin>],
     query_eff_searchsp: &'a [i64],
     /// The searched queries of each query batch of the call, in order, for the reports of
@@ -9727,31 +9767,6 @@ fn write_reports_untimed(
     } else {
         Vec::new()
     };
-    // With `-filtering_db` the query vector's masks of a query with repeat hits are its masks
-    // combined with the hits (`repeat_filter::RepeatFilter::add_masks`): the archive searches the
-    // repeats again, one search for each query batch, as the batch's set-up searched them.
-    let archive_repeats: Vec<Vec<(usize, usize)>> = match &args.repeat_filter {
-        Some(filter) if output_formats.contains(&BlastnOutputFormat::Archive) => {
-            let serial = crate::utils::threading::SearchPool::x_serial();
-            let pool = x_pool.unwrap_or(&serial);
-            let whole = [0..query_records.len()];
-            let spans = if results.batches.is_empty() {
-                &whole[..]
-            } else {
-                results.batches
-            };
-            let mut found = Vec::with_capacity(query_records.len());
-            for span in spans {
-                found.extend(
-                    filter
-                        .hits(&args.strand, &query_records[span.clone()], pool)
-                        .map_err(|error| super::super::repeat_filter::rejection(filter, error))?,
-                );
-            }
-            found
-        }
-        _ => Vec::new(),
-    };
     let records_parsed = if args.parse_deflines && reported.is_none() {
         crate::report::db_subject::parsed_records(
             subject_letters
@@ -9785,6 +9800,14 @@ fn write_reports_untimed(
         }
         None => results.reads.to_vec(),
     };
+    // The kept repeat hits are those of the reported queries, one for each (the archive reads
+    // them by query index and would take a missing one for a query without hits).
+    debug_assert!(
+        results.repeat_hits.is_empty() || results.repeat_hits.len() == query_records.len(),
+        "repeat hits for {} of {} queries",
+        results.repeat_hits.len(),
+        query_records.len()
+    );
     // A subject set's subjects are all loaded (`database_loads`).
     let every_loaded = crate::report::db_subject::HitLoads::default();
     let report_inputs = BlastnReportInputs {
@@ -9794,7 +9817,10 @@ fn write_reports_untimed(
         ranges,
         query_masks: results.query_masks,
         archive_dust: &archive_dust,
-        archive_repeats: &archive_repeats,
+        // With `-filtering_db` the query vector's masks of a query with repeat hits are its masks
+        // combined with the hits (`repeat_filter::RepeatFilter::add_masks`): those that the
+        // batch's set-up found.
+        archive_repeats: results.repeat_hits,
         lcase_masking: args.lcase_masking,
         database_mask: args.db_mask_resolved.as_ref().map(|mask| mask.id),
         query_eff_searchsp: results.query_eff_searchsp,
@@ -9961,7 +9987,9 @@ fn window_masker_rejection(
 /// The masks of a query batch with `-filtering_db` (`coordination::query_masks`: DUST's, the
 /// lower case and the hits of `filter`'s repeat search of the `searched` letters), and with
 /// `-query_loc` and `-lcase_masking` (`ranged`: each query's record and the start of its
-/// interval) the lower case next to the intervals that they join (`repeat_filter::MasksOutside`).
+/// interval) the lower case next to the intervals that they join (`repeat_filter::MasksOutside`),
+/// and the repeat hits of each query (`RepeatFilter::add_masks`), which the batch's BLAST archive
+/// reads (`BatchResults::repeat_hits`).
 /// NCBI makes them in the set-up of the batch's queries: an error of the repeat search that it
 /// reports fails each query of the batch (`Ok(Err(..))`, `repeat_filter::batch_error`).
 #[allow(clippy::type_complexity)]
@@ -9972,7 +10000,14 @@ fn repeat_batch_masks(
     ranged: Option<Vec<(&FastaRecord, usize)>>,
     pool: &crate::utils::threading::SearchPool<'_>,
 ) -> Result<
-    std::result::Result<(Vec<Vec<MaskedInterval>>, Vec<MasksOutside>), crate::cli::NativeError>,
+    std::result::Result<
+        (
+            Vec<Vec<MaskedInterval>>,
+            Vec<MasksOutside>,
+            Vec<Vec<(usize, usize)>>,
+        ),
+        crate::cli::NativeError,
+    >,
 > {
     let mut outside: Vec<MasksOutside> = ranged
         .unwrap_or_default()
@@ -9983,7 +10018,7 @@ fn repeat_batch_masks(
         })
         .collect();
     match super::super::coordination::query_masks(args, searched, &mut outside, pool) {
-        Ok(masks) => Ok(Ok((masks, outside))),
+        Ok((masks, hits)) => Ok(Ok((masks, outside, hits))),
         Err(MaskError::Repeats(error)) => {
             match super::super::repeat_filter::batch_error(&error, searched.len()) {
                 Some(failure) => Ok(Err(failure)),
@@ -10185,6 +10220,7 @@ fn search_query_batch<const UNGAPPED: bool>(
             ..
         } => masks.to_vec(),
         BatchStage::Search { .. } => query_masks(args, &letters, &mut [], parallel_pool)
+            .map(|(masks, _)| masks)
             .map_err(|error| mask_rejection(args, error))?,
         BatchStage::ChunkPrelim { query_masks, .. } => query_masks.to_vec(),
     };

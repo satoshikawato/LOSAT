@@ -76,6 +76,9 @@ pub(super) struct BlastpTabular<'a> {
     /// (`recount_shown_identities`): NCBI's formatter opens its alignment block, and reads the
     /// subject for `nident`, on the Seq-align's count (`TabularSpec::opens_counts`).
     pub engine_counts: &'a super::seqalign::EngineCounts,
+    /// The query's molecule is `other` (`PsiSearch::query_other_coding`): the first row that reads
+    /// the query's letters ends the run (`report::tabular::query_sequence_end`).
+    pub query_other_coding: Option<i32>,
 }
 
 /// The subjects as the report shows them, by subject index (a subject set) or rank (the
@@ -396,12 +399,14 @@ pub(super) fn needs_rows(rows: bool, spec: &TabularSpec, app: BlastpApp) -> bool
 }
 
 /// The spec of a tabular report with a field list or a delimiter, or of outfmt 10 or 20, of a
-/// `-outfmt` value read as NCBI reads it (`app::parse_formatting_string`); `None` for the other
-/// formats and for the default outfmt 6 and 7 (`TabularSpec::of`).
-pub(super) fn custom_tabular_spec(outfmt: &str) -> Option<&'static TabularSpec> {
+/// `-outfmt` value read as NCBI reads it (`app::parse_formatting_string`), as `app`'s formatter
+/// writes it (`TabularSpec::of_app`: psiblast's and rpsblast's without the custom delimiter);
+/// `None` for the other formats and for the default outfmt 6 and 7. Every report of the blastp
+/// engine reads its spec here, from the value of the command line or the library's as given.
+pub(super) fn custom_tabular_spec(outfmt: &str, app: BlastpApp) -> Option<&'static TabularSpec> {
     let choice = crate::blastinput::app::parse_formatting_string(outfmt).ok()?;
     let format = crate::blastinput::app::ReportFormat::from_number(choice.number)?;
-    TabularSpec::of(format, &choice).map(TabularSpec::intern)
+    TabularSpec::of_app(format, &choice, app.request_kind()).map(TabularSpec::intern)
 }
 
 /// Writes the warning of the formatter that NCBI makes for outfmt 20's header line, which it
@@ -720,10 +725,12 @@ fn write_tabular_rows<const RPS: bool>(
             // subject once); `qcovus` is blastn's only (blast_format.cpp:818-820).
             let qcovs = if needs.qcovs {
                 query_ranges.clear();
+                // An HSP of length 0 has no letter to cover (its range is empty).
                 query_ranges.extend(
                     hsp_list
                         .hsps
                         .iter()
+                        .filter(|hsp| hsp.length > 0)
                         .map(|hsp| (hsp.q_start as u64 - 1, hsp.q_end as u64 - 1)),
                 );
                 coverage_percent(union_length(&mut query_ranges), query_length)
@@ -744,6 +751,11 @@ fn write_tabular_rows<const RPS: bool>(
                 .zip(table_rows.last_found())
                 .map(|(values, kept)| values.subject(tab.names, -1, kept));
             for (index_in_list, hsp) in hsp_list.hsps.iter().enumerate() {
+                if let Some(coding) = tab.query_other_coding.filter(|_| spec.reads_sequences()) {
+                    return Err(crate::report::tabular::query_sequence_end(
+                        writer, &buf, coding,
+                    ));
+                }
                 // The Seq-align's `num_ident` (the engine's count where the reports' recount
                 // replaced it, `BlastpTabular::engine_counts`).
                 let seqalign_num_ident = tab.engine_counts.num_ident(
@@ -908,160 +920,10 @@ fn tabular_hsp<'r>(
         // `Blast_HSPGetQueryCoverage` of the HSP's context, which has the searched length.
         end_gaps: true,
         stored_gaps: [&[], &[]],
-        qcovhsp: hsp_coverage((hsp.q_end - hsp.q_start + 1) as i32, searched_length as i32),
+        qcovhsp: hsp_coverage((hsp.q_end + 1 - hsp.q_start) as i32, searched_length as i32),
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::blastinput::app::{FormatChoice, ReportFormat};
-    use crate::common::Hit;
-
-    fn hit(q: (usize, usize), s: (usize, usize), s_idx: u32) -> Hit {
-        Hit {
-            identity: 50.0,
-            length: q.1 - q.0 + 1,
-            mismatch: 2,
-            gapopen: 0,
-            q_start: q.0,
-            q_end: q.1,
-            s_start: s.0,
-            s_end: s.1,
-            e_value: 1.0e-10,
-            bit_score: 40.5,
-            num_ident: q.1 - q.0 - 1,
-            query_frame: 0,
-            query_length: 100,
-            q_idx: 0,
-            s_idx,
-            raw_score: 90,
-            sort_query_offset: 0,
-            sort_query_end: 0,
-            sort_subject_offset: 0,
-            sort_subject_end: 0,
-            has_sort_offsets: false,
-            gap_info: None,
-            num_positives: 0,
-        }
-    }
-
-    fn hit_list(hsp_lists: Vec<Vec<Hit>>, count: usize) -> BlastpHitList {
-        BlastpHitList {
-            hsplist_count: count,
-            hsplist_max: hsp_lists.len(),
-            worst_evalue: 0.0,
-            low_score: 0,
-            heapified: false,
-            hsplist_array: hsp_lists
-                .into_iter()
-                .map(|hits| super::super::hsp::BlastpHspList {
-                    oid: hits[0].s_idx,
-                    query_index: 0,
-                    hsps: hits.into_iter().map(BlastpHsp::from_hit).collect(),
-                    best_evalue: 0.0,
-                })
-                .collect(),
-            hsplist_current: 0,
-            num_hits: 0,
-        }
-    }
-
-    fn report(
-        number: i32,
-        fields: &str,
-        app: BlastpApp,
-        hit_lists: &[Option<BlastpHitList>],
-    ) -> (String, String) {
-        let format = ReportFormat::from_number(number).unwrap();
-        let spec = TabularSpec::of(
-            format,
-            &FormatChoice {
-                number,
-                spec: fields.to_string(),
-                delimiter: String::new(),
-            },
-        )
-        .unwrap();
-        let ids: Vec<crate::algorithm::common::tabular::SubjectId> =
-            vec![Some(Arc::from(&b"s1"[..])), Some(Arc::from(&b"s2"[..]))];
-        let length = |s_idx: usize| 200 + s_idx;
-        let tab = BlastpTabular {
-            spec: &spec,
-            app,
-            program_version: "PSIBLAST 2.17.0+",
-            iteration: (app == BlastpApp::Psiblast).then_some(1),
-            matrix: ScoringMatrix::Blosum62,
-            query_ids: &[Arc::from(&b"q1"[..]), Arc::from(&b"q2"[..])],
-            query_records: &[],
-            query_titles: &[Arc::from(&b"q1 first"[..]), Arc::from(&b"q2"[..])],
-            searched_lengths: &[100, 50],
-            range_length: None,
-            database: "User specified sequence set (Input: s.faa)",
-            subjects: TabularSubjects::Records {
-                records: &[],
-                ids: &ids,
-                accessions: &[],
-                parsed: &[],
-                length: &length,
-            },
-            unsearched: &[false, true],
-            hits_found: None,
-            prolog: true,
-            epilog: Some(2),
-            taxdb_found: false,
-            names: None,
-            engine_counts: &crate::algorithm::blastp::seqalign::EngineCounts::default(),
-        };
-        let (mut out, mut err) = (Vec::new(), Vec::new());
-        let before = [crate::report::diag_log::Posts::of_lines(
-            b"Warning: q1\n".to_vec(),
-        )];
-        let mut warnings = QueryWarnings::of_posts(&before, None, &mut err);
-        write_blastp_tabular(&tab, hit_lists, &mut out, Some(&mut warnings), None, None).unwrap();
-        drop(warnings);
-        (
-            String::from_utf8(out).unwrap(),
-            String::from_utf8(err).unwrap(),
-        )
-    }
-
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1061-1091 (frames 1, `sstrand` N/A of a protein subject), c++/src/algo/blast/format/blastfmtutil.cpp
-    // :629-640 (`qcovs`, the union of the subject's HSPs; `qcovus` is blastn's only), tabular.cpp
-    // :1264-1298 (outfmt 7's lines: psiblast's round, no count for an unsearched batch) and the
-    // taxonomy database's warning of each formatter (tabular.cpp:1093-1104).
-    #[test]
-    fn rows_and_comment_lines_are_ncbis() {
-        let lists = [
-            Some(hit_list(
-                vec![
-                    vec![hit((1, 40), (1, 40), 0), hit((31, 60), (101, 130), 0)],
-                    vec![hit((5, 14), (5, 14), 1)],
-                ],
-                1,
-            )),
-            None,
-        ];
-        let (out, err) = report(
-            6,
-            "qseqid sseqid slen qcovs qcovhsp qcovus sstrand frames stitle",
-            BlastpApp::Blastp,
-            &lists,
-        );
-        assert_eq!(
-            out,
-            "q1\ts1\t200\t60\t40\tN/A\tN/A\t1/1\tN/A\nq1\ts1\t200\t60\t30\tN/A\tN/A\t1/1\tN/A\n"
-        );
-        assert_eq!(err, "Warning: q1\n");
-        let (out, err) = report(7, "qseqid sseqid sscinames", BlastpApp::Psiblast, &lists);
-        assert_eq!(
-            out,
-            "# PSIBLAST 2.17.0+\n# Iteration: 1\n# Query: q1 first\n# Database: User specified sequence set (Input: s.faa)\n# Fields: query id, subject id, subject sci names\n# 2 hits found\nq1\ts1\tN/A\nq1\ts1\tN/A\n\
-             # PSIBLAST 2.17.0+\n# Iteration: 1\n# Query: q2\n# Database: User specified sequence set (Input: s.faa)\n# BLAST processed 2 queries\n"
-        );
-        let warning = taxdb_warning_line("psiblast");
-        assert_eq!(err, format!("Warning: q1\n{warning}{warning}{warning}"));
-        let (out, _) = report(20, "qseqid evalue", BlastpApp::Blastp, &lists);
-        assert_eq!(out, "qseqid,evalue\nq1,1.00e-10\nq1,1.00e-10\n");
-    }
-}
+#[path = "tabular_tests.rs"]
+mod tests;

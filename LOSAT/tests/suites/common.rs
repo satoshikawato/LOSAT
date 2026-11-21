@@ -29,12 +29,16 @@ mod blastx_library_db_hold;
 mod cli_smoke;
 #[path = "../compressed_clut_pairs.rs"]
 mod compressed_clut_pairs;
+#[path = "../database_sequence_without_letters.rs"]
+mod database_sequence_without_letters;
 #[path = "../db_empty_title.rs"]
 mod db_empty_title;
 #[path = "../db_seqidlist.rs"]
 mod db_seqidlist;
 #[path = "../db_taxid_root.rs"]
 mod db_taxid_root;
+#[path = "../db_unreadable_files.rs"]
+mod db_unreadable_files;
 #[path = "../default_bundle.rs"]
 mod default_bundle;
 #[path = "../entry_names.rs"]
@@ -49,6 +53,8 @@ mod library_api;
 mod library_examples;
 #[path = "../library_out_taxdb.rs"]
 mod library_out_taxdb;
+#[path = "../makeblastdb_failed_index.rs"]
+mod makeblastdb_failed_index;
 #[path = "../makeblastdb_ncbi_exceptions.rs"]
 mod makeblastdb_ncbi_exceptions;
 #[path = "../makeblastdb_output_streams.rs"]
@@ -57,6 +63,8 @@ mod makeblastdb_output_streams;
 mod makeblastdb_past_32_bits;
 #[path = "../makeblastdb_rename_lock.rs"]
 mod makeblastdb_rename_lock;
+#[path = "../makembindex_fixtures.rs"]
+mod makembindex_fixtures;
 #[path = "../masker_fixtures.rs"]
 mod masker_fixtures;
 #[path = "../ncbi_lookup_paths.rs"]
@@ -121,6 +129,8 @@ mod parse_deflines_subject;
 mod redo_contain_idx;
 #[path = "../report_counts_cli.rs"]
 mod report_counts_cli;
+#[path = "../rps_pipeline.rs"]
+mod rps_pipeline;
 #[path = "../rpsbproc_fixtures.rs"]
 mod rpsbproc_fixtures;
 #[path = "../search_environment.rs"]

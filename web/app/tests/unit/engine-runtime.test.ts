@@ -16,7 +16,6 @@ import {
   reopening,
   toProgramDescription,
 } from 'losat';
-import type { FastaParserKind } from 'losat/domain';
 import { INFLATED_TOO_LARGE } from 'losat/ports';
 import { findReactors } from '../../build/reactors';
 import { ABI_VERSION, EngineStoppedError, ReactorAbi, stopMessage, type AbiExports } from '../../../packages/losat/src/infra/reactor/abi';
@@ -397,7 +396,7 @@ describe('ReactorAbi', () => {
 
   it('releases a registered handle whose response cannot be read', () => {
     const { abi, released } = fakeReactor('{"handle": 7, "records": [', 4);
-    expect(() => abi.register('blastn', 1, new Uint8Array([62, 115]))).toThrow(SyntaxError);
+    expect(() => abi.register('blastn', 1, true, new Uint8Array([62, 115]))).toThrow(SyntaxError);
     expect(released).toEqual([7]);
   });
 
@@ -555,12 +554,12 @@ describe.skipIf(reactors === undefined)('responses of more than 1 MiB from the s
   it('scans and registers thousands of records', async () => {
     const instance = await instantiateSerial(new WebAssembly.Module(reactors!.serial.bytes as BufferSource));
     const scanner = new ReactorScanner(async () => instance.abi);
-    const scan = await scanner.scan(1, (async function* () {
+    const scan = await scanner.scan({ program: 'blastn', role: 'subject', dataLoaders: true }, (async function* () {
       yield fasta;
     })());
     expect(scan.records).toHaveLength(25_000);
     expect(scan.records[24_999]).toMatchObject({ id: 'record_24999', length: 32 });
-    const registered = instance.abi.register('blastn', 1, fasta);
+    const registered = instance.abi.register('blastn', 1, true, fasta);
     expect(registered.records).toHaveLength(25_000);
     expect(registered.records[24_999]).toEqual({ id: 'record_24999', length: 32 });
     instance.abi.release(registered.handle);
@@ -583,9 +582,13 @@ describe.skipIf(reactors === undefined)('the serial reactor scans with the NCBI 
     yield new TextEncoder().encode('>a desc\nACGT\n>b\nACGTAC\n');
   })();
 
-  // Kinds 1 (nucleotide flags) and 2 (protein flags) are real since S9 (abi_v2.md §4, §9).
-  it.each([1, 2])('scans a small input with parser kind %i', async (kind) => {
-    const scan = await scanner.scan(kind as FastaParserKind, bytes());
+  // Kinds 1 (nucleotide flags) and 2 (protein flags) are real since S9 (abi_v2.md §4, §9); the scan takes the
+  // engine's reader of a program's input since ABI version 8 (line WQA's D13, 2026-11-20).
+  it.each([
+    ['blastn', 'query'],
+    ['blastp', 'subject'],
+  ] as const)("scans a small input with the reader of %s's %s", async (program, role) => {
+    const scan = await scanner.scan({ program, role, dataLoaders: true }, bytes());
     expect(scan.records.map(({ id, length }) => ({ id, length }))).toEqual([
       { id: 'a', length: 4 },
       { id: 'b', length: 6 },
@@ -617,7 +620,8 @@ describe.skipIf(reactors === undefined)('the serial reactor answers the search f
 
   it("checks an input with the engine's register: the verdict and the message", async () => {
     const checker = new ReactorInputChecker(reopening(open));
-    expect(await checker.check('blastn', 'query', new TextEncoder().encode('>a\nACGT\n>b\nACGT\n'))).toEqual({
+    const reader = (program: 'blastn' | 'blastp' | 'tblastx', role: 'query' | 'subject', dataLoaders = true) => ({ program, role, dataLoaders });
+    expect(await checker.check(reader('blastn', 'query'), new TextEncoder().encode('>a\nACGT\n>b\nACGT\n'))).toEqual({
       ok: true,
       records: [
         { id: 'a', length: 4 },
@@ -627,24 +631,34 @@ describe.skipIf(reactors === undefined)('the serial reactor answers the search f
     // The engine's register reads with NCBI's reader (abi_v2.md §4), which accepts what the
     // bio reader of ABI v1 refused: its records and lengths are the reader's (it stores
     // the four residues of ACLGT in a nucleotide query and of MK-LV in a protein subject).
-    expect(await checker.check('blastn', 'query', new TextEncoder().encode('>a\nACGT\n>b\nACLGT\n'))).toEqual({
+    expect(await checker.check(reader('blastn', 'query'), new TextEncoder().encode('>a\nACGT\n>b\nACLGT\n'))).toEqual({
       ok: true,
       records: [
         { id: 'a', length: 4 },
         { id: 'b', length: 4 },
       ],
     });
-    expect(await checker.check('blastp', 'subject', new TextEncoder().encode('>p\nMK-LV\n'))).toEqual({
+    expect(await checker.check(reader('blastp', 'subject'), new TextEncoder().encode('>p\nMK-LV\n'))).toEqual({
       ok: true,
       records: [{ id: 'p', length: 4 }],
     });
-    // What register still refuses: a first line that NCBI may read as a Seq-id and a gap line.
-    const seqId = await checker.check('blastn', 'query', new TextEncoder().encode('AB123456\nACGT\n'));
-    expect(seqId.ok).toBe(false);
-    expect(!seqId.ok && seqId.message).toMatch(/not supported in the browser/);
-    const gap = await checker.check('blastp', 'subject', new TextEncoder().encode('>p\nMK\n>?10\nMK\n'));
-    expect(gap.ok).toBe(false);
-    expect(!gap.ok && gap.message).toMatch(/not supported in the browser/);
+    // A gap line's letters are the record's, as the CLI reads them (line WQA's D13 (a), 2026-11-20).
+    expect(await checker.check(reader('blastp', 'subject'), new TextEncoder().encode('>p\nMK\n>?10\nMK\n'))).toEqual({
+      ok: true,
+      records: [{ id: 'p', length: 14 }],
+    });
+    // A first line that NCBI may read as a Seq-id is refused in the CLI's words with the data loaders on (D13 (c)),
+    // and read as data with them off (`DATA_LOADERS=none`, D16).
+    const seqId = await checker.check(reader('tblastx', 'query'), new TextEncoder().encode('AB123456\nACGT\n'));
+    expect(seqId).toEqual({
+      ok: false,
+      message:
+        'the first line of the query ("AB123456") is not a defline and may be a sequence identifier that NCBI BLAST+ fetches through a data loader (from GenBank or a BLAST database), which is not supported by LOSAT\'s TBLASTX (start the query with a \'>\' defline, or set DATA_LOADERS=none in the [BLAST] section of .ncbirc)',
+    });
+    expect(await checker.check(reader('blastp', 'query', false), new TextEncoder().encode('2HHB\nMKLV\n'))).toEqual({
+      ok: true,
+      records: [{ id: '', length: 7 }],
+    });
   });
 });
 
@@ -652,8 +666,8 @@ describe.skipIf(reactors === undefined)('the warm-up on the serial reactor', () 
   const open = async () => (await instantiateSerial(new WebAssembly.Module(reactors!.serial.bytes as BufferSource))).abi;
   // Streams 0, 6 and 7 (the three output formats) of one search on an instance.
   const search = (abi: ReactorAbi, argv: readonly string[], query: Uint8Array, subject: Uint8Array) => {
-    const q = abi.register(argv[0]!, 0, query).handle;
-    const s = abi.register(argv[0]!, 1, subject).handle;
+    const q = abi.register(argv[0]!, 0, true, query).handle;
+    const s = abi.register(argv[0]!, 1, true, subject).handle;
     const out: Record<number, string> = { 0: '', 6: '', 7: '' };
     const decoder = new TextDecoder();
     abi.run(argv, q, s, (stream, bytes) => {

@@ -224,7 +224,7 @@ fn run_inner(
     // messages of each archive are the diagnostics posted since the previous one.
     let mut archive_stderr = crate::cli::CliStderr::process();
     let mut archive_tee;
-    let tax_report = choice.number == 18;
+    let tax_report = choice.number() == Some(18);
     let mut stderr: Box<dyn Write + '_> = match &archive {
         Some(handle) => {
             archive_tee = crate::report::archive::DiagTee::new(&mut archive_stderr, handle.clone());
@@ -264,7 +264,10 @@ fn run_inner(
     // with lower case only) read the whole record.
     if let Some(range) = &subject_range {
         // Outfmt 0 to 4: the rows of outfmt 0 and the query-anchored sections (1 to 4).
-        let shows_lower_case = args.lcase_masking && (0..=4).contains(&choice.number);
+        let shows_lower_case = args.lcase_masking
+            && choice
+                .number()
+                .is_some_and(|number| (0..=4).contains(&number));
         for record in &mut subjects {
             let (from, to_exclusive) =
                 crate::blastinput::seq_range::record_cut(range, record.sequence.len())?;
@@ -288,14 +291,14 @@ fn run_inner(
     // Outfmt 13 and 14 write side files next to `-out` and the master file at `-out`: with no
     // file name they stop at NCBI's `xinclude_check` below (`Please provide a file name`).
     let out_file = args.out.as_deref().filter(|p| *p != Path::new("-"));
-    let structured_xml = match choice.number {
-        5 | 15 | 16 => true,
-        13 | 14 => out_file.is_some(),
+    let structured_xml = match choice.number() {
+        Some(5 | 15 | 16) => true,
+        Some(13 | 14) => out_file.is_some(),
         _ => false,
     };
     // The hold of the side files of outfmt 13 and 14 follows the master file's.
     let side_files = out_file.and_then(|out| {
-        let kind = app::ReportFormat::from_number(choice.number).and_then(Xml2Kind::of)?;
+        let kind = app::ReportFormat::from_number(choice.number()?).and_then(Xml2Kind::of)?;
         kind.is_files()
             .then(|| super::blast_xml::HeldSideFiles::new(Box::new(FsSideFiles::new(out, kind))))
     });
@@ -306,13 +309,16 @@ fn run_inner(
     // of standard output. Every other format's: LOSAT's buffer before the file or standard output,
     // behind the held document.
     let stream = match out_file {
-        Some(path) if tax_report => crate::cli::NcbiOstream::file(create(path)?),
-        None if tax_report => crate::cli::NcbiOstream::standard_output(),
+        Some(path) if tax_report => crate::cli::NcbiOstream::file(create(path)?, strategy.as_ref()),
+        None if tax_report => crate::cli::NcbiOstream::standard_output(strategy.as_ref()),
         out_file => {
-            let destination: Box<dyn Write> = match out_file {
-                None => Box::new(io::stdout().lock()),
-                Some(path) => Box::new(create(path)?),
-            };
+            let destination: Box<dyn Write> = crate::report::archive::strategy::hold_report(
+                strategy.as_ref(),
+                match out_file {
+                    None => Box::new(io::stdout().lock()),
+                    Some(path) => Box::new(create(path)?),
+                },
+            );
             crate::cli::NcbiOstream::buffered(match structured_xml {
                 true => Box::new(
                     held.insert(super::blast_xml::HeldOutput::new(
@@ -352,6 +358,8 @@ fn run_inner(
         args.query_loc.as_deref(),
         crate::blastinput::seq_range::RangeRole::Query,
     )?;
+    // A value that the early reading left to this handler (`EarlyFormat::Deferred`) fails here.
+    let choice = choice.at_formatting_handler(&args.outfmt)?;
     app::formatting_handler_check(&choice, Program::Blastx)?;
     // The warnings of the hit list size and of an ignored -num_descriptions
     // (`blastinput::report_counts`).
@@ -368,6 +376,7 @@ fn run_inner(
                 name,
                 &settings,
                 list.as_ref(),
+                args.db_mask.option().as_ref(),
                 &mut stderr,
                 program.upper,
             )?
@@ -491,10 +500,22 @@ fn run_inner(
             || !query_file.metadata().is_ok_and(|m| m.is_file())
             || !crate::blastinput::input_files::has_stream_position(&query_file)
         {
-            bail!(
-                "unsupported BLASTX query input for -outfmt {}: use a regular file",
-                choice.number
-            );
+            // RPSTBLASTN reads such a query into an unnamed temporary file first and reads it
+            // from there (twice); BLASTX keeps DECISIONS 22's refusal. The copy is read as
+            // the stream is read (`InputFile::into_seekable_copy`).
+            let copy = args
+                .rpstblastn
+                .is_some()
+                .then(|| query_file.into_seekable_copy())
+                .flatten();
+            query_file = match copy {
+                Some(copy) => copy,
+                None => bail!(
+                    "unsupported {} query input for -outfmt {}: use a regular file",
+                    program.upper,
+                    choice.number
+                ),
+            };
         }
         // The read before the search reads the open file itself (a `.gz` query is an unnamed
         // inflated file, `input_files::open_file_input`, which no path reaches) and gives it back
@@ -581,6 +602,18 @@ fn run_inner(
     // batches of a run without `BATCH_SIZE` are, and its report is written when its last unit
     // is searched. (`batch_size` is read above, for the reads before the search.)
     let batch_size = batch_size?;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:140-153 (cited at
+    // `blastinput::db_mask::DbMaskOption::resolve`)
+    // The formatter resolves the database masking (`-db_soft_mask`, `-db_hard_mask`; series NP,
+    // M4b) before its other work (`BlastxDatabase::resolve_mask_option`).
+    if let (Some(database), Some(option)) = (&database, args.db_mask.option()) {
+        options.db_mask = database.resolve_mask_option(
+            &option,
+            archive.as_ref(),
+            strategy.as_ref(),
+            &mut *stderr,
+        )?;
+    }
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:773-789
     write_empty_subject_warnings(&subjects, &mut *stderr)?;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:251-254
@@ -590,19 +623,26 @@ fn run_inner(
     // `BL2SEQ_LEGACY` makes NCBI search each `-subject` sequence on its own and write the
     // bl2seq report; LOSAT refuses it before the search, where an empty query has already ended
     // the run as NCBI ends it (`Query is Empty!`, exit status 0).
+    // LOSAT's refusals of the masked search (`ResolvedMask::check_losat_limits`) come where NCBI
+    // starts the search, after its checks.
+    if let (Some(database), Some(mask)) = (&database, options.db_mask.as_ref()) {
+        database.check_mask_limits(mask)?;
+    }
     app::check_search_environment(program.upper, database.is_none())?;
     // RPSTBLASTN's refusals of the database's files and of its options, before the first byte
     // of the reports, as rpsblast refuses them (`args::RpsTblastnSearch::for_database`, once per
     // run).
     if let Some(search) = options.rpstblastn.clone() {
-        let search = search.for_database(&options, database.as_ref(), strategy.is_some())?;
-        // What each batch's RPS set-up writes into the options handle, which the search strategy's
-        // later requests hold (`OptionsHandle::pass`): the search for the database knows its
-        // volumes' costs.
-        if let Some(strategy) = &strategy {
-            strategy
-                .options()
-                .set_search_sets(Vec::new(), search.handle_sets())?;
+        let handle = archive
+            .as_ref()
+            .map(crate::report::archive::ArchiveHandle::options)
+            .or_else(|| strategy.as_ref().map(|strategy| strategy.options()));
+        let search = search.for_database(&options, database.as_ref(), handle.is_some())?;
+        // What each batch's RPS set-up writes into the options handle, which the requests of the
+        // archive and of the search strategy hold (`OptionsHandle::pass`): the search for the
+        // database knows its volumes' costs and its units' database length.
+        if let Some(handle) = handle {
+            handle.set_search_sets(Vec::new(), search.handle_sets())?;
         }
         options.rpstblastn = Some(search);
     }
@@ -611,7 +651,9 @@ fn run_inner(
     if database.is_none() && crate::seqdb::x_dbidxread() != crate::seqdb::XDbIdxRead::Off {
         crate::utils::xreach::x_reach!("LOSAT_X_DBIDXREAD", false);
     }
-    let pairwise_database = database.as_ref().map(BlastxDatabase::pairwise_database);
+    let pairwise_database = database
+        .as_ref()
+        .map(|database| database.pairwise_database_masked(options.db_mask.as_ref()));
     let no_reported = ReportedSubjects::default();
     let records_parsed = if args.parse_deflines {
         report::RecordsParsed::of(&subjects, args.show_gis, |parsed| {
@@ -1280,7 +1322,12 @@ pub(super) fn reported_batch(
         crate::report::db_subject::FormatThrow::of_run([asks.throw]),
     );
     super::x_timing::run(XRun::Titles, x_t);
-    let reported = reported.map_err(reported_error)?;
+    let mut reported = reported.map_err(reported_error)?;
+    // `-db_soft_mask` and `-db_hard_mask`: the rows of outfmt 0 to 4 show the stored masks in
+    // lower case (`ReportedSubjects::shown_db_masks`).
+    if let Some(mask) = options.db_mask.as_ref().filter(|_| asks.pairwise) {
+        reported.read_db_masks(database, mask.id)?;
+    }
     if let Some(scopes) = query_scopes {
         reported.refuse_ids_of_queries(results, options.gapped, scopes)?;
     }
@@ -2646,317 +2693,9 @@ pub(crate) fn warnings_of(args: &BlastxArgs, outfmt: i32) -> Vec<u8> {
 }
 
 #[cfg(test)]
-mod archive_error_tests {
-    use super::*;
-    use crate::report::serial::encoder::SerialError;
-
-    /// The encoder's refusal stays LOSAT's own error: no `BLAST engine error:` text and no
-    /// error archive. NCBI's engine errors still become both.
-    #[test]
-    fn the_encoders_refusal_gets_no_error_archive() {
-        let refusal = archive_error(SerialError::NonVisibleChar(0xc3).into());
-        assert!(refusal.is::<SerialError>());
-        assert!(archive::error_lines(&refusal, false).is_none());
-        assert!(archive::error_lines(&refusal, true).is_none());
-        let engine_error = archive_error(anyhow::anyhow!("something else"));
-        assert!(engine_error.downcast_ref::<NativeError>().is_some());
-        assert!(archive::error_lines(&engine_error, false).is_some());
-    }
-
-    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:209-214 (the
-    // subjects' `GetAllSeqs` turns `eNoDefline` into a `CInputException`; its text ends with the
-    // NUL of `ends`, which the error archive does not keep); a query keeps the reader's error.
-    #[test]
-    fn a_subject_without_a_first_defline_is_the_input_error_of_get_all_seqs() {
-        let subject = subject_input_error(NoDeflineError(4).into());
-        let native = subject.downcast_ref::<NativeError>().unwrap();
-        assert_eq!(
-            (native.exit, native.message.as_slice()),
-            (
-                1,
-                b"BLAST query/options error: Query input doesn't start with a defline or comment, \
-                  line 4\0\nPlease refer to the LOSAT user manual.\n"
-                    .as_slice()
-            )
-        );
-        let texts = |error: &anyhow::Error| -> Vec<Vec<u8>> {
-            archive::error_lines(error, true)
-                .unwrap()
-                .into_iter()
-                .map(|(_, text)| text)
-                .collect()
-        };
-        assert_eq!(
-            texts(&subject),
-            [
-                b"BLAST query/options error: Query input doesn't start with a defline or comment, line 4".to_vec(),
-                b"Please refer to the LOSAT user manual.".to_vec(),
-            ]
-        );
-        let query = input_error(NoDeflineError(4).into());
-        let native = query.downcast_ref::<NativeError>().unwrap();
-        assert_eq!(
-            (native.exit, native.message.as_slice()),
-            (
-                1,
-                b"BLAST query error: CFastaReader: Input doesn't start with a defline or comment \
-                  around line 4\n"
-                    .as_slice()
-            )
-        );
-        // Every other reader error of the subjects is the reader's (`BLAST query error`).
-        let other = subject_input_error(FastaParseError("CFastaReader: x".into()).into());
-        assert_eq!(
-            other.downcast_ref::<NativeError>().unwrap().message,
-            b"BLAST query error: CFastaReader: x\n"
-        );
-    }
-
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:940-944
-    // A BLASTX report with `-sorthits` whose one subject (the table's last row) totals more than
-    // 99999 bits: the report's `TotalScoreRefusal`, which `report_error` passes on. It is not
-    // NCBI's "BLAST failed to write output" (exit status 6), so `exit_on_native_error` leaves it
-    // and `main` writes "Error: " and the refusal's text and exits with status 1, as BLASTN,
-    // BLASTP, TBLASTN and TBLASTX do.
-    #[test]
-    fn the_sorthits_refusal_is_not_a_write_failure() {
-        use crate::report::pairwise::{
-            write_blastx_pairwise_report, BlastpPairwiseQuery, BlastpPairwiseReport,
-            BlastxPairwiseOptions, PairwiseConfig, PairwiseHit,
-        };
-        let hit = PairwiseHit::from(crate::common::Hit {
-            identity: 100.0,
-            length: 50_000,
-            mismatch: 0,
-            gapopen: 0,
-            q_start: 1,
-            q_end: 150_000,
-            s_start: 1,
-            s_end: 50_000,
-            e_value: 0.0,
-            bit_score: 100_500.0,
-            num_ident: 50_000,
-            query_frame: 1,
-            query_length: 150_000,
-            q_idx: 0,
-            s_idx: 0,
-            raw_score: 260_000,
-            sort_query_offset: 0,
-            sort_query_end: 50_000,
-            sort_subject_offset: 0,
-            sort_subject_end: 50_000,
-            has_sort_offsets: true,
-            gap_info: None,
-            num_positives: 50_000,
-        });
-        let query = BlastpPairwiseQuery {
-            query_name: b"q".to_vec(),
-            query_length: 150_000,
-            ungapped_karlin: Default::default(),
-            effective_search_space: 1,
-            valid: true,
-            batch_skipped: false,
-        };
-        let report = BlastpPairwiseReport {
-            version: String::new(),
-            database_name: Vec::new(),
-            database_num_sequences: 1,
-            database_total_letters: 50_000,
-            matrix_name: Some("BLOSUM62".into()),
-            gap_open: 11,
-            gap_extend: 1,
-            word_threshold: 12.0,
-            window_size: 40,
-            gapped_karlin: Default::default(),
-            gumbel: None,
-            gapped: true,
-            show_linked_set_size: false,
-            num_descriptions: 500,
-            num_alignments: 250,
-        };
-        let write = |hits: Option<u8>| {
-            let mut out = Vec::new();
-            let config = PairwiseConfig {
-                program: "blastx".into(),
-                sort: crate::report::hit_sort::ReportSort { hits, hsps: None },
-                ..PairwiseConfig::default()
-            };
-            write_blastx_pairwise_report(
-                std::slice::from_ref(&hit),
-                &mut out,
-                None,
-                &config,
-                std::slice::from_ref(&query),
-                &[crate::report::pairwise::DescriptionLabel::title_only(
-                    b"s0".to_vec(),
-                )],
-                &report,
-                &BlastxPairwiseOptions {
-                    word_threshold: 12.0,
-                    gapped: true,
-                    sum_stats: false,
-                    num_descriptions: 500,
-                    num_alignments: 0,
-                },
-                None,
-                &[],
-                &[],
-                None,
-                None,
-                0,
-                None,
-                None,
-            )
-            .map(|()| out)
-        };
-        let error = report_error(write(Some(1)).unwrap_err().into());
-        assert!(error.downcast_ref::<NativeError>().is_none(), "{error:?}");
-        assert!(crate::report::pairwise::is_total_score_refusal(&error));
-        let text = "-sorthits: the total score of the description table's last subject is wider \
-                    than its column (more than 99999 bits), where NCBI BLAST+ 2.17.0 writes \
-                    spaces without end (CAlignFormatUtil::AddSpace of a negative size); run \
-                    without -sorthits";
-        assert_eq!(error.to_string(), text);
-        // No cause after the text (`main`'s "Caused by:" lines).
-        assert_eq!(error.chain().count(), 1);
-        // Without `-sorthits` the table is written (the score column takes the total's width).
-        assert!(write(None).is_ok());
-        // An error of the output stream stays NCBI's write failure.
-        let failure = report_error(io::Error::other("disk full").into());
-        assert_eq!(
-            failure.downcast_ref::<NativeError>().map(|e| e.exit),
-            Some(6)
-        );
-    }
-
-    // Line DBID pfoff-1: `CATCH_ALL`'s report of a `CSeqDBException` that an outfmt 13 or 14
-    // report raises (the lookup of a reported subject that throws) stays as it is, not an
-    // engine error.
-    #[test]
-    fn a_database_error_of_catch_all_is_no_engine_error() {
-        let thrown = crate::ncbi_exception::NcbiException::new(
-            crate::seqdb::lookup_throw_site(crate::seqdb::tax_files::NO_ACCESSION_INFO.as_bytes())
-                .unwrap(),
-            crate::seqdb::tax_files::NO_ACCESSION_INFO,
-        );
-        let error = report_error(NativeError::exception(&thrown).into());
-        let error = error.downcast_ref::<NativeError>().unwrap();
-        assert_eq!(error.exit, 2);
-        assert_eq!(
-            error.message,
-            b"BLAST Database error: DB contains no accession info.\n"
-        );
-    }
-}
+#[path = "native_archive_error_tests.rs"]
+mod archive_error_tests;
 
 #[cfg(all(test, feature = "parallel"))]
-mod reader_batch_tests {
-    use super::*;
-
-    fn record(letters: usize) -> FastaRecord {
-        FastaRecord {
-            internal_id: String::new(),
-            title: Vec::new(),
-            sequence: vec![b'A'; letters],
-            lowercase_masks: Vec::new(),
-            warnings: Vec::new(),
-            source: None,
-            around: None,
-            skipped: None,
-        }
-    }
-
-    /// One unit's result for `queries` queries, skipped or not.
-    fn unit_results(queries: usize, skipped: bool) -> Vec<BatchResults> {
-        let records: Vec<_> = (0..queries).map(|_| record(30)).collect();
-        vec![BatchResults {
-            query_ordinal: 0,
-            queries: vec![Vec::new(); queries],
-            prepared: super::super::query_setup::prepare_queries(
-                &records,
-                &super::super::stage_c_tests::options(),
-            )
-            .unwrap(),
-            parameters: Vec::new(),
-            search_skipped: skipped,
-            request_space: None,
-            unlisted: Vec::new(),
-            shown: Vec::new(),
-            gapped_k: None,
-        }]
-    }
-
-    /// A reader batch (any `BATCH_SIZE`) is split into units of at most 10002 letters, as a run
-    /// without `BATCH_SIZE` batches its queries; the last unit is marked, and the units cover the
-    /// batch in order.
-    #[test]
-    fn a_reader_batch_is_split_into_units_of_10002_letters() {
-        let batch = [4000, 4000, 4000, 100, 10002, 5, 20000, 1]
-            .map(record)
-            .to_vec();
-        let options = super::super::stage_c_tests::options();
-        let units = XUnit::split(&batch, &options, false);
-        let ranges: Vec<_> = units.iter().map(|unit| unit.range.clone()).collect();
-        // 4000 + 4000 + 4000 reaches 10002 at the third record; 100 + 10002 at the fifth;
-        // 5 + 20000 at the seventh; the rest is the last unit.
-        assert_eq!(ranges, vec![0..3, 3..5, 5..7, 7..8]);
-        assert_eq!(
-            units.iter().map(|unit| unit.last).collect::<Vec<_>>(),
-            [false, false, false, true]
-        );
-        assert_eq!(units[1].queries().len(), 2);
-        // A reader batch of at most 10002 letters (the default, or a smaller `BATCH_SIZE`) is
-        // one unit.
-        let small = XUnit::split(&batch[..3], &options, false);
-        assert_eq!(small.len(), 1);
-        assert!(small[0].last);
-    }
-
-    /// A unit whose phase 1 did not end with a preparation (it failed) is prepared again with
-    /// the reader batch's layout, so its error is the batch's: here a batch without a valid
-    /// context, whose two empty records are in different units.
-    #[test]
-    fn a_unit_without_its_phase_1_fails_as_its_reader_batch() {
-        let batch: Vec<_> = [0]
-            .into_iter()
-            .chain([2; 5001])
-            .chain([0])
-            .map(record)
-            .collect();
-        let options = super::super::stage_c_tests::options();
-        let units = XUnit::split(&batch, &options, false);
-        assert_eq!(units.len(), 2);
-        let subjects: Subjects<'_> = (&batch[1..2]).into();
-        for unit in &units {
-            let error = unit
-                .take_prep(&options, subjects)
-                .err()
-                .expect("a reader batch without a valid context");
-            assert_eq!(
-                error.to_string(),
-                "Warning: Sequence contains no data ".repeat(2)
-            );
-        }
-    }
-
-    /// The results of the units become the reader batch's at its last unit: ordinals count from
-    /// the batch's first query, and a unit with no valid context is skipped only when no unit
-    /// had one.
-    #[test]
-    fn the_units_results_are_the_reader_batchs() {
-        let mut pending = ReaderBatchResults::default();
-        assert!(pending.add(0, false, unit_results(3, false)).is_none());
-        assert!(pending.add(3, false, unit_results(1, true)).is_none());
-        let results = pending.add(4, true, unit_results(2, false)).unwrap();
-        let ordinals: Vec<_> = results.iter().map(|r| r.query_ordinal).collect();
-        assert_eq!(ordinals, [0, 3, 4]);
-        assert!(results.iter().all(|r| !r.search_skipped));
-        // Nothing is left for the next reader batch, and a batch of skipped units is skipped.
-        let results = pending
-            .add(0, false, unit_results(1, true))
-            .or_else(|| pending.add(1, true, unit_results(1, true)))
-            .unwrap();
-        assert_eq!(results.len(), 2);
-        assert!(results.iter().all(|r| r.search_skipped));
-    }
-}
+#[path = "native_reader_batch_tests.rs"]
+mod reader_batch_tests;

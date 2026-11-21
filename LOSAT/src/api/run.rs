@@ -32,6 +32,7 @@ use crate::blastinput::seq_range::{
     parse_optional_range, record_interval, RangeRole, RecordInterval, SequenceRange,
 };
 use crate::cli::Commands;
+use crate::report::archive::options::RequestKind;
 use crate::report::blast_xml::XmlStats;
 use crate::report::PairwiseHit;
 
@@ -582,18 +583,21 @@ pub(crate) fn search_groups(command: &Commands, numbers: &[i32]) -> Vec<Vec<usiz
 // the taxonomy database up themselves, through the search path of NCBI's databases: a search of
 // records reads the application settings for them, as the command line does, and the search asks
 // where the command line asks (`common::database::subject_taxonomy`).
-/// The `[BLAST] BLASTDB` setting of the call (`start`) when a report of `outputs` looks every
-/// taxid up (the plural names of the taxonomy database, the organism report); `None` otherwise,
-/// without reading the settings.
+/// The `[BLAST] BLASTDB` setting of the call (`start`) when a report of `outputs` (as `app`'s
+/// formatter writes it, `TabularSpec::of_app`) looks every taxid up (the plural names of the
+/// taxonomy database, the organism report); `None` otherwise, without reading the settings.
 fn taxdb_setting(
     outputs: &mut ReportOutputs<'_>,
     start: &mut CallStart,
+    app: RequestKind,
 ) -> anyhow::Result<Option<crate::algorithm::common::database::TaxdbSetting>> {
     use crate::blastinput::app::{parse_formatting_string, ReportFormat};
     let looks_up = outputs.formats.iter().any(|format| {
         parse_formatting_string(format.outfmt).is_ok_and(|choice| {
             ReportFormat::from_number(choice.number)
-                .and_then(|report| crate::report::tabular::TabularSpec::of(report, &choice))
+                .and_then(|report| {
+                    crate::report::tabular::TabularSpec::of_app(report, &choice, app)
+                })
                 .is_some_and(|spec| spec.looks_up_every_taxid())
         })
     });
@@ -685,7 +689,12 @@ fn run_local_entry(
     }
     match command {
         Commands::Blastp(mut args) => {
-            args.taxdb_setting = taxdb_setting(outputs, start)?;
+            args.taxdb_setting = taxdb_setting(outputs, start, RequestKind::Blastp)?;
+            // The file of an ungapped search's `-matrix` that NCBI's tables do not have, looked up
+            // where the options are resolved, as on the command line (`BlastpArgs::matrix_search`).
+            if args.unknown_matrix_name() {
+                args.matrix_search = Some(start.settings(&mut *outputs.diagnostics)?.matrix_search);
+            }
             run_local_blastp(args, query, subject, "", "", outputs)
         }
         Commands::Tblastn(mut args) => {
@@ -697,11 +706,11 @@ fn run_local_entry(
                 let settings = start.settings(&mut *outputs.diagnostics)?;
                 args.find_matrix_file(&settings.matrix_search)?;
             }
-            args.taxdb_setting = taxdb_setting(outputs, start)?;
+            args.taxdb_setting = taxdb_setting(outputs, start, RequestKind::Tblastn)?;
             run_local_tblastn(args, query, subject, outputs)
         }
         Commands::Blastn(mut args) => {
-            args.taxdb_setting = taxdb_setting(outputs, start)?;
+            args.taxdb_setting = taxdb_setting(outputs, start, RequestKind::Blastn)?;
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:446-448
             // The counts file of `-window_masker_db` is read from the file system, as on the
             // command line (LOSAT Web's host gives its own source).
@@ -717,6 +726,13 @@ fn run_local_entry(
                 args.window_masker_registry = Some(settings.window_masker_registry);
                 args.window_masker_counts = Some(Arc::new(crate::utils::winmask::FileCounts));
             }
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/repeats_filter_cxx.cpp:368-372
+            // The database of `-filtering_db` is looked up as the database of `-db` (the call's
+            // settings), by the repeat search of each query batch.
+            if args.filtering_db.is_some() {
+                let settings = start.settings(&mut *outputs.diagnostics)?;
+                args.resolve_repeat_filter(&settings);
+            }
             run_local_blastn(args, query, subject, outputs)
         }
         Commands::Tblastx(mut args) => {
@@ -726,11 +742,11 @@ fn run_local_entry(
                 let settings = start.settings(&mut *outputs.diagnostics)?;
                 args.find_matrix_file(&settings.matrix_search)?;
             }
-            args.taxdb_setting = taxdb_setting(outputs, start)?;
+            args.taxdb_setting = taxdb_setting(outputs, start, RequestKind::Tblastx)?;
             run_local_tblastx(args, query, subject, outputs)
         }
         Commands::Blastx(mut args) => {
-            args.taxdb_setting = taxdb_setting(outputs, start)?;
+            args.taxdb_setting = taxdb_setting(outputs, start, RequestKind::Blastx)?;
             // The file of a `-matrix` that NCBI's tables do not have, looked up after the options
             // are resolved, as on the command line (`ResolvedOptions::find_matrix_file`).
             if args.unknown_matrix_name() {
@@ -740,7 +756,7 @@ fn run_local_entry(
         }
         Commands::Psiblast(args) => {
             let mut args = psiblast_args(args, outputs)?;
-            args.taxdb_setting = taxdb_setting(outputs, start)?;
+            args.taxdb_setting = taxdb_setting(outputs, start, RequestKind::Psiblast)?;
             run_local_blastp(args, query, subject, "", "", outputs)
         }
         Commands::Rpsblast(_)
@@ -760,7 +776,12 @@ fn psiblast_args(
     outputs: &ReportOutputs<'_>,
 ) -> anyhow::Result<crate::algorithm::blastp::args::BlastpArgs> {
     for format in &outputs.formats {
-        crate::algorithm::psiblast::PsiblastArgs::check_outfmt(format.outfmt)?;
+        // The library writes no search strategy file (`search::validate`).
+        crate::algorithm::psiblast::PsiblastArgs::check_outfmt(
+            format.outfmt,
+            format.side_out(args.out.as_deref()),
+            false,
+        )?;
     }
     args.into_blastp_args()
 }
@@ -1289,147 +1310,5 @@ pub fn run_collect(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::api::{validate, Program};
-
-    // Test protein: N-terminal part of E. coli AsnA (RefSeq NP_418200.1), Cys51 changed to Ala.
-    const PROTEIN: &[u8] = b"MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQ";
-
-    fn one_protein() -> (Vec<FastaRecord>, Vec<FastaRecord>) {
-        (
-            vec![FastaRecord::new("Query_1", b"q", PROTEIN)],
-            vec![FastaRecord::new("Subject_1", b"s", PROTEIN)],
-        )
-    }
-
-    #[test]
-    fn the_strand_is_ncbis_rule_and_the_ranges_are_half_open_on_the_plus_strand() {
-        assert_eq!(strand(true, 9, 1), None);
-        assert_eq!(strand(false, 1, 9), Some(Strand::Plus));
-        assert_eq!(strand(false, 9, 1), Some(Strand::Minus));
-        // A row of one letter: `(s_start - s_end) > 0` is false.
-        assert_eq!(strand(false, 5, 5), Some(Strand::Plus));
-        let (query, subject) = one_protein();
-        let search = validate(Program::Blastp, &[]).unwrap();
-        let outcome = run_collect(&search, Inputs::new(&query, &subject), &["6"]).unwrap();
-        let mut hsp = outcome.hsps[0].clone();
-        (hsp.q_start, hsp.q_end, hsp.s_start, hsp.s_end) = (3, 9, 9, 3);
-        assert_eq!(hsp.query_range(), 2..9);
-        assert_eq!(hsp.subject_range(), 2..9);
-        (hsp.s_start, hsp.s_end) = (5, 5);
-        assert_eq!(hsp.subject_range(), 4..5);
-    }
-
-    #[test]
-    fn groups_follow_the_hit_list_sizes() {
-        let inputs = Inputs::new(&[], &[]);
-        let plain = validate(Program::Blastp, &[])
-            .unwrap()
-            .command(inputs)
-            .unwrap();
-        assert_eq!(search_groups(&plain, &[6, 0, 7]), vec![vec![0, 1, 2]]);
-        // -num_alignments changes the pairwise formats' hit list size only: two searches, the
-        // tabular formats first.
-        let split = validate(Program::Blastp, &["-num_alignments", "1"])
-            .unwrap()
-            .command(inputs)
-            .unwrap();
-        assert_eq!(search_groups(&split, &[0, 6, 7]), vec![vec![1, 2], vec![0]]);
-        // -max_target_seqs sets every format's size.
-        let same = validate(Program::Blastp, &["-max_target_seqs", "5"])
-            .unwrap()
-            .command(inputs)
-            .unwrap();
-        assert_eq!(search_groups(&same, &[0, 6]), vec![vec![0, 1]]);
-    }
-
-    #[test]
-    fn a_self_search_gives_one_hsp_with_its_rows_and_sections() {
-        let (query, subject) = one_protein();
-        let search = validate(Program::Blastp, &[]).unwrap();
-        let outcome = run_collect(&search, Inputs::new(&query, &subject), &["6", "0"]).unwrap();
-        assert_eq!(outcome.reports.len(), 2);
-        assert_eq!(outcome.reports[0].outfmt, "6");
-        assert_eq!(outcome.reports[1].outfmt, "0");
-        assert!(
-            outcome.diagnostics.is_empty(),
-            "{:?}",
-            String::from_utf8_lossy(&outcome.diagnostics)
-        );
-        assert_eq!(outcome.hsps.len(), 1);
-        let hsp = &outcome.hsps[0];
-        assert_eq!((hsp.index, hsp.q_idx, hsp.s_idx, hsp.rank), (0, 0, 0, 0));
-        assert_eq!(
-            (hsp.q_start, hsp.q_end, hsp.s_start, hsp.s_end),
-            (1, 66, 1, 66)
-        );
-        assert!(hsp.bit_score > 100.0);
-        assert!(hsp.e_value < 1e-30);
-        assert_eq!(
-            hsp.query_aligned.as_deref(),
-            Some(std::str::from_utf8(PROTEIN).unwrap())
-        );
-        // The row in outfmt 6 is the report's one line; the section in outfmt 0 starts at
-        // the score line and the heading at the defline.
-        let row = outcome.reports[0].spans[0].clone().unwrap();
-        let tabular = &outcome.reports[0].bytes;
-        assert_eq!(&tabular[row.clone()], tabular.as_slice());
-        assert!(tabular.ends_with(b"\n"));
-        assert_eq!(tabular.iter().filter(|&&b| b == b'\n').count(), 1);
-        let section = outcome.reports[1].spans[0].clone().unwrap();
-        let pairwise = &outcome.reports[1].bytes;
-        assert!(pairwise[section].starts_with(b" Score ="));
-        let heading = outcome.reports[1].subject_headings[0].clone().unwrap();
-        assert!(pairwise[heading].starts_with(b">"));
-        assert!(outcome.reports[0].subject_headings[0].is_none());
-    }
-
-    #[test]
-    fn two_searches_give_each_format_its_own_report_and_records_from_the_first() {
-        let (query, subject) = one_protein();
-        let search = validate(Program::Blastp, &["-num_alignments", "1"]).unwrap();
-        let outcome = run_collect(&search, Inputs::new(&query, &subject), &["0", "6"]).unwrap();
-        assert_eq!(outcome.reports[0].outfmt, "0");
-        assert_eq!(outcome.reports[1].outfmt, "6");
-        assert_eq!(outcome.hsps.len(), 1);
-        // The records come from the tabular search: a row in report 1, no section in report
-        // 0 (another search).
-        assert!(outcome.reports[1].spans[0].is_some());
-        assert_eq!(outcome.reports[0].spans, [None]);
-        // The same bytes as the formats searched alone.
-        let alone = run_collect(&search, Inputs::new(&query, &subject), &["0"]).unwrap();
-        assert_eq!(alone.reports[0].bytes, outcome.reports[0].bytes);
-    }
-
-    #[test]
-    fn the_run_writes_to_the_callers_outputs_and_the_errors_are_the_command_lines() {
-        let (query, subject) = one_protein();
-        let search = validate(Program::Blastp, &[]).unwrap();
-        let mut report = Vec::new();
-        let mut diagnostics = Vec::new();
-        run(
-            &search,
-            Inputs::new(&query, &subject),
-            &mut [("6", &mut report)],
-            &mut diagnostics,
-        )
-        .unwrap();
-        let collected = run_collect(&search, Inputs::new(&query, &subject), &["6"]).unwrap();
-        assert_eq!(report, collected.reports[0].bytes);
-        assert!(diagnostics.is_empty());
-        // A format the command line rejects fails before any search, as does a call without one.
-        let error = run_collect(&search, Inputs::new(&query, &subject), &["99"]).unwrap_err();
-        assert!(matches!(error, Error::Argv(_)), "{error}");
-        let error = run_collect(&search, Inputs::new(&query, &subject), &[]).unwrap_err();
-        assert!(matches!(error, Error::Argv(_)), "{error}");
-        // An engine error is the command line's message.
-        let empty: Vec<FastaRecord> = Vec::new();
-        let error = run_collect(&search, Inputs::new(&query, &empty), &["6"]).unwrap_err();
-        assert!(matches!(error, Error::Search(_)), "{error}");
-        assert!(
-            error.to_string().contains("Empty CBlastQueryVector"),
-            "{error}"
-        );
-    }
-}
+#[path = "run_tests.rs"]
+mod tests;

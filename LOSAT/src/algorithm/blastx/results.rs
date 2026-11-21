@@ -254,15 +254,24 @@ pub(crate) fn prelim_hitlist_size(o: &ResolvedOptions) -> usize {
 /// `-subject_besthit` over one subject's HSPs of BLASTX (`core::blast_hits::subject_besthit`):
 /// the contexts are the query frames, and the offsets those of the HSP in its frame.
 pub(crate) fn subject_besthit(hsps: &mut Vec<Hsp>) {
-    crate::core::blast_hits::subject_besthit(hsps, false, |h| {
-        crate::core::blast_hits::BestHitExtent {
-            context: h.hsp.context as i64,
-            query_frame: i32::from(h.hsp.frame),
-            offset: i64::from(h.hsp.q_start),
-            end: i64::from(h.hsp.q_end),
-            query_length: 0,
-        }
-    });
+    crate::core::blast_hits::subject_besthit(hsps, false, |h| best_hit_extent(&h.hsp));
+}
+
+/// `subject_besthit` of a list of preliminary HSPs sorted by score: the list of a sequence with
+/// `-db_hard_mask` after each of its chunks joins it (`search_db_masked.rs`; series NP, M4b).
+pub(crate) fn subject_besthit_preliminary(hsps: &mut Vec<PreliminaryHsp>) {
+    crate::core::blast_hits::subject_besthit(hsps, false, best_hit_extent);
+}
+
+/// What `-subject_besthit` reads of a BLASTX HSP.
+fn best_hit_extent(hsp: &PreliminaryHsp) -> crate::core::blast_hits::BestHitExtent {
+    crate::core::blast_hits::BestHitExtent {
+        context: hsp.context as i64,
+        query_frame: i32::from(hsp.frame),
+        offset: i64::from(hsp.q_start),
+        end: i64::from(hsp.q_end),
+        query_length: 0,
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:399-421
@@ -719,132 +728,9 @@ impl CompoHeap {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:252-275
 #[cfg(test)]
-mod boundary_tests {
-    use super::*;
-    use std::fmt::Write;
-    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:75-85
-    fn dump(out: &mut String, stage: &str, oid: i32, result: i32, h: &CompoHeap) {
-        write!(
-            out,
-            "H\t{stage}\t{oid}\t{result}\t{}\t{:016x}\t{}",
-            h.entries.len(),
-            h.worst.to_bits(),
-            i32::from(h.heapified)
-        )
-        .unwrap();
-        for e in &h.entries {
-            write!(
-                out,
-                "\t{}:{}:{:016x}",
-                e.list.oid,
-                e.best_score,
-                e.list.best_evalue.to_bits()
-            )
-            .unwrap();
-        }
-        out.push('\n');
-    }
-    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:252-275
-    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:330-391
-    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:439-461
-    #[test]
-    fn pinned_c_heap_threshold_cutoff_tie_and_empty_pop() {
-        let expected = include_str!("../../../tests/unit/blastx_d_boundary_expected.tsv")
-            .lines()
-            .filter(|l| !l.starts_with("C\t"))
-            .map(|l| format!("{l}\n"))
-            .collect::<String>();
-        let mut actual = String::new();
-        for threshold in 1..=2 {
-            let mut heap = CompoHeap::new(threshold);
-            writeln!(actual, "T\t{threshold}").unwrap();
-            dump(&mut actual, "INIT", -1, 0, &heap);
-            let es = [0.1, 0.1, 0.2, 0.09, 0.0021, 0.002, 0.001, 0.002, 0.003];
-            let scores = [100, 100, 101, 99, 99, 98, 97, 98, 1000];
-            for (i, (&e, &score)) in es.iter().zip(&scores).enumerate() {
-                let yes = heap.would_insert(e, score, i);
-                dump(&mut actual, "WOULD", i as i32, i32::from(yes), &heap);
-                if yes {
-                    let discarded = heap.insert(HeapEntry {
-                        list: HspList {
-                            query_index: 0,
-                            oid: i,
-                            hsps: Vec::new(),
-                            best_evalue: e,
-                        },
-                        best_score: score,
-                    });
-                    dump(
-                        &mut actual,
-                        "INSERT",
-                        i as i32,
-                        discarded.map_or(-1, |e| e.list.oid as i32),
-                        &heap,
-                    );
-                }
-            }
-            loop {
-                let entry = heap.pop();
-                dump(
-                    &mut actual,
-                    "POP",
-                    entry.as_ref().map_or(-1, |e| e.list.oid as i32),
-                    0,
-                    &heap,
-                );
-                if entry.is_none() {
-                    break;
-                }
-            }
-        }
-        assert_eq!(actual, expected);
-    }
-}
+#[path = "results_boundary_tests.rs"]
+mod boundary_tests;
 
 #[cfg(test)]
-mod negative_length_tests {
-    use super::*;
-
-    fn hsp(context: usize, score: i32, q_start: i32, length: i32) -> Hsp {
-        Hsp {
-            hsp: PreliminaryHsp {
-                context,
-                frame: 1,
-                score,
-                q_start,
-                q_end: q_start + length,
-                q_gapped_start: q_start,
-                s_start: 5,
-                s_end: 5 + length,
-                s_gapped_start: 5,
-            },
-            num: 1,
-            evalue: 1.0,
-            bit_score: 0.0,
-            identity: 0,
-            positive: 0,
-            edit_script: Vec::new(),
-            composition_method: 0,
-        }
-    }
-
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2566-2569
-    /// An HSP of length -4 at the start of its context ends at -4: its end + 3 is below 0, so
-    /// NCBI's range ends at -4 itself and keeps a weaker HSP ending at -2 (an end + 3 of -1
-    /// would remove it), and removes one that ends at -4 or before.
-    #[test]
-    fn subject_besthit_keeps_the_end_below_minus_three() {
-        let ends = |hsps: &[Hsp]| {
-            hsps.iter()
-                .map(|h| (h.hsp.q_start, h.hsp.q_end))
-                .collect::<Vec<_>>()
-        };
-        let mut hsps = vec![hsp(0, 9, 0, -4), hsp(0, 5, 1, -3), hsp(0, 4, 0, -5)];
-        subject_besthit(&mut hsps);
-        assert_eq!(ends(&hsps), vec![(0, -4), (1, -2)]);
-        // An end + 3 of 0 or more is the range's end, as before.
-        let mut hsps = vec![hsp(0, 9, 0, -3), hsp(0, 5, 1, -2)];
-        subject_besthit(&mut hsps);
-        assert_eq!(ends(&hsps), vec![(0, -3)]);
-    }
-}
+#[path = "results_negative_length_tests.rs"]
+mod negative_length_tests;

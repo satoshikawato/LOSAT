@@ -293,6 +293,57 @@ impl<'a> Subjects<'a> {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:328-353 and
+    // c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1631-1636
+    // With `-db_hard_mask`, each fetch after the preliminary stage (the composition-based
+    // statistics, the traceback) is a copy with `X` over the sequence's masks; the formatter
+    // reads the stored letters.
+    /// The residues of subject `oid` for the stages after the preliminary search that score it
+    /// (the composition redo, the traceback): `read_encoded`, with `X` over the masks of
+    /// `-db_hard_mask` (`options.db_mask`). The reports' records read `read_encoded`.
+    pub(crate) fn read_searched(
+        &self,
+        oid: usize,
+        options: &super::args::ResolvedOptions,
+    ) -> Result<Cow<'a, [u8]>> {
+        let encoded = self.read_encoded(oid)?;
+        match options.db_mask.as_ref() {
+            Some(mask) if mask.kind == crate::blastinput::db_mask::MaskKind::Hard => {
+                self.x_hard_masked(oid, mask.id, encoded)
+            }
+            _ => Ok(encoded),
+        }
+    }
+
+    /// `encoded` (the residues of database sequence `oid`) with `X` over its stored masks of the
+    /// algorithm `algo_id` (`db_mask_search::mask_protein_letters`).
+    #[cold]
+    #[inline(never)]
+    fn x_hard_masked(
+        &self,
+        oid: usize,
+        algo_id: i32,
+        encoded: Cow<'a, [u8]>,
+    ) -> Result<Cow<'a, [u8]>> {
+        let Some(db) = self.seqdb() else {
+            return Ok(encoded);
+        };
+        let mut reader = crate::algorithm::common::db_mask_search::SubjectMasks::with_window(1);
+        let masks = reader.of(
+            db,
+            oid as u32,
+            algo_id,
+            crate::algorithm::common::database::database_error_of,
+            "BLASTX",
+        )?;
+        if masks.is_empty() {
+            return Ok(encoded);
+        }
+        let mut residues = encoded.into_owned();
+        crate::algorithm::common::db_mask_search::mask_protein_letters(&mut residues, masks);
+        Ok(Cow::Owned(residues))
+    }
+
     /// The reader of one pass over the subjects in ascending
     /// order (`XSubjectPass::view`).
     pub(crate) fn x_pass(&self) -> XSubjectPass<'a> {
@@ -397,44 +448,5 @@ fn search_residue(letter: u8) -> u8 {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::algorithm::blastx::input::parse_fasta;
-
-    // No NCBI counterpart: LOSAT's encoding of `-subject` records (`encoded_with_sentinel` is the
-    // reference).
-    /// EXPERIMENT (LOSAT_X_BXUNGAPSENT): a FASTA subject read with both sentinels is the record's
-    /// encoding with the byte 0 added before it, for records of 0, 1 and more letters, lower case
-    /// and letters outside the alphabet included.
-    #[test]
-    fn fasta_subjects_with_both_sentinels_add_the_byte_before() {
-        let records =
-            parse_fasta(b">a\nMKV*LLAx\n>b\nW\n>c\n\n>d\nbjouzBJOUZ-\n", true, false).unwrap();
-        let subjects = Subjects::Fasta(&records);
-        for oid in 0..records.len() {
-            let both = subjects.x_encoded_with_sentinels(oid);
-            assert_eq!(
-                *both,
-                [&[0u8][..], &subjects.encoded_with_sentinel(oid)].concat(),
-                "{oid}"
-            );
-        }
-    }
-
-    // NCBI reference (598d8ae6): `search_residue` (c++/src/algo/blast/api/blast_setup_cxx.cpp:894-899).
-    /// A `-subject` record's pyrrolysine (O or o) is searched as X, through every encoding; the
-    /// record, whose letters the reports show, keeps the O.
-    #[test]
-    fn a_fasta_subject_pyrrolysine_is_searched_as_x() {
-        let records = parse_fasta(b">a\nSOSoXU\n", true, false).unwrap();
-        let subjects = Subjects::Fasta(&records);
-        let [s, x, u] = [b'S', b'X', b'U'].map(aa_char_to_ncbistdaa);
-        assert_eq!(*subjects.encoded(0), [s, x, s, x, x, u]);
-        assert_eq!(*subjects.encoded_with_sentinel(0), [s, x, s, x, x, u, 0]);
-        assert_eq!(
-            *subjects.x_encoded_with_sentinels(0),
-            [0, s, x, s, x, x, u, 0]
-        );
-        assert_eq!(records[0].sequence, b"SOSOXU");
-    }
-}
+#[path = "subjects_tests.rs"]
+mod tests;

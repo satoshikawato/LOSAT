@@ -31,7 +31,8 @@ use super::{
     blastp_get_ungapped_hsp_context_with_bounds, blastp_restricted_align_enabled,
     blastp_save_init_hsp, blastp_timing_start, blastp_trace_init_hsp_overlaps_target,
     build_restricted_align_array_into, chain_blastp_init_hsps, extend_preliminary_blastp_hit,
-    ncbi_qsort_init_hsps_by_score, preliminary_tree_hsp,
+    ncbi_qsort_init_hsps_by_score, ncbi_qsort_preliminary_hits,
+    preliminary_hits_is_sorted_by_score_ncbi, preliminary_score_compare, preliminary_tree_hsp,
     prepare_preliminary_hits_for_kappa_in_place, rebuild_preliminary_interval_tree_from_list,
     remove_preliminary_hits_for_query, should_retry_exact_preliminary_gapped_alignment,
     split_preliminary_hits_by_query_into, x_bp_tree_max_cells,
@@ -46,8 +47,8 @@ use crate::algorithm::blastp::args::ResolvedBlastpArgs;
 use crate::algorithm::blastp::extension::{
     extend_one_hit_blosum62, extend_one_hit_of, extend_two_hit_blosum62, extend_two_hit_table,
 };
-use crate::algorithm::blastp::gapalign::BlastpGappedAlignmentMode;
-use crate::algorithm::blastp::hsp::reap_hsplist_by_evalue;
+use crate::algorithm::blastp::gapalign::{BlastpGappedAlignmentMode, BlastpPreliminaryHsp};
+use crate::algorithm::blastp::hsp::{reap_hsplist_by_evalue, update_best_evalue};
 use crate::algorithm::blastp::kappa::{blastp_trace_hsp_target, blastp_trace_matches_pair};
 use crate::algorithm::blastp::x_seed_fused::XContextTable;
 use crate::algorithm::blastp::x_ungapped_sent::XSentQuery;
@@ -56,6 +57,7 @@ use crate::algorithm::tblastx::blast_extend::DiagStruct;
 use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::{X_BLASTP, X_BLASTP_MATRIX};
 use crate::algorithm::tblastx::lookup::QueryContext;
 use crate::config::ScoringMatrix;
+use crate::core::blast_hits::reap_by_query_coverage;
 use crate::stats::{BlastGumbelBlk, KarlinParams};
 
 /// What the kernel reads of `run_call` (`search_subject` and its gapped half `gapped_subject`): each
@@ -112,10 +114,10 @@ impl BlastpPrelimKernel<'_> {
     /// and for a subject with letters the scan and the ungapped extensions into the scratch's list of
     /// initial hits, the diagonal offset moved past the subject, the interval tree reset for it, and
     /// the gapped half (`gapped_subject`), which gives the list back to the scratch and writes the
-    /// subject's HSP lists into `subject_result`. The four macros name the method's locals (their
-    /// hygiene), so they are defined after them.
+    /// subject's HSP lists into `subject_result` (the body is [`Self::search_subject_in`]).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:493-498
+    #[inline(always)]
     pub(super) fn search_subject(
         &self,
         scratch: &mut BlastpSubjectScratch,
@@ -123,6 +125,43 @@ impl BlastpPrelimKernel<'_> {
         subject: BlastpSubjectRef<'_>,
         subject_result: &mut BlastpSubjectResult,
         values: &BlastpPrelimValues<'_>,
+    ) {
+        // `-lcase_masking`: this subject's scan ranges, when it has lower-case letters.
+        let x_soft = self
+            .x_soft_subjects
+            .and_then(|all| all.get(s_idx))
+            .filter(|ranges| !ranges.is_empty())
+            .map(Vec::as_slice);
+        self.search_subject_in(
+            scratch,
+            s_idx,
+            subject,
+            subject_result,
+            values,
+            x_soft,
+            false,
+        );
+    }
+
+    /// [`Self::search_subject`] with the scan ranges `scan_ranges` (`-lcase_masking`'s of a
+    /// subject, or with `-db_soft_mask` a database sequence's; `None`: every word), and, with
+    /// `chunk`, for one hard chunk of a sequence with `-db_hard_mask` (`db_masked.rs`): the chunk's
+    /// HSPs are left in the scratch's HSP list (`gapped_subject`), sorted by score, for the merge
+    /// of the sequence's chunks. One body for every caller (no code placement in NCBI): the
+    /// masked kernels call it as the default path does, so that the functions it calls keep one
+    /// call site each and stay inlined into it. The four macros name the method's locals (their
+    /// hygiene), so they are defined after them.
+    #[inline(never)]
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn search_subject_in(
+        &self,
+        scratch: &mut BlastpSubjectScratch,
+        s_idx: usize,
+        subject: BlastpSubjectRef<'_>,
+        subject_result: &mut BlastpSubjectResult,
+        values: &BlastpPrelimValues<'_>,
+        scan_ranges: Option<&[(i32, i32)]>,
+        chunk: bool,
     ) {
         // `run_call`'s values as its former kernel closure read them: a reference or a `Copy` value
         // each.
@@ -139,7 +178,6 @@ impl BlastpPrelimKernel<'_> {
             x_ungap_sent,
             diag_mask,
             total_query_span,
-            x_soft_subjects,
             timing_enabled,
             timing,
             ..
@@ -166,10 +204,8 @@ impl BlastpPrelimKernel<'_> {
         let subject_diag_offset = scratch.diag_offset;
 
         let scan_ungapped_start = blastp_timing_start(timing_enabled);
-        // `-lcase_masking`: this subject's scan ranges, when it has lower-case letters.
-        let x_soft = x_soft_subjects
-            .and_then(|all| all.get(s_idx))
-            .filter(|ranges| !ranges.is_empty());
+        // The scan ranges (`-lcase_masking`, `-db_soft_mask`).
+        let x_soft = scan_ranges;
         // The subject scan and the two-hit test in one loop (a search with a window).
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:502-505,509
         // Dispatch point: the two-hit test reads the lookup cells in place
@@ -697,14 +733,201 @@ impl BlastpPrelimKernel<'_> {
             );
         }
         // The gapped half (`gapped_subject`): from the order of the ungapped hits to the subject's HSP
-        // lists in `subject_result`, with the subject's letters and word cutoffs made above.
+        // lists in `subject_result`, with the subject's letters and word cutoffs made above. An
+        // ungapped search (`-ungapped`) takes `ungapped_subject` instead: its HSPs are the ungapped
+        // hits (decision D2 of task O4b: the one place where the mode enters the kernel).
         let scanned = ScannedSubject {
             subject,
             subject_sequence,
             values,
             word_cutoff_scores,
         };
-        self.gapped_subject(scratch, s_idx, scanned, subject_result, init_hsps);
+        if args.ungapped {
+            self.ungapped_subject(scratch, s_idx, scanned, subject_result, init_hsps, chunk);
+        } else {
+            self.gapped_subject(scratch, s_idx, scanned, subject_result, init_hsps, chunk);
+        }
+    }
+
+    /// The ungapped half of the kernel for one subject with letters (`-ungapped`, in place of
+    /// `gapped_subject`): the subject's ungapped hits become its HSPs, in the order of the sorted
+    /// list of hits, sorted by score, without the purge of common endpoints and without a
+    /// containment test; the HSPs of a negative length are deleted (`Blast_HSPTest`); the list of
+    /// each query then takes its E-values from the context's own Karlin block (`kbp_std`, no sum
+    /// statistics, no Gumbel block), is reaped by the preliminary E-value and by
+    /// `-qcov_hsp_perc`, and goes into `subject_result` (`ungapped_lists`). Arguments and the
+    /// scratch's arrays as `gapped_subject`'s: the list of hits goes back to the scratch before the
+    /// method returns; with `chunk` (one hard chunk of a sequence with `-db_hard_mask`,
+    /// `db_masked.rs`) the chunk's HSPs, sorted by score, are left in the scratch's HSP list for the
+    /// merge of the sequence's chunks, which ends with `ungapped_lists` on the joined list.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1482-1541
+    /// (BLASTP has no `link_hsp_params` without psiblast's `-sum_stats`, which has no `-ungapped`;
+    /// the bit scores are made by the final stage, `UngappedFinish::run`.)
+    #[cold]
+    #[inline(never)]
+    fn ungapped_subject(
+        &self,
+        scratch: &mut BlastpSubjectScratch,
+        s_idx: usize,
+        scanned: ScannedSubject<'_>,
+        subject_result: &mut BlastpSubjectResult,
+        mut init_hsps: Vec<InitHSP>,
+        chunk: bool,
+    ) {
+        let Self {
+            contexts,
+            context_lookup_bounds,
+            concatenated_query,
+            ..
+        } = *self;
+        let ScannedSubject {
+            subject, values, ..
+        } = scanned;
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:234-235
+        ncbi_qsort_init_hsps_by_score(&mut init_hsps);
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4752-4770
+        let mut preliminary_hsp_list = std::mem::take(&mut scratch.preliminary_hsp_list);
+        preliminary_hsp_list.clear();
+        for init_hsp in &init_hsps {
+            let mut init_hsp = *init_hsp;
+            let (context_idx, ctx, _) = blastp_adjust_hsp_offsets_and_get_query_data(
+                concatenated_query,
+                contexts,
+                context_lookup_bounds,
+                &mut init_hsp,
+            );
+            let ungapped = init_hsp.ungapped_data;
+            preliminary_hsp_list.push(BlastpPreliminaryHsp {
+                query_start: ungapped.q_start,
+                query_end: ungapped.length + ungapped.q_start,
+                subject_start: ungapped.s_start,
+                subject_end: ungapped.length + ungapped.s_start,
+                gapped_query_start: init_hsp.q_seed_absolute,
+                gapped_subject_start: init_hsp.s_seed,
+                raw_score: ungapped.score,
+                query_context: i32::try_from(context_idx)
+                    .expect("NCBI BLAST preliminary blastp context index must fit in Int4"),
+                query_frame: 0,
+                subject_frame: 0,
+                query_length: ctx.aa_len,
+                q_idx: ctx.q_idx,
+                s_idx: s_idx as u32,
+            });
+        }
+        scratch.init_hsps = init_hsps;
+        x_ih_pool::at_subject_end(&mut scratch.init_hsps);
+        scratch.init_hsps.clear();
+        if !preliminary_hits_is_sorted_by_score_ncbi(&preliminary_hsp_list) {
+            ncbi_qsort_preliminary_hits(&mut preliminary_hsp_list, preliminary_score_compare);
+        }
+        // A hard chunk's HSPs stay in the list for the merge of the sequence's chunks
+        // (`db_masked.rs`).
+        if chunk {
+            scratch.preliminary_hsp_list = preliminary_hsp_list;
+            return;
+        }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2713-2733
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:993-999
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:586-591
+        // `-subject_besthit` on the subject's list of every query, sorted by score, before the test
+        // below deletes the HSPs of a negative length: the step sees them, as NCBI's does (it runs
+        // in the engine; the reevaluation that deletes them is the caller's).
+        self.subject_besthit(&mut preliminary_hsp_list);
+        self.ungapped_lists(
+            scratch,
+            s_idx,
+            subject.aa_len,
+            values,
+            &mut preliminary_hsp_list,
+            subject_result,
+        );
+        scratch.preliminary_hsp_list = preliminary_hsp_list;
+    }
+
+    /// The HSP lists per query of an ungapped search's subject of `subject_len` letters from its
+    /// HSPs `preliminary_hsp_list` (sorted by score, after `-subject_besthit`; drained): the HSPs of
+    /// a negative length deleted, then each query's list with its E-values from the context's own
+    /// Karlin block, reaped by the preliminary E-value and by `-qcov_hsp_perc`, into
+    /// `subject_result`. The end of `ungapped_subject`, and of the merge of a hard-masked
+    /// sequence's chunks (`db_masked.rs`), whose length is the whole sequence's.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1482-1541
+    #[cold]
+    #[inline(never)]
+    pub(super) fn ungapped_lists(
+        &self,
+        scratch: &mut BlastpSubjectScratch,
+        s_idx: usize,
+        subject_len: usize,
+        values: &BlastpPrelimValues<'_>,
+        preliminary_hsp_list: &mut Vec<BlastpPreliminaryHsp>,
+        subject_result: &mut BlastpSubjectResult,
+    ) {
+        let Self {
+            args,
+            query_ids,
+            contexts,
+            ..
+        } = *self;
+        // BLASTP has no `-perc_identity` and its minimum hit length is 0: the test deletes an HSP
+        // of a negative length (`align_length` of an ungapped HSP is the length of its query range,
+        // blast_hits.c:773-780) and keeps the others, whose scores did not change, in their order.
+        delete_failed_hsp_tests(preliminary_hsp_list);
+        // The lists of the queries (`Blast_HSPListSplitByQuery` of the HSP stream's writer), then
+        // each list's E-values from the context's own block (`context_block`), the reap by the
+        // preliminary E-value and by `-qcov_hsp_perc`, as NCBI's lines cited above do on the
+        // subject's list (a HSP's evalue depends on its own HSP only).
+        let mut preliminary_hits_by_query = std::mem::take(&mut scratch.preliminary_hits_by_query);
+        split_preliminary_hits_by_query_into(
+            preliminary_hsp_list,
+            contexts,
+            query_ids.len(),
+            &mut preliminary_hits_by_query,
+        );
+        for (q_idx, preliminary_hits) in preliminary_hits_by_query
+            .iter_mut()
+            .take(query_ids.len())
+            .enumerate()
+        {
+            if preliminary_hits.is_empty() {
+                continue;
+            }
+            let ctx = &contexts[q_idx];
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1869-1873
+            // `kbp` is `sbp->kbp` (`kbp_std`) for an ungapped search and there is no Gumbel block.
+            let mut compact_hsp_list = x_build_compact_preliminary_hsp_list(
+                preliminary_hits.iter(),
+                s_idx as u32,
+                q_idx as u32,
+                ctx.aa_len,
+                subject_len,
+                &ctx.karlin_params,
+                None,
+                &values.search_spaces[q_idx],
+                None,
+            );
+            reap_hsplist_by_evalue(&mut compact_hsp_list, values.prelim_evalue);
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2010-2045 (cited at
+            // `core::blast_hits::reap_by_query_coverage`)
+            if reap_by_query_coverage(&mut compact_hsp_list.hsps, args.query_cov_hsp_perc, |hsp| {
+                (
+                    i64::from(hsp.hsp.query_start),
+                    i64::from(hsp.hsp.query_end),
+                    hsp.hsp.query_length as i64,
+                )
+            }) {
+                update_best_evalue(&mut compact_hsp_list);
+            }
+            if !compact_hsp_list.hsps.is_empty() {
+                compact_hsp_list.hsps.shrink_to_fit();
+                subject_result
+                    .x_compact_hsp_lists
+                    .push((q_idx, compact_hsp_list));
+            }
+            preliminary_hits.clear();
+        }
+        scratch.preliminary_hits_by_query = preliminary_hits_by_query;
     }
 
     /// The gapped half of the kernel for one subject with letters (`search_subject`'s last statement,
@@ -722,6 +945,7 @@ impl BlastpPrelimKernel<'_> {
         scanned: ScannedSubject<'_>,
         subject_result: &mut BlastpSubjectResult,
         mut init_hsps: Vec<InitHSP>,
+        chunk: bool,
     ) {
         // `run_call`'s values as its former kernel closure read them: a reference or a `Copy` value
         // each.
@@ -732,8 +956,6 @@ impl BlastpPrelimKernel<'_> {
             context_lookup_bounds,
             concatenated_query,
             x_drop_gapped,
-            gapped_params,
-            gapped_gumbel,
             x_trace_query_base,
             timing_enabled,
             timing,
@@ -1071,11 +1293,37 @@ impl BlastpPrelimKernel<'_> {
                 endpoint_duplicates_purged,
             );
         }
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:586-591
-        // `-subject_besthit` on the subject's list of every query, sorted by score, before the
-        // e-values and the reap by the preliminary e-value.
-        if args.subject_besthit {
-            crate::core::blast_hits::subject_besthit(&mut preliminary_hsp_list, false, |hsp| {
+        // The subject's HSP lists per query (`subject_lists`) after `-subject_besthit`; a hard
+        // chunk's HSPs stay in the list for the merge of the sequence's chunks, which filters the
+        // joined list after each chunk (`db_masked.rs`).
+        if !chunk {
+            self.subject_besthit(&mut preliminary_hsp_list);
+            self.subject_lists(
+                scratch,
+                s_idx,
+                subject.aa_len,
+                values,
+                &mut preliminary_hsp_list,
+                subject_result,
+            );
+        }
+        scratch.restricted_align_array = restricted_align_array;
+        scratch.restricted_align_array.clear();
+        scratch.preliminary_hsp_counts_by_query = preliminary_hsp_counts_by_query;
+        scratch.preliminary_hsp_counts_by_query.clear();
+        scratch.preliminary_hsp_list = preliminary_hsp_list;
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:586-591
+    // `-subject_besthit` on the subject's list of every query, sorted by score, after each
+    // chunk's merge: before the e-values and the reap by the preliminary e-value.
+    /// `-subject_besthit`, when the search asks for it, over a subject's HSPs sorted by score
+    /// (`core::blast_hits::subject_besthit`): at the end of `gapped_subject`, and after each hard
+    /// chunk's merge into a masked sequence's list (`db_masked.rs`).
+    #[inline(always)]
+    pub(super) fn subject_besthit(&self, preliminary_hsp_list: &mut Vec<BlastpPreliminaryHsp>) {
+        if self.args.subject_besthit {
+            crate::core::blast_hits::subject_besthit(preliminary_hsp_list, false, |hsp| {
                 crate::core::blast_hits::BestHitExtent {
                     context: i64::from(hsp.query_context),
                     query_frame: 0,
@@ -1085,15 +1333,43 @@ impl BlastpPrelimKernel<'_> {
                 }
             });
         }
+    }
+
+    /// The HSP lists per query of a subject of `subject_len` letters from its HSPs
+    /// `preliminary_hsp_list` (purged and sorted by score; drained), with the E-values of the
+    /// statistics `values` and the reap by the preliminary E-value, into `subject_result`: the end
+    /// of `gapped_subject`, and of the merge of a hard-masked sequence's chunks (`db_masked.rs`),
+    /// whose statistics are those of the whole sequence.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:869-899
+    /// After the chunks of a subject, the E-values of its HSPs with the subject's length and the
+    /// reap by the preliminary E-value.
+    #[inline(always)]
+    pub(super) fn subject_lists(
+        &self,
+        scratch: &mut BlastpSubjectScratch,
+        s_idx: usize,
+        subject_len: usize,
+        values: &BlastpPrelimValues<'_>,
+        preliminary_hsp_list: &mut Vec<BlastpPreliminaryHsp>,
+        subject_result: &mut BlastpSubjectResult,
+    ) {
+        let Self {
+            query_ids,
+            contexts,
+            gapped_params,
+            gapped_gumbel,
+            ..
+        } = *self;
         if x_hits_flat::x_bphitsflat() {
             x_hits_flat::x_lists_by_query(
-                &mut preliminary_hsp_list,
+                preliminary_hsp_list,
                 contexts,
                 query_ids.len(),
                 &mut scratch.x_hits_order,
                 &mut scratch.x_hits_starts,
                 s_idx as u32,
-                subject.aa_len,
+                subject_len,
                 gapped_params,
                 gapped_gumbel.as_ref(),
                 values.search_spaces,
@@ -1105,7 +1381,7 @@ impl BlastpPrelimKernel<'_> {
             let mut preliminary_hits_by_query =
                 std::mem::take(&mut scratch.preliminary_hits_by_query);
             split_preliminary_hits_by_query_into(
-                &mut preliminary_hsp_list,
+                preliminary_hsp_list,
                 contexts,
                 query_ids.len(),
                 &mut preliminary_hits_by_query,
@@ -1127,7 +1403,7 @@ impl BlastpPrelimKernel<'_> {
                     s_idx as u32,
                     q_idx as u32,
                     ctx.aa_len,
-                    subject.aa_len,
+                    subject_len,
                     gapped_params,
                     gapped_gumbel.as_ref(),
                     &values.search_spaces[q_idx],
@@ -1147,10 +1423,20 @@ impl BlastpPrelimKernel<'_> {
             }
             scratch.preliminary_hits_by_query = preliminary_hits_by_query;
         }
-        scratch.restricted_align_array = restricted_align_array;
-        scratch.restricted_align_array.clear();
-        scratch.preliminary_hsp_counts_by_query = preliminary_hsp_counts_by_query;
-        scratch.preliminary_hsp_counts_by_query.clear();
-        scratch.preliminary_hsp_list = preliminary_hsp_list;
     }
 }
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2713-2733 (cited at
+// `BlastpPrelimKernel::ungapped_subject`) and c++/src/algo/blast/core/blast_hits.c:993-999
+/// `Blast_HSPTest` of the HSPs of an ungapped search's subject (`Blast_HSPListReevaluateUngapped`):
+/// BLASTP has no `-perc_identity` and its minimum hit length is 0, so the test deletes an HSP of a
+/// negative length (`align_length` of an ungapped HSP is the length of its query range,
+/// blast_hits.c:773-780) and keeps the others, an HSP of length 0 among them, in their order (their
+/// scores did not change).
+fn delete_failed_hsp_tests(hsps: &mut Vec<BlastpPreliminaryHsp>) {
+    hsps.retain(|hsp| hsp.query_end - hsp.query_start >= 0);
+}
+
+#[cfg(test)]
+#[path = "prelim_kernel_tests.rs"]
+mod tests;

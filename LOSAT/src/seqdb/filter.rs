@@ -170,7 +170,8 @@ impl OidFilter {
         self
     }
 
-    /// The iteration range `(begin, end)`.
+    /// The iteration range `(begin, end)` (of `SeqDb::included_length`).
+    #[cfg(any(test, feature = "parallel"))]
     pub(crate) fn range(&self) -> (u32, u32) {
         (self.begin, self.end)
     }
@@ -646,13 +647,10 @@ impl LmdbEntry {
         if !ntf_path.is_file() {
             return Err(missing_file(&ntf_path));
         }
-        let ntf_file = DbFile::open(&ntf_path)?;
-        let ntf = Env::open(&ntf_file).map_err(|message| SeqDbError::Format {
-            path: ntf_path.clone(),
-            message,
-        })?;
+        let ntf_file = DbFile::open(&ntf_path).map_err(lmdb_file_error)?;
+        let ntf = Env::open(&ntf_file).map_err(|message| lmdb_open_error(&ntf_file, message))?;
         let nto_path = self.lookup_file("to");
-        let nto = DbFile::open(&nto_path)?;
+        let nto = DbFile::open(&nto_path).map_err(lookup_file_error)?;
         let tax_error = |error: tax_files::TaxError, path: &Path| match error {
             tax_files::TaxError::Data(message) => SeqDbError::Format {
                 path: path.to_path_buf(),
@@ -662,7 +660,7 @@ impl LmdbEntry {
         };
         let mut found = if negative {
             let not_path = self.lookup_file("ot");
-            let not = DbFile::open(&not_path)?;
+            let not = DbFile::open(&not_path).map_err(lookup_file_error)?;
             tax_files::negative_tax_ids_to_oids(&ntf, &nto, &not, self.num_oids, tax_ids)
                 .map_err(|error| tax_error(error, &not_path))?
         } else {
@@ -681,11 +679,8 @@ impl LmdbEntry {
         if !ntf_path.is_file() {
             return Err(missing_file(&ntf_path));
         }
-        let ntf_file = DbFile::open(&ntf_path)?;
-        let ntf = Env::open(&ntf_file).map_err(|message| SeqDbError::Format {
-            path: ntf_path.clone(),
-            message,
-        })?;
+        let ntf_file = DbFile::open(&ntf_path).map_err(lmdb_file_error)?;
+        let ntf = Env::open(&ntf_file).map_err(|message| lmdb_open_error(&ntf_file, message))?;
         tax_files::get_db_tax_ids(&ntf).map_err(|error| match error {
             tax_files::TaxError::Data(message) => SeqDbError::Format {
                 path: ntf_path.clone(),
@@ -709,7 +704,7 @@ impl LmdbEntry {
     /// (NCBI reads past its index there).
     fn oid_tax_ids(&self, oids: &[u32], tax_ids: &mut BTreeSet<i32>) -> Result<(), SeqDbError> {
         let path = self.lookup_file("ot");
-        let file = DbFile::open(&path)?;
+        let file = DbFile::open(&path).map_err(lookup_file_error)?;
         let format = |message: String| SeqDbError::Format {
             path: path.clone(),
             message,
@@ -744,15 +739,12 @@ impl LmdbEntry {
 
     /// The LMDB file, opened for lookups (`with_env`, `lookup::SeqidLookup`).
     pub(super) fn open_file(&self) -> Result<DbFile, SeqDbError> {
-        DbFile::open(&self.lmdb)
+        DbFile::open(&self.lmdb).map_err(lmdb_file_error)
     }
 
     /// The LMDB environment over `file`, this entry's file (`open_file`).
     pub(super) fn open_env<'f>(&self, file: &'f DbFile) -> Result<Env<'f, DbFile>, SeqDbError> {
-        Env::open(file).map_err(|message| SeqDbError::Format {
-            path: self.lmdb.clone(),
-            message,
-        })
+        Env::open(file).map_err(|message| lmdb_open_error(file, message))
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdblmdbset.cpp:81-113
@@ -892,7 +884,7 @@ impl LmdbEntry {
         }
         pairs.sort();
         let nos_path = self.lookup_file("os");
-        let nos_file = DbFile::open(&nos_path)?;
+        let nos_file = DbFile::open(&nos_path).map_err(lookup_file_error)?;
         let lookup =
             tax_files::OidSeqIds::open(&nos_file).map_err(|message| SeqDbError::Format {
                 path: nos_path.clone(),
@@ -1029,8 +1021,10 @@ pub(super) fn entries_accessions_to_oids(
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp:91-96
 // LMDB 0.9.24 (NCBI 598d8ae6 copy): c++/src/util/lmdb/mdb.c:1461-1462
 // (LMDB's notice and the OpenLDAP Public License 2.8: THIRD_PARTY_NOTICES, section 2 (LMDB).)
-/// The error of an LMDB file that opens but is not read: NCBI's text for an empty file (probe
-/// SR4), a file of another format (SR3) and another LMDB version; LOSAT's for the rest.
+/// The error of an LMDB file (`.pdb`/`.ndb`, `.ptf`/`.ntf`) that opens but is not read: NCBI's
+/// text for an empty file (probe SR4; an empty `.ptf` of a taxid list: line WQA D18 review M4,
+/// NCBI BLAST+ 2.17.0 on 2026-11-21), a file of another format (SR3) and another LMDB version;
+/// LOSAT's for the rest.
 fn lmdb_open_error(file: &DbFile, message: String) -> SeqDbError {
     let what = if file.is_empty() {
         "Bad file descriptor"
@@ -1047,22 +1041,38 @@ fn lmdb_open_error(file: &DbFile, message: String) -> SeqDbError {
     SeqDbError::NotFound(format!("LMDB runtime error: mdb_env_open: {what}").into())
 }
 
-/// The error of an LMDB file that does not open: the system's text in NCBI's words (a file
-/// without read permission gives `Permission denied`, checked with NCBI on 2026-10-31).
+/// The error of an LMDB file (`.pdb`/`.ndb`, `.ptf`/`.ntf`) that does not open or whose first
+/// byte cannot be read (`DbFile::open`): `mdb_env_open`'s, with the system's text
+/// (`utils::os_error_text::ncbi_strerror`, so LOSAT Web gives the native CLI's). NCBI BLAST+
+/// 2.17.0 gives it for every code, EMFILE and ENFILE too (a file without read permission:
+/// `Permission denied`, checked with NCBI on 2026-10-31; `open()`, `read()` or `mmap()` of the
+/// file made to fail: line WQA D18 probes 4-7, 2026-11-21).
 fn lmdb_file_error(error: SeqDbError) -> SeqDbError {
-    if let SeqDbError::Open { source, .. } = &error {
-        if let Some(code) = source.raw_os_error() {
-            let text = source.to_string();
-            if let Some(strerror) = text.strip_suffix(&format!(" (os error {code})")) {
-                if cfg!(unix) && !strerror.contains("Too many open files") {
-                    return SeqDbError::NotFound(
-                        format!("LMDB runtime error: mdb_env_open: {strerror}").into(),
-                    );
-                }
-            }
+    if let SeqDbError::Open { source, .. } | SeqDbError::Map { source, .. } = &error {
+        if let Some(strerror) = crate::utils::os_error_text::ncbi_strerror(source) {
+            return SeqDbError::NotFound(
+                format!("LMDB runtime error: mdb_env_open: {strerror}").into(),
+            );
         }
     }
     error
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp:537-538
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp:631-632
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp:714-715
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp:739-740
+/// The error of a lookup file (`.pos`/`.nos`, `.pot`/`.not`, `.pto`/`.nto`) that does not open
+/// or whose first byte cannot be read (`DbFile::open`): NCBI maps these with `CMemoryFile`
+/// itself, outside the reader's atlas, so `CMemoryFile`'s exception reaches the program (`Error:
+/// ` and the report, exit status 255; NCBI BLAST+ 2.17.0 with the file without read permission,
+/// or its `open()` or `mmap()` made to fail, EMFILE included: line WQA D18 probes 5-7,
+/// 2026-11-21).
+fn lookup_file_error(error: SeqDbError) -> SeqDbError {
+    match error.memory_file_exception() {
+        Some(exception) => SeqDbError::Ncbi(exception),
+        None => error,
+    }
 }
 
 fn missing_file(path: &Path) -> SeqDbError {
@@ -1203,10 +1213,13 @@ impl TaxIdLookup<'_> {
         if oids.is_empty() {
             return Err(SeqDbError::NotFound(tax_ids_not_found(&self.entries)));
         }
-        Ok(oids
-            .into_iter()
-            .filter(|&oid| self.db.check_oid(oid))
-            .collect())
+        let mut kept = Vec::with_capacity(oids.len());
+        for oid in oids {
+            if self.db.check_oid(oid)? {
+                kept.push(oid);
+            }
+        }
+        Ok(kept)
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:1307-1325
@@ -1221,9 +1234,9 @@ impl TaxIdLookup<'_> {
     /// visits where the alias files have ranges), ascending.
     pub fn db_tax_ids(&self) -> Result<BTreeSet<i32>, SeqDbError> {
         let mut tax_ids = BTreeSet::new();
+        self.db.build_oid_list()?;
         if self.db.filter.is_some() {
-            self.db.set_up_oid_list();
-            let oids: Vec<u32> = self.db.oid_walk().collect();
+            let oids: Vec<u32> = self.db.oid_walk()?.collect();
             entries_oid_tax_ids(&self.entries, &oids, &mut tax_ids)?;
             return Ok(tax_ids);
         }
@@ -1373,39 +1386,59 @@ impl SeqDb {
         self.list_applied
     }
 
-    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:229-258
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:229-262
     // NCBI builds its OID list at its first use: `x_CheckOrFindOID`, and the readers that call
     // `x_GetOidList` first (`AccessionToOids`, `GetDBTaxIds`, `GetBioseq`, `GetHdr`,
     // `GetSeqIDs`, `OidToGi`, `GetNextOIDChunk`), or in the constructor that scans the totals
-    // with a list (`apply_filter`). Only `x_CheckOrFindOID` sees the difference: before the
-    // build its range is every OID.
-    /// Marks NCBI's OID list as built (`x_GetOidList`): from here on `x_CheckOrFindOID`
-    /// ([`SeqDb::check_or_find_oid`]) sees the iteration range.
-    pub fn set_up_oid_list(&self) {
-        self.oid_list_set_up.store(true, Ordering::Relaxed);
-    }
-
-    /// Whether NCBI's OID list was built before this call, which builds it (a call that reads
-    /// the list: [`SeqDb::check_or_find_oid`], [`SeqDb::oid_walk`]). A load and a store, as
-    /// only one thread (blastdbcmd's) sets the list up.
-    fn oid_list_was_set_up(&self) -> bool {
+    // (`apply_filter`, `check_alias_values`). Only `x_CheckOrFindOID` sees the difference: before
+    // the build its range is every OID. Where an alias file's OID list file fails and NCBI opened
+    // the database without building the list (`read_alias_tree`), the build throws, and
+    // `m_OidListSetup` stays false, so every later use throws again.
+    /// NCBI's build of its OID list (`x_GetOidList`), the one gate of every reader that uses it:
+    /// whether the list was built before this call, which builds it; the error of an alias
+    /// file's OID list file where the build fails.
+    pub fn build_oid_list(&self) -> Result<bool, SeqDbError> {
+        if let Some(failure) = &self.oid_list_error {
+            return Err(failure.to_error());
+        }
         let set_up = self.oid_list_set_up.load(Ordering::Relaxed);
         if !set_up {
-            self.set_up_oid_list();
+            self.oid_list_set_up.store(true, Ordering::Relaxed);
         }
-        set_up
+        Ok(set_up)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:300-313
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:241-251 (at
+    // `common::database::PreliminaryReadError`)
+    // A search asks for its first chunk of OIDs (`GetNextOIDChunk`, which builds the list) just
+    // before it reads their sequences, in its preliminary stage: a build that fails fails the
+    // search where the first read of a sequence file fails, as one that cannot be opened does
+    // (probes G2c, G8 of line RG D1b: `BLAST engine error: Database memory map file error`, exit
+    // status 3; psiblast's full text with exit status 2). The other readers read the sequences
+    // that NCBI reads without building the list (blastdbcmd `-ipg` with `%s`, `%h`, probe S3 of
+    // review A of line RG D1b-1).
+    /// Makes every read of a sequence fail with the failure of NCBI's build of its OID list
+    /// ([`SeqDb::build_oid_list`]), as the reads of a search follow its first request of OIDs:
+    /// the database's opening for a search (`common::database::open_search_database`).
+    pub fn fail_search_reads_with_oid_list(&mut self) {
+        if let Some(failure) = &self.oid_list_error {
+            for volume in &mut self.volumes {
+                volume.fail_sequence_reads(failure.clone());
+            }
+        }
     }
 
     /// `x_CheckOrFindOID(next)` (`OidFilter::check_or_find`; without an OID list every OID of
     /// the volumes passes): whether `next`, moved to the first OID from it on that NCBI's list
-    /// holds, passes NCBI's checks of the iteration range. Sets the list up
-    /// ([`SeqDb::set_up_oid_list`]).
-    pub fn check_or_find_oid(&self, next: &mut u32) -> bool {
-        let set_up = self.oid_list_was_set_up();
-        match &self.filter {
+    /// holds, passes NCBI's checks of the iteration range. Builds the list
+    /// ([`SeqDb::build_oid_list`]).
+    pub fn check_or_find_oid(&self, next: &mut u32) -> Result<bool, SeqDbError> {
+        let set_up = self.build_oid_list()?;
+        Ok(match &self.filter {
             Some(filter) => filter.check_or_find(next, set_up),
             None => *next < self.num_oids(),
-        }
+        })
     }
 
     /// Whether the database includes `oid` ([`SeqDb::num_seqs`]: NCBI's list holds it, inside
@@ -1424,16 +1457,16 @@ impl SeqDb {
     /// `x_CheckOrFindOID(oid2) && oid2 == oid`: whether NCBI's check keeps `oid`. Once the list
     /// is set up, the OIDs it keeps are the included ones ([`SeqDb::includes_oid`]); the first
     /// check of a list not set up keeps any listed OID up to the range's end.
-    pub fn check_oid(&self, oid: u32) -> bool {
+    pub fn check_oid(&self, oid: u32) -> Result<bool, SeqDbError> {
         let mut next = oid;
-        self.check_or_find_oid(&mut next) && next == oid
+        Ok(self.check_or_find_oid(&mut next)? && next == oid)
     }
 
     /// The OIDs of NCBI's loop `for (oid = 0; CheckOrFindOID(oid); oid++)`, ascending
-    /// (`OidFilter::walk`; without an OID list every OID of the volumes). The loop sets the list
-    /// up ([`SeqDb::set_up_oid_list`]).
-    pub fn oid_walk(&self) -> impl Iterator<Item = u32> + '_ {
-        let set_up = self.oid_list_was_set_up();
+    /// (`OidFilter::walk`; without an OID list every OID of the volumes). The loop builds the
+    /// list ([`SeqDb::build_oid_list`]).
+    pub fn oid_walk(&self) -> Result<impl Iterator<Item = u32> + '_, SeqDbError> {
+        let set_up = self.build_oid_list()?;
         let (filter, walk) = match &self.filter {
             Some(filter) => (Some(&**filter), Some(filter.walk(set_up))),
             None => (None, None),
@@ -1443,7 +1476,7 @@ impl SeqDb {
             .zip(filter)
             .into_iter()
             .flat_map(|(walk, filter)| walk.oids(filter));
-        all.into_iter().flatten().chain(listed)
+        Ok(all.into_iter().flatten().chain(listed))
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdblmdbset.cpp:213-262
@@ -1658,7 +1691,7 @@ impl SeqDb {
     // clears every OID of `m_AllBits` (the code above): no OID is searched and each query
     // gets `Filtering resulted in an empty database.` (two or more volumes, or one volume
     // whose every path in the alias files crosses an OID range that cuts it). When `m_AllBits`
-    // is the special all-set (`alias::all_bits_special_set`), the clearing (`ClearBit` below
+    // is the special all-set (`alias::AliasOids::all_bits_special_set`), the clearing (`ClearBit` below
     // 24 OIDs, a `memset` from 24; a release build compiles `_ASSERT(m_Special == eNone)`
     // out) writes into the array its copy left behind, and the set still answers every OID:
     // NCBI searches the whole database
@@ -1932,23 +1965,49 @@ impl SeqDb {
         num_oids: u32,
         rule: Option<DeflineRule>,
     ) -> Result<(), SeqDbError> {
+        // The constructor builds the OID list to scan: an alias file's OID list that fails is
+        // its error, after the list's own (`CSeqDBGiListSet` resolves the list first).
+        self.build_oid_list()?;
         let range = match &self.filter {
-            Some(ranges) => {
-                for (word, range) in words.iter_mut().zip(&ranges.words) {
-                    *word &= range;
+            Some(alias) => {
+                for (word, kept) in words.iter_mut().zip(&alias.words) {
+                    *word &= kept;
                 }
-                ranges.range()
+                self.alias_range
             }
             None => (0, num_oids),
         };
-        let list = OidFilter::new(words, num_oids).with_range(range);
-        let scan = self.scan_walk(&list, list.walk(false))?;
-        let filter = list.with_range((0, num_oids));
         if let Some(rule) = rule.map(Arc::new) {
             for (volume, &start) in self.volumes.iter_mut().zip(&self.volume_starts) {
                 volume.set_defline_rule(Arc::clone(&rule), start);
             }
         }
+        self.list_applied = true;
+        self.constructor_scan(OidFilter::new(words, num_oids).with_range(range))
+            .map(|_| ())
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:117-132
+    // The alias files' own scan (`alias::needs_totals_scan`), as the constructor makes it with a
+    // list (`apply_filter`): the reports, which open the database again without a list, scan
+    // the same OIDs, so the printed counts are this scan (probes B1, B2, U1 of line RG D1b).
+    /// Scans the totals of the alias files' OID list `list` (with its iteration range) as NCBI's
+    /// constructor does without a list: the counts and the printed counts are the scan.
+    pub(super) fn scan_alias(&mut self, list: OidFilter) -> Result<(), SeqDbError> {
+        let scan = self.constructor_scan(list)?;
+        self.alias_scanned = true;
+        self.printed_num_seqs = scan.count as i32;
+        self.printed_total_length = scan.total;
+        Ok(())
+    }
+
+    /// The constructor's scan of the OID list `list` (`x_ScanTotals` over the OIDs of its first
+    /// `x_CheckOrFindOID` loop, `OidFilter::walk`) and its `SetIterationRange(0, 0)`: the list,
+    /// with every OID in range, becomes the database's, and the counts are the scan.
+    fn constructor_scan(&mut self, list: OidFilter) -> Result<ScanTotals, SeqDbError> {
+        let num_oids = self.num_oids();
+        let scan = self.scan_walk(&list, list.walk(false))?;
+        let filter = list.with_range((0, num_oids));
         // `x_ScanTotals` counts the OIDs in an `int` (the volume set holds fewer than 2^31 OIDs:
         // `open_tree`) and keeps the shortest length without the `<= 0` fallback.
         self.num_seqs = filter.count();
@@ -1958,12 +2017,12 @@ impl SeqDb {
             max_length: scan.longest,
             min_length: scan.shortest as i32,
         };
-        self.list_applied = true;
         self.oid_list_set_up.store(true, Ordering::Relaxed);
         // The scan is that of `included_length` when it visited every included OID.
         self.set_included_length((scan.count == filter.count()).then_some(scan.total));
         self.filter = Some(Box::new(filter));
-        self.update_first_oid_length()
+        self.update_first_oid_length()?;
+        Ok(scan)
     }
 
     /// The database restricted to the OIDs that `keep` takes, as a list that names them does:
@@ -1997,6 +2056,33 @@ impl SeqDb {
         }
         #[cfg(not(any(test, feature = "parallel")))]
         let _ = length;
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:846-862
+    // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:545-555 (at
+    // `blastdbcmd::write_info_head`)
+    // A database whose constructor scanned the totals scans them again with exact lengths,
+    // over the OIDs of its list set up with every OID in range (`x_CheckOrFindOID`), and keeps
+    // the longest length of that scan, which blastdbcmd `-info` prints after the total.
+    /// `GetExactTotalLength`, with the `GetMaxLength` after it: the total and the longest exact
+    /// length of the included OIDs where the database scanned its totals (a list, an alias
+    /// file's `OIDLIST`), else [`SeqDb::total_length`] and [`SeqDb::max_length`].
+    pub fn exact_totals(&self) -> Result<(u64, u32), SeqDbError> {
+        let filter = match &self.filter {
+            Some(filter) if self.alias_scanned || self.list_applied => filter,
+            _ => return Ok((self.counts.total_length, self.counts.max_length)),
+        };
+        let (mut total, mut longest) = (0u64, 0u32);
+        for oid in filter.walk(true).oids(filter) {
+            let at = self.locate_oid(oid)?;
+            let length = match self.seqtype {
+                SeqType::Protein => self.volumes[at.volume].protein_length(at.vol_oid)?,
+                SeqType::Nucleotide => self.nucleotide_length_at(at)? as u32,
+            };
+            total += u64::from(length);
+            longest = longest.max(length);
+        }
+        Ok((total, longest))
     }
 
     /// NCBI's totals of the OIDs of the walk `walk` of the list `list` (`OidFilter::walk`).
@@ -2149,756 +2235,5 @@ fn approx_length(seqtype: SeqType, seq: &[u32], amb: &[u32], i: usize, oid: u32)
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn filter_of(num_oids: u32, included: &[u32]) -> OidFilter {
-        let mut words = vec![0u64; (num_oids as usize).div_ceil(64)];
-        for &oid in included {
-            words[(oid / 64) as usize] |= 1 << (oid % 64);
-        }
-        OidFilter::new(words, num_oids)
-    }
-
-    /// A deterministic pseudo-random sequence (xorshift).
-    fn next(state: &mut u64) -> u64 {
-        *state ^= *state << 13;
-        *state ^= *state >> 7;
-        *state ^= *state << 17;
-        *state
-    }
-
-    #[test]
-    fn rank_select_and_runs_agree_with_a_list() {
-        let mut state = 0x2026_1030_u64;
-        for &(num_oids, per_mille) in &[
-            (1u32, 1000u64),
-            (63, 500),
-            (64, 1000),
-            (65, 0),
-            (511, 900),
-            (512, 10),
-            (513, 500),
-            (5000, 2),
-            (5000, 998),
-            (20_000, 300),
-        ] {
-            let included: Vec<u32> = (0..num_oids)
-                .filter(|_| next(&mut state) % 1000 < per_mille)
-                .collect();
-            let filter = filter_of(num_oids, &included);
-            assert_eq!(filter.count() as usize, included.len(), "{num_oids}");
-            for (ordinal, &oid) in included.iter().enumerate() {
-                assert_eq!(
-                    filter.select(ordinal as u32),
-                    oid,
-                    "{num_oids} select {ordinal}"
-                );
-            }
-            for oid in 0..=num_oids {
-                let below = included.partition_point(|&o| o < oid) as u32;
-                assert_eq!(filter.rank(oid), below, "{num_oids} rank {oid}");
-                assert_eq!(filter.contains(oid), included.binary_search(&oid).is_ok());
-                let limit = num_oids.min(oid + 130);
-                let mut end = oid;
-                while end < limit && included.binary_search(&end).is_ok() {
-                    end += 1;
-                }
-                assert_eq!(
-                    filter.run_end(oid, limit),
-                    end.max(oid.min(limit)),
-                    "{num_oids} run {oid}"
-                );
-            }
-        }
-    }
-
-    /// NCBI's `x_CheckOrFindOID` (c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:272-296, cited at `OidFilter::check_or_find`)
-    /// over the list `listed` of `num_oids` OIDs with the range `[begin, end)` once set up.
-    fn ncbi_check_or_find(
-        listed: &[u32],
-        num_oids: u32,
-        (begin, end): (u32, u32),
-        set_up: &mut bool,
-        next: &mut u32,
-    ) -> bool {
-        let (restrict_begin, restrict_end) = if *set_up { (begin, end) } else { (0, num_oids) };
-        let mut success = true;
-        if *next < restrict_begin {
-            *next = restrict_begin;
-        }
-        if *next >= restrict_end {
-            success = false;
-        }
-        *set_up = true;
-        if success {
-            match listed.iter().find(|&&oid| oid >= *next) {
-                Some(&oid) => {
-                    *next = oid;
-                    success = oid <= end;
-                }
-                None => success = false,
-            }
-        }
-        success
-    }
-
-    #[test]
-    fn the_range_and_ncbis_checks_agree_with_ncbis_loop() {
-        let mut state = 0x2026_1113_u64;
-        for round in 0..400u32 {
-            let num_oids = [0u32, 1, 5, 64, 65, 130, 700][(round % 7) as usize];
-            let per_mille = [0u64, 300, 700, 1000][(round / 7 % 4) as usize];
-            let listed: Vec<u32> = (0..num_oids)
-                .filter(|_| next(&mut state) % 1000 < per_mille)
-                .collect();
-            let end = (next(&mut state) % (u64::from(num_oids) + 1)) as u32;
-            let begin = (next(&mut state) % (u64::from(end) + 1)) as u32;
-            let filter = filter_of(num_oids, &listed).with_range((begin, end));
-            let included: Vec<u32> = listed
-                .iter()
-                .copied()
-                .filter(|oid| (begin..end).contains(oid))
-                .collect();
-            let case = format!("{num_oids} {listed:?} [{begin}, {end})");
-            // The search's view: the listed OIDs inside the range.
-            assert_eq!(filter.count() as usize, included.len(), "{case}");
-            for (ordinal, &oid) in included.iter().enumerate() {
-                assert_eq!(filter.select(ordinal as u32), oid, "{case}");
-            }
-            for oid in 0..=num_oids {
-                let below = included.partition_point(|&o| o < oid) as u32;
-                assert_eq!(filter.rank(oid), below, "{case} rank {oid}");
-                assert_eq!(filter.contains(oid), included.contains(&oid), "{case}");
-                let limit = num_oids.min(oid + 70);
-                let mut stop = oid;
-                while stop < limit && included.contains(&stop) {
-                    stop += 1;
-                }
-                assert_eq!(
-                    filter.run_end(oid, limit),
-                    stop.max(oid.min(limit)),
-                    "{case}"
-                );
-            }
-            // NCBI's loop from OID 0, with the list set up before it or not.
-            for set_up in [false, true] {
-                let mut flag = set_up;
-                let mut want = Vec::new();
-                let mut oid = 0;
-                while ncbi_check_or_find(&listed, num_oids, (begin, end), &mut flag, &mut oid) {
-                    want.push(oid);
-                    oid += 1;
-                }
-                let walk: Vec<u32> = filter.walk(set_up).oids(&filter).collect();
-                assert_eq!(walk, want, "{case} set up {set_up}");
-                // Each check alone.
-                for oid in 0..=num_oids {
-                    let (mut flag, mut at, mut got) = (set_up, oid, oid);
-                    let want =
-                        ncbi_check_or_find(&listed, num_oids, (begin, end), &mut flag, &mut at);
-                    assert_eq!(
-                        (filter.check_or_find(&mut got, set_up), got),
-                        (want, at),
-                        "{case} set up {set_up} check {oid}"
-                    );
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn bits_past_the_last_oid_are_not_included() {
-        let filter = OidFilter::new(vec![u64::MAX; 2], 70);
-        assert_eq!(filter.count(), 70);
-        assert!(!filter.contains(70));
-        assert_eq!(filter.run_end(60, 128), 70);
-        assert_eq!(filter.select(69), 69);
-    }
-
-    fn tx_dir() -> PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/seqdb/lmdb")
-    }
-
-    /// NCBI's OIDs of `tx` for each taxid set (`blastdbcmd -taxids S -no_taxid_expansion` for a
-    /// positive set, the sequences `blastp -negative_taxids S -no_taxid_expansion` searched for a
-    /// negative one: `tests/seqdb/lmdb/expected/tx_oracle.txt`).
-    #[test]
-    fn restricted_oids_are_ncbis_on_the_tx_fixture() {
-        let oracle = std::fs::read_to_string(tx_dir().join("expected/tx_oracle.txt")).unwrap();
-        let name = tx_dir().join("tx");
-        let mut checked = 0;
-        for line in oracle.lines().filter(|line| !line.trim().is_empty()) {
-            let mut fields = line.split(' ').filter(|field| !field.is_empty());
-            let kind = fields.next().unwrap();
-            let set: BTreeSet<i32> = fields
-                .next()
-                .unwrap()
-                .split(',')
-                .map(|taxid| taxid.parse().unwrap())
-                .collect();
-            let rest: Vec<&str> = fields.collect();
-            let list = match kind {
-                "P" => TaxidList::Positive(set),
-                "N" => TaxidList::Negative(set),
-                other => panic!("{other}"),
-            };
-            let mut db = SeqDb::open(name.to_str().unwrap(), SeqType::Protein).unwrap();
-            let whole = (db.num_seqs() as i32, db.total_length());
-            let result = db.restrict_taxids(&list);
-            if rest.first() == Some(&"Error:") {
-                let Err(SeqDbError::NotFound(text)) = result else {
-                    panic!("{line}: {result:?}");
-                };
-                assert_eq!(
-                    text, b"Taxonomy ID(s) not found in the tx database.",
-                    "{line}"
-                );
-                continue;
-            }
-            let warning = result.unwrap_or_else(|error| panic!("{line}: {error}"));
-            let want: Vec<u32> = rest.iter().map(|oid| oid.parse().unwrap()).collect();
-            let got: Vec<u32> = (0..db.num_seqs())
-                .map(|ordinal| db.oid(ordinal).get())
-                .collect();
-            assert_eq!(got, want, "{line}");
-            assert_eq!(
-                (db.printed_num_seqs(), db.printed_total_length()),
-                whole,
-                "{line}"
-            );
-            // A negative list of taxids that `tx` does not hold excludes nothing and warns.
-            assert_eq!(
-                warning.is_some(),
-                matches!(&list, TaxidList::Negative(set) if set.iter().all(|t| *t == 999)),
-                "{line}"
-            );
-            // The sequences read through the ordinal ids are those of the OIDs.
-            let mut whole_db = SeqDb::open(name.to_str().unwrap(), SeqType::Protein).unwrap();
-            whole_db.filter = None;
-            let mut lengths = 0u64;
-            for (ordinal, &oid) in want.iter().enumerate() {
-                let filtered = db.read_sequence(ordinal as u32).unwrap();
-                let plain = whole_db.read_sequence(oid).unwrap();
-                assert_eq!(filtered.protein(0), plain.protein(0), "{line} {oid}");
-                lengths += filtered.protein(0).len() as u64;
-            }
-            assert_eq!(db.total_length(), lengths, "{line}");
-            let mut first = 0;
-            let mut seen = Vec::new();
-            let mut listed = Vec::new();
-            while let Some(range) = db.next_block(first, 1 << 20) {
-                listed.push(range);
-                for at in range.first..range.end {
-                    seen.push(db.volume_starts[range.volume] + at);
-                }
-                first = range.end_ordinal();
-            }
-            assert_eq!(seen, want, "{line}: blocks");
-            // LOSAT_X_BNDBSMALL: listed in runs, the blocks are the same (cut at excluded OIDs).
-            assert_eq!(db.x_next_blocks(0, 1 << 20, usize::MAX), listed, "{line}");
-            for max_bytes in [0, 1, 100] {
-                let mut first = 0;
-                let mut listed = Vec::new();
-                while let Some(range) = db.next_block(first, max_bytes) {
-                    listed.push(range);
-                    first = range.end_ordinal();
-                }
-                for entries in [1, 2, 1 << 14] {
-                    assert_eq!(
-                        db.x_next_blocks_in(0, max_bytes, usize::MAX, entries),
-                        listed,
-                        "{line} within {max_bytes}, runs of {entries}"
-                    );
-                }
-            }
-            checked += 1;
-        }
-        assert!(checked >= 30, "{checked}");
-    }
-
-    fn ids_db(name: &str, seqtype: SeqType) -> SeqDb {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/db_search/ids")
-            .join(name);
-        SeqDb::open(path.to_str().unwrap(), seqtype).unwrap()
-    }
-
-    fn list_of(text: &[u8], negative: bool) -> SeqidList {
-        let mut warnings = Vec::new();
-        SeqidList {
-            negative,
-            file: seqidlist::read_si_list(text, &mut warnings).unwrap(),
-        }
-    }
-
-    /// The Seq-id strings (`GetSeqIdString(true)`) of the definition lines the restricted
-    /// database keeps, per ordinal id.
-    fn kept_ids(db: &SeqDb) -> Vec<Vec<String>> {
-        (0..db.num_seqs())
-            .map(|ordinal| {
-                let at = db.locate_oid(db.oid(ordinal).get()).unwrap();
-                let set = db.volumes[at.volume].defline_set(at.vol_oid).unwrap();
-                set.deflines
-                    .iter()
-                    .flat_map(|d| d.ids.iter())
-                    .map(|id| {
-                        let mut out = Vec::new();
-                        label::content(id, true, &mut out);
-                        String::from_utf8(out).unwrap()
-                    })
-                    .collect()
-            })
-            .collect()
-    }
-
-    #[test]
-    fn the_seq_align_id_lookup_finds_the_sequence_ncbi_finds_first() {
-        // tests/db_search/ids/make_ids.py (line DBID N1, probe R/accoid/p1 with NCBI 2.17.0):
-        // the Seq-align id of the second record of pairs 1 to 3 finds the first record, those of
-        // pairs 4 and 5 find their own records; version 5 through the LMDB key, version 4 the
-        // ISAM.
-        // `pdup_ab` and `pdup_ac` are aliases of two databases (two LMDB files): the second's
-        // record finds the first's.
-        let pairs = [0, 0, 2, 2, 4, 4, 6, 7, 8, 9].map(Some);
-        for (name, seqtype, want) in [
-            ("pfound_v5", SeqType::Protein, &pairs[..]),
-            ("pfound_v4", SeqType::Protein, &pairs[..]),
-            ("nfound_v5", SeqType::Nucleotide, &pairs[..2]),
-            ("nfound_v4", SeqType::Nucleotide, &pairs[..2]),
-            ("pdup_ab", SeqType::Protein, &pairs[..2]),
-            ("pdup_ac", SeqType::Protein, &pairs[..2]),
-        ] {
-            let db = ids_db(name, seqtype);
-            let lookup = db.seqid_lookup().unwrap();
-            let found: Vec<Option<u32>> = (0..db.num_seqs())
-                .map(|ordinal| {
-                    let set = db.defline_set(ordinal).unwrap();
-                    lookup.seqid_to_oid(set.alignment_id().unwrap()).unwrap()
-                })
-                .collect();
-            assert_eq!(found, want, "{name}");
-        }
-        // A list that leaves the first record out: `gb|AAA00001|` finds its own record, as
-        // NCBI's lookup through `x_CheckOrFindOID` (row db.id.blastp.found.neg.6; version 4
-        // keeps every OID here and refuses such a list when the search reads the volume).
-        let mut db = ids_db("pfound_v5", SeqType::Protein);
-        db.restrict(
-            &DbList::Seqids(list_of(b"AAA00001.1\n", true)),
-            &mut Vec::new(),
-        )
-        .unwrap();
-        assert_eq!((db.oid(0).get(), db.ordinal_of(1)), (1, 0));
-        let lookup = db.seqid_lookup().unwrap();
-        let set = db.defline_set(0).unwrap();
-        assert_eq!(
-            lookup.seqid_to_oid(set.alignment_id().unwrap()).unwrap(),
-            Some(1)
-        );
-    }
-
-    #[test]
-    fn a_positive_seqid_list_keeps_the_named_oids_and_their_lines() {
-        let whole = ids_db("prot_v5", SeqType::Protein);
-        let mut db = ids_db("prot_v5", SeqType::Protein);
-        let mut warnings = Vec::new();
-        db.restrict(
-            &DbList::Seqids(list_of(b">DAA10001.1\n", false)),
-            &mut warnings,
-        )
-        .unwrap();
-        assert_eq!(
-            warnings,
-            [ListWarning::Posted(TEXT_LIST_WARNING.to_string())]
-        );
-        assert!(db.is_restricted());
-        assert_eq!(db.num_seqs(), 1);
-        assert_eq!(kept_ids(&db), [vec!["DAA10001.1".to_string()]]);
-        assert!(db.total_length() > 0 && db.total_length() < whole.total_length());
-        assert_eq!(db.printed_num_seqs(), whole.num_seqs() as i32);
-
-        // Versionless accessions, a pdb chain, a general id as db:tag, an unknown id, a gi.
-        let mut db = ids_db("prot_v5", SeqType::Protein);
-        db.restrict(
-            &DbList::Seqids(list_of(
-                b"NP_100006 XP_000011\n2XYZ_B mydb:prot10\nUNKNOWN1\ngi|1414\n",
-                false,
-            )),
-            &mut Vec::new(),
-        )
-        .unwrap();
-        assert_eq!(db.num_seqs(), 4);
-        for ids in kept_ids(&db) {
-            assert!(
-                ids.iter().any(|id| {
-                    ["NP_100006.1", "XP_000011.2", "2XYZ_B", "mydb:prot10"].contains(&id.as_str())
-                }),
-                "{ids:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn a_negative_seqid_list_excludes_an_oid_only_when_every_id_is_covered() {
-        let whole = ids_db("prot_v5", SeqType::Protein).num_seqs();
-        // `lcl|Subject_28|tpg|DAA10008.1|`: one id listed keeps the OID, both exclude it (the
-        // versionless `DAA10008` covers the stored `DAA10008.1`).
-        let mut db = ids_db("prot_v5", SeqType::Protein);
-        db.restrict(
-            &DbList::Seqids(list_of(b"Subject_28\n", true)),
-            &mut Vec::new(),
-        )
-        .unwrap();
-        assert_eq!(db.num_seqs(), whole);
-        assert!(db.is_restricted());
-        let mut db = ids_db("prot_v5", SeqType::Protein);
-        db.restrict(
-            &DbList::Seqids(list_of(b"Subject_28\nDAA10008\n", true)),
-            &mut Vec::new(),
-        )
-        .unwrap();
-        assert_eq!(db.num_seqs(), whole - 1);
-        // A definition line whose only ids are gis or `ti` general ids is dropped by a
-        // negative seqid list (`CSeqDBNegativeList::FindId` matches no type): an OID of such
-        // lines alone keeps none: its hits get no Seq-align (`keeps_line`), and a read of its
-        // lines still refuses (no report reads it); every other kept OID reads.
-        let unrestricted = ids_db("prot_v5", SeqType::Protein);
-        let gi_only: Vec<u32> = (0..unrestricted.num_seqs())
-            .filter(|&oid| {
-                let at = unrestricted.locate_oid(oid).unwrap();
-                let set = unrestricted.volumes[at.volume]
-                    .defline_set(at.vol_oid)
-                    .unwrap();
-                set.deflines.iter().all(|d| {
-                    d.ids.iter().all(|id| {
-                        matches!(id, ParsedSeqId::Gi(_))
-                            || matches!(id, ParsedSeqId::General(tag) if tag.db == b"ti")
-                    })
-                })
-            })
-            .collect();
-        assert!(!gi_only.is_empty());
-        for ordinal in 0..db.num_seqs() {
-            let oid = db.oid(ordinal).get();
-            let at = db.locate_oid(oid).unwrap();
-            match db.volumes[at.volume].defline_set(at.vol_oid) {
-                Ok(set) => {
-                    assert!(!gi_only.contains(&oid), "{oid}");
-                    assert!(db.keeps_line(ordinal).unwrap(), "{oid}");
-                    assert!(set.deflines.iter().all(|d| {
-                        d.ids.iter().all(|id| {
-                            let mut out = Vec::new();
-                            label::content(id, true, &mut out);
-                            out != b"DAA10008.1"
-                        })
-                    }));
-                }
-                Err(error) => {
-                    assert!(gi_only.contains(&oid), "{oid}: {error}");
-                    assert!(error.to_string().contains("none of its definition lines"));
-                    assert!(!db.keeps_line(ordinal).unwrap(), "{oid}");
-                }
-            }
-        }
-        // A nucleotide local id of its own OID.
-        let whole = ids_db("nucl_v5", SeqType::Nucleotide).num_seqs();
-        let mut db = ids_db("nucl_v5", SeqType::Nucleotide);
-        db.restrict(
-            &DbList::Seqids(list_of(b"mynuc6\nUNKNOWN1\n", true)),
-            &mut Vec::new(),
-        )
-        .unwrap();
-        assert_eq!(db.num_seqs(), whole - 1);
-    }
-
-    #[test]
-    fn a_list_that_loses_every_id_leaves_a_version_5_database_of_one_volume_whole() {
-        let whole = ids_db("prot_v5", SeqType::Protein).num_seqs();
-        for negative in [false, true] {
-            let mut db = ids_db("prot_v5", SeqType::Protein);
-            let mut warnings = Vec::new();
-            db.restrict(
-                &DbList::Seqids(list_of(b"gi|1414\ngi|2\n", negative)),
-                &mut warnings,
-            )
-            .unwrap();
-            assert_eq!(
-                warnings,
-                [
-                    ListWarning::Posted(TEXT_LIST_WARNING.to_string()),
-                    ListWarning::Posted(EMPTY_LIST_WARNING.to_string())
-                ]
-            );
-            assert!(db.is_restricted());
-            assert_eq!(db.num_seqs(), whole);
-            assert_eq!(kept_ids(&db).len(), whole as usize);
-            assert!(db.min_length() > 0);
-        }
-    }
-
-    // Line DBID gisl: `x_ApplyUserGiList` clears every OID of a positive list that lost every id,
-    // except where NCBI's OID bit set is the special all-set (one volume that the alias files
-    // keep whole); a negative one excludes nothing.
-    #[test]
-    fn a_positive_list_that_loses_every_id_keeps_no_oid_unless_one_volume_is_kept_whole() {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search");
-        for (name, seqtype, whole) in [
-            ("taxfilter/tfp", SeqType::Protein, true),
-            // `FIRST_OID 1`, `LAST_OID 23`: the whole volume.
-            ("aliaskeys/p_r123", SeqType::Protein, true),
-            // A range and the volume itself; the same volume twice.
-            ("aliaskeys/p_twice", SeqType::Protein, true),
-            ("aliaskeys/p_dupvol", SeqType::Protein, true),
-            // The whole volume and a range inside it, in both orders.
-            ("aliaskeys/p_cover", SeqType::Protein, true),
-            ("aliaskeys/p_coverr", SeqType::Protein, true),
-            // An alias of an alias; the whole range above it.
-            ("aliaskeys/p_chain", SeqType::Protein, true),
-            ("aliaskeys/p_above", SeqType::Protein, true),
-            // Two ranges ORed (a bit array), then the whole range.
-            ("aliaskeys/p_arrcov", SeqType::Protein, true),
-            // One volume of a nucleotide database.
-            ("taxfilter/tfn.00", SeqType::Nucleotide, true),
-            // A range inside the volume; two ranges ORed, and two whose union is the volume.
-            ("aliaskeys/p_range", SeqType::Protein, false),
-            ("aliaskeys/p_union", SeqType::Protein, false),
-            ("aliaskeys/p_halves", SeqType::Protein, false),
-            // A range that cuts the volume above an alias without one.
-            ("aliaskeys/p_abovecut", SeqType::Protein, false),
-            // Two volumes; one of them inside a range.
-            ("taxfilter/tfn", SeqType::Nucleotide, false),
-            ("aliaskeys/n_vol1", SeqType::Nucleotide, false),
-        ] {
-            let path = root.join(name);
-            let path = path.to_str().unwrap();
-            let unrestricted = SeqDb::open(path, seqtype).unwrap().num_seqs();
-            for negative in [false, true] {
-                let mut db = SeqDb::open(path, seqtype).unwrap();
-                let mut warnings = Vec::new();
-                db.restrict(
-                    &DbList::Seqids(list_of(b"gi|1414\n", negative)),
-                    &mut warnings,
-                )
-                .unwrap();
-                assert_eq!(
-                    warnings.last(),
-                    Some(&ListWarning::Posted(EMPTY_LIST_WARNING.to_string())),
-                    "{name}"
-                );
-                let kept = if negative || whole { unrestricted } else { 0 };
-                assert_eq!(db.num_seqs(), kept, "{name}, negative {negative}");
-            }
-        }
-    }
-
-    // Probes T08-T12, C01-C97 of line DI-8: 0 OIDs, NCBI's statistics read OID 0 and one sequence.
-    #[test]
-    fn a_list_without_a_kept_sequence_has_the_statistics_of_oid_zero() {
-        for (name, seqtype) in [
-            ("prot_v5", SeqType::Protein),
-            ("nucl_v5", SeqType::Nucleotide),
-        ] {
-            let mut db = ids_db(name, seqtype);
-            let first = match seqtype {
-                SeqType::Protein => u64::from(db.protein_length(0).unwrap()),
-                SeqType::Nucleotide => db.nucleotide_length(0).unwrap() as u64,
-            };
-            let whole = (db.total_length() as i64, db.num_seqs() as i32);
-            assert!(!db.filtered_empty());
-            assert_eq!(db.statistics_numbers(), whole, "{name}");
-            let mut warnings = Vec::new();
-            db.restrict(
-                &DbList::Seqids(list_of(b"UNKNOWN1\n", false)),
-                &mut warnings,
-            )
-            .unwrap();
-            assert!(db.filtered_empty(), "{name}");
-            assert_eq!((db.num_seqs(), db.total_length()), (0, 0), "{name}");
-            assert_eq!(db.statistics_numbers(), (first as i64, 1), "{name}");
-            assert_eq!(db.printed_num_seqs(), whole.1, "{name}");
-            assert!(db.next_block(0, 1 << 20).is_none(), "{name}");
-        }
-    }
-
-    #[test]
-    fn a_binary_list_selects_what_its_text_list_selects() {
-        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search/seqidlist");
-        let text = std::fs::read(dir.join("sl_nucl.txt")).unwrap();
-        let binary = std::fs::read(dir.join("sl_nucl.bsl")).unwrap();
-        let mut from_text = ids_db("nucl_v5", SeqType::Nucleotide);
-        let mut warnings = Vec::new();
-        from_text
-            .restrict(&DbList::Seqids(list_of(&text, false)), &mut warnings)
-            .unwrap();
-        assert_eq!(warnings.len(), 1);
-        let mut from_binary = ids_db("nucl_v5", SeqType::Nucleotide);
-        let mut warnings = Vec::new();
-        from_binary
-            .restrict(&DbList::Seqids(list_of(&binary, false)), &mut warnings)
-            .unwrap();
-        assert!(warnings.is_empty());
-        assert!(from_text.num_seqs() >= 6);
-        assert_eq!(from_text.num_seqs(), from_binary.num_seqs());
-        assert_eq!(kept_ids(&from_text), kept_ids(&from_binary));
-        assert_eq!(from_text.total_length(), from_binary.total_length());
-        // A recorded database length that is not this database's: NCBI's warning, the list used.
-        let badlen = std::fs::read(dir.join("sl_tfp_badlen.bsl")).unwrap();
-        let mut db = ids_db("prot_v5", SeqType::Protein);
-        let mut warnings = Vec::new();
-        let result = db.restrict(&DbList::Seqids(list_of(&badlen, false)), &mut warnings);
-        assert_eq!(warnings, [ListWarning::Posted(DB_INFO_WARNING.to_string())]);
-        // tfp's ids are not in prot_v5: no OID is kept (the search programs refuse that).
-        assert!(result.is_ok() && db.num_seqs() == 0);
-    }
-
-    #[test]
-    fn a_sequence_kept_without_a_definition_line_gets_no_seq_align() {
-        // `lcl|Subject_29|pdb|3ABC|C`: the molecule name is a lookup key, no line's id. The
-        // list keeps the sequence (it is searched and counted), but none of its lines: NCBI
-        // makes no Seq-align of its hits (`keeps_line`); a read of its lines refuses.
-        let mut db = ids_db("prot_v5", SeqType::Protein);
-        db.restrict(
-            &DbList::Seqids(list_of(b"3ABC\nDAA10001.1\n", false)),
-            &mut Vec::new(),
-        )
-        .unwrap();
-        assert_eq!(db.num_seqs(), 2);
-        assert!(db.drops_lineless_hits());
-        let kept: Vec<bool> = (0..2)
-            .map(|ordinal| db.keeps_line(ordinal).unwrap())
-            .collect();
-        assert_eq!(kept.iter().filter(|&&kept| kept).count(), 1, "{kept:?}");
-        let lineless = kept.iter().position(|&kept| !kept).unwrap() as u32;
-        let error = db.defline_set(lineless).unwrap_err();
-        assert!(
-            error
-                .to_string()
-                .contains("but none of its definition lines, and NCBI leaves its hits out"),
-            "{error}"
-        );
-        assert!(error.ncbi_message().is_none());
-        // Without a seqid list every sequence keeps its lines, and none is read.
-        let whole = ids_db("prot_v5", SeqType::Protein);
-        assert!(!whole.drops_lineless_hits());
-        assert!(whole.keeps_line(0).unwrap());
-    }
-
-    #[test]
-    fn a_negative_list_with_ids_excludes_its_lineless_sequences_at_the_fetches() {
-        // A negative seqid list keeps a line with an id that is neither a gi nor a ti nor listed.
-        // prot_v4's sequences 14 (`gi|1414`) and 28 (`gnl|ti|123`) have one line, with a gi or a
-        // ti only, and the one line of sequence 11, `ref|XP_000011.2|`, is the list's
-        // `XP_000011`: the list keeps the three sequences (NCBI 2.17.0's statistics count all 53
-        // under it) and removes their lines. NCBI's id set holds the list's ids, so its fetches
-        // with `check_oid_exclusion` exclude them.
-        let mut db = ids_db("prot_v4", SeqType::Protein);
-        db.restrict(
-            &DbList::Seqids(list_of(b"XP_000011\n", true)),
-            &mut Vec::new(),
-        )
-        .unwrap();
-        assert!(db.drops_lineless_hits());
-        assert!(db.excludes_lineless_at_fetch());
-        let lineless: Vec<u32> = (0..db.num_seqs() as u32)
-            .filter(|&ordinal| !db.keeps_line(ordinal).unwrap())
-            .collect();
-        assert_eq!(lineless, [11, 14, 28]);
-        // A positive list leaves NCBI's id set blank: its sequences without a line are not
-        // excluded at the fetches, and leave at the Seq-aligns.
-        let mut positive = ids_db("prot_v5", SeqType::Protein);
-        positive
-            .restrict(
-                &DbList::Seqids(list_of(b"3ABC\nDAA10001.1\n", false)),
-                &mut Vec::new(),
-            )
-            .unwrap();
-        assert!(positive.drops_lineless_hits());
-        assert!(!positive.excludes_lineless_at_fetch());
-        // A negative list of gis only is empty on a version 5 database once the gis are dropped
-        // (`s_ProcessSeqIDsForV5`): no line rule, no id set.
-        let mut gis = ids_db("prot_v5", SeqType::Protein);
-        gis.restrict(
-            &DbList::Seqids(list_of(b"gi|1414\n", true)),
-            &mut Vec::new(),
-        )
-        .unwrap();
-        assert!(!gis.drops_lineless_hits());
-        assert!(!gis.excludes_lineless_at_fetch());
-    }
-
-    #[test]
-    fn a_version_4_database_refuses_a_binary_seqid_list() {
-        let binary = std::fs::read(
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search/seqidlist/sl_tfp.bsl"),
-        )
-        .unwrap();
-        let mut db = ids_db("prot_v4", SeqType::Protein);
-        let error = db
-            .restrict(&DbList::Seqids(list_of(&binary, false)), &mut Vec::new())
-            .unwrap_err();
-        assert_eq!(
-            error.ncbi_message().as_deref(),
-            Some(BINARY_LIST_V4_ERROR.as_bytes())
-        );
-    }
-
-    #[test]
-    fn a_version_4_database_refuses_a_taxid_list() {
-        let name = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/seqdb/db/prot_v4");
-        let mut db = SeqDb::open(name.to_str().unwrap(), SeqType::Protein).unwrap();
-        let error = db
-            .restrict_taxids(&TaxidList::Positive([9606].into_iter().collect()))
-            .unwrap_err();
-        assert_eq!(
-            error.ncbi_message().as_deref(),
-            Some(b"Taxonomy filtering is not supported in v4 BLAST dbs".as_slice())
-        );
-    }
-
-    fn defline(taxid: Option<i32>, links: Option<Vec<i32>>) -> BlastDefline {
-        BlastDefline {
-            taxid,
-            links,
-            ..BlastDefline::default()
-        }
-    }
-
-    #[test]
-    fn definition_lines_follow_ncbis_rules() {
-        let set = |ids: &[i32]| ids.iter().copied().collect::<BTreeSet<i32>>();
-        let positive = DeflineRule::Taxids(set(&[9606, 10090]));
-        assert!(positive.keeps(&defline(Some(9606), None)));
-        assert!(positive.keeps(&defline(Some(1), Some(vec![10090]))));
-        assert!(!positive.keeps(&defline(Some(1), Some(vec![2]))));
-        // `IsSetTaxid`: an absent taxid is not 0.
-        assert!(!DeflineRule::Taxids(set(&[0])).keeps(&defline(None, None)));
-        assert!(DeflineRule::Taxids(set(&[0])).keeps(&defline(Some(0), None)));
-
-        let negative = DeflineRule::NegativeTaxids(set(&[9606]));
-        assert!(!negative.keeps(&defline(Some(9606), None)));
-        assert!(negative.keeps(&defline(Some(9606), Some(vec![10090]))));
-        // `GetTaxIds` drops 0 beside another taxid.
-        assert!(!negative.keeps(&defline(Some(0), Some(vec![9606]))));
-        assert!(negative.keeps(&defline(Some(0), None)));
-        // No taxid at all: an empty set is a subset of every list.
-        assert!(!negative.keeps(&defline(None, None)));
-    }
-
-    #[test]
-    fn a_rule_that_keeps_no_line_keeps_every_line() {
-        let rule = DeflineRule::Taxids([5].into_iter().collect());
-        let set = DeflineSet {
-            deflines: vec![defline(Some(1), None), defline(Some(5), None)],
-        };
-        assert_eq!(rule.keep_mask(&set), Some(vec![false, true]));
-        let none = DeflineSet {
-            deflines: vec![defline(Some(1), None), defline(Some(2), None)],
-        };
-        assert_eq!(rule.keep_mask(&none), Some(vec![true, true]));
-        let mut lines = vec![1, 2, 3];
-        lines.retain_lines(&[true, false, true]);
-        assert_eq!(lines, vec![1, 3]);
-        lines.retain_lines(&[false]);
-        assert_eq!(lines, vec![1, 3]);
-    }
-}
+#[path = "filter_tests.rs"]
+mod tests;

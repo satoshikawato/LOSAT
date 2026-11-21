@@ -70,11 +70,12 @@ fn run_main_entry() -> Result<()> {
     // An executable called `blastn` is `losat blastn` (`cli::entry_argv`).
     let argv: Vec<std::ffi::OsString> = crate::cli::entry_argv(std::env::args_os());
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_usage_report.cpp:84-86
-    // Every NCBI BLAST+ program's application but dustmasker's and segmasker's has a usage
+    // Every NCBI BLAST+ program's application but the maskers' (dustmasker, segmasker,
+    // windowmasker) has a usage
     // report, made with the application before `AppMain` runs; it reads `.ncbirc`
     // (`ncbi_environment::ApplicationStart`), and its messages go to stderr at once, before
     // `-version` and before blastdbcmd's `-logfile` is read. The start of the others (dustmasker,
-    // segmasker, rpsbproc) writes nothing here.
+    // segmasker, windowmasker, rpsbproc) writes nothing here.
     // The program's application start, made once here and given to what reads after it.
     let start = argv
         .get(1)
@@ -109,10 +110,20 @@ fn run_main_entry() -> Result<()> {
     if let Some(start) = started("segmasker") {
         std::process::exit(crate::segmasker::run(&argv[2..], start));
     }
+    // NCBI reference (598d8ae6): c++/src/app/winmasker/main.cpp:39-42
+    // `losat windowmasker` too.
+    if let Some(start) = started("windowmasker") {
+        std::process::exit(crate::windowmasker::run(&argv[2..], start));
+    }
     // NCBI reference (598d8ae6): c++/src/app/blastdb/convert2blastmask.cpp:259-263
     // `losat convert2blastmask` too.
     if let Some(start) = started("convert2blastmask") {
         std::process::exit(crate::convert2blastmask::run(&argv[2..], start));
+    }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/makeindex/main.cpp:51-54
+    // `losat makembindex` too.
+    if let Some(start) = started("makembindex") {
+        std::process::exit(crate::makembindex::run(&argv[2..], start));
     }
     // No NCBI counterpart: makes those names (`cli::install_shims`). Read before clap, as the
     // top level has no options of its own.
@@ -153,7 +164,7 @@ fn run_main_entry() -> Result<()> {
         None => crate::blastinput::ncbi_environment::DiagTarget::Stderr,
     };
     if let Some(start) = &start {
-        start.write_log_setup(&mut target);
+        start.write_log_setup(&mut target, &mut std::io::stderr());
     }
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:926-1001 (`-version` and the full
     // versions are read before the program's arguments and before the configuration load,
@@ -321,8 +332,10 @@ fn run_main_entry() -> Result<()> {
             .map_err(anyhow::Error::msg)?;
             // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1134-1136
             // The variables that makeblastdb reads itself.
-            crate::writedb::makeblastdb::check_environment(&|name: &str| std::env::var_os(name))
-                .map_err(anyhow::Error::msg)?;
+            crate::writedb::makeblastdb::check_environment(&args, &|name: &str| {
+                std::env::var_os(name)
+            })
+            .map_err(anyhow::Error::msg)?;
             let status = crate::writedb::makeblastdb::run(&args, &settings);
             if status != 0 {
                 std::process::exit(status);

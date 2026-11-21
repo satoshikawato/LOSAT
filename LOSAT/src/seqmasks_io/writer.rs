@@ -21,10 +21,14 @@ use crate::seqdb::mask::FilterProgram;
 use crate::seqid::label::bioseq_fasta;
 use crate::seqid::ParsedSeqId;
 
-/// One sequence as the writers see it (`CBioseq_Handle`): its Seq-ids in order (the first is
-/// `GetSeqId()`), its title descriptor and its letters in `eCoding_Iupac`.
+/// One sequence as the writers see it (`CBioseq_Handle`): its Seq-ids in order, its title
+/// descriptor and its letters in `eCoding_Iupac`.
 pub(crate) struct MaskedBioseq<'a> {
     pub ids: &'a [ParsedSeqId],
+    /// `GetSeqId()` where a handle that outlives the sequence made the info of the sequence's
+    /// access handle ([`access_seq_id`]): windowmasker's id lists matched as Seq-ids
+    /// (`windowmasker::ids::IdLists::handle_seq_id`). `None`: the access Seq-id as it is.
+    pub handle_seq_id: Option<ParsedSeqId>,
     pub title: Option<&'a [u8]>,
     /// The name of the organism of the Bioseq's first source (a database sequence's), from which
     /// `GenerateDefline` makes an empty title (`report::defline::BioseqFacts::taxname`).
@@ -91,7 +95,7 @@ pub(crate) struct MaskInfoWriter {
     algo_id: i32,
     program: FilterProgram,
     options: Vec<u8>,
-    /// `m_ListOfMasks`: the first Seq-id and the mask of each sequence with a mask.
+    /// `m_ListOfMasks`: the Seq-id that names each sequence with a mask (`seq_id`) and its mask.
     masks: Vec<(ParsedSeqId, Vec<(u32, u32)>)>,
 }
 
@@ -140,8 +144,7 @@ impl MaskWriter {
             MaskWriter::Fasta { hard_masking } => {
                 let mut text = id_to_string(seq, parsed_id)?;
                 text.push(b'\n');
-                fasta_letters(seq.iupac, mask, *hard_masking, &mut text);
-                out.write_all(&text)?;
+                fasta_letters(seq.iupac, mask, *hard_masking, text, out)?;
             }
             MaskWriter::SeqLoc(serial) => {
                 // NCBI reference (598d8ae6): c++/src/objtools/seqmasks_io/mask_writer_seqloc.cpp:61-90
@@ -149,13 +152,13 @@ impl MaskWriter {
                     return Ok(());
                 }
                 let mut bytes = Vec::new();
-                let document = Document::SeqLoc(first_id(seq), mask);
+                let document = Document::SeqLoc(seq_id(seq), mask);
                 write_document(*serial, &document, &mut bytes, out, diag)?;
                 out.write_all(&bytes)?;
             }
             MaskWriter::MaskInfo(writer) => {
                 // NCBI reference (598d8ae6): c++/src/objtools/seqmasks_io/mask_writer_blastdb_maskinfo.cpp:137-176
-                writer.print_id(first_id(seq), mask, out)?;
+                writer.print_id(seq_id(seq), mask, out)?;
             }
         }
         Ok(())
@@ -237,9 +240,32 @@ fn interval_lines(mask: &[(u32, u32)], text: &mut Vec<u8>) {
     }
 }
 
-/// `bsh.GetSeqId()`: the first Seq-id of the sequence.
-fn first_id<'a>(seq: &MaskedBioseq<'a>) -> &'a ParsedSeqId {
-    seq.ids.first().expect("a sequence has a Seq-id")
+/// `bsh.GetSeqId()`: the Seq-id of the sequence's access handle, as the handles that outlive the
+/// sequence give it back (`MaskedBioseq::handle_seq_id`).
+///
+/// NCBI reference (598d8ae6): c++/src/objmgr/bioseq_handle.cpp:128-131
+fn seq_id<'s>(seq: &'s MaskedBioseq<'_>) -> &'s ParsedSeqId {
+    seq.handle_seq_id
+        .as_ref()
+        .unwrap_or_else(|| access_seq_id(seq.ids))
+}
+
+/// The Seq-id of `CBioseq_Handle::GetAccessSeq_id_Handle()` of a sequence whose Seq-ids are `ids`
+/// (a handle of `CBioseq_CI` has no Seq-id of its own): its first gi, else its first Textseq-id,
+/// else its first Seq-id. A gi of 0 is not a gi there (`IsGi()` asks for a non-zero packed
+/// value, and gi 0's handle packs 0): `>gi|0|gb|AB000001.1|` is named `genbank`, `>lcl|x|gi|0`
+/// `local`, and only a sequence whose first id is gi 0 and that has no Textseq-id `gi 0`.
+///
+/// NCBI reference (598d8ae6): c++/src/objmgr/bioseq_handle.cpp:939-985
+/// NCBI reference (598d8ae6): c++/src/objmgr/scope_impl.cpp:2102-2106
+/// NCBI reference (598d8ae6): c++/include/objects/seq/seq_id_handle.hpp:279-282
+/// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:609-627
+pub(crate) fn access_seq_id(ids: &[ParsedSeqId]) -> &ParsedSeqId {
+    ids.iter()
+        .find(|id| matches!(id, ParsedSeqId::Gi(gi) if *gi != 0))
+        .or_else(|| ids.iter().find(|id| id.textseq().is_some()))
+        .or_else(|| ids.first())
+        .expect("a sequence has a Seq-id")
 }
 
 /// The object of one document.
@@ -386,13 +412,16 @@ fn encode<E: Encoder>(enc: &mut E, document: &Document<'_>) -> Option<SerialErro
 }
 
 /// `CMaskWriter::IdToString`: `>`, with `-parse_seqids` the Seq-ids in FASTA form
-/// (`GetStringDescr(eFormat_FastA)`) and a space, then `CDeflineGenerator::GenerateDefline`.
+/// (`GetStringDescr(eFormat_FastA)`, which ranks the ids for a protein when the Bioseq is one:
+/// segmasker's `lcl|a|sp|P12345|` is `sp|P12345|`) and a space, then
+/// `CDeflineGenerator::GenerateDefline`.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/seqmasks_io/mask_writer.cpp:46-65
+/// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:2347-2375
 fn id_to_string(seq: &MaskedBioseq<'_>, parsed_id: bool) -> Result<Vec<u8>, WriteError> {
     let mut text = vec![b'>'];
     if parsed_id {
-        bioseq_fasta(seq.ids, false, &mut text);
+        bioseq_fasta(seq.ids, seq.protein, &mut text);
         text.push(b' ');
     }
     let mut facts = bioseq_facts(seq.ids);
@@ -416,7 +445,53 @@ fn id_to_string(seq: &MaskedBioseq<'_>, parsed_id: bool) -> Result<Vec<u8>, Writ
 /// (`N` with `-hard_masking`).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/seqmasks_io/mask_writer_fasta.cpp:57-101
-fn fasta_letters(iupac: &[u8], mask: &[(u32, u32)], hard_masking: bool, out: &mut Vec<u8>) {
+/// `text` is the definition line; it and the lines go to `out` a block of lines at a time
+/// (NCBI writes each line to its buffered stream), so the text of a record is never held
+/// whole. Each line is copied whole and then masked in place ([`mask_line`]): the loop over
+/// the letters touches only the line, not the growing text.
+fn fasta_letters(
+    iupac: &[u8],
+    mask: &[(u32, u32)],
+    hard_masking: bool,
+    mut text: Vec<u8>,
+    out: &mut dyn Write,
+) -> io::Result<()> {
+    const LINE: usize = 60;
+    const BLOCK: usize = 1 << 16;
+    let mut imask = 0;
+    let mut pos = 0u64;
+    for letters in iupac.chunks(LINE) {
+        let at = text.len();
+        text.extend_from_slice(letters);
+        mask_line(&mut text[at..], pos, mask, &mut imask, hard_masking);
+        text.push(b'\n');
+        pos += letters.len() as u64;
+        if text.len() >= BLOCK {
+            out.write_all(&text)?;
+            text.clear();
+        }
+    }
+    out.write_all(&text)
+}
+
+/// NCBI's walk over the mask for the letters of one line, the first at `pos`: a letter at or
+/// past the start of interval `imask` is masked while within it; past its end, the walk takes
+/// the next interval (one step per letter) and masks the letter if it is within that one
+/// (NCBI's loop cited at [`fasta_letters`]).
+fn mask_line(
+    line: &mut [u8],
+    pos: u64,
+    mask: &[(u32, u32)],
+    imask: &mut usize,
+    hard_masking: bool,
+) {
+    // A letter before the start of interval `imask` changes neither itself nor `imask`, so a
+    // line that ends before that start is left as it is.
+    match mask.get(*imask) {
+        None => return,
+        Some(&(first, _)) if pos + line.len() as u64 <= u64::from(first) => return,
+        Some(_) => {}
+    }
     let masked = |letter: u8| {
         if hard_masking {
             b'N'
@@ -424,52 +499,26 @@ fn fasta_letters(iupac: &[u8], mask: &[(u32, u32)], hard_masking: bool, out: &mu
             letter.to_ascii_lowercase()
         }
     };
-    let mut imask = 0;
-    let mut line = 0;
-    for (i, &letter) in iupac.iter().enumerate() {
-        let i_pos = i as u64;
-        let mut letter = letter;
-        if let Some(&(first, second)) = mask.get(imask) {
+    let mut i_pos = pos;
+    for letter in line {
+        if let Some(&(first, second)) = mask.get(*imask) {
             if i_pos >= u64::from(first) {
                 if i_pos <= u64::from(second) {
-                    letter = masked(letter);
+                    *letter = masked(*letter);
                 } else {
-                    imask += 1;
-                    if let Some(&(first, second)) = mask.get(imask) {
+                    *imask += 1;
+                    if let Some(&(first, second)) = mask.get(*imask) {
                         if i_pos >= u64::from(first) && i_pos <= u64::from(second) {
-                            letter = masked(letter);
+                            *letter = masked(*letter);
                         }
                     }
                 }
             }
         }
-        out.push(letter);
-        line += 1;
-        if line == 60 {
-            out.push(b'\n');
-            line = 0;
-        }
-    }
-    if line > 0 {
-        out.push(b'\n');
+        i_pos += 1;
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn fasta_letters_follow_ncbis_one_step_mask_iterator() {
-        // A mask list where one position passes two intervals: NCBI advances the iterator
-        // once per position, so the second interval [3, 3] after [0, 1] is reached at 2 and
-        // its letter 3 is masked; a third interval right after is reached only at its own
-        // positions.
-        let mut out = Vec::new();
-        fasta_letters(b"ACGTACGT", &[(0, 1), (3, 3), (4, 5)], false, &mut out);
-        assert_eq!(out, b"acGtacGT\n");
-        let mut out = Vec::new();
-        fasta_letters(&[b'A'; 61], &[(59, 60)], true, &mut out);
-        assert_eq!(&out[..], [&[b'A'; 59][..], b"N\nN\n"].concat());
-    }
-}
+#[path = "writer_tests.rs"]
+mod tests;

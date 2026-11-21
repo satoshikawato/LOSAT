@@ -39,11 +39,23 @@ impl Source {
 type NamedSource = (Source, String);
 
 /// The query of a search: a FASTA input and its name, or a PSSM file (`-in_pssm` of psiblast and
-/// tblastn, `api::Inputs::pssm`), which the search reads.
+/// tblastn, `api::Inputs::pssm`), or an alignment file (`-in_msa` of psiblast, `api::Inputs::msa`),
+/// which the search reads. `_api.py` gives an alignment as the dict `{"alignment": path}`, a PSSM
+/// as the path alone.
 #[derive(FromPyObject)]
 pub enum NamedQuery {
+    Alignment {
+        #[pyo3(item("alignment"))]
+        path: PathBuf,
+    },
     Fasta(NamedSource),
     Pssm(PathBuf),
+}
+
+/// The file that holds the query of a search, in place of query records.
+enum QueryFile {
+    Pssm(PathBuf),
+    Alignment(PathBuf),
 }
 
 /// The subject of a search: a FASTA input and its name, or no input and the name of a database.
@@ -58,8 +70,8 @@ pub fn checked(program: &str, argv: &[String]) -> Result<Search, api::Error> {
 /// A checked search and its records.
 pub struct Loaded {
     search: Search,
-    /// The PSSM file of a PSSM query; the query records are then none.
-    pssm: Option<PathBuf>,
+    /// The PSSM or alignment file of a query that a file holds; the query records are then none.
+    file: Option<QueryFile>,
     query: Vec<FastaRecord>,
     subject: Vec<FastaRecord>,
     query_name: String,
@@ -77,15 +89,18 @@ impl Loaded {
     ) -> Result<Self, api::Error> {
         let search = checked(program, argv)?;
         let database = subject.is_none();
-        let (query, query_name, pssm) = match query {
+        let (query, query_name, file) = match query {
             NamedQuery::Fasta((query, query_name)) => (Some(query), query_name, None),
-            NamedQuery::Pssm(path) => (None, String::new(), Some(path)),
+            NamedQuery::Pssm(path) => (None, String::new(), Some(QueryFile::Pssm(path))),
+            NamedQuery::Alignment { path } => {
+                (None, String::new(), Some(QueryFile::Alignment(path)))
+            }
         };
         // A dry run reads no record, as the command line's does not (`Search::dry_run`).
         if search.dry_run() {
             return Ok(Self {
                 search,
-                pssm,
+                file,
                 query: Vec::new(),
                 subject: Vec::new(),
                 query_name,
@@ -93,7 +108,8 @@ impl Loaded {
                 database,
             });
         }
-        // A PSSM query is read by the search, as the command line's `-in_pssm`.
+        // A PSSM or alignment query is read by the search, as the command line's `-in_pssm` and
+        // `-in_msa`.
         let query_bytes = match &query {
             Some(query) => query.bytes(Role::Query)?,
             None => Cow::Borrowed(&[][..]),
@@ -105,7 +121,7 @@ impl Loaded {
         let (query, subject) = api::read_inputs(&search, &query_bytes, &subject_bytes)?;
         Ok(Self {
             search,
-            pssm,
+            file,
             query,
             subject,
             query_name,
@@ -115,9 +131,13 @@ impl Loaded {
     }
 
     fn inputs(&self) -> Inputs<'_> {
-        let inputs = match (self.database, self.pssm.as_deref()) {
-            (true, Some(pssm)) => Inputs::pssm_database(pssm, &self.subject_name),
-            (false, Some(pssm)) => Inputs::pssm(pssm, &self.subject),
+        let inputs = match (self.database, self.file.as_ref()) {
+            (true, Some(QueryFile::Pssm(pssm))) => Inputs::pssm_database(pssm, &self.subject_name),
+            (false, Some(QueryFile::Pssm(pssm))) => Inputs::pssm(pssm, &self.subject),
+            (true, Some(QueryFile::Alignment(msa))) => {
+                Inputs::msa_database(msa, &self.subject_name)
+            }
+            (false, Some(QueryFile::Alignment(msa))) => Inputs::msa(msa, &self.subject),
             (true, None) => Inputs::database(&self.query, &self.subject_name),
             (false, None) => Inputs::new(&self.query, &self.subject),
         };
@@ -317,6 +337,17 @@ pub fn segmasker<'py>(
     run_tool(py, argv, input, api::run_segmasker)
 }
 
+/// `windowmasker` with the command line's words: `input` is its standard input (`-in -`, and
+/// without `-in`). Returns what it writes to standard output and to standard error.
+#[pyfunction]
+pub fn windowmasker<'py>(
+    py: Python<'py>,
+    argv: Vec<String>,
+    input: PyBackedBytes,
+) -> PyResult<ToolBytes<'py>> {
+    run_tool(py, argv, input, api::run_windowmasker)
+}
+
 /// `convert2blastmask` with the command line's words: `input` is its standard input (`-in -`,
 /// and without `-in`). Returns what it writes to standard output and to standard error.
 #[pyfunction]
@@ -326,6 +357,18 @@ pub fn convert2blastmask<'py>(
     input: PyBackedBytes,
 ) -> PyResult<ToolBytes<'py>> {
     run_tool(py, argv, input, api::run_convert2blastmask)
+}
+
+/// `makembindex` with the command line's words: `input` is its standard input (FASTA input of
+/// `-old_style_index true` without `-input`). Returns what it writes to standard output and to
+/// standard error; the index files are written where the command line writes them.
+#[pyfunction]
+pub fn makembindex<'py>(
+    py: Python<'py>,
+    argv: Vec<String>,
+    input: PyBackedBytes,
+) -> PyResult<ToolBytes<'py>> {
+    run_tool(py, argv, input, api::run_makembindex)
 }
 
 /// `run` without reports.

@@ -264,6 +264,7 @@ pub(super) fn prefetch_reported_subjects(
                 crate::report::db_subject::FormatThrow::of_outfmts(
                     outputs.formats.iter().map(|format| format.outfmt),
                     crate::blastinput::app::Program::Blastp,
+                    args.app.request_kind(),
                 ),
             )
         });
@@ -716,6 +717,36 @@ pub(super) fn refuse_unreportable(
         }
         _ => None,
     });
+    // Outfmt 1 to 4 of an `-ungapped` search that shows an HSP of length 0: the merge of NCBI's
+    // query-anchored section can crash on it (`empty_alignments::refuse_merge_frees`), unless
+    // the search ends with an exception first (`-subject`'s mapper).
+    if let Some(view) = anchored_view {
+        let parsed = listed_titles
+            .as_ref()
+            .map_or(&[][..], |titles| titles.parsed.as_slice());
+        super::empty_alignments::refuse_merge_frees(
+            view,
+            args.sort,
+            args.num_alignments,
+            hit_lists,
+            pairwise_hits.as_deref().map(Vec::as_slice),
+            rows_of,
+            subject_titles,
+            &|previous, s_idx| {
+                crate::report::db_subject::rank_joins_as_copy(
+                    parsed,
+                    previous as usize,
+                    s_idx as usize,
+                )
+            },
+            super::empty_alignments::subject_start_exception(
+                hit_lists,
+                ranges.subject_placements,
+                database.is_none(),
+            )
+            .is_some(),
+        )?;
+    }
     if let (Some(view), true, None) = (anchored_view, args.parse_deflines, database) {
         for (q_idx, record) in query_records.iter().enumerate() {
             if record.believed().is_none_or(|ids| ids.shared.is_none()) {
@@ -814,9 +845,20 @@ pub(super) fn refuse_unreportable(
     // search never takes a database with them (`database::x_titles_allow_blocks`). Were a block
     // search to reach it, it would refuse in the call of the query's block as the abort above,
     // after the reports of the blocks before (NCBI's bytes for their queries).
-    if let (Some(_), false, Some(titles)) =
-        (anchored_view, args.parse_deflines, listed_titles.as_ref())
-    {
+    // rpsblast's BLAST XML (outfmt 5): the same collision of an entry's generated id with a query
+    // of its batch, where NCBI's XML takes the query's title for the entry (the archive,
+    // outfmt 11, is NCBI's bytes with it): refused here before any byte, for the reported
+    // entries only (`ListedTitles::refuse_generated_ids`; PS15a-1, followup
+    // `rps_lcl_query_title.md`). Outfmt 0, 6 and 7 are line RG item X7's.
+    let rps_xml = args.rps_search.is_some()
+        && format_plans
+            .iter()
+            .any(|outfmt| matches!(outfmt, BlastpReport::Xml));
+    if let (true, false, Some(titles)) = (
+        anchored_view.is_some() || rps_xml,
+        args.parse_deflines,
+        listed_titles.as_ref(),
+    ) {
         let scopes: Vec<(usize, crate::blastinput::query_batch::QueryScope)> = query_batches
             .iter()
             .map(|batch| {
@@ -831,15 +873,22 @@ pub(super) fn refuse_unreportable(
             })
             .collect();
         let none = crate::blastinput::query_batch::QueryScope::default();
-        titles.refuse_generated_query_ids(
-            hit_lists,
-            |query| {
-                scopes
-                    .get(scopes.partition_point(|&(end, _)| end <= query))
-                    .map_or(&none, |(_, scope)| scope)
-            },
-            |q_idx| described(q_idx, true),
-        )?;
+        let scope_of = |query: usize| {
+            scopes
+                .get(scopes.partition_point(|&(end, _)| end <= query))
+                .map_or(&none, |(_, scope)| scope)
+        };
+        if rps_xml {
+            titles.refuse_generated_ids(
+                hit_lists,
+                &scope_of,
+                crate::algorithm::common::database::XML_EFFECT,
+            )?;
+        }
+        if anchored_view.is_some() {
+            titles
+                .refuse_generated_query_ids(hit_lists, scope_of, |q_idx| described(q_idx, true))?;
+        }
     }
     // Outfmt 0 to 4 of a database search with queries whose ids the reports show
     // (`-parse_deflines`, a PSSM query with its ids): a sequence whose description line shows a
@@ -1121,8 +1170,13 @@ pub(super) fn report_values(
     // subject (`PruneSeqalign`, cited at `joined_cut`): a copy of one record that follows
     // another is kept with it; where it keeps another subject for others, the run is LOSAT's
     // refusal before any format is written.
+    // rpsblast's archive holds the merged results of its volumes as the search made them: no
+    // formatter cuts them before `WriteArchive` (the other formats' formatters cut them).
+    let prunes_lists = args.app.prunes_after_traceback()
+        && !(args.app == crate::algorithm::blastp::args::BlastpApp::Rpsblast
+            && matches!(requested_formats.first(), Some(BlastpReport::Archive)));
     let psiblast_kept: Option<Vec<usize>> = match (args.app, listed_titles.as_ref()) {
-        (app, Some(titles)) if app.prunes_after_traceback() => {
+        (_, Some(titles)) if prunes_lists => {
             Some(titles.joined_cut(hit_lists, args.max_target_seqs)?)
         }
         _ => None,
@@ -1273,7 +1327,7 @@ pub(super) fn report_values(
     }
     // Whether this call makes a PSSM: `-out_pssm`'s, or a round's for the next round.
     let pssm_made = args.psi_pssm.is_some() || reports.psi_round.is_some_and(|io| io.makes_next());
-    let psiblast_hits_found: Option<Vec<usize>> = args.app.prunes_after_traceback().then(|| {
+    let psiblast_hits_found: Option<Vec<usize>> = prunes_lists.then(|| {
         hit_lists
             .iter_mut()
             .enumerate()
@@ -1297,7 +1351,13 @@ pub(super) fn report_values(
         ShownQueries::of(query_records, args),
         shown_subjects,
         args.scoring.matrix,
-        psi_round::searched_other_letters(args),
+        // `-db_hard_mask`: the search read `X` over the masks of the database sequences, and the
+        // reports count their stored letters (series NP, M4b).
+        psi_round::searched_other_letters(args)
+            || args
+                .db_mask_resolved
+                .as_ref()
+                .is_some_and(|mask| mask.kind == crate::blastinput::db_mask::MaskKind::Hard),
         &mut engine_counts,
     );
     Ok(ReportValues {

@@ -8,10 +8,10 @@ use std::fmt;
 
 use super::error::Error;
 
-/// A search program of the library API. `makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`
-/// and `convert2blastmask` are not searches: they have functions of their own
-/// (`run_makeblastdb`, `run_blastdbcmd`, `run_dustmasker`, `run_segmasker`,
-/// `run_convert2blastmask`).
+/// A search program of the library API. `makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`,
+/// `windowmasker`, `convert2blastmask` and `makembindex` are not searches: they have functions of
+/// their own (`run_makeblastdb`, `run_blastdbcmd`, `run_dustmasker`, `run_segmasker`,
+/// `run_windowmasker`, `run_convert2blastmask`, `run_makembindex`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Program {
@@ -58,7 +58,7 @@ impl Program {
 
     /// The program of a command-line name. A program that the command line runs and the API
     /// does not search with (`makeblastdb`, `makedb`, `blastdbcmd`, `dustmasker`, `segmasker`,
-    /// `convert2blastmask`) is named in the error.
+    /// `windowmasker`, `convert2blastmask`, `makembindex`) is named in the error.
     pub fn parse(name: &str) -> Result<Self, Error> {
         match name {
             "blastn" => Ok(Program::Blastn),
@@ -79,8 +79,14 @@ impl Program {
             "segmasker" => Err(Error::Argv(
                 "segmasker is not a search program: run_segmasker runs it".into(),
             )),
+            "windowmasker" => Err(Error::Argv(
+                "windowmasker is not a search program: run_windowmasker runs it".into(),
+            )),
             "convert2blastmask" => Err(Error::Argv(
                 "convert2blastmask is not a search program: run_convert2blastmask runs it".into(),
+            )),
+            "makembindex" => Err(Error::Argv(
+                "makembindex is not a search program: run_makembindex runs it".into(),
             )),
             // rpsblast (series PR, item PS11a) runs on the command line; the API has no program
             // for it yet (its results and options are those of a later item).
@@ -132,36 +138,5 @@ impl std::str::FromStr for Program {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn names_round_trip_and_the_tools_are_named() {
-        for program in Program::ALL {
-            assert_eq!(Program::parse(program.name()), Ok(program));
-            assert_eq!(program.to_string(), program.name());
-            assert_eq!(program.name().parse::<Program>(), Ok(program));
-        }
-        for tool in ["makeblastdb", "makedb", "blastdbcmd"] {
-            let error = Program::parse(tool).unwrap_err();
-            assert!(
-                error.to_string().contains("not a search program"),
-                "{error}"
-            );
-        }
-        // rpsblast and rpstblastn run on the command line only (line PS, PS11a, PS12a).
-        for program in ["rpsblast", "rpstblastn"] {
-            let error = Program::parse(program).unwrap_err();
-            assert!(
-                error.to_string().contains(&format!(
-                    "{program} is not available through the library API"
-                )),
-                "{error}"
-            );
-        }
-        assert_eq!(
-            Program::parse("nosuch"),
-            Err(Error::Argv("unknown program 'nosuch'".into()))
-        );
-    }
-}
+#[path = "program_tests.rs"]
+mod tests;

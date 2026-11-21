@@ -113,6 +113,15 @@ pub struct PsiblastArgs {
     // every round culls, the PSSM rounds and `-in_pssm` too (`pssm_hooks::pssm_prelim`).
     #[arg(long, value_parser = nonnegative_ncbi_integer, help = "If the query range of a hit is enveloped by that of at least this many higher-scoring hits, delete the hit")]
     pub culling_limit: Option<i32>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3304-3328
+    // psiblast's `CHspFilteringArgs`, blastp's (`BlastpArgs::best_hit_overhang`): every round,
+    // the PSSM rounds and `-in_pssm` too (`pssm_hooks::pssm_prelim`).
+    /// Best Hit algorithm overhang value (recommended value: 0.1)
+    #[arg(long, value_parser = best_hit_value, value_name = "float_value", conflicts_with = "culling_limit")]
+    pub best_hit_overhang: Option<f64>,
+    /// Best Hit algorithm score edge value (recommended value: 0.1)
+    #[arg(long, value_parser = best_hit_value, value_name = "float_value", conflicts_with = "culling_limit")]
+    pub best_hit_score_edge: Option<f64>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3329,3347-3349
     // psiblast's `CHspFilteringArgs`, blastp's (`BlastpArgs::subject_besthit`): every round.
     /// Return only the best HSP for each non overlapping query region
@@ -309,7 +318,11 @@ impl PsiblastArgs {
         // input PSSM (item PS5b), and a range of the query (`-query_loc`) runs them as NCBI does:
         // the later rounds search the range with the PSSM of the whole record
         // (`PsiSearch::from_engine`, series Q, Q4a).
-        Self::check_outfmt(&self.outfmt)?;
+        Self::check_outfmt(
+            &self.outfmt,
+            self.out.as_deref(),
+            self.export_search_strategy.is_some(),
+        )?;
         // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:246-248 (cited at
         // `in_pssm_files`: the loop writes the PSSM of each round at its start, the input PSSM of
         // `-in_pssm` in round 1)
@@ -329,6 +342,8 @@ impl PsiblastArgs {
             db: self.db,
             // blastp's database filters (line DI-8), which every round searches with.
             db_filter: self.db_filter,
+            // psiblast has no database masks (NCBI's unknown arguments).
+            db_mask: Default::default(),
             dbsize: self.dbsize,
             show_gis: self.show_gis,
             parse_deflines: self.parse_deflines,
@@ -352,6 +367,8 @@ impl PsiblastArgs {
             max_hsps_per_subject: self.max_hsps_per_subject,
             qcov_hsp_perc: self.qcov_hsp_perc,
             culling_limit: self.culling_limit,
+            best_hit_overhang: self.best_hit_overhang,
+            best_hit_score_edge: self.best_hit_score_edge,
             subject_besthit: self.subject_besthit,
             ungapped: false,
             xdrop_ungap: self.xdrop_ungap,
@@ -376,6 +393,7 @@ impl PsiblastArgs {
             request_inputs,
             app: BlastpApp::Psiblast,
             taxdb_setting: None,
+            matrix_search: None,
             inclusion_ethresh: Some(self.inclusion_ethresh),
             first_query_ordinal: self.first_query_ordinal,
             psiblast_pssm: Some(crate::algorithm::psiblast::pssm::PsiblastPssmOptions {
@@ -426,6 +444,8 @@ impl PsiblastArgs {
         inputs.qcov_hsp_perc = self.qcov_hsp_perc;
         inputs.max_hsps = self.max_hsps_per_subject.map(|count| count as i32);
         inputs.culling_limit = self.culling_limit;
+        inputs.best_hit_overhang = self.best_hit_overhang;
+        inputs.best_hit_score_edge = self.best_hit_score_edge;
         inputs.subject_besthit = self.subject_besthit;
         // `static_cast<int>` of the double, as BLASTP's (`blastp::archive::option_inputs`).
         inputs.threshold = self
@@ -452,13 +472,27 @@ impl PsiblastArgs {
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2744-2748
     /// NCBI parses `-outfmt` before the option handlers; its own errors come from that parse
     /// and from blastp's (`run`). The formats that NCBI runs and LOSAT's psiblast does not
-    /// write yet are refused here. The tabular reports with a field list, and outfmt 10 and
-    /// 20, are blastp's (`blastp::tabular`), without a custom delimiter, which psiblast's
-    /// formatter does not get (psiblast_app.cpp:482-505, `blast_engine.rs` `run`).
-    pub fn check_outfmt(outfmt: &str) -> Result<()> {
-        let choice = crate::blastinput::app::parse_formatting_string(outfmt)?;
-        if let Some(format) = crate::blastinput::app::ReportFormat::from_number(choice.number) {
-            use crate::blastinput::app::ReportFormat;
+    /// write yet are refused here, with `-out` `out`, but a value that NCBI refuses itself later
+    /// (`app::ncbi_refuses_format`: outfmt 17, a custom delimiter that the field list uses,
+    /// outfmt 13 and 14 without a file name) goes on to NCBI's error at its place (blastp's).
+    /// The tabular reports with a field list, and outfmt 10 and 20, are blastp's
+    /// (`blastp::tabular`), without a custom delimiter, which psiblast's formatter does not get
+    /// (psiblast_app.cpp:482-505, `report::tabular::TabularSpec::of_app`). `strategy`: the run
+    /// writes a search strategy file (`-export_search_strategy`), before which NCBI reads no
+    /// `-outfmt`.
+    pub fn check_outfmt(outfmt: &str, out: Option<&std::path::Path>, strategy: bool) -> Result<()> {
+        use crate::blastinput::app::{Program, ReportFormat};
+        // A value not read yet (`EarlyFormat::Deferred`) is the formatting handler's.
+        let Some(choice) = crate::blastinput::app::early_format_choice(outfmt, strategy)?
+            .parsed()
+            .cloned()
+        else {
+            return Ok(());
+        };
+        if crate::blastinput::app::ncbi_refuses_format(&choice, Program::Blastp, out) {
+            return Ok(());
+        }
+        if let Some(format) = ReportFormat::from_number(choice.number) {
             if !matches!(
                 format,
                 ReportFormat::Pairwise
@@ -466,7 +500,6 @@ impl PsiblastArgs {
                     | ReportFormat::TabularWithComments
                     | ReportFormat::CommaSeparatedValues
                     | ReportFormat::CommaSeparatedValuesWithHeader
-                    | ReportFormat::Sam
             ) {
                 bail!(
                     "output format {} is not supported by LOSAT's PSIBLAST",
@@ -479,307 +512,5 @@ impl PsiblastArgs {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::cli::{Cli, Commands};
-
-    fn parse(extra: &[&str]) -> Result<PsiblastArgs, String> {
-        let mut argv = vec!["losat", "psiblast", "-query", "q.faa", "-subject", "s.faa"];
-        argv.extend_from_slice(extra);
-        match crate::cli::try_parse_from::<Cli, _, _>(argv) {
-            Ok(Cli {
-                command: Commands::Psiblast(args),
-            }) => Ok(args),
-            Ok(other) => panic!("not psiblast: {other:?}"),
-            Err(error) => Err(crate::cli::render_message(&error)),
-        }
-    }
-
-    // psiblast_args.cpp:44-118 and psiblast_options.cpp:46-60: blastp's task options, the
-    // program psiblast, and the PSSM engine's defaults (inclusion threshold 0.002, pseudo-count 0,
-    // one round).
-    #[test]
-    fn the_first_round_is_blastps_search_with_psiblasts_program() {
-        let args = parse(&[]).unwrap();
-        assert_eq!(args.num_iterations, 1);
-        assert_eq!(args.pseudocount, 0);
-        assert_eq!(args.inclusion_ethresh, 0.002);
-        let blastp = args.into_blastp_args().unwrap();
-        assert_eq!(blastp.app, BlastpApp::Psiblast);
-        assert_eq!(blastp.task, "blastp");
-        assert!(!blastp.ungapped);
-        assert_eq!(blastp.inclusion_ethresh, Some(0.002));
-        let resolved = blastp.resolve().unwrap();
-        assert_eq!(resolved.app, BlastpApp::Psiblast);
-        assert_eq!(resolved.inclusion_ethresh, 0.002);
-        assert_eq!(resolved.query_batch_size().unwrap(), 1);
-        // traceback_stage.cpp:216-225: the preliminary hit list size of CBS (1050 for 500).
-        assert_eq!(resolved.max_target_seqs, 500);
-        assert_eq!(resolved.traceback_hitlist_size(), 1050);
-        let resolved = parse(&["-max_target_seqs", "600", "-inclusion_ethresh", "1e-300"])
-            .unwrap()
-            .into_blastp_args()
-            .unwrap()
-            .resolve()
-            .unwrap();
-        assert_eq!(resolved.traceback_hitlist_size(), 1250);
-        assert_eq!(resolved.inclusion_ethresh, 1e-300);
-        // blastp keeps its hit list size and its threshold in the traceback.
-        let mut blastp = parse(&[]).unwrap().into_blastp_args().unwrap();
-        blastp.app = BlastpApp::Blastp;
-        blastp.inclusion_ethresh = None;
-        let resolved = blastp.resolve().unwrap();
-        assert_eq!(resolved.traceback_hitlist_size(), 500);
-        assert_eq!(resolved.inclusion_ethresh, 0.002);
-    }
-
-    // blast_args.cpp:234-238 and 303-307, ncbiargs.cpp:118-129: `-searchsp` takes NCBI's `Int8`
-    // forms (a sign, hex, leading zeros) at 0 or above, and at any value (0 too) the search runs
-    // without the Gumbel block (NCBI 2.17.0 probes `x.sp.{plus,hex,lead0}`, `err.sp.*` and
-    // `x.sp.{space,trail}` of line PS, item PS5c).
-    #[test]
-    fn searchsp_takes_ncbis_int8_forms_and_drops_the_gumbel_block() {
-        for (value, space) in [
-            ("+1000000000", 1_000_000_000),
-            ("0x3B9ACA00", 1_000_000_000),
-            ("0001000000000", 1_000_000_000),
-            ("9223372036854775807", i64::MAX),
-            ("0", 0),
-        ] {
-            let args = parse(&["-searchsp", value]).unwrap();
-            assert_eq!(args.searchsp, Some(space), "{value}");
-            let resolved = args.into_blastp_args().unwrap().resolve().unwrap();
-            assert_eq!(resolved.searchsp, Some(space), "{value}");
-            assert!(resolved.old_fsc, "{value}");
-        }
-        let blastp = parse(&[]).unwrap().into_blastp_args().unwrap();
-        assert_eq!(blastp.searchsp, None);
-        for value in [" 1", "1 ", "1e6", "1.5", "", "-1", "9223372036854775808"] {
-            assert!(
-                parse(&["-searchsp", value]).is_err(),
-                "-searchsp {value:?} is refused"
-            );
-        }
-    }
-
-    // psiblast_app.cpp:246-321 (`rounds.rs`): the rounds of a FASTA query run (0: until
-    // convergence), and those of `-in_pssm` (PS5b, with one round too when a PSSM file is
-    // written), with `-query_loc` too (Q4a).
-    #[test]
-    fn rounds_run_and_the_later_output_formats_are_refused() {
-        for (rounds, plan) in [("0", Some(0)), ("2", Some(2)), ("1", None)] {
-            let blastp = parse(&["-num_iterations", rounds])
-                .unwrap()
-                .into_blastp_args()
-                .unwrap();
-            assert_eq!(blastp.psiblast_pssm.as_ref().unwrap().rounds, plan);
-            let resolved = blastp.resolve().unwrap();
-            assert_eq!(
-                resolved.psi_rounds.as_ref().map(|plan| plan.num_iterations),
-                plan
-            );
-        }
-        let in_pssm = |extra: &[&str]| {
-            let mut argv = vec![
-                "losat", "psiblast", "-in_pssm", "x.asn", "-subject", "s.faa",
-            ];
-            argv.extend_from_slice(extra);
-            let Ok(Cli {
-                command: Commands::Psiblast(args),
-            }) = crate::cli::try_parse_from::<Cli, _, _>(argv)
-            else {
-                panic!("psiblast -in_pssm {extra:?}");
-            };
-            args.into_blastp_args()
-                .unwrap()
-                .psiblast_pssm
-                .unwrap()
-                .rounds
-        };
-        assert_eq!(in_pssm(&["-num_iterations", "3"]), Some(3));
-        assert_eq!(in_pssm(&[]), None);
-        assert_eq!(in_pssm(&["-out_pssm", "f"]), Some(1));
-        assert_eq!(in_pssm(&["-out_ascii_pssm", "f"]), Some(1));
-        let ranged = parse(&["-num_iterations", "2", "-query_loc", "1-20"])
-            .unwrap()
-            .into_blastp_args()
-            .unwrap()
-            .resolve()
-            .unwrap();
-        assert_eq!(
-            ranged.psi_rounds.as_ref().map(|plan| plan.num_iterations),
-            Some(2),
-            "the rounds of a range run"
-        );
-        assert!(ranged.query_range.is_some(), "the range reaches the rounds");
-        for masks in [
-            &["-seg", "yes"][..],
-            &["-soft_masking", "true"],
-            &["-seg", "yes", "-soft_masking", "true"],
-        ] {
-            let masked = parse(&[&["-num_iterations", "3"][..], masks].concat())
-                .unwrap()
-                .into_blastp_args()
-                .unwrap()
-                .resolve()
-                .unwrap();
-            assert_eq!(
-                masked.psi_rounds.as_ref().map(|plan| plan.num_iterations),
-                Some(3),
-                "the rounds of a masked query run ({masks:?})"
-            );
-        }
-        for format in ["1", "3", "5", "8", "11", "13", "15", "16", "18"] {
-            let error = parse(&["-outfmt", format])
-                .unwrap()
-                .into_blastp_args()
-                .unwrap_err()
-                .to_string();
-            assert_eq!(
-                error,
-                format!("output format {format} is not supported by LOSAT's PSIBLAST")
-            );
-        }
-        for format in [
-            "0",
-            "6",
-            "7",
-            "6 qseqid sseqid evalue",
-            "6 delim=| std",
-            "10",
-            "20 qseqid sseqid",
-            "17",
-        ] {
-            assert!(parse(&["-outfmt", format])
-                .unwrap()
-                .into_blastp_args()
-                .is_ok());
-        }
-        // NCBI's own error of the format string comes first (NCBI 2.17.0 `psiblast -outfmt 99`:
-        // "Error: Formatting choice is out of range", exit 255).
-        assert!(parse(&["-outfmt", "99"])
-            .unwrap()
-            .into_blastp_args()
-            .unwrap_err()
-            .to_string()
-            .contains("Formatting choice is out of range"));
-    }
-
-    #[test]
-    fn blastps_database_filters_and_id_options_reach_the_search() {
-        let db = |extra: &[&str]| {
-            let mut argv = vec!["losat", "psiblast", "-query", "q.faa", "-db", "d"];
-            argv.extend_from_slice(extra);
-            match crate::cli::try_parse_from::<Cli, _, _>(argv) {
-                Ok(Cli {
-                    command: Commands::Psiblast(args),
-                }) => Ok(args.into_blastp_args().unwrap()),
-                Ok(other) => panic!("not psiblast: {other:?}"),
-                Err(error) => Err(crate::cli::render_message(&error)),
-            }
-        };
-        let blastp = db(&[
-            "-taxids",
-            "9606",
-            "-no_taxid_expansion",
-            "-show_gis",
-            "-parse_deflines",
-            "-lcase_masking",
-            "-num_iterations",
-            "3",
-        ])
-        .unwrap();
-        assert_eq!(blastp.db_filter.taxids.as_deref(), Some("9606"));
-        assert!(blastp.db_filter.no_taxid_expansion);
-        assert!(blastp.show_gis && blastp.parse_deflines && blastp.lcase_masking);
-        let blastp = db(&["-negative_seqidlist", "l.txt"]).unwrap();
-        assert_eq!(
-            blastp.db_filter.negative_seqidlist.as_deref(),
-            Some("l.txt")
-        );
-        let blastp = db(&[]).unwrap();
-        assert!(!blastp.show_gis && !blastp.parse_deflines && !blastp.lcase_masking);
-        assert!(blastp.db_filter.taxids.is_none() && blastp.db_filter.seqidlist.is_none());
-        // The filters exclude `-subject` and `-subject_loc`, as blastp's do.
-        for extra in [
-            &["-subject", "s.faa", "-taxids", "9606"][..],
-            &["-subject_loc", "1-10", "-seqidlist", "l.txt"][..],
-        ] {
-            let mut argv = vec!["losat", "psiblast", "-query", "q.faa"];
-            argv.extend_from_slice(extra);
-            let error = crate::cli::try_parse_from::<Cli, _, _>(argv).unwrap_err();
-            assert!(
-                crate::cli::render_message(&error).contains("cannot be used with"),
-                "{extra:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn the_x_drops_gap_trigger_culling_and_sum_stats_reach_blastps_search() {
-        let blastp = |extra: &[&str]| parse(extra).unwrap().into_blastp_args();
-        let args = blastp(&[
-            "-culling_limit",
-            "2",
-            "-xdrop_ungap",
-            "3.5",
-            "-xdrop_gap",
-            "1e9",
-            "-xdrop_gap_final",
-            "-1",
-            "-gap_trigger",
-            "-5",
-            "-sum_stats",
-            "false",
-        ])
-        .unwrap();
-        assert_eq!(args.culling_limit, Some(2));
-        assert_eq!(
-            (args.xdrop_ungap, args.xdrop_gap, args.xdrop_gap_final),
-            (Some(3.5), Some(1e9), Some(-1.0))
-        );
-        assert_eq!(args.gap_trigger, Some(-5.0));
-        // NCBI's default gap trigger of a protein search (BLAST_GAP_TRIGGER_PROT).
-        let args = blastp(&[]).unwrap();
-        assert_eq!(args.gap_trigger, Some(22.0));
-        assert_eq!(args.culling_limit, None);
-        assert!(!args.sum_stats);
-        // Sum statistics link the HSPs, in every spelling of NCBI's boolean.
-        for spelling in ["true", "T", "t", "1", "yes"] {
-            assert!(
-                blastp(&["-sum_stats", spelling]).unwrap().sum_stats,
-                "{spelling}"
-            );
-        }
-        assert!(!blastp(&["-sum_stats", "false"]).unwrap().sum_stats);
-        // NCBI's constraint of -culling_limit (0 or more).
-        assert!(parse(&["-culling_limit", "-1"]).is_err());
-    }
-
-    #[test]
-    fn psiblasts_arguments_that_losat_does_not_run_are_named() {
-        for (option, value) in [("-phi_pattern", Some("x")), ("-html", None)] {
-            let mut extra = vec![option];
-            extra.extend(value);
-            let error = parse(&extra).unwrap_err();
-            assert!(
-                error.contains(&format!(
-                    "the NCBI BLAST+ option {option} is not supported by LOSAT's PSIBLAST"
-                )),
-                "{option}: {error}"
-            );
-        }
-        // `-in_pssm` (PS4a) is an argument: with `-query` it is the parser's exclusion
-        // (blast_args.cpp:1240-1247).
-        let error = parse(&["-in_pssm", "x"]).unwrap_err();
-        assert!(error.contains("cannot be used with"), "{error}");
-        // Arguments that psiblast does not have are unknown, as in NCBI's parser.
-        for option in ["-task", "-ungapped", "-db_soft_mask", "-mt_mode"] {
-            let error = parse(&[option, "1"]).unwrap_err();
-            assert!(
-                error.contains("unknown option or argument"),
-                "{option}: {error}"
-            );
-        }
-    }
-}
+#[path = "args_tests.rs"]
+mod tests;

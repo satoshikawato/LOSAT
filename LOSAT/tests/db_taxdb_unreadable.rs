@@ -1,13 +1,18 @@
 //! A file of the taxonomy database that cannot be read (line WQA D18b, 2026-11-21): `taxdb.bti`
 //! or `taxdb.btd` of mode 000, or a directory in place of either, on `BLASTDB` beside a database
 //! whose sequences have taxids, for blastp (a database with parsed Seq-ids, `tm_psi`, and one
-//! without, `put`), psiblast, blastx, blastn, tblastn and tblastx by output format, and for
-//! blastdbcmd. The expected bytes and exit statuses are NCBI BLAST+ 2.17.0's, run as a user that
-//! is not the superuser (tests/seqdb/expected/taxdb_unreadable.tsv, frozen from probe 12 of D18b;
-//! NCBI is not run here). NCBI's every load of a sequence with a taxid throws there; the rows
-//! that LOSAT writes as NCBI (`same`) are compared byte for byte at 1 and 4 threads, the others
-//! (`refused`) are LOSAT's refusal, exit status 1, which says what NCBI does. A superuser reads a
-//! file of mode 000, so there only the rows of a directory are compared.
+//! without, `put`), psiblast, blastx, blastn, tblastn and tblastx by output format, psiblast's
+//! rounds and PSSM files with a query that differs from the subjects it includes, blastp with
+//! `-subject`, batches whose prefetch is off, and blastdbcmd. The expected bytes and exit statuses
+//! are NCBI BLAST+ 2.17.0's, run as a user that is not the superuser
+//! (tests/seqdb/expected/taxdb_unreadable.tsv, frozen from probe 12 of D18b; NCBI is not run
+//! here). NCBI's every load of a sequence with a taxid throws there; the rows that LOSAT writes as
+//! NCBI (`same`) are compared byte for byte at 1 and 4 threads, the others (`refused`) are LOSAT's
+//! refusal, exit status 1, which says what the user can do. For those, the file keeps NCBI's exit
+//! status and the SHA-256 of its standard output and error with the addresses of a stack trace's
+//! frames masked (`addr=0x?`, which the system's address layout moves at each run), so that a
+//! new run of NCBI checks them. A superuser reads a file of mode 000, so there only the rows of a
+//! directory are compared.
 #![cfg(unix)]
 
 use std::fs;
@@ -17,12 +22,15 @@ use std::process::Command;
 
 /// The rows: `id program db query words target status stdout stderr losat`. A text field escapes
 /// `\\`, `\n` and `\t`; `\e` is empty; `{W}` is the run's directory. `words` are the arguments
-/// after `-db DB -query QUERY`, separated by `|`.
+/// after `-db DB -query QUERY` (no `-db` for an empty `db`), separated by `|`; a word `env:NAME=VALUE`
+/// sets that variable instead. The files `o` and `o_*` that a run writes follow its standard output.
 const ROWS: &str = include_str!("seqdb/expected/taxdb_unreadable.tsv");
 
-/// The files of the database `db` and of the query `query`, under tests/.
+/// The files of the database `db` and of the query `query`, under tests/ (no database: the
+/// query of `db_search/multidb`, which is also the `-subject`).
 fn files(db: &str, query: &str) -> Vec<String> {
     let (dir, exts): (&str, &[&str]) = match db {
+        "" => ("db_search/multidb", &[]),
         "tm_psi" => (
             "db_search",
             &[
@@ -114,13 +122,22 @@ fn run(dir: &Path, row: &[String], threads: Option<&str>) -> (String, String, i3
         .current_dir(dir)
         .env("HOME", dir.join("home"))
         .env("BLASTDB", dir)
-        .args([&row[1], "-db", &row[2]])
+        .arg(&row[1])
+        .args(["-db", &row[2]].into_iter().filter(|_| !row[2].is_empty()))
         .args(
             ["-query", &row[3]]
                 .into_iter()
                 .filter(|_| !row[3].is_empty()),
         )
-        .args(row[4].split('|').filter(|word| !word.is_empty()))
+        .args(
+            row[4]
+                .split('|')
+                .filter(|word| !word.is_empty() && !word.starts_with("env:")),
+        )
+        .envs(row[4].split('|').filter_map(|word| {
+            word.strip_prefix("env:")
+                .and_then(|variable| variable.split_once('='))
+        }))
         .args(threads.map(|n| ["-num_threads", n]).into_iter().flatten())
         .output()
         .unwrap();
@@ -197,9 +214,12 @@ fn taxonomy_files_that_cannot_be_read_give_ncbis_bytes_or_losats_refusal() {
                 "refused" => {
                     let file = dir.join(format!("taxdb.{}", &target[..3]));
                     let words = format!(
-                        "{} cannot be opened: Permission denied, where NCBI BLAST+ 2.17.0 fails to \
-                         load each database sequence with a taxid",
-                        file.display()
+                        "{} cannot be opened: Permission denied; NCBI BLAST+ 2.17.0 then fails at \
+                         each taxonomy lookup and writes this output differently or stops, which \
+                         LOSAT's {} does not support; make the file readable, or move it off the \
+                         BLASTDB path",
+                        file.display(),
+                        row[1].to_ascii_uppercase()
                     );
                     assert!(stderr.contains(&words), "{at}: {stderr}");
                     assert_eq!(status, 1, "{at}: exit status");
@@ -222,7 +242,7 @@ fn taxonomy_files_that_cannot_be_read_give_ncbis_bytes_or_losats_refusal() {
     fs::remove_dir_all(&root).unwrap();
     eprintln!("{same} rows as NCBI, {refused} refused");
     assert!(
-        same + refused >= if superuser { 30 } else { 162 },
+        same + refused >= if superuser { 82 } else { 300 },
         "{same} {refused}"
     );
 }

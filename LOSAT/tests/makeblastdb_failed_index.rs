@@ -347,7 +347,9 @@ fn a_full_disk_leaves_the_index_as_ncbi_reads_it() {
         let output = command.output().expect("run losat makeblastdb");
         let d = tmp.to_str().unwrap();
         let status = output.status.code().unwrap_or(-1);
-        let stderr = masked(&String::from_utf8_lossy(&output.stderr), d);
+        // The limit refuses an instrumented build's profile too: its lines are not compared.
+        let stderr = crate::llvm_profile::without_profile_errors(&output.stderr);
+        let stderr = masked(&String::from_utf8_lossy(&stderr), d);
         let stdout = masked(&String::from_utf8_lossy(&output.stdout), d);
         let files = listing(&out_dir);
         let name = format!("{} limit {}", row.kind, row.limit);

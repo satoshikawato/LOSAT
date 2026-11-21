@@ -978,11 +978,13 @@ impl<'a> LineCheck<'a> {
 /// the composition-based redo or the ungapped re-evaluation of a nucleotide subject fetches it
 /// (seqsrc_seqdb.cpp:302-313). It was searched and counts in the statistics; a gapped search's
 /// preliminary hit lists hold it (it took its place there), and its hits leave the search
-/// before the final hit lists are made, so they take no place in them. Each program removes
-/// such subjects from the preliminary hit lists right before its traceback or redo, after
-/// their cut and trim (`ADAPTIVE_CBS`), and an ungapped search of a nucleotide database drops
-/// a subject's HSPs before they reach the preliminary hit lists. Shared by the threads of a
-/// search (`Sync`); each subject's header is read once.
+/// before the final hit lists are made, so they take no place in them. A program removes
+/// such subjects from the preliminary hit lists right before its traceback (`retain`), after
+/// their cut and trim (`ADAPTIVE_CBS`); for the composition-based redo the places of their
+/// lists in its stream count (`marks`, `FetchMarks`), since they change NCBI's status of the
+/// batch; an ungapped search of a nucleotide database drops a subject's HSPs before they
+/// reach the preliminary hit lists. Shared by the threads of a search (`Sync`); each subject's
+/// header is read once.
 ///
 /// NCBI's fetch reads the header of every subject it fetches (`GetSeqIDs`), so a header that
 /// cannot be read ends NCBI's search there (exit 255 in the traceback, `BLAST engine error`
@@ -1028,6 +1030,25 @@ impl<'a> FetchExcluded<'a> {
         Ok(())
     }
 
+    /// Which of `items` (the preliminary hit lists of a redo's stream, in the stream's order)
+    /// are on a subject the fetch excludes (`FetchMarks`); `ordinal` names an item's subject
+    /// (`None`: fetched). The first header that cannot be read, in the order of `items`, is the
+    /// error (with its ordinal), as `retain`'s.
+    pub(crate) fn marks<T>(
+        &self,
+        items: &[T],
+        ordinal: impl Fn(&T) -> Option<u32>,
+    ) -> Result<FetchMarks, (u32, SeqDbError)> {
+        let mut excluded = Vec::with_capacity(items.len());
+        for item in items {
+            excluded.push(match ordinal(item) {
+                Some(ordinal) => self.excludes(ordinal).map_err(|error| (ordinal, error))?,
+                None => false,
+            });
+        }
+        Ok(FetchMarks(excluded))
+    }
+
     /// LOSAT's refusal (in `program`'s name) of a search whose fetch of `ordinal` cannot read
     /// its header (`error`), where NCBI's search fails (`FetchRefusal`).
     pub(crate) fn refusal((ordinal, error): (u32, SeqDbError), program: &str) -> anyhow::Error {
@@ -1043,6 +1064,43 @@ impl<'a> FetchExcluded<'a> {
             .to_string(),
         )
         .into()
+    }
+}
+
+/// Which lists of a composition-based redo's stream, by their place in it, are on a subject
+/// that NCBI's fetch excludes (`FetchExcluded::marks`; none without a negative seqid list with
+/// ids, `FetchMarks::default`). NCBI's redo loop tests such a list's early termination first,
+/// like any other's; where the test does not stop the list, the fetch excludes the subject and
+/// NCBI sets the status of the thread back to 0 and goes on with the next list, with no redo and
+/// no heap insert, so a failed Smith-Waterman redo before it no longer fails the batch; where
+/// the test stops the list, nothing changes. BLASTP's `exclude_fetched` reads them: it removes
+/// those lists and keeps their places for the Smith-Waterman redo's status
+/// (`blastp::blast_engine::database::FetchExcludedMatch`). The other programs remove such lists
+/// with `FetchExcluded::retain`.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3540
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3560-3575
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:306-314
+#[derive(Debug, Default)]
+pub(crate) struct FetchMarks(Vec<bool>);
+
+impl FetchMarks {
+    /// The marks of `items` under `excluded` (`FetchExcluded::marks`), none without it.
+    pub(crate) fn of<T>(
+        excluded: Option<&FetchExcluded<'_>>,
+        items: &[T],
+        ordinal: impl Fn(&T) -> Option<u32>,
+    ) -> Result<Self, (u32, SeqDbError)> {
+        match excluded {
+            Some(excluded) => excluded.marks(items, ordinal),
+            None => Ok(Self::default()),
+        }
+    }
+
+    /// Whether the fetch excludes the subject of the stream's item `index`.
+    #[inline(always)]
+    pub(crate) fn excluded(&self, index: usize) -> bool {
+        self.0.get(index).copied().unwrap_or(false)
     }
 }
 
@@ -2388,12 +2446,15 @@ pub(crate) fn refuse_display_id_of_a_query(
 /// batch's queries to its scope before their reports and empties it after them and finds such a
 /// subject there: its reports show the query's title and letters in the subject's place, and the
 /// query-anchored merge of the query's own Bioseq can abort (`double free or corruption`). NCBI's
-/// display of such a sequence in outfmt 0, 6 and 7 is line RG item X7's.
+/// display of such a sequence in outfmt 0, 6 and 7 is line RG item X7's. `effect` says what NCBI
+/// does with it: `QUERY_ANCHORED_EFFECT`, or `XML_EFFECT` for the RPS programs' BLAST XML (`-outfmt 5`: RPSBLAST gets the query's title for the entry, RPSTBLASTN
+/// an exception from its Seq-align conversion and half a document; PS15a-1).
 pub(crate) fn refuse_generated_query_id(
     subject: &crate::report::db_subject::ParsedSubject,
     oid: crate::seqdb::Oid,
     scope: &crate::blastinput::query_batch::QueryScope,
     program: &str,
+    effect: &str,
 ) -> Result<()> {
     if !scope.has_key(&subject.query_scope_keys().own) {
         return Ok(());
@@ -2402,12 +2463,19 @@ pub(crate) fn refuse_generated_query_id(
         oid,
         &format!(
             "has the Seq-id {}, {GENERATED_QUERY_ID} in the query batch that reports it: NCBI \
-             BLAST+ shows that query in its place in the query-anchored formats (outfmt 1 to 4)",
+             BLAST+ {effect}",
             String::from_utf8_lossy(&subject.alignment_fasta())
         ),
         program,
     ))
 }
+
+/// What NCBI does with such a sequence in the query-anchored formats (`refuse_generated_query_id`).
+pub(crate) const QUERY_ANCHORED_EFFECT: &str =
+    "shows that query in its place in the query-anchored formats (outfmt 1 to 4)";
+
+/// What NCBI does with it in the BLAST XML of the RPS programs (`refuse_generated_query_id`).
+pub(crate) const XML_EFFECT: &str = "takes that query for it in BLAST XML (outfmt 5)";
 
 /// The query-anchored formats (outfmt 1 to 4) of a program whose reports name a database's
 /// sequences by rank (BLASTN, TBLASTN: line RG T3b; BLASTP's `ListedTitles` asks the same
@@ -2441,7 +2509,13 @@ pub(crate) fn refuse_query_ids_of_anchored_reports<'s>(
         if generated {
             for &rank in &ranks {
                 if let Some(subject) = parsed_of(rank) {
-                    refuse_generated_query_id(subject, oid_of(rank), scope, program)?;
+                    refuse_generated_query_id(
+                        subject,
+                        oid_of(rank),
+                        scope,
+                        program,
+                        QUERY_ANCHORED_EFFECT,
+                    )?;
                 }
             }
         }

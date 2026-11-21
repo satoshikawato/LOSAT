@@ -313,13 +313,22 @@ impl RedoMatch<'_> {
             if run.bound_exceeded.is_some() {
                 return Ok(None);
             }
+            // A window that ends before it begins (`-strand plus|minus`, NCBI's six-frame
+            // arithmetic on the three-frame buffer; `frame_range`): the score-only scan's row of
+            // `end - begin` columns, a negative count converted to `size_t`, cannot be allocated,
+            // the scan returns -1 and the match's redo fails (as `SwWindowRedo::Failed`).
+            // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/smith_waterman.c:74-77
+            // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1444-1454
+            if window.end < window.begin {
+                return Ok(None);
+            }
             // `frame_range`'s buffer holds the frame's letters from byte 1 and a zero byte before
             // the window (`buffer[begin]`): NCBI's `seqData->data` after the fit, whose byte before
             // `ALIGN_EX` reads.
             let rows = &run.matrix.rows;
             let window_letters = SwWindow {
                 subject_from_sentinel: &subject_data[window.begin as usize..],
-                subject_length: (window.end - window.begin).max(0) as usize,
+                subject_length: (window.end - window.begin) as usize,
                 query_length,
                 rows: |pos| &rows[pos],
                 gap_open: run.gap_open,

@@ -191,7 +191,7 @@ impl MaskWriter {
     // `seq_length` is `x_ComputeSeqLength()` for the sequence being written,
     // `None` when there is none ("Need sequence data."). All lengths and
     // offsets are 4-byte integers; every size is a multiple of 4, so
-    // `WritePadBytes(4, eSimple)` adds nothing. With `-gi_mask` the masks of a sequence without a
+    // NCBI's padding to 4 bytes adds nothing. With `-gi_mask` the masks of a sequence without a
     // GI (`gis` empty) are dropped before any check (survey D4), and the checked ranges of the
     // others go to the GI masks of their algorithms.
     /// `SetMaskData`: the blobs of the sequence being written, or its ranges under its GIs `gis`

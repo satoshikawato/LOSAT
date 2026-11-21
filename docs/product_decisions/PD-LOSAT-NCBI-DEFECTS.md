@@ -1125,7 +1125,7 @@ file would differ, and NCBI's programs still could not open the database).
     database for its metadata file (`makeblastdb.cpp:1296-1317`) and ends there with that message
     and exit status 2, after every other file is written; no NCBI program can open the database.
     LOSAT writes the database's file name without a directory in that line
-    (`CDirEntry(m_Dbname).GetName()`, the form of the list of several volumes), which NCBI's reader
+    (the file name of `m_Dbname`, the form of the list of several volumes), which NCBI's reader
     takes for the volume of the alias file's own name (`seqdbalias.cpp:773-797`): the database
     opens, and the build goes on as a build of several volumes does, with the metadata file and
     exit status 0. Every other file, the messages and the log are NCBI's. The metadata file is the
@@ -1389,7 +1389,7 @@ file would differ, and NCBI's programs still could not open the database).
   whatever its size, and when the first record does not fit `-max_file_sz` the volume `.00` is
   never created. A `-gi_mask_name` in a directory that does not exist writes nothing there and is
   still listed in `MASKLIST`. GIs from 2^31 to 2^32 - 1 are written as the low 32 bits
-  (`GI_TO(int, gi)`). The size of a record in `CanFit` (`writedb_gimask.hpp:96-99`: twice the
+  (NCBI converts a GI to `int` with `GI_TO`). The size of a record in `CanFit` (`writedb_gimask.hpp:96-99`: twice the
   number of ranges plus one, times four, which NCBI computes in `int` and which overflows past
   268,435,455 ranges) is computed without overflow. Two algorithms whose GI-mask files are the
   same files are written as NCBI writes them where their files are written one after the other

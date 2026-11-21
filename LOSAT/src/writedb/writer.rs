@@ -829,7 +829,7 @@ impl WriteDb {
         Ok(id)
     }
 
-    /// `SetMaskData(ranges, gis)`: the masked ranges of the sequence added last (its mask blobs
+    /// `SetMaskData`: the masked ranges of the sequence added last (its mask blobs
     /// are written with it when it is published; with `-gi_mask` they go to the GI masks under
     /// the sequence's GIs `gis`, and nowhere for a sequence without one). The ranges are those
     /// `MaskedRangeSet::get_ranges` gives.

@@ -788,7 +788,7 @@ impl<'a> BuildDatabase<'a> {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:446-466
     // The Seq-ids are `bs->GetId()`: the parsed ids of a sequence with `-parse_seqids`, its
     // `local id` without it. A sequence with no 31-bit local id has none. The GIs are those of
-    // the first definition line (`bs->GetId()`), in its order; `-gi_mask` requires
+    // the first definition line (the Bioseq's ids), in its order; `-gi_mask` requires
     // `-parse_seqids`.
     //
     // Where NCBI's order of the ranges is the memory addresses', LOSAT's order is written, so that

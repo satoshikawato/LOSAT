@@ -117,7 +117,7 @@ impl GiMaskData {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_gimask.cpp:133-184
-// `GI_TO(int, gi)` keeps the low 32 bits: a GI from 2^31 to 2^32 - 1 is written as the same
+// NCBI converts a GI to `int` (`GI_TO`), which keeps its low 32 bits: a GI from 2^31 to 2^32 - 1 is written as the same
 // four bytes (larger GIs never reach the masks, `deflines::large_gi_to_skip`).
 /// `CWriteDB_GiMaskOffset::AddGIs`: the offset file, page by page.
 fn write_offset_file(file: &mut WriteDbFile, gi_offset: &[GiOffset], le: bool) {
@@ -227,8 +227,8 @@ impl GiMask {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_gimask.cpp:46-57
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_gimask.cpp:188-198
     /// The files of the algorithm `name` with the description `desc`; `dates` are the dates of
-    /// the `.gmi` and the `.gni` file (`CTime(CTime::eCurrent).AsString()` of each constructor,
-    /// read in that order by the caller).
+    /// the `.gmi` and the `.gni` file (the current time as `CTime` text, which each of NCBI's
+    /// constructors reads; the caller reads them in that order).
     pub(crate) fn new(name: &str, desc: &[u8], max_file_size: u64, dates: [Vec<u8>; 2]) -> Self {
         Self {
             name: name.to_string(),

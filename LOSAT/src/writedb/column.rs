@@ -120,7 +120,8 @@ pub(crate) fn write_string_var(out: &mut Vec<u8>, text: &[u8]) {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbblob.cpp:562-585
-/// `WritePadBytes(align, eString)`: 1 to `align` bytes, `#` and a NUL at the end.
+/// `WritePadBytes` of the string kind to a multiple of `align`: 1 to `align` bytes, `#` and a
+/// NUL at the end.
 pub(crate) fn write_pad_bytes_string(out: &mut Vec<u8>, align: usize) {
     let pads = align - out.len() % align;
     out.extend(std::iter::repeat_n(b'#', pads - 1));

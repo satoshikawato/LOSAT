@@ -499,6 +499,12 @@ impl<'a> BuildDatabase<'a> {
         })
     }
 
+    /// `oid_masks` of the `CBuildDatabase` constructor (`-oid_masks`): the OID mask files the
+    /// volumes write (`writedb::oid_list`).
+    pub fn set_oid_masks(&mut self, oid_masks: u64) {
+        self.output_db.set_oid_masks(oid_masks);
+    }
+
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1216-1219
     /// `SetTaxids`: the taxids of `-taxid` or `-taxid_map`.
     pub fn set_taxids(&mut self, taxids: TaxIdSet) {

@@ -2504,6 +2504,31 @@ pub(crate) fn blastp_section_aborts(
     )
 }
 
+/// Whether the merge of the query-anchored section (`view`) of query `q_idx` of a BLASTP
+/// `-ungapped` search frees a segment that it still reads (`query_anchored::section_frees`, which
+/// NCBI BLAST+ crashes on): an HSP of length 0 among the section's aligned subjects, `rows` the
+/// rows of the call's hits in the final order and `joins` the copies of one database record
+/// (`blastp_report_group`).
+pub(crate) fn blastp_section_frees(
+    view: PairwiseView,
+    sort: super::hit_sort::ReportSort,
+    num_alignments: usize,
+    q_idx: usize,
+    rows: &[PairwiseHit],
+    subject_titles: &[Arc<[u8]>],
+    joins: impl Fn(u32, u32) -> bool,
+) -> io::Result<bool> {
+    if view == PairwiseView::Pairwise {
+        return Ok(false);
+    }
+    let Some(group) =
+        blastp_report_group(view.report_sort(sort), q_idx, rows, subject_titles, joins)
+    else {
+        return Ok(false);
+    };
+    super::query_anchored::section_frees(&blastp_section_hsps(num_alignments, &group, |_| false))
+}
+
 /// Whether NCBI BLAST+ aborts on the query-anchored section (`view`) of query `q_idx` of a
 /// `-subject` search (`query_anchored::ncbi_aborts`), `rows` the rows of its hits in the final
 /// order: the section of the report (`QuerySections::alignments`), whose group is sorted by

@@ -720,10 +720,12 @@ fn write_tabular_rows<const RPS: bool>(
             // subject once); `qcovus` is blastn's only (blast_format.cpp:818-820).
             let qcovs = if needs.qcovs {
                 query_ranges.clear();
+                // An HSP of length 0 has no letter to cover (its range is empty).
                 query_ranges.extend(
                     hsp_list
                         .hsps
                         .iter()
+                        .filter(|hsp| hsp.length > 0)
                         .map(|hsp| (hsp.q_start as u64 - 1, hsp.q_end as u64 - 1)),
                 );
                 coverage_percent(union_length(&mut query_ranges), query_length)
@@ -908,7 +910,7 @@ fn tabular_hsp<'r>(
         // `Blast_HSPGetQueryCoverage` of the HSP's context, which has the searched length.
         end_gaps: true,
         stored_gaps: [&[], &[]],
-        qcovhsp: hsp_coverage((hsp.q_end - hsp.q_start + 1) as i32, searched_length as i32),
+        qcovhsp: hsp_coverage((hsp.q_end + 1 - hsp.q_start) as i32, searched_length as i32),
     }
 }
 

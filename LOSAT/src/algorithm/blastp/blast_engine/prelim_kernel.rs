@@ -112,10 +112,10 @@ impl BlastpPrelimKernel<'_> {
     /// and for a subject with letters the scan and the ungapped extensions into the scratch's list of
     /// initial hits, the diagonal offset moved past the subject, the interval tree reset for it, and
     /// the gapped half (`gapped_subject`), which gives the list back to the scratch and writes the
-    /// subject's HSP lists into `subject_result`. The four macros name the method's locals (their
-    /// hygiene), so they are defined after them.
+    /// subject's HSP lists into `subject_result` (the body is [`Self::search_subject_in`]).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:493-498
+    #[inline(always)]
     pub(super) fn search_subject(
         &self,
         scratch: &mut BlastpSubjectScratch,
@@ -124,23 +124,42 @@ impl BlastpPrelimKernel<'_> {
         subject_result: &mut BlastpSubjectResult,
         values: &BlastpPrelimValues<'_>,
     ) {
-        self.search_subject_in::<false>(scratch, s_idx, subject, subject_result, values, None);
+        // `-lcase_masking`: this subject's scan ranges, when it has lower-case letters.
+        let x_soft = self
+            .x_soft_subjects
+            .and_then(|all| all.get(s_idx))
+            .filter(|ranges| !ranges.is_empty())
+            .map(Vec::as_slice);
+        self.search_subject_in(
+            scratch,
+            s_idx,
+            subject,
+            subject_result,
+            values,
+            x_soft,
+            false,
+        );
     }
 
-    /// [`Self::search_subject`] with the scan ranges `db_soft` of a database sequence with
-    /// `-db_soft_mask` (`None`: those of `-lcase_masking`'s subjects, if any), and, with `CHUNK`,
-    /// for one hard chunk of a sequence with `-db_hard_mask` (`db_masked.rs`): the chunk's HSPs
-    /// are left in the scratch's HSP list (`gapped_subject`), sorted by score, for the merge of
-    /// the sequence's chunks. Inlined into each caller, so that `search_subject` keeps its code.
-    #[inline(always)]
-    pub(super) fn search_subject_in<const CHUNK: bool>(
+    /// [`Self::search_subject`] with the scan ranges `scan_ranges` (`-lcase_masking`'s of a
+    /// subject, or with `-db_soft_mask` a database sequence's; `None`: every word), and, with
+    /// `chunk`, for one hard chunk of a sequence with `-db_hard_mask` (`db_masked.rs`): the chunk's
+    /// HSPs are left in the scratch's HSP list (`gapped_subject`), sorted by score, for the merge
+    /// of the sequence's chunks. One body for every caller (no code placement in NCBI): the
+    /// masked kernels call it as the default path does, so that the functions it calls keep one
+    /// call site each and stay inlined into it. The four macros name the method's locals (their
+    /// hygiene), so they are defined after them.
+    #[inline(never)]
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn search_subject_in(
         &self,
         scratch: &mut BlastpSubjectScratch,
         s_idx: usize,
         subject: BlastpSubjectRef<'_>,
         subject_result: &mut BlastpSubjectResult,
         values: &BlastpPrelimValues<'_>,
-        db_soft: Option<&[(i32, i32)]>,
+        scan_ranges: Option<&[(i32, i32)]>,
+        chunk: bool,
     ) {
         // `run_call`'s values as its former kernel closure read them: a reference or a `Copy` value
         // each.
@@ -157,7 +176,6 @@ impl BlastpPrelimKernel<'_> {
             x_ungap_sent,
             diag_mask,
             total_query_span,
-            x_soft_subjects,
             timing_enabled,
             timing,
             ..
@@ -184,15 +202,8 @@ impl BlastpPrelimKernel<'_> {
         let subject_diag_offset = scratch.diag_offset;
 
         let scan_ungapped_start = blastp_timing_start(timing_enabled);
-        // `-lcase_masking`: this subject's scan ranges, when it has lower-case letters.
-        // `-db_soft_mask`: a database sequence's scan ranges (`db_masked.rs`).
-        let x_soft = match db_soft {
-            Some(ranges) => Some(ranges),
-            None => x_soft_subjects
-                .and_then(|all| all.get(s_idx))
-                .filter(|ranges| !ranges.is_empty())
-                .map(Vec::as_slice),
-        };
+        // The scan ranges (`-lcase_masking`, `-db_soft_mask`).
+        let x_soft = scan_ranges;
         // The subject scan and the two-hit test in one loop (a search with a window).
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:502-505,509
         // Dispatch point: the two-hit test reads the lookup cells in place
@@ -727,7 +738,7 @@ impl BlastpPrelimKernel<'_> {
             values,
             word_cutoff_scores,
         };
-        self.gapped_subject::<CHUNK>(scratch, s_idx, scanned, subject_result, init_hsps);
+        self.gapped_subject(scratch, s_idx, scanned, subject_result, init_hsps, chunk);
     }
 
     /// The gapped half of the kernel for one subject with letters (`search_subject`'s last statement,
@@ -738,13 +749,14 @@ impl BlastpPrelimKernel<'_> {
     /// the lists per query) go back to it before the method returns; no statement leaves it early.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3664-3666
-    fn gapped_subject<const CHUNK: bool>(
+    fn gapped_subject(
         &self,
         scratch: &mut BlastpSubjectScratch,
         s_idx: usize,
         scanned: ScannedSubject<'_>,
         subject_result: &mut BlastpSubjectResult,
         mut init_hsps: Vec<InitHSP>,
+        chunk: bool,
     ) {
         // `run_call`'s values as its former kernel closure read them: a reference or a `Copy` value
         // each.
@@ -1095,7 +1107,7 @@ impl BlastpPrelimKernel<'_> {
         // The subject's HSP lists per query (`subject_lists`) after `-subject_besthit`; a hard
         // chunk's HSPs stay in the list for the merge of the sequence's chunks, which filters the
         // joined list after each chunk (`db_masked.rs`).
-        if !CHUNK {
+        if !chunk {
             self.subject_besthit(&mut preliminary_hsp_list);
             self.subject_lists(
                 scratch,

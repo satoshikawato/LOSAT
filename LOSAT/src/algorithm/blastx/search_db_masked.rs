@@ -22,10 +22,10 @@ use super::super::parameters::ContextParameters;
 use super::super::preliminary::{sort_by_score, PreliminaryHsp};
 use super::super::query_setup::PreparedQueryBatch;
 use super::super::results::subject_besthit_preliminary;
-use super::super::seed::{BxLookup, BxScoring, Diagonals};
+use super::super::seed::{BxLookup, Diagonals};
 use super::super::subjects::Subjects;
 use super::super::x_db_stream::XReadError;
-use super::{compute_subject, compute_subject_of, subject_hits_with, SubjectComputation};
+use super::{compute_subject, compute_subject_of, SubjectComputation, SubjectPiece};
 use crate::algorithm::common::database::search_read_error_of;
 use crate::algorithm::common::db_mask_search::{SearchMask, SubjectPlan};
 use crate::seqdb::SeqDbError;
@@ -58,49 +58,36 @@ pub(super) fn compute_masked_subject(
     x_containment: bool,
     mask: SearchMask,
 ) -> Result<SubjectComputation> {
-    let blosum62 = options.scoring == crate::config::ScoringMatrix::Blosum62;
     let plain = |diagonals: &mut Diagonals| {
-        if blosum62 {
-            compute_subject(
-                subjects,
-                batch,
-                params,
-                options,
-                lookup,
-                diagonals,
-                xdrop,
-                oid,
-                x_containment,
-            )
-        } else {
-            compute_subject_of(
-                subjects,
-                batch,
-                params,
-                options,
-                lookup,
-                diagonals,
-                xdrop,
-                oid,
-                x_containment,
-            )
-        }
+        masked_piece(
+            subjects,
+            batch,
+            params,
+            options,
+            lookup,
+            diagonals,
+            xdrop,
+            oid,
+            x_containment,
+            None,
+        )
     };
     let Some(db) = subjects.seqdb() else {
         return plain(diagonals);
     };
-    let length = subjects.length(oid);
-    if length == 0 {
+    if subjects.length(oid) == 0 {
         return plain(diagonals);
     }
-    let stored = diagonals
-        .x_db_masks
-        .of(db, oid as u32, mask.algo_id, mask_read_error, PROGRAM)?
-        .to_vec();
+    let mut reader = diagonals.x_db_masks.take().unwrap_or_default();
+    let stored = reader
+        .of(db, oid as u32, mask.algo_id, mask_read_error, PROGRAM)
+        .map(<[(u32, u32)]>::to_vec);
+    diagonals.x_db_masks = Some(reader);
+    let stored = stored?;
     if stored.is_empty() {
         return plain(diagonals);
     }
-    let masked = Masked {
+    Masked {
         subjects,
         batch,
         params,
@@ -111,11 +98,51 @@ pub(super) fn compute_masked_subject(
         x_containment,
         stored: &stored,
         hard: mask.hard(),
-    };
-    if blosum62 {
-        masked.compute(super::super::seed::Blosum62Bx, diagonals)
+    }
+    .compute(diagonals)
+}
+
+/// The search of database sequence `oid`, or with `piece` of a piece of it, by the search's
+/// matrix: the default path's bodies (`compute_subject`, `compute_subject_of`).
+#[allow(clippy::too_many_arguments)]
+fn masked_piece(
+    subjects: Subjects<'_>,
+    batch: &PreparedQueryBatch,
+    params: &[ContextParameters],
+    options: &ResolvedOptions,
+    lookup: &BxLookup,
+    diagonals: &mut Diagonals,
+    xdrop: i32,
+    oid: usize,
+    x_containment: bool,
+    piece: Option<SubjectPiece<'_>>,
+) -> Result<SubjectComputation> {
+    if options.scoring == crate::config::ScoringMatrix::Blosum62 {
+        compute_subject(
+            subjects,
+            batch,
+            params,
+            options,
+            lookup,
+            diagonals,
+            xdrop,
+            oid,
+            x_containment,
+            piece,
+        )
     } else {
-        masked.compute(super::super::seed::MatrixBx::of(options.scoring), diagonals)
+        compute_subject_of(
+            subjects,
+            batch,
+            params,
+            options,
+            lookup,
+            diagonals,
+            xdrop,
+            oid,
+            x_containment,
+            piece,
+        )
     }
 }
 
@@ -147,15 +174,11 @@ impl Masked<'_> {
     // TBLASTN's and TBLASTX's chunks of a long range overlap; this reason does not carry over.
     // With `-subject_besthit` the filter then runs on the joined list after every chunk with HSPs
     // (blast_engine.c:586-591, blast_hits.c:2538-2580), not once on the whole sequence's list.
-    /// The sequence's computation with the matrix of `scoring`: the link cutoffs of its whole
-    /// length (`compute_subject_with`), and its HSPs over the soft ranges or the hard chunks. A
-    /// chunk shorter than the word finds nothing in NCBI's one-hit and two-hit scans alike and is
-    /// passed over (`SubjectPlan::next_searched_chunk`).
-    fn compute<S: BxScoring>(
-        &self,
-        scoring: S,
-        diagonals: &mut Diagonals,
-    ) -> Result<SubjectComputation> {
+    /// The sequence's computation: the link cutoffs of its whole length (`compute_subject_with`),
+    /// and its HSPs over the soft ranges or the hard chunks, each piece searched by the default
+    /// path's bodies (`masked_piece`). A chunk shorter than the word finds nothing in NCBI's
+    /// one-hit and two-hit scans alike and is passed over (`SubjectPlan::next_searched_chunk`).
+    fn compute(&self, diagonals: &mut Diagonals) -> Result<SubjectComputation> {
         let Masked {
             subjects,
             batch,
@@ -168,6 +191,22 @@ impl Masked<'_> {
             stored,
             hard,
         } = *self;
+        let piece = |diagonals: &mut Diagonals, piece: SubjectPiece<'_>| {
+            masked_piece(
+                subjects,
+                batch,
+                params,
+                options,
+                lookup,
+                diagonals,
+                xdrop,
+                oid,
+                x_containment,
+                Some(piece),
+            )
+        };
+        // The sequence with the sentinel after its residues (and before them too for a batch with
+        // `x_ungap_sent`), as `compute_subject_with` reads it.
         let x_lead = batch.x_ungap_sent;
         let x_buffer = if x_lead {
             subjects.x_encoded_with_sentinels(oid)
@@ -176,8 +215,20 @@ impl Masked<'_> {
         };
         let residues = &x_buffer[usize::from(x_lead)..x_buffer.len() - 1];
         let length = residues.len();
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1451-1455
-        // The link cutoffs of an ungapped search with the whole sequence's length.
+        let mut plan = SubjectPlan::default();
+        if !hard {
+            // The whole sequence over its soft ranges: its own link cutoffs.
+            let ranges = plan.soft(stored, length);
+            return piece(
+                diagonals,
+                SubjectPiece {
+                    buffer: &x_buffer,
+                    ranges: Some(ranges),
+                },
+            );
+        }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1451-1455 (cited at
+        // `compute_subject_with`): the link cutoffs of the sequence's whole length.
         let prepared_link = if super::super::linking::computes_link_cutoffs(options) {
             Some(super::super::linking::link_cutoffs(
                 batch,
@@ -189,58 +240,31 @@ impl Masked<'_> {
         } else {
             None
         };
-        let mut containment = Vec::new();
-        let mut plan = SubjectPlan::default();
-        if !hard {
-            let ranges = plan.soft(stored, length);
-            let (raw, purged) = subject_hits_with(
-                scoring,
-                batch,
-                params,
-                options,
-                lookup,
-                diagonals,
-                xdrop,
-                &x_buffer,
-                x_lead,
-                Some(ranges),
-                x_containment,
-                &mut containment,
-            )?;
-            return Ok(SubjectComputation {
-                raw,
-                purged,
-                containment,
-                prepared_link,
-            });
-        }
         let word = usize::try_from(options.word_size).unwrap_or(usize::MAX);
         plan.start_hard(stored, length);
         let mut raw = Vec::new();
         let mut purged = Vec::new();
+        let mut containment = Vec::new();
         let mut letters = Vec::new();
         while let Some(chunk) = plan.next_searched_chunk(word) {
-            // The chunk's letters with the sentinel after them, and before them with `x_lead`.
+            // The chunk's letters between the sentinels that the sequence has.
             letters.clear();
             if x_lead {
                 letters.push(0);
             }
             letters.extend_from_slice(&residues[chunk.offset..chunk.offset + chunk.length]);
             letters.push(0);
-            let mut chunk_containment = Vec::new();
-            let (chunk_raw, chunk_purged) = subject_hits_with(
-                scoring,
-                batch,
-                params,
-                options,
-                lookup,
+            let SubjectComputation {
+                raw: chunk_raw,
+                purged: chunk_purged,
+                containment: chunk_containment,
+                ..
+            } = piece(
                 diagonals,
-                xdrop,
-                &letters,
-                x_lead,
-                None,
-                x_containment,
-                &mut chunk_containment,
+                SubjectPiece {
+                    buffer: &letters,
+                    ranges: None,
+                },
             )?;
             let offset = chunk.offset as i32;
             let chunk_hits = !chunk_purged.is_empty();
@@ -252,13 +276,12 @@ impl Masked<'_> {
                     .map(|(hsp, contained)| (shifted(hsp, offset), contained)),
             );
             if options.subject_besthit && chunk_hits {
-                // The filter of the joined list after this chunk; the sink's own filter of the
-                // whole list after the last chunk deletes nothing more (the filter keeps no pair
-                // that it would delete).
+                // The filter of the joined list after this chunk, in the merge's order.
                 sort_by_score(&mut purged);
                 subject_besthit_preliminary(&mut purged);
             }
         }
+        // The merge's order: by score.
         sort_by_score(&mut purged);
         Ok(SubjectComputation {
             raw,

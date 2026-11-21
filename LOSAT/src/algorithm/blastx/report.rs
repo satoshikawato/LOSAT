@@ -994,10 +994,12 @@ fn write_pairwise(
             },
             show_gis: options.show_gis,
             query_masks: super::anchored::AnchoredSequences::query_masks(queries, batches),
-            subject_masks: if subjects.iter().any(FastaRecord::has_lowercase_runs) {
-                super::x_soft_subject::x_subject_masks(hits, subjects)
-            } else {
-                Default::default()
+            subject_masks: match db_subject_masks(shown, hits) {
+                Some(masks) => masks,
+                None if subjects.iter().any(FastaRecord::has_lowercase_runs) => {
+                    super::x_soft_subject::x_subject_masks(hits, subjects)
+                }
+                None => Default::default(),
             },
             code: crate::algorithm::tblastx::report::DisplayCode::new(
                 &crate::utils::genetic_code::GeneticCode::from_id(options.query_gencode),
@@ -1198,11 +1200,26 @@ pub(super) fn pairwise_hits(
     // `-lcase_masking`: the subject rows show their records' lower case too (x_soft_subject.rs), in
     // outfmt 0 and in the hits that LOSAT Web's `run_local` hands out, as the query rows do.
     // A `-subject_loc` subject can show runs of its record outside the interval
-    // (`FastaRecord::archive_lowercase_runs`).
-    if subjects.iter().any(FastaRecord::has_lowercase_runs) {
+    // (`FastaRecord::archive_lowercase_runs`). `-db_soft_mask` and `-db_hard_mask`: the stored
+    // masks by NCBI's Seq-id (`ReportedSubjects::shown_db_masks`).
+    if let Some(masks) = db_subject_masks(shown, &hits) {
+        super::x_soft_subject::x_kept_subject_rows(&mut hits, &masks);
+    } else if subjects.iter().any(FastaRecord::has_lowercase_runs) {
         super::x_soft_subject::x_masked_subject_rows(&mut hits, subjects);
     }
     Ok(hits)
+}
+
+/// The subject masks of a search with `-db_soft_mask` or `-db_hard_mask` that the rows `hits`
+/// show (`ReportedSubjects::shown_db_masks`); `None` for any other search.
+fn db_subject_masks(
+    shown: &ShownSubjects<'_>,
+    hits: &[crate::report::pairwise::PairwiseHit],
+) -> Option<std::collections::HashMap<(u32, u32), Vec<(i32, i32)>>> {
+    match shown {
+        ShownSubjects::Database { reported, .. } => reported.shown_db_masks(hits),
+        ShownSubjects::Fasta { .. } => None,
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:226-244

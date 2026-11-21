@@ -184,3 +184,83 @@ fn hard_masked_bases_are_b_over_the_ambiguities() {
     );
     assert_eq!(HARD_MASK_NUCLEOTIDE_CODE, 14);
 }
+
+/// A pairwise row of query `q_idx` with subject rank `s_idx` over the subject's letters
+/// `s_start..=s_end` (1-based).
+fn row(
+    q_idx: u32,
+    s_idx: u32,
+    s_start: usize,
+    s_end: usize,
+) -> crate::report::pairwise::PairwiseHit {
+    crate::report::pairwise::PairwiseHit::from(crate::common::Hit {
+        identity: 100.0,
+        length: s_end + 1 - s_start,
+        mismatch: 0,
+        gapopen: 0,
+        q_start: 1,
+        q_end: s_end + 1 - s_start,
+        s_start,
+        s_end,
+        e_value: 1e-10,
+        bit_score: 50.0,
+        num_ident: s_end + 1 - s_start,
+        query_frame: 0,
+        query_length: 400,
+        q_idx,
+        s_idx,
+        raw_score: 100,
+        sort_query_offset: 0,
+        sort_query_end: s_end + 1 - s_start,
+        sort_subject_offset: s_start - 1,
+        sort_subject_end: s_end,
+        has_sort_offsets: true,
+        gap_info: None,
+        num_positives: s_end + 1 - s_start,
+    })
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1046-1052 and 1247-1250
+// (cited at `shown_db_subject_masks`)
+// Two sequences of one Seq-id (ranks 0 and 1, from two databases with parsed Seq-ids): both rows
+// of a query show the masks of the later in the rows' order that meet its own HSPs; a sequence
+// whose masks meet none of its HSPs replaces nothing; another Seq-id keeps its own; each query
+// keeps its own map.
+#[test]
+fn rows_show_the_masks_of_their_seq_id() {
+    let stored: [Vec<(u32, u32)>; 3] = [vec![(150, 190)], vec![(0, 30), (300, 320)], vec![(5, 9)]];
+    let keys = |rank: u32| match rank {
+        0 | 1 => (b"p5".to_vec(), b"p5".to_vec()),
+        _ => (b"p6".to_vec(), b"p6".to_vec()),
+    };
+    let hits = [
+        row(0, 1, 21, 380),
+        row(0, 0, 21, 380),
+        row(0, 2, 1, 50),
+        row(1, 0, 140, 200),
+        row(1, 1, 100, 120),
+    ];
+    let shown = shown_db_subject_masks(
+        &hits,
+        |rank| stored.get(rank as usize).map(Vec::as_slice),
+        keys,
+    );
+    // Query 0: rank 1's [0, 30) meets its HSP (closed [20, 380]), [300, 320) too; rank 0's
+    // [150, 190) comes later and replaces them for both rows.
+    assert_eq!(shown.get(&(0, 0)), Some(&vec![(150, 189)]));
+    assert_eq!(shown.get(&(0, 1)), Some(&vec![(150, 189)]));
+    assert_eq!(shown.get(&(0, 2)), Some(&vec![(5, 8)]));
+    // Query 1: rank 0's mask meets its HSP; rank 1's masks meet none of [99, 120], so rank 0's
+    // stay for both rows.
+    assert_eq!(shown.get(&(1, 0)), Some(&vec![(150, 189)]));
+    assert_eq!(shown.get(&(1, 1)), Some(&vec![(150, 189)]));
+    // Ranks without a shared Seq-id: each its own (the BL_ORD_ID key of each OID).
+    let own = |rank: u32| (vec![rank as u8], vec![rank as u8]);
+    let shown = shown_db_subject_masks(
+        &hits[..2],
+        |rank| stored.get(rank as usize).map(Vec::as_slice),
+        own,
+    );
+    assert_eq!(shown.get(&(0, 1)), Some(&vec![(0, 29), (300, 319)]));
+    assert_eq!(shown.get(&(0, 0)), Some(&vec![(150, 189)]));
+}

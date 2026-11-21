@@ -399,6 +399,9 @@ pub(crate) struct ReportedSubjects {
     /// by query ordinal, where the format's writer places them at the reads
     /// (`report::query_warnings::ReadCursor`; `ShownSubjects::query_reads`).
     query_reads: std::collections::BTreeMap<usize, crate::report::query_warnings::QueryReads>,
+    /// `-db_soft_mask` and `-db_hard_mask` with a pairwise report: the stored masks of the
+    /// search's algorithm of each rank (`read_db_masks`); `None` otherwise.
+    db_masks: Option<Vec<Vec<(u32, u32)>>>,
 }
 
 /// The values of a custom tabular report's fields that read more of the reported sequences than
@@ -1209,32 +1212,52 @@ impl ReportedSubjects {
         &self.records
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1586-1601 and
-    // c++/src/algo/blast/api/seqinfosrc_seqdb.cpp:109-139
-    // A masked database search's report shows in lower case the stored masks of the search's
-    // algorithm that meet the closed range from one of the query's HSPs' subject offset to its
-    // end (one past its last letter).
-    /// With `-db_soft_mask` or `-db_hard_mask` of the algorithm `algo_id`: each record's
-    /// lower-case runs become the stored masks of its sequence (inclusive, sorted, overlapping and
-    /// touching masks joined), which the pairwise report and the query-anchored sections keep
-    /// where they meet the closed range of one of the query's HSPs with the subject
-    /// (`x_soft_subject::x_subject_masks`, `x_masked_subject_rows`: a row's letter in a kept run
-    /// is a letter in any run). The records' letters stay those stored.
+    /// With `-db_soft_mask` or `-db_hard_mask` of the algorithm `algo_id` and a pairwise report:
+    /// the stored masks of each rank, which the rows show (`shown_db_masks`). The records'
+    /// letters stay those stored.
     #[cold]
     #[inline(never)]
-    pub(crate) fn show_db_masks(&mut self, database: &BlastxDatabase, algo_id: i32) -> Result<()> {
+    pub(crate) fn read_db_masks(&mut self, database: &BlastxDatabase, algo_id: i32) -> Result<()> {
         let mut reader = crate::algorithm::common::db_mask_search::SubjectMasks::with_window(1);
-        for (record, &ordinal) in self.records.iter_mut().zip(&self.ordinals) {
-            let stored = reader.of(
-                &database.db,
-                ordinal,
-                algo_id,
-                shared::database_error_of,
-                database.program,
-            )?;
-            record.lowercase_masks = lower_case_runs(stored, record.sequence.len());
+        let mut masks = Vec::with_capacity(self.ordinals.len());
+        for &ordinal in &self.ordinals {
+            masks.push(
+                reader
+                    .of(
+                        &database.db,
+                        ordinal,
+                        algo_id,
+                        shared::database_error_of,
+                        database.program,
+                    )?
+                    .to_vec(),
+            );
         }
+        self.db_masks = Some(masks);
         Ok(())
+    }
+
+    /// The subject masks that the pairwise rows `hits` show in a search with `-db_soft_mask` or
+    /// `-db_hard_mask` (`read_db_masks`), by (query, rank), inclusive, by NCBI's Seq-id
+    /// (`db_mask_search::shown_db_subject_masks`); `None` for a search without them.
+    #[cold]
+    #[inline(never)]
+    pub(crate) fn shown_db_masks(
+        &self,
+        hits: &[crate::report::pairwise::PairwiseHit],
+    ) -> Option<std::collections::HashMap<(u32, u32), Vec<(i32, i32)>>> {
+        use crate::algorithm::common::db_mask_search as db_mask;
+        let masks = self.db_masks.as_ref()?;
+        Some(db_mask::shown_db_subject_masks(
+            hits,
+            |rank| masks.get(rank as usize).map(Vec::as_slice),
+            |rank| {
+                db_mask::subject_id_keys(
+                    self.parsed_subject(rank as usize),
+                    self.oid(rank as usize),
+                )
+            },
+        ))
     }
 
     /// The ordinal id of rank `rank`.
@@ -1364,26 +1387,6 @@ impl ReportedSubjects {
             })
             .collect()
     }
-}
-
-/// The stored masks `stored` (`[start, end)`) of a sequence of `length` letters as lower-case
-/// runs: inclusive, clipped to the letters, sorted, and the overlapping and touching ones joined.
-fn lower_case_runs(stored: &[(u32, u32)], length: usize) -> Vec<(i32, i32)> {
-    let mut masks: Vec<(usize, usize)> = stored
-        .iter()
-        .map(|&(start, end)| (start as usize, (end as usize).min(length)))
-        .filter(|&(start, end)| start < end)
-        .collect();
-    masks.sort_unstable();
-    let mut runs: Vec<(i32, i32)> = Vec::with_capacity(masks.len());
-    for (start, end) in masks {
-        let (start, last) = (start as i32, end as i32 - 1);
-        match runs.last_mut() {
-            Some(run) if start <= run.1 + 1 => run.1 = run.1.max(last),
-            _ => runs.push((start, last)),
-        }
-    }
-    runs
 }
 
 #[cfg(test)]

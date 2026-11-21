@@ -815,6 +815,15 @@ struct SubjectComputation {
     prepared_link: Option<crate::core::link_hsps::LinkCutoffs>,
 }
 
+/// A piece of a database sequence that a search with `-db_soft_mask` or `-db_hard_mask` scans in
+/// place of the sequence (`search_db_masked.rs`): its letters with the sentinel after them (and
+/// before them too for a batch with `x_ungap_sent`), and its scan ranges (`None`: every word).
+#[derive(Clone, Copy)]
+struct SubjectPiece<'a> {
+    buffer: &'a [u8],
+    ranges: Option<&'a [(i32, i32)]>,
+}
+
 #[cfg(feature = "parallel")]
 impl SubjectComputation {
     /// A subject without anything for the sink (the chunks searched side by side keep only the
@@ -850,6 +859,7 @@ fn compute_subject(
     xdrop: i32,
     oid: usize,
     x_containment: bool,
+    piece: Option<SubjectPiece<'_>>,
 ) -> Result<SubjectComputation> {
     compute_subject_with(
         super::seed::Blosum62Bx,
@@ -862,6 +872,7 @@ fn compute_subject(
         xdrop,
         oid,
         x_containment,
+        piece,
     )
 }
 
@@ -880,6 +891,7 @@ fn compute_subject_of(
     xdrop: i32,
     oid: usize,
     x_containment: bool,
+    piece: Option<SubjectPiece<'_>>,
 ) -> Result<SubjectComputation> {
     compute_subject_with(
         super::seed::MatrixBx::of(options.scoring),
@@ -892,6 +904,7 @@ fn compute_subject_of(
         xdrop,
         oid,
         x_containment,
+        piece,
     )
 }
 
@@ -984,6 +997,7 @@ fn compute_subject_scored(
             xdrop,
             oid,
             x_containment,
+            None,
         )
     } else {
         compute_subject_of(
@@ -996,6 +1010,7 @@ fn compute_subject_scored(
             xdrop,
             oid,
             x_containment,
+            None,
         )
     }
 }
@@ -1069,7 +1084,11 @@ fn compute_own_subject(
 }
 
 /// The body of [`compute_subject`] with the matrix of `scoring`: BLOSUM62's stages are today's
-/// functions (`BxScoring::BLOSUM62`), another matrix's their instances for it.
+/// functions (`BxScoring::BLOSUM62`), another matrix's their instances for it. With `piece`, the
+/// search of a piece of a masked database sequence (`search_db_masked.rs`: the whole sequence over
+/// its soft ranges, or a hard chunk, whose link cutoffs of the chunk's length are not read); the
+/// masked search calls these bodies (no code placement in NCBI), so that the stages keep one call
+/// site each and stay inlined here.
 #[inline(always)]
 #[allow(clippy::too_many_arguments)]
 fn compute_subject_with<S: super::seed::BxScoring>(
@@ -1083,18 +1102,19 @@ fn compute_subject_with<S: super::seed::BxScoring>(
     xdrop: i32,
     oid: usize,
     x_containment: bool,
+    piece: Option<SubjectPiece<'_>>,
 ) -> Result<SubjectComputation> {
     #[cfg(feature = "blastx-worker-probe")]
     worker_probe("start", oid);
     let mut containment = Vec::new();
     // EXPERIMENT (LOSAT_X_BXUNGAPSENT): for a batch on the path of the seed loops' sentinel walks,
     // the subject with the sentinel before its residues too (`blastx/x_ungap_sent.rs`);
-    // `encoded` is the same bytes either way.
+    // `encoded` is the same bytes either way. A masked sequence's piece brings its own.
     let x_lead = batch.x_ungap_sent;
-    let x_buffer = if x_lead {
-        subjects.x_encoded_with_sentinels(oid)
-    } else {
-        subjects.encoded_with_sentinel(oid)
+    let x_buffer = match piece {
+        Some(piece) => std::borrow::Cow::Borrowed(piece.buffer),
+        None if x_lead => subjects.x_encoded_with_sentinels(oid),
+        None => subjects.encoded_with_sentinel(oid),
     };
     let encoded: &[u8] = &x_buffer[usize::from(x_lead)..];
     // `subjects.length(oid)` for every kind of subjects: the residues before the sentinel byte (a
@@ -1128,7 +1148,12 @@ fn compute_subject_with<S: super::seed::BxScoring>(
     // x_seed_diag.rs). A `-subject` with lower-case letters (`-lcase_masking`) is scanned over its
     // scan ranges by the reference word finder (x_soft_subject.rs). The tests compare both with
     // the reference word finder (`seed::word_finder_bx`).
+    // A masked sequence's piece: its own scan ranges (a database sequence has no lower case).
     let scan_ranges = super::x_soft_subject::x_subject_scan_ranges(subjects, oid);
+    let ranges = match piece {
+        Some(piece) => piece.ranges,
+        None => scan_ranges.as_deref(),
+    };
     let (raw, purged) = subject_hits_with(
         scoring,
         batch,
@@ -1139,7 +1164,7 @@ fn compute_subject_with<S: super::seed::BxScoring>(
         xdrop,
         &x_buffer,
         x_lead,
-        scan_ranges.as_deref(),
+        ranges,
         x_containment,
         &mut containment,
     )?;
@@ -1153,8 +1178,8 @@ fn compute_subject_with<S: super::seed::BxScoring>(
     })
 }
 
-/// The preliminary HSPs of a subject (`compute_subject_with`) or of a hard chunk of a database
-/// sequence (`x_db_mask.rs`): its word finder over the whole subject or over `ranges`, its
+/// The preliminary HSPs of a subject or of a piece of a masked database sequence
+/// (`compute_subject_with`, its one caller): its word finder over the whole subject or over `ranges`, its
 /// gapped or ungapped extensions, and the list before (`raw`) and after the purge of the HSPs
 /// with common endpoints and the sort by score (`purged`). `x_buffer` is the subject's residues
 /// and the sentinel after them, and with `x_lead` the sentinel before them too.

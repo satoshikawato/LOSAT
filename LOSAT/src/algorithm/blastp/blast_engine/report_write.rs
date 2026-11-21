@@ -747,20 +747,34 @@ pub(super) fn write_pairwise(
             None => std::borrow::Cow::Owned(rows_of(window.clone())?),
         };
         // `-db_soft_mask` and `-db_hard_mask`: the subjects' stored masks that meet the
-        // query's HSPs with them, shown in lower case as `-lcase_masking` shows a FASTA
-        // subject's (`x_soft_subject::x_db_subject_masks`).
+        // query's HSPs with them, by NCBI's Seq-id, shown in lower case as `-lcase_masking`
+        // shows a FASTA subject's (`db_mask_search::shown_db_subject_masks`).
         let db_subject_masks = match (
             args.db_mask_resolved.as_ref(),
             database,
             listed_subjects.as_ref(),
         ) {
-            (Some(mask), Some(database), Some(listed)) => Some(x_soft_subject::x_db_subject_masks(
-                &rows,
-                database.seqdb(),
-                &listed.ordinals,
-                mask.id,
-                args.app.name(),
-            )?),
+            (Some(mask), Some(database), Some(listed)) => {
+                use crate::algorithm::common::db_mask_search as db_mask;
+                let ordinal = |rank: u32| listed.ordinals.get(rank as usize).copied();
+                let stored = db_mask::read_shown_stored(
+                    &rows,
+                    database.seqdb(),
+                    mask.id,
+                    args.app.name(),
+                    ordinal,
+                )?;
+                Some(db_mask::shown_db_subject_masks(
+                    &rows,
+                    |rank| stored.get(&rank).map(Vec::as_slice),
+                    |rank| {
+                        db_mask::subject_id_keys(
+                            listed_parsed.get(rank as usize).and_then(Option::as_deref),
+                            database.oid_map().oid(listed.ordinals[rank as usize]),
+                        )
+                    },
+                ))
+            }
             _ => None,
         };
         // Outfmt 1 to 4: the sections read the sequences and their masks

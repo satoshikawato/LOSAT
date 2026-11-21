@@ -11,16 +11,23 @@
 //! - [`SubjectPlan`]: the scan ranges (`-db_soft_mask`) or the hard chunks (`-db_hard_mask`) of a
 //!   sequence with masks, from the complement of its masks (`core::subject_split`);
 //! - [`mask_protein_letters`]: the letters of NCBI's later fetches with `-db_hard_mask`;
-//! - [`shown_subject_masks`]: the masks that the pairwise report shows in lower case.
+//! - [`shown_subject_masks`], [`read_shown_stored`] and [`shown_db_subject_masks`]: the masks
+//!   that the pairwise report shows in lower case, by NCBI's Seq-id ([`subject_id_keys`]).
 //!
 //! Nothing here runs in a search without the options: each program chooses its masked kernel once
 //! per call.
+
+use std::collections::HashMap;
 
 use anyhow::Result;
 
 use crate::blastinput::db_mask::{MaskKind, ResolvedMask};
 use crate::core::subject_split::{complement_masks, HardChunk, HardSplitState};
+use crate::report::pairwise::PairwiseHit;
 use crate::seqdb::{AmbiguityRun, BlockMasks, BlockRange, MaskBlock, SeqDb, SeqDbError};
+use crate::seqid::defline_set::ordered_key;
+use crate::seqid::model::{Dbtag, ObjectId};
+use crate::seqid::ParsedSeqId;
 use crate::sequence::packed_subject::PackedNucleotide;
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1631-1636
@@ -284,6 +291,134 @@ pub(crate) fn shown_subject_masks(
                     .any(|&(offset, hsp_end)| start <= hsp_end && offset < end)
         })
         .collect()
+}
+
+/// The stored masks of the algorithm `algo_id` of each subject rank of `hits` (the pairwise rows),
+/// read from `db` at the rank's ordinal id (`ordinal`; a rank without one has none); `program`
+/// names the read errors (`database_error_of`).
+pub(crate) fn read_shown_stored(
+    hits: &[PairwiseHit],
+    db: &SeqDb,
+    algo_id: i32,
+    program: &str,
+    ordinal: impl Fn(u32) -> Option<u32>,
+) -> Result<HashMap<u32, Vec<(u32, u32)>>> {
+    let mut reader = SubjectMasks::with_window(1);
+    let mut stored = HashMap::new();
+    for hit in hits {
+        let rank = hit.hit.s_idx;
+        if stored.contains_key(&rank) {
+            continue;
+        }
+        let Some(ordinal) = ordinal(rank) else {
+            continue;
+        };
+        let masks = reader.of(
+            db,
+            ordinal,
+            algo_id,
+            crate::algorithm::common::database::database_error_of,
+            program,
+        )?;
+        stored.insert(rank, masks.to_vec());
+    }
+    Ok(stored)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/seqinfosrc_seqdb.cpp:115-116
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqinfosrc_aux.cpp:51-69
+// The masks of a sequence carry its first Seq-id; its Seq-aligns carry its first GI, else that
+// first Seq-id. A database without parsed Seq-ids names each sequence `gnl|BL_ORD_ID|oid`.
+/// The [`ordered_key`]s of the first Seq-id of a database sequence (`CSeqDB::GetSeqIDs(oid)`'s
+/// first: NCBI's subject masks are kept under it) and of its Seq-align id
+/// (`DeflineSet::alignment_id`: a row looks the masks up by it): those of its parsed Seq-ids
+/// `parsed`, or `gnl|BL_ORD_ID|oid` for both.
+pub(crate) fn subject_id_keys(
+    parsed: Option<&crate::report::db_subject::ParsedSubject>,
+    oid: crate::seqdb::Oid,
+) -> (Vec<u8>, Vec<u8>) {
+    match parsed {
+        Some(parsed) => {
+            let alignment = ordered_key(parsed.alignment_id());
+            let first = parsed
+                .deflines()
+                .iter()
+                .flat_map(|defline| defline.ids.iter())
+                .next()
+                .map_or_else(|| alignment.clone(), ordered_key);
+            (first, alignment)
+        }
+        None => {
+            let id = ParsedSeqId::General(Dbtag {
+                db: b"BL_ORD_ID".to_vec(),
+                tag: ObjectId::Id(oid.get() as i32),
+            });
+            let key = ordered_key(&id);
+            (key.clone(), key)
+        }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1568-1601
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1046-1052 and 1247-1250
+// A query's subject masks go, in the order of its hit list, into a map by the first Seq-id of
+// each sequence (a sequence with none that meets its HSPs adds nothing; a later sequence's
+// replace an earlier one's of an equal Seq-id), and each row of the pairwise report shows the
+// entry of its Seq-align id. Two database sequences share a Seq-id only across databases with
+// parsed Seq-ids (`-db "a b"`, an alias of both): each row then shows the masks of the last.
+/// The subject masks that the pairwise rows `hits` (in the order of the hit lists) show in lower
+/// case, by (query, subject rank), inclusive: each subject's stored masks (`stored`, by rank) that
+/// meet its HSPs with the query ([`shown_subject_masks`]), under the first Seq-id of its
+/// [`subject_id_keys`] (`id_keys`), read back by its Seq-align id.
+pub(crate) fn shown_db_subject_masks<'a>(
+    hits: &[PairwiseHit],
+    stored: impl Fn(u32) -> Option<&'a [(u32, u32)]>,
+    mut id_keys: impl FnMut(u32) -> (Vec<u8>, Vec<u8>),
+) -> HashMap<(u32, u32), Vec<(i32, i32)>> {
+    // Each query's subject ranks in the order of the rows, and the HSP ranges of each pair.
+    let mut queries: Vec<(u32, Vec<u32>)> = Vec::new();
+    let mut query_at: HashMap<u32, usize> = HashMap::new();
+    let mut hsp_ranges: HashMap<(u32, u32), Vec<(usize, usize)>> = HashMap::new();
+    for hit in hits {
+        let (query, rank) = (hit.hit.q_idx, hit.hit.s_idx);
+        let ranges = hsp_ranges.entry((query, rank)).or_insert_with(|| {
+            let at = *query_at.entry(query).or_insert_with(|| {
+                queries.push((query, Vec::new()));
+                queries.len() - 1
+            });
+            queries[at].1.push(rank);
+            Vec::new()
+        });
+        ranges.push((hit.hit.s_start - 1, hit.hit.s_end));
+    }
+    let mut keys: HashMap<u32, (Vec<u8>, Vec<u8>)> = HashMap::new();
+    let mut shown = HashMap::new();
+    for (query, ranks) in &queries {
+        let mut by_id: HashMap<Vec<u8>, Vec<(i32, i32)>> = HashMap::new();
+        for &rank in ranks {
+            let Some(masks) = stored(rank) else {
+                continue;
+            };
+            let runs: Vec<(i32, i32)> = shown_subject_masks(masks, &hsp_ranges[&(*query, rank)])
+                .into_iter()
+                .map(|(start, end)| (start as i32, end as i32 - 1))
+                .collect();
+            if !runs.is_empty() {
+                let first = keys.entry(rank).or_insert_with(|| id_keys(rank)).0.clone();
+                by_id.insert(first, runs);
+            }
+        }
+        if by_id.is_empty() {
+            continue;
+        }
+        for &rank in ranks {
+            let alignment = &keys.entry(rank).or_insert_with(|| id_keys(rank)).1;
+            if let Some(runs) = by_id.get(alignment) {
+                shown.insert((*query, rank), runs.clone());
+            }
+        }
+    }
+    shown
 }
 
 #[cfg(test)]

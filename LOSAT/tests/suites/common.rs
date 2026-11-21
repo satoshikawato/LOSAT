@@ -75,6 +75,8 @@ mod ncbi_toolkit_version;
 mod ncbi_windows_paths;
 #[path = "../newton_lanes8_default.rs"]
 mod newton_lanes8_default;
+#[path = "../non_utf8_names.rs"]
+mod non_utf8_names;
 #[path = "../outfmt11_blastn.rs"]
 mod outfmt11_blastn;
 #[path = "../outfmt11_blastp.rs"]
@@ -121,6 +123,8 @@ mod parse_deflines_subject;
 mod redo_contain_idx;
 #[path = "../report_counts_cli.rs"]
 mod report_counts_cli;
+#[path = "../rps_pipeline.rs"]
+mod rps_pipeline;
 #[path = "../rpsbproc_fixtures.rs"]
 mod rpsbproc_fixtures;
 #[path = "../search_environment.rs"]

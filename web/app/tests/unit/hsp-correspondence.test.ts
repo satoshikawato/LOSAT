@@ -295,12 +295,16 @@ function check(fixture: Fixture, outputs: Outputs): { hsps: number; sections: nu
   // -sorthits and -sorthsps sort the pairwise output only (NCBI: "Not applicable for outfmt > 4";
   // blast_format.cpp:1523-1530), so with them the sections follow that order, not the records'.
   const sortsPairwise = fixture.words.includes('-sorthits') || fixture.words.includes('-sorthsps');
+  // BLASTN's matrix-only scoring (`-task rmblastn`, reward 0 and penalty 0) opens its report with
+  // RMBLASTN and shows the raw score alone (` Score = 27204`; blast_format.cpp:168-177,
+  // showalign.cpp:3586-3591,3605); the other searches show `<bits> bits (<raw>),`.
+  const rawScoreOnly = decoder.decode(out0.subarray(0, 9)) === 'RMBLASTN ';
   let previousEnd = 0;
   const headings = new Map<string, readonly [number, number] | null>();
   let sections = 0;
   let unshown = 0;
   // A subject whose title NCBI cannot decode (pd.undec.*, under -parse_deflines) has an empty heading, and
-  // NCBI's line stands in place of each of its alignments (showalign.cpp:1976-1981; LOSAT's
+  // NCBI's line stands in place of each of its alignments (c++/src/objtools/align_format/showalign.cpp:1976-1981; LOSAT's
   // report/pairwise.rs write_skipped_alignment; line WQA's sweep, D7, 2026-11-19).
   const skippedLine = /^Sequence with id \S+ no longer exists in database\.\.\.alignment skipped\n$/;
   const skippedHeadings = new Set<number>();
@@ -344,7 +348,8 @@ function check(fixture: Fixture, outputs: Outputs): { hsps: number; sections: nu
       headingNames.set(record.s_idx, named);
     }
     expect(section.startsWith(' Score ='), `${where(record)} section text`).toBe(true);
-    expect(section, `${where(record)} section raw score`).toContain(`bits (${record.raw_score}),`);
+    if (rawScoreOnly) expect(section, `${where(record)} section raw score`).toMatch(new RegExp(`^ Score = ${record.raw_score}\n`));
+    else expect(section, `${where(record)} section raw score`).toContain(`bits (${record.raw_score}),`);
     const queryEnds = alignmentEnds(section, 'Query');
     const subjectEnds = alignmentEnds(section, 'Sbjct');
     expect(queryEnds, `${where(record)} Query lines`).toEqual(shownEnds(queryEnds, record.q_start, record.q_end));

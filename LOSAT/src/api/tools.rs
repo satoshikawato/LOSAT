@@ -6,42 +6,10 @@
 //! writes, to the caller's writers; none touches the process's standard streams.
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1360-1363
-//! ```c++
-//! int main(int argc, const char* argv[] /*, const char* envp[]*/)
-//! {
-//!     return CMakeBlastDBApp().AppMain(argc, argv);
-//! }
-//! ```
 //! NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:1295-1298
-//! ```c++
-//! int main(int argc, const char* argv[] /*, const char* envp[]*/)
-//! {
-//!     return CBlastDBCmdApp().AppMain(argc, argv);
-//! }
-//! ```
 //! NCBI reference (598d8ae6): c++/src/app/dustmasker/main.cpp:39-42
-//! ```c++
-//! int main( int argc, char * argv[] )
-//! {
-//!     return CDustMaskApplication().AppMain(argc, argv);
-//! }
-//! ```
 //! NCBI reference (598d8ae6): c++/src/app/segmasker/segmasker.cpp:265-272
-//! ```c++
-//! int main(int argc, const char* argv[])
-//! {
-//!     // Execute main application function
-//!     return SegMaskerApplication().AppMain(argc, argv);
-//! }
-//! ```
 //! NCBI reference (598d8ae6): c++/src/app/blastdb/convert2blastmask.cpp:259-263
-//! ```c++
-//! int main(int argc, const char* argv[])
-//! {
-//!     // Execute main application function
-//!     return CConvert2BlastMaskApplication().AppMain(argc, argv);
-//! }
-//! ```
 #![warn(missing_docs, unused)]
 
 use std::ffi::OsString;
@@ -73,23 +41,20 @@ impl Write for Recorded<'_> {
     }
 }
 
-/// The result of a tool that ended with `status` after writing `diagnostics`.
+/// The result of a tool that ended with `status` after writing `diagnostics`: their bytes, as the
+/// command line writes them to its standard error (`Error::written`).
 fn outcome(status: i32, diagnostics: Vec<u8>) -> Result<(), Error> {
     if status == 0 {
         return Ok(());
     }
-    Err(Error::Search(
-        String::from_utf8_lossy(&diagnostics)
-            .trim_end_matches('\n')
-            .to_string(),
-    ))
+    Err(Error::written(diagnostics))
 }
 
 /// LOSAT's refusal `reason` in a tool's run, written to its diagnostics as the command line's
 /// `main` writes it (`Error: ` and the reason; exit status 1 there), and the error of what the
 /// run wrote (`outcome`), as the tools of `ncbi_app` refuse.
-fn refused(mut recorded: Recorded<'_>, reason: &str) -> Error {
-    let _ = writeln!(recorded, "Error: {reason}");
+fn refused(mut recorded: Recorded<'_>, reason: &[u8]) -> Error {
+    let _ = recorded.write_all(&[b"Error: ", reason, b"\n"].concat());
     match outcome(1, recorded.bytes) {
         Err(error) => error,
         Ok(()) => unreachable!("a status of 1 is a failure"),
@@ -185,25 +150,7 @@ pub fn run_convert2blastmask(
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1031-1041
-// ```c++
-//     // Setup some debugging features from environment variables.
-//     if ( !m_Environ->Get(DIAG_TRACE).empty() ) {
-//         SetDiagTrace(eDT_Enable, eDT_Enable);
-//     }
-//     string post_level = m_Environ->Get(DIAG_POST_LEVEL);
-//     if ( !post_level.empty() ) {
-//         EDiagSev sev;
-//         if (CNcbiDiag::StrToSeverityLevel(post_level.c_str(), sev)) {
-//             SetDiagFixedPostLevel(sev);
-//         }
-//     }
-// ```
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1134-1136
-// ```c++
-//     const string dont_scan_bioseq =
-//         GetEnvironment().Get("NCBI_MAKEBLASTDB_DONT_SCAN_BIOSEQ_FOR_CFASTAREADER_USER_OBJECTS");
-//     const bool scan_bioseq_4_cfastareader_usrobj = static_cast<bool>(dont_scan_bioseq.empty());
-// ```
 /// Runs `makeblastdb` with the words after the program name, as on the command line, which
 /// writes the database's files as there. `input` is what the command line reads as standard input
 /// (`-in -`, and without `-in`), so a database can be built from FASTA in memory. What the command
@@ -239,11 +186,11 @@ pub fn run_makeblastdb(
     {
         Ok(None) => {}
         Ok(Some(status)) => return outcome(status, recorded.bytes),
-        Err(reason) => return Err(refused(recorded, &reason)),
+        Err(reason) => return Err(refused(recorded, reason.as_bytes())),
     }
     drop(opened.target);
     let cli: Cli = crate::cli::try_parse_with_own_start(words())
-        .map_err(|error| Error::Argv(crate::cli::render_message(&error)))?;
+        .map_err(|error| Error::Argv(crate::cli::render_message(&error).into()))?;
     let Commands::Makedb(args) = cli.command else {
         unreachable!("the first word names makeblastdb");
     };
@@ -251,7 +198,7 @@ pub fn run_makeblastdb(
     // LOSAT rejects the settings that change the output (`cli/main_entry.rs`).
     let settings = match opened.start.settings() {
         Ok(settings) => settings,
-        Err(reason) => return Err(refused(recorded, &reason)),
+        Err(reason) => return Err(refused(recorded, reason.as_bytes())),
     };
     // `-dryrun` ends here, as on the command line (`cli::main_entry`).
     if matches!(preparse(argv), Preparsed::Words { dryrun: true, .. }) {
@@ -267,7 +214,7 @@ pub fn run_makeblastdb(
     )
     .and_then(|()| makeblastdb::check_environment(&|name: &str| std::env::var_os(name)));
     if let Err(reason) = checked {
-        return Err(refused(recorded, &reason));
+        return Err(refused(recorded, reason.as_bytes()));
     }
     let now = LocalTime::now();
     let status = makeblastdb::run_with(

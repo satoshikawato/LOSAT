@@ -30,16 +30,8 @@ use super::mask_data::column::{write_pad_bytes_string, write_string_var};
 use super::WriteDbError;
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_gimask.hpp:145-152
-// ```c++
-//     /// Size of a GI
-//     static const int kGISize = 4;
-//
-//     /// Size of offset entry
-//     static const int kOffsetSize = 8;
-//
-//     /// Page size
-//     static const int kPageSize = 512;
-// ```
+// The bytes of a GI and of the volume and offset after it in the offset file, and the number of
+// GIs in a page of the offset file.
 const GI_SIZE: u32 = 4;
 const OFFSET_SIZE: u32 = 8;
 const PAGE_SIZE: usize = 512;
@@ -71,18 +63,8 @@ struct GiMaskData {
 
 impl GiMaskData {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_gimask.cpp:279-288
-    // ```c++
-    // CWriteDB_GiMaskData::CWriteDB_GiMaskData(const string     & maskname,
-    //                                          const string     & extn,
-    //                                          int                index,
-    //                                          Uint8              max_file_size,
-    //                                          bool               le)
-    //     : CWriteDB_File (maskname, extn, index, max_file_size, false),
-    //       m_DataLength  (0),
-    //       m_UseLE       (le),
-    //       m_Index       (index)
-    // { }
-    // ```
+    /// `CWriteDB_GiMaskData`: data volume `index` of `name` with `extension`, created by its
+    /// first write, empty, in the byte order `le` (little-endian for the `.gnd` files).
     fn new(name: &str, extension: &'static str, index: u32, max_file_size: u64, le: bool) -> Self {
         Self {
             file: WriteDbFile::lazy(name, extension, index, max_file_size),
@@ -93,23 +75,10 @@ impl GiMaskData {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_gimask.hpp:88-99
-    // ```c++
-    //     TOffset GetOffset() const
-    //     {
-    //         return pair<int, int>(m_Index, m_DataLength);
-    //     }
-    //
-    //     /// Tests whether there is room for another batch
-    //     /// @param the number of masks to be added. [in]
-    //     /// @return Return TRUE if masks can fit into the volume.
-    //     bool CanFit(int num_masks) const
-    //     {
-    //         return (m_DataLength + (num_masks *2+1)*4 < m_MaxFileSize);
-    //     }
-    // ```
     // `m_MaxFileSize` is the file's (`-max_file_sz`, 999,999,999 for 0). `(num_masks *2+1)*4` is
     // an `int` expression that overflows (undefined behaviour) past 268,435,455 ranges; LOSAT
     // computes it without overflow.
+    /// `CanFit`: whether a record of `num_masks` ranges keeps the volume below its size limit.
     fn can_fit(&self, num_masks: usize) -> bool {
         self.data_length + (num_masks as u64 * 2 + 1) * 4 < self.file.max_file_size()
     }
@@ -120,31 +89,8 @@ impl GiMaskData {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_gimask.cpp:290-315
-    // ```c++
-    // void CWriteDB_GiMaskData::WriteMask(const TPairVector & mask)
-    // {
-    //
-    //     if (! mask.size()) return;
-    //
-    //     if (! m_Created) Create();
-    //
-    //     CBlastDbBlob data;
-    //
-    //     if (m_UseLE ) {
-    //         data.WriteInt4_LE(mask.size());
-    //         ITERATE(TPairVector, range, mask) {
-    //             data.WriteInt4_LE(range->first);
-    //             data.WriteInt4_LE(range->second);
-    //         }
-    //     } else {
-    //         data.WriteInt4(mask.size());
-    //         ...
-    //     }
-    //
-    //     Write(data.Str());
-    //     m_DataLength += (1+2*mask.size()) * 4;
-    // }
-    // ```
+    /// `WriteMask`: one record, the number of ranges and the start and end of each, in the
+    /// volume's byte order; an empty list writes nothing.
     fn write_mask(&mut self, mask: &[(u32, u32)]) {
         if mask.is_empty() {
             return;
@@ -164,46 +110,6 @@ impl GiMaskData {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_gimask.cpp:133-184
-// ```c++
-// void CWriteDB_GiMaskOffset::AddGIs(const TGiOffset & gi_offset)
-// {
-//     CBlastDbBlob gis(kPageSize * kGISize);
-//     CBlastDbBlob offsets(kPageSize * kOffsetSize);
-//
-//     if ( ! m_Created) {
-//         Create();
-//     }
-//
-//     int i = 0;
-//     ITERATE(TGiOffset, iter, gi_offset) {
-// #ifdef NCBI_INT8_GI
-//         if (m_UseLE) {
-//             gis.WriteInt4_LE(GI_TO(int, iter->first));
-//             offsets.WriteInt4_LE(iter->second.first);
-//             offsets.WriteInt4_LE(iter->second.second);
-//         } else {
-//             ...
-//         }
-//         ...
-//         ++i;
-//
-//         if (i== kPageSize) {
-//             Write(gis.Str());
-//             Write(offsets.Str());
-//             gis.Clear();
-//             offsets.Clear();
-//             i = 0;
-//         }
-//     }
-//
-//     // flush the residual records
-//     if (i) {
-//         Write(gis.Str());
-//         Write(offsets.Str());
-//         ...
-//     }
-// }
-// ```
 // `GI_TO(int, gi)` keeps the low 32 bits: a GI from 2^31 to 2^32 - 1 is written as the same
 // four bytes (larger GIs never reach the masks, `deflines::large_gi_to_skip`).
 /// `CWriteDB_GiMaskOffset::AddGIs`: the offset file, page by page.
@@ -227,48 +133,6 @@ fn write_offset_file(file: &mut WriteDbFile, gi_offset: &[GiOffset], le: bool) {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_gimask.cpp:200-251
-// ```c++
-// void CWriteDB_GiMaskIndex::AddGIs(const TGiOffset & gi_offset,
-//                                   int               num_vols)
-// {
-//     m_NumGIs   = gi_offset.size();
-//     m_NumIndex = m_NumGIs / kPageSize + 2;
-//
-//     CBlastDbBlob gis(m_NumIndex * kGISize);
-//     CBlastDbBlob offsets(m_NumIndex * kOffsetSize);
-//
-//     if ( ! m_Created) {
-//         Create();
-//     }
-//
-//     int i = 0;
-//     m_NumIndex = 0;
-//
-//     ITERATE(TGiOffset, iter, gi_offset) {
-//         if (i % kPageSize && i < m_NumGIs-1) {
-//             ++i;
-//             continue;
-//         }
-//
-//         ++i;
-//
-// #ifdef NCBI_INT8_GI
-//         if (m_UseLE ) {
-//             gis.WriteInt4_LE(GI_TO(int, iter->first));
-//             offsets.WriteInt4_LE(iter->second.first);
-//             offsets.WriteInt4_LE(iter->second.second);
-//         } else {
-//             ...
-//         }
-//         ...
-//         ++m_NumIndex;
-//     }
-//
-//     x_BuildHeaderFields(num_vols);
-//     Write(gis.Str());
-//     Write(offsets.Str());
-// }
-// ```
 // The GIs sampled are the first of every page of the offset file and the last GI.
 /// `CWriteDB_GiMaskIndex::AddGIs`: the index file, its header first.
 fn write_index_file(
@@ -307,31 +171,6 @@ fn write_index_file(
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_gimask.cpp:253-275
-// ```c++
-// void CWriteDB_GiMaskIndex::x_BuildHeaderFields(int num_vols)
-// {
-//     const int kFormatVersion = 1; // SeqDB has one of these.
-//
-//     CBlastDbBlob header;
-//
-//     header.WriteInt4(kFormatVersion);
-//     header.WriteInt4(num_vols);
-//     header.WriteInt4(kGISize);
-//     header.WriteInt4(kOffsetSize);
-//     header.WriteInt4(kPageSize);
-//     header.WriteInt4(m_NumIndex);
-//     header.WriteInt4(m_NumGIs);
-//     header.WriteInt4(0);   // index start will be calculated later
-//     header.WriteString(m_Desc, kStringFmt);
-//     header.WriteString(m_Date, kStringFmt);
-//     header.WritePadBytes(8, CBlastDbBlob::eString);
-//
-//     Int4 size = header.GetWriteOffset();
-//     header.WriteInt4(size, 28);
-//
-//     Write(header.Str());
-// }
-// ```
 // `kStringFmt` is `CBlastDbBlob::eSizeVar` (writedb_gimask.hpp:191-192). The header is
 // big-endian in both index files.
 /// `x_BuildHeaderFields`: the header of an index file.
@@ -379,34 +218,7 @@ pub(crate) struct GiMask {
 
 impl GiMask {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_gimask.cpp:46-57
-    // ```c++
-    // CWriteDB_GiMask::CWriteDB_GiMask(const string      & maskname,
-    //                                  const string      & desc,
-    //                                  Uint8               max_file_size):
-    //        m_MaskName    (maskname),
-    //        m_MaxFileSize (max_file_size),
-    //        m_DFile       (new CWriteDB_GiMaskData(maskname, "gmd", 0, max_file_size)),
-    //        m_DFile_LE    (new CWriteDB_GiMaskData(maskname, "gnd", 0, max_file_size, true)),
-    //        m_OFile       (new CWriteDB_GiMaskOffset(maskname, "gmo", max_file_size)),
-    //        m_OFile_LE    (new CWriteDB_GiMaskOffset(maskname, "gno", max_file_size, true)),
-    //        m_IFile       (new CWriteDB_GiMaskIndex(maskname, "gmi", desc, max_file_size)),
-    //        m_IFile_LE    (new CWriteDB_GiMaskIndex(maskname, "gni", desc, max_file_size, true))
-    // { }
-    // ```
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_gimask.cpp:188-198
-    // ```c++
-    // CWriteDB_GiMaskIndex::
-    // CWriteDB_GiMaskIndex(const string        & maskname,
-    //                      const string        & extn,
-    //                      const string        & desc,
-    //                      Uint8                 max_file_size,
-    //                      bool                  le)
-    //     : CWriteDB_GiMaskOffset (maskname, extn, max_file_size, le),
-    //       m_Desc                (desc)
-    // {
-    //     m_Date = CTime(CTime::eCurrent).AsString();
-    // }
-    // ```
     /// The files of the algorithm `name` with the description `desc`; `dates` are the dates of
     /// the `.gmi` and the `.gni` file (`CTime(CTime::eCurrent).AsString()` of each constructor,
     /// read in that order by the caller).
@@ -438,27 +250,6 @@ impl GiMask {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_gimask.cpp:70-88
-    // ```c++
-    // void CWriteDB_GiMask::AddGiMask(const vector<TGi> & GIs,
-    //                                 const TPairVector & mask)
-    // {
-    //     if (!m_DFile->CanFit(mask.size())) {
-    //         int index = m_DFile->GetIndex() + 1;
-    //         m_DFile->Close();
-    //         m_DFile_LE->Close();
-    //         m_DFile.Reset(new CWriteDB_GiMaskData(m_MaskName, "gmd", index, m_MaxFileSize));
-    //         m_DFile_LE.Reset(new CWriteDB_GiMaskData(m_MaskName, "gnd", index, m_MaxFileSize, true));
-    //     }
-    //
-    //     TOffset offset = m_DFile->GetOffset();
-    //     m_DFile->WriteMask(mask);
-    //     m_DFile_LE->WriteMask(mask);
-    //
-    //     ITERATE(vector<TGi>, gi, GIs) {
-    //         m_GiOffset.push_back(pair<TGi, TOffset> (*gi, offset));
-    //     }
-    // }
-    // ```
     // A record that does not fit an empty volume opens the next one all the same: the volume
     // `.00` of a first record larger than `-max_file_sz` is never created (survey D8), and a
     // record larger than the limit is written whole into a volume of its own.
@@ -481,39 +272,6 @@ impl GiMask {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_gimask.cpp:90-120
-    // ```c++
-    // void CWriteDB_GiMask::Close()
-    // {
-    //     if (!m_GiOffset.size()) {
-    //         // un_used mask file
-    //         m_MaskName = "";
-    //         return;
-    //     }
-    //
-    //     m_DFile->Close();
-    //     m_DFile_LE->Close();
-    //
-    //     int num_vols = m_DFile->GetIndex() + 1;
-    //     if (num_vols == 1) {
-    //         m_DFile->RenameSingle();
-    //         m_DFile_LE->RenameSingle();
-    //     }
-    //
-    //     sort(m_GiOffset.begin(), m_GiOffset.end());
-    //
-    //     m_IFile->AddGIs(m_GiOffset, num_vols);
-    //     m_IFile->Close();
-    //
-    //     m_IFile_LE->AddGIs(m_GiOffset, num_vols);
-    //     m_IFile_LE->Close();
-    //
-    //     m_OFile->AddGIs(m_GiOffset);
-    //     m_OFile->Close();
-    //
-    //     m_OFile_LE->AddGIs(m_GiOffset);
-    //     m_OFile_LE->Close();
-    // }
-    // ```
     // `sort` uses the `operator<` of `std::pair`, which compares the GI, then the volume, then
     // the offset: elements that compare equal are equal, so the result does not depend on the
     // sort algorithm. Two sequences with one GI (a version 4 database allows that) keep both
@@ -593,13 +351,6 @@ impl GiMasks {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:338-342
-    // ```c++
-    //         if (m_UseGiMask) {
-    //             for (unsigned int i=0; i<m_GiMasks.size(); ++i) {
-    //                 m_GiMasks[i]->Close();
-    //             }
-    //         }
-    // ```
     /// Closes every GI mask, in the order of registration.
     pub(crate) fn close(&mut self) {
         for mask in &mut self.masks {

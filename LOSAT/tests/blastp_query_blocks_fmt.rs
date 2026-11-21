@@ -18,15 +18,6 @@
 //! format).
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:253-295
-//! ```c++
-//!         formatter.PrintProlog();
-//!         ...
-//!         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
-//!             ...
-//!                     formatter.PrintOneResultSet(**result, query_batch);
-//!         ...
-//!         formatter.PrintEpilog(opt);
-//! ```
 
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};

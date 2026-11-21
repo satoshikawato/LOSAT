@@ -14,20 +14,6 @@ use crate::seqid::parse::{seq_id_from_text, SeqIdError};
 use crate::seqid::ParsedSeqId;
 
 // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/seqdbcommon.hpp:134-145
-// ```c++
-// struct NCBI_XOBJREAD_EXPORT SBlastSeqIdListInfo {
-// 		SBlastSeqIdListInfo() : is_v4(true), file_size(0), num_ids(0), create_date(kEmptyStr),
-// 				      db_vol_length(0), db_create_date(kEmptyStr), db_vol_names(kEmptyStr) {}
-// 		bool is_v4;
-// 		Uint8 file_size;
-// 		Uint8 num_ids;
-// 		string title;
-// 		string create_date;
-// 		Uint8 db_vol_length;
-// 		string db_create_date;
-// 		string db_vol_names;
-// };
-// ```
 /// What the list file says of itself (`SBlastSeqIdListInfo`): a text list is `is_v4`, a binary
 /// list carries its header.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -68,74 +54,8 @@ pub struct SeqidListFile {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqidlist_reader.cpp:58-85
-// ```c++
-// CSeqidlistRead::CSeqidlistRead (CMemoryFile & file) : m_Ptr((char*) file.GetPtr()), m_EndPtr((char*) file.GetPtr()) {
-// 	if(m_Ptr == NULL) {
-// 		NCBI_THROW(CSeqDBException, eArgErr, "Failed to map seqidlist file ");
-// 	}
-//
-// 	char null_byte = x_GetChar();
-// 	if (null_byte == 0) {
-// 		m_info.is_v4 = false;
-// 		Uint8 file_size = file.GetFileSize();
-// 		m_info.file_size = x_GetUint8();
-// 		if (m_info.file_size != file_size) {
-// 			NCBI_THROW(CSeqDBException, eArgErr, "Invalid seqidlist file");
-// 		}
-// 		m_EndPtr += file_size;
-// 		m_info.num_ids = x_GetUint8();
-// 		Uint4 title_length = x_GetUint4();
-// 		x_GetString(m_info.title, title_length);
-// 		char file_create_date_length = x_GetChar();
-// 		x_GetString(m_info.create_date, file_create_date_length);
-// 		m_info.db_vol_length = x_GetUint8();
-// 		if(m_info.db_vol_length != 0) {
-// 			char file_db_create_date_length = x_GetChar();
-// 			x_GetString(m_info.db_create_date, file_db_create_date_length);
-// 			Uint4 file_vol_names_length = x_GetUint4();
-// 			x_GetString(m_info.db_vol_names, file_vol_names_length);
-// 		}
-// 	}
-// }
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqidlist_reader.cpp:87-108
-// ```c++
-// int CSeqidlistRead::GetIds(vector<CSeqDBGiList::SSiOid>  & idlist)
-// {
-// 	const unsigned char byte_max = 0xFF;
-// 	unsigned int i = 0;
-// 	idlist.clear();
-// 	idlist.resize(m_info.num_ids);
-// 	for(; (m_Ptr < m_EndPtr) && (i < m_info.num_ids); i++) {
-// 		unsigned char id_len = (unsigned char) x_GetChar();
-// 		if(id_len == byte_max) {
-// 			Uint4 long_id_len = x_GetUint4();
-// 			x_GetString(idlist[i].si, long_id_len);
-// 		}
-// 		else {
-// 			x_GetString(idlist[i].si, id_len);
-// 		}
-// 	}
-// 	if(i != m_info.num_ids) {
-// 		NCBI_THROW(CSeqDBException, eArgErr, "Invalid total num of ids in seqidlist file");
-// 	}
-//
-// 	return i;
-// }
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqidlist_reader.cpp:111-120
-// ```c++
-// int CBlastSeqidlistFile::GetSeqidlist(CMemoryFile & file, vector<CSeqDBGiList::SSiOid>  & idlist,
-// 		                              SBlastSeqIdListInfo & list_info)
-// {
-//
-// 	CSeqidlistRead list(file);
-// 	list.GetListInfo(list_info);
-// 	list.GetIds(idlist);
-//
-// 	return list_info.num_ids;
-// }
-// ```
 // A 0-byte file has no memory map (`CMemoryFile` leaves the pointer null), hence the first
 // error. NCBI reads the header and the ids from the map without bounds; a header or an id
 // cut off by the end of the file reads memory past it. LOSAT gives the second error for such
@@ -217,47 +137,6 @@ impl<'a> Cursor<'a> {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:1284-1322
-// ```c++
-// void SeqDB_ReadMemorySiList(const char * fbeginp,
-//                             const char * fendp,
-//                             vector<CSeqDBGiList::SSiOid> & sis,
-//                             bool * in_order)
-// {
-//     Int8 file_size = fendp - fbeginp;
-//
-//     // We would prefer to do only one allocation, so assume
-//     // average seqid is 6 digits plus newline.  A few extra will be
-//     // allocated, but this is preferable to letting the vector
-//     // double itself (which it still will do if needed).
-//
-//     sis.reserve(sis.size() + int(file_size / 7));
-//
-//     const char * p = fbeginp;
-//     const char * head;
-//     while ( p < fendp) {
-//         // find the head of the seqid
-//         while (p< fendp && (*p=='>' || *p==' ' || *p=='\t' || *p=='\n' || *p=='\r')) ++p;
-//         if (p< fendp && *p == '#') {
-//             // anything beyond this point in the line is a comment
-//             while (p< fendp && *p!='\n') ++p;
-//             continue;
-//         }
-//         head = p;
-//         while (p< fendp && *p!=' ' && *p!='\t' && *p!='\n' && *p!='\r') ++p;
-//         if (p > head) {
-//             string acc(head, p);
-//             string str_id = NStr::TruncateSpaces(acc, NStr::eTrunc_Both);
-//             if (str_id != "") {
-//                 sis.push_back(str_id);
-//             } else {
-//                 cerr << "WARNING:  " << acc
-//                      << " is not a valid seqid string." << endl;
-//             }
-//         }
-//     }
-//     if (in_order) *in_order = false;
-// }
-// ```
 // A token holds no space, tab, line feed or carriage return, so `TruncateSpaces` (which
 // trims `isspace`: also form feed and vertical tab) can empty it only when it is made of
 // those two characters; such a token is reported and dropped.
@@ -296,22 +175,6 @@ fn read_memory_si_list(bytes: &[u8], warnings: &mut Vec<String>) -> Vec<Vec<u8>>
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:1476-1491
-// ```c++
-// void SeqDB_ReadSiList(const string & fname, vector<CSeqDBGiList::SSiOid> & sis, bool * in_order, SBlastSeqIdListInfo & db_info)
-// {
-// 	CMemoryFile mfile(SeqDB_MakeOSPath(fname));
-//     if (CBlastSeqidlistFile::GetSeqidlist(mfile, sis, db_info)) {
-//     	*in_order = true;
-//     	return;
-//     }
-//     else {
-//     	Int8 file_size = mfile.GetSize();
-//     	const char *fbeginp = (char*) mfile.GetPtr();
-//     	const char *fendp   = fbeginp + file_size;
-//     	SeqDB_ReadMemorySiList(fbeginp, fendp, sis, in_order);
-//     }
-// }
-// ```
 // A binary list of no ids (`GetSeqidlist` returns 0) is read again as text: its header
 // bytes become tokens. The header of a text file is the default (`is_v4`).
 /// Reads a seqid list file's bytes: a binary list, else a text list. `Err`: NCBI's
@@ -333,42 +196,6 @@ pub fn read_si_list(bytes: &[u8], warnings: &mut Vec<String>) -> Result<SeqidLis
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbgilistset.cpp:148-181
-// ```c++
-// void s_ProcessSeqIDsForV5 (vector<string> & idlist)
-// {
-// 	 vector<string> tmplist;
-// 	 tmplist.reserve(idlist.size());
-//     for(unsigned int i=0; i < idlist.size(); i++) {
-//             try {
-//             CSeq_id seqid(idlist[i], CSeq_id::fParse_RawText | CSeq_id::fParse_AnyLocal | CSeq_id::fParse_PartialOK);
-//             if(seqid.IsGi()) {
-//                     continue;
-//             }
-//
-//             if(seqid.IsPir() || seqid.IsPrf()) {
-//                     string id = seqid.AsFastaString();
-//                     tmplist.push_back(id);
-//                     continue;
-//             }
-//             tmplist.push_back(seqid.GetSeqIdString(true));
-//             } catch (CException & e) {
-//                     ERR_POST(e.GetMsg());
-//                     NCBI_THROW(CSeqDBException, eArgErr, "Invalid seq id: " + idlist[i]);
-//
-//             }
-//     }
-//
-//     if (tmplist.size() == 0) {
-//         ERR_POST(Warning << "Empty seqid list");
-//     }
-//     else {
-//     	sort(tmplist.begin(), tmplist.end());
-//     	vector<string>::iterator it = unique (tmplist.begin(), tmplist.end());
-//     	tmplist.resize(distance(tmplist.begin(),it));
-//     }
-//    	idlist.swap(tmplist);
-// }
-// ```
 /// The parse of a token failed: NCBI posts the exception's message, then throws
 /// `Invalid seq id: <token>`.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -378,24 +205,15 @@ pub struct InvalidSeqId {
 }
 
 impl InvalidSeqId {
-    /// The `CSeqDBException` text (`BLAST Database error: Invalid seq id: <token>`).
-    pub fn message(&self) -> String {
-        format!("Invalid seq id: {}", String::from_utf8_lossy(&self.token))
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbgilistset.cpp:165-167
+    /// The `CSeqDBException` text (`BLAST Database error: Invalid seq id: <token>`), with the
+    /// token's bytes (probe R3 of line LIB-B: a word that is not UTF-8).
+    pub fn message(&self) -> Vec<u8> {
+        [b"Invalid seq id: ".as_slice(), &self.token].concat()
     }
 }
 
 // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:2532-2541
-// ```c++
-//         x_Init(fasta_pieces, type, tv);
-//         if ( !fasta_pieces.empty() ) {
-//             // tolerate trailing parts if they're all empty.
-//             ITERATE(list<CTempString>, it, fasta_pieces) {
-//                 if ( !it->empty() ) {
-//                     if ((flags & fParse_PartialOK) != 0) {
-//                         ERR_POST_X(10, Warning << "Ignoring extra parts"
-//                                    " (synonyms?) in FASTA-style ID "
-//                                    << the_id);
-// ```
 /// The ids of a text list as a version 5 database looks them up (`s_ProcessSeqIDsForV5`):
 /// sorted and unique. An empty result is NCBI's `Empty seqid list` warning (the caller
 /// writes it). `warn` gets the warnings the parse of each token posts, in order (a FASTA-style
@@ -434,197 +252,5 @@ pub fn parse_list_id(text: &[u8]) -> Result<ParsedSeqId, SeqIdError> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn tokens(text: &str) -> Vec<String> {
-        let mut warnings = Vec::new();
-        read_memory_si_list(text.as_bytes(), &mut warnings)
-            .into_iter()
-            .map(|t| String::from_utf8(t).unwrap())
-            .collect()
-    }
-
-    #[test]
-    fn text_tokens_as_ncbi_reads_them() {
-        assert_eq!(
-            tokens(">AAA00001.1\n# comment line\naaa00001.2 ref|NP_000001.1| # trailing\r\nlcl|x\tgnl|db|t\n"),
-            ["AAA00001.1", "aaa00001.2", "ref|NP_000001.1|", "lcl|x", "gnl|db|t"]
-        );
-        assert_eq!(tokens("a#1 b"), ["a#1", "b"]);
-        assert_eq!(tokens(">>  >id\r\n"), ["id"]);
-        assert_eq!(tokens("P69905"), ["P69905"]);
-        assert!(tokens("# only\n\n").is_empty());
-        assert!(tokens("").is_empty());
-    }
-
-    #[test]
-    fn a_token_of_vertical_tabs_is_reported_and_dropped() {
-        let mut warnings = Vec::new();
-        let ids = read_memory_si_list(b"\x0b\x0c ok\n", &mut warnings);
-        assert_eq!(ids, [b"ok".to_vec()]);
-        assert_eq!(
-            warnings,
-            ["WARNING:  \x0b\x0c is not a valid seqid string."]
-        );
-    }
-
-    fn binary(ids: &[&[u8]], db_vol_length: u64) -> Vec<u8> {
-        let mut body = Vec::new();
-        body.extend_from_slice(&(ids.len() as u64).to_le_bytes());
-        body.extend_from_slice(&5u32.to_le_bytes());
-        body.extend_from_slice(b"title");
-        body.push(3);
-        body.extend_from_slice(b"Oct");
-        body.extend_from_slice(&db_vol_length.to_le_bytes());
-        if db_vol_length != 0 {
-            body.push(2);
-            body.extend_from_slice(b"Dt");
-            body.extend_from_slice(&4u32.to_le_bytes());
-            body.extend_from_slice(b"vols");
-        }
-        for id in ids {
-            if id.len() >= 0xFF {
-                body.push(0xFF);
-                body.extend_from_slice(&(id.len() as u32).to_le_bytes());
-            } else {
-                body.push(id.len() as u8);
-            }
-            body.extend_from_slice(id);
-        }
-        let size = 1 + 8 + body.len();
-        let mut file = vec![0u8];
-        file.extend_from_slice(&(size as u64).to_le_bytes());
-        file.extend_from_slice(&body);
-        file
-    }
-
-    #[test]
-    fn a_binary_list_gives_its_ids_and_header() {
-        let long = vec![b'A'; 300];
-        let file = binary(&[b"AAA00001.2", b"Q00002", &long], 12345);
-        let mut warnings = Vec::new();
-        let list = read_si_list(&file, &mut warnings).unwrap();
-        assert_eq!(
-            list.ids,
-            [b"AAA00001.2".to_vec(), b"Q00002".to_vec(), long.clone()]
-        );
-        assert_eq!(
-            list.info,
-            SeqidListInfo {
-                is_v4: false,
-                file_size: file.len() as u64,
-                num_ids: 3,
-                title: b"title".to_vec(),
-                create_date: b"Oct".to_vec(),
-                db_vol_length: 12345,
-                db_create_date: b"Dt".to_vec(),
-                db_vol_names: b"vols".to_vec(),
-            }
-        );
-        assert!(warnings.is_empty());
-        let plain = binary(&[b"X"], 0);
-        let list = read_si_list(&plain, &mut warnings).unwrap();
-        assert_eq!(list.ids, [b"X".to_vec()]);
-        assert_eq!(list.info.db_vol_length, 0);
-        assert!(list.info.db_vol_names.is_empty());
-    }
-
-    #[test]
-    fn damaged_binary_lists_give_ncbis_messages() {
-        let mut warnings = Vec::new();
-        assert_eq!(
-            read_si_list(b"", &mut warnings).unwrap_err(),
-            "Failed to map seqidlist file "
-        );
-        let mut file = binary(&[b"X"], 0);
-        file.push(0);
-        assert_eq!(
-            read_si_list(&file, &mut warnings).unwrap_err(),
-            "Invalid seqidlist file"
-        );
-        let mut short = binary(&[b"X", b"Y"], 0);
-        let cut = short.len() - 2;
-        short.truncate(cut);
-        short[1..9].copy_from_slice(&(cut as u64).to_le_bytes());
-        assert_eq!(
-            read_si_list(&short, &mut warnings).unwrap_err(),
-            "Invalid total num of ids in seqidlist file"
-        );
-        // A binary list of no ids is read as text: its header bytes are the tokens.
-        let empty = binary(&[], 0);
-        let list = read_si_list(&empty, &mut warnings).unwrap();
-        assert!(list.info.is_v4);
-        assert!(!list.ids.is_empty());
-    }
-
-    fn processed_warned(tokens: &[&str]) -> (Vec<String>, Vec<SeqIdWarning>) {
-        let ids: Vec<Vec<u8>> = tokens.iter().map(|t| t.as_bytes().to_vec()).collect();
-        let mut warnings = Vec::new();
-        let ids = process_for_v5(&ids, &mut |warning| warnings.push(warning))
-            .unwrap()
-            .into_iter()
-            .map(|t| String::from_utf8(t).unwrap())
-            .collect();
-        (ids, warnings)
-    }
-
-    fn processed(tokens: &[&str]) -> Vec<String> {
-        let (ids, warnings) = processed_warned(tokens);
-        assert_eq!(warnings, []);
-        ids
-    }
-
-    #[test]
-    fn version5_ids_are_rewritten_as_ncbi_rewrites_them() {
-        assert_eq!(
-            processed(&[
-                "aaa00001.2",
-                "ref|NP_000001.1|",
-                "np_000002",
-                "lcl|myprot9",
-                "gnl|mydb|tag1",
-                "mydb:tag1",
-                "12345",
-                "gi|999",
-                "sp|Q00001.1|N1_HUMAN",
-                "MixedCase1",
-                "pdb|1ABC|A",
-                "1ABC_A",
-                "1ABC",
-                "pir||S00007",
-                "AAA00001.2",
-            ]),
-            [
-                "12345",
-                "1ABC",
-                "1ABC_A",
-                "AAA00001.2",
-                "MixedCase1",
-                "NP_000001.1",
-                "NP_000002",
-                "Q00001.1",
-                "mydb:tag1",
-                "myprot9",
-                "pir||S00007",
-            ]
-        );
-        assert!(processed(&["gi|999", "gi|998"]).is_empty());
-        // An unknown FASTA tag is a local id under `fParse_AnyLocal` (probe S23 of
-        // dropin-survey-20261029/DI8: no error, the id is looked up as it is).
-        assert_eq!(processed(&["xyz|ABC|DEF"]), ["xyz|ABC|DEF"]);
-        let bad = process_for_v5(&[b"gi|abc".to_vec()], &mut |_| {}).unwrap_err();
-        assert_eq!(bad.message(), "Invalid seq id: gi|abc");
-        // A FASTA-style id of several parts: NCBI's warning for each non-empty part after the
-        // first id (rows db.gisl.bp.full.6, db.gisl.bn.full.6), the gi dropped.
-        let warning = SeqIdWarning {
-            subcode: 10,
-            message: "Ignoring extra parts (synonyms?) in FASTA-style ID gi|1111|ref|NP_1.1|"
-                .to_string(),
-        };
-        assert_eq!(
-            processed_warned(&["gi|1111|ref|NP_1.1|", "NP_2.1"]),
-            (vec!["NP_2.1".to_string()], vec![warning.clone(), warning])
-        );
-    }
-}
+#[path = "seqidlist_tests.rs"]
+mod tests;

@@ -2,10 +2,12 @@
 //! the scan's hits, bucket by bucket, on NCBI's diagonal table of the concatenation, extended
 //! with PS4a's PSSM ungapped kernels on the whole concatenation.
 //!
-//! The diagonal table has `L` entries, `L` the smallest power of two at least the
-//! concatenation's length plus the window (`s_BlastDiagTableNew`), and is indexed with `mask =
-//! L - 1`: the two-hit finder reads `(q - s) & mask`, the one-hit finder `(s - q) & mask`. Where a
-//! query is longer than `L` less the concatenation, two diagonals share an entry, as in NCBI.
+//! The diagonal table has `L` entries, `L` the smallest power of two at least the concatenated
+//! length `Lc` plus the window (`s_BlastDiagTableNew` of `concat_db.length`,
+//! `RpsRun::concat_length`: the volume's rows, or an alias file's `LENGTH` and `NSEQ` over one
+//! volume, so that `L` may be below the rows or above them), and is indexed with `mask = L - 1`:
+//! the two-hit finder reads `(q - s) & mask`, the one-hit finder `(s - q) & mask`. Where a query
+//! is longer than `L` less the concatenation, two diagonals share an entry, as in NCBI.
 //!
 //! NCBI keeps one table for the queries of a batch, moving `diag_offset` on by the query's
 //! length and the window after each (`Blast_ExtendWordExit`); an entry that an earlier query
@@ -18,6 +20,7 @@ use super::scan::{
 };
 use super::RpsRows;
 use crate::algorithm::blastp::extension::BlastpUngappedData;
+use crate::algorithm::pssm_search::rows::PssmRows;
 use crate::algorithm::pssm_search::ungapped::{pssm_extend_one_hit, pssm_extend_two_hit};
 use crate::seqdb::rps::RPS_WORDSIZE;
 
@@ -26,12 +29,6 @@ use crate::seqdb::rps::RPS_WORDSIZE;
 /// zeroed one comes from the allocator's zeroed pages (`vec![0u32; n]`, `calloc`), as NCBI's.
 ///
 /// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_extend.h:57-60
-/// ```c
-/// typedef struct DiagStruct {
-///    signed int last_hit   : 31; /**< Offset of the last hit */
-///    unsigned int flag      : 1 ; /**< Reset the next extension? */
-/// } DiagStruct;
-/// ```
 trait RpsDiag {
     fn last_hit(&self) -> i32;
     fn flag(&self) -> bool;
@@ -74,73 +71,37 @@ impl RpsDiagTable {
         }
     }
 
-    /// `BlastExtendWordNew(concat_length, ...)`: a zeroed table of the volume's length. The
+    /// `BlastExtendWordNew(concat_length, ...)`: a zeroed table of the unit's length. The
     /// table is allocated zeroed and not written (NCBI's `calloc`): only the pages of the
     /// diagonals that the queries hit become resident, whatever the window.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:145-146
-    /// ```c
-    ///         diag_table->hit_level_array = (DiagStruct *)
-    ///             calloc(diag_table->diag_array_length, sizeof(DiagStruct));
-    /// ```
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:52-62
-    /// ```c
-    ///                 diag_array_length = 1;
-    ///                 /* What power of 2 is just longer than the query? */
-    ///                 while (diag_array_length < (qlen+window_size))
-    ///                 {
-    ///                         diag_array_length = diag_array_length << 1;
-    ///                 }
-    ///                 /* These are used in the word finders to shift and mask
-    ///                 rather than dividing and taking the remainder. */
-    ///                 diag_table->diag_array_length = diag_array_length;
-    ///                 diag_table->diag_mask = diag_array_length-1;
-    ///                 diag_table->multiple_hits = multiple_hits;
-    ///                 diag_table->offset = window_size;
-    ///                 diag_table->window = window_size;
-    /// ```
-    pub(crate) fn reset_for(&mut self, concat_length: i32, window: i32) {
-        let length = diag_array_length(concat_length, window);
+    /// The table has `length` entries (`diag_table_length`).
+    pub(crate) fn reset_for(&mut self, length: i32, window: i32) {
         self.array = vec![0u32; length as usize];
         self.mask = length - 1;
         self.offset = window;
         self.window = window;
     }
 
-    /// The table of a volume of `concat_length` rows: the table as it is when it has that
-    /// volume's length and the window already (series PR, item PS12s, D3: a worker keeps its
+    /// The table of a search of `length` entries (`diag_table_length`): the table as it is when
+    /// it has that length and the window already (series PR, item PS12s, D3: a worker keeps its
     /// table from volume to volume), else a zeroed one (`reset_for`). The entries an earlier
     /// volume's queries wrote read as "no hit on this diagonal yet", as those of an earlier query
     /// of the same volume do (the offset rule of `exit`, which keeps NCBI's clear at
     /// `INT4_MAX / 4`): a query's hits do not depend on what the table held.
-    pub(crate) fn prepare_for(&mut self, concat_length: i32, window: i32) {
-        let length = diag_array_length(concat_length, window);
+    pub(crate) fn prepare_for(&mut self, length: i32, window: i32) {
         if self.array.len() != length as usize || self.window != window {
-            self.reset_for(concat_length, window);
+            self.reset_for(length, window);
         }
     }
 
     /// `Blast_ExtendWordExit`: the offset after a query of `subject_length` letters.
     ///
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:171-178
-    /// ```c
-    ///     if (ewp->diag_table) {
-    ///         if (ewp->diag_table->offset >= INT4_MAX / 4) {
-    ///             ewp->diag_table->offset = ewp->diag_table->window;
-    ///             s_BlastDiagClear(ewp->diag_table);
-    ///         } else {
-    ///             ewp->diag_table->offset += subject_length + ewp->diag_table->window;
-    ///         }
-    /// ```
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:72-89 (`s_BlastDiagClear`)
-    /// ```c
-    ///         for (i=0; i < n; i++) {
-    ///             diag_struct_array[i].flag = 0;
-    ///             diag_struct_array[i].last_hit = -diag->window;
-    ///             if (diag->hit_len_array) diag->hit_len_array[i] = 0;
-    ///         }
-    /// ```
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:167-178
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:102-104 (`s_BlastDiagClear`)
     fn exit(&mut self, subject_length: i32) {
         if self.offset >= i32::MAX / 4 {
             self.offset = self.window;
@@ -153,13 +114,43 @@ impl RpsDiagTable {
     }
 }
 
-/// The length of the diagonal table of a concatenation of `concat_length` rows.
+/// NCBI's length of the diagonal table of a concatenated length `concat_length` (`Lc`, also 0
+/// or negative) and the word window `window` (`s_BlastDiagTableNew`, cited at
+/// `RpsDiagTable::reset_for`): the power of 2 from 1 up that is at least their sum (1 entry where
+/// the sum is 1 or less; the sum is at most 2^30, `RpsUnit::check_engine_length`).
 pub(crate) fn diag_array_length(concat_length: i32, window: i32) -> i32 {
     let mut length = 1i32;
     while length < concat_length + window {
         length <<= 1;
     }
     length
+}
+
+/// The entries of the diagonal table of a search of `rows` concatenated rows and queries (frames)
+/// of at most `longest` letters with NCBI's length `diag_array_length(concat_length, window)`:
+/// that length, or the power of 2 from 1 up that is at least `rows + longest` where that is
+/// smaller (review B of D1a-4, SF2). The word finders' diagonal of a hit is `(q - s) & mask` with
+/// `q` within the rows and `s` within the query: the `rows + longest - 1` diagonals of a query are
+/// apart in a table of either length, so no two share an entry in NCBI's table where it is the
+/// longer one, nor in this one, and each entry reads and writes as NCBI's (the offset of `exit`
+/// and its clear are the same for every entry). Where NCBI's table is the shorter one (an `Lc`
+/// below the rows) its diagonals share entries as NCBI's do. One worker's table of NCBI's length
+/// is 4 GiB at `Lc + window` of 2^30, where NCBI searches the volume with one table.
+pub(crate) fn diag_table_length(
+    concat_length: i32,
+    window: i32,
+    rows: usize,
+    longest: usize,
+) -> i32 {
+    let ncbi = diag_array_length(concat_length, window);
+    let apart = (rows as u64)
+        .saturating_add(longest as u64)
+        .next_power_of_two();
+    if apart < ncbi as u64 {
+        apart as i32
+    } else {
+        ncbi
+    }
 }
 
 /// NCBI's `BlastInitHSP` with its `BlastUngappedData` (`BlastSaveInitHsp`).
@@ -198,10 +189,22 @@ impl RpsWordScratch {
         }
     }
 
-    /// The table and the buckets of a volume of `num_rows` concatenated rows
-    /// (`RpsDiagTable::prepare_for`, `RpsBuckets::reset_for`): what the scratch kept stays.
-    pub(crate) fn prepare_for(&mut self, num_rows: usize, window: i32) {
-        self.diag.prepare_for(num_rows as i32, window);
+    /// The table of a search of the concatenated length `concat_length` (`Lc`,
+    /// `RpsRun::concat_length`: `BlastExtendWordNew(concat_db.length, ...)`) whose queries (frames)
+    /// have at most `longest` letters (`diag_table_length`) and the buckets of a volume of
+    /// `num_rows` concatenated rows (`RpsDiagTable::prepare_for`, `RpsBuckets::reset_for`): what
+    /// the scratch kept stays.
+    pub(crate) fn prepare_for(
+        &mut self,
+        num_rows: usize,
+        concat_length: i32,
+        window: i32,
+        longest: usize,
+    ) {
+        self.diag.prepare_for(
+            diag_table_length(concat_length, window, num_rows, longest),
+            window,
+        );
         self.buckets.reset_for(num_rows);
     }
 }
@@ -210,138 +213,60 @@ impl RpsWordScratch {
 /// (not sorted; the caller sorts them, `Blast_InitHitListSortByScore`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:265-283
-/// ```c
-///     if (ewp->diag_table->multiple_hits) {
-///         status = s_BlastRPSWordFinder_TwoHit(subject, query,
-///                                              lut_wrap, ewp,
-///                                              matrix,
-///                                              cutoffs->cutoff_score,
-///                                              cutoffs->x_dropoff,
-///                                              init_hitlist, ungapped_stats);
-///     } else {
-///         status = s_BlastRPSWordFinder_OneHit(subject, query,
-///                                              lut_wrap, ewp,
-///                                              matrix,
-///                                              cutoffs->cutoff_score,
-///                                              cutoffs->x_dropoff,
-///                                              init_hitlist, ungapped_stats);
-///     }
-/// ```
+///
+/// The extensions read the rows as `RpsRowsWhole` where `Lc` is the rows' count (every search
+/// but one over an alias file whose `LENGTH` and `NSEQ` give another `Lc`), else as `RpsRows`
+/// with `Lc` and NCBI's step past the rows, out of line (`word_finder_other_length`): the same
+/// scan, whose common instantiation carries neither the bound nor the step (fix rounds 6 and 8
+/// of line RG D1a-4).
 pub(crate) fn word_finder(
     params: &RpsWordParams<'_>,
     scratch: &mut RpsWordScratch,
     subject: &[u8],
     init_hsps: &mut Vec<RpsInitHsp>,
 ) {
-    if params.window > 0 {
-        two_hit(params, scratch, subject, init_hsps);
-    } else {
-        one_hit(params, scratch, subject, init_hsps);
+    match params.rows.whole() {
+        Some(rows) => scan(params, &rows, scratch, subject, init_hsps),
+        None => word_finder_other_length(params, scratch, subject, init_hsps),
     }
     scratch.diag.exit(subject.len() as i32);
+}
+
+/// `word_finder`'s scan with an `Lc` that is not the rows' count: the extensions' bound below
+/// the rows (`RpsRows::length`) or NCBI's step past them (`RpsRows::past`, an `Lc` above them).
+#[cold]
+#[inline(never)]
+fn word_finder_other_length(
+    params: &RpsWordParams<'_>,
+    scratch: &mut RpsWordScratch,
+    subject: &[u8],
+    init_hsps: &mut Vec<RpsInitHsp>,
+) {
+    scan(params, &params.rows, scratch, subject, init_hsps);
+}
+
+/// The two-hit or the one-hit finder (`-window_size` 0), whose extensions read `rows`.
+#[inline(always)]
+fn scan<R: PssmRows>(
+    params: &RpsWordParams<'_>,
+    rows: &R,
+    scratch: &mut RpsWordScratch,
+    subject: &[u8],
+    init_hsps: &mut Vec<RpsInitHsp>,
+) {
+    if params.window > 0 {
+        two_hit(params, rows, scratch, subject, init_hsps);
+    } else {
+        one_hit(params, rows, scratch, subject, init_hsps);
+    }
 }
 
 /// `s_BlastRPSWordFinder_TwoHit`.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:331-426
-/// ```c
-///     while (first_offset <= last_offset) {
-///         /* scan the subject sequence for hits */
-///         hits = BlastRPSScanSubject(lookup_wrap, subject, &first_offset);
-///
-///         totalhits += hits;
-///         /* for each region of the concatenated database */
-///         for (i = 0; i < lookup->num_buckets; ++i) {
-///             ...
-///             for (j = 0; j < hits; ++j) {
-///                 Uint4 query_offset = offset_pairs[j].qs_offsets.q_off;
-///                 Uint4 subject_offset = offset_pairs[j].qs_offsets.s_off;
-///
-///                 /* calculate the diagonal associated with this query-subject
-///                    pair */
-///
-///                 diag_coord = (query_offset - subject_offset) & diag_mask;
-///
-///                 /* If the reset bit is set, an extension just happened. */
-///                 if (diag_array[diag_coord].flag) {
-///                     /* If we've already extended past this hit, skip it. */
-///                     if ((Int4) (subject_offset + diag_offset) <
-///                         diag_array[diag_coord].last_hit) {
-///                         continue;
-///                     }
-///                     /* Otherwise, start a new hit. */
-///                     else {
-///                         diag_array[diag_coord].last_hit =
-///                             subject_offset + diag_offset;
-///                         diag_array[diag_coord].flag = 0;
-///                     }
-///                 }
-///                 /* If the reset bit is cleared, try to start an extension. */
-///                 else {
-///                     /* find the distance to the last hit on this diagonal */
-///                     last_hit = diag_array[diag_coord].last_hit - diag_offset;
-///                     diff = subject_offset - last_hit;
-///
-///                     if (diff >= window) {
-///                         /* We are beyond the window for this diagonal; start
-///                            a new hit */
-///                         diag_array[diag_coord].last_hit =
-///                             subject_offset + diag_offset;
-///                         continue;
-///                     }
-///
-///                     /* If the difference is less than the wordsize (i.e.
-///                        last hit and this hit overlap), give up */
-///
-///                     if (diff < wordsize) {
-///                         continue;
-///                     }
-///
-///                     /* Extend this pair of hits. The extension to the left
-///                        must reach the end of the first word in order for
-///                        extension to the right to proceed. */
-///
-///                     score = s_BlastAaExtendTwoHit(matrix, subject, query,
-///                                                   last_hit + wordsize,
-///                                                   subject_offset, query_offset,
-///                                                   dropoff, &hsp_q, &hsp_s,
-///                                                   &hsp_len, TRUE,
-///                                                   wordsize, &right_extend,
-///                                                   &s_last_off);
-///
-///                     ++hits_extended;
-///
-///                     /* if the hsp meets the score threshold, report it */
-///                     if (score >= cutoff)
-///                         BlastSaveInitHsp(ungapped_hsps, hsp_q, hsp_s,
-///                                          query_offset, subject_offset,
-///                                          hsp_len, score);
-///
-///                     /* If an extension to the right happened, reset the last
-///                        hit so that future hits to this diagonal must start
-///                        over. */
-///
-///                     if (right_extend) {
-///                         diag_array[diag_coord].flag = 1;
-///                         diag_array[diag_coord].last_hit =
-///                             s_last_off - (wordsize - 1) + diag_offset;
-///                     }
-///                     /* Otherwise, make the present hit into the previous hit
-///                        for this diagonal */
-///                     else {
-///                         diag_array[diag_coord].last_hit =
-///                             subject_offset + diag_offset;
-///                     }
-///                 }               /* end else */
-///
-///             }                   /* end for - done with this batch of hits */
-///         }                       /* end for - done with this bucket, call
-///                                    scansubject again */
-///     }                           /* end while - done with the entire sequence.
-///                                  */
-/// ```
-fn two_hit(
+fn two_hit<R: PssmRows>(
     params: &RpsWordParams<'_>,
+    rows: &R,
     scratch: &mut RpsWordScratch,
     subject: &[u8],
     init_hsps: &mut Vec<RpsInitHsp>,
@@ -412,7 +337,7 @@ fn two_hit(
                         let query_offset = q_base + q;
                         let subject_offset = s_base + s;
                         let hit = pssm_extend_two_hit(
-                            &params.rows,
+                            rows,
                             subject,
                             s_base + last_hit + wordsize,
                             subject_offset,
@@ -443,46 +368,9 @@ fn two_hit(
 /// two-hit finder's.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:657-703
-/// ```c
-///     while (first_offset <= last_offset) {
-///         /* scan the subject sequence for hits */
-///         hits = BlastRPSScanSubject(lookup_wrap, subject, &first_offset);
-///
-///         totalhits += hits;
-///         for (i = 0; i < lookup->num_buckets; i++) {
-///             ...
-///             for (j = 0; j < hits; ++j) {
-///                 Uint4 query_offset = offset_pairs[j].qs_offsets.q_off;
-///                 Uint4 subject_offset = offset_pairs[j].qs_offsets.s_off;
-///                 diag_coord = (subject_offset - query_offset) & diag_mask;
-///                 diff = subject_offset -
-///                     (diag_array[diag_coord].last_hit - diag_offset);
-///
-///                 /* do an extension, but only if we have not already extended
-///                    this far */
-///                 if (diff >= 0) {
-///                     ++hits_extended;
-///                     score = s_BlastAaExtendOneHit(matrix, subject, query,
-///                                                   subject_offset, query_offset,
-///                                                   dropoff, &hsp_q, &hsp_s,
-///                                                   &hsp_len, wordsize, TRUE,
-///                                                   &s_last_off);
-///
-///                     /* if the hsp meets the score threshold, report it */
-///                     if (score >= cutoff) {
-///                         BlastSaveInitHsp(ungapped_hsps, hsp_q, hsp_s,
-///                                          query_offset, subject_offset,
-///                                          hsp_len, score);
-///                     }
-///                     diag_array[diag_coord].last_hit =
-///                         s_last_off - (wordsize - 1) + diag_offset;
-///                 }
-///             }                   /* end for (one bucket) */
-///         }                       /* end for (all buckets) */
-///     }                           /* end while */
-/// ```
-fn one_hit(
+fn one_hit<R: PssmRows>(
     params: &RpsWordParams<'_>,
+    rows: &R,
     scratch: &mut RpsWordScratch,
     subject: &[u8],
     init_hsps: &mut Vec<RpsInitHsp>,
@@ -535,7 +423,7 @@ fn one_hit(
                         let query_offset = q_base + q;
                         let subject_offset = s_base + s;
                         let hit = pssm_extend_one_hit(
-                            &params.rows,
+                            rows,
                             subject,
                             subject_offset,
                             query_offset,
@@ -558,291 +446,5 @@ fn one_hit(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn the_table_is_the_power_of_two_past_the_concatenation_and_the_window() {
-        assert_eq!(diag_array_length(5035, 40), 8192);
-        assert_eq!(diag_array_length(1130, 40), 2048);
-        assert_eq!(diag_array_length(984, 40), 1024);
-        assert_eq!(diag_array_length(985, 40), 2048);
-        assert_eq!(diag_array_length(1024, 0), 1024);
-    }
-
-    #[test]
-    fn the_entry_keeps_ncbis_31_bit_signed_field_and_flag() {
-        let mut entry = 0u32;
-        entry.set(-40, true);
-        assert_eq!((entry.last_hit(), entry.flag()), (-40, true));
-        entry.set(i32::MAX / 4 + 10, false);
-        assert_eq!((entry.last_hit(), entry.flag()), (i32::MAX / 4 + 10, false));
-    }
-
-    // Diagonals `L` apart share an entry (`(q - s) & mask`): across buckets, a hit of a later
-    // bucket at a smaller `s` reads the entry that an earlier bucket's hit at a larger `s` wrote
-    // (exactness point 1 of the design). A hit of bucket 0 on diagonal -4180 makes the two hits of
-    // bucket 1 on diagonal -84 (4,096 apart) read as overlapping it; with a table of 8,192 entries
-    // the second of them extends.
-    #[test]
-    fn diagonals_a_table_length_apart_share_an_entry_across_buckets() {
-        use crate::seqdb::rps::RPS_BACKBONE_SIZE;
-        let concat = 2100usize;
-        let mut rows = vec![[3i32; 28]; concat];
-        rows[concat - 1] = [-32767; 28];
-        let word = |l: usize| (l << 10) | (l << 5) | l;
-        let mut cells = vec![[0i32; 4]; RPS_BACKBONE_SIZE + 1];
-        let mut pv = vec![0u64; RPS_BACKBONE_SIZE / 64];
-        // The last letter's rows of the words A A A (q 10), C C C (q 2060), D D D (q 2065).
-        for (letter, entry) in [(1usize, 12), (3, 2062), (4, 2067)] {
-            cells[word(letter)] = [1, entry, 0, 0];
-            pv[word(letter) / 64] |= 1 << (word(letter) % 64);
-        }
-        let mut query = vec![20u8; 4200];
-        query[4190..4193].fill(1);
-        query[2144..2147].fill(3);
-        query[2149..2152].fill(4);
-        let params = RpsWordParams {
-            rows: RpsRows { rows: &rows },
-            table: RpsTable {
-                cells: &cells,
-                overflow: &[],
-                pv: &pv,
-            },
-            window: 40,
-            cutoff: 1,
-            dropoff: 20,
-        };
-        let hits_with_table = |length: i32| {
-            let mut scratch = RpsWordScratch {
-                diag: RpsDiagTable::new(),
-                buckets: RpsBuckets::new(concat, Default::default()),
-            };
-            scratch.diag.reset_for(length, 40);
-            let mut hits = Vec::new();
-            word_finder(&params, &mut scratch, &query, &mut hits);
-            (scratch.diag.mask, hits)
-        };
-        let (mask, ncbi) = hits_with_table(concat as i32);
-        assert_eq!(mask, 4095);
-        assert!(ncbi.is_empty(), "{ncbi:?}");
-        let (wide_mask, wide) = hits_with_table(8000);
-        assert_eq!(wide_mask, 8191);
-        assert_eq!(wide.len(), 1);
-        assert_eq!((wide[0].q_off, wide[0].s_off), (2065, 2149));
-    }
-
-    // Stale entries of earlier queries read as no hit: a table that searched another query
-    // gives the hits of a fresh one (exactness point 2 of the design).
-    #[test]
-    fn a_used_table_gives_the_hits_of_a_fresh_one() {
-        use crate::seqdb::rps::RPS_BACKBONE_SIZE;
-        // One profile of 8 positions that scores +5 on letter 1 (A) and -4 elsewhere, then its
-        // sentinel row; every word A A A hits the rows of the profile.
-        let mut rows = vec![[-4i32; 28]; 9];
-        for row in rows.iter_mut().take(8) {
-            row[1] = 5;
-        }
-        rows[8] = [-32767; 28];
-        let mut cells = vec![[0i32; 4]; RPS_BACKBONE_SIZE + 1];
-        let mut pv = vec![0u64; RPS_BACKBONE_SIZE / 64];
-        let w = (1 << 10) | (1 << 5) | 1;
-        let overflow: Vec<i32> = vec![3, 4, 5, 6, 7];
-        cells[w] = [6, 2, 0, 0];
-        pv[w / 64] |= 1 << (w % 64);
-        let params = RpsWordParams {
-            rows: RpsRows { rows: &rows },
-            table: RpsTable {
-                cells: &cells,
-                overflow: &overflow,
-                pv: &pv,
-            },
-            window: 40,
-            cutoff: 1,
-            dropoff: 20,
-        };
-        let query = [1u8, 1, 1, 1, 1, 1, 20, 1, 1, 1, 1];
-        let other = [1u8; 30];
-        let run = |before: &[&[u8]]| {
-            let mut scratch = RpsWordScratch {
-                diag: RpsDiagTable::new(),
-                buckets: RpsBuckets::new(rows.len(), Default::default()),
-            };
-            scratch.diag.reset_for(rows.len() as i32, 40);
-            let mut ignored = Vec::new();
-            for q in before {
-                word_finder(&params, &mut scratch, q, &mut ignored);
-            }
-            let mut hits = Vec::new();
-            word_finder(&params, &mut scratch, &query, &mut hits);
-            hits
-        };
-        let fresh = run(&[]);
-        assert!(!fresh.is_empty());
-        assert_eq!(run(&[&other]), fresh);
-        assert_eq!(run(&[&other, &query, &other]), fresh);
-        // NCBI's clear at `INT4_MAX / 4` (`RpsDiagTable::exit`) on a kept table (D3 of PS12s): a
-        // worker's offset reaches it after about 536 M letters of frames. A table whose offset is
-        // just below it searches `other` (its entries then hold values past the limit), the offset
-        // passes the limit, `query` still gets a fresh table's hits, and its exit clears the table
-        // (every entry `-window`, the offset the window), after which `query` gets them again.
-        let mut scratch = RpsWordScratch {
-            diag: RpsDiagTable::new(),
-            buckets: RpsBuckets::new(rows.len(), Default::default()),
-        };
-        scratch.diag.reset_for(rows.len() as i32, 40);
-        scratch.diag.offset = i32::MAX / 4 - 5;
-        let mut ignored = Vec::new();
-        word_finder(&params, &mut scratch, &other, &mut ignored);
-        assert!(scratch.diag.offset >= i32::MAX / 4);
-        assert!(scratch
-            .diag
-            .array
-            .iter()
-            .any(|entry| entry.last_hit() > i32::MAX / 4));
-        let mut hits = Vec::new();
-        word_finder(&params, &mut scratch, &query, &mut hits);
-        assert_eq!(hits, fresh);
-        assert_eq!(scratch.diag.offset, 40);
-        assert!(scratch
-            .diag
-            .array
-            .iter()
-            .all(|entry| (entry.last_hit(), entry.flag()) == (-40, false)));
-        let mut hits = Vec::new();
-        word_finder(&params, &mut scratch, &query, &mut hits);
-        assert_eq!(hits, fresh);
-    }
-
-    // D3 of PS12s: a worker's table kept from one volume to the next of the same table length
-    // gives a query the hits of a fresh table (the offset rule), and a volume of another length
-    // gets a zeroed table of its own length.
-    #[test]
-    fn a_table_kept_from_another_volume_gives_the_hits_of_a_fresh_one() {
-        use crate::seqdb::rps::RPS_BACKBONE_SIZE;
-        // Two volumes whose tables have 1,024 entries (984 and 900 rows), each one profile scoring
-        // +5 on letter `letter` and -4 elsewhere; the word of three such letters hits every row.
-        let volume = |rows_count: usize, letter: usize| {
-            let mut rows = vec![[-4i32; 28]; rows_count];
-            for row in rows.iter_mut().take(rows_count - 1) {
-                row[letter] = 5;
-            }
-            rows[rows_count - 1] = [-32767; 28];
-            let mut cells = vec![[0i32; 4]; RPS_BACKBONE_SIZE + 1];
-            let mut pv = vec![0u64; RPS_BACKBONE_SIZE / 64];
-            let w = (letter << 10) | (letter << 5) | letter;
-            let entries: Vec<i32> = (2..rows_count as i32 - 1).step_by(37).collect();
-            cells[w] = [entries.len() as i32, entries[0], 0, 0];
-            pv[w / 64] |= 1 << (w % 64);
-            (rows, cells, pv, entries[1..].to_vec())
-        };
-        let (rows_a, cells_a, pv_a, overflow_a) = volume(984, 1);
-        let (rows_b, cells_b, pv_b, overflow_b) = volume(900, 3);
-        let a = RpsWordParams {
-            rows: RpsRows { rows: &rows_a },
-            table: RpsTable {
-                cells: &cells_a,
-                overflow: &overflow_a,
-                pv: &pv_a,
-            },
-            window: 40,
-            cutoff: 1,
-            dropoff: 20,
-        };
-        let b = RpsWordParams {
-            rows: RpsRows { rows: &rows_b },
-            table: RpsTable {
-                cells: &cells_b,
-                overflow: &overflow_b,
-                pv: &pv_b,
-            },
-            ..a
-        };
-        let query_a = [1u8; 40];
-        let query_b: Vec<u8> = (0..60).map(|i| if i % 7 == 6 { 20 } else { 3 }).collect();
-        let hits =
-            |scratch: &mut RpsWordScratch, params: &RpsWordParams<'_>, rows: usize, q: &[u8]| {
-                scratch.prepare_for(rows, 40);
-                let mut hits = Vec::new();
-                word_finder(params, scratch, q, &mut hits);
-                hits
-            };
-        let fresh_b = hits(
-            &mut RpsWordScratch::new(Default::default()),
-            &b,
-            900,
-            &query_b,
-        );
-        assert!(!fresh_b.is_empty());
-        let mut scratch = RpsWordScratch::new(Default::default());
-        assert!(!hits(&mut scratch, &a, 984, &query_a).is_empty());
-        assert_eq!(scratch.diag.array.len(), 1024);
-        let kept = scratch.diag.array.as_ptr();
-        assert_eq!(hits(&mut scratch, &b, 900, &query_b), fresh_b);
-        assert_eq!(scratch.diag.array.as_ptr(), kept, "the table is kept");
-        // A volume whose table has another length gets a table of its own.
-        scratch.prepare_for(5035, 40);
-        assert_eq!(scratch.diag.array.len(), 8192);
-        assert_eq!(scratch.diag.offset, 40);
-        assert!(scratch.diag.array.iter().all(|&entry| entry == 0));
-    }
-
-    // PS12m: the word finders read the hits in passes of buckets; the initial HSPs (and their
-    // order) are the same for one pass of every bucket and for passes of 1, 2 and 64 buckets, the
-    // two-hit and the one-hit finder, the diagonals of a long query sharing the table's entries.
-    #[test]
-    fn the_initial_hsps_do_not_depend_on_the_groups_of_buckets() {
-        use crate::seqdb::rps::RPS_BACKBONE_SIZE;
-        let rows_count = 9_000usize;
-        let mut rows = vec![[-4i32; 28]; rows_count];
-        for row in rows.iter_mut().take(rows_count - 1) {
-            row[1] = 5;
-        }
-        rows[rows_count - 1] = [-32767; 28];
-        let mut cells = vec![[0i32; 4]; RPS_BACKBONE_SIZE + 1];
-        let mut pv = vec![0u64; RPS_BACKBONE_SIZE / 64];
-        let w = (1 << 10) | (1 << 5) | 1;
-        // The word A A A hits every 37th row, in ascending order (five buckets, one overflow run).
-        let entries: Vec<i32> = (2..rows_count as i32 - 1).step_by(37).collect();
-        cells[w] = [entries.len() as i32, entries[0], 0, 0];
-        pv[w / 64] |= 1 << (w % 64);
-        let overflow = entries[1..].to_vec();
-        let mut query = Vec::new();
-        for run in [30usize, 12, 55, 9, 80] {
-            query.extend(std::iter::repeat_n(1u8, run));
-            query.extend([20u8, 20]);
-        }
-        let hits_of = |window: i32, group_buckets: usize| {
-            let params = RpsWordParams {
-                rows: RpsRows { rows: &rows },
-                table: RpsTable {
-                    cells: &cells,
-                    overflow: &overflow,
-                    pv: &pv,
-                },
-                window,
-                cutoff: 1,
-                dropoff: 20,
-            };
-            let mut scratch = RpsWordScratch {
-                diag: RpsDiagTable::new(),
-                buckets: RpsBuckets::with_group(rows_count, Default::default(), group_buckets),
-            };
-            scratch.diag.reset_for(rows_count as i32, window);
-            let mut hits = Vec::new();
-            word_finder(&params, &mut scratch, &query, &mut hits);
-            hits
-        };
-        for window in [40, 0] {
-            let whole = hits_of(window, usize::MAX / 2);
-            assert!(whole.len() > 10, "window {window}: {} HSPs", whole.len());
-            for group_buckets in [1, 2, 64] {
-                assert_eq!(
-                    hits_of(window, group_buckets),
-                    whole,
-                    "{window} {group_buckets}"
-                );
-            }
-        }
-    }
-}
+#[path = "wordfinder_tests.rs"]
+mod tests;

@@ -13,20 +13,6 @@ use crate::stats::{lookup_protein_params, KarlinParams};
 use anyhow::{bail, ensure, Result};
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2743-2754
-// ```c++
-//    Int4 context; /* loop variable. */
-//    Blast_ResFreq* rfp,* stdrfp;
-//    BlastContextInfo* contexts = query_info->contexts;
-//    Boolean check_ideal =
-//       (program == eBlastTypeBlastx || program == eBlastTypeTblastx ||
-//        program == eBlastTypeRpsTblastn);
-//    Boolean valid_context = FALSE;
-//
-//    ASSERT(contexts);
-//
-//    /* Ideal Karlin block is filled unconditionally. */
-//    status = Blast_ScoreBlkKbpIdealCalc(sbp);
-// ```
 #[derive(Clone, Debug)]
 pub struct ContextParameters {
     pub valid: bool,
@@ -65,34 +51,6 @@ fn ideal_block() -> KarlinParams {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2776-2801
-// ```c++
-//       buffer = &query[context_offset];
-//
-//       Blast_ResFreqString(sbp, rfp, (char*)buffer, query_length);
-//       sbp->sfp[context] = Blast_ScoreFreqNew(sbp->loscore, sbp->hiscore);
-//       BlastScoreFreqCalc(sbp, sbp->sfp[context], rfp, stdrfp);
-//       sbp->kbp_std[context] = kbp = Blast_KarlinBlkNew();
-//       loop_status = Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]);
-//       if (loop_status) {
-//           contexts[context].is_valid = FALSE;
-//           sbp->sfp[context] = Blast_ScoreFreqFree(sbp->sfp[context]);
-//           sbp->kbp_std[context] = Blast_KarlinBlkFree(sbp->kbp_std[context]);
-//           if (!Blast_QueryIsTranslated(program) ) {
-//              Blast_MessageWrite(blast_message, eBlastSevWarning, context,
-//              kBlastErrMsg_CantCalculateUngappedKAParams);
-//           }
-//           continue;
-//       }
-//       /* For searches with translated queries, check whether ideal values
-//          should be substituted instead of calculated values, so a more
-//          conservative (smaller) Lambda is used. */
-//       if (check_ideal && kbp->Lambda >= sbp->kbp_ideal->Lambda)
-//          Blast_KarlinBlkCopy(kbp, sbp->kbp_ideal);
-//
-//       sbp->kbp_psi[context] = Blast_KarlinBlkNew();
-//       loop_status = Blast_KarlinBlkUngappedCalc(sbp->kbp_psi[context],
-//                                            sbp->sfp[context]);
-// ```
 /// `score_block` with the search's matrix: BLOSUM62's is `score_block`, another matrix's
 /// `score_block_of`.
 pub fn score_block_for(
@@ -119,11 +77,6 @@ fn score_block_of(batch: &PreparedQueryBatch, matrix: ScoringMatrix) -> Vec<Cont
     let (low, high) = matrix_score_bounds(matrix);
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:3127-3130 (the alpha and
     // beta of an ungapped search, which the length adjustment reads, blast_setup.c:815)
-    // ```c
-    //    else if (num_values > 0) {
-    //      (*alpha) = alpha_arr[0];
-    //      (*beta) = beta_arr[0];
-    // ```
     // The matrix's ungapped row (BLOSUM62's are the computed block's defaults), as TBLASTX's
     // contexts take them (`tblastx/blast_engine/run_impl.rs`).
     let row = crate::stats::tables::lookup_protein_params_ungapped(matrix);
@@ -193,16 +146,6 @@ pub fn score_block(batch: &PreparedQueryBatch) -> Vec<ContextParameters> {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:913-920
-// ```c
-//       /* Set the database length for new FSC */
-//       if (sbp->gbp) {
-//           Int8 dbl = total_length;
-//           /* Override the database length or set one (e.g., blast2seq). */
-//           if (eff_len_options->db_length) {
-//               dbl = eff_len_options->db_length;
-//           }
-//           sbp->gbp->db_length =
-// ```
 /// The database length of the Gumbel block: `-dbsize` when it is not 0 (also below 0, as
 /// NCBI), else the real total `db_length`; not divided by 3, since BLASTX's subject is not
 /// translated (blast_setup.c:921-922).
@@ -230,13 +173,6 @@ pub(crate) fn gapped_karlin(options: &ResolvedOptions) -> KarlinParams {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:303-307
-// ```c++
-//     if (args.Exist(kArgEffSearchSpace) && args[kArgEffSearchSpace]) {
-//         CNcbiEnvironment env;
-//         env.Set("OLD_FSC", "true");
-//         opt.SetEffectiveSearchSpace(args[kArgEffSearchSpace].AsInt8());
-//     }
-// ```
 /// The Gumbel block of a gapped search, none with `-searchsp` (at any value) or `OLD_FSC`, nor in
 /// an ungapped search (`ResolvedOptions::has_gumbel_block`).
 pub fn gumbel_block(options: &ResolvedOptions, db_length: i64) -> Option<BlastGumbelBlk> {
@@ -254,64 +190,7 @@ pub fn gumbel_block(options: &ResolvedOptions, db_length: i64) -> Option<BlastGu
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:784-824
-// ```c++
-//       if (query_info->contexts[index].is_valid &&
-//           ((query_length = query_info->contexts[index].query_length) > 0) ) {
-//
-//          /* Use the correct Karlin block. For blastn, two identical Karlin
-//           * blocks are allocated for each sequence (one per strand), but we
-//           * only need one of them.
-//           */
-//          if (program_number == eBlastTypeBlastn) {
-//              /* Setting reward and penalty to zero is being used to indicate
-//               * that matrix scoring should be used for ungapped and gapped
-//               * alignment.  For now reward/penalty are being reset to the
-//               * default blastn values to not disturb the KA calcs  -RMH- */
-//              if ( scoring_options->reward == 0 && scoring_options->penalty == 0 )
-//              {
-//                  Blast_GetNuclAlphaBeta(BLAST_REWARD,
-//                                     BLAST_PENALTY,
-//                                     scoring_options->gap_open,
-//                                     scoring_options->gap_extend,
-//                                     sbp->kbp_std[index],
-//                                     scoring_options->gapped_calculation,
-//                                     &alpha, &beta);
-//              }else {
-//                  Blast_GetNuclAlphaBeta(scoring_options->reward,
-//                                     scoring_options->penalty,
-//                                     scoring_options->gap_open,
-//                                     scoring_options->gap_extend,
-//                                     sbp->kbp_std[index],
-//                                     scoring_options->gapped_calculation,
-//                                     &alpha, &beta);
-//              }
-//          } else {
-//              BLAST_GetAlphaBeta(sbp->name, &alpha, &beta,
-//                                 scoring_options->gapped_calculation,
-//                                 scoring_options->gap_open,
-//                                 scoring_options->gap_extend,
-//                                 sbp->kbp_std[index]);
-//          }
-//          BLAST_ComputeLengthAdjustment(kbp->K, kbp->logK,
-//                                        alpha/kbp->Lambda, beta,
-//                                        query_length, db_length,
-//                                        db_num_seqs, &length_adjustment);
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:836-847
-// ```c++
-//         	 Int8 effective_db_length = db_length - ((Int8)db_num_seqs * length_adjustment);
-//
-//         	 // Just in case effective_db_length < 0
-//         	 if (effective_db_length <= 0)
-//         		 effective_db_length = 1;
-//
-//              effective_search_space = effective_db_length *
-//                              (query_length - length_adjustment);
-//          }
-//       }
-//       query_info->contexts[index].eff_searchsp = effective_search_space;
-//       query_info->contexts[index].length_adjustment = length_adjustment;
-// ```
 /// LOSAT's refusal of a search whose effective search space overflows NCBI's `Int8` (the shared
 /// one of `stats::setup::calc_eff_lengths`).
 pub(crate) use crate::stats::setup::SearchSpaceOverflow;
@@ -346,11 +225,6 @@ pub fn effective_lengths(
         // reads for the first query's frame +1 (`one_query_info->contexts[0]`).
         //
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:770-772
-        // ```c
-        //    for (index = query_info->first_context;
-        //         index <= query_info->last_context;
-        //         index++) {
-        // ```
         if i < batch.first_context {
             p.length_adjustment = 0;
             p.search_space = 0;
@@ -378,164 +252,10 @@ pub fn effective_lengths(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:908-944
-// ```c++
-//    if (seq_src) {
-//       total_length = BlastSeqSrcGetTotLenStats(seq_src);
-//       if (total_length <= 0)
-//           total_length = BlastSeqSrcGetTotLen(seq_src);
-//
-//       /* Set the database length for new FSC */
-//       if (sbp->gbp) {
-//           Int8 dbl = total_length;
-//           /* Override the database length or set one (e.g., blast2seq). */
-//           if (eff_len_options->db_length) {
-//               dbl = eff_len_options->db_length;
-//           }
-//           sbp->gbp->db_length =
-//               (Blast_SubjectIsTranslated(program_number))?
-//               dbl/3 : dbl;
-//       }
-//
-//       if (total_length > 0) {
-//           num_seqs = BlastSeqSrcGetNumSeqsStats(seq_src);
-//           if (num_seqs <= 0)
-//               num_seqs = BlastSeqSrcGetNumSeqs(seq_src);
-//       } else {
-//           /* Not a database search; each subject sequence is considered
-//              individually */
-//           Int4 oid = 0;  /* Get length of first sequence. */
-//           if ( (total_length = BlastSeqSrcGetSeqLen(seq_src, (void*) &oid)) < 0) {
-//               total_length = -1;
-//               num_seqs = -1;
-//           }
-//           num_seqs = 1;
-//       }
-//    }
-//
-//    /* Initialize the effective length parameters with real values of
-//       database length and number of sequences */
-//    BlastEffectiveLengthsParametersNew(eff_len_options, total_length, num_seqs,
-//                                       eff_len_params);
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-987
-// ```c++
-//    if (sbp->gbp) {
-//        min_subject_length = BlastSeqSrcGetMinSeqLen(seq_src);
-//        if (Blast_SubjectIsTranslated(program_number)) {
-//            min_subject_length/=3;
-//        }
-//    } else {
-//        min_subject_length = (Int4) (total_length/num_seqs);
-//    }
-//
-//    if(min_subject_length <=0) {
-// 	   return BLASTERR_SUBJECT_LENGTH_INVALID;
-//    }
-//
-//    if ((status = BlastHitSavingParametersNew(program_number, hit_options, sbp,
-// 		                                     query_info, min_subject_length,
-// 		                                     (*ext_params)->options->compositionBasedStats,
-// 		                                     hit_params)) != 0){
-//        return status;
-//    }
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1372-1374
-// ```c++
-//     BlastInitialWordParametersNew(program_number, word_options,
-//       hit_params, lookup_wrap, sbp, query_info,
-//       BlastSeqSrcGetAvgSeqLen(seq_src), &word_params);
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:935-975
-// ```c++
-//          if (sbp->gbp && sbp->gbp->filled) {
-// 	     /* If cbs greater than 1 (2 or 3), then increase expect value by 5 for preliminary search. */
-// 	     int cbs_stretch = (compositionBasedStats > 1) ? 5 : 1;
-// 	     params->prelim_evalue = cbs_stretch*evalue;
-//              new_cutoff = BLAST_SpougeEtoS(cbs_stretch*evalue, kbp, sbp->gbp,
-//                          query_info->contexts[context].query_length,
-//                          avg_subject_length);
-//          } else {
-//              BLAST_Cutoffs(&new_cutoff, &evalue, kbp, searchsp, FALSE, 0);
-//          }
-//          params->cutoffs[context].cutoff_score = new_cutoff;
-//          params->cutoffs[context].cutoff_score_max = new_cutoff;
-//       }
-//
-//       /* If using sum statistics, use a modified cutoff score
-//          if that turns out smaller */
-//       if (params->link_hsp_params && gapped_calculation) {
-//
-//          double evalue_hsp = 1.0;
-//          Int4 concat_qlen =
-//              query_info->contexts[query_info->last_context].query_offset +
-//              query_info->contexts[query_info->last_context].query_length;
-//          Int4 avg_qlen = concat_qlen / (query_info->last_context + 1);
-//          Int8 searchsp = (Int8)MIN(avg_qlen, avg_subject_length) *
-//                          (Int8)avg_subject_length;
-//
-//          ASSERT(params->link_hsp_params);
-//
-//          for (context = query_info->first_context;
-//                              context <= query_info->last_context; ++context) {
-//             Int4 new_cutoff = 1;
-//
-//             if (!(query_info->contexts[context].is_valid))
-//                 continue;
-//
-//             kbp = kbp_array[context];
-//             ASSERT(s_BlastKarlinBlkIsValid(kbp));
-//             BLAST_Cutoffs(&new_cutoff, &evalue_hsp, kbp, searchsp,
-//                        TRUE, params->link_hsp_params->gap_decay_rate);
-//             params->cutoffs[context].cutoff_score = MIN(new_cutoff,
-//                                     params->cutoffs[context].cutoff_score);
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:340-383
-// ```c++
-//       if (sbp->kbp_std) {     /* this may not be set for gapped blastn */
-//          kbp = sbp->kbp_std[context];
-//          if (s_BlastKarlinBlkIsValid(kbp)) {
-//             gap_trigger = (Int4)((kOptions->gap_trigger * NCBIMATH_LN2 +
-//                                      kbp->logK) / kbp->Lambda);
-//          }
-//       }
-//
-//       if (!gapped_calculation || sbp->matrix_only_scoring) {
-//          double cutoff_e = s_GetCutoffEvalue(program_number);
-//          Int4 query_length = query_info->contexts[context].query_length;
-//
-//          /* include the length of reverse complement for blastn searchs. */
-//          ASSERT(query_length > 0);
-//          if (program_number == eBlastTypeBlastn ||
-//              program_number == eBlastTypeMapping)
-//             query_length *= 2;
-//
-//          kbp = kbp_array[context];
-//          ASSERT(s_BlastKarlinBlkIsValid(kbp));
-//          BLAST_Cutoffs(&new_cutoff, &cutoff_e, kbp,
-//                        MIN((Uint8)subj_length,
-//                            (Uint8)query_length)*((Uint8)subj_length),
-//                        TRUE, gap_decay_rate);
-//
-//          /* Perform this check for compatibility with the old code */
-//          if (program_number != eBlastTypeBlastn)
-//             new_cutoff = MIN(new_cutoff, gap_trigger);
-//       } else {
-//          new_cutoff = gap_trigger;
-//       }
-//       new_cutoff *= (Int4)sbp->scale_factor;
-//       new_cutoff = MIN(new_cutoff,
-//                        hit_params->cutoffs[context].cutoff_score_max);
-//       curr_cutoffs->cutoff_score = new_cutoff;
-//
-//       /* Note that x_dropoff_init stays constant throughout the search,
-//          but the cutoff_score and x_dropoff parameters may be updated
-//          multiple times, if every subject sequence is treated individually */
-//
-//       if (curr_cutoffs->x_dropoff_init == 0)
-//          curr_cutoffs->x_dropoff = new_cutoff;
-//       else
-//          curr_cutoffs->x_dropoff = curr_cutoffs->x_dropoff_init;
-// ```
 /// The numbers of the subjects that the parameters of a search read (`Subjects::numbers`), as
 /// NCBI's sequence source answers them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -594,48 +314,31 @@ pub fn subject_parameters(
         request_count: _,
     } = numbers;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980
-    // ```c
-    //    if (sbp->gbp) {
-    //        min_subject_length = BlastSeqSrcGetMinSeqLen(seq_src);
-    //        ...
-    //    } else {
-    //        min_subject_length = (Int4) (total_length/num_seqs);
-    //    }
-    //
-    //    if(min_subject_length <=0) {
-    // 	   return BLASTERR_SUBJECT_LENGTH_INVALID;
-    //    }
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_message.c:215-217
-    // ```c
-    //     case BLASTERR_SUBJECT_LENGTH_INVALID:
-    //         new_msg->message = strdup("The average subject length is too short");
-    //         new_msg->severity = eBlastSevFatal;
-    // ```
     // BLASTX's subject is not translated, so the shortest length is not divided by 3. Without the
     // Gumbel block (`ResolvedOptions::has_gumbel_block`: `-ungapped`, `-searchsp`, `OLD_FSC`) the
     // statistics' average divides by their number of sequences, which an alias file's `NSEQ 0`
-    // makes 0: NCBI crashes there (SIGFPE), LOSAT refuses (`common::database::check_statistics_count`,
+    // makes 0: NCBI crashes there (SIGFPE), LOSAT refuses (`common::database::check_setup_count`,
     // DECISIONS 14 of line RG). A set of subjects whose average is below one letter fails the
     // batch's setup: the engine error after the start of the outfmt 0 report, exit status 3, as
     // every other error of this setup (`native::database_search_error`; NCBI 2.17.0 blastx
     // `-subject` of three empty records, or of `M`, `` and ``, with `-searchsp`, `OLD_FSC` or
     // `-ungapped -comp_based_stats 0`, env parity probe f_probe of 2026-11-12).
     let gumbel_block_used = options.has_gumbel_block();
-    if !gumbel_block_used && db_count == 0 && db_length > 0 {
-        return Err(crate::algorithm::common::database::refusal(
-            crate::algorithm::common::database::STATISTICS_COUNT_ZERO,
-            "BLASTX",
-        ));
-    }
+    crate::algorithm::common::database::check_setup_count(
+        db_length,
+        db_count,
+        gumbel_block_used,
+        "BLASTX",
+    )?;
     let Some(n) = crate::stats::setup::setup_subject_length(
         db_length,
         db_count,
         gumbel_block_used.then_some((i32::try_from(shortest).unwrap_or(i32::MAX), false)),
     ) else {
-        bail!("The average subject length is too short");
+        bail!(crate::stats::setup::SUBJECT_LENGTH_TOO_SHORT);
     };
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:759-760 (quoted at
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:759-760 (cited at
     // `stats::setup::hit_saving_parameters_fail`)
     if crate::stats::setup::hit_saving_parameters_fail(options.sum_stats, options.gapped, n) {
         bail!(crate::stats::setup::HIT_SAVING_PARAMETERS_ERROR);
@@ -666,7 +369,7 @@ pub fn subject_parameters(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:219-220 and
-// c++/src/algo/blast/api/split_query_aux_priv.cpp:155-181 (quoted at
+// c++/src/algo/blast/api/split_query_aux_priv.cpp:155-181 (cited at
 // `stats::setup::preliminary_option_space`)
 /// The option spaces that NCBI's preliminary stage sets for the contexts of the query batch
 /// `batch` (`SplitQuery_SetEffectiveSearchSpace`), where they differ from the setup's own spaces
@@ -705,22 +408,8 @@ pub(crate) fn preliminary_spaces(
     Ok(Some(spaces))
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:1001-1024 (quoted at
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:1001-1024 (cited at
 // `stats::setup::subject_eff_lengths`)
-// ```c
-//    eff_len_params->real_db_length = subject_length;
-//    if ((status = BLAST_CalcEffLengths(program_number, scoring_options,
-//                                 eff_len_params, sbp, query_info, NULL)) != 0)
-//       return status;
-//    /* Update cutoff scores in hit saving parameters */
-//    BlastHitSavingParametersUpdate(program_number, sbp, query_info, subject_length, 0, /* FIXME */
-//                                   hit_params);
-//
-//    if (word_params) {
-//       /* Update cutoff scores in initial word parameters */
-//       BlastInitialWordParametersUpdate(program_number, hit_params, sbp, query_info,
-//            subject_length, word_params);
-// ```
 /// The parameters of the contexts of a query chunk `batch` for the subject of `subject_length`
 /// residues, where NCBI's preliminary search computes the statistics of each subject
 /// (`Subjects::per_subject`, a database length of 0): the chunk's preliminary parameters
@@ -760,7 +449,7 @@ pub(crate) fn subject_update(
     Ok(parameters)
 }
 
-/// The gap decay rate of the hit-saving and word cutoffs (`BlastLinkHSPParametersNew`, quoted at
+/// The gap decay rate of the hit-saving and word cutoffs (`BlastLinkHSPParametersNew`, cited at
 /// `linking::link_parameters`, the one rule of whether BLASTX links), 0 without linking: no sum
 /// statistics, or a gapped search whose intron length links nothing (blast_parameters.c:793-805).
 fn gap_decay_rate(options: &ResolvedOptions) -> f64 {
@@ -768,7 +457,7 @@ fn gap_decay_rate(options: &ResolvedOptions) -> f64 {
 }
 
 /// The word cutoff of a valid context of `length` residues (`BlastInitialWordParametersUpdate`,
-/// quoted above `SubjectNumbers`): the gap trigger of its ungapped block, below it an ungapped
+/// cited above `SubjectNumbers`): the gap trigger of its ungapped block, below it an ungapped
 /// search's `BLAST_Cutoffs` at the subject length `average`, at most the hit-saving cutoff
 /// `p.hit_cutoff_max`.
 fn word_cutoff(
@@ -782,9 +471,8 @@ fn word_cutoff(
     if options.gapped {
         trigger
     } else {
-        // NCBI blast_parameters.c:143-144 uses CUTOFF_E_BLASTX;
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:143-144 uses CUTOFF_E_BLASTX;
         // c++/include/algo/blast/core/blast_parameters.h:78:
-        // #define CUTOFF_E_BLASTX 1.0
         cutoff_score_sum_stats(length as i32, average, decay, &p.ungapped)
             .max(1)
             .min(trigger)
@@ -793,14 +481,7 @@ fn word_cutoff(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:396-416
-// ```c
-//       if (new_cutoff < cutoff_min) {
-//          cutoff_min = new_cutoff;
-//       }
-//       ...
-//    parameters->cutoff_score_min = cutoff_min;
-// ```
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1448-1455 (quoted at
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1448-1455 (cited at
 // `search::compute_subject_with`): the link cutoffs read it (`linking::link_cutoffs`).
 // NCBI's query batch is the reader batch (`reader_batch.rs`): the statistics of each subject update
 // the word cutoffs of all its contexts, also those of the units LOSAT searches apart.
@@ -867,7 +548,7 @@ pub(crate) fn subject_word_cutoff_min(
 }
 
 /// The cutoffs of each valid context (`BlastHitSavingParametersNew`/`Update`,
-/// `BlastInitialWordParametersNew`/`Update`, quoted above `SubjectNumbers`) after its effective
+/// `BlastInitialWordParametersNew`/`Update`, cited above `SubjectNumbers`) after its effective
 /// lengths: the hit-saving cutoff from `evalue` (stretched 5 times for the Gumbel block with
 /// `stretch`, a composition-based statistics above 1) at the subject length `n` (Spouge's, and the
 /// sum statistics' search space), and the word cutoff, which an ungapped search computes at the
@@ -929,7 +610,7 @@ fn context_cutoffs(
 /// BLASTX's defaults) at the gapped Lambda `gapped` (`gapped_karlin`; the contexts share it, the
 /// smallest one), converted as the protein programs convert them (`core::x_drop`).
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:454-463 (quoted at
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:454-463 (cited at
 /// `core::x_drop::gapped_x_dropoffs`)
 pub(crate) fn gapped_x_drops(options: &ResolvedOptions, gapped: &KarlinParams) -> (i32, i32) {
     crate::core::x_drop::gapped_x_dropoffs(

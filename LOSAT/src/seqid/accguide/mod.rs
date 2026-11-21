@@ -32,10 +32,6 @@ pub type AccInfo = u32;
 /// `e_not_set`).
 ///
 /// NCBI reference (598d8ae6): c++/include/objects/seqloc/Seq_id.hpp:562-563
-/// ```c++
-///     static E_Choice GetAccType(EAccessionInfo info)
-///         { return static_cast<E_Choice>(info & eAcc_type_mask); }
-/// ```
 pub fn acc_type(info: AccInfo) -> u32 {
     info & TYPE_MASK
 }
@@ -43,23 +39,6 @@ pub fn acc_type(info: AccInfo) -> u32 {
 /// The parse flags of `CSeq_id` (`EParseFlags`) that the accession functions read.
 ///
 /// NCBI reference (598d8ae6): c++/include/objects/seqloc/Seq_id.hpp:75-103
-/// ```c++
-///     enum EParseFlags {
-///         fParse_PartialOK  = 0x01,
-///         fParse_RawText    = 0x02, ///< Try to ID raw non-numeric accessions
-///         fParse_RawGI      = 0x04, ///< Treat raw numbers as GIs, not local IDs
-///         fParse_AnyRaw     = fParse_RawText | fParse_RawGI,
-///         ...
-///         fParse_ValidLocal = 0x08,
-///         ...
-///         fParse_AnyLocal   = 0x18,
-///         fParse_NoFASTA    = 0x20, ///< Don't bother checking for a tag
-///         ...
-///         fParse_FallbackOK = 0x40,
-///         ...
-///         fParse_Default    = fParse_RawText | fParse_ValidLocal
-///     };
-/// ```
 pub mod parse_flags {
     pub const PARTIAL_OK: u32 = 0x01;
     pub const RAW_TEXT: u32 = 0x02;
@@ -80,7 +59,8 @@ use parse_flags::RAW_TEXT;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SeqIdWarning {
     pub subcode: u32,
-    pub message: String,
+    /// The warning's text, as bytes (an id's text keeps its bytes: probe R3 of line LIB-B).
+    pub message: Vec<u8>,
 }
 
 /// A set of bit positions as `bm::bvector<>` holds them for a small special: sorted,
@@ -138,22 +118,6 @@ impl BitRanges {
 /// `SAccGuide::SSubMap`: the rules of one format (`<letters>+<digits>`).
 ///
 /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:889-911
-/// ```c++
-///     typedef map<string, TAccInfo>   TPrefixes;
-///     typedef pair<string, TAccInfo>  TPair;
-///     typedef list<TPair>             TPairs; // not vector -- need stable ptrs
-///     typedef map<string, TPair>      TBigSpecialMap; // last -> first -> value
-///     typedef pair<bm::bvector<>, TAccInfo> TSmallSpecialOption;
-///     typedef multimap<string, TSmallSpecialOption> TSmallSpecialMap;
-///     ...
-///     struct SSubMap {
-///         TPrefixes         prefixes;
-///         TPairs            wildcards;
-///         TBigSpecialMap    big_specials;
-///         TSmallSpecialMap  small_specials;
-///     };
-///     typedef map<TFormatCode, SSubMap> TMainMap;
-/// ```
 /// The multimap is a map of each key to its options in the multimap's order (an
 /// `emplace` adds an option at the end of its key's equal range).
 #[derive(Default, Debug)]
@@ -177,36 +141,6 @@ pub struct AccGuide {
 /// `SAccGuide::SHints`: the state that `AddRule` keeps from one line to the next.
 ///
 /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:907-945
-/// ```c++
-///     struct SHints {
-///         SHints()
-///             : prev_type(CSeq_id::eAcc_unknown), prev_submap(NULL),
-///               prev_special_format(0),
-///               prev_special_type(CSeq_id::eAcc_unknown),
-///               prev_special_base_type(CSeq_id::eAcc_unknown),
-///               special2_submap(nullptr), version(1)
-///             {}
-///         ...
-///         TAccInfo              prev_type;
-///         CTempString           prev_type_name;
-///         TMainMap::value_type* prev_submap;
-///         TBigSpecialMap::iterator   prev_big_special;
-///         TSmallSpecialMap::iterator prev_small_special;
-///         TFormatCode           prev_special_format;
-///         string                prev_special_key;
-///         CTempString           prev_special_type_name;
-///         string                prev_special_base_key;
-///         TAccInfo              prev_special_type;
-///         TAccInfo              prev_special_base_type;
-///         string                prev_special2_acc;
-///         map<string, CTempString> default_fallbacks;
-///         string                special2_name;
-///         unique_ptr<string>    special2_old_name;
-///         SSubMap*              special2_submap;
-///         TAccInfo              special2_type;
-///         unsigned int          version;
-///     };
-/// ```
 /// `prev_small_special` is the key and the position of the option in its equal range
 /// (`None` for `end()`); `prev_big_special` is only an insertion hint and is not kept.
 /// The fallback members serve unknown type names only.
@@ -251,15 +185,6 @@ impl Default for Hints {
 /// `kMaxSmallSpecialDigits` and `kBVSizes`.
 ///
 /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:866-884
-/// ```c++
-/// static const unsigned int kMaxSmallSpecialDigits = 9;
-/// static const bm::bvector<>::size_type kBVSizes[kMaxSmallSpecialDigits + 1] = {
-///     1,
-///     10,
-///     ...
-///     1000000000
-/// };
-/// ```
 const MAX_SMALL_SPECIAL_DIGITS: u32 = 9;
 const BV_SIZES: [u32; 10] = [
     1,
@@ -277,10 +202,6 @@ const BV_SIZES: [u32; 10] = [
 /// `SAccGuide::s_Key(letters, digits)`.
 ///
 /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:952-953
-/// ```c++
-///     static TFormatCode s_Key(unsigned short letters, unsigned short digits)
-///         { return TFormatCode(letters) << 16 | digits; }
-/// ```
 fn format_key(letters: usize, digits: usize) -> u32 {
     ((letters as u32 & 0xffff) << 16) | (digits as u32 & 0xffff)
 }
@@ -293,9 +214,6 @@ fn format_key(letters: usize, digits: usize) -> u32 {
 /// such text NCBI's throwing `StringToNumeric` forms read the same values.
 ///
 /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1048
-/// ```c++
-///         hints.version = NStr::StringToUInt(tokens[1], NStr::fConvErr_NoThrow);
-/// ```
 fn bit_number(digits: &[u8]) -> u32 {
     crate::ncbi_str::string_to_uint(digits).unwrap_or(0)
 }
@@ -304,38 +222,6 @@ fn bit_number(digits: &[u8]) -> u32 {
 /// and the number that is its bit.
 ///
 /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1596-1629
-/// ```c++
-/// bm::bvector_size_type SAccGuide::x_SplitSpecial(CTempString& acc,
-///                                                 TFormatCode fmt)
-/// {
-///     auto raw_digits = fmt & 0xffff, digits = raw_digits;
-///     auto normal_size = (fmt >> 16) + digits;
-///     if (digits == kMaxSmallSpecialDigits + 1) {
-///         digits -= 2;
-///     } else if (digits > kMaxSmallSpecialDigits) {
-///         digits = kMaxSmallSpecialDigits;
-///     }
-///     SIZE_TYPE pos;
-///     bm::bvector_size_type result;
-///     if (acc.size() == normal_size) {
-///         pos = acc.size() - digits;
-///         NStr::StringToNumeric(acc.substr(pos), &result);
-///     } else {
-///         _ASSERT(acc.size() == normal_size + 1);
-///         _ASSERT(digits >= 3);
-///         pos = (fmt >> 16) + 2;
-///         _ASSERT(isalpha(static_cast<unsigned char>(acc[pos])));
-///         NStr::StringToNumeric(acc.substr(pos + 1), &result);
-///         if (digits == raw_digits) {
-///             pos -= 2;
-///             result += (NStr::StringToNumeric<Uint1>(acc.substr(pos, 2))
-///                        * kBVSizes[digits - 2]);
-///         }
-///     }
-///     acc.erase(pos);
-///     return result;
-/// }
-/// ```
 fn split_special(acc: &[u8], fmt: u32) -> (usize, u32) {
     let raw_digits = fmt & 0xffff;
     let mut digits = raw_digits;
@@ -364,44 +250,6 @@ fn split_special(acc: &[u8], fmt: u32) -> (usize, u32) {
 /// letters, `_` and `?` (any one character); a NUL character of `str` matches nothing.
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:291-307,359-386
-/// ```c++
-/// static EMatchesMaskResult s_MatchesMask(CTempString str, CTempString mask, bool ignore_case)
-/// {
-///     char s, m;
-///     size_t str_pos = 0, mask_pos = 0;
-///
-///     for ( ; (m = mask[mask_pos]); ++str_pos, ++mask_pos) {
-///
-///         s = str[str_pos];
-///
-///         if (!s  &&  m != '*') {
-///             return eMismatch;
-///         }
-///         // Analyze mask symbol
-///         switch ( m ) {
-///         case '?':
-///             _ASSERT(s);
-///             continue;
-///         ...
-///         default:
-///             // Compare non pattern character in mask and name
-///             _ASSERT(s  &&  m);
-///             if (ignore_case) {
-///                 ...
-///             } else {
-///                 if (s != m)
-///                     return eNoMatch;
-///             }
-///             continue;
-///         }
-///     }
-///     // Matches if we reach the end of the string and mask at the same time only
-///     if ( str[str_pos] ) {
-///         return eNoMatch;
-///     }
-///     return eMatch;
-/// }
-/// ```
 /// (`CTempString::operator[]` gives NUL past the end.) The loading refuses a mask with `*`,
 /// `[` or `\`.
 fn matches_mask(text: &[u8], mask: &[u8]) -> bool {
@@ -427,79 +275,6 @@ impl AccGuide {
     /// it, as NCBI's (for the loading's diagnostics).
     ///
     /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1370-1441
-    /// ```c++
-    /// const SAccGuide::TAccInfo& SAccGuide::Find(TFormatCode fmt,
-    ///                                            const CTempString& acc_or_pfx,
-    ///                                            string* key_used) const
-    /// {
-    ///     static const TAccInfo kUnknown = CSeq_id::eAcc_unknown;
-    ///     TMainMap::const_iterator it = rules.find(fmt);
-    ///     if (it == rules.end()) {
-    ///         return kUnknown;
-    ///     }
-    ///
-    ///     const SSubMap&            submap = it->second;
-    ///     const TAccInfo*           result = &kUnknown;
-    ///     CTempString               pfx     (acc_or_pfx, 0, fmt >> 16);
-    ///     TPrefixes::const_iterator pit    = submap.prefixes.find(pfx);
-    ///     if (pit != submap.prefixes.end()) {
-    ///         result = &pit->second;
-    ///     } else {
-    ///         ITERATE (TPairs, wit, submap.wildcards) {
-    ///             if (NStr::MatchesMask(pfx, wit->first)) {
-    ///                 bool bad_match = false; // Limit ? to matching letters
-    ///                 SIZE_TYPE pos = wit->first.find('?');
-    ///                 while (pos != NPOS) {
-    ///                     if ( !isalnum(pfx[pos])  &&  pfx[pos] != '?' ) {
-    ///                         bad_match = true;
-    ///                         break;
-    ///                     } else {
-    ///                         pos = wit->first.find('?', pos + 1);
-    ///                     }
-    ///                 }
-    ///                 if (bad_match) {
-    ///                     continue;
-    ///                 }
-    ///                 if (key_used  &&  acc_or_pfx != wit->first) {
-    ///                     *key_used = wit->first;
-    ///                 }
-    ///                 result = &wit->second;
-    ///                 break;
-    ///             }
-    ///         }
-    ///     }
-    ///     if (acc_or_pfx != pfx  &&  (*result & CSeq_id::fAcc_specials) != 0) {
-    ///         pfx = acc_or_pfx;
-    ///         auto n = x_SplitSpecial(pfx, fmt);
-    ///         for (auto ssit = submap.small_specials.lower_bound(pfx);
-    ///              ssit != submap.small_specials.end()  &&  ssit->first == pfx;
-    ///              ++ssit) {
-    ///             if (ssit->second.first[n]) {
-    ///                 if (key_used) {
-    ///                     key_used->erase();
-    ///                 }
-    ///                 return ssit->second.second;
-    ///             }
-    ///         }
-    ///         TBigSpecialMap::const_iterator bsit
-    ///             = submap.big_specials.lower_bound(acc_or_pfx);
-    ///         if (bsit != submap.big_specials.end()
-    ///             &&  !(acc_or_pfx < bsit->second.first) ) {
-    ///             if (key_used) {
-    ///                 key_used->erase();
-    ///             }
-    ///             return bsit->second.second;
-    ///         } else {
-    ///             if (key_used  &&  key_used->empty()) {
-    ///                 *key_used = pfx.substr(0, fmt >> 16);
-    ///             }
-    ///             return *result;
-    ///         }
-    ///     } else /* if (*result != CSeq_id::eAcc_unknown) */ {
-    ///         return *result;
-    ///     }
-    /// }
-    /// ```
     fn find(&self, fmt: u32, acc_or_pfx: &[u8], mut key_used: Option<&mut Vec<u8>>) -> AccInfo {
         let Some(submap) = self.rules.get(&fmt) else {
             return UNKNOWN;
@@ -569,24 +344,6 @@ impl AccGuide {
     /// `SHints::FindAccInfo(name)`.
     ///
     /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:974-989
-    /// ```c++
-    /// inline
-    /// SAccGuide::TAccInfo SAccGuide::SHints::FindAccInfo(CTempString name)
-    /// {
-    ///     if (name == prev_type_name) {
-    ///         return prev_type;
-    ///     } else {
-    ///         TAccInfoMap::const_iterator it = sc_AccInfoMap.find(name);
-    ///         if (it == sc_AccInfoMap.end()) {
-    ///             return kUnrecognized;
-    ///         } else {
-    ///             prev_special_key.clear();
-    ///             prev_type_name = it->first;
-    ///             return prev_type = it->second;
-    ///         }
-    ///     }
-    /// }
-    /// ```
     /// `None` is `kUnrecognized`.
     fn find_acc_info_hinted(hints: &mut Hints, name: &[u8]) -> Option<AccInfo> {
         if !hints.prev_type_name.is_empty() && name == hints.prev_type_name.as_slice() {
@@ -602,28 +359,6 @@ impl AccGuide {
     /// `SHints::FindSpecial(guide, fmt, acc_or_range)`.
     ///
     /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:991-1010
-    /// ```c++
-    /// inline
-    /// SAccGuide::TAccInfo SAccGuide::SHints::FindSpecial(const SAccGuide& guide,
-    ///                                                    TFormatCode fmt,
-    ///                                                    CTempString acc_or_range)
-    /// {
-    ///     CTempString pfx(acc_or_range, 0, fmt >> 16);
-    ///     if (fmt == prev_special_format) {
-    ///         if (acc_or_range == prev_special_key) {
-    ///             prev_special_type = prev_type;
-    ///             prev_special_type_name = prev_type_name;
-    ///             return prev_type;
-    ///         } else if (pfx == prev_special_base_key) {
-    ///             return prev_special_base_type;
-    ///         }
-    ///     }
-    ///     prev_special_format    = fmt;
-    ///     prev_special_base_key  = pfx;
-    ///     prev_special_base_type = guide.Find(fmt, pfx);
-    ///     return prev_special_base_type;
-    /// }
-    /// ```
     fn find_special(&self, hints: &mut Hints, fmt: u32, acc_or_range: &[u8]) -> AccInfo {
         let pfx = &acc_or_range[..((fmt >> 16) as usize).min(acc_or_range.len())];
         if fmt == hints.prev_special_format {
@@ -644,25 +379,6 @@ impl AccGuide {
     /// `SHints::FindSubMap(rules, fmt)`: the rules of `fmt`, made if absent.
     ///
     /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1012-1028
-    /// ```c++
-    /// inline
-    /// SAccGuide::SSubMap& SAccGuide::SHints::FindSubMap(SAccGuide::TMainMap& rules,
-    ///                                                   SAccGuide::TFormatCode fmt)
-    /// {
-    ///     if (prev_submap != NULL  &&  prev_submap->first == fmt) {
-    ///         return prev_submap->second;
-    ///     } else {
-    ///         SAccGuide::TMainMap::iterator it = rules.lower_bound(fmt);
-    ///         if (it == rules.end() || it->first != fmt) {
-    ///             it = rules.insert(it, make_pair(fmt, SAccGuide::SSubMap()));
-    ///         }
-    ///         prev_submap = &*it;
-    ///         prev_big_special   = it->second.big_specials.end();
-    ///         prev_small_special = it->second.small_specials.end();
-    ///         return it->second;
-    ///     }
-    /// }
-    /// ```
     fn find_sub_map(&mut self, hints: &mut Hints, fmt: u32) -> u32 {
         if hints.prev_submap != Some(fmt) {
             self.rules.entry(fmt).or_default();
@@ -676,69 +392,6 @@ impl AccGuide {
     /// for a known type name (`old_name` null).
     ///
     /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1513-1597
-    /// ```c++
-    /// void SAccGuide::x_AddSpecial(SSubMap& submap, SHints& hints, TFormatCode fmt,
-    ///                              CTempString from, CTempString to, TAccInfo value,
-    ///                              const string* old_name,
-    ///                              const CTempString& new_name)
-    /// {
-    ///     CTempString from_pfx = from, to_pfx = to;
-    ///     auto left  = x_SplitSpecial(from_pfx, fmt),
-    ///          right = x_SplitSpecial(to_pfx, fmt);
-    ///     const TAccInfo* value_ptr = nullptr;
-    ///     if (from_pfx != to_pfx) {
-    ///         hints.prev_big_special
-    ///             = submap.big_specials.insert(hints.prev_big_special,
-    ///                                          make_pair(to, TPair(from, value)));
-    ///         // Account for possible refinement.
-    ///         hints.prev_big_special->second.second = value;
-    ///         ...
-    ///     } else {
-    ///         TSmallSpecialMap::iterator it = submap.small_specials.end();
-    ///         if (hints.prev_small_special != submap.small_specials.end()
-    ///             &&  hints.prev_small_special->first == from_pfx) {
-    ///             it = hints.prev_small_special;
-    ///             it->second.first.clear_range(left, right);
-    ///             while ((it->second.second & ~CSeq_id::fAcc_fallback)
-    ///                    != (value & ~CSeq_id::fAcc_fallback)) {
-    ///                 if (it == submap.small_specials.begin()
-    ///                     ||  (--it)->first != from_pfx) {
-    ///                     it = hints.prev_small_special;
-    ///                     ++it;
-    ///                     break;
-    ///                 }
-    ///             }
-    ///         } else {
-    ///             it = submap.small_specials.lower_bound(from_pfx);
-    ///         }
-    ///         while (it != submap.small_specials.end()) {
-    ///             if (it->first != from_pfx) {
-    ///                 it = submap.small_specials.end();
-    ///                 break;
-    ///             } else if ((it->second.second & ~CSeq_id::fAcc_fallback)
-    ///                        == (value & ~CSeq_id::fAcc_fallback)) {
-    ///                 break;
-    ///             } else {
-    ///                 ++it;
-    ///             }
-    ///         }
-    ///         if (it != submap.small_specials.end()) {
-    ///             ...
-    ///             hints.prev_small_special = it;
-    ///         } else {
-    ///             auto size = kBVSizes[min(fmt & 0xffff, kMaxSmallSpecialDigits)];
-    ///             hints.prev_small_special =
-    ///                 submap.small_specials.emplace(
-    ///                     from_pfx, make_pair(bm::bvector<>(size), value));
-    ///         }
-    ///         hints.prev_small_special->second.first.set_range(left, right);
-    ///         // Account for possible refinement.
-    ///         hints.prev_small_special->second.second = value;
-    ///         ...
-    ///     }
-    ///     ...
-    /// }
-    /// ```
     /// A bit vector needs no size here (`BitRanges`); `x_SplitSpecial` never gives a bit
     /// past it.
     fn add_special(&mut self, hints: &mut Hints, fmt: u32, from: &[u8], to: &[u8], value: AccInfo) {
@@ -788,32 +441,6 @@ impl AccGuide {
     /// tokens of each `:` line of a `special2` block.
     ///
     /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1030-1053
-    /// ```c++
-    /// void SAccGuide::AddRule(const CTempString& rule, SHints& hints)
-    /// {
-    ///     CTempString         tmp1, tmp2;
-    ///     vector<CTempStringEx> tokens;
-    ///     SIZE_TYPE           pos, pos2;
-    ///
-    ///     ++count;
-    ///     tmp1.assign(rule, 0, rule.find('#')); // strip comment
-    ///     if (tmp1.empty())
-    ///         return;
-    ///     tokens.reserve(3);
-    ///     NStr::Split(tmp1, " \t", tokens,
-    ///                 NStr::fSplit_MergeDelimiters | NStr::fSplit_Truncate);
-    ///     if (tokens.empty()) {
-    ///         return;
-    ///     } else if (tokens.size() == 2
-    ///                &&  NStr::EqualNocase(tokens[0], "version")) {
-    ///         hints.special2_submap = nullptr;
-    ///         hints.version = NStr::StringToUInt(tokens[1], NStr::fConvErr_NoThrow);
-    ///         if (hints.version > 2  ||  hints.version < 1) {
-    ///             ERR_POST_X(2, "SAccGuide::AddRule: " << count
-    ///                           << ": Unsupported version " << tokens[1]);
-    ///             return;
-    ///         }
-    /// ```
     fn add_rule(&mut self, tokens: &[&[u8]], hints: &mut Hints) {
         let Some(&first) = tokens.first() else {
             return;
@@ -843,18 +470,6 @@ impl AccGuide {
             self.add_special2_ranges(&tokens[1..], hints);
         } else if tokens.len() == 3 && first.eq_ignore_ascii_case(b"gnl") {
             // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1324-1329,1349-1351
-            // ```c++
-            //     } else if (tokens.size() == 3 && NStr::EqualNocase(tokens[0], "gnl")) {
-            //         hints.special2_submap = nullptr;
-            //         string key(tokens[1]);
-            //         NStr::ToUpper(key);
-            //         TAccInfo value = hints.FindAccInfo(tokens[2]);
-            //         if (value == kUnrecognized) {
-            //         ...
-            //         } else {
-            //             general[key] = value;
-            //         }
-            // ```
             hints.special2_submap = None;
             match Self::find_acc_info_hinted(hints, tokens[2]) {
                 Some(value) => {
@@ -885,44 +500,6 @@ impl AccGuide {
     /// The `<letters>+<digits> <prefix> <type> [*]` line of `AddRule`.
     ///
     /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1054-1066,1102-1131
-    /// ```c++
-    ///     } else if ((pos = tokens[0].find('+')) != NPOS
-    ///                &&  (tokens.size() == 3
-    ///                     ||  (tokens.size() == 4  &&  tokens[3] == "*"))) {
-    ///         hints.special2_submap = nullptr;
-    ///         // _VERIFY(NStr::SplitInTwo(tokens[0], "+", tmp1, tmp2));
-    ///         tmp1.assign(tokens[0], 0, pos);
-    ///         tmp2.assign(tokens[0], pos + 1, NPOS);
-    ///         TFormatCode fmt
-    ///             = s_Key(NStr::StringToUInt(tmp1, NStr::fConvErr_NoThrow),
-    ///                     NStr::StringToUInt(tmp2, NStr::fConvErr_NoThrow));
-    ///         TAccInfo value = hints.FindAccInfo(tokens[2]);
-    ///         unique_ptr<string> old_name;
-    ///         if (value == kUnrecognized) {
-    ///         ...
-    ///         if (value != kUnrecognized) {
-    ///             SSubMap& submap = hints.FindSubMap(rules, fmt);
-    ///             if (tokens.size() == 4) {
-    ///                 value = TAccInfo(value | CSeq_id::fAcc_specials);
-    ///             }
-    ///             const TAccInfo* value_ptr = NULL;
-    ///             if (tokens[1].find_first_of("?*") == NPOS) {
-    ///                 value_ptr = &(submap.prefixes[tokens[1]] = value);
-    ///             } else {
-    ///                 // Account for possible refinements of fallback definitions
-    ///                 NON_CONST_ITERATE (TPairs, wit, submap.wildcards) {
-    ///                     if (wit->first == tokens[1]) {
-    ///                         wit->second = value;
-    ///                         value_ptr   = &wit->second;
-    ///                         break;
-    ///                     }
-    ///                 }
-    ///                 if (value_ptr == NULL) {
-    ///                     submap.wildcards.push_back(TPair(tokens[1], value));
-    ///                     value_ptr = &submap.wildcards.back().second;
-    ///                 }
-    ///             }
-    /// ```
     fn add_prefix_rule(&mut self, tokens: &[&[u8]], plus: usize, hints: &mut Hints) {
         hints.special2_submap = None;
         let fmt = format_key(
@@ -958,48 +535,6 @@ impl AccGuide {
     /// The `special <acc>[-<acc>] <type>` line of `AddRule`.
     ///
     /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1133-1154,1193-1209
-    /// ```c++
-    ///     } else if (tokens.size() == 3 && NStr::EqualNocase(tokens[0], "special")) {
-    ///         hints.special2_submap = nullptr;
-    ///         pos  = tokens[1].find_first_of(kDigits);
-    ///         pos2 = tokens[1].find('-', pos);
-    ///         TFormatCode fmt
-    ///             = s_Key(pos, ((pos2 == NPOS) ? tokens[1].size() : pos2) - pos);
-    ///         TAccInfo old   = hints.FindSpecial(*this, fmt, tokens[1]);
-    ///         TAccInfo value = hints.FindAccInfo(tokens[2]);
-    ///         if ((old & CSeq_id::fAcc_specials) != 0) {
-    ///             old = TAccInfo(old & ~CSeq_id::fAcc_specials);
-    ///         } else {
-    ///             string key_used;
-    ///             Find(fmt, tokens[1].substr(0, pos2), &key_used);
-    ///             if ( !key_used.empty() ) {
-    ///                 ERR_POST_X(13, Warning
-    ///                            << "SAccGuide::AddRule: Main listing for special "
-    ///                            << tokens[1]
-    ///                            << " doesn't indicate that specials are present.");
-    ///             }
-    ///         }
-    ///         unique_ptr<string> old_name;
-    ///         if (value == kUnrecognized) {
-    ///         ...
-    ///         } else {
-    ///             _ASSERT(hints.prev_type == value);
-    ///             hints.prev_special_key = tokens[1];
-    ///         }
-    ///         if (value != kUnrecognized) {
-    ///             SSubMap& submap = hints.FindSubMap(rules, fmt);
-    ///             if (pos2 == NPOS) {
-    ///                 tmp1 = tmp2 = tokens[1];
-    ///             } else {
-    ///                 tmp1.assign(tokens[1], 0, pos2);
-    ///                 tmp2.assign(tokens[1], pos2 + 1, NPOS);
-    ///             }
-    ///             x_AddSpecial(submap, hints, fmt, tmp1, tmp2, value, old_name.get(),
-    ///                          tokens[2]);
-    ///         }
-    ///         hints.prev_special_type_name.clear();
-    ///         hints.prev_special_type = CSeq_id::eAcc_unknown;
-    /// ```
     fn add_special_rule(&mut self, tokens: &[&[u8]], hints: &mut Hints) {
         hints.special2_submap = None;
         let range = tokens[1];
@@ -1042,46 +577,6 @@ impl AccGuide {
     /// range lines.
     ///
     /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1210-1247
-    /// ```c++
-    ///     } else if (tokens.size() >= 3
-    ///                &&  NStr::EqualNocase(tokens[0], "special2")) {
-    ///         if (hints.version < 2) {
-    ///             ERR_POST_X(18,
-    ///                        Warning << "SAccGuide::AddRule: " << count
-    ///                        << ": special2 valid only in version 2+ guides");
-    ///         }
-    ///         NStr::SplitInTwo(tokens[1], "+", tmp1, tmp2);
-    ///         auto digits = NStr::StringToNumeric<unsigned short>(tmp2);
-    ///         hints.prev_special_format = s_Key(tmp1.size(), digits);
-    ///         hints.special2_name = tokens[2];
-    ///         hints.special2_old_name.reset();
-    ///         hints.special2_submap
-    ///             = &hints.FindSubMap(rules, hints.prev_special_format);
-    ///         hints.prev_special2_acc = tmp1 + string(digits, '0');
-    ///         TAccInfo old = hints.FindSpecial(*this, hints.prev_special_format,
-    ///                                          hints.prev_special2_acc);
-    ///         string why;
-    ///         if ((old & CSeq_id::fAcc_specials) != 0) {
-    ///             old = TAccInfo(old & ~CSeq_id::fAcc_specials);
-    ///         } else {
-    ///             Find(hints.prev_special_format, hints.prev_special2_acc, &why);
-    ///             if ( !why.empty() ) {
-    ///                 ERR_POST_X(13, Warning
-    ///                            << "SAccGuide::AddRule: Main listing for special "
-    ///                            << tokens[1]
-    ///                            << " doesn't indicate that specials are present.");
-    ///             }
-    ///         }
-    ///         for (size_t i = 2;  i < tokens.size();  ++i) {
-    ///             hints.special2_type = hints.FindAccInfo(tokens[i]);
-    ///             if (hints.special2_type != kUnrecognized) {
-    ///                 if (i > 2) {
-    ///                     hints.special2_old_name.reset(new string(tokens[i]));
-    ///                 }
-    ///                 break;
-    ///             }
-    ///         }
-    /// ```
     /// A known name in the third token is the only case without a fallback (the elided
     /// lines, 1248-1294).
     fn add_special2_rule(&mut self, tokens: &[&[u8]], hints: &mut Hints) {
@@ -1122,35 +617,6 @@ impl AccGuide {
     /// of the block's running accession.
     ///
     /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1292-1323
-    /// ```c++
-    ///     } else if (tokens.size() >= 2  &&  tokens[0] == ":") {
-    ///         ...
-    ///         if (hints.special2_submap == nullptr) {
-    ///             ERR_POST_X(20,
-    ///                        Warning <<
-    ///                        "SAccGuide::AddRule: " << count
-    ///                        << ": ignoring misplaced special2 ranges line.");
-    ///             return;
-    ///         }
-    ///         string s;
-    ///         CTempString from;
-    ///         char *p = &hints.prev_special2_acc[hints.prev_special2_acc.size()];
-    ///         for (size_t i = 1;  i < tokens.size();  ++i) {
-    ///             NStr::SplitInTwo(tokens[i], "-", tmp1, tmp2);
-    ///             memcpy(p - tmp1.size(), tmp1.data(), tmp1.size());
-    ///             if (tmp2.empty()) {
-    ///                 from = hints.prev_special2_acc;
-    ///             } else {
-    ///                 s = hints.prev_special2_acc;
-    ///                 from = s;
-    ///                 memcpy(p - tmp2.size(), tmp2.data(), tmp2.size());
-    ///             }
-    ///             x_AddSpecial(*hints.special2_submap, hints,
-    ///                          hints.prev_special_format, from,
-    ///                          hints.prev_special2_acc, hints.special2_type,
-    ///                          hints.special2_old_name.get(), hints.special2_name);
-    ///         }
-    /// ```
     fn add_special2_ranges(&mut self, ranges: &[&[u8]], hints: &mut Hints) {
         if hints.version < 2 {
             self.load_warnings
@@ -1186,41 +652,6 @@ impl AccGuide {
     /// specials and `x_InitGeneral`.
     ///
     /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1443-1498
-    /// ```c++
-    ///         static const unsigned int kNumBuiltInRules
-    ///             = sizeof(kBuiltInGuide) / sizeof(*kBuiltInGuide);
-    ///         SHints hints;
-    ///         for (unsigned int i = 0;  i < kNumBuiltInRules;  ++i) {
-    ///             AddRule(kBuiltInGuide[i], hints);
-    ///         }
-    ///     }
-    ///     for (auto &rit : rules) {
-    ///         ERASE_ITERATE(TSmallSpecialMap, sit, rit.second.small_specials) {
-    ///             if (sit->second.first.any()) {
-    ///                 sit->second.first.optimize();
-    ///             } else {
-    ///                 rit.second.small_specials.erase(sit);
-    ///             }
-    ///         }
-    ///     }
-    ///     x_InitGeneral();
-    /// }
-    ///
-    /// void SAccGuide::x_InitGeneral(void)
-    /// {
-    ///     if (general.empty()) {
-    ///         // Populate with a hard-coded list by default; there are only
-    ///         // a few tags to worry about, but listing them in accguide.txt
-    ///         // right away would yield warnings from old Toolkit versions.
-    ///         static const char* const kNucDBs[] = {
-    ///             "SRA", "TI", "TR_ASSM_CH", "TRACE_ASSM", "TRACE_CHGR", NULL
-    ///         };
-    ///         for (const char* const* p = kNucDBs;  *p;  ++p) {
-    ///             general[*p] = CSeq_id::eAcc_general_nuc;
-    ///         }
-    ///     }
-    /// }
-    /// ```
     /// The comments and blank lines of `kBuiltInGuide` are not in `rules.txt` (`AddRule`
     /// returns at once for them), and no data file is looked for (`g_FindDataFile`):
     /// makeblastdb 2.17.0 reads the built-in guide when no newer `accguide2.txt` is on its
@@ -1311,14 +742,6 @@ impl<'a> RangeLines<'a> {
 /// The guide, read at its first use (`s_Guide`, a `CSafeStatic` made at the first call).
 ///
 /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1627-1632
-/// ```c++
-/// static CRef<SAccGuide>* s_CreateGuide(void)
-/// {
-///     return new CRef<SAccGuide>(new SAccGuide);
-/// }
-///
-/// static CSafeStatic<CRef<SAccGuide> > s_Guide(s_CreateGuide, NULL);
-/// ```
 pub fn guide() -> &'static AccGuide {
     static GUIDE: OnceLock<AccGuide> = OnceLock::new();
     GUIDE.get_or_init(AccGuide::built_in)
@@ -1328,38 +751,6 @@ pub fn guide() -> &'static AccGuide {
 /// diagnostic of an accession with a protein flag and an unexpected division.
 ///
 /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1634-1663
-/// ```c++
-/// CSeq_id::EAccessionInfo CSeq_id::IdentifyAccession(const CTempString& acc,
-///                                                    TParseFlags flags)
-/// {
-///     SIZE_TYPE main_size = acc.find('.');
-///     bool has_version = true;
-///     if (main_size == NPOS) {
-///         has_version = false;
-///         main_size = acc.size();
-///     } else if (main_size >= acc.size() - 1
-///                ||  acc.find_first_not_of(kDigits, main_size + 1) != NPOS) {
-///         return eAcc_unknown; // non-numeric "version"
-///     }
-///
-///     static const SIZE_TYPE kMainAccBufSize = 32;
-///     if (main_size <= kMainAccBufSize) {
-///         const unsigned char* ucdata = (const unsigned char*)acc.data();
-///         char main_acc_buf[kMainAccBufSize];
-///         for (SIZE_TYPE i = 0;  i < main_size;  ++i) {
-///             main_acc_buf[i] = toupper(ucdata[i]);
-///         }
-///         CTempString main_acc(main_acc_buf, main_size);
-///         return x_IdentifyAccession(main_acc, flags, has_version);
-///     } else {
-///         // Unlikely to prove recognizable (far too long for any standard
-///         // format as of January 2016), but try anyway.
-///         string main_acc(acc, 0, main_size);
-///         NStr::ToUpper(main_acc);
-///         return x_IdentifyAccession(main_acc, flags, has_version);
-///     }
-/// }
-/// ```
 /// (`acc.size() - 1` of an empty accession wraps to `NPOS`, which no `find` result passes.)
 pub fn identify_accession(acc: &[u8], flags: u32, warn: &mut dyn FnMut(SeqIdWarning)) -> AccInfo {
     let (main_size, has_version) = match acc.iter().position(|&c| c == b'.') {
@@ -1387,97 +778,6 @@ pub fn identify_accession(acc: &[u8], flags: u32, warn: &mut dyn FnMut(SeqIdWarn
 /// `CSeq_id::x_IdentifyAccession(main_acc, flags, has_version)`.
 ///
 /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1665-1772
-/// ```c++
-/// CSeq_id::EAccessionInfo
-/// CSeq_id::x_IdentifyAccession(const CTempString& main_acc, TParseFlags flags,
-///                              bool has_version)
-/// {
-///     SIZE_TYPE digit_pos = main_acc.find_first_of(kDigits),
-///         main_size = main_acc.size();
-///     char flag_char = '\0';
-///     if (digit_pos == NPOS) {
-///         return eAcc_unknown;
-///     } else {
-///         SIZE_TYPE non_dig_pos = main_acc.find_first_not_of(kDigits, digit_pos);
-///         const unsigned char* ucdata = (const unsigned char*)main_acc.data();
-///         if (non_dig_pos != NPOS  &&  (flags & fParse_RawText) != 0) {
-///             if ( !has_version  &&  digit_pos == 0  &&  main_size >= 4
-///                 &&  non_dig_pos < 5  &&  isalnum(ucdata[1])
-///                 &&  isalnum(ucdata[2])  &&  isalnum(ucdata[3])) {
-///                 // Possible PDB (always unversioned); examine further
-///                 // to avoid false positives.
-///                 if (main_size > 4  &&  main_size <= 17
-///                     &&  strchr("|-_", main_acc[4])
-///                     &&  (main_size <= 6  ||  isalnum(ucdata[5]))) {
-///                     // Conventionally delimited
-///                     return eAcc_pdb;
-///                 } else switch (main_size) {
-///                 ...
-///                 case 4:
-///                     return eAcc_pdb;
-///                 }
-///             }
-///             if (digit_pos == 1  &&  main_size == 6
-///                 &&  (main_acc[0] == 'O'  ||  main_acc[0] == 'P'
-///                      ||  main_acc[0] == 'Q' ||  isalpha(ucdata[2]))
-///                 &&  isdigit(ucdata[1])  &&  isalnum(ucdata[2])
-///                 &&  isalnum(ucdata[3])  &&  isalnum(ucdata[4])
-///                 &&  isdigit(ucdata[5])) {
-///                 return eAcc_swissprot;
-///             } else if (digit_pos == 1  &&  main_size == 10
-///                        &&  main_acc[0] != 'O'  &&  main_acc[0] != 'P'
-///                        &&  main_acc[0] != 'Q'
-///                        &&  isalpha(ucdata[2])  &&  isalnum(ucdata[3])
-///                        &&  isalnum(ucdata[4])  &&  isdigit(ucdata[5])
-///                        &&  isalpha(ucdata[6])  &&  isalnum(ucdata[7])
-///                        &&  isalnum(ucdata[8])  &&  isdigit(ucdata[9])) {
-///                 return eAcc_swissprot;
-///             } else if ( !has_version  &&  digit_pos == 0
-///                        &&  (non_dig_pos == 6  ||  non_dig_pos == 7)
-///                        &&  (main_size == non_dig_pos + 1
-///                             ||  main_acc[non_dig_pos + 1] == ':'
-///                             ||  (isalpha(ucdata[non_dig_pos + 1])
-///                                  &&  (main_size == non_dig_pos + 2
-///                                       ||  main_acc[non_dig_pos + 2] == ':')))) {
-///                 // A formal spec appears to be elusive, but all examples in ID
-///                 // contain six or seven digits followed by one or two letters,
-///                 // followed in some rare cases by a tag such as :PDB=...
-///                 return eAcc_prf;
-///             } else if (digit_pos >= 4  &&  non_dig_pos == digit_pos + 2
-///                        &&  main_size - non_dig_pos >= 6  &&  main_acc[3] != '_'
-///                        &&  (main_acc[non_dig_pos] == 'S'
-///                             ||  main_acc[non_dig_pos] == 'P')
-///                        &&  (main_acc.find_first_not_of
-///                             (kDigits, non_dig_pos + 1) == NPOS)) {
-///                 flag_char = main_acc[non_dig_pos];
-///             } else {
-///                 return eAcc_unknown;
-///             }
-///         }
-///     }
-///
-///     if (digit_pos == 0) {
-///         if ((flags & fParse_RawGI) != 0  &&  !has_version
-///             &&  main_acc[0] != '0'
-///             &&  main_acc.find_first_not_of(kDigits) == NPOS) {
-///             return eAcc_gi; // just digits
-///         } else {
-///             return eAcc_unknown; // PDB already handled
-///         }
-///     } else if ((flags & fParse_RawText) == 0) {
-///         return eAcc_unknown;
-///     }
-///
-///     SIZE_TYPE flag_len = (flag_char == '\0') ? 0 : 1;
-///     SIZE_TYPE digit_count = main_size - digit_pos - flag_len;
-///     auto& guide = *s_Guide;
-///     const EAccessionInfo& found_ai
-///         = guide->Find(SAccGuide::s_Key(digit_pos, digit_count), main_acc);
-///     EAccessionInfo ai = found_ai;
-///     if ((ai & fAcc_specials) != 0) {
-///         ai = EAccessionInfo(ai & ~fAcc_specials);
-///     }
-/// ```
 /// In NCBI, cases 7, 6 and 5 of this `switch` are commented out, so only case 4 is live.
 /// `strchr` also finds the terminating NUL (a NUL at index 4 is a delimiter). The value is
 /// never a fallback (see the module), so the fallback branch (Seq_id.cpp:1770-1792) is not
@@ -1596,43 +896,6 @@ pub fn x_identify_accession(
     let mut ai = guide().find(format_key(digit_pos, digit_count), main, None);
     ai &= !F_SPECIALS;
     // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1793-1829
-    // ```c++
-    //     if (flag_char == 'P') {
-    //         switch (ai & eAcc_division_mask) {
-    //         case eAcc_targeted:
-    //         case eAcc_wgs:
-    //         // case eAcc_wgs_intermed:
-    //             ai = EAccessionInfo((ai & eAcc_type_mask) | eAcc_wgs | fAcc_prot);
-    //             break;
-    //         case eAcc_tsa:
-    //             ai = EAccessionInfo((ai & eAcc_type_mask) | eAcc_tsa | fAcc_prot);
-    //             break;
-    //         default:
-    //             ERR_POST_X(11,
-    //                        Warning << main_acc
-    //                        << ": Protein flag found with unexpected division "
-    //                        << ((ai & eAcc_division_mask) >> 8));
-    //             ai = EAccessionInfo((ai & (eAcc_type_mask | eAcc_division_mask))
-    //                                 | fAcc_prot);
-    //             break;
-    //         }
-    //     }
-    //     switch (ai & eAcc_division_mask) {
-    //     case eAcc_targeted:
-    //     case eAcc_tsa:
-    //     case eAcc_wgs:
-    //     case eAcc_wgs_intermed:
-    //         if (digit_pos >= 4
-    //             &&  (main_acc.find_first_not_of
-    //                  ("0", digit_pos /* + flag_len */ + 2) == NPOS)) {
-    //             return EAccessionInfo(ai | fAcc_master);
-    //         }
-    //     default:
-    //         break;
-    //     }
-    //     return ai;
-    // }
-    // ```
     if flag_char == b'P' {
         match ai & DIVISION_MASK {
             TARGETED | WGS => ai = (ai & TYPE_MASK) | WGS | F_PROT,
@@ -1640,11 +903,15 @@ pub fn x_identify_accession(
             division => {
                 warn(SeqIdWarning {
                     subcode: 11,
-                    message: format!(
-                        "{}: Protein flag found with unexpected division {}",
-                        String::from_utf8_lossy(main),
-                        division >> 8
-                    ),
+                    message: [
+                        main,
+                        format!(
+                            ": Protein flag found with unexpected division {}",
+                            division >> 8
+                        )
+                        .as_bytes(),
+                    ]
+                    .concat(),
                 });
                 ai = (ai & (TYPE_MASK | DIVISION_MASK)) | F_PROT;
             }
@@ -1667,55 +934,6 @@ pub fn x_identify_accession(
 /// are `fParse_AnyRaw | fParse_AnyLocal`).
 ///
 /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1832-1876
-/// ```c++
-/// CSeq_id::EAccessionInfo CSeq_id::IdentifyAccession(TParseFlags flags) const
-/// {
-///     E_Choice type = Which();
-///     switch (type) {
-///     case e_Pir: case e_Swissprot: case e_Prf: // but *NOT* e_Pdb
-///         // always just protein
-///         return (EAccessionInfo)((EAccessionInfo)type | fAcc_prot);
-///
-///     case e_Genbank: case e_Embl:  case e_Ddbj:
-///     case e_Tpg:     case e_Tpe:   case e_Tpd:
-///     case e_Other:   case e_Gpipe: case e_Named_annot_track:
-///     {
-///         const CTextseq_id* tsid = GetTextseq_Id();
-///         if (tsid->IsSetAccession()) {
-///             // Can't necessarily go straight to x_IdentifyAccession, as
-///             // the accession may contain lowercase letters.
-///             EAccessionInfo ai = IdentifyAccession(tsid->GetAccession(), flags);
-///             E_Choice type2 = GetAccType(ai);
-///             auto div2 = ai & eAcc_division_mask;
-///             if (type2 == e_not_set) {
-///                 // We *know* what the type should be....
-///                 return (EAccessionInfo)((ai & eAcc_flag_mask) | type);
-///             } else if (type2 == type) {
-///                 return ai;
-///             } else if (type == e_Tpe  &&  type2 == e_Embl
-///                        &&  (div2 == eAcc_other  ||  div2 == eAcc_wgs)) {
-///                 return (EAccessionInfo)((ai & ~eAcc_type_mask) | type);
-///             } else { // misidentified or mislabeled; assume the former
-///                 return static_cast<EAccessionInfo>(type);
-///             }
-///         } else {
-///             return static_cast<EAccessionInfo>(type);
-///         }
-///     }
-///
-///     case e_General:
-///     {
-///         string db = GetGeneral().GetDb();
-///         NStr::ToUpper(db);
-///         SAccGuide::TPrefixes::const_iterator it = (*s_Guide)->general.find(db);
-///         return it == (*s_Guide)->general.end() ? eAcc_general : it->second;
-///     }
-///
-///     default:
-///         return static_cast<EAccessionInfo>(type);
-///     }
-/// }
-/// ```
 pub fn identify_seq_id(
     id: &ParsedSeqId,
     flags: u32,

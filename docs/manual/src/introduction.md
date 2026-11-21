@@ -5,13 +5,13 @@
 
 LOSAT is a BLAST+ compatible toolkit in one executable, `losat`. It takes the command lines of NCBI BLAST+ 2.17.0, so the search you already run with `blastn`, `blastp` or `makeblastdb` runs as `losat blastn`, `losat blastp` or `losat makeblastdb`, with the same options and the same output. Link the program names to `losat` (see [Coming from NCBI BLAST+](from-ncbi-blast.md)) and tools that look for `blastn` on your `PATH` use LOSAT without changes.
 
-LOSAT is written in pure Rust. Searching and building databases need nothing else: no NCBI BLAST+, no C or C++ libraries, no database to format before a pairwise search. Two things come from NCBI: in v0.2.0 the domain annotation of `rpsbproc` reads an archive written by NCBI's `rpsblast` or `rpstblastn`, and NCBI's prebuilt databases are downloaded from NCBI (see [BLAST databases](databases.md)). A `-subject` search compares your query with a FASTA file directly. When you do want a database, `losat makeblastdb` writes the files that NCBI's `makeblastdb` writes, and the search programs read databases made by either tool, including NCBI's distributed ones such as `swissprot`.
+LOSAT is written in pure Rust. Searching and building databases need nothing else: no NCBI BLAST+, no C or C++ libraries, no database to format before a pairwise search. Two things come from NCBI: the CDD data files that `rpsbproc` reads and NCBI's prebuilt databases, which are downloaded from NCBI (see [BLAST databases](databases.md)). A `-subject` search compares your query with a FASTA file directly. When you do want a database, `losat makeblastdb` writes the files that NCBI's `makeblastdb` writes, and the search programs read databases made by either tool, including NCBI's distributed ones such as `swissprot`.
 
 ## What v0.2.0 provides
 
 | Kind | Program | What it does |
 |:---|:---|:---|
-| Search | [`blastn`](programs/blastn.md) | Nucleotide query against nucleotide subjects. Tasks `megablast` (default), `blastn`, `dc-megablast`, `blastn-short`. |
+| Search | [`blastn`](programs/blastn.md) | Nucleotide query against nucleotide subjects. Tasks `megablast` (default), `blastn`, `dc-megablast`, `blastn-short`, `rmblastn`. |
 | Search | [`blastp`](programs/blastp.md) | Protein query against protein subjects. Tasks `blastp` (default), `blastp-fast`, `blastp-short`. |
 | Search | [`blastx`](programs/blastx.md) | Translated nucleotide query against protein subjects. Tasks `blastx` (default), `blastx-fast`. |
 | Search | [`tblastn`](programs/tblastn.md) | Protein query against translated nucleotide subjects. Tasks `tblastn` (default), `tblastn-fast`; a PSSM query with `-in_pssm`. |
@@ -24,7 +24,7 @@ LOSAT is written in pure Rust. Searching and building databases need nothing els
 | Databases and masks | [`dustmasker`](programs/dustmasker.md) | Finds low-complexity regions in nucleotide sequences. |
 | Databases and masks | [`segmasker`](programs/segmasker.md) | Finds low-complexity regions in protein sequences. |
 | Databases and masks | [`convert2blastmask`](programs/convert2blastmask.md) | Turns lower-case masking in FASTA into masking information for `makeblastdb`. |
-| Domain annotation | [`rpsbproc`](programs/rpsbproc.md) | Annotates conserved domains, sites and motifs from the `-outfmt 11` results of NCBI's `rpsblast` and `rpstblastn` (see its page). |
+| Domain annotation | [`rpsbproc`](programs/rpsbproc.md) | Annotates conserved domains, sites and motifs from the `-outfmt 11` results of `rpsblast` and `rpstblastn` (see its page). |
 
 The search programs read BLAST databases (`-db`) and, except `rpsblast` and `rpstblastn` (as in NCBI), FASTA subjects (`-subject`). Each can read its query from the standard input (`-query -`).
 
@@ -41,9 +41,9 @@ The Rust library (`losat::api`) is the same crate, and the Python binding `pylos
 These are on the list for a later release:
 
 - the programs `deltablast`, `makeprofiledb`, `blast_formatter` and `windowmasker`;
-- `psiblast -in_msa` (with `-msa_master_idx` and `-ignore_msa_master`) and `-phi_pattern`;
+- `psiblast -phi_pattern`, and `psiblast -in_msa` with an alignment that is not in Clustal format;
 - the `psiblast` output formats other than `0`, `6`, `7`, `10` and `20` (with `-in_pssm`: `0`, `6`, `7`);
-- the `rpsblast` output formats other than `0`, `6`, `7` and `10`, and the `rpstblastn` ones other than `0` to `4`, `6`, `7` and `10`. Until then, `rpsbproc` reads the `-outfmt 11` archives that NCBI's `rpsblast` and `rpstblastn` write;
+- the `rpsblast` output formats other than `0`, `5`, `6`, `7`, `10` and `11`, and the `rpstblastn` ones other than `0` to `7`, `10` and `11`;
 - `-html`.
 
 LOSAT does not provide these NCBI programs: `blastdb_aliastool`, `blast_formatter_vdb`, `blast_vdb_cmd`, `blastn_vdb`, `tblastn_vdb`, `blastdbcheck`, `makembindex`, `legacy_blast.pl`, `update_blastdb.pl`, `get_species_taxids.sh` and `cleanup-blastdb-volumes.py`.
@@ -65,4 +65,4 @@ If LOSAT fails, or its output differs from NCBI BLAST+ 2.17.0 for the same comma
 
 ## License
 
-LOSAT is released under the [MIT License](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/LICENSE).
+LOSAT is a Rust translation of the search programs and database tools of NCBI BLAST+ 2.17.0. The code written by NCBI is in the public domain in the United States. LOSAT's own work (the changes and additions of the translation, threading, the WebAssembly builds, the tests, the Web application and the Python package) is under the [MIT License](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/LICENSE). Parts that come from other projects (LMDB, Boost, Arm Optimized Routines, Sun's fdlibm, Microsoft's C runtime, BitMagic, the Rust crates bzip2 and ruzstd) keep their own notices: see [THIRD_PARTY_NOTICES](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/THIRD_PARTY_NOTICES).

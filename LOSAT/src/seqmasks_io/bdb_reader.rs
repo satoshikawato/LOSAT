@@ -62,30 +62,7 @@ pub(crate) enum BdbError {
 /// those outside the alias files' OID ranges (`SeqDb::open_every_oid_in`).
 ///
 /// NCBI reference (598d8ae6): c++/include/objtools/seqmasks_io/mask_bdb_reader.hpp:55-61
-/// ```c++
-///     CMaskBDBReader( const string & dbname, bool is_nucl = true)
-///         : CMaskReader( cin ),
-///           seqdb_( new CSeqDB( dbname, (is_nucl
-///                                        ? CSeqDB::eNucleotide
-///                                        : CSeqDB::eProtein)) ),
-///           oid_( 0 )
-///     {}
-/// ```
 /// NCBI reference (598d8ae6): c++/src/objtools/seqmasks_io/mask_bdb_reader.cpp:41-55
-/// ```c++
-/// CRef< CSeq_entry > CMaskBDBReader::GetNextSequence()
-/// {
-///     CRef< CSeq_entry > entry( null );
-///
-///     if( oid_ < seqdb_->GetNumOIDs() ) {
-///         CRef< CBioseq > seq = seqdb_->GetBioseq( oid_++ );
-///         entry.Reset( new CSeq_entry );
-///         if( seq.NotEmpty() ) entry->SetSeq( *seq );
-///     }
-///
-///     return entry;
-/// }
-/// ```
 pub(crate) struct MaskBdbReader {
     db: SeqDb,
     molecule: SeqType,
@@ -214,23 +191,6 @@ impl MaskBdbReader {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1126-1155
-    // ```c++
-    //     for(TBDLLConstIter iter = dl.begin(); iter != dl.end(); iter ++) {
-    //         TTaxId taxid = ZERO_TAX_ID;
-    //
-    //         if ((*iter)->CanGetTaxid()) {
-    //             taxid = (*iter)->GetTaxid();
-    //         }
-    //         if (taxid <= ZERO_TAX_ID) {
-    //             continue;
-    //         }
-    //         ...
-    //             try {
-    //                 found_taxid_in_taxonomy_blastdb = CSeqDBTaxInfo::GetTaxNames(taxid, tnames);
-    //             } catch (CSeqDBException &) {
-    //                 found_taxid_in_taxonomy_blastdb = false;
-    //             }
-    // ```
     // The first source names the organism (`DeflineSet::first_source_taxid`,
     // `seqdb::taxdb::SourceNames::taxname`). The load of the sequence (`TaxdbRun::bioseq_texts`,
     // in `next_record` before this) made the lookups and has their texts; the name is asked again
@@ -269,14 +229,6 @@ fn lookup_refusal(oid: u32, error: SeqDbError) -> BdbError {
 }
 
 // NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_tables.cpp:1785-1813
-// ```c++
-// const Uint1 CStdaaToIupacaa::scm_Table[32] = {
-//     255, 'A', 'B', 'C', 'D', 'E', 'F', 'G',
-//     'H', 'I', 'K', 'L', 'M', 'N', 'P', 'Q',
-//     'R', 'S', 'T', 'V', 'W', 'X', 'Y', 'Z',
-//     'U', 255, 'O', 'J', 255, 255, 255, 255
-// };
-// ```
 /// The `eCoding_Iupac` letters of a protein's NCBIstdaa codes (`CSeqVector`'s IUPACaa): the gap
 /// (0) and the stop (25) are the byte 255, as NCBI's table has them (segmasker 2.17.0 writes
 /// them so with `-infmt blastdb -outfmt fasta`, fixture `db_ambig_fasta`).

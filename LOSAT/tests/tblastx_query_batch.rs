@@ -6,11 +6,6 @@
 //! splits the query's frames into several context groups.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:841 and :897
-//! ```c
-//!     n = MIN(subject->length - s_off, query->length - q_off);
-//! ...
-//!     n = MIN(s_off, q_off);
-//! ```
 //! The walks count the letters of the whole query batch, so they read the NULLB between two frames
 //! (BLAST_SCORE_MIN) and go on into the next frame while the X-drop allows it. Where they score
 //! higher there, NCBI keeps the HSP in the seed's frame with query offsets outside it

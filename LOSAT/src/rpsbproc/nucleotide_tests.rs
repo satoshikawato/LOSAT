@@ -60,7 +60,7 @@ fn hit(from: u32, to: u32, strand: i32) -> DomAlign {
     parse_std_align(&[seg], &align, 7).unwrap()
 }
 
-// biodata_core.cpp:113-145 (quoted at `frames::translate_all`): NCBI's `TranslateAll` erases
+// biodata_core.cpp:113-145 (cited at `frames::translate_all`): NCBI's `TranslateAll` erases
 // the first byte of a translation made from fewer than 3 bases, or from fewer than 3 letters of
 // the reverse complement (which drops what is not an IUPACna letter): an empty string, which
 // crashes NCBI (PS16c oracle `short2`, 2 bases: segmentation fault). Refused.
@@ -77,7 +77,7 @@ fn translations_of_fewer_than_3_bases_or_letters() {
     assert_eq!(value(translations(b"ATGAAA"))[0], b"MK");
 }
 
-// rpsbproc_main.cpp:1457 (quoted at `codon`): `(char)toupper(dimTranslated[rfidx][iterRP->curr])`.
+// rpsbproc_main.cpp:1457 (cited at `codon`): `(char)toupper(dimTranslated[rfidx][iterRP->curr])`.
 // At the end of the translation `operator[]` gives its terminating 0; elsewhere outside it NCBI
 // reads outside the string (PS16c oracle `natoprot`, whose two 0.5.1 builds print different
 // bytes): refused, the residue numbered from 1.
@@ -97,7 +97,7 @@ fn residues_outside_the_translation() {
     );
 }
 
-// rpsbproc_main.cpp:949,1456-1457,1631-1633 (quoted at `codon`): the plus-strand codon of a
+// rpsbproc_main.cpp:949,1456-1457,1631-1633 (cited at `codon`): the plus-strand codon of a
 // residue, `xres + 1` in `int` and `xres +/- 2 + 1` in `unsigned int` (wraps). `xres + 1` at
 // `INT_MAX` and `MinusPr2PlusNA`'s `pr - 1` at `INT_MIN` overflow `int` (undefined): computed as
 // their values (PD-LOSAT-NCBI-DEFECTS exception 12), which equal the codon of the residue next to
@@ -130,7 +130,7 @@ fn codons_and_their_overflow() {
     );
 }
 
-// rpsbproc_main.cpp:1746-1747,1788-1789 (quoted at `motif_ends`): `GetLeft() + 1` in `int` and
+// rpsbproc_main.cpp:1746-1747,1788-1789 (cited at `motif_ends`): `GetLeft() + 1` in `int` and
 // `GetRight() +/- 2 + 1` in `unsigned int` after `Pr2NaConvert`. A set past `int`'s range, a
 // minus-strand residue at `INT_MIN` (`domains::pr2na_ends`) and `GetLeft() + 1` at `INT_MAX`
 // overflow `int` (undefined): computed as their values (PD-LOSAT-NCBI-DEFECTS exception 12;

@@ -4,24 +4,10 @@
 //! ARGS -num_threads 1`, run from LOSAT/ with an empty pipe as standard input). LOSAT prints them
 //! at 1, 4, 8 and 16 threads.
 //!
-//! NCBI reference: c++/src/algo/blast/core/blast_message.c:242-247 (a name without a table:
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_message.c:242-247 (a name without a table:
 //! `Blast_ScoreBlkMatrixFill` returns -1, one message per query of the batch)
-//! ```c
-//!     default:
-//!         {
-//!             char buf[512];
-//!             snprintf(buf, sizeof(buf) - 1, "Unknown error code %d", error_code);
-//! ```
 //! and c++/src/algo/blast/format/data4xmlformat.cpp:211-218 (the XML reports, when the first
 //! report is made: a name that is not spelled as the table's)
-//! ```c++
-//!     else {
-//!         string prog_name = Blast_ProgramNameFromType(
-//!                                            m_Options.GetProgramType());
-//!         if (prog_name != "blastn" && prog_name != "megablast") {
-//!             NCBI_THROW(blast::CBlastException, eInvalidArgument,
-//!                         "unsupported score matrix");
-//! ```
 
 use std::fs;
 use std::io::Write;

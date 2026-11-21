@@ -46,7 +46,7 @@ fn install(dir: &Path) -> Output {
 }
 
 /// The programs that the binary links, in the order it lists them.
-const PROGRAMS: [&str; 15] = [
+const PROGRAMS: [&str; 16] = [
     "blastn",
     "blastp",
     "blastx",
@@ -59,6 +59,7 @@ const PROGRAMS: [&str; 15] = [
     "blastdbcmd",
     "dustmasker",
     "segmasker",
+    "windowmasker",
     "convert2blastmask",
     "makembindex",
     "rpsbproc",
@@ -94,8 +95,9 @@ fn a_shim_prints_what_the_subcommand_prints() {
     assert!(installed.status.success(), "{installed:?}");
     for name in installed_names(&installed).iter().map(String::as_str) {
         // `blastn -version` is what tools read the version from (`blastn: LOSAT 0.2.0`, where NCBI's
-        // is `blastn: 2.17.0+`; rpsbproc, dustmasker and segmasker write LOSAT's too, where NCBI's
-        // are `rpsbproc: 0.5.1`, `dustmasker: 1.0.0`, `segmasker: 1.0.0`, `makembindex: 2.17.0`).
+        // is `blastn: 2.17.0+`; rpsbproc and the maskers write LOSAT's too, where NCBI's are
+        // `rpsbproc: 0.5.1`, `dustmasker: 1.0.0`, `segmasker: 1.0.0`, `windowmasker: 1.0.0`,
+        // `makembindex: 2.17.0`).
         let version = run(shim(&dir, name), &["-version"]);
         assert!(version.status.success(), "{name}: {version:?}");
         let first_line = format!("{name}: LOSAT {}\n", env!("CARGO_PKG_VERSION"));
@@ -285,6 +287,7 @@ fn top_level_help_names_every_program() {
             "blastdbcmd",
             "dustmasker",
             "segmasker",
+            "windowmasker",
             "convert2blastmask",
             "makembindex",
         ] {
@@ -568,4 +571,34 @@ fn blastx_refuses_a_subject_over_5_000_000_residues_in_one_form() {
     );
     assert!(fs::read(&out).map_or(true, |bytes| bytes.is_empty()));
     fs::remove_dir_all(&dir).unwrap();
+}
+
+// The bioconda recipe's tests run `<program> -version` for every program the package links, and
+// its description names them: a program added to `PROGRAMS` goes into the recipe too (makembindex
+// had been left out of it). Not in a crate built from its package, which has no recipe.
+#[test]
+fn the_bioconda_recipe_tests_every_program() {
+    let recipe =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../packaging/bioconda/meta.yaml.template");
+    let Ok(recipe) = fs::read_to_string(&recipe) else {
+        assert!(
+            !Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../.git")
+                .exists(),
+            "{} is missing",
+            recipe.display()
+        );
+        return;
+    };
+    let description = recipe.split("description:").nth(1).unwrap_or_default();
+    for name in PROGRAMS {
+        assert!(
+            recipe.contains(&format!("    - {name} -version\n")),
+            "the recipe's tests have no `{name} -version`"
+        );
+        assert!(
+            description.contains(name),
+            "the recipe's description does not name {name}"
+        );
+    }
 }

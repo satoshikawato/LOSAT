@@ -274,6 +274,21 @@ pub struct BlastnArgs {
     // Read by `soft_masking`.
     #[arg(long, value_parser = ncbi_boolean, help = "Apply filtering locations as soft masks [default: true]")]
     pub soft_masking: Option<bool>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:350-352
+    // Read by the filtering handler after `-dust` and before the WindowMasker options, which
+    // count it (`resolve_window_masker`); the repeat search runs where the masks of each query
+    // batch are made (`repeat_filter`).
+    #[arg(
+        long = "filtering_db",
+        value_name = "filtering_database",
+        help = "BLAST database containing filtering elements (i.e.: repeats)"
+    )]
+    pub filtering_db: Option<String>,
+    /// The repeat search of `-filtering_db` (`repeat_filter::RepeatFilter`): the database's name
+    /// and the settings that look it up, given by the caller that has them (`resolve_repeat_filter`);
+    /// `None` without the option.
+    #[arg(skip)]
+    pub repeat_filter: Option<std::sync::Arc<super::repeat_filter::RepeatFilter>>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:354-356
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2285
     // Read by the filtering handler after `-dust` (`resolve_window_masker`); 0 is no
@@ -360,6 +375,15 @@ pub struct BlastnArgs {
     /// higher-scoring hits, delete the hit (default: 0, no culling).
     #[arg(long, value_parser = nonnegative_ncbi_integer)]
     pub culling_limit: Option<i32>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3304-3328
+    // With `-culling_limit` NCBI refuses the command line, LOSAT's parser too (with its own
+    // text, as for the other exclusions).
+    /// Best Hit algorithm overhang value (recommended value: 0.1)
+    #[arg(long, value_parser = best_hit_value, value_name = "float_value", conflicts_with = "culling_limit")]
+    pub best_hit_overhang: Option<f64>,
+    /// Best Hit algorithm score edge value (recommended value: 0.1)
+    #[arg(long, value_parser = best_hit_value, value_name = "float_value", conflicts_with = "culling_limit")]
+    pub best_hit_score_edge: Option<f64>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:917-917,929-929
     /// Perform ungapped alignment only.
     #[arg(long)]
@@ -446,6 +470,13 @@ pub struct BlastnArgs {
     // argument of the command line sets this.
     #[arg(skip)]
     pub one_query_batch: bool,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/repeats_filter_cxx.cpp:394-399
+    // The search of the repeats of `-filtering_db` (`repeat_filter`) is a `CLocalBlast` whose
+    // alignments its caller reads: no formatter reads its results, so nothing that only the
+    // formatter reads (`PRE_FETCH_SEQS_LIMIT`) stops it. Its caller takes the hits
+    // (`blast_engine::repeat_search_hits`). No argument of the command line sets this.
+    #[arg(skip)]
+    pub hits_only: bool,
     // NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_input.hpp:180-182
     // The position in the whole input of the first of these records, as a reader's counter
     // starts there (`api::run_batches`): a query's `Query_N` in the messages. 0 on the command
@@ -495,6 +526,16 @@ impl BlastnArgs {
     /// whether it was given (`culling_limit`).
     pub fn culling_limit_value(&self) -> i32 {
         self.culling_limit.unwrap_or(0)
+    }
+
+    /// The best hit filter of `-best_hit_overhang` and `-best_hit_score_edge` (the one not given
+    /// takes its default), `None` when neither is given. The BLAST archive records the options
+    /// as given.
+    pub(crate) fn best_hit(&self) -> Option<crate::core::hspfilter_besthit::BestHitParams> {
+        crate::core::hspfilter_besthit::BestHitParams::from_options(
+            self.best_hit_overhang,
+            self.best_hit_score_edge,
+        )
     }
 
     /// `-searchsp`, 0 without it (`CBlastOptions::SetEffectiveSearchSpace`).
@@ -551,9 +592,9 @@ impl BlastnArgs {
     /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:430-466
     /// `-window_masker_taxid` counts also with the taxid 0, which uses no WindowMasker
     /// (`Blast_FindWindowMaskerLoc_Fwd` reads a taxid only when it is not 0); its file is
-    /// looked for in the set-up of the query batches (`window_masker::open_taxid`). `-filtering_db`
-    /// is refused when the arguments are parsed (`cli::is_unported_blastn_arg`), so it is never
-    /// counted here.
+    /// looked for in the set-up of the query batches (`window_masker::open_taxid`).
+    /// `-filtering_db` counts with any value, an empty one too (its database is opened by the
+    /// repeat search of each query batch, `repeat_filter`).
     pub fn resolve_window_masker(&mut self) -> anyhow::Result<()> {
         if self.window_masker_db.is_none() && self.window_masker_taxid.is_none() {
             return Ok(());
@@ -563,7 +604,10 @@ impl BlastnArgs {
             Some(name) => Some(super::window_masker::open(name, &*source)?),
             None => None,
         };
-        if self.window_masker_taxid.is_some() && database.is_some() {
+        let filter_dbs = usize::from(self.filtering_db.is_some())
+            + usize::from(self.window_masker_taxid.is_some())
+            + usize::from(database.is_some());
+        if filter_dbs > 1 {
             // See docs/product_decisions/PD-LOSAT-CLI-NONSEARCH-DIFFERENCES.md exception 12.
             return Err(crate::cli::NativeError {
                 exit: 1,

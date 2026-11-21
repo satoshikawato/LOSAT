@@ -1,0 +1,22 @@
+Blast-db-mask-info ::= {
+  algo-id 2,
+  algo-program dust,
+  algo-options "hedge3 long",
+  masks {
+    masks {
+      packed-int {
+        {
+          from 3270,
+          to 3329,
+          id local id 1
+        },
+        {
+          from 5201,
+          to 5250,
+          id local id 1
+        }
+      }
+    },
+    more FALSE
+  }
+}

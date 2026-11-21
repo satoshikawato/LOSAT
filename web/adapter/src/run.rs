@@ -305,7 +305,7 @@ const START_VARIABLES: &[(&str, &str)] = &[(
 /// `START_VARIABLES`, with the registry files registered now (kind 2, `files::registry_files`) and
 /// the file of `-logfile` going to `run_files`; the messages that the command line writes to its
 /// standard error go to `diagnostics`. `Err` when the start ends the run (a usage report or a
-/// load that LOSAT refuses, a `-logfile` name that LOSAT Web refuses, the error of NCBI's load:
+/// load that LOSAT refuses, the error of NCBI's load:
 /// `-conffile` of a file that is not registered, a registry file that NCBI cannot read), with the
 /// message that the command line writes to its standard error without `-logfile`, and the start
 /// when its file of `-logfile` is open (it has the messages); and for a program that ABI v2 does
@@ -546,6 +546,13 @@ fn blastn_group_check(
     // The host has no database files.
     if args.db.is_some() {
         return Err("-db (a database search) is not supported in the browser yet".to_string());
+    }
+    // Nor a database of repeats (the engine's own refusal, `run_local`).
+    if args.filtering_db.is_some() {
+        return Err(
+            "-filtering_db (a BLAST database of repeats) is not supported in the browser yet"
+                .to_string(),
+        );
     }
     let outfmts: Vec<i32> = group.iter().map(|output| output.number as i32).collect();
     // `process_options` sets the counts that the checks read.
@@ -2493,6 +2500,20 @@ mod tests {
         assert_eq!(
             run(&words, &query, &subject).unwrap_err(),
             "-db (a database search) is not supported in the browser yet"
+        );
+        // BLASTN's database of repeats is refused too (line RG item D4).
+        let repeats = [
+            "blastn",
+            "-query",
+            "q",
+            "-subject",
+            "s",
+            "-filtering_db",
+            "repeats",
+        ];
+        assert_eq!(
+            validate(&repeats).unwrap_err(),
+            "-filtering_db (a BLAST database of repeats) is not supported in the browser yet"
         );
         // `-db` with `-subject` is the parser's conflict, as on the command line.
         let both = ["blastp", "-query", "q", "-subject", "s", "-db", "swissprot"];

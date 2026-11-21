@@ -24,8 +24,8 @@
 //! volume (the files `.?aa`, `.?ab`, `.?ac`, version 4 and 5 alike) from the mask files that
 //! `mask_info` reads (ASN.1 text or binary, as dustmasker, segmasker, windowmasker and
 //! convert2blastmask write them) and `mask_data` turns into ranges per sequence, with or without
-//! `-parse_seqids`. `losat makeblastdb` refuses `-gi_mask`, `-gi_mask_name`, `-oid_masks` and
-//! the other options of `makeblastdb::UNSUPPORTED_OPTIONS`; `-metadata_output_prefix` names the
+//! `-parse_seqids`. `losat makeblastdb` refuses `-gi_mask`, `-gi_mask_name` and the other options
+//! of `makeblastdb::UNSUPPORTED_OPTIONS`; `-oid_masks` writes the OID mask files (`oid_list`); `-metadata_output_prefix` names the
 //! files of the metadata file (`metadata::metadata_user_path`).
 
 pub mod bioseq;
@@ -49,6 +49,7 @@ pub(crate) mod mask_info;
 pub(crate) mod mdb;
 pub(crate) mod metadata;
 pub(crate) mod ofstream;
+pub(crate) mod oid_list;
 pub mod platform;
 pub mod taxid_set;
 pub mod time;

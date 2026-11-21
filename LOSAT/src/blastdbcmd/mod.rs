@@ -42,8 +42,9 @@ const PROGRAM: &str = "BLASTDBCMD";
 const HELP: &str = include_str!("help.txt");
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:1175-1177
-/// blastdbcmd as NCBI's application runs it (`ncbi_app`): its `-version` is that of BLAST+
-/// (`CBlastDBCmdApp` sets `CBlastVersion`), its diagnostics carry the prefix `[blastdbcmd]`.
+/// blastdbcmd as NCBI's application runs it (`ncbi_app`): its `-version` states LOSAT's version
+/// where NCBI's states BLAST+'s (`CBlastDBCmdApp` sets `CBlastVersion`), its diagnostics carry the
+/// prefix `[blastdbcmd]`.
 static TOOL: Tool = Tool {
     program: "blastdbcmd",
     refusal_name: PROGRAM,
@@ -51,6 +52,7 @@ static TOOL: Tool = Tool {
     descs: args::DESCS,
     dependencies: args::dependencies,
     post_prefix: Some("blastdbcmd"),
+    components: &[],
 };
 
 /// Runs `blastdbcmd` with `words` (the command line after `losat blastdbcmd`), after its

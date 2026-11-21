@@ -47,9 +47,9 @@ const DESCS: &[Desc] = &[
 ];
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/convert2blastmask.cpp:111-120
-/// convert2blastmask as NCBI's application runs it (`ncbi_app`): BLAST's version, BLAST's
-/// usage report (`ncbi_environment`), no dependencies between its arguments and no prefix on
-/// its diagnostics.
+/// convert2blastmask as NCBI's application runs it (`ncbi_app`): LOSAT's version where NCBI's
+/// states BLAST's (`ncbi_version::print`), BLAST's usage report (`ncbi_environment`), no
+/// dependencies between its arguments and no prefix on its diagnostics.
 static TOOL: Tool = Tool {
     program: "convert2blastmask",
     refusal_name: PROGRAM,
@@ -57,6 +57,7 @@ static TOOL: Tool = Tool {
     descs: DESCS,
     dependencies: no_dependencies,
     post_prefix: None,
+    components: &[],
 };
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/convert2blastmask.cpp:259-263

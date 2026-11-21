@@ -56,9 +56,10 @@ fn run_in(dir: &Path, program: &str, words: &[&str]) -> Output {
 }
 
 /// The programs (the first line of the `-version-full` of each is `<program>: LOSAT <version>`:
-/// NCBI's is `<program>: 2.17.0+` (rpsbproc `0.5.1`, the maskers `1.0.0`, makembindex `2.17.0`), probes `vf`, and its XML and JSON `version_info` have NCBI's
-/// numbers; LOSAT's have LOSAT's), and an option of each that takes a value.
-const PROGRAMS: [(&str, &str); 15] = [
+/// NCBI's is `<program>: 2.17.0+` (rpsbproc
+/// `0.5.1`, the maskers `1.0.0`, makembindex `2.17.0`), probes `vf`, and its XML and JSON
+/// `version_info` have NCBI's numbers; LOSAT's have LOSAT's), and an option of each that takes a value.
+const PROGRAMS: [(&str, &str); 16] = [
     ("blastn", "-out"),
     ("blastp", "-out"),
     ("blastx", "-out"),
@@ -72,6 +73,7 @@ const PROGRAMS: [(&str, &str); 15] = [
     ("blastdbcmd", "-out"),
     ("dustmasker", "-out"),
     ("segmasker", "-out"),
+    ("windowmasker", "-out"),
     ("convert2blastmask", "-out"),
     ("makembindex", "-input"),
 ];
@@ -95,6 +97,48 @@ fn losat_numbers() -> (String, String) {
     )
 }
 
+/// The components of `program`'s full versions: windowmasker's six (NCBI BLAST+ 2.17.0
+/// `windowmasker -version-full*`, probe b1 of line NP M5), each with LOSAT's empty build
+/// information; the text, the XML and the JSON list.
+fn components(program: &str) -> (String, String, String) {
+    if program != "windowmasker" {
+        return (String::new(), String::new(), "[]".to_string());
+    }
+    let list = [
+        ("window-masker-algorithm", "", "0"),
+        ("windowmasker-statistics-algorithm-version", "", "0"),
+        ("windowmasker-statistics-format-version", "ascii ", "1"),
+        ("windowmasker-statistics-format-version", "binary ", "1"),
+        ("windowmasker-statistics-format-version", "oascii ", "1"),
+        ("windowmasker-statistics-format-version", "obinary ", "1"),
+    ];
+    let text = list
+        .iter()
+        .map(|(name, prefix, minor)| format!("\n {name}:{prefix}1.{minor}.0\n"))
+        .collect();
+    let xml = list
+        .iter()
+        .map(|(name, _, minor)| {
+            format!(
+                "<component name=\"{name}\">\n\
+                 <version_info major=\"1\" minor=\"{minor}\" patch_level=\"0\"/>\n\n\
+                 <build_info>\n</build_info>\n</component>\n"
+            )
+        })
+        .collect();
+    let json: Vec<String> = list
+        .iter()
+        .map(|(name, _, minor)| {
+            format!(
+                "\n      {{ \"name\": \"{name}\", \"version_info\": \
+                 {{\"major\": 1, \"minor\": {minor}, \"patch_level\": 0}},\n        \
+                 \"build_info\": {{}}}}"
+            )
+        })
+        .collect();
+    (text, xml, format!("[{}]", json.join(",")))
+}
+
 /// What LOSAT's `word` prints for `program` (RG DECISIONS E3-1).
 fn expected(program: &str, word: &str) -> String {
     let version = concat!("LOSAT ", env!("CARGO_PKG_VERSION"));
@@ -108,23 +152,26 @@ fn expected(program: &str, word: &str) -> String {
         env!("CARGO_PKG_VERSION_PATCH"),
     );
     let (losat_xml, losat_json) = losat_numbers();
+    let (component_text, component_xml, component_json) = components(program);
     match word {
         "-version" => format!("{program}: {version}\n{package}"),
         "-version-full" => {
-            format!("{program}: {version}\n{package} Package-Config:  \n GI-64bit:  TRUE\n")
+            format!(
+                "{program}: {version}\n{package} Package-Config:  \n GI-64bit:  TRUE\n{component_text}"
+            )
         }
         "-version-full-xml" => format!(
             "<?xml version=\"1.0\"?>\n<ncbi_version xmlns=\"ncbi:version\"\n  \
              xmlns:xs=\"http://www.w3.org/2001/XMLSchema-instance\"\n  \
              xs:schemaLocation=\"ncbi:version ncbi_version.xsd\">\n<appname>{program}</appname>\n\
              <version_info major=\"{major}\" minor=\"{minor}\" patch_level=\"{patch}\"/>\n\
-             <package name=\"LOSAT\">\n<version_info {losat_xml}/>\n<build_info>\n</build_info>\n\
+             {component_xml}<package name=\"LOSAT\">\n<version_info {losat_xml}/>\n<build_info>\n</build_info>\n\
              <config></config>\n</package>\n<build_info>\n</build_info>\n</ncbi_version>\n"
         ),
         "-version-full-json" => format!(
             "{{\n  \"ncbi_version\": {{\n    \"appname\": \"{program}\",\n    \
              \"version_info\": {{\"major\": {major}, \"minor\": {minor}, \"patch_level\": {patch}}},\n    \
-             \"component\": [],\n    \"package\": {{\n      \"name\": \"LOSAT\",\n      \
+             \"component\": {component_json},\n    \"package\": {{\n      \"name\": \"LOSAT\",\n      \
              \"version_info\": {{{losat_json}}},\n      \"build_info\": {{}},\n      \
              \"config\": \"\"}},\n    \"build_info\": {{}}\n  }}\n}}\n"
         ),
@@ -243,8 +290,8 @@ fn the_full_versions_come_before_the_configuration() {
 }
 
 /// The library's tools (`api::run_makeblastdb`, `run_blastdbcmd`, `run_dustmasker`,
-/// `run_segmasker`, `run_convert2blastmask`) run NCBI's application start as the command line
-/// does: they print the versions to their output (line RG item E1w-2 for makeblastdb). The search
+/// `run_segmasker`, `run_windowmasker`, `run_convert2blastmask`, `run_makembindex`) run NCBI's
+/// application start as the command line does: they print the versions to their output (line RG item E1w-2 for makeblastdb). The search
 /// programs of the library return reports, and refuse the words (`cli::version_word_refusal`).
 /// The library runs are `examples/library_command_line`, in the command line's environment.
 #[test]
@@ -271,6 +318,7 @@ fn the_library_s_tools_print_the_versions_as_the_command_line() {
                 | "blastdbcmd"
                 | "dustmasker"
                 | "segmasker"
+                | "windowmasker"
                 | "convert2blastmask"
                 | "makembindex"
         );

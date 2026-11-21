@@ -2,7 +2,7 @@
 //! (`search_subject`, which was the closure `process_subject` of `search_query_batch`), the pass over a
 //! subject set's subjects in subject order (`search_subjects`, serial, on the pool, or with
 //! `LOSAT_X_BNSTREAM`), the preliminary pass (`prelim_pass`: a subject set or a database, into the HSP
-//! collector or, with `-culling_limit`, NCBI's culling writer, with the `-ungapped` finish of each
+//! collector or, with `-culling_limit` or `-best_hit_*`, NCBI's culling or best hit writer, with the `-ungapped` finish of each
 //! subject's list) and the traceback pass (`traceback_pass`).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1409-1427 (the loop of
@@ -26,10 +26,11 @@ use super::traceback_subject::{self, TraceBatch};
 ))]
 use super::X_BNSTREAM_SUBJECTS_PER_THREAD;
 use super::{
-    culling, database, listed_prelim_hits, prelim_hits_by_subject, ungapped_reap_query_coverage,
-    ungapped_subject_stage, update_hitlists_with_subject_hits, x_bnstream, BlastnArgs,
-    BlastnHitList, BlastnSubjectRef, FastaRecord, GapAlignScratch, LookupTables, PrelimHit,
-    PrelimHitCollector, PrelimHitLists, SubjectCtx, SubjectHits, SubjectScratch, SubjectSource,
+    besthit, culling, database, listed_prelim_hits, prelim_hits_by_subject,
+    ungapped_reap_query_coverage, ungapped_subject_stage, update_hitlists_with_subject_hits,
+    x_bnstream, BlastnArgs, BlastnHitList, BlastnSubjectRef, FastaRecord, GapAlignScratch,
+    LookupTables, PrelimHit, PrelimHitCollector, PrelimHitLists, SubjectCtx, SubjectHits,
+    SubjectScratch, SubjectSource,
 };
 use crate::algorithm::blastn::coordination::subject_trace_id;
 use anyhow::Result;
@@ -494,14 +495,15 @@ impl SubjectPasses<'_> {
     /// The preliminary pass of the batch: the lists of `split_prelim_lists` (a split batch's query chunks
     /// searched before), else the HSPs of every subject, in the order of their ordinal ids, into the
     /// preliminary hit lists of `prelim_hitlist_size` subjects per query. With `-culling_limit` NCBI's
-    /// culling writer takes the place of the HSP collector. A database's read error is returned as it is
+    /// culling writer takes the place of the HSP collector, with `-best_hit_*` its best hit writer. A database's read error is returned as it is
     /// (the caller reports it with `database_search_error`).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1674-1679 (the preliminary search
     /// of a batch in `Blast_RunPreliminarySearchWithInterrupt`, into the batch's HSP stream)
     /// NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:351-357 (the stream's writer
     /// without a filtering option: the HSP collector, `PrelimHitCollector` here; `-culling_limit` chooses
-    /// the culling writer in the body below, and NCBI's other choice, `-best_hit_*`, is not ported)
+    /// the culling writer in the body below, and `-best_hit_overhang` / `-best_hit_score_edge` the best
+    /// hit writer)
     pub(super) fn prelim_pass<const UNGAPPED: bool>(
         &self,
         split_prelim_lists: Option<PrelimHitLists>,
@@ -520,6 +522,19 @@ impl SubjectPasses<'_> {
                 self.prelim_batch.query_lengths,
                 self.prelim_hitlist_size,
                 self.args.culling_limit_value(),
+            );
+            self.prelim_into::<UNGAPPED, _>(lookup_tables, &mut |oid, prelim| {
+                writer.add(oid, prelim)
+            })?;
+            Ok(writer.finish())
+        } else if let Some(params) = self.args.best_hit() {
+            // `-best_hit_overhang` / `-best_hit_score_edge`: NCBI's best hit writer, in the same
+            // place, with the overhang of the preliminary stage (0).
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:305-329
+            let mut writer = besthit::PrelimBestHit::new(
+                self.prelim_batch.query_lengths,
+                self.prelim_hitlist_size,
+                params,
             );
             self.prelim_into::<UNGAPPED, _>(lookup_tables, &mut |oid, prelim| {
                 writer.add(oid, prelim)

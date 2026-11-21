@@ -20,9 +20,7 @@ use super::time::LocalTime;
 use super::writer::{build_lmdb_file_name, DbVersion, Indices};
 use super::WriteDbError;
 use crate::blastinput::compressed::{compression_of_name, Compression};
-use crate::blastinput::ncbi_environment::{
-    diag_target, ApplicationSettings, DiagStream, DiagTarget,
-};
+use crate::blastinput::ncbi_environment::{diag_target, ApplicationSettings, DiagStream};
 use crate::ncbi_str::string_to_uint8_data_size;
 use crate::seqdb::{SearchPath, SeqDb, SeqDbError, SeqType};
 
@@ -99,14 +97,20 @@ pub struct MakedbArgs {
     /// parsed automatically
     #[arg(long)]
     pub parse_seqids: bool,
+    /// 0x01 Exclude Model
+    // NCBI's integer (`AsInteger`, an `int`: `0x01` is 1, `-1` sets every bit), made an `Uint8`
+    // (makeblastdb.cpp:1227-1230).
+    #[arg(long, value_name = "oid_masks",
+          value_parser = crate::blastinput::value_parsers::ncbi_integer)]
+    pub oid_masks: Option<i32>,
 }
 
 /// The options of makeblastdb 2.17.0 that `losat makeblastdb` refuses
 /// (makeblastdb.cpp:246-333). `-h` and `-version` are served (`crate::cli`);
 /// `-logfile`, `-parse_seqids`, `-hash_index`, `-taxid`, `-taxid_map`, `-mask_data`, `-mask_id`,
-/// `-mask_desc` and `-metadata_output_prefix` are read. `-gi_mask` and `-gi_mask_name` write
-/// GI-indexed mask files (item M4c), which LOSAT does not write yet.
-pub const UNSUPPORTED_OPTIONS: [&str; 4] = ["randomize", "gi_mask", "gi_mask_name", "oid_masks"];
+/// `-mask_desc`, `-metadata_output_prefix` and `-oid_masks` are read. `-gi_mask` and
+/// `-gi_mask_name` write GI-indexed mask files (item M4c), which LOSAT does not write yet.
+pub const UNSUPPORTED_OPTIONS: [&str; 3] = ["randomize", "gi_mask", "gi_mask_name"];
 
 /// How `losat makeblastdb` ends when it does not build a database, or cannot
 /// open the one it built.
@@ -650,6 +654,9 @@ fn build_database_with_log(
             hash: args.hash_index,
         },
     )?;
+    if let Some(oid_masks) = args.oid_masks {
+        db.set_oid_masks(oid_masks as u64);
+    }
     let max_file_size = max_file_size(args)?;
     let _ = writeln!(
         db.log(),
@@ -975,8 +982,13 @@ pub(crate) fn registry_blastdb(settings: &ApplicationSettings) -> Option<&str> {
 // standard error stream, and the build stops where makeblastdb opens the log,
 // after the checks of the database name and the title, with "Command line
 // argument error: Argument "logfile". File is not accessible:  `F'" and exit
-// status 1. LOSAT opens the file once and writes both streams through the one
-// handle. Three names are special. `-` keeps the diagnostics on the standard
+// status 1. The diagnostics' file is the one that NCBI's diagnostics open for the
+// name (`ncbi_environment::diag_target`) and the log's the one that the system opens
+// under the name as written (`log_of`): one file for most names, two where NCBI's
+// diagnostics read the name otherwise (` mk.log` is `mk.log` there, `a/../mk.log`
+// the `mk.log` beside the link `a`), and no log for `logs/`, which the
+// diagnostics read as the file `logs` (NCBI BLAST+ 2.17.0; line WQA's D11 round 2,
+// 2026-11-20). Three names are special. `-` keeps the diagnostics on the standard
 // error stream and opens the standard output for the log: makeblastdb runs as
 // without `-logfile`. `/dev/null` (that name, on every platform) and the empty
 // name discard the diagnostics; the log then goes to the file `/dev/null`, and
@@ -1020,8 +1032,7 @@ pub(crate) fn run_with(
     // The diagnostics go to the target of `-logfile` (`ncbi_environment::diag_target`, which
     // owns the special names), and the log to `AsOutputFile` of the same name (`log_of`).
     let target = diag_target(Some(std::ffi::OsStr::new(name)));
-    let mut opened = None;
-    let log = log_of(&target, name, &mut opened);
+    let log = log_of(name);
     let mut diag = DiagStream {
         target: &target,
         stderr: err,
@@ -1062,32 +1073,24 @@ pub(crate) fn run_with(
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1199-1201
-/// The log of `-logfile name` (`AsOutputFile`, append) beside its diagnostics' `target`
-/// (`diag_target` of the same name): the target's open file itself; for a name whose
-/// diagnostics go nowhere (`/dev/null`), that file, opened into `opened`; none for the empty name
-/// and a file that cannot be opened. The log writes through this shared reference to the target's
-/// file (`Write for &File`) while the diagnostics write to the target (`DiagStream`, which holds
-/// it by a shared reference too): one handle, so the two streams append in the order they are
-/// written, as NCBI's two appending streams on the file do, on every target. (A copy of the
-/// handle, `try_clone`, is a copy of its descriptor, which the WASI targets cannot make: the run
-/// stopped with "File is not accessible".)
-fn log_of<'a>(
-    target: &'a DiagTarget,
-    name: &str,
-    opened: &'a mut Option<std::fs::File>,
-) -> Option<&'a std::fs::File> {
-    match target {
-        DiagTarget::File(file) => Some(file),
-        _ if name.is_empty() => None,
-        _ => {
-            *opened = std::fs::OpenOptions::new()
-                .append(true)
-                .create(true)
-                .open(name)
-                .ok();
-            opened.as_ref()
-        }
+/// The log of `-logfile name` (`AsOutputFile`, append): the file that the system opens under
+/// the name as written; none for the empty name and a name that it cannot open (`logs/`). The
+/// diagnostics open the file of NCBI's reading of the name (`diag_target`), which is this file
+/// for most names and another one where that reading differs (` mk.log`, `a/../mk.log` beside
+/// a link `a`; NCBI BLAST+ 2.17.0 makeblastdb writes its log to ` mk.log` and its
+/// diagnostics to `mk.log`; line WQA's D11 round 2, 2026-11-20). Both append, so where they are
+/// one file the two streams land in it in the order they are written, as NCBI's two appending
+/// streams on the file do. (A second open, not a copy of the diagnostics' handle, `try_clone`,
+/// which the WASI targets cannot make: the run stopped with "File is not accessible".)
+fn log_of(name: &str) -> Option<std::fs::File> {
+    if name.is_empty() {
+        return None;
     }
+    std::fs::OpenOptions::new()
+        .append(true)
+        .create(true)
+        .open(name)
+        .ok()
 }
 
 /// The error message and the exit code of a build, then the messages of

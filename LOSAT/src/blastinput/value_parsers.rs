@@ -297,6 +297,22 @@ pub fn tblastx_query_coverage(value: &str) -> Result<f64, String> {
     percentage(value)
 }
 
+/// A `-best_hit_overhang` or `-best_hit_score_edge` value: above 0 and below 0.5 (NaN is
+/// outside), of every program that has the options.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3304-3328
+/// NCBI reference (598d8ae6): c++/include/algo/blast/core/hspfilter_besthit.h:80-91
+/// The constraint reads the value with the argument's own conversion (`ncbi_double`); NCBI
+/// BLAST+ 2.17.0 refuses 0 and 0.5 with "Illegal value, expected (>0 and <0.5)" (line NP O6a's
+/// probe).
+pub fn best_hit_value(value: &str) -> Result<f64, String> {
+    let n = ncbi_double(value)?;
+    if !(n > 0.0 && n < 0.5) {
+        return Err("expected a number above 0 and below 0.5".into());
+    }
+    Ok(n)
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:995-1006
 pub fn genetic_code(value: &str) -> Result<u8, String> {
     let n = genetic_code_number(value).ok_or("invalid genetic code")?;

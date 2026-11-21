@@ -511,4 +511,5 @@ pub fn losat::api::run_makeblastdb(&[&str], &mut dyn std::io::Read, &mut dyn std
 pub fn losat::api::run_makembindex(&[&str], &mut dyn std::io::Read, &mut dyn std::io::Write, &mut dyn std::io::Write) -> core::result::Result<(), losat::api::Error>
 pub fn losat::api::run_segmasker(&[&str], &mut dyn std::io::Read, &mut dyn std::io::Write, &mut dyn std::io::Write) -> core::result::Result<(), losat::api::Error>
 pub fn losat::api::run_to_file(&losat::api::Search, losat::api::Inputs<'_>, &str, &std::path::Path, &mut (dyn std::io::Write + core::marker::Send)) -> core::result::Result<(), losat::api::Error>
+pub fn losat::api::run_windowmasker(&[&str], &mut dyn std::io::Read, &mut dyn std::io::Write, &mut dyn std::io::Write) -> core::result::Result<(), losat::api::Error>
 pub fn losat::api::validate(losat::api::Program, &[&str]) -> core::result::Result<losat::api::Search, losat::api::Error>

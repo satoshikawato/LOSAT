@@ -85,30 +85,24 @@ pub fn ncbi_integer(value: &str) -> Result<i32, String> {
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:351-360
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:118-129
-/// `NStr::StringToInt8(value)` and `NStr::StringToInt8(value, 0, 16)` are
-/// `ncbi_str::string_to_int8` and `ncbi_str::string_to_int8_base`. LOSAT's messages: "expected
-/// an integer" for a value that neither reads (a byte after `0x` that is not a hexadecimal
-/// digit included, which is tested first: NCBI's base 16 conversion throws on an overflow
-/// before it reaches such a byte, ncbistr.cpp:852), "Integer value is out of range" for a
-/// hexadecimal number beyond `Int8`.
+/// `s_StringToInt8` is `ncbi_app::args::string_to_int8` (the one reading of NCBI's integer
+/// arguments). LOSAT's messages: "Integer value is out of range" for a hexadecimal number beyond
+/// `Int8` (every byte after `0x` a hexadecimal digit), "expected an integer" for any other value
+/// that does not read (a byte after `0x` that is not a hexadecimal digit included: NCBI's base
+/// 16 conversion throws on an overflow before it reaches such a byte, ncbistr.cpp:852).
 pub fn ncbi_int8(value: &str) -> Result<i64, String> {
-    use crate::ncbi_str::{string_to_int8, string_to_int8_base};
-    let value = value.as_bytes();
-    match string_to_int8(value, 0) {
-        Ok(n) => Ok(n),
-        Err(_)
-            if value
-                .get(..2)
-                .is_some_and(|prefix| prefix.eq_ignore_ascii_case(b"0x")) =>
-        {
-            if !value[2..].iter().all(u8::is_ascii_hexdigit) {
-                return Err("expected an integer".into());
-            }
-            string_to_int8_base(value, 0, 16)
-                .map_err(|_| "Integer value is out of range".to_string())
+    crate::ncbi_app::args::string_to_int8(value).map_err(|_| {
+        let bytes = value.as_bytes();
+        let hexadecimal = bytes
+            .get(..2)
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case(b"0x"))
+            && bytes[2..].iter().all(u8::is_ascii_hexdigit);
+        if hexadecimal {
+            "Integer value is out of range".to_string()
+        } else {
+            "expected an integer".to_string()
         }
-        Err(_) => Err("expected an integer".into()),
-    }
+    })
 }
 
 /// A real argument as NCBI reads it (`CArg_Double`): `NStr::StringToDouble(value,
@@ -316,7 +310,7 @@ pub fn best_hit_value(value: &str) -> Result<f64, String> {
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:995-1006
 pub fn genetic_code(value: &str) -> Result<u8, String> {
     let n = genetic_code_number(value).ok_or("invalid genetic code")?;
-    if !matches!(n, 1..=6 | 9..=16 | 21..=31 | 33) {
+    if !crate::ncbi_app::args::is_genetic_code(i32::from(n)) {
         return Err("unsupported genetic code".into());
     }
     Ok(n)
@@ -345,41 +339,11 @@ pub(crate) fn genetic_code_number(value: &str) -> Option<u8> {
 pub fn blastn_output_path() -> impl clap::builder::TypedValueParser<Value = PathBuf> {
     use clap::builder::TypedValueParser;
     clap::builder::OsStringValueParser::new().try_map(|value| {
-        if ncbi_file_name_length(value.as_encoded_bytes()) >= 256 {
+        if crate::ncbi_app::args::file_name_length(value.as_encoded_bytes()) >= 256 {
             return Err("Illegal value, expected file name length < 256".to_string());
         }
         Ok(PathBuf::from(value))
     })
-}
-
-/// The length of NCBI's `CDirEntry::GetName` of a path: the text after the last separator
-/// once the trailing directory separators are removed (a path of one separator has none).
-///
-/// NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:298-312
-/// NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:465-472
-/// NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:358-363
-/// On Unix, `DIR_SEPARATORS` and `ALL_SEPARATORS` are `/` (ncbifile.cpp:110-115); on
-/// Windows they are `/\` and `:/\`, with the disk name `C:`.
-fn ncbi_file_name_length(path: &[u8]) -> usize {
-    let (dir_separators, all_separators): (&[u8], &[u8]) = if cfg!(windows) {
-        (b"/\\", b":/\\")
-    } else {
-        (b"/", b"/")
-    };
-    let root = path.len() == 1 && dir_separators.contains(&path[0]);
-    let disk = cfg!(windows) && matches!(path.len(), 2 | 3) && path[1] == b':';
-    let path = if root || disk {
-        path
-    } else {
-        let end = path
-            .iter()
-            .rposition(|byte| !dir_separators.contains(byte))
-            .map_or(0, |pos| pos + 1);
-        &path[..end]
-    };
-    path.iter()
-        .rposition(|byte| all_separators.contains(byte))
-        .map_or(path.len(), |pos| path.len() - pos - 1)
 }
 
 /// A BLASTN input file: any value, as NCBI's `eInputFile` argument; `-` is standard input

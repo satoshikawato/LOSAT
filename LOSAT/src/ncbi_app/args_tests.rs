@@ -100,6 +100,42 @@ fn xml_arguments(xml: &str) -> Vec<(&str, &str, &str)> {
     out
 }
 
+/// The `<alias>` lines of the elements `elements` (alias, name) and the entries of the
+/// `<dependencies>` element of `xml` (first name, dependency, second name), each in the XML's
+/// order: read here apart from the build's reader (`build/ncbi_args.rs`).
+fn xml_aliases_and_dependencies(
+    xml: &str,
+    elements: &[&(&str, &str, &str)],
+) -> (Vec<(String, String)>, Vec<(String, Dep, String)>) {
+    let text = |within: &str, tag: &str| {
+        let (_, rest) = within.split_once(&format!("<{tag}>"))?;
+        Some(xml_decode(rest.split_once(&format!("</{tag}>")).unwrap().0))
+    };
+    let mut aliases = Vec::new();
+    for &&(_, name, element) in elements {
+        assert!(!element.contains("<negated_alias>"), "-{name}");
+        let mut rest = element;
+        while let Some(alias) = text(rest, "alias") {
+            aliases.push((alias, name.to_string()));
+            rest = rest.split_once("</alias>").unwrap().1;
+        }
+    }
+    let mut dependencies = Vec::new();
+    if let Some((_, block)) = xml.split_once("\n<dependencies>\n") {
+        let block = block.split_once("\n</dependencies>\n").unwrap().0;
+        for entry in block.split("<first_").skip(1) {
+            let dep = match entry.split_once("_second>").unwrap().0 {
+                "requires" => Dep::Requires,
+                "excludes" => Dep::Excludes,
+                other => panic!("{other}"),
+            };
+            let (first, second) = (text(entry, "arg1"), text(entry, "arg2"));
+            dependencies.push((first.unwrap(), dep, second.unwrap()));
+        }
+    }
+    (aliases, dependencies)
+}
+
 #[test]
 fn every_program_of_the_xml_has_its_table() {
     let tables: Vec<&str> = programs().map(|(program, _)| program).collect();
@@ -129,6 +165,7 @@ fn every_argument_of_the_xml_is_in_its_table() {
         "dryrun",
     ];
     let mut constraints = 0;
+    let (mut aliases, mut dependencies) = (0, 0);
     for (program, arguments) in programs() {
         let xml = xml(program);
         let elements = xml_arguments(&xml);
@@ -137,6 +174,31 @@ fn every_argument_of_the_xml_is_in_its_table() {
             .filter(|(_, name, _)| !standard.contains(name))
             .collect();
         assert_eq!(own.len(), arguments.descs().len(), "{program}");
+        // The aliases and the dependencies, every entry in the XML's order: NCBI writes the
+        // `eRequires` entries of its multimap, then the `eExcludes` ones.
+        let (xml_aliases, xml_dependencies) = xml_aliases_and_dependencies(&xml, &own);
+        let table_aliases: Vec<_> = arguments
+            .aliases()
+            .map(|(alias, name)| (alias.to_string(), name.to_string()))
+            .collect();
+        assert_eq!(table_aliases, xml_aliases, "{program}");
+        let table_dependencies: Vec<_> = arguments
+            .dependencies()
+            .map(|(first, dep, second)| (first.to_string(), dep, second.to_string()))
+            .collect();
+        assert_eq!(table_dependencies, xml_dependencies, "{program}");
+        let excludes = xml_dependencies
+            .iter()
+            .position(|(_, dep, _)| *dep == Dep::Excludes)
+            .unwrap_or(xml_dependencies.len());
+        assert!(
+            xml_dependencies[excludes..]
+                .iter()
+                .all(|(_, dep, _)| *dep == Dep::Excludes),
+            "{program}"
+        );
+        aliases += xml_aliases.len();
+        dependencies += xml_dependencies.len();
         for &&(tag, name, element) in &own {
             let desc = arguments.descs().iter().find(|desc| desc.name() == name);
             let desc = desc.unwrap_or_else(|| panic!("{program} -{name}"));
@@ -179,6 +241,10 @@ fn every_argument_of_the_xml_is_in_its_table() {
     // The 169 constraints of the 14 programs of line RG item K4i (SURVEY), and makembindex's 6
     // and windowmasker's 16.
     assert_eq!(constraints, 169 + 6 + 16);
+    // rpsbproc's 8 aliases; the 1,294 entries of the dependencies of the 14 programs,
+    // windowmasker's 76 (its 38 exclusions, each in both directions) and makembindex's 3.
+    assert_eq!(aliases, 8);
+    assert_eq!(dependencies, 1294 + 76 + 3);
 }
 
 /// Which class a constraint is.
@@ -462,6 +528,22 @@ fn integer_keys_convert_as_ncbi_s_reader() {
             &[
                 "Cannot convert string '2.5' to Int8 (m_Pos = 1)",
                 "Argument \"window\". Argument cannot be converted:  `2.5'",
+            ],
+        ),
+        // No space is skipped, after the number or before it (NCBI on `64 ` and ` 64`: probes
+        // dust.window.08 and 07 of the line RG K4i review).
+        (
+            "5 ",
+            &[
+                "Cannot convert string '5 ' to Int8 (m_Pos = 1)",
+                "Argument \"window\". Argument cannot be converted:  `5 '",
+            ],
+        ),
+        (
+            " 5",
+            &[
+                "Cannot convert string ' 5' to Int8 (m_Pos = 0)",
+                "Argument \"window\". Argument cannot be converted:  ` 5'",
             ],
         ),
         (

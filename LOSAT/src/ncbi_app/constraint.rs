@@ -41,6 +41,12 @@ const GENETIC_CODES: [i32; 26] = [
     1, 2, 3, 4, 5, 6, 9, 10, 11, 12, 13, 14, 15, 16, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 33,
 ];
 
+/// Whether `code` is a genetic code that `CArgAllowGeneticCodeInteger` allows: the one list of
+/// them, for this reader and for the programs on clap (`blastinput::value_parsers::genetic_code`).
+pub(crate) fn is_genetic_code(code: i32) -> bool {
+    GENETIC_CODES.contains(&code)
+}
+
 impl Constraint {
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:1231-1242
     // The reader calls `Verify` inside a `try`: an exception counts as a refused value.
@@ -90,8 +96,9 @@ impl Constraint {
                 .is_ok_and(|number| integers(values).contains(&number)),
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1002-1007
             // Read with `NStr::StringToInt`, then looked up among the genetic codes.
-            Constraint::GeneticCode => crate::ncbi_str::string_to_int(bytes, 0)
-                .is_ok_and(|number| GENETIC_CODES.contains(&number)),
+            Constraint::GeneticCode => {
+                crate::ncbi_str::string_to_int(bytes, 0).is_ok_and(is_genetic_code)
+            }
             // NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_input_aux.hpp:85-88
             // The length of the file name part of the path, below the maximum.
             Constraint::MaxFileNameLength(max) => {
@@ -193,7 +200,9 @@ fn permissible_values<T: std::fmt::Display>(values: impl Iterator<Item = T>) -> 
     usage
 }
 
-/// `NStr::DoubleToString(value)`: C's `%g` (`report::sam::push_g`).
+// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:2316-2339
+/// `NStr::DoubleToString(value)`: with no precision and the default flags, C's `%g`
+/// (`report::sam::push_g`).
 fn double_to_string(value: f64) -> String {
     let mut out = Vec::new();
     crate::report::sam::push_g(&mut out, value);
@@ -203,7 +212,8 @@ fn double_to_string(value: f64) -> String {
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:115-129
 /// `s_StringToInt8(value)`, NCBI's reading of an integer argument (`CArg_Int8`, `CArg_Integer`)
 /// and of `CArgAllow_Integers`: decimal, then, for a value that starts with `0x` or `0X`, base 16,
-/// whose exception is then the one thrown (`0x` alone reads 0).
+/// whose exception is then the one thrown (`0x` alone reads 0). The one reading of it, for this
+/// reader and for the programs on clap (`blastinput::value_parsers::ncbi_int8`).
 pub(crate) fn string_to_int8(value: &str) -> Result<i64, crate::ncbi_exception::NcbiException> {
     use crate::ncbi_str::{string_to_int8, string_to_int8_base};
     let bytes = value.as_bytes();
@@ -225,8 +235,9 @@ pub(crate) fn string_to_int8(value: &str) -> Result<i64, crate::ncbi_exception::
 /// The length of `CFile(path).GetName()`: the text after the last separator once the trailing
 /// directory separators are removed (a path of one separator, or a disk name, keeps them). On Unix
 /// `DIR_SEPARATORS` and `ALL_SEPARATORS` are `/` (ncbifile.cpp:110-115); on Windows they are `/\`
-/// and `:/\`, with the disk name `C:`.
-fn file_name_length(path: &[u8]) -> usize {
+/// and `:/\`, with the disk name `C:`. The one reading of it, for this reader and for the
+/// programs on clap (`blastinput::value_parsers`, `CArgAllowMaximumFileNameLength` of `-out`).
+pub(crate) fn file_name_length(path: &[u8]) -> usize {
     let (dir_separators, all_separators): (&[u8], &[u8]) = if cfg!(windows) {
         (b"/\\", b":/\\")
     } else {

@@ -18,7 +18,7 @@ use super::Tool;
 #[path = "constraint.rs"]
 mod constraint;
 
-pub(crate) use constraint::Constraint;
+pub(crate) use constraint::{file_name_length, is_genetic_code, string_to_int8, Constraint};
 
 /// What an argument holds (`CArgDescriptions::EType` of a key, or a flag).
 ///
@@ -599,9 +599,9 @@ fn not_converted(desc: &Desc, value: &str, predecessor: String) -> ArgsError {
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:351-360
-/// The value of an `eInt8` key (`CArg_Int8`: `s_StringToInt8`, `constraint::string_to_int8`).
+/// The value of an `eInt8` key (`CArg_Int8`: `s_StringToInt8`, `string_to_int8`).
 fn int8_value(desc: &Desc, value: &str) -> Result<i64, ArgsError> {
-    constraint::string_to_int8(value)
+    string_to_int8(value)
         .map_err(|error| not_converted(desc, value, String::from_utf8_lossy(&error.text()).into()))
 }
 

@@ -12,18 +12,48 @@
 //!
 //! The XML is read as NCBI's `CArgDescriptions::PrintUsageXml` writes it: one element or line per
 //! line, every text escaped by `NStr::XmlEncode`. An element, a type, a flag or a constraint that this
-//! reader does not know stops the build with its text, so that no definition of NCBI's is dropped or
-//! guessed.
+//! reader does not know stops the build with its text.
 //!
 //! NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:1006-1051
 //! (`CArgDesc::PrintUsageXml`: the start tag of a key or a flag with its name, a key's type and
 //! `optional="true"` for an optional argument or a flag, then one line for each of its parts,
 //! and a `<constraint>` element of the usage text and the constraint's own lines.)
+//!
+//! Four things the XML cannot carry are taken on trust. Each holds for the 16 XMLs LOSAT embeds:
+//! checked against the 598d8ae6 source of the programs on 2026-11-21 (line RG K4i review L1), and
+//! to be checked again whenever an XML is replaced.
+//!
+//! (a) A real bound is read back from its text, `%g` with six significant digits: the `<min>` and
+//! `<max>` of `<Doubles>` and the numbers of BLAST's usage texts. A bound with more digits would
+//! be checked rounded. The bounds of these programs are 0, 0.5, 1, 2, 4 and 100.
+//! NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:4864-4872
+//! NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:2316-2339
+//!
+//! (b) A constraint whose usage text is empty (an integer range from the least to the greatest
+//! `int`, say) has no `<constraint>` element, so its table has no constraint, though NCBI's reader
+//! checks it. No argument of these programs has one.
+//! NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:1032-1043
+//!
+//! (c) `<default>` is the display value of a default, which is the default itself unless the
+//! program gives another (a display value, or a default read from the environment): the table
+//! takes it as the default. No argument of these programs gives one.
+//! NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:1093-1095
+//! NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:1368-1371
+//!
+//! (d) A usage text of permissible values on an integer key is read as BLAST's set of integers,
+//! which compares numbers; BLAST's set of strings on such a key would write the same text and
+//! compare the texts (`016` is not `16`). The one such key, blastn's `-template_length`, is a set
+//! of integers.
+//! NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_input_aux.hpp:214-240
 
 use std::fmt::Write as _;
 use std::fs;
 use std::path::Path;
 
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:2207-2219
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:2253-2350
+// The constructor of the description adds the help flags; `AddStdArguments` adds `-logfile`, `-conffile`, `-version`, the three `-version-full` flags and
+// `-dryrun` that the program has not, unless the program hides them.
 /// The arguments that every NCBI application's description has (the help flags of the
 /// `CArgDescriptions` constructor, `-logfile` and `-conffile` of `AddDefaultFileArguments`, and the
 /// ones `AddStdArguments` adds before the XML is printed): the reader of `ncbi_app::args` knows the
@@ -274,6 +304,10 @@ pub fn write_tables(manifest_dir: &Path, out_dir: &Path) {
     fs::write(&target, out).unwrap_or_else(|error| panic!("{}: {error}", target.display()));
 }
 
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3899-3915
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3925-3943
+// The keys are written first, then the flags, each in the order of the description, each with
+// its aliases; the dependencies follow the arguments.
 /// The arguments (but the standard ones) and the dependencies of one XML, in the XML's order.
 fn read_xml(xml: &str) -> Result<(Vec<Argument>, Vec<Dependency>), String> {
     let mut lines = xml.lines();
@@ -375,6 +409,12 @@ fn kind_of(type_name: &str) -> Option<&'static str> {
     })
 }
 
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:4639-4652
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:4729-4741
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:4864-4872
+// A set of strings writes its case sensitivity and one `<value>` per string; a range of integers
+// (written `Integers`, or `Int8s` for 64 bits) or of reals one `<min>` and `<max>` pair per
+// interval, the reals with `NStr::DoubleToString`.
 /// The `Constraint` of a `<constraint>` element whose usage text is `description`, the lines after
 /// it up to `</constraint>`. NCBI's toolkit classes write their values (`<Strings>`, `<Doubles>`,
 /// `<Integers>`); BLAST's write only their usage text (`CArgAllow::PrintUsageXml` writes nothing),
@@ -443,6 +483,11 @@ fn read_values<'a>(
     }
 }
 
+// NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_input_aux.hpp:79-185
+// NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_input_aux.hpp:214-240
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:998-1013
+// BLAST's own constraints write no values of their own, only their usage texts: the ranges at
+// least, at most and between, the sets of permissible values and the genetic codes.
 /// The class of BLAST's constraint whose `GetUsage` is `usage` (`blast_input_aux.hpp`,
 /// `blast_args.cpp`; the `Constraint` of each says how NCBI writes it), on a key of `kind`.
 fn blast_constraint(kind: &str, usage: &str) -> Result<Spec, String> {
@@ -522,6 +567,7 @@ fn blast_constraint(kind: &str, usage: &str) -> Result<Spec, String> {
     Err(format!("a constraint that maps to no class: {usage}"))
 }
 
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3925-3943
 /// The dependencies of a `<dependencies>` element, up to `</dependencies>`: NCBI writes its
 /// `multimap` twice, the `eRequires` entries first, then the `eExcludes` ones, each in the map's
 /// order (an exclusion is in the map in both directions).

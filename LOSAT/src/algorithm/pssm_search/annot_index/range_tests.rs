@@ -645,3 +645,47 @@ fn giim_handles_follow_ncbis_inverted_tree() {
     );
     assert_eq!(m.map.len(), 2);
 }
+
+// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.hpp:359-388 (F-LH: probes of
+// `F/lh/ncbi/`, rows `db.ps.inpssm.d3.om.flh.*`)
+#[test]
+fn an_accession_is_written_by_the_seq_id_that_made_the_info_of_its_packed_key() {
+    use crate::seqid::model::TextseqId;
+    let acc = |text: &str, version: Option<i32>| TextseqId {
+        accession: Some(text.as_bytes().to_vec()),
+        version,
+        name: None,
+        release: None,
+    };
+    let embl = |text: &str, version| ParsedSeqId::Embl(acc(text, version));
+    let genbank = |text: &str, version| ParsedSeqId::Genbank(acc(text, version));
+    let written = |query: &[ParsedSeqId], id: &ParsedSeqId| {
+        let mut handles = LiveHandles::new(query);
+        let handle = Handle::of_run(id, &mut handles);
+        handles.as_string(&handle, id)
+    };
+    // Another number of the prefix, digit count and version made the info: its alternative.
+    let first = [embl("AAA00002", Some(1))];
+    assert_eq!(
+        written(&first, &genbank("AAA00001", Some(1))),
+        "emb|AAA00001.1|"
+    );
+    // The accession's own case, the info's alternative; another prefix case shares the info.
+    let first = [embl("aaa00002", Some(1))];
+    assert_eq!(
+        written(&first, &genbank("AAA00001", Some(1))),
+        "emb|AAA00001.1|"
+    );
+    // Another version, digit count or prefix, or no version: an info of its own.
+    for other in [
+        embl("AAA00002", Some(2)),
+        embl("AAA000002", Some(1)),
+        embl("AAB00002", Some(1)),
+        embl("AAA00002", None),
+    ] {
+        assert_eq!(
+            written(&[other], &genbank("AAA00001", Some(1))),
+            "gb|AAA00001.1|"
+        );
+    }
+}

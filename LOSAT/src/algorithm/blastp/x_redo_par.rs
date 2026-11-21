@@ -73,13 +73,17 @@
 //!   with cap(q) <= threads + q's jobs at risk computed, and all used, before it; and where q's
 //!   batch's heaps never fill, q's windows are back to their job budget after a number of windows
 //!   logarithmic in q's work at risk. With `-use_sw_tback` a replay may stop inside its window
-//!   and carry the rest to the next one (below); the bound holds there too: q's matches at risk
-//!   carried to the next window count toward cap(q) there (in jobs of four), cap(q) grows only by
-//!   q's jobs at risk of a window whose replay passed all of q's matches in it, and a replay never
+//!   and carry the rest, with their results, to the next one (below). q's results are still
+//!   dropped in one window, the one whose replay reaches them after the heaps fill: a replay never
 //!   stops within q after dropping a result of q (a stop is at a match the test did not end, and
-//!   once the test ends a match of q it ends every later one: their E-values are not smaller), so
-//!   q's results are dropped in one window, the one whose replay reaches them after the heaps
-//!   fill.
+//!   once the test ends a match of q it ends every later one: their E-values are not smaller); a
+//!   carried match was at risk or not by the heaps at its own window's start, which stays valid.
+//!   That window's results of q at risk are those of its new jobs (at most cap(q)) and those
+//!   carried from the windows before it whose replay stopped before passing all of q's matches,
+//!   each of which took at most cap(q) new jobs at risk of q with the same cap(q): cap(q) grows
+//!   only by q's jobs at risk of a window whose replay passed all of q's matches in it. So it
+//!   drops at most 4 x cap(q) x (1 + those stopped windows) results of q, and at most the results
+//!   it holds with the carried ones (2 x 4 x 64 x threads, below).
 //!
 //! Why the output is the one-thread loop's: a match's result is a function of that match's inputs
 //! (the same query workspace values, parameter values, subject and matrix), computed by the same
@@ -695,11 +699,11 @@ fn x_next_job(lists: &[Option<BlastpHitList>], cursor: &mut XMatch, job: &mut Ve
 /// new jobs together are at most `2 x jobs` (so a window holds at most `2 x X_JOB_MATCHES x jobs`
 /// matches with the carried ones, and a carry fewer: one budget of new jobs, and the carried
 /// matches in place of new jobs past one budget). The carried matches count as the window's
-/// matches of their query (each inserts at most one list), and those of the last carried query that the
-/// early termination test may end, with a result, toward that query's jobs at risk, in jobs of
-/// `X_JOB_MATCHES` (so a query's results at risk held before their replay stay within its cap). A
-/// deferred heap test that turns FALSE wastes nothing (`x_sw_heap_test`), so a Smith-Waterman job
-/// is at risk only as an X-drop job is.
+/// matches of their query (each inserts at most one list); the last carried query's new jobs at
+/// risk start from none, so a query's results at risk held before their replay grow by at most
+/// `caps[q]` jobs per stopped window (`x_redo_windows` does not grow `caps[q]` there). A deferred
+/// heap test that turns FALSE wastes nothing (`x_sw_heap_test`), so a Smith-Waterman job is at
+/// risk only as an X-drop job is.
 fn x_window<const SW: bool>(
     lists: &[Option<BlastpHitList>],
     heaps: &[BlastCompoHeap],
@@ -756,23 +760,11 @@ fn x_window<const SW: bool>(
         let last_from = window
             .matches
             .partition_point(|matched| matched.q_idx < last);
-        let last_open = batch_open(last, first_query);
-        let at_risk = (last_from..window.matches.len())
-            .filter(|&index| {
-                !window.ended[index]
-                    && may_be_ended(
-                        last,
-                        last_open,
-                        x_local_match(lists, window.matches[index]).best_evalue,
-                        index - last_from,
-                    )
-            })
-            .count();
         query = Some((
             last,
-            last_open,
+            batch_open(last, first_query),
             window.matches.len() - last_from,
-            at_risk.div_ceil(X_JOB_MATCHES),
+            0,
         ));
     }
     let mut cursor = start;
@@ -1591,9 +1583,11 @@ fn x_redo_windows<const SW: bool>(
     let mut released_to = 0;
     // The cap on the jobs at risk of query q in a window, `caps[q]`: `limits.at_risk_jobs` at
     // first and after a window that dropped a computed result of q; otherwise grown by q's jobs
-    // at risk that the window computed and its replay passed (all used; it doubles when it closed
-    // the window), up to the job budget. So it is at most `limits.at_risk_jobs` plus q's jobs at
-    // risk computed and used before.
+    // at risk of a window whose replay passed all of q's matches in it (all used; it doubles when
+    // it closed the window), up to the job budget. So it is at most `limits.at_risk_jobs` plus q's
+    // jobs at risk computed and used before; and with `SW` a window whose replay stopped before
+    // passing q's matches leaves it as it is, so each window that carries q's results at risk on
+    // to the one that drops them took at most `caps[q]` new jobs at risk of q.
     let budget = limits.jobs.max(limits.at_risk_jobs);
     let mut caps = vec![limits.at_risk_jobs; lists.len()];
     let mut sw_batch = XSwBatch::new(sw_excluded);

@@ -2439,22 +2439,24 @@ fn a_carry_counts_toward_the_window_budget_and_stays_within_one_window() {
     );
 }
 
-/// The cap on jobs at risk holds across stopped replays (review 1 of X4-mt, S2). Query 0 (alone in
-/// its batch, `-max_target_seqs 1`) stops the replay `stops` times; queries 1 and 2 form a batch
-/// whose heaps fill to the cutoff at query 2's first match, after which the early termination
-/// test ends query 2's 399 others. Query 2's matches at risk carried to the next window count
-/// toward its cap there, and its cap grows only by the jobs at risk that a replay passed, so the
-/// results dropped are those of one window with the first cap (15, within 4 x 4), as without a
-/// stop; where either rule was missing, 5 stops dropped 95 results and 20 stops 123 (both
-/// missing: all 399).
+/// The results at risk that stopped replays carry on are bounded per stopped window (review 1 of
+/// X4-mt, S2, as restated in X4mt-9). Query 0 (alone in its batch, `-max_target_seqs 1`) stops the
+/// replay `stops` times; queries 1 and 2 form a batch whose heaps fill to the cutoff at query 2's
+/// first match, after which the early termination test ends query 2's 399 others. Query 2's cap
+/// does not grow while the replays stop before it, so each stopped window takes at most that cap
+/// of new jobs at risk of query 2 and carries their results on, and the one window that drops
+/// query 2's results drops at most `4 x cap x (stops + 1)` of them (`16 x (stops + 1) - 1` here:
+/// query 2's first match fills the heaps) and at most the results a window holds with the carried
+/// ones (`2 x 4 x 32`; 251 after 20 stops). Where a stopped window's jobs at risk grew the cap,
+/// 1, 2 and 5 stops dropped 47, 111 and 251 results.
 #[test]
-fn a_stopped_replay_keeps_the_results_at_risk_within_the_cap() {
+fn a_stopped_replay_drops_at_most_a_cap_of_results_at_risk_per_stopped_window() {
     let limits = XWindowLimits {
         jobs: 32,
         at_risk_jobs: 4,
     };
-    for stops in [0, 5, 20] {
-        let (first, first_cases) = stopping_query(stops);
+    for (stops, wasted) in [(0, 15), (1, 31), (2, 47), (5, 95), (20, 251)] {
+        let (first, first_cases) = stopping_query(stops as u32);
         let lists = vec![
             first,
             hit_list(vec![list(0, 1e-9, false)]),
@@ -2480,14 +2482,25 @@ fn a_stopped_replay_keeps_the_results_at_risk_within_the_cap() {
             heap_contents(&model),
             "{stops} stops"
         );
+        let bound = (X_JOB_MATCHES * limits.at_risk_jobs * (stops + 1))
+            .min(2 * X_JOB_MATCHES * limits.jobs);
+        assert!(
+            counts.wasted <= bound,
+            "{stops} stops: {} results dropped, bound {bound}",
+            counts.wasted
+        );
         assert_eq!(
             (counts.wasted, counts.skipped, counts.continued),
-            (15, 384, stops as usize),
+            (wasted, 399 - wasted, stops),
             "{stops} stops"
         );
-        // Query 2's first match and its 15 matches at risk, query 1's match, query 0's matches
-        // and their continuations.
-        assert_eq!(computed, 16 + 1 + (stops as usize + 1) + stops as usize);
+        // Query 2's first match and its matches at risk, query 1's match, query 0's matches and
+        // their continuations.
+        assert_eq!(
+            computed,
+            (1 + wasted) + 1 + (stops + 1) + stops,
+            "{stops} stops"
+        );
     }
 }
 

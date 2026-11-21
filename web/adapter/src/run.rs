@@ -268,7 +268,11 @@ fn parse_printing(words: &[&str]) -> Result<Parsed, String> {
         queries: applied.queries,
         subjects: applied.subjects,
     };
-    Ok(Parsed::Command(program, Box::new(applied.command), Some(supplied)))
+    Ok(Parsed::Command(
+        program,
+        Box::new(applied.command),
+        Some(supplied),
+    ))
 }
 
 /// `parse` with the inputs that the argv's search strategy supplies (`parse_printing`).

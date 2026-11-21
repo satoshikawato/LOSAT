@@ -35,19 +35,23 @@ pub(crate) struct SeqData {
     pub(crate) texts: Vec<String>,
 }
 
-/// `base_value(r)`: 1 + the NCBI2na value of an IUPACna letter `A`, `C`, `G`, `T`; 0 for any
-/// other letter.
+/// The bit of `CODES` that marks a letter other than A, C, G or T.
+const INVALID: u8 = 4;
+
+/// `base_value(r) - 1` of each IUPACna letter `r` as the index packs it: the NCBI2na value of
+/// `A`, `C`, `G`, `T`, and 0 with `INVALID` for any other letter (`base_value` 0).
 // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_factory.cpp:103-112
-#[inline]
-fn base_value(r: u8) -> u8 {
-    match r {
-        b'A' => 1,
-        b'C' => 2,
-        b'G' => 3,
-        b'T' => 4,
-        _ => 0,
-    }
-}
+const CODES: [u8; 256] = {
+    let mut codes = [INVALID; 256];
+    codes[b'A' as usize] = 0;
+    codes[b'C' as usize] = 1;
+    codes[b'G' as usize] = 2;
+    codes[b'T' as usize] = 3;
+    codes
+};
+
+/// The letters of a byte of `Bases::packed`.
+const CR: usize = super::CR as usize;
 
 /// The letters of a sequence as the index reads them: whether each is A, C, G or T
 /// (`base_value` above 0), and the sequence packed as `seq_store_` holds it. The letters
@@ -56,8 +60,8 @@ fn base_value(r: u8) -> u8 {
 pub(crate) struct Bases {
     /// The number of letters.
     len: usize,
-    /// Four letters to a byte, the first in the two highest bits, each `base_value(r) - 1` (0
-    /// for a letter other than A, C, G, T), the last byte's unused bits 0.
+    /// Four letters to a byte, the first in the two highest bits, each `CODES[r] & 3` (0 for a
+    /// letter other than A, C, G, T), the last byte's unused bits 0.
     // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_factory.cpp:814-876
     packed: Vec<u8>,
     /// The runs `[from, to)` of letters other than A, C, G and T, in increasing order.
@@ -76,33 +80,58 @@ impl Bases {
         bases
     }
 
-    /// Adds the next letters of the sequence.
+    /// Adds the next letters of the sequence: four at a time into a byte of their own, the
+    /// letters before and after those one at a time.
     fn push(&mut self, letters: &[u8]) {
-        self.packed.reserve(letters.len() / super::CR as usize + 1);
-        for &r in letters {
-            let value = base_value(r);
-            if value == 0 {
-                let pos = self.len as u32;
-                match self.invalid.last_mut() {
-                    Some(run) if run.1 == pos => run.1 = pos + 1,
-                    _ => self.invalid.push((pos, pos + 1)),
-                }
-            }
-            self.accum = (self.accum << 2) + value.saturating_sub(1);
-            self.pending += 1;
-            if u64::from(self.pending) == super::CR {
-                self.packed.push(self.accum);
-                (self.accum, self.pending) = (0, 0);
-            }
-            self.len += 1;
+        let mut rest = letters;
+        while self.pending != 0 {
+            let Some((&r, after)) = rest.split_first() else {
+                return;
+            };
+            self.push_letter(r);
+            rest = after;
         }
+        let (groups, tail) = rest.as_chunks::<CR>();
+        let start = self.len;
+        let invalid = &mut self.invalid;
+        self.packed
+            .extend(groups.iter().enumerate().map(|(group, letters)| {
+                let codes = letters.map(|r| CODES[usize::from(r)]);
+                if (codes[0] | codes[1] | codes[2] | codes[3]) & INVALID != 0 {
+                    for (k, &code) in codes.iter().enumerate() {
+                        if code & INVALID != 0 {
+                            add_invalid(invalid, (start + group * CR + k) as u32);
+                        }
+                    }
+                }
+                codes.iter().fold(0, |byte, &code| (byte << 2) | (code & 3))
+            }));
+        self.len += groups.len() * CR;
+        for &r in tail {
+            self.push_letter(r);
+        }
+    }
+
+    /// Adds one letter.
+    fn push_letter(&mut self, r: u8) {
+        let code = CODES[usize::from(r)];
+        if code & INVALID != 0 {
+            add_invalid(&mut self.invalid, self.len as u32);
+        }
+        self.accum = (self.accum << 2) | (code & 3);
+        self.pending += 1;
+        if usize::from(self.pending) == CR {
+            self.packed.push(self.accum);
+            (self.accum, self.pending) = (0, 0);
+        }
+        self.len += 1;
     }
 
     /// Ends the sequence: its last letters fill the high bits of the last byte.
     fn finish(&mut self) {
         if self.pending > 0 {
             self.packed
-                .push(self.accum << ((super::CR as u8 - self.pending) * 2));
+                .push(self.accum << ((CR as u8 - self.pending) * 2));
             (self.accum, self.pending) = (0, 0);
         }
         self.packed.shrink_to_fit();
@@ -122,6 +151,14 @@ impl Bases {
     /// The runs of letters other than A, C, G and T (`base_value` 0).
     pub(crate) fn invalid(&self) -> &[(u32, u32)] {
         &self.invalid
+    }
+}
+
+/// Adds the letter at `pos` to the runs of letters other than A, C, G and T.
+fn add_invalid(invalid: &mut Vec<(u32, u32)>, pos: u32) {
+    match invalid.last_mut() {
+        Some(run) if run.1 == pos => run.1 = pos + 1,
+        _ => invalid.push((pos, pos + 1)),
     }
 }
 
@@ -507,3 +544,7 @@ impl SequenceStream for FastaStream<'_> {
         std::mem::take(&mut self.warnings)
     }
 }
+
+#[cfg(test)]
+#[path = "stream_tests.rs"]
+mod tests;

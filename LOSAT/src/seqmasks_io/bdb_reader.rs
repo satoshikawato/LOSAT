@@ -207,10 +207,11 @@ impl MaskBdbReader {
                  (it writes an error each time it reads them)"
             )));
         }
-        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1358-1362
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1362-1366
         // `GetBioseq` gives no Bioseq for a sequence whose every definition line the alias files'
         // `OID_MASK_TYPE` erased (line RG D1b-2), before it reads the letters: the record of a
-        // sequence without letters, which the maskers skip (probe S2_seg_walk of line RG D1b) and
+        // sequence without letters, which segmasker and windowmasker skip (probe S2_seg_walk of
+        // line RG D1b), dustmasker stops at (probes dust_omnx_int, dust_ntall_fasta of D1b-2) and
         // makembindex refuses.
         if set.deflines.is_empty() {
             let record = BdbRecord {

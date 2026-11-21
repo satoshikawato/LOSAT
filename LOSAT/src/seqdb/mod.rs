@@ -2318,6 +2318,19 @@ impl SeqDb {
         self.sequence_header(at.volume, oid, self.volumes[at.volume].header(at.vol_oid))
     }
 
+    /// [`SeqDb::read_header_of_oid`] with every definition line the header stores
+    /// (`Volume::stored_header`): the read of a volume that NCBI's RPS search of a database of
+    /// several volumes searches bare, where neither a list nor the alias files' `OID_MASK_TYPE`
+    /// reaches the Seq-aligns' ids.
+    pub fn read_stored_header_of_oid(&self, oid: u32) -> Result<SequenceHeader, SeqDbError> {
+        let at = self.locate_oid(oid)?;
+        self.sequence_header(
+            at.volume,
+            oid,
+            self.volumes[at.volume].stored_header(at.vol_oid),
+        )
+    }
+
     /// The `SequenceHeader` of the header `header` of the sequence `oid` (its OID, which the
     /// messages name) in `volume`.
     fn sequence_header(

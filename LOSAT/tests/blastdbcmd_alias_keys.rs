@@ -461,6 +461,37 @@ const RANGE_REFUSALS: &[(&str, &[&str])] = &[
     ("A241", &["-db", "db/ak/ol/p_pc", "-entry", "all", "-outfmt", "%o|%a"]),
 ];
 
+/// A definition line with bytes NCBI reads as '#' that an alias file's `OID_MASK_TYPE` erases
+/// (`../db_search/oidmask/ombx`, line RG D1b-2, review A B1): NCBI decodes the whole header and
+/// writes its error for each such byte before it erases the line (probe b1); LOSAT refuses it
+/// as it refuses such bytes in a line it prints.
+#[test]
+fn removed_lines_with_bytes_ncbi_reads_as_hash_are_refused() {
+    let config = TestDir::new("hash-refusals");
+    let words = [
+        "-db",
+        "../db_search/oidmask/ombx",
+        "-entry",
+        "all",
+        "-outfmt",
+        "%o|%a|%t",
+    ];
+    let (stdout, stderr, code) = blastdbcmd(&words, &config.0);
+    let stderr = String::from_utf8_lossy(&stderr);
+    assert_eq!(
+        (stdout.as_slice(), code),
+        (b"".as_slice(), 1),
+        "A271: {stderr}"
+    );
+    assert!(
+        stderr.contains(
+            "sequence 0 of the volume: a definition line that a list or the alias \
+             files' OID_MASK_TYPE removes, with bytes NCBI reads as '#'"
+        ),
+        "A271: {stderr}"
+    );
+}
+
 #[test]
 fn ranges_outside_the_bit_array_below_them_are_refused() {
     let config = TestDir::new("range-refusals");

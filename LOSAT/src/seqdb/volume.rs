@@ -620,11 +620,15 @@ impl Volume {
     // Seq-align (`keeps_line`), and `GetBioseq` gives none. The accession guide's warning about an
     // id (`oid_mask::is_predicted`) is posted at each of NCBI's header reads that is not served
     // by its cache of filtered headers (seqdbvol.cpp:1977-1988, a cache of the main thread):
-    // LOSAT does not count those reads and refuses such an id.
+    // LOSAT does not count those reads and refuses such an id. NCBI decodes the whole header
+    // before it removes a line (seqdbvol.cpp:1993, then 2057), and its decoder writes an error
+    // for each byte it reads as '#' in a line it then removes too (probe b1 of line RG D1b-2):
+    // refused as the bytes of a kept line are where they are read.
     /// Which definition lines of the sequence `oid` (volume-relative), decoded as `set`, the reads
     /// keep, as NCBI's filtered header read tests them (the volume's list rule, `rule_mask`, then
     /// the erasure of model lines): `None` where a seqid rule keeps none; the reader's error for
-    /// a tag NCBI's read cannot adjust, LOSAT's refusal of an id the accession guide warns about.
+    /// a tag NCBI's read cannot adjust, LOSAT's refusals of a removed line with bytes NCBI reads
+    /// as '#' and of an id the accession guide warns about.
     fn filtered_mask(
         &self,
         oid: u32,
@@ -635,29 +639,57 @@ impl Volume {
                 .map_err(|error| error.error(&self.base, line_rule.volume_start + oid))?
             {
                 Some(mask) => mask,
-                None => return Ok(None),
+                None => {
+                    self.refuse_removed_replaced_bytes(oid, set, &vec![false; set.deflines.len()])?;
+                    return Ok(None);
+                }
             },
             None => vec![true; set.deflines.len()],
         };
+        let mut warned = false;
         if self.exclude_model {
-            let mut warned = false;
             for (keep, defline) in mask.iter_mut().zip(&set.deflines) {
                 if *keep {
                     *keep = !super::oid_mask::is_model_line(&defline.ids, &mut |_| warned = true);
                 }
             }
-            if warned {
-                return Err(SeqDbError::Unsupported {
-                    path: self.base.clone(),
-                    message: format!(
-                        "sequence {oid}: a Seq-id that NCBI's accession guide warns about, under \
-                         the alias files' OID_MASK_TYPE (NCBI writes the warning at each of its \
-                         uncached reads of the header)"
-                    ),
-                });
-            }
+        }
+        self.refuse_removed_replaced_bytes(oid, set, &mask)?;
+        if warned {
+            return Err(SeqDbError::Unsupported {
+                path: self.base.clone(),
+                message: format!(
+                    "sequence {oid} of the volume: a Seq-id that NCBI's accession guide warns \
+                     about, under the alias files' OID_MASK_TYPE (NCBI writes the warning at each \
+                     of its uncached reads of the header)"
+                ),
+            });
         }
         Ok(Some(mask))
+    }
+
+    /// LOSAT's refusal of the sequence `oid` (volume-relative) where a line of `set` that `mask`
+    /// removes has bytes NCBI reads as '#' (`filtered_mask`).
+    fn refuse_removed_replaced_bytes(
+        &self,
+        oid: u32,
+        set: &crate::seqid::DeflineSet,
+        mask: &[bool],
+    ) -> Result<(), SeqDbError> {
+        let removed_replaced = set.deflines.iter().zip(mask).any(|(defline, &keep)| {
+            !keep && (defline.replaced_title_bytes > 0 || defline.replaced_id_bytes > 0)
+        });
+        if removed_replaced {
+            return Err(SeqDbError::Unsupported {
+                path: self.base.clone(),
+                message: format!(
+                    "sequence {oid} of the volume: a definition line that a list or the alias \
+                     files' OID_MASK_TYPE removes, with bytes NCBI reads as '#' (it writes an \
+                     error each time it reads them)"
+                ),
+            });
+        }
+        Ok(())
     }
 
     /// [`Volume::filtered_mask`] for a read of the sequence `oid` (volume-relative): LOSAT's
@@ -735,6 +767,45 @@ impl Volume {
                 .kept_lines(oid, record, path, read)
                 .map(VolumeHeader::Ordinal),
         }
+    }
+
+    /// The header of the sequence `oid` (volume-relative) with every definition line it stores:
+    /// no list's rule and no erasure of model lines, as NCBI reads the volume searched bare
+    /// (`SeqDb::read_stored_header_of_oid`).
+    pub fn stored_header(&self, oid: u32) -> Result<VolumeHeader, SeqDbError> {
+        let (record, path) = self.header_record(oid)?;
+        match decode_deflines_as(&record, path, oid, true) {
+            Err(error) if error.is_parsed_seqids() => {
+                decode_full(&record, path).map(VolumeHeader::Parsed)
+            }
+            read => read.map(VolumeHeader::Ordinal),
+        }
+    }
+
+    /// Whether the volume's reads remove a definition line of the sequence `oid`
+    /// (volume-relative): its list's rule or the erasure of model lines
+    /// (`SeqDb::erases_a_line_of_oid`). Nothing is posted or refused for the lines themselves,
+    /// as a read of the volume searched bare tests none (the reader's error for a header that
+    /// cannot be read or a tag NCBI's read cannot adjust stays).
+    pub(super) fn erases_a_line(&self, oid: u32) -> Result<bool, SeqDbError> {
+        if !self.filters_lines() {
+            return Ok(false);
+        }
+        let (record, path) = self.header_record(oid)?;
+        let set = decode_full(&record, path)?;
+        let mask = match &self.defline_rule {
+            Some(line_rule) => match Self::rule_mask(line_rule, &set)
+                .map_err(|error| error.error(&self.base, line_rule.volume_start + oid))?
+            {
+                Some(mask) => mask,
+                None => return Ok(true),
+            },
+            None => vec![true; set.deflines.len()],
+        };
+        Ok(mask.iter().zip(&set.deflines).any(|(&keep, defline)| {
+            !keep
+                || (self.exclude_model && super::oid_mask::is_model_line(&defline.ids, &mut |_| {}))
+        }))
     }
 
     /// LOSAT's refusal of the sequence `oid` (volume-relative) whose every definition line

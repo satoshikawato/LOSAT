@@ -1836,6 +1836,13 @@ impl SeqDb {
         self.volumes[at.volume].keeps_line(at.vol_oid)
     }
 
+    /// Whether the database's reads remove a definition line of the sequence of OID `oid`,
+    /// included or not (`Volume::erases_a_line`: nothing posted or refused for its lines).
+    pub fn erases_a_line_of_oid(&self, oid: u32) -> Result<bool, SeqDbError> {
+        let at = self.locate_oid(oid)?;
+        self.volumes[at.volume].erases_a_line(at.vol_oid)
+    }
+
     /// The bitmap of the OIDs a seqid list keeps in a version 5 database (`ids`: sorted and
     /// unique, as the lookup wants them).
     fn seqid_words_v5(

@@ -653,16 +653,21 @@ impl TranslatedRpsSearch {
         let db = database.x_seqdb();
         for batch in 0..states.len() {
             let state = &mut states[batch];
-            let checked =
-                report_ordinal_ids(db, &mut state.hit_lists, options.shown_lists(), PROGRAM)
-                    .and_then(|unlisted| {
-                        state.unlisted = unlisted.unwrap_or_default();
-                        if self.strategy {
-                            state.request_space(units, options, &gapped)
-                        } else {
-                            Ok(None)
-                        }
-                    });
+            let checked = report_ordinal_ids(
+                db,
+                &mut state.hit_lists,
+                options.shown_lists(),
+                PROGRAM,
+                units.searches_volumes_bare(),
+            )
+            .and_then(|unlisted| {
+                state.unlisted = unlisted.unwrap_or_default();
+                if self.strategy {
+                    state.request_space(units, options, &gapped)
+                } else {
+                    Ok(None)
+                }
+            });
             match checked {
                 Ok(request_space) => state.request_space = request_space,
                 Err(error) => {

@@ -678,20 +678,20 @@ fn a_profile_of_the_reported_seq_id_past_the_cut_is_reported() {
     );
     let mut joined = vec![Some(hit_list(&[twin, copy, other]))];
     assert_eq!(
-        report_ordinal_ids(db, &mut joined, 1, PROGRAM).unwrap(),
+        report_ordinal_ids(db, &mut joined, 1, PROGRAM, true).unwrap(),
         None
     );
     assert_eq!(oids(&joined), [1, 1, 0]);
     let mut apart = vec![Some(hit_list(&[twin, other, copy]))];
     assert_eq!(
-        report_ordinal_ids(db, &mut apart, 1, PROGRAM).unwrap(),
+        report_ordinal_ids(db, &mut apart, 1, PROGRAM, true).unwrap(),
         Some(vec![1])
     );
     assert_eq!(oids(&apart), [1, 0]);
     let database = open(1, "dup");
     let db = database.x_seqdb();
     let mut unfound = vec![Some(hit_list(&[twin, copy, other]))];
-    let error = report_ordinal_ids(db, &mut unfound, 1, PROGRAM).unwrap_err();
+    let error = report_ordinal_ids(db, &mut unfound, 1, PROGRAM, true).unwrap_err();
     assert!(
         error.to_string().contains(&format!(
             "a hit of the profile of OID {twin} outside the RPS-BLAST database's alias files' FIRST_OID, LAST_OID and OIDLIST (NCBI BLAST+ 2.17.0's report does not find it"
@@ -720,7 +720,7 @@ fn a_profile_of_the_reported_seq_id_past_the_cut_is_reported() {
         let database = open(2, copy_dir);
         let db = database.x_seqdb();
         let mut found_other = vec![Some(hit_list(&[twin, copy, other]))];
-        let error = report_ordinal_ids(db, &mut found_other, 1, PROGRAM).unwrap_err();
+        let error = report_ordinal_ids(db, &mut found_other, 1, PROGRAM, true).unwrap_err();
         assert!(
             error.to_string().contains(&format!(
                 "a hit of the profile of OID {copy} outside the RPS-BLAST database's alias files' FIRST_OID, LAST_OID and OIDLIST, whose Seq-id NCBI BLAST+ 2.17.0's report finds in another record or other letters (the profile of OID {twin})"

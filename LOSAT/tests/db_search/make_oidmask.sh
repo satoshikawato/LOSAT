@@ -11,6 +11,7 @@
 #   omn         makeblastdb -parse_seqids -oid_masks 1 over omn.fna in two volumes (omn.00, omn.01, omn.nal, .nxm each)
 #   omnx        blastdb_aliastool -oid_masks 1 over omn (omnx.nal, omnx.00.nal, omnx.01.nal)
 #   q.faa, q.fna  queries: record 1 of om.faa / omn.fna
+#   omb, ombx   a version 4 database with the byte 0x80 in two predicted lines' titles, and its alias (below)
 #   *.pal, *.nal, *.msk  hand-written alias files and OID list files (below)
 # makeblastdb writes the build date into the .pjs/.njs files, so a rebuild differs from the committed files.
 #
@@ -101,6 +102,30 @@ al j1.pal "DBLIST omp" "FIRST_OID 2" "LAST_OID 6" "OIDLIST omp.pxm" "OID_MASK_TY
 al tall.pal "DBLIST omp" "OIDLIST ones.msk" "OID_MASK_TYPE 1" "NSEQ 8" "LENGTH 1133"
 # --- over the nucleotide database: a per-volume list (bits past each volume's end are ignored)
 al ntall.nal "DBLIST omn" "OIDLIST onesn.msk" "OID_MASK_TYPE 1"
+# --- omb (version 4, -oid_masks 1) and ombx (blastdb_aliastool -oid_masks 1): OID 0 has a normal line and a
+# predicted one whose title holds the byte 0x80, OID 1 a normal line, OID 2 a predicted one with 0x80 (masked out by
+# omb.pxm). makeblastdb writes '#' for such a byte, so the stored "bad#" is patched back to "bad\x80" (as a header that
+# NCBI's decoder reads as '#': it writes an error for each, also in a line OID_MASK_TYPE then erases; review A of D1b-2).
+python3 - <<'PY'
+seqs = []
+for line in open("om.faa"):
+    if line.startswith(">"):
+        seqs.append("")
+    else:
+        seqs[-1] += line.strip()
+with open("omb.faa", "w") as out:
+    out.write(">ref|NP_000011.1| ok eleven\x01ref|XP_000012.1| bad#twelve\n" + seqs[0] + "\n")
+    out.write(">ref|NP_000013.1| plain thirteen\n" + seqs[6] + "\n")
+    out.write(">ref|XP_000014.1| bad#fourteen\n" + seqs[7] + "\n")
+PY
+"$N/makeblastdb" -in omb.faa -dbtype prot -parse_seqids -oid_masks 1 -blastdb_version 4 -out omb > /dev/null
+python3 - <<'PY'
+data = open("omb.phr", "rb").read()
+assert data.count(b"bad#") == 2
+open("omb.phr", "wb").write(data.replace(b"bad#", b"bad\x80"))
+PY
+"$N/blastdb_aliastool" -db omb -dbtype prot -oid_masks 1 -out ombx > /dev/null
+rm omb.faa
 # --- the seqid lists of rows db.om.bp.tall.neg.6 and .pos.6
 al neg.txt WP_000008.1
 al pos.txt XP_000003.1 NP_000001.1

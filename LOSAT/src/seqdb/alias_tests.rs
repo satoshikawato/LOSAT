@@ -163,3 +163,42 @@ fn each_volume_has_the_type_of_its_own_list() {
     );
     assert_eq!(lines(&open("omn", SeqType::Nucleotide).unwrap()), ALL_LINES);
 }
+
+/// `omb` holds the byte 0x80 in the titles of two predicted lines (`make_oidmask.sh`): NCBI
+/// writes its error for each such byte at every read of the header, also in a line it then
+/// erases (probe b1 of line RG D1b-2), which LOSAT refuses at the read; a sequence without such
+/// a line is read.
+#[test]
+fn a_removed_line_with_bytes_ncbi_reads_as_hash_is_refused() {
+    let db = open("ombx", SeqType::Protein).unwrap();
+    let error = db.defline_set(0).unwrap_err().to_string();
+    assert!(
+        error.contains("removes, with bytes NCBI reads as '#'"),
+        "{error}"
+    );
+    assert!(db.keeps_line(0).is_err());
+    assert_eq!(db.defline_set(1).unwrap().deflines.len(), 1);
+}
+
+/// The reads of a volume that NCBI's RPS search of several volumes searches bare: the stored
+/// header keeps the lines the type erases, and `erases_a_line_of_oid` tells which sequences lose
+/// one (OIDs 1 and 5, which the list leaves out, too).
+#[test]
+fn the_stored_header_keeps_the_lines_the_type_erases() {
+    use super::super::SequenceHeader;
+    let db = open("ompx", SeqType::Protein).unwrap();
+    let count = |header: SequenceHeader| match header {
+        SequenceHeader::Parsed(set) => set.deflines.len(),
+        SequenceHeader::Ordinal(deflines) => deflines.len(),
+    };
+    let erased: Vec<bool> = (0..8)
+        .map(|oid| db.erases_a_line_of_oid(oid).unwrap())
+        .collect();
+    assert_eq!(erased, [false, true, true, true, false, true, false, false]);
+    assert_eq!(count(db.read_header_of_oid(2).unwrap()), 0);
+    assert_eq!(count(db.read_stored_header_of_oid(2).unwrap()), 1);
+    assert_eq!(count(db.read_header_of_oid(3).unwrap()), 1);
+    assert_eq!(count(db.read_stored_header_of_oid(3).unwrap()), 2);
+    let db = open("ompy", SeqType::Protein).unwrap();
+    assert!((0..8).all(|oid| !db.erases_a_line_of_oid(oid).unwrap()));
+}

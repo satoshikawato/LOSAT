@@ -298,10 +298,11 @@
   database of one volume, which names the volume where NCBI's names the database itself, the
   Owner's decision of 2026-11-20 (Q6=B); the explicit rejection, rule 2, of two masking
   algorithms that would write one GI-mask data file at the same time, whose bytes depend on how
-  the C++ runtime buffers two streams on one file; the GI-mask writer's other defects reproduced
-  under rule 2, two algorithms of one name whose files are written one after the other included;
-  the form of exception 20 and the rejection Owner-delegated, standing instruction 2026-09-29,
-  restated 2026-10-07; numbered after 1.67, line LIB-S item S1; first 1.60, then 1.61, 1.63 and
+  the C++ runtime buffers two streams on one file, the Owner's decision of 2026-11-21 23:07 JST
+  (question Q-GIDUP, 「推奨通り」); the GI-mask writer's other defects reproduced under rule 2, two
+  algorithms of one name whose files are written one after the other included; the form of
+  exception 20 Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered
+  after 1.67, line LIB-S item S1; first 1.60, then 1.61, 1.63 and
   1.68 at the merges of dev that brought line RG's 1.60, then line RG's 1.61 and line LIB-O's 1.62,
   then the 1.63 to 1.67 of lines RG, PS, NP and LIB-S)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
@@ -2507,8 +2508,8 @@ Q-BM decodes it as NCBI does, as the Owner decided on 2026-11-16 (「推奨通�
   4 GiB.
 
 - makeblastdb `-gi_mask`, two masking algorithms that would write one GI-mask data file at the
-  same time (version 1.68, 2026-11-21, line NP item M4c-1, Owner-delegated, standing instruction
-  2026-09-29, restated 2026-10-07; not of the database class above). Two algorithms whose names
+  same time (version 1.68, 2026-11-21, line NP item M4c-1, the Owner's decision; not of the
+  database class above). Two algorithms whose names
   lead to the same files (one `-gi_mask_name` twice, two names of one path such as `x` and `./x`,
   or a name that reaches the same directory through a link; on Windows and macOS also two names
   that differ only in case) each get a `CWriteDB_GiMask` (`writedb_impl.cpp:1453-1456`) with its
@@ -2526,9 +2527,9 @@ Q-BM decodes it as NCBI does, as the Owner decided on 2026-11-16 (「推奨通�
   would create that volume (exit 1, "losat makeblastdb: -gi_mask: two masking algorithms would
   write one GI-mask data file at the same time ..."). The build ends there as an error of NCBI's
   `SetMaskData` ends it (case `x03gi`): the volume files are removed, and the GI-mask files of
-  the other algorithm and the alias file stay. The Owner has not seen this choice yet; the PR of
-  M4c-1 asks it (keep this rejection, or reproduce the runtime's buffering once the audit
-  allows). Unit tests in `LOSAT/src/writedb/gi_mask_tests.rs`, cases `w25`, `w25b` and `m04`
+  the other algorithm and the alias file stay. The Owner answered 「推奨通り」 on 2026-11-21 at
+  23:07 JST to question Q-GIDUP, whose recommended option A was to keep this rejection; option
+  B, to reproduce the C++ runtime's buffering, was not taken. Unit tests in `LOSAT/src/writedb/gi_mask_tests.rs`, cases `w25`, `w25b` and `m04`
   (refused) and `x11_1`, `x11_2` and `x12` (written in turn) of `LOSAT/tests/seqdb/gi_mask`
   (`make_gi_mask_fixtures.py`).
 

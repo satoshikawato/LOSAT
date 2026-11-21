@@ -467,15 +467,30 @@ def write_source_db(bin_dir, d, env):
     return " ".join(sorted(p.name for p in d.glob("src4.*")))
 
 
-def check_bytes_total(case_dir, stamp):
+def metadata_sizes(case_dir):
+    """The sizes of the metadata files under `case_dir`, taken before a run."""
+    return {path: path.stat().st_size for path in case_dir.rglob("*.[np]js")}
+
+
+def check_bytes_total(case_dir, stamp, before):
     """The "bytes-total" of every metadata file that the run wrote is the sum of the sizes of the
-    files it lists, each time it lists one (the Rust test compares LOSAT's distance from that
-    sum with 0)."""
+    files it lists, each time it lists one, the metadata file itself at its size before the run
+    (`before`: makeblastdb lists the files before it writes the new one, so an old one that the
+    run did not remove counts as it was). The Rust test compares LOSAT's distance from that sum
+    with 0."""
     for path in sorted(case_dir.rglob("*.[np]js")):
         if path.stat().st_mtime_ns < stamp.stat().st_mtime_ns:
             continue
         meta = json.loads(path.read_text())
-        total = sum((path.parent / name).stat().st_size for name in meta["files"])
+        total = 0
+        for name in meta["files"]:
+            listed = path.parent / name
+            if listed == path:
+                if path not in before:
+                    raise SystemExit(f"{path}: lists itself, which did not exist before the run")
+                total += before[path]
+            else:
+                total += listed.stat().st_size
         if meta["bytes-total"] != total:
             raise SystemExit(f"{path}: bytes-total {meta['bytes-total']}, files {total}")
 
@@ -595,13 +610,14 @@ def main():
             put = []
         put += setup(case_dir, tokens, inputs)
         argv = [w.replace("{C}", str(case_dir)) for w in words]
+        before = metadata_sizes(case_dir)
         stamp.touch()
         time.sleep(0.05)
         result = subprocess.run([str(bin_dir / "makeblastdb")] + argv, cwd=case_dir,
                                 capture_output=True, env=env)
         rc, stderr = single_volume_exception(bin_dir, case_dir, argv, result.returncode,
                                              result.stderr, stamp, env)
-        check_bytes_total(case_dir, stamp)
+        check_bytes_total(case_dir, stamp, before)
         rows.append("\t".join([name, losat, setup_text] + words))
         exp = out / "expected"
         (exp / f"{name}.rc").write_text(f"{rc}\n")

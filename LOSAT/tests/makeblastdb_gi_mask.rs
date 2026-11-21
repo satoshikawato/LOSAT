@@ -12,9 +12,11 @@
 //! masked: the date of a `.gmi` or `.gni` file (its length is compared), the creation time of a
 //! mask column file (`.naa`, `.paa`), the line "Alias file created" of an alias file, and
 //! "last-updated" of a metadata file. Its "bytes-total" is compared as its distance from the sum
-//! of the sizes of the files it lists, each time it lists one, in the run directory: 0 for
-//! makeblastdb's (the script checks that when it freezes them). A metadata file that the case's
-//! run did not write (an earlier case of its directory did) has it masked.
+//! of the sizes of the files it lists, each time it lists one, in the run directory, the metadata
+//! file itself at the size it had before the run (makeblastdb lists the files before it writes the
+//! new one, so an old one that the run did not remove counts as it was): 0 for makeblastdb's (the
+//! script checks that when it freezes them). A metadata file that the case's run did not write (an
+//! earlier case of its directory did) has it masked.
 //!
 //! The cases of the column `losat` other than `same`: `refuse` (two algorithms that would write
 //! one GI-mask data file at the same time, which LOSAT refuses at the record that would open it:
@@ -35,6 +37,7 @@
 // size, and the run directory of a message is the directory as the child process sees it.
 #![cfg(target_os = "linux")]
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -149,18 +152,22 @@ fn masked(text: &str, c: &str) -> String {
 /// How the "bytes-total" of a metadata file is compared (`bytes_total_distance`).
 #[derive(Clone, Copy)]
 enum BytesTotal<'a> {
-    /// A file of LOSAT's run, in this directory.
-    Run(&'a Path),
+    /// A file of LOSAT's run under this directory, with the sizes of the run's metadata files
+    /// before the run (`metadata_sizes`).
+    Run(&'a Path, &'a HashMap<String, u64>),
     /// A file of makeblastdb's run, whose value is the sum (distance 0).
     Frozen,
     /// A file that an earlier case of the directory wrote: masked.
     Masked,
 }
 
-/// The "bytes-total" of the metadata file `text` replaced by its distance from the sum of the
-/// sizes of the files that it lists (each time it lists one), read in the directory of the
-/// metadata file of LOSAT's run (`total`).
-fn bytes_total_distance(text: &str, total: BytesTotal<'_>) -> String {
+/// The "bytes-total" of the metadata file `rel` (`text`) replaced by its distance from the sum of
+/// the sizes of the files that it lists (each time it lists one), read in the directory of the
+/// metadata file of LOSAT's run (`total`); the metadata file itself counts at its size before the
+/// run.
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb.cpp:1610-1703 (the files
+// that exist when the metadata is made, the old metadata file among them, are listed and summed)
+fn bytes_total_distance(rel: &str, text: &str, total: BytesTotal<'_>) -> String {
     let key = "\"bytes-total\": ";
     let Some(at) = text.find(key).map(|at| at + key.len()) else {
         return text.to_string();
@@ -169,7 +176,10 @@ fn bytes_total_distance(text: &str, total: BytesTotal<'_>) -> String {
     let distance = match total {
         BytesTotal::Frozen => "0".to_string(),
         BytesTotal::Masked => "N".to_string(),
-        BytesTotal::Run(dir) => {
+        BytesTotal::Run(run, before) => {
+            let path = run.join(rel);
+            let dir = path.parent().unwrap();
+            let own = path.file_name().unwrap().to_string_lossy().into_owned();
             let listed = text
                 .split_once("\"files\": [")
                 .map_or("", |(_, rest)| rest.split(']').next().unwrap_or(""));
@@ -179,9 +189,15 @@ fn bytes_total_distance(text: &str, total: BytesTotal<'_>) -> String {
                 .map(|item| item.trim().trim_matches('"'))
                 .filter(|name| !name.is_empty())
             {
-                match std::fs::metadata(dir.join(name)) {
-                    Ok(meta) => sum += i128::from(meta.len()),
-                    Err(_) => return format!("{text}\n(listed file {name} is missing)"),
+                let size = match name == own {
+                    true => before.get(rel).copied(),
+                    false => std::fs::metadata(dir.join(name))
+                        .ok()
+                        .map(|meta| meta.len()),
+                };
+                match size {
+                    Some(size) => sum += i128::from(size),
+                    None => return format!("{text}\n(listed file {name} is missing)"),
                 }
             }
             match text[at..end].trim().parse::<i128>() {
@@ -246,15 +262,7 @@ fn masked_file(rel: &str, bytes: Vec<u8>, c: &str, total: BytesTotal<'_>) -> Vec
     let metadata = rel.ends_with(".njs") || rel.ends_with(".pjs");
     match (text, metadata) {
         (true, true) => {
-            let dir = match total {
-                BytesTotal::Run(run) => Some(run.join(rel).parent().unwrap().to_path_buf()),
-                _ => None,
-            };
-            let total = match &dir {
-                Some(dir) => BytesTotal::Run(dir),
-                None => total,
-            };
-            let text = bytes_total_distance(&String::from_utf8_lossy(&bytes), total);
+            let text = bytes_total_distance(rel, &String::from_utf8_lossy(&bytes), total);
             masked(&text, c).into_bytes()
         }
         (true, false) => masked(&String::from_utf8_lossy(&bytes), c).into_bytes(),
@@ -298,6 +306,18 @@ fn files_under(dir: &Path) -> Vec<String> {
     listing(dir, &[])
         .into_iter()
         .map(|line| line.split('\t').next().unwrap().to_string())
+        .collect()
+}
+
+/// The sizes of the metadata files under `dir` (relative path), taken before a run.
+fn metadata_sizes(dir: &Path) -> HashMap<String, u64> {
+    files_under(dir)
+        .into_iter()
+        .filter(|rel| rel.ends_with(".njs") || rel.ends_with(".pjs"))
+        .map(|rel| {
+            let size = std::fs::metadata(dir.join(&rel)).unwrap().len();
+            (rel, size)
+        })
         .collect()
 }
 
@@ -347,6 +367,7 @@ fn compare(
     put: &[String],
     got: (i32, String, String),
     started: std::time::SystemTime,
+    before: &HashMap<String, u64>,
 ) -> Vec<String> {
     let dir = fixtures();
     // makeblastdb's messages in LOSAT's words (`losat::wording`, the one mapping of the freeze).
@@ -394,7 +415,7 @@ fn compare(
             .and_then(|meta| meta.modified())
             .is_ok_and(|modified| modified >= started);
         let (want_total, got_total) = match fresh {
-            true => (BytesTotal::Frozen, BytesTotal::Run(case_dir)),
+            true => (BytesTotal::Frozen, BytesTotal::Run(case_dir, before)),
             false => (BytesTotal::Masked, BytesTotal::Masked),
         };
         let want = masked_file(&rel, frozen, c, want_total);
@@ -450,11 +471,12 @@ fn gi_mask_builds_end_as_makeblastdb_s() {
         let stamp = tmp.0.join("stamp");
         std::fs::write(&stamp, case.name.as_bytes()).unwrap();
         let started = std::fs::metadata(&stamp).unwrap().modified().unwrap();
+        let before = metadata_sizes(&case_dir);
         let got = run(&case_dir, &words);
         let problems = match case.losat.as_str() {
             "same" => {
                 counts[0] += 1;
-                compare(&case, &case_dir, &put, got, started)
+                compare(&case, &case_dir, &put, got, started, &before)
             }
             "refuse" => {
                 counts[1] += 1;

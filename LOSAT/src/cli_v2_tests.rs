@@ -1717,15 +1717,9 @@ fn blastp_takes_a_database_and_its_size() {
         let text = crate::cli::render_message(&error);
         assert!(text.contains("'-db <NAME>'"), "{text}");
     }
-    // LOSAT Web has no database files: its validation (`check_options`) rejects `-db`.
-    let error =
-        crate::algorithm::blastp::blast_engine::check_options(&blastp(&["-db", "d"]).unwrap())
-            .unwrap_err();
-    assert!(
-        format!("{error:#}")
-            .contains("-db (a database search) is not supported in the browser yet"),
-        "{error:#}"
-    );
+    // LOSAT Web's validation (`check_options`) checks `-db` as the command line does: the run opens
+    // the database from the files that the host gives (line WQA D12a).
+    crate::algorithm::blastp::blast_engine::check_options(&blastp(&["-db", "d"]).unwrap()).unwrap();
 }
 
 // BLASTN's `-db NAME` and `-dbsize N` (blast_args.cpp:2191-2199 and 2231-2237, quoted
@@ -1825,14 +1819,9 @@ fn tblastn_takes_a_database_and_its_size() {
             "{words:?}: {error}"
         );
     }
-    // LOSAT Web has no database files: its validation (`check_options`) rejects `-db`.
-    let error =
-        crate::algorithm::tblastn::check_options(&tblastn(&["-db", "d"]).unwrap()).unwrap_err();
-    assert!(
-        format!("{error:#}")
-            .contains("-db (a database search) is not supported in the browser yet"),
-        "{error:#}"
-    );
+    // LOSAT Web's validation (`check_options`) checks `-db` as the command line does: the run opens
+    // the database from the files that the host gives (line WQA D12a).
+    crate::algorithm::tblastn::check_options(&tblastn(&["-db", "d"]).unwrap()).unwrap();
 }
 
 // TBLASTX's `-db NAME` and `-dbsize N`, as TBLASTN's: `-db` excludes `-subject` and
@@ -1876,15 +1865,10 @@ fn tblastx_takes_a_database_and_its_size() {
             "{words:?}: {error}"
         );
     }
-    // LOSAT Web has no database files: its validation (`check_options`) rejects `-db`.
-    let error =
-        crate::algorithm::tblastx::blast_engine::check_options(&tblastx(&["-db", "d"]).unwrap())
-            .unwrap_err();
-    assert!(
-        format!("{error:#}")
-            .contains("-db (a database search) is not supported in the browser yet"),
-        "{error:#}"
-    );
+    // LOSAT Web's validation (`check_options`) checks `-db` as the command line does: the run opens
+    // the database from the files that the host gives (line WQA D12a).
+    crate::algorithm::tblastx::blast_engine::check_options(&tblastx(&["-db", "d"]).unwrap())
+        .unwrap();
 }
 
 #[test]

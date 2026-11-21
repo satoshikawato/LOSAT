@@ -88,12 +88,15 @@ pub use crate::algorithm::tblastn::refuse_browser_pssm_query as refuse_tblastn_p
 pub use crate::algorithm::tblastx::blast_engine::check_options as check_tblastx_options;
 pub use crate::utils::threading::validate_threads;
 
-// The searches: each program's `run_local` over records in memory, the pool that the searches
-// of one argv share, and the routing of their outputs (`api/local_blast.rs`).
+// The searches: each program's `run_local` over records in memory and its `run_local_database`
+// over the database of `-db` (opened by name with the run's application settings, as the command
+// line opens it: LOSAT Web's host gives the engine the run's working directory, line WQA D12a), the
+// pool that the searches of one argv share, and the routing of their outputs (`api/local_blast.rs`).
 pub use crate::api::local_blast::{
-    run_local_blastn, run_local_blastp, run_local_blastx, run_local_tblastn, run_local_tblastx,
-    with_run_pool, FormatObserver, FormatOutput, FormatRefusal, HspIndex, OutputSink,
-    ReportOutputs,
+    run_local_blastn, run_local_blastp, run_local_blastx, run_local_database_blastn,
+    run_local_database_blastp, run_local_database_blastx, run_local_database_tblastn,
+    run_local_database_tblastx, run_local_tblastn, run_local_tblastx, with_run_pool,
+    FormatObserver, FormatOutput, FormatRefusal, HspIndex, OutputSink, ReportOutputs,
 };
 pub use crate::report::blast_xml2::SideFileSink;
 pub use crate::report::PairwiseHit;

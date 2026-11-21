@@ -4,7 +4,7 @@
 // thread drops messages of an older one.
 import type { RecordKey, ShownIds } from '../../domain/dataset.js';
 import type { CountsUse } from '../../domain/counts.js';
-import type { MessagePlace, RegistryFile, RunFile } from '../../domain/run-files.js';
+import type { DirectoryFile, MessagePlace, RegistryFile, RunFile } from '../../domain/run-files.js';
 import type { EnginePhase } from '../../ports/engine.js';
 import type { OutputStream } from '../../ports/run-output.js';
 import type { ReactorArtifact } from '../reactor/artifact.js';
@@ -72,7 +72,10 @@ export interface WorkerRun {
   /** Threads to use; 1 runs the serial module. */
   readonly threads: number;
   readonly query: WorkerInput;
-  readonly subject: WorkerInput;
+  /** None for a run of `-db`, which searches the database in `files` (EngineRunRequest.subject). */
+  readonly subject?: WorkerInput;
+  /** The files of the run's working directory (EngineRunRequest.files); Files are shared, not copied. */
+  readonly files?: readonly DirectoryFile[];
   readonly windowMasker?: WorkerCounts;
   /**
    * The registry file of `-conffile` (EngineRunRequest.conffile): registered before the argv is
@@ -203,6 +206,8 @@ export interface ThreadPrepare {
   readonly faults: MessagePort;
   /** The use count of the instance (instance-use.ts): a thread counts itself off when it returns. */
   readonly use: SharedArrayBuffer;
+  /** The table of the descriptors of the run's working directory that the instance's threads share (run-directory.ts). */
+  readonly directory: SharedArrayBuffer;
 }
 
 /** Start states, in the start message's shared Int32Array (index 0). */
@@ -217,6 +222,8 @@ export interface ThreadStart {
   readonly startArg: number;
   /** Int32Array(1) on a SharedArrayBuffer: START_PENDING, then START_TAKEN or START_ABANDONED. */
   readonly started: SharedArrayBuffer;
+  /** The files of the run's working directory (run-directory.ts), which the thread reads as the run's other threads do. */
+  readonly files: readonly DirectoryFile[];
 }
 
 export type ThreadCommand = ThreadPrepare | ThreadStart;

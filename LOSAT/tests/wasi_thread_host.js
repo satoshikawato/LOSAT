@@ -439,14 +439,14 @@ function recycleWorkers(kind) {
   return kind === "threaded-reactor" && raw === "1";
 }
 
-async function instantiateMain(module, args, spawnThread, limits, provided, files) {
+async function instantiateMain(module, args, spawnThread, limits, provided, files, directory) {
   const initial = parsePositiveIntEnv("LOSAT_WASM_MEMORY_INITIAL_PAGES", limits.initial);
   // A maximum given in the environment is used as it is, without stepping down.
   const requested = parsePositiveIntEnv("LOSAT_WASM_MEMORY_MAXIMUM_PAGES", limits.maximum);
   const { memory, maximum } = createSharedMemory(initial, requested,
     process.env.LOSAT_WASM_MEMORY_MAXIMUM_PAGES === undefined);
   debug(`shared memory: initial ${initial} pages, maximum ${maximum} pages (module declares ${limits.maximum})`);
-  return { ...await instantiateWithMemory(module, memory, args, spawnThread, provided, undefined, files), memory };
+  return { ...await instantiateWithMemory(module, memory, args, spawnThread, provided, undefined, files, directory), memory };
 }
 
 async function terminateWorkers(workers) {
@@ -557,9 +557,11 @@ async function prepareThreadHost(wasmPath, kind, compiling = () => {}) {
 async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, options) {
   const args = [wasmPath, ...argv];
   const prespawn = prespawnCount(argv), recycle = recycleWorkers(kind), refill = recycle ? 0 : refillCount(argv);
-  // The table of the files that every thread reads and writes (sharedFileImports), in a command
-  // at every thread count (a reactor opens no files).
-  const files = kind === "threaded-command" ? sharedFileTable() : null;
+  // The table of the files that every thread reads and writes (sharedFileImports), at every thread
+  // count: a command's, and a reactor's, whose search of -db opens its database by name in the
+  // run directory `options.directory`, preopened as "/work" on every thread (createWasi; line WQA D12a,
+  // 2026-11-20), and reads it on the search's threads.
+  const files = sharedFileTable(), directory = options.directory;
   const workers = new Set(), exits = new Map(), events = [], standby = [];
   // LOSAT_WASI_RECYCLE: the workers that run one guest thread after another, the guest threads
   // they run now (tids), and how each of those threads' exit promise is resolved.
@@ -618,7 +620,7 @@ async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, o
   const recycledWorker = (data) => {
     const control = new SharedArrayBuffer(4 * START_WORDS);
     const worker = new Worker(WORKER_FILE, { env: SHARE_ENV, resourceLimits: WORKER_LIMITS, workerData: { module, wasmPath, args, memory: mainMemory,
-      control, files, fault: options.fault || null, recycle: true, ...data } });
+      control, files, directory, fault: options.fault || null, recycle: true, ...data } });
     const slot = { index: nextSlot++, worker, control, state: new Int32Array(control), tid: data.tid ?? null };
     if (data.tid === undefined) Atomics.store(slot.state, SLOT_STATE, SLOT_PREPARING);
     worker.on("message", message => {
@@ -684,7 +686,7 @@ async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, o
     let worker;
     try {
       worker = new Worker(WORKER_FILE, { env: SHARE_ENV, resourceLimits: WORKER_LIMITS, workerData: { module, wasmPath, args, memory: mainMemory,
-        startArg, tid, control, files, fault: options.fault || null } });
+        startArg, tid, control, files, directory, fault: options.fault || null } });
     } catch (err) { event("spawn_rejected", { tid, error: String(err) }); return -1; }
     workers.add(worker); event("spawned", { tid });
     exits.set(worker, new Promise(resolve => {
@@ -716,10 +718,10 @@ async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, o
       try {
         if (early) {
           worker = early.worker;
-          worker.postMessage({ module, wasmPath, args, memory: mainMemory, files });
+          worker.postMessage({ module, wasmPath, args, memory: mainMemory, files, directory });
         } else {
           worker = new Worker(WORKER_FILE, { env: SHARE_ENV, resourceLimits: WORKER_LIMITS, workerData: { module, wasmPath, args, memory: mainMemory,
-            control, files, standby: index, fault: options.fault || null } });
+            control, files, directory, standby: index, fault: options.fault || null } });
         }
       } catch (err) { event("standby_rejected", { standby: index, error: String(err) }); return; }
       worker.unref();
@@ -740,7 +742,7 @@ async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, o
       standby.push(slot); event("standby_spawned", { standby: index });
     }
   };
-  const instantiated = await instantiateMain(module, args, spawnThread, identity.memory, options.imports, files);
+  const instantiated = await instantiateMain(module, args, spawnThread, identity.memory, options.imports, files, directory);
   mainMemory = instantiated.memory;
   const { instance, wasi } = instantiated;
   if (kind === "threaded-reactor") wasi.initialize(instance);
@@ -769,7 +771,7 @@ async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, o
       await Promise.all([terminateWorkers(workers), terminateWorkers(new Set(standby.splice(0).map(slot => slot.worker))),
         terminateWorkers(new Set(recycled.splice(0).map(slot => slot.worker)))]);
       // The shared files that the guest left open.
-      if (files) for (const descriptor of sharedFileViews(files).os) if (descriptor >= 0) fs.closeSync(descriptor);
+      for (const descriptor of sharedFileViews(files).os) if (descriptor >= 0) fs.closeSync(descriptor);
       exits.clear();
     },
   };

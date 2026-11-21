@@ -91,7 +91,7 @@ class ManualEngine implements EngineGateway {
   /** The registry files that `validate` was given, in order. */
   readonly registries: Array<RegistryFile | undefined> = [];
   /** What the engine's start reads of every argv, or its message. */
-  startResult: StartResult = { ok: true, start: { conffile: null, logFile: null, dryRun: false, registerInputs: false, prints: null } };
+  startResult: StartResult = { ok: true, start: { conffile: null, logFile: null, dryRun: false, registerInputs: false, prints: null, database: false } };
   private readonly pending = new Map<
     string,
     { resolve: (runFiles?: readonly RunFile[]) => void; reject: (e: Error) => void; output: MessagePort }
@@ -177,7 +177,7 @@ class ManualEngine implements EngineGateway {
   }
 }
 
-const startOf = (start: Partial<StartInfo>): StartResult => ({ ok: true, start: { conffile: null, logFile: null, dryRun: false, registerInputs: false, prints: null, ...start } });
+const startOf = (start: Partial<StartInfo>): StartResult => ({ ok: true, start: { conffile: null, logFile: null, dryRun: false, registerInputs: false, prints: null, database: false, ...start } });
 const logFile = (text: string): RunFile => ({ name: 'run.log', bytes: new TextEncoder().encode(text) });
 
 describe('Coordinator', () => {

@@ -1317,3 +1317,32 @@ test("the table of files writes at the OS's offset until a seek or a read, then 
     fs.rmSync(directory, { recursive: true, force: true });
   }
 });
+
+// A LOSAT Web reactor's run directory, preopened as "." (wasi_thread_worker.js createWasi; line WQA
+// D12a, 2026-11-20): the table opens a name in that directory, and leaves a path out of it (`..`)
+// to the thread's own uvwasi, which refuses it.
+test("the table of files opens names in the run directory of a reactor and leaves `..` to uvwasi", () => {
+  const { sharedFileTable, sharedFileImports } = require("./wasi_files");
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "losat-wasi-run-"));
+  try {
+    fs.writeFileSync(path.join(directory, "db.pin"), "pin");
+    const memory = new WebAssembly.Memory({ initial: 1 });
+    const local = Object.fromEntries(["path_open", "fd_read", "fd_close"].map(name => [name, () => 76]));
+    const wasi = sharedFileImports(sharedFileTable(), memory, local, directory), bytes = new Uint8Array(memory.buffer);
+    const open = (name) => {
+      bytes.set(Buffer.from(name), 64);
+      // path_open(3, follow, 64, len, 0, FD_READ, 0, 0, 8)
+      return wasi.path_open(3, 1, 64, name.length, 0, 1n << 1n, 0n, 0, 8);
+    };
+    assert.equal(open("db.pin"), 0);
+    const fd = new DataView(memory.buffer).getUint32(8, true);
+    new DataView(memory.buffer).setUint32(16, 512, true);
+    new DataView(memory.buffer).setUint32(20, 3, true);
+    assert.equal(wasi.fd_read(fd, 16, 1, 24), 0);
+    assert.equal(Buffer.from(bytes.subarray(512, 515)).toString(), "pin");
+    assert.equal(wasi.fd_close(fd), 0);
+    assert.equal(open(`../${path.basename(directory)}/db.pin`), 76);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});

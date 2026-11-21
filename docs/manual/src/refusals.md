@@ -522,7 +522,8 @@ NCBI's errors for a missing `.aux`, `.loo` or `.rps` file and for an empty `.aux
 | Option or value | What happens |
 | :--- | :--- |
 | `-randomize`, `-gi_mask`, `-gi_mask_name` | Refused. The error names the option. |
-| `-input_type blastdb`, `asn1_txt`, `asn1_bin` | Refused. Only `fasta` works. |
+| `-input_type asn1_txt`, `asn1_bin` | Refused. `fasta` and `blastdb` work. |
+| `-input_type blastdb` with an empty `-in` and no `-title` | Refused. NCBI reads the title of a database that is not there and crashes. |
 | An option value that is not UTF-8 (a `-title`, `-out` or `-metadata_output_prefix` of other bytes) | Refused. NCBI keeps the bytes. |
 | A FASTA record of 4,294,967,296 letters or more, counting the letters of its gaps, whose sequence NCBI builds from all those letters | Refused. NCBI counts the length of a record in 32 bits, which wrap there. |
 | `[BLAST] LONG_SEQID`, or a `[BLAST] MAX_SEQID_LENGTH` that `makeblastdb` would use with `-parse_seqids` | Refused. They change which ids are parsed. |
@@ -541,6 +542,10 @@ error: the NCBI BLAST+ option -randomize is not supported by LOSAT's makeblastdb
 
 - Some records of that size are handled as NCBI handles them, not refused: the error for a sequence longer than 2,147,483,647 bases, and the record skipped when the length modulo 2^32 is 0, when it has a gi above 4294967295 or when it starts with a gap of unknown length.
 - A protein whose `>?` lines sum to a multiple of 2^32 gets NCBI's error.
+- With `-input_type blastdb`, these input sequences are refused: one without a definition line, one whose definition lines have bytes that NCBI reads as `#`, a definition line with leaf tax ids and no id, and a first definition line whose `other-info` (where NCBI reads the PIG) is an empty list. NCBI reads past them or writes errors for each read.
+- With `-input_type blastdb`, an input database with one masking algorithm is refused when one of its volumes does not list the algorithm and has two sequences with masks. For the second one NCBI reuses the algorithm id it kept from an earlier lookup and reads the masks of that id.
+- With `-input_type blastdb`, an input database with masks is refused when the first column of one of its volumes is not the mask column (for example, a volume with another column and no masks). NCBI reads the first column of every volume as its masks. The error names that column's file in the volume.
+- With `-input_type blastdb`, an input database that LOSAT's reader refuses (see [Alias files and database arithmetic](#alias-files-and-database-arithmetic) and [blastdbcmd](#blastdbcmd)) is refused.
 
 </details>
 

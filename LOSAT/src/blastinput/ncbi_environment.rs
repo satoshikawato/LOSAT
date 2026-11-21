@@ -71,7 +71,13 @@ fn is_harmless_entry(section: &str, name: &str, value: &str) -> bool {
     // 	if (registry->HasEntry("BLAST", "BLAST_USAGE_REPORT")) {
     // 		bool enable = NStr::StringToBool(registry->Get("BLAST", "BLAST_USAGE_REPORT"));
     // ```
-    // A Boolean only decides whether the usage is reported; another value aborts NCBI.
+    // A Boolean only decides whether the usage is reported. Another value aborts NCBI where
+    // the usage report converts it: in `.ncbirc` or `NCBI_CONFIG__BLAST__BLAST_USAGE_REPORT`
+    // (which answers first), unless the variable BLAST_USAGE_REPORT is a false Boolean.
+    // Elsewhere (`<program>.ini`, which the usage report does not read, or with
+    // BLAST_USAGE_REPORT false) NCBI never converts it and runs normally; LOSAT still rejects
+    // it, as the allowlist is closed and lists this entry with a Boolean only (`AUTHORITY.md`
+    // §J-8 of `docs/evidence/losat_web_e2h/`).
     if section.eq_ignore_ascii_case("BLAST") && name.eq_ignore_ascii_case("BLAST_USAGE_REPORT") {
         return ncbi_string_to_bool(value).is_some();
     }
@@ -1883,6 +1889,84 @@ fn check_registry_entries(path: &Path, entries: &[RegistryEntry]) -> Result<(), 
     Ok(())
 }
 
+/// The entries of a `.ncbirc` that act when only NCBI's usage report reads the file
+/// (`<program>.ini` has `[NCBI] DONT_USE_NCBIRC`; `application_settings`), in the file's
+/// order: every `[NCBI] .Inherits`, and the last `[BLAST] BLAST_USAGE_REPORT` (empty
+/// included) when `usage_from_file` (no `NCBI_CONFIG__BLAST__BLAST_USAGE_REPORT` answers
+/// first). `check_registry_entries`, the allowlist of the application's reads, rejects every
+/// `[NCBI] .Inherits` and a `BLAST_USAGE_REPORT` that is not a Boolean, so a file is
+/// rejected for the same entries with the same message whichever reader reads it (re-audit
+/// round 4 finding T-1 of session SFe).
+///
+/// After reading the file into its registry of `.ncbirc` (`IncludeNcbircIfAllowed`), the
+/// usage report's load calls `LoadBaseRegistries` without `fJustCore`, which loads each name of
+/// `[NCBI] .Inherits` (`<name>.ini`, then `<name>`, from the file's directory, then the search
+/// path) into that registry. NCBI then writes `Critical: Base registry <name> absent or
+/// unreadable` for a base it cannot load (twice, as the name is collected from the main
+/// registry and again from the same registry in the priority map), `Critical: ... Syntax
+/// error in system-wide configuration file` for a base with a syntax error, and aborts in
+/// `StringToBool` on a base's `[BLAST] BLAST_USAGE_REPORT` that is not a Boolean when the file
+/// itself and the environment set none; LOSAT reads no base registry. An empty value names no
+/// base (`NStr::Split` with `fSplit_Truncate` gives no name) and NCBI does nothing, but LOSAT
+/// rejects it as the allowlist does when the application reads the file.
+///
+/// NCBI reference (598d8ae6): c++/src/corelib/metareg.cpp:116-119
+/// ```c++
+///     CCompoundRWRegistry* crwreg = dynamic_cast<CCompoundRWRegistry*>(dest);
+///     if (crwreg) {
+///         crwreg->LoadBaseRegistries(reg_flags, reload_flags, file.GetDir());
+///     }
+/// ```
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:1821-1835,1846-1850
+/// ```c++
+/// bool CCompoundRWRegistry::LoadBaseRegistries(TFlags flags, int metareg_flags,
+///                                              const string& path)
+/// {
+///     if (flags & fJustCore) {
+///         return false;
+///     }
+///
+///     list<string> names;
+///     {{
+///         string s = m_MainRegistry->Get("NCBI", ".Inherits");
+///
+///         REVERSE_ITERATE(CCompoundRegistry::TPriorityMap, it, m_AllRegistries->m_PriorityMap) {
+///             s += ',';
+///             s += it->second->Get("NCBI", ".Inherits");
+///         }
+///         ...
+///         NStr::Split(s, ", ", names,
+///                     NStr::fSplit_CanSingleQuote |
+///                     NStr::fSplit_MergeDelimiters |
+///                     NStr::fSplit_Truncate);
+///         if (names.empty()) return false;
+/// ```
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:1881-1887
+/// ```c++
+///         if (entry2.registry) {
+///             m_BaseRegNames.insert(*it);
+///             bases.push_back(TNewBase(*it, entry2.registry));
+///         } else {
+///             ERR_POST(Critical << "Base registry " << *it
+///                      << " absent or unreadable");
+///         }
+/// ```
+fn usage_report_entries(entries: &[RegistryEntry], usage_from_file: bool) -> Vec<RegistryEntry> {
+    let is = |entry: &RegistryEntry, section: &str, name: &str| {
+        entry.section.eq_ignore_ascii_case(section) && entry.name.eq_ignore_ascii_case(name)
+    };
+    let usage = entries
+        .iter()
+        .rposition(|entry| is(entry, "BLAST", "BLAST_USAGE_REPORT"))
+        .filter(|_| usage_from_file);
+    entries
+        .iter()
+        .enumerate()
+        .filter(|&(index, entry)| is(entry, "NCBI", ".Inherits") || Some(index) == usage)
+        .map(|(_, entry)| entry.clone())
+        .collect()
+}
+
 /// The NCBI application settings that LOSAT reproduces (`check_ncbi_application_settings`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ApplicationSettings {
@@ -2192,8 +2276,9 @@ pub fn check_ncbi_application_settings(program: &str) -> Result<ApplicationSetti
 /// value counts (`data_loaders_of`). A syntax error makes the usage report's load fail
 /// and leaves nothing in the cache; LOSAT rejects such a file anyway. The usage report reads
 /// `.ncbirc` also when `<program>.ini` turns it off for the application (`[NCBI]
-/// DONT_USE_NCBIRC`): its syntax errors are still reported and its `[BLAST]
-/// BLAST_USAGE_REPORT` is still converted to a Boolean (another value aborts NCBI). The copy
+/// DONT_USE_NCBIRC`): its syntax errors are still reported, its `[BLAST]
+/// BLAST_USAGE_REPORT` is still converted to a Boolean (another value aborts NCBI) and its
+/// `[NCBI] .Inherits` still loads base registries (`usage_report_entries`). The copy
 /// changes no other value: `Printable` writes octal escapes that `ParseEscapes` reads back.
 ///
 /// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:81
@@ -2395,16 +2480,14 @@ fn application_settings(
             if application_reads_ncbirc {
                 check_registry_entries(&path, &text.entries)?;
                 ncbirc_entries = text.entries;
-            } else if app_env("NCBI_CONFIG__BLAST__BLAST_USAGE_REPORT").is_none() {
-                // Only the usage report reads the file: its last [BLAST] BLAST_USAGE_REPORT,
-                // empty included (read into the usage report's own registry).
-                let usage = text.entries.iter().rev().find(|entry| {
-                    entry.section.eq_ignore_ascii_case("BLAST")
-                        && entry.name.eq_ignore_ascii_case("BLAST_USAGE_REPORT")
-                });
-                if let Some(entry) = usage {
-                    check_registry_entries(&path, std::slice::from_ref(entry))?;
-                }
+            } else {
+                // Only the usage report reads the file: the allowlist checks the entries that
+                // act there, as when the application reads the file.
+                let usage_from_file = app_env("NCBI_CONFIG__BLAST__BLAST_USAGE_REPORT").is_none();
+                check_registry_entries(
+                    &path,
+                    &usage_report_entries(&text.entries, usage_from_file),
+                )?;
             }
         }
     }
@@ -3169,6 +3252,42 @@ mod tests {
         assert_eq!(settings(&[("BLAST_USAGE_REPORT", "no")]), Ok(true));
         std::fs::write(&ncbirc, "[BLAST]\nLONG_SEQID = 1\n").unwrap();
         assert_eq!(settings(&[]), Ok(true));
+        // Its [NCBI] .Inherits (any case, quoted or empty) loads base registries in the usage
+        // report, also when NCBI_CONFIG__BLAST__BLAST_USAGE_REPORT answers first: rejected
+        // with the allowlist's message (re-audit round 4 finding T-1 of session SFe).
+        for text in [
+            "[NCBI]\n.Inherits = nosuch\n",
+            "[ncbi]\n.inherits = \"sub\"\n",
+            "[BLAST]\nBLASTDB = /db\n[NCBI]\n.Inherits =\n",
+        ] {
+            std::fs::write(&ncbirc, text).unwrap();
+            let error = settings(&[]).unwrap_err();
+            assert!(error
+                .to_ascii_lowercase()
+                .contains("sets [ncbi] .inherits, which"));
+            assert!(error.contains("not supported by LOSAT"));
+            let cfg_bur = ("NCBI_CONFIG__BLAST__BLAST_USAGE_REPORT", "true");
+            assert_eq!(settings(&[cfg_bur]), Err(error));
+            assert_eq!(settings(&[("BLAST_USAGE_REPORT", "no")]), Ok(true));
+            assert_eq!(settings(&[("NCBI_DONT_USE_NCBIRC", "")]), Ok(true));
+        }
+        // A BLAST_USAGE_REPORT that an earlier layer hides is not read; the entries are
+        // checked in the file's order.
+        std::fs::write(
+            &ncbirc,
+            "[BLAST]\nBLAST_USAGE_REPORT = maybe\n[NCBI]\n.Inherits = sub\n",
+        )
+        .unwrap();
+        assert!(settings(&[])
+            .unwrap_err()
+            .contains("BLAST_USAGE_REPORT, which"));
+        let cfg_bur = ("NCBI_CONFIG__BLAST__BLAST_USAGE_REPORT", "true");
+        assert!(settings(&[cfg_bur])
+            .unwrap_err()
+            .contains(".Inherits, which"));
+        std::fs::write(&ncbirc, "[BLAST]\nBLAST_USAGE_REPORT = maybe\n").unwrap();
+        assert_eq!(settings(&[cfg_bur]), Ok(true));
+        std::fs::write(&ncbirc, "[BLAST]\nLONG_SEQID = 1\n").unwrap();
         std::fs::remove_file(&ini).unwrap();
         assert!(settings(&[]).is_err());
         std::fs::write(&ncbirc, "[BLAST]\nDATA_LOADERS = none\n").unwrap();

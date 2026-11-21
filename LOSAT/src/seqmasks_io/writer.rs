@@ -21,10 +21,14 @@ use crate::seqdb::mask::FilterProgram;
 use crate::seqid::label::bioseq_fasta;
 use crate::seqid::ParsedSeqId;
 
-/// One sequence as the writers see it (`CBioseq_Handle`): its Seq-ids in order (the first is
-/// `GetSeqId()`), its title descriptor and its letters in `eCoding_Iupac`.
+/// One sequence as the writers see it (`CBioseq_Handle`): its Seq-ids in order, its title
+/// descriptor and its letters in `eCoding_Iupac`.
 pub(crate) struct MaskedBioseq<'a> {
     pub ids: &'a [ParsedSeqId],
+    /// `GetSeqId()` where a handle that outlives the sequence made the info of the sequence's
+    /// access handle ([`access_seq_id`]): windowmasker's id lists matched as Seq-ids
+    /// (`windowmasker::ids::IdLists::handle_seq_id`). `None`: the access Seq-id as it is.
+    pub handle_seq_id: Option<ParsedSeqId>,
     pub title: Option<&'a [u8]>,
     /// The name of the organism of the Bioseq's first source (a database sequence's), from which
     /// `GenerateDefline` makes an empty title (`report::defline::BioseqFacts::taxname`).
@@ -193,7 +197,7 @@ impl MaskWriter {
                     return Ok(());
                 }
                 let mut bytes = Vec::new();
-                let document = Document::SeqLoc(first_id(seq), mask);
+                let document = Document::SeqLoc(seq_id(seq), mask);
                 write_document(*serial, &document, &mut bytes, out, diag)?;
                 out.write_all(&bytes)?;
             }
@@ -216,7 +220,7 @@ impl MaskWriter {
                 // ...
                 //     Print(*bsh.GetSeqId(), mask);
                 // ```
-                writer.print_id(first_id(seq), mask, out)?;
+                writer.print_id(seq_id(seq), mask, out)?;
             }
         }
         Ok(())
@@ -332,9 +336,28 @@ fn interval_lines(mask: &[(u32, u32)], text: &mut Vec<u8>) {
     }
 }
 
-/// `bsh.GetSeqId()`: the first Seq-id of the sequence.
-fn first_id<'a>(seq: &MaskedBioseq<'a>) -> &'a ParsedSeqId {
-    seq.ids.first().expect("a sequence has a Seq-id")
+/// `bsh.GetSeqId()`: the Seq-id of the sequence's access handle, as the handles that outlive the
+/// sequence give it back (`MaskedBioseq::handle_seq_id`).
+///
+/// NCBI reference (598d8ae6): c++/src/objmgr/bioseq_handle.cpp:128-131
+fn seq_id<'s>(seq: &'s MaskedBioseq<'_>) -> &'s ParsedSeqId {
+    seq.handle_seq_id
+        .as_ref()
+        .unwrap_or_else(|| access_seq_id(seq.ids))
+}
+
+/// The Seq-id of `CBioseq_Handle::GetAccessSeq_id_Handle()` of a sequence whose Seq-ids are `ids`
+/// (a handle of `CBioseq_CI` has no Seq-id of its own): its first gi, else its first Textseq-id,
+/// else its first Seq-id.
+///
+/// NCBI reference (598d8ae6): c++/src/objmgr/bioseq_handle.cpp:939-985
+/// NCBI reference (598d8ae6): c++/src/objmgr/scope_impl.cpp:2102-2106
+pub(crate) fn access_seq_id(ids: &[ParsedSeqId]) -> &ParsedSeqId {
+    ids.iter()
+        .find(|id| matches!(id, ParsedSeqId::Gi(_)))
+        .or_else(|| ids.iter().find(|id| id.textseq().is_some()))
+        .or_else(|| ids.first())
+        .expect("a sequence has a Seq-id")
 }
 
 /// The object of one document.

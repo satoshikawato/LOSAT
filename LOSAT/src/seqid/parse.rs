@@ -69,6 +69,22 @@ impl SeqIdError {
     pub fn what(&self) -> String {
         self.exception().what()
     }
+
+    /// `CException::what()` in NCBI's words (before `crate::wording::losat_bytes`), with the
+    /// message's bytes as NCBI's `std::string` holds them: windowmasker posts it for an id of a
+    /// list, which may be any bytes. The report of one exception ends with its message and a
+    /// line feed.
+    pub(crate) fn ncbi_what_bytes(&self) -> Vec<u8> {
+        let empty = SeqIdError {
+            message: Vec::new(),
+            ..self.clone()
+        };
+        let report = empty.exception().ncbi_what();
+        let place = report
+            .strip_suffix('\n')
+            .expect("a report ends with a line feed");
+        [place.as_bytes(), &self.message, b"\n"].concat()
+    }
 }
 
 const SEQ_ID_CPP: &str = "src/objects/seq/../seqloc/Seq_id.cpp";

@@ -74,6 +74,51 @@ def main():
     write("ids_cr.txt", "rec1\rrec4\n".encode(), "wb")
     write("ids_none.txt", "nosuchid\n")
     write("ids_db.txt", "AB000001.1\nrec1\nNC_000099.1\n")
+    # Id lists of -text_match F (CIdSet_SeqId: each id read as a Seq-id; the first six are those of
+    # probe s1 of line NP M5, 2026-11-21): bare words, versions, case, forms, ordinal ids, ids that
+    # CSeq_id cannot read (empty, a byte of 0x80 or more, too many parts, ...), a CRLF list.
+    write("ids_unver.txt", "AB000001\nlcl|rec1\nrec1\nNC_000099\n")
+    write("ids_ord.txt", "gnl|BL_ORD_ID|0\ngnl|BL_ORD_ID|3\n")
+    write("ids_case.txt", "ab000001.1\nnc_000099.1\nREC1\nlcl|REC2\n")
+    write("ids_forms.txt", "AB000001.2\nref|NC_000099.1|\ngb|AB000001.1|\nsp|P12345|ABC_HUMAN\nP12345\n"
+          "BK000001.1\ntpg|BK000001.1|\n")
+    write("ids_bad.txt", "gb|\nx y\n|||\nrec1\n")
+    write("ids_lcl.txt", "lcl|rec2\nrec2\nrec4\nlcl|rec4.\n")
+    write("ids_sp.txt", "P12345\n")
+    write("ids_tpa.txt", "BK000001.1\n")
+    write("ids_seqid_err.txt", b" x\n>\n> y\ngb||\ngb|A|B|C|D\ngi|abc\ngi|0\ncaf\xe9\nAB000001.1.2\n"
+          b"ref|NC_000099.x|\npdb|\npat|US\ngnl|\ngnl|db\ntr|\nlcl|\n", "wb")
+    write("ids_seqid_crlf.txt", b"AB000001.1\r\nrec1\r\nlcl|rec2\r\n", "wb")
+    # Seq-id lists of the M5c review (2026-11-21): a list id that makes the handle's info of a
+    # database id (another alternative, another number, another case), ordinal ids of a list of two
+    # databases, and one id each for the database multi_ids.
+    write("ids_emb2.txt", "emb|AB000002.1|\n")
+    write("ids_case_mi.txt", "ab000001.1\nsp|P12345|abc_human\nREC1\nlcl|REC2\n")
+    write("ids_ord3.txt", "gnl|BL_ORD_ID|3\n")
+    write("ids_ord8.txt", "gnl|BL_ORD_ID|8\n")
+    write("ids_gi5.txt", "5\n")
+    write("ids_gi5_bar.txt", "gi|5\n")
+    write("ids_ab5.txt", "AB000005.1\n")
+    write("ids_ab6.txt", "AB000006.1\n")
+    write("ids_aj7.txt", "AJ000007.1\n")
+    # Accessions with a protein flag (P) whose division the accession guide does not give as
+    # WGS, TSA or targeted: the parse's warning (error code 1306).
+    write("ids_warn.txt", "ABCD12P12345\nAAAA01P000001\nlcl|rec2\n")
+    # The database multi_ids (made with -parse_seqids by make_fixtures.py): a gi before a GenBank
+    # id, two definition lines (^A), a local id before an EMBL id, a local id alone.
+    write("multi_ids.fa",
+          f">gi|5|gb|AB000005.1| gi first\n{wrap(dm[24000:27000])}\n"
+          f">gb|AB000006.1| first line\x01emb|AJ000007.1| second line\n{wrap(dm[27000:30000])}\n"
+          f">lcl|q|emb|AJ000008.1| local first\n{wrap(dm[36000:39000])}\n"
+          f">lcl|r local alone\n{wrap(dm[39000:41000])}\n")
+    # FASTA records whose Seq-id of the handle (GetAccessSeq_id_Handle: a gi, else a Textseq-id,
+    # else the first) is not their first Seq-id.
+    write("access.fa",
+          f">lcl|a|gb|AB000001.1| GenBank after local\n{wrap(dm[0:4000])}\n"
+          f">lcl|b|gi|7 gi after local\n{wrap(dm[4000:7000])}\n"
+          f">gnl|db|e|ref|NC_000001.1| RefSeq after general\n{wrap(dm[7000:10500])}\n"
+          f">emb|AJ000009.1|gb|AB000010.1| two Textseq-ids\n{wrap(dm[10500:13000])}\n"
+          f">lcl|z|gb|AB000011.1|gi|9 gi last\n{wrap(dm[13000:15000])}\n")
     # Counts files: garbage, empty, and the ascii counts of mg1655_u9 without their ##pct lines.
     write("garbage.counts", "hello\n")
     write("empty.counts", "")

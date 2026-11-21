@@ -2,8 +2,8 @@
 """Freezes NCBI BLAST+ 2.17.0 windowmasker's output for each row of cases.tsv (run in this
 directory, as tests/masker_fixtures.rs runs LOSAT): ncbi/<name>.out, .err, .rc, with this
 directory's path in the standard error written as @CWD@. First makes db/wm and db/wm_ps with
-NCBI makeblastdb from in/multi.fa (the second with -parse_seqids). NCBI is run here only, never
-by the tests.
+NCBI makeblastdb from in/multi.fa (the second with -parse_seqids), and db/multi_ids and db/wm_b
+from in/multi_ids.fa (the first with -parse_seqids). NCBI is run here only, never by the tests.
 
 Usage: python3 -I make_fixtures.py --ncbi-bin <dir of windowmasker and makeblastdb>"""
 import argparse
@@ -57,8 +57,9 @@ def main():
     db = os.path.join(HERE, "db")
     shutil.rmtree(db, ignore_errors=True)
     os.makedirs(db)
-    for name, extra in (("wm", []), ("wm_ps", ["-parse_seqids"])):
-        subprocess.run([makeblastdb, "-in", "in/multi.fa", "-dbtype", "nucl", "-out", f"db/{name}"] + extra,
+    for name, source, extra in (("wm", "multi.fa", []), ("wm_ps", "multi.fa", ["-parse_seqids"]),
+                                ("multi_ids", "multi_ids.fa", ["-parse_seqids"]), ("wm_b", "multi_ids.fa", [])):
+        subprocess.run([makeblastdb, "-in", f"in/{source}", "-dbtype", "nucl", "-out", f"db/{name}"] + extra,
                        cwd=HERE, env=env, check=True, stdout=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
     out_dir = os.path.join(HERE, "ncbi")
     shutil.rmtree(out_dir, ignore_errors=True)

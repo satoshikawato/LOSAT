@@ -11,6 +11,7 @@ use crate::ncbi_app::Diag;
 use crate::ncbi_exception::{err_post_x, NcbiException, ThrowSite};
 use crate::seqdb::mask::FilterProgram;
 use crate::seqdb::SeqType;
+use crate::seqid::accguide::SeqIdWarning;
 use crate::seqid::ParsedSeqId;
 use crate::seqmasks_io::bdb_reader::{prints_title, BdbError, MaskBdbReader};
 use crate::seqmasks_io::fasta_reader::{MaskFastaReader, MaskReadError};
@@ -21,7 +22,7 @@ use crate::seqmasks_io::writer::{MaskWriter, MaskedBioseq, Serial, WriteError};
 use crate::utils::winmask::{MaskerParams, PctSettings, SeqMasker, UnitCounts, WinMaskError};
 use crate::writedb::fasta_source::reader::ReaderWarning;
 
-use super::ids::{get_title, IdLists, Title};
+use super::ids::{IdLists, TitleFromSource};
 use super::sdust::{merge_mask_info, SDustMasker};
 
 /// The settings of the masking run, as `CWinMaskConfig` reads them from NCBI's `CArgs`.
@@ -154,9 +155,9 @@ pub(super) trait SequenceSource {
     ) -> Result<Option<Record>, Failure>;
 }
 
-/// The reader of `-infmt` (`CWinMaskConfig`'s `reader`): `CMaskFastaReader( *is, true,
-/// args["parse_seqids"] )` of the opened input, or `CMaskBDBReader( args[kInput].AsString() )`;
-/// none for `seqids` (`input` is `None` only for `blastdb`).
+/// The reader of `-infmt` (`CWinMaskConfig`'s `reader`): `CMaskFastaReader` of the opened input
+/// (nucleotide, with `-parse_seqids`), or `CMaskBDBReader` of the database `-in`; none for
+/// `seqids` (`input` is `None` only for `blastdb`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_config.cpp:384-397
 pub(super) fn reader<'a, R: Read + 'a>(
@@ -188,7 +189,7 @@ struct FastaSource<R: Read> {
 }
 
 impl<R: Read> SequenceSource for FastaSource<R> {
-    // windowmasker posts at the level Warning (`SetDiagPostLevel( eDiag_Warning )`,
+    // windowmasker posts at the level Warning (`SetDiagPostLevel` to `eDiag_Warning`,
     // win_mask_app.cpp:118): the reader's warnings are written, each on its line (the line
     // warnings, `LOG_POST`) or as `ERR_POST_X` of the Seq-id parser (error code 1306). The
     // output written so far comes out first, whatever its last byte (`cerr` is tied to `cout`);
@@ -207,11 +208,7 @@ impl<R: Read> SequenceSource for FastaSource<R> {
             }
             match warning {
                 ReaderWarning::Line(line) => diag.post_bytes(line),
-                ReaderWarning::SeqId(warning) => {
-                    let mut line = format!("Warning: (1306.{}) ", warning.subcode).into_bytes();
-                    line.extend_from_slice(&warning.message);
-                    diag.post_bytes(&line)
-                }
+                ReaderWarning::SeqId(warning) => post_seq_id_warning(diag, &warning),
             }
         });
         if closed {
@@ -233,6 +230,14 @@ impl<R: Read> SequenceSource for FastaSource<R> {
             texts: Vec::new(),
         }))
     }
+}
+
+/// A warning of NCBI's Seq-id code (`ERR_POST_X` of error code 1306, at windowmasker's post
+/// level Warning) as windowmasker posts it: `Warning: (1306.<subcode>) <message>`, no prefix.
+pub(super) fn post_seq_id_warning(diag: &mut Diag, warning: &SeqIdWarning) {
+    let mut line = format!("Warning: (1306.{}) ", warning.subcode).into_bytes();
+    line.extend_from_slice(&warning.message);
+    diag.post_bytes(&line)
 }
 
 /// `CMaskBDBReader(name)` of a nucleotide database (`seqmasks_io::bdb_reader`).
@@ -431,6 +436,7 @@ fn mask_input(
         }
         let seq = MaskedBioseq {
             ids: &record.ids,
+            handle_seq_id: lists.handle_seq_id(&record.ids),
             title: record.title.as_deref(),
             taxname: record.taxname.as_ref(),
             has_source: record.has_source,
@@ -443,15 +449,12 @@ fn mask_input(
     Ok(())
 }
 
-/// `CWinMaskUtil::consider` of `record`, which asks for its title only when a list is used.
+/// `CWinMaskUtil::consider` of `record` (`IdLists::consider`), or LOSAT's refusal of a title
+/// that a list matched as text asks for and LOSAT does not make.
 fn considered(lists: &IdLists, record: &Record) -> Result<bool, Failure> {
-    if !lists.active() {
-        return Ok(true);
-    }
-    match get_title(&record.ids, record.title.as_deref(), record.any_source) {
-        Title::Text(title) => Ok(lists.consider(&title)),
-        Title::FromSource => Err(Failure::Refused(unsupported(
-            "-ids or -exclude_ids with a database sequence without a title whose definition line has a tax id (NCBI matches the ids against a title made from the taxonomy names)",
-        ))),
-    }
+    lists.consider(record).map_err(|TitleFromSource| {
+        Failure::Refused(unsupported(
+            "-ids or -exclude_ids matched as text (-text_match T) with a database sequence without a title whose definition line has a tax id (NCBI matches the ids against a title made from the taxonomy names)",
+        ))
+    })
 }

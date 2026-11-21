@@ -54,11 +54,11 @@ use super::{
     advance_diag_table_offset, build_subject_seq_ranges_from_masks,
     calculate_blastn_context_statistics, database, diag_hash_insert_window,
     encode_iupac_to_blastna, merge_prelim_hit_lists, na_scan, next_subject_chunk, prelim_hsp_list,
-    prelim_subject_best_hit, read_db_seq_ranges, two_stage_scan, ungapped_subject_stage, x_diag_lv,
-    x_pair_seed, BlastnSubjectRef, BlastnTiming, ContextKarlin, DiagStruct, GapAlignScratch,
-    HspListSplit, PrelimHit, PrelimReap, QueryContext, QueryContextIndex, SubjectChunk,
-    SubjectChunkStatus, SubjectCtx, SubjectScratch, SubjectSplitState, COMPRESSION_RATIO,
-    DBSEQ_CHUNK_OVERLAP,
+    prelim_subject_best_hit, read_db_seq_ranges, two_stage_scan, ungapped_subject_stage,
+    x_bn_pv_once, x_bn_rank_once, x_diag_lv, x_mb_hit_prefetch, x_pair_seed, BlastnSubjectRef,
+    BlastnTiming, ContextKarlin, DiagStruct, GapAlignScratch, HspListSplit, PrelimHit, PrelimReap,
+    QueryContext, QueryContextIndex, SubjectChunk, SubjectChunkStatus, SubjectCtx, SubjectScratch,
+    SubjectSplitState, COMPRESSION_RATIO, DBSEQ_CHUNK_OVERLAP,
 };
 use crate::algorithm::blastn::alignment::gapped::BlastnaMatrix;
 use crate::algorithm::blastn::alignment::x_greedy_prelim::XPrelimSubject;
@@ -279,6 +279,23 @@ pub(super) struct ScanBatch<'a> {
     pub(super) min_ungapped_score: i32,
     pub(super) timing_ref: Option<&'a BlastnTiming>,
     pub(super) timing_enabled: bool,
+    /// The forms of the word finder of every chunk, chosen once for the batch from its table,
+    /// switches and diagnostics, as NCBI chooses a lookup table's scanner and extension once for
+    /// the search (below), and each switch's side recorded where it is chosen (`LOSAT_X_REACH`):
+    /// the query line prefetch of the steps of the pairs (LOSAT_X_MBHITPF), a CSR table's run taken from the ring's element (LOSAT_X_BNRANKONCE) and a packed head's
+    /// presence bits as its only test (LOSAT_X_BNPVONCE, `two_stage_scan::scan_two_stage_lookup`);
+    /// the part of PAIRPAR's scope that is the same for every chunk and thread
+    /// (`x_pair_seed::owner_scope`); and whether the run records the sides (`xreach::recording`),
+    /// so a chunk that records a side of its own makes no call when it does not.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:2994-3006 and
+    /// c++/src/algo/blast/core/na_ungapped.c:1651-1667 (the scanner and the extension set once in
+    /// the lookup table's wrapper, which every chunk's word finder calls through)
+    pub(super) x_hit_prefetch: bool,
+    pub(super) x_rank_once: bool,
+    pub(super) x_pv_once: bool,
+    pub(super) x_pair_scope: bool,
+    pub(super) x_recording: bool,
 }
 
 impl<'a> ScanBatch<'a> {
@@ -300,6 +317,26 @@ impl<'a> ScanBatch<'a> {
         let two_hits = window_size > 0;
         let debug_enabled = batch.debug_mode || batch.blastn_debug;
         let exact_ungapped = batch.matrix_only || word_length < 11;
+        let diagnostics =
+            debug_enabled || batch.blastn_trace_enabled || batch.debug_window.is_some();
+        let small_na_word = !batch.small_na_compressed_query.is_empty();
+        // The forms every chunk's word finder takes (the fields' doc): a two-stage table's only;
+        // a contiguous one's scan reads the CSR switches, any one's steps of the pairs the others.
+        let contiguous = two_stage_lookup_ref.filter(|table| table.disc().is_none());
+        let x_rank_once =
+            contiguous.is_some_and(|table| x_bn_rank_once(table.x_mb_csr().is_some()));
+        let x_pv_once = contiguous
+            .and_then(|table| table.x_mb_csr())
+            .and_then(|csr| csr.x_packed())
+            .is_some_and(|packed| x_bn_pv_once(&packed));
+        let x_hit_prefetch = two_stage_lookup_ref.is_some() && x_mb_hit_prefetch();
+        let x_pair_scope = x_pair_seed::owner_scope(
+            use_array_indexing,
+            window_size,
+            batch.scan_range,
+            small_na_word,
+            diagnostics,
+        );
         ScanBatch {
             batch,
             two_stage_lookup_ref,
@@ -362,12 +399,15 @@ impl<'a> ScanBatch<'a> {
             debug_enabled,
             blastn_trace_enabled: batch.blastn_trace_enabled,
             debug_window: batch.debug_window,
-            diagnostics: debug_enabled
-                || batch.blastn_trace_enabled
-                || batch.debug_window.is_some(),
+            diagnostics,
             min_ungapped_score: batch.min_ungapped_score,
             timing_ref: batch.timing_ref,
             timing_enabled: batch.timing_ref.is_some(),
+            x_hit_prefetch,
+            x_rank_once,
+            x_pv_once,
+            x_pair_scope,
+            x_recording: crate::utils::xreach::recording(),
         }
     }
 }
@@ -527,9 +567,9 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
         // a bucket whose cells all lie below the level bound, unless diagnostics print what
         // they read.
         let x_lv_ref = diag_hash.x_lv_on() && !scan.diagnostics;
-        // The sides are recorded only when LOSAT_X_REACH is set (`xreach::recording`, one test for
-        // the two marks of every chunk).
-        if crate::utils::xreach::recording() && diag_hash.x_lv_on() {
+        // The sides are recorded only when LOSAT_X_REACH is set (`ScanBatch::x_recording`, one
+        // test for the two marks of every chunk).
+        if scan.x_recording && diag_hash.x_lv_on() {
             crate::utils::xreach::x_reach!("LOSAT_X_DIAGLV", !use_array_indexing && x_lv_ref);
             // EXPERIMENT (LOSAT_X_DIAGLV2): the reference folds called below
             // (`pair_extend::extend_offset_pairs`, `na_scan::scan_na_lookup`) never read
@@ -594,12 +634,9 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
             // inputs and makes no call.
             if x_pair_seed::wants(
                 two_stage.disc().is_some(),
-                use_array_indexing,
-                scan.window_size,
-                scan.scan_range,
-                !scan.small_na_compressed_query.is_empty(),
-                scan.diagnostics,
+                scan.x_pair_scope,
                 !batch.use_parallel && reuse_prelim_hits,
+                scan.x_recording,
             ) && x_pair_seed::run(
                 &x_pair_seed::Inputs {
                     two_stage,

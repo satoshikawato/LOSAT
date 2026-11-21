@@ -388,37 +388,42 @@ fn owner_chunk(
     ) && one_subject_owner
 }
 
-/// No NCBI counterpart (scheduling only): whether `prelim_subject::prelim_chunk_hits` calls `run`
-/// for a chunk with these inputs (the names of `Inputs`; `disc`: the table is discontiguous),
-/// asked before it builds `Inputs`: always for a discontiguous table (`disc::run` decides with
-/// its own switches), else `run`'s tests for a contiguous table (`owner_chunk` and a pool of two
-/// threads or more), so a chunk that `run` would send back at once (every chunk of a database
-/// search: one thread has no pool, and a pool searches the subjects in parallel) costs neither
-/// the inputs nor the call. Such a chunk records the reference side of LOSAT_X_PAIRPAR here, as
-/// `run` recorded it.
-#[allow(clippy::too_many_arguments)]
-#[inline(always)]
-pub(super) fn wants(
-    disc: bool,
+/// No NCBI counterpart (scheduling only): the part of `run`'s test of a chunk with a contiguous
+/// table that is the same for every chunk and thread of a batch (`chunk_free_scope`, the names of
+/// `Inputs`), taken once per batch (`ScanBatch::new`, `ScanBatch::x_pair_scope`) for `wants`.
+pub(super) fn owner_scope(
     use_array_indexing: bool,
     window_size: usize,
     scan_range: usize,
     small_na_word: bool,
     diagnostics: bool,
-    one_subject_owner: bool,
 ) -> bool {
-    if disc {
-        return true;
-    }
-    let wanted = owner_chunk(
+    chunk_free_scope(
+        false,
         use_array_indexing,
         window_size,
         scan_range,
         small_na_word,
         diagnostics,
-        one_subject_owner,
-    ) && pool_threads().is_some();
-    if !wanted {
+    )
+}
+
+/// No NCBI counterpart (scheduling only): whether `prelim_subject::prelim_chunk_hits` calls `run`
+/// for a chunk (`disc`: the table is discontiguous), asked before it builds `Inputs`: always for a
+/// discontiguous table (`disc::run` decides with its own switches), else `run`'s tests for a
+/// contiguous table: the batch's part (`scope`, `owner_scope`), a chunk the subject's owner
+/// searches by itself (`one_subject_owner`) and a pool of two threads or more, so a chunk that
+/// `run` would send back at once (every chunk of a database search: one thread has no pool, and a
+/// pool searches the subjects in parallel) costs neither the inputs nor the call. Such a chunk
+/// records the reference side of LOSAT_X_PAIRPAR here, as `run` recorded it, when the run records
+/// the sides (`recording`, read once per batch: a run that records nothing makes no call).
+#[inline(always)]
+pub(super) fn wants(disc: bool, scope: bool, one_subject_owner: bool, recording: bool) -> bool {
+    if disc {
+        return true;
+    }
+    let wanted = scope && one_subject_owner && pool_threads().is_some();
+    if !wanted && recording {
         crate::utils::xreach::x_reach!("LOSAT_X_PAIRPAR", false);
     }
     wanted

@@ -27,9 +27,9 @@
 //!
 //! This module is a child of `run` for the items it keeps private (the types `DiagHashTable`,
 //! `OffsetPair`, `SubjectChunk` and `UngappedHit`; `scan_subject_kmers_with_ranges`,
-//! `scan_subject_disc_words_with_ranges`, `select_mb_scan_kind`, `x_mb_hit_prefetch`,
-//! `x_bn_pv_once` and `OFFSET_ARRAY_SIZE`). Its function is the statements of the branch of
-//! `prelim_chunk_hits` that were there, in their order; the strips scans of PAIRPAR
+//! `scan_subject_disc_words_with_ranges`, `select_mb_scan_kind` and `OFFSET_ARRAY_SIZE`; the
+//! switches' forms are the batch's, `ScanBatch::new`). Its function is the statements of the
+//! branch of `prelim_chunk_hits` that were there, in their order; the strips scans of PAIRPAR
 //! (`x_pair_seed.rs` `scan_strip`, `x_pair_seed_disc.rs` `scan_strip_disc`) walk the lookup hits
 //! in the order `on_word` does. What the scan reads is `TwoStageScanInputs` (the batch's word
 //! finder, `prelim_subject::ScanBatch` or its copy per subject, and the chunk's own values), and
@@ -40,8 +40,8 @@ use super::pair_extend;
 use super::prelim_subject::ScanBatch;
 use super::{
     scan_subject_disc_words_with_ranges, scan_subject_kmers_with_ranges, select_mb_scan_kind,
-    x_bn_pv_once, x_bn_rank_once, x_dc_csr, x_mb_hit_prefetch, DiagHashTable, DiagStruct,
-    OffsetPair, SmallNaWord, SubjectChunk, UngappedHit, OFFSET_ARRAY_SIZE,
+    x_dc_csr, DiagHashTable, DiagStruct, OffsetPair, SmallNaWord, SubjectChunk, UngappedHit,
+    OFFSET_ARRAY_SIZE,
 };
 use crate::algorithm::blastn::lookup::{TwoStageLookup, XHeadFifo};
 use std::mem::MaybeUninit;
@@ -211,7 +211,8 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
     let mut offset_pairs_len = 0usize;
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:451-497
-    let x_hit_prefetch = x_mb_hit_prefetch();
+    // (LOSAT_X_MBHITPF, chosen once for the batch: `ScanBatch::new`)
+    let x_hit_prefetch = scan.x_hit_prefetch;
     // What the steps of the offset pairs of this chunk
     // (`pair_extend::extend_offset_pairs`) read besides the batch's word finder (`scan`, a
     // parameter of their own): the chunk's values, built once per chunk.
@@ -245,95 +246,103 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
         dbg_gapped_attempted: &mut *dbg_gapped_attempted,
     };
 
-    let mut on_word = |kmer_start: usize,
-                       s_range: usize,
-                       current_lut_kmer: u64,
-                       second_template_index: Option<u64>| {
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:193-207
-        if debug_enabled {
-            *dbg_total_s_positions += 1;
-        }
-
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:193-207
-        if debug_mode || blastn_debug {
-            // DEBUG: Track processing time
-            let _dbg_start = std::time::Instant::now();
-        }
-
-        // Lookup using lut_word_length k-mer
-        let matches_len = if debug_mode || blastn_debug {
-            two_stage.count_hits(current_lut_kmer)
-        } else {
-            0
-        };
-
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:193-207
-        // DEBUG: Log max matches
-        if (debug_mode || blastn_debug) && matches_len > 1000 {
-            eprintln!(
-                "[WARN] Large matches_slice: len={} for kmer at position {}",
-                matches_len, kmer_start
-            );
-        }
-
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:1504-1533
-        if offset_pairs_len >= OFFSET_ARRAY_SIZE {
-            pair_extend::extend_offset_pairs(
-                scan,
-                &pair_inputs,
-                &mut pair_state,
-                offset_pairs,
-                &mut offset_pairs_len,
-                &mut scan_pause_ns,
-                true,
-            );
-        }
-
-        // For each match, add to the offset_pairs buffer.
-        two_stage.for_each_hit(current_lut_kmer, |q_off_1| {
-            if debug_enabled {
-                *dbg_seeds_found += 1;
-            }
-            if q_off_1 != 0 {
-                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:1406-1418
-                offset_pairs[offset_pairs_len] = OffsetPair {
-                    q_off: q_off_1 as usize - 1,
-                    s_off: kmer_start,
-                    s_range,
-                };
-                offset_pairs_len += 1;
-            }
-        });
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:1456-1469
-        // The second template's hits of the same subject offset follow
-        // the first template's (`longest_chain` counts both chains).
-        if let Some(second_template_index) = second_template_index {
-            two_stage.for_each_hit2(second_template_index, |q_off_1| {
+    // `on_word!()`: the closure that takes one word of a table with chains (its lookup hits in
+    // the chain order into the offset pairs), made in the two scans that call it (a
+    // discontiguous table's chains and a contiguous table's chains), so a scan of a table laid
+    // out as CSR builds no closure it never calls.
+    macro_rules! on_word {
+        () => {
+            |kmer_start: usize,
+             s_range: usize,
+             current_lut_kmer: u64,
+             second_template_index: Option<u64>| {
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:193-207
                 if debug_enabled {
-                    *dbg_seeds_found += 1;
+                    *dbg_total_s_positions += 1;
                 }
-                offset_pairs[offset_pairs_len] = OffsetPair {
-                    q_off: q_off_1 as usize - 1,
-                    s_off: kmer_start,
-                    s_range,
-                };
-                offset_pairs_len += 1;
-            });
-        }
 
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:255-288
-        if offset_pairs_len >= offset_array_size {
-            pair_extend::extend_offset_pairs(
-                scan,
-                &pair_inputs,
-                &mut pair_state,
-                offset_pairs,
-                &mut offset_pairs_len,
-                &mut scan_pause_ns,
-                true,
-            );
-        }
-    };
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:193-207
+                if debug_mode || blastn_debug {
+                    // DEBUG: Track processing time
+                    let _dbg_start = std::time::Instant::now();
+                }
+
+                // Lookup using lut_word_length k-mer
+                let matches_len = if debug_mode || blastn_debug {
+                    two_stage.count_hits(current_lut_kmer)
+                } else {
+                    0
+                };
+
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:193-207
+                // DEBUG: Log max matches
+                if (debug_mode || blastn_debug) && matches_len > 1000 {
+                    eprintln!(
+                        "[WARN] Large matches_slice: len={} for kmer at position {}",
+                        matches_len, kmer_start
+                    );
+                }
+
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:1504-1533
+                if offset_pairs_len >= OFFSET_ARRAY_SIZE {
+                    pair_extend::extend_offset_pairs(
+                        scan,
+                        &pair_inputs,
+                        &mut pair_state,
+                        offset_pairs,
+                        &mut offset_pairs_len,
+                        &mut scan_pause_ns,
+                        true,
+                    );
+                }
+
+                // For each match, add to the offset_pairs buffer.
+                two_stage.for_each_hit(current_lut_kmer, |q_off_1| {
+                    if debug_enabled {
+                        *dbg_seeds_found += 1;
+                    }
+                    if q_off_1 != 0 {
+                        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:1406-1418
+                        offset_pairs[offset_pairs_len] = OffsetPair {
+                            q_off: q_off_1 as usize - 1,
+                            s_off: kmer_start,
+                            s_range,
+                        };
+                        offset_pairs_len += 1;
+                    }
+                });
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:1456-1469
+                // The second template's hits of the same subject offset follow
+                // the first template's (`longest_chain` counts both chains).
+                if let Some(second_template_index) = second_template_index {
+                    two_stage.for_each_hit2(second_template_index, |q_off_1| {
+                        if debug_enabled {
+                            *dbg_seeds_found += 1;
+                        }
+                        offset_pairs[offset_pairs_len] = OffsetPair {
+                            q_off: q_off_1 as usize - 1,
+                            s_off: kmer_start,
+                            s_range,
+                        };
+                        offset_pairs_len += 1;
+                    });
+                }
+
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:255-288
+                if offset_pairs_len >= offset_array_size {
+                    pair_extend::extend_offset_pairs(
+                        scan,
+                        &pair_inputs,
+                        &mut pair_state,
+                        offset_pairs,
+                        &mut offset_pairs_len,
+                        &mut scan_pause_ns,
+                        true,
+                    );
+                }
+            }
+        };
+    }
     // The presence vector and its shift, held by the scans' per-word closures by value
     // (`lookup::XPvView`), which test each word there before they call out.
     let pv_view = two_stage.x_pv_view();
@@ -442,6 +451,7 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
             // batches go out in the same order (with the debug output on, its lines too).
             let every_word = debug_mode || blastn_debug;
             let mut words_without_hits = 0usize;
+            let mut on_word = on_word!();
             let mut emit = |(s_off, s_range, index, index2): (usize, usize, u64, Option<u64>)| {
                 on_word(s_off, s_range, index, index2)
             };
@@ -503,7 +513,8 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
         // one element per cell), whose `emit` gets the word only.
         // `x_scan_csr!(head, |k| test)`: the scan of `head` whose per-word closure
         // keeps a word `k` for the ring when `test` holds (`XWordBatch`).
-        let rank_once = x_bn_rank_once(true);
+        // (chosen once for the batch, with LOSAT_X_BNPVONCE below: `ScanBatch::new`)
+        let rank_once = scan.x_rank_once;
         macro_rules! x_scan_csr {
             ($head:expr, |$k:ident| $has:expr) => {{
                 use x_dc_csr::XHead;
@@ -592,7 +603,7 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
             }};
         }
         match csr.x_packed() {
-            Some(packed) if x_bn_pv_once(&packed) => {
+            Some(packed) if scan.x_pv_once => {
                 x_scan_csr!(packed, |k| packed.x_present(k as usize))
             }
             Some(packed) => {
@@ -602,7 +613,6 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
             None => x_scan_csr!(csr, |k| pv_view.has_hits(k)),
         }
     } else {
-        x_bn_rank_once(false);
         let mb_scan_kind = select_mb_scan_kind(lut_word_length, scan_step, subject_masked);
         // A word whose chain is empty (the presence vector, which `for_each_hit` tests first)
         // adds no pair: tested here, inline in the scan, so such a word makes no call to
@@ -613,6 +623,7 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
         // before that batch's window lines.
         let every_word = debug_mode || blastn_debug;
         let mut words_without_hits = 0usize;
+        let mut on_word = on_word!();
         scan_subject_kmers_with_ranges(
             search_seq_packed,
             s_len,

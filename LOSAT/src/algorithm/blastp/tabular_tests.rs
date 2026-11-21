@@ -154,7 +154,7 @@ fn rows_and_comment_lines_are_ncbis() {
 // `qend` is `qstart - 1`, with 0.000 identity and no coverage; `qcovs` leaves it out.
 #[test]
 fn an_hsp_of_length_zero_is_a_row_that_covers_nothing() {
-    let mut empty = hit((3, 3), (24, 24), 0);
+    let mut empty = hit((3, 4), (24, 25), 0);
     empty.length = 0;
     empty.q_end = 2;
     empty.s_end = 23;

@@ -59,10 +59,14 @@ fn losat_binary() -> PathBuf {
     path
 }
 
+/// The binary with no `LOSAT_*` variable that chooses a code path. `LOSAT_BLASTX_WORKER_LOG`
+/// stays: a binary built with the `blastx-worker-probe` feature (`cargo test --all-features`, as
+/// in CI) needs that file name as soon as a search has more than one thread, and it selects
+/// nothing.
 fn clean_losat_command() -> Command {
     let mut command = Command::new(losat_binary());
     for (name, _) in std::env::vars_os() {
-        if name.to_string_lossy().starts_with("LOSAT_") {
+        if name.to_string_lossy().starts_with("LOSAT_") && name != "LOSAT_BLASTX_WORKER_LOG" {
             command.env_remove(name);
         }
     }

@@ -931,6 +931,7 @@ impl BlastnDatabase {
         self.db.read_mask_block(block, algo_id, masks);
         match masks.ranges(block.first + (ordinal - block.first_ordinal)) {
             Ok(BlockMasks::Ranges(stored)) => Ok(stored),
+            Ok(BlockMasks::NoMaskData) => Ok(&[]),
             Ok(BlockMasks::AlgorithmNotInVolume) => Err(anyhow::anyhow!(
                 "LOSAT internal error: the volume of sequence {ordinal} has no mask algorithm {algo_id}"
             )),

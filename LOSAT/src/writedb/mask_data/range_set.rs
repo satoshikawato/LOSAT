@@ -204,6 +204,17 @@ fn merge_ranges(rg1: &mut Range, rg2: Range, reverse: bool) -> bool {
 // (`tests/unit/sort_observed/`). They make the same calls, in the same order, and leave the same
 // order; no library source was read.
 
+/// Sorts the ranges of one group and strand with `range_less` (`CRange_ReverseLess` when
+/// `reverse`). Each strand has its own comparator with nothing captured, so the sort neither
+/// tests the strand nor reads it from memory at each comparison.
+fn sort_ranges(ranges: &mut [Range], reverse: bool) {
+    if reverse {
+        sort_as_observed(ranges, &mut |a: &Range, b: &Range| range_less(a, b, true));
+    } else {
+        sort_as_observed(ranges, &mut |a: &Range, b: &Range| range_less(a, b, false));
+    }
+}
+
 /// Stretches of at most this many elements are not split; the closing insertion pass orders them.
 const SPLIT_ABOVE: usize = 16;
 
@@ -614,9 +625,7 @@ fn add_locs(tree: &mut GiimTree, l1: &Loc, l2: &Loc) -> Loc {
                     reverse: false,
                 });
             } else {
-                sort_as_observed(ranges, &mut |a: &Range, b: &Range| {
-                    range_less(a, b, reverse)
-                });
+                sort_ranges(ranges, reverse);
                 let id = id_index[index];
                 let mut push = |rg: Range| {
                     pushed.push(if rg.is_whole() {

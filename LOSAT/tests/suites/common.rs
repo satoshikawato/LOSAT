@@ -29,6 +29,8 @@ mod blastx_library_db_hold;
 mod cli_smoke;
 #[path = "../compressed_clut_pairs.rs"]
 mod compressed_clut_pairs;
+#[path = "../database_sequence_without_letters.rs"]
+mod database_sequence_without_letters;
 #[path = "../db_empty_title.rs"]
 mod db_empty_title;
 #[path = "../db_seqidlist.rs"]

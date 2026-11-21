@@ -256,8 +256,9 @@ fn read_outfmt(
         0 => None,
         6 | 7 => words_follow.then_some(outfmt),
         // The query-anchored formats (every program's, line RG T3) without the words after the
-        // number, which the CLI drops (`FormatChoice::normalized`) and the engine's library
-        // refuses after 0 to 4, as a field list.
+        // number, which NCBI and the CLI drop (`FormatChoice::normalized`). The engine's library
+        // drops them as well (`parse_formatting_string`; BLASTP's since line RG F/d36), so this
+        // only gives the output one spelling of its number.
         1..=4 => Some(choice.normalized()),
         _ => Some(outfmt),
     };
@@ -405,6 +406,21 @@ pub fn emit_start(words: &[&str]) -> Result<(), String> {
     Ok(())
 }
 
+/// Whether the run of `words` reads its FASTA inputs with NCBI's data loaders on
+/// (`ApplicationSettings::data_loaders`: `[BLAST] DATA_LOADERS` of the registry, which `-conffile`
+/// names): with them on, the reader refuses a first line that NCBI would fetch as a Seq-id; with
+/// `DATA_LOADERS=none` it reads that line as data, as the CLI does (line WQA's D16, 2026-11-20).
+/// `Err` with the start's error where the start, or LOSAT's check of its settings, ends the run.
+pub fn data_loaders(words: &[&str]) -> Result<bool, String> {
+    let started = start(
+        words,
+        &RunFiles::Receiver(Arc::new(NoFiles)),
+        &mut std::io::sink(),
+    )
+    .map_err(|(message, _)| message)?;
+    Ok(started.settings()?.data_loaders)
+}
+
 /// `validate`: the application start (`start`: its errors are the command line's first), then
 /// `parse`, the settings that LOSAT refuses, and nothing more for a dry run (`-dryrun`); then the
 /// syntax of `-subject_loc` and `-query_loc`, BLASTN's
@@ -418,7 +434,17 @@ pub fn emit_start(words: &[&str]) -> Result<(), String> {
 /// `search_all`), as the CLI checks the argv's `-outfmt` alone.
 /// The other search's rejection fails only its formats, which the argv does not ask for.
 /// `run` leaves the other checks to the engine, which reports them as the CLI does.
-pub fn validate(words: &[&str]) -> Result<(), String> {
+/// Returns whether the run reads its inputs with NCBI's data loaders on (`data_loaders`), which
+/// the host gives `register` and `scan_begin` (line WQA's D16, 2026-11-20).
+pub fn validate(words: &[&str]) -> Result<bool, String> {
+    validate_with(words, &mut |_| ())
+}
+
+/// `validate`, which also gives `known` the data loaders of the argv's registry as soon as the
+/// start has read it and LOSAT takes its settings, before the checks of the arguments and the
+/// options: the setting does not depend on them, so it is known while another option is refused
+/// (line WQA's D13 round 3, L1, 2026-11-20). Not called when the start or the settings fail.
+pub fn validate_with(words: &[&str], known: &mut dyn FnMut(bool)) -> Result<bool, String> {
     use losat::web_adapter::{parse_optional_range, RangeRole};
     let started = start(
         words,
@@ -426,8 +452,11 @@ pub fn validate(words: &[&str]) -> Result<(), String> {
         &mut std::io::sink(),
     )
     .map_err(|(message, _)| message)?;
+    if let Ok(settings) = started.settings() {
+        known(settings.data_loaders);
+    }
     let Some((program, command, requested)) = started_command(words, &started)? else {
-        return Ok(());
+        return Ok(started.settings()?.data_loaders);
     };
     let custom = requested.custom.as_deref();
     let settings = started.settings()?;
@@ -507,7 +536,7 @@ pub fn validate(words: &[&str]) -> Result<(), String> {
         }
         _ => {}
     }
-    Ok(())
+    Ok(settings.data_loaders)
 }
 
 /// NCBI's formatting handler's check of the argv's own `-outfmt` (a custom delimiter that a field
@@ -2103,7 +2132,7 @@ mod tests {
                 &["-reward", "5", "-penalty", "-1"],
                 &["-reward", "2", "-penalty", "-1"],
             ] {
-                assert_eq!(with(base, pair), Ok(()), "{base:?} {pair:?}");
+                assert_eq!(with(base, pair), Ok(true), "{base:?} {pair:?}");
             }
         }
         // The checks of the options stand: NCBI's and LOSAT's refusals.
@@ -2202,7 +2231,7 @@ mod tests {
     fn parse_deflines_reads_the_inputs_together() {
         for program in ["blastp", "tblastn", "blastn", "tblastx", "blastx"] {
             let words = [program, "-query", "q", "-subject", "s", "-parse_deflines"];
-            assert_eq!(validate(&words), Ok(()));
+            assert_eq!(validate(&words), Ok(true));
             assert!(inputs_together(&words), "{program}");
             assert!(start_json(&words)
                 .unwrap()
@@ -2252,36 +2281,27 @@ mod tests {
             rows.iter().map(|(_, argv)| argv[0].as_str()).collect();
         assert_eq!(programs.len(), 5, "{programs:?}");
         assert!(rows.len() >= 130, "{}", rows.len());
-        let (mut shown, mut refused, mut alone) = (0, 0, 0);
+        let (mut shown, mut gaps, mut alone) = (0, 0, 0);
         for (id, argv) in &rows {
             let words: Vec<&str> = argv.iter().map(String::as_str).collect();
             let at = |flag: &str| words[words.iter().position(|w| *w == flag).unwrap() + 1];
             let (query, subject) = (read(at("-query")), read(at("-subject")));
-            // Rows that LOSAT Web does not run, each with its refusal, so that this test shows
-            // when one runs: a `>?` gap line, which the store refuses (maintainer decision 3).
+            // A `>?` gap line runs as in the CLI (line WQA's D13 (a), 2026-11-20; the store refused
+            // it before): its rows are counted, to show that they run.
             let gap_line = [&query, &subject].iter().any(|bytes| {
                 bytes
                     .split(|b| *b == b'\n')
                     .any(|line| line.starts_with(b">?"))
             });
+            gaps += usize::from(gap_line);
             // The pd.self rows other than outfmt 0: a record that is both a query and a subject and
             // has masks, whose outfmt 0 LOSAT refuses, that format's alone
             // (`believed::refuse_shared_masks_in`; line WQA's sweep, D7, 2026-11-19): the run
             // writes the argv's format and outfmt 0 fails alone, its refusal on stream 3 after the
             // CLI's warnings.
             let shared_masks = id.starts_with("pd.self.") && !id.ends_with(".0");
-            let streams = match try_registered_streams(&words, &query, &subject) {
-                Ok(streams) => {
-                    assert!(!gap_line, "{id}: LOSAT Web runs it now");
-                    streams
-                }
-                Err(error) if gap_line => {
-                    assert!(error.contains("is a gap line ('>?')"), "{id}: {error}");
-                    refused += 1;
-                    continue;
-                }
-                Err(error) => panic!("{id}: {error}"),
-            };
+            let streams = try_registered_streams(&words, &query, &subject)
+                .unwrap_or_else(|error| panic!("{id}: {error}"));
             let outfmt = at("-outfmt");
             let stream = match outfmt {
                 "0" => 0,
@@ -2361,9 +2381,10 @@ mod tests {
             }
         }
         assert!(shown > 0);
+        assert!(gaps > 0, "the rows of a gap line run");
         assert_eq!(alone, 33, "the pd.self rows other than outfmt 0");
         eprintln!(
-            "{} rows, {refused} refused, {alone} with outfmt 0 failed alone, {shown} outfmt 6 rows' ids",
+            "{} rows, {gaps} with a gap line, {alone} with outfmt 0 failed alone, {shown} outfmt 6 rows' ids",
             rows.len()
         );
     }
@@ -2371,7 +2392,7 @@ mod tests {
     // The errors of a run with `-parse_deflines` are the CLI's, in its order (line WQA's sweep, D7,
     // 2026-11-19; the texts are those of the native CLI of this branch for the same inputs, less its
     // `Error: ` and line end): the subjects are read before the query, so a subject's error comes
-    // first, also before LOSAT Web's refusal of a gap line in the query; a subject input without
+    // first; a query with a gap line runs (line WQA's D13 (a), 2026-11-20); a subject input without
     // records ends the run before the query is read; a ranged id fails a run that writes the BLAST
     // archive alone. A dry run reads no input.
     #[test]
@@ -2406,10 +2427,9 @@ mod tests {
         );
         assert_eq!(error("6", good, dup), dup_subject);
         assert_eq!(error("6", gap, dup), dup_subject);
-        let gap_alone = error("6", gap, good);
-        assert!(gap_alone.contains("is a gap line ('>?')"), "{gap_alone}");
-        // A reader's error of the query comes before LOSAT Web's refusal of its gap line, as the CLI
-        // reads it: here a query and a subject record of one id and other letters.
+        assert!(try_registered_streams(&words("6"), gap, good).is_ok());
+        // LOSAT's refusal of ids that the query's gap line does not change: here a query and a
+        // subject record of one id and other letters.
         let shared_gap: &[u8] = b">s1 x\nACGT\n>?10\nACGT\n";
         assert_eq!(
             error("6", shared_gap, good),
@@ -2807,7 +2827,7 @@ mod tests {
                     "{program} {outfmt:?}"
                 );
                 let words = [program, "-query", "q", "-subject", "s", "-outfmt", outfmt];
-                assert_eq!(validate(&words), Ok(()), "{program} {outfmt:?}");
+                assert_eq!(validate(&words), Ok(true), "{program} {outfmt:?}");
             }
             // Every program writes the query-anchored formats 1 to 4 (line RG T3: BLASTP in T3a,
             // BLASTN and TBLASTN in T3b, BLASTX and TBLASTX in T3c), each an output of its own
@@ -2829,7 +2849,7 @@ mod tests {
                     "{program} {outfmt:?}"
                 );
                 let words = [program, "-query", "q", "-subject", "s", "-outfmt", outfmt];
-                assert_eq!(validate(&words), Ok(()), "{program} {outfmt:?}");
+                assert_eq!(validate(&words), Ok(true), "{program} {outfmt:?}");
             }
             // What the CLI rejects, with its message.
             let engine = engine_program(Program::parse(program).unwrap());
@@ -2944,17 +2964,22 @@ mod tests {
             let (query, subject, _) = crate::store::register_inputs(words, query, subject)?;
             (query, subject)
         } else {
-            let (query, _) = crate::store::register(words[0], 0, query)?;
-            let (subject, _) = crate::store::register(words[0], 1, subject).inspect_err(|_| {
-                crate::store::release(query).unwrap();
-            })?;
+            let (query, _) = crate::store::register(words[0], 0, true, query)?;
+            let (subject, _) =
+                crate::store::register(words[0], 1, true, subject).inspect_err(|_| {
+                    crate::store::release(query).unwrap();
+                })?;
             (query, subject)
         };
         crate::emit::EMITTED.with(|emitted| emitted.borrow_mut().clear());
-        let result =
-            crate::store::with_inputs(program, query, subject, words, |queries, subjects| {
-                run(words, queries, subjects)
-            });
+        let result = crate::store::with_inputs(
+            program,
+            query,
+            subject,
+            words,
+            data_loaders(words).ok(),
+            |queries, subjects| run(words, queries, subjects),
+        );
         crate::store::release(query).unwrap();
         crate::store::release(subject).unwrap();
         result??;
@@ -4157,14 +4182,15 @@ mod tests {
     #[test]
     fn the_store_keeps_the_deflines_that_the_title_does_not_give() {
         let fasta: &[u8] = b">a one\r\nACGT\n>b\twith tab\nGG\n>  c\nTT\n>d \nAA\n>e\r\nCC\n";
-        let (handle, _) = crate::store::register("blastn", 0, fasta).unwrap();
-        let (subject, _) = crate::store::register("blastn", 1, b">s\nACGTACGT\n").unwrap();
+        let (handle, _) = crate::store::register("blastn", 0, true, fasta).unwrap();
+        let (subject, _) = crate::store::register("blastn", 1, true, b">s\nACGTACGT\n").unwrap();
         let sources = |whole: bool| {
             crate::store::with_inputs(
                 Program::Blastn,
                 handle,
                 subject,
                 argv_writing_archive(whole),
+                Some(true),
                 |queries, subjects| {
                     let source = |record: &FastaRecord| {
                         record.source.as_ref().map(|source| source.defline.clone())
@@ -4208,14 +4234,16 @@ mod tests {
                 vec![b">a ".to_vec(), b"".to_vec()],
             ),
         ] {
-            let (handle, _) = crate::store::register("blastn", 0, fasta).unwrap();
-            let (subject, _) = crate::store::register("blastn", 1, b">s\nACGTACGT\n").unwrap();
+            let (handle, _) = crate::store::register("blastn", 0, true, fasta).unwrap();
+            let (subject, _) =
+                crate::store::register("blastn", 1, true, b">s\nACGTACGT\n").unwrap();
             let defline = |whole: bool| {
                 crate::store::with_inputs(
                     Program::Blastn,
                     handle,
                     subject,
                     argv_writing_archive(whole),
+                    Some(true),
                     |queries, _| {
                         queries
                             .iter()

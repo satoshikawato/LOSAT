@@ -120,16 +120,18 @@ pub(super) struct TblastnTabular<'a> {
     pub program_version: &'static str,
 }
 
-/// The custom tabular report of a checked `-outfmt` value (`TabularSpec::of`): a field list or a
-/// delimiter of outfmt 6 and 7, and every outfmt 10 and 20; `None` for the default 6 and 7 (the
-/// `std` fields with a tab, `stage_e_report::write_tabular`) and the other formats.
+/// The custom tabular report of a checked `-outfmt` value (`TabularSpec::of_app`, tblastn's
+/// formatter, PSI-TBLASTN's too, gets the delimiter): a field list or a delimiter of outfmt 6 and
+/// 7, and every outfmt 10 and 20; `None` for the default 6 and 7 (the `std` fields with a tab,
+/// `stage_e_report::write_tabular`) and the other formats.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:770-786
 pub(super) fn tabular_spec(outfmt: &str) -> Option<TabularSpec> {
     let choice = crate::blastinput::app::parse_formatting_string(outfmt).ok()?;
-    TabularSpec::of(
+    TabularSpec::of_app(
         crate::blastinput::app::ReportFormat::from_number(choice.number)?,
         &choice,
+        crate::report::archive::options::RequestKind::Tblastn,
     )
 }
 

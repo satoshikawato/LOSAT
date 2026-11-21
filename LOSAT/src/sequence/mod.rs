@@ -6,3 +6,4 @@
 pub mod packed_letters;
 pub mod packed_subject;
 pub(crate) mod stdaa_letters;
+pub(crate) mod title;

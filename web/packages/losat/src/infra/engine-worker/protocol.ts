@@ -146,6 +146,8 @@ export interface WorkerRunResult {
   readonly countsBytes?: number;
   /** The files that the run made besides its outputs (stream 8), when it made any. */
   readonly runFiles?: readonly RunFile[];
+  /** The text that the run printed in place of a search (stream 11; `RuntimeInfo.printed`). */
+  readonly printed?: Uint8Array;
 }
 
 export interface WorkerError {
@@ -158,6 +160,8 @@ export interface WorkerError {
   readonly stopped?: boolean;
   /** The files that the failed run made besides its outputs (stream 8; `runFilesOf`). */
   readonly runFiles?: readonly RunFile[];
+  /** The failed run ended its output with `fail` (`runOutputFailedOf`). */
+  readonly outputFailed?: true;
 }
 
 export type EngineEvent =

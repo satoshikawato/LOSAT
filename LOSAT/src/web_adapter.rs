@@ -20,14 +20,19 @@
 use std::ffi::OsString;
 
 // The command line's arguments (`cli.rs`): the clap types of every program, the parser's
-// messages, and the command line's own errors.
-pub use crate::cli::{command_line_message, Cli, Commands, NativeError, WEB_V2_PROGRAMS};
+// messages, the text that the command line prints where its reader stopped at a help word, and
+// the command line's own errors.
+pub use crate::cli::{
+    command_line_message, printed_text, Cli, Commands, NativeError, WEB_V2_PROGRAMS,
+};
 
-/// `cli::try_parse_with_own_start` for the command line's own arguments (`Cli`): the argv read as
-/// the command line reads it after its application start, NCBI's single-dash options included. A
-/// run of ABI v2 makes its own start (`start_run`), so the toolkit's words that the start reads
-/// (`-logfile`, `-conffile`, `-dryrun`) are taken, as the library API takes them; the versions and
-/// `-xmlhelp`, whose texts only the command line writes, are refused.
+/// `cli::try_parse_with_printing_start` for the command line's own arguments (`Cli`): the argv read
+/// as the command line reads it after its application start, NCBI's single-dash options included.
+/// A run of ABI v2 makes its own start (`start_run`), so the toolkit's words that the start reads
+/// (`-logfile`, `-conffile`, `-dryrun`) are taken, as the library API takes them, and the help
+/// words stop the reader as on the command line, `-xmlhelp` included: the run prints their text
+/// (`printed_text`; line WQA's D14, 2026-11-20). The versions are printed by the start
+/// (`CallerStart::version`) and never reach the reader.
 ///
 /// Only `Cli`: the adapter parses nothing else, so the façade does not offer the parser for any
 /// other clap type.
@@ -36,7 +41,7 @@ where
     I: IntoIterator<Item = S>,
     S: Into<OsString>,
 {
-    crate::cli::try_parse_with_own_start(argv)
+    crate::cli::try_parse_with_printing_start(argv)
 }
 
 // The NCBI application start of a run (`api::start`, line RG item E1w-3a): the words that it reads
@@ -93,13 +98,21 @@ pub use crate::api::local_blast::{
 pub use crate::report::blast_xml2::SideFileSink;
 pub use crate::report::PairwiseHit;
 
+// LOSAT's words of NCBI's messages (`wording.rs`, PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 12):
+// the adapter's tests compare the engine's messages with NCBI's texts through it (AGENTS.md
+// rule 8).
+pub use crate::wording::{
+    losat_bytes, losat_output_bytes, losat_text, LOSAT_VERSION, REPORT_VERSION,
+};
+
 // The output formats of the application layer (`blastinput/app.rs`, NCBI's CFormattingArgs):
 // `-outfmt` parsed and checked as the command line does. `EngineProgram` is the program of
 // these checks (the adapter has its own `Program`, and `api::Program` is another type).
 pub use crate::blastinput::app::output_format::{ARCHIVE_FORMAT, SAM as SAM_FORMAT};
 pub use crate::blastinput::app::Program as EngineProgram;
 pub use crate::blastinput::app::{
-    engine_error, formatting_handler_check, parse_formatting_string, report_format,
+    engine_error, formatting_handler_check, missing_subject_error, parse_formatting_string,
+    report_format,
 };
 
 // The hit list sizes of the formats (`blastinput/report_counts.rs`), the scoring matrices that
@@ -118,6 +131,10 @@ pub use crate::api::input::{parse_deflines_of, read_search_inputs};
 pub use crate::blastinput::fasta_reader::{
     read_all, FastaInputSource, ParseErrorCode, ReadError, ReaderConfig, RecordSource,
 };
+// The reader's own counts for LOSAT Web's index scan (`web/adapter/src/scan/ncbi.rs`), which reads
+// the inputs as the reader does without holding their letters: the letters of a `>?` gap line and
+// the refusal of a record longer than LOSAT reads.
+pub use crate::blastinput::fasta_reader::{gap_line_letters, record_too_long, MAX_RECORD_LETTERS};
 pub use crate::blastinput::input_files::is_blank;
 
 /// The options of `program`'s command line that the browser's searches of records do not take:

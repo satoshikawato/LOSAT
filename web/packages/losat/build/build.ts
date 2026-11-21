@@ -10,7 +10,9 @@
 // - abi.json: the package's version, the engine's version (LOSAT/Cargo.toml; the package's
 //   version must be the same) and the ABI version that the serial reactor reports
 //   (`losat_web2_abi_version`, read here through the package's own host);
-// - package.json for publishing (its exports name dist's files), README.md and LICENSE.
+// - package.json for publishing (its exports name dist's files), README.md, LICENSE, and the
+//   notices of the code from other projects (THIRD_PARTY_NOTICES) and of the code the reactors
+//   link (THIRD_PARTY_LICENSES), from the repository's root.
 //
 // `npm pack` and `npm publish` run in dist/. Publishing is the maintainer's act (plan §4.2).
 import { execFileSync } from 'node:child_process';
@@ -165,6 +167,8 @@ export async function build(env: NodeJS.ProcessEnv = process.env): Promise<void>
   writeFileSync(join(DIST, 'package.json'), `${JSON.stringify(published, null, 2)}\n`);
   copyFileSync(join(PACKAGE, 'README.md'), join(DIST, 'README.md'));
   copyFileSync(join(REPOSITORY, 'LICENSE'), join(DIST, 'LICENSE'));
+  copyFileSync(join(REPOSITORY, 'THIRD_PARTY_NOTICES'), join(DIST, 'THIRD_PARTY_NOTICES'));
+  copyFileSync(join(REPOSITORY, 'THIRD_PARTY_LICENSES'), join(DIST, 'THIRD_PARTY_LICENSES'));
 }
 
 if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) await build();

@@ -1,22 +1,11 @@
 use crate::core::blast_encoding::COMPRESSION_RATIO;
 
 /// BLASTNA alphabet size.
-/// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_encoding.h:91-92
-/// ```c
-/// #define BLASTNA_SIZE 16     /**< Size of nucleic acid alphabet */
-/// ```
+/// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_encoding.h:91-92
 const BLASTNA_SIZE: usize = 16;
 
 /// Ungapped extension results (0-based coordinates, length in bases).
-/// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_extend.h:141-147
-/// ```c
-/// typedef struct BlastUngappedData {
-///    Int4 q_start;
-///    Int4 s_start;
-///    Int4 length;
-///    Int4 score;
-/// } BlastUngappedData;
-/// ```
+/// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_extend.h:141-147
 #[derive(Clone, Copy, Debug)]
 pub struct UngappedData {
     pub q_start: usize,
@@ -26,17 +15,7 @@ pub struct UngappedData {
 }
 
 /// Build the nucleotide ungapped score table for 4-base blocks.
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:236-259
-/// ```c
-/// for (i = 0; i < 256; i++) {
-///    Int4 score = 0;
-///    if (i & 3) score += penalty; else score += reward;
-///    if ((i >> 2) & 3) score += penalty; else score += reward;
-///    if ((i >> 4) & 3) score += penalty; else score += reward;
-///    if (i >> 6) score += penalty; else score += reward;
-///    table[i] = score;
-/// }
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:236-259
 pub fn build_nucl_score_table(reward: i32, penalty: i32) -> [i32; 256] {
     let mut table = [0i32; 256];
     for i in 0..256 {
@@ -67,10 +46,7 @@ pub fn build_nucl_score_table(reward: i32, penalty: i32) -> [i32; 256] {
 }
 
 /// Extract base N from packed ncbi2na byte.
-/// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_util.h:51-55
-/// ```c
-/// #define NCBI2NA_UNPACK_BASE(x, N) (((x)>>(2*(N))) & NCBI2NA_MASK)
-/// ```
+/// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_util.h:51-55
 #[cfg(test)]
 #[inline]
 fn ncbi2na_unpack_base(byte: u8, n: u8) -> u8 {
@@ -78,28 +54,7 @@ fn ncbi2na_unpack_base(byte: u8, n: u8) -> u8 {
 }
 
 /// Exact ungapped extension (per-base) for nucleotide sequences.
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:148-242
-/// ```c
-/// s_NuclUngappedExtendExact(..., Int4 q_off, Int4 s_off, Int4 X, ...)
-/// {
-///    base = 3 - (s_off % 4);
-///    ...
-///    while ((s > start) || (s == start && base < remainder)) {
-///        if (base == 3) { s--; base = 0; } else { ++base; }
-///        if ((sum += matrix[*--q][NCBI2NA_UNPACK_BASE(ch, base)]) > 0) {
-///            q_beg = q; score += sum; sum = 0;
-///        } else if (sum < X) break;
-///    }
-///    ...
-///    while (s < sf || (s == sf && base > remainder)) {
-///        if ((sum += matrix[*q++][NCBI2NA_UNPACK_BASE(ch, base)]) > 0) {
-///            q_end = q; score += sum; X_current = (-score > X) ? -score : X; sum = 0;
-///        } else if (sum < X_current) break;
-///        if (base == 0) { base = 3; s++; } else base--;
-///    }
-///    ungapped_data->length = (Int4)(q_end - q_beg);
-/// }
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:148-242
 ///
 /// LOSAT_X_BNUNGAPCOUNT (graduated 2026-10-27, always on): the same loops run with their step
 /// counts worked out first (`x_ungap_count.rs`). The loop-for-loop port below stays as the
@@ -140,13 +95,6 @@ pub(crate) fn extend_hit_ungapped_exact_ported(
 ) -> UngappedData {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:743-747 (the same at
     // 913-917 and 1755-1759)
-    // ```c
-    //                s_NuclUngappedExtendExact(query, subject, matrix, q_off,
-    //                                   s_off, -(cutoffs->x_dropoff), ungapped_data);
-    //             }else {
-    //                s_NuclUngappedExtend(query, subject, matrix, q_off, s_end, s_off,
-    //                                  -(cutoffs->x_dropoff), ungapped_data,
-    // ```
     // A raw X-drop past `Int4` (`INT_MIN`, `core::x_drop`) negates to itself in NCBI's x86-64
     // build, so the extension never stops at the X-drop; LOSAT negates it the same way.
     let x = x_dropoff.wrapping_neg();
@@ -184,15 +132,7 @@ pub(crate) fn extend_hit_ungapped_exact_ported(
         }
         q_idx -= 1;
 
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:188-199
-        // ```c
-        // ch = *s;
-        // if ((sum += matrix[*--q][NCBI2NA_UNPACK_BASE(ch, base)]) > 0) {
-        //     q_beg = q;
-        //     score += sum;
-        //     sum = 0;
-        // }
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:188-200
         // SAFETY: q_idx and s_idx are kept within bounds by the loop guards
         // and mirror NCBI's pointer arithmetic on query/subject buffers.
         let ch = unsafe { *s_seq_packed.get_unchecked(s_idx as usize) };
@@ -236,15 +176,7 @@ pub(crate) fn extend_hit_ungapped_exact_ported(
         if q_idx as usize >= q_len {
             break;
         }
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:217-229
-        // ```c
-        // ch = *s;
-        // if ((sum += matrix[*q++][NCBI2NA_UNPACK_BASE(ch, base)]) > 0) {
-        //     q_end = q;
-        //     score += sum;
-        //     ...
-        // }
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:217-229
         // SAFETY: q_idx and s_idx stay within bounds under the same
         // conditions as the NCBI pointer-based loop.
         let ch = unsafe { *s_seq_packed.get_unchecked(s_idx as usize) };
@@ -283,8 +215,7 @@ pub(crate) fn extend_hit_ungapped_exact_ported(
     }
 }
 
-// NCBI reference: c++/src/algo/blast/core/na_ungapped.c:292-294,322-324
-// Uint1 q_byte = (q[0] << 6) | (q[1] << 4) | (q[2] << 2) | q[3];
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:292-294,322-324
 // NCBI's overlapping BLASTNA bit expression of the query letters `start..start + 4`,
 // ambiguities included, computed where it is read as NCBI does (LOSAT's memory: no array
 // of these bytes at every offset of the query).
@@ -304,69 +235,18 @@ pub fn build_query_four_base_bytes(query: &[u8]) -> Vec<u8> {
         .collect()
 }
 
-// NCBI reference: c++/src/algo/blast/core/na_ungapped.c:294,324
-// Uint1 q_byte = (q[0] << 6) | (q[1] << 4) | (q[2] << 2) | q[3];
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:294,324
 // C promotes each BLASTNA byte before truncating the expression to Uint1.
 #[cfg(test)]
-mod four_base_tests {
-    use super::build_query_four_base_bytes;
-
-    #[test]
-    fn every_blastna_word_and_starting_phase_matches_c_uint1_expression() {
-        for word in 0..65_536u32 {
-            let bases = [word >> 12, (word >> 8) & 15, (word >> 4) & 15, word & 15];
-            let expected = ((bases[0] << 6) | (bases[1] << 4) | (bases[2] << 2) | bases[3]) as u8;
-            for phase in 0..4 {
-                let mut query = vec![15; phase];
-                query.extend(bases.map(|base| base as u8));
-                assert_eq!(build_query_four_base_bytes(&query)[phase], expected);
-            }
-        }
-        for len in 0..8 {
-            let query = vec![15; len];
-            assert_eq!(
-                build_query_four_base_bytes(&query),
-                vec![255; len.saturating_sub(3)]
-            );
-        }
-    }
-}
+#[path = "extension_four_base_tests.rs"]
+mod four_base_tests;
 
 /// NCBI's compressed query of the small-query lookup table: byte `j` holds the query
 /// letters `j` to `j + 3` as two-bit bases (`blastna & 3`, so an ambiguity code or a
 /// sentinel reads as a base), with 0 before the first and after the last letter. The
 /// returned vector holds NCBI's `new_seq[j]` at `j + 3` (`j` from -3).
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_util.c:473-499
-/// ```c
-///     new_seq[-1] = new_seq[-2] = new_seq[-3] = 0;
-///     new_seq[len-3] = new_seq[len-2] = new_seq[len-1] = 0;
-///
-///     /* the first 3 bytes behind new_seq contain right-justified
-///        versions of the first 3 (or less) bases */
-///     max_start = MIN(3, len);
-///     curr_letter = 0;
-///     for (i = 0; i < max_start; i++) {
-///         curr_letter = curr_letter << 2 | (old_seq[i] & 3);
-///         new_seq[i - max_start] = curr_letter;
-///     }
-///
-///     /* offset i into new_seq points to bases i to i+3
-///        packed together into one byte */
-///
-///     for (; i < len; i++) {
-///         curr_letter = curr_letter << 2 | (old_seq[i] & 3);
-///         new_seq[i - max_start] = curr_letter;
-///     }
-///
-///     /* the last 3 bytes contain left-justified versions of
-///        the last 3 (or less) bases */
-///     max_start = MIN(3, len);
-///     for (i = 0; i < max_start; i++) {
-///         curr_letter = curr_letter << 2;
-///         new_seq[len - (max_start - i)] = curr_letter;
-///     }
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:473-499
 /// (`new_seq[i - max_start]` is `Uint1`; with `max_start` = 3 each byte is the last
 /// four letters read, and the prologue writes -3..-1 for queries of three or more letters.)
 pub fn build_compressed_query(query: &[u8]) -> Vec<u8> {
@@ -385,23 +265,8 @@ pub fn build_compressed_query(query: &[u8]) -> Vec<u8> {
 /// The number of matching two-bit bases at the right end (`left`) or the left end
 /// (`right`) of the XOR of a query byte and a subject byte, at most 4.
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1326-1330
-/// ```c
-/// /** Entry i of this list gives the number of pairs of
-///  * bits that are zero in the bit pattern of i, looking
-///  * from right to left
-///  */
-/// static const Uint1 s_ExactMatchExtendLeft[256] = {
-/// ```
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1349-1354
-/// ```c
-/// /** Entry i of this list gives the number of pairs of
-///  * bits that are zero in the bit pattern of i, looking
-///  * from left to right
-///  */
-/// static const Uint1 s_ExactMatchExtendRight[256] = {
-/// 4, 3, 3, 3, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1326-1330
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1349-1354
 fn exact_match_extend_left(xor: u8) -> i64 {
     i64::from(xor.trailing_zeros().min(8) / 2)
 }
@@ -428,62 +293,7 @@ impl SmallNaWord<'_> {
         self.compressed_query[(offset + 3) as usize]
     }
 
-    /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1514-1566
-    /// ```c
-    ///         Int4 ext_max = MIN(MIN(word_length - lut_word_length, s_offset), q_offset - q_start);
-    ///
-    ///         /* Start the extension at the first multiple of 4 bases in
-    ///            the subject sequence to the right of the seed.
-    ///            Collect exact matches in groups of four, until a
-    ///            mismatch is encountered or the expected number of
-    ///            matches is found. The index into q[] below can
-    ///            technically be negative, but the compressed version
-    ///            of the query has extra pad bytes before q[0] */
-    ///
-    ///         Int4 rsdl = COMPRESSION_RATIO - (s_offset % COMPRESSION_RATIO);
-    ///         s_offset += rsdl;
-    ///         q_offset += rsdl;
-    ///         ext_max  += rsdl;
-    ///
-    ///         s_off = s_offset;
-    ///         q_off = q_offset;
-    ///
-    ///         while (ext_left < ext_max) {
-    ///             Uint1 q_byte = q[q_off - 4];
-    ///             Uint1 s_byte = s[s_off / COMPRESSION_RATIO - 1];
-    ///             Uint1 bases = s_ExactMatchExtendLeft[q_byte ^ s_byte];
-    ///             ext_left += bases;
-    ///             if (bases < 4)
-    ///                 break;
-    ///             q_off -= 4;
-    ///             s_off -= 4;
-    ///         }
-    ///         ext_left = MIN(ext_left, ext_max);
-    ///
-    ///         /* extend to the right. The extension begins at the first
-    ///            base not examined by the left extension */
-    ///
-    ///         s_off = s_offset;
-    ///         q_off = q_offset;
-    ///         ext_max = MIN(MIN(word_length - ext_left, s_range - s_off), q_range - q_off);
-    ///         while (ext_right < ext_max) {
-    ///             Uint1 q_byte = q[q_off];
-    ///             Uint1 s_byte = s[s_off / COMPRESSION_RATIO];
-    ///             Uint1 bases = s_ExactMatchExtendRight[q_byte ^ s_byte];
-    ///             ext_right += bases;
-    ///             if (bases < 4)
-    ///                 break;
-    ///             q_off += 4;
-    ///             s_off += 4;
-    ///         }
-    ///         ext_right = MIN(ext_right, ext_max);
-    ///
-    ///         if (ext_left + ext_right < word_length)
-    ///             continue;
-    ///
-    ///         q_offset -= ext_left;
-    ///         s_offset -= ext_left;
-    /// ```
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1514-1566
     /// Returns the query and subject offsets of the word.
     pub fn extend(
         &self,
@@ -549,30 +359,7 @@ impl SmallNaWord<'_> {
     /// The extension for a lookup width that is a multiple of 4, a scan step that is a
     /// multiple of 4 and a word at most 4 letters longer than the lookup word.
     ///
-    /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1415-1435
-    /// ```c
-    ///         if ( (s_offset > 0) && (q_offset > 0) ) {
-    ///             Uint1 q_byte = q[q_offset - 4];
-    ///             Uint1 s_byte = s[s_offset / COMPRESSION_RATIO - 1];
-    ///             ext_left = s_ExactMatchExtendLeft[q_byte ^ s_byte];
-    ///             ext_left = MIN(MIN(ext_left, ext_to), q_offset - q_start);
-    ///         }
-    ///
-    ///         /* look for up to 4 exact matches to the right of the seed */
-    ///
-    ///         if ((ext_left < ext_to) && ((q_offset + lut_word_length) < query->length)) {
-    ///             Uint1 q_byte = q[q_offset + lut_word_length];
-    ///             Uint1 s_byte = s[(s_offset + lut_word_length) / COMPRESSION_RATIO];
-    ///             Int4 ext_right = s_ExactMatchExtendRight[q_byte ^ s_byte];
-    ///             ext_right = MIN(MIN(ext_right, s_range - (s_offset + lut_word_length)),
-    ///                                            q_range - (q_offset + lut_word_length));
-    ///             if (ext_left + ext_right < ext_to)
-    ///                 continue;
-    ///         }
-    ///
-    ///         q_offset -= ext_left;
-    ///         s_offset -= ext_left;
-    /// ```
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1415-1435
     pub fn extend_aligned_one_byte(
         &self,
         q_offset: usize,
@@ -612,171 +399,11 @@ impl SmallNaWord<'_> {
 }
 
 #[cfg(test)]
-mod small_na_tests {
-    use super::{
-        build_compressed_query, exact_match_extend_left, exact_match_extend_right, SmallNaWord,
-    };
-
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1330-1347
-    // ```c
-    // static const Uint1 s_ExactMatchExtendLeft[256] = {
-    // ```
-    const NCBI_LEFT: [i64; 256] = [
-        4, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0,
-        0, 0, 2, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0,
-        1, 0, 0, 0, 3, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 1, 0, 0, 0, 1, 0,
-        0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 1, 0, 0, 0,
-        1, 0, 0, 0, 1, 0, 0, 0, 3, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 1, 0,
-        0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0,
-        1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 3, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 2, 0,
-        0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0,
-        2, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0,
-    ];
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1353-1358
-    // ```c
-    // static const Uint1 s_ExactMatchExtendRight[256] = {
-    // ```
-    // (64 initializers; C sets the other entries to 0.)
-    const NCBI_RIGHT_INITIALIZED: [i64; 64] = [
-        4, 3, 3, 3, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-        1, 1, 1, 1,
-    ];
-
-    #[test]
-    fn exact_match_counts_are_ncbi_tables() {
-        for xor in 0..=255u8 {
-            assert_eq!(
-                exact_match_extend_left(xor),
-                NCBI_LEFT[xor as usize],
-                "{xor}"
-            );
-            let right = NCBI_RIGHT_INITIALIZED
-                .get(xor as usize)
-                .copied()
-                .unwrap_or(0);
-            assert_eq!(exact_match_extend_right(xor), right, "{xor}");
-        }
-    }
-
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_util.c:473-499 (the loops,
-    // with `Int4 curr_letter` stored into `Uint1` bytes).
-    fn ncbi_compress(old: &[u8]) -> Vec<u8> {
-        let len = old.len() as isize;
-        let at = |index: isize| (index + 3) as usize;
-        let mut new_seq = vec![0u8; old.len() + 3];
-        let max_start = len.min(3);
-        let mut curr_letter = 0u32;
-        let mut i = 0;
-        while i < len {
-            curr_letter = curr_letter << 2 | u32::from(old[i as usize] & 3);
-            new_seq[at(i - max_start)] = curr_letter as u8;
-            i += 1;
-        }
-        for i in 0..max_start {
-            curr_letter <<= 2;
-            new_seq[at(len - (max_start - i))] = curr_letter as u8;
-        }
-        new_seq
-    }
-
-    #[test]
-    fn the_compressed_query_is_ncbis() {
-        let mut state = 7u32;
-        for len in 3..64 {
-            let query: Vec<u8> = (0..len)
-                .map(|_| {
-                    state = state.wrapping_mul(1_103_515_245).wrapping_add(12_345);
-                    ((state >> 16) % 16) as u8
-                })
-                .collect();
-            assert_eq!(
-                build_compressed_query(&query),
-                ncbi_compress(&query),
-                "{query:?}"
-            );
-        }
-    }
-
-    fn packed(bases: &[u8]) -> Vec<u8> {
-        bases
-            .chunks(4)
-            .map(|chunk| {
-                (0..4).fold(0u8, |byte, index| {
-                    byte << 2 | chunk.get(index).copied().unwrap_or(0)
-                })
-            })
-            .collect()
-    }
-
-    // The fourteenth S07+ audit round: the query `K` (blastna 7) reads as `T` in the
-    // compressed query, so the exact-match extension of a lookup hit runs through it and the
-    // word starts before it; the per-base extension of the other tables stops at it.
-    #[test]
-    fn the_small_table_extension_reads_ambiguity_codes_as_bases() {
-        let code = |text: &str| -> Vec<u8> {
-            text.bytes()
-                .map(|letter| match letter {
-                    b'A' => 0,
-                    b'C' => 1,
-                    b'G' => 2,
-                    b'T' => 3,
-                    b'K' => 7,
-                    b'D' => 11,
-                    _ => unreachable!(),
-                })
-                .collect()
-        };
-        let query = code("TTTCGTTGACCTAAAAAGTTCKGTTGGTATGAGAGAAGAATTTTTGGTTGDCAGAAAAAC");
-        let subject =
-            code("AAAGCGGCATTTCGTTGACCTAAAAAGTTCTGTTGGTATGAGAGAAGAATTTTTGGTTGACAGAAAAACGGCATTACGA");
-        let compressed = build_compressed_query(&query);
-        let subject_packed = packed(&subject);
-        let word = SmallNaWord {
-            compressed_query: &compressed,
-            subject_packed: &subject_packed,
-            query_length: query.len(),
-            word_length: 28,
-            lut_word_length: 8,
-        };
-        // The lookup hit of query 12 at subject 21 (scan step 21) starts its word at the
-        // query start.
-        assert_eq!(
-            word.extend(12, 21, 0, query.len(), subject.len()),
-            Some((0, 9))
-        );
-        // Query 33 at subject 42 runs back through the K to query 13.
-        assert_eq!(
-            word.extend(33, 42, 0, query.len(), subject.len()),
-            Some((13, 22))
-        );
-        // A word that would end past the query context (here at 40) is dropped.
-        assert_eq!(word.extend(33, 42, 0, 40, subject.len()), None);
-    }
-}
+#[path = "extension_small_na_tests.rs"]
+mod small_na_tests;
 
 /// Approximate ungapped extension (4-base blocks) with optional exact recomputation.
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:261-349
-/// ```c
-/// s_NuclUngappedExtend(..., Int4 q_off, Int4 s_match_end, Int4 s_off, Int4 X, ...)
-/// {
-///    len = (4 - (s_off % 4)) % 4;
-///    q_ext = q_off + len; s_ext = s_off + len;
-///    ...
-///    for (i = 0; i < len; s--, q -= 4, i++) {
-///        Uint1 s_byte = s[-1];
-///        Uint1 q_byte = (q[-4] << 6) | (q[-3] << 4) | (q[-2] << 2) | q[-1];
-///        sum += score_table[q_byte ^ s_byte];
-///        ...
-///    }
-///    ...
-///    if (score >= reduced_cutoff) {
-///        s_NuclUngappedExtendExact(...);
-///    } else {
-///        ungapped_data->length = MAX(s_match_end - s_start, ...);
-///    }
-/// }
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:261-349
 pub(crate) fn extend_hit_ungapped_approx_ncbi(
     q_seq: &[u8],        // BLASTNA (1 byte/base)
     s_seq_packed: &[u8], // ncbi2na packed (4 bases/byte)
@@ -791,13 +418,6 @@ pub(crate) fn extend_hit_ungapped_approx_ncbi(
 ) -> UngappedData {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:743-747 (the same at
     // 913-917 and 1755-1759)
-    // ```c
-    //                s_NuclUngappedExtendExact(query, subject, matrix, q_off,
-    //                                   s_off, -(cutoffs->x_dropoff), ungapped_data);
-    //             }else {
-    //                s_NuclUngappedExtend(query, subject, matrix, q_off, s_end, s_off,
-    //                                  -(cutoffs->x_dropoff), ungapped_data,
-    // ```
     // A raw X-drop past `Int4` (`INT_MIN`, `core::x_drop`) negates to itself in NCBI's x86-64
     // build, so the extension never stops at the X-drop; LOSAT negates it the same way.
     let x = x_dropoff.wrapping_neg();
@@ -822,15 +442,10 @@ pub(crate) fn extend_hit_ungapped_approx_ncbi(
         if q_idx < 4 || s_idx == 0 {
             break;
         }
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:292-304
-        // ```c
-        // Uint1 s_byte = s[-1];
-        // Uint1 q_byte = (q[-4] << 6) | (q[-3] << 4) | (q[-2] << 2) | q[-1];
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:292-304
         // SAFETY: q_idx >= 4 and s_idx > 0 are enforced by the loop guard.
         let s_byte = unsafe { *s_seq_packed.get_unchecked((s_idx - 1) as usize) };
-        // NCBI reference: c++/src/algo/blast/core/na_ungapped.c:294
-        // Uint1 q_byte = (q[-4] << 6) | (q[-3] << 4) | (q[-2] << 2) | q[-1];
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:294
         let q_byte = query_four_base_byte(q_seq, (q_idx - 4) as usize);
         sum = sum.wrapping_add(score_table[(q_byte ^ s_byte) as usize]);
         if sum > 0 {
@@ -856,16 +471,11 @@ pub(crate) fn extend_hit_ungapped_approx_ncbi(
     new_q = q_idx;
 
     for _ in 0..right_len {
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:322-334
-        // ```c
-        // Uint1 s_byte = s[0];
-        // Uint1 q_byte = (q[0] << 6) | (q[1] << 4) | (q[2] << 2) | q[3];
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:322-334
         // SAFETY: q_idx + 3 and s_idx stay within bounds by the loop length
         // derived from query/subject lengths (NCBI uses the same limits).
         let s_byte = unsafe { *s_seq_packed.get_unchecked(s_idx as usize) };
-        // NCBI reference: c++/src/algo/blast/core/na_ungapped.c:324
-        // Uint1 q_byte = (q[0] << 6) | (q[1] << 4) | (q[2] << 2) | q[3];
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:324
         let q_byte = query_four_base_byte(q_seq, q_idx as usize);
         sum = sum.wrapping_add(score_table[(q_byte ^ s_byte) as usize]);
         if sum > 0 {
@@ -909,149 +519,17 @@ pub(crate) fn extend_hit_ungapped_approx_ncbi(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:286,292-305,336-341
-// ```c
-//     len = MIN(q_ext, s_ext) / COMPRESSION_RATIO;
-//     ...
-//     for (i = 0; i < len; s--, q -= 4, i++) {
-//         Uint1 s_byte = s[-1];
-//         Uint1 q_byte = (q[-4] << 6) | (q[-3] << 4) | (q[-2] << 2) | q[-1];
-//
-//         sum += score_table[q_byte ^ s_byte];
-//         if (sum > 0) {
-//             new_q = q - 4;
-//             score += sum;
-//             sum = 0;
-//         }
-//         if (sum < X) {
-//             break;
-//         }
-//     }
-//     ...
-//     if (score >= reduced_cutoff) {
-//         /* the current score is high enough; throw away the alignment and
-//            recompute it rigorously */
-//         s_NuclUngappedExtendExact(query, subject, matrix, q_off,
-//                                   s_off, X, ungapped_data);
-//     }
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:1122-1127
-// ```c
-//     /* The value of 15 is a gap, which is a sentinel between strands in
-//     the ungapped extension algorithm */
-//     for (index1=0; index1<BLASTNA_SIZE; index1++)
-//         matrix[BLASTNA_SIZE-1][index1] = INT4_MIN / 2;
-//     for (index1=0; index1<BLASTNA_SIZE; index1++)
-//         matrix[index1][BLASTNA_SIZE-1] = INT4_MIN / 2;
-// ```
 // The approximate extension works on the concatenated query: its left loop is bounded by
 // the offset in the whole query, and the truncated `q_byte` reads the sentinel (0x0F) as
 // bases, so it runs into the previous context. The exact extension stops at the sentinel.
 #[cfg(test)]
-mod approx_context_tests {
-    use super::{build_nucl_score_table, extend_hit_ungapped_approx_ncbi};
-    use crate::algorithm::blastn::alignment::build_blastna_matrix;
-
-    fn blastna(text: &str) -> Vec<u8> {
-        text.bytes()
-            .map(|letter| match letter {
-                b'A' => 0,
-                b'C' => 1,
-                b'G' => 2,
-                b'T' => 3,
-                _ => unreachable!(),
-            })
-            .collect()
-    }
-
-    fn packed(text: &str) -> Vec<u8> {
-        blastna(text)
-            .chunks(4)
-            .map(|chunk| {
-                (0..4).fold(0u8, |byte, index| {
-                    byte << 2 | chunk.get(index).copied().unwrap_or(0)
-                })
-            })
-            .collect()
-    }
-
-    // Two contexts and the sentinel between them (blast_encoding.c:121, kNuclSentinel = 0xF):
-    // context 0 at 0..16, the sentinel at 16, context 1 at 17..35. The seed is the first letter
-    // of context 1 and the subject offset is 2 mod 4, so the first left block holds the last
-    // letter of context 0, the sentinel and the first two letters of context 1.
-    #[test]
-    fn the_approximate_extension_crosses_the_sentinel_and_its_score_decides_the_rerun() {
-        let mut query = blastna("ACGTACGTACGTACGT");
-        query.push(15);
-        query.extend(blastna("GACCGGTTAATTTTGGGG"));
-        let context_start = 17;
-        let subject = packed("GTACTTGACCGGTTAATTAA");
-        let subject_len = 20;
-        let score_table = build_nucl_score_table(2, -3);
-        let matrix = build_blastna_matrix(2, -3);
-        let (q_off, s_off, s_match_end, x_dropoff) = (context_start, 6, 14, 16);
-        let extend = |reduced_cutoff: i32| {
-            extend_hit_ungapped_approx_ncbi(
-                &query,
-                &subject,
-                q_off,
-                s_off,
-                s_match_end,
-                subject_len,
-                x_dropoff,
-                &score_table,
-                reduced_cutoff,
-                &matrix,
-            )
-        };
-
-        // Approximate score 24 below the reduced cutoff 25 (cutoff 32): the approximate result
-        // is kept and starts two letters left of context 1. Such a result is rejected, as its
-        // score is below the cutoff.
-        let kept = extend(25);
-        assert!(kept.q_start < context_start);
-        assert_eq!(
-            (kept.q_start, kept.s_start, kept.length, kept.score),
-            (15, 4, 12, 24)
-        );
-
-        // Reduced cutoff 19 (cutoff 24): the crossing block lifts the approximate score to 24,
-        // so the exact extension reruns; it stops at the sentinel and scores 24, the cutoff.
-        let rerun = extend(19);
-        assert_eq!(
-            (rerun.q_start, rerun.s_start, rerun.length, rerun.score),
-            (17, 6, 12, 24)
-        );
-
-        // The same seed on context 1 alone (not NCBI's extension): the first two letters are
-        // never scored, the approximate score is 16 < 19, no rerun, and 16 < 24 would reject
-        // the hit that NCBI saves.
-        let clamped = extend_hit_ungapped_approx_ncbi(
-            &query[context_start..],
-            &subject,
-            0,
-            s_off,
-            s_match_end,
-            subject_len,
-            x_dropoff,
-            &score_table,
-            19,
-            &matrix,
-        );
-        assert_eq!(
-            (
-                clamped.q_start,
-                clamped.s_start,
-                clamped.length,
-                clamped.score
-            ),
-            (2, 8, 8, 16)
-        );
-    }
-}
+#[path = "extension_approx_context_tests.rs"]
+mod approx_context_tests;
 
 /// Determine word type for two-stage lookup
 ///
-/// NCBI reference: na_ungapped.c:508-607 (s_TypeOfWord function)
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:508-607 (s_TypeOfWord function)
 ///
 /// This is a FAITHFUL TRANSPILE of NCBI BLAST's s_TypeOfWord function.
 /// It does NOT perform actual sequence extension - only calculates ext_to
@@ -1090,16 +568,13 @@ pub fn type_of_word<F>(
 where
     F: FnMut(usize, usize) -> bool,
 {
-    // NCBI reference: na_ungapped.c:508-607
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:508-607
     // FAITHFUL TRANSPILE - DO NOT ASSUME
 
     // NCBI: *extended = 0;
     let mut extended = 0;
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:531
-    // ```c
-    // if (word_length == lut_word_length) return 1;
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:531
     if word_length == lut_word_length {
         return (1, 0, q_off, s_off);
     }
@@ -1114,35 +589,14 @@ where
     let mut q_off_adjusted = q_off;
     let mut s_off_adjusted = s_off;
     if has_locations {
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:452-490
-        // ```c
-        // static NCBI_INLINE Boolean s_IsSeedMasked(...)
-        // {
-        //     ...
-        //     return !(((T_Lookup_Callback)(lookup_wrap->lookup_callback))
-        //                                      (lookup_wrap, index, q_pos));
-        // }
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:452-490
 
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:540-544
-        // ```c
-        // if (s_IsSeedMasked(lookup_wrap, subject,
-        //                    s_end - lut_word_length,
-        //                    lut_word_length,
-        //                    q_end - lut_word_length)) return 0;
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:540-544
         if is_seed_masked(s_end - lut_word_length, q_end - lut_word_length) {
             return (0, 0, q_off_adjusted, s_off_adjusted);
         }
 
-        // NCBI: search for valid left end and reposition q_off
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:546-549
-        // ```c
-        // for (; TRUE; ++(*s_off), ++(*q_off)) {
-        //     if (!s_IsSeedMasked(lookup_wrap, subject,
-        //                         *s_off, lut_word_length, *q_off)) break;
-        // }
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:546-549
         while q_off_adjusted < q_range && s_off_adjusted < s_range {
             if !is_seed_masked(s_off_adjusted, q_off_adjusted) {
                 break;
@@ -1150,13 +604,7 @@ where
             q_off_adjusted += 1;
             s_off_adjusted += 1;
         }
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:546-549
-        // ```c
-        // for (; TRUE; ++(*s_off), ++(*q_off)) {
-        //     if (!s_IsSeedMasked(lookup_wrap, subject,
-        //                         *s_off, lut_word_length, *q_off)) break;
-        // }
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:546-549
         // Rust must stop if the absolute context/subject boundary is reached
         // before finding an unmasked seed.
         if q_off_adjusted >= q_range || s_off_adjusted >= s_range {
@@ -1164,11 +612,7 @@ where
         }
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:553-554
-    // ```c
-    // ext_to = word_length - (q_end - (*q_off));
-    // ext_max = MIN(q_range - q_end, s_range - s_end);
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:553-554
     let ext_to = word_length - (q_end - q_off_adjusted);
     // NCBI's `Int4 ext_max` is negative for a word that runs past the context or the scan
     // range (the aligned small-table extension does not check the right end at the end of
@@ -1185,10 +629,7 @@ where
 
     // NCBI: if (ext_to || locations) {
     if ext_to > 0 || has_locations {
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:559
-        // ```c
-        // if (ext_to > ext_max) return 0;
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:559
         if ext_to > ext_max {
             return (0, 0, q_off_adjusted, s_off_adjusted);
         }
@@ -1199,21 +640,7 @@ where
         s_end += ext_to;
 
         // NCBI: for (s_pos = s_end - lut_word_length, q_pos = q_end - lut_word_length;
-        //      s_pos > *s_off;
-        //      s_pos -= lut_word_length, q_pos -= lut_word_length) {
-        //     if (s_IsSeedMasked(lookup_wrap, subject, s_pos, lut_word_length, q_pos)) return 0;
-        // }
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:563-569
-        // ```c
-        // for (s_pos = s_end - lut_word_length,
-        //      q_pos = q_end - lut_word_length;
-        //      s_pos > *s_off;
-        //      s_pos -= lut_word_length,
-        //      q_pos -= lut_word_length) {
-        //     if (s_IsSeedMasked(lookup_wrap, subject,
-        //                       s_pos, lut_word_length, q_pos)) return 0;
-        // }
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:563-569
         let mut s_pos = s_end - lut_word_length;
         let mut q_pos = q_end - lut_word_length;
 
@@ -1233,10 +660,7 @@ where
         extended = ext_to;
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:575-576
-    // ```c
-    // if (!check_double) return 1;
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:575-576
     if !check_double {
         return (1, extended, q_off_adjusted, s_off_adjusted);
     }
@@ -1247,11 +671,7 @@ where
     let double_ext_max = ext_max.min(double_ext_to);
 
     // NCBI: try seed by seed
-    // for (s_pos = s_end, q_pos = q_end;
-    //      *extended + lut_word_length <= ext_max;
-    //      s_pos += lut_word_length, q_pos += lut_word_length, (*extended) += lut_word_length) {
-    //     if (s_IsSeedMasked(lookup_wrap, subject, s_pos, lut_word_length, q_pos)) break;
-    // }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:585-586
     let mut s_pos = s_end;
     let mut q_pos = q_end;
 
@@ -1268,29 +688,19 @@ where
     }
 
     // NCBI: try base by base
-    // s_pos -= (lut_word_length - 1);
-    // q_pos -= (lut_word_length - 1);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:595-596
     // NCBI BLAST: Position adjustment happens UNCONDITIONALLY (before the while loop)
-    // Reference: na_ungapped.c:594-603
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:594-603
     // NCBI BLAST: s_pos -= (lut_word_length - 1) (unconditional, no bounds check)
     // Use saturating_sub to prevent underflow while maintaining NCBI behavior
     s_pos = s_pos.saturating_sub(lut_word_length - 1);
     q_pos = q_pos.saturating_sub(lut_word_length - 1);
 
-    // NCBI: while (*extended < ext_max) {
-    //     if (s_IsSeedMasked(lookup_wrap, subject, s_pos, lut_word_length, q_pos)) return 1;
-    //     (*extended)++;
-    //     ++s_pos;
-    //     ++q_pos;
-    // }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:600-602
     // NCBI BLAST: This loop runs regardless of locations status
-    // Reference: na_ungapped.c:597-603
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:597-603
     while extended < double_ext_max {
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:597-599
-        // ```c
-        // if (s_IsSeedMasked(lookup_wrap, subject, s_pos,
-        //                        lut_word_length, q_pos)) return 1;
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:597-599
         if is_seed_masked(s_pos, q_pos) {
             return (1, extended, q_off_adjusted, s_off_adjusted);
         }
@@ -1299,10 +709,7 @@ where
         q_pos += 1;
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:605
-    // ```c
-    // return ((ext_max == ext_to) ? 2 : 1);
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:605
     if double_ext_max == double_ext_to {
         (2, extended, q_off_adjusted, s_off_adjusted)
     } else {

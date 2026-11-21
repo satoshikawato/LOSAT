@@ -14,10 +14,6 @@
 //! were given the mapped capacity.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:145-146
-//! ```c
-//!         diag_table->hit_level_array = (DiagStruct *)
-//!             calloc(diag_table->diag_array_length, sizeof(DiagStruct));
-//! ```
 //! NCBI allocates one diagonal table per search thread; the switch chooses only the capacity of
 //! LOSAT's per-split tables and lists, so the property under test is that the report does not
 //! depend on it. That reports equal NCBI's is the business of the fixture comparisons, which run
@@ -201,10 +197,6 @@ fn unmap(stderr: &str) -> (bool, [u64; 3]) {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:145-146
-// ```c
-//         diag_table->hit_level_array = (DiagStruct *)
-//             calloc(diag_table->diag_array_length, sizeof(DiagStruct));
-// ```
 // Where the rule holds, with no variable for the switch (it is on by default): the report is that
 // of `LOSAT_X_SEEDUNMAP=0` at one and four threads; at one thread (the serial path keeps today's
 // capacities) the counters are 0; at four threads, where the switch acts (`active=1`), diagonal
@@ -235,10 +227,6 @@ fn where_the_rule_holds_the_blocks_are_mapped_and_the_report_is_the_same() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:145-146
-// ```c
-//         diag_table->hit_level_array = (DiagStruct *)
-//             calloc(diag_table->diag_array_length, sizeof(DiagStruct));
-// ```
 // With `LOSAT_X_SEEDCOMPACT=0` the units keep today's lists: only the diagonal tables are given
 // the mapped capacity (where the switch acts), and the report is the same.
 #[test]
@@ -254,11 +242,6 @@ fn without_the_compact_lists_only_the_tables_are_mapped() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:503-505
-// ```c
-//     /* scan the subject sequence for hits */
-//     hits = scansub(lookup_wrap, subject,
-//                               offset_pairs, array_size, scan_range);
-// ```
 // A short query against a long subject (query-group spans of about 1,000 letters, chunks of about
 // 70,000) and the reverse, at four threads: the line is printed (the switch is on) with zero
 // counters, and the report is that of `LOSAT_X_SEEDUNMAP=0`.

@@ -9,30 +9,7 @@ use crate::config::{ProteinScoringSpec, ScoringMatrix};
 pub use crate::blastinput::value_parsers::SegSpec as BlastpSegSpec;
 use crate::blastinput::value_parsers::*;
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:825-876
-// ```c
-// switch (comp_stat_string[0]) {
-// case '0': case 'F': case 'f':
-//     compo_mode = eNoCompositionBasedStats;
-//     break;
-// case '1':
-//     compo_mode = eCompositionBasedStats;
-//     break;
-// case 'D': case 'd':
-//     ...
-//     compo_mode = eCompositionMatrixAdjust;
-//     break;
-// case '2':
-//     compo_mode = eCompositionMatrixAdjust;
-//     break;
-// case '3':
-//     compo_mode = eCompoForceFullMatrixAdjust;
-//     break;
-// case 'T': case 't':
-//     compo_mode = ... eCompositionMatrixAdjust;
-//     break;
-// }
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:825-876
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BlastpCompositionMode {
     NoCompositionBasedStats,
@@ -41,44 +18,10 @@ pub enum BlastpCompositionMode {
     ForceFullMatrixAdjust,
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:877-886
-// ```c
-// opt.SetCompositionBasedStats(compo_mode);
-// if (program == eBlastp &&
-//     compo_mode != eNoCompositionBasedStats &&
-//     tolower(comp_stat_string[1]) == 'u') {
-//     opt.SetUnifiedP(1);
-// }
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:877-886
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/psiblast_args.cpp:44-56
-// ```c++
-// CPsiBlastAppArgs::CPsiBlastAppArgs()
-// {
-//     bool const kQueryIsProtein = true;
-//     bool const kFilterByDefault = false;
-//     static const string kProgram("psiblast");
-//     CRef<IBlastCmdLineArgs> arg;
-//     arg.Reset(new CProgramDescriptionArgs(kProgram,
-//                                           "Position-Specific Iterated BLAST"));
-//     m_Args.push_back(arg);
-//     m_ClientId = kProgram + " " + CBlastVersion().Print();
-//
-//     static const char kDefaultTask[] = "psiblast";
-//     SetTask(kDefaultTask);
-// ```
 // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:418-421
-// ```c++
-//         // Allow the fasta reader to complain on invalid sequence input
-//         SetDiagPostLevel(eDiag_Warning);
-//         SetDiagPostPrefix("psiblast");
-//         SetDiagHandler(&m_bah, false);
-// ```
-// NCBI reference (598d8ae6): c++/src/app/blast/rpsblast_app.cpp:117-119
-// ```c++
-//         SetDiagPostLevel(eDiag_Warning);
-//         SetDiagPostPrefix("rpsblast");
-//         SetDiagHandler(&bah, false);
-// ```
+// NCBI reference (598d8ae6): c++/src/app/blast/rpsblast_app.cpp:117-120
 /// The NCBI application whose search the blastp engine runs: blastp, the first round of
 /// psiblast (`algorithm/psiblast`), whose program is `ePSIBlast` (`eBlastTypePsiBlast` in the
 /// core) with blastp's search until a PSSM exists except blastp's restricted gapped alignment
@@ -98,13 +41,17 @@ impl BlastpApp {
     /// (`# PSIBLAST 2.17.0+` in upper case): its application's name
     /// (`options::RequestKind::application`, the one table of the names).
     pub fn ncbi_name(self) -> &'static str {
+        self.request_kind().application()
+    }
+
+    /// The app's NCBI application (`options::RequestKind`).
+    pub fn request_kind(self) -> crate::report::archive::options::RequestKind {
         use crate::report::archive::options::RequestKind;
         match self {
             BlastpApp::Blastp => RequestKind::Blastp,
             BlastpApp::Psiblast => RequestKind::Psiblast,
             BlastpApp::Rpsblast => RequestKind::Rpsblast,
         }
-        .application()
     }
 
     /// Whether the app's Seq-aligns come from traceback hit lists longer than `max_target_seqs`
@@ -136,16 +83,7 @@ impl BlastpCompBasedStats {
         self.mode != BlastpCompositionMode::NoCompositionBasedStats
     }
 
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:825-886
-    // ```c
-    // switch (comp_stat_string[0]) {
-    // case '0': ... case '1': ... case '2': ... case '3': ...
-    // }
-    // if (program == eBlastp && compo_mode != eNoCompositionBasedStats &&
-    //     tolower(comp_stat_string[1]) == 'u') {
-    //     opt.SetUnifiedP(1);
-    // }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:825-886
     pub fn to_ncbi_cli_string(self) -> String {
         let mode = match self.mode {
             BlastpCompositionMode::NoCompositionBasedStats => '0',
@@ -161,18 +99,7 @@ impl BlastpCompBasedStats {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:838-886
-// ```c
-// switch (comp_stat_string[0]) {
-// ...
-// }
-// ...
-// if (program == eBlastp &&
-//     compo_mode != eNoCompositionBasedStats &&
-//     tolower(comp_stat_string[1]) == 'u') {
-//     opt.SetUnifiedP(1);
-// }
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:838-886
 #[cfg(any(target_arch = "wasm32", test))]
 pub fn parse_comp_based_stats(value: &str) -> Result<BlastpCompBasedStats, String> {
     let mut chars = value.chars();
@@ -209,71 +136,20 @@ pub fn parse_comp_based_stats(value: &str) -> Result<BlastpCompBasedStats, Strin
     Ok(BlastpCompBasedStats { mode, unified_p })
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_prot_options.cpp:55-83
-// ```c
-// void CBlastProteinOptionsHandle::SetWordSize(int ws) {
-//     m_Opts->SetWordSize(ws);
-//     switch (ws) {
-//     case 3: m_Opts->SetWordThreshold(BLAST_WORD_THRESHOLD_BLASTP); break;
-//     case 5: m_Opts->SetWordThreshold(BLAST_WORD_THRESHOLD_BLASTP_FAST); break;
-//     case 6: m_Opts->SetWordThreshold(BLAST_WORD_THRESHOLD_BLASTP_WD_SZ_6); break;
-//     case 7: m_Opts->SetWordThreshold(BLAST_WORD_THRESHOLD_BLASTP_WD_SZ_7); break;
-//     }
-//     if (ws > 4) m_Opts->SetLookupTableType(eCompressedAaLookupTable);
-// }
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_prot_options.cpp:55-83
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BlastpLookupTableType {
     AaLookupTable,
     CompressedAaLookupTable,
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_prot_options.cpp:85-148
-// ```c
-// SetWordSize(BLAST_WORDSIZE_PROT);
-// SetWordThreshold(BLAST_WORD_THRESHOLD_BLASTP);
-// SetWindowSize(BLAST_WINDOW_SIZE_PROT);
-// SetMatrixName(BLAST_DEFAULT_MATRIX);
-// SetGapOpeningCost(BLAST_GAP_OPEN_PROT);
-// SetGapExtensionCost(BLAST_GAP_EXTN_PROT);
-// SetHitlistSize(500);
-// SetEvalueThreshold(BLAST_EXPECT_VALUE);
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_prot_options.cpp:85-148
 //
-// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_advprot_options.cpp:48-66
-// ```c
-// CBlastProteinOptionsHandle::SetGappedExtensionDefaults();
-// m_Opts->SetCompositionBasedStats(eCompositionMatrixAdjust);
-// m_Opts->SetSmithWatermanMode(false);
-// ...
-// CBlastProteinOptionsHandle::SetQueryOptionDefaults();
-// SetSegFiltering(false);
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_advprot_options.cpp:48-66
 // CLI v2 names/defaults: NCBI c++/src/algo/blast/blastinput/blast_args.cpp:
 // 166-170,203-207,332-349,2657-2660,3158-3163; cmdline_flags.cpp:46-94.
-// arg_desc.AddOptionalKey(kArgMaxHSPsPerSubject, "int_value", ..., eInteger);
-// arg_desc.SetConstraint(kArgMaxHSPsPerSubject, new CArgAllowValuesGreaterThanOrEqual(1));
-// arg_desc.AddDefaultKey(kArgNumThreads, "int_value", ..., NStr::IntToString(kDfltValue));
 // The single-dash lexical translation is owned by crate::cli.
-// NCBI reference: c++/src/algo/blast/blastinput/blastp_args.cpp:44-60
-// ```c
-// CBlastpAppArgs::CBlastpAppArgs()
-// {
-//     CRef<IBlastCmdLineArgs> arg;
-//     static const string kProgram("blastp");
-//     arg.Reset(new CProgramDescriptionArgs(kProgram, "Protein-Protein BLAST"));
-//     const bool kQueryIsProtein = true;
-//     bool const kFilterByDefault = false;
-//     m_Args.push_back(arg);
-//     m_ClientId = kProgram + " " + CBlastVersion().Print();
-//
-//     static const char kDefaultTask[] = "blastp";
-//     SetTask(kDefaultTask);
-//     set<string> tasks
-//         (CBlastOptionsFactory::GetTasks(CBlastOptionsFactory::eProtProt));
-//     arg.Reset(new CTaskCmdLineArgs(tasks, kDefaultTask));
-//     m_Args.push_back(arg);
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastp_args.cpp:44-60
 /// BLASTP's `-task`: the command line's parser, and the check of `run_local` (`TaskParser::check`).
 pub(crate) const BLASTP_TASK: TaskParser =
     task_parser("BLASTP", &["blastp", "blastp-fast", "blastp-short"], &[]);
@@ -285,12 +161,7 @@ pub(crate) const BLASTP_TASK: TaskParser =
 #[derive(Args, Debug, Clone)]
 #[command(rename_all = "snake_case")]
 pub struct BlastpArgs {
-    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3425-3427
-    // ```c
-    //     arg_desc.AddDefaultKey(kArgQuery, "input_file",
-    //                      "Input file name",
-    //                      CArgDescriptions::eInputFile, kDfltArgQuery);
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3425-3427
     // `-` (the default) is standard input.
     #[arg(long, default_value = "-", value_parser = ncbi_input_path(), value_name = "PATH")]
     pub query: PathBuf,
@@ -299,27 +170,7 @@ pub struct BlastpArgs {
     #[arg(long, value_parser = ncbi_input_path(), value_name = "PATH")]
     pub subject: Option<PathBuf>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2191-2199
-    // ```c++
-    //     arg_desc.SetCurrentGroup("General search options");
-    //     // database filename
-    //     if (m_IsIgBlast){
-    //         arg_desc.AddOptionalKey(kArgDb, "database_name", "Optional additional database name",
-    //                                 CArgDescriptions::eString);
-    //     } else {
-    //         arg_desc.AddOptionalKey(kArgDb, "database_name", "BLAST database name",
-    //                                 CArgDescriptions::eString);
-    //     }
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2364-2371
-    // ```c++
-    //         arg_desc.AddOptionalKey(kArgSubject, "subject_input_file",
-    //                                 "Subject sequence(s) to search",
-    //                                 CArgDescriptions::eInputFile);
-    //         ITERATE(vector<string>, dbarg, database_args) {
-    //             arg_desc.SetDependency(kArgSubject, CArgDescriptions::eExcludes,
-    //                                    *dbarg);
-    //         }
-    // ```
     // (and the same exclusion for `-subject_loc`, blast_args.cpp:2377-2381). The exclusion
     // is an error of the argument parser: LOSAT's parser reports it with its own text
     // (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES, exception 1).
@@ -334,23 +185,14 @@ pub struct BlastpArgs {
     /// `-no_taxid_expansion` (line DI-8).
     #[command(flatten)]
     pub db_filter: crate::blastinput::db_filter::DbFilterArgs,
+    /// `-db_soft_mask` and `-db_hard_mask` (`blastinput::db_mask`; series NP, M4b).
+    #[command(flatten)]
+    pub db_mask: crate::blastinput::db_mask::DbMaskArgs,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2231-2237
-    // ```c++
-    //     // DB size
-    //     if (!m_IsMapper) {
-    //         arg_desc.SetCurrentGroup("Statistical options");
-    //         arg_desc.AddOptionalKey(kArgDbSize, "num_letters",
-    //                                 "Effective length of the database ",
-    //                                 CArgDescriptions::eInt8);
-    //     }
-    // ```
     // No constraint and no dependency: read with `-db` and with `-subject`.
     #[arg(long, value_parser = ncbi_int8, value_name = "LETTERS", help = "Effective length of the database")]
     pub dbsize: Option<i64>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2663
-    // ```c++
-    //     arg_desc.AddFlag(kArgShowGIs, "Show NCBI GIs in deflines?", true);
-    // ```
     #[arg(
         long = "show_gis",
         default_value_t = false,
@@ -367,9 +209,6 @@ pub struct BlastpArgs {
     #[arg(long = "html", default_value_t = false, help = "Produce HTML output?")]
     pub html: bool,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2050-2052
-    // ```c++
-    //     arg_desc.AddDefaultKey(kArgParseDeflines, "TF", "Should the query and "
-    // ```
     // `-parse_deflines` is a flag of the programs (blast_args.cpp:1961).
     #[arg(
         long = "parse_deflines",
@@ -381,20 +220,9 @@ pub struct BlastpArgs {
     #[arg(skip)]
     pub id_scope: Option<std::sync::Arc<crate::seqid::id_scope::IdScope>>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:234-238
-    // ```c++
-    //     arg_desc.AddOptionalKey(kArgEffSearchSpace, "int_value",
-    //                             "Effective length of the search space",
-    //                             CArgDescriptions::eInt8);
-    // ```
     #[arg(long, value_parser = crate::blastinput::value_parsers::nonnegative_ncbi_int8, value_name = "INT_VALUE", help = "Effective length of the search space")]
     pub searchsp: Option<i64>,
-    // NCBI reference: c++/src/algo/blast/api/blast_options_handle.cpp:225-228
-    // ```c
-    //     if (choice == eProtProt || choice == eAll) {
-    //         retval.insert("blastp");
-    //         retval.insert("blastp-short");
-    //         retval.insert("blastp-fast");
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_handle.cpp:225-228
     // `blastp-short` (word size 2, PAM30 9/1, `BlastpTaskOptions::create`) runs the lookup table
     // of word size 2 (item SC3).
     #[arg(long, default_value = "blastp", value_parser = BLASTP_TASK)]
@@ -408,23 +236,7 @@ pub struct BlastpArgs {
     pub word_size: Option<i32>,
     #[arg(long, default_value_t = 1, value_parser = blastn_count)]
     pub num_threads: usize,
-    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3169-3181
-    // ```c++
-    //     if (m_MTMode >= 0) {
-    //     	arg_desc.AddDefaultKey(kArgMTMode, "int_value",
-    //                                "Multi-thread mode to use in BLAST search:\n "
-    //                                "0 auto split by database or queries \n "
-    //                                "1 split by queries\n "
-    //                                "2 split by database",
-    //                                CArgDescriptions::eInteger,
-    //                                NStr::IntToString(0));
-    //     	arg_desc.SetConstraint(kArgMTMode,
-    //                                new CArgAllowValuesBetween(0, 2, true));
-    //     	arg_desc.SetDependency(kArgMTMode,
-    //                                CArgDescriptions::eRequires,
-    //                                kArgNumThreads);
-    //     }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3168-3181
     // `-mt_mode` is read and has no effect: LOSAT's output is the same at every thread count
     // and for every value, and equals NCBI's `-num_threads 1` output (Owner 2026-10-13;
     // CLI DECISIONS 5). NCBI's `-mt_mode 1` (and `0` when it chooses to split by queries)
@@ -437,12 +249,6 @@ pub struct BlastpArgs {
     #[arg(long, value_name = "PATH", value_parser = ncbi_output_path())]
     pub out: Option<PathBuf>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3532-3535
-    // ```c++
-    //     arg_desc.AddOptionalKey(kArgOutputSearchStrategy,
-    //                             "filename",
-    //                             "File name to record the search strategy used",
-    //                             CArgDescriptions::eOutputFile);
-    // ```
     // The search strategy file (`report::archive::strategy`), created by `run` before the other
     // options are read.
     #[arg(long, value_name = "filename", value_parser = ncbi_output_path(), help = "File name to record the search strategy used")]
@@ -451,7 +257,7 @@ pub struct BlastpArgs {
     // descriptions and alignments of the pairwise report (500, 250).
     #[arg(long, value_parser = blastn_count, help = "Maximum number of aligned sequences to keep [default: 500]", conflicts_with_all = ["num_descriptions", "num_alignments"])]
     pub max_target_seqs: Option<usize>,
-    // NCBI blast_args.cpp:2665-2685,2732-2738: 0 or more; -max_target_seqs excludes both.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2665-2685,2732-2738: 0 or more; -max_target_seqs excludes both.
     #[arg(long = "num_descriptions", value_name = "int_value", value_parser = report_count, help = "Number of database sequences to show one-line descriptions for. Not applicable for outfmt > 4 [default: 500]")]
     pub num_descriptions: Option<usize>,
     #[arg(long = "num_alignments", value_name = "int_value", value_parser = report_count, help = "Number of database sequences to show alignments for [default: 250]")]
@@ -463,60 +269,31 @@ pub struct BlastpArgs {
     pub formatting: crate::blastinput::report_counts::FormattingArgs,
     #[arg(long = "max_hsps", value_parser = blastn_count)]
     pub max_hsps_per_subject: Option<usize>,
-    // NCBI blast_args.cpp:196-201,313-315: no filter when omitted or 0.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:196-201,313-315: no filter when omitted or 0.
     #[arg(long = "qcov_hsp_perc", value_parser = blastp_query_coverage, help = "Percent query coverage per hsp")]
     pub qcov_hsp_perc: Option<f64>,
-    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3335-3340
-    // ```c
-    // CHspFilteringArgs::ExtractAlgorithmOptions(const CArgs& args,
-    //                                            CBlastOptions& opts)
-    // {
-    //     if (args[kArgCullingLimit]) {
-    //         opts.SetCullingLimit(args[kArgCullingLimit].AsInteger());
-    //     }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3335-3340
     /// If the query range of a hit is enveloped by that of at least this many
     /// higher-scoring hits, delete the hit (default: 0, no culling).
     #[arg(long, value_parser = nonnegative_ncbi_integer)]
     pub culling_limit: Option<i32>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3304-3328
+    // With `-culling_limit` NCBI refuses the command line, LOSAT's parser too (with its own
+    // text, as for the other exclusions). psiblast's are its parser's
+    // (`PsiblastArgs::best_hit_overhang`); rpsblast has neither.
+    /// Best Hit algorithm overhang value (recommended value: 0.1)
+    #[arg(long, value_parser = best_hit_value, value_name = "float_value", conflicts_with = "culling_limit")]
+    pub best_hit_overhang: Option<f64>,
+    /// Best Hit algorithm score edge value (recommended value: 0.1)
+    #[arg(long, value_parser = best_hit_value, value_name = "float_value", conflicts_with = "culling_limit")]
+    pub best_hit_score_edge: Option<f64>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3329,3347-3349
+    /// Return only the best HSP for each non overlapping query region
+    #[arg(long)]
+    pub subject_besthit: bool,
     #[arg(long)]
     pub ungapped: bool,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:209-229, 276-286
-    // ```c++
-    //         arg_desc.SetCurrentGroup("Extension options");
-    //         // ungapped X-drop
-    //         // Default values: blastn=20, megablast=10, others=7
-    //         arg_desc.AddOptionalKey(kArgUngappedXDropoff, "float_value",
-    //                             "X-dropoff value (in bits) for ungapped extensions",
-    //                             CArgDescriptions::eDouble);
-    //
-    //         // Tblastx is ungapped only.
-    //         if (!m_IsTblastx) {
-    //          // initial gapped X-drop
-    //          // Default values: blastn=30, megablast=20, tblastx=0, others=15
-    //             arg_desc.AddOptionalKey(kArgGappedXDropoff, "float_value",
-    //                  "X-dropoff value (in bits) for preliminary gapped extensions",
-    //                  CArgDescriptions::eDouble);
-    //
-    //          // final gapped X-drop
-    //          // Default values: blastn/megablast=50, tblastx=0, others=25
-    //             arg_desc.AddOptionalKey(kArgFinalGappedXDropoff, "float_value",
-    //                          "X-dropoff value (in bits) for final gapped alignment",
-    //                          CArgDescriptions::eDouble);
-    //         }
-    //     ...
-    //     if (args.Exist(kArgUngappedXDropoff) && args[kArgUngappedXDropoff]) {
-    //         opt.SetXDropoff(args[kArgUngappedXDropoff].AsDouble());
-    //     }
-    //
-    //     if (args.Exist(kArgGappedXDropoff) && args[kArgGappedXDropoff]) {
-    //         opt.SetGapXDropoff(args[kArgGappedXDropoff].AsDouble());
-    //     }
-    //
-    //     if (args.Exist(kArgFinalGappedXDropoff) && args[kArgFinalGappedXDropoff]) {
-    //         opt.SetGapXDropoffFinal(args[kArgFinalGappedXDropoff].AsDouble());
-    //     }
-    // ```
     // BLASTP's X-drops in bits; `None`: the defaults of every task (`ResolvedBlastpArgs`).
     // psiblast's are its parser's (`PsiblastArgs::xdrop_ungap`); rpsblast's are its RPS engine's
     // (`rps`).
@@ -537,11 +314,7 @@ pub struct BlastpArgs {
     pub gap_open: Option<i32>,
     #[arg(long = "gapextend", value_parser = ncbi_integer, help = "Cost to extend a gap [default: 1, or the matrix's best value]")]
     pub gap_extend: Option<i32>,
-    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:796-797
-    // ```c
-    //     arg_desc.AddDefaultKey(kArgCompBasedStats, "compo", legend,
-    //                            CArgDescriptions::eString, m_DefaultOpt);
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:796-797
     // Read when NCBI's handler reads it (`blastinput/app.rs` `parse_comp_based_stats`).
     #[arg(
         long,
@@ -554,36 +327,15 @@ pub struct BlastpArgs {
     #[arg(long, help = "SEG: no, yes, or \"WINDOW LOCUT HICUT\" [default: no]")]
     pub seg: Option<String>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:339-342
-    // ```c++
-    //         arg_desc.AddDefaultKey(kArgLookupTableMaskingOnly, "soft_masking",
-    //                         "Apply filtering locations as soft masks",
-    //                         CArgDescriptions::eBoolean,
-    //                         kDfltArgLookupTableMaskingOnlyProt);
-    // ```
     #[arg(long, value_parser = ncbi_boolean, help = "Apply filtering locations as soft masks [default: false]")]
     pub soft_masking: Option<bool>,
-    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:1938-1942,2549-2557
-    // arg_desc.AddFlag(kArgUseLCaseMasking,
-    //     "Use lower case filtering in query and subject sequence(s)?", true);
-    // ReadSequencesToBlast(..., use_lcase_masks, subjects, ...);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1938-1942,2549-2557
     #[arg(long)]
     pub lcase_masking: bool,
-    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:803-806
-    // ```c
-    //     arg_desc.AddFlag(kArgUseSWTraceback,
-    //                      "Compute locally optimal Smith-Waterman alignments?",
-    //                      true);
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:804-806
     #[arg(long)]
     pub use_sw_tback: bool,
-    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:1945-1949
-    // ```c++
-    //     // query location
-    //     arg_desc.AddOptionalKey(kArgQueryLocation, "range",
-    //                             "Location on the query sequence in 1-based offsets "
-    //                             "(Format: start-stop)",
-    //                             CArgDescriptions::eString);
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1945-1949
     // Read by the query options handler (`check_options`).
     #[arg(
         long = "query_loc",
@@ -591,14 +343,7 @@ pub struct BlastpArgs {
         help = "Location on the query sequence in 1-based offsets (Format: start-stop)"
     )]
     pub query_loc: Option<String>,
-    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:2372-2376
-    // ```c++
-    //         // subject location
-    //         arg_desc.AddOptionalKey(kArgSubjectLocation, "range",
-    //                         "Location on the subject sequence in 1-based offsets "
-    //                         "(Format: start-stop)",
-    //                         CArgDescriptions::eString);
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2372-2376
     // Read by the database arguments handler when it reads the subjects (`run`).
     #[arg(
         long = "subject_loc",
@@ -607,7 +352,7 @@ pub struct BlastpArgs {
         help = "Location on the subject sequence in 1-based offsets (Format: start-stop)"
     )]
     pub subject_loc: Option<String>,
-    // NCBI's argument is a string (blast_args.cpp:2657-2660), parsed before the option
+    // NCBI's argument is a string (c++/src/algo/blast/blastinput/blast_args.cpp:2657-2660), parsed before the option
     // handlers (`blastinput/app.rs` `parse_formatting_string`).
     #[arg(long, default_value = "0", value_name = "SPEC", help = crate::cli::outfmt_help("0 to 16, 18 and 20", "6, 7, 10 and 20", ""))]
     pub outfmt: String,
@@ -635,30 +380,25 @@ pub struct BlastpArgs {
     /// files). Not a public option.
     #[arg(skip)]
     pub taxdb_setting: Option<crate::algorithm::common::database::TaxdbSetting>,
+    /// The settings by which the options' resolution looks up the file of an ungapped search's
+    /// `-matrix` that NCBI's tables do not have (`ResolvedBlastpArgs::matrix_file`): the command
+    /// line's own settings (`search_cli`, `search_database`) and, for a search of the library with
+    /// `-subject`, the call's (`api::run`, from its application start); `None` in LOSAT Web, which
+    /// has no file system. Not a public option.
+    #[arg(skip)]
+    pub matrix_search: Option<crate::blastinput::ncbi_environment::MatrixSearch>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1117-1119
-    // ```c++
-    //     if (args[kArgPSIInclusionEThreshold]) {
-    //         opt.SetInclusionThreshold(args[kArgPSIInclusionEThreshold].AsDouble());
-    //     }
-    // ```
     /// psiblast's `-inclusion_ethresh`; `None` keeps the options' default
     /// (`PSI_INCLUSION_ETHRESH`, which blastp's options have too).
     #[arg(skip)]
     pub inclusion_ethresh: Option<f64>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:584-591
-    // ```c
-    //    if (Blast_ProgramIsNucleotide(program_number)) {
-    //       ...
-    //    } else {
-    //       ...
-    //       (*options)->gap_trigger = BLAST_GAP_TRIGGER_PROT;
-    // ```
     /// psiblast's `-gap_trigger` in bits (`CGapTriggerArgs`); `None` keeps the options' default
     /// (`BLAST_GAP_TRIGGER_PROT`, 22 bits), the only value of blastp and rpsblast, which have no
     /// such argument.
     #[arg(skip)]
     pub gap_trigger: Option<f64>,
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1460-1471 (quoted at
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1460-1471 (cited at
     // `ResolvedBlastpArgs::sum_stats`)
     /// psiblast's `-sum_stats true` (`CGenericSearchArgs`): every round links the HSPs of each
     /// subject with sum statistics (`core::link_hsps`). blastp and rpsblast have no such argument
@@ -666,11 +406,6 @@ pub struct BlastpArgs {
     #[arg(skip)]
     pub sum_stats: bool,
     // NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_input.hpp:180-182
-    // ```c++
-    //     int GetLocalIdCounterInitValue() const { return m_LocalIdCounter; }
-    //     ...
-    //     void SetLocalIdCounterInitValue(int val) { m_LocalIdCounter = val; }
-    // ```
     // The position in the whole input of the first of these records, as a reader's counter
     // starts there (`api::run_batches`): a query's `Query_N` in the messages. 0 on the command
     // line, whose records are the whole input.
@@ -686,54 +421,8 @@ pub struct BlastpArgs {
     pub rps: Option<crate::algorithm::rps_search::engine::RpsSearch>,
 }
 
-// NCBI reference: c++/src/algo/blast/api/blast_options_handle.cpp:381-402
-// ```c
-//     else if (!NStr::CompareNocase(task, "blastp") ||
-//              !NStr::CompareNocase(task, "blastp-short") ||
-//              !NStr::CompareNocase(task, "blastp-fast"))
-//     {
-//          CBlastAdvancedProteinOptionsHandle* opts =
-//                dynamic_cast<CBlastAdvancedProteinOptionsHandle*>
-//                 (CBlastOptionsFactory::Create(eBlastp, locality));
-//          if (task == "blastp-short") {
-//             opts->SetMatrixName("PAM30");
-//             opts->SetGapOpeningCost(9);
-//             opts->SetGapExtensionCost(1);
-//             opts->SetEvalueThreshold(20000);
-//             opts->SetWordSize(2);
-//             opts->ClearFilterOptions();
-//          } else if (task == "blastp-fast") {
-//             opts->SetWordSize(5);
-//             opts->SetOptions().SetLookupTableType(eCompressedAaLookupTable);
-//             opts->SetWordThreshold(BLAST_WORD_THRESHOLD_BLASTP_FAST);
-//             opts->SetChaining(true);
-//          }
-//          retval = opts;
-//     }
-// ```
-// NCBI reference: c++/src/algo/blast/api/blast_prot_options.cpp:56-82
-// ```c
-// void CBlastProteinOptionsHandle::SetWordSize(int ws) {
-//
-//    	m_Opts->SetWordSize(ws);
-//    	switch (ws) {
-//    		case 3:
-//    		m_Opts->SetWordThreshold(BLAST_WORD_THRESHOLD_BLASTP);
-//    		break;
-// ...
-//    		default:
-//    		m_Opts->SetWordThreshold(BLAST_WORD_THRESHOLD_BLASTP);
-//    		break;
-//    	}
-//
-//    	if (ws > 4) {
-//    		m_Opts->SetLookupTableType(eCompressedAaLookupTable);
-//    	}
-//    	else {
-//    		m_Opts->SetLookupTableType(eAaLookupTable);
-//    	}
-// }
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_handle.cpp:381-402
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_prot_options.cpp:56-82
 // The options of a task before the command line's values (BLAST_EXPECT_VALUE 10,
 // BLAST_WORDSIZE_PROT 3, BLAST_WORD_THRESHOLD_BLASTP 11, BLOSUM62 11/1, window 40, SEG
 // off for the advanced protein handle).
@@ -787,17 +476,7 @@ impl BlastpTaskOptions {
         Ok(options)
     }
 
-    // NCBI reference: c++/src/algo/blast/api/blast_options_local_priv.hpp:612-619
-    // ```c
-    // CBlastOptionsLocal::SetWordSize(int ws)
-    // {
-    //     m_LutOpts->word_size = ws;
-    //     if (m_LutOpts->lut_type == eCompressedAaLookupTable && ws <= 4)
-    // 	m_LutOpts->lut_type = eAaLookupTable;
-    //     else if (m_LutOpts->lut_type == eAaLookupTable && ws > 4)
-    // 	m_LutOpts->lut_type = eCompressedAaLookupTable;
-    // }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_local_priv.hpp:612-619
     fn set_word_size(&mut self, ws: i32) {
         self.word_size = ws;
         if self.lookup_table_type == BlastpLookupTableType::CompressedAaLookupTable && ws <= 4 {
@@ -824,6 +503,12 @@ pub struct ResolvedBlastpArgs {
     pub is_html: bool,
     /// The `-db` value as NCBI keeps it (`db_name`), when the search is of a database.
     pub db: Option<String>,
+    /// `-db_soft_mask` or `-db_hard_mask` as the command line keeps it (`DbMaskArgs::option`;
+    /// series NP, M4b).
+    pub db_mask: Option<crate::blastinput::db_mask::DbMaskOption>,
+    /// The database masking as the formatter resolved it (`DbMaskOption::resolve`, in
+    /// `search`); `None` before, and for a search without it.
+    pub db_mask_resolved: Option<crate::blastinput::db_mask::ResolvedMask>,
     /// `-dbsize` (`eff_len_options->db_length`; 0 when it is not given).
     pub dbsize: i64,
     /// `-searchsp`: the effective search space when above 0, and at any value no Gumbel block
@@ -831,6 +516,7 @@ pub struct ResolvedBlastpArgs {
     pub searchsp: Option<i64>,
     /// No Gumbel block (finite-size correction): `-searchsp` at any value, or BLASTP,
     /// PSIBLAST and RPSBLAST with the environment variable `OLD_FSC` (`app::old_fsc_environment`).
+    /// An ungapped search has none either, whatever this says (`has_gumbel`).
     pub old_fsc: bool,
     pub task: String,
     pub evalue: f64,
@@ -852,13 +538,16 @@ pub struct ResolvedBlastpArgs {
     /// `-sorthits` and `-sorthsps` of the pairwise report (`FormattingArgs::report_sort`):
     /// blastp's; none for psiblast and rpsblast, which read them and sort nothing.
     pub sort: crate::report::hit_sort::ReportSort,
-    /// Whether -max_target_seqs was given (the text of LOSAT's limit on the hit list size).
-    pub max_target_seqs_given: bool,
     pub max_hsps_per_subject: usize,
     /// The -qcov_hsp_perc value, or 0 (no filter).
     pub query_cov_hsp_perc: f64,
     /// The -culling_limit value (0: no culling, as NCBI's `SetCullingLimit(0)`).
     pub culling_limit: i32,
+    /// The best hit filter of `-best_hit_overhang` and `-best_hit_score_edge`, `None` without
+    /// them (`BlastpArgs::best_hit`).
+    pub(crate) best_hit: Option<crate::core::hspfilter_besthit::BestHitParams>,
+    /// Whether -subject_besthit was given.
+    pub subject_besthit: bool,
     pub ungapped: bool,
     /// The X-drops in bits (`word_options->x_dropoff`, `ext_options->gap_x_dropoff` and
     /// `gap_x_dropoff_final`): `-xdrop_ungap`, `-xdrop_gap`, `-xdrop_gap_final` or the defaults
@@ -866,19 +555,6 @@ pub struct ResolvedBlastpArgs {
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_prot_options.cpp:100-111 (no
     /// task changes them, blast_options_handle.cpp:381-402)
-    /// ```c++
-    /// CBlastProteinOptionsHandle::SetInitialWordOptionsDefaults()
-    /// {
-    ///     SetXDropoff(BLAST_UNGAPPED_X_DROPOFF_PROT);
-    ///     SetWindowSize(BLAST_WINDOW_SIZE_PROT);
-    /// }
-    ///
-    /// void
-    /// CBlastProteinOptionsHandle::SetGappedExtensionDefaults()
-    /// {
-    ///     SetGapXDropoff(BLAST_GAP_X_DROPOFF_PROT);
-    ///     SetGapXDropoffFinal(BLAST_GAP_X_DROPOFF_FINAL_PROT);
-    /// ```
     pub x_drop_ungapped_bits: f64,
     pub x_drop_gapped_bits: f64,
     pub x_drop_final_bits: f64,
@@ -886,14 +562,7 @@ pub struct ResolvedBlastpArgs {
     /// `BLAST_GAP_TRIGGER_PROT`. Every round converts it with the query's ungapped block
     /// (`kbp_std`) into the cutoff of the ungapped alignments that a gapped extension starts from.
     pub gap_trigger_bits: f64,
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:777-784
-    // ```c
-    //    params->do_sum_stats = options->do_sum_stats;
-    // ...
-    //    if (params->do_sum_stats) {
-    //       BlastLinkHSPParametersNew(program_number, gapped_calculation,
-    //                                 &params->link_hsp_params);
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:774-784
     /// `hit_params->do_sum_stats`: psiblast's `-sum_stats true`. The search links the HSPs of each
     /// subject (`core::link_hsps`) in the preliminary stage, the traceback and the
     /// composition-based redo, and lowers the cutoff scores of the HSPs it keeps
@@ -904,6 +573,17 @@ pub struct ResolvedBlastpArgs {
     /// is its LOSAT matrix when LOSAT has it, otherwise BLOSUM62 (and the search rejects
     /// the name, `blast_engine.rs` `validate_requested_blastp_support`).
     pub matrix_name: String,
+    /// An ungapped search whose `-matrix` NCBI's tables do not have (`scoring.matrix` is then
+    /// BLOSUM62, which no search scores with): NCBI's set-up of the first query batch fails with
+    /// "Unknown error code -1" (`blastx/query_setup.rs` `unknown_matrix_message`,
+    /// `preliminary_search_error`).
+    pub unknown_matrix: bool,
+    /// The file that NCBI BLAST+ reads for `unknown_matrix`'s name
+    /// (`ncbi_environment::ApplicationSettings::matrix_file`), found with the settings' search of
+    /// the call (`BlastpArgs::matrix_search`) where the options are resolved, so for every entry of
+    /// a search alike; `None` without such a file and in LOSAT Web. The first query batch is
+    /// refused then (`blastx::query_setup::matrix_error_message`).
+    pub matrix_file: Option<PathBuf>,
     pub scoring: ProteinScoringSpec,
     /// The composition mode that the search runs: the `-comp_based_stats` value, or mode 0 when
     /// IDENTITY resets it (`identity_cbs_reset`; the archive records the value as given).
@@ -962,26 +642,18 @@ pub struct ResolvedBlastpArgs {
 }
 
 impl ResolvedBlastpArgs {
+    /// Whether the search has a Gumbel block (the finite-size correction): not with `-searchsp`
+    /// or `OLD_FSC` (`old_fsc`), and not in an ungapped search, whose score block frees it.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:517-527 (cited at
+    /// `blast_engine::call_setup::gapped_block`) and c++/src/algo/blast/core/blast_stat.c:921-923
+    /// (cited at `ResolvedBlastpArgs::old_fsc`'s resolution, `BlastpArgs::check_options`)
+    pub fn has_gumbel(&self) -> bool {
+        !self.ungapped && !self.old_fsc
+    }
+
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:213-224
-    // ```c++
-    //     // When dealing with PSI-BLAST iterations, we need to keep a larger
-    //     // alignment for the PSSM engine as to replicate blastpgp's behavior
-    //     int hitlist_size_backup = m_OptsMemento->m_HitSaveOpts->hitlist_size;
-    //     if (m_OptsMemento->m_ProgramType == eBlastTypePsiBlast ) {
-    //         SBlastHitsParameters* bhp = NULL;
-    //         SBlastHitsParametersNew(m_OptsMemento->m_HitSaveOpts,
-    //                                 m_OptsMemento->m_ExtnOpts,
-    //                                 m_OptsMemento->m_ScoringOpts,
-    //                                 &bhp);
-    //         m_OptsMemento->m_HitSaveOpts->hitlist_size = bhp->prelim_hitlist_size;
-    //         SBlastHitsParametersFree(bhp);
-    //     }
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:92-93
-    // ```c
-    //        (*retval)->prelim_hitlist_size = GetPrelimHitlistSize(hit_options->hitlist_size,
-    //     		   ext_options->compositionBasedStats, scoring_options->gapped_calculation);
-    // ```
     /// The hit list size of the traceback (`hitParams->options->hitlist_size`: the heaps and the
     /// hit lists of the composition-based redo): the hit list size, or psiblast's preliminary hit
     /// list size. psiblast's formatter then keeps the first `max_target_seqs` subjects
@@ -989,6 +661,23 @@ impl ResolvedBlastpArgs {
     /// positive (`validate_requested_blastp_support`).
     pub fn traceback_hitlist_size(&self) -> usize {
         self.traceback_hitlist
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3288-3292
+    /// The heap of one query's redone matches as the composition-based redo starts.
+    ///
+    /// With unified P-values (BLASTP's `-comp_based_stats 1u`, `2u`, `3u`) the redo ends no match
+    /// early ([`super::hsp::BlastCompoHeap::without_early_end`]): the only query whose matches NCBI's test can
+    /// end is the last one of a query batch, whose result LOSAT defines by NCBI's search with a
+    /// copy of it after it, where NCBI redoes every match of it.
+    pub(crate) fn redone_match_heap(&self) -> super::hsp::BlastCompoHeap {
+        let heap =
+            super::hsp::BlastCompoHeap::new(self.traceback_hitlist_size(), self.inclusion_ethresh);
+        if self.comp_based_stats.unified_p {
+            heap.without_early_end()
+        } else {
+            heap
+        }
     }
 
     fn compute_traceback_hitlist_size(&self) -> usize {
@@ -1000,23 +689,12 @@ impl ResolvedBlastpArgs {
                 self.max_target_seqs,
                 self.comp_based_stats.is_enabled(),
                 true,
-            )
-            .max(1) as usize,
+            ),
         }
     }
 
     // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:465-468
-    // ```c++
-    //             CRef<CBlastFastaInputSource> fasta(new CBlastFastaInputSource(
-    //                                          m_CmdLineArgs->GetInputStream(),
-    //                                          iconfig));
-    //             input.Reset(new CBlastInput(&*fasta, 1));
-    // ```
     // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:215-216
-    // ```c++
-    //         CBlastFastaInputSource fasta(m_CmdLineArgs->GetInputStream(), iconfig);
-    //         CBlastInput input(&fasta, m_CmdLineArgs->GetQueryBatchSize());
-    // ```
     /// The query batch size: blastp's (`BATCH_SIZE` or 10000 letters), or psiblast's 1, which
     /// reads no variable (a batch of one query, and of the queries without letters before it).
     pub fn query_batch_size(&self) -> Result<u32> {
@@ -1024,12 +702,6 @@ impl ResolvedBlastpArgs {
             BlastpApp::Blastp => crate::blastinput::app::query_batch_size(10000),
             BlastpApp::Psiblast => Ok(1),
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpsblast_args.cpp:141-144
-            // ```c++
-            // CRPSBlastAppArgs::GetQueryBatchSize() const
-            // {
-            //     bool is_remote = (m_RemoteArgs.NotEmpty() && m_RemoteArgs->ExecuteRemotely());
-            //     return blast::GetQueryBatchSize(eRPSBlast, m_IsUngapped, is_remote);
-            // ```
             // (`eRPSBlast` takes the default of `GetQueryBatchSize`, 10000, or `BATCH_SIZE`.)
             BlastpApp::Rpsblast => crate::blastinput::app::query_batch_size(10000),
         }
@@ -1043,6 +715,27 @@ impl BlastpArgs {
         self.culling_limit.unwrap_or(0)
     }
 
+    /// The best hit filter of `-best_hit_overhang` and `-best_hit_score_edge` (the one not given
+    /// takes its default), `None` when neither is given. The BLAST archive records the options
+    /// as given.
+    pub(crate) fn best_hit(&self) -> Option<crate::core::hspfilter_besthit::BestHitParams> {
+        crate::core::hspfilter_besthit::BestHitParams::from_options(
+            self.best_hit_overhang,
+            self.best_hit_score_edge,
+        )
+    }
+
+    /// Whether the search is ungapped with a `-matrix` that NCBI's tables do not have: the name
+    /// that NCBI looks for as a file (`ResolvedBlastpArgs::unknown_matrix`, which the resolution
+    /// sets for such a search; a gapped one refuses the name first).
+    pub(crate) fn unknown_matrix_name(&self) -> bool {
+        self.ungapped
+            && self
+                .matrix
+                .as_deref()
+                .is_some_and(|name| name.parse::<ScoringMatrix>().is_err())
+    }
+
     /// The options as `check_options` resolves them, without NCBI's warnings.
     pub fn resolve(&self) -> Result<ResolvedBlastpArgs> {
         self.check_options(&mut std::io::sink())
@@ -1052,18 +745,7 @@ impl BlastpArgs {
     /// options, each argument handler in the order of `CBlastpAppArgs` (with the warnings
     /// that they post to `diagnostics`), and `Validate`, with NCBI's errors.
     ///
-    /// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3631-3639
-    /// ```c
-    ///     NON_CONST_ITERATE(TBlastCmdLineArgs, arg, m_Args) {
-    ///         (*arg)->ExtractAlgorithmOptions(args, opts);
-    ///     }
-    ///
-    ///     m_IsUngapped = !opts.GetGappedMode();
-    ///     try { retval->Validate(); }
-    ///     catch (const CBlastException& e) {
-    ///         NCBI_THROW(CInputException, eInvalidInput, e.GetMsg());
-    ///     }
-    /// ```
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3631-3639
     pub fn check_options(
         &self,
         diagnostics: &mut dyn std::io::Write,
@@ -1077,39 +759,7 @@ impl BlastpArgs {
             SuggestionProgram,
         };
         let mut options = BlastpTaskOptions::create(&self.task)?;
-        // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:251-301
-        // ```c
-        //     if (args.Exist(kArgEvalue) && args[kArgEvalue]) {
-        //         opt.SetEvalueThreshold(args[kArgEvalue].AsDouble());
-        //     }
-        //
-        //     int gap_open=0, gap_extend=0;
-        //     if (args.Exist(kArgMatrixName) && args[kArgMatrixName])
-        //          BLAST_GetProteinGapExistenceExtendParams
-        //              (args[kArgMatrixName].AsString().c_str(), &gap_open, &gap_extend);
-        //
-        //     if (args.Exist(kArgGapOpen) && args[kArgGapOpen]) {
-        //         opt.SetGapOpeningCost(args[kArgGapOpen].AsInteger());
-        //     }
-        //     else if (args.Exist(kArgMatrixName) && args[kArgMatrixName]) {
-        //         opt.SetGapOpeningCost(gap_open);
-        //     }
-        // ...
-        //     if ( args.Exist(kArgWordSize) && args[kArgWordSize]) {
-        //         if (m_QueryIsProtein && args[kArgWordSize].AsInteger() > 4){
-        //            opt.SetLookupTableType(eCompressedAaLookupTable);
-        //            opt.SetWordThreshold(19.3);
-        //            if (args[kArgWordSize].AsInteger() > 5) {
-        //                opt.SetWordThreshold(21.0);
-        //            }
-        //            if (args[kArgWordSize].AsInteger() > 6) {
-        //                opt.SetWordThreshold(20.25);
-        //            }
-        //         }
-        //         opt.SetWordSize(args[kArgWordSize].AsInteger());
-        //
-        //     }
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:251-301
         if let Some(evalue) = self.evalue {
             options.evalue = evalue;
         }
@@ -1141,101 +791,41 @@ impl BlastpArgs {
             }
             options.set_word_size(word_size);
         }
-        // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:396-406 (the
+        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:396-406 (the
         // filtering handler; `blastinput/app.rs` `parse_seg_option`)
-        // ```c
-        //         if (m_QueryIsProtein && args[kArgSegFiltering]) {
-        //             const string& seg_opts = args[kArgSegFiltering].AsString();
-        // ```
         if let Some(seg) = &self.seg {
             options.seg = crate::blastinput::app::parse_seg_option(seg)?;
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:387-391
-        // ```c++
-        // CFilteringArgs::ExtractAlgorithmOptions(const CArgs& args, CBlastOptions& opt)
-        // {
-        //     if (args[kArgLookupTableMaskingOnly]) {
-        //         opt.SetMaskAtHash(args[kArgLookupTableMaskingOnly].AsBoolean());
-        //     }
-        // ```
         // The argument always has its default (`kDfltArgLookupTableMaskingOnlyProt`, "false"),
         // and no other handler of blastp sets `mask_at_hash`.
         let soft_masking = self.soft_masking.unwrap_or(false);
-        // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:634-639
-        // ```c
-        // CMatrixNameArg::ExtractAlgorithmOptions(const CArgs& args, CBlastOptions& opt)
-        // {
-        //     if (args[kArgMatrixName]) {
-        //         opt.SetMatrixName(args[kArgMatrixName].AsString().c_str());
-        //     }
-        // }
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:634-639
         if let Some(matrix) = &self.matrix {
             options.matrix_name = matrix.clone();
         }
-        // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:586-623
-        // ```c
-        // s_IsDefaultWordThreshold(EProgram program, double threshold)
-        // {
-        //     int word_threshold = static_cast<int>(threshold);
-        //     bool retval = true;
-        //     if (program == eBlastp &&
-        //         word_threshold != BLAST_WORD_THRESHOLD_BLASTP) {
-        //         retval = false;
-        // ...
-        //     if (args[kArgWordScoreThreshold]) {
-        //         opt.SetWordThreshold(args[kArgWordScoreThreshold].AsDouble());
-        //     } else if (s_IsDefaultWordThreshold(opt.GetProgram(),
-        //                                         opt.GetWordThreshold())) {
-        //         double threshold = -1;
-        //         BLAST_GetSuggestedThreshold(opt.GetProgramType(),
-        //                                     opt.GetMatrixName(),
-        //                                     &threshold);
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:586-623
         if let Some(threshold) = self.threshold {
             options.threshold = threshold;
         } else if options.threshold as i32 == 11 {
             options.threshold =
                 suggested_threshold(SuggestionProgram::Protein, &options.matrix_name);
         }
-        // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:485-497
-        // ```c
-        // CWindowSizeArg::ExtractAlgorithmOptions(const CArgs& args, CBlastOptions& opt)
-        // {
-        //     if (args[kArgWindowSize]) {
-        //         opt.SetWindowSize(args[kArgWindowSize].AsInteger());
-        //     } else {
-        //         int window = -1;
-        //         BLAST_GetSuggestedWindowSize(opt.GetProgramType(),
-        //                                      opt.GetMatrixName(),
-        //                                      &window);
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:485-497
         options.window_size = match self.window_size {
             Some(window) => window,
             None => suggested_window_size(&options.matrix_name),
         };
-        // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:1995-1999
-        // ```c++
-        //     // set the sequence range
-        //     if (args.Exist(kArgQueryLocation) && args[kArgQueryLocation]) {
-        //         m_Range = ParseSequenceRange(args[kArgQueryLocation].AsString(),
-        //                                      "Invalid specification of query location");
-        //     }
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1995-1999
         // The query options handler comes after the window size handler and before the
         // formatting handler (blastp_args.cpp:44-120).
         let query_range = crate::blastinput::seq_range::parse_optional_range(
             self.query_loc.as_deref(),
             crate::blastinput::seq_range::RangeRole::Query,
         )?;
-        // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:2874-2886 and
+        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2975-2976 and
         // 2960-2977 (the formatting handler: other programs' formats, the hit list size
         // and its warning)
-        // ```c
-        //     if(hitlist_size < 5){
-        //    		ERR_POST(Warning << "Examining 5 or more matches is recommended");
-        //     }
-        // ```
         let choice = crate::blastinput::app::parse_formatting_string(&self.outfmt)?;
         crate::blastinput::app::formatting_handler_check(
             &choice,
@@ -1263,18 +853,8 @@ impl BlastpArgs {
             &self.formatting,
         )?;
         diagnostics.write_all(&warnings)?;
-        // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:893-903 (the
+        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:893-903 (the
         // composition-based statistics handler; `blastinput/app.rs`)
-        // ```c
-        //     if (args[kArgCompBasedStats]) {
-        //         unique_ptr<bool> ungapped(args.Exist(kArgUngapped)
-        //             ? new bool(args[kArgUngapped]) : 0);
-        //         s_SetCompositionBasedStats(opt,
-        //                                    args[kArgCompBasedStats].AsString(),
-        //                                    args[kArgUseSWTraceback],
-        //                                    ungapped.get());
-        //     }
-        // ```
         // The unified P-values are blastp's only (`program == eBlastp`, blast_args.cpp:880-883).
         let (mode, unified_p) = crate::blastinput::app::parse_comp_based_stats(
             &self.comp_based_stats,
@@ -1285,36 +865,62 @@ impl BlastpArgs {
             pssm.check()?;
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1338-1340
-        // ```c++
-        //     if (args.Exist(kArgPSIInputChkPntFile) && args[kArgPSIInputChkPntFile]) {
-        //         CNcbiIstream& in = args[kArgPSIInputChkPntFile].AsInputFile();
-        //         _ASSERT(m_Pssm.Empty());
-        // ```
         // psiblast's `-in_pssm` is read by the same handler, after the checks of its PSSM
         // files (`algorithm::psiblast::in_pssm`); the file as read goes to the rounds' plan
         // (`in_pssm_files`), and to the search strategy's request with `-db` (`PssmReader::strategy`).
         let mut in_pssm_file = None;
-        let psi_search = match self
+        let pssm_reader = crate::algorithm::pssm_search::in_pssm::PssmReader {
+            // The PSSM engine makes the scores of a PSSM of frequency ratios only with
+            // the options' matrix, as tblastn's (`opts.GetMatrixName()`; NCBI BLAST+
+            // 2.17.0 `-matrix BLOSUM45 -gapopen 15 -gapextend 2`: the engine's error,
+            // line RG D3-1 review 4c `out_m/` m13-m15).
+            matrix_name: &options.matrix_name,
+            strategy: self.export_search_strategy.is_some(),
+            database: self.db.is_some(),
+            archive: self.archive.as_ref(),
+            ..crate::algorithm::pssm_search::in_pssm::PssmReader::PSIBLAST
+        };
+        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1319-1328
+        // `-in_msa`'s PSSM is made first, with the matrix and gap costs that the generic search
+        // handler has set by then (`algorithm::psiblast::in_msa`); the search of it is `-in_pssm`'s.
+        let msa_read = match self
             .psiblast_pssm
             .as_ref()
-            .and_then(|pssm| pssm.in_pssm.as_deref())
+            .and_then(|pssm| pssm.in_msa.as_ref())
         {
-            Some(path) => {
-                let (mut search, file) = crate::algorithm::pssm_search::in_pssm::read_in_pssm(
+            Some(input) => Some(crate::algorithm::psiblast::in_msa::read_in_msa(
+                input,
+                &crate::algorithm::psiblast::in_msa::MsaScoring {
+                    matrix_name: &options.matrix_name,
+                    gap_open: options.gap_open,
+                    gap_extend: options.gap_extend,
+                    save_ascii_pssm: self
+                        .psiblast_pssm
+                        .as_ref()
+                        .is_some_and(|pssm| pssm.out_ascii_pssm.is_some()),
+                },
+                pssm_reader,
+                diagnostics,
+            )?),
+            None => None,
+        };
+        let pssm_read = match msa_read {
+            Some(read) => Some(read),
+            None => match self
+                .psiblast_pssm
+                .as_ref()
+                .and_then(|pssm| pssm.in_pssm.as_deref())
+            {
+                Some(path) => Some(crate::algorithm::pssm_search::in_pssm::read_in_pssm(
                     path,
-                    crate::algorithm::pssm_search::in_pssm::PssmReader {
-                        // The PSSM engine makes the scores of a PSSM of frequency ratios only with
-                        // the options' matrix, as tblastn's (`opts.GetMatrixName()`; NCBI BLAST+
-                        // 2.17.0 `-matrix BLOSUM45 -gapopen 15 -gapextend 2`: the engine's error,
-                        // line RG D3-1 review 4c `out_m/` m13-m15).
-                        matrix_name: &options.matrix_name,
-                        strategy: self.export_search_strategy.is_some(),
-                        database: self.db.is_some(),
-                        archive: self.archive.as_ref(),
-                        ..crate::algorithm::pssm_search::in_pssm::PssmReader::PSIBLAST
-                    },
+                    pssm_reader,
                     diagnostics,
-                )?;
+                )?),
+                None => None,
+            },
+        };
+        let psi_search = match pssm_read {
+            Some((mut search, file)) => {
                 in_pssm_file = Some(file);
                 search.setup_messages = crate::algorithm::psiblast::in_pssm::setup_messages(
                     &search,
@@ -1333,20 +939,7 @@ impl BlastpArgs {
             mode
         };
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:143-155
-        // ```c++
-        //     if (opts_memento->m_ScoringOpts->matrix &&
-        //         strcasecmp("identity", opts_memento->m_ScoringOpts->matrix) == 0 &&
-        //         opts_memento->m_ExtnOpts->compositionBasedStats > 0) {
-        //
-        //         opts_memento->m_ExtnOpts->compositionBasedStats = 0;
-        // ...
-        //         search_messages.AddMessageAllQueries(eBlastSevWarning, 0, os.str());
-        //     }
-        // ```
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3043
-        // ```c
-        //     int compositionTestIndex = extendParams->options->unifiedP;
-        // ```
         // IDENTITY has no composition data: NCBI searches it in mode 0 whatever mode was asked,
         // with a warning for each query of the first query batch (`identity_cbs_reset`; the reset
         // stays in the options of the later batches, `blastp_app.cpp:274`), as TBLASTN
@@ -1381,23 +974,46 @@ impl BlastpArgs {
                 .xdrop_ungap
                 .or_else(|| self.rps.as_ref().and_then(|rps| rps.x_drop_ungapped_bits)),
         })?;
+        // NCBI reference (598d8ae6): c++/src/util/tables/raw_scoremat.c:131-166 (cited at
+        // `blastx::args::blastx_matrix`)
         // `validate_protein_options` has refused a matrix that NCBI's tables do not know in a
         // gapped search (blast_options.c:907-940). An ungapped search takes any name, and NCBI
         // fails at the score block of the first query batch ("BLAST engine error: Error: Unknown
-        // error code -1 " for each query, exit 3; NCBI BLAST+ 2.17.0, line LIB P-S3); LOSAT
-        // refuses every ungapped BLASTP search before that (`blast_engine.rs`
-        // `validate_requested_blastp_support`), so no search scores with the BLOSUM62 below. The
-        // port of `-ungapped` (series NP, O4) gives NCBI's error, as BLASTX does
-        // (`blastx/query_setup.rs` `unknown_matrix_message`).
-        let matrix = match options.matrix_name.parse::<ScoringMatrix>() {
-            Ok(matrix) => matrix,
-            Err(_) => {
-                debug_assert!(
-                    self.ungapped,
-                    "validate_protein_options refuses an unknown matrix of a gapped search"
+        // error code -1 " for each query, exit 3; NCBI BLAST+ 2.17.0, line LIB P-S3): the search
+        // reads `unknown_matrix` (`blast_engine.rs` `run_call`), as BLASTX does
+        // (`blastx/query_setup.rs` `unknown_matrix_message`), so no search scores with the
+        // BLOSUM62 below. NCBI 2.17.0 crashes on a name that its matrix loader reads as IDENTITY
+        // without IDENTITY's statistics table (`IDENTITYX`, exit 139): LOSAT refuses it, as BLASTX
+        // does (`blastx::args`, ungapped searches only: a gapped one stops at NCBI's matrix error
+        // first).
+        let matrix = options.matrix_name.parse::<ScoringMatrix>().ok();
+        let unknown_matrix = matrix.is_none();
+        if unknown_matrix {
+            debug_assert!(
+                self.ungapped,
+                "validate_protein_options refuses an unknown matrix of a gapped search"
+            );
+            if options
+                .matrix_name
+                .get(..8)
+                .is_some_and(|start| start.eq_ignore_ascii_case("identity"))
+            {
+                bail!(
+                    "-matrix {} is read as IDENTITY without IDENTITY's statistics table (NCBI BLAST+ 2.17.0 aborts); this is not supported by LOSAT's BLASTP",
+                    options.matrix_name
                 );
-                ScoringMatrix::Blosum62
             }
+        }
+        let matrix = matrix.unwrap_or(ScoringMatrix::Blosum62);
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:1301-1306 (cited at
+        // `ncbi_environment::ApplicationSettings::matrix_file`: `BlastFindMatrixPath`)
+        // The file that NCBI reads for that name, looked up with the settings' search where every
+        // entry of a search resolves the options (`matrix_search`).
+        let matrix_file = match (&self.matrix_search, unknown_matrix) {
+            (Some(search), true) => search
+                .file(&options.matrix_name)
+                .map_err(anyhow::Error::msg)?,
+            _ => None,
         };
         let psi_pssm = self
             .psiblast_pssm
@@ -1418,13 +1034,6 @@ impl BlastpArgs {
             html,
             is_html: self.html,
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2472-2476
-            // ```c++
-            //     if (args.Exist(kArgDb) && args[kArgDb]) {
-            // 	std::string local_dblist = NStr::TruncateSpaces( args[kArgDb].AsString() );
-            //
-            //         m_SearchDb.Reset(new CSearchDatabase( local_dblist,
-            //                                              mol_type));
-            // ```
             // The name without the white space at its ends: what the reader resolves and
             // what the reports show.
             db: self
@@ -1432,21 +1041,14 @@ impl BlastpArgs {
                 .as_deref()
                 .map(crate::seqdb::db_argument_name)
                 .map(str::to_string),
+            db_mask: self.db_mask.option(),
+            db_mask_resolved: None,
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2570-2572
-            // ```c++
-            //     if (args.Exist(kArgDbSize) && args[kArgDbSize]) {
-            //         opts.SetDbLength(args[kArgDbSize].AsInt8());
-            //     }
-            // ```
             // The options start with a database length of 0
             // (blast_prot_options.cpp:150-156, `SetDbLength(0)`).
             dbsize: self.dbsize.unwrap_or(0),
             searchsp: self.searchsp,
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:922-923
-            // ```c
-            //     use_old_fsc = getenv("OLD_FSC");
-            //     if (!use_old_fsc) sbp->gbp = s_BlastGumbelBlkNew();
-            // ```
             // `-searchsp` sets OLD_FSC (blast_args.cpp:303-307); every app reads the variable.
             old_fsc: self.searchsp.is_some() || crate::blastinput::app::old_fsc_environment(),
             task: self.task.clone(),
@@ -1460,36 +1062,22 @@ impl BlastpArgs {
             num_descriptions: counts.num_descriptions,
             num_alignments: counts.num_alignments,
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2939-2941
-            // ```c++
-            //     	if (args[kArgLineLength]) {
-            //     	    m_LineLength = args[kArgLineLength].AsInteger();
-            //     	}
-            // ```
             // (Read for the output formats up to 4, the others warn, `warnings_with`.)
             line_length: self.formatting.line_length(),
             // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:246-248
-            // ```c++
-            //         formatter.SetLineLength(fmt_args->GetLineLength());
-            //         formatter.SetHitsSortOption(fmt_args->GetHitsSortOption());
-            //         formatter.SetHspsSortOption(fmt_args->GetHspsSortOption());
-            // ```
             // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:502
-            // ```c++
-            //         formatter.SetLineLength(fmt_args->GetLineLength());
-            // ```
             // (rpsblast_app.cpp:187 sets the line length only, as psiblast_app.cpp does.)
             sort: match self.app {
                 BlastpApp::Blastp => self.formatting.report_sort(),
                 BlastpApp::Psiblast | BlastpApp::Rpsblast => Default::default(),
             },
-            max_target_seqs_given: self.max_target_seqs.is_some(),
-            // NCBI blast_args.cpp:317-318: if (args[kArgMaxHSPsPerSubject])
-            // opt.SetMaxHspsPerSubject(args[kArgMaxHSPsPerSubject].AsInteger());
+            // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:317-318
             max_hsps_per_subject: self.max_hsps_per_subject.unwrap_or(0),
-            // NCBI blast_args.cpp:313-315: if (args[kArgQueryCovHspPerc])
-            // opt.SetQueryCovHspPerc(args[kArgQueryCovHspPerc].AsDouble());
+            // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:313-315
             query_cov_hsp_perc: self.qcov_hsp_perc.unwrap_or(0.0),
             culling_limit: self.culling_limit_value(),
+            best_hit: self.best_hit(),
+            subject_besthit: self.subject_besthit,
             ungapped: self.ungapped,
             x_drop_ungapped_bits: self
                 .xdrop_ungap
@@ -1506,6 +1094,8 @@ impl BlastpArgs {
             sum_stats: self.sum_stats,
             window_size: usize::try_from(options.window_size).unwrap_or(0),
             matrix_name: options.matrix_name,
+            unknown_matrix,
+            matrix_file,
             scoring: ProteinScoringSpec {
                 matrix,
                 gap_open: options.gap_open,
@@ -1553,12 +1143,6 @@ impl BlastpArgs {
         };
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_rps_options.cpp:60-66 (no word
         // threshold for RPS-BLAST: the reports print none, blast_format.cpp:2281-2284)
-        // ```c++
-        //     m_Opts->SetLookupTableType(eRPSLookupTable);
-        //     // N.B.: the word threshold is not set because for RPS-BLAST it CANNOT be
-        //     // done, i.e.: the RPS-BLAST databases already have this value encoded in
-        //     // them and therefore this value cannot be changed on an RPS-BLAST run
-        // ```
         if resolved.rps_search.is_some() {
             resolved.threshold = 0.0;
         }
@@ -1568,545 +1152,5 @@ impl BlastpArgs {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_handle.cpp:336-342 and
-    // blast_aux.cpp:662-673 (quoted at `TaskParser::check`): a task read in lower case, LOSAT's
-    // refusal for another program's NCBI task, NCBI's error for a name NCBI does not know.
-    #[test]
-    fn task_check_reads_the_name_as_ncbis_options_factory() {
-        let mut task = String::from("BLASTP-Fast");
-        BLASTP_TASK.check(&mut task).unwrap();
-        assert_eq!(task, "blastp-fast");
-        let message = |name: &str| {
-            let mut task = name.to_string();
-            BLASTP_TASK.check(&mut task).unwrap_err().to_string()
-        };
-        assert_eq!(
-            message("blastx"),
-            "the task blastx is not supported by LOSAT's BLASTP (use blastp, blastp-fast or blastp-short)"
-        );
-        assert_eq!(message("BlastQ"), "'blastq' is not a supported task");
-    }
-
-    // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3152-3171 (`s_TruncateSpaces`
-    // with `eTrunc_Both`: `isspace` at both ends; `seqdb::db_argument_name`).
-    #[test]
-    fn the_database_name_loses_the_white_space_at_its_ends() {
-        let resolved_name = |given: &str| {
-            let cli = parse_cli(["losat", "blastp", "-query", "q.faa", "-db", given]);
-            let TestCommand::Blastp(args) = cli.command;
-            args.resolve().unwrap().db
-        };
-        for (given, kept) in [
-            ("db", "db"),
-            (" db ", "db"),
-            ("\tdir/db\n", "dir/db"),
-            ("\r\x0b\x0c db", "db"),
-            ("a b", "a b"),
-            (" a  b ", "a  b"),
-            ("", ""),
-            ("   ", ""),
-            ("\u{a0}db", "\u{a0}db"),
-        ] {
-            assert_eq!(resolved_name(given).as_deref(), Some(kept), "{given:?}");
-        }
-    }
-
-    // NCBI blast_args.cpp:332-349: parse the same single string as the public CLI.
-    fn parse_cli<'a>(args: impl IntoIterator<Item = &'a str>) -> TestCli {
-        crate::cli::try_parse_from(args).unwrap()
-    }
-
-    #[derive(clap::Parser, Debug)]
-    struct TestCli {
-        #[command(subcommand)]
-        command: TestCommand,
-    }
-
-    #[derive(clap::Subcommand, Debug)]
-    enum TestCommand {
-        Blastp(BlastpArgs),
-    }
-
-    #[test]
-    fn test_default_blastp_options_resolve_to_ncbi_defaults() {
-        let cli = parse_cli(["losat", "blastp", "-query", "q.faa", "-subject", "s.faa"]);
-        let TestCommand::Blastp(args) = cli.command;
-        assert_eq!(args.evalue, None);
-        assert_eq!(args.threshold, None);
-        assert_eq!(args.word_size, None);
-        assert_eq!(args.window_size, None);
-        assert_eq!(args.matrix, None);
-        assert_eq!(args.gap_open, None);
-        assert_eq!(args.gap_extend, None);
-        assert_eq!(args.comp_based_stats, "2");
-        assert_eq!(args.seg, None);
-        assert!(!args.ungapped);
-        assert!(!args.use_sw_tback);
-
-        let resolved = args.resolve().expect("resolved blastp args");
-        assert_eq!(resolved.task, "blastp");
-        assert_eq!(resolved.evalue, 10.0);
-        assert_eq!(resolved.word_size, 3);
-        assert_eq!(
-            resolved.lookup_table_type,
-            BlastpLookupTableType::AaLookupTable
-        );
-        assert_eq!(resolved.threshold, 11.0);
-        assert_eq!(resolved.window_size, 40);
-        assert_eq!(resolved.scoring.matrix, ScoringMatrix::Blosum62);
-        assert_eq!(resolved.scoring.gap_open, 11);
-        assert_eq!(resolved.scoring.gap_extend, 1);
-        assert_eq!(
-            resolved.comp_based_stats,
-            BlastpCompBasedStats {
-                mode: BlastpCompositionMode::CompositionMatrixAdjust,
-                unified_p: false,
-            }
-        );
-        assert_eq!(resolved.seg, BlastpSegSpec::No);
-        assert_eq!(resolved.max_target_seqs, 500);
-        assert_eq!(resolved.max_hsps_per_subject, 0);
-        assert!(!resolved.ungapped);
-        assert!(!resolved.use_sw_tback);
-        assert!(!resolved.chaining);
-        assert!(!resolved.soft_masking);
-        assert_eq!(resolved.outfmt, "0");
-    }
-
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:143-155 (IDENTITY's
-    // search runs mode 0 whatever mode was asked; NCBI 2.17.0's footers and reports of
-    // `-matrix IDENTITY` with modes 1, 2, 3, T and 2u equal those of mode 0, item SC4b)
-    #[test]
-    fn identity_resets_the_composition_mode_to_0() {
-        let no_cbs = BlastpCompBasedStats {
-            mode: BlastpCompositionMode::NoCompositionBasedStats,
-            unified_p: false,
-        };
-        for (matrix, cbs, reset) in [
-            ("IDENTITY", "2", true),
-            ("identity", "1", true),
-            ("Identity", "3", true),
-            ("IDENTITY", "T", true),
-            ("IDENTITY", "2u", true),
-            ("IDENTITY", "0", false),
-            ("IDENTITY", "F", false),
-            ("IDENTITY", "0u", false),
-        ] {
-            let cli = parse_cli([
-                "losat",
-                "blastp",
-                "-query",
-                "q.faa",
-                "-subject",
-                "s.faa",
-                "-matrix",
-                matrix,
-                "-comp_based_stats",
-                cbs,
-            ]);
-            let TestCommand::Blastp(args) = cli.command;
-            let resolved = args.resolve().expect("resolved blastp args");
-            assert_eq!(resolved.comp_based_stats, no_cbs, "{matrix} {cbs}");
-            assert_eq!(resolved.identity_cbs_reset, reset, "{matrix} {cbs}");
-            assert_eq!(resolved.scoring.matrix, ScoringMatrix::Identity);
-            assert_eq!(
-                (resolved.scoring.gap_open, resolved.scoring.gap_extend),
-                (15, 2)
-            );
-            assert_eq!((resolved.threshold, resolved.window_size), (27.0, 40));
-        }
-        // The other matrices keep their mode.
-        let cli = parse_cli([
-            "losat", "blastp", "-query", "q.faa", "-subject", "s.faa", "-matrix", "PAM30",
-        ]);
-        let TestCommand::Blastp(args) = cli.command;
-        let resolved = args.resolve().expect("resolved blastp args");
-        assert!(!resolved.identity_cbs_reset);
-        assert_eq!(
-            resolved.comp_based_stats.mode,
-            BlastpCompositionMode::CompositionMatrixAdjust
-        );
-    }
-
-    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:387-391
-    // ```c++
-    //     if (args[kArgLookupTableMaskingOnly]) {
-    //         opt.SetMaskAtHash(args[kArgLookupTableMaskingOnly].AsBoolean());
-    //     }
-    // ```
-    // `-soft_masking` takes NCBI's boolean spellings (`NStr::StringToBool`); a task does not
-    // change it (`blastp-short`'s `ClearFilterOptions` comes before the handler).
-    #[test]
-    fn soft_masking_sets_mask_at_hash() {
-        let resolve = |extra: &[&str]| {
-            let mut argv = vec!["losat", "blastp", "-query", "q.faa", "-subject", "s.faa"];
-            argv.extend_from_slice(extra);
-            let TestCommand::Blastp(args) = parse_cli(argv).command;
-            args.resolve().expect("resolved blastp args").soft_masking
-        };
-        for value in ["true", "T", "1", "YES", "on"] {
-            assert!(resolve(&["-soft_masking", value]), "{value}");
-        }
-        for value in ["false", "F", "0", "no", "off"] {
-            assert!(!resolve(&["-soft_masking", value]), "{value}");
-        }
-        assert!(resolve(&["-task", "blastp-short", "-soft_masking", "true"]));
-        assert!(resolve(&[
-            "-task",
-            "blastp-fast",
-            "-soft_masking",
-            "true",
-            "-seg",
-            "yes"
-        ]));
-    }
-
-    // NCBI blast_args.cpp:2894-2973 (`blastinput::report_counts`): the hit list size and the
-    // counts of outfmt 0 from -num_descriptions / -num_alignments; "No hits are being saved".
-    #[test]
-    fn num_descriptions_and_num_alignments_set_the_counts() {
-        let resolve = |extra: &[&str]| {
-            let mut argv = vec!["losat", "blastp", "-query", "q.faa", "-subject", "s.faa"];
-            argv.extend_from_slice(extra);
-            let cli = parse_cli(argv);
-            let TestCommand::Blastp(args) = cli.command;
-            args.resolve()
-        };
-        let counts = |extra: &[&str]| {
-            let resolved = resolve(extra).unwrap();
-            (
-                resolved.max_target_seqs,
-                resolved.num_descriptions,
-                resolved.num_alignments,
-            )
-        };
-        assert_eq!(counts(&[]), (500, 500, 250));
-        assert_eq!(counts(&["-num_descriptions", "3"]), (250, 3, 250));
-        assert_eq!(counts(&["-num_alignments", "2"]), (500, 500, 2));
-        assert_eq!(
-            counts(&["-num_descriptions", "2", "-num_alignments", "4"]),
-            (4, 2, 4)
-        );
-        assert_eq!(counts(&["-max_target_seqs", "7"]), (7, 7, 7));
-        assert_eq!(counts(&["-outfmt", "6", "-num_alignments", "2"]), (2, 2, 2));
-        assert_eq!(
-            counts(&["-outfmt", "6", "-num_descriptions", "2"]),
-            (500, 500, 500)
-        );
-        let error = resolve(&["-num_descriptions", "0", "-num_alignments", "0"]).unwrap_err();
-        assert_eq!(
-            error.to_string(),
-            "BLAST query/options error: No hits are being saved\nPlease refer to the BLAST+ user manual.\n"
-        );
-        assert!(resolve(&["-outfmt", "7", "-num_alignments", "0"]).is_err());
-        assert!(resolve(&["-num_descriptions", "0"]).is_ok());
-    }
-
-    #[test]
-    fn test_blastp_short_task_resolves_ncbi_defaults() {
-        // NCBI api/blast_options_handle.cpp:395-399: blastp-fast sets word size 5, the
-        // compressed lookup and BLAST_WORD_THRESHOLD_BLASTP_FAST (20), which is kept
-        // because (int)20 is not BLASTP's default threshold (blast_args.cpp:586-600).
-        let cli = parse_cli([
-            "losat",
-            "blastp",
-            "-query",
-            "q.faa",
-            "-subject",
-            "s.faa",
-            "-task",
-            "blastp-short",
-        ]);
-        let TestCommand::Blastp(mut args) = cli.command;
-        let resolved = args.resolve().expect("resolved blastp-short args");
-        assert_eq!(resolved.task, "blastp-short");
-        assert_eq!(resolved.evalue, 20000.0);
-        assert_eq!(resolved.scoring.matrix, ScoringMatrix::Pam30);
-        assert_eq!(resolved.scoring.gap_open, 9);
-        assert_eq!(resolved.scoring.gap_extend, 1);
-        assert_eq!(resolved.word_size, 2);
-        assert_eq!(resolved.threshold, 16.0);
-        assert_eq!(resolved.window_size, 15);
-        assert_eq!(resolved.seg, BlastpSegSpec::No);
-        assert!(!resolved.chaining);
-        args.evalue = Some(42.0);
-        assert_eq!(args.resolve().unwrap().evalue, 42.0);
-    }
-
-    #[test]
-    fn test_blastp_fast_task_resolves_ncbi_defaults() {
-        // NCBI api/blast_options_handle.cpp:395-399: blastp-fast sets word size 5, the
-        // compressed lookup and BLAST_WORD_THRESHOLD_BLASTP_FAST (20), which is kept
-        // because (int)20 is not BLASTP's default threshold (blast_args.cpp:586-600).
-        let cli = parse_cli(["losat", "blastp", "-query", "q.faa", "-subject", "s.faa"]);
-        let TestCommand::Blastp(mut args) = cli.command;
-        args.task = "blastp-fast".into();
-        let resolved = args.resolve().expect("resolved blastp-fast args");
-        assert_eq!(resolved.task, "blastp-fast");
-        assert_eq!(resolved.evalue, 10.0);
-        assert_eq!(resolved.word_size, 5);
-        assert_eq!(resolved.threshold, 20.0);
-        assert_eq!(
-            resolved.lookup_table_type,
-            BlastpLookupTableType::CompressedAaLookupTable
-        );
-        assert!(resolved.chaining);
-        args.evalue = Some(42.0);
-        assert_eq!(args.resolve().unwrap().evalue, 42.0);
-    }
-
-    #[test]
-    fn test_seg_yes_no_and_custom_parser() {
-        let cli = parse_cli([
-            "losat", "blastp", "-query", "q.faa", "-subject", "s.faa", "-seg", "no",
-        ]);
-        let TestCommand::Blastp(args) = cli.command;
-        assert_eq!(args.resolve().unwrap().seg, BlastpSegSpec::No);
-
-        let cli = parse_cli([
-            "losat", "blastp", "-query", "q.faa", "-subject", "s.faa", "-seg", "yes",
-        ]);
-        let TestCommand::Blastp(args) = cli.command;
-        assert_eq!(args.resolve().unwrap().seg, BlastpSegSpec::Yes);
-
-        let cli = parse_cli([
-            "losat",
-            "blastp",
-            "-query",
-            "q.faa",
-            "-subject",
-            "s.faa",
-            "-seg",
-            "15 2.5 3.0",
-        ]);
-        let TestCommand::Blastp(args) = cli.command;
-        assert_eq!(
-            args.resolve().unwrap().seg,
-            BlastpSegSpec::WindowLocutHicut {
-                window: 15,
-                locut: 2.5,
-                hicut: 3.0,
-            }
-        );
-    }
-
-    #[test]
-    fn test_comp_based_stats_parser_supports_ncbi_modes() {
-        assert_eq!(
-            parse_comp_based_stats("0").unwrap(),
-            BlastpCompBasedStats {
-                mode: BlastpCompositionMode::NoCompositionBasedStats,
-                unified_p: false,
-            }
-        );
-        assert_eq!(
-            parse_comp_based_stats("1").unwrap(),
-            BlastpCompBasedStats {
-                mode: BlastpCompositionMode::CompositionBasedStats,
-                unified_p: false,
-            }
-        );
-        assert_eq!(
-            parse_comp_based_stats("2u").unwrap(),
-            BlastpCompBasedStats {
-                mode: BlastpCompositionMode::CompositionMatrixAdjust,
-                unified_p: true,
-            }
-        );
-        assert_eq!(
-            parse_comp_based_stats("3").unwrap(),
-            BlastpCompBasedStats {
-                mode: BlastpCompositionMode::ForceFullMatrixAdjust,
-                unified_p: false,
-            }
-        );
-        assert_eq!(
-            parse_comp_based_stats("T").unwrap(),
-            BlastpCompBasedStats {
-                mode: BlastpCompositionMode::CompositionMatrixAdjust,
-                unified_p: false,
-            }
-        );
-    }
-
-    #[test]
-    fn test_matrix_resolution_updates_gap_threshold_and_window_defaults() {
-        let cli = parse_cli([
-            "losat", "blastp", "-query", "q.faa", "-subject", "s.faa", "-matrix", "BLOSUM45",
-        ]);
-        let TestCommand::Blastp(args) = cli.command;
-        let resolved = args.resolve().expect("resolved blastp args");
-        assert_eq!(resolved.scoring.matrix, ScoringMatrix::Blosum45);
-        assert_eq!(resolved.scoring.gap_open, 14);
-        assert_eq!(resolved.scoring.gap_extend, 2);
-        assert_eq!(resolved.threshold, 14.0);
-        assert_eq!(resolved.window_size, 60);
-    }
-
-    #[test]
-    fn test_explicit_gap_values_override_matrix_defaults_independently() {
-        let cli = parse_cli([
-            "losat", "blastp", "-query", "q.faa", "-subject", "s.faa", "-matrix", "PAM70",
-            "-gapopen", "11",
-        ]);
-        let TestCommand::Blastp(args) = cli.command;
-        let resolved = args.resolve().expect("resolved blastp args");
-        assert_eq!(resolved.scoring.matrix, ScoringMatrix::Pam70);
-        assert_eq!(resolved.scoring.gap_open, 11);
-        assert_eq!(resolved.scoring.gap_extend, 1);
-    }
-
-    #[test]
-    fn test_word_size_above_four_selects_compressed_lookup_thresholds() {
-        let cli = parse_cli([
-            "losat",
-            "blastp",
-            "-query",
-            "q.faa",
-            "-subject",
-            "s.faa",
-            "-word_size",
-            "5",
-        ]);
-        let TestCommand::Blastp(args) = cli.command;
-        let resolved = args.resolve().expect("resolved blastp args");
-        assert_eq!(
-            resolved.lookup_table_type,
-            BlastpLookupTableType::CompressedAaLookupTable
-        );
-        assert_eq!(resolved.threshold, 19.3);
-
-        let cli = parse_cli([
-            "losat",
-            "blastp",
-            "-query",
-            "q.faa",
-            "-subject",
-            "s.faa",
-            "-word_size",
-            "7",
-        ]);
-        let TestCommand::Blastp(args) = cli.command;
-        let resolved = args.resolve().expect("resolved blastp args");
-        assert_eq!(resolved.threshold, 20.25);
-    }
-
-    #[test]
-    fn test_ungapped_with_composition_based_stats_is_rejected() {
-        let cli = parse_cli([
-            "losat",
-            "blastp",
-            "-query",
-            "q.faa",
-            "-subject",
-            "s.faa",
-            "-ungapped",
-            "-comp_based_stats",
-            "2",
-        ]);
-        let TestCommand::Blastp(args) = cli.command;
-        let err = args
-            .resolve()
-            .expect_err("ungapped comp-based stats should fail");
-        assert!(err
-            .to_string()
-            .contains("Composition-adjusted searched are not supported with an ungapped search"));
-    }
-
-    #[test]
-    fn test_comp_based_stats_cli_string_matches_ncbi_modes() {
-        assert_eq!(
-            BlastpCompBasedStats {
-                mode: BlastpCompositionMode::NoCompositionBasedStats,
-                unified_p: false,
-            }
-            .to_ncbi_cli_string(),
-            "0"
-        );
-        assert_eq!(
-            BlastpCompBasedStats {
-                mode: BlastpCompositionMode::CompositionBasedStats,
-                unified_p: false,
-            }
-            .to_ncbi_cli_string(),
-            "1"
-        );
-        assert_eq!(
-            BlastpCompBasedStats {
-                mode: BlastpCompositionMode::CompositionMatrixAdjust,
-                unified_p: true,
-            }
-            .to_ncbi_cli_string(),
-            "2u"
-        );
-        assert_eq!(
-            BlastpCompBasedStats {
-                mode: BlastpCompositionMode::ForceFullMatrixAdjust,
-                unified_p: false,
-            }
-            .to_ncbi_cli_string(),
-            "3"
-        );
-    }
-
-    #[test]
-    fn test_seg_cli_string_matches_ncbi_forms() {
-        assert_eq!(BlastpSegSpec::No.to_ncbi_cli_string(), "no");
-        assert_eq!(BlastpSegSpec::Yes.to_ncbi_cli_string(), "yes");
-        assert_eq!(
-            BlastpSegSpec::WindowLocutHicut {
-                window: 12,
-                locut: 2.2,
-                hicut: 2.5,
-            }
-            .to_ncbi_cli_string(),
-            "12 2.2 2.5"
-        );
-    }
-    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:276-286,
-    // api/blast_prot_options.cpp:100-111 and core/blast_options.c:608-618 (quoted at the fields
-    // and at `validate_protein_options`): the X-drops reach the resolved arguments (7, 15 and 25
-    // bits at every task), and an ungapped X-drop of 0 or below is NCBI's options error.
-    #[test]
-    fn the_x_drops_reach_the_resolved_arguments() {
-        let resolved = |words: &[&str]| {
-            let mut argv = vec!["losat", "blastp", "-query", "q.faa", "-subject", "s.faa"];
-            argv.extend_from_slice(words);
-            let TestCommand::Blastp(args) = parse_cli(argv).command;
-            args.resolve()
-        };
-        let bits = |args: &ResolvedBlastpArgs| {
-            (
-                args.x_drop_ungapped_bits,
-                args.x_drop_gapped_bits,
-                args.x_drop_final_bits,
-            )
-        };
-        for task in ["blastp", "blastp-fast", "blastp-short"] {
-            let args = resolved(&["-task", task]).unwrap();
-            assert_eq!(bits(&args), (7.0, 15.0, 25.0), "{task}");
-        }
-        let args = resolved(&[
-            "-xdrop_ungap",
-            "3",
-            "-xdrop_gap",
-            "0",
-            "-xdrop_gap_final",
-            "-1e300",
-        ])
-        .unwrap();
-        assert_eq!(bits(&args), (3.0, 0.0, -1e300));
-        for value in ["0", "-1", "-0.0", "-inf"] {
-            let error = resolved(&["-xdrop_ungap", value]).unwrap_err();
-            assert!(
-                format!("{error:#}").contains("x_dropoff must be greater than zero"),
-                "{value}: {error:#}"
-            );
-        }
-        // `<= 0.0` is false for NaN, as in C: NCBI searches with it.
-        assert!(resolved(&["-xdrop_ungap", "+nan"]).is_ok());
-    }
-}
+#[path = "args_tests.rs"]
+mod tests;

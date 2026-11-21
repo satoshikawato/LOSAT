@@ -1,0 +1,2 @@
+Error: (CWinMaskConfigException::can not open input stream) ../winmask/fasta/dm2L_3k.fa,../winmask/fasta/dm2L_3k.fa
+Error: (106.16) Application's execution failed (CWinMaskConfigException::can not open input stream) ../winmask/fasta/dm2L_3k.fa,../winmask/fasta/dm2L_3k.fa

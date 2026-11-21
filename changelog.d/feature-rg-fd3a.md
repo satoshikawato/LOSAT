@@ -8,8 +8,8 @@
   LOSAT skipped are kept (line RG item D3-1).
   A query's `annot` (feature tables, alignments, graphs, locations, Seq-tables) is indexed as NCBI's object manager
   indexes it: the PSSM is searched, with NCBI's messages and errors where NCBI writes them. Refused, each with its
-  reason: the cases whose NCBI output names a memory address, depends on the machine or reads outside NCBI's data,
-  well-formed BitMagic data of a Seq-table (until its decode is ported, decided by the Owner on 2026-11-16), and the annotation's text that
+  reason: the cases whose NCBI output names a memory address, depends on the machine or reads outside NCBI's data
+  (for BitMagic data of a Seq-table, see line RG item Q-BM), and the annotation's text that
   NCBI prints after its `Failed to parse location of` message. The Seq-ids of the annotations are one sequence
   where NCBI's Seq-id index takes them for one (accessions, names, local and general ids and patent numbers in any
   letter case; versions and releases exactly; `giim` ids by the `giim` handles alive in the run, across the

@@ -1,0 +1,16 @@
+# BLASTP 2.17.0+
+# Query: qsok2 BDT63578.1 of PajaWSV
+# Database: tests/db_search/paja
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 11 hits found
+qsok2	BDT63578.1	100.000	92	0	0	1	92	1	92	5.84e-64	182
+qsok2	BDT63503.1	33.962	53	24	3	50	92	1747	1798	0.42	22.3
+qsok2	BDT63522.1	32.468	77	30	3	1	73	1	59	2.0	20.4
+qsok2	BDT63530.1	28.889	45	28	1	22	66	71	111	2.6	20.0
+qsok2	BDT63516.1	18.182	44	36	0	12	55	1583	1626	5.2	19.2
+qsok2	BDT63556.1	44.000	25	13	1	31	54	324	348	7.2	18.9
+qsok2	BDT63557.1	34.483	29	19	0	43	71	43	71	8.1	18.5
+qsok2	BDT63533.1	40.000	30	16	1	61	88	125	154	8.7	18.5
+qsok2	BDT63533.1	22.727	22	17	0	19	40	814	835	9.5	18.5
+qsok2	BDT63566.1	32.500	40	26	1	53	92	37	75	9.1	18.5
+qsok2	BDT63523.1	33.333	33	21	1	5	36	1126	1158	9.6	18.5

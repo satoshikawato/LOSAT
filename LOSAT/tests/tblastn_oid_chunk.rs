@@ -4,19 +4,6 @@
 //! subjects.
 //!
 //! NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:697-707
-//! ```c++
-//!         Int8 tot_length = m_Atlas.GetSliceSize() / (4*m_NumThreads) + 1;
-//!
-//!         res.length = vol->GetSequence(vol_oid++, &seq);
-//!         if (res.length < 0) return;
-//!         // must return at least one sequence
-//!         do {
-//!             tot_length -= res.length;
-//!             res.address = seq;
-//!             buffer->results.push_back(res);
-//!             res.length = vol->GetSequence(vol_oid++, &seq);
-//!         } while (res.length >= 0 && tot_length >= res.length && vol_oid < m_RestrictEnd);
-//! ```
 //! With two or more threads each NCBI search thread takes a chunk of consecutive subjects whose
 //! bases stay within `min(2^30, F) / (4 * threads) + 1`, at least one subject; F is the largest
 //! file of the database, and for `-subject` LOSAT takes ceil(bases / 4), the `.nsq` that
@@ -205,13 +192,6 @@ fn units_on_the_pool(stderr: &str) -> usize {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1409-1413
-// ```c
-//     itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
-//
-//     /* iterate over all subject sequences */
-//     while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-//            != BLAST_SEQSRC_EOF) {
-// ```
 // The one-thread search runs this loop over the subjects in order. The pool's chunks must give
 // its report.
 #[test]
@@ -240,28 +220,8 @@ fn the_report_is_the_one_thread_report() {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:697-707
-// ```c++
-//         Int8 tot_length = m_Atlas.GetSliceSize() / (4*m_NumThreads) + 1;
-// ...
-//         } while (res.length >= 0 && tot_length >= res.length && vol_oid < m_RestrictEnd);
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:333-344
-// ```c++
-//     begin_chunk = * state_obj;
-//
-//     // fill the cache for all sequence in mmaped slice
-//     if (m_NumThreads) {
-//         SSeqResBuffer * buffer = m_CachedSeqs[cacheID];
-//         x_FillSeqBuffer(buffer, begin_chunk);
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:478-482
-// ```c
-//     while (TRUE) {
-//         status = s_GetNextSubjectChunk(subject, &backup, kNucleotide,
-//                                        dbseq_chunk_overlap);
-//
-//         if (status == SUBJECT_SPLIT_DONE) break;
-// ```
 // A subject longer than a chunk's budget is a chunk of its own, wherever it stands; the chunks
 // before and after it are cut short or start anew. The threads take the next chunk when they are
 // free, as NCBI's do, and the lists come back in OID order (`src/algorithm/tblastn/x_oid_flow.rs`).

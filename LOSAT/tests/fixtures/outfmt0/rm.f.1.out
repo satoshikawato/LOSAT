@@ -1,0 +1,188 @@
+RMBLASTN 2.17.0+
+
+
+Reference: Robert M. Hubley, Arian Smit
+RMBlast - RepeatMasker Search Engine
+2010 <http://www.repeatmasker.org>
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input: tests/fasta/MG1655.fna).
+           1 sequences; 100,000 total letters
+
+
+
+Query= NC_002655.2 Escherichia coli O157:H7 str. EDL933, complete sequence
+
+Length=5528445
+
+
+Query_1    1     AGCTTTTCATTCTGACTGCAACGGGCAATATGTCTCTGTGTGGATTaaaaaaaGAGTCTC  60
+Subject_1  1     .........................................................G..  60
+
+Query_1    61    TGACAGCAGCTTCTGAACTGGTTACCTGCCGTGAGTAAATTAAAATTTTATTGACTTAGG  120
+Subject_1  61    ...T........................................................  120
+
+Query_1    121   TCACTAAATACTTTAACCAATATAGGCATAGCGCACAGACAGATAAAAATTACAGAGTAC  180
+Subject_1  121   ............................................................  180
+
+Query_1    181   ACAACATCCATGAAACGCATTAGcaccaccattaccaccaccatcaccaccaccatcacc  240
+Subject_1  181   .................................................-----------  229
+
+Query_1    241   attaccattaccacAGGTAACGGTGCGGGCTGACGCGTACAGGAAACACAGAAAAAAGCC  300
+Subject_1  230   -------.....................................................  282
+
+Query_1    301   CGCACCTGACAGTGCGGGCttttttttCGACCAAAGGTAACGAGGTAACAACCATGCGAG  360
+Subject_1  283   ............................................................  343
+                                            \                                
+                                            |                                
+                                            T
+
+Query_1    361   TGTTGAAGTTCGGCGGTACATCAGTGGCAAATGCAGAACGTTTTCTGCGGGTTGCCGATA  420
+Subject_1  344   .................................................T..........  403
+
+Query_1    421   TTCTGGAAAGCAATGCCAGGCAGGGGCAGGTGGCCACCGTCCTCTCTGCCCCCGCCAAAA  480
+Subject_1  404   ............................................................  463
+
+Query_1    481   TCACCAACCACCTGGTGGCGATGATTGAAAAAACCATTAGCGGCCAGGATGCTTTACCCA  540
+Subject_1  464   ............................................................  523
+
+Query_1    541   ATATCAGCGATGCCGAACGTATTTTTGCCGAACTTCTGACGGGACTCGCCGCCGCCCAGC  600
+Subject_1  524   ...................................T........................  583
+
+Query_1    601   CGGGATTCCCGCTGGCGCAATTGAAAACTTTCGTCGACCAGGAATTTGCCCAAATAAAAC  660
+Subject_1  584   ....G................................T......................  643
+
+Query_1    661   ATGTCCTGCATGGCATTAGTTTGTTAGGGCAGTGCCCGGATAGCATTAACGCTGCGCTGA  720
+Subject_1  644   .........................G....................C.............  703
+
+Query_1    721   TTTGCCGTGGCGAGAAAATGTCGATCGCCATTATGGCCGGCGTATTAGAAGCGCGCGGTC  780
+Subject_1  704   ............................................................  763
+
+Query_1    781   ACAACGTTACCGTTATCGATCCGGTCGAAAAACTGCTGGCAGTGGGGCATTACCTCGAAT  840
+Subject_1  764   ..........T.................................................  823
+
+Query_1    841   CTACTGTCGATATTGCAGAGTCCACCCGCCGTATTGCGGCAAGTCGTATTCCGGCTGATC  900
+Subject_1  824   ....C...........T..........................C..C.............  883
+
+Query_1    901   ACATGGTGCTGATGGCAGGTTTCACCGCCGGTAATGAAAAAGGCGAACTGGTGGTACTTG  960
+Subject_1  884   .......................................................G....  943
+
+Query_1    961   GACGCAACGGTTCCGACTACTCCGCGGCGGTGCTGGCTGCCTGTTTACGCGCCGATTGTT  1020
+Subject_1  944   ......................T..T..................................  1003
+
+Query_1    1021  GCGAGATTTGGACGGACGTTGACGGGGTATATACCTGCGACCCGCGTCAGGTGCCCGATG  1080
+Subject_1  1004  ............................C...............................  1063
+
+Query_1    1081  CGAGGTTGTTGAAATCGATGTCCTACCAGGAAGCGATGGAGCTTTCCTACTTCGGCGCTA  1140
+Subject_1  1064  .............G..............................................  1123
+
+Query_1    1141  AAGTTCTTCACCCCCGCACCATTACCCCCATCGCCCAGTTCCAGATCCCTTGCCTGATTA  1200
+Subject_1  1124  ............................................................  1183
+
+Query_1    1201  AAAATACCGGAAATCCTCAAGCTCCAGGTACGCTCATTGGTGCCAGTCGTGATGAAGACG  1260
+Subject_1  1184  ......................A.......................C.............  1243
+
+Query_1    1261  AATTACCGGTCAAGGGCATTTCCAATCTGAATAATATGGCAATGTTCAGCGTTTCCGGCC  1320
+Subject_1  1244  ..................................C....................T..T.  1303
+
+Query_1    1321  CGGGGATGAAAGGAATGGTCGGCATGGCGGCGCGCGTCTTTGCTGCAATGTCACGCGCCC  1380
+Subject_1  1304  .............G.............................A..G.............  1363
+
+Query_1    1381  GTATTTCCGTGGTGCTGATTACGCAATCATCTTCCGAATACAGTATCAGTTTCTGCGTTC  1440
+Subject_1  1364  ...........................................C................  1423
+
+Query_1    1441  CGCAAAGCGACTGTGTGCGAGCTGAACGGGCAATGCAGGAAGAGTTCTACCTGGAACTGA  1500
+Subject_1  1424  .A..........................................................  1483
+
+Query_1    1501  AAGAAGGCTTACTGGAGCCGCTGGCGGTGACGGAACGGCTGGCCATTATCTCGGTGGTAG  1560
+Subject_1  1484  .........................A..................................  1543
+
+Query_1    1561  GTGATGGTATGCGCACCTTGCGTGGGATCTCGGCGAAATTCTTTGCCGCGCTGGCCCGCG  1620
+Subject_1  1544  .................................................A..........  1603
+
+Query_1    1621  CCAATATCAACATTGTCGCTATTGCTCAGGGATCTTCTGAACGCTCAATCTCTGTCGTGG  1680
+Subject_1  1604  ...................C........................................  1663
+
+Query_1    1681  TAAATAACGATGATGCGACCACTGGCGTGCGCGTTACTCATCAGATGCTGTTCAATACCG  1740
+Subject_1  1664  ............................................................  1723
+
+Query_1    1741  ATCAGGTTATCGAAGTGTTTGTGATTGGCGTCGGTGGCGTTGGCGGTGCGCTGCTGGAGC  1800
+Subject_1  1724  ............................................................  1783
+
+Query_1    1801  AACTGAAGCGTCAGCAAAGCTGGTTGAAGAATAAACATATCGACTTACGTGTCTGCGGTG  1860
+Subject_1  1784  .......................C....................................  1843
+
+Query_1    1861  TTGCTAACTCGAAGGCTCTGCTCACCAATGTGCATGGCCTAAATCTGGAAAACTGGCAGG  1920
+Subject_1  1844  ....C..........................A........T...................  1903
+
+Query_1    1921  AAGAACTGGCGCAAGCCAAAGAGCCGTTTAATCTCGGGCGCTTAATTCGCCTCGTGAAAG  1980
+Subject_1  1904  ............................................................  1963
+
+Query_1    1981  AATATCATCTGCTGAACCCGGTCATTGTTGACTGCACCTCCAGCCAGGCAGTGGCGGATC  2040
+Subject_1  1964  .....................................T......................  2023
+
+Query_1    2041  AATATGCCGACTTCCTGCGCGAAGGTTTCCACGTTGTCACGCCGAACAAAAAGGCCAACA  2100
+Subject_1  2024  ............................................................  2083
+
+Query_1    2101  CCTCGTCGATGGATTACTACCATCTGTTGCGTCATGCGGCTGAAAAATCGCGGCGTAAAT  2160
+Subject_1  2084  ........................A.......T.......G...................  2143
+
+Query_1    2161  TCCTCTATGACACCAACGTTGGGGCTGGATTACCGGTTATTGAGAACCTGCAAAATCTGC  2220
+Subject_1  2144  ............................................................  2203
+
+Query_1    2221  TCAATGCTGGTGATGAATTGATGAAGTTCTCCGGCATTCTTTCAGGTTCGCTTTCTTATA  2280
+Subject_1  2204  .......A...................................T................  2263
+
+Query_1    2281  TCTTCGGCAAGTTAGACGAAGGCATGAGTTTCTCCGAGGCGACTACGCTGGCGCGGGAAA  2340
+Subject_1  2264  ...........................................C................  2323
+
+Query_1    2341  TGGGTTATACCGAACCGGATCCGCGAGATGATCTTTCTGGTATGGATGTAGCGCGTAAAC  2400
+Subject_1  2324  ...................C.............................G..........  2383
+
+Query_1    2401  TATTAATTCTCGCTCGTGAAACGGGACGTGAACTGGAGCTGGCGGATATTGAAATTGAAC  2460
+Subject_1  2384  ....G.......................................................  2443
+
+Query_1    2461  CTGTGCTGCCCGCAGAGTTTAACGCTGAGGGTGATGTTGCCGCTTTTATGGCGAATCTGT  2520
+Subject_1  2444  .........................C..................................  2503
+
+Query_1    2521  CACAGCTCGACGATCTCTTTGCCGCGCGCGTGGCGAAGGCCCGTGATGAAGGAAAAGTTT  2580
+Subject_1  2504  ....A.......................................................  2563
+
+Query_1    2581  TGCGCTATGTTGGCAATATTGATGAAGATGGCGTCTGCCGCGTGAAGATTGCCGAAGTGG  2640
+Subject_1  2564  ............................................................  2623
+
+Query_1    2641  ATGGTAATGATCCGCTGTTCAAAGTGAAAAATGGCGAAAACGCCCTGGCCTTTTATAGCC  2700
+Subject_1  2624  ....................................................C.......  2683
+
+Query_1    2701  ACTATTATCAGCCGCTGCCGTTGGTGCTGCGCGGATATGGTGCGGGCAATGACGTTACCG  2760
+Subject_1  2684  .........................A................................A.  2743
+
+Query_1    2761  CTGCCGGTGTCTTTGCCGATCTGCTACGTACCCTCTCATGGAAGTTAGGAGTCTGACATG  2820
+Subject_1  2744  ................T...........................................  2803
+
+Query_1    2821  GTTAAAGTTTATGCCCCGGCTTCCAGTGCCAATATGAGCGTCGGGTTTGATGTGCTCGGG  2880
+Subject_1  2804  ............................................................  2863
+
+Query_1    2881  GCGGCGGTGACACCCGTTGATGGTGCATTGCTCGGAGATGTAGTCACGGTTGAGTCGGCA  2940
+Subject_1  2864  ..............T.......................................G.....  2923
+
+Query_1    2941  GAGACATTCAGTCTCAACAACCTCGGACGCTTTGCCGATAAGCTGCCGTCAGAACCACGG  3000
+Subject_1  2924  ............................................................  2983
+
+
+
+  Database: User specified sequence set (Input: tests/fasta/MG1655.fna).
+    Posted date:  Unknown
+  Number of letters in database: 100,000
+  Number of sequences in database:  1
+
+
+
+Matrix: blastn matrix 0 0
+Gap Penalties: Existence: 5, Extension: 2

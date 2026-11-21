@@ -26,14 +26,7 @@
 //! with hits (`txr_q3.faa`, `txr_q2.fna`).
 //!
 //! NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
-//! ```c++
-//!        		const CBioseq_Handle& subject_bh =
-//!                 scope.GetBioseqHandle(align.GetSeq_id(1));
-//! ```
 //! NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:997
-//! ```c++
-//!             const CBioseq_Handle& handle = m_Scope.GetBioseqHandle(*subid);
-//! ```
 
 use std::process::{Command, Stdio};
 
@@ -608,14 +601,18 @@ fn merged(case: &(&str, &str, &str, &str, &str, &[&str], &str), threads: &str) -
 #[test]
 fn the_texts_of_the_reports_reads_come_where_ncbi_reads_the_subjects() {
     for case in CASES {
-        let expected = std::fs::read(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("tests")
-                .join("fixtures")
-                .join("taxonomy_read_order")
-                .join(format!("{}.txt", case.0)),
+        // NCBI's frozen bytes in LOSAT's words (`losat::wording`, AGENTS.md rule 8).
+        let expected = losat::wording::losat_output_bytes(
+            &std::fs::read(
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("tests")
+                    .join("fixtures")
+                    .join("taxonomy_read_order")
+                    .join(format!("{}.txt", case.0)),
+            )
+            .unwrap(),
         )
-        .unwrap();
+        .into_owned();
         for threads in ["1", "4"] {
             let merged = merged(case, threads);
             assert!(

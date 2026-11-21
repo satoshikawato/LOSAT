@@ -5,10 +5,8 @@ mod in_pssm;
 // The score source of the stages: the matrix or a PSSM query (`TbnScore`).
 mod score;
 mod tblastn_app;
-// NCBI c++/src/algo/blast/core/blast_engine.c:804-844:
-// for (context=first_context; context<=last_context; context++) {
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:804-844:
 //     status = s_BlastSearchEngineOneContext(...);
-// }
 pub(crate) mod search_seed;
 // EXPERIMENT (LOSAT_X_TBNSCANBYTE): the lookup scan on presence bytes, a block of indexes at once
 // (blastx's direct loop takes it too, LOSAT_X_BXSCANBYTE).
@@ -16,8 +14,7 @@ pub(crate) mod search_seed;
 // encoder).
 #[cfg(test)]
 mod x_scan_bf_tests;
-// NCBI c++/src/algo/blast/core/blast_util.c:1072,1084-1086:
-// translation_table = s_BlastGetTranslationTable(genetic_code, FALSE);
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:1072,1084-1086:
 // length = BLAST_TranslateCompressedSequence(translation_table, nucl_length, nucl_seq, frame, ...);
 // The subject frames read from tables.
 mod x_subject_translate;
@@ -25,63 +22,59 @@ mod x_subject_translate;
 mod x_subject_store;
 // The stages over the `-db` stream (`common/x_db_stream.rs`).
 mod x_db_stream;
-// NCBI c++/src/algo/blast/core/aa_ungapped.c:200-234:
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:200-234:
 // status = s_BlastAaWordFinder_TwoHit(..., init_hitlist, ...);
-// Blast_InitHitListSortByScore(init_hitlist);
 mod search_init;
-// NCBI c++/src/algo/blast/core/aa_ungapped.c:516-552: the two-hit tests of every hit.
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516-552: the two-hit tests of every hit.
 // Too far and overlap without a branch.
 mod x_tbn_hitbf;
-// NCBI c++/src/algo/blast/core/blast_engine.c:522-552:
-// aux_struct->GetGappedScore(..., init_hitlist, &hsp_list, ...);
-// Blast_HSPListPurgeHSPsWithCommonEndpoints(...);
-// Blast_HSPListSortByScore(hsp_list);
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:522-552,555:
 mod search_gapped;
-// NCBI c++/src/algo/blast/core/blast_setup.c:729-735,770-847:
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:729-735,770-847:
 // translated db_length /= 3 before per-context length adjustment and search space.
 mod stage_d_stats;
-// NCBI c++/src/algo/blast/core/link_hsps.c:1602-1810;
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1602-1810;
 // blast_engine.c:870-906: link the preliminary list and reap by prelim E-value.
 mod stage_d_linking;
-// NCBI c++/src/algo/blast/core/blast_kappa.c:2352-2390,2418-2479 constructs redo inputs
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2352-2390,2418-2479 constructs redo inputs
 // from the initial score block, extension options and hit-saving parameters.
 mod stage_d_kappa_params;
-// NCBI core/blast_kappa.c:1896-1957 redoes translated-subject alignments.
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1896-1957 redoes translated-subject alignments.
 mod kappa;
-// NCBI composition_adjustment/compo_heap.c:252-275,330-391,439-466:
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:252-275,330-391,439-466:
 // Kappa result records enter the NCBI comparator heap and pop in its order.
 mod kappa_heap;
-// NCBI core/blast_kappa.c:2494-2515 and blast_hits.c:3243-3297,3420-3437:
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2494-2515 and c++/src/algo/blast/core/blast_hits.c:3243-3297,3420-3437:
 // popped lists enter Blast_HitListUpdate, then results are reversed.
 mod stage_d_results;
-// NCBI c++/src/algo/blast/core/blast_engine.c:870-905;
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:870-905;
 // blast_traceback.c:1481-1499,1763-1776: preliminary lists enter Kappa,
 // then local results pass through the post-traceback pipes.
 mod stage_d_pipeline;
-// NCBI c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:333-344: each search thread takes the
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:333-344: each search thread takes the
 // next chunk of subjects when it is free.
 // Graduated 2026-10-22 (was LOSAT_X_TBNOIDNEXT): the chunks of subjects are handed to threads
 // when they are free.
 #[cfg(feature = "parallel")]
 mod x_oid_flow;
-// NCBI c++/src/algo/blast/format/blast_format.cpp:1411-1458:
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1411-1458:
 // PrintOneResultSet dispatches the retained search result to its output format.
 mod stage_e_report;
 // The sequences of the query-anchored reports (outfmt 1 to 4).
 mod anchored;
 // TBLASTN's BLAST XML (outfmt 5), once per run, from the final hit lists.
 mod blast_xml;
-// NCBI c++/src/algo/blast/format/blast_format.cpp:770-834 (`CBlastTabularInfo`): the tabular
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:770-834 (`CBlastTabularInfo`): the tabular
 // reports with a field list or a delimiter and outfmt 10 and 20, once per run, from the final hit
 // lists (`report::tabular`).
 mod tabular;
-// NCBI c++/src/app/blast/tblastn_app.cpp:295 (`WriteArchive`): TBLASTN's BLAST archive (outfmt 11),
+// NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:295 (`WriteArchive`): TBLASTN's BLAST archive (outfmt 11),
 // one Blast4-archive per query batch.
 pub(crate) mod archive;
-// NCBI c++/src/algo/blast/api/blast_seqalign.cpp:1549-1649 (BlastHitList2SeqAlign_OMF): the
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1549-1649 (BlastHitList2SeqAlign_OMF): the
 // Seq-aligns of each query's final hit list (outfmt 8, 12).
 mod seqalign;
-// NCBI c++/src/app/blast/tblastn_app.cpp:188-194 and seqsrc_seqdb.cpp: the search of a BLAST
+// NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:188-194 and c++/src/algo/blast/api/seqsrc_seqdb.cpp: the search of a BLAST
 // nucleotide database (`-db`): its sequences, numbers and titles.
 mod database;
 // Web ABI v1's TBLASTN (`web_api::run_pair`): the CLI's parser and run over the call's bytes.

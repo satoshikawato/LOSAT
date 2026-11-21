@@ -9,26 +9,6 @@
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:856-873
-// ```c++
-// 	char c;
-// 	CNcbiStreampos orig_p = in.tellg();
-// 	// Piped input
-// 	if(orig_p < 0)
-// 		return false;
-//
-// 	IOS_BASE::iostate orig_state = in.rdstate();
-// 	IOS_BASE::fmtflags orig_flags = in.setf(ios::skipws);
-//
-// 	if(! (in >> c))
-// 		return true;
-//
-// 	in.seekg(orig_p);
-// 	in.flags(orig_flags);
-// 	in.clear();
-// 	in.setstate(orig_state);
-//
-// 	return false;
-// ```
 pub(crate) fn stream_is_empty<R: Read + Seek>(stream: &mut FastaStream<R>) -> bool {
     if stream.no_position {
         return false;
@@ -53,17 +33,6 @@ pub(crate) fn stream_is_empty<R: Read + Seek>(stream: &mut FastaStream<R>) -> bo
     }
 }
 // NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:166-174
-// ```c++
-//
-//     switch (m_EOLStyle) {
-//     case eEOL_unknown: x_AdvanceEOLUnknown();                   break;
-//     case eEOL_cr:      x_AdvanceEOLSimple('\r', '\n');          break;
-//     case eEOL_lf:      x_AdvanceEOLSimple('\n', '\r');          break;
-//     case eEOL_crlf:    x_AdvanceEOLCRLF();                      break;
-//     case eEOL_mixed:   NcbiGetline(*m_Stream, m_Line, "\r\n");  break;
-//     }
-//     return *this;
-// ```
 #[derive(Clone, Copy, PartialEq)]
 enum EolStyle {
     Unknown,
@@ -73,67 +42,20 @@ enum EolStyle {
     Mixed,
 }
 // NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:81-89
-// ```c++
-//       m_UngetLine(false), m_AutoEOL(eol_style == eEOL_unknown),
-//       m_EOLStyle(eol_style)
-// {
-// }
-//
-//
-// CStreamLineReader::CStreamLineReader(CNcbiIstream& is,
-//                                      EOwnership ownership)
-//     : m_Stream(&is, ownership), m_LineNumber(0), m_LastReadSize(0),
-// ```
 // NCBI reference (598d8ae6): c++/src/corelib/stream_utils.cpp:437-443
-// ```c++
-//     if (!del_ptr  &&  how != ePushback_NoCopy) {
-//         del_ptr = new CT_CHAR_TYPE[buf_size];
-//         buf = (CT_CHAR_TYPE*) memcpy(del_ptr, buf, buf_size);
-//     }
-//
-//     (void) new CPushback_Streambuf(is, buf, buf_size, del_ptr);
-// }
-// ```
 // NCBI reference (598d8ae6): c++/src/corelib/stream_utils.cpp:134-143
-// ```c++
-// CPushback_Streambuf::CPushback_Streambuf(istream&      is,
-//                                          CT_CHAR_TYPE* buf,
-//                                          size_t        buf_size,
-//                                          void*         del_ptr)
-//     : m_Is(is), m_Next(0), m_Buf(buf), m_BufSize(buf_size), m_DelPtr(del_ptr)
-// {
-//     _ASSERT(m_Buf  &&  m_BufSize);
-//     setp(0, 0);  // unbuffered output at this level of streambuf's hierarchy
-//     setg(m_Buf, m_Buf, m_Buf + m_BufSize);
-//     m_Sb = m_Is.rdbuf(this);
-// ```
 struct PushbackBuffer {
     bytes: Vec<u8>,
     position: usize,
     capacity: usize,
 }
 // NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:81-89
-// ```c++
-//       m_UngetLine(false), m_AutoEOL(eol_style == eEOL_unknown),
-//       m_EOLStyle(eol_style)
-// {
-// }
-//
-//
-// CStreamLineReader::CStreamLineReader(CNcbiIstream& is,
-//                                      EOwnership ownership)
-//     : m_Stream(&is, ownership), m_LineNumber(0), m_LastReadSize(0),
-// ```
 pub(crate) struct FastaStream<R: Read> {
     input: BufReader<R>,
     failed: bool,
     eol: EolStyle,
     pushback: Vec<PushbackBuffer>,
     // NCBI reference (598d8ae6): c++/src/corelib/stream_utils.cpp:235-236
-    // ```c++
-    //     x_FillBuffer((size_t) m_Sb->in_avail());
-    //     return gptr() < egptr() ? CT_TO_INT_TYPE(*gptr()) : CT_EOF;
-    // ```
     backend_available: Option<fn(&mut R) -> std::io::Result<usize>>,
     /// Whether the input's buffered bytes count as readable (`in_avail` of a `filebuf`'s get
     /// area); false for `cin`, whose `stdio_sync_filebuf` has no get area.
@@ -146,55 +68,12 @@ pub(crate) struct FastaStream<R: Read> {
     no_position: bool,
 }
 // NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:81-89
-// ```c++
-//       m_UngetLine(false), m_AutoEOL(eol_style == eEOL_unknown),
-//       m_EOLStyle(eol_style)
-// {
-// }
-//
-//
-// CStreamLineReader::CStreamLineReader(CNcbiIstream& is,
-//                                      EOwnership ownership)
-//     : m_Stream(&is, ownership), m_LineNumber(0), m_LastReadSize(0),
-// ```
 impl<R: Read> FastaStream<R> {
     // NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:81-89
-    // ```c++
-    //       m_UngetLine(false), m_AutoEOL(eol_style == eEOL_unknown),
-    //       m_EOLStyle(eol_style)
-    // {
-    // }
-    //
-    //
-    // CStreamLineReader::CStreamLineReader(CNcbiIstream& is,
-    //                                      EOwnership ownership)
-    //     : m_Stream(&is, ownership), m_LineNumber(0), m_LastReadSize(0),
-    // ```
     pub(crate) fn new(input: R) -> Self {
         Self {
             // NCBI reference (598d8ae6): c++/include/corelib/ncbistre.hpp:437-440
-            // ```c++
-            // #else
-            // /// Portable alias for ifstream.
-            // typedef IO_PREFIX::ifstream      CNcbiIfstream;
-            // #endif
-            // ```
             // NCBI reference (598d8ae6): c++/src/corelib/stream_utils.cpp:224-236
-            // ```c++
-            // CT_INT_TYPE CPushback_Streambuf::underflow(void)
-            // {
-            //     // we are here because there is no more data in the pushback buffer
-            //     _ASSERT(gptr()  &&  gptr() >= egptr());
-            //
-            // #ifdef NCBI_COMPILER_MIPSPRO
-            //     if (m_MIPSPRO_ReadsomeGptrSetLevel  &&  m_MIPSPRO_ReadsomeGptr != gptr())
-            //         return CT_EOF;
-            //     m_MIPSPRO_ReadsomeGptr = (CT_CHAR_TYPE*)(-1L);
-            // #endif //NCBI_COMPILER_MIPSPRO
-            //
-            //     x_FillBuffer((size_t) m_Sb->in_avail());
-            //     return gptr() < egptr() ? CT_TO_INT_TYPE(*gptr()) : CT_EOF;
-            // ```
             // The pinned CNcbiIfstream exposes 8191 readable bytes per default
             // window (independent C++ file_window oracle; tested at EOF/pushback
             // boundaries). Preserve that window because reuse retains EOF state.
@@ -203,10 +82,6 @@ impl<R: Read> FastaStream<R> {
             eol: EolStyle::Unknown,
             pushback: Vec::new(),
             // NCBI reference (598d8ae6): c++/src/corelib/stream_utils.cpp:235-236
-            // ```c++
-            //     x_FillBuffer((size_t) m_Sb->in_avail());
-            //     return gptr() < egptr() ? CT_TO_INT_TYPE(*gptr()) : CT_EOF;
-            // ```
             backend_available: None,
             get_area: true,
             bulk: true,
@@ -214,77 +89,7 @@ impl<R: Read> FastaStream<R> {
         }
     }
     // NCBI reference (598d8ae6): c++/src/corelib/stream_utils.cpp:224-236
-    // ```c++
-    // CT_INT_TYPE CPushback_Streambuf::underflow(void)
-    // {
-    //     // we are here because there is no more data in the pushback buffer
-    //     _ASSERT(gptr()  &&  gptr() >= egptr());
-    //
-    // #ifdef NCBI_COMPILER_MIPSPRO
-    //     if (m_MIPSPRO_ReadsomeGptrSetLevel  &&  m_MIPSPRO_ReadsomeGptr != gptr())
-    //         return CT_EOF;
-    //     m_MIPSPRO_ReadsomeGptr = (CT_CHAR_TYPE*)(-1L);
-    // #endif //NCBI_COMPILER_MIPSPRO
-    //
-    //     x_FillBuffer((size_t) m_Sb->in_avail());
-    //     return gptr() < egptr() ? CT_TO_INT_TYPE(*gptr()) : CT_EOF;
-    // ```
     // NCBI reference (598d8ae6): c++/src/corelib/stream_utils.cpp:306-358
-    // ```c++
-    // void CPushback_Streambuf::x_FillBuffer(size_t max_size)
-    // {
-    //     _ASSERT(m_Sb);
-    //     if ( !max_size ) {
-    //         ++max_size;
-    //     }
-    //
-    //     CPushback_Streambuf* sb = dynamic_cast<CPushback_Streambuf*> (m_Sb);
-    //     if ( !sb ) {
-    //         CT_CHAR_TYPE* bp = 0;
-    //         size_t buf_size = m_DelPtr
-    //             ? (size_t)(m_Buf - (CT_CHAR_TYPE*) m_DelPtr) + m_BufSize : 0;
-    //         if (buf_size < kMinBufSize) {
-    //             buf_size = kMinBufSize;
-    //             bp = new CT_CHAR_TYPE[buf_size];
-    //         }
-    //         streamsize r = (streamsize)(buf_size < max_size ? buf_size : max_size);
-    //         streamsize n = m_Sb->sgetn(bp ? bp : (CT_CHAR_TYPE*) m_DelPtr, r);
-    //         if (n <= 0) {
-    //             // NB: For unknown reasons WorkShop6 can return -1 from sgetn :-/
-    //             delete[] bp;
-    //             return;
-    //         }
-    //         if (bp) {
-    //             delete[] (CT_CHAR_TYPE*) m_DelPtr;
-    //             m_DelPtr = bp;
-    //         }
-    //         m_Buf = (CT_CHAR_TYPE*) m_DelPtr;
-    //         m_BufSize = buf_size;
-    //         setg(m_Buf, m_Buf, m_Buf + n);
-    //         return;
-    //     }
-    //
-    //     _ASSERT(&m_Is  == &sb->m_Is);
-    //     _ASSERT(m_Next == sb);
-    //     m_Sb       = sb->m_Sb;
-    //     m_Next     = sb->m_Next;
-    //     sb->m_Sb   = 0;
-    //     sb->m_Next = 0;
-    //     if (sb->gptr() >= sb->egptr()) {
-    //         delete sb;
-    //         x_FillBuffer(max_size);
-    //         return;
-    //     }
-    //     delete[] (CT_CHAR_TYPE*) m_DelPtr;
-    //     m_Buf        = sb->m_Buf;
-    //     m_BufSize    = sb->m_BufSize;
-    //     m_DelPtr     = sb->m_DelPtr;
-    //     sb->m_DelPtr = 0;
-    //     setg(sb->gptr(), sb->gptr(), sb->egptr());
-    //     delete sb;
-    // }
-    //
-    // ```
     fn raw_peek(&mut self) -> Option<u8> {
         while let Some(buffer) = self.pushback.last() {
             if let Some(&byte) = buffer.bytes.get(buffer.position) {
@@ -298,41 +103,6 @@ impl<R: Read> FastaStream<R> {
                 continue;
             }
             // NCBI reference (598d8ae6): c++/src/corelib/stream_utils.cpp:306-338
-            // ```c++
-            // void CPushback_Streambuf::x_FillBuffer(size_t max_size)
-            // {
-            //     _ASSERT(m_Sb);
-            //     if ( !max_size ) {
-            //         ++max_size;
-            //     }
-            //
-            //     CPushback_Streambuf* sb = dynamic_cast<CPushback_Streambuf*> (m_Sb);
-            //     if ( !sb ) {
-            //         CT_CHAR_TYPE* bp = 0;
-            //         size_t buf_size = m_DelPtr
-            //             ? (size_t)(m_Buf - (CT_CHAR_TYPE*) m_DelPtr) + m_BufSize : 0;
-            //         if (buf_size < kMinBufSize) {
-            //             buf_size = kMinBufSize;
-            //             bp = new CT_CHAR_TYPE[buf_size];
-            //         }
-            //         streamsize r = (streamsize)(buf_size < max_size ? buf_size : max_size);
-            //         streamsize n = m_Sb->sgetn(bp ? bp : (CT_CHAR_TYPE*) m_DelPtr, r);
-            //         if (n <= 0) {
-            //             // NB: For unknown reasons WorkShop6 can return -1 from sgetn :-/
-            //             delete[] bp;
-            //             return;
-            //         }
-            //         if (bp) {
-            //             delete[] (CT_CHAR_TYPE*) m_DelPtr;
-            //             m_DelPtr = bp;
-            //         }
-            //         m_Buf = (CT_CHAR_TYPE*) m_DelPtr;
-            //         m_BufSize = buf_size;
-            //         setg(m_Buf, m_Buf, m_Buf + n);
-            //         return;
-            //     }
-            //
-            // ```
             let buffered = if self.get_area {
                 self.input.buffer().len()
             } else {
@@ -370,20 +140,6 @@ impl<R: Read> FastaStream<R> {
         }
     }
     // NCBI reference (598d8ae6): c++/src/corelib/ncbistre.cpp:87-98
-    // ```c++
-    //             iostate = NcbiEofbit;
-    //             break;
-    //         }
-    //         SIZE_TYPE delim_pos = delims.find(CT_TO_CHAR_TYPE(ch));
-    //         if (delim_pos != NPOS) {
-    //             // Special case -- if two different delimiters are back to
-    //             // back and in the same order as in delims, treat them as
-    //             // a single delimiter (necessary for correct handling of
-    //             // DOS/MAC-style CR/LF endings).
-    //             ch = is.rdbuf()->sgetc();
-    //             if (!CT_EQ_INT_TYPE(ch, CT_EOF)
-    //                 &&  delims.find(CT_TO_CHAR_TYPE(ch), delim_pos + 1) != NPOS) {
-    // ```
     fn raw_take(&mut self) -> Option<u8> {
         let byte = self.raw_peek()?;
         if let Some(buffer) = self.pushback.last_mut() {
@@ -394,52 +150,7 @@ impl<R: Read> FastaStream<R> {
         Some(byte)
     }
     // NCBI reference (598d8ae6): c++/src/corelib/stream_utils.cpp:413-443
-    // ```c++
-    //         if (how == ePushback_Stepback
-    //             ||  (how == ePushback_Copy
-    //                  &&  buf_size <= (del_ptr
-    //                                   ? CPushback_Streambuf::kMinBufSize
-    //                                   : CPushback_Streambuf::kMinBufSize >> 4))) {
-    //             CT_CHAR_TYPE* bp = sb->gptr();
-    //             size_t avail = bp - sb->m_Buf;
-    //             size_t take  = avail < buf_size ? avail : buf_size;
-    //             if (take) {
-    //                 bp -= take;
-    //                 buf_size -= take;
-    //                 if (how != ePushback_Stepback  &&  bp != buf + buf_size) {
-    //                     memmove(bp, buf + buf_size, take);
-    //                 }
-    //                 sb->setg(bp, bp, sb->egptr());
-    //             }
-    //         }
-    //     }
-    //
-    //     if ( !buf_size ) {
-    //         delete[] (CT_CHAR_TYPE*) del_ptr;
-    //         return;
-    //     }
-    //
-    //     if (!del_ptr  &&  how != ePushback_NoCopy) {
-    //         del_ptr = new CT_CHAR_TYPE[buf_size];
-    //         buf = (CT_CHAR_TYPE*) memcpy(del_ptr, buf, buf_size);
-    //     }
-    //
-    //     (void) new CPushback_Streambuf(is, buf, buf_size, del_ptr);
-    // }
-    // ```
     // NCBI reference (598d8ae6): c++/src/corelib/stream_utils.cpp:134-143
-    // ```c++
-    // CPushback_Streambuf::CPushback_Streambuf(istream&      is,
-    //                                          CT_CHAR_TYPE* buf,
-    //                                          size_t        buf_size,
-    //                                          void*         del_ptr)
-    //     : m_Is(is), m_Next(0), m_Buf(buf), m_BufSize(buf_size), m_DelPtr(del_ptr)
-    // {
-    //     _ASSERT(m_Buf  &&  m_BufSize);
-    //     setp(0, 0);  // unbuffered output at this level of streambuf's hierarchy
-    //     setg(m_Buf, m_Buf, m_Buf + m_BufSize);
-    //     m_Sb = m_Is.rdbuf(this);
-    // ```
     fn push_back(&mut self, bytes: &[u8]) {
         let mut remaining = bytes.len();
         if let Some(buffer) = self.pushback.last_mut() {
@@ -462,13 +173,6 @@ impl<R: Read> FastaStream<R> {
         }
     }
     // NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:100-104
-    // ```c++
-    // bool CStreamLineReader::AtEOF(void) const
-    // {
-    //     return !m_UngetLine &&
-    //         (m_Stream->eof()  ||  CT_EQ_INT_TYPE(m_Stream->peek(), CT_EOF));
-    // }
-    // ```
     pub(crate) fn at_eof(&mut self) -> bool {
         if self.failed {
             return true;
@@ -479,24 +183,6 @@ impl<R: Read> FastaStream<R> {
         self.failed
     }
     // NCBI reference (598d8ae6): c++/src/corelib/ncbistre.cpp:151-166
-    // ```c++
-    //     SIZE_TYPE size = 0;
-    //     SIZE_TYPE max_size = str.max_size();
-    //     do {
-    //         CT_INT_TYPE nextc = is.get();
-    //         if (CT_EQ_INT_TYPE(nextc, CT_EOF)
-    //             ||  CT_EQ_INT_TYPE(nextc, CT_TO_INT_TYPE(delim))) {
-    //             ++size;
-    //             break;
-    //         }
-    //         if ( !is.unget() )
-    //             break;
-    //         if (size == max_size) {
-    //             is.clear(NcbiFailbit);
-    //             break;
-    //         }
-    //         SIZE_TYPE n = max_size - size;
-    // ```
     fn next_byte(&mut self) -> Option<u8> {
         if self.failed {
             return None;
@@ -508,54 +194,7 @@ impl<R: Read> FastaStream<R> {
         byte
     }
     // NCBI reference (598d8ae6): c++/src/corelib/ncbistre.cpp:87-105
-    // ```c++
-    //             iostate = NcbiEofbit;
-    //             break;
-    //         }
-    //         SIZE_TYPE delim_pos = delims.find(CT_TO_CHAR_TYPE(ch));
-    //         if (delim_pos != NPOS) {
-    //             // Special case -- if two different delimiters are back to
-    //             // back and in the same order as in delims, treat them as
-    //             // a single delimiter (necessary for correct handling of
-    //             // DOS/MAC-style CR/LF endings).
-    //             ch = is.rdbuf()->sgetc();
-    //             if (!CT_EQ_INT_TYPE(ch, CT_EOF)
-    //                 &&  delims.find(CT_TO_CHAR_TYPE(ch), delim_pos + 1) != NPOS) {
-    //                 is.rdbuf()->sbumpc();
-    //                 delim_count = 2;
-    //             } else {
-    //                 delim_count = 1;
-    //             }
-    //             break;
-    //         }
-    // ```
     // NCBI reference (598d8ae6): c++/src/corelib/ncbistre.cpp:151-174
-    // ```c++
-    //     SIZE_TYPE size = 0;
-    //     SIZE_TYPE max_size = str.max_size();
-    //     do {
-    //         CT_INT_TYPE nextc = is.get();
-    //         if (CT_EQ_INT_TYPE(nextc, CT_EOF)
-    //             ||  CT_EQ_INT_TYPE(nextc, CT_TO_INT_TYPE(delim))) {
-    //             ++size;
-    //             break;
-    //         }
-    //         if ( !is.unget() )
-    //             break;
-    //         if (size == max_size) {
-    //             is.clear(NcbiFailbit);
-    //             break;
-    //         }
-    //         SIZE_TYPE n = max_size - size;
-    //         is.get(buf, n < sizeof(buf) ? n : sizeof(buf), delim);
-    //         n = (size_t) is.gcount();
-    //         str.append(buf, n);
-    //         size += n;
-    //         _ASSERT(size == str.length());
-    //     } while ( is.good() );
-    // #endif
-    //
-    // ```
     fn getline(&mut self, delimiters: &[u8], line: &mut Vec<u8>) -> Option<u8> {
         line.clear();
         loop {
@@ -672,41 +311,7 @@ impl<R: Read> FastaStream<R> {
         last
     }
     // NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:245-267
-    // ```c++
-    // CStreamLineReader::EEOLStyle CStreamLineReader::x_AdvanceEOLSimple(char eol,
-    //                                                                    char alt_eol)
-    // {
-    //     SIZE_TYPE pos;
-    //     NcbiGetline(*m_Stream, m_Line, eol, &m_LastReadSize);
-    //     if (m_AutoEOL  &&  (pos = m_Line.find(alt_eol)) != NPOS) {
-    //         ++pos;
-    //         if (eol != '\n'  ||  pos != m_Line.size()) {
-    //             // an *immediately* preceding CR is quite all right
-    //             CStreamUtils::Pushback(*m_Stream, m_Line.data() + pos,
-    //                                    m_Line.size() - pos);
-    //             m_EOLStyle = eEOL_mixed;
-    //         }
-    //         m_Line.resize(pos - 1);
-    //         m_LastReadSize = pos;
-    //         return (m_EOLStyle == eEOL_mixed) ? m_EOLStyle : eEOL_crlf;
-    //     } else if (m_AutoEOL  &&  eol == '\r'  &&
-    //                CT_EQ_INT_TYPE(m_Stream->peek(), CT_TO_INT_TYPE(alt_eol))) {
-    //         m_Stream->get();
-    //         ++m_LastReadSize;
-    //         return eEOL_crlf;
-    //     }
-    //     return (eol == '\r') ? eEOL_cr : eEOL_lf;
-    // ```
     // NCBI reference (598d8ae6): c++/src/corelib/stream_utils.cpp:437-443
-    // ```c++
-    //     if (!del_ptr  &&  how != ePushback_NoCopy) {
-    //         del_ptr = new CT_CHAR_TYPE[buf_size];
-    //         buf = (CT_CHAR_TYPE*) memcpy(del_ptr, buf, buf_size);
-    //     }
-    //
-    //     (void) new CPushback_Streambuf(is, buf, buf_size, del_ptr);
-    // }
-    // ```
     fn advance_simple(&mut self, eol: u8, alternate: u8, line: &mut Vec<u8>) -> EolStyle {
         if let Some(position) = self.getline_watching(eol, alternate, line) {
             let position = position + 1;
@@ -747,28 +352,7 @@ impl<R: Read> FastaStream<R> {
     }
 }
 // NCBI reference (598d8ae6): c++/include/corelib/ncbistre.hpp:437-440
-// ```c++
-// #else
-// /// Portable alias for ifstream.
-// typedef IO_PREFIX::ifstream      CNcbiIfstream;
-// #endif
-// ```
 // NCBI reference (598d8ae6): c++/src/corelib/stream_utils.cpp:224-236
-// ```c++
-// CT_INT_TYPE CPushback_Streambuf::underflow(void)
-// {
-//     // we are here because there is no more data in the pushback buffer
-//     _ASSERT(gptr()  &&  gptr() >= egptr());
-//
-// #ifdef NCBI_COMPILER_MIPSPRO
-//     if (m_MIPSPRO_ReadsomeGptrSetLevel  &&  m_MIPSPRO_ReadsomeGptr != gptr())
-//         return CT_EOF;
-//     m_MIPSPRO_ReadsomeGptr = (CT_CHAR_TYPE*)(-1L);
-// #endif //NCBI_COMPILER_MIPSPRO
-//
-//     x_FillBuffer((size_t) m_Sb->in_avail());
-//     return gptr() < egptr() ? CT_TO_INT_TYPE(*gptr()) : CT_EOF;
-// ```
 // The registered std::ifstream backend reports buffered availability first,
 // then remaining regular-file bytes without forcing the next 8191-byte window.
 // Independent instrumented pinned CPushback_Streambuf calibrates this hint;
@@ -784,10 +368,6 @@ fn file_available(file: &mut crate::blastinput::input_files::InputFile) -> std::
         Ok(metadata.len().saturating_sub(position) as usize)
     } else {
         // NCBI reference (598d8ae6): c++/src/corelib/stream_utils.cpp:235-236
-        // ```c++
-        //     x_FillBuffer((size_t) m_Sb->in_avail());
-        //     return gptr() < egptr() ? CT_TO_INT_TYPE(*gptr()) : CT_EOF;
-        // ```
         // The registered native CNcbiIfstream exposes queued pipe bytes via
         // FIONREAD before forcing a file-buffer refill (independent C++ oracle).
         #[cfg(unix)]
@@ -803,17 +383,7 @@ fn file_available(file: &mut crate::blastinput::input_files::InputFile) -> std::
     }
 }
 // NCBI reference (598d8ae6): c++/include/corelib/ncbistre.hpp:437-440
-// ```c++
-// #else
-// /// Portable alias for ifstream.
-// typedef IO_PREFIX::ifstream      CNcbiIfstream;
-// #endif
-// ```
 // NCBI reference (598d8ae6): c++/src/corelib/stream_utils.cpp:235-236
-// ```c++
-//     x_FillBuffer((size_t) m_Sb->in_avail());
-//     return gptr() < egptr() ? CT_TO_INT_TYPE(*gptr()) : CT_EOF;
-// ```
 // Bytes in memory are read as a regular file with the same bytes (`file_available`): the
 // readable-byte hint is the number of bytes not yet taken from them.
 fn bytes_available(rest: &mut &[u8]) -> std::io::Result<usize> {
@@ -832,21 +402,6 @@ impl<'a> FastaStream<&'a [u8]> {
 
 impl FastaStream<crate::blastinput::input_files::InputFile> {
     // NCBI reference (598d8ae6): c++/src/corelib/stream_utils.cpp:224-236
-    // ```c++
-    // CT_INT_TYPE CPushback_Streambuf::underflow(void)
-    // {
-    //     // we are here because there is no more data in the pushback buffer
-    //     _ASSERT(gptr()  &&  gptr() >= egptr());
-    //
-    // #ifdef NCBI_COMPILER_MIPSPRO
-    //     if (m_MIPSPRO_ReadsomeGptrSetLevel  &&  m_MIPSPRO_ReadsomeGptr != gptr())
-    //         return CT_EOF;
-    //     m_MIPSPRO_ReadsomeGptr = (CT_CHAR_TYPE*)(-1L);
-    // #endif //NCBI_COMPILER_MIPSPRO
-    //
-    //     x_FillBuffer((size_t) m_Sb->in_avail());
-    //     return gptr() < egptr() ? CT_TO_INT_TYPE(*gptr()) : CT_EOF;
-    // ```
     /// A stream over an opened input, whose refills read as NCBI's stream of it answers them
     /// (`InputBackend::of`: `cin` for `-`, a `CNcbiIfstream` for a path).
     pub(crate) fn from_file(input: impl Into<crate::blastinput::input_files::InputFile>) -> Self {
@@ -877,24 +432,8 @@ pub(crate) struct InputBackend {
 
 impl InputBackend {
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:717-721
-    // ```c++
-    //     if (AsString() == "-") {
-    // #if defined(NCBI_OS_MSWIN)
-    //         NcbiSys_setmode(NcbiSys_fileno(stdin), (mode & IOS_BASE::binary) ? O_BINARY : O_TEXT);
-    // #endif
-    //         m_Ios  = &cin;
-    // ```
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1342-1344
-    // ```c++
-    //     if ((m_StdioFlags & fNoSyncWithStdio) != 0) {
-    //         IOS_BASE::sync_with_stdio(false);
-    //     }
-    // ```
     // NCBI reference (598d8ae6): c++/src/corelib/stream_utils.cpp:235-236
-    // ```c++
-    //     x_FillBuffer((size_t) m_Sb->in_avail());
-    //     return gptr() < egptr() ? CT_TO_INT_TYPE(*gptr()) : CT_EOF;
-    // ```
     /// The backend of `input`. Standard input (`-`, `InputFile::is_standard_input`) is `cin`,
     /// which the BLAST applications keep synchronised with stdio: its streambuf (libstdc++'s
     /// `stdio_sync_filebuf`) has no get area and the default `showmanyc` of 0, so `in_avail` is
@@ -919,70 +458,9 @@ impl InputBackend {
     }
 }
 // NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:154-174
-// ```c++
-// CStreamLineReader& CStreamLineReader::operator++(void)
-// {
-//     /* If at EOF - noop */
-//     if (AtEOF()) {
-//         m_Line = string();
-//         return *this;
-//     }
-//     ++m_LineNumber;
-//     if ( m_UngetLine ) {
-//         m_UngetLine = false;
-//         return *this;
-//     }
-//
-//     switch (m_EOLStyle) {
-//     case eEOL_unknown: x_AdvanceEOLUnknown();                   break;
-//     case eEOL_cr:      x_AdvanceEOLSimple('\r', '\n');          break;
-//     case eEOL_lf:      x_AdvanceEOLSimple('\n', '\r');          break;
-//     case eEOL_crlf:    x_AdvanceEOLCRLF();                      break;
-//     case eEOL_mixed:   NcbiGetline(*m_Stream, m_Line, "\r\n");  break;
-//     }
-//     return *this;
-// ```
 impl<R: Read> FastaStream<R> {
     // NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:219-241
-    // ```c++
-    // CStreamLineReader::EEOLStyle CStreamLineReader::x_AdvanceEOLUnknown(void)
-    // {
-    //     _ASSERT(m_AutoEOL);
-    //     NcbiGetline(*m_Stream, m_Line, "\r\n", &m_LastReadSize);
-    //     m_Stream->unget();
-    //     CT_INT_TYPE eol = m_Stream->get();
-    //     if (CT_EQ_INT_TYPE(eol, CT_TO_INT_TYPE('\r'))) {
-    //         m_EOLStyle = eEOL_cr;
-    //     } else if (CT_EQ_INT_TYPE(eol, CT_TO_INT_TYPE('\n'))) {
-    //         // NcbiGetline doesn't yield enough information to determine
-    //         // whether eEOL_lf or eEOL_crlf is more appropriate, and not
-    //         // all streams allow tellg() (which could otherwise resolve
-    //         // matters), so defer further analysis to x_AdvanceEOLCRLF,
-    //         // which will be responsible for reading the next line and
-    //         // supports switching to eEOL_lf as appropriate.
-    //         //
-    //         // An alternative approach would have been to pass \n\r rather
-    //         // than \r\n, and then check for an immediately following \n
-    //         // if eol turned out to be \r, but that would miscount an
-    //         // actual(!) \n\r sequence as a single line break.
-    //         m_EOLStyle = eEOL_crlf;
-    //     }
-    //     return m_EOLStyle;
-    // ```
     // NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:271-281
-    // ```c++
-    // CStreamLineReader::EEOLStyle CStreamLineReader::x_AdvanceEOLCRLF(void)
-    // {
-    //     if (m_AutoEOL) {
-    //         EEOLStyle style = x_AdvanceEOLSimple('\n', '\r');
-    //         if (style == eEOL_mixed) {
-    //             // found an embedded CR
-    //             m_EOLStyle = eEOL_cr;
-    //         } else if (style != eEOL_crlf) {
-    //             m_EOLStyle = eEOL_lf;
-    //         }
-    //     } else {
-    // ```
     /// The switch of `operator++` on the end-of-line style (the caller has checked
     /// `AtEOF` and the ungot line): the next line into `line`, without its end of line.
     pub(crate) fn advance(&mut self, line: &mut Vec<u8>) {
@@ -1077,14 +555,6 @@ fn find_delimiter(haystack: &[u8], delimiters: &[u8]) -> Option<usize> {
 /// and the ungot line.
 ///
 /// NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:86-92
-/// ```c++
-/// CStreamLineReader::CStreamLineReader(CNcbiIstream& is,
-///                                      EOwnership ownership)
-///     : m_Stream(&is, ownership), m_LineNumber(0), m_LastReadSize(0),
-///       m_UngetLine(false), m_AutoEOL(true), m_EOLStyle(eEOL_unknown)
-/// {
-/// }
-/// ```
 pub(crate) struct LineReader<R: Read> {
     stream: FastaStream<R>,
     line: Vec<u8>,
@@ -1097,11 +567,6 @@ impl<R: Read + Seek> LineReader<R> {
     /// read (`stream_is_empty`).
     ///
     /// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:845-847
-    /// ```c++
-    /// bool
-    /// IsIStreamEmpty(CNcbiIstream & in)
-    /// {
-    /// ```
     pub(crate) fn stream_is_empty(&mut self) -> bool {
         debug_assert!(self.line_number == 0 && !self.unget_line);
         stream_is_empty(&mut self.stream)
@@ -1119,13 +584,6 @@ impl<R: Read> LineReader<R> {
     }
 
     /// NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:100-104
-    /// ```c++
-    /// bool CStreamLineReader::AtEOF(void) const
-    /// {
-    ///     return !m_UngetLine &&
-    ///         (m_Stream->eof()  ||  CT_EQ_INT_TYPE(m_Stream->peek(), CT_EOF));
-    /// }
-    /// ```
     pub(crate) fn at_eof(&mut self) -> bool {
         !self.unget_line && self.stream.at_eof()
     }
@@ -1133,41 +591,6 @@ impl<R: Read> LineReader<R> {
     /// The first byte of the next line, `0` for an empty line (`None` at the end).
     ///
     /// NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:107-140
-    /// ```c++
-    /// char CStreamLineReader::PeekChar(void) const
-    /// {
-    ///     _ASSERT(!AtEOF());
-    ///     /* If at EOF - undefined behavior, return m_Stream->peek() */
-    ///     if (AtEOF()) {
-    ///         return (char)m_Stream->peek();
-    ///     }
-    ///     /* If right after constructor (line number is 0 and line was not ungot) -
-    ///        return the first character of the first line */
-    ///     if (m_LineNumber == 0 && !m_UngetLine) {
-    ///         char c = (char)m_Stream->peek();
-    ///         /* If there are delimiters right from the start (which means the
-    ///         first line is empty), return 0 */
-    ///         if (c == '\n' || c == '\r') {
-    ///             return 0;
-    ///         }
-    ///         return c;
-    ///     }
-    ///     /* If line was ungot - return its first symbol */
-    ///     if (m_UngetLine) {
-    ///         /* if line is empty - return 0 */
-    ///         if (m_Line.empty()) {
-    ///             return 0;
-    ///         }
-    ///         return *m_Line.begin();
-    ///     }
-    ///     char c = (char)m_Stream->peek();
-    ///     /* If line is empty - return 0 */
-    ///     if (c == '\n' || c == '\r') {
-    ///         return 0;
-    ///     }
-    ///     return c;
-    /// }
-    /// ```
     pub(crate) fn peek_char(&mut self) -> Option<u8> {
         if self.at_eof() {
             return self.stream.peek();
@@ -1182,18 +605,6 @@ impl<R: Read> LineReader<R> {
     }
 
     /// NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:142-151
-    /// ```c++
-    /// void CStreamLineReader::UngetLine(void)
-    /// {
-    ///     _ASSERT(!m_UngetLine && m_LineNumber != 0);
-    ///     /* If after UngetLine() or after constructor - noop */
-    ///     if (m_UngetLine || m_LineNumber == 0) {
-    ///         return;
-    ///     }
-    ///     --m_LineNumber;
-    ///     m_UngetLine = true;
-    /// }
-    /// ```
     pub(crate) fn unget_line(&mut self) {
         if self.unget_line || self.line_number == 0 {
             return;
@@ -1206,30 +617,6 @@ impl<R: Read> LineReader<R> {
     /// `UngetLine`, an empty line at the end).
     ///
     /// NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:154-175
-    /// ```c++
-    /// CStreamLineReader& CStreamLineReader::operator++(void)
-    /// {
-    ///     /* If at EOF - noop */
-    ///     if (AtEOF()) {
-    ///         m_Line = string();
-    ///         return *this;
-    ///     }
-    ///     ++m_LineNumber;
-    ///     if ( m_UngetLine ) {
-    ///         m_UngetLine = false;
-    ///         return *this;
-    ///     }
-    ///
-    ///     switch (m_EOLStyle) {
-    ///     case eEOL_unknown: x_AdvanceEOLUnknown();                   break;
-    ///     case eEOL_cr:      x_AdvanceEOLSimple('\r', '\n');          break;
-    ///     case eEOL_lf:      x_AdvanceEOLSimple('\n', '\r');          break;
-    ///     case eEOL_crlf:    x_AdvanceEOLCRLF();                      break;
-    ///     case eEOL_mixed:   NcbiGetline(*m_Stream, m_Line, "\r\n");  break;
-    ///     }
-    ///     return *this;
-    /// }
-    /// ```
     pub(crate) fn next_line(&mut self) -> &[u8] {
         if self.at_eof() {
             self.line.clear();
@@ -1262,17 +649,6 @@ impl<R: Read> LineReader<R> {
     }
 
     /// NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:208-216
-    /// ```c++
-    /// Uint8 CStreamLineReader::GetLineNumber(void) const
-    /// {
-    ///     /* Right after constructor (m_LineNumber is 0 and UngetLine() was not run)
-    ///        - 0 */
-    ///     /* If at EOF - returns the number of the last string */
-    ///     /* After UngetLine() - number of the previous string */
-    ///     /* Not at EOF, not after UngetLine() - number of the current string */
-    ///     return m_LineNumber;
-    /// }
-    /// ```
     pub(crate) fn line_number(&self) -> u64 {
         self.line_number
     }

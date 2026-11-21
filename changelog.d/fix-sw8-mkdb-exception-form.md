@@ -11,7 +11,7 @@
 - Fixed: a `BLASTDB_LMDB_MAP_SIZE` of more digits than a 64-bit number holds no longer adds
   `, overflow` to makeblastdb's message.
 - Fixed: `losat makeblastdb` of version 5 with an output name of 247 bytes or more, whose LMDB lock
-  file name would pass 255 bytes, now stops as makeblastdb does: `BLAST Database error: LMDB
+  file name would pass 255 bytes, now stops as makeblastdb does: `LOSAT database error: LMDB
   runtime error: mdb_env_open: File name too long` (exit status 2), or that creation error with
   one sequence (exit status 1), with no file left. It used to build the database at 247 and 248
   bytes and fail at the first volume file from 249 bytes on.

@@ -1,6 +1,6 @@
 //! Local BLAST Search
 //!
-//! Reference: ncbi-blast/c++/src/algo/blast/api/local_blast.cpp
+//! NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp
 //!
 //! This module provides the main entry point for running local BLAST searches, and the
 //! output routing shared by every entry that runs through it (the CLI, web ABI v1 and
@@ -15,46 +15,14 @@ use crate::record::FastaRecord;
 use crate::report::blast_xml::XmlStats;
 use crate::report::PairwiseHit;
 
-// NCBI reference: ncbi-blast/c++/src/app/blast/tblastx_app.cpp:106-111
-// ```c
-// if(RecoverSearchStrategy(args, m_CmdLineArgs)) {
-// 	opts_hndl.Reset(&*m_CmdLineArgs->SetOptionsForSavedStrategy(args));
-// }
-// else {
-// 	opts_hndl.Reset(&*m_CmdLineArgs->SetOptions(args));
-// }
-// ```
+// NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:106-111
 pub use crate::algorithm::tblastx::blast_engine::run_local as run_local_tblastx;
 // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:113-119
-// ```c++
-//         /*** Initialize the database/subject ***/
-//         CRef<CBlastDatabaseArgs> db_args(m_CmdLineArgs->GetBlastDatabaseArgs());
-//         CRef<CLocalDbAdapter> db_adapter;
-//         CRef<CScope> scope;
-//         InitializeSubject(db_args, opts_hndl, m_CmdLineArgs->ExecuteRemotely(),
-//                          db_adapter, scope);
-// ```
 pub use crate::algorithm::tblastx::blast_engine::run_local_database as run_local_database_tblastx;
 
-// NCBI reference: ncbi-blast/c++/src/app/blast/blastn_app.cpp:128-133
-// ```c
-// if(RecoverSearchStrategy(args, m_CmdLineArgs)) {
-// 	m_OptsHndl.Reset(&*m_CmdLineArgs->SetOptionsForSavedStrategy(args));
-// }
-// else {
-// 	m_OptsHndl.Reset(&*m_CmdLineArgs->SetOptions(args));
-// }
-// ```
+// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:128-133
 pub use crate::algorithm::blastn::blast_engine::run_local as run_local_blastn;
 // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:191-197
-// ```c++
-//         /*** Initialize the database/subject ***/
-//         CRef<CBlastDatabaseArgs> db_args(m_CmdLineArgs->GetBlastDatabaseArgs());
-//         CRef<CLocalDbAdapter> db_adapter;
-//         CRef<CScope> scope;
-//         InitializeSubject(db_args, m_OptsHndl, m_CmdLineArgs->ExecuteRemotely(),
-//                          db_adapter, scope);
-// ```
 pub use crate::algorithm::blastn::blast_engine::run_local_database as run_local_database_blastn;
 
 // Re-export the pool of a run of several searches (`run_local` calls of one argv), which they
@@ -62,79 +30,25 @@ pub use crate::algorithm::blastn::blast_engine::run_local_database as run_local_
 pub use crate::utils::threading::with_run_pool;
 
 // Re-export BLASTP run function
-// NCBI reference: ncbi-blast/c++/src/algo/blast/api/local_blast.cpp:1196-1218
-// ```c
-// CLocalBlast::Run()
-// {
-//     x_SetupSearch();
-//     x_RunSearch();
-// }
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:167-299
 pub use crate::algorithm::blastp::blast_engine::run_local as run_local_blastp;
 // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:194-199
-// ```c++
-//         CRef<CBlastDatabaseArgs> db_args(m_CmdLineArgs->GetBlastDatabaseArgs());
-//         CRef<CLocalDbAdapter> db_adapter;
-//         CRef<CScope> scope;
-//         InitializeSubject(db_args, m_OptsHndl, m_CmdLineArgs->ExecuteRemotely(),
-//                          db_adapter, scope);
-//         _ASSERT(db_adapter && scope);
-// ```
 pub use crate::algorithm::blastp::blast_engine::run_local_database as run_local_database_blastp;
 
 // Re-export the TBLASTN entry
-// NCBI reference: ncbi-blast/c++/src/app/blast/tblastn_app.cpp:289-301
-// ```c
-// CLocalBlast lcl_blast(query_factory, m_OptsHndl, db_adapter);
-// lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
-// results = lcl_blast.Run();
-// ...
-// ITERATE(CSearchResultSet, result, *results) {
-//     formatter.PrintOneResultSet(**result, query);
-// }
-// ```
+// NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:289-301
 pub use crate::algorithm::tblastn::run_local as run_local_tblastn;
 // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:189-193
-// ```c++
-//         CRef<CBlastDatabaseArgs> db_args(m_CmdLineArgs->GetBlastDatabaseArgs());
-//         CRef<CLocalDbAdapter> db_adapter;
-//         CRef<CScope> scope(new CScope(*CObjectManager::GetInstance()));
-//         InitializeSubject(db_args, m_OptsHndl, m_CmdLineArgs->ExecuteRemotely(),
-//                          db_adapter, scope);
-// ```
 pub use crate::algorithm::tblastn::run_local_database as run_local_database_tblastn;
 
 // Re-export BLASTX's shared entry (web ABI v2).
 // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:277-279
-// ```c++
-//                 CLocalBlast lcl_blast(queries, m_OptsHndl, db_adapter);
-//                 lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
-//                 results = lcl_blast.Run();
-// ```
 pub use crate::algorithm::blastx::run_local as run_local_blastx;
 // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:195-200
-// ```c++
-//         /*** Initialize the database/subject ***/
-//         CRef<CBlastDatabaseArgs> db_args(m_CmdLineArgs->GetBlastDatabaseArgs());
-//         CRef<CLocalDbAdapter> db_adapter;
-//         CRef<CScope> scope;
-//         InitializeSubject(db_args, m_OptsHndl, m_CmdLineArgs->ExecuteRemotely(),
-//                          db_adapter, scope);
-// ```
 pub use crate::algorithm::blastx::run_local_database as run_local_database_blastx;
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:68-93
-// ```c
-// CBlastFormat::CBlastFormat(..., CNcbiOstream& outfile, ...)
-//     : m_FormatType(format_type), ..., m_Outfile(outfile),
-//       m_NumSummary(num_summary), ...
-// ```
-// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3441-3443
-// ```c
-// arg_desc.AddDefaultKey(kArgOutput, "output_file",
-//                "Output file name",
-//                CArgDescriptions::eOutputFile, "-");
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:68-93
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3441-3443
 /// Where one requested output format is written.
 #[non_exhaustive]
 pub enum OutputSink<'a> {
@@ -160,12 +74,7 @@ pub enum OutputSink<'a> {
 }
 
 impl OutputSink<'_> {
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3478-3480
-    // ```c
-    // else {
-    //     m_OutputStream = &args[kArgOutput].AsOutputFile();
-    // }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3478-3480
     // NCBI opens the `-out` stream while it processes the arguments, before the search.
     // LOSAT has always created the file when the report is written, after the search;
     // this routing keeps that existing timing unchanged.
@@ -197,13 +106,8 @@ impl OutputSink<'_> {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3478-3480
-// ```c
-// else {
-//     m_OutputStream = &args[kArgOutput].AsOutputFile();
-// }
-// ```
-// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:913-916 (quoted at
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3478-3480
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:913-916 (cited at
 // `ReportOutputs::finish_archive`): `PrintErrorArchive` opens `-out` for the error archive of an
 // error that came before the argument handling opened it.
 /// The `-out` file of the library's `run_to_file` (`OutputSink::Out`). It is made where the
@@ -277,12 +181,7 @@ impl Write for OutFile {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2800-2803
-// ```c
-// if (args[kArgOutputFormat]) {
-//     string fmt_choice =
-//         NStr::TruncateSpaces(args[kArgOutputFormat].AsString());
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2800-2803
 /// One requested output: an `-outfmt` value, parsed and validated by the program exactly
 /// as on the command line, where to write it, and what LOSAT's refusal of its report does.
 pub struct FormatOutput<'a> {
@@ -370,6 +269,35 @@ impl FormatOutput<'_> {
             .and_then(|choice| ReportFormat::from_number(choice.number))
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1432-1452
+    /// Whether this output's report writes the queries' result warnings
+    /// (`ReportFormat::writes_query_warnings`; a value that NCBI's reading refuses writes no report,
+    /// and counts as one that does).
+    pub(crate) fn writes_query_warnings(&self) -> bool {
+        self.report_format()
+            .is_none_or(crate::blastinput::app::ReportFormat::writes_query_warnings)
+    }
+
+    /// This format's receiver, among the caller's (`later`, `ReportOutputs::later_warnings`; the
+    /// format is the call's `index`th), of the queries' result warnings that its reports write:
+    /// `None` where they are not kept for the later formats (`keeps`,
+    /// `ReportOutputs::keeps_later_query_warnings`) or this format's report writes none. The
+    /// format's writer writes them there before each query's report
+    /// (`QueryWarnings::with_later`).
+    ///
+    /// NCBI reference (598d8ae6): blast_format.cpp:1450-1452 (at `QueryWarnings::with_later`).
+    pub(crate) fn later_warnings<'s>(
+        &self,
+        keeps: bool,
+        later: &'s mut Option<&mut [Vec<u8>]>,
+        index: usize,
+    ) -> Option<&'s mut Vec<u8>> {
+        match keeps && self.writes_query_warnings() {
+            true => later.as_deref_mut()?.get_mut(index),
+            false => None,
+        }
+    }
+
     /// Whether this output is the BLAST archive (outfmt 11).
     fn is_archive(&self) -> bool {
         self.report_format() == Some(crate::blastinput::app::ReportFormat::ArchiveFormat)
@@ -387,75 +315,30 @@ pub(crate) fn open_out(formats: &mut [FormatOutput<'_>]) -> anyhow::Result<()> {
     Ok(())
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:1411
-// ```c
-// CBlastFormat::PrintOneResultSet(const blast::CSearchResults& results,
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1411
 // Every output format prints from the same final result set, so a position in that
 // result identifies an HSP in every format.
 /// Index of an HSP in the final, sorted hit list of a search: the list that
 /// `ReportOutputs::hits` receives. It identifies the HSP in every output format.
 pub type HspIndex = usize;
 
-// NCBI reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp:1970-1973
-// ```c++
-// subid=&(avRef->GetSeqId(1));
-// bool showDefLine = previousId.Empty() || !subid->Match(*previousId);
-// x_DisplayAlnvecInfo(out, alnvecInfo,showDefLine);
-// ```
-// NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
-// ```c
-// ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
-//     // Add tab in front of field, except for the first field.
-//     if (iter != m_FieldsToShow.begin())
-//         m_Ostream << m_FieldDelimiter;
-//     x_PrintField(*iter);
-// }
-// m_Ostream << "\n";
-// ```
-// NCBI reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp:3956-3975
-// ```c++
-// void CDisplaySeqalign::x_DisplayAlnvecInfo(CNcbiOstream& out,
-//                                            SAlnInfo* aln_vec_info,
-//                                            bool show_defline)
-// {
-//     ...
-// 	if(!m_AlignTemplates) {
-// 		x_ShowAlnvecInfo(out,aln_vec_info,show_defline);
-// 	}
-// ```
-// NCBI reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp:3613-3632
-// ```c++
-// void CDisplaySeqalign::x_ShowAlnvecInfo(CNcbiOstream& out,
-//                                            SAlnInfo* aln_vec_info,
-//                                            bool show_defline)
-// {
-// 	bool showSortControls = false;
-//     if(show_defline) {
-// 		...
-// 				string deflines = x_PrintDefLine(bsp_handle, aln_vec_info);
-// 				out<< deflines;
-// 		...
-// 			out << "\n";
-// ```
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1970-1973
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3956-3975
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3613-3632
 // The observed units follow NCBI's: one printed row per HSP in outfmt 6 and 7, and in
 // outfmt 0 the output of one x_DisplayAlnvecInfo call without the subject defline that
 // it prints before the first HSP of each subject (the section starts at " Score =").
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/format_flags.cpp:38-40
-// ```c++
-// const char* kDfltArgTabularOutputFmt =
-//     "qaccver saccver pident length mismatch gapopen qstart qend sstart send "
-//     "evalue bitscore";
-// ```
 /// A sequence of a database that a search reported (`FormatObserver::database_subjects`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReportedSubject {
     /// The sequence's OID in the database (the `n` of `gnl|BL_ORD_ID|n`), the same in every
     /// search of the database, also one that a taxid or Seq-id list restricts.
     pub oid: u32,
-    /// The `saccver` of the default tabular report.
-    pub id: std::sync::Arc<str>,
+    /// The `saccver` of the default tabular report, its bytes.
+    pub id: crate::api::Id,
     /// Its letters.
     pub length: usize,
 }
@@ -475,20 +358,7 @@ pub trait FormatObserver {
     /// `hsp`. Every byte of it has reached the sink.
     fn hsp_end(&mut self, format: usize, hsp: HspIndex);
 
-    // NCBI reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp:3613-3632
-    // ```c++
-    // void CDisplaySeqalign::x_ShowAlnvecInfo(CNcbiOstream& out,
-    //                                            SAlnInfo* aln_vec_info,
-    //                                            bool show_defline)
-    // {
-    // 	bool showSortControls = false;
-    //     if(show_defline) {
-    // 		...
-    // 				string deflines = x_PrintDefLine(bsp_handle, aln_vec_info);
-    // 				out<< deflines;
-    // 		...
-    // 			out << "\n";
-    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3613-3632
     /// The outfmt 0 formatter for `ReportOutputs::formats[format]` starts the heading of
     /// a subject (its defline and length line), which precedes the first HSP of that
     /// subject, `first_hsp`, and the HSPs of the copies of one database record that follow it
@@ -501,21 +371,6 @@ pub trait FormatObserver {
     fn subject_end(&mut self, _format: usize, _first_hsp: HspIndex) {}
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:82-94
-    // ```c++
-    //     // find the first valid context corresponding to this query
-    //     for (i = 0; i < context_per_query; i++) {
-    //         BlastContextInfo *ctx = query_info->contexts +
-    //                                 query_number * context_per_query + i;
-    //         if (ctx->is_valid) {
-    //             m_SearchSpace = ctx->eff_searchsp;
-    //             m_LengthAdjustment = ctx->length_adjustment;
-    //             break;
-    //         }
-    //     }
-    //     if (i >= context_per_query) {
-    //         return; // we didn't find a valid context :(
-    //     }
-    // ```
     // NCBI keeps one `CBlastAncillaryData` per query with the query's result; here each program
     // hands over what its XML reports print of it, whichever formats were asked for.
     /// The statistics of query `q_idx` of the search: the values that the `Statistics` of its
@@ -526,14 +381,6 @@ pub trait FormatObserver {
     fn query_stats(&mut self, _q_idx: usize, _stats: XmlStats) {}
 
     // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:253-259
-    // ```c++
-    //         formatter.PrintProlog();
-    //         ...
-    //         /*** Process the input ***/
-    //         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
-    //         ...
-    //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
-    // ```
     // What NCBI writes before this loop is written once for the run; a call of `run_local`
     // per query batch writes it again, and this event tells where it ends.
     /// The checks of the run are done and the subjects are read: what the diagnostics receive
@@ -541,23 +388,11 @@ pub trait FormatObserver {
     fn queries_begin(&mut self) {}
 
     // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:299-300
-    // ```c++
-    //                 if (!batch_size)
-    //                     input.SetBatchSize(mixer.GetBatchSize(lcl_blast.GetNumExtensions()));
-    // ```
     /// BLASTN's query batch just searched made `extensions` successful initial extensions, which
     /// size the next batch (`CBatchSizeMixer`). The other programs' batches have one size.
     fn batch_extensions(&mut self, _extensions: i32) {}
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-842
-    // ```c++
-    //        		const CBioseq_Handle& subject_bh =
-    //                 scope.GetBioseqHandle(align.GetSeq_id(1));
-    //             if(setSubjectId) {
-    //             	SetSubjectId(subject_bh);
-    //             }
-    //             m_SubjectLength = subject_bh.GetBioseqLength();
-    // ```
     // NCBI's reports read a subject's ids and length by the Seq-align's id; a database search's
     // hit list names its sequences by rank, and this event tells what the ranks are.
     /// The sequences that `Hit::s_idx` of a database search's final hit list (`ReportOutputs::hits`)
@@ -566,15 +401,6 @@ pub trait FormatObserver {
     fn database_subjects(&mut self, _subjects: Vec<ReportedSubject>) {}
 
     // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:537-543
-    // ```c++
-    // 		scope->AddTopLevelSeqEntry(pssm->SetQuery());
-    //
-    // 		CRef<CSeq_loc> sl(new CSeq_loc());
-    // 		sl->SetWhole().Assign(*pssm->GetQuery().GetSeq().GetFirstId());
-    //
-    // 		CRef<CBlastSearchQuery> q(new CBlastSearchQuery(*sl, *scope));
-    // 		CRef<CBlastQueryVector> query(new CBlastQueryVector());
-    // ```
     // A PSSM search's query is the PSSM's Bioseq, which the inputs do not hold
     // (`api::Inputs::pssm`): the search reads it with the options.
     /// The query of a PSSM search (psiblast's and tblastn's `-in_pssm`): the record of the PSSM's
@@ -583,15 +409,6 @@ pub trait FormatObserver {
     fn pssm_query(&mut self, _query: &FastaRecord) {}
 
     // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:250-285
-    // ```c++
-    //                 CRef<CSearchResultSet> results;
-    //                 ...
-    //                    results = psiblast->Run();
-    //                    ...
-    // 	                      formatter.PrintOneResultSet(**result, query,
-    // 	                                                itr.GetIterationNumber(),
-    // 	                                                itr.GetPreviouslyFoundSeqIds());
-    // ```
     // NCBI's psiblast searches one query per round and formats each round's result set; LOSAT's
     // round driver makes one search call per round of a query (`blastp::blast_engine::psi_round`).
     /// psiblast's round driver starts round `round` (1-based, NCBI's `GetIterationNumber`) of the
@@ -602,22 +419,13 @@ pub trait FormatObserver {
     fn round_begin(&mut self, _query: usize, _round: u32) {}
 
     // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:525-528
-    // ```c++
-    //                 if (converged && !fmt_args->HasStructuredOutputFormat() &&
-    //                 	fmt_args->GetFormattedOutputChoice() != CFormattingArgs::eArchiveFormat) {
-    //                 	out_stream << NcbiEndl << "Search has CONVERGED!" << NcbiEndl;
-    //             	}
-    // ```
     /// The rounds of the searched query `query` converged (NCBI's `HasConverged`): every subject
     /// below `-inclusion_ethresh` in its last round was below it in the round before too. It
     /// comes after the query's last round, whatever the formats.
     fn rounds_converged(&mut self, _query: usize) {}
 }
 
-// NCBI reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp:1970-1973
-// ```c++
-// x_DisplayAlnvecInfo(out, alnvecInfo,showDefLine);
-// ```
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1970-1973
 /// The observer of one output format, as handed to that format's formatter.
 pub struct FormatProbe<'o> {
     observer: &'o mut dyn FormatObserver,
@@ -649,35 +457,8 @@ impl<'o> FormatProbe<'o> {
 /// The receiver of the final hit list (`ReportOutputs::hits`).
 pub type HitsSink<'a> = dyn FnMut(std::sync::Arc<Vec<PairwiseHit>>) + Send + 'a;
 
-// NCBI reference: ncbi-blast/c++/src/app/blast/blastp_app.cpp:195-295
-// ```c
-// CRef<CLocalDbAdapter> db_adapter;
-// CRef<CScope> scope;
-// InitializeSubject(db_args, m_OptsHndl, m_CmdLineArgs->ExecuteRemotely(),
-//                  db_adapter, scope);
-// CBlastFormat formatter(opt, *db_adapter,
-//                        fmt_args->GetFormattedOutputChoice(), ...);
-// formatter.PrintProlog();
-// for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
-//         CLocalBlast lcl_blast(queries, m_OptsHndl, db_adapter);
-//         results = lcl_blast.Run();
-//         ITERATE(CSearchResultSet, result, *results) {
-//             formatter.PrintOneResultSet(**result, query_batch);
-//         }
-// }
-// formatter.PrintEpilog(opt);
-// ```
-// NCBI reference: ncbi-blast/c++/src/app/blast/blast_formatter.cpp:429-467
-// ```c
-// CRef<CSearchResultSet> results = m_RmtBlast->GetResultSet();
-// formatter.PrintProlog();
-// ...
-// ITERATE(CSearchResultSet, result, *results) {
-//     ...
-//         formatter.PrintOneResultSet(**result, queries);
-//     ...
-// }
-// ```
+// NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:195-295
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:429-467
 // NCBI formats one CSearchResultSet without searching again; several requested formats
 // are several CBlastFormat printers over the same result set.
 /// The outputs of one search. Every part is `Send`, because the search runs the
@@ -687,6 +468,26 @@ pub struct ReportOutputs<'a> {
     pub formats: Vec<FormatOutput<'a>>,
     /// Receives the warnings that the CLI writes to standard error, each once.
     pub diagnostics: &'a mut (dyn Write + Send),
+    /// By format, as `formats`: receives what the command line's run of a format after the first
+    /// writes to its standard error with its queries' reports and the first format's run does
+    /// not. A structured first format (outfmt 5, 8, 9, 11 to 17) writes none of the queries'
+    /// result warnings (`ReportFormat::writes_query_warnings`), and the run of a later format
+    /// that writes them posts each when the query's report starts: such a format's writer writes
+    /// them to `later_warnings[i]` there, `i` being its place in `formats`, so a format whose
+    /// report stops (it failed alone, `FormatRefusal`) has given those of the queries that it
+    /// reached, and one refused before its report none. BLASTX gives each such format's whole
+    /// standard error of the reports, which may repeat lines of the diagnostics. The texts of
+    /// several formats repeat each other: the caller keeps each line once (LOSAT Web writes
+    /// outfmt 0, 6 and 7 besides the argv's `-outfmt`, and adds what their standard error adds;
+    /// line WQA's sweep, D3 review r3, 2026-11-19). Nothing is written where the first format
+    /// writes the warnings itself, nor to a place beyond the slice. `None` drops them, as the
+    /// command line, whose one format is the first. In BLASTN, BLASTP, TBLASTN and TBLASTX, a
+    /// later format that gets a receiver also writes its writer's own lines (the taxonomy
+    /// lookups of a tabular field list, outfmt 20's prolog warning), and they go to the
+    /// diagnostics, not to its receiver, so receivers can add lines to the diagnostics there;
+    /// BLASTX gives them to the receiver. LOSAT Web's later formats are the plain outfmt 0, 6
+    /// and 7, which write none (reviews r2 L1 and r3 L2 of 2026-11-20).
+    pub later_warnings: Option<&'a mut [Vec<u8>]>,
     /// Receives the final, sorted hit list with rendered alignments, once per call. It may come
     /// before or after the reports are written (blastp's query blocks hand it over after the
     /// last block, `LOSAT_X_BPQBLOCK`). The list is shared, not copied: it holds an alignment's
@@ -699,11 +500,59 @@ pub struct ReportOutputs<'a> {
 }
 
 impl ReportOutputs<'_> {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1432-1452 (cited at
+    // `FormatOutput::writes_query_warnings`): a structured report returns before the warnings.
+    /// Whether the first format writes the queries' result warnings with its reports (a call
+    /// without formats too): a structured format does not (`ReportFormat::writes_query_warnings`).
+    pub(crate) fn first_writes_query_warnings(&self) -> bool {
+        self.formats
+            .first()
+            .is_none_or(FormatOutput::writes_query_warnings)
+    }
+
+    /// Whether the queries' result warnings are kept for the formats after the first
+    /// (`Posts::later`), each of which writes them to its own receiver
+    /// (`FormatOutput::later_warnings`): the first format writes none and the caller takes the
+    /// later formats' (`later_warnings`).
+    ///
+    /// NCBI reference (598d8ae6): blast_format.cpp:1450-1452 (at `QueryWarnings::with_later`).
+    pub(crate) fn keeps_later_query_warnings(&self) -> bool {
+        self.later_warnings.is_some() && !self.first_writes_query_warnings()
+    }
+
     /// Makes the `-out` file of `run_to_file` (`OutputSink::Out`) where the command line opens its
     /// `-out`: each program's entry calls it after reading the subjects (or the taxid or seqid list
     /// of `-db`) and before processing the options. The other sinks are not opened here.
     pub(crate) fn open_out(&mut self) -> anyhow::Result<()> {
         open_out(&mut self.formats)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:887-899
+    /// The first requested format that is an XInclude format (13, 14) whose side files have no
+    /// file name to go by (`FormatOutput::side_out` of the run's `-out` `out`: no
+    /// `api::run_to_file` file and no receiver of them), for which NCBI's `UseXInclude` fails
+    /// (`blastinput::app::xinclude_check_for`, the one check of the command line and the library).
+    pub(crate) fn xinclude_choice(
+        &self,
+        out: Option<&std::path::Path>,
+    ) -> anyhow::Result<Option<crate::blastinput::app::FormatChoice>> {
+        for format in &self.formats {
+            let choice = crate::blastinput::app::parse_formatting_string(format.outfmt)?;
+            if crate::blastinput::app::xinclude_check_for(&choice, format.side_out(out)).is_err() {
+                return Ok(Some(choice));
+            }
+        }
+        Ok(None)
+    }
+
+    /// NCBI's error of the first XInclude format without a file name (`xinclude_choice`). Each
+    /// program's entry calls it where its command line makes the formatter: after `Query is
+    /// Empty!` and the subjects' warnings.
+    pub(crate) fn xinclude_check(&self, out: Option<&std::path::Path>) -> anyhow::Result<()> {
+        match self.xinclude_choice(out)? {
+            Some(choice) => crate::blastinput::app::xinclude_check_for(&choice, None),
+            None => Ok(()),
+        }
     }
 
     /// Whether every requested format is the BLAST archive (outfmt 11), which NCBI's apps but
@@ -715,12 +564,6 @@ impl ReportOutputs<'_> {
     }
 
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:913-916
-    // ```c++
-    // void PrintErrorArchive(const CArgs & a, const list<CRef<CBlast4_error> > & msg)
-    // {
-    // 	try {
-    // 		if(NStr::StringToInt(NStr::TruncateSpaces(a[align_format::kArgOutputFormat].AsString())) == CFormattingArgs::eArchiveFormat) {
-    // ```
     /// `handle` with the `-outfmt` text of the requested archive format: an error archive
     /// follows that text (`ArchiveHandle::with_outfmt_text`).
     pub(crate) fn with_archive_outfmt(
@@ -734,14 +577,6 @@ impl ReportOutputs<'_> {
     }
 
     // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:327-332
-    // ```c++
-    //     } CATCH_ALL(status)
-    //
-    //     if(!m_Bah.GetMessages().empty()) {
-    //     	const CArgs & a = GetArgs();
-    //     	PrintErrorArchive(a, m_Bah.GetMessages());
-    //     }
-    // ```
     /// The end of a run with a BLAST archive (outfmt 11) that `result` closes: NCBI writes an
     /// error archive after the archives of the batches before when the application stops with one
     /// of its own errors, and when the run ends with messages that no archive carried. `no_query`:
@@ -791,6 +626,7 @@ impl ReportOutputs<'_> {
         let ReportOutputs {
             formats,
             diagnostics,
+            later_warnings,
             hits,
             observer,
         } = self;
@@ -814,6 +650,8 @@ impl ReportOutputs<'_> {
                 })
                 .collect(),
             diagnostics: &mut tee,
+            // Not saved in the archive: the archive's run (outfmt 11 first) writes none of them.
+            later_warnings: later_warnings.as_deref_mut(),
             hits: hits.as_mut().map(|hits| &mut **hits as &mut HitsSink<'_>),
             observer: observer
                 .as_mut()
@@ -832,11 +670,7 @@ impl ReportOutputs<'_> {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/app/blast/blastp_app.cpp:225-226
-// ```c
-// CBlastFormat formatter(opt, *db_adapter,
-//                        fmt_args->GetFormattedOutputChoice(),
-// ```
+// NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:225-226
 // One command-line invocation constructs one formatter for its single `-outfmt`.
 impl<'a> ReportOutputs<'a> {
     /// The command-line shape: one output format and warnings, no records or observer.
@@ -852,6 +686,7 @@ impl<'a> ReportOutputs<'a> {
                 refusal: FormatRefusal::FailsCall,
             }],
             diagnostics,
+            later_warnings: None,
             hits: None,
             observer: None,
         }

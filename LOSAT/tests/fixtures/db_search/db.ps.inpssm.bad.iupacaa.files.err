@@ -1,0 +1,4 @@
+Error: (803.7) [psiblast] PssmWithParameters.pssm.query.seq.inst.seq-data.iupacaa
+Bad char [0xE9] in string at line 18
+ACDEFGHIKLMNPQRSTVWYACDEFGÈAAA
+BLAST engine error: Warning: Invalid residues found at positions 26 

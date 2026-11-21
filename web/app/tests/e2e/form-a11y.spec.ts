@@ -55,8 +55,8 @@ test('a refusal of "Additional options" marks its text box, which points to the 
   await expect(page.locator(`#${REFUSAL}`)).toHaveText('-evalue is set in the form: Expect threshold');
   // The engine's refusal of an option typed there.
   await extra.fill('-qcov_hsp_perc 50 -foo');
-  await expect(validation).toHaveText("error: unknown option or argument '-foo'; use -help for CLI v2 syntax");
-  await expectRefused(extra, "error: unknown option or argument '-foo'; use -help for CLI v2 syntax");
+  await expect(validation).toHaveText("error: unknown option or argument '-foo'; use -help to list the options");
+  await expectRefused(extra, "error: unknown option or argument '-foo'; use -help to list the options");
   // A message about its text.
   await extra.fill("-strand 'plus");
   await expect(validation).toHaveText("Additional options: a quote (') is not closed");
@@ -225,6 +225,7 @@ test('two "?" helps are not open by the pointer at once, where one "?" is inside
 
 /** A run of the FakeEngine (or the engine) with HSPs on three subjects, shown on the results page. */
 async function threeSubjects(page: Page): Promise<void> {
+  // Test protein: N-terminal part of E. coli AsnA (RefSeq NP_418200.1), Cys51 changed to Ala.
   const protein = 'MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQFEVVHSLAKWKRQTLGQHDFSAGEGLYTHMKALRPDEDRLSPLHSVYVDQWDWERVMGDGERQFSTLKSTVEAIWAGIKATEAAVSEEFGLAPFLPDQIHFVHSQELLSRYPDLDAKGRERAIAKDLGAVFLVGIGGKLSDGHRHDVRAPDYDDWEAVTLGEQ';
   await openSearch(page);
   await program(page, 'blastp');

@@ -349,7 +349,7 @@ describe('pointers of 2 GiB or more', () => {
     const response = TWO_GIB + PAGE;
     const failure = TWO_GIB + 2 * PAGE;
     const json = new TextEncoder().encode('{"handle": 7, "records": [{"id": "a", "length": 4}]}');
-    const message = new TextEncoder().encode('BLAST query error');
+    const message = new TextEncoder().encode('LOSAT query error');
     const calls: number[][] = [];
     const ref: { abi?: ReactorAbi } = {};
     const exports = {
@@ -359,8 +359,8 @@ describe('pointers of 2 GiB or more', () => {
         calls.push([ptr, len]);
         return 0;
       },
-      losat_web2_register: (programPtr: number, programLen: number, role: number, ptr: number, len: number) => {
-        calls.push([programPtr, programLen, role, ptr, len]);
+      losat_web2_register: (programPtr: number, programLen: number, role: number, dataLoaders: number, ptr: number, len: number) => {
+        calls.push([programPtr, programLen, role, dataLoaders, ptr, len]);
         new Uint8Array(memory.buffer, response, json.length).set(json);
         ref.abi!.emit(2, signed(response), json.length);
         return 7;
@@ -375,12 +375,12 @@ describe('pointers of 2 GiB or more', () => {
     } as unknown as AbiExports;
     ref.abi = new ReactorAbi(exports);
     expect(signed(input)).toBeLessThan(0);
-    expect(ref.abi.register('blastn', 1, new Uint8Array([62, 97, 10, 65]))).toEqual({ handle: 7, records: [{ id: 'a', length: 4 }] });
+    expect(ref.abi.register('blastn', 1, true, new Uint8Array([62, 97, 10, 65]))).toEqual({ handle: 7, records: [{ id: 'a', length: 4 }] });
     // The input bytes are at the unsigned address (the last argument written stays there).
     expect([...new Uint8Array(memory.buffer, input, 4)]).toEqual([62, 97, 10, 65]);
     // The engine receives the pointers it gave; as i32 they are the same bits.
-    expect(calls[0]!.map(signed)).toEqual([signed(input), 6, 1, signed(input), 4]);
-    expect(ref.abi.validate(['blastn'])).toBe('BLAST query error');
+    expect(calls[0]!.map(signed)).toEqual([signed(input), 6, 1, 1, signed(input), 4]);
+    expect(ref.abi.validate(['blastn'])).toEqual({ ok: false, message: 'LOSAT query error' });
   });
 });
 
@@ -433,8 +433,8 @@ describe.skipIf(reactors === undefined)('the serial reactor with its heap above 
   /** SHA-256 and length of every stream of one search. */
   function search(abi: ReactorAbi, testCase: (typeof CASES)[number]): Record<number, { sha256: string; bytes: number }> {
     const [program, ...options] = testCase.argv;
-    const query = abi.register(program, ROLE_QUERY, readFileSync(resolve(LOSAT, testCase.query)));
-    const subject = abi.register(program, ROLE_SUBJECT, readFileSync(resolve(LOSAT, testCase.subject)));
+    const query = abi.register(program, ROLE_QUERY, true, readFileSync(resolve(LOSAT, testCase.query)));
+    const subject = abi.register(program, ROLE_SUBJECT, true, readFileSync(resolve(LOSAT, testCase.subject)));
     const streams = new Map<number, Uint8Array[]>();
     const argv = [program, '-query', testCase.query, '-subject', testCase.subject, ...options, '-num_threads', '1'];
     abi.run(argv, query.handle, subject.handle, (stream, bytes) => streams.set(stream, [...(streams.get(stream) ?? []), bytes.slice()]));

@@ -46,13 +46,14 @@ describe('verification table', () => {
   it('has the default options of every program and task compared in outfmt 0, 6 and 7', () => {
     // A run with the defaults is Supported (WA-RS-03): the outfmt 7 rows of the default BLASTN
     // task (megablast), of default BLASTX and of tblastn-fast are the def7.* rows of outfmt0_manifest.tsv;
-    // blastp-short's are score.blastp.short.def.* (series SC, SC3).
+    // blastp-short's are score.blastp.short.def.* (series SC, SC3); rmblastn's are rm.def.* (line RG X6).
     for (const program of PROGRAMS) expect(formatsOf(program, []), program).toEqual([0, 6, 7]);
     const tasks = [
       ['blastn', 'megablast'],
       ['blastn', 'blastn'],
       ['blastn', 'dc-megablast'],
       ['blastn', 'blastn-short'],
+      ['blastn', 'rmblastn'],
       ['blastp', 'blastp-fast'],
       ['blastp', 'blastp-short'],
       ['blastx', 'blastx-fast'],

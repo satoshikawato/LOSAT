@@ -2,14 +2,6 @@
 //! (`LOSAT_X_BPIHPOOL`, `src/algorithm/blastp/blast_engine/x_ih_pool.rs`) on whole searches.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:336-341
-//! ```c
-//!     if (num >= num_avail) {
-//!         if (init_hitlist->do_not_reallocate)
-//!             return FALSE;
-//!         num_avail *= 2;
-//!         match_array = (BlastInitHSP *)
-//!             realloc(match_array, num_avail * sizeof(BlastInitHSP));
-//! ```
 //! The switch is in the strict set (`src/utils/xswitch.rs`): it is on unless its variable is
 //! `0`. It changes only where a subject's array of initial hits lives once it passes NCBI's first
 //! size (100 hits), never which hits it holds or their order (the lib tests of `x_ih_pool`), so the

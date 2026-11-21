@@ -85,7 +85,7 @@ fn run(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:662-673 (`ThrowIfInvalidTask`,
-// quoted at `TaskParser::check`). The command line's parser refuses a task that is not TBLASTN's;
+// cited at `TaskParser::check`). The command line's parser refuses a task that is not TBLASTN's;
 // a caller of `run_local` (or `run_local_database`, before it opens the database) that sets one
 // itself gets NCBI's error for a name NCBI does not know, LOSAT's for another program's task,
 // instead of a search with the default task.
@@ -113,6 +113,7 @@ fn a_task_that_is_not_tblastns_is_refused() {
                     sink: OutputSink::Writer(&mut sink),
                 }],
                 diagnostics: &mut diagnostics,
+                later_warnings: None,
                 hits: None,
                 observer: None,
             };
@@ -134,21 +135,8 @@ fn a_task_that_is_not_tblastns_is_refused() {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/app/blast/blast_formatter.cpp:429-467
-// ```c
-// CRef<CSearchResultSet> results = m_RmtBlast->GetResultSet();
-// formatter.PrintProlog();
-// ...
-// ITERATE(CSearchResultSet, result, *results) {
-//     ...
-//         formatter.PrintOneResultSet(**result, queries);
-//     ...
-// }
-// ```
-// NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:1443-1451
-// ```c
-// if (results.HasWarnings()) ERR_POST(Warning << results.GetWarningStrings());
-// ```
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:429-467
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1443-1451
 // The saved NCBI outputs name the inputs by the paths NCBI read, so those paths are
 // passed as the display names.
 #[test]
@@ -198,9 +186,11 @@ fn formats_of_one_search_equal_the_ncbi_bytes_and_warn_once() {
         for (index, outfmt) in SAVED_FORMATS.iter().enumerate() {
             let expected = std::fs::read(repository(&format!("{stem}.fmt{outfmt}{suffix}")))
                 .expect("saved NCBI output");
+            // The saved bytes are NCBI's; LOSAT writes them in its own words.
+            let expected = crate::wording::losat_output_bytes(&expected).into_owned();
             assert!(
                 together.outputs[index] == expected,
-                "{stem} outfmt {outfmt} differs from the saved NCBI bytes"
+                "{stem} outfmt {outfmt} differs from the saved NCBI bytes in LOSAT's words"
             );
         }
         let expected_stderr = stderr_suffix.map_or_else(Vec::new, |stderr_suffix| {
@@ -279,15 +269,7 @@ impl Drop for Inputs {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/app/blast/tblastn_app.cpp:289-301
-// ```c
-// CLocalBlast lcl_blast(query_factory, m_OptsHndl, db_adapter);
-// results = lcl_blast.Run();
-// ...
-// ITERATE(CSearchResultSet, result, *results) {
-//     formatter.PrintOneResultSet(**result, query);
-// }
-// ```
+// NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:289-301
 // This is the engine half of the test of the same name in `LOSAT/tests/run_local_tblastn.rs`,
 // which compares every format with the CLI run of that format through `losat::api`. Here the
 // reference is the same entry in process: a search that requests every format together, with the
@@ -325,12 +307,7 @@ fn every_format_of_one_search_matches_the_cli_run_of_that_format() {
     );
 }
 
-// NCBI reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp:3971-3980
-// ```c++
-// x_ShowAlnvecInfo(out,aln_vec_info,show_defline);
-// ...
-// out<<"\n";
-// ```
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3971-3980
 #[test]
 fn observer_ranges_are_exact_rows_and_sections_of_the_same_hsp() {
     let inputs = Inputs::new();
@@ -352,20 +329,14 @@ fn observer_ranges_are_exact_rows_and_sections_of_the_same_hsp() {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2657-2660
-// ```c
-// arg_desc.AddDefaultKey(kArgOutputFormat, "format",
-//                        kOutputFormatDescription,
-//                        CArgDescriptions::eString,
-//                        NStr::IntToString(dft_outfmt));
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2657-2660
 #[test]
 fn unsupported_formats_fail_before_searching() {
     let inputs = Inputs::new();
     let queries = queries(&inputs.query);
     let subjects = subjects(&inputs.subject);
     let (query_name, subject_name) = inputs.names();
-    // NCBI blast_args.cpp:2845-2851: a custom specification of outfmt 0 is ignored, so
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2845-2851: a custom specification of outfmt 0 is ignored, so
     // "0 qseqid" is outfmt 0. A delimiter that a field separates its entries with is NCBI's
     // error (blast_args.cpp:2753-2792, `s_ValidateCustomDelim`). SAM (17) is BLASTN's alone (TBLASTN
     // writes 1 to 4 since line RG T3b).
@@ -385,6 +356,7 @@ fn unsupported_formats_fail_before_searching() {
                 },
             ],
             diagnostics: &mut diagnostics,
+            later_warnings: None,
             hits: None,
             observer: None,
         };
@@ -399,7 +371,7 @@ fn unsupported_formats_fail_before_searching() {
     }
 }
 
-// NCBI derives the hit list size per output format (blast_args.cpp:2894-2973): with
+// NCBI derives the hit list size per output format (c++/src/algo/blast/blastinput/blast_args.cpp:2894-2973): with
 // `-num_descriptions 3` it is 250 for outfmt 0 and 500 for outfmt 6. One run searches once,
 // so formats that need different hit list sizes are refused before anything is written
 // (`blastinput/report_counts.rs`), while formats of one hit list size still share a run.
@@ -423,6 +395,7 @@ fn formats_needing_different_hit_list_sizes_are_refused() {
                 })
                 .collect(),
             diagnostics: &mut diagnostics,
+            later_warnings: None,
             hits: None,
             observer: None,
         };
@@ -469,7 +442,7 @@ fn formats_needing_different_hit_list_sizes_are_refused() {
     }
 }
 
-// NCBI reference: c++/src/objmgr/util/create_defline.cpp:219-312 (x_CleanAndCompress) and
+// NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:219-312 (x_CleanAndCompress) and
 // 4066 (`NStr::HtmlDecode`): NCBI reads past the end of the title `, ,` (and crashes when
 // such a subject has hits) and decodes `&amp;` in outfmt 0; the tabular formats print
 // only the ids. LOSAT writes the title `, ` stopped at the end of the string (approved

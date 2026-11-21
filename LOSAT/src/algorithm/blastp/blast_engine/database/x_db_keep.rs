@@ -24,7 +24,7 @@
 //! the window), and otherwise waits, so the results held for the merge stay within W blocks, without
 //! the end of a round of `search_blocks_of` where every worker waits for the round's last block and
 //! the merge. NCBI's threads allocate their search structures
-//! once each (`BlastCoreAuxStruct`, `aux_struct->offset_pairs`, quoted at `BlastpSubjectScratch`)
+//! once each (`BlastCoreAuxStruct`, `aux_struct->offset_pairs`, cited at `BlastpSubjectScratch`)
 //! and read the sequences in the mapped files.
 //!
 //! Why the reports do not change: each block is searched as a task of `search_blocks_of` searches
@@ -150,15 +150,15 @@ fn x_read_search_block_into(
     kept: &mut Vec<u8>,
     program: &str,
 ) -> Result<SequenceBlock> {
-    let mut block = db
+    let block = db
         .x_read_block_into(range, kept)
         .map_err(|error| crate::algorithm::common::database::search_read_error(error, program))?;
-    prepare_search_block(&mut block, db.oid_map(), program)?;
+    prepare_search_block(&block, db.oid_map(), program)?;
     Ok(block)
 }
 
 // No NCBI counterpart: where LOSAT keeps its scratch and its block bytes (NCBI's
-// `BlastCoreAuxStruct` per thread, quoted at `BlastpSubjectScratch`).
+// `BlastCoreAuxStruct` per thread, cited at `BlastpSubjectScratch`).
 /// A worker's search scratch and block buffer.
 struct XKit {
     scratch: BlastpSubjectScratch,
@@ -365,7 +365,7 @@ fn x_window_worker<S, K, P>(
     }
 }
 
-// No NCBI counterpart: scheduling of the preliminary loop (NCBI's loop is quoted above
+// No NCBI counterpart: scheduling of the preliminary loop (NCBI's loop is cited above
 // `search_blocks`); it changes no value NCBI computes.
 /// The parallel stage of `x_search_blocks_kept`: the blocks of at most `block_bytes` searched by
 /// one task per worker, in the window `size` (module header).
@@ -440,7 +440,7 @@ where
 }
 
 // No NCBI counterpart: scheduling of the preliminary loop and where its buffers are kept (NCBI's
-// loop is quoted above `search_blocks`); it changes no value NCBI computes.
+// loop is cited above `search_blocks`); it changes no value NCBI computes.
 /// EXPERIMENT (LOSAT_X_BPDBKEEP): `search_blocks_of` (the same blocks of at most `block_bytes`)
 /// with one scratch and one block buffer per worker for the whole stage, the blocks taken in a
 /// window of `blocks_per_thread` blocks per worker (module header).
@@ -517,80 +517,5 @@ where
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    struct NoSink;
-    impl PrelimSink for NoSink {
-        fn add(&mut self, _result: &mut BlastpSubjectResult) {}
-    }
-
-    fn window(sink: &mut NoSink, width: usize, floor: usize, max: usize) -> XWindow<'_, NoSink> {
-        XWindow {
-            next_ordinal: 0,
-            diag_offset: 0,
-            taken: 0,
-            merged: 0,
-            slots: std::iter::repeat_with(|| None).take(width).collect(),
-            floor,
-            waiting_bytes: 0,
-            max_waiting_bytes: max,
-            sink,
-            error: None,
-            stopped: false,
-        }
-    }
-
-    // Past the width nothing is taken; past the floor only while few bytes wait; within the floor
-    // always, so the oldest block not merged always runs.
-    #[test]
-    fn the_window_narrows_to_the_floor_while_many_bytes_wait() {
-        let mut sink = NoSink;
-        let mut w = window(&mut sink, 64, 8, 1000);
-        w.merged = 5;
-        for (past, bytes, full) in [
-            (0, 5000, false),
-            (7, 5000, false),
-            (8, 5000, true),
-            (8, 1000, false),
-            (63, 1000, false),
-            (63, 1001, true),
-            (64, 0, true),
-        ] {
-            w.taken = w.merged + past;
-            w.waiting_bytes = bytes;
-            assert_eq!(w.full(), full, "past {past} bytes {bytes}");
-        }
-    }
-
-    #[test]
-    fn the_size_of_the_window_without_and_with_the_switch() {
-        let narrow = XWindowSize::of(4, 8, false);
-        assert_eq!((narrow.floor, narrow.width), (32, 32));
-        assert_eq!(narrow.max_waiting_bytes, usize::MAX);
-        let wide = XWindowSize::of(4, 8, true);
-        assert_eq!((wide.floor, wide.width), (32, 256));
-        assert_eq!(wide.max_waiting_bytes, 4 << 20);
-    }
-
-    #[test]
-    fn the_bytes_of_a_block_count_its_vectors() {
-        use std::mem::size_of;
-        let mut result = BlastpSubjectResult::new(0);
-        let list = BlastpHspList {
-            oid: 0,
-            query_index: 0,
-            hsps: Vec::with_capacity(10),
-            best_evalue: 0.0,
-        };
-        let hsps = list.hsps.capacity() * size_of::<XPrelimHsp>();
-        result.x_compact_hsp_lists = Vec::with_capacity(2);
-        let lists =
-            result.x_compact_hsp_lists.capacity() * size_of::<(usize, BlastpHspList<XPrelimHsp>)>();
-        result.x_compact_hsp_lists.push((0, list));
-        let block = vec![result];
-        let blocks = block.capacity() * size_of::<BlastpSubjectResult>();
-        assert_eq!(x_kept_bytes(&Ok(block)), hsps + lists + blocks);
-        assert_eq!(x_kept_bytes(&Err(anyhow::anyhow!("failed"))), 0);
-    }
-}
+#[path = "x_db_keep_tests.rs"]
+mod tests;

@@ -1,7 +1,7 @@
 // Engine side of the run output channel (ports/run-output.ts). The Engine worker (S09) and
 // the FakeEngine write through it.
 import type { RunOutput } from '../../domain/output-format.js';
-import type { MessagePlace } from '../../domain/run-files.js';
+import type { OutputPlace } from '../../domain/run-files.js';
 import type { OutputStream, RunOutputMessage } from '../../ports/run-output.js';
 
 export class RunOutputWriter {
@@ -34,7 +34,7 @@ export class RunOutputWriter {
    * searches, also where none of its chunks was sent. The chunks sent still count in the totals of
    * `end`.
    */
-  discard(stream: RunOutput, error: MessagePlace): void {
+  discard(stream: RunOutput, error: OutputPlace): void {
     if (this.ended) throw new Error('the output of this run has already ended');
     const message: RunOutputMessage = { type: 'discard', stream, error };
     this.port.postMessage(message);
@@ -42,9 +42,21 @@ export class RunOutputWriter {
 
   /** Sends `end`. Call it once, after the last chunk and before the run reports success. */
   end(): void {
+    this.finish('end');
+  }
+
+  /**
+   * Sends `fail` in place of `end`: the engine failed the run after it began to write. Call it once,
+   * before the run's rejection, which then says so (`withRunOutputFailed`, ports/engine.ts).
+   */
+  fail(): void {
+    this.finish('fail');
+  }
+
+  private finish(type: 'end' | 'fail'): void {
     if (this.ended) throw new Error('the output of this run has already ended');
     this.ended = true;
-    const message: RunOutputMessage = { type: 'end', chunks: this.chunks, bytes: this.bytes };
+    const message: RunOutputMessage = { type, chunks: this.chunks, bytes: this.bytes };
     this.port.postMessage(message);
   }
 }

@@ -9,14 +9,7 @@
 //! `prd_q3.faa`'s three queries warns once for it (`tests/db_search/README.md`, review 2 of
 //! pssmread; NCBI 2.17.0's merged stream of the same runs is byte-identical to LOSAT's).
 //!
-//! NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:304-308 and 562
-//! ```c++
-//!                         pssm =
-//!                          ComputePssmForNextIteration(*seq, aln, psi_opts, scope,
-//!                                      results_1st_query.GetAncillaryData());
-//!     ...
-//!         formatter.PrintEpilog(opt);
-//! ```
+//! NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:304-309 and 562
 
 use std::process::{Command, Stdio};
 

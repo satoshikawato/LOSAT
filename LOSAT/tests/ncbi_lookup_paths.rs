@@ -107,11 +107,11 @@ fn matrix_runs() -> [(&'static str, Vec<String>); 2] {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:1301-1381
-// (`BlastFindMatrixPath`, quoted at `ApplicationSettings::matrix_file`). NCBI BLAST+ 2.17.0
+// (`BlastFindMatrixPath`, cited at `ApplicationSettings::matrix_file`). NCBI BLAST+ 2.17.0
 // (`-matrix mymat`, env parity S4): with the file `MYMAT` in `BLASTMAT`, in `BLASTMAT/nt`, in a
 // directory of `NCBI_DATA_PATH` or `NCBI_CONFIG__NCBI__DATA`, or in `./data`, tblastx writes its
 // first line and two empty ones and aborts (rc 134); with `BLASTMAT` naming a file, or no file,
-// it stops with "BLAST engine error: Error: Unknown error code -1" (rc 3); an empty query reads
+// it stops with "LOSAT engine error: Error: Unknown error code -1" (rc 3); an empty query reads
 // no matrix (rc 0). blastx `-ungapped -comp_based_stats 0` does the same.
 #[test]
 fn a_matrix_file_that_ncbi_reads_is_refused() {
@@ -187,7 +187,7 @@ fn a_matrix_file_that_ncbi_reads_is_refused() {
             } else {
                 assert_eq!(output.status.code(), Some(3), "{program} {at}: {stderr}");
                 assert!(
-                    stderr.starts_with("BLAST engine error: -matrix mymat"),
+                    stderr.starts_with("LOSAT engine error: -matrix mymat"),
                     "{program} {at}: {stderr}"
                 );
             }
@@ -225,7 +225,7 @@ fn a_matrix_file_that_ncbi_reads_is_refused() {
                 "{program} {envs:?}: {stderr}"
             );
             assert!(
-                stderr.starts_with("BLAST engine error: Error: Unknown error code -1"),
+                stderr.starts_with("LOSAT engine error: Error: Unknown error code -1"),
                 "{program} {envs:?}: {stderr}"
             );
             check_library(&with_query, &at, &envs, &output, program);
@@ -299,7 +299,7 @@ fn a_matrix_file_that_ncbi_cannot_open_gives_ncbis_error() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert_eq!(output.status.code(), Some(3), "{program}: {stderr}");
         assert!(
-            stderr.starts_with("BLAST engine error: Error: Unknown error code -1"),
+            stderr.starts_with("LOSAT engine error: Error: Unknown error code -1"),
             "{program}: {stderr}"
         );
     }
@@ -308,7 +308,7 @@ fn a_matrix_file_that_ncbi_cannot_open_gives_ncbis_error() {
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/metareg.cpp:331-396 and
-// c++/src/algo/blast/api/blast_usage_report.cpp:195-209 (quoted at `registry_search_path`).
+// c++/src/algo/blast/api/blast_usage_report.cpp:195-209 (cited at `registry_search_path`).
 // NCBI BLAST+ 2.17.0 (env parity S1, a malformed `.ncbirc` or `blastn.ini`, whose read NCBI
 // reports): blastn run by a link on `PATH` reads one in the link's directory only with
 // `BLAST_USAGE_REPORT=false` or `=0`; with an empty `NCBI_CONFIG_PATH` it reads none, not even
@@ -403,24 +403,28 @@ fn registry_files_are_looked_for_where_ncbi_looks() {
 #[cfg(unix)]
 const NCBI_BUILD_ROOT: &str = "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../..";
 
-/// NCBI's post of one read of a `.ncbirc` with the line `garbage` at `line`.
+/// NCBI's post of one read of a `.ncbirc` with the line `garbage` at `line`, in LOSAT's words
+/// (NCBI's text through `losat::wording`, AGENTS.md rule 8).
 #[cfg(unix)]
 fn critical(line: usize) -> String {
-    format!(
+    temp_support::expected_losat_text(format!(
         "Critical: (110.6) CNcbiRegistry: Syntax error in system-wide configuration file: NCBI C++ Exception:\n    T0 \"{NCBI_BUILD_ROOT}/src/corelib/ncbireg.cpp\", line 722: Error: (CRegistryException::eEntry) ncbi::IRWRegistry::x_Read() - Invalid registry entry format: 'garbage' (m_Pos = {line})\n\n"
-    )
+    ))
 }
 
-/// NCBI's report of a `<program>.ini` of the line `garbage`, which ends the program.
+/// NCBI's report of a `<program>.ini` of the line `garbage`, which ends the program, in LOSAT's
+/// words (NCBI's text through `losat::wording`, AGENTS.md rule 8).
 #[cfg(unix)]
-const INI_REPORT: &str = "Error: (CRegistryException::eEntry) Invalid registry entry format: 'garbage' (m_Pos = 1)\nError: (106.15) Application's initialization failed (CRegistryException::eEntry) Invalid registry entry format: 'garbage' (m_Pos = 1)\n";
+fn ini_report() -> String {
+    temp_support::expected_losat_text("Error: (CRegistryException::eEntry) Invalid registry entry format: 'garbage' (m_Pos = 1)\nError: (106.15) Application's initialization failed (CRegistryException::eEntry) Invalid registry entry format: 'garbage' (m_Pos = 1)\n".to_string())
+}
 
 /// The name of the system-wide registry file on Unix (Windows names it `ncbi.ini`).
 #[cfg(unix)]
 const NCBIRC: &str = ".ncbirc";
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:1650-1663 and
-// c++/src/corelib/ncbiapp.cpp:669-674 (quoted at `ncbi_environment::ApplicationStart`). NCBI
+// c++/src/corelib/ncbiapp.cpp:669-674 (cited at `ncbi_environment::ApplicationStart`). NCBI
 // BLAST+ 2.17.0, the official Linux x64 release (env parity g_reg probes of 2026-11-11: run.sh
 // `partial` with and without BLAST_USAGE_REPORT=false, x_version, x_help, x_dontuse, x_inidont,
 // x_ini, x_iniUR, x_inibothbad): a `.ncbirc` that NCBI reports is posted by each of its two reads
@@ -476,7 +480,11 @@ fn a_malformed_registry_file_is_reported_as_ncbi_reports_it() {
     assert_eq!(off.stdout, reference.stdout);
     let version = run_in(losat, &["blastn", "-version"], &dir, &[], b"");
     assert_eq!(text(&version.stderr), critical(3));
-    assert!(text(&version.stdout).starts_with("blastn: 2.17.0+\n"));
+    assert!(text(&version.stdout).starts_with(concat!(
+        "blastn: LOSAT ",
+        env!("CARGO_PKG_VERSION"),
+        "\n"
+    )));
     assert_eq!(version.status.code(), Some(0));
     let help = run_in(losat, &["blastn", "-h"], &dir, &[], b"");
     assert_eq!(text(&help.stderr), both);
@@ -489,7 +497,7 @@ fn a_malformed_registry_file_is_reported_as_ncbi_reports_it() {
     assert_eq!(ini_off.stdout, reference.stdout);
     // A malformed blastn.ini, also for `-h`; without the usage report's read, its report twice.
     fs::write(&ini, "garbage\n").unwrap();
-    let report = format!("{}{INI_REPORT}", critical(3));
+    let report = format!("{}{}", critical(3), ini_report());
     for words in [&args[..], &["blastn", "-h"]] {
         let failed = run_in(losat, words, &dir, &[], b"");
         assert_eq!(failed.status.code(), Some(2), "{failed:?}");
@@ -498,7 +506,7 @@ fn a_malformed_registry_file_is_reported_as_ncbi_reports_it() {
     }
     let failed = run_in(losat, &args, &dir, &[("BLAST_USAGE_REPORT", "false")], b"");
     assert_eq!(failed.status.code(), Some(2));
-    assert_eq!(text(&failed.stderr), INI_REPORT.repeat(2));
+    assert_eq!(text(&failed.stderr), ini_report().repeat(2));
     let _ = fs::remove_dir_all(&dir);
 }
 
@@ -558,7 +566,8 @@ fn the_registry_messages_go_to_the_log_of_blastdbcmd_and_makeblastdb() {
     // A malformed blastdbcmd.ini.
     let ini = dir.join("blastdbcmd.ini");
     fs::write(&ini, "[x\n").unwrap();
-    let section = "Error: (CRegistryException::eSection) Invalid registry section (']' is missing): `[x' (m_Pos = 1)\nError: (106.15) Application's initialization failed (CRegistryException::eSection) Invalid registry section (']' is missing): `[x' (m_Pos = 1)\n";
+    // NCBI's text in LOSAT's words (`losat::wording`, AGENTS.md rule 8).
+    let section = temp_support::expected_losat_text("Error: (CRegistryException::eSection) Invalid registry section (']' is missing): `[x' (m_Pos = 1)\nError: (106.15) Application's initialization failed (CRegistryException::eSection) Invalid registry section (']' is missing): `[x' (m_Pos = 1)\n".to_string());
     let failed = run_in(losat, &with_log, &dir, &[], b"");
     assert_eq!(failed.status.code(), Some(2), "{failed:?}");
     assert!(failed.stdout.is_empty());
@@ -606,7 +615,11 @@ fn the_registry_messages_go_to_the_log_of_blastdbcmd_and_makeblastdb() {
         b"",
     );
     assert_eq!(text(&version.stderr), critical(1));
-    assert!(text(&version.stdout).starts_with("makeblastdb: 2.17.0+\n"));
+    assert!(text(&version.stdout).starts_with(concat!(
+        "makeblastdb: LOSAT ",
+        env!("CARGO_PKG_VERSION"),
+        "\n"
+    )));
     assert_eq!(logged(), critical(1));
     fs::remove_file(dir.join(NCBIRC)).unwrap();
     // Without a message, `-version` still makes the file.
@@ -634,12 +647,16 @@ fn the_registry_messages_go_to_the_log_of_blastdbcmd_and_makeblastdb() {
         b"",
     );
     assert_eq!(text(&version.stderr), critical(1));
-    assert!(text(&version.stdout).starts_with("blastn: 2.17.0+\n"));
+    assert!(text(&version.stdout).starts_with(concat!(
+        "blastn: LOSAT ",
+        env!("CARGO_PKG_VERSION"),
+        "\n"
+    )));
     assert_eq!(logged(), critical(1));
     let _ = fs::remove_dir_all(&dir);
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:1181-1187 (quoted at
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:1181-1187 (cited at
 // `ncbi_environment::replays_to_stderr`). NCBI BLAST+ 2.17.0, the official Linux x64 release
 // (env parity review G, F1; g_reg probe_h of 2026-11-12): with a malformed `<program>.ini` and a
 // `-logfile` target, blastn, blastp, blastx, tblastn and psiblast post the report to the target
@@ -657,7 +674,8 @@ fn a_malformed_ini_with_a_logfile_is_replayed_where_ncbi_replays_it() {
         let _ = fs::remove_file(&log);
         content
     };
-    let section = "Error: (CRegistryException::eSection) Invalid registry section (']' is missing): `[x' (m_Pos = 1)\nError: (106.15) Application's initialization failed (CRegistryException::eSection) Invalid registry section (']' is missing): `[x' (m_Pos = 1)\n";
+    // NCBI's text in LOSAT's words (`losat::wording`, AGENTS.md rule 8).
+    let section = temp_support::expected_losat_text("Error: (CRegistryException::eSection) Invalid registry section (']' is missing): `[x' (m_Pos = 1)\nError: (106.15) Application's initialization failed (CRegistryException::eSection) Invalid registry section (']' is missing): `[x' (m_Pos = 1)\n".to_string());
     let u = critical(1);
     fs::write(dir.join(NCBIRC), "garbage\n").unwrap();
     for program in [
@@ -713,9 +731,9 @@ fn a_malformed_ini_with_a_logfile_is_replayed_where_ncbi_replays_it() {
     let _ = fs::remove_dir_all(&dir);
 }
 
-// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:926-1022 (quoted at
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:926-1022 (cited at
 // `ncbi_environment::preparse` and `ncbi_environment::conf_file_path`) and
-// c++/src/algo/blast/api/blast_usage_report.cpp:195-206 (quoted at
+// c++/src/algo/blast/api/blast_usage_report.cpp:195-206 (cited at
 // `ncbi_environment::usage_report_reads_ncbirc`). NCBI BLAST+ 2.17.0 (env parity review G, F2-F4):
 // `-conffile other.ini` loads that file in place of a malformed `blastn.ini`, which is not read
 // (line RG item E1); `BLAST_USAGE_REPORT=abc` aborts before `-version` (LOSAT refuses there);

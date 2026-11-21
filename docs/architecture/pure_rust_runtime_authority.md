@@ -44,7 +44,7 @@ for this directory.
 
 ## Pinned source
 
-The NCBI source quoted throughout the repository (`AGENTS.md`, source comments, and these
+The NCBI source cited throughout the repository (`AGENTS.md`, source comments, and these
 documents) is commit `598d8ae6a72b923127ba2fbfaffd48e4c83bfbf4` of
 `https://github.com/satoshikawato/ncbi-blast` (commit subject `ncbi-blast-2.17.0+-src`,
 2025-12-21). That commit is an import of NCBI's official BLAST+ 2.17.0 source tarball
@@ -74,8 +74,8 @@ The source scan classified imported and implemented `extern "C"`/`extern
 "system"` functions, `#[link]`/`link_name`, direct `libc` and dynamic-loader
 tokens, production `Command` use for NCBI executable names, `c_void`/raw C
 types, native build tools, `qsort` declarations/calls, and production callers.
-Rust comments are removed before matching so embedded NCBI snippets are not
-mistaken for LOSAT implementation.
+Rust comments are removed before matching so the NCBI names that comments cite
+are not mistaken for LOSAT implementation.
 
 ## Classification summary
 
@@ -87,7 +87,7 @@ mistaken for LOSAT implementation.
 | Cargo `links` review signal | Two resolved normal-dependency findings, `rayon-core 1.13.0` and `wasm-bindgen-shared 0.2.121`; both reviewed as non-algorithm integration below. |
 | Production subprocess/dynamic load | None. `LOSAT/src` contains no `Command` launch of `blastn`, `blastp`, `tblastx`, or `makeblastdb`, and no `libloading`, `dlopen`, `LoadLibrary`, or direct `libc::` call. |
 | Test/diagnostic/certification oracle | NCBI executable use is outside production. The release-readiness workflow's package-manager NCBI jobs are explicitly named diagnostics and are not frozen release certification. |
-| Documentation/comment/false positive | Program-name strings, NCBI C snippets, internal `NonNull<c_void>` storage, and Rust `extern "C" fn` exports/callbacks do not import native behavior. |
+| Documentation/comment/false positive | Program-name strings, NCBI names in comments, internal `NonNull<c_void>` storage, and Rust `extern "C" fn` exports/callbacks do not import native behavior. |
 
 The live audit matches the revised authoritative inventory: four production
 delegation groups, four imported C `qsort` declarations, five direct C calls,

@@ -6,14 +6,6 @@
 //! e-values and bit scores read `kbp_gap_psi` (`sbp->kbp_gap`, `Blast_QueryIsPssm`).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1486-1500
-//! ```c
-//!     if (ext_params->options->compositionBasedStats > 0 ||
-//!         ext_params->options->eTbackExt == eSmithWatermanTbck) {
-//!         status =
-//!             Blast_RedoAlignmentCore_MT(program_number, ...);
-//!     } else {
-//!         BlastSeqSrcGetSeqArg seq_arg;
-//! ```
 //!
 //! As for BLASTP, a list's traceback reads nothing another list writes and the hit lists' order
 //! is total, so every list is inserted into the one hit list of the query in the lists' order, at
@@ -87,18 +79,7 @@ struct Traced {
 impl<R: PssmRows> PssmTraceback0<'_, R> {
     /// The final hit list of the query from its preliminary lists, which it takes.
     ///
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1690-1699
-    /// ```c
-    ///                 /* Free HSP list if all HSPs have been deleted. */
-    ///                 batch->hsplist_array[hsplist_itr] = NULL;
-    ///                 if (hsp_list->hspcnt == 0) {
-    ///                     hsp_list = Blast_HSPListFree(hsp_list);
-    ///                 }
-    ///                 else {
-    ///                     Blast_HSPResultsInsertHSPList(thread_data->tld[tid]->results, hsp_list,
-    ///                                   hit_params->options->hitlist_size);
-    ///                 }
-    /// ```
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1690-1706
     pub(crate) fn run(
         &self,
         preliminary_hit_lists: &mut [Option<BlastpHitList>],
@@ -131,7 +112,7 @@ impl<R: PssmRows> PssmTraceback0<'_, R> {
             }
         }
         let mut traced = self.trace_lists(work, pool)?;
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:591-608 (quoted at
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:591-608 (cited at
         // `HitList::put_in_traceback_order` of BLASTN): the traceback reads the preliminary lists by
         // OID (blast_traceback.c:1500-1520, 1700-1707). Where the results are sorted at the end
         // (blast_traceback.c:1768-1772), the order of insertion changes nothing; where they are not,
@@ -202,11 +183,6 @@ impl<R: PssmRows> PssmTraceback0<'_, R> {
     /// `None` when no HSP is left.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:367-373
-    /// ```c
-    ///    tree = Blast_IntervalTreeInit(0, query_blk->length + 1,
-    ///                                  0, (subject_length > 0 ? subject_length :
-    ///                                  subject_blk->length / CODON_LENGTH) + 1);
-    /// ```
     fn trace_list(
         &self,
         oid: u32,
@@ -251,27 +227,8 @@ impl<R: PssmRows> PssmTraceback0<'_, R> {
     /// or with psiblast's `-sum_stats true` the linked sets' e-values (large gaps only), the
     /// e-value reap, the bit scores.
     ///
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:213-216
-    /// ```c
-    ///    /* Relink and rereap the HSP list, if needed. */
-    ///    if (hit_params->link_hsp_params) {
-    ///       BLAST_LinkHsps(program_number, hsp_list, query_info, subject_length,
-    ///                      sbp, hit_params->link_hsp_params, kGapped);
-    ///    } else {
-    /// ```
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:213-217
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:229-250
-    /// ```c
-    ///       Blast_HSPListGetEvalues(program_number, query_info, subject_length,
-    ///                               hsp_list, kGapped, FALSE, sbp, 0,
-    ///                               scale_factor);
-    ///    }
-    ///
-    ///    Blast_HSPListReapByEvalue(hsp_list, hit_params->options);
-    ///    ...
-    ///    s_HSPListRescaleScores(hsp_list, score_params->scale_factor);
-    ///    ...
-    ///    Blast_HSPListGetBitScores(hsp_list, kGapped, sbp);
-    /// ```
     fn post_traceback_update(&self, hsp_list: &mut BlastpHspList, subject_length: usize) {
         match &self.link {
             Some((params, context)) => {
@@ -291,11 +248,6 @@ impl<R: PssmRows> PssmTraceback0<'_, R> {
         }
         reap_hsplist_by_evalue(hsp_list, self.expect_value);
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1926-1928
-        // ```c
-        //       hsp->bit_score =
-        //          (hsp->score*kbp[hsp->context]->Lambda -
-        //           kbp[hsp->context]->logK) / NCBIMATH_LN2;
-        // ```
         let log_k = self.karlin.k.glibc_ln();
         for hsp in &mut hsp_list.hsps {
             hsp.bit_score =
@@ -331,19 +283,8 @@ pub(crate) struct TraceHsps<'a, R: PssmRows> {
 /// (`subject.frame`), without `AdjustSubjectRange`, inside a containment tree whose subject bound
 /// is `tree_bound`.
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:416-421
-/// ```c
-///             if (program_number == eBlastTypeRpsTblastn) {
-///                  const Int4 context = BLAST_FrameToContext(hsp->subject.frame, program_number);
-///                  subject = translation_buffer + frame_offsets[context] + 1;
-///                  subject_length = frame_offsets[context+1] - frame_offsets[context] - 1;
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:414-421
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:461-468
-/// ```c
-///          if (!kTranslateSubject && !kSmithWaterman) {
-///              AdjustSubjectRange(&s_start, &adjusted_s_length, q_start,
-///                                 query_length, &start_shift);
-/// ```
 #[derive(Clone, Copy)]
 pub(crate) enum TraceSubject<'a> {
     One(&'a [u8]),
@@ -371,11 +312,6 @@ impl<'a> TraceSubject<'a> {
 /// none was).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:367-373
-/// ```c
-///    tree = Blast_IntervalTreeInit(0, query_blk->length + 1,
-///                                  0, (subject_length > 0 ? subject_length :
-///                                  subject_blk->length / CODON_LENGTH) + 1);
-/// ```
 pub(crate) fn trace_hsps<R: PssmRows>(
     inputs: &TraceHsps<'_, R>,
     hsps: impl Iterator<Item = BlastpPreliminaryHsp>,
@@ -391,11 +327,6 @@ pub(crate) fn trace_hsps<R: PssmRows>(
     let mut stat_length = 0usize;
     for mut hsp in hsps {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:402-405
-        // ```c
-        //       if (program_number == eBlastTypeRpsBlast ||
-        //           !BlastIntervalTreeContainsHSP(tree, hsp, query_info,
-        //                                hit_options->min_diag_separation)) {
-        // ```
         if inputs.contained_before && tree.contains_hsp(&tree_hsp(&hsp), 0, 0) {
             continue;
         }
@@ -404,20 +335,6 @@ pub(crate) fn trace_hsps<R: PssmRows>(
             stat_length = subject.len();
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:436-447
-        // ```c
-        //          if (hsp->query.gapped_start == 0 &&
-        //                               hsp->subject.gapped_start == 0) {
-        //             Boolean retval =
-        //                BlastGetOffsetsForGappedAlignment(query, subject, sbp,
-        //                    hsp, &q_start, &s_start);
-        //             if (!retval)
-        //             {  /* Unable to find start for this HSP */
-        //                hsp_array[index] = Blast_HSPFree(hsp);
-        //                continue;
-        //             }
-        //             hsp->query.gapped_start = q_start;
-        //             hsp->subject.gapped_start = s_start;
-        // ```
         if hsp.gapped_query_start == 0 && hsp.gapped_subject_start == 0 {
             let Some((q_start, s_start)) = pssm_get_offsets_for_gapped_alignment(
                 inputs.rows,
@@ -433,16 +350,6 @@ pub(crate) fn trace_hsps<R: PssmRows>(
             hsp.gapped_subject_start = s_start;
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:463-473
-        // ```c
-        //          if (!kTranslateSubject && !kSmithWaterman) {
-        //              AdjustSubjectRange(&s_start, &adjusted_s_length, q_start,
-        //                                 query_length, &start_shift);
-        //              adjusted_subject = subject + start_shift;
-        //              /* Shift the gapped start in HSP structure, to compensate for
-        //                 a shift in the other direction later. */
-        //              hsp->subject.gapped_start = s_start;
-        //          }
-        // ```
         let (s_start, s_length, shift) = if translated {
             (hsp.gapped_subject_start as usize, subject.len(), 0)
         } else {
@@ -454,12 +361,6 @@ pub(crate) fn trace_hsps<R: PssmRows>(
             )
         };
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:509-512
-        // ```c
-        //            BLAST_GappedAlignmentWithTraceback(program_number, query,
-        //                  adjusted_subject, gap_align, score_params, q_start, s_start,
-        //                  query_length, adjusted_s_length,
-        //                  fence_hit);
-        // ```
         let aligned = pssm_gapped_alignment_with_traceback(
             inputs.rows,
             &subject[shift..],
@@ -472,16 +373,6 @@ pub(crate) fn trace_hsps<R: PssmRows>(
             scratch,
         );
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:583-601
-        // ```c
-        //            Blast_HSPUpdateWithTraceback(gap_align, hsp);
-        //            ...
-        //                delete_hsp = Blast_HSPTest(hsp, hit_options, align_length);
-        //            ...
-        //            if (!delete_hsp) {
-        //               Blast_HSPAdjustSubjectOffset(hsp, start_shift);
-        //               status = BlastIntervalTreeAddHSP(hsp, tree, query_info,
-        //                                          eQueryAndSubject);
-        // ```
         // `Blast_HSPTest` deletes nothing (psiblast has no percent identity or minimum hit
         // length).
         let shift = shift as i32;
@@ -498,31 +389,6 @@ pub(crate) fn trace_hsps<R: PssmRows>(
         });
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:634-692
-    // ```c
-    //        /* Remove any HSPs that share a starting or ending diagonal
-    //           with a higher-scoring HSP. */
-    //        Int4 extra_start =
-    //            Blast_HSPListPurgeHSPsWithCommonEndpoints(program_number, hsp_list, FALSE);
-    //        ...
-    //        /* Sort HSPs by score again, as the scores might have changed. */
-    //        Blast_HSPListSortByScore(hsp_list);
-    //
-    //        /* Remove any HSPs that are contained within other HSPs.
-    //           Since the list is sorted by score already, any HSP
-    //           contained by a previous HSP is guaranteed to have a
-    //           lower score, and may be purged. */
-    //        Blast_IntervalTreeReset(tree);
-    //        for (index = 0; index < hsp_list->hspcnt; index++) {
-    //            hsp = hsp_array[index];
-    //
-    //            if (BlastIntervalTreeContainsHSP(tree, hsp, query_info,
-    //                                      hit_options->min_diag_separation)) {
-    //                hsp_array[index] = Blast_HSPFree(hsp);
-    //            }
-    //            else {
-    //                status = BlastIntervalTreeAddHSP(hsp, tree, query_info,
-    //                                        eQueryAndSubject);
-    // ```
     // The purge deletes (`purge |= (program != eBlastTypeBlastn)`, blast_hits.c:2464) and
     // returns the HSP count, so the re-evaluation loop from `extra_start`
     // (blast_traceback.c:647-665) has nothing to do.
@@ -586,31 +452,7 @@ pub(super) fn preliminary_hsp(local: &BlastpHsp) -> BlastpPreliminaryHsp {
 /// `Blast_HSPGetNumIdentitiesAndPositives` on the unmasked query with the search's matrix
 /// (`sbp->matrix`; rpsblast's is BLOSUM62), with the gaps and mismatches that the reports read.
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:806-833
-/// ```c
-///       for (index=0; index<esp->size; index++)
-///       {
-///          switch (esp->op_type[index]) {
-///          case eGapAlignSub:
-///             for (i=0; i<esp->num[index]; i++) {
-///                if (*q == *s) {
-///                   num_ident++;
-///                }
-///                else if (NULL != matrix) {
-///             	   if (matrix[*q][*s] > 0)
-///             		   num_pos ++;
-///                }
-///                q++;
-///                s++;
-///             }
-///             break;
-///          case eGapAlignDel:
-///             s += esp->num[index];
-///             break;
-///          case eGapAlignIns:
-///             q += esp->num[index];
-///             break;
-/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:796-833
 pub(super) fn final_hsp(
     hsp: &BlastpPreliminaryHsp,
     edit_script: Vec<GapEditOp>,
@@ -686,56 +528,5 @@ pub(super) fn final_hsp(
 }
 
 #[cfg(test)]
-mod frame_tests {
-    use super::*;
-
-    fn hsp(frame: i32, query: (i32, i32), subject: (i32, i32), score: i32) -> BlastpPreliminaryHsp {
-        BlastpPreliminaryHsp {
-            query_start: query.0,
-            query_end: query.1,
-            subject_start: subject.0,
-            subject_end: subject.1,
-            gapped_query_start: query.0,
-            gapped_subject_start: subject.0,
-            raw_score: score,
-            query_context: 0,
-            query_frame: 0,
-            subject_frame: frame,
-            query_length: 100,
-            q_idx: 0,
-            s_idx: 0,
-        }
-    }
-
-    // blast_traceback.c:402-405 (quoted at `trace_hsps`): before each alignment of a translated
-    // subject, an HSP inside one traced before is dropped when their subject frames have the
-    // same sign (`BlastIntervalTreeContainsHSP` compares the signs only, blast_itree.c), so a
-    // frame +2 HSP inside a frame +1 one is contained and a frame -1 one is not.
-    #[test]
-    fn containment_reads_the_sign_of_the_subject_frame_only() {
-        let mut tree = BlastIntervalTree::new(0, 101, 0, 101);
-        tree.add_hsp(
-            tree_hsp(&hsp(1, (10, 60), (10, 60), 500)),
-            0,
-            IndexMethod::QueryAndSubject,
-        );
-        assert!(tree.contains_hsp(&tree_hsp(&hsp(2, (20, 40), (20, 40), 100)), 0, 0));
-        assert!(!tree.contains_hsp(&tree_hsp(&hsp(-1, (20, 40), (20, 40), 100)), 0, 0));
-        assert!(!tree.contains_hsp(&tree_hsp(&hsp(1, (5, 40), (20, 40), 100)), 0, 0));
-    }
-
-    // blast_traceback.c:416-421 (quoted at `TraceSubject`): each HSP aligns on its own frame.
-    #[test]
-    fn a_translated_subject_gives_each_hsp_its_frames_letters() {
-        let frames: [&[u8]; 6] = [b"a", b"b", b"c", b"d", b"e", b"f"];
-        let subject = TraceSubject::Frames {
-            frames: &frames,
-            tree_bound: 3,
-        };
-        let letters: Vec<&[u8]> = [1, 2, 3, -1, -2, -3]
-            .map(|frame| subject.of(frame))
-            .to_vec();
-        assert_eq!(letters, frames.to_vec());
-        assert_eq!(TraceSubject::One(b"xyz").of(0), b"xyz");
-    }
-}
+#[path = "traceback0_frame_tests.rs"]
+mod frame_tests;

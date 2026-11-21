@@ -13,29 +13,8 @@ use anyhow::{ensure, Result};
 use std::ops::Range;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:78-86
-// ```c++
-//         // multiple of 3, that way, when the nucleotide sequence(s) get(s)
-//         // split, context N%6 in one chunk will have the same frame as context
-//         // N%6 in the next chunk
-//         case eBlastx:
-//         case eTblastx:
-//             // N.B.: the splitting is done on the nucleotide query sequences,
-//             // then each of these chunks is translated
-//             retval = 10002;
-//             break;
-// ```
 pub const CHUNK_SIZE: usize = 10002;
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:62-69
-// ```c++
-//     if (Blast_QueryIsTranslated(program)) {
-//         // N.B.: this value must be divisible by 3 to work with translated
-//         // queries, as we split them in nucleotide coordinates and then do the
-//         // translation
-//         retval = 297;
-//     }
-//     _TRACE("Using overlap chunk size " << retval);
-//     return retval;
-// ```
 pub const OVERLAP_NT: usize = 297;
 
 /// The sizes when neither `CHUNK_SIZE` nor `OVERLAP_CHUNK_SIZE` is set.
@@ -63,41 +42,8 @@ fn refusal(message: impl Into<String>) -> anyhow::Error {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:54-62
-// ```c++
-// SplitQuery_GetChunkSize(EProgram program)
-// {
-//     size_t retval = 0;
-//
-//     // used for experimentation purposes
-//     char* chunk_sz_str = getenv("CHUNK_SIZE");
-//     if (chunk_sz_str && !NStr::IsBlank(chunk_sz_str)) {
-//         retval = NStr::StringToInt(chunk_sz_str);
-//         _TRACE("Using query chunk size from environment " << retval);
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:50-60
-// ```c++
-// size_t
-// SplitQuery_GetOverlapChunkSize(EBlastProgramType program)
-// {
-//     size_t retval = 100;
-//     // used for experimentation purposes
-//     char* overlap_sz_str = getenv("OVERLAP_CHUNK_SIZE");
-//     if (overlap_sz_str && !NStr::IsBlank(overlap_sz_str)) {
-//         retval = NStr::StringToInt(overlap_sz_str);
-//         _TRACE("Using overlap chunk size from environment " << retval);
-//         return retval;
-//     }
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:105-111
-// ```c++
-//     if ( !SplitQuery_ShouldSplit(program, *chunk_size,
-//                                  concatenated_query_length, num_queries)) {
-//         _TRACE("Not splitting queries");
-//         return 1;
-//     }
-//
-//     size_t overlap_size = SplitQuery_GetOverlapChunkSize(program);
-// ```
 /// The chunk size and overlap, in nucleotides, of a query batch of `query_count` queries, as
 /// NCBI's query splitter reads them for each batch before the batch's queries are set up:
 /// `CHUNK_SIZE` always, `OVERLAP_CHUNK_SIZE` only when the batch has one query
@@ -131,49 +77,6 @@ fn batch_query_count(records: &[FastaRecord], full: &PreparedQueryBatch) -> usiz
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:105-145
-// ```c++
-//     if ( !SplitQuery_ShouldSplit(program, *chunk_size,
-//                                  concatenated_query_length, num_queries)) {
-//         _TRACE("Not splitting queries");
-//         return 1;
-//     }
-//
-//     size_t overlap_size = SplitQuery_GetOverlapChunkSize(program);
-//     Uint4 num_chunks = 0;
-//
-//     _DEBUG_ARG(size_t target_chunk_size = *chunk_size);
-//
-//     // For translated queries the chunk size should be divisible by CODON_LENGTH
-//     if (Blast_QueryIsTranslated(program)) {
-//         size_t chunk_size_delta = ((*chunk_size) % CODON_LENGTH);
-//         *chunk_size -= chunk_size_delta;
-//         _ASSERT((*chunk_size % CODON_LENGTH) == 0);
-//     }
-//
-//     // Fix for small query size
-//     if ((*chunk_size) > overlap_size) {
-//        num_chunks = concatenated_query_length / ((*chunk_size) - overlap_size);
-//     }
-//
-//     // Only one chunk, just return;
-//     if (num_chunks <= 1) {
-//        *chunk_size = concatenated_query_length;
-//        return 1;
-//     }
-//
-//     // Re-adjust the chunk_size to make load even
-//     if (!Blast_QueryIsTranslated(program)) {
-//        *chunk_size = (concatenated_query_length + (num_chunks - 1) * overlap_size) / num_chunks;
-//        // Round up only if this will not decrease the number of chunks
-//        if (num_chunks < (*chunk_size) - overlap_size ) (*chunk_size)++;
-//     }
-//
-//     _TRACE("Number of chunks: " << num_chunks << "; "
-//            "Target chunk size: " << target_chunk_size << "; "
-//            "Returned chunk size: " << *chunk_size);
-//
-//     return num_chunks;
-// ```
 pub fn calculate_num_chunks(
     chunk_size: &mut u64,
     overlap: u64,
@@ -199,17 +102,6 @@ pub fn calculate_num_chunks(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:101-109
-// ```c++
-//         NCBI_THROW(CBlastException, eInvalidArgument,
-//                    "Split query chunk size must be divisible by 3");
-//     }
-//     _TRACE("Returning query chunk size " << retval << " for " << EProgramToTaskName(program));
-//     return retval;
-// }
-//
-// CLocalBlast::CLocalBlast(CRef<IQueryFactory> qf,
-//                          CRef<CBlastOptionsHandle> opts_handle,
-// ```
 pub fn validate_chunk_size(size: u64) -> Result<()> {
     ensure!(
         size.is_multiple_of(3),
@@ -219,54 +111,7 @@ pub fn validate_chunk_size(size: u64) -> Result<()> {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:161-178
-// ```c++
-//         m_SplitBlk->SetChunkBounds(chunk_num,
-//                                    TChunkRange(static_cast<unsigned int>(chunk_start), static_cast<unsigned int>(chunk_end)));
-//         _TRACE("Chunk " << chunk_num << ": ranges from " << chunk_start
-//                << " to " << chunk_end);
-//
-//         chunk_start += (m_ChunkSize - kOverlapSize);
-//         if (chunk_start > m_TotalQueryLength ||
-//             chunk_end == m_TotalQueryLength) {
-//             break;
-//         }
-//     }
-//
-//     // For purposes of having an accurate overlap size when stitching back
-//     // HSPs, save the overlap size
-//     const size_t kOverlap =
-//         Blast_QueryIsTranslated(m_Options->GetProgramType())
-//         ? kOverlapSize / CODON_LENGTH : kOverlapSize;
-//     m_SplitBlk->SetChunkOverlapSize(kOverlap);
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:365-389
-// ```c++
-//                 for (unsigned int ctx = 0; ctx < kNumContexts; ctx++) {
-//                     // handle the plus strand...
-//                     if (ctx % NUM_FRAMES < CODON_LENGTH) {
-//                         if (kStrand == eNa_strand_minus) {
-//                             m_SplitBlk->AddContextToChunk(chunk_num,
-//                                                           kInvalidContext);
-//                         } else {
-//                             m_SplitBlk->AddContextToChunk(chunk_num,
-//                                               static_cast<Int4>(kNumContexts*queries[i]+ctx));
-//                         }
-//                     } else { // handle the negative strand
-//                         if (kStrand == eNa_strand_plus) {
-//                             m_SplitBlk->AddContextToChunk(chunk_num,
-//                                                           kInvalidContext);
-//                         } else {
-//                             if (chunk_num == (size_t)last_query_chunk) {
-//                                 // last chunk doesn't have shift
-//                                 m_SplitBlk->AddContextToChunk(chunk_num,
-//                                           static_cast<Int4>(kNumContexts*queries[i]+ctx));
-//                             } else {
-//                                 m_SplitBlk->AddContextToChunk(chunk_num,
-//                                           static_cast<Int4>(kNumContexts*queries[i]+
-//                                           s_AddShift(ctx, shift)));
-//                             }
-//                         }
-// ```
 #[derive(Clone, Debug)]
 pub struct QueryChunk {
     /// Read by the tests that check the split against NCBI's chunk bounds.
@@ -281,206 +126,9 @@ pub struct QueryChunk {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:50-62
-// ```c++
-// CQuerySplitter::CQuerySplitter(CRef<IQueryFactory> query_factory,
-//                                const CBlastOptions* options)
-//     : m_QueryFactory(query_factory), m_Options(options), m_NumChunks(0),
-//     m_LocalQueryData(0), m_TotalQueryLength(0), m_ChunkSize(0)
-// {
-//     m_ChunkSize = SplitQuery_GetChunkSize(m_Options->GetProgram());
-//     m_LocalQueryData = m_QueryFactory->MakeLocalQueryData(m_Options);
-//     m_TotalQueryLength = m_LocalQueryData->GetSumOfSequenceLengths();
-//     m_NumChunks = SplitQuery_CalculateNumChunks(m_Options->GetProgramType(),
-//         &m_ChunkSize, m_TotalQueryLength, m_LocalQueryData->GetNumQueries());
-//     /* No split for ungapped mode JIRA SB-1082 */
-//     if (!options->GetGappedMode()) m_NumChunks = 1;
-//     x_ExtractCScopesAndMasks();
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:145-171
-// ```c++
-//     size_t chunk_start = 0;
-//     const size_t kOverlapSize =
-//         SplitQuery_GetOverlapChunkSize(m_Options->GetProgramType());
-//     for (size_t chunk_num = 0; chunk_num < m_NumChunks; chunk_num++) {
-//         size_t chunk_end = chunk_start + m_ChunkSize;
-//
-//         // if the chunk end is larger than the sequence ...
-//         if (chunk_end >= m_TotalQueryLength ||
-//             // ... or this is the last chunk and it didn't make it to the end
-//             // of the sequence
-//             (chunk_end < m_TotalQueryLength && (chunk_num + 1) == m_NumChunks))
-//         {
-//             // ... assign this chunk's end to the end of the sequence
-//             chunk_end = m_TotalQueryLength;
-//         }
-//
-//         m_SplitBlk->SetChunkBounds(chunk_num,
-//                                    TChunkRange(static_cast<unsigned int>(chunk_start), static_cast<unsigned int>(chunk_end)));
-//         _TRACE("Chunk " << chunk_num << ": ranges from " << chunk_start
-//                << " to " << chunk_end);
-//
-//         chunk_start += (m_ChunkSize - kOverlapSize);
-//         if (chunk_start > m_TotalQueryLength ||
-//             chunk_end == m_TotalQueryLength) {
-//             break;
-//         }
-//     }
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:300-335
-// ```c++
-// static inline unsigned int
-// s_AddShift(unsigned int context, int shift)
-// {
-//     _ASSERT(context == 3 || context == 4 || context == 5);
-//     _ASSERT(shift == 0 || shift == 1 || shift == -1);
-//
-//     unsigned int retval;
-//     if (shift == 0) {
-//         retval = context;
-//     } else if (shift == 1) {
-//         retval = context == 3 ? 5 : context - shift;
-//     } else if (shift == -1) {
-//         retval = context == 5 ? 3 : context - shift;
-//     } else {
-//         abort();
-//     }
-//     return retval;
-// }
-//
-// /**
-//  * @brief Retrieve the shift for the negative strand
-//  *
-//  * @param query_length length of the query [in]
-//  *
-//  * @return shift (either 1, -1, or 0)
-//  */
-// static inline int
-// s_GetShiftForTranslatedNegStrand(size_t query_length)
-// {
-//     int retval;
-//     switch (query_length % CODON_LENGTH) {
-//     case 1: retval = -1; break;
-//     case 2: retval = 1; break;
-//     case 0: default: retval = 0; break;
-//     }
-//     return retval;
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:724-836
-// ```c++
-//             size_t correction = 0;
-//             const int starting_chunk =
-//                 ctx_translator.GetStartingChunk(chunk_num, ctx);
-//             const int absolute_context =
-//                 ctx_translator.GetAbsoluteContext(chunk_num, ctx);
-//             const int last_query_chunk = qdpc.GetLastChunk(chunk_num, ctx);
-//
-//             if (absolute_context == kInvalidContext ||
-//                 starting_chunk == kInvalidContext) {
-//                 _ASSERT( !chunk_qinfo[chunk_num]->contexts[ctx].is_valid );
-//                 // INT4_MAX is the sentinel value for invalid contexts
-//                 m_SplitBlk->AddContextOffsetToChunk(chunk_num, INT4_MAX);
-//                 continue;
-//             }
-//
-//             // The corrections for the contexts corresponding to the negative
-//             // strand in the last chunk of a query sequence are all 0
-//             if (!s_IsPlusStrand(chunk_qinfo[chunk_num], ctx) &&
-//                 (chunk_num == (size_t)last_query_chunk) &&
-//                 (ctx % NUM_FRAMES >= 3)) {
-//                 correction = 0;
-//                 goto error_check;
-//             }
-//
-//             // The corrections for the contexts corresponding to the plus
-//             // strand are always the same, so only calculate the first one
-//             if (s_IsPlusStrand(chunk_qinfo[chunk_num], ctx) &&
-//                 (ctx % NUM_FRAMES == 1 || ctx % NUM_FRAMES == 2)) {
-//                 correction = m_SplitBlk->GetContextOffsets(chunk_num).back();
-//                 goto error_check;
-//             }
-//
-//             // If the query length is divisible by CODON_LENGTH, the
-//             // corrections for all contexts corresponding to a given strand are
-//             // the same, so only calculate the first one
-//             if ((qdpc.GetQueryLength(chunk_num, ctx) % CODON_LENGTH == 0) &&
-//                 (ctx % NUM_FRAMES != 0) && (ctx % NUM_FRAMES != 3)) {
-//                 correction = m_SplitBlk->GetContextOffsets(chunk_num).back();
-//                 goto error_check;
-//             }
-//
-//             // If the query length % CODON_LENGTH == 1, the corrections for the
-//             // first two contexts of the negative strand are the same, and the
-//             // correction for the last context is one more than that.
-//             if ((qdpc.GetQueryLength(chunk_num, ctx) % CODON_LENGTH == 1) &&
-//                 !s_IsPlusStrand(chunk_qinfo[chunk_num], ctx)) {
-//
-//                 if (ctx % NUM_FRAMES == 4) {
-//                     correction =
-//                         m_SplitBlk->GetContextOffsets(chunk_num).back();
-//                     goto error_check;
-//                 } else if (ctx % NUM_FRAMES == 5) {
-//                     correction =
-//                         m_SplitBlk->GetContextOffsets(chunk_num).back() + 1;
-//                     goto error_check;
-//                 }
-//             }
-//
-//             // If the query length % CODON_LENGTH == 2, the corrections for the
-//             // last two contexts of the negative strand are the same, which is
-//             // one more that the first context on the negative strand.
-//             if ((qdpc.GetQueryLength(chunk_num, ctx) % CODON_LENGTH == 2) &&
-//                 !s_IsPlusStrand(chunk_qinfo[chunk_num], ctx)) {
-//
-//                 if (ctx % NUM_FRAMES == 4) {
-//                     correction =
-//                         m_SplitBlk->GetContextOffsets(chunk_num).back() + 1;
-//                     goto error_check;
-//                 } else if (ctx % NUM_FRAMES == 5) {
-//                     correction =
-//                         m_SplitBlk->GetContextOffsets(chunk_num).back();
-//                     goto error_check;
-//                 }
-//             }
-//
-//             if (s_IsPlusStrand(chunk_qinfo[chunk_num], ctx)) {
-//
-//                 for (int c = static_cast<int>(chunk_num); c != starting_chunk; c--) {
-//                     size_t prev_len = s_GetAbsoluteContextLength(chunk_qinfo,
-//                                                          c - 1,
-//                                                          ctx_translator,
-//                                                          absolute_context);
-//                     size_t curr_len = s_GetAbsoluteContextLength(chunk_qinfo, c,
-//                                                          ctx_translator,
-//                                                          absolute_context);
-//                     size_t overlap = min(kOverlap, curr_len);
-//                     correction += prev_len - min(overlap, prev_len);
-//                 }
-//
-//             } else {
-//
-//                 size_t subtrahend = 0;
-//
-//                 for (int c = static_cast<int>(chunk_num); c >= starting_chunk && c >= 0; c--) {
-//                     size_t prev_len = s_GetAbsoluteContextLength(chunk_qinfo,
-//                                                          c - 1,
-//                                                          ctx_translator,
-//                                                          absolute_context);
-//                     size_t curr_len = s_GetAbsoluteContextLength(chunk_qinfo,
-//                                                          c,
-//                                                          ctx_translator,
-//                                                          absolute_context);
-//                     size_t overlap = min(kOverlap, curr_len);
-//                     subtrahend += (curr_len - min(overlap, prev_len));
-//                 }
-//                 correction =
-//                     global_qinfo->contexts[absolute_context].query_length -
-//                     subtrahend;
-//             }
-//
-// error_check:
-//             _ASSERT((chunk_qinfo[chunk_num]->contexts[ctx].is_valid));
-//             m_SplitBlk->AddContextOffsetToChunk(chunk_num, static_cast<Int4>(correction));
-// ```
 pub fn split_queries(
     records: &[FastaRecord],
     full: &PreparedQueryBatch,
@@ -535,26 +183,7 @@ pub fn split_queries(
         start..end
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:190-201
-    // ```c++
-    //     BlastSeqSrc* seqsrc =
-    //         BlastSeqSrcCopy(full_data->m_SeqSrc->GetPointer());
-    //     CRef<SBlastSetupData> setup_data =
-    //         BlastSetupPreliminarySearchEx(
-    //                 qf, options,
-    //                 CRef<objects::CPssmWithParameters>(),
-    //                 seqsrc, num_threads);
-    //     BlastSeqSrcResetChunkIterator(seqsrc);
-    //     setup_data->m_InternalData->m_SeqSrc.Reset(new TBlastSeqSrc(seqsrc,
-    //                                                BlastSeqSrcFree));
-    //
-    //     _ASSERT(setup_data->m_QuerySplitter->IsQuerySplit() == false);
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:206-208
-    // ```c++
-    //     // 5. Create the lookup table
-    //     if ( !retval->m_QuerySplitter->IsQuerySplit() ) {
-    //         LookupTableWrap* lut =
-    // ```
     // Each chunk's setup builds its own query splitter with the same sizes; when it would split
     // the chunk again (an overlap of half the chunk size or more), the release build skips the
     // chunk's lookup table and stops with a null reference. This also covers a loop that ends
@@ -570,15 +199,6 @@ pub fn split_queries(
     // A chunk's query setup (translation, SEG) reads only its own slice of the query, so the chunks
     // can be prepared on the search pool; the corrections below still run in chunk order.
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:237-249
-    // ```c
-    //         for (Uint4 i = 0; i < query_splitter->GetNumberOfChunks(); i++) {
-    // ...
-    //                 CRef<IQueryFactory> chunk_qf =
-    //                     query_splitter->GetQueryFactoryForChunk(i);
-    // ...
-    //                 CRef<ILocalQueryData> query_data(
-    //                         chunk_qf->MakeLocalQueryData( &*m_Options ) );
-    // ```
     // NCBI prepares each query chunk in turn (query factory for the chunk, then its local query
     // data, which holds the translation and the filtering). make_chunk is the same preparation for
     // one chunk, as a closure so that several chunks can be prepared at once.
@@ -625,15 +245,6 @@ pub fn split_queries(
     };
     let mut chunks: Vec<QueryChunk> = Vec::new();
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:237-249
-    // ```c
-    //         for (Uint4 i = 0; i < query_splitter->GetNumberOfChunks(); i++) {
-    // ...
-    //                 CRef<IQueryFactory> chunk_qf =
-    //                     query_splitter->GetQueryFactoryForChunk(i);
-    // ...
-    //                 CRef<ILocalQueryData> query_data(
-    //                         chunk_qf->MakeLocalQueryData( &*m_Options ) );
-    // ```
     // Dispatch point: inside the search pool of 2+ threads, the chunks are prepared in
     // parallel; otherwise the loop below prepares them one after another as NCBI does. The chunks
     // are collected in index order and the corrections that follow still run in chunk order.
@@ -709,12 +320,6 @@ fn x_chunk_slice() -> bool {
 /// The lowercase masks of `whole` inside `start..end`, moved to the chunk's coordinates.
 fn x_chunk_masks(whole: &FastaRecord, start: usize, end: usize) -> Vec<(i32, i32)> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:278-281
-    // ```c++
-    //             CRef<CSeq_loc> mask_query_loc(new CSeq_loc);
-    //             s_SetSplitQuerySeqInterval(chunk, query_range, 0, mask_query_loc);
-    //             TMaskedQueryRegions split_mask =
-    //                 m_UserSpecifiedMasks[qindex].RestrictToSeqInt(mask_query_loc->GetInt());
-    // ```
     // Each run is one letter longer inside a chunk, and a run that starts on the chunk's last
     // letter is dropped (`restrict_masks`). With `-query_loc` NCBI restricts the record's runs by
     // the chunk in the searched letters' coordinates, so a run survives only in
@@ -800,42 +405,6 @@ fn x_chunk_record_from_copy(whole: &FastaRecord, start: usize, end: usize) -> Fa
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:477-510
-// ```c++
-// static string s_GetPrintableSequence(const Uint1* seq, size_t len, bool is_prot)
-// {
-//     string retval;
-//     for (size_t i = 0; i < len; i++) {
-//         retval.append(1, (is_prot
-//                       ? NCBISTDAA_TO_AMINOACID[seq[i]]
-//                       : BLASTNA_TO_IUPACNA[seq[i]]));
-//     }
-//     return retval;
-// }
-//
-// /** Auxiliary function to validate the context offset corrections
-//  * @param global global query sequence data [in]
-//  * @param chunk sequence data for chunk [in]
-//  * @param len length of the data to compare [in]
-//  * @param is_prot whether the sequence is protein or not [in]
-//  * @return true if sequence data is identical, false otherwise
-//  */
-// static bool cmp_sequence(const Uint1* global, const Uint1* chunk, size_t len,
-//                          bool is_prot)
-// {
-//     bool retval = true;
-//
-//     for (size_t i = 0; i < len; i++) {
-//         if (global[i] != chunk[i]) {
-//             retval = false;
-//             break;
-//         }
-//     }
-//
-//     if (retval == false) {
-//         _TRACE("Comparing global: '"
-//                << s_GetPrintableSequence(global, len, is_prot) << "'");
-//         _TRACE("with chunk: '"
-// ```
 fn absolute_length(chunks: &[QueryChunk], index: isize, absolute: i32) -> i32 {
     if index < 0 {
         return 0;
@@ -850,52 +419,6 @@ fn absolute_length(chunks: &[QueryChunk], index: isize, absolute: i32) -> i32 {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1488-1531
-// ```c++
-// s_BlastMergeTwoHSPs(BlastHSP* hsp1, BlastHSP* hsp2, Boolean allow_gap)
-// {
-//    ASSERT(!hsp1->gap_info || !hsp2->gap_info);
-//
-//    /* do not merge off-diagonal hsps for ungapped search */
-//    if (!allow_gap &&
-//        hsp1->subject.offset - hsp2->subject.offset -hsp1->query.offset + hsp2->query.offset)
-//    {
-//        return FALSE;
-//    }
-//
-//    if(hsp1->subject.frame != hsp2->subject.frame)
-// 	   return FALSE;
-//
-//    /* combine the boundaries of the two HSPs,
-//       assuming they intersect at all */
-//    if (CONTAINED_IN_HSP(hsp1->query.offset, hsp1->query.end,
-//                         hsp2->query.offset,
-//                         hsp1->subject.offset, hsp1->subject.end,
-//                         hsp2->subject.offset) ||
-//        CONTAINED_IN_HSP(hsp1->query.offset, hsp1->query.end,
-//                         hsp2->query.end,
-//                         hsp1->subject.offset, hsp1->subject.end,
-//                         hsp2->subject.end)) {
-//
-// 	  double score_density =  (hsp1->score + hsp2->score) *(1.0) /
-// 			                  ((hsp1->query.end - hsp1->query.offset) +
-// 			                   (hsp2->query.end - hsp2->query.offset));
-//       hsp1->query.offset = MIN(hsp1->query.offset, hsp2->query.offset);
-//       hsp1->subject.offset = MIN(hsp1->subject.offset, hsp2->subject.offset);
-//       hsp1->query.end = MAX(hsp1->query.end, hsp2->query.end);
-//       hsp1->subject.end = MAX(hsp1->subject.end, hsp2->subject.end);
-//       if (hsp2->score > hsp1->score) {
-//           hsp1->query.gapped_start = hsp2->query.gapped_start;
-//           hsp1->subject.gapped_start = hsp2->subject.gapped_start;
-// 	  hsp1->score = hsp2->score;
-//       }
-//
-//       hsp1->score = MAX((int) (score_density *(hsp1->query.end - hsp1->query.offset)), hsp1->score);
-//       return TRUE;
-//    }
-//
-//    return FALSE;
-// }
-// ```
 // The divisor is never 0 here, unlike in TBLASTX's merge across subject chunks
 // (`ChunkMergeUndefined`): only the one-hit word finder's ungapped HSPs can have a length of 0 or
 // less, and an ungapped search is never split (`split_queries`, split_query_cxx.cpp:60-61), so
@@ -921,182 +444,5 @@ pub(crate) fn merge_two(a: &mut PreliminaryHsp, b: &PreliminaryHsp) -> bool {
 }
 
 #[cfg(test)]
-mod x_chunk_record_tests {
-    use super::{
-        prepare_queries, split_queries, x_chunk_record, x_chunk_record_from_copy, FastaRecord,
-        DEFAULT_SIZES,
-    };
-    use crate::algorithm::blastx::input::InputWarning;
-    use crate::blastinput::fasta_reader::RecordSource;
-
-    /// A query of 30,000 letters of no repeat in its frames, with masks at the chunks' borders.
-    fn whole() -> FastaRecord {
-        FastaRecord {
-            internal_id: "Query_1".to_string(),
-            title: b"long query".to_vec(),
-            sequence: (0..30_000u32)
-                .map(|k| b"ACGT"[(k.wrapping_mul(2_654_435_761) >> 30) as usize])
-                .collect(),
-            lowercase_masks: vec![(0, 9), (100, 299), (9_990, 10_010), (29_990, 29_999)],
-            warnings: vec![InputWarning {
-                line: 3,
-                kind: "defline_id",
-                positions: vec![7],
-                text: b"a warning".to_vec(),
-            }],
-            source: Some(Box::new(RecordSource {
-                defline: b">long query".to_vec(),
-                ..RecordSource::default()
-            })),
-            around: None,
-            skipped: None,
-        }
-    }
-
-    // LOSAT_X_BXCHUNKSLICE: the record without the copy equals the one from the copy in every
-    // field, at ranges that hold, cross and miss the masks.
-    #[test]
-    fn a_chunks_record_equals_the_one_cut_from_a_copy() {
-        let whole = whole();
-        for (start, end) in [
-            (0, 10_002),
-            (9_705, 19_707),
-            (10, 100),
-            (299, 300),
-            (300, 9_000),
-            (29_000, 30_000),
-        ] {
-            let new = x_chunk_record(&whole, start, end);
-            let old = x_chunk_record_from_copy(&whole, start, end);
-            assert_eq!(format!("{new:?}"), format!("{old:?}"), "{start}..{end}");
-            assert_eq!(new.sequence.len(), end - start);
-        }
-    }
-
-    // LOSAT_X_BXCHUNKSLICE: `split_queries` does split this query, and each chunk holds what a
-    // record cut from a copy prepares, masks included.
-    #[test]
-    fn a_split_querys_chunks_are_prepared_as_from_a_copy() {
-        let whole = whole();
-        let options = super::super::stage_c_tests::options();
-        let records = std::slice::from_ref(&whole);
-        let full = prepare_queries(records, &options).unwrap();
-        let chunks = split_queries(records, &full, &options, DEFAULT_SIZES).unwrap();
-        assert!(chunks.len() > 1, "{} chunks", chunks.len());
-        for chunk in &chunks {
-            let (start, end) = (chunk.range.start, chunk.range.end);
-            let old = x_chunk_record_from_copy(&whole, start, end);
-            let old = prepare_queries(&[old], &options).unwrap();
-            let new = &chunk.prepared;
-            assert_eq!(new.original_lengths, old.original_lengths, "{start}..{end}");
-            assert_eq!(new.sequence_start, old.sequence_start, "{start}..{end}");
-            assert_eq!(
-                new.sequence_start_nomask, old.sequence_start_nomask,
-                "{start}..{end}"
-            );
-            assert_eq!(new.lookup_segments, old.lookup_segments, "{start}..{end}");
-        }
-    }
-
-    /// `whole` cut `offset` letters into its record, keeping the record's letters: `before` lower
-    /// case letters end on the letter before the interval.
-    fn cut_whole(mut whole: FastaRecord, offset: usize, before: usize) -> FastaRecord {
-        let mut uncut = vec![b'A'; offset];
-        uncut[offset - before..].make_ascii_lowercase();
-        uncut.extend_from_slice(&whole.sequence);
-        for &(left, right) in &whole.lowercase_masks {
-            uncut[offset + left as usize..=offset + right as usize].make_ascii_lowercase();
-        }
-        let source = whole.source.as_deref_mut().unwrap();
-        source.cut_from = offset;
-        source.uncut_length = uncut.len();
-        source.uncut = Some(uncut);
-        whole
-    }
-
-    // A chunk restricts the runs it reads from its letters in the record and the one before
-    // them as it would restrict all the runs of the record, also runs that cross the ends of those
-    // letters, at offsets 0, 1 and 2,500.
-    #[test]
-    fn a_chunks_runs_read_near_it_restrict_as_all_the_records_runs() {
-        use crate::algorithm::blastn::query_split::{restrict_record_masks, ChunkQuery};
-        use crate::utils::dust::MaskedInterval;
-        let mut whole = whole();
-        whole
-            .lowercase_masks
-            .extend([(9_700, 9_710), (19_405, 19_415), (19_700, 19_720)]);
-        whole.lowercase_masks.sort_unstable();
-        for (offset, before) in [(0, 0), (1, 1), (2_500, 0), (2_500, 1), (2_500, 3)] {
-            let cut = cut_whole(whole.clone(), offset, before);
-            let letters = cut.source.as_deref().unwrap().uncut.as_deref().unwrap();
-            let runs: Vec<_> = crate::algorithm::common::masks::lowercase_runs(letters)
-                .into_iter()
-                .map(|(a, b)| MaskedInterval::new(a as usize, b as usize + 1))
-                .collect();
-            for (start, end) in [
-                (0, 10_002),
-                (9_705, 19_707),
-                (19_410, 30_000),
-                (99, 101),
-                (299, 300),
-                (9_701, 9_702),
-            ] {
-                let part = ChunkQuery {
-                    query: 0,
-                    from: start,
-                    to: end,
-                };
-                let all: Vec<_> = restrict_record_masks(&runs, &part, offset)
-                    .into_iter()
-                    .map(|mask| (mask.start as i32, mask.end as i32 - 1))
-                    .collect();
-                assert_eq!(
-                    x_chunk_record(&cut, start, end).lowercase_masks,
-                    all,
-                    "offset {offset} before {before} {start}..{end}"
-                );
-            }
-        }
-    }
-
-    // `-query_loc`: a record cut 2,500 letters into its record keeps a run in a chunk only in
-    // `[start + 2,500, end - 1]` of the record (the run in the last chunk's last letters is
-    // dropped, those inside stay), the run that ends on the letter before the interval masks the
-    // first chunk's first letter (a record without its whole letters cannot), and no chunk copies
-    // the record's whole letters.
-    #[test]
-    fn a_cut_records_chunks_restrict_the_runs_in_the_record() {
-        let mut whole = whole();
-        whole.lowercase_masks.remove(0);
-        let plain: Vec<_> = [(9_705, 19_707), (29_000, 30_000)]
-            .iter()
-            .map(|&(start, end)| x_chunk_record(&whole, start, end).lowercase_masks)
-            .collect();
-        let whole = cut_whole(whole, 2_500, 3);
-        let mut runs_cut_only = whole.clone();
-        runs_cut_only.source.as_deref_mut().unwrap().uncut = None;
-        let first = x_chunk_record(&whole, 0, 10_002);
-        assert_eq!(first.lowercase_masks, vec![(0, 0), (100, 300)]);
-        assert_eq!(
-            x_chunk_record(&runs_cut_only, 0, 10_002).lowercase_masks,
-            vec![(100, 300)]
-        );
-        let inside = x_chunk_record(&whole, 9_705, 19_707);
-        assert_eq!(inside.lowercase_masks, plain[0]);
-        assert!(!plain[1].is_empty());
-        let last = x_chunk_record(&whole, 29_000, 30_000);
-        assert!(last.lowercase_masks.is_empty());
-        for chunk in [first, inside, last] {
-            let source = chunk.source.as_deref().unwrap();
-            assert!(source.uncut.is_none());
-            assert_eq!(
-                (
-                    source.cut_from,
-                    source.uncut_length,
-                    chunk.placement().offset
-                ),
-                (2_500, 32_500, 2_500)
-            );
-        }
-    }
-}
+#[path = "split_x_chunk_record_tests.rs"]
+mod x_chunk_record_tests;

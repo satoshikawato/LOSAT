@@ -6,12 +6,12 @@ LOSAT runs as a native program on five platforms, as a WebAssembly (WASI) comman
 
 | Platform | File | Status in v0.2.0 |
 |:---|:---|:---|
-| Linux x86_64 | `LOSAT-0.2.0-x86_64-unknown-linux-gnu.tar.gz` | Supported: matches NCBI BLAST+ 2.17.0 on the release test set |
+| Linux x86_64 | `LOSAT-0.2.0-x86_64-unknown-linux-gnu.tar.gz` | Supported: matches NCBI BLAST+ 2.17.0 on the release test set (apart from the version line, which names LOSAT) |
 | Linux aarch64 | `LOSAT-0.2.0-aarch64-unknown-linux-gnu.tar.gz` | Supported |
 | Windows x86_64 | `LOSAT-0.2.0-x86_64-pc-windows-msvc.zip` | Supported |
 | macOS arm64 | `LOSAT-0.2.0-aarch64-apple-darwin.tar.gz` | Supported |
 | macOS x86_64 | `LOSAT-0.2.0-x86_64-apple-darwin.tar.gz` | Supported |
-| WASI serial (`wasm32-wasip1`) | `LOSAT-0.2.0-wasm32-wasip1.tar.gz` | Supported: matches NCBI BLAST+ 2.17.0 on the release test set |
+| WASI serial (`wasm32-wasip1`) | `LOSAT-0.2.0-wasm32-wasip1.tar.gz` | Supported: matches NCBI BLAST+ 2.17.0 on the release test set (apart from the version line, which names LOSAT) |
 | WASI threads (`wasm32-wasip1-threads`) | `LOSAT-0.2.0-wasm32-wasip1-threads.tar.gz` | Supported: tested in CI, outside the release's NCBI parity claim |
 | Web GUI (browser) | not a release file | Preview: outside the release's NCBI parity claim |
 
@@ -57,7 +57,7 @@ A WASI module sees only what its host gives it.
 - **Files.** The host must open the directories the module reads and writes (a preopened directory). The release tests give the module `/`, so absolute and relative file names work as they do natively.
 - **Working directory.** Pass the directory you start in as the environment variable `PWD`. Relative file names, and the `New DB name:` that `makeblastdb` prints, start from `PWD`. Without `PWD` they start from `/`.
 - **Time zone.** Pass `TZ`, or give the module the zone files (`/etc/localtime` and `/usr/share/zoneinfo`). `makeblastdb` then writes local times. Without them it writes UTC.
-- **Temporary files.** A WASI command has no temporary directory. A search program normally decompresses a `.gz`, `.bz2` or `.zst` input into a temporary file first; on WASI it stops with an error instead. Decompress the file yourself, or pipe it to `-query -`.
+- **Temporary files.** A search program decompresses a `.gz`, `.bz2` or `.zst` input into a temporary file beside the input. A WASI command has no temporary directory to fall back on, so if the input's folder refuses the file, it stops with an error. Give the module a writable folder for the input, or pipe the data to `-query -`.
 - **Memory.** A module can grow past 2 GiB. A host must then pass pointers and lengths to WASI calls as unsigned 32-bit numbers. Node's `node:wasi` refuses the signed values that the plain WebAssembly interface gives for 2 GiB and above, so the repository's Node.js runner (below) converts them.
 
 ### Run with Node.js

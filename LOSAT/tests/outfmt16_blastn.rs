@@ -18,7 +18,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
 mod temp_support;
-use temp_support::{home_and_worker_log, Finished, RunFiles};
+use temp_support::{
+    expected_losat_bytes, expected_losat_text, home_and_worker_log, Finished, RunFiles,
+};
 
 fn fixtures() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/outfmt16")
@@ -103,7 +105,7 @@ fn args<'a>(query: &'a str, mode: &str, threads: &'a str, format: &'a str) -> Ve
 }
 
 fn frozen(name: &str) -> String {
-    String::from_utf8(fs::read(fixtures().join(name)).unwrap()).unwrap()
+    expected_losat_text(String::from_utf8(fs::read(fixtures().join(name)).unwrap()).unwrap())
 }
 
 /// Design §5.2 row 22 for BLASTN (`badbatch_blastn_*`): with `BATCH_SIZE=100` every query is a
@@ -125,7 +127,7 @@ fn a_failed_batch_keeps_the_db_report_and_loses_the_held_subject_report() {
                 let stderr = String::from_utf8_lossy(&output.stderr);
                 assert_eq!(output.status.code(), Some(1), "{mode} {format}: {stderr}");
                 assert!(
-                    stderr.starts_with("BLAST query error: CFastaReader: Near line 13"),
+                    stderr.starts_with("LOSAT query error: CFastaReader: Near line 13"),
                     "{mode} {format}: {stderr}"
                 );
                 assert_eq!(
@@ -167,7 +169,7 @@ fn a_first_batch_that_fails_to_read_leaves_the_prolog_alone() {
                 let stderr = String::from_utf8_lossy(&output.stderr);
                 assert_eq!(output.status.code(), Some(1), "{mode} {format}: {stderr}");
                 assert!(
-                    stderr.starts_with("BLAST query error: CFastaReader: Near line 13"),
+                    stderr.starts_with("LOSAT query error: CFastaReader: Near line 13"),
                     "{mode} {format}: {stderr}"
                 );
                 assert_eq!(
@@ -389,12 +391,14 @@ fn a_file_sink_holds_the_document_of_standard_output() {
     let query = tests.join("fasta/outfmt0/x16n_q.fna");
     let subject = tests.join("fasta/outfmt0/x16n_s.fna");
     for format in ["15", "16"] {
-        let expected = fs::read(
-            tests
-                .join("fixtures/outfmt0")
-                .join(format!("sa.x16.blastn.minus.{format}.out")),
-        )
-        .unwrap();
+        let expected = expected_losat_bytes(
+            fs::read(
+                tests
+                    .join("fixtures/outfmt0")
+                    .join(format!("sa.x16.blastn.minus.{format}.out")),
+            )
+            .unwrap(),
+        );
         for threads in ["1", "4", "8", "16"] {
             let scratch = temp_dir("file_sink");
             let out = scratch.join("report.out");
@@ -436,8 +440,12 @@ fn equals_frozen(stem: &str, query: &str, extra: &[&str], env: &[(&str, &str)], 
     for format in ["15", "16"] {
         for mode in ["sub", "db"] {
             let name = format!("{stem}_{mode}_{format}");
-            let out = fs::read(dir.join(format!("{name}.out"))).unwrap();
-            let err = fs::read(dir.join(format!("{name}.err"))).unwrap_or_default();
+            let out = expected_losat_bytes(fs::read(dir.join(format!("{name}.out"))).unwrap());
+            // NCBI's bytes in LOSAT's words (`losat::wording`, AGENTS.md rule 8).
+            let err = losat::wording::losat_output_bytes(
+                &fs::read(dir.join(format!("{name}.err"))).unwrap_or_default(),
+            )
+            .into_owned();
             for threads in ["1", "4", "8", "16"] {
                 let mut args = args(query, mode, threads, format);
                 args.extend(extra);

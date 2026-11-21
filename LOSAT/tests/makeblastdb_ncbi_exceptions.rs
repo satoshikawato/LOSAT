@@ -94,16 +94,16 @@ const MAP: &str = "BLASTDB_LMDB_MAP_SIZE";
 const TXN: &str = "MAX_LMDB_TXN_ENTRY";
 
 const CASES: [Case; 15] = [
-    creation("mapsz_abc_1seq", MAP, "abc", "BLAST Database creation error: Cannot convert string 'abc' to Uint8\n"),
+    creation("mapsz_abc_1seq", MAP, "abc", "LOSAT database creation error: Cannot convert string 'abc' to Uint8\n"),
     case("mapsz_abc_2seq", MAP, "abc", "Error: NCBI C++ Exception:\n    T0 \"{ROOT}/src/corelib/ncbistr.cpp\", line 908: Error: (CStringException::eConvert) ncbi::NStr::StringToUInt8() - Cannot convert string 'abc' to Uint8 (m_Pos = 0)\n\n"),
-    creation("mapsz_plus_1seq", MAP, "+", "BLAST Database creation error: Cannot convert string '+' to Uint8\n"),
+    creation("mapsz_plus_1seq", MAP, "+", "LOSAT database creation error: Cannot convert string '+' to Uint8\n"),
     case("mapsz_plus_2seq", MAP, "+", "Error: NCBI C++ Exception:\n    T0 \"{ROOT}/src/corelib/ncbistr.cpp\", line 895: Error: (CStringException::eConvert) ncbi::NStr::StringToUInt8() - Cannot convert string '+' to Uint8 (m_Pos = 1)\n\n"),
-    creation("mapsz_1x_1seq", MAP, "1x", "BLAST Database creation error: Cannot convert string '1x' to Uint8\n"),
+    creation("mapsz_1x_1seq", MAP, "1x", "LOSAT database creation error: Cannot convert string '1x' to Uint8\n"),
     case("mapsz_1x_2seq", MAP, "1x", "Error: NCBI C++ Exception:\n    T0 \"{ROOT}/src/corelib/ncbistr.cpp\", line 908: Error: (CStringException::eConvert) ncbi::NStr::StringToUInt8() - Cannot convert string '1x' to Uint8 (m_Pos = 1)\n\n"),
     // The fast conversion's overflow names no ", overflow".
-    creation("mapsz_ovf_1seq", MAP, "99999999999999999999", "BLAST Database creation error: Cannot convert string '99999999999999999999' to Uint8\n"),
+    creation("mapsz_ovf_1seq", MAP, "99999999999999999999", "LOSAT database creation error: Cannot convert string '99999999999999999999' to Uint8\n"),
     case("mapsz_ovf_2seq", MAP, "99999999999999999999", "Error: NCBI C++ Exception:\n    T0 \"{ROOT}/src/corelib/ncbistr.cpp\", line 912: Error: (CStringException::eConvert) ncbi::NStr::StringToUInt8() - Cannot convert string '99999999999999999999' to Uint8 (m_Pos = 19)\n\n"),
-    creation("txn_abc_1seq", TXN, "abc", "BLAST Database creation error: Cannot convert string 'abc' to Int8\n"),
+    creation("txn_abc_1seq", TXN, "abc", "LOSAT database creation error: Cannot convert string 'abc' to Int8\n"),
     case("txn_abc_2seq", TXN, "abc", "Error: NCBI C++ Exception:\n    T0 \"{ROOT}/src/corelib/ncbistr.cpp\", line 861: Error: (CStringException::eConvert) ncbi::NStr::StringToInt8() - Cannot convert string 'abc' to Int8 (m_Pos = 0)\n\n"),
     case("txn_endptr_2seq", TXN, "-1x", "Error: NCBI C++ Exception:\n    T0 \"{ROOT}/src/corelib/ncbistr.cpp\", line 870: Error: (CStringException::eConvert) ncbi::NStr::StringToInt8() - Cannot convert string '-1x' to Int8 (m_Pos = 2)\n\n"),
     case("txn_intovf_2seq", TXN, "99999999999", "Error: NCBI C++ Exception:\n    T0 \"{ROOT}/src/corelib/ncbistr.cpp\", line 640: Error: (CStringException::eConvert) ncbi::NStr::StringToInt() - Cannot convert string '99999999999' to int, overflow (m_Pos = 0)\n\n"),
@@ -113,13 +113,13 @@ const CASES: [Case; 15] = [
     Case {
         parse_seqids: true,
         stdout: "\n\nBuilding a new DB, current time: <T>\nNew DB name:   <D>/db\nNew DB title:  in.fa\nSequence type: Protein\nKeep MBits: T\nMaximum file size: 3000000000B\nAdding sequences from FASTA; added 1 sequences in <S> seconds.\n\n\n",
-        ..creation("split_chunk_abc_1seq", "LMDB_SPLIT_CHUNK_SIZE", "abc", "BLAST Database creation error: Cannot convert string 'abc' to Uint8\n")
+        ..creation("split_chunk_abc_1seq", "LMDB_SPLIT_CHUNK_SIZE", "abc", "LOSAT database creation error: Cannot convert string 'abc' to Uint8\n")
     },
     Case {
         input: TWO,
         parse_seqids: true,
         stdout: "\n\nBuilding a new DB, current time: <T>\nNew DB name:   <D>/db\nNew DB title:  in.fa\nSequence type: Protein\nKeep MBits: T\nMaximum file size: 3000000000B\nAdding sequences from FASTA; added 2 sequences in <S> seconds.\n\n\n",
-        ..creation("split_min_abc_2seq", "LMDB_MIN_SPLIT_SIZE", "abc", "BLAST Database creation error: Cannot convert string 'abc' to Uint8\n")
+        ..creation("split_min_abc_2seq", "LMDB_MIN_SPLIT_SIZE", "abc", "LOSAT database creation error: Cannot convert string 'abc' to Uint8\n")
     },
 ];
 
@@ -222,7 +222,8 @@ fn unconvertible_lmdb_variables_end_as_makeblastdb_ends() {
         assert_eq!(output.status.code(), Some(case.status), "{}", case.name);
         assert_eq!(
             String::from_utf8_lossy(&output.stderr),
-            case.stderr.replace("{ROOT}", ROOT),
+            // NCBI's text in LOSAT's words (`losat::wording`, AGENTS.md rule 8).
+            losat::wording::losat_text(&case.stderr.replace("{ROOT}", ROOT)),
             "{}",
             case.name
         );
@@ -259,7 +260,8 @@ fn a_variable_s_bytes_are_quoted_as_makeblastdb_quotes_them() {
         assert_eq!(output.status.code(), Some(255), "{variable}");
         assert_eq!(
             String::from_utf8_lossy(&output.stderr),
-            stderr.replace("{ROOT}", ROOT),
+            // NCBI's text in LOSAT's words (`losat::wording`, AGENTS.md rule 8).
+            losat::wording::losat_text(&stderr.replace("{ROOT}", ROOT)),
             "{variable}"
         );
     }

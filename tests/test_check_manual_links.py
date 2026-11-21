@@ -64,6 +64,50 @@ class CheckManualLinks(unittest.TestCase):
         self.assertEqual(check_manual_links.heading_id("Coming from `NCBI` BLAST+ 2.17.0"), "coming-from-ncbi-blast-2170")
         self.assertEqual(check_manual_links.heading_id("What LOSAT refuses"), "what-losat-refuses")
 
+    def test_repo_markdown_checks_links_srcset_and_forbidden_words(self):
+        root = Path(tempfile.mkdtemp())
+        (root / "docs" / "img").mkdir(parents=True)
+        (root / "docs" / "img" / "fig1.png").write_bytes(b"png")
+        (root / "docs" / "img" / "fig1_dark.png").write_bytes(b"png")
+        (root / "docs" / "guide.md").write_text("# Guide\n\n## Install\n\nReady.\n", encoding="utf-8")
+        readme = root / "README.md"
+        readme.write_text(
+            "# LOSAT\n\n"
+            "<picture>\n"
+            '<source media="(prefers-color-scheme: dark)" srcset="docs/img/fig1_dark.png">\n'
+            '<img src="docs/img/fig1.png" alt="Figure 1">\n'
+            "</picture>\n\n"
+            "[Install guide](docs/guide.md#install)\n"
+            "[Broken](docs/guide.md#missing)\n"
+            "[MissingImg](docs/img/missing.png)\n"
+            "All runs are verified here.\n",
+            encoding="utf-8",
+        )
+        problems = "\n".join(check_manual_links.check_repo_markdown(readme, repo_root=root))
+        self.assertIn("README.md:9: docs/guide.md#missing names no heading", problems)
+        self.assertIn("README.md:10: docs/img/missing.png does not exist", problems)
+        self.assertIn("README.md:11: says 'verified'", problems)
+
+    def test_package_readme_forbids_relative_links_and_forbidden_words(self):
+        root = Path(tempfile.mkdtemp())
+        pkg = root / "python" / "README.md"
+        pkg.parent.mkdir(parents=True)
+        pkg.write_text(
+            "# pylosat\n\n## Install\n\n"
+            "[Self](#install)\n"
+            "[Docs](https://satoshikawato.github.io/LOSAT/)\n"
+            "[BadRel](../docs/manual/src/installation.md)\n"
+            "[BadFile](bench.png)\n"
+            "Verified output.\n",
+            encoding="utf-8",
+        )
+        problems = check_manual_links.check_package_readme(pkg, display_name="python/README.md")
+        joined = "\n".join(problems)
+        self.assertEqual(len(problems), 3, problems)
+        self.assertIn("../docs/manual/src/installation.md", joined)
+        self.assertIn("bench.png", joined)
+        self.assertIn("says 'Verified'", joined)
+
 
 if __name__ == "__main__":
     unittest.main()

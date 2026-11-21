@@ -40,9 +40,9 @@ All contributions that touch alignment or search code must strictly satisfy thes
 ### 1. NCBI BLAST+ Source as the Ground Truth
 - The authoritative reference for all algorithmic behavior is the official NCBI BLAST C/C++ source code (`ncbi-blast`).
 - We do not speculate, approximate, or introduce heuristics that NCBI does not use. Every ported algorithm must faithfully follow NCBI's exact logic, scoring, and statistics.
-- Code modifications affecting search or scoring behavior must include the corresponding NCBI C/C++ reference comments (file path and line numbers) immediately above the Rust code:
+- Code modifications affecting search or scoring behavior must cite the corresponding NCBI C/C++ source (file path and line numbers in the pinned tree, NCBI BLAST+ 2.17.0 at commit `598d8ae6`) immediately above the Rust code, without copying the source text into the comment (`scripts/ncbi_ref.py <file>[:<line>]` prints the cited lines):
   ```rust
-  // NCBI reference: c++/src/algo/blast/core/blast_hits.c:993-1001
+  // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:993-1001
   ```
 
 ### 2. Standalone Pure-Rust Implementation

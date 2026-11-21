@@ -24,7 +24,9 @@ use std::process::Stdio;
 use std::process::{Command, Output};
 
 mod temp_support;
-use temp_support::{home_and_worker_log, Finished, RunFiles};
+use temp_support::{
+    expected_losat_bytes, expected_losat_text, home_and_worker_log, Finished, RunFiles,
+};
 
 fn fixtures() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/outfmt16")
@@ -135,7 +137,7 @@ fn fasta(path: &Path, records: &[(&[u8], &[u8])]) {
 }
 
 /// Standard error of the failed batches (`qnx_bad.fna`, `qnx_firstbad.fna`).
-const READER_ERROR: &str = "BLAST query error: CFastaReader: Near line";
+const READER_ERROR: &str = "LOSAT query error: CFastaReader: Near line";
 
 /// `blastx -query QUERY (-subject sprot.faa | -db db/sprot | -db db/sprot_tax with the `good` taxdb in
 /// BLASTDB)` in `tests/fixtures/outfmt16`: what NCBI BLAST+ 2.17.0 wrote in `<stem>_{sub,db,dbtax}_{15,16}`
@@ -147,8 +149,12 @@ fn equals_frozen(stem: &str, query: &str, modes: &[&str], rc: i32, stderr_start:
     for format in ["15", "16"] {
         for &mode in modes {
             let name = format!("{stem}_{mode}_{format}");
-            let out = fs::read(dir.join(format!("{name}.out"))).unwrap();
-            let err = fs::read(dir.join(format!("{name}.err"))).unwrap_or_default();
+            let out = expected_losat_bytes(fs::read(dir.join(format!("{name}.out"))).unwrap());
+            // NCBI's bytes in LOSAT's words (`losat::wording`, AGENTS.md rule 8).
+            let err = losat::wording::losat_output_bytes(
+                &fs::read(dir.join(format!("{name}.err"))).unwrap_or_default(),
+            )
+            .into_owned();
             for threads in ["1", "4", "8", "16"] {
                 let mut args = vec!["blastx", "-query", query];
                 args.extend(match mode {
@@ -195,7 +201,7 @@ fn a_query_of_an_unsearched_batch_lists_no_masks() {
     for format in ["15", "16"] {
         for mode in ["sub", "db"] {
             let name = format!("unsearchedmask_blastx_{mode}_{format}");
-            let expected = fs::read(dir.join(format!("{name}.out"))).unwrap();
+            let expected = expected_losat_bytes(fs::read(dir.join(format!("{name}.out"))).unwrap());
             for threads in ["1", "4", "8", "16"] {
                 let mut args = vec!["blastx", "-query", "qnx_unsearched_lc.fna"];
                 args.extend(if mode == "sub" {
@@ -216,7 +222,9 @@ fn a_query_of_an_unsearched_batch_lists_no_masks() {
             }
         }
     }
-    let out = fs::read_to_string(fixtures().join("unsearchedmask_blastx_sub_16.out")).unwrap();
+    let out = expected_losat_text(
+        fs::read_to_string(fixtures().join("unsearchedmask_blastx_sub_16.out")).unwrap(),
+    );
     assert_eq!(out.matches("<query-masking>").count(), 1, "{out}");
     assert_eq!(out.matches(" &#xa;No hits found").count(), 2, "{out}");
 }
@@ -236,7 +244,9 @@ fn a_failed_batch_keeps_the_db_report_and_loses_the_held_subject_report() {
         1,
         READER_ERROR,
     );
-    let dbtax = fs::read_to_string(fixtures().join("badbatch_blastx_dbtax_16.out")).unwrap();
+    let dbtax = expected_losat_text(
+        fs::read_to_string(fixtures().join("badbatch_blastx_dbtax_16.out")).unwrap(),
+    );
     assert!(dbtax.contains("<sciname>Homo sapiens</sciname>"), "{dbtax}");
 }
 
@@ -262,7 +272,7 @@ fn a_query_without_a_sequence_leaves_the_prolog_alone() {
         "qnx_empty.fna",
         &["sub", "db"],
         3,
-        "BLAST engine error: Warning: Sequence contains no data",
+        "LOSAT engine error: Warning: Sequence contains no data",
     );
 }
 
@@ -423,8 +433,12 @@ fn a_taxdb_name_outside_us_ascii_in_a_later_batch_is_written_as_ncbi_writes_it()
     let taxdb = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/seqdb/taxdb/high_bytes_utf8");
     for format in ["15", "16"] {
         let name = format!("taxbad_blastx_db_{format}");
-        let out = fs::read(dir.join(format!("{name}.out"))).unwrap();
-        let err = fs::read(dir.join(format!("{name}.err"))).unwrap_or_default();
+        let out = expected_losat_bytes(fs::read(dir.join(format!("{name}.out"))).unwrap());
+        // NCBI's bytes in LOSAT's words (`losat::wording`, AGENTS.md rule 8).
+        let err = losat::wording::losat_output_bytes(
+            &fs::read(dir.join(format!("{name}.err"))).unwrap_or_default(),
+        )
+        .into_owned();
         for threads in ["1", "4", "8", "16"] {
             let args = [
                 "blastx",
@@ -475,8 +489,12 @@ fn a_taxid_that_is_in_the_database_but_never_reported_writes_no_name() {
     for format in ["15", "16"] {
         for (case, taxdb) in [("good", "good"), ("badname", "high_bytes_utf8")] {
             let name = format!("mixtax_blastx_{case}_{format}");
-            let out = fs::read(dir.join(format!("{name}.out"))).unwrap();
-            let err = fs::read(dir.join(format!("{name}.err"))).unwrap_or_default();
+            let out = expected_losat_bytes(fs::read(dir.join(format!("{name}.out"))).unwrap());
+            // NCBI's bytes in LOSAT's words (`losat::wording`, AGENTS.md rule 8).
+            let err = losat::wording::losat_output_bytes(
+                &fs::read(dir.join(format!("{name}.err"))).unwrap_or_default(),
+            )
+            .into_owned();
             let taxdb = Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("tests/seqdb/taxdb")
                 .join(taxdb);
@@ -565,8 +583,12 @@ fn the_taxdb_rows_match_the_frozen_ncbi_bytes_at_1_4_8_and_16_threads() {
                 continue;
             }
             let frozen = engine.join("tests/fixtures/db_search");
-            let out = fs::read(frozen.join(format!("{id}.out"))).unwrap();
-            let err = fs::read(frozen.join(format!("{id}.err"))).unwrap_or_default();
+            let out = expected_losat_bytes(fs::read(frozen.join(format!("{id}.out"))).unwrap());
+            // NCBI's bytes in LOSAT's words (`losat::wording`, AGENTS.md rule 8).
+            let err = losat::wording::losat_output_bytes(
+                &fs::read(frozen.join(format!("{id}.err"))).unwrap_or_default(),
+            )
+            .into_owned();
             assert!(
                 output.stdout == out,
                 "{id} threads {threads}: stdout differs"

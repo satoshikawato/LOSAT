@@ -19,7 +19,7 @@ and the PSSM files it writes must be those of `side_sha256` byte for byte (none 
 the frozen ones, or in the kinds `pssm-asn` and `pssm-both` a file over 64 KB by its SHA-256 alone. With `--library` LOSAT is `examples/library_command_line`, the
 same search through the library API, which writes the PSSM files, runs psiblast's rounds and
 searches a PSSM query (`-in_pssm`, a query cell `pssm-gz:` or `pssm:`; the library's `Inputs::pssm`)
-as the command line.
+and an alignment query (psiblast's `-in_msa`, a query cell `msa:PATH`; the library's `Inputs::msa`) as the command line; a row with `-msa_master_idx` or `-ignore_msa_master` and no `-in_msa`, or with `-in_msa` and `-query` or `-in_pssm`, is `library-skip` there.
 
 A row with the contract `approved_db_gencode_deviation` (AGENTS.md's approved TBLASTX
 exception: LOSAT's local search applies a non-default -db_gencode to the subject) is
@@ -43,6 +43,7 @@ from pathlib import Path
 import subprocess
 
 from run_oracle import DEVIATION, ENGINE, is_sam_outfmt, outfmt, read_manifest, search_argv, strip_sam_cl, xinclude
+import losat_wording  # noqa: E402  (on the path of run_oracle: LOSAT's words in NCBI's frozen bytes)
 
 FIXTURES = ENGINE / "tests/fixtures/outfmt0"
 
@@ -107,6 +108,16 @@ def main() -> int:
     differing = []
     rows = selected_rows(read_manifest()[2], args.programs, args.only, args.outfmts)
     for row in rows:
+        argv = search_argv(row)
+        if args.library and (
+            ("-in_msa" not in argv and any(word in xinclude.ALIGNMENT_OPTIONS for word in argv))
+            or ("-in_msa" in argv and ("-query" in argv or "-in_pssm" in argv))
+        ):
+            # The master options without `-in_msa` (`-msa_master_idx`, `-ignore_msa_master`) and
+            # `-in_msa` with another query have no library call: the library's query is records, a
+            # PSSM or an alignment (`api::Inputs`; line LIB item 1.6).
+            print(f"{row['fixture_id']}\tlibrary-skip\t")
+            continue
         threads = ["-num_threads", str(args.threads)] if args.threads else []
         command = [str(args.losat.resolve()), row["program"], *search_argv(row), *threads]
         files = xinclude.wants_files(row)
@@ -120,12 +131,13 @@ def main() -> int:
         else:
             run = subprocess.run(command, cwd=ENGINE, capture_output=True)
         expected_err_path = FIXTURES / f"{row['fixture_id']}.err"
-        expected_err = expected_err_path.read_bytes() if row["stderr_sha256"] else b""
-        expected_out = (FIXTURES / f"{row['fixture_id']}.out").read_bytes()
+        # LOSAT's words in NCBI's frozen bytes (AGENTS.md rule 8, `losat_wording`).
+        expected_err = losat_wording.losat_bytes(expected_err_path.read_bytes() if row["stderr_sha256"] else b"")
+        expected_out = losat_wording.losat_output_bytes((FIXTURES / f"{row['fixture_id']}.out").read_bytes())
         problems = []
         deviation = row.get("contract") == DEVIATION
         if deviation:
-            database_out = (FIXTURES / f"{row['fixture_id']}.db.out").read_bytes()
+            database_out = losat_wording.losat_output_bytes((FIXTURES / f"{row['fixture_id']}.db.out").read_bytes())
         if run.returncode != 0:
             problems.append(f"exit {run.returncode}: {run.stderr.decode(errors='replace').strip()[:200]}")
         elif deviation:

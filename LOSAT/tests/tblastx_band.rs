@@ -13,16 +13,6 @@
 //! several the units split the one subject over the pool.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:52-63
-//! ```c
-//! diag_array_length = 1;
-//! /* What power of 2 is just longer than the query? */
-//! while (diag_array_length < (qlen+window_size))
-//! {
-//!         diag_array_length = diag_array_length << 1;
-//! }
-//! ...
-//! diag_table->diag_mask = diag_array_length-1;
-//! ```
 //! The switch is in the strict set (on unless `LOSAT_X_TBXBAND=0`). The tests compare the reports
 //! of the default and of `LOSAT_X_TBXBAND=0`, read `[X_STATS] PAIRPAR ... units= fallback_guard=
 //! fallback_cost= band=`.

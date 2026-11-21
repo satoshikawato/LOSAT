@@ -3,13 +3,6 @@
 //! `src/algorithm/tblastx/lookup/x_clut_direct.rs` `for_each_cell`) on whole searches.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:274-341
-//! ```c
-//!        index = preshift + compressed_char;
-//!        preshift = (Int4)((((Int8)( index )) * recip) >> 32);
-//!
-//!        /* if there are hits */
-//!        if (PV_TEST(pv, index, pv_array_bts)) {
-//! ```
 //! The switch is in the strict set (on unless it is `0`). The branch-free list holds the offsets
 //! and indices of the loop with the branch, in the same order (the lib test
 //! `flat_scans_give_the_reference_scans_hits` compares both with the reference scan), so the

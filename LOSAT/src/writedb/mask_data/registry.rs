@@ -34,32 +34,12 @@ fn exception(message: String) -> WriteDbError {
 
 impl MaskInfoRegistry {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/mask_info_registry.hpp:66-68
-    // ```c++
-    //     bool IsRegistered(int algo_id) const {
-    //         return m_UsedIds.find(algo_id) != m_UsedIds.end();
-    //     }
-    // ```
     /// `IsRegistered`: whether `algo_id` has been given to an algorithm.
     pub(crate) fn is_registered(&self, algo_id: i32) -> bool {
         self.used_ids.contains(&algo_id)
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/mask_info_registry.cpp:62-74
-    // ```c++
-    // int
-    // CMaskInfoRegistry::x_FindNextValidIdWithinRange(int start, int stop)
-    // {
-    //     for (int id = start; id < stop &&
-    //                          id < (int)eBlast_filter_program_max; id++) {
-    //         if (m_UsedIds.find(id) == m_UsedIds.end()) {
-    //             return id;
-    //         }
-    //     }
-    //     string msg("Too many IDs in range " + NStr::IntToString(start));
-    //     msg += "-" + NStr::IntToString(stop);
-    //     NCBI_THROW(CWriteDBException, eArgErr, msg);
-    // }
-    // ```
     fn find_next_valid_id_within_range(&self, start: i32, stop: i32) -> Result<i32, WriteDbError> {
         let mut id = start;
         while id < stop && id < FILTER_PROGRAM_MAX {
@@ -72,28 +52,6 @@ impl MaskInfoRegistry {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/mask_info_registry.cpp:41-60
-    // ```c++
-    // int
-    // CMaskInfoRegistry::x_AssignId(int start, int end)
-    // {
-    //     return x_FindNextValidIdWithinRange(start, end);
-    // }
-    //
-    // int
-    // CMaskInfoRegistry::x_AssignId(int start, int end, bool use_start)
-    // {
-    //     if (use_start) {
-    //         if (m_UsedIds.find(start) != m_UsedIds.end()) {
-    //             string msg("Masking algorithm with default arguments "
-    //                        "already provided");
-    //             NCBI_THROW(CWriteDBException, eArgErr, msg);
-    //         }
-    //         return start;
-    //     } else {
-    //         return x_FindNextValidIdWithinRange(start+1, end);
-    //     }
-    // }
-    // ```
     fn assign_id_with_default(
         &self,
         start: i32,
@@ -113,22 +71,6 @@ impl MaskInfoRegistry {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/mask_info_registry.cpp:76-89
-    // ```c++
-    // int
-    // CMaskInfoRegistry::Add(const string& id)
-    // {
-    //     if (find(m_RegisteredAlgos.begin(), m_RegisteredAlgos.end(), id)
-    //             != m_RegisteredAlgos.end()) {
-    //         NCBI_THROW(CWriteDBException, eArgErr, "Duplicate masking algorithm found.");
-    //     }
-    //
-    //     m_RegisteredAlgos.push_back(id);
-    //
-    //     int algo_id = x_AssignId(eBlast_filter_program_other, eBlast_filter_program_max);
-    //     m_UsedIds.insert(algo_id);
-    //     return algo_id;
-    // }
-    // ```
     /// `Add(const string & id)`: registers an algorithm named by the user
     /// (`makeblastdb -mask_id`); its id is the first free one from 100 on.
     pub(crate) fn add_id(&mut self, id: &[u8]) -> Result<i32, WriteDbError> {
@@ -143,59 +85,6 @@ impl MaskInfoRegistry {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/mask_info_registry.cpp:91-141
-    // ```c++
-    // int
-    // CMaskInfoRegistry::Add(EBlast_filter_program program,
-    //                        const string& options, /* = string() */
-    //                        const string& progname /* = string() */)
-    // {
-    //
-    //     int algo_id = (int)program;
-    //     string algo_descr = NStr::IntToString(algo_id) + progname + options;
-    //
-    //     if (find(m_RegisteredAlgos.begin(), m_RegisteredAlgos.end(), algo_descr)
-    //             != m_RegisteredAlgos.end()) {
-    //         NCBI_THROW(CWriteDBException, eArgErr, "Duplicate masking algorithm found.");
-    //     }
-    //
-    //     m_RegisteredAlgos.push_back(algo_descr);
-    //
-    //     switch (program) {
-    //     case eBlast_filter_program_dust:
-    //         algo_id = x_AssignId(program, eBlast_filter_program_seg,
-    //                              options.empty());
-    //         break;
-    //
-    //     case eBlast_filter_program_seg:
-    //         algo_id = x_AssignId(program, eBlast_filter_program_windowmasker,
-    //                              options.empty());
-    //         break;
-    //
-    //     case eBlast_filter_program_windowmasker:
-    //         algo_id = x_AssignId(program, eBlast_filter_program_repeat,
-    //                              options.empty());
-    //         break;
-    //
-    //     case eBlast_filter_program_repeat:
-    //         algo_id = x_AssignId(program, eBlast_filter_program_other);
-    //         break;
-    //
-    //     case eBlast_filter_program_other:
-    //         algo_id = x_AssignId(program, eBlast_filter_program_max);
-    //         break;
-    //
-    //     case eBlast_filter_program_not_set:
-    //     case eBlast_filter_program_max:
-    //     default:
-    //         string msg("Invalid filtering program: ");
-    //         msg += NStr::IntToString((int)program);
-    //         NCBI_THROW(CWriteDBException, eArgErr, msg);
-    //     }
-    //
-    //     m_UsedIds.insert(algo_id);
-    //     return algo_id;
-    // }
-    // ```
     // `progname` is the name of the mask file for makeblastdb. The two-
     // argument `x_AssignId` (repeat, other) takes the first free id from the
     // program's own value on and ignores the options.

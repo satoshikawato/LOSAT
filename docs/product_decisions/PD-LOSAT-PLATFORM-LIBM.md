@@ -6,8 +6,9 @@
   2026-11-18 (1.1, WASI: Owner, see Amendments); 2026-11-20 (1.2, WASI retired: Owner, see
   Amendments)
 - Status: macOS clause (1.0): Accepted for v0.2.0; it stays, and is unverified on macOS (no Apple
-  device). WASI clause (1.1): retired by 1.2 (Owner, 2026-11-20) because of the port of glibc's
-  FMA `exp`, `log`, `log10` and `pow` to one Rust path on every target (#1344).
+  device). WASI clause (1.1): retired by 1.2 (Owner, 2026-11-20) because `exp`, `log`, `log10` and
+  `pow` give the bits of glibc 2.35's FMA versions on one Rust path on every target (#1344: the code
+  of Arm Optimized Routines, MIT, and Sun's fdlibm for `log10`).
 
 ## Scope
 
@@ -160,8 +161,9 @@ psiblast ASN.1 PSSM files give the Linux x64 bytes.
   counts only, which let a shorter mantissa 1 away pass).
 - 1.2 (2026-11-20, Owner; proposed the same day by line LIBM): the WASI clause of 1.1 is
   retired; the macOS clause (1.0) stays and is unverified on macOS (no Apple device). Why: the branch
-  `fix/libm-glibc-fma` (#1344) ports glibc 2.35's x86-64 FMA versions of `exp`, `log`, `log10`
-  and `pow` to one Rust path on every target (`LOSAT/src/utils/glibc_fma_libm.rs`): `f64::mul_add`
+  `fix/libm-glibc-fma` (#1344) gives `exp`, `log`, `log10` and `pow` the bits of glibc 2.35's
+  x86-64 FMA versions on one Rust path on every target (`LOSAT/src/utils/glibc_fma_libm.rs`, the
+  code of Arm Optimized Routines, MIT, and Sun's fdlibm for `log10`): `f64::mul_add`
   where there is an FMA instruction (aarch64; x86-64 CPUs that have FMA, detected at run time), an
   exact emulation of the FMA elsewhere (WebAssembly, x86-64 without FMA). Every call site uses it,
   and clippy refuses the libm methods of `f64` elsewhere. Measured 2026-11-20 on the serial WASI

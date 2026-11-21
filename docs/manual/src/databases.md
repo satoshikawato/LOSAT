@@ -56,7 +56,7 @@ You do not choose a version to search: LOSAT detects it. `blastdbcmd -db DB -inf
 
 A large database is split into volumes (`name.00`, `name.01`, ...) and an alias file (`.pal` for protein, `.nal` for nucleotide) that lists them. LOSAT searches such a database like any other: give the alias name to `-db`. `losat makeblastdb` writes volumes when a file would pass `-max_file_sz`.
 
-An alias file can also name other databases (`DBLIST`) or select part of a database. LOSAT reads these alias keys as NCBI does: `TITLE`, `DBLIST`, `NSEQ`, `LENGTH`, `STATS_NSEQ`, `STATS_TOTLEN`, `MIN_SEQ_LENGTH`, `FIRST_OID` and `LAST_OID`. `VDBLIST` and `MAX_SEQ_LENGTH` are ignored, as in NCBI. An alias file with `GILIST`, `TILIST`, `SEQIDLIST`, `TAXIDLIST`, `OIDLIST`, `MEMB_BIT`, `MASKLIST` or `OID_MASK_TYPE` is refused (see [What LOSAT refuses](refusals.md)).
+An alias file can also name other databases (`DBLIST`) or select part of a database. LOSAT reads these alias keys as NCBI does: `TITLE`, `DBLIST`, `NSEQ`, `LENGTH`, `STATS_NSEQ`, `STATS_TOTLEN`, `MIN_SEQ_LENGTH`, `FIRST_OID`, `LAST_OID` and `OIDLIST` (an OID list file, such as the `.pxm` and `.nxm` files of `makeblastdb -oid_masks`, applied to each volume below the alias file). `VDBLIST` and `MAX_SEQ_LENGTH` are ignored, as in NCBI. An alias file with `GILIST`, `TILIST`, `SEQIDLIST`, `TAXIDLIST`, `MEMB_BIT`, `MASKLIST` or `OID_MASK_TYPE` is refused (see [What LOSAT refuses](refusals.md)).
 
 `-db` can name several databases: `-db "swissprot pdbaa"` (the names in double quotes, separated by spaces). They are searched as one database. A name with spaces goes in double quotes inside the value.
 
@@ -95,10 +95,10 @@ Without `taxdb`, name fields print `N/A` and LOSAT writes NCBI's warning (`Taxon
 
 A database can hold masks that mark low-complexity or repeat regions, made by `dustmasker`, `segmasker`, `windowmasker` or `convert2blastmask` and added with `makeblastdb -mask_data`. Masks are used in these ways:
 
-- `blastn -db_soft_mask ID` and `-db_hard_mask ID` search with the masks of one algorithm: words inside a soft mask do not start hits, and a hard mask cuts the masked letters out of the search. `ID` is the numeric id or the name shown by `blastdbcmd -info` under "Available filtering algorithms". Other programs refuse these options (see [What LOSAT refuses](refusals.md)).
+- `blastn`, `blastp`, `blastx`, `tblastn` and `tblastx` `-db_soft_mask ID` and `-db_hard_mask ID` search with the masks of one algorithm: words inside a soft mask do not start hits, and a hard mask cuts the masked letters out of the search. `ID` is the numeric id or the name shown by `blastdbcmd -info` under "Available filtering algorithms". The alignments in format 0 to 4 of `blastn`, `blastp` and `blastx` show the masked letters of the database sequence in lower case; `tblastn` and `tblastx` show the translated letters in upper case, as NCBI does. `tblastn` and `tblastx` read each mask in every reading frame at the positions divided by 3, and with `-db_hard_mask` they score the masked bases as ambiguous after the first search, as NCBI does (see [What LOSAT refuses](refusals.md)).
 - `blastdbcmd -mask_sequence_with ID` writes masked letters in lower case, and `-outfmt "%m<ID>"` prints the mask ranges.
 
-See [dustmasker](programs/dustmasker.md), [segmasker](programs/segmasker.md), [convert2blastmask](programs/convert2blastmask.md) and [makeblastdb](programs/makeblastdb.md).
+See [dustmasker](programs/dustmasker.md), [segmasker](programs/segmasker.md), [windowmasker](programs/windowmasker.md), [convert2blastmask](programs/convert2blastmask.md) and [makeblastdb](programs/makeblastdb.md).
 
 ## Which programs read which databases
 
@@ -109,6 +109,7 @@ See [dustmasker](programs/dustmasker.md), [segmasker](programs/segmasker.md), [c
 | [`rpsblast`](programs/rpsblast.md), [`rpstblastn`](programs/rpstblastn.md) | A profile database, such as NCBI's CDD (files `.rps`, `.loo`, `.aux`; one or several volumes). LOSAT does not provide `makeprofiledb`: use NCBI's databases. |
 | [`blastdbcmd`](programs/blastdbcmd.md) | Either; `-dbtype` chooses when a name exists for both. |
 | [`dustmasker`](programs/dustmasker.md) (`-infmt blastdb`) | Nucleotide |
+| [`windowmasker`](programs/windowmasker.md) (`-infmt blastdb`) | Nucleotide |
 | [`segmasker`](programs/segmasker.md) (`-infmt blastdb`) | Protein |
 | [`rpsbproc`](programs/rpsbproc.md) | None: it reads the archives that `rpsblast` and `rpstblastn` write, and the CDD data files. |
 

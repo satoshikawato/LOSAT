@@ -5,10 +5,13 @@ import { HEADERS_FILE, parseHeadersFile, pathHeaders, siteHeaders } from './buil
 import { readFileSync } from 'node:fs';
 import { findReactors, losatEngine } from './build/reactors.ts';
 import { losatVerification } from './build/verification.ts';
+import { losatNotices } from './build/notices.ts';
 
 const headers = siteHeaders();
 const rules = parseHeadersFile(readFileSync(HEADERS_FILE, 'utf8'));
 const reactors = findReactors();
+// The license and the notices, with the npm packages of the main and the worker bundles.
+const notices = losatNotices();
 // The dev server injects component styles as inline <style> elements, which the
 // production CSP forbids. It therefore serves the isolation headers without the CSP;
 // `vite preview` (used by the E2E tests) serves the production headers unchanged.
@@ -48,12 +51,15 @@ function headersOnEveryResponse(): Plugin {
 export default defineConfig({
   // The engine modules (LOSAT_WEB_REACTORS); the worker bundles read the same description.
   // The headers first, so that they reach the engine modules that losatEngine serves in dev.
-  plugins: [headersOnEveryResponse(), vue(), losatEngine({ reactors }), losatVerification()],
+  plugins: [headersOnEveryResponse(), vue(), losatEngine({ reactors }), losatVerification(), notices.site],
   define: { __LOSAT_TEST_HOOKS__: 'false' },
   server: { headers: devHeaders },
   preview: { headers },
-  worker: { format: 'es', plugins: () => [losatEngine({ reactors, emit: false })] },
-  build: { target: 'es2022' },
+  worker: { format: 'es', plugins: () => [losatEngine({ reactors, emit: false }), notices.worker()] },
+  // No module preload polyfill: the site has one chunk and no modulepreload link, so it would do
+  // nothing, and its code (adapted from es-module-shims) has no notice in the site
+  // (build/notices.ts stops the build if it comes back).
+  build: { target: 'es2022', modulePreload: { polyfill: false } },
   test: {
     include: ['tests/unit/**/*.test.ts'],
     environment: 'node',

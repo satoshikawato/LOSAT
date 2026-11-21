@@ -82,7 +82,8 @@ fn frozen(name: &str) -> Vec<u8> {
     fs::read(run_dir().join("expected").join(name)).unwrap()
 }
 
-/// `text` with `{R}` placed.
+/// `text` with `{R}` placed, in LOSAT's words (NCBI's bytes through `losat::wording`, AGENTS.md
+/// rule 8).
 fn placed(text: &[u8]) -> Vec<u8> {
     let root = run_dir();
     let root = root.to_str().unwrap().as_bytes();
@@ -94,7 +95,7 @@ fn placed(text: &[u8]) -> Vec<u8> {
         rest = &rest[at + 3..];
     }
     placed.extend_from_slice(rest);
-    placed
+    losat::wording::losat_output_bytes(&placed).into_owned()
 }
 
 fn holds_root(text: &[u8]) -> bool {

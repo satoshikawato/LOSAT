@@ -26,14 +26,4 @@
 //! redo freed).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3398-3399
-//! ```c
-//!         while (BlastHSPStreamRead(hsp_stream, &localMatch)
-//!                 != kBlastHSPStream_Eof) {
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3734-3738
-//! ```c
-//! match_loop_cleanup:
-//!                 if (seqSrc) {
-//!                     localMatch = Blast_HSPListFree(localMatch);
-//!                 } else {
-//! ```

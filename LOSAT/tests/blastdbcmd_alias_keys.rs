@@ -7,7 +7,8 @@
 //! does not convert, and (item D1a-2) `-ipg` / `-ipg_batch` for a PIG whose OID an alias file's
 //! range leaves out (NCBI's `PigToOid` asks the volumes, and its formatters read that OID), and (D1a-2
 //! part 2) `FIRST_OID` / `LAST_OID` of 2^31 or more and the iteration range of the only alias file
-//! of a `-db`, as each sub-command reads NCBI's OID list (`make_d1a2a_fixtures.py`). The
+//! of a `-db`, as each sub-command reads NCBI's OID list (`make_d1a2a_fixtures.py`), and (D1b-1)
+//! `OIDLIST` (`make_d1b_blastdbcmd.py`, 2026-11-21). The
 //! expected bytes are NCBI BLAST+ 2.17.0 blastdbcmd's (the release build on the developer machine,
 //! 2026-11-12 and 2026-11-13, `remaining-gaps-20261112/D/fixtures/make_d1a_blastdbcmd.py` and
 //! `make_d1a2_blastdbcmd.py`); the alias files are in `tests/blastdbcmd/db/ak/`, the batch files
@@ -92,7 +93,8 @@ fn frozen(name: &str) -> Vec<u8> {
     fs::read(run_dir().join("expected").join(name)).unwrap()
 }
 
-/// `text` with `{R}` placed.
+/// `text` with `{R}` placed, in LOSAT's words (NCBI's bytes through `losat::wording`, AGENTS.md
+/// rule 8).
 fn placed(text: &[u8]) -> Vec<u8> {
     let root = run_dir();
     let root = root.to_str().unwrap().as_bytes();
@@ -104,7 +106,7 @@ fn placed(text: &[u8]) -> Vec<u8> {
         rest = &rest[at + 3..];
     }
     placed.extend_from_slice(rest);
-    placed
+    losat::wording::losat_output_bytes(&placed).into_owned()
 }
 
 fn holds_root(text: &[u8]) -> bool {
@@ -324,6 +326,70 @@ const CASES: &[(&str, &[&str], i32)] = &[
     ("A193", &["-db", "db/ak/cnt/nsm5", "-dbtype", "prot", "-info"], 0),
     ("A194", &["-db", "db/ak/cnt/neg1", "-dbtype", "prot", "-info"], 0),
     ("A195", &["-db", "db/ak/cnt/ns2p31", "-dbtype", "prot", "-info"], 0),
+    // D1b-1: `OIDLIST` (`db/ak/ol/`, over `or/tfp` and `or/tfn`): the OID list file read relative
+    // to each volume, NCBI's constructor scan of the OIDs it keeps unless a node above it has both
+    // `NSEQ` and `LENGTH` (A202, A221: the walks), `-exact_length`'s exact scan (A211: the
+    // approximate nucleotide lengths of A210), the bytes past the file (A215) and a header of
+    // 0xFFFFFFFF (A213, A214), a range over the list in the only alias file of a `-db` (A216, A217),
+    // and the errors of a missing file: at the constructor's scan (A207 and A208, which reports
+    // the nucleotide type `-dbtype guess` tried first; A209 names the directory of the node's
+    // volume), or at the first use of the OID list under `NSEQ` and `LENGTH` (A205, A206, A219,
+    // A220; `-info` never reads it, A204).
+    ("A196", &["-db", "db/ak/ol/p_k", "-info"], 0),
+    ("A197", &["-db", "db/ak/ol/p_k", "-info", "-exact_length"], 0),
+    ("A198", &["-db", "db/ak/ol/p_k", "-entry", "all", "-outfmt", "%o %a %l"], 0),
+    ("A199", &["-db", "db/ak/ol/p_k", "-entry", "P01923.1", "-outfmt", "%o %a"], 1),
+    ("A200", &["-db", "db/ak/ol/p_k", "-entry", "P69905.2,Q9TS35.2", "-outfmt", "%o %a"], 0),
+    ("A201", &["-db", "db/ak/ol/p_k", "-metadata"], 0),
+    ("A202", &["-db", "db/ak/ol/p_knl", "-info"], 0),
+    ("A203", &["-db", "db/ak/ol/p_kr", "-entry", "all", "-outfmt", "%o %a"], 0),
+    ("A204", &["-db", "db/ak/ol/p_missl", "-info"], 0),
+    ("A205", &["-db", "db/ak/ol/p_missl", "-entry", "all", "-outfmt", "%o %a"], 1),
+    ("A206", &["-db", "db/ak/ol/p_missl", "-entry", "P69905.2", "-outfmt", "%o %a"], 1),
+    ("A207", &["-db", "db/ak/ol/p_miss", "-info", "-dbtype", "prot"], 2),
+    ("A208", &["-db", "db/ak/ol/p_miss", "-info"], 2),
+    ("A209", &["-db", "db/ak/ol/p_rel", "-info", "-dbtype", "prot"], 2),
+    ("A210", &["-db", "db/ak/ol/n_n", "-info", "-dbtype", "nucl"], 0),
+    ("A211", &["-db", "db/ak/ol/n_n", "-info", "-exact_length", "-dbtype", "nucl"], 0),
+    ("A212", &["-db", "db/ak/ol/n_n", "-entry", "all", "-dbtype", "nucl", "-outfmt", "%o %a %l"], 0),
+    ("A213", &["-db", "db/ak/ol/p_wrap", "-info"], 0),
+    ("A214", &["-db", "db/ak/ol/p_wrap", "-entry", "all", "-outfmt", "%o %a"], 0),
+    ("A215", &["-db", "db/ak/ol/p_h2", "-entry", "all", "-outfmt", "%o %a"], 0),
+    ("A216", &["-db", "db/ak/ol/p_lr db/ak/or/tfp", "-info"], 0),
+    ("A217", &["-db", "db/ak/ol/p_lr db/ak/or/tfp", "-entry", "all", "-outfmt", "%o %a"], 0),
+    ("A218", &["-db", "db/ak/ol/p_k", "-taxids", "9606", "-no_taxid_expansion", "-outfmt", "%o %a"], 0),
+    ("A219", &["-db", "db/ak/ol/p_missl", "-taxids", "9606", "-no_taxid_expansion", "-outfmt", "%o %a"], 1),
+    ("A220", &["-db", "db/ak/ol/p_missl", "-metadata"], 2),
+    ("A221", &["-db", "db/ak/ol/p_knl", "-info", "-exact_length"], 0),
+    // Review A of line RG D1b-1 (2026-11-21, NCBI 2.17.0): an OID list over two range-only
+    // sub-nodes keeps NCBI's OIDs (the union's bit array cut at the list's last OID where the
+    // arrays differ in start or bytes, A222-A227; ANDed where they agree, A228); a range across
+    // the volumes of tfn; a relative path through `../` as NCBI joins it; the list file beside
+    // the first volume; `-ipg` reads a sequence without building the list (A232, A233) but not
+    // its header (A234); a taxid list over a list file that fails at the scan.
+    ("A222", &["-db", "db/ak/ol/p_cu2", "-entry", "all", "-outfmt", "%o|%a"], 0),
+    ("A223", &["-db", "db/ak/ol/p_cu2", "-info"], 0),
+    ("A224", &["-db", "db/ak/ol/p_cu8", "-entry", "all", "-outfmt", "%o|%a"], 0),
+    ("A225", &["-db", "db/ak/ol/p_cu29", "-entry", "all", "-outfmt", "%o|%a"], 0),
+    ("A226", &["-db", "db/ak/ol/p_cu0", "-info"], 0),
+    ("A227", &["-db", "db/ak/ol/p_dq", "-entry", "all", "-outfmt", "%o|%a"], 0),
+    ("A228", &["-db", "db/ak/ol/p_dr", "-entry", "all", "-outfmt", "%o|%a"], 0),
+    ("A229", &["-db", "db/ak/ol/n_nr", "-dbtype", "nucl", "-entry", "all", "-outfmt", "%o|%a"], 0),
+    ("A230", &["-db", "db/ak/ol/p_reln", "-info", "-dbtype", "prot"], 2),
+    ("A231", &["-db", "db/ak/ol/p_fb", "-entry", "all", "-outfmt", "%o %a"], 0),
+    ("A232", &["-db", "db/ak/ol/p_pl", "-dbtype", "prot", "-ipg", "1001", "-outfmt", "%s"], 0),
+    ("A233", &["-db", "db/ak/ol/p_pl", "-dbtype", "prot", "-ipg", "1001", "-outfmt", "%h"], 0),
+    ("A234", &["-db", "db/ak/ol/p_pl", "-dbtype", "prot", "-ipg", "1001", "-outfmt", "%s %a"], 1),
+    ("A235", &["-db", "db/ak/ol/p_miss", "-taxids", "9606", "-no_taxid_expansion", "-outfmt", "%o %a"], 2),
+    // A range outside the bit array of the union below it: `-info` builds no list (A236); past
+    // the array inside its last byte no OID is kept (A237). Before it and past its bytes,
+    // `RANGE_REFUSALS`.
+    ("A236", &["-db", "db/ak/ol/p_pb", "-info"], 0),
+    ("A237", &["-db", "db/ak/ol/p_pa", "-entry", "all", "-outfmt", "%o|%a"], 0),
+    // An OID list file of its header alone fails NCBI's assertion at the constructor's scan, a
+    // `CSeqDBException` that NCBI's guess of the type catches to look for a nucleotide database.
+    ("A239", &["-db", "db/ak/ol/p_h4", "-info"], 2),
+    ("A240", &["-db", "db/ak/ol/p_h4", "-entry", "all", "-outfmt", "%o|%a"], 2),
 ];
 
 /// The cases of probe p4c_c that LOSAT's BLASTDBCMD refuses: `-outfmt %d` and `%b` (the ASN.1
@@ -344,6 +410,32 @@ fn asn1_texts_of_a_pig_outside_the_range_are_refused() {
         assert_eq!(code, 1, "{id} {words:?}: {stderr}");
         assert!(
             stderr.ends_with("is not supported by LOSAT's BLASTDBCMD\n"),
+            "{id} {words:?}: {stderr}"
+        );
+    }
+}
+
+/// A range outside the bit array of the union of the ranges below it, where NCBI clears bits
+/// outside the array where it builds its OID list (line RG D1b-1), which LOSAT refuses there:
+/// ending before the array (A238), NCBI crashes (SIGSEGV, probe D1a_P); starting past its bytes
+/// (A241), NCBI writes over its heap, which crashes it unless the bytes stay in the unused end of
+/// the array's allocation, as here (probes RB_pc and RB9 of review B of D1b-1).
+#[rustfmt::skip]
+const RANGE_REFUSALS: &[(&str, &[&str])] = &[
+    ("A238", &["-db", "db/ak/ol/p_pb", "-entry", "all", "-outfmt", "%o|%a"]),
+    ("A241", &["-db", "db/ak/ol/p_pc", "-entry", "all", "-outfmt", "%o|%a"]),
+];
+
+#[test]
+fn ranges_outside_the_bit_array_below_them_are_refused() {
+    let config = TestDir::new("range-refusals");
+    for &(id, words) in RANGE_REFUSALS {
+        let (stdout, stderr, code) = blastdbcmd(words, &config.0);
+        let stderr = String::from_utf8_lossy(&stderr);
+        assert_eq!(stdout, b"", "{id} {words:?}");
+        assert_eq!(code, 1, "{id} {words:?}: {stderr}");
+        assert!(
+            stderr.contains("(NCBI crashes on it)"),
             "{id} {words:?}: {stderr}"
         );
     }

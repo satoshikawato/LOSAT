@@ -1,6 +1,18 @@
 # Installation
 
-LOSAT is one executable, `losat`. Install it from Bioconda, download a pre-built file from the GitHub release page, or build it from source. Searching and building databases need nothing else: no NCBI BLAST+ and no extra libraries. In v0.2.0 the domain annotation of `rpsbproc` reads an archive written by NCBI's `rpsblast` or `rpstblastn`, and NCBI's prebuilt databases are downloaded from NCBI.
+LOSAT is one executable, `losat` (`losat.exe` on Windows). Install it from Bioconda, download a pre-built file from the GitHub release page, or build it with `cargo` from crates.io or from source. Searching and building databases need nothing else: no NCBI BLAST+ and no extra libraries. In v0.2.0 the domain annotation of `rpsbproc` reads an archive written by NCBI's `rpsblast` or `rpstblastn`, and NCBI's prebuilt databases are downloaded from NCBI.
+
+## Where LOSAT is published
+
+| Channel | What you get |
+|:---|:---|
+| [Bioconda](https://anaconda.org/bioconda/losat) | `losat` for Linux (x86_64, aarch64) and macOS (Intel, Apple silicon) |
+| [GitHub Releases](https://github.com/satoshikawato/LOSAT/releases) | `losat` for Linux, macOS and Windows, the two WASI modules, and the source crate |
+| [crates.io](https://crates.io/crates/losat) | The crate `losat`: `cargo install --locked losat` builds the command, and Rust programs use it as a library |
+| [PyPI](https://pypi.org/project/pylosat/) | The Python binding `pylosat` |
+| This repository | Build `losat` from source; the WebAssembly engine for web pages |
+
+LOSAT is not published on Homebrew, Docker Hub or npm.
 
 ## Bioconda
 
@@ -41,7 +53,7 @@ Each release from v0.2.0 on lists eight items on the [Releases](https://github.c
 | WASI threads | `wasm32-wasip1-threads` | `.tar.gz` | `losat.wasm` |
 | Source crate | none | `.crate` | none |
 
-The archives keep the name `LOSAT` of v0.1.0, for example `LOSAT-0.2.0-x86_64-unknown-linux-gnu.tar.gz`. The program inside is `losat`. The source crate is `losat-0.2.0.crate`. An archive unpacks into a folder of its own name that holds the program, `LICENSE`, `README.md` and `RELEASE-METADATA.json`.
+The archives keep the name `LOSAT` of v0.1.0, for example `LOSAT-0.2.0-x86_64-unknown-linux-gnu.tar.gz`. The program inside is `losat`. The source crate is `losat-0.2.0.crate`. An archive unpacks into a folder of its own name that holds the program, `LICENSE`, `THIRD_PARTY_NOTICES` and `THIRD_PARTY_LICENSES` (the notices and licenses of the code from other projects), `README.md` and `RELEASE-METADATA.json`.
 
 The release also carries `SHA256SUMS`, a software bill of materials (`LOSAT-0.2.0.cdx.json`) and GitHub artifact attestations for the eight files.
 
@@ -57,9 +69,7 @@ The release also carries `SHA256SUMS`, a software bill of materials (`LOSAT-0.2.
 | WASI serial | `LOSAT-0.2.0-wasm32-wasip1.tar.gz` | Supported |
 | WASI threads | `LOSAT-0.2.0-wasm32-wasip1-threads.tar.gz` | Supported: tested in CI, outside the release's NCBI parity claim |
 
-"Supported" means the output matches NCBI BLAST+ 2.17.0 on the release test set. [Platforms and WebAssembly](platforms.md) gives the details for each platform, including the macOS and WASI notes.
-
-LOSAT is not published on crates.io, Homebrew, PyPI, Docker Hub or npm. Bioconda is the only package-manager channel.
+"Supported" without a note means the output matches NCBI BLAST+ 2.17.0 on the release test set (apart from the version line, which names LOSAT); on macOS, the last digit of a full-precision E value can differ by 1. [Platforms and WebAssembly](platforms.md) gives the details for each platform, including the macOS and WASI notes.
 
 ### Install a native file
 
@@ -67,10 +77,12 @@ On Linux or macOS, unpack the archive and put `losat` on your `PATH`:
 
 ```bash
 tar -xzf LOSAT-0.2.0-x86_64-unknown-linux-gnu.tar.gz
-mkdir -p ~/bin
-cp LOSAT-0.2.0-x86_64-unknown-linux-gnu/losat ~/bin/
-~/bin/losat --version
+mkdir -p ~/.local/bin
+cp LOSAT-0.2.0-x86_64-unknown-linux-gnu/losat ~/.local/bin/
+~/.local/bin/losat --version
 ```
+
+If `~/.local/bin` is not on your `PATH` yet, add it (for example `export PATH="$HOME/.local/bin:$PATH"` in your shell's start-up file).
 
 On Windows, unzip the `.zip` file and put `losat.exe` in a folder that is on your `PATH`. The binaries are not code-signed or notarized; see [Troubleshooting](troubleshooting.md) if macOS or Windows stops a downloaded file.
 
@@ -98,7 +110,15 @@ gh attestation verify LOSAT-0.2.0-x86_64-unknown-linux-gnu.tar.gz --repo satoshi
 
 ## Build from source
 
-You need the [Rust toolchain](https://rustup.rs/) (Rust 1.92 or later; the repository pins 1.92.0). LOSAT is not on crates.io, so `cargo` builds it from the repository:
+You need the [Rust toolchain](https://rustup.rs/) (Rust 1.92 or later; the repository pins 1.92.0). `cargo` builds LOSAT from crates.io:
+
+```bash
+cargo install --locked losat
+```
+
+`--locked` builds with the dependency versions of the release build; without it, Cargo picks the newest compatible versions. The program goes to `~/.cargo/bin`.
+
+To build it from the repository:
 
 ```bash
 git clone https://github.com/satoshikawato/LOSAT.git
@@ -108,9 +128,15 @@ cargo build --release
 
 The program is `target/release/losat` (`target\release\losat.exe` on Windows). It needs no C or C++ compiler.
 
+## The libraries
+
+- **Rust.** Add the crate `losat` from crates.io with `cargo add losat`. See [Rust (`losat`)](libraries/rust.md).
+- **Python.** `pip install pylosat` (Python 3.10 or later). See [Python (`pylosat`)](libraries/python.md).
+- **Web pages.** The WebAssembly engine for the browser is built from `web/packages/losat` in this repository; it is not on npm. See [WebAssembly and Browser](libraries/webassembly.md).
+
 ## The WASI files
 
-The two WASI files are WebAssembly command modules, `losat.wasm`, for hosts such as Node.js. The serial module (`wasm32-wasip1`) runs on one thread. The threads module (`wasm32-wasip1-threads`) needs a host that provides shared memory and threads. How to run them, and what the host must pass in, is on the [Platforms and WebAssembly](platforms.md) page.
+The two WASI files are WebAssembly command modules, `losat.wasm`, for hosts such as Node.js. The serial module (`wasm32-wasip1`) runs on one thread. The threads module (`wasm32-wasip1-threads`) needs a host that provides shared memory and threads. The repository's Node.js runners (Node.js 24 or later) handle what the host must pass in; how to run them is on the [Platforms and WebAssembly](platforms.md) page.
 
 To build them yourself, add the two targets with `rustup target add wasm32-wasip1 wasm32-wasip1-threads`, then, from the `LOSAT` folder of the repository:
 
@@ -124,4 +150,4 @@ cargo build --release --bin losat --target wasm32-wasip1-threads --features wasm
 
 ## Next steps
 
-Try the [Quick start](quick-start.md). If you use NCBI BLAST+ today, read [Coming from NCBI BLAST+](from-ncbi-blast.md) to make `blastn`, `blastp` and the other names run LOSAT.
+Try the [Quick start](quick-start.md), then the recipes in [Common workflows](workflows.md). If you use NCBI BLAST+ today, read [Coming from NCBI BLAST+](from-ncbi-blast.md) to make `blastn`, `blastp` and the other names run LOSAT.

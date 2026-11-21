@@ -1,0 +1,85 @@
+RMBLASTN 2.17.0+
+
+
+Reference: Robert M. Hubley, Arian Smit
+RMBlast - RepeatMasker Search Engine
+2010 <http://www.repeatmasker.org>
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input:
+tests/fixtures/blastn_regression/inputs/ambrun_s.fa).
+           1 sequences; 1,000 total letters
+
+
+
+Query= qamb
+
+Length=700
+
+> samb
+Length=1000
+
+ Score = 508
+
+ Identities = 569/600 (95%), Gaps = 0/600 (0%)
+ Strand=Plus/Plus
+
+Query  51   TCATTGGCTATCCTAACCCGACCCTAGGAGCGGTTGGCGTGTATGCCGTGAATTTTCTCA  110
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  201  TCATTGGCTATCCTAACCCGACCCTAGGAGCGGTTGGCGTGTATGCCGTGAATTTTCTCA  260
+
+Query  111  TTTCCGCTAGACATAATCGTTCTGCCTATATCTGGACAACATCCCGGCGACTTAGGCGAC  170
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  261  TTTCCGCTAGACATAATCGTTCTGCCTATATCTGGACAACATCCCGGCGACTTAGGCGAC  320
+
+Query  171  CCACAGAATCGTCCCTTCTAACGTAGTTCGCATAGTTCCCGTCCGTAGCCGGACTATTCG  230
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  321  CCACAGAATCGTCCCTTCTAACGTAGTTCGCATAGTTCCCGTCCGTAGCCGGACTATTCG  380
+
+Query  231  AACACCCAGTATTCGATTAACTCGGGCTTGACGTATTAGAGGCGTTAGTGTGCCAGGTAA  290
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  381  AACACCCAGTATTCGATTAACTCGGGCTTGACGTATTAGAGGCGTTAGTGTGCCAGGTAA  440
+
+Query  291  GATACGCCAACGGAATTAACCTCTGTGACACTCCGCGGAGCCTTCGGACATATAAGTGAT  350
+            ||||||||||||||||||||||||||||||||||||||||||||||||||          
+Sbjct  441  GATACGCCAACGGAATTAACCTCTGTGACACTCCGCGGAGCCTTCGGACANNNNNNNNNN  500
+
+Query  351  CGGGTCTACGTTTGTTAGACTTGAGACGTCTGTTAAGAGTTGGGTCTAATAAATCGCCTA  410
+                                ||||||||||||||||||||||||||||||||||||||||
+Sbjct  501  NNNNNNNNNNNNNNNNNNNNTTGAGACGTCTGTTAAGAGTTGGGTCTAATAAATCGCCTA  560
+
+Query  411  CACGTGGAGTCTAACGGGGAAGCGTCGAATCCTGATACATCATATAATGGAGCGTGTTAT  470
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  561  CACGTGGAGTCTAACGGGGAAGCGTCGAATCCTGATACATCATATAATGGAGCGTGTTAT  620
+
+Query  471  GAAAAAAGAGCATTCCATTGTACGAGCCGTGCCAGAAACGGCTTGACTACGTGAGCGTAG  530
+            |||||||||||||||||||||||||||||| |||||||||||||||||||||||||||||
+Sbjct  621  GAAAAAAGAGCATTCCATTGTACGAGCCGTRCCAGAAACGGCTTGACTACGTGAGCGTAG  680
+
+Query  531  TGTTAGATAAACAGGAAACACTGACGCGGTTAGAAGGCGGATTGCCGGTAGGTTTTGGAA  590
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  681  TGTTAGATAAACAGGAAACACTGACGCGGTTAGAAGGCGGATTGCCGGTAGGTTTTGGAA  740
+
+Query  591  ACATAAATACACACGGTATCATGTTGGGTCACGATTCCTATCACCGCACAGGGCCAACCA  650
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  741  ACATAAATACACACGGTATCATGTTGGGTCACGATTCCTATCACCGCACAGGGCCAACCA  800
+
+
+
+
+  Database: User specified sequence set (Input:
+tests/fixtures/blastn_regression/inputs/ambrun_s.fa).
+    Posted date:  Unknown
+  Number of letters in database: 1,000
+  Number of sequences in database:  1
+
+
+
+Matrix: blastn matrix 0 0
+Gap Penalties: Existence: 5, Extension: 2

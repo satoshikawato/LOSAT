@@ -4,15 +4,6 @@
 //! searches against NCBI BLAST+ 2.17.0.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:578-584
-//! ```c
-//!         Blast_HSPListAdjustOffsets(hsp_list, backup.offset);
-//!         overlap = (backup.offset == backup.hard_ranges[backup.hm_index].left) ?
-//!                   0 : dbseq_chunk_overlap;
-//!         status = Blast_HSPListsMerge(&hsp_list, &combined_hsp_list,
-//!                      kHspNumMax, &(backup.offset), INT4_MIN,
-//!                      overlap, score_options->gapped_calculation,
-//!                      Blast_ProgramIsMapping(program_number));
-//! ```
 //! The subject is written at test time: 15,000,300 letters of A (its frames read K and F only,
 //! which give no word hit with the options below) with a segment copied at nt 420 and at nt
 //! 14,999,760, so each copy lies in the overlap of the two parts of the minus frames and of the

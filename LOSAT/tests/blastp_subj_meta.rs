@@ -8,16 +8,6 @@
 //! written is refused before any block runs, as in the search of all queries.
 //!
 //! NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:863-870
-//! ```c++
-//!         } catch (const CException&) {
-//!             list<CRef<CSeq_id> > subject_ids;
-//!             CRef<CSeq_id> id(new CSeq_id());
-//!             id->Assign(align.GetSeq_id(1));
-//!             subject_ids.push_back(id);
-//!             SetSubjectId(subject_ids);
-//!             bioseqs_found = false;
-//!         }
-//! ```
 
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};

@@ -21,8 +21,9 @@ the Linux arm64 cell of `platform-checks.yml` (since 2026-10-18, plan v4 D6 (a)(
   `_mm*_fnm*`, `vfmaq_*`, `vfmsq_*`), or the Wasm `relaxed-simd` feature (its `relaxed_madd`
   fuses or not depending on the engine). The Wasm builds enable `+simd128` only.
 - **Fused multiply-adds in two places.** First, `f64::mul_add` in `stats/spouge.rs::x_product_error`: the exact
-  rounding error of a product in the double-double emulation of `expl` in the long-double line
-  `result *= expl(-z * z) / z` of NCBI's `boost_erf.c`. The other call is its test
+  rounding error of a product in the double-double emulation of `expl` in ErfC's long-double
+  product (Boost (NCBI 598d8ae6 copy): c++/src/algo/blast/core/boost_erf.c:143). The other call is
+  its test
   `x_dekker_product_error_matches_fused_multiply_add`. `mul_add` rounds once (IEEE 754
   fusedMultiplyAdd) on every target, so an instruction and a library routine give the same bits.
   In the release binary of dev 79fab14e it sits in `stats::spouge::erf_impl_ncbi`:
@@ -56,13 +57,15 @@ the Linux arm64 cell of `platform-checks.yml` (since 2026-10-18, plan v4 D6 (a)(
   A new `mul_add` needs the same argument (the fused result is the value NCBI computes) and an
   entry in the checker's `MUL_ADD_SITES` (and, in another module, `MUL_ADD_FUNCTION_PREFIXES`).
 - **The C library's math functions.** `exp`, `ln`, `log10` and `pow` (`powf`) come from
-  `utils/glibc_fma_libm.rs` on every target (since 2026-11-20, #1344): glibc 2.35's x86-64 FMA
-  versions, bit for bit, with `f64::mul_add` where the CPU has FMA and an exact emulation of the
-  FMA elsewhere (WebAssembly, x86-64 CPUs without FMA). NCBI's reference bytes were written with
+  `utils/glibc_fma_libm.rs` on every target (since 2026-11-20, #1344): the code of Arm Optimized
+  Routines (MIT; `log10`: Sun's fdlibm), which gives glibc 2.35's x86-64 FMA versions bit for bit,
+  with `f64::mul_add` where the CPU has FMA and an exact emulation of the FMA elsewhere (WebAssembly, x86-64 CPUs without FMA). NCBI's reference bytes were written with
   glibc's FMA variants (`__log_fma` and the others, picked from the CPU when glibc is loaded);
   the other libms (glibc without FMA, Apple's, the UCRT, wasi-libc) differ from them by 1 ULP on
   some arguments. `LOSAT/clippy.toml` refuses the transcendental methods of `f64` and `f32`
-  outside the module; a new one is ported into it from glibc. Do not call the `libm` crate
+  outside the module; a new one is added to it from a permissively licensed source of the same
+  code (Arm Optimized Routines, musl, fdlibm) with that source's notice, and tests check that it
+  gives glibc 2.35's bits; glibc's (LGPL) source is not read (AGENTS.md). Do not call the `libm` crate
   (`LOSAT/tests/check_fp_contract.py` rejects `libm::<fn>`).
 - **Release builds.** `cargo build --release`: fat LTO, one codegen unit, `panic = "abort"`
   (`LOSAT/Cargo.toml`) and the x86-64 loop alignment of `LOSAT/.cargo/config.toml`, for the

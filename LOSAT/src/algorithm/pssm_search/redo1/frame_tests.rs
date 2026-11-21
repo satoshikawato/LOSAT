@@ -64,7 +64,7 @@ fn encode(text: &str) -> Vec<u8> {
     text.bytes().map(aa_char_to_ncbistdaa).collect()
 }
 
-// redo_alignment.c:644-765 (quoted at `windows_from_translated_aligns`): one window per alignment,
+// redo_alignment.c:644-765 (cited at `windows_from_translated_aligns`): one window per alignment,
 // [MAX(0, matchStart - 200), MIN(translated length, matchEnd + 200)) in its frame, with the
 // translated length of `GET_NUCL_LENGTH` of the buffer's length; sorted by query, frame, begin
 // and end (glibc's stable sort), a window joined into the next one of its frame that it reaches
@@ -101,7 +101,7 @@ fn the_windows_are_ncbis() {
     );
 }
 
-// blast_kappa.c:1597-1643 (quoted at `frame_range`): the frame's letters as NCBI finds them in
+// blast_kappa.c:1597-1643 (cited at `frame_range`): the frame's letters as NCBI finds them in
 // the translation buffer, in a zeroed buffer of the buffer's length plus 2, the byte before the
 // window zeroed.
 #[test]
@@ -172,7 +172,7 @@ fn align_in(frame: i32, s: (i32, i32)) -> Align {
 }
 
 // redo_alignment.c:921-936 and composition_adjustment.c:1204-1248 (`Blast_GetCompositionRange`,
-// quoted at `blast_get_composition_range`): the letters between the stops around the alignment,
+// cited at `blast_get_composition_range`): the letters between the stops around the alignment,
 // 20 letters inside each stop unless that cuts into the alignment, within the window's letters;
 // where the window ends before it begins, the range ends at the alignment's end.
 #[test]
@@ -194,7 +194,7 @@ fn the_window_composition_is_ncbis() {
     assert_eq!(composition.num_true_amino_acids, 89);
 }
 
-// redo_alignment.c:1063-1094 (quoted at `preliminary_test_near_identical` and
+// redo_alignment.c:1063-1094 (cited at `preliminary_test_near_identical` and
 // `old_test_near_identical`): with the cutoff 0 (rpstblastn's query whose frame +1 is invalid,
 // `RedoRun::without_valid_context`) the window must hold one ungapped alignment as long as the
 // profile or 50, whatever its score; with a cutoff above 0 the score per position decides.

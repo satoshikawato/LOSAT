@@ -129,6 +129,17 @@
   line-height: 1.45;
 }
 
+/* The page always has its vertical scroll bar, so that its width never depends on whether it scrolls. Where scroll bars
+   take space (Windows, Linux), the Dot Plot's square plot follows the page's width and makes the page taller as it
+   grows: in a window a few pixels taller than the page, the bar went away, the wider plot brought it back, and the plot
+   changed its size, with "ResizeObserver loop completed with undelivered notifications.", every frame (line WQA's
+   sweep 2, S2-2, review M1, 2026-11-20). Overlay scroll bars (phones, macOS) take no space. `scrollbar-gutter: stable`
+   keeps the same place, but Chromium keeps it also where it hides scroll bars, as in the tests, which would then see
+   every window 15 px narrower than it is. */
+html {
+  overflow-y: scroll;
+}
+
 body {
   margin: 0;
   padding: 0 16px 32px;
@@ -469,6 +480,13 @@ input[type='radio'] {
   overflow-wrap: anywhere;
 }
 
+/* The file of -logfile has the name the user gave it, as long as they made it: its line and its button (line WQA's
+   sweep 2, S2-1, 2026-11-20: a name of 46 characters made the Outputs 414 px wide in a 320 px window). */
+.run-file-name,
+.run-file > button {
+  overflow-wrap: anywhere;
+}
+
 .tabs button[aria-selected='true'],
 .tabs button[aria-selected='true']:hover:not(:disabled) {
   border-color: var(--accent);
@@ -493,8 +511,16 @@ input[type='radio'] {
   gap: 0 24px;
 }
 
-/* An option name is not broken after its leading hyphen (S13 screen review L2). */
+/* An option's name (OptionName.vue): a line takes it whole or leaves it whole to the next line, and only a name
+   longer than its line breaks, at the line's end; its lead (the hyphen and the letter after it) never does (S13
+   screen review L2). With the whole name unbreakable, -min_raw_gapped_score made Run details and the results' Options
+   line wider than a 320 or 360 px window (line WQA's sweep 2, S2-1, 2026-11-20). An inline-block name would have let
+   a line break between the name and the ':' or ')' after it in the notices' sentences. */
 .option-name {
+  overflow-wrap: anywhere;
+}
+
+.option-lead {
   white-space: nowrap;
 }
 
@@ -2229,6 +2255,37 @@ pre.range-text {
 
 .commands code {
   overflow-wrap: anywhere;
+}
+
+/* Below 480 px each label of the results' lists of labels and values (the header block, Run details) is above its
+   value, which then has the whole width: beside a column of labels such as "Threads requested", the values of a
+   320 px window had 114 to 134 px, and option names such as -min_raw_gapped_score broke inside (line WQA's sweep 2,
+   S2-1 round 2, 2026-11-20). OptionName's break at the line's end stays for a name longer than the whole line. */
+@media (max-width: 479px) {
+  .results-summary {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .results-summary dt {
+    padding: 5px 0 0;
+    border-bottom: none;
+  }
+
+  .results-summary dd {
+    padding-top: 1px;
+  }
+
+  .details-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .details-list {
+    row-gap: 0;
+  }
+
+  .details-list dd {
+    margin-bottom: 6px;
+  }
 }
 
 /* Narrow screens: the notes one under the other (design §3.4). */

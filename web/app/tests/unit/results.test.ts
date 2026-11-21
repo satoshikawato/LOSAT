@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import type { MessagePlace } from 'losat/domain';
 import type { HspRecord, ProgramDescription } from 'losat/ports';
 import type { AppState, RunView } from '../../src/application/coordinator';
-import { noHspReason, ResultsBrowser, type ResultsDeps } from '../../src/application/results';
+import { keptOutputs, noHspReason, ResultsBrowser, type ResultsDeps } from '../../src/application/results';
 import { Store } from '../../src/application/store';
 import { hspTable, out0Range, out6Range, frame, subjectSpan } from '../../src/domain/hsp-table';
 import { headingTitle } from '../../src/domain/outfmt0';
@@ -668,27 +668,67 @@ describe('ResultsBrowser', () => {
   it('shows why a run has no results, and opens it when it completes', async () => {
     const failed = setup({ status: 'failed' });
     await failed.results.open('r1');
-    expect(failed.results.state.get()).toMatchObject({ phase: 'unavailable', message: 'Run 1 failed: boom. A failed run keeps no results.' });
+    expect(failed.results.state.get()).toMatchObject({ phase: 'unavailable', message: 'Run 1 failed: boom. It keeps no outputs.' });
 
     // One full stop at the end of the reason, whatever it ends with (WA-RN-02).
     for (const [error, said] of [
       ['Earlier results are kept.', 'Earlier results are kept.'],
-      ['BLAST engine error: Warning: Sequence contains no data \n', 'BLAST engine error: Warning: Sequence contains no data.'],
+      ['LOSAT engine error: Warning: Sequence contains no data \n', 'LOSAT engine error: Warning: Sequence contains no data.'],
       ['Is it full?', 'Is it full?'],
       ['The file (see the log.)', 'The file (see the log.)'],
       ['', 'no reason was recorded.'],
     ] as const) {
       const run = setup({ status: 'failed', error });
       await run.results.open('r1');
-      expect(run.results.state.get().message).toBe(`Run 1 failed: ${said} A failed run keeps no results.`);
+      expect(run.results.state.get().message).toBe(`Run 1 failed: ${said} It keeps no outputs.`);
     }
 
     // A failed run that made the file of its -logfile keeps it (line RG E1w-3b).
-    const logged = setup({ status: 'failed', error: 'BLAST engine error: The average subject length is too short', record: { runFiles: [{ name: 'run.log', bytes: new Uint8Array([65]) }] } });
+    const logged = setup({ status: 'failed', error: 'LOSAT engine error: The average subject length is too short', record: { runFiles: [{ name: 'run.log', bytes: new Uint8Array([65]) }] } });
     await logged.results.open('r1');
     expect(logged.results.state.get().message).toBe(
-      'Run 1 failed: BLAST engine error: The average subject length is too short. A failed run keeps no results. It keeps the file of its -logfile, run.log.',
+      'Run 1 failed: LOSAT engine error: The average subject length is too short. It keeps the file of its -logfile, run.log.',
     );
+    // A failed run keeps the warnings written before its error (line WQA's sweep, D3, 2026-11-19); white space alone is none.
+    const warned = setup({
+      status: 'failed',
+      error: 'LOSAT engine error: The average subject length is too short',
+      record: { diagnostics: 'Warning: [blastn] Subject_1 empty record: Subject sequence contains no data\n' },
+    });
+    await warned.results.open('r1');
+    expect(warned.results.state.get().message).toBe(
+      'Run 1 failed: LOSAT engine error: The average subject length is too short. It keeps the warnings written before the error.',
+    );
+    const blank = setup({ status: 'failed', error: 'boom', record: { diagnostics: '\n' } });
+    await blank.results.open('r1');
+    expect(blank.results.state.get().message).toBe('Run 1 failed: boom. It keeps no outputs.');
+
+    // A failed run keeps the outputs written before its error (line WQA's sweep, D15, 2026-11-20): said when one holds bytes,
+    // with the others' words after it, and not said for an output of no bytes. The outputs that the engine dropped (place
+    // `run`) are not the run's.
+    const result = (lengths: { 0: number; 6: number; 7: number }, failed: readonly FailedOutput[]) => ({
+      runId: 'r1',
+      byteLengths: lengths,
+      hitCount: 0,
+      failed,
+    });
+    const dropped: readonly FailedOutput[] = [
+      { output: 6, error: 'run' },
+      { output: 7, error: 'run' },
+    ];
+    const wrote = setup({ status: 'failed', error: 'boom', result: result({ 0: 282, 6: 0, 7: 0 }, dropped), record: { diagnostics: 'Warning: x\n' } });
+    await wrote.results.open('r1');
+    expect(wrote.results.state.get().message).toBe('Run 1 failed: boom. It keeps the outputs written before the error. It keeps the warnings written before the error.');
+    expect(keptOutputs(wrote.view)).toEqual([0]);
+    const empty = setup({ status: 'failed', error: 'boom', result: result({ 0: 0, 6: 0, 7: 0 }, dropped) });
+    await empty.results.open('r1');
+    expect(empty.results.state.get().message).toBe('Run 1 failed: boom. It keeps no outputs.');
+    // The bytes of an output that the engine dropped do not count (they are none, but the rule is the engine's).
+    const lost = setup({ status: 'failed', error: 'boom', result: result({ 0: 0, 6: 9, 7: 0 }, dropped) });
+    await lost.results.open('r1');
+    expect(lost.results.state.get().message).toBe('Run 1 failed: boom. It keeps no outputs.');
+    // A completed run keeps every output of its argv.
+    expect(keptOutputs({ ...wrote.view, status: 'completed', result: result({ 0: 1, 6: 1, 7: 1 }, []) })).toEqual([0, 6, 7]);
 
     const running = setup({ status: 'running' });
     await running.results.open('r1');
@@ -803,6 +843,19 @@ describe('ResultsBrowser', () => {
     const searched = setup({ specs: [] });
     await searched.results.open('r1');
     expect(noHspReason(searched.results.state.get())).toBe('no-hits');
+  });
+
+  // Line WQA's D14, 2026-11-20: a run of a help or version word completes without a search: its notice says so and where
+  // the text is, in place of "no hits", also when the argv has -dryrun (the command line prints the text first).
+  it("says that a completed run printed the command line's help or version and searched nothing", async () => {
+    for (const prints of ['help', 'version'] as const) {
+      const { results } = setup({ specs: [], snapshot: { prints, dryRun: true } });
+      await results.open('r1');
+      expect(results.state.get().phase).toBe('ready');
+      expect(noHspReason(results.state.get())).toBe(`printed-${prints}`);
+    }
+    expect(NO_HSP_TEXT['printed-help']).toBe("This run printed the command line's help and ran no search. The text is in Outputs.");
+    expect(NO_HSP_TEXT['printed-version']).toBe("This run printed the command line's version and ran no search. The text is in Outputs.");
   });
 
   // WA-FM-07: the command of a run without results is read with the grammar too.

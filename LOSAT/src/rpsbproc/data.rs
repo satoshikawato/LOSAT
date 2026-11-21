@@ -3,17 +3,6 @@
 //! PSSM-ID, accession and cluster that the classification makes.
 //!
 //! NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/offl_sparcle_data.hpp:12-26
-//! ```c++
-//! class COfflDomClusterData: public CDomClusterIndex
-//! {
-//! 	...
-//! 	static constexpr const char * __cdd_ids_file = "cddid.tbl";
-//! 	static constexpr const char * __spec_feats_file = "cddannot.dat";
-//! 	static constexpr const char * __gen_feats_file = "cddannot_generic.dat";
-//! 	static constexpr const char * __bs_thrlds_file = "bitscore_specific.txt";
-//! 	static constexpr const char * __cdtrack_file = "cdtrack.txt";
-//! 	static constexpr const char * __domfam_link_file = "family_superfamily_links";
-//! ```
 //!
 //! NCBI keeps a `TDomain` (or `TCluster`) per row with every column as a `std::string`; LOSAT
 //! keeps the columns that the outputs print or decide by (the PSSM-ID, accession, short name,
@@ -21,25 +10,19 @@
 //! root, and the sites of `cddannot*.dat`: title, motif, positions, type, size) with the texts
 //! in one buffer. The definition lines and the site columns no output reads (index, evidence
 //! flags) are read as NCBI reads them, for their errors, but not kept.
-//! The lookups are NCBI's `CPtrMap`: the rows sorted by libstdc++'s `std::sort` with NCBI's
-//! comparison and searched by NCBI's binary search, so that a key held by two rows finds the row
-//! that NCBI finds.
+//! The lookups are NCBI's `CPtrMap`: the rows sorted with NCBI's comparison and searched by
+//! NCBI's binary search. The sort is Rust's standard sort with the row's place in the file as
+//! the last key (`sort_ties_in_input_order`), so rows of one key stay in the order of the file
+//! (NCBI's `std::sort` may leave them in another order; PD-LOSAT-NCBI-DEFECTS 1.67, the order of
+//! tied hits).
 
 use std::io::{BufRead, BufReader};
 
 use crate::ncbi_exception::NcbiException;
 use crate::ncbi_str::{printable_string, string_to_double, string_to_int, string_to_uint};
-use crate::utils::std_sort::std_sort;
 
 /// `INVALIDPSSMID`.
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/basedata.hpp:26-30
-// ```c++
-// constexpr const PssmId_t INVALIDPSSMID = 100000000;
-// constexpr const PssmId_t DOMSRCMUL = 1000000;
-// constexpr const ArchId_t MINSPECARCHID = 10000000;
-// constexpr const ClusterId_t INVALIDCLUSTERID = -1;
-// constexpr const ClusterId_t SINGLEMEMBERCLUSTER = k_INT_MAX;
-// ```
 pub(crate) const INVALID_PSSM_ID: u32 = 100_000_000;
 const DOMSRCMUL: u32 = 1_000_000;
 const INVALID_CLUSTER_ID: i32 = -1;
@@ -191,20 +174,8 @@ impl<'a> Line<'a> {
     }
 
     /// `substr(pos, n)`: `n` clipped to the end; `pos` past the end throws `out_of_range`.
-    // libstdc++ (GCC 13): bits/basic_string.h:385-393
-    // ```c++
-    //       size_type
-    //       _M_check(size_type __pos, const char* __s) const
-    //       {
-    // 	if (__pos > this->size())
-    // 	  __throw_out_of_range_fmt(__N("%s: __pos (which is %zu) > "
-    // 				       "this->size() (which is %zu)"),
-    // 				   __s, __pos, this->size());
-    // 	return __pos;
-    //       }
-    // ```
-    // (`substr` calls `_M_check(__pos, "basic_string::substr")`, bits/basic_string.h:3163-3165;
-    // NCBI's rpsbproc printed `Error: (106.6) Application's initialization failed:
+    // The C++ standard's `basic_string::substr` throws `out_of_range` when `pos > size()`; the text
+    // is that of NCBI's build, observed: NCBI's rpsbproc printed `Error: (106.6) Application's initialization failed:
     // basic_string::substr: __pos (which is 18446744073709551615) > this->size() (which is 10)`
     // for a `cdtrack.txt` line of an accession alone, PS16a review oracle A4-1 case `ct3`.)
     //
@@ -253,20 +224,6 @@ impl<'a> Line<'a> {
 /// `x_GetTrimPos` and the other trims of rpsbproc's library: a byte is white space when it is at
 /// most `' '` as a signed `char` (so the bytes from 0x80 too).
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/basealgo.cpp:18-28
-// ```c++
-// void x_GetTrimPos(const string & ori, size_t &pos0, size_t &pos1)
-// {
-// 	pos0 = 0;
-// 	pos1 = ori.size();;
-//
-// 	while (pos0 < pos1 && ori[pos0] <= ' ')
-// 		++pos0;
-//
-// 	while (pos1 > pos0 && ori[pos1 - 1] <= ' ')
-// 		--pos1;
-//
-// }
-// ```
 fn is_trim_space(byte: u8) -> bool {
     (byte as i8) <= b' ' as i8
 }
@@ -294,20 +251,6 @@ fn ltrim(text: &[u8]) -> &[u8] {
 }
 
 // NCBI reference (598d8ae6): c++/include/corelib/ncbistr.hpp:3582-3593
-// ```c++
-//     template <typename TNumeric>
-//     static typename enable_if< is_integral<TNumeric>::value && is_signed<TNumeric>::value && (sizeof(TNumeric) == sizeof(int) && !is_same<TNumeric, long>::value), TNumeric>::type
-//     x_StringToNumeric(const CTempString str, TStringToNumFlags flags, int base)
-//     {
-//         return StringToInt(str, flags, base);
-//     }
-//     template <typename TNumeric>
-//     static typename enable_if< is_integral<TNumeric>::value && is_unsigned<TNumeric>::value && (sizeof(TNumeric) == sizeof(unsigned int) && !is_same<TNumeric, unsigned long>::value), TNumeric>::type
-//     x_StringToNumeric(const CTempString str, TStringToNumFlags flags, int base)
-//     {
-//         return StringToUInt(str, flags, base);
-//     }
-// ```
 // The loader's `NStr::StringToNumeric<T>(text)` (flags 0, base 10) is `StringToUInt` for the
 // unsigned ids and lengths, `StringToInt` for the signed ones and `StringToDouble` for the bit
 // scores (ncbistr.hpp:3632-3637): `ncbi_str::string_to_uint`, `string_to_int` and
@@ -317,31 +260,6 @@ fn ltrim(text: &[u8]) -> &[u8] {
 
 /// `TDomSrcCount::ESrcIdx` and the signatures of the source databases.
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/basedata.cpp:117-140
-// ```c++
-// array<const char * , TDomSrcCount::TOTALSIGS > TDomSrcCount::DOMSRCSIGS = {"CD", "PFAM", "TIGR", "COG", "KOG", "SMART", "PRK", "CHL", "MTH", "PHA", "PLN", "PTZ"};
-//
-// TDomSrcCount::ESrcIdx TDomSrcCount::DomAccType(const string &acxn)
-// {
-// 	size_t sig = 0, acxn_len = acxn.size();
-// 	while (sig < TOTALSIGS)
-// 	{
-//
-// 		size_t siglen = strlen(TDomSrcCount::DOMSRCSIGS[sig]);
-// 		if (siglen < acxn_len)
-// 		{
-// 			for (size_t cidx = 0; cidx < siglen; ++cidx)
-// 			{
-// 				if (toupper((unsigned char)acxn[cidx]) != (unsigned char)TDomSrcCount::DOMSRCSIGS[sig][cidx])
-// 					goto labelNext;
-// 			}
-// 			return (ESrcIdx)sig;
-// 		}
-// 	labelNext:
-// 		++sig;
-// 	}
-// 	return TOTALSIGS;
-// }
-// ```
 const DOMSRCSIGS: [&[u8]; 12] = [
     b"CD", b"PFAM", b"TIGR", b"COG", b"KOG", b"SMART", b"PRK", b"CHL", b"MTH", b"PHA", b"PLN",
     b"PTZ",
@@ -364,34 +282,6 @@ pub(crate) fn dom_acc_type(accession: &[u8]) -> usize {
 
 /// `TDomSrcCount::ComputePseudoPssmId`: the PSSM-ID of a model known only by accession.
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/basedata.cpp:168-193
-// ```c++
-// PssmId_t TDomSrcCount::ComputePseudoPssmId(const string &acxn)
-// {
-// 	PssmId_t pseudo_pssmid = 0;
-// 	if (!acxn.empty())
-// 	{
-// 		ESrcIdx srctype = DomAccType(acxn);
-// 		pseudo_pssmid = INVALIDPSSMID + (PssmId_t)(srctype * DOMSRCMUL);
-//
-//
-// 		size_t idx = 0, idxEnd = acxn.size();
-//
-// 		while (idx < idxEnd && !isdigit(acxn[idx]))
-// 			++idx;
-//
-// 		PssmId_t odr = 0;
-// 		while (idx < idxEnd && isdigit(acxn[idx]))
-// 		{
-// 			odr = odr * 10 + (PssmId_t)(acxn[idx] - '0');
-// 			++idx;
-// 		}
-//
-// 		pseudo_pssmid += odr;
-//
-// 	}
-// 	return pseudo_pssmid;
-// }
-// ```
 // (`PssmId_t` is `unsigned int`: the arithmetic wraps.)
 pub(crate) fn compute_pseudo_pssm_id(accession: &[u8]) -> u32 {
     if accession.is_empty() {
@@ -458,47 +348,7 @@ impl CddData {
 
     /// `CPtrMap::Find` of `m_pssmid2cd`: the domain of `pssm_id`.
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/ptrmap.hpp:109-127
-    // ```c++
-    // CPtrMap<TKey, TVal, TComp> :: Find(const TKey &k) const
-    // {
-    // 	std::size_t rbegin = 0, rend = m_ptr_vec.size(), dist = rend - rbegin;
-    // 	while (dist > 0)
-    // 	{
-    // 		std::size_t rmid = rbegin + (dist >> 1);
-    // 		int ord = m_comp(k, *m_ptr_vec[rmid]);
-    // 		if (0 == ord)
-    // 			return m_ptr_vec[rmid];	//found
-    // 		else if (ord > 0) rbegin = rmid + 1;
-    // 		else rend = rmid;
-    // 		dist = rend - rbegin;
-    // 	}
-    // 	return nullptr;
-    // }
-    // ```
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/basedata.hpp:796-833
-    // ```c++
-    // 	struct TSortByPssmId
-    // 	{
-    // 		int operator () (const TCluster & v1, const TCluster & v2) const
-    // 		{
-    // 			return (int)v1.m_uiPssmId - (int)v2.m_uiPssmId;
-    // 		}
-    //
-    // 		int operator () (PssmId_t pssmid, const TCluster & v) const
-    // 		{
-    // 			return (int)pssmid - (int)v.m_uiPssmId;
-    // 		}
-    // 	};
-    // 	...
-    // 	struct TSortByAcxn
-    // 	{
-    // 		...
-    // 		int operator () (const std::string & acxn, const TCluster & v) const
-    // 		{
-    // 			return acxn.compare(v.m_strAccession);
-    // 		}
-    // 	};
-    // ```
     // (The `int` difference is compared without its overflow: `int_order`.)
     pub(crate) fn find_domain(&self, pssm_id: u32) -> Option<usize> {
         let found = binary_search(&self.domain_by_pssm_id, |index| {
@@ -517,20 +367,6 @@ impl CddData {
 
     /// `FindClusterInfo(clusterid)`.
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/basedata.hpp:809-820
-    // ```c++
-    // 	struct TSortByClusterId
-    // 	{
-    // 		int operator () (const TCluster & v1, const TCluster & v2) const
-    // 		{
-    // 			return v1.m_iClusterId - v2.m_iClusterId;
-    // 		}
-    //
-    // 		int operator () (ClusterId_t clstid, const TCluster & v) const
-    // 		{
-    // 			return (int)clstid - (int)v.m_iClusterId;
-    // 		}
-    // 	};
-    // ```
     pub(crate) fn find_cluster(&self, cluster_id: i32) -> Option<usize> {
         let found = binary_search(&self.cluster_by_id, |index| {
             int_order(cluster_id, self.clusters[index as usize].cluster_id)
@@ -540,21 +376,6 @@ impl CddData {
 
     /// `COfflDomClusterData::LoadData_real`.
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/offl_sparcle_data.cpp:66-83
-    // ```c++
-    // void COfflDomClusterData::LoadData_real(const string &cddids, const string &spfeats, const string &genfeats, const string &bscores, const string &cdtrack, const string &famlinks)
-    // {
-    // 	...
-    // 	if (m_CDStore.IsEmpty())	//not loaded yet, load it
-    // 	{
-    // 		ifstream dfstream;
-    // 		string buf;
-    //
-    // 		CFile srcfile;
-    // 		srcfile.Reset(cddids);
-    // 		...
-    // 		if (!srcfile.Exists())
-    // 			throw CSimpleException(__FILE__, __LINE__, "Data file " + srcfile.GetPath() + " does not exist");
-    // ```
     // The files are read in this order: `cddid.tbl`, `cdtrack.txt`, `family_superfamily_links`,
     // `cddannot.dat`, `cddannot_generic.dat`, `bitscore_specific.txt`; each one is checked when
     // its turn comes.
@@ -571,116 +392,6 @@ impl CddData {
     }
 
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/offl_sparcle_data.cpp:100-213
-    // ```c++
-    // 			while (dfstream.good())
-    // 			{
-    // 				buf.clear();
-    // 				getline(dfstream, buf);
-    // 				//LTrimString(buf);
-    // 				if (!buf.empty() && '#' != buf[0])
-    // 				{
-    //
-    // 					size_t pos0 = 0, pos1 = buf.find('\t', pos0);
-    //
-    // 					string pssmid_lit = buf.substr(pos0, pos1 - pos0);
-    // 					LTrimString(pssmid_lit);
-    //
-    // 					PssmId_t pssmid = 0;
-    //
-    // 					if (!pssmid_lit.empty())
-    // 						pssmid = NStr::StringToNumeric<PssmId_t> (pssmid_lit);
-    //
-    // 					pos0 = pos1 + 1;
-    // 					pos1 = buf.find('\t', pos0);
-    // 					string tmp(buf.substr(pos0, pos1 - pos0));
-    // 					TrimString(tmp);
-    //
-    // 					if (0 == pssmid)	//make pseudo pssmid
-    // 						pssmid = TDomSrcCount::ComputePseudoPssmId(tmp);
-    //
-    // 					if ('c' == tmp[0] && 'l' == tmp[1] && (tmp[2] >= '0' && tmp[2] <= '9'))	//cluster
-    // 					{
-    //
-    // 						// is cluster
-    // 						TCluster * p_clst = m_ClusterStore.Append();
-    // 						p_clst->m_uiPssmId = pssmid;
-    // 						p_clst->m_strAccession = move(tmp);
-    // 						p_clst->m_iClusterId = NStr::StringToNumeric<ClusterId_t> (p_clst->m_strAccession.substr(2));
-    //
-    // 						pos0 = pos1 + 1;
-    // 						pos1 = buf.find('\t', pos0);
-    // 						p_clst->m_strShortName = buf.substr(pos0, pos1 - pos0);
-    // 						TrimString(p_clst->m_strShortName);
-    // 						pos0 = pos1 + 1;
-    // 						pos1 = buf.find('\t', pos0);
-    // 						p_clst->m_strDefline = buf.substr(pos0, pos1 - pos0);
-    // 						TrimString(p_clst->m_strDefline);
-    // 						...
-    // 						clst_ptrs.emplace_back(p_clst);
-    // 					}
-    // 					else	//cd
-    // 					{
-    // 						TDomain * p_cd = m_CDStore.Append();
-    // 						p_cd->m_uiPssmId = pssmid;
-    // 						p_cd->m_strAccession = buf.substr(pos0, pos1 - pos0);
-    // 						TrimString(p_cd->m_strAccession);
-    // 						if (isdigit(p_cd->m_strAccession[2]))	//cdxxx, sdxxx or clxxx
-    // 						{
-    // 							if ('d' == p_cd->m_strAccession[1])	//cd or sd
-    // 							{
-    // 								if ('c' == p_cd->m_strAccession[0])	//curated
-    // 								{
-    // 									p_cd->m_bCurated = true;
-    // 									//cd_ptrs.emplace_back(p_cd);
-    // 								}
-    //
-    // 								else if ('s' == p_cd->m_strAccession[0])	//curated
-    // 									p_cd->m_bIsStructDom = true;
-    // 							}
-    // 						}
-    //
-    //
-    // 						pos0 = pos1 + 1;
-    // 						pos1 = buf.find('\t', pos0);
-    // 						p_cd->m_strShortName = buf.substr(pos0, pos1 - pos0);
-    // 						TrimString(p_cd->m_strShortName);
-    //
-    // 						pos0 = pos1 + 1;
-    // 						pos1 = buf.find('\t', pos0);
-    // 						p_cd->m_strDefline = buf.substr(pos0, pos1 - pos0);
-    // 						TrimString(p_cd->m_strDefline);
-    //
-    // 						pos0 = pos1 + 1;
-    // 						pos1 = buf.find('\t', pos0);
-    //
-    // 						// -- assume length is the last field
-    // 						while (string::npos != pos1)
-    // 						{
-    // 							pos0 = pos1 + 1;
-    // 							pos1 = buf.find('\t', pos0);
-    // 						}
-    //
-    // 						string tmp1(buf.substr(pos0));
-    // 						TrimString(tmp1);
-    //
-    // 						p_cd->m_uiLength = NStr::StringToNumeric<SeqLen_t> (tmp1);
-    // 						dom_ptrs.emplace_back(p_cd);
-    // 					}
-    // 				}
-    // 			}
-    // 			dfstream.close();
-    //
-    // 			// -- now create maps,
-    // 			clst_ptrs.shrink_to_fit();	//cluster
-    // 			//cd_ptrs.shrink_to_fit();	//curated
-    // 			dom_ptrs.shrink_to_fit();	//all domains
-    //
-    // 			SetPssmId2CdPtrs(dom_ptrs);
-    // 			SetPssmId2ClusterPtrs(clst_ptrs);
-    //
-    // 			SetAcxn2CdPtrs(move(dom_ptrs));
-    // 			SetClusterId2ClusterPtrs(move(clst_ptrs));
-    // ```
     // (`pos1 + 1` of `npos` is 0: a line with fewer tabs than NCBI expects reads its fields from
     // the start again. The definition lines are not kept.)
     fn load_cddids(&mut self, path: &str) -> Result<(), DataError> {
@@ -775,48 +486,52 @@ impl CddData {
         self.domains = domains;
         self.clusters = clusters;
         // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/ptrmap.hpp:167-179
-        // ```c++
-        // void CPtrMap<TKey, TVal, TComp> :: Reset(const TSORTED_PTRS & ptrs)
-        // {
-        // 	m_ptr_vec = ptrs;
-        // 	if (m_ptr_vec.size() > 1) sort(m_ptr_vec.begin(), m_ptr_vec.end(), m_sort_cmp);
-        // }
-        // ```
         // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/ptrmap.hpp:63-70
-        // ```c++
-        // 	struct TSortComp
-        // 	{
-        // 		const TComp &m_comp;
-        // 		bool operator() (CONST_VAL_PTR p1, CONST_VAL_PTR p2)
-        // 		{
-        // 			return m_comp(*p1, *p2) < 0;
-        // 		}
-        // ```
         let domains = &self.domains;
         let clusters = &self.clusters;
         let text = &self.text;
         let span = |s: Span| &text[s.start as usize..(s.start + s.len) as usize];
+        // (LOSAT sorts with Rust's standard sort (`sort_ties_in_input_order`) and the comparisons
+        // that the lookups search with, `int_order` and `compare_bytes`, which order every pair of
+        // keys, then the row's index: rows of one key keep the order of the file, where NCBI's
+        // `sort` may leave them in another. No CDD v3.22 file has two rows of one key.
+        // PD-LOSAT-NCBI-DEFECTS 1.67, the order of tied hits.)
         let mut by_pssm: Vec<u32> = (0..domains.len() as u32).collect();
-        std_sort(&mut by_pssm, &mut |&a: &u32, &b: &u32| {
-            int_order(
-                domains[a as usize].pssm_id as i32,
-                domains[b as usize].pssm_id as i32,
-            ) < 0
-        });
+        sort_ties_in_input_order(
+            &mut by_pssm,
+            |&row| row,
+            |&a, &b| {
+                int_order(
+                    domains[a as usize].pssm_id as i32,
+                    domains[b as usize].pssm_id as i32,
+                )
+                .cmp(&0)
+            },
+        );
         let mut by_acc: Vec<u32> = (0..domains.len() as u32).collect();
-        std_sort(&mut by_acc, &mut |&a: &u32, &b: &u32| {
-            compare_bytes(
-                span(domains[a as usize].accession),
-                span(domains[b as usize].accession),
-            ) < 0
-        });
+        sort_ties_in_input_order(
+            &mut by_acc,
+            |&row| row,
+            |&a, &b| {
+                compare_bytes(
+                    span(domains[a as usize].accession),
+                    span(domains[b as usize].accession),
+                )
+                .cmp(&0)
+            },
+        );
         let mut cl_by_id: Vec<u32> = (0..clusters.len() as u32).collect();
-        std_sort(&mut cl_by_id, &mut |&a: &u32, &b: &u32| {
-            int_order(
-                clusters[a as usize].cluster_id,
-                clusters[b as usize].cluster_id,
-            ) < 0
-        });
+        sort_ties_in_input_order(
+            &mut cl_by_id,
+            |&row| row,
+            |&a, &b| {
+                int_order(
+                    clusters[a as usize].cluster_id,
+                    clusters[b as usize].cluster_id,
+                )
+                .cmp(&0)
+            },
+        );
         self.domain_by_pssm_id = by_pssm;
         self.domain_by_accession = by_acc;
         self.cluster_by_id = cl_by_id;
@@ -824,91 +539,6 @@ impl CddData {
     }
 
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/offl_sparcle_data.cpp:217-308
-    // ```c++
-    // 		srcfile.Reset(cdtrack);
-    // 		if (!srcfile.Exists())
-    // 			throw CSimpleException(__FILE__, __LINE__, "Data file " + srcfile.GetPath() + " does not exist");
-    // 		else
-    // 		{
-    // 			dfstream.open(srcfile.GetPath().c_str());
-    //
-    // 			while (dfstream.good())
-    // 			{
-    // 				buf.clear();
-    // 				getline(dfstream, buf);
-    // 				LTrimString(buf);
-    //
-    // 				if (!buf.empty() && '#' != buf[0])
-    // 				{
-    // 					// -- accession
-    // 					size_t pos0 = 0, pos1 = buf.find(' ', pos0);
-    //
-    // 					string currAcc = buf.substr(pos0, pos1 - pos0);
-    //
-    // 					TrimString(currAcc);
-    // 					TDomain * p_dom = const_cast< TDomain* > (FindCdInfo(currAcc));
-    // 					...
-    // 					if (nullptr != p_dom)
-    // 					{
-    // 						// -- shortname - not used
-    // 						while(buf[pos1] <= ' ') ++pos1;
-    // 						pos0 = pos1;
-    // 						pos1 = buf.find(' ', pos0);
-    //
-    // 						// -- // -- skip short-name. to go pssmid
-    // 						while(' ' == buf[pos1]) ++pos1;
-    //
-    //
-    // 						if (isdigit(buf[pos1]))	//is pssmid
-    // 						{
-    // 							pos0 = pos1;
-    // 							pos1 = buf.find(' ', pos0);
-    // 							// -- parent acc
-    // 							while(buf[pos1] <= ' ') ++pos1;
-    // 							//pssmid = NStr::StringToNumeric<PssmId_t> (buf.substr(pos0, pos1 - pos0));
-    // 						}
-    // 						//	otherwise this should already goes to next field
-    // 						pos0 = pos1;
-    // 						pos1 = buf.find(' ', pos0);
-    //
-    // 						string parentAcc = buf.substr(pos0, pos1 - pos0);
-    //
-    // 						TrimString(parentAcc);
-    // 						if ("N/A" != parentAcc)
-    // 						{
-    // 							if (parentAcc == p_dom->m_strAccession)
-    // 								p_dom->m_uiHierarchyParent = p_dom->m_uiPssmId;
-    // 							else
-    // 							{
-    // 								const TDomain * ppcd = FindCdInfo(parentAcc);
-    // 								if (nullptr != ppcd)
-    // 									p_dom->m_uiHierarchyParent = ppcd->m_uiPssmId;
-    // 							}
-    // 						}
-    //
-    // 						// -- root acc
-    // 						while(buf[pos1] <= ' ') ++pos1;
-    // 						pos0 = pos1;
-    // 						pos1 = buf.find(' ', pos0);
-    // 						string rootAcc = buf.substr(pos0, pos1 - pos0);
-    // 						TrimString(rootAcc);
-    //
-    // 						if (rootAcc == parentAcc)
-    // 							p_dom->m_uiHierarchyRoot = p_dom->m_uiHierarchyParent;
-    // 						else if (rootAcc == p_dom->m_strAccession)
-    // 							p_dom->m_uiHierarchyRoot = p_dom->m_uiPssmId;
-    // 						else
-    // 						{
-    // 							const TDomain * prcd = FindCdInfo(rootAcc);
-    //
-    // 							if (nullptr != prcd)
-    // 								p_dom->m_uiHierarchyParent = prcd->m_uiPssmId;
-    //
-    // 						}
-    // 					}
-    // 				}
-    // 			}	//dfstream
-    // ```
     // The parent and the root set `m_uiHierarchyParent` and `m_uiHierarchyRoot`, which the site
     // output reads (`pRootCdInfo`; the `-t doms` output does not). The root column that is
     // neither the parent nor the domain itself sets the *parent* (NCBI's quirk, survey 8.4), and
@@ -987,56 +617,6 @@ impl CddData {
     }
 
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/offl_sparcle_data.cpp:310-386
-    // ```c++
-    // 		srcfile.Reset(famlinks);
-    //
-    // 		if (!srcfile.Exists())
-    // 			throw CSimpleException(__FILE__, __LINE__, "Data file " + srcfile.GetPath() + " does not exist");
-    // 		else
-    // 		{
-    // 			dfstream.open(srcfile.GetPath().c_str());
-    //
-    // 			while (dfstream.good())
-    // 			{
-    // 				buf.clear();
-    // 				getline(dfstream, buf);
-    // 				LTrimString(buf);
-    // 				if (!buf.empty() && '#' != buf[0])
-    // 				{
-    // 					size_t pos0 = 0, pos1 = buf.find('\t', pos0);
-    // 					// -- acxn
-    // 					TDomain * p_dom = const_cast< TDomain* > (FindCdInfo(buf.substr(pos0, pos1 - pos0)));
-    //
-    // 					if (nullptr != p_dom)
-    // 					{
-    // 						// -- pssmid, unused
-    // 						pos0 = pos1 + 1;
-    // 						pos1 = buf.find('\t', pos0);
-    // 						...
-    // 						//superfamily accession
-    // 						pos0 = pos1 + 1;
-    // 						pos1 = buf.find('\t', pos0);
-    //
-    // 						string sf_acxn = buf.substr(pos0, pos1 - pos0);
-    //
-    //
-    // 						if ('c' ==sf_acxn[0] && 'l' == sf_acxn[1])	//superfamily
-    // 						{
-    // 							ClusterId_t clstid = NStr::StringToNumeric<ClusterId_t> (buf.substr(pos0+2, pos1-pos0-2));
-    //
-    // 							const TCluster *p_clst = FindClusterInfo(clstid);
-    //
-    // 							if (nullptr != p_clst)
-    // 								p_dom->m_iClusterId = clstid;
-    // 						}
-    // 						else
-    // 						{
-    // 							p_dom->m_iClusterId = SINGLEMEMBERCLUSTER;
-    // 						}
-    // 						...
-    // 						p_dom->m_bMultiDom = false;
-    // 					}
-    // ```
     // (The domain is looked up by accession: the PSSM-ID column is not read.)
     fn load_famlinks(&mut self, path: &str) -> Result<(), DataError> {
         if !file_exists(path) {
@@ -1077,138 +657,13 @@ impl CddData {
 
     /// The sites of `cddannot.dat` (`specific`) or `cddannot_generic.dat`.
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/offl_sparcle_data.cpp:388-504
-    // ```c++
-    // 		TDomSite featValue;
-    // 		// -- specific site annotations
-    // 		srcfile.Reset(spfeats);
-    // 		...
-    // 				buf.clear();
-    // 				getline(dfstream, buf);
-    // 				LTrimString(buf);
-    // 				if (!buf.empty() && '#' != buf[0])
-    // 				{
-    // 					size_t pos0 = 0, pos1 = buf.find('\t', pos0);	//pssmid, skip
-    //
-    //
-    // 					pos0 = pos1 + 1;
-    // 					pos1 = buf.find('\t', pos0);	//accession
-    //
-    //
-    // 					string tmp(buf.substr(pos0, pos1 - pos0));
-    // 					TrimString(tmp);
-    // 					TDomain * p_dom = const_cast< TDomain* > (FindCdInfo(tmp));
-    // 					...
-    // 					if (nullptr != p_dom)
-    // 					{
-    // 						p_dom->m_lstSpecificFeatures.emplace_back(featValue);
-    // 						TDomSite &tgt =  *(p_dom->m_lstSpecificFeatures.rbegin());
-    //
-    // 						pos0 = pos1 + 1;
-    // 						pos1 = buf.find('\t', pos0);	//shortname
-    //
-    // 						pos0 = pos1 + 1;
-    // 						pos1 = buf.find('\t', pos0);	//index
-    //
-    // 						tmp = buf.substr(pos0, pos1 - pos0);
-    // 						TrimString(tmp);
-    // 						tgt.m_iIndex = NStr::StringToNumeric<int>(tmp);
-    //
-    // 						pos0 = pos1 + 1;
-    // 						pos1 = buf.find('\t', pos0);	//title
-    //
-    // 						tgt.m_strTitle = buf.substr(pos0, pos1 - pos0);
-    // 						TrimString(tgt.m_strTitle);
-    //
-    // 						pos0 = pos1 + 1;
-    // 						pos1 = buf.find('\t', pos0);	//Motif
-    //
-    // 						if ('0' != buf[pos0])
-    // 						{
-    // 							//tgt.SetMotifStr(buf.substr(pos0, pos1 - pos0).c_str());
-    // 							tgt.m_strMotif = buf.substr(pos0, pos1 - pos0);
-    // 							TrimString(tgt.m_strMotif);
-    // 						}
-    //
-    // 						pos0 = pos1 + 1;
-    // 						pos1 = buf.find('\t', pos0);	//structure based evidence present
-    //
-    // 						if ('1' == buf[pos0])
-    // 							tgt.m_flags |= TDomSite::STRUCTURE_BASED_EVIDENCE;
-    // 						...
-    // 						pos0 = pos1 + 1;
-    // 						pos1 = buf.find('\t', pos0);	//site coordinates
-    //
-    // 						vector<TSignedSeqPos> vecSitePos;	//to store coordinates
-    //
-    // 						vecSitePos.reserve((pos1 - pos0) * 3);	//estimated
-    //
-    // 						size_t pos_c = buf.find(',', pos0);
-    //
-    // 						while (pos_c < pos1)
-    // 						{
-    // 							vecSitePos.emplace_back(NStr::StringToNumeric<SeqPos_t>(buf.substr(pos0, pos_c - pos0)));
-    // 							pos0 = pos_c + 1;
-    // 							pos_c = buf.find(',', pos0);
-    // 						}
-    //
-    // 						// -- last one
-    // 						vecSitePos.emplace_back(NStr::StringToNumeric<SeqPos_t>(buf.substr(pos0, pos1 - pos0)));
-    //
-    // 						tgt.SetData(vecSitePos);
-    //
-    // 						tgt.m_iCompleteSize = (int)vecSitePos.size();
-    //
-    // 						pos0 = pos1 + 1;
-    // 						pos1 = buf.find('\t', pos0);	//type
-    //
-    // 						if (string::npos == pos1)	//no other field
-    // 							tgt.m_iType = NStr::StringToNumeric<int>(buf.substr(pos0));
-    // 						else	//assume has motif string added
-    // 							tgt.m_iType = NStr::StringToNumeric<int>(buf.substr(pos0, pos1 - pos0));
-    // 					}
-    // ```
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/offl_sparcle_data.cpp:518-609
-    // ```c++
-    // 			while (dfstream.good())
-    // 			{
-    // 				buf.clear();
-    // 				getline(dfstream, buf);
-    // 				if (!buf.empty() && '#' != buf[0])
-    // 				{
-    // 					size_t pos0 = 0, pos1 = buf.find('\t', pos0);	//pssmid -- skip
-    //
-    // 					pos0 = pos1 + 1;
-    // 					pos1 = buf.find('\t', pos0);	//accession
-    //
-    // 					//PssmId_t pssmid = NStr::StringToNumeric<PssmId_t> (buf.substr(pos0, pos1 - pos0));
-    // 					TDomain * p_dom = const_cast< TDomain* > (FindCdInfo(buf.substr(pos0, pos1-pos0)));
-    // 					if (nullptr != p_dom)
-    // 					{
-    // 						...
-    // 						tgt.m_iIndex = NStr::StringToNumeric<int>(buf.substr(pos0, pos1 - pos0));
-    //
-    // 						pos0 = pos1 + 1;
-    // 						pos1 = buf.find('\t', pos0);	//title
-    //
-    // 						tgt.m_strTitle = buf.substr(pos0, pos1 - pos0);
-    // 						...
-    // ```
     // The generic file is read without the trims of the specific one (the line, the accession,
     // the index and the title keep their white space). A coordinates field at the line's end
     // (`pos1` is `npos`) makes NCBI reserve `(npos - pos0) * 3` positions, more than a
-    // `vector<int>` can hold whatever `pos0` is, which throws `std::length_error`:
-    // libstdc++ (GCC 13): bits/vector.tcc:64-71
-    // ```c++
-    //   template<typename _Tp, typename _Alloc>
-    //     _GLIBCXX20_CONSTEXPR
-    //     void
-    //     vector<_Tp, _Alloc>::
-    //     reserve(size_type __n)
-    //     {
-    //       if (__n > this->max_size())
-    // 	__throw_length_error(__N("vector::reserve"));
-    // ```
-    // (NCBI's rpsbproc printed `Error: (106.6) Application's initialization failed:
+    // `vector<int>` can hold whatever `pos0` is, which throws `std::length_error` (the C++
+    // standard's `vector::reserve` throws it for a count above `max_size()`; the text is observed:
+    // NCBI's rpsbproc printed `Error: (106.6) Application's initialization failed:
     // vector::reserve` and exited 2, PS16a review oracle A4-1 cases `annot10` and `gen10`.)
     fn load_sites(&mut self, path: &str, specific: bool) -> Result<(), DataError> {
         if !file_exists(path) {
@@ -1360,43 +815,6 @@ impl CddData {
     }
 
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/offl_sparcle_data.cpp:617-657
-    // ```c++
-    // 		// -- read bitscore thresholds
-    // 		srcfile.Reset(bscores);
-    //
-    // 		if (!srcfile.Exists())
-    // 			throw CSimpleException(__FILE__, __LINE__, "Data file " + srcfile.GetPath() + " does not exist");
-    // 		else
-    // 		{
-    //
-    // 			dfstream.open(srcfile.GetPath().c_str());
-    // 			while (dfstream.good())
-    // 			{
-    // 				buf.clear();
-    // 				getline(dfstream, buf);
-    // 				if (!buf.empty() && '#' != buf[0])
-    // 				{
-    // 					size_t pos0 = 0, pos1 = buf.find('\t', pos0);	//pssmid - skip
-    // 					// -- accession
-    // 					pos0 = pos1 + 1;
-    // 					pos1 = buf.find('\t', pos0);	//accession
-    // 					...
-    // 					TDomain * p_dom = const_cast< TDomain* > (FindCdInfo(buf.substr(pos0, pos1 - pos0)));
-    //
-    // 					if (nullptr != p_dom)
-    // 					{
-    // 						// -- score
-    // 						pos0 = pos1 + 1;
-    // 						pos1 = buf.find('\t', pos0);
-    //
-    // 						if (string::npos == pos1)
-    // 							p_dom->m_dMinBitScore = NStr::StringToNumeric<double>(buf.substr(pos0));
-    // 						else
-    // 							p_dom->m_dMinBitScore = NStr::StringToNumeric<double>(buf.substr(pos0, pos1 - pos0));
-    //
-    //
-    // 					}
-    // ```
     fn load_bscores(&mut self, path: &str) -> Result<(), DataError> {
         if !file_exists(path) {
             return Err(DataError::Missing(path.to_string()));
@@ -1432,39 +850,6 @@ impl CddData {
 
 /// `CSegSetTmpl::SetData(residues)`: the sorted, merged ranges of a list of positions.
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/impl/segset_impl.hpp:25-55
-// ```c++
-// void CSegSetTmpl<SEGTYPE>::SetData(const std::vector<SeqPos_t> &residues)
-// {
-// 	m_lstContainer.clear();
-//
-// 	if (residues.empty()) return;
-//
-// 	std::vector<SeqPos_t> sorted(residues);
-// 	std::sort(sorted.begin(), sorted.end());
-//
-// 	SEGTYPE seg;
-//
-// 	seg.from = seg.to = seg.ori_from = sorted[0];
-//
-// 	size_t i = 0, iEnd = sorted.size();
-//
-// 	while (i < iEnd)
-// 	{
-// 		if (sorted[i] > seg.to + 1)
-// 		{
-// 			AddSeg(seg);
-// 			seg.from = seg.to = seg.ori_from = sorted[i];
-// 		}
-// 		else if (sorted[i] > seg.to)
-// 		{
-// 			seg.to = sorted[i];
-// 		}
-//
-// 		++i;
-// 	}
-// 	AddSeg(seg);
-// }
-// ```
 // (`AddSeg` of a range that is more than one position from the last one appends it: the
 // ranges come in order.)
 fn site_data_segs(residues: &mut [i32]) -> Vec<[i32; 2]> {
@@ -1495,6 +880,23 @@ fn site_data_segs(residues: &mut [i32]) -> Vec<[i32; 2]> {
 /// compares the signed values in both, the order NCBI's maps have.
 fn int_order(a: i32, b: i32) -> i32 {
     (i64::from(a) - i64::from(b)).signum() as i32
+}
+
+/// Sorts `items` by `order`, and items that `order` leaves equal by `position`, their place in the
+/// input, which must increase strictly over `items` as given: the order of a stable sort. LOSAT's
+/// sorts of rpsbproc's hits and data rows (PD-LOSAT-NCBI-DEFECTS 1.67, the order of tied hits). It
+/// uses Rust's `sort_unstable_by`, which sorts in place, because `slice::sort_by` allocates a
+/// buffer of up to the slice's length beyond its short slices; with `position` as the last key no
+/// two items are equal, so the two give the same order.
+pub(crate) fn sort_ties_in_input_order<T, P: Ord>(
+    items: &mut [T],
+    position: impl Fn(&T) -> P,
+    mut order: impl FnMut(&T, &T) -> std::cmp::Ordering,
+) {
+    debug_assert!(items
+        .windows(2)
+        .all(|pair| position(&pair[0]) < position(&pair[1])));
+    items.sort_unstable_by(|a, b| order(a, b).then_with(|| position(a).cmp(&position(b))));
 }
 
 /// `std::string::compare` as a sign: bytes compared as unsigned, a prefix first.

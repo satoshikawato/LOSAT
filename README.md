@@ -126,8 +126,8 @@ Every search program reads BLAST databases (`-db`, versions 4 and 5, found throu
 | `tblastn` | Protein or PSSM (`-in_pssm`) against translated nucleotide (`tblastn`, `tblastn-fast`) | `0`–`16`, `18`, `20` | [tblastn](docs/manual/src/programs/tblastn.md) |
 | `tblastx` | Translated nucleotide against translated nucleotide | `0`–`16`, `18`, `20` | [tblastx](docs/manual/src/programs/tblastx.md) |
 | `psiblast` | Iterated protein search with a PSSM (`-num_iterations`, `-in_pssm`, `-in_msa`, `-out_pssm`) | `0`, `6`, `7`, `10`, `20` (with `-in_pssm` or `-in_msa`: `0`, `6`, `7`) | [psiblast](docs/manual/src/programs/psiblast.md) |
-| `rpsblast` | Protein against a PSSM database such as CDD | `0`, `6`, `7`, `10` | [rpsblast](docs/manual/src/programs/rpsblast.md) |
-| `rpstblastn` | Translated nucleotide against a PSSM database | `0`–`4`, `6`, `7`, `10` | [rpstblastn](docs/manual/src/programs/rpstblastn.md) |
+| `rpsblast` | Protein against a PSSM database such as CDD | `0`, `5`, `6`, `7`, `10`, `11` | [rpsblast](docs/manual/src/programs/rpsblast.md) |
+| `rpstblastn` | Translated nucleotide against a PSSM database | `0`–`7`, `10`, `11` | [rpstblastn](docs/manual/src/programs/rpstblastn.md) |
 | `makeblastdb` | Builds BLAST databases (versions 5 and 4; `-parse_seqids`, `-taxid`, `-mask_data`) from FASTA, also compressed | | [makeblastdb](docs/manual/src/programs/makeblastdb.md) |
 | `blastdbcmd` | Prints sequences and information from a BLAST database (`-entry`, `-entry_batch`, `-info`, `-outfmt`) | | [blastdbcmd](docs/manual/src/programs/blastdbcmd.md) |
 | `dustmasker` | Masks low-complexity nucleotide regions | intervals, FASTA, mask files for `makeblastdb` | [dustmasker](docs/manual/src/programs/dustmasker.md) |
@@ -135,7 +135,7 @@ Every search program reads BLAST databases (`-db`, versions 4 and 5, found throu
 | `convert2blastmask` | Turns lower-case masked FASTA into mask files for `makeblastdb` | mask files, intervals | [convert2blastmask](docs/manual/src/programs/convert2blastmask.md) |
 | `rpsbproc` | Annotates conserved domains, sites and motifs from RPS-BLAST results, as NCBI's `rpsbproc` 0.5.1 | domain report | [rpsbproc](docs/manual/src/programs/rpsbproc.md) |
 
-`rpsbproc` reads `-outfmt 11` archives. In v0.2.0 LOSAT's `rpsblast` and `rpstblastn` do not write that format, so make the archive with NCBI BLAST+'s `rpsblast` or `rpstblastn` ([rpsbproc](docs/manual/src/programs/rpsbproc.md)).
+`rpsbproc` reads `-outfmt 11` archives, which LOSAT's `rpsblast` and `rpstblastn` write as NCBI BLAST+'s do: `losat rpsblast -query proteins.faa -db Cdd -outfmt 11 | losat rpsbproc -d cdd_data` ([rpsbproc](docs/manual/src/programs/rpsbproc.md)).
 
 ---
 

@@ -670,43 +670,33 @@ impl BlastCompoHeap {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:252-255,257-284
     pub(crate) fn would_insert(&mut self, evalue: f64, score: i32, subject_index: u32) -> bool {
-        if self.n < self.heap_threshold || evalue <= self.ecutoff || evalue < self.worst_evalue {
+        if self.would_insert_before_root(evalue) {
             return true;
         }
         if self.heap_array.is_none() {
             self.convert_to_heap();
         }
-        let record = BlastCompoHeapRecord {
-            best_evalue: evalue,
-            best_score: score,
-            subject_index,
-            ..Default::default()
-        };
-        let heap_array = self
-            .heap_array
-            .as_ref()
-            .expect("compo heap converted before root comparison");
-        compo_heap_record_compare(&heap_array[1], &record)
+        self.would_replace_root(evalue, score, subject_index)
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:251-276
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:252-255
+    /// The clauses of `would_insert` that need no root: the heap holds fewer lists than its
+    /// threshold, or the E-value is within the cutoff, or below the worst E-value kept.
+    #[inline(always)]
+    fn would_insert_before_root(&self, evalue: f64) -> bool {
+        self.n < self.heap_threshold || evalue <= self.ecutoff || evalue < self.worst_evalue
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:257-284
     // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:230-247
-    /// The answer of `would_insert` on the heap as it is, without its one side effect: an array
-    /// that has reached the threshold is not turned into its heap form (`convert_to_heap`). In
-    /// that form the root is the record of `array[1..=n]` that `compo_heap_record_compare` puts
-    /// above every other one, which is the root that the conversion makes: the comparison reads
-    /// only the E-value, the score and the subject index, and orders distinct keys strictly, so
-    /// every maximum has the root's key. The windows of the parallel redo ask it from many
-    /// threads on the heaps as a window's start left them (`x_redo_par.rs`).
-    // Only the parallel redo's windows ask it (the module `x_redo_par` is compiled where they run).
-    #[cfg(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    ))]
-    pub(crate) fn would_insert_view(&self, evalue: f64, score: i32, subject_index: u32) -> bool {
-        if self.n < self.heap_threshold || evalue <= self.ecutoff || evalue < self.worst_evalue {
-            return true;
-        }
+    /// The last clause of `would_insert`: the root (`compo_heap_record_compare`'s worst record) is
+    /// worse than the candidate. In the heap form the root is `heap_array[1]`; in the array form it
+    /// is the record of `array[1..=n]` that the comparison puts above every other one, which is the
+    /// root that the conversion (`convert_to_heap`) makes: the comparison reads only the E-value,
+    /// the score and the subject index, and orders distinct keys strictly, so every maximum has the
+    /// root's key.
+    #[inline(always)]
+    fn would_replace_root(&self, evalue: f64, score: i32, subject_index: u32) -> bool {
         let record = BlastCompoHeapRecord {
             best_evalue: evalue,
             best_score: score,
@@ -725,6 +715,22 @@ impl BlastCompoHeap {
             (None, None) => unreachable!("a compo heap holds its array or its heap array"),
         };
         compo_heap_record_compare(root, &record)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:251-276
+    /// The answer of `would_insert` on the heap as it is, without its one side effect: an array
+    /// that has reached the threshold is not turned into its heap form (`convert_to_heap`); the
+    /// same clauses (`would_insert_before_root`, `would_replace_root`, which reads the root of the
+    /// array form). The windows of the parallel redo ask it from many threads on the heaps as a
+    /// window's start left them (`x_redo_par.rs`).
+    // Only the parallel redo's windows ask it (the module `x_redo_par` is compiled where they run).
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    pub(crate) fn would_insert_view(&self, evalue: f64, score: i32, subject_index: u32) -> bool {
+        self.would_insert_before_root(evalue)
+            || self.would_replace_root(evalue, score, subject_index)
     }
 
     // No NCBI counterpart: a copy for looking ahead; NCBI's heap has none.

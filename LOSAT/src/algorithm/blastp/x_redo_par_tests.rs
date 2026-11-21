@@ -1,5 +1,6 @@
 use super::*;
 use crate::algorithm::blastp::encoding::EncodedProtein;
+use crate::algorithm::blastp::kappa::smith_waterman::SwRedoEndless;
 use crate::utils::glibc_fma_libm::GlibcLibm;
 
 const ECUTOFF: f64 = 0.002;
@@ -78,23 +79,32 @@ fn failed(message: &str) -> Option<XComputed> {
     done(Err(anyhow::anyhow!("{message}")))
 }
 
-// No NCBI counterpart: the tests' stand-ins for `redo_run::sw_batch_failed` and
-// `redo_run::sw_endless`, which name the batch and what its first query's heap holds.
-fn test_batch_failed(batch_start: usize, first_query: &BlastCompoHeap) -> anyhow::Error {
-    anyhow::anyhow!(
-        "batch {batch_start} failed, first query holds {}",
-        first_query.n
-    )
+/// The text of an error of the redo: the batch that the error of a batch's search names
+/// (`HeaderReadError`, as `redo_run::sw_batch_failed` and `redo_run::sw_endless` make it), and the
+/// message.
+fn error_text(result: &Result<()>) -> Option<String> {
+    result.as_ref().err().map(|error| {
+        match error.downcast_ref::<crate::algorithm::common::database::HeaderReadError>() {
+            Some(batch) => format!("batch {}: {:#}", batch.query, batch.error),
+            None => format!("{error:#}"),
+        }
+    })
 }
 
-fn test_endless(batch_start: usize) -> anyhow::Error {
-    anyhow::anyhow!("endless in batch {batch_start}")
+/// The text of the error of a redo that does not end, in the batch that starts at `batch_start`.
+fn endless_in(batch_start: usize) -> Option<String> {
+    error_text(&Err(sw_endless(batch_start)))
 }
 
-const TEST_SW_ERRORS: XSwErrors = XSwErrors {
-    batch_failed: test_batch_failed,
-    endless: test_endless,
-};
+/// The text of the error of the batch that starts at `batch_start` and fails at its end, its first
+/// query's heap holding a list (`holds`) or none.
+fn batch_failed_text(batch_start: usize, holds: bool) -> Option<String> {
+    let mut first_query = BlastCompoHeap::new(1, ECUTOFF);
+    if holds {
+        first_query.insert(list(0, 1e-9, false), 1e-9, 40, 0);
+    }
+    error_text(&Err(sw_batch_failed(batch_start, &first_query)))
+}
 
 /// The replay of the X-drop redo's window.
 fn replay(
@@ -110,7 +120,7 @@ fn replay(
         lists,
         heaps,
         batches,
-        &mut XSwBatch::new(TEST_SW_ERRORS, &[]),
+        &mut XSwBatch::new(&[]),
         &mut None,
     )
 }
@@ -458,7 +468,6 @@ fn drive_expanding(
         limits,
         false,
         expand,
-        TEST_SW_ERRORS,
         &[],
         &mut |lists, _, window| {
             window_seen(lists, window);
@@ -1312,7 +1321,6 @@ fn windows_computed_with_jobs_largest_first_equal_the_par_iter_windows() {
                     build_redo_align_params: &build,
                     timing: false,
                     engine_positives: false,
-                    sw_errors: TEST_SW_ERRORS,
                     sw_excluded: &[],
                 };
                 let shared = || Arc::new(XSharedSubjectRanges::new());
@@ -1443,7 +1451,6 @@ fn windows_with_the_seg_store_emptied_after_each_equal_windows_with_one_store() 
                     build_redo_align_params: &build,
                     timing: false,
                     engine_positives: false,
-                    sw_errors: TEST_SW_ERRORS,
                     sw_excluded: &[],
                 };
                 let kept = Arc::new(XSharedSubjectRanges::new());
@@ -1533,10 +1540,15 @@ enum SwKind {
     Endless,
 }
 
+/// A synthetic match of the Smith-Waterman redo: the E-value and score of its first round, which
+/// its heap test asks, and those of its result after a TRUE answer (its best alignment's, which
+/// the heap's insert test asks), drawn apart as the redo's rounds make them.
 #[derive(Clone, Copy, Debug)]
 struct SwCase {
     evalue: f64,
     score: i32,
+    final_evalue: f64,
+    final_score: i32,
     kind: SwKind,
 }
 
@@ -1566,9 +1578,9 @@ fn sw_job_match(test: XSwTest<'_>, oid: u32, case: SwCase) -> XComputed {
     } else {
         match case.kind {
             SwKind::Kept => Ok(BlastpPostprocessResult {
-                hsp_list: Some(list(oid, case.evalue, false)),
-                best_score: case.score,
-                best_evalue: case.evalue,
+                hsp_list: Some(list(oid, case.final_evalue, false)),
+                best_score: case.final_score,
+                best_evalue: case.final_evalue,
             }),
             SwKind::Purged => no_alignment(),
             SwKind::Failed => Err(SwRedoFailed.into()),
@@ -1593,11 +1605,11 @@ fn sw_drive(
     batches: &[Range<usize>],
     limits: XWindowLimits,
 ) -> (Result<XCounts>, usize) {
-    sw_drive_excluded(lists, cases, heaps, batches, limits, &[])
+    sw_drive_excluded(lists, cases, heaps, batches, limits, &[], |_| {})
 }
 
 /// `sw_drive` with the marks of the lists that the fetch excludes (`excluded`, by query and
-/// place).
+/// place), and each window given to `window_seen` before its jobs run.
 fn sw_drive_excluded(
     lists: &mut [Option<BlastpHitList>],
     cases: &[Vec<SwCase>],
@@ -1605,6 +1617,7 @@ fn sw_drive_excluded(
     batches: &[Range<usize>],
     limits: XWindowLimits,
     excluded: &[FetchExcludedMatch],
+    mut window_seen: impl FnMut(&XWindow),
 ) -> (Result<XCounts>, usize) {
     let mut computed = 0;
     let counts = x_redo_windows::<true>(
@@ -1614,9 +1627,9 @@ fn sw_drive_excluded(
         limits,
         false,
         None,
-        TEST_SW_ERRORS,
         excluded,
         &mut |lists, heaps, window| {
+            window_seen(window);
             window
                 .jobs
                 .iter()
@@ -1712,18 +1725,14 @@ fn sw_one_thread_excluded(
                 match case.kind {
                     SwKind::Kept => {
                         failed = false;
-                        if heaps[q_idx].would_insert(case.evalue, case.score, oid) {
-                            heaps[q_idx].insert(
-                                list(oid, case.evalue, false),
-                                case.evalue,
-                                case.score,
-                                oid,
-                            );
+                        let (evalue, score) = (case.final_evalue, case.final_score);
+                        if heaps[q_idx].would_insert(evalue, score, oid) {
+                            heaps[q_idx].insert(list(oid, evalue, false), evalue, score, oid);
                         }
                     }
                     SwKind::Purged => failed = false,
                     SwKind::Failed => failed = true,
-                    SwKind::Endless => return Err(test_endless(batch.start)),
+                    SwKind::Endless => return Err(sw_endless(batch.start)),
                     SwKind::NotAsked => unreachable!(),
                 }
             }
@@ -1733,7 +1742,7 @@ fn sw_one_thread_excluded(
             failed &= !reached(mark, heaps);
         }
         if failed && q_idx + 1 == batch.end {
-            return Err(test_batch_failed(batch.start, &heaps[batch.start]));
+            return Err(sw_batch_failed(batch.start, &heaps[batch.start]));
         }
     }
     Ok(())
@@ -1753,10 +1762,6 @@ fn heap_contents(heaps: &[BlastCompoHeap]) -> Vec<(usize, u64, Vec<u32>)> {
             (n, worst, oids)
         })
         .collect()
-}
-
-fn error_text(result: &Result<()>) -> Option<String> {
-    result.as_ref().err().map(|error| format!("{error:#}"))
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:251-276
@@ -1805,10 +1810,13 @@ fn smith_waterman_jobs_are_at_risk_only_as_x_drop_jobs_are() {
     }
 }
 
+/// A match whose first round and result have the E-value `evalue` and the score 40.
 fn sw_case(evalue: f64, kind: SwKind) -> SwCase {
     SwCase {
         evalue,
         score: 40,
+        final_evalue: evalue,
+        final_score: 40,
         kind,
     }
 }
@@ -1830,7 +1838,7 @@ fn a_deferred_heap_test_that_turns_false_masks_a_failed_and_an_endless_redo() {
         jobs: 8,
         at_risk_jobs: 8,
     };
-    for (heap_threshold, expected) in [(1, None), (3, Some("endless in batch 0".to_string()))] {
+    for (heap_threshold, expected) in [(1, None), (3, endless_in(0))] {
         let mut heaps = heaps_of(1, heap_threshold);
         let (counts, computed) = sw_drive(&mut lists(), &cases, &mut heaps, &alone(1), one_window);
         assert_eq!(computed, 3);
@@ -1847,7 +1855,7 @@ fn a_deferred_heap_test_that_turns_false_masks_a_failed_and_an_endless_redo() {
                 // Both later tests were deferred and turned FALSE.
                 assert_eq!((counts.turned, counts.continued), (Some(2), 0));
             }
-            Err(error) => assert_eq!(Some(format!("{error:#}")), expected),
+            Err(error) => assert_eq!(error_text(&Err(error)), expected),
         }
         assert_eq!(heap_contents(&heaps), heap_contents(&model));
     }
@@ -1876,10 +1884,12 @@ fn a_deferred_heap_test_that_turns_true_is_finished_by_a_continuation_in_the_nex
     query.extend((3..9).map(|_| sw_case(0.6, SwKind::Kept)));
     query.push(sw_case(0.7, SwKind::Failed));
     let cases = vec![query];
-    // One job per window: the fourth match is carried once, the later ones are FALSE for
-    // certain at their windows. Two: the second window holds the continuation, the carried
-    // matches and the last job. Eight: the first window holds all.
-    for (jobs, turned) in [(1, 1), (2, 7), (8, 7)] {
+    // One job per window: the replay stops at the second match, then (in the second window,
+    // the carry and the next job) at the third; the third window holds the carried matches only
+    // (six: two jobs, two budgets), whose five deferred tests turn FALSE, and the last job's
+    // matches are computed after the better list is kept and are FALSE for certain. Two and
+    // eight: every test after the third match's turns FALSE.
+    for (jobs, turned) in [(1, 5), (2, 7), (8, 7)] {
         let limits = XWindowLimits {
             jobs,
             at_risk_jobs: jobs,
@@ -1969,19 +1979,19 @@ fn a_continuation_sets_its_batch_status_before_the_batch_ends() {
         (
             sw_case(1e-20, SwKind::Failed),
             sw_case(0.5, SwKind::Kept),
-            "endless in batch 1",
+            endless_in(1),
         ),
         // The continuation's redo fails: the batch fails at its end.
         (
             sw_case(0.5, SwKind::NotAsked),
             sw_case(0.5, SwKind::Failed),
-            "batch 0 failed, first query holds 0",
+            batch_failed_text(0, false),
         ),
         // The continuation's redo never ends.
         (
             sw_case(0.5, SwKind::NotAsked),
             sw_case(0.5, SwKind::Endless),
-            "endless in batch 0",
+            endless_in(0),
         ),
     ] {
         let cases = vec![vec![first, second], later.clone()];
@@ -1991,7 +2001,7 @@ fn a_continuation_sets_its_batch_status_before_the_batch_ends() {
             let mut model = heaps_of(2, 1);
             let reference = sw_one_thread(&lists(), &cases, &mut model, &alone(2));
             let result = result.map(|_| ());
-            assert_eq!(error_text(&reference), Some(expected.to_string()));
+            assert_eq!(error_text(&reference), expected);
             assert_eq!(error_text(&result), error_text(&reference), "{limits:?}");
             assert_eq!(heap_contents(&heaps), heap_contents(&model), "{limits:?}");
             // The second match's job and its continuation.
@@ -2036,18 +2046,15 @@ fn the_batch_status_crosses_windows_and_fails_the_batch_at_its_end() {
         assert_eq!(heap_contents(&heaps), heap_contents(&model));
         error_text(&result)
     };
-    let failed = Some("batch 0 failed, first query holds 1".to_string());
-    let endless = Some("endless in batch 2".to_string());
+    let failed = batch_failed_text(0, true);
+    let endless = endless_in(2);
     for limits in [one_job, one_window] {
         // Query 1's first match is reached and clears the status; batch 2's redo never ends.
         assert_eq!(run(1e-9, limits, vec![0..2, 0..2, 2..3]), endless);
         // Query 1 alone in a batch: query 0's failed status fails batch 0 before batch 1.
         assert_eq!(run(1e-9, limits, vec![0..1, 1..2, 2..3]), failed);
         // All three in one batch: the endless redo of query 2 ends it.
-        assert_eq!(
-            run(1e-9, limits, vec![0..3; 3]),
-            Some("endless in batch 0".to_string())
-        );
+        assert_eq!(run(1e-9, limits, vec![0..3; 3]), endless_in(0));
     }
     // A match ended by the test leaves the status that the match before it set: query 1's
     // third match (E 1.0) comes after both heaps are filled to the cutoff.
@@ -2076,11 +2083,12 @@ fn the_batch_status_crosses_windows_and_fails_the_batch_at_its_end() {
             &[0..2, 0..2],
             limits,
         );
-        let error = result.expect_err("query 1's failed redo fails the batch");
-        assert_eq!(format!("{error:#}"), "batch 0 failed, first query holds 2");
+        let error = error_text(&result.map(|_| ()));
+        // Query 0 holds two lists: the batch's failure where NCBI's clean-up crashes.
+        assert_eq!(error, batch_failed_text(0, true));
         let mut model = heaps_of(2, 1);
         let reference = sw_one_thread(&lists, &cases, &mut model, &[0..2, 0..2]);
-        assert_eq!(error_text(&reference), Some(format!("{error:#}")));
+        assert_eq!(error_text(&reference), error);
     }
 }
 
@@ -2119,6 +2127,7 @@ fn an_excluded_list_after_a_failed_redo_clears_the_failure_unless_the_redo_ends_
             batches,
             limits,
             marks,
+            |_| {},
         );
         let mut model = heaps_of(lists.len(), 1);
         let reference = sw_one_thread_excluded(lists, cases, &mut model, batches, marks);
@@ -2194,16 +2203,22 @@ fn an_excluded_list_after_a_failed_redo_clears_the_failure_unless_the_redo_ends_
 /// whose first-round tests are certain, deferred and turned, failed and endless redos, early
 /// termination, `-max_target_seqs` 1 to 500, windows of one job up to a few, small caps on
 /// jobs at risk; in every other search, lists that the fetch excludes at random places, which
-/// NCBI's loop reaches in its order (`sw_one_thread_excluded`).
+/// NCBI's loop reaches in its order (`sw_one_thread_excluded`). A match's result has its own
+/// E-value and score, drawn apart from its first round's (the test's): the look-ahead of
+/// `x_sw_continued` must insert with the one and test with the other. Each way a carried match
+/// is continued (the stop, the exact look-ahead, the bound) is reached many times.
 #[test]
 fn smith_waterman_windows_give_the_one_thread_heaps_and_error_on_random_searches() {
     let mut rng = XorShift(0x9e37_79b9_7f4a_7c15);
     // The excluded lists' own sequence, so that the searches are drawn as without them.
     let mut mark_rng = XorShift(0x2545_f491_4f6c_dd1d);
+    // The results' E-values and scores, their own sequence too.
+    let mut final_rng = XorShift(0x5851_f42d_4c95_7f2d);
     let mut changed_by_excluded = 0;
     let prelim = [1e-30, 1e-5, 0.001, 0.005, 0.02, 1.0];
     let first_round = [1e-30, 1e-5, ECUTOFF, 0.004, 0.01, 0.5, 2.0];
     let (mut turned, mut continued, mut ended) = (0, 0, 0);
+    let mut continued_by = XContinuedBy::default();
     let (mut batch_failures, mut endless, mut clean) = (0, 0, 0);
     for run in 0..1500 {
         let queries = 1 + rng.below(8);
@@ -2236,16 +2251,31 @@ fn smith_waterman_windows_give_the_one_thread_heaps_and_error_on_random_searches
             ));
             cases.push(
                 (0..count)
-                    .map(|_| SwCase {
-                        evalue: first_round[rng.below(first_round.len())],
-                        score: 30 + rng.below(4) as i32,
-                        kind: match rng.below(100) {
+                    .map(|_| {
+                        let evalue = first_round[rng.below(first_round.len())];
+                        let score = 30 + rng.below(4) as i32;
+                        let kind = match rng.below(100) {
                             0..=9 => SwKind::NotAsked,
                             10..=19 => SwKind::Purged,
                             20..=29 => SwKind::Failed,
                             30 if run % 4 == 0 => SwKind::Endless,
                             _ => SwKind::Kept,
-                        },
+                        };
+                        // The result: a first-round E-value, or three times or a seventh of the
+                        // test's, and the test's score within three.
+                        let final_evalue = match final_rng.below(first_round.len() + 2) {
+                            pick if pick < first_round.len() => first_round[pick],
+                            pick if pick == first_round.len() => evalue * 3.0,
+                            _ => evalue / 7.0,
+                        };
+                        let final_score = score - 3 + final_rng.below(7) as i32;
+                        SwCase {
+                            evalue,
+                            score,
+                            final_evalue,
+                            final_score,
+                            kind,
+                        }
                     })
                     .collect(),
             );
@@ -2279,9 +2309,11 @@ fn smith_waterman_windows_give_the_one_thread_heaps_and_error_on_random_searches
             &batches,
             limits,
             &excluded,
+            |_| {},
         );
         let mut model = heaps_of(queries, heap_threshold);
         let reference = sw_one_thread_excluded(&lists, &cases, &mut model, &batches, &excluded);
+        // The searches whose outcome the excluded lists change (18 of the 1,500).
         if !excluded.is_empty() {
             let mut unmarked = heaps_of(queries, heap_threshold);
             let without = sw_one_thread(&lists, &cases, &mut unmarked, &batches);
@@ -2291,28 +2323,172 @@ fn smith_waterman_windows_give_the_one_thread_heaps_and_error_on_random_searches
         if let Ok(counts) = &result {
             turned += counts.turned.expect("the Smith-Waterman counts");
             continued += counts.continued;
+            continued_by.add(counts.continued_by);
             ended += counts.skipped + counts.wasted;
+            let by = counts.continued_by;
+            assert_eq!(by.stop + by.ahead + by.bound, counts.continued);
         }
         let result = result.map(|_| ());
         assert_eq!(error_text(&result), error_text(&reference), "{at}");
         assert_eq!(heap_contents(&heaps), heap_contents(&model), "{at}");
         match error_text(&reference) {
             None => clean += 1,
-            Some(text) if text.starts_with("endless") => endless += 1,
+            Some(text) if text.contains("does not end") => endless += 1,
             Some(_) => batch_failures += 1,
         }
     }
     assert!(
         turned > 100
             && continued > 100
+            && continued_by.stop > 100
+            && continued_by.ahead > 20
+            && continued_by.bound > 20
             && ended > 100
             && batch_failures > 50
             && endless > 20
             && clean > 300
-            && changed_by_excluded > 20,
-        "turned {turned} continued {continued} ended {ended} failed batches {batch_failures} \
-             endless {endless} clean {clean} changed by excluded lists {changed_by_excluded}"
+            && changed_by_excluded > 10,
+        "turned {turned} continued {continued} {continued_by:?} ended {ended} failed batches \
+             {batch_failures} endless {endless} clean {clean} changed by excluded lists \
+             {changed_by_excluded}"
     );
+}
+
+/// A query whose replay stops at each of its matches after the first: a list kept above the
+/// cutoff (E 0.9, preliminary E 0.5) and then `stops` matches each better than the last
+/// (E 0.8 / (k + 1)), so that with `-max_target_seqs 1` each one's deferred heap test is TRUE at
+/// its replay.
+fn stopping_query(stops: u32) -> (Option<BlastpHitList>, Vec<SwCase>) {
+    let cases = (0..=stops)
+        .map(|position| {
+            let evalue = if position == 0 {
+                0.9
+            } else {
+                0.8 / f64::from(position + 1)
+            };
+            SwCase {
+                evalue,
+                score: 30,
+                final_evalue: evalue,
+                final_score: 30,
+                kind: SwKind::Kept,
+            }
+        })
+        .collect();
+    (
+        hit_list((0..=stops).map(|oid| list(oid, 0.5, false)).collect()),
+        cases,
+    )
+}
+
+/// The carry of a stopped replay is bounded (review 1 of X4-mt, S1). Query 0, alone in its batch
+/// with `-max_target_seqs 1`, stops the replay at each of its 40 matches after the first; 2,000
+/// queries of four matches within the cutoff follow. A window takes at most `jobs` new jobs, and
+/// with the carried matches (in jobs of four) at most `2 x jobs`, so it holds at most
+/// `2 x X_JOB_MATCHES x jobs` matches with the carried ones, and a carry at most one fewer; where
+/// the carried matches did not count, the carry grew by about `X_JOB_MATCHES x (jobs - 1)` matches
+/// per stopped window (2,329 matches here, with every carried match's result and its query's list
+/// held).
+#[test]
+fn a_carry_counts_toward_the_window_budget_and_stays_within_one_window() {
+    const QUERIES: usize = 1 + 2000;
+    let limits = XWindowLimits {
+        jobs: 16,
+        at_risk_jobs: 8,
+    };
+    let (first, first_cases) = stopping_query(40);
+    let mut lists = vec![first];
+    let mut cases = vec![first_cases];
+    for _ in 1..QUERIES {
+        lists.push(hit_list((0..4).map(|oid| list(oid, 1e-9, false)).collect()));
+        cases.push(vec![sw_case(1e-9, SwKind::Kept); 4]);
+    }
+    let batches = alone(QUERIES);
+    let mut heaps = heaps_of(QUERIES, 1);
+    let mut held = Vec::new();
+    let (counts, _) = sw_drive_excluded(
+        &mut lists.clone(),
+        &cases,
+        &mut heaps,
+        &batches,
+        limits,
+        &[],
+        |window| held.push((window.carried, window.matches.len())),
+    );
+    let counts = counts.expect("no error");
+    let mut model = heaps_of(QUERIES, 1);
+    sw_one_thread(&lists, &cases, &mut model, &batches).expect("no error");
+    assert_eq!(heap_contents(&heaps), heap_contents(&model));
+    let bound = 2 * X_JOB_MATCHES * limits.jobs;
+    assert_eq!(held.iter().map(|&(_, matches)| matches).max(), Some(bound));
+    assert_eq!(
+        held.iter().map(|&(carried, _)| carried).max(),
+        Some(bound - 1)
+    );
+    assert_eq!(counts.carried_max, bound - 1);
+    assert_eq!(
+        (counts.continued, counts.continued_by),
+        (
+            40,
+            XContinuedBy {
+                stop: 40,
+                ahead: 0,
+                bound: 0
+            }
+        )
+    );
+}
+
+/// The cap on jobs at risk holds across stopped replays (review 1 of X4-mt, S2). Query 0 (alone in
+/// its batch, `-max_target_seqs 1`) stops the replay `stops` times; queries 1 and 2 form a batch
+/// whose heaps fill to the cutoff at query 2's first match, after which the early termination
+/// test ends query 2's 399 others. Query 2's matches at risk carried to the next window count
+/// toward its cap there, and its cap grows only by the jobs at risk that a replay passed, so the
+/// results dropped are those of one window with the first cap (15, within 4 x 4), as without a
+/// stop; where either rule was missing, 5 stops dropped 95 results and 20 stops 123 (both
+/// missing: all 399).
+#[test]
+fn a_stopped_replay_keeps_the_results_at_risk_within_the_cap() {
+    let limits = XWindowLimits {
+        jobs: 32,
+        at_risk_jobs: 4,
+    };
+    for stops in [0, 5, 20] {
+        let (first, first_cases) = stopping_query(stops);
+        let lists = vec![
+            first,
+            hit_list(vec![list(0, 1e-9, false)]),
+            hit_list(
+                (0..400)
+                    .map(|oid| list(oid, if oid == 0 { 1e-5 } else { 1.0 }, false))
+                    .collect(),
+            ),
+        ];
+        let cases = vec![
+            first_cases,
+            vec![sw_case(1e-9, SwKind::Kept)],
+            vec![sw_case(1e-9, SwKind::Kept); 400],
+        ];
+        let batches = [0..1, 1..3, 1..3];
+        let mut heaps = heaps_of(3, 1);
+        let (counts, computed) = sw_drive(&mut lists.clone(), &cases, &mut heaps, &batches, limits);
+        let counts = counts.expect("no error");
+        let mut model = heaps_of(3, 1);
+        sw_one_thread(&lists, &cases, &mut model, &batches).expect("no error");
+        assert_eq!(
+            heap_contents(&heaps),
+            heap_contents(&model),
+            "{stops} stops"
+        );
+        assert_eq!(
+            (counts.wasted, counts.skipped, counts.continued),
+            (15, 384, stops as usize),
+            "{stops} stops"
+        );
+        // Query 2's first match and its 15 matches at risk, query 1's match, query 0's matches
+        // and their continuations.
+        assert_eq!(computed, 16 + 1 + (stops as usize + 1) + stops as usize);
+    }
 }
 
 /// The Smith-Waterman jobs on real matches (`x_redo_match_sw`): at 1, 2, 3 and 7 threads, with
@@ -2407,7 +2583,6 @@ fn smith_waterman_jobs_equal_the_one_thread_call_on_the_window_start_heaps() {
                     build_redo_align_params: &build,
                     timing: false,
                     engine_positives: false,
-                    sw_errors: TEST_SW_ERRORS,
                     sw_excluded: &[],
                 };
                 // The one-thread loop's call with fresh scratch, its heap test answered by
@@ -2484,7 +2659,7 @@ fn smith_waterman_jobs_equal_the_one_thread_call_on_the_window_start_heaps() {
                             &caps,
                             Some(&carry),
                             window.next.unwrap_or(stream_end),
-                            window.jobs.len() + 2,
+                            carry.matches.len().div_ceil(X_JOB_MATCHES) + window.jobs.len() + 2,
                         ));
                     }
                 }

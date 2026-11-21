@@ -72,7 +72,14 @@
 //!   the window), up to the job budget. So that window drops at most 4 x cap(q) results of q,
 //!   with cap(q) <= threads + q's jobs at risk computed, and all used, before it; and where q's
 //!   batch's heaps never fill, q's windows are back to their job budget after a number of windows
-//!   logarithmic in q's work at risk.
+//!   logarithmic in q's work at risk. With `-use_sw_tback` a replay may stop inside its window
+//!   and carry the rest to the next one (below); the bound holds there too: q's matches at risk
+//!   carried to the next window count toward cap(q) there (in jobs of four), cap(q) grows only by
+//!   q's jobs at risk of a window whose replay passed all of q's matches in it, and a replay never
+//!   stops within q after dropping a result of q (a stop is at a match the test did not end, and
+//!   once the test ends a match of q it ends every later one: their E-values are not smaller), so
+//!   q's results are dropped in one window, the one whose replay reaches them after the heaps
+//!   fill.
 //!
 //! Why the output is the one-thread loop's: a match's result is a function of that match's inputs
 //! (the same query workspace values, parameter values, subject and matrix), computed by the same
@@ -105,21 +112,32 @@
 //! is NCBI's (no alignment, status 0) and nothing was computed in vain. On TRUE the replay stops at
 //! the match: the match and the window's matches after it, with their results, go to the next
 //! window, which finishes the match (a continuation: the same redo with the test answered TRUE, as
-//! the replay answered it) and, in the same way, each carried match whose deferred test is TRUE for
-//! certain on the heaps where the replay stopped (`x_sw_continued`: the carried matches before it
-//! that keep no list do not count), while its other jobs compute the matches after the carried
-//! ones. The carried results stay valid: a certain answer stays certain, and a deferred one is
-//! asked at its replay. The replay also keeps the batch's status of NCBI's one-thread redo
-//! (`XSwBatch`): a match that the redo reaches sets it, failed or not; a match the early termination
-//! test ends leaves it; a list whose subject the redo's fetch excludes (line RG X4-excl) sets it to 0
-//! unless the early termination test ends that list, read when the replay passes the list's query,
-//! with the one-thread loop's reader; a batch whose status says failed at its end fails the search
-//! there, and an endless redo fails it at that match. A continuation is replayed before every match
-//! after it, so a batch ends after its continuations. A Smith-Waterman job is at risk only as an
-//! X-drop job is (the early termination test may end its match). With `LOSAT_TIMING=1` the
-//! `[TIMING] x_bpredopar:` line of such a search ends with `turned=<t> continued=<c> rerun_s=<s>`
-//! (the deferred answers that the replay answered FALSE, and TRUE, and the seconds of the continued
-//! matches' first jobs, which their continuations repeat up to the test).
+//! the replay answered it; it repeats the redo's first round, which the job computed up to the
+//! test) and, in the same way, each carried match whose deferred test is TRUE for certain on the
+//! heaps where the replay stopped (`x_sw_continued`: the carried matches before it that keep no
+//! list do not count), while its other jobs compute the matches after the carried ones. The carried
+//! results stay valid: a certain answer stays certain, and a deferred one is asked at its replay.
+//! A window with a carry takes at most a budget of new jobs, as one without, and the carried
+//! matches, in jobs of four, and the new jobs together are at most two budgets, so a window holds
+//! at most 2 x 4 x 64 x threads results before their replay with the carried ones, and a carry
+//! fewer than that; the serial work of a stop (`x_sw_continued`, the carry's copy) is linear in
+//! the carry, at most that of a window's replay. The replay also keeps
+//! the batch's status of NCBI's one-thread redo (`XSwBatch`, with the one-thread loop's
+//! `redo_run::SwBatchStatus`): a match that the redo reaches sets it, failed or not; a match the
+//! early termination test ends leaves it; a list whose subject the redo's fetch excludes (line RG
+//! X4-excl) sets it to 0 unless the early termination test ends that list, read when the replay
+//! passes the list's query, with the one-thread loop's reader; a batch whose status says failed at
+//! its end fails the search there, and an endless redo fails it at that match. A continuation is
+//! replayed before every match after it, so a batch ends after its continuations. A Smith-Waterman
+//! job is at risk only as an X-drop job is (the early termination test may end its match). With
+//! `LOSAT_TIMING=1` the `[TIMING] x_bpredopar:` line of such a search ends with `turned=<t>
+//! continued=<c> cont_stop=<a> cont_ahead=<b> cont_bound=<d> carried_max=<m> rerun_s=<s>
+//! rerun_max_s=<s>`: the deferred answers that the replay answered FALSE, and the carried matches
+//! continued, by the reason why their test is TRUE (the stopped match itself, the exact look-ahead
+//! in a later query, the bound on the lists the heap holds); the most matches a replay carried; the
+//! seconds of the continued matches' first jobs, which their continuations repeat up to the test,
+//! and the sum over the windows of the largest of them in a window (the repeat that a window whose
+//! slowest job is a continuation waits for in full, as in a chain of stopped windows).
 //!
 //! `LOSAT_X_BPREDOPAR` is a switch of the strict set (on by default since 2026-10-17): on unless it
 //! is `0`. With `LOSAT_TIMING=1` each search the path runs
@@ -149,7 +167,8 @@
 //! budget and then reads the next job (one query's), so the window and the first match after it
 //! lie within expanded lists (asserted after each window). The windows, the replay and the lists released are
 //! therefore those of the full expansion, and the expanded lists held at a time are those of the
-//! queries of about one window instead of all queries.
+//! queries of about one window instead of all queries (with `-use_sw_tback`, also those of the
+//! matches carried behind the window's start, at most two windows' with the new jobs).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3398-3399,3421,3447-3449
 
@@ -169,7 +188,8 @@ use crate::stats::{BlastGumbelBlk, KarlinParams};
 use crate::utils::threading::SearchPool;
 
 use super::blast_engine::{
-    preliminary_hit_from_local_match_hsp, query_fetch_excluded_reached, FetchExcludedMatch,
+    preliminary_hit_from_local_match_hsp, query_fetch_excluded_reached, sw_batch_failed,
+    sw_endless, FetchExcludedMatch, SwBatchStatus,
 };
 use super::gapalign::{BlastpPreliminaryHsp, GapAlignScratch};
 use super::hsp::{
@@ -178,7 +198,7 @@ use super::hsp::{
 };
 #[cfg(test)]
 use super::hsp::{fill_results_from_compo_heaps, BlastpHsp};
-use super::kappa::smith_waterman::{SwMatchScratch, SwRedoEndless, SwRedoFailed};
+use super::kappa::smith_waterman::{SwMatchScratch, SwRedoFailed};
 use super::kappa::{
     build_query_workspace, postprocess_preliminary_hits,
     postprocess_preliminary_hits_smith_waterman, x_newton_lanes_prefetch_matches,
@@ -256,24 +276,12 @@ pub(crate) struct XRedoParSearch<'a, P> {
     pub timing: bool,
     /// `postprocess_preliminary_hits`' `engine_positives` (the Seq-aligns are requested).
     pub engine_positives: bool,
-    /// The errors of the Smith-Waterman redo's query batches (`-use_sw_tback`).
-    pub sw_errors: XSwErrors,
     /// The lists of the Smith-Waterman redo's stream whose subjects the redo's fetch excludes (line
     /// RG X4-excl), by query and place: they left the preliminary hit lists before the redo, each
     /// leaving a mark of its place (`blast_engine::database::exclude_fetched`), and change the
     /// status of their query batch (`XSwBatch`); empty without a database or a negative seqid list
     /// with ids.
     pub sw_excluded: &'a [FetchExcludedMatch],
-}
-
-/// The errors of a query batch of the Smith-Waterman redo, those of the one-thread loop
-/// (`redo_run::sw_batch_failed`, `redo_run::sw_endless`): the batch that starts at query
-/// `batch_start` fails at its end because its status says failed (given its first query's heap),
-/// or at a match whose redo does not end.
-#[derive(Clone, Copy)]
-pub(crate) struct XSwErrors {
-    pub batch_failed: fn(usize, &BlastCompoHeap) -> anyhow::Error,
-    pub endless: fn(usize) -> anyhow::Error,
 }
 
 /// One match: its query and the position of its list in the query's preliminary hit list.
@@ -334,12 +342,36 @@ struct XCounts {
     /// The Smith-Waterman redo: the heap tests that a job deferred and its replay answered FALSE
     /// (`XReplayed::turned`).
     turned: Option<usize>,
-    /// The Smith-Waterman redo: the heap tests that a job deferred and its replay answered TRUE,
-    /// each finished by a continuation in the next window (`XCarry`).
+    /// The Smith-Waterman redo: the carried matches finished by a continuation (`XCarry`): the
+    /// heap tests that a job deferred and that are TRUE at their replay.
     continued: usize,
+    /// `continued` by the reason why the test is TRUE (`x_sw_continued`).
+    continued_by: XContinuedBy,
+    /// The most matches that a replay carried to the next window.
+    carried_max: usize,
     /// The seconds of the continued matches' jobs, which their continuations repeat up to the
-    /// heap test (`XCarry::first_round_s`).
+    /// heap test (`XComputed::first_round_s`).
     rerun_s: f64,
+    /// The sum over the windows of the largest of those seconds among the window's continuations.
+    rerun_max_s: f64,
+}
+
+/// The carried matches that a window continues (`x_sw_continued`), by the reason why their heap
+/// test is TRUE: the stopped match, whose test the replay answered; the exact look-ahead in a
+/// query after the stopped match's; the bound on the lists that the heap holds.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct XContinuedBy {
+    stop: usize,
+    ahead: usize,
+    bound: usize,
+}
+
+impl XContinuedBy {
+    fn add(&mut self, other: Self) {
+        self.stop += other.stop;
+        self.ahead += other.ahead;
+        self.bound += other.bound;
+    }
 }
 
 /// The matches of one query's preliminary hit list: its lists with HSPs. A compact list
@@ -436,6 +468,8 @@ struct XWindow {
     /// carried matches whose test is TRUE (`x_sw_continued`), each the match of a job of its own (a
     /// continuation), with the test's E-value and score; by match index.
     continued: Vec<(usize, (f64, i32))>,
+    /// `continued` by the reason why the test is TRUE.
+    continued_by: XContinuedBy,
     /// The matches the replay before left, `matches[..carried]`: those not continued are in no job,
     /// their results come with the carry.
     carried: usize,
@@ -481,8 +515,9 @@ fn x_sw_continued(
     lists: &[Option<BlastpHitList>],
     heaps: &[BlastCompoHeap],
     end_above: &[Option<f64>],
-) -> Vec<(usize, (f64, i32))> {
+) -> (Vec<(usize, (f64, i32))>, XContinuedBy) {
     let mut continued = Vec::new();
+    let mut by = XContinuedBy::default();
     let mut query = None;
     // The query's heap replayed ahead (copied at its first match replayed so), exact while
     // `exact`; after that the count of the matches that may insert a list.
@@ -505,6 +540,7 @@ fn x_sw_continued(
                 .deferred
                 .expect("the stopped match's test was deferred");
             continued.push((index, test));
+            by.stop += 1;
             may_insert = 1;
             continue;
         }
@@ -522,6 +558,7 @@ fn x_sw_continued(
                 (Some((evalue, score)), _) => {
                     if heap.would_insert(evalue, score, local_match.oid) {
                         continued.push((index, (evalue, score)));
+                        by.ahead += 1;
                         exact = false;
                         may_insert = 1;
                     }
@@ -547,6 +584,7 @@ fn x_sw_continued(
         match computed.deferred {
             Some(test) if !may_end && heap.n.saturating_add(may_insert) < heap.heap_threshold => {
                 continued.push((index, test));
+                by.bound += 1;
                 may_insert += 1;
             }
             Some((evalue, score)) => {
@@ -555,7 +593,7 @@ fn x_sw_continued(
             None => may_insert += usize::from(inserts),
         }
     }
-    continued
+    (continued, by)
 }
 
 /// A match computed by its job: the result of its redo and, for a Smith-Waterman match whose heap
@@ -652,10 +690,16 @@ fn x_next_job(lists: &[Option<BlastpHitList>], cursor: &mut XMatch, job: &mut Ve
 /// With `SW` (the Smith-Waterman redo) and `carry` (the replay before stopped at a deferred heap
 /// test answered TRUE), the window starts with the carried matches: those whose test is TRUE for
 /// certain (`x_sw_continued`) are each a job of its own (a continuation), the others are in no job
-/// (their results come with the carry); its other jobs start at `start`.
-/// The carried matches count as the window's matches of their query (each inserts at most one
-/// list). A deferred heap test wastes nothing (`x_sw_heap_test`), so a Smith-Waterman job is at risk
-/// only as an X-drop job is.
+/// (their results come with the carry); its other jobs start at `start`. As without a carry, the
+/// window takes at most `jobs` new jobs; the carried matches, in jobs of `X_JOB_MATCHES`, and the
+/// new jobs together are at most `2 x jobs` (so a window holds at most `2 x X_JOB_MATCHES x jobs`
+/// matches with the carried ones, and a carry fewer: one budget of new jobs, and the carried
+/// matches in place of new jobs past one budget). The carried matches count as the window's
+/// matches of their query (each inserts at most one list), and those of the last carried query that the
+/// early termination test may end, with a result, toward that query's jobs at risk, in jobs of
+/// `X_JOB_MATCHES` (so a query's results at risk held before their replay stay within its cap). A
+/// deferred heap test that turns FALSE wastes nothing (`x_sw_heap_test`), so a Smith-Waterman job
+/// is at risk only as an X-drop job is.
 fn x_window<const SW: bool>(
     lists: &[Option<BlastpHitList>],
     heaps: &[BlastCompoHeap],
@@ -673,6 +717,7 @@ fn x_window<const SW: bool>(
         next: None,
         at_risk: Vec::new(),
         continued: Vec::new(),
+        continued_by: XContinuedBy::default(),
         carried: 0,
     };
     // The queries before the window's first match are replayed.
@@ -685,6 +730,16 @@ fn x_window<const SW: bool>(
         end_above[q_idx].is_some()
             && (batch.start..batch.end.min(first_query)).all(|done| heaps[done].filled_to_cutoff())
     };
+    // Whether the early termination test may end a match of query `q_idx` with `best_evalue`
+    // at its replay, the window holding `before` of the query's matches before it.
+    let may_be_ended = |q_idx: usize, batch_open: bool, best_evalue: f64, before: usize| {
+        batch_open
+            && end_above[q_idx].is_some_and(|above| best_evalue > above)
+            && heaps[q_idx].may_fill(before)
+    };
+    // With `SW`: the carried matches, in jobs of `X_JOB_MATCHES`, which count toward the second
+    // budget.
+    let mut carried_jobs = 0;
     if let (true, Some(carry)) = (SW, carry) {
         first_query = carry.matches[0].q_idx;
         window.matches.extend_from_slice(&carry.matches);
@@ -692,16 +747,33 @@ fn x_window<const SW: bool>(
             .ended
             .extend(carry.results.iter().map(|computed| computed.is_none()));
         window.carried = carry.matches.len();
-        window.continued = x_sw_continued(carry, lists, heaps, end_above);
+        carried_jobs = window.carried.div_ceil(X_JOB_MATCHES);
+        (window.continued, window.continued_by) = x_sw_continued(carry, lists, heaps, end_above);
         window
             .jobs
             .extend(window.continued.iter().map(|&(index, _)| index..index + 1));
         let last = window.matches[window.matches.len() - 1].q_idx;
-        let in_window = window.matches.len()
-            - window
-                .matches
-                .partition_point(|matched| matched.q_idx < last);
-        query = Some((last, batch_open(last, first_query), in_window, 0));
+        let last_from = window
+            .matches
+            .partition_point(|matched| matched.q_idx < last);
+        let last_open = batch_open(last, first_query);
+        let at_risk = (last_from..window.matches.len())
+            .filter(|&index| {
+                !window.ended[index]
+                    && may_be_ended(
+                        last,
+                        last_open,
+                        x_local_match(lists, window.matches[index]).best_evalue,
+                        index - last_from,
+                    )
+            })
+            .count();
+        query = Some((
+            last,
+            last_open,
+            window.matches.len() - last_from,
+            at_risk.div_ceil(X_JOB_MATCHES),
+        ));
     }
     let mut cursor = start;
     let mut job = Vec::with_capacity(X_JOB_MATCHES);
@@ -717,23 +789,26 @@ fn x_window<const SW: bool>(
             }
             _ => (batch_open(q_idx, first_query), 0, 0),
         };
-        let heap = &heaps[q_idx];
         let mark = window.matches.len();
         let mut at_risk = false;
         for (index, &matched) in job.iter().enumerate() {
             let best_evalue = x_local_match(lists, matched).best_evalue;
-            let may_end = batch_open
-                && end_above[q_idx].is_some_and(|above| best_evalue > above)
-                && heap.may_fill(in_window + index);
+            let may_end = may_be_ended(q_idx, batch_open, best_evalue, in_window + index);
             let ended = may_end
                 && blast_compo_early_termination(best_evalue, &heaps[query_batches[q_idx].clone()]);
             at_risk |= may_end && !ended;
             window.ended.push(ended);
         }
+        // The budget: `jobs` new jobs; with `SW` also at most `2 x jobs` with the carried matches'
+        // (the continuations are carried matches, not new jobs).
+        let full = if SW {
+            let stream = window.stream_jobs();
+            stream >= jobs || carried_jobs + stream >= 2 * jobs
+        } else {
+            window.jobs.len() >= jobs
+        };
         // A window holds at least one job.
-        if !window.jobs.is_empty()
-            && (window.jobs.len() >= jobs || (at_risk && at_risk_jobs >= caps[q_idx]))
-        {
+        if !window.jobs.is_empty() && (full || (at_risk && at_risk_jobs >= caps[q_idx])) {
             window.ended.truncate(mark);
             window.next = Some(first);
             return window;
@@ -1280,33 +1355,32 @@ where
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3560-3575
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:250-252
 /// The status of a query batch in NCBI's one-thread Smith-Waterman redo (`status_code_tld[0]`),
-/// replayed in stream order (`redo_run::one_thread_redo`'s `sw_last_failed`): a match that the redo
-/// reaches sets it (failed, or 0 for a redo that ends without failing, with alignments or
-/// without, as when its heap test is FALSE); a match the early termination test ends leaves it; a
-/// list whose subject the redo's fetch excludes sets it to 0 unless the early termination test
-/// ends that list (line RG X4-excl, `XRedoParSearch::sw_excluded`); at the batch's end a failed
-/// status fails the search there (`XSwErrors::batch_failed`). It is kept across windows: a window
-/// may end inside a batch.
+/// replayed in stream order with the one-thread loop's own status (`redo_run::SwBatchStatus`, the
+/// one owner of its rule): a match that the redo reaches sets it (`redone`: failed, or 0 for a redo
+/// that ends without failing, with alignments or without, as when its heap test is FALSE); a match
+/// the early termination test ends leaves it; a list whose subject the redo's fetch excludes sets it
+/// to 0 unless the early termination test ends that list (line RG X4-excl,
+/// `XRedoParSearch::sw_excluded`); at the batch's end a failed status fails the search there
+/// (`redo_run::sw_batch_failed`), and the next batch starts at 0. It is kept across windows: a
+/// window may end inside a batch.
 struct XSwBatch<'a> {
-    errors: XSwErrors,
     /// The marks of the excluded lists of the queries that the replay has not passed yet.
     excluded: &'a [FetchExcludedMatch],
     /// The query of the last match replayed, if any.
     query: Option<usize>,
     /// The place of that query's last match whose redo set the status, if any.
     status_position: Option<usize>,
-    /// The status of that query's batch says failed.
-    failed: bool,
+    /// The status of that query's batch.
+    status: SwBatchStatus,
 }
 
 impl<'a> XSwBatch<'a> {
-    fn new(errors: XSwErrors, excluded: &'a [FetchExcludedMatch]) -> Self {
+    fn new(excluded: &'a [FetchExcludedMatch]) -> Self {
         Self {
-            errors,
             excluded,
             query: None,
             status_position: None,
-            failed: false,
+            status: SwBatchStatus::default(),
         }
     }
 
@@ -1317,10 +1391,10 @@ impl<'a> XSwBatch<'a> {
     /// loop's reader after its loop (`redo_run::query_fetch_excluded_reached`) on the heaps as they
     /// are now, which are those after the query's loop (the queries after the last match's have no
     /// match). Then, if `next` is in a later batch or there is none, the end of the last match's
-    /// batch: a failed status fails the search there (the batches between them have no match the
-    /// redo reaches, so their status stays 0). The excluded lists of a batch's queries before its
-    /// first match replayed change nothing (the status is 0 there, and such a list only sets it to
-    /// 0), nor do those of a batch with no match replayed.
+    /// batch: a failed status fails the search there, and otherwise the next batch starts at 0 (the
+    /// batches between them have no match the redo reaches, so their status stays 0). The excluded
+    /// lists of a batch's queries before its first match replayed change nothing (the status is 0
+    /// there, and such a list only sets it to 0), nor do those of a batch with no match replayed.
     fn pass(
         &mut self,
         next: Option<usize>,
@@ -1348,12 +1422,15 @@ impl<'a> XSwBatch<'a> {
                         marks,
                         status_position,
                         &heaps[batch.clone()],
-                        &mut self.failed,
+                        &mut self.status,
                     );
                 }
             }
-            if self.failed && next.is_none_or(|next| !batch.contains(&next)) {
-                return Err((self.errors.batch_failed)(batch.start, &heaps[batch.start]));
+            if next.is_none_or(|next| !batch.contains(&next)) {
+                if self.status.failed() {
+                    return Err(sw_batch_failed(batch.start, &heaps[batch.start]));
+                }
+                self.status = SwBatchStatus::default();
             }
         }
         self.query = next;
@@ -1362,10 +1439,18 @@ impl<'a> XSwBatch<'a> {
     }
 
     /// A match of the query of the last `pass`, at `position` in its preliminary list, that the
-    /// redo reaches sets the batch's status: `failed` or 0.
-    fn reached(&mut self, position: usize, failed: bool) {
+    /// redo reaches, with its redo's `result`: it sets the batch's status
+    /// (`SwBatchStatus::redone`). The match's result where its redo ended, none where it failed,
+    /// the error of a redo that does not end in the batch that starts at `batch_start`
+    /// (`redo_run::sw_endless`), any other error as it is.
+    fn redone(
+        &mut self,
+        position: usize,
+        batch_start: usize,
+        result: Result<BlastpPostprocessResult>,
+    ) -> Result<Option<BlastpPostprocessResult>> {
         self.status_position = Some(position);
-        self.failed = failed;
+        self.status.redone(result, || sw_endless(batch_start))
     }
 }
 
@@ -1442,22 +1527,15 @@ fn x_replay<const SW: bool>(
             }
             replayed.turned += 1;
         }
-        let postprocessed = match result {
-            Ok(postprocessed) => {
-                if SW {
-                    batch.reached(matched.position, false);
-                }
-                postprocessed
+        let postprocessed = if SW {
+            // A match the redo reaches sets the batch's status; a failed redo leaves it without
+            // alignments.
+            match batch.redone(matched.position, batch_start, result)? {
+                Some(postprocessed) => postprocessed,
+                None => continue,
             }
-            // A failed redo leaves the match without alignments and sets the batch's status.
-            Err(error) if SW && error.is::<SwRedoFailed>() => {
-                batch.reached(matched.position, true);
-                continue;
-            }
-            Err(error) if SW && error.is::<SwRedoEndless>() => {
-                return Err((batch.errors.endless)(batch_start));
-            }
-            Err(error) => return Err(error),
+        } else {
+            result?
         };
         let best_score = postprocessed.best_score;
         let best_evalue = postprocessed.best_evalue;
@@ -1477,8 +1555,8 @@ fn x_replay<const SW: bool>(
 /// of the windows before left them) and then replayed in stream order into `heaps`. A query's
 /// preliminary list is released after the replay of the window that holds its last match. With
 /// `expand`, the compact lists are expanded ahead of each window. With `SW` (the Smith-Waterman
-/// redo) the replay keeps the query batches' status across the windows (`XSwBatch`, its errors
-/// `sw_errors`), and the batch of the last match ends after the last window.
+/// redo) the replay keeps the query batches' status across the windows (`XSwBatch`, with the
+/// excluded lists `sw_excluded`), and the batch of the last match ends after the last window.
 #[allow(clippy::too_many_arguments)]
 fn x_redo_windows<const SW: bool>(
     lists: &mut [Option<BlastpHitList>],
@@ -1487,7 +1565,6 @@ fn x_redo_windows<const SW: bool>(
     limits: XWindowLimits,
     timing: bool,
     mut expand: Option<&mut XExpandAhead<'_>>,
-    sw_errors: XSwErrors,
     sw_excluded: &[FetchExcludedMatch],
     compute: &mut dyn FnMut(
         &[Option<BlastpHitList>],
@@ -1514,12 +1591,12 @@ fn x_redo_windows<const SW: bool>(
     let mut released_to = 0;
     // The cap on the jobs at risk of query q in a window, `caps[q]`: `limits.at_risk_jobs` at
     // first and after a window that dropped a computed result of q; otherwise grown by q's jobs
-    // at risk that the window computed (all used; it doubles when it closed the window), up to
-    // the job budget. So it is at most `limits.at_risk_jobs` plus q's jobs at risk computed and
-    // used before.
+    // at risk that the window computed and its replay passed (all used; it doubles when it closed
+    // the window), up to the job budget. So it is at most `limits.at_risk_jobs` plus q's jobs at
+    // risk computed and used before.
     let budget = limits.jobs.max(limits.at_risk_jobs);
     let mut caps = vec![limits.at_risk_jobs; lists.len()];
-    let mut sw_batch = XSwBatch::new(sw_errors, sw_excluded);
+    let mut sw_batch = XSwBatch::new(sw_excluded);
     // With `SW`: what the last replay left to the next window.
     let mut carry: Option<XCarry> = None;
     // With a carry and no match of the stream left, the window holds the carry only.
@@ -1564,18 +1641,24 @@ fn x_redo_windows<const SW: bool>(
             // The carried results, the continued ones replaced by their continuations', then the
             // results of the jobs after them.
             if let Some(carry) = carry.take() {
+                counts.carried_max = counts.carried_max.max(window.carried);
+                counts.continued_by.add(window.continued_by);
+                let mut rerun_max_s = 0.0f64;
                 let mut computed = results.into_iter();
                 results = carry.results;
                 for index in window.jobs.iter().flat_map(|job| job.clone()) {
                     let result = computed.next().expect("one result per match of a job");
                     if index < window.carried {
                         let stopped = std::mem::replace(&mut results[index], result);
+                        let first_round_s = stopped.map_or(0.0, |stopped| stopped.first_round_s);
                         counts.continued += 1;
-                        counts.rerun_s += stopped.map_or(0.0, |stopped| stopped.first_round_s);
+                        counts.rerun_s += first_round_s;
+                        rerun_max_s = rerun_max_s.max(first_round_s);
                     } else {
                         results.push(result);
                     }
                 }
+                counts.rerun_max_s += rerun_max_s;
             }
             let replay_start = timing.then(Instant::now);
             let replayed = match x_replay::<SW>(
@@ -1598,8 +1681,16 @@ fn x_redo_windows<const SW: bool>(
             if let Some(replay_start) = replay_start {
                 counts.replay_s += replay_start.elapsed().as_secs_f64();
             }
+            // With `SW`, a replay that stopped passed none of the matches from the stopped one's
+            // query on (they go to the next window): the caps of those queries do not grow.
+            let passed_to = match (SW, &carry) {
+                (true, Some(carry)) => carry.matches[0].q_idx,
+                _ => usize::MAX,
+            };
             for &(q_idx, at_risk_jobs) in &window.at_risk {
-                caps[q_idx] = caps[q_idx].saturating_add(at_risk_jobs).min(budget);
+                if q_idx < passed_to {
+                    caps[q_idx] = caps[q_idx].saturating_add(at_risk_jobs).min(budget);
+                }
             }
             // A dropped result is of a job at risk; after its window the pre-check leaves out
             // every match of the query that the test ends.
@@ -1704,7 +1795,6 @@ where
         limits,
         search.timing,
         expand,
-        search.sw_errors,
         search.sw_excluded,
         &mut |lists, heaps, window| {
             let (results, lpt_ran) =
@@ -1747,12 +1837,17 @@ fn x_print_timing(counts: &XCounts) {
         counts
             .lpt_windows
             .map_or(String::new(), |windows| format!(" lpt_windows={windows}")),
-        counts
-            .turned
-            .map_or(String::new(), |turned| format!(
-                " turned={turned} continued={} rerun_s={:.6}",
-                counts.continued, counts.rerun_s
-            ))
+        counts.turned.map_or(String::new(), |turned| format!(
+            " turned={turned} continued={} cont_stop={} cont_ahead={} cont_bound={} carried_max={} \
+             rerun_s={:.6} rerun_max_s={:.6}",
+            counts.continued,
+            counts.continued_by.stop,
+            counts.continued_by.ahead,
+            counts.continued_by.bound,
+            counts.carried_max,
+            counts.rerun_s,
+            counts.rerun_max_s
+        ))
     );
 }
 

@@ -1953,17 +1953,38 @@ Rebuilding less:
   one window drops matches of q, and it drops at most 4 x cap(q) of them, cap(q) <= threads + q's jobs at
   risk computed, and all used, before (the one-thread loop computes none); where q's batch's heaps never
   fill, q's windows are back to their budget after a number of windows logarithmic in q's work at risk.
-  With
+  Since line RG X4-mt (2026-11-21) the path also runs the Smith-Waterman redo of `-use_sw_tback` (before, such
+  a search ran the one-thread loop at every thread count): a job answers a match's heap test
+  (`BlastCompo_HeapWouldInsert` before its first alignment) where the heap at the window's start makes the
+  answer certain, and otherwise stops the match's redo at the test as on FALSE and leaves the test to the
+  replay; a FALSE there keeps the job's result (NCBI's), a TRUE stops the replay and carries that match and
+  the window's matches after it to the next window, which finishes the match (a continuation, which repeats
+  the redo's first round) and every carried match whose test is TRUE for certain, and the replay keeps each
+  batch's status with the one-thread loop's own rule (`redo_run::SwBatchStatus`). A window with a carry
+  takes at most a budget of new jobs, as one without, and the carried matches (in jobs of four) and the new
+  jobs together are at most two budgets, so a window holds at most 2 x 4 x 64 x threads results before their
+  replay, carried ones included, and a stop's serial work is linear in the carry (at most a window's); q's matches at risk carried to the next window count toward cap(q) there, and cap(q) grows only
+  by q's jobs at risk of a window whose replay passed all of q's matches in it, so the bound on dropped
+  results above holds with `-use_sw_tback` too (a replay never stops within q after dropping a result of
+  q). Evidence (head 09b75aaef, node 1 of the workstation, 8 cores, median of 3, `-db paja`, every output =
+  NCBI 2.17.0 `-num_threads 1`): SicyWSV.faa 0.66 s at 8 threads against 4.08 s before (dev a638d419e) and
+  NCBI's 2.30 s; AP027131.faa 3.03 s against 20.46 s and 4.78 s; with `-max_target_seqs 1` and 5 0.56 /
+  2.79 / 0.92 / 3.47 s (NCBI 2.21 / 4.04 / 2.62 / 4.67 s); one thread unchanged; max RSS at most 33.7 MiB
+  (NCBI 75-96 MiB). With
   `LOSAT_TIMING=1` each search the path runs prints
   `[TIMING] x_bpredopar: matches=<n> jobs=<j> windows=<w> split=<s> ended=<e> skipped=<k> wasted=<x>
   par_s=<s> replay_s=<s>` (on one line; `split`: windows that end inside a query; `ended`: the matches the
   early termination test ended, as many as in the one-thread loop; `skipped`: those not computed;
   `wasted`: those computed and dropped; with `-use_sw_tback` the line ends with ` turned=<t>
-  continued=<c>`: the matches whose heap test a job could not answer (its redo stopped at the test) and
-  the replay answered FALSE (the job's result stands) or TRUE (a continuation in the next window
-  finishes the match), and ` rerun_s=<s>`, the seconds of the continued matches' jobs, which their
-  continuations repeat up to the test). A redo that ends in an error prints the line too, with the counts
-  of the windows replayed before the one that ended it. Diagnostics only, the output bytes do not change: the counters
+  continued=<c> cont_stop=<a> cont_ahead=<b> cont_bound=<d> carried_max=<m> rerun_s=<s> rerun_max_s=<s>`:
+  the matches whose heap test a job could not answer (its redo stopped at the test) and the replay
+  answered FALSE (the job's result stands); the carried matches that a continuation in the next window
+  finishes, by the reason why their test is TRUE (the stopped match itself, the exact look-ahead in a
+  later query, the bound on the lists the heap holds); the most matches a replay carried; the seconds of
+  the continued matches' jobs, which their continuations repeat up to the test, and the sum over the
+  windows of the largest of them in a window, the repeat that a window waits for in full where its slowest
+  job is a continuation, as in a chain of stopped windows). A redo that ends in an error prints the line
+  too, with the counts of the windows replayed before the one that ended it. Diagnostics only, the output bytes do not change: the counters
   and traces of the redo count the `wasted` matches as well (`[TIMING] x_bpredofit: lists= hsps=`, the
   kappa range counters, `LOSAT_DEBUG_BLASTP_TRACE_HSP` lines), and `[X_STATS] NEWTONLANES` counts the
   prefetches of the jobs (four matches each, the one-thread loop prefetches 16 ahead). With
@@ -2022,7 +2043,10 @@ Rebuilding less:
   expansion. The match counts that the early termination bound (`x_end_above`) and the choice of the path read are
   counted from the compact lists. Where the path does not run after all (fewer than two matches), every list is expanded before
   the other paths (the only expansion before the previous switch existed). The expanded lists held at a time are those of the queries of about one
-  window, and each query's compact list is freed when it is expanded.
+  window (with `-use_sw_tback` also those of the matches that a stopped replay carries behind the window's
+  start, which count toward its second budget: at most two windows' with the new jobs), and each query's
+  compact list is freed
+  when it is expanded.
   Evidence 2026-10-20 (v4-D12 s3 probe, workstation): in `blastp -db` UniRef50 q100 at 32 threads the expansion of all
   91 lists of the first query batch (194,347 HSPs of 168 bytes) added 31 MiB to the main heap before the redo, which
   ran in 10 windows. Measured (head 6ef84094, workstation, on / off in one job): that run (node 1, the branch merged

@@ -93,7 +93,9 @@ traceback and of the composition-based redo under a negative seqid list, and bla
 
 With `--dup-only` (fix 3 of line RG item T5d) it writes the databases of NCBI's scope's read of another
 sequence that holds a reported sequence's Seq-align id (`dup_main`); with `--dup5-only` (fix 5) those of the
-order of such a load to a lookup that throws on its id and to another such load (`dup5_main`).
+order of such a load to a lookup that throws on its id and to another such load (`dup5_main`). With
+`--sw-only` (merge 6 of T5d) it writes the databases of the reads of the composition-based redo's fetches
+before its Smith-Waterman redo fails a batch (`sw_main`).
 
 Python 3 standard library only; makeblastdb is NCBI's (the comparison oracle builds the inputs).
 """
@@ -596,6 +598,49 @@ def fetch_main(ncbi_bin):
     os.rmdir(work)
 
 
+def sw_main(ncbi_bin):
+    """`--sw-only` (merge 6 of line RG item T5d, with the rows of line RG item X4-excl): the version 5
+    databases `psw_utf8` and `psw_utf8x` with `-parse_seqids` of the records of `../x4excl/rev`
+    (sx_strong, `gnl|ti|7100`, which `../x4excl/neg.txt` keeps without a definition line, so the fetch of
+    the composition-based redo excludes it, then sfail, whose Smith-Waterman redo against tks_W of
+    `tests/fasta/rps/tks_w.faa` fails at the batch's last match), the title of sfail's record (`psw_utf8`,
+    OID 1) or of sx_strong's (`psw_utf8x`, OID 0) a UTF8String: under the list NCBI's redo reads the header
+    of each subject it fetches, both before its failure (`BLAST engine error: Traceback failed`), so its
+    warning comes before its error."""
+    here = os.path.join("tests", "db_search", "t5")
+    work = os.path.join(here, "work")
+    os.makedirs(work, exist_ok=True)
+
+    def records_of(path):
+        seqs, name = {}, None
+        for line in open(path):
+            line = line.strip()
+            if line.startswith(">"):
+                name = line[1:].split()[0]
+                seqs[name] = ""
+            elif name:
+                seqs[name] += line
+        return seqs
+
+    tks_w = records_of(os.path.join("tests", "fasta", "rps", "tks_w.faa"))["tks_W"]
+    sfail = records_of(os.path.join("tests", "fasta", "x4", "sw_subjects.faa"))["sfail"]
+    utf8 = lambda r: with_first_tag(r, b"\xa0\x80", 0x1A, 0x0C)
+    for name, oid in (("psw_utf8", 1), ("psw_utf8x", 0)):
+        fasta = os.path.join(work, f"{name}.fa")
+        with open(fasta, "w") as f:
+            f.write(f">gnl|ti|7100 sx_strong tks_W itself\n{tks_w}\n")
+            f.write(f">dbj|BAA200102.1| sfail tks_M with D first, twice\n{sfail}\n")
+        out = os.path.join(here, name)
+        cmd = [os.path.join(ncbi_bin, "makeblastdb"), "-in", fasta, "-dbtype", "prot", "-parse_seqids",
+               "-blastdb_version", "5", "-title", name, "-out", out]
+        env = {"PATH": "/usr/bin:/bin", "HOME": os.path.abspath(here), "BLAST_USAGE_REPORT": "false"}
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, env=env)
+        patch_record_any(out, "p", oid, utf8)
+    for name in os.listdir(work):
+        os.remove(os.path.join(work, name))
+    os.rmdir(work)
+
+
 def dup_main(ncbi_bin):
     """`--dup-only` (line RG item T5d fix 3): databases whose lists hold `gb|DUP00001.1|` twice. `pds` and
     `pda` (version 5, protein, `-parse_seqids`): the subject `gb|DUP00001.1| subject record`, hd0 of `hd.faa`
@@ -973,6 +1018,8 @@ if __name__ == "__main__":
         taxid_main(sys.argv[1])
     elif "--fetch-only" in sys.argv[2:]:
         fetch_main(sys.argv[1])
+    elif "--sw-only" in sys.argv[2:]:
+        sw_main(sys.argv[1])
     elif "--dup-only" in sys.argv[2:]:
         dup_main(sys.argv[1])
     elif "--dup5-only" in sys.argv[2:]:

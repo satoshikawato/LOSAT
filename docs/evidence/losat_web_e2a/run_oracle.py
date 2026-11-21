@@ -125,17 +125,18 @@ def search_argv(row: dict[str, str]) -> list[str]:
 def oracle_argv(row: dict[str, str]) -> list[str]:
     """The arguments of NCBI's run: the search arguments, with the -culling_limit of an
     `approved_culling_wrap` row replaced by the contract's limit, and each hit list size of an
-    `approved_hitlist_wrap` row by the contract's size."""
+    `approved_hitlist_wrap` row larger than the contract's size by that size."""
     argv = search_argv(row)
     contract = row.get("contract", "")
     if contract.startswith(CULLING_WRAP):
         argv[argv.index("-culling_limit") + 1] = contract.removeprefix(CULLING_WRAP)
     if contract.startswith(HITLIST_WRAP):
-        sizes = [index for index, word in enumerate(argv) if word in HITLIST_OPTIONS]
+        near = contract.removeprefix(HITLIST_WRAP)
+        sizes = [index for index, word in enumerate(argv) if word in HITLIST_OPTIONS and int(argv[index + 1]) > int(near)]
         if not sizes:
-            raise SystemExit(f"{row['fixture_id']}: {contract} without {' / '.join(HITLIST_OPTIONS)}")
+            raise SystemExit(f"{row['fixture_id']}: {contract} without a {' / '.join(HITLIST_OPTIONS)} above {near}")
         for index in sizes:
-            argv[index + 1] = contract.removeprefix(HITLIST_WRAP)
+            argv[index + 1] = near
     return argv
 
 

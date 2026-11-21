@@ -1386,9 +1386,7 @@ fn give_blastn_counts(
 /// runs the argv: the run completes when that search completes, and fails with its error when it
 /// fails, with stream 3 the CLI's standard error for the argv up to that error (that search's
 /// warnings). The failure of the other search of a run of two searches (`-num_alignments 0` for the
-/// tabular formats, a BLASTN `-num_descriptions` of 2,147,483,598 or more for format 0, where N + 50
-/// overflows the 32-bit preliminary hit list size) fails its formats alone, as the CLI fails those
-/// formats alone: their streams stay empty, what the host received of them is discarded, and
+/// tabular formats) fails its formats alone, as the CLI fails those formats alone: their streams stay empty, what the host received of them is discarded, and
 /// without the tabular search there are no records. A fault of the adapter itself (`Failed::fault`)
 /// fails the run in any search.
 ///

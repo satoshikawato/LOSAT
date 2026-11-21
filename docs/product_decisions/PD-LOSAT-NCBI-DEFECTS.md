@@ -274,7 +274,8 @@
   and 2026-10-22 「広い型になおしましょう」, and accepted by the maintainer on 2026-11-21 by marking
   PR #1440 ready for review, as the PR asked; numbered after 1.63);
   1.65 2026-11-21 (approved exception 19, hit list sizes past `Int4`, NCBI parity line O1c, PR
-  #O1C_PR: the preliminary hit list size computed without NCBI's `Int4` overflow, which ends the rule-2
+  #O1C_PR: the preliminary hit list size, and the best-hit writer's twice that size, computed without
+  NCBI's `Int4` overflow, which ends the rule-2
   reproduction of its wrapped sizes and the rule-3 rejection of the sizes on which NCBI crashes;
   proposed under the standing instruction 2026-09-29, restated 2026-10-07, on the Owner's rules of
   2026-10-10 「NCBI のバグを再現する必要はない」 and 2026-10-22 「広い型になおしましょう」; pending the
@@ -2240,7 +2241,7 @@ Proposed under the standing instruction of 2026-09-29 (restated 2026-10-07), und
 of 2026-10-10 「NCBI のバグを再現する必要はない」 and 2026-10-22 「広い型になおしましょう」 and rule 1 above;
 pending the maintainer's decision (the question of PR #O1C_PR).
 
-19. **A hit list size whose preliminary size passes `Int4`.** `GetPrelimHitlistSize`
+19. **A hit list size whose preliminary size, or twice it with `-best_hit_*`, passes `Int4`.** `GetPrelimHitlistSize`
     (`core/blast_hits.c:44-70`) computes the preliminary hit list size in `Int4`:
     `MIN(MAX(2*h,10),h+50)` for a gapped search without composition-based statistics, `2*h+50`
     above 500 with them (from 1000 with `ADAPTIVE_CBS`), a signed overflow (undefined behavior in C)
@@ -2259,7 +2260,17 @@ pending the maintainer's decision (the question of PR #O1C_PR).
     these sizes (the rows with the contract `approved_hitlist_wrap:1073741798` of
     `LOSAT/tests/outfmt0_manifest.tsv` and the `ncbi-near` rows `db.acbs.blastx.*` and
     `db.hitlist.*` of `LOSAT/tests/db_search_manifest/`). Ungapped searches and TBLASTX keep the
-    size itself, in NCBI as in LOSAT. Every smaller size gives NCBI's bytes. Until version 1.64 LOSAT
+    size itself, in NCBI as in LOSAT. With `-best_hit_overhang` or `-best_hit_score_edge` the
+    best-hit writer holds `2 * prelim_hitlist_size` HSPs of a query before it rebuilds its list
+    (`max_hsps`, `core/hspfilter_besthit.c:79`), also in `Int4`, which overflows from a smaller size:
+    1073741774 for a gapped search without composition-based statistics, 536870887 with them
+    (`2*(2*h+50)`) and 2^30 for an ungapped search. NCBI BLAST+ 2.17.0 then rebuilds the list from
+    its first HSP on and keeps HSPs that the best-hit test removes at the size below (line O1c's
+    probe: BLASTN 69 lines where 1073741773 gives 56, ungapped BLASTN 69 where 1073741823 gives 57,
+    BLASTP and PSIBLAST 11 where 536870886 gives 10, each a superset). LOSAT computes that count in
+    64 bits too (`core/hspfilter_besthit.rs`, since line O6a), so with these options such a size
+    gives NCBI's output at 1073741773, 536870886 or 1073741823 (the rows `hitlist.*.bh*` with those
+    contracts). Every smaller size gives NCBI's bytes. Until version 1.64 LOSAT
     reproduced the wrapped sizes (rule 2) and rejected those on which NCBI crashes (rule 3).
 
 ## Explicit rejections of deterministic results (rule 2, version 1.10)

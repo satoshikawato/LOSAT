@@ -1888,10 +1888,11 @@ fn tblastx_takes_a_database_and_its_size() {
 }
 
 #[test]
-fn values_on_which_ncbi_crashes_are_rejected_with_the_options() {
+fn evalues_on_which_ncbi_crashes_are_rejected_and_large_hit_list_sizes_run() {
     // Decision D12 (AUTHORITY.md): an -evalue of DBL_MAX or more crashes NCBI's blastp and
-    // tblastn on some inputs; blast_hits.c:43-70: a -max_target_seqs whose preliminary size wraps to a
-    // negative int crashes NCBI.
+    // tblastn on some inputs. blast_hits.c:43-70: a -max_target_seqs whose preliminary size passes
+    // NCBI's int wraps or crashes NCBI; LOSAT computes the size without the overflow and runs
+    // (PD-LOSAT-NCBI-DEFECTS exception 19).
     let blastp = |words: &[&str]| {
         let Commands::Blastp(args) = parse("blastp", words).unwrap().command else {
             unreachable!("blastp")

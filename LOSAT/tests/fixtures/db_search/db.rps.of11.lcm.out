@@ -1,0 +1,227 @@
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastp",
+      service "rpsblast",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_1"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">YP_009220478.1 hypothetical protein [White spot
+ syndrome virus]"
+                  }
+                }
+              },
+              title "YP_009220478.1 hypothetical protein [White spot syndrome
+ virus]"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 295,
+              seq-data ncbieaa "MKNSRQRSGVWRGNSCLYKSFYFSGAIIECKKIRIIMMFLLLSLIL
+FVCFVGVVVGVIFMSRPNKTTTTSNKKTKKDKEKEKEDDTEGAVLGRREPENRPIGRDEEGAVEDGKEEEEVFEFEQP
+SVNTGSNTGGGGTGTVPGEGLLPPPPPTPTPTPPPTPTPTPPPPPTRTPSPSSSLGEDDDDDIDIDFDDNDIDEFLDS
+GEEMEEDEEEEDLDTLLSRLETGMSGEEVDFDASSAYIQPDPVVVKNIERSDYTLDPMESWKVLNRSEGDIRFFVDRG
+ITNKIKAMTEDLKEL"
+            }
+          },
+          seq {
+            id {
+              local str "Query_2"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">tk_lc TK-TMK with residues 61-120 in lower case"
+                  }
+                }
+              },
+              title "tk_lc TK-TMK with residues 61-120 in lower case"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 398,
+              seq-data ncbieaa "MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLF
+VKHSLETRYGCGTGTIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIAALDG
+TSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGGAEMYAAACRDCYKKINKKKNKG
+KLVVLEGGDRCGKSTQAKLLLTNKNSPLYGGEYMCFPDRSSHTGKLINDYLTKKIELDDHAAHLLFSANRWEVCSKIK
+QLLDDGIHVVMDRYYYSGIVFSLARGVDTVEWCSASDEGLPQPDLVLLMLLDVEKCSNRDTFGVERFETNSIQERARA
+LFLDLANKDEKNVWIKVDARGTIEEVQTKIINIVYNIVEE"
+            }
+          }
+        }
+      },
+      subject database "rps_mini",
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, -5 }
+        },
+        {
+          name "MaskAtHash",
+          value boolean FALSE
+        },
+        {
+          name "SegFiltering",
+          value boolean FALSE
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "CompositionBasedStats",
+          value integer 1
+        },
+        {
+          name "SmithWatermanMode",
+          value boolean FALSE
+        },
+        {
+          name "MatrixName",
+          value string "BLOSUM62"
+        },
+        {
+          name "GapOpeningCost",
+          value integer 11
+        },
+        {
+          name "GapExtensionCost",
+          value integer 1
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 124550
+        }
+      },
+      program-options {
+        {
+          name "LCaseMask",
+          value query-mask {
+            locations {
+              packed-int {
+                {
+                  from 60,
+                  to 119,
+                  id local str "Query_2"
+                }
+              }
+            },
+            frame notset
+          }
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 531
+          },
+          {
+            id str "blast_score",
+            value int 531
+          },
+          {
+            id str "e_value",
+            value real { 110207883081644, 10, -84 }
+          },
+          {
+            id str "bit_score",
+            value real { 208852179316552, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 130
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 1
+          },
+          {
+            id str "num_positives",
+            value int 130
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 482386934673367, 10, -13 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_2",
+            general {
+              db "CDD",
+              tag id 101
+            }
+          },
+          starts {
+            0,
+            0
+          },
+          lens {
+            190
+          },
+          strands {
+            unknown,
+            unknown
+          }
+        }
+      }
+    },
+    masks {
+      {
+        locations {
+          packed-int {
+            {
+              from 60,
+              to 119,
+              id local str "Query_2"
+            }
+          }
+        },
+        frame notset
+      }
+    },
+    ka-blocks {
+      {
+        lambda { 310650398921015, 10, -15 },
+        k { 134776653967244, 10, -15 },
+        h { 39231402231945, 10, -14 },
+        gapped FALSE
+      },
+      {
+        lambda { 267, 10, -3 },
+        k { 50373036, 10, -9 },
+        h { 14, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 124550",
+      "Effective search space used: 124550",
+      "Length adjustment: 30"
+    }
+  }
+}

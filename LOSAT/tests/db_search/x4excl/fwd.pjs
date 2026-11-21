@@ -1,0 +1,24 @@
+{
+  "version": "1.2",
+  "dbname": "fwd",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "fwd",
+  "number-of-letters": 370,
+  "number-of-sequences": 4,
+  "last-updated": "2026-11-20T23:23:00",
+  "number-of-volumes": 1,
+  "bytes-total": 50185,
+  "bytes-to-cache": 487,
+  "files": [
+    "fwd.pdb",
+    "fwd.phr",
+    "fwd.pin",
+    "fwd.pog",
+    "fwd.pos",
+    "fwd.pot",
+    "fwd.psq",
+    "fwd.ptf",
+    "fwd.pto"
+  ]
+}

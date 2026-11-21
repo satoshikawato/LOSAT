@@ -38,6 +38,7 @@ With the NCBI names installed (see [Coming from NCBI BLAST+](../from-ncbi-blast.
 | `-mask_desc` | none | Comma-separated free-text descriptions of the algorithms. |
 | `-max_file_sz` | `3000000000` | Largest size of one database file, in bytes. A larger database is split into volumes. |
 | `-logfile` | standard output and error | Write the log and messages to this file (appended). |
+| `-metadata_output_prefix` | none | Path written before each file name in the JSON metadata (`.pjs`, `.njs`), for a database that will be read from another directory. The path separator (`/`, `\` on Windows) is added when the value does not end with one. |
 
 For every option: `losat makeblastdb -help`.
 
@@ -106,7 +107,7 @@ The full list is on [Differences from NCBI BLAST+](../differences.md).
 
 ## What LOSAT refuses
 
-- `-randomize`, `-gi_mask`, `-gi_mask_name`, `-oid_masks` and `-metadata_output_prefix`: each stops with an error that names the option.
+- `-randomize`, `-gi_mask`, `-gi_mask_name` and `-oid_masks`: each stops with an error that names the option.
 - `-input_type blastdb`, `asn1_txt` and `asn1_bin`. Only `fasta` works.
 - A FASTA record of 4,294,967,296 letters or more whose letters NCBI would build into a sequence.
 - NCBI settings that change which ids are parsed or which titles are stored (`[BLAST] LONG_SEQID`, a `[BLAST] MAX_SEQID_LENGTH` that `makeblastdb` would use with `-parse_seqids`, `DIAG_*` variables and other `NCBI_CONFIG_*` entries).

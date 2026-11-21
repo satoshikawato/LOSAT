@@ -93,7 +93,6 @@ Formats 6, 7, 10 and 20 write twelve fields by default: `qaccver saccver pident 
 LOSAT stops with an error for these `blastn` settings instead of running something else. The full list is on [What LOSAT refuses](../refusals.md).
 
 - `-reward 0` with a penalty other than 0, and `-reward 0 -penalty 0` with the greedy extension of `-task megablast`.
-- `-ungapped` together with `-outfmt 17` (SAM).
 - `-html`, `-remote`, `-entrez_query`, `-gilist` and `-import_search_strategy`.
 - `-use_index true` when NCBI BLAST+ would search with the MegaBLAST index (`makembindex`): its warning paths (no index found, a first index volume whose header does not read, or a `-word_size` below the index's minimum) run as in NCBI BLAST+.
 - `-db_hard_mask` with `-task blastn-short` on a database whose sequences are masked to their end, and on a database whose masks overlap or are stored out of order.

@@ -767,10 +767,9 @@ fn is_unported_blastn_arg(name: &str) -> bool {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastp_args.cpp:44-50
 // The options of NCBI blastp 2.17.0+ (-help) that LOSAT's BLASTP does not implement
-// (AGENTS.md rule 2: explicit unsupported errors).
+// (AGENTS.md rule 2: explicit unsupported errors). `-best_hit_overhang` / `-best_hit_score_edge`
+// are implemented (series NP O6a-2, psiblast's too).
 const UNPORTED_BLASTP_ARGS: &[&str] = &[
-    "best_hit_overhang",
-    "best_hit_score_edge",
     "entrez_query",
     "gilist",
     "html",

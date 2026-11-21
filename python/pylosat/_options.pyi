@@ -200,6 +200,10 @@ class BlastpOptions(TypedDict, total=False):
     culling_limit: int
     """If the query range of a hit is enveloped by that of at least this many higher-scoring
     hits, delete the hit (default: 0, no culling)"""
+    best_hit_overhang: float
+    """Best Hit algorithm overhang value (recommended value: 0.1)"""
+    best_hit_score_edge: float
+    """Best Hit algorithm score edge value (recommended value: 0.1)"""
     subject_besthit: bool
     """Return only the best HSP for each non overlapping query region"""
     ungapped: bool
@@ -587,6 +591,10 @@ class PsiblastOptions(TypedDict, total=False):
     culling_limit: int
     """If the query range of a hit is enveloped by that of at least this many higher-scoring
     hits, delete the hit"""
+    best_hit_overhang: float
+    """Best Hit algorithm overhang value (recommended value: 0.1)"""
+    best_hit_score_edge: float
+    """Best Hit algorithm score edge value (recommended value: 0.1)"""
     subject_besthit: bool
     """Return only the best HSP for each non overlapping query region"""
     xdrop_ungap: float

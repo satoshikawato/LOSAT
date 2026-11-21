@@ -24,6 +24,7 @@ use crate::seqid::parse::seq_id_from_text;
 use crate::seqid::{DeflineSet, ParsedSeqId};
 
 use super::args;
+use super::bioseq::{write_asn_text, AsnTextDocument, BioseqFormatter, DbSeqData};
 use super::fasta::FastaFormatter;
 use super::format::FormatSpec;
 use super::range::{parse_sequence_range_open_end, SeqRange, NO_RANGE};
@@ -160,17 +161,29 @@ impl<'a> Source<'a> {
     /// `GetHdr(oid)`: the definition lines with their Seq-ids.
     pub fn deflines(&self, oid: u32) -> Result<DeflineSet, Stop> {
         let set = self.db.defline_set_at(self.at(oid)?)?;
-        if set
-            .deflines
-            .iter()
-            .any(|defline| defline.replaced_title_bytes > 0 || defline.replaced_id_bytes > 0)
-        {
-            return Err(Stop::refused(format!(
-                "sequence {oid}: a definition line with bytes NCBI reads as '#' (it writes an \
-                 error each time it reads them)"
-            )));
-        }
+        check_read_bytes(oid, &set)?;
         Ok(set)
+    }
+
+    /// `GetHdr(oid)` and the header that `GetBioseq` keeps in the Bioseq's user object
+    /// (`SeqDb::defline_set_with_header_at`).
+    pub fn deflines_with_header(&self, oid: u32) -> Result<(DeflineSet, Vec<u8>), Stop> {
+        let (set, header) = self.db.defline_set_with_header_at(self.at(oid)?)?;
+        check_read_bytes(oid, &set)?;
+        Ok((set, header))
+    }
+
+    /// The `Seq-data` of `GetBioseq(oid)`: the stored NCBIstdaa of a protein, the stored 2-bit
+    /// bytes or NCBI4na of a nucleotide (`SequenceBlock::nucleotide_seq_data`).
+    pub fn seq_data(&self, oid: u32) -> Result<DbSeqData, Stop> {
+        let block = self.db.read_sequence_at(self.at(oid)?)?;
+        if self.protein {
+            return Ok(DbSeqData::Ncbistdaa(block.protein(0).to_vec()));
+        }
+        Ok(match block.nucleotide_seq_data(0)? {
+            (true, bytes) => DbSeqData::Ncbi2na(bytes),
+            (false, bytes) => DbSeqData::Ncbi4na(bytes),
+        })
     }
 
     /// The letters of `GetSequenceAsString(oid[, range])` (`-outfmt %s`, `%h`): iupacaa
@@ -291,6 +304,21 @@ impl<'a> Source<'a> {
     }
 }
 
+/// The refusal of a sequence whose definition lines hold bytes that NCBI reads as '#'.
+fn check_read_bytes(oid: u32, set: &DeflineSet) -> Result<(), Stop> {
+    if set
+        .deflines
+        .iter()
+        .any(|defline| defline.replaced_title_bytes > 0 || defline.replaced_id_bytes > 0)
+    {
+        return Err(Stop::refused(format!(
+            "sequence {oid}: a definition line with bytes NCBI reads as '#' (it writes an \
+             error each time it reads them)"
+        )));
+    }
+    Ok(())
+}
+
 /// The retrieval's output and its diagnostics, NCBI's `cout` and the `cerr` tied to it.
 pub(super) struct Output<'a, 'b> {
     out: &'a mut dyn Write,
@@ -307,6 +335,30 @@ impl Output<'_, '_> {
         self.out.flush().map_err(Stop::write)?;
         self.diag.err_post(message);
         Ok(())
+    }
+
+    /// `m_Out << MSerial_AsnText << object`: the ASN.1 text document `document`, with NCBI's post
+    /// of each byte its text stream replaces (`bioseq::write_asn_text`).
+    pub fn asn_text<D: AsnTextDocument>(&mut self, document: &D) -> Result<(), Stop> {
+        let diag = &mut *self.diag;
+        write_asn_text(document, &mut *self.out, |replaced| {
+            diag.post_replaced(std::slice::from_ref(replaced))
+        })
+    }
+
+    /// The line of `x_Print` whose one field is the ASN.1 text document `document`, which NCBI
+    /// writes into the field's string first: the posts of the bytes its text stream replaces, then
+    /// the document and the line's end.
+    pub fn asn_text_line<D: AsnTextDocument>(&mut self, document: &D) -> Result<(), Stop> {
+        let mut line = Vec::new();
+        let mut replaced = Vec::new();
+        write_asn_text(document, &mut line, |byte| replaced.push(byte.clone()))?;
+        if !replaced.is_empty() {
+            self.out.flush().map_err(Stop::write)?;
+            self.diag.post_replaced(&replaced);
+        }
+        line.push(b'\n');
+        self.out.write_all(&line).map_err(Stop::write)
     }
 }
 
@@ -333,12 +385,11 @@ fn slice(letters: &[u8], range: Option<(u32, u32)>) -> &[u8] {
     }
 }
 
-/// The formatter of the request (`CBlastDB_Formatter`), or the refusal of one LOSAT does
-/// not write, given at the first sequence (NCBI's `%b` and `%d` fail on nothing before).
+/// The formatter of the request (`CBlastDB_Formatter`).
 enum Formatter {
     Fasta(FastaFormatter),
+    Bioseq(BioseqFormatter),
     Fields(FormatSpec),
-    Refused(String),
 }
 
 impl Formatter {
@@ -346,18 +397,18 @@ impl Formatter {
     /// a `%` specifier's `GetHdr`), which set NCBI's OID list up (`SeqDb::set_up_oid_list`).
     fn reads_deflines(&self) -> bool {
         match self {
-            Formatter::Fasta(_) => true,
+            Formatter::Fasta(_) | Formatter::Bioseq(_) => true,
             Formatter::Fields(spec) => spec.reads_deflines(),
-            Formatter::Refused(_) => false,
         }
     }
 
-    /// Whether the formatter writes the letters of the sequence (the FASTA, `%s`).
+    /// Whether the formatter writes letters that `-strand` turns (the FASTA, `%s`; the Bioseq
+    /// of `%b` holds the stored data).
     fn reads_letters(&self) -> bool {
         match self {
             Formatter::Fasta(_) => true,
+            Formatter::Bioseq(_) => false,
             Formatter::Fields(spec) => spec.writes_letters(),
-            Formatter::Refused(_) => false,
         }
     }
 
@@ -371,14 +422,15 @@ impl Formatter {
     //
     //     NCBI_THROW(CSeqDBException, eArgErr, CSeqDB::kOidNotFound);
     // ```
-    /// `Write(-1, config)`: the OID of a PIG that no volume holds. The FASTA formatter's
-    /// `GetBioseq` throws `OID not found`; the `%` formatter's first read does
+    /// `Write(-1, config)`: the OID of a PIG that no volume holds. The FASTA and Bioseq
+    /// formatters' `GetBioseq` throws `OID not found`; the `%` formatter's first read does
     /// (`FormatSpec::write_missing_oid`).
     fn write_missing(&mut self, out: &mut dyn Write) -> Result<(), Stop> {
         match self {
-            Formatter::Fasta(_) => Err(Stop::Ncbi(OID_NOT_FOUND.to_string())),
+            Formatter::Fasta(_) | Formatter::Bioseq(_) => {
+                Err(Stop::Ncbi(OID_NOT_FOUND.to_string()))
+            }
             Formatter::Fields(spec) => spec.write_missing_oid(out),
-            Formatter::Refused(reason) => Err(Stop::Refused(reason.clone())),
         }
     }
 
@@ -392,8 +444,8 @@ impl Formatter {
     ) -> Result<(), Stop> {
         match self {
             Formatter::Fasta(fasta) => fasta.write(source, oid, config, target, out),
+            Formatter::Bioseq(bioseq) => bioseq.write(source, oid, target, out),
             Formatter::Fields(spec) => spec.write(source, oid, config, target, out),
-            Formatter::Refused(reason) => Err(Stop::Refused(reason.clone())),
         }
     }
 }
@@ -410,7 +462,12 @@ pub(super) fn numeric_target(text: &str) -> Option<i64> {
 /// `CSeq_id(text, fParse_PartialOK | fParse_Default)`: the Seq-id of a `-target_only`
 /// target that is not a number; the message of NCBI's exception as the request reports it.
 pub(super) fn parse_target(text: &str) -> Result<ParsedSeqId, Stop> {
-    seq_id_from_text(text.as_bytes(), PARTIAL_OK | DEFAULT, &mut |_| {})
+    parse_target_with(text, PARTIAL_OK | DEFAULT)
+}
+
+/// `CSeq_id(text, flags)` of a `-target_only` target (`parse_target`).
+pub(super) fn parse_target_with(text: &str, flags: u32) -> Result<ParsedSeqId, Stop> {
+    seq_id_from_text(text.as_bytes(), flags, &mut |_| {})
         .map_err(|error| Stop::NcbiBytes(error.message))
 }
 
@@ -512,13 +569,8 @@ fn request(
         OutputKind::Fasta => {
             Formatter::Fasta(FastaFormatter::new(line_length, args.given("long_seqids")))
         }
-        OutputKind::Bioseq => Formatter::Refused(super::refusal(
-            "-outfmt %b (the Bioseq as ASN.1 text) is not served",
-        )),
+        OutputKind::Bioseq => Formatter::Bioseq(BioseqFormatter),
         OutputKind::Fields(spec, mask_algos) => match FormatSpec::parse(&spec, mask_algos) {
-            Ok(spec) if spec.asks_asn_text() => Formatter::Refused(super::refusal(
-                "-outfmt %d (the definition lines as ASN.1 text) is not served",
-            )),
             Ok(spec) => Formatter::Fields(spec),
             Err(message) => return Err(Stop::Ncbi(message)),
         },

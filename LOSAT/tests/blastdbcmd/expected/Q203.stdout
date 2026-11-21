@@ -1,0 +1,518 @@
+Bioseq ::= {
+  id {
+    other {
+      accession "NM_000001",
+      version 1
+    }
+  },
+  descr {
+    title "alpha mRNA [Homo sapiens] >gb|AB000001.1| alpha cDNA >emb|X00001.2|
+ alpha clone",
+    user {
+      type str "ASN1_BlastDefLine",
+      data {
+        {
+          label str "ASN1_BlastDefLine",
+          num 1,
+          data oss {
+            '30803080A0801A19616C706861206D524E41205B486F6D6F2073617069656E735D
+0000A1803080A9803080A1801A094E4D5F3030303030310000A380020101000000000000000000
+00A28002022586000000003080A0801A0A616C7068612063444E410000A1803080A4803080A180
+1A0841423030303030310000A38002010100000000000000000000A2800202276A000000003080
+A0801A0B616C70686120636C6F6E650000A1803080A5803080A1801A065830303030310000A380
+02010200000000000000000000A28002022586000000000000'H
+          }
+        }
+      }
+    },
+    source {
+      org {
+        db {
+          {
+            db "taxon",
+            tag id 9606
+          }
+        }
+      }
+    },
+    source {
+      org {
+        db {
+          {
+            db "taxon",
+            tag id 10090
+          }
+        }
+      }
+    },
+    source {
+      org {
+        db {
+          {
+            db "taxon",
+            tag id 9606
+          }
+        }
+      }
+    }
+  },
+  inst {
+    repr raw,
+    mol na,
+    length 488,
+    seq-data ncbi2na 'EFE7BED928FD49E4F6C028CEE8E811D6E72090FFE5B9F6C0B8E86158
+031A8EA54E9E4382A7A881CF9E95983309E80B5F382FE2FF5D633515F90FCE4FE7970A33A4054A
+3ED821A31BE4CAD243AB7BA293093742ACEEEC1BAE20D12343775A4F9017053867079880FC237D
+4413AEAD3A88124DE2A41BAE1A7F82C9'H
+  }
+}
+Bioseq ::= {
+  id {
+    gi 654321,
+    genbank {
+      accession "AB000002",
+      version 3
+    }
+  },
+  descr {
+    title "gi plus gb nucleotide",
+    user {
+      type str "ASN1_BlastDefLine",
+      data {
+        {
+          label str "ASN1_BlastDefLine",
+          num 1,
+          data oss {
+            '30803080A0801A15676920706C7573206762206E75636C656F746964650000A180
+3080AB80020309FBF10000A4803080A1801A0841423030303030320000A3800201030000000000
+0000000000A28002021C3B000000000000'H
+          }
+        }
+      }
+    },
+    source {
+      org {
+        db {
+          {
+            db "taxon",
+            tag id 7227
+          }
+        }
+      }
+    }
+  },
+  inst {
+    repr raw,
+    mol na,
+    length 488,
+    seq-data ncbi2na 'EFE7BED928FD49E4F6C028CEE8E811D6E72090FFE5B9F6C0B8E86158
+031A8EA54E9E4382A7A881CF9E95983309E80B5F382FE2FF5D633515F90FCE4FE7970A33A4054A
+3ED821A31BE4CAD243AB7BA29309374AACEEEC1BAE20D12343775A4F9017053867079880FC237D
+8413AEAD3A88124DE2A41BAE1A7F82C9'H
+  }
+}
+Bioseq ::= {
+  id {
+    embl {
+      accession "AJ000003",
+      version 1
+    }
+  },
+  descr {
+    title "emb nucleotide",
+    user {
+      type str "ASN1_BlastDefLine",
+      data {
+        {
+          label str "ASN1_BlastDefLine",
+          num 1,
+          data oss {
+            '30803080A0801A0E656D62206E75636C656F746964650000A1803080A5803080A1
+801A08414A3030303030330000A38002010100000000000000000000A280020100000000000000
+'H
+          }
+        }
+      }
+    }
+  },
+  inst {
+    repr raw,
+    mol na,
+    length 488,
+    seq-data ncbi2na 'EFE7BED928FD49E4F5C028CEE8E811D6E72090BFE5B9F6C0B8E86158
+031A8EA54E9E4383A7A881CF9E95983309E80B5F382FE2FF5D633515F90FCE4FE7970A33A4054A
+3ED821A31BE4CAD243AB7BA293093742ACEEEC1BAE20D10343775A4F9017053867079880FC237D
+4413AEAD3A88124DE2A41BAE1A7F82C9'H
+  }
+}
+Bioseq ::= {
+  id {
+    ddbj {
+      accession "AB000004",
+      version 1
+    }
+  },
+  descr {
+    title "dbj nucleotide",
+    user {
+      type str "ASN1_BlastDefLine",
+      data {
+        {
+          label str "ASN1_BlastDefLine",
+          num 1,
+          data oss {
+            '30803080A0801A0E64626A206E75636C656F746964650000A1803080AC803080A1
+801A0841423030303030340000A38002010100000000000000000000A280020100000000000000
+'H
+          }
+        }
+      }
+    }
+  },
+  inst {
+    repr raw,
+    mol na,
+    length 488,
+    seq-data ncbi2na 'EFE7BED9283D49E4F6C028CEE8E819D6E72090FFE5B9F6C0B8E86158
+031A8EA54E5E4382A7A881CF9E94983309E80B5F382FE2FF5D633515F90FCE4FE7970A33A4054A
+3ED821A31BE4CAD243A87BA293093742ACEEEC1BAE20D12343775A4F9017053867079880FC237D
+441BAEAD3A88124DE2A41BAE1A7F82C9'H
+  }
+}
+Bioseq ::= {
+  id {
+    other {
+      accession "NC_000005",
+      version 11
+    }
+  },
+  descr {
+    title "chromosome-like",
+    user {
+      type str "ASN1_BlastDefLine",
+      data {
+        {
+          label str "ASN1_BlastDefLine",
+          num 1,
+          data oss {
+            '30803080A0801A0F6368726F6D6F736F6D652D6C696B650000A1803080A9803080
+A1801A094E435F3030303030350000A38002010B00000000000000000000A28002010000000000
+0000'H
+          }
+        }
+      }
+    }
+  },
+  inst {
+    repr raw,
+    mol na,
+    length 488,
+    seq-data ncbi2na 'EFE7BEDB28FD49E4F6C428CEE82811D6E72090FFE5B9F6C0B8E86058
+031A8EA54E9E438267A881CF9E95983309E80B5F382FE2FF5D633515F90FCE4FE7970A33A4054A
+3ED821A31BE4CAD243AB7BA293093742ACEEEC1BAE20D12343775A4F90170538670798803C233D
+44136EAD3A88124DE2A41BAE1A7F82C9'H
+  }
+}
+Bioseq ::= {
+  id {
+    local str "mynuc6"
+  },
+  descr {
+    title "local id nucleotide",
+    user {
+      type str "ASN1_BlastDefLine",
+      data {
+        {
+          label str "ASN1_BlastDefLine",
+          num 1,
+          data oss {
+            '30803080A0801A136C6F63616C206964206E75636C656F746964650000A1803080
+A080A1801A066D796E7563360000000000000000A280020100000000000000'H
+          }
+        }
+      }
+    }
+  },
+  inst {
+    repr raw,
+    mol na,
+    length 488,
+    seq-data ncbi2na 'EFE7BED928FD49E8F6C028CEE8E81156E72090FFE5B9F6D0B8E86158
+035A82A54E9A4382A7A881CF9E95983309E80B5F382FE2FF5D633515F90FCE4FE7970A33A4054A
+3EDB21A31BE4CAD243AB7BA293093742ACEEE41BAE20D12343F75A4F9017053867079880FC237D
+4513AEAD3A88124DE2A41BAE1A7F82C9'H
+  }
+}
+Bioseq ::= {
+  id {
+    general {
+      db "mydb",
+      tag str "nuc7"
+    }
+  },
+  descr {
+    title "general id nucleotide",
+    user {
+      type str "ASN1_BlastDefLine",
+      data {
+        {
+          label str "ASN1_BlastDefLine",
+          num 1,
+          data oss {
+            '30803080A0801A1567656E6572616C206964206E75636C656F746964650000A180
+3080AA803080A0801A046D7964620000A180A1801A046E756337000000000000000000000000A2
+80020100000000000000'H
+          }
+        }
+      }
+    }
+  },
+  inst {
+    repr raw,
+    mol na,
+    length 488,
+    seq-data ncbi2na 'EFE7BED928FD49E4F6C028CEE8E811D6E72090FFE5B9F6C0B8E86158
+031A8EA54E9E4382A76881CF9E95982309E80B5F382FE2BF5D633515F90FCE47D7970A33A4054A
+3ED821A31BD4CAD243AB7BA2D3093772ACDEAC1BAE20D12343775A479017053867079880FC237D
+4413AEAD3A88124DE3A41BAE1A7F82C9'H
+  }
+}
+Bioseq ::= {
+  id {
+    other {
+      accession "NM_000008",
+      version 2
+    }
+  },
+  descr {
+    title "bare refseq accession",
+    user {
+      type str "ASN1_BlastDefLine",
+      data {
+        {
+          label str "ASN1_BlastDefLine",
+          num 1,
+          data oss {
+            '30803080A0801A15626172652072656673657120616363657373696F6E0000A180
+3080A9803080A1801A094E4D5F3030303030380000A38002010200000000000000000000A28002
+0100000000000000'H
+          }
+        }
+      }
+    }
+  },
+  inst {
+    repr raw,
+    mol na,
+    length 488,
+    seq-data ncbi2na 'EFE7BED928FD49E4F6C028CEE8E811D6E72090FFE5B9F600B8E84158
+039A8EA54E9E4382A7AC81CF9E95983205E80B5F382FE2FF5D633515F90FCE4FE7970A33A4054A
+3ED823A31BE4CADE53AB7BA29F093742ACEEEC1BAA20D12340775A4F9017053867079880FC237D
+4413EEAD3888124DE2A41BAE1A7F82C9'H
+  }
+}
+Bioseq ::= {
+  id {
+    ddbj {
+      accession "AB000009"
+    }
+  },
+  descr {
+    title "bare genbank accession without version",
+    user {
+      type str "ASN1_BlastDefLine",
+      data {
+        {
+          label str "ASN1_BlastDefLine",
+          num 1,
+          data oss {
+            '30803080A0801A26626172652067656E62616E6B20616363657373696F6E207769
+74686F75742076657273696F6E0000A1803080AC803080A1801A08414230303030303900000000
+000000000000A280020100000000000000'H
+          }
+        }
+      }
+    }
+  },
+  inst {
+    repr raw,
+    mol na,
+    length 488,
+    seq-data ncbi2na 'EFE7BEF928FD59E4B6C068CEE8E811D6E72090FFE5B9F6C0B8E82158
+03BA8EA54E9E4382A7A981CFDE99983319E80B5F382FE2FF5D633515F90FCE4FE7970A33A4054A
+3ED811A31BE4CAD243AF7BA293093742ACEEEC1BAC20D32343775A5F9017053867079880FC237D
+4413AEAD3A88124DE2A41BAE1A7F82C9'H
+  }
+}
+Bioseq ::= {
+  id {
+    local str "mynuc_10"
+  },
+  descr {
+    title "bare non-accession word",
+    user {
+      type str "ASN1_BlastDefLine",
+      data {
+        {
+          label str "ASN1_BlastDefLine",
+          num 1,
+          data oss {
+            '30803080A0801A1762617265206E6F6E2D616363657373696F6E20776F72640000
+A1803080A080A1801A086D796E75635F31300000000000000000A280020100000000000000'H
+          }
+        }
+      }
+    }
+  },
+  inst {
+    repr raw,
+    mol na,
+    length 488,
+    seq-data ncbi2na 'EFE7BED928FD49E4F6C028CEE8E811F6E72090FFE5B0F6C0B8E86158
+039A8EA54E9E4382A7A881CF9E15983389E80B5F382FE2FF5D633555B50FCE4FE7970A33A4C54A
+7EDB21A31BE4CAD243AB7BA193093772ACEEEC1BAEE0D12343775A4F9017043864079880FC237D
+4413AEAD3A88124DE2A41BEE1A7F82C9'H
+  }
+}
+Bioseq ::= {
+  id {
+    tpg {
+      accession "BK000012",
+      version 1
+    }
+  },
+  descr {
+    title "third-party nucleotide",
+    user {
+      type str "ASN1_BlastDefLine",
+      data {
+        {
+          label str "ASN1_BlastDefLine",
+          num 1,
+          data oss {
+            '30803080A0801A1674686972642D7061727479206E75636C656F746964650000A1
+803080AF803080A1801A08424B3030303031320000A38002010100000000000000000000A28002
+0100000000000000'H
+          }
+        }
+      }
+    }
+  },
+  inst {
+    repr raw,
+    mol na,
+    length 488,
+    seq-data ncbi2na 'EFE7BED928FD49E4F6C028CEE8E811D6E72090FFE1B9F4C0B8E86158
+03DA8EA44E9E4382A7A881CF5E91983309E80B5F381FE2FF5D433515F90FCE8FE7970A33A4064A
+3ED821A31BECCAD2438B7BA2930937422CEEEC5BAE20D123437B5A4F901F0138670AB880FC237D
+4613AEAD3A88124DE2A41BAE1A7F82C9'H
+  }
+}
+Bioseq ::= {
+  id {
+    genbank {
+      name "LOCUS13",
+      accession "AB000013",
+      version 1
+    }
+  },
+  descr {
+    title "gb with a locus name",
+    user {
+      type str "ASN1_BlastDefLine",
+      data {
+        {
+          label str "ASN1_BlastDefLine",
+          num 1,
+          data oss {
+            '30803080A0801A14676220776974682061206C6F637573206E616D650000A18030
+80A4803080A0801A074C4F43555331330000A1801A0841423030303031330000A3800201010000
+0000000000000000A280020100000000000000'H
+          }
+        }
+      }
+    }
+  },
+  inst {
+    repr raw,
+    mol na,
+    length 488,
+    seq-data ncbi2na 'EFE7BED928FD45E4DEC028CEECE811D6E72090FFE1B9F6C0B8E86158
+031A8EA54E9E4386A7B881CFAEB5984309E80B67382FE2FF5D633515F90FCE4FE7B70A33A4054B
+3ED021A31BE4CAD243AB7BA293091742ACEFEC1B2E60D12343775A4F1017053867075880FC237D
+4413AEAD3A88124DE2A4DBAE1A7F82C9'H
+  }
+}
+Bioseq ::= {
+  id {
+    patent {
+      seqid 14,
+      cit {
+        country "US",
+        id number "1234567"
+      }
+    }
+  },
+  descr {
+    title "patent nucleotide",
+    user {
+      type str "ASN1_BlastDefLine",
+      data {
+        {
+          label str "ASN1_BlastDefLine",
+          num 1,
+          data oss {
+            '30803080A0801A11706174656E74206E75636C656F746964650000A1803080A880
+3080A08002010E0000A1803080A0801A0255530000A180A0801A07313233343536370000000000
+0000000000000000000000A280020100000000000000'H
+          }
+        }
+      }
+    }
+  },
+  inst {
+    repr raw,
+    mol na,
+    length 488,
+    seq-data ncbi2na 'EFE7BED928FD49E4F6C028CEE8E81116E72090FFE5B9F7C0B8E86158
+031A8FA5469E438287A881CF9E95983309E80B9F382FE2FF5D630515F50FCE4FE7870A33AA054A
+3CD821A31BE4CAD24FABFBA293053742ACEEEC1BAF20E12343375A4F8017053867079880FE237D
+741FAEAD3A8812CDE2A43BAD1A7F82C9'H
+  }
+}
+Bioseq ::= {
+  id {
+    gi 1515,
+    genbank {
+      accession "AB000015",
+      version 1
+    }
+  },
+  descr {
+    title ">gi|1516|ref|XM_000016.1| second defline",
+    user {
+      type str "ASN1_BlastDefLine",
+      data {
+        {
+          label str "ASN1_BlastDefLine",
+          num 1,
+          data oss {
+            '30803080A0801A000000A1803080AB80020205EB0000A4803080A1801A08414230
+30303031350000A38002010100000000000000000000A280020100000000003080A0801A0E7365
+636F6E64206465666C696E650000A1803080AB80020205EC0000A9803080A1801A09584D5F3030
+303031360000A38002010100000000000000000000A280020100000000000000'H
+          }
+        }
+      }
+    }
+  },
+  inst {
+    repr raw,
+    mol na,
+    length 488,
+    seq-data ncbi2na 'EFE7BED928FD49E4F6C028CEE8E811D6EB2090FFE5B9F6C0B8E8615A
+031A8EA54E9E4382A7A881CF9E95983009E00B5F382FE2CD5D636515F98FCE4FE7972A33A4054E
+3ED421632BE4CAD243AB7AA292093741ACEEEC0BAE20D12363775A4F901764382F079880FC237D
+0413AFAD3A88124DE3A41BAE1A7F82C9'H
+  }
+}

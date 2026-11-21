@@ -2587,6 +2587,29 @@ impl SeqDb {
         self.ordinal_set(at.volume, self.location_oid(&at), set)
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2319-2346
+    /// The definition lines of the sequence at `at` (`defline_set_at`) and the header that
+    /// NCBI's `GetBioseq` keeps in the Bioseq's `ASN1_BlastDefLine` user object
+    /// (`x_GetFilteredBinaryHeader`): the stored record, or the set serialized again
+    /// (`writedb::header::encode_defline_set`, NCBI's `CObjectOStreamAsnBinary`) where NCBI's read
+    /// changed it: a `general` id `BL_ORD_ID` of a volume after the first, whose tag the read made
+    /// the OID in the database (`x_GetHdrAsn1`), or a line that the definition-line rule dropped
+    /// (`x_GetFilteredHeader`).
+    pub fn defline_set_with_header_at(
+        &self,
+        at: SeqLocation,
+    ) -> Result<(DeflineSet, Vec<u8>), SeqDbError> {
+        let volume = at.volume;
+        let (mut set, record) = self.volumes[volume].defline_set_with_record(at.vol_oid)?;
+        let adjusted = adjust_ordinal_tags(&mut set, self.volume_starts[volume])
+            .map_err(|error| error.error(self.volumes[volume].base(), self.location_oid(&at)))?;
+        let header = match record {
+            Some(record) if !adjusted => record,
+            _ => crate::writedb::header::encode_defline_set(&set, &mut Vec::new()),
+        };
+        Ok((set, header))
+    }
+
     /// `set`, the definition lines of the sequence `oid` (its OID, which the messages name) in
     /// `volume`, with the tag of a `general` id `BL_ORD_ID` made its OID in the database
     /// (`defline_set`).
@@ -2929,13 +2952,15 @@ pub(super) fn has_ordinal_tag(set: &DeflineSet) -> bool {
 /// the tag of each `general` id `BL_ORD_ID` made the stored tag plus `volume_start` (`x_GetHdrAsn1`
 /// with `adjust_oids`): the OID in the database where makeblastdb stored the number in the volume.
 /// Fails where NCBI's `GetId` throws (a string tag) and where the sum passes a signed 32-bit id
-/// (`OrdinalTagError`), with `set` then partly changed.
+/// (`OrdinalTagError`), with `set` then partly changed. Ok: whether a tag was changed (NCBI's
+/// `changed`, which makes `x_GetFilteredBinaryHeader` serialize the set again).
 pub(super) fn adjust_ordinal_tags(
     set: &mut DeflineSet,
     volume_start: u32,
-) -> Result<(), OrdinalTagError> {
+) -> Result<bool, OrdinalTagError> {
+    let mut changed = false;
     if volume_start == 0 {
-        return Ok(());
+        return Ok(changed);
     }
     for id in set
         .deflines
@@ -2957,8 +2982,9 @@ pub(super) fn adjust_ordinal_tags(
             return Err(OrdinalTagError::PastSigned32);
         };
         dbtag.tag = ObjectId::Id(adjusted);
+        changed = true;
     }
-    Ok(())
+    Ok(changed)
 }
 
 /// A `BL_ORD_ID` tag that NCBI's header read of a volume after the first cannot make an OID in

@@ -65,6 +65,12 @@ tests are in `LOSAT/src/seqdb/mask_tests.rs`:
   `CWriteDB::CreateUserColumn` in 2007): six proteins and the user column `comedy`, whose data
   file is the big-endian `.pab` alone; no masks. Its `.pnd .pni .psd .psi` and `.pog` files are
   left out.
+- `db/seqn.{nin,nsq,nhr,nni,nnd}` and `db/seqp.{pin,psq,phr,pni,pnd}`: copies of NCBI's
+  `c++/src/algo/blast/unit_tests/seqdb_reader/data/seqn` and `seqp` (598d8ae6; version 4, GIs with
+  DDBJ, GenBank and other accessions), whose `GetBioseq` and `GetHdr` texts NCBI's cases GetBioseqN,
+  GetBioseqP, GetHdrN and GetHdrP expect (`LOSAT/tests/blastdbcmd_retrieve.rs`, `-outfmt %b` and
+  `%d`). Their string-id ISAM files (`.nsd .nsi .psd .psi`), the `.nhd .nhi .phd .phi` and `.nog .pog`
+  files are left out: the cases look the sequences up by GI.
 - `expected/mask_*.algorithms.txt`: the table that NCBI prints for the algorithms of the
   database (`GetAvailableMaskAlgorithmDescriptions`, with its leading empty line).
 - `expected/mask_*.masks.tsv`: rows `algorithm<TAB>oid<TAB>ranges` from

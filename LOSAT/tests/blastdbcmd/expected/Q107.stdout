@@ -1,0 +1,265 @@
+Blast-def-line-set ::= {
+  {
+    title "pdb chain A",
+    seqid {
+      pdb {
+        mol "1914",
+        chain 65,
+        chain-id "A"
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "pdb chain lower",
+    seqid {
+      pdb {
+        mol "1914",
+        chain 98,
+        chain-id "b"
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "gi of digits",
+    seqid {
+      gi 1914,
+      other {
+        accession "NP_191400",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "pdb blank chain",
+    seqid {
+      pdb {
+        mol "2XYY"
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "embl then genbank in one defline",
+    seqid {
+      embl {
+        accession "X10001",
+        version 1
+      },
+      genbank {
+        accession "U10002",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "genbank then embl",
+    seqid {
+      genbank {
+        accession "U20001",
+        version 1
+      },
+      embl {
+        accession "X20002",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "",
+    seqid {
+      other {
+        accession "NP_300001",
+        version 1
+      }
+    },
+    taxid 0
+  },
+  {
+    title "second defline",
+    seqid {
+      embl {
+        accession "X30002",
+        version 1
+      }
+    },
+    taxid 0
+  },
+  {
+    title "third defline",
+    seqid {
+      genbank {
+        accession "U30003",
+        version 2
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "swiss",
+    seqid {
+      swissprot {
+        name "NAME_HUMAN",
+        accession "P77777",
+        release "reviewed",
+        version 3
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "cdd id",
+    seqid {
+      general {
+        db "CDD",
+        tag id 123
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "gnomon id",
+    seqid {
+      general {
+        db "GNOMON",
+        tag str "5.p"
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "pig id",
+    seqid {
+      general {
+        db "PIG",
+        tag id 77
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "ti as general",
+    seqid {
+      general {
+        db "ti",
+        tag id 88
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "ordinal in a defline",
+    seqid {
+      general {
+        db "BL_ORD_ID",
+        tag id 2
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "local number",
+    seqid {
+      local id 123
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "local mixed",
+    seqid {
+      local str "MixedCase7"
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "version one",
+    seqid {
+      other {
+        accession "NP_400001",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "version two",
+    seqid {
+      other {
+        accession "NP_400001",
+        version 2
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "no version",
+    seqid {
+      other {
+        accession "NP_400002"
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "with locus",
+    seqid {
+      genbank {
+        name "LOCUS50",
+        accession "AAA50001",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "only a locus",
+    seqid {
+      genbank {
+        name "LOCUS51"
+      }
+    },
+    taxid 0
+  }
+}

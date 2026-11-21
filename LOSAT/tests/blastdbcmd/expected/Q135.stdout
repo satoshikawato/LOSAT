@@ -1,0 +1,231 @@
+Blast-def-line-set ::= {
+  {
+    title "ref|XP_000001.1| alpha protein [Homo sapiens]
+ sp|P99999.2|TEST_HUMAN alpha-like protein gb|AAA00001.1| hypothetical
+ protein, partial",
+    seqid {
+      general {
+        db "BL_ORD_ID",
+        tag id 0
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "gi|123456|ref|NP_000002.1| gi plus ref protein",
+    seqid {
+      general {
+        db "BL_ORD_ID",
+        tag id 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "sp|Q00003|ABC_MOUSE swissprot without version",
+    seqid {
+      general {
+        db "BL_ORD_ID",
+        tag id 2
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "tr|A0A000|A0A000_YEAST trembl entry",
+    seqid {
+      general {
+        db "BL_ORD_ID",
+        tag id 3
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "pdb|1ABC|A Chain A, test structure",
+    seqid {
+      general {
+        db "BL_ORD_ID",
+        tag id 4
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "emb|CAA00005.1| emb protein",
+    seqid {
+      general {
+        db "BL_ORD_ID",
+        tag id 5
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "dbj|BAA00006.1| dbj protein",
+    seqid {
+      general {
+        db "BL_ORD_ID",
+        tag id 6
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "pir||S00007 pir protein",
+    seqid {
+      general {
+        db "BL_ORD_ID",
+        tag id 7
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "prf||0008123A prf protein",
+    seqid {
+      general {
+        db "BL_ORD_ID",
+        tag id 8
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "lcl|myprot9 local id protein",
+    seqid {
+      general {
+        db "BL_ORD_ID",
+        tag id 9
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "gnl|mydb|prot10 general id protein",
+    seqid {
+      general {
+        db "BL_ORD_ID",
+        tag id 10
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "XP_000011.2 bare refseq accession",
+    seqid {
+      general {
+        db "BL_ORD_ID",
+        tag id 11
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "P00012 bare uniprot-like accession",
+    seqid {
+      general {
+        db "BL_ORD_ID",
+        tag id 12
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "myprot_13 bare non-accession word",
+    seqid {
+      general {
+        db "BL_ORD_ID",
+        tag id 13
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "gi|1414 gi only",
+    seqid {
+      general {
+        db "BL_ORD_ID",
+        tag id 14
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "tpg|DAA00016.1| third-party protein",
+    seqid {
+      general {
+        db "BL_ORD_ID",
+        tag id 15
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "gb|AAA00017.1|LOCUS17 gb with a locus name",
+    seqid {
+      general {
+        db "BL_ORD_ID",
+        tag id 16
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "gi|1818|gb|AAA00018.1| gi|1819|emb|CAA00019.1| second defline
+ gi|1820|ref|XP_000020.1| third defline",
+    seqid {
+      general {
+        db "BL_ORD_ID",
+        tag id 17
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "sp|P00019.3|NAME_HUMAN with taxid",
+    seqid {
+      general {
+        db "BL_ORD_ID",
+        tag id 18
+      }
+    },
+    taxid 0
+  }
+}

@@ -1,0 +1,201 @@
+Blast-def-line-set ::= {
+  {
+    title "first defline without a gi",
+    seqid {
+      other {
+        accession "XP_900001",
+        version 1
+      }
+    },
+    taxid 0
+  },
+  {
+    title "second defline with a gi",
+    seqid {
+      gi 9002,
+      embl {
+        accession "CAA90002",
+        version 1
+      }
+    },
+    taxid 0
+  },
+  {
+    title "third defline swissprot",
+    seqid {
+      swissprot {
+        name "NAME3_HUMAN",
+        accession "P90003",
+        release "reviewed",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "long title number 01 with many words so that it is longer than
+ sixty characters in total",
+    seqid {
+      other {
+        accession "XP_910001",
+        version 1
+      }
+    },
+    taxid 0
+  },
+  {
+    title "long title number 02 with many words so that it is longer than
+ sixty characters in total",
+    seqid {
+      other {
+        accession "XP_910002",
+        version 1
+      }
+    },
+    taxid 0
+  },
+  {
+    title "long title number 03 with many words so that it is longer than
+ sixty characters in total",
+    seqid {
+      other {
+        accession "XP_910003",
+        version 1
+      }
+    },
+    taxid 0
+  },
+  {
+    title "long title number 04 with many words so that it is longer than
+ sixty characters in total",
+    seqid {
+      other {
+        accession "XP_910004",
+        version 1
+      }
+    },
+    taxid 0
+  },
+  {
+    title "long title number 05 with many words so that it is longer than
+ sixty characters in total",
+    seqid {
+      other {
+        accession "XP_910005",
+        version 1
+      }
+    },
+    taxid 0
+  },
+  {
+    title "long title number 06 with many words so that it is longer than
+ sixty characters in total",
+    seqid {
+      other {
+        accession "XP_910006",
+        version 1
+      }
+    },
+    taxid 0
+  },
+  {
+    title "long title number 07 with many words so that it is longer than
+ sixty characters in total",
+    seqid {
+      other {
+        accession "XP_910007",
+        version 1
+      }
+    },
+    taxid 0
+  },
+  {
+    title "long title number 08 with many words so that it is longer than
+ sixty characters in total",
+    seqid {
+      other {
+        accession "XP_910008",
+        version 1
+      }
+    },
+    taxid 0
+  },
+  {
+    title "long title number 09 with many words so that it is longer than
+ sixty characters in total",
+    seqid {
+      other {
+        accession "XP_910009",
+        version 1
+      }
+    },
+    taxid 0
+  },
+  {
+    title "long title number 10 with many words so that it is longer than
+ sixty characters in total",
+    seqid {
+      other {
+        accession "XP_910010",
+        version 1
+      }
+    },
+    taxid 0
+  },
+  {
+    title "long title number 11 with many words so that it is longer than
+ sixty characters in total",
+    seqid {
+      other {
+        accession "XP_910011",
+        version 1
+      }
+    },
+    taxid 0
+  },
+  {
+    title "long title number 12 with many words so that it is longer than
+ sixty characters in total",
+    seqid {
+      other {
+        accession "XP_910012",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "has a title",
+    seqid {
+      other {
+        accession "XP_920001",
+        version 1
+      }
+    },
+    taxid 0
+  },
+  {
+    title "",
+    seqid {
+      embl {
+        accession "CAA92002",
+        version 1
+      }
+    },
+    taxid 0
+  },
+  {
+    title "third has a title",
+    seqid {
+      ddbj {
+        accession "BAA92003",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}

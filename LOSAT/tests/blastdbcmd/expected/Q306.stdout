@@ -1,0 +1,91 @@
+Bioseq ::= {
+  id {
+    swissprot {
+      name "TEST_HUMAN",
+      accession "P99999",
+      release "reviewed",
+      version 2
+    }
+  },
+  descr {
+    title "alpha-like protein",
+    user {
+      type str "ASN1_BlastDefLine",
+      data {
+        {
+          label str "ASN1_BlastDefLine",
+          num 1,
+          data oss {
+            '30803080A0801A12616C7068612D6C696B652070726F7465696E0000A1803080A7
+803080A0801A0A544553545F48554D414E0000A1801A065039393939390000A2801A0872657669
+657765640000A38002010200000000000000000000A2800202276A000000000000'H
+          }
+        }
+      }
+    },
+    source {
+      org {
+        db {
+          {
+            db "taxon",
+            tag id 10090
+          }
+        }
+      }
+    }
+  },
+  inst {
+    repr raw,
+    mol aa,
+    length 137,
+    seq-data ncbistdaa '0C140C050811130B0A011306011310100A130C04040E0A09100407
+0E0C01130C0A0714050D1603140E010D0C11140A130B0C0A16050611110409080E14090314090E
+0A050F0F120E0714140A1204120B080C01050C070B140C080A160E0A030C03130C13101612040F
+110B10081405090D1204010D06050A0B0A090B08080C13070807101201110507'H
+  }
+}
+Bioseq ::= {
+  id {
+    gi 123456,
+    other {
+      accession "NP_000002",
+      version 1
+    }
+  },
+  descr {
+    title "gi plus ref protein",
+    user {
+      type str "ASN1_BlastDefLine",
+      data {
+        {
+          label str "ASN1_BlastDefLine",
+          num 1,
+          data oss {
+            '30803080A0801A13676920706C7573207265662070726F7465696E0000A1803080
+AB80020301E2400000A9803080A1801A094E505F3030303030320000A380020101000000000000
+00000000A28002022784000000000000'H
+          }
+        }
+      }
+    },
+    source {
+      org {
+        db {
+          {
+            db "taxon",
+            tag id 10116
+          }
+        }
+      }
+    }
+  },
+  inst {
+    repr raw,
+    mol aa,
+    length 137,
+    seq-data ncbistdaa '0C140C050811130B0A011306011310100A130C04040E0A09100407
+0E0C01130C0A0714050D1603140E010D0C11140A130B0C0A16050611110409080E14090314090E
+0A050F0F120E0714140A1204120F080C010501070B140C080A160E0A030C03130C13101612040F
+110B10081405090D1204010D06050A0B0A090B08080C13070807101201110507'H
+  }
+}

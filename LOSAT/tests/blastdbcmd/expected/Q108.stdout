@@ -1,0 +1,3600 @@
+Blast-def-line-set ::= {
+  {
+    title "filler 0",
+    seqid {
+      other {
+        accession "XP_900000",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "dup one a",
+    seqid {
+      other {
+        accession "XP_800001",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 2",
+    seqid {
+      other {
+        accession "XP_900002",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 3",
+    seqid {
+      other {
+        accession "XP_900003",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 4",
+    seqid {
+      other {
+        accession "XP_900004",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 5",
+    seqid {
+      other {
+        accession "XP_900005",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 6",
+    seqid {
+      other {
+        accession "XP_900006",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 7",
+    seqid {
+      other {
+        accession "XP_900007",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 8",
+    seqid {
+      other {
+        accession "XP_900008",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "dup two a",
+    seqid {
+      other {
+        accession "XP_800002",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "dup two b",
+    seqid {
+      other {
+        accession "XP_800002",
+        version 2
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 11",
+    seqid {
+      other {
+        accession "XP_900011",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 12",
+    seqid {
+      other {
+        accession "XP_900012",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 13",
+    seqid {
+      other {
+        accession "XP_900013",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 14",
+    seqid {
+      other {
+        accession "XP_900014",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 15",
+    seqid {
+      other {
+        accession "XP_900015",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 16",
+    seqid {
+      other {
+        accession "XP_900016",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 17",
+    seqid {
+      other {
+        accession "XP_900017",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 18",
+    seqid {
+      other {
+        accession "XP_900018",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 19",
+    seqid {
+      other {
+        accession "XP_900019",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 20",
+    seqid {
+      other {
+        accession "XP_900020",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 21",
+    seqid {
+      other {
+        accession "XP_900021",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 22",
+    seqid {
+      other {
+        accession "XP_900022",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 23",
+    seqid {
+      other {
+        accession "XP_900023",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 24",
+    seqid {
+      other {
+        accession "XP_900024",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 25",
+    seqid {
+      other {
+        accession "XP_900025",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 26",
+    seqid {
+      other {
+        accession "XP_900026",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 27",
+    seqid {
+      other {
+        accession "XP_900027",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 28",
+    seqid {
+      other {
+        accession "XP_900028",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 29",
+    seqid {
+      other {
+        accession "XP_900029",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 30",
+    seqid {
+      other {
+        accession "XP_900030",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 31",
+    seqid {
+      other {
+        accession "XP_900031",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 32",
+    seqid {
+      other {
+        accession "XP_900032",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 33",
+    seqid {
+      other {
+        accession "XP_900033",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 34",
+    seqid {
+      other {
+        accession "XP_900034",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 35",
+    seqid {
+      other {
+        accession "XP_900035",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 36",
+    seqid {
+      other {
+        accession "XP_900036",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 37",
+    seqid {
+      other {
+        accession "XP_900037",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 38",
+    seqid {
+      other {
+        accession "XP_900038",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 39",
+    seqid {
+      other {
+        accession "XP_900039",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 40",
+    seqid {
+      other {
+        accession "XP_900040",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 41",
+    seqid {
+      other {
+        accession "XP_900041",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 42",
+    seqid {
+      other {
+        accession "XP_900042",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 43",
+    seqid {
+      other {
+        accession "XP_900043",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 44",
+    seqid {
+      other {
+        accession "XP_900044",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 45",
+    seqid {
+      other {
+        accession "XP_900045",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 46",
+    seqid {
+      other {
+        accession "XP_900046",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 47",
+    seqid {
+      other {
+        accession "XP_900047",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 48",
+    seqid {
+      other {
+        accession "XP_900048",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 49",
+    seqid {
+      other {
+        accession "XP_900049",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 50",
+    seqid {
+      other {
+        accession "XP_900050",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 51",
+    seqid {
+      other {
+        accession "XP_900051",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 52",
+    seqid {
+      other {
+        accession "XP_900052",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 53",
+    seqid {
+      other {
+        accession "XP_900053",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 54",
+    seqid {
+      other {
+        accession "XP_900054",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 55",
+    seqid {
+      other {
+        accession "XP_900055",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 56",
+    seqid {
+      other {
+        accession "XP_900056",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 57",
+    seqid {
+      other {
+        accession "XP_900057",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 58",
+    seqid {
+      other {
+        accession "XP_900058",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 59",
+    seqid {
+      other {
+        accession "XP_900059",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 60",
+    seqid {
+      other {
+        accession "XP_900060",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 61",
+    seqid {
+      other {
+        accession "XP_900061",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 62",
+    seqid {
+      other {
+        accession "XP_900062",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 63",
+    seqid {
+      other {
+        accession "XP_900063",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 64",
+    seqid {
+      other {
+        accession "XP_900064",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 65",
+    seqid {
+      other {
+        accession "XP_900065",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 66",
+    seqid {
+      other {
+        accession "XP_900066",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 67",
+    seqid {
+      other {
+        accession "XP_900067",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 68",
+    seqid {
+      other {
+        accession "XP_900068",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 69",
+    seqid {
+      other {
+        accession "XP_900069",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 70",
+    seqid {
+      other {
+        accession "XP_900070",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 71",
+    seqid {
+      other {
+        accession "XP_900071",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 72",
+    seqid {
+      other {
+        accession "XP_900072",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 73",
+    seqid {
+      other {
+        accession "XP_900073",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 74",
+    seqid {
+      other {
+        accession "XP_900074",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 75",
+    seqid {
+      other {
+        accession "XP_900075",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 76",
+    seqid {
+      other {
+        accession "XP_900076",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 77",
+    seqid {
+      other {
+        accession "XP_900077",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 78",
+    seqid {
+      other {
+        accession "XP_900078",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 79",
+    seqid {
+      other {
+        accession "XP_900079",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 80",
+    seqid {
+      other {
+        accession "XP_900080",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 81",
+    seqid {
+      other {
+        accession "XP_900081",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 82",
+    seqid {
+      other {
+        accession "XP_900082",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 83",
+    seqid {
+      other {
+        accession "XP_900083",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 84",
+    seqid {
+      other {
+        accession "XP_900084",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 85",
+    seqid {
+      other {
+        accession "XP_900085",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 86",
+    seqid {
+      other {
+        accession "XP_900086",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 87",
+    seqid {
+      other {
+        accession "XP_900087",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 88",
+    seqid {
+      other {
+        accession "XP_900088",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 89",
+    seqid {
+      other {
+        accession "XP_900089",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 90",
+    seqid {
+      other {
+        accession "XP_900090",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 91",
+    seqid {
+      other {
+        accession "XP_900091",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 92",
+    seqid {
+      other {
+        accession "XP_900092",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 93",
+    seqid {
+      other {
+        accession "XP_900093",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 94",
+    seqid {
+      other {
+        accession "XP_900094",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 95",
+    seqid {
+      other {
+        accession "XP_900095",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 96",
+    seqid {
+      other {
+        accession "XP_900096",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 97",
+    seqid {
+      other {
+        accession "XP_900097",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 98",
+    seqid {
+      other {
+        accession "XP_900098",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 99",
+    seqid {
+      other {
+        accession "XP_900099",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 100",
+    seqid {
+      other {
+        accession "XP_900100",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 101",
+    seqid {
+      other {
+        accession "XP_900101",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 102",
+    seqid {
+      other {
+        accession "XP_900102",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 103",
+    seqid {
+      other {
+        accession "XP_900103",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 104",
+    seqid {
+      other {
+        accession "XP_900104",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 105",
+    seqid {
+      other {
+        accession "XP_900105",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 106",
+    seqid {
+      other {
+        accession "XP_900106",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 107",
+    seqid {
+      other {
+        accession "XP_900107",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 108",
+    seqid {
+      other {
+        accession "XP_900108",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 109",
+    seqid {
+      other {
+        accession "XP_900109",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 110",
+    seqid {
+      other {
+        accession "XP_900110",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 111",
+    seqid {
+      other {
+        accession "XP_900111",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 112",
+    seqid {
+      other {
+        accession "XP_900112",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 113",
+    seqid {
+      other {
+        accession "XP_900113",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 114",
+    seqid {
+      other {
+        accession "XP_900114",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 115",
+    seqid {
+      other {
+        accession "XP_900115",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 116",
+    seqid {
+      other {
+        accession "XP_900116",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 117",
+    seqid {
+      other {
+        accession "XP_900117",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 118",
+    seqid {
+      other {
+        accession "XP_900118",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 119",
+    seqid {
+      other {
+        accession "XP_900119",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 120",
+    seqid {
+      other {
+        accession "XP_900120",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 121",
+    seqid {
+      other {
+        accession "XP_900121",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 122",
+    seqid {
+      other {
+        accession "XP_900122",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 123",
+    seqid {
+      other {
+        accession "XP_900123",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 124",
+    seqid {
+      other {
+        accession "XP_900124",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 125",
+    seqid {
+      other {
+        accession "XP_900125",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 126",
+    seqid {
+      other {
+        accession "XP_900126",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 127",
+    seqid {
+      other {
+        accession "XP_900127",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 128",
+    seqid {
+      other {
+        accession "XP_900128",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 129",
+    seqid {
+      other {
+        accession "XP_900129",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 130",
+    seqid {
+      other {
+        accession "XP_900130",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 131",
+    seqid {
+      other {
+        accession "XP_900131",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 132",
+    seqid {
+      other {
+        accession "XP_900132",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 133",
+    seqid {
+      other {
+        accession "XP_900133",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 134",
+    seqid {
+      other {
+        accession "XP_900134",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 135",
+    seqid {
+      other {
+        accession "XP_900135",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 136",
+    seqid {
+      other {
+        accession "XP_900136",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 137",
+    seqid {
+      other {
+        accession "XP_900137",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 138",
+    seqid {
+      other {
+        accession "XP_900138",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 139",
+    seqid {
+      other {
+        accession "XP_900139",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 140",
+    seqid {
+      other {
+        accession "XP_900140",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 141",
+    seqid {
+      other {
+        accession "XP_900141",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 142",
+    seqid {
+      other {
+        accession "XP_900142",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 143",
+    seqid {
+      other {
+        accession "XP_900143",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 144",
+    seqid {
+      other {
+        accession "XP_900144",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 145",
+    seqid {
+      other {
+        accession "XP_900145",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 146",
+    seqid {
+      other {
+        accession "XP_900146",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 147",
+    seqid {
+      other {
+        accession "XP_900147",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 148",
+    seqid {
+      other {
+        accession "XP_900148",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 149",
+    seqid {
+      other {
+        accession "XP_900149",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 150",
+    seqid {
+      other {
+        accession "XP_900150",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 151",
+    seqid {
+      other {
+        accession "XP_900151",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 152",
+    seqid {
+      other {
+        accession "XP_900152",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 153",
+    seqid {
+      other {
+        accession "XP_900153",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 154",
+    seqid {
+      other {
+        accession "XP_900154",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 155",
+    seqid {
+      other {
+        accession "XP_900155",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 156",
+    seqid {
+      other {
+        accession "XP_900156",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 157",
+    seqid {
+      other {
+        accession "XP_900157",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 158",
+    seqid {
+      other {
+        accession "XP_900158",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 159",
+    seqid {
+      other {
+        accession "XP_900159",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 160",
+    seqid {
+      other {
+        accession "XP_900160",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 161",
+    seqid {
+      other {
+        accession "XP_900161",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 162",
+    seqid {
+      other {
+        accession "XP_900162",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 163",
+    seqid {
+      other {
+        accession "XP_900163",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 164",
+    seqid {
+      other {
+        accession "XP_900164",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 165",
+    seqid {
+      other {
+        accession "XP_900165",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 166",
+    seqid {
+      other {
+        accession "XP_900166",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 167",
+    seqid {
+      other {
+        accession "XP_900167",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 168",
+    seqid {
+      other {
+        accession "XP_900168",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 169",
+    seqid {
+      other {
+        accession "XP_900169",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 170",
+    seqid {
+      other {
+        accession "XP_900170",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 171",
+    seqid {
+      other {
+        accession "XP_900171",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 172",
+    seqid {
+      other {
+        accession "XP_900172",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 173",
+    seqid {
+      other {
+        accession "XP_900173",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 174",
+    seqid {
+      other {
+        accession "XP_900174",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 175",
+    seqid {
+      other {
+        accession "XP_900175",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 176",
+    seqid {
+      other {
+        accession "XP_900176",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 177",
+    seqid {
+      other {
+        accession "XP_900177",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 178",
+    seqid {
+      other {
+        accession "XP_900178",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 179",
+    seqid {
+      other {
+        accession "XP_900179",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 180",
+    seqid {
+      other {
+        accession "XP_900180",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 181",
+    seqid {
+      other {
+        accession "XP_900181",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 182",
+    seqid {
+      other {
+        accession "XP_900182",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 183",
+    seqid {
+      other {
+        accession "XP_900183",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 184",
+    seqid {
+      other {
+        accession "XP_900184",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 185",
+    seqid {
+      other {
+        accession "XP_900185",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 186",
+    seqid {
+      other {
+        accession "XP_900186",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 187",
+    seqid {
+      other {
+        accession "XP_900187",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 188",
+    seqid {
+      other {
+        accession "XP_900188",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 189",
+    seqid {
+      other {
+        accession "XP_900189",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 190",
+    seqid {
+      other {
+        accession "XP_900190",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 191",
+    seqid {
+      other {
+        accession "XP_900191",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 192",
+    seqid {
+      other {
+        accession "XP_900192",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 193",
+    seqid {
+      other {
+        accession "XP_900193",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 194",
+    seqid {
+      other {
+        accession "XP_900194",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 195",
+    seqid {
+      other {
+        accession "XP_900195",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 196",
+    seqid {
+      other {
+        accession "XP_900196",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 197",
+    seqid {
+      other {
+        accession "XP_900197",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 198",
+    seqid {
+      other {
+        accession "XP_900198",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 199",
+    seqid {
+      other {
+        accession "XP_900199",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 200",
+    seqid {
+      other {
+        accession "XP_900200",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 201",
+    seqid {
+      other {
+        accession "XP_900201",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 202",
+    seqid {
+      other {
+        accession "XP_900202",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 203",
+    seqid {
+      other {
+        accession "XP_900203",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 204",
+    seqid {
+      other {
+        accession "XP_900204",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 205",
+    seqid {
+      other {
+        accession "XP_900205",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 206",
+    seqid {
+      other {
+        accession "XP_900206",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 207",
+    seqid {
+      other {
+        accession "XP_900207",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 208",
+    seqid {
+      other {
+        accession "XP_900208",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 209",
+    seqid {
+      other {
+        accession "XP_900209",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 210",
+    seqid {
+      other {
+        accession "XP_900210",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 211",
+    seqid {
+      other {
+        accession "XP_900211",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 212",
+    seqid {
+      other {
+        accession "XP_900212",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 213",
+    seqid {
+      other {
+        accession "XP_900213",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 214",
+    seqid {
+      other {
+        accession "XP_900214",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 215",
+    seqid {
+      other {
+        accession "XP_900215",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 216",
+    seqid {
+      other {
+        accession "XP_900216",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 217",
+    seqid {
+      other {
+        accession "XP_900217",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 218",
+    seqid {
+      other {
+        accession "XP_900218",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 219",
+    seqid {
+      other {
+        accession "XP_900219",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 220",
+    seqid {
+      other {
+        accession "XP_900220",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 221",
+    seqid {
+      other {
+        accession "XP_900221",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 222",
+    seqid {
+      other {
+        accession "XP_900222",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 223",
+    seqid {
+      other {
+        accession "XP_900223",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 224",
+    seqid {
+      other {
+        accession "XP_900224",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 225",
+    seqid {
+      other {
+        accession "XP_900225",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 226",
+    seqid {
+      other {
+        accession "XP_900226",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 227",
+    seqid {
+      other {
+        accession "XP_900227",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 228",
+    seqid {
+      other {
+        accession "XP_900228",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 229",
+    seqid {
+      other {
+        accession "XP_900229",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 230",
+    seqid {
+      other {
+        accession "XP_900230",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 231",
+    seqid {
+      other {
+        accession "XP_900231",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 232",
+    seqid {
+      other {
+        accession "XP_900232",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 233",
+    seqid {
+      other {
+        accession "XP_900233",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 234",
+    seqid {
+      other {
+        accession "XP_900234",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 235",
+    seqid {
+      other {
+        accession "XP_900235",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 236",
+    seqid {
+      other {
+        accession "XP_900236",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 237",
+    seqid {
+      other {
+        accession "XP_900237",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 238",
+    seqid {
+      other {
+        accession "XP_900238",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 239",
+    seqid {
+      other {
+        accession "XP_900239",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 240",
+    seqid {
+      other {
+        accession "XP_900240",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 241",
+    seqid {
+      other {
+        accession "XP_900241",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 242",
+    seqid {
+      other {
+        accession "XP_900242",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 243",
+    seqid {
+      other {
+        accession "XP_900243",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 244",
+    seqid {
+      other {
+        accession "XP_900244",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 245",
+    seqid {
+      other {
+        accession "XP_900245",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 246",
+    seqid {
+      other {
+        accession "XP_900246",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 247",
+    seqid {
+      other {
+        accession "XP_900247",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 248",
+    seqid {
+      other {
+        accession "XP_900248",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 249",
+    seqid {
+      other {
+        accession "XP_900249",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 250",
+    seqid {
+      other {
+        accession "XP_900250",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 251",
+    seqid {
+      other {
+        accession "XP_900251",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 252",
+    seqid {
+      other {
+        accession "XP_900252",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 253",
+    seqid {
+      other {
+        accession "XP_900253",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 254",
+    seqid {
+      other {
+        accession "XP_900254",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 255",
+    seqid {
+      other {
+        accession "XP_900255",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "dup one b",
+    seqid {
+      other {
+        accession "XP_800001",
+        version 2
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 257",
+    seqid {
+      other {
+        accession "XP_900257",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 258",
+    seqid {
+      other {
+        accession "XP_900258",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 259",
+    seqid {
+      other {
+        accession "XP_900259",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 260",
+    seqid {
+      other {
+        accession "XP_900260",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 261",
+    seqid {
+      other {
+        accession "XP_900261",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 262",
+    seqid {
+      other {
+        accession "XP_900262",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 263",
+    seqid {
+      other {
+        accession "XP_900263",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 264",
+    seqid {
+      other {
+        accession "XP_900264",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 265",
+    seqid {
+      other {
+        accession "XP_900265",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 266",
+    seqid {
+      other {
+        accession "XP_900266",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 267",
+    seqid {
+      other {
+        accession "XP_900267",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 268",
+    seqid {
+      other {
+        accession "XP_900268",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 269",
+    seqid {
+      other {
+        accession "XP_900269",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 270",
+    seqid {
+      other {
+        accession "XP_900270",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 271",
+    seqid {
+      other {
+        accession "XP_900271",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 272",
+    seqid {
+      other {
+        accession "XP_900272",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 273",
+    seqid {
+      other {
+        accession "XP_900273",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 274",
+    seqid {
+      other {
+        accession "XP_900274",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 275",
+    seqid {
+      other {
+        accession "XP_900275",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 276",
+    seqid {
+      other {
+        accession "XP_900276",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 277",
+    seqid {
+      other {
+        accession "XP_900277",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 278",
+    seqid {
+      other {
+        accession "XP_900278",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 279",
+    seqid {
+      other {
+        accession "XP_900279",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 280",
+    seqid {
+      other {
+        accession "XP_900280",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 281",
+    seqid {
+      other {
+        accession "XP_900281",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 282",
+    seqid {
+      other {
+        accession "XP_900282",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 283",
+    seqid {
+      other {
+        accession "XP_900283",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 284",
+    seqid {
+      other {
+        accession "XP_900284",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 285",
+    seqid {
+      other {
+        accession "XP_900285",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 286",
+    seqid {
+      other {
+        accession "XP_900286",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 287",
+    seqid {
+      other {
+        accession "XP_900287",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 288",
+    seqid {
+      other {
+        accession "XP_900288",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 289",
+    seqid {
+      other {
+        accession "XP_900289",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 290",
+    seqid {
+      other {
+        accession "XP_900290",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 291",
+    seqid {
+      other {
+        accession "XP_900291",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 292",
+    seqid {
+      other {
+        accession "XP_900292",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 293",
+    seqid {
+      other {
+        accession "XP_900293",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 294",
+    seqid {
+      other {
+        accession "XP_900294",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 295",
+    seqid {
+      other {
+        accession "XP_900295",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 296",
+    seqid {
+      other {
+        accession "XP_900296",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 297",
+    seqid {
+      other {
+        accession "XP_900297",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 298",
+    seqid {
+      other {
+        accession "XP_900298",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "filler 299",
+    seqid {
+      other {
+        accession "XP_900299",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}

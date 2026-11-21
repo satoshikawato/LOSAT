@@ -1,0 +1,198 @@
+Blast-def-line-set ::= {
+  {
+    title "alpha mRNA [Homo sapiens]",
+    seqid {
+      other {
+        accession "NM_000001",
+        version 1
+      }
+    },
+    taxid 9606
+  },
+  {
+    title "alpha cDNA",
+    seqid {
+      genbank {
+        accession "AB000001",
+        version 1
+      }
+    },
+    taxid 10090
+  },
+  {
+    title "alpha clone",
+    seqid {
+      embl {
+        accession "X00001",
+        version 2
+      }
+    },
+    taxid 9606
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "gi plus gb nucleotide",
+    seqid {
+      gi 654321,
+      genbank {
+        accession "AB000002",
+        version 3
+      }
+    },
+    taxid 7227
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "emb nucleotide",
+    seqid {
+      embl {
+        accession "AJ000003",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "dbj nucleotide",
+    seqid {
+      ddbj {
+        accession "AB000004",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "chromosome-like",
+    seqid {
+      other {
+        accession "NC_000005",
+        version 11
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "local id nucleotide",
+    seqid {
+      local str "mynuc6"
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "general id nucleotide",
+    seqid {
+      general {
+        db "mydb",
+        tag str "nuc7"
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "bare refseq accession",
+    seqid {
+      other {
+        accession "NM_000008",
+        version 2
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "bare genbank accession without version",
+    seqid {
+      ddbj {
+        accession "AB000009"
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "bare non-accession word",
+    seqid {
+      local str "mynuc_10"
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "third-party nucleotide",
+    seqid {
+      tpg {
+        accession "BK000012",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "gb with a locus name",
+    seqid {
+      genbank {
+        name "LOCUS13",
+        accession "AB000013",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "patent nucleotide",
+    seqid {
+      patent {
+        seqid 14,
+        cit {
+          country "US",
+          id number "1234567"
+        }
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "",
+    seqid {
+      gi 1515,
+      genbank {
+        accession "AB000015",
+        version 1
+      }
+    },
+    taxid 0
+  },
+  {
+    title "second defline",
+    seqid {
+      gi 1516,
+      other {
+        accession "XM_000016",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}

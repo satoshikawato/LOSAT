@@ -1,0 +1,49 @@
+Blast-def-line-set ::= {
+  {
+    title "alpha protein [Homo sapiens]",
+    seqid {
+      other {
+        accession "XP_000001",
+        version 1
+      }
+    },
+    taxid 9606
+  },
+  {
+    title "hypothetical protein, partial",
+    seqid {
+      genbank {
+        accession "AAA00001",
+        version 1
+      }
+    },
+    taxid 9606
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "third defline",
+    seqid {
+      gi 1820,
+      other {
+        accession "XP_000020",
+        version 1
+      }
+    },
+    taxid 9606
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "with taxid",
+    seqid {
+      swissprot {
+        name "NAME_HUMAN",
+        accession "P00019",
+        release "reviewed",
+        version 3
+      }
+    },
+    taxid 9606
+  }
+}

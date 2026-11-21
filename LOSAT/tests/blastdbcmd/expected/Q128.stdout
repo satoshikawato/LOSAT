@@ -1,0 +1,35 @@
+Blast-def-line-set ::= {
+  {
+    title "",
+    seqid {
+      gi 1818,
+      genbank {
+        accession "AAA00018",
+        version 1
+      }
+    },
+    taxid 562
+  },
+  {
+    title "second defline",
+    seqid {
+      gi 1819,
+      embl {
+        accession "CAA00019",
+        version 1
+      }
+    },
+    taxid 562
+  },
+  {
+    title "third defline",
+    seqid {
+      gi 1820,
+      other {
+        accession "XP_000020",
+        version 1
+      }
+    },
+    taxid 9606
+  }
+}

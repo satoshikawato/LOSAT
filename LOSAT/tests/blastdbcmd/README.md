@@ -19,7 +19,7 @@ machine) run in this directory on the alias files of `db/ak/` (`NSEQ`, `LENGTH`,
 `MIN_SEQ_LENGTH`, `FIRST_OID`, `LAST_OID`, `VDBLIST`, values that do not convert) over `p5`, `n5`, the volumes of `dv4` and
 `j/lst/p5`, and on `-db "db/palias db/p5"` (a volume that an alias and a name both give):
 `LOSAT/tests/blastdbcmd_alias_keys.rs`, `remaining-gaps-20261112/D/fixtures/make_d1a_blastdbcmd.py`.
-`A33`-`A58` (D1a-2, 2026-11-13; `A37` and `A38` are LOSAT's refusals of `%d` and `%b`, not frozen) are the same
+`A33`-`A58` (D1a-2, 2026-11-13; `A37` and `A38`, `%d` and `%b`, frozen on 2026-11-21 from the run of `Q127` and `Q228`) are the same
 build on `-ipg` and `-ipg_batch` (`in/ak_pig.txt`, `in/ak_pigm.txt`) through the ranges `db/ak/m_r`, `m_s` and `m_t`
 over `db/m/pmg`, whose PIGs' OIDs the ranges leave out (`A52`: approved difference 5, NCBI's header with the letters of
 its `%s` run): `make_d1a2_blastdbcmd.py`. `A59`-`A65` (D1a-2) are `-info` and `-entry all` on alias files with `NSEQ`,
@@ -37,6 +37,18 @@ developer machine, run with the words of the tests from the `blastdbcmd` directo
 this layout whose `seqdb/db` held the five files of `user-column-db`
 (`LOSAT/tests/seqdb/README.md`); `{T}` replaces that copy's root. NCBI's whole file set (`-db
 uc/user-column-db -dbtype prot`, with its ISAM files) gave the same bytes but for the path.
+`Q101`-`Q144` (`-outfmt %d`), `Q201`-`Q244` (`-outfmt %b`) and `Q301`-`Q331` (both; line RG, item Dbc,
+2026-11-21) are NCBI BLAST+ 2.17.0 blastdbcmd (the release build on the developer machine) run in a copy of this
+directory beside copies of `../db_search/t5`, `../seqdb/taxdb/t5`, `../seqdb/taxdb/k5` and `../seqid/db`, with
+`BLASTDB` set for the taxonomy names where `LOSAT/tests/blastdbcmd_retrieve.rs` sets it: the definition lines and
+Bioseqs of the databases of version 4 and 5 here, with `-entry`, `-entry_batch`, `-ipg`, `-taxids`, `-target_only`,
+`-get_dups`, `-ctrl_a`, `-range`, `-strand`, `-mask_sequence_with`, `-long_seqids`, `-out`, and `%d` and `%b` beside
+other specifiers. The probe (`remaining-gaps-20261112/D/dbc/probe/`) also ran NCBI's distributed
+`18S_fungal_sequences` (memberships, stored bits after the last base of a sequence), whose bytes LOSAT gives but
+which is not copied here.
+`db/pl4` (`Q330`, `Q331`) is NCBI makeblastdb's version 4 database (`-parse_seqids`; its `.pin .phr .psq`) of two
+proteins read as ASN.1 text Bioseqs whose `ASN1_BlastDefLine` user objects hold definition lines with memberships and
+other-info (makeblastdb drops their links): `remaining-gaps-20261112/D/dbc/probe/mk/make_links.py`.
 
 - `db/`: databases of that probe. `p5` (version 5, `-parse_seqids`) and `p4` (version 4)
   are proteins with every Seq-id type, `n5` / `n4` the nucleotides, `p5n` / `p4n` / `n5n` /

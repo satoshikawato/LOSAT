@@ -1,0 +1,34 @@
+Blast-def-line-set ::= {
+  {
+    title "alpha protein [Homo sapiens]",
+    seqid {
+      other {
+        accession "XP_000001",
+        version 1
+      }
+    },
+    taxid 9606
+  },
+  {
+    title "alpha-like protein",
+    seqid {
+      swissprot {
+        name "TEST_HUMAN",
+        accession "P99999",
+        release "reviewed",
+        version 2
+      }
+    },
+    taxid 10090
+  },
+  {
+    title "hypothetical protein, partial",
+    seqid {
+      genbank {
+        accession "AAA00001",
+        version 1
+      }
+    },
+    taxid 9606
+  }
+}

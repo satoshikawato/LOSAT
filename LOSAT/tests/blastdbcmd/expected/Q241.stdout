@@ -1,0 +1,99 @@
+Bioseq ::= {
+  id {
+    gi 1914,
+    other {
+      accession "NP_191400",
+      version 1
+    }
+  },
+  descr {
+    title "gi of digits",
+    user {
+      type str "ASN1_BlastDefLine",
+      data {
+        {
+          label str "ASN1_BlastDefLine",
+          num 1,
+          data oss {
+            '30803080A0801A0C6769206F66206469676974730000A1803080AB800202077A00
+00A9803080A1801A094E505F3139313430300000A38002010100000000000000000000A2800201
+00000000000000'H
+          }
+        }
+      }
+    }
+  },
+  inst {
+    repr raw,
+    mol aa,
+    length 40,
+    seq-data ncbistdaa '040D060406140B05130F1014030601050506010C0513110A100C0E
+040304080E08140E0A16140F0C'H
+  }
+}
+Bioseq ::= {
+  id {
+    gi 1914,
+    other {
+      accession "NP_191400",
+      version 1
+    }
+  },
+  descr {
+    title "gi of digits",
+    user {
+      type str "ASN1_BlastDefLine",
+      data {
+        {
+          label str "ASN1_BlastDefLine",
+          num 1,
+          data oss {
+            '30803080A0801A0C6769206F66206469676974730000A1803080AB800202077A00
+00A9803080A1801A094E505F3139313430300000A38002010100000000000000000000A2800201
+00000000000000'H
+          }
+        }
+      }
+    }
+  },
+  inst {
+    repr raw,
+    mol aa,
+    length 40,
+    seq-data ncbistdaa '040D060406140B05130F1014030601050506010C0513110A100C0E
+040304080E08140E0A16140F0C'H
+  }
+}
+Bioseq ::= {
+  id {
+    pdb {
+      mol "1914",
+      chain 65,
+      chain-id "A"
+    }
+  },
+  descr {
+    title "pdb chain A",
+    user {
+      type str "ASN1_BlastDefLine",
+      data {
+        {
+          label str "ASN1_BlastDefLine",
+          num 1,
+          data oss {
+            '30803080A0801A0B70646220636861696E20410000A1803080AE803080A0801A04
+313931340000A1800201410000A3801A014100000000000000000000A280020100000000000000
+'H
+          }
+        }
+      }
+    }
+  },
+  inst {
+    repr raw,
+    mol aa,
+    length 40,
+    seq-data ncbistdaa '030B06100D051016111601120F140D16130F0E070305050E060507
+1211060E16120A14070E040314'H
+  }
+}

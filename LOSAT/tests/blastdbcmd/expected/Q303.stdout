@@ -1,0 +1,148 @@
+Bioseq ::= {
+  id {
+    other {
+      accession "XP_000001",
+      version 1
+    }
+  },
+  descr {
+    title "alpha protein [Homo sapiens] >gb|AAA00001.1| hypothetical protein,
+ partial",
+    user {
+      type str "ASN1_BlastDefLine",
+      data {
+        {
+          label str "ASN1_BlastDefLine",
+          num 1,
+          data oss {
+            '30803080A0801A1C616C7068612070726F7465696E205B486F6D6F207361706965
+6E735D0000A1803080A9803080A1801A0958505F3030303030310000A380020101000000000000
+00000000A28002022586000000003080A0801A1D6879706F746865746963616C2070726F746569
+6E2C207061727469616C0000A1803080A4803080A1801A0841414130303030310000A380020101
+00000000000000000000A28002022586000000000000'H
+          }
+        }
+      }
+    },
+    source {
+      org {
+        db {
+          {
+            db "taxon",
+            tag id 9606
+          }
+        }
+      }
+    },
+    source {
+      org {
+        db {
+          {
+            db "taxon",
+            tag id 9606
+          }
+        }
+      }
+    }
+  },
+  inst {
+    repr raw,
+    mol aa,
+    length 137,
+    seq-data ncbistdaa '0C140C050811130B0A011306011310100A130C04040E0A09100407
+0E0C01130C0A0714050D1603140E010D0C11140A130B0C0A16050611110409080E14090314090E
+0A050F0F120E0714140A1204120B080C01050C070B140C080A160E0A030C03130C13101612040F
+110B10081405090D1204010D06050A0B0A090B08080C13070807101201110507'H
+  }
+}
+Bioseq ::= {
+  id {
+    gi 1820,
+    other {
+      accession "XP_000020",
+      version 1
+    }
+  },
+  descr {
+    title "third defline",
+    user {
+      type str "ASN1_BlastDefLine",
+      data {
+        {
+          label str "ASN1_BlastDefLine",
+          num 1,
+          data oss {
+            '30803080A0801A0D7468697264206465666C696E650000A1803080AB800202071C
+0000A9803080A1801A0958505F3030303032300000A38002010100000000000000000000A28002
+022586000000000000'H
+          }
+        }
+      }
+    },
+    source {
+      org {
+        db {
+          {
+            db "taxon",
+            tag id 9606
+          }
+        }
+      }
+    }
+  },
+  inst {
+    repr raw,
+    mol aa,
+    length 137,
+    seq-data ncbistdaa '0C140C050811130B0A01130E010A10100A130E04050E0A09100413
+0E091313050A0D14050D12030F0E010D0C11140A130B0C1111050611100409080E14090314090E
+0A050F0F0F0E0708140A12041201080C01050C070F1406080A160E0A030C0C130C131116130110
+110B10081405090D120F011606050A0A0A070B05120C13070807101201110507'H
+  }
+}
+Bioseq ::= {
+  id {
+    swissprot {
+      name "NAME_HUMAN",
+      accession "P00019",
+      release "reviewed",
+      version 3
+    }
+  },
+  descr {
+    title "with taxid",
+    user {
+      type str "ASN1_BlastDefLine",
+      data {
+        {
+          label str "ASN1_BlastDefLine",
+          num 1,
+          data oss {
+            '30803080A0801A0A776974682074617869640000A1803080A7803080A0801A0A4E
+414D455F48554D414E0000A1801A065030303031390000A2801A0872657669657765640000A380
+02010300000000000000000000A28002022586000000000000'H
+          }
+        }
+      }
+    },
+    source {
+      org {
+        db {
+          {
+            db "taxon",
+            tag id 9606
+          }
+        }
+      }
+    }
+  },
+  inst {
+    repr raw,
+    mol aa,
+    length 137,
+    seq-data ncbistdaa '0C140C050811130B0A010506010110100A130C0414040C0910040C
+0E0C01130C0E0714050D16030A03110D1608160A130F0C0A16050611110609160E140904010D0E
+0A050F0F140E0714061212041204080C160709070B140C110A160E0A031311130C13101612050F
+110B10081405090D12130E0B06050A0A0A090B08080C13070807101201110507'H
+  }
+}

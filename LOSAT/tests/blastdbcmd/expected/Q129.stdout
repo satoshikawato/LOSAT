@@ -1,0 +1,45 @@
+Blast-def-line-set ::= {
+  {
+    title "masked one",
+    seqid {
+      other {
+        accession "NM_100001",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "masked two",
+    seqid {
+      genbank {
+        accession "AB100002",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "no low complexity",
+    seqid {
+      local str "nomask3"
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "masked four",
+    seqid {
+      embl {
+        accession "X100004",
+        version 2
+      }
+    },
+    taxid 0
+  }
+}

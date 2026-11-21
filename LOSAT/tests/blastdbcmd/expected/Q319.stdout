@@ -1,0 +1,266 @@
+Blast-def-line-set ::= {
+  {
+    title "third party embl",
+    seqid {
+      tpe {
+        accession "BK000012",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "third party ddbj",
+    seqid {
+      tpd {
+        accession "BK000013",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "genome pipeline",
+    seqid {
+      gpipe {
+        accession "GPP123"
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "gibbsq (no hits)",
+    seqid {
+      gibbsq 123
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "gibbmt",
+    seqid {
+      gibbmt 123
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "two char chain",
+    seqid {
+      pdb {
+        mol "1ABC",
+        chain-id "AA"
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "no chain",
+    seqid {
+      pdb {
+        mol "1ABC"
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "swiss no name",
+    seqid {
+      swissprot {
+        accession "P99999",
+        release "reviewed"
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "big gi",
+    seqid {
+      gi 3000000000,
+      genbank {
+        accession "AAA00100",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "long title word long title word long title word long title word
+ long title word long title word long title word long title word long title
+ word long title word long title word long title word long title word long
+ title word long title word long title word long title word long title word
+ long title word long title word ",
+    seqid {
+      local str "long1"
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "trace id",
+    seqid {
+      general {
+        db "ti",
+        tag id 123
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "pig id (no hits)",
+    seqid {
+      general {
+        db "PIG",
+        tag id 123
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "patent reissue",
+    seqid {
+      patent {
+        seqid 1,
+        cit {
+          country "US",
+          id number "RE33188"
+        }
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "patent with letters",
+    seqid {
+      patent {
+        seqid 7,
+        cit {
+          country "EP",
+          id number "0123456A1"
+        }
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "ref without version",
+    seqid {
+      other {
+        accession "NP_000002"
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "prf two fields",
+    seqid {
+      prf {
+        name "DEF",
+        accession "ABC"
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "numeric local",
+    seqid {
+      local id 123
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "pre-grant patent",
+    seqid {
+      patent {
+        seqid 7,
+        cit {
+          country "EP",
+          id number "0238993"
+        }
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "named annotation track (no hits)",
+    seqid {
+      named-annot-track {
+        accession "NA000001",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "subject seven",
+    seqid {
+      local str "Subject_7"
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "",
+    seqid {
+      local str "Subject_8"
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "titled first",
+    seqid {
+      swissprot {
+        name "ONE_HUMAN",
+        accession "P11111",
+        release "reviewed",
+        version 1
+      }
+    },
+    taxid 0
+  },
+  {
+    title "second line",
+    seqid {
+      local str "Subject_9"
+    },
+    taxid 0
+  }
+}

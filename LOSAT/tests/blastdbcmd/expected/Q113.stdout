@@ -1,0 +1,12 @@
+Blast-def-line ::= {
+  title "",
+  seqid {
+    gi 1818,
+    genbank {
+      accession "AAA00018",
+      version 1
+    }
+  },
+  taxid 562
+}
+

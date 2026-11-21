@@ -1,0 +1,128 @@
+Bioseq ::= {
+  id {
+    other {
+      accession "NM_100001",
+      version 1
+    }
+  },
+  descr {
+    title "masked one",
+    user {
+      type str "ASN1_BlastDefLine",
+      data {
+        {
+          label str "ASN1_BlastDefLine",
+          num 1,
+          data oss {
+            '30803080A0801A0A6D61736B6564206F6E650000A1803080A9803080A1801A094E
+4D5F3130303030310000A38002010100000000000000000000A280020100000000000000'H
+          }
+        }
+      }
+    }
+  },
+  inst {
+    repr raw,
+    mol na,
+    length 400,
+    seq-data ncbi2na 'DB9F29D684A7D4187B5FFCCBE7E62AFFB937A9B75E384142F25E8835
+0A4B00000000000000000000135C903DB169D52CA040278904C7204EF428773D44444444444444
+4444444444444444E622FEF58C6D422EC5ED95D0776461FD6EFFB790B0747E6163'H
+  }
+}
+Bioseq ::= {
+  id {
+    genbank {
+      accession "AB100002",
+      version 1
+    }
+  },
+  descr {
+    title "masked two",
+    user {
+      type str "ASN1_BlastDefLine",
+      data {
+        {
+          label str "ASN1_BlastDefLine",
+          num 1,
+          data oss {
+            '30803080A0801A0A6D61736B65642074776F0000A1803080A4803080A1801A0841
+423130303030320000A38002010100000000000000000000A280020100000000000000'H
+          }
+        }
+      }
+    }
+  },
+  inst {
+    repr raw,
+    mol na,
+    length 449,
+    seq-data ncbi4na '41828442811124241241841281428128828182214224881414448811
+888288888888888888888888888888888881842224428884484144844141181418444828418414
+444818121188884248448248181484882244148841822188211888482282112214822222842221
+288844442281821224814811812811421184841428441288818848842142118244822884848411
+184184184184184184184184184184184184184184184184184184184184822884221212281214
+41112888118212224841212282821248FFFFF5AC38224211821121282211448822288484418141
+1841'H
+  }
+}
+Bioseq ::= {
+  id {
+    local str "nomask3"
+  },
+  descr {
+    title "no low complexity",
+    user {
+      type str "ASN1_BlastDefLine",
+      data {
+        {
+          label str "ASN1_BlastDefLine",
+          num 1,
+          data oss {
+            '30803080A0801A116E6F206C6F7720636F6D706C65786974790000A1803080A080
+A1801A076E6F6D61736B330000000000000000A280020100000000000000'H
+          }
+        }
+      }
+    }
+  },
+  inst {
+    repr raw,
+    mol na,
+    length 300,
+    seq-data ncbi2na '3B096016A63206C34B22455A5BE30A83DAF8E56E4E6C458FB810C786
+71F73A402BCC95B11FF368A5DBFA11346CF5293706FD80F3FA4534F11208C965223977391206ED
+6A3A0950E3DB5490'H
+  }
+}
+Bioseq ::= {
+  id {
+    embl {
+      accession "X100004",
+      version 2
+    }
+  },
+  descr {
+    title "masked four",
+    user {
+      type str "ASN1_BlastDefLine",
+      data {
+        {
+          label str "ASN1_BlastDefLine",
+          num 1,
+          data oss {
+            '30803080A0801A0B6D61736B656420666F75720000A1803080A5803080A1801A07
+583130303030340000A38002010200000000000000000000A280020100000000000000'H
+          }
+        }
+      }
+    }
+  },
+  inst {
+    repr raw,
+    mol na,
+    length 250,
+    seq-data ncbi2na 'BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB3A7791
+3DCBA36E03A1B042C0B44F96C3F27A03DF1172FC5B6594113CE8670118CF0830D3EA00'H
+  }
+}

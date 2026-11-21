@@ -1,0 +1,170 @@
+Blast-def-line-set ::= {
+  {
+    title "",
+    seqid {
+      genbank {
+        accession "AB301001",
+        version 1
+      }
+    },
+    taxid 100001
+  },
+  {
+    title "",
+    seqid {
+      genbank {
+        accession "AB301002",
+        version 1
+      }
+    },
+    taxid 100002
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "",
+    seqid {
+      genbank {
+        accession "AB311001",
+        version 1
+      }
+    },
+    taxid 0
+  },
+  {
+    title "",
+    seqid {
+      genbank {
+        accession "AB311002",
+        version 1
+      }
+    },
+    taxid 100002
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "",
+    seqid {
+      genbank {
+        accession "AB321001",
+        version 1
+      }
+    },
+    taxid 100002
+  },
+  {
+    title "second title",
+    seqid {
+      genbank {
+        accession "AB321002",
+        version 1
+      }
+    },
+    taxid 100001
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "first title",
+    seqid {
+      genbank {
+        accession "AB331001",
+        version 1
+      }
+    },
+    taxid 100001
+  },
+  {
+    title "",
+    seqid {
+      genbank {
+        accession "AB331002",
+        version 1
+      }
+    },
+    taxid 100002
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "",
+    seqid {
+      tpg {
+        accession "BK310041",
+        version 1
+      }
+    },
+    taxid 100001
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "",
+    seqid {
+      embl {
+        accession "CA310051",
+        version 1
+      }
+    },
+    taxid 100005
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "",
+    seqid {
+      gi 3000061,
+      genbank {
+        accession "AB341061",
+        version 1
+      }
+    },
+    taxid 100002
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "",
+    seqid {
+      pdb {
+        mol "1XY1"
+      }
+    },
+    taxid 100001
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "",
+    seqid {
+      pdb {
+        mol "1XZ1",
+        chain 65,
+        chain-id "A"
+      }
+    },
+    taxid 100002
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "",
+    seqid {
+      local str "Subject_1"
+    },
+    taxid 100001
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "",
+    seqid {
+      general {
+        db "mydb",
+        tag str "seq11"
+      }
+    },
+    taxid 100004
+  }
+}

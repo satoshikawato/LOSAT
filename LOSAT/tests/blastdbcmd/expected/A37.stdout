@@ -1,0 +1,13 @@
+Blast-def-line-set ::= {
+  {
+    title "one",
+    seqid {
+      gi 1001,
+      other {
+        accession "XP_1001",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}

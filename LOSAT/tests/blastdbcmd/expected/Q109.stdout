@@ -1,0 +1,259 @@
+Blast-def-line-set ::= {
+  {
+    title "alpha protein [Homo sapiens]",
+    seqid {
+      other {
+        accession "XP_000001",
+        version 1
+      }
+    },
+    taxid 0
+  },
+  {
+    title "alpha-like protein",
+    seqid {
+      swissprot {
+        name "TEST_HUMAN",
+        accession "P99999",
+        release "reviewed",
+        version 2
+      }
+    },
+    taxid 0
+  },
+  {
+    title "hypothetical protein, partial",
+    seqid {
+      genbank {
+        accession "AAA00001",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "gi plus ref protein",
+    seqid {
+      gi 123456,
+      other {
+        accession "NP_000002",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "swissprot without version",
+    seqid {
+      swissprot {
+        name "ABC_MOUSE",
+        accession "Q00003",
+        release "reviewed"
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "trembl entry",
+    seqid {
+      swissprot {
+        name "A0A000_YEAST",
+        accession "A0A000",
+        release "unreviewed"
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "Chain A, test structure",
+    seqid {
+      pdb {
+        mol "1ABC",
+        chain 65,
+        chain-id "A"
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "emb protein",
+    seqid {
+      embl {
+        accession "CAA00005",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "dbj protein",
+    seqid {
+      ddbj {
+        accession "BAA00006",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "pir protein",
+    seqid {
+      pir {
+        name "S00007"
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "prf protein",
+    seqid {
+      prf {
+        name "0008123A"
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "local id protein",
+    seqid {
+      local str "myprot9"
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "general id protein",
+    seqid {
+      general {
+        db "mydb",
+        tag str "prot10"
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "bare refseq accession",
+    seqid {
+      other {
+        accession "XP_000011",
+        version 2
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "bare uniprot-like accession",
+    seqid {
+      swissprot {
+        accession "P00012"
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "bare non-accession word",
+    seqid {
+      local str "myprot_13"
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "third-party protein",
+    seqid {
+      tpg {
+        accession "DAA00016",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "gb with a locus name",
+    seqid {
+      genbank {
+        name "LOCUS17",
+        accession "AAA00017",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "",
+    seqid {
+      gi 1818,
+      genbank {
+        accession "AAA00018",
+        version 1
+      }
+    },
+    taxid 0
+  },
+  {
+    title "second defline",
+    seqid {
+      gi 1819,
+      embl {
+        accession "CAA00019",
+        version 1
+      }
+    },
+    taxid 0
+  },
+  {
+    title "third defline",
+    seqid {
+      gi 1820,
+      other {
+        accession "XP_000020",
+        version 1
+      }
+    },
+    taxid 0
+  }
+}
+Blast-def-line-set ::= {
+  {
+    title "with taxid",
+    seqid {
+      swissprot {
+        name "NAME_HUMAN",
+        accession "P00019",
+        release "reviewed",
+        version 3
+      }
+    },
+    taxid 0
+  }
+}

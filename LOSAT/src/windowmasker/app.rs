@@ -119,10 +119,15 @@ fn masking_run(
             ))
         })?)
     };
-    let source = work::reader(options, input)?;
+    let mut source = work::reader(options, input)?;
     let mut output = args.output_file("out", out).map_err(Failure::Arg)?;
     let writer = work::writer(options.outfmt);
     let lists = id_lists(args, options.infmt, diag)?;
+    if lists.match_titles() {
+        if let Some(source) = source.as_mut() {
+            source.make_titles();
+        }
+    }
     work::run(options, source, writer, &lists, &mut output, diag)
 }
 

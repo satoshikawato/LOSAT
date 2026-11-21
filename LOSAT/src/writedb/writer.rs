@@ -233,11 +233,6 @@ impl WriteDb {
         }
     }
 
-    /// `m_DbVersion`.
-    pub fn version(&self) -> DbVersion {
-        self.version
-    }
-
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1563-1566
     /// `SetMaxFileSize`: the limit of the files of the volumes created from
     /// now on.
@@ -936,22 +931,6 @@ impl WriteDb {
     /// The date for a column when the clock cannot be read (the time of the build).
     pub fn set_column_date_fallback(&mut self, date: &[u8]) {
         self.column_dates.set_fallback(date);
-    }
-
-    /// The volumes written: the path of each without extension, its number
-    /// of sequences and its letters (what NCBI's reader takes from the index
-    /// files for the totals of the database).
-    pub fn volume_totals(&self) -> Vec<(String, u32, u64)> {
-        self.volumes
-            .iter()
-            .map(|volume| {
-                (
-                    volume.volume_name().to_string(),
-                    volume.oid(),
-                    volume.letters(),
-                )
-            })
-            .collect()
     }
 
     fn alias_name(&self) -> String {

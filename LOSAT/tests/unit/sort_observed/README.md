@@ -59,8 +59,9 @@ library.
   - `-` stands for an empty field.
 
   The fixture holds every answer sequence for 0 to 5 elements for both `sort` and `partial_sort`
-  (333 sorts), and 58 random sorts of 17 to 92 elements (keys, ranges, adversary; 10 of them reach
-  the heap phase): 391 sorts, 24,798 calls.
+  (333 sorts), and 58 random sorts: 50 `sort` runs of 21 to 92 elements (keys, ranges, adversary;
+  10 of them reach the heap phase) and 8 `partial_sort` runs of 6 to 62 elements (keys): 391 sorts,
+  24,798 calls.
 
 ## What was seen (the rule `sort_as_observed` follows)
 

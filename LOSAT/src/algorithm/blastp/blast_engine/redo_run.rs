@@ -1053,7 +1053,7 @@ fn fetch_excluded_reached(
 /// No NCBI counterpart: NCBI tests each list in stream order in its loop. The status this gives
 /// is NCBI's one-thread status of the batch.
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3774-3779
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3775-3779
 fn query_fetch_excluded_reached(
     marks: &[super::database::FetchExcludedMatch],
     status_position: Option<usize>,
@@ -1307,7 +1307,7 @@ where
         // frees each list it has redone (`x_prelim_free.rs`).
         preliminary_hit_lists[q_idx] = None;
         *x_prelim_freed += 1;
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3774-3781
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3775-3781
         // A failed Smith-Waterman redo of the batch's last redone match fails NCBI's traceback of
         // the batch (`Traceback failed`, traceback_stage.cpp:251-253), or crashes NCBI's clean-up
         // when the batch's first query holds a redone match (`sw_batch_failed`).

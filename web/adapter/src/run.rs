@@ -2719,7 +2719,7 @@ mod tests {
                 words.extend(["-outfmt", outfmt]);
             }
             crate::emit::EMITTED.with(|emitted| emitted.borrow_mut().clear());
-            let error = run(&words, &query, &subject).unwrap_err();
+            let error = run(&words, &query, &losat::api::QueryEnd::Input, &subject).unwrap_err();
             assert!(
                 error.contains("The average subject length is too short"),
                 "{outfmt:?}: {error}"

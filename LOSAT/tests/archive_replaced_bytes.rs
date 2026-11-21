@@ -29,6 +29,9 @@
 //! batch's reader messages, before its report (DECISIONS K4b-2), with the reports on the standard
 //! output; `k_*_pf` stop the first batch with NCBI's exception after its posts, whose exit
 //! status `<name>.rc` gives (the status is 0 without the file; RG K4b review L7, 2026-11-14).
+//! LOSAT's version is longer than NCBI's, so the merged run of a row whose posts come after it
+//! reads a query with a shorter title (`balanced_title`): its posts then come after the same bytes
+//! as NCBI's.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -41,6 +44,7 @@ fn fixtures() -> PathBuf {
 }
 
 /// One row of the table.
+#[derive(Clone)]
 struct Case {
     name: String,
     program: String,
@@ -146,15 +150,15 @@ struct Streams {
     status: i32,
 }
 
-/// `case` run by `binary` in `dir`, and with `merged` once more with the standard output and
-/// error in one file (`2>&1`).
-fn run(binary: &Path, case: &Case, dir: &Path, merged: bool) -> Streams {
+/// `case` run by `binary` in `dir`, and with `merged` once more, as that row, with the standard
+/// output and error in one file (`2>&1`).
+fn run(binary: &Path, case: &Case, dir: &Path, merged: Option<&Case>) -> Streams {
     let file = |ext: &str| format!("files/{}.{ext}", case.name);
     let mut streams = run_once(binary, case, dir, None);
-    if merged {
+    if let Some(merged) = merged {
         let path = dir.join(file("merged"));
         let one = fs::File::create(&path).unwrap();
-        let again = run_once(binary, case, dir, Some(one));
+        let again = run_once(binary, merged, dir, Some(one));
         assert_eq!(
             again.status, streams.status,
             "{}: the exit status of the second run",
@@ -246,6 +250,58 @@ fn expected(case: &Case) -> Streams {
     }
 }
 
+/// NCBI's standard output in the frozen merged stream `merged` before its last post: `merged`
+/// without the posts of `err` (its standard error, a run of its own; a post starts a line with
+/// `Error: (`), each found in order, up to the last; `None` when a post is not found.
+fn stdout_before_posts(merged: &[u8], err: &[u8]) -> Option<Vec<u8>> {
+    let starts: Vec<usize> = (0..err.len())
+        .filter(|&at| err[at..].starts_with(b"Error: (") && (at == 0 || err[at - 1] == b'\n'))
+        .collect();
+    let mut bounds = vec![0];
+    bounds.extend(starts.into_iter().filter(|&at| at > 0));
+    bounds.push(err.len());
+    let mut stdout = Vec::new();
+    let mut done = 0;
+    for post in bounds.windows(2).map(|pair| &err[pair[0]..pair[1]]) {
+        if post.is_empty() {
+            continue;
+        }
+        let at = done + merged[done..].windows(post.len()).position(|w| w == post)?;
+        stdout.extend_from_slice(&merged[done..at]);
+        done = at + post.len();
+    }
+    Some(stdout)
+}
+
+/// The merged run of a row with NCBI's merged stream: the row itself and NCBI's stream in LOSAT's
+/// words, or, where LOSAT's version adds bytes before the posts, the row with a shorter query
+/// title written to `dir` and NCBI's stream with that title (`balanced_title`).
+fn merged_run(case: &Case, dir: &Path, want: &mut Streams) -> Case {
+    let frozen = |ext: &str| {
+        fs::read(fixtures().join("ncbi").join(format!("{}.{ext}", case.name))).unwrap_or_default()
+    };
+    let merged = frozen("merged");
+    let Some(stdout) = stdout_before_posts(&merged, &frozen("err")) else {
+        return case.clone();
+    };
+    let Some(query_at) = case.words.iter().position(|word| word == "-query") else {
+        return case.clone();
+    };
+    let query = fs::read_to_string(dir.join(&case.words[query_at + 1])).unwrap();
+    let parse_deflines = case.words.iter().any(|word| word == "-parse_deflines");
+    let Some(balanced) =
+        crate::balanced_title::balanced_title(&merged, &stdout, &query, parse_deflines)
+    else {
+        return case.clone();
+    };
+    let path = format!("files/{}.q.fa", case.name);
+    fs::write(dir.join(&path), balanced.query).unwrap();
+    want.merged = Some(balanced.expected);
+    let mut run = case.clone();
+    run.words[query_at + 1] = path;
+    run
+}
+
 /// The names of the rows whose run through `binary` differs from NCBI's, printed with the first
 /// stream that differs; `library` leaves out the rows with `-logfile` and
 /// `-export_search_strategy` (the library refuses both).
@@ -263,7 +319,11 @@ fn rows_that_differ(binary: &Path, tag: &str, library: bool) -> Vec<String> {
         }
         ran += 1;
         let mut want = expected(&case);
-        let got = run(binary, &case, &dir, want.merged.is_some());
+        let merged = want
+            .merged
+            .is_some()
+            .then(|| merged_run(&case, &dir, &mut want));
+        let got = run(binary, &case, &dir, merged.as_ref());
         if want.merged.is_some() {
             // The merged stream holds the standard output, which the table does not repeat.
             want.stdout = got.stdout.clone();

@@ -1240,7 +1240,7 @@ fn write_first_batch_prologs(
             crate::report::pairwise::write_tblastn_pairwise_prolog(
                 &mut writer,
                 program,
-                crate::NCBI_BLAST_VERSION,
+                crate::wording::REPORT_VERSION,
                 &name,
                 num_subjects as i64,
                 total,

@@ -69,7 +69,7 @@ The release also carries `SHA256SUMS`, a software bill of materials (`LOSAT-0.2.
 | WASI serial | `LOSAT-0.2.0-wasm32-wasip1.tar.gz` | Supported |
 | WASI threads | `LOSAT-0.2.0-wasm32-wasip1-threads.tar.gz` | Supported: tested in CI, outside the release's NCBI parity claim |
 
-"Supported" without a note means the output matches NCBI BLAST+ 2.17.0 on the release test set; on macOS, the last digit of a full-precision E value can differ by 1. [Platforms and WebAssembly](platforms.md) gives the details for each platform, including the macOS and WASI notes.
+"Supported" without a note means the output matches NCBI BLAST+ 2.17.0 on the release test set (apart from the version line, which names LOSAT); on macOS, the last digit of a full-precision E value can differ by 1. [Platforms and WebAssembly](platforms.md) gives the details for each platform, including the macOS and WASI notes.
 
 ### Install a native file
 

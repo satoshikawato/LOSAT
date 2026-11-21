@@ -7,5 +7,5 @@
   any other (`PD-LOSAT-NCBI-DEFECTS` exception 6). The lookup in a version 4 database built with `-parse_seqids`
   stays refused.
 - Every program that opens a version 5 database now reads its LMDB file there, as NCBI does: a file that is not an
-  LMDB file, an empty one, or one that lists other volumes gives NCBI's `BLAST Database error` and exit status 2, and
+  LMDB file, an empty one, or one that lists other volumes gives NCBI's message in LOSAT's words (`LOSAT database error`) and exit status 2, and
   a truncated one (on which NCBI crashes) is refused.

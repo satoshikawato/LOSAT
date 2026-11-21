@@ -335,15 +335,18 @@ fn formats_of_one_search_equal_the_frozen_ncbi_rows() {
         formats.extend(FORMATS.iter().filter(|&&f| f != outfmt));
         let inputs = Inputs::new(&query, &subject);
         let run = inputs.collect(&formats, &extra);
-        let expected = std::fs::read(crate_dir().join(format!("tests/fixtures/outfmt0/{id}.out")))
-            .expect("frozen NCBI output");
+        let expected = losat::wording::losat_output_bytes(
+            &std::fs::read(crate_dir().join(format!("tests/fixtures/outfmt0/{id}.out")))
+                .expect("frozen NCBI output"),
+        )
+        .into_owned();
         assert!(run.reports[0].bytes == expected, "{id}: differs from NCBI");
         if let Ok(stderr) =
             std::fs::read(crate_dir().join(format!("tests/fixtures/outfmt0/{id}.err")))
         {
             assert_eq!(
                 String::from_utf8_lossy(&run.diagnostics),
-                String::from_utf8_lossy(&stderr),
+                String::from_utf8_lossy(&losat::wording::losat_output_bytes(&stderr)),
                 "{id}: warnings"
             );
         }
@@ -578,7 +581,7 @@ impl ReaderDifference {
         assert!(!cli_ok, "{context}: the CLI fails");
         match self {
             Self::NoRecords => {
-                assert_eq!(cli_stderr, "BLAST engine error: Empty CBlastQueryVector\n");
+                assert_eq!(cli_stderr, "LOSAT engine error: Empty CBlastQueryVector\n");
                 assert!(result.is_ok(), "{context}");
                 assert_eq!(diagnostics, b"Warning: [blastx] Query is Empty!\n");
             }
@@ -1007,7 +1010,7 @@ fn a_short_average_subject_length_without_the_gumbel_block_is_ncbis_engine_error
     let path = subject.0.display().to_string();
     let subjects_warning = "Warning: [blastx] Subject_2 b: Subject sequence contains no data\n\
                             Warning: [blastx] Subject_3 c: Subject sequence contains no data\n";
-    let error = "BLAST engine error: The average subject length is too short\n";
+    let error = "LOSAT engine error: The average subject length is too short\n";
     // The prolog's database line wraps a long path as NCBI's does, so only its end is compared.
     let prolog_end = "           3 sequences; 1 total letters\n\n";
     for (args, env, first_batch) in [
@@ -1037,13 +1040,13 @@ fn a_short_average_subject_length_without_the_gumbel_block_is_ncbis_engine_error
             );
             match (outfmt, first_batch) {
                 ("0", false) => assert!(
-                    stdout.starts_with("BLASTX 2.17.0+\n")
+                    stdout.starts_with(concat!("BLASTX (LOSAT ", env!("CARGO_PKG_VERSION"), ")\n"))
                         && stdout.contains("Database: User specified sequence set (Input:")
                         && stdout.ends_with(prolog_end),
                     "{stdout}"
                 ),
                 ("0", true) => assert!(
-                    stdout.starts_with("BLASTX 2.17.0+\n")
+                    stdout.starts_with(concat!("BLASTX (LOSAT ", env!("CARGO_PKG_VERSION"), ")\n"))
                         && stdout.contains("Database: User specified sequence set (Input:")
                         && stdout.ends_with(&format!(
                             "{prolog_end}\n\nQuery= qx all N\n\nLength=90\n\n\n***** No hits found *****\n\n\n\nLambda      K        H\n   -1.00    -1.00    -1.00 \n\nGapped\nLambda      K        H\n   -1.00    -1.00    -1.00 \n\nEffective search space used: 0\n"
@@ -1053,7 +1056,7 @@ fn a_short_average_subject_length_without_the_gumbel_block_is_ncbis_engine_error
                 ("7", true) => assert_eq!(
                     stdout,
                     format!(
-                        "# BLASTX 2.17.0+\n# Query: qx all N\n# Database: User specified sequence set (Input: {path})\n"
+                        concat!("# BLASTX (LOSAT ", env!("CARGO_PKG_VERSION"), ")\n# Query: qx all N\n# Database: User specified sequence set (Input: {path})\n"), path = path
                     )
                 ),
                 _ => assert!(stdout.is_empty(), "{args:?} {env:?}: {stdout}"),

@@ -473,7 +473,7 @@ test("the options form: the engine's defaults are not written; tasks, templates 
     await expect(page.getByTestId('argv-validation')).toHaveAttribute('data-state', 'ok');
     await task(page, 'megablast');
     await expect(page.getByTestId('argv-validation')).toContainText(
-      'BLAST query/options error: Invalid discontiguous template parameters: word size must be either 11 or 12',
+      'LOSAT query/options error: Invalid discontiguous template parameters: word size must be either 11 or 12',
     );
   }
 });
@@ -496,7 +496,7 @@ test("the engine's refusals of option values are shown as the engine writes them
   await page.getByTestId('param-word_size').selectOption('3');
   await page.getByTestId('param-matrix').selectOption('BLOSUM62');
   await page.getByTestId('param-evalue').fill('0');
-  await expect(page.getByTestId('argv-validation')).toContainText('BLAST query/options error:');
+  await expect(page.getByTestId('argv-validation')).toContainText('LOSAT query/options error:');
 });
 
 // WA-FM-01: scores without a Karlin-Altschul table row are not refused by the form's check. The CLI

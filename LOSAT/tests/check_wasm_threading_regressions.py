@@ -9,6 +9,7 @@ only with their listed output, and the run fails on any other mismatch, on an
 execution or thread-evidence failure, and on a stale allow-list entry.
 """
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -18,6 +19,7 @@ from concurrent.futures import ThreadPoolExecutor
 import certify_platform_native_v010 as authority
 from frozen_allowlist import Allowlist
 from wasm_performance import execute, digest, validate_thread_evidence
+import losat_wording  # noqa: E402  (LOSAT's words read back to NCBI's, AGENTS.md rule 8)
 
 ROOT = Path(__file__).resolve().parents[2]
 TESTS = ROOT / 'LOSAT/tests'
@@ -57,8 +59,18 @@ def main():
         result = execute(command, ROOT, out / label, env, args.timeout_seconds)
         result.update(label=label, program=program, case_id=case_id, expected_sha256=expected)
         executed = result['status'] == 'PASS'
-        result['raw_equal'] = executed and result['raw_output_sha256'] == expected
-        result['allowlist'] = allowlist.classify(program, case_id, expected, result.get('raw_output_sha256'), executed)
+        observed = result.get('raw_output_sha256')
+        output = out / label / 'output.txt'
+        if executed and not label.startswith('retained-linux-oracle/') and output.is_file():
+            # The frozen LOSAT hashes (v0.1.1) are of outputs in NCBI's words: LOSAT's version line
+            # (AGENTS.md rule 8) is read back to NCBI's for the comparison, and an output that still
+            # writes NCBI's words matches nothing.
+            data = output.read_bytes()
+            found = losat_wording.names_ncbi(data)
+            observed = f'ncbi-words:{found.decode()}' if found else hashlib.sha256(losat_wording.ncbi_hash_form(data)).hexdigest()
+            result['ncbi_words_sha256'] = observed
+        result['raw_equal'] = executed and observed == expected
+        result['allowlist'] = allowlist.classify(program, case_id, expected, observed, executed)
         result['thread_evidence'] = None
         if threads is not None and executed:
             try:

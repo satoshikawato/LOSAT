@@ -1475,7 +1475,7 @@ test('many queries; view filters change the view, not the search; the notices te
   if (BUILD_HAS_ENGINE) {
     // A run that fails: a TBLASTX subject record without residues. `register` and `validate`
     // accept it (the engine registers every record the reader returns), and the run ends with
-    // NCBI's `BLAST engine error: The average subject length is too short`, as the CLI does
+    // `LOSAT engine error: The average subject length is too short`, as the CLI does
     // (screens.spec.ts has the same input).
     const sequence = dna(7, 300);
     // A view filter of run 1 is not carried to the next run that opens.

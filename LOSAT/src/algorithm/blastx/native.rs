@@ -26,6 +26,7 @@ use crate::algorithm::common::database::{
     prefetches_subjects, HeaderReadError, PreliminaryReadError,
 };
 use crate::report::blast_xml2::{FsSideFiles, NoSideFiles, RunSideFiles, Xml2Kind};
+use crate::wording::{DATABASE_ERROR, ENGINE_ERROR};
 use anyhow::{bail, Result};
 use std::{
     fmt,
@@ -46,7 +47,7 @@ use run_parts::{read_subjects, ArchiveBatch, RunSetup, SubjectRead};
 pub(crate) fn engine(message: impl fmt::Display) -> anyhow::Error {
     NativeError {
         exit: 3,
-        message: format!("BLAST engine error: {message}\n").into(),
+        message: format!("{ENGINE_ERROR} {message}\n").into(),
     }
     .into()
 }
@@ -131,8 +132,8 @@ pub(super) fn report_error(error: anyhow::Error) -> anyhow::Error {
     } else if error.downcast_ref::<NativeError>().is_some_and(|e| {
         (e.exit == 1 && e.message.starts_with(b"Command line argument error"))
             || (e.exit == 6 && e.message == b"BLAST failed to write output\n")
-            || (e.exit == 3 && e.message.starts_with(b"BLAST engine error: "))
-            || (e.exit == 2 && e.message.starts_with(b"BLAST Database error: "))
+            || (e.exit == 3 && e.message.starts_with(ENGINE_ERROR.as_bytes()))
+            || (e.exit == 2 && e.message.starts_with(DATABASE_ERROR.as_bytes()))
             || e.exit == 255
     }) {
         // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:185-185

@@ -101,7 +101,9 @@ pub use crate::report::PairwiseHit;
 // LOSAT's words of NCBI's messages (`wording.rs`, PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 12):
 // the adapter's tests compare the engine's messages with NCBI's texts through it (AGENTS.md
 // rule 8).
-pub use crate::wording::{losat_bytes, losat_text};
+pub use crate::wording::{
+    losat_bytes, losat_output_bytes, losat_text, LOSAT_VERSION, REPORT_VERSION,
+};
 
 // The output formats of the application layer (`blastinput/app.rs`, NCBI's CFormattingArgs):
 // `-outfmt` parsed and checked as the command line does. `EngineProgram` is the program of

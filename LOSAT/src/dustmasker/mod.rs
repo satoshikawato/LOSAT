@@ -57,12 +57,12 @@ const DESCS: &[Desc] = &[
 ];
 
 // NCBI reference (598d8ae6): c++/src/app/dustmasker/dust_mask_app.hpp:51-55
-/// dustmasker as NCBI's application runs it (`ncbi_app`): its own version, no dependencies
-/// between its arguments and no prefix on its diagnostics.
+/// dustmasker as NCBI's application runs it (`ncbi_app`): LOSAT's version where NCBI's states its
+/// own (`ncbi_version::print`), no dependencies between its arguments and no prefix on its
+/// diagnostics.
 static TOOL: Tool = Tool {
     program: "dustmasker",
     refusal_name: PROGRAM,
-    version: "1.0.0",
     help: HELP,
     descs: DESCS,
     dependencies: no_dependencies,

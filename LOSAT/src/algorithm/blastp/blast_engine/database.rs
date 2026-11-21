@@ -2582,10 +2582,6 @@ fn x_taxids_allow_blocks(
     all_read && !shared::taxdb_may_refuse(db)
 }
 
-#[cfg(test)]
-#[path = "database_tests.rs"]
-mod tests;
-
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:440-450 (cited at
 // `algorithm::psiblast::pssm::input_msa`)
 /// What psiblast's PSSM reads of the subjects that it includes, by rank, where that is not the
@@ -2671,3 +2667,7 @@ impl PssmReads {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "database_tests.rs"]
+mod tests;

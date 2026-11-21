@@ -35,17 +35,17 @@ Links made by an earlier LOSAT are replaced without a message, so you can run th
 
 ## `blastn: command not found`, or the wrong `blastn` answers
 
-The names exist only after `losat --install-shims`. Make sure the folder you gave is on your `PATH`, and before any folder with NCBI's programs if you want LOSAT to answer. `blastn -version` shows who answers: LOSAT's second line starts with `Package: LOSAT`.
+The names exist only after `losat --install-shims`. Make sure the folder you gave is on your `PATH`, and before any folder with NCBI's programs if you want LOSAT to answer. `blastn -version` shows who answers: LOSAT's first line is `blastn: LOSAT 0.2.0` and its second line starts with `Package: LOSAT`.
 
 If you moved or replaced `losat` after making the links, run `losat --install-shims DIR` again.
 
 ## The database is not found
 
 ```text
-BLAST Database error: No alias or index file found for protein database [nodb] in search path [...]
+LOSAT database error: No alias or index file found for protein database [nodb] in search path [...]
 ```
 
-This is NCBI's message. Check the database name, that it is a protein or nucleotide database as the program needs (`blastp` reads protein, `blastn` reads nucleotide), and where LOSAT looks for it: the current directory, then the directories in `BLASTDB`, then the configuration in `.ncbirc`, as NCBI BLAST+ does. See [BLAST databases](databases.md).
+The message is NCBI's; where NCBI starts it with `BLAST Database error:`, LOSAT starts it with `LOSAT database error:`. Check the database name, that it is a protein or nucleotide database as the program needs (`blastp` reads protein, `blastn` reads nucleotide), and where LOSAT looks for it: the current directory, then the directories in `BLASTDB`, then the configuration in `.ncbirc`, as NCBI BLAST+ does. See [BLAST databases](databases.md).
 
 ## A `-seqidlist` warning names `blastdb_aliastool`
 
@@ -92,7 +92,7 @@ These apply when you run `losat.wasm` yourself. See [Platforms and WebAssembly](
 
 ## Memory and threads
 
-- **`-num_threads` sets the number of threads.** The default is 1. The output is the same at every thread count, and it is what NCBI BLAST+ writes with `-num_threads 1`. `-mt_mode` is accepted and changes nothing in the output (`blastn`, `blastp`, `blastx` and `tblastn` take 0, 1 or 2; `rpsblast` and `rpstblastn` take 0 or 1; `tblastx` and `psiblast` have no `-mt_mode`, as in NCBI BLAST+ 2.17.0). `-num_threads` takes an integer of 1 or more (`rpsblast` also reads 0 as one thread for each volume of the database).
+- **`-num_threads` sets the number of threads.** The default is 1. The output is the same at every thread count, and it is what NCBI BLAST+ writes with `-num_threads 1` (apart from the version line, which names LOSAT). `-mt_mode` is accepted and changes nothing in the output (`blastn`, `blastp`, `blastx` and `tblastn` take 0, 1 or 2; `rpsblast` and `rpstblastn` take 0 or 1; `tblastx` and `psiblast` have no `-mt_mode`, as in NCBI BLAST+ 2.17.0). `-num_threads` takes an integer of 1 or more (`rpsblast` also reads 0 as one thread for each volume of the database).
 - **Threads and memory.** The page [Threads, speed and memory](performance.md) explains how threads and memory use relate.
 - **A search of a compressed file needs room for the copy.** See "A compressed input fails" above.
 - **Development variables.** Variables that start with `LOSAT_X_`, and `LOSAT_TIMING`, are for development; leave them unset.

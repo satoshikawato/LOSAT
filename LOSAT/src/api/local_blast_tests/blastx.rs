@@ -371,7 +371,7 @@ fn two_empty_inputs_end_with_ncbis_error_with_parse_deflines_too() {
         // NCBI's message as the command line writes it to its standard error.
         let error = format!("{:#}", result.expect_err("no records"));
         assert_eq!(
-            error, "BLAST engine error: Empty CBlastQueryVector\n",
+            error, "LOSAT engine error: Empty CBlastQueryVector\n",
             "{extra:?}"
         );
         assert!(outputs.iter().all(Vec::is_empty) && diagnostics.is_empty());

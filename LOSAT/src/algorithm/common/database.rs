@@ -12,6 +12,7 @@
 //! errors to NCBI's application errors (`crate::cli::NativeError`) and to LOSAT's
 //! refusals.
 
+use crate::wording::{DATABASE_ERROR, ENGINE_ERROR};
 use anyhow::{bail, Result};
 
 use crate::blastinput::ncbi_environment::ApplicationSettings;
@@ -330,7 +331,7 @@ impl PsiSearchReadFailure {
         match self {
             PsiSearchReadFailure::EmptyDatabase => NativeError {
                 exit: 2,
-                message: "BLAST Database error: OID not found\n".into(),
+                message: format!("{DATABASE_ERROR} OID not found\n").into(),
             }
             .into(),
             PsiSearchReadFailure::Unopenable(error) => database_error(error, program),
@@ -357,7 +358,7 @@ pub(crate) fn database_error_of(error: &SeqDbError, program: &str) -> anyhow::Er
     match error.ncbi_message() {
         Some(text) => NativeError {
             exit: 2,
-            message: [b"BLAST Database error: ".as_slice(), &text, b"\n"].concat(),
+            message: [DATABASE_ERROR.as_bytes(), b" ", &text, b"\n"].concat(),
         }
         .into(),
         None => anyhow::Error::msg(losat_reader_error(error, program)),
@@ -636,7 +637,7 @@ pub(crate) struct PreliminaryReadError(pub(crate) &'static str);
 
 impl std::fmt::Display for PreliminaryReadError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "BLAST engine error: {}", self.0)
+        write!(f, "{ENGINE_ERROR} {}", self.0)
     }
 }
 
@@ -6272,7 +6273,14 @@ fn prefetch_stop(
         query: queries.error_query,
         error: NativeError {
             exit: 2,
-            message: [text.as_slice(), b"BLAST Database error: ", message, b"\n"].concat(),
+            message: [
+                text.as_slice(),
+                DATABASE_ERROR.as_bytes(),
+                b" ",
+                message,
+                b"\n",
+            ]
+            .concat(),
         }
         .into(),
     })

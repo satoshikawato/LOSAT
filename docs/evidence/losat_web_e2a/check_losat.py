@@ -137,7 +137,7 @@ def main() -> int:
         problems = []
         deviation = row.get("contract") == DEVIATION
         if deviation:
-            database_out = (FIXTURES / f"{row['fixture_id']}.db.out").read_bytes()
+            database_out = losat_wording.losat_output_bytes((FIXTURES / f"{row['fixture_id']}.db.out").read_bytes())
         if run.returncode != 0:
             problems.append(f"exit {run.returncode}: {run.stderr.decode(errors='replace').strip()[:200]}")
         elif deviation:

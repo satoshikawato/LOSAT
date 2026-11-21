@@ -191,13 +191,60 @@ fn set_up_part(dir: &Path, setup: &str) {
     }
 }
 
+/// `words`, NCBI's frozen bytes `ncbi` of a run in LOSAT's words (`losat::wording`, AGENTS.md
+/// rule 8), with the version of the SESSION lines as NCBI's: rpsbproc copies the version of its
+/// input into them, and the input of these cases is NCBI's archive or XML, which names NCBI's
+/// version (`blastp\t2.17.0+`).
+fn keep_the_sessions(ncbi: &[u8], mut words: Vec<u8>) -> Vec<u8> {
+    for line in ncbi.split(|&byte| byte == b'\n') {
+        if !line.starts_with(b"SESSION\t") {
+            continue;
+        }
+        // `SESSION<tab>ordinal<tab>program<tab>version<tab>`: the rest of the line (a long
+        // database name, an error that cuts it) is mapped with the other bytes.
+        let Some(end) = line
+            .iter()
+            .enumerate()
+            .filter(|&(_, &byte)| byte == b'\t')
+            .map(|(at, _)| at)
+            .nth(3)
+        else {
+            continue;
+        };
+        let head = &line[..=end];
+        let mapped = losat::wording::losat_output_bytes(head).into_owned();
+        if mapped == head {
+            continue;
+        }
+        let find = |haystack: &[u8], needle: &[u8]| {
+            haystack
+                .windows(needle.len())
+                .position(|window| window == needle)
+        };
+        // A file whose text is cut in the first line (see `file_in_losat_words`) keeps the head.
+        let Some(at) = find(&words, &mapped) else {
+            assert!(
+                find(&words, head).is_some(),
+                "the SESSION head is in the words"
+            );
+            continue;
+        };
+        words.splice(at..at + mapped.len(), head.iter().copied());
+    }
+    words
+}
+
 /// Compares a run's stdout, stderr and exit status with `<dir>/<case>.{out,err,rc}` by bytes
 /// (the text is only shown). The frozen bytes of NCBI's are compared in LOSAT's words (NCBI's
-/// bytes through `losat::wording`, AGENTS.md rule 8; LOSAT's own files are left as they are).
+/// bytes through `losat::wording`, AGENTS.md rule 8; LOSAT's own files are left as they are; the
+/// SESSION lines keep the version of NCBI's input).
 fn assert_same(dir: &Path, case: &str, out: &[u8], err: &[u8], status: i32) {
     let expected = |suffix: &str| {
         let bytes = fs::read(dir.join(format!("{case}.{suffix}"))).unwrap();
-        losat::wording::losat_output_bytes(&bytes).into_owned()
+        keep_the_sessions(
+            &bytes,
+            losat::wording::losat_output_bytes(&bytes).into_owned(),
+        )
     };
     for (name, got, want) in [
         ("stdout", out, expected("out")),
@@ -275,7 +322,7 @@ fn compare_rows(stem: &str, usage: &str, expected: &str) -> usize {
                 got,
                 fs::read(&expected)
                     .ok()
-                    .map(|bytes| file_in_losat_words(&bytes)),
+                    .map(|bytes| keep_the_sessions(&bytes, file_in_losat_words(&bytes))),
                 "{case}: the file {made} (expected {})",
                 expected.display()
             );
@@ -486,7 +533,14 @@ fn tied_rows_differ_from_ncbi_only_in_the_order_of_tied_hits() {
     let read = |dir: &str, case: &str, suffix: &str| {
         fs::read(fixtures().join(dir).join(format!("{case}.{suffix}"))).unwrap()
     };
-    let in_losat_words = |bytes: Vec<u8>| losat::wording::losat_output_bytes(&bytes).into_owned();
+    // Both sides in LOSAT's words, as `assert_same` reads a case's files: NCBI's frozen bytes and
+    // the `tied` files, which LOSAT wrote before it stated its own version (AGENTS.md rule 8).
+    let in_losat_words = |bytes: Vec<u8>| {
+        keep_the_sessions(
+            &bytes,
+            losat::wording::losat_output_bytes(&bytes).into_owned(),
+        )
+    };
     let table = fs::read_to_string(fixtures().join("tied").join("CLASSES.tsv")).unwrap();
     let mut listed = Vec::new();
     for line in table.lines().skip(1).filter(|line| !line.is_empty()) {
@@ -505,12 +559,12 @@ fn tied_rows_differ_from_ncbi_only_in_the_order_of_tied_hits() {
         for suffix in ["err", "rc"] {
             assert_eq!(
                 in_losat_words(read("oracle", case, suffix)),
-                read("tied", case, suffix),
+                in_losat_words(read("tied", case, suffix)),
                 "{case}: {suffix}"
             );
         }
         let ncbi = in_losat_words(read("oracle", case, "out"));
-        let losat = read("tied", case, "out");
+        let losat = in_losat_words(read("tied", case, "out"));
         assert_eq!(tied_difference(&ncbi, &losat), Ok(expected), "{case}");
         listed.push(case.to_string());
     }
@@ -699,7 +753,11 @@ fn rpsbproc_command_line() {
     assert_eq!(status, 0);
     let out = String::from_utf8(out).unwrap();
     assert!(
-        out.starts_with("rpsbproc: 0.5.1\n Package: LOSAT "),
+        out.starts_with(concat!(
+            "rpsbproc: LOSAT ",
+            env!("CARGO_PKG_VERSION"),
+            "\n Package: LOSAT "
+        )),
         "{out}"
     );
     let (out, _, status) = rpsbproc(dir, &["-help"], None);
@@ -713,8 +771,11 @@ fn rpsbproc_command_line() {
     assert_eq!((status, err), (0, Vec::new()));
     let out = String::from_utf8(out).unwrap();
     assert!(
-        out.starts_with("rpsbproc: 0.5.1\n Package: LOSAT ")
-            && out.ends_with(" Package-Config:  \n GI-64bit:  TRUE\n"),
+        out.starts_with(concat!(
+            "rpsbproc: LOSAT ",
+            env!("CARGO_PKG_VERSION"),
+            "\n Package: LOSAT "
+        )) && out.ends_with(" Package-Config:  \n GI-64bit:  TRUE\n"),
         "{out}"
     );
     let (out, err, status) = rpsbproc(dir, &["-i", "arch/one.asn", "-dryrun=1"], None);

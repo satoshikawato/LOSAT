@@ -220,6 +220,8 @@ fn initial_tabular_oracle_bytes() {
                 env!("CARGO_MANIFEST_DIR"),
             ))
             .unwrap();
+            // The frozen files are NCBI's bytes; LOSAT writes them in its own words.
+            let expected = crate::wording::losat_output_bytes(&expected).into_owned();
             if *actual != expected {
                 // No NCBI counterpart: test plumbing; the platform's temporary directory
                 // replaces the Unix-only "/tmp" that made a mismatch fail on Windows with

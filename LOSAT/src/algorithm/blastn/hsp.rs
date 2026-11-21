@@ -255,7 +255,7 @@ fn write_blastn_outfmt7_header<W: Write>(
     subject_title: &str,
     num_hits: Option<usize>,
 ) -> io::Result<()> {
-    writeln!(writer, "# BLASTN {}", crate::NCBI_BLAST_VERSION)?;
+    writeln!(writer, "# BLASTN {}", crate::wording::REPORT_VERSION)?;
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1305-1308
     // The title's bytes (`write_outfmt7_query_line`).
     crate::report::outfmt6::write_outfmt7_query_line(writer, query_title)?;

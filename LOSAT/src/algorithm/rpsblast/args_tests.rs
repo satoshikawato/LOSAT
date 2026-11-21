@@ -239,7 +239,7 @@ fn an_ungapped_x_drop_of_zero_or_below_is_ncbis_options_error() {
             .unwrap_err();
         assert_eq!(
             format!("{error:#}"),
-            "BLAST query/options error: x_dropoff must be greater than zero\nPlease refer to the LOSAT user manual.\n",
+            "LOSAT query/options error: x_dropoff must be greater than zero\nPlease refer to the LOSAT user manual.\n",
             "{value}"
         );
     }

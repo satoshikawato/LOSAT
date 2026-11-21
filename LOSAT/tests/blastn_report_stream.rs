@@ -528,13 +528,13 @@ fn errors_after_earlier_batches_give_the_off_bytes() {
         (
             &reader_error,
             1,
-            "BLAST query error: CFastaReader: Near line",
+            "LOSAT query error: CFastaReader: Near line",
             [1, 4, 1],
         ),
         (
             &empty_batch,
             3,
-            "BLAST engine error: Warning: Sequence contains no data",
+            "LOSAT engine error: Warning: Sequence contains no data",
             [4, 1, 4],
         ),
     ] {

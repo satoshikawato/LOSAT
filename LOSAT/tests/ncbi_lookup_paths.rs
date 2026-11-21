@@ -111,7 +111,7 @@ fn matrix_runs() -> [(&'static str, Vec<String>); 2] {
 // (`-matrix mymat`, env parity S4): with the file `MYMAT` in `BLASTMAT`, in `BLASTMAT/nt`, in a
 // directory of `NCBI_DATA_PATH` or `NCBI_CONFIG__NCBI__DATA`, or in `./data`, tblastx writes its
 // first line and two empty ones and aborts (rc 134); with `BLASTMAT` naming a file, or no file,
-// it stops with "BLAST engine error: Error: Unknown error code -1" (rc 3); an empty query reads
+// it stops with "LOSAT engine error: Error: Unknown error code -1" (rc 3); an empty query reads
 // no matrix (rc 0). blastx `-ungapped -comp_based_stats 0` does the same.
 #[test]
 fn a_matrix_file_that_ncbi_reads_is_refused() {
@@ -187,7 +187,7 @@ fn a_matrix_file_that_ncbi_reads_is_refused() {
             } else {
                 assert_eq!(output.status.code(), Some(3), "{program} {at}: {stderr}");
                 assert!(
-                    stderr.starts_with("BLAST engine error: -matrix mymat"),
+                    stderr.starts_with("LOSAT engine error: -matrix mymat"),
                     "{program} {at}: {stderr}"
                 );
             }
@@ -225,7 +225,7 @@ fn a_matrix_file_that_ncbi_reads_is_refused() {
                 "{program} {envs:?}: {stderr}"
             );
             assert!(
-                stderr.starts_with("BLAST engine error: Error: Unknown error code -1"),
+                stderr.starts_with("LOSAT engine error: Error: Unknown error code -1"),
                 "{program} {envs:?}: {stderr}"
             );
             check_library(&with_query, &at, &envs, &output, program);
@@ -299,7 +299,7 @@ fn a_matrix_file_that_ncbi_cannot_open_gives_ncbis_error() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert_eq!(output.status.code(), Some(3), "{program}: {stderr}");
         assert!(
-            stderr.starts_with("BLAST engine error: Error: Unknown error code -1"),
+            stderr.starts_with("LOSAT engine error: Error: Unknown error code -1"),
             "{program}: {stderr}"
         );
     }
@@ -480,7 +480,11 @@ fn a_malformed_registry_file_is_reported_as_ncbi_reports_it() {
     assert_eq!(off.stdout, reference.stdout);
     let version = run_in(losat, &["blastn", "-version"], &dir, &[], b"");
     assert_eq!(text(&version.stderr), critical(3));
-    assert!(text(&version.stdout).starts_with("blastn: 2.17.0+\n"));
+    assert!(text(&version.stdout).starts_with(concat!(
+        "blastn: LOSAT ",
+        env!("CARGO_PKG_VERSION"),
+        "\n"
+    )));
     assert_eq!(version.status.code(), Some(0));
     let help = run_in(losat, &["blastn", "-h"], &dir, &[], b"");
     assert_eq!(text(&help.stderr), both);
@@ -611,7 +615,11 @@ fn the_registry_messages_go_to_the_log_of_blastdbcmd_and_makeblastdb() {
         b"",
     );
     assert_eq!(text(&version.stderr), critical(1));
-    assert!(text(&version.stdout).starts_with("makeblastdb: 2.17.0+\n"));
+    assert!(text(&version.stdout).starts_with(concat!(
+        "makeblastdb: LOSAT ",
+        env!("CARGO_PKG_VERSION"),
+        "\n"
+    )));
     assert_eq!(logged(), critical(1));
     fs::remove_file(dir.join(NCBIRC)).unwrap();
     // Without a message, `-version` still makes the file.
@@ -639,7 +647,11 @@ fn the_registry_messages_go_to_the_log_of_blastdbcmd_and_makeblastdb() {
         b"",
     );
     assert_eq!(text(&version.stderr), critical(1));
-    assert!(text(&version.stdout).starts_with("blastn: 2.17.0+\n"));
+    assert!(text(&version.stdout).starts_with(concat!(
+        "blastn: LOSAT ",
+        env!("CARGO_PKG_VERSION"),
+        "\n"
+    )));
     assert_eq!(logged(), critical(1));
     let _ = fs::remove_dir_all(&dir);
 }

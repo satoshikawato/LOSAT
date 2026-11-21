@@ -78,7 +78,7 @@ for (const role of ['query', 'subject'] as const) {
       await waitStatus(page, 1, 'failed');
       await pickRun(page, 1);
       await expect(page.getByTestId('results-status')).toContainText(
-        role === 'query' ? 'BLAST engine error: Warning: Sequence contains no data' : 'BLAST engine error: The average subject length is too short',
+        role === 'query' ? 'LOSAT engine error: Warning: Sequence contains no data' : 'LOSAT engine error: The average subject length is too short',
       );
     }
   });

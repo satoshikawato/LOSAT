@@ -349,7 +349,7 @@ describe('pointers of 2 GiB or more', () => {
     const response = TWO_GIB + PAGE;
     const failure = TWO_GIB + 2 * PAGE;
     const json = new TextEncoder().encode('{"handle": 7, "records": [{"id": "a", "length": 4}]}');
-    const message = new TextEncoder().encode('BLAST query error');
+    const message = new TextEncoder().encode('LOSAT query error');
     const calls: number[][] = [];
     const ref: { abi?: ReactorAbi } = {};
     const exports = {
@@ -380,7 +380,7 @@ describe('pointers of 2 GiB or more', () => {
     expect([...new Uint8Array(memory.buffer, input, 4)]).toEqual([62, 97, 10, 65]);
     // The engine receives the pointers it gave; as i32 they are the same bits.
     expect(calls[0]!.map(signed)).toEqual([signed(input), 6, 1, 1, signed(input), 4]);
-    expect(ref.abi.validate(['blastn'])).toEqual({ ok: false, message: 'BLAST query error' });
+    expect(ref.abi.validate(['blastn'])).toEqual({ ok: false, message: 'LOSAT query error' });
   });
 });
 

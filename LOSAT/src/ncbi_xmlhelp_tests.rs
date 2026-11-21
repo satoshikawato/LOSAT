@@ -125,12 +125,13 @@ fn run_refusals_name_the_argument_and_the_program() {
     );
 }
 
-// The XML is NCBI's lines in NCBI's order, of which only whole elements of the arguments refused
+// The XML is NCBI's lines (in LOSAT's words) in NCBI's order, of which only whole elements of the arguments refused
 // and the dependencies that name one are missing.
 #[test]
 fn the_xml_is_ncbis_without_the_refused_arguments() {
     for program in CLAP_PROGRAMS {
-        let ncbi = ncbi_xml(program).unwrap();
+        // NCBI's XML in LOSAT's words (the program's description names LOSAT's version).
+        let ncbi = crate::wording::losat_text(ncbi_xml(program).unwrap()).into_owned();
         let xml = xml_help_text(program).unwrap();
         let gone: Vec<&str> = ncbi_argument_names(program)
             .into_iter()
@@ -151,7 +152,7 @@ fn the_xml_is_ncbis_without_the_refused_arguments() {
             );
         }
         // The dependencies kept are NCBI's of two names kept.
-        let expected: Vec<(String, String)> = dependencies(ncbi)
+        let expected: Vec<(String, String)> = dependencies(&ncbi)
             .into_iter()
             .filter(|(a, b)| !gone.contains(&a.as_str()) && !gone.contains(&b.as_str()))
             .collect();
@@ -167,13 +168,14 @@ fn the_xml_is_ncbis_without_the_refused_arguments() {
     }
 }
 
-// Without a refusal the XML is NCBI's bytes, for every program; with every argument refused, what
+// Without a refusal the XML is NCBI's bytes in LOSAT's words, for every program; with every argument refused, what
 // is left is the program's part and an empty argument list (NCBI writes no `<dependencies>`
 // without one).
 #[test]
 fn the_filter_leaves_whole_elements() {
     for program in programs() {
-        let ncbi = ncbi_xml(program).unwrap();
+        // NCBI's XML in LOSAT's words (the program's description names LOSAT's version).
+        let ncbi = crate::wording::losat_text(ncbi_xml(program).unwrap()).into_owned();
         assert_eq!(print(program, |_| false).unwrap(), ncbi, "{program}");
         let none = print(program, |_| true).unwrap();
         let head = &ncbi[..ncbi.find("<arguments>\n").unwrap()];

@@ -2,6 +2,7 @@
 
 use crate::blastinput::fasta_reader::believed::BelievedIds;
 use crate::blastinput::fasta_reader::{FastaRecord, ReadError};
+use crate::wording::ENGINE_ERROR;
 
 /// The query batch size from the environment variable `BATCH_SIZE` (`value`; 0 when it is not
 /// set: blastn then uses `CBatchSizeMixer`, the other programs their default). `Err` is the
@@ -728,7 +729,7 @@ fn read_batches(
             stop_error = Some(
                 crate::cli::NativeError {
                     exit: 3,
-                    message: "BLAST engine error: Empty CBlastQueryVector\n".into(),
+                    message: format!("{ENGINE_ERROR} Empty CBlastQueryVector\n").into(),
                 }
                 .into(),
             );
@@ -788,7 +789,7 @@ fn no_data_batch_error(batch: &[FastaRecord]) -> Option<anyhow::Error> {
     if !batch.iter().all(|record| record.seq().is_empty()) {
         return None;
     }
-    let mut message = String::from("BLAST engine error: ");
+    let mut message = format!("{ENGINE_ERROR} ");
     for _ in batch {
         message.push_str("Warning: ");
         message.push_str(NO_DATA_MESSAGE);
@@ -814,8 +815,8 @@ fn psiblast_batch_error(batch: &[FastaRecord]) -> Option<anyhow::Error> {
         _ => Some(
             crate::cli::NativeError {
                 exit: 3,
-                message: "BLAST engine error: PSI-BLAST only accepts one protein sequence as query\n"
-                    .to_string().into(),
+                message: format!("{ENGINE_ERROR} PSI-BLAST only accepts one protein sequence as query\n")
+                    .into(),
             }
             .into(),
         ),

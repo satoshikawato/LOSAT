@@ -1166,7 +1166,7 @@ fn a_batch_with_two_stopping_lookups_ends_at_the_first_that_ncbi_makes() {
         assert!(!refusal.is::<HeaderReadError>(), "{refusal}");
         refusal.to_string()
     };
-    let error = "BLAST Database error: DB contains no accession info.\n".to_owned();
+    let error = "LOSAT database error: DB contains no accession info.\n".to_owned();
     // 1. The first stop in NCBI's order is one that it makes: `ref|NP_000002.1|` before
     // `lcl|Query_1`, which the scope holds (kit `R.q1`), in either order of the batch.
     let db = open(&["lda", "ldp", "ldq"], None);
@@ -1381,7 +1381,7 @@ fn the_texts_that_a_cut_report_left_go_to_the_first_asking_load_before_the_stop(
         assert_eq!(native.exit, 2);
         (failure.query, String::from_utf8(native.message).unwrap())
     };
-    let error = "BLAST Database error: DB contains no accession info.\n".to_owned();
+    let error = "LOSAT database error: DB contains no accession info.\n".to_owned();
     // The model of the cut report of query 0 in `run`: its reads of `read` (each sequence's
     // first load in the run; the first writes the texts of opening).
     let cut_report = |db: &SeqDb, run: &TaxdbRun, read: &[u32]| {
@@ -1651,7 +1651,7 @@ fn the_record_before_a_stop_holds_only_what_ncbis_reports_and_prefetches_loaded(
         )
         .collect()
     };
-    let error = "BLAST Database error: DB contains no accession info.\n".to_owned();
+    let error = "LOSAT database error: DB contains no accession info.\n".to_owned();
     // The stop of query 1's batch (`ref|NP_000002.1|`) after the record `loaded`.
     let stop = |loaded: &[u32], queries: &PrefetchQueries<'_>| {
         batch_prefetch(
@@ -1790,7 +1790,7 @@ fn a_lookup_that_fails_on_a_file_stops_the_batchs_prefetch_as_ncbis() {
         assert_eq!(native.exit, 2);
         (failure.query, String::from_utf8(native.message).unwrap())
     };
-    let error = "BLAST Database error: DB contains no accession info.\n".to_owned();
+    let error = "LOSAT database error: DB contains no accession info.\n".to_owned();
     let names = [
         "db_search/multidb/na",
         "db_search/multidb/nnp",

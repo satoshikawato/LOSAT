@@ -9,6 +9,8 @@
 
 #[path = "../archive_replaced_bytes.rs"]
 mod archive_replaced_bytes;
+#[path = "../balanced_title.rs"]
+mod balanced_title;
 #[path = "../blastdbcmd_alias_keys.rs"]
 mod blastdbcmd_alias_keys;
 #[path = "../blastdbcmd_batch_line_ends.rs"]

@@ -178,12 +178,12 @@ fn expected(name: &str) -> (i32, Vec<u8>, Vec<u8>) {
 }
 
 /// The date of the database masked: the text after `Date: ` (up to a tab or the end of the line)
-/// and after `Posted date:  `.
+/// and after the pairwise report's `    Posted date:  `.
 fn without_dates(bytes: &[u8]) -> Vec<u8> {
     let text = String::from_utf8_lossy(bytes);
     text.split_inclusive('\n')
         .map(|line| {
-            for start in ["Date: ", "  Posted date:  "] {
+            for start in ["Date: ", "    Posted date:  "] {
                 if let Some(rest) = line.strip_prefix(start) {
                     let end = rest.find(['\t', '\n']).unwrap_or(rest.len());
                     return format!("{start}<D>{}", &rest[end..]);

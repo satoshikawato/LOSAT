@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.60
+- Version: 1.61
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -251,7 +251,11 @@
   GI-mask files are the same files, which NCBI writes through two streams whose flushing decides
   the bytes, rule 3; the GI-mask writer's other defects reproduced under rule 2; the form of
   exception 18 and the rejection Owner-delegated, standing instruction 2026-09-29, restated
-  2026-10-07; numbered after 1.59, line RG item X4-excl)
+  2026-10-07; numbered after 1.59, line RG item X4-excl);
+  1.61 2026-11-21 (the readers of GI-indexed masks, line NP item M4c-2: NCBI's results on such
+  databases reproduced, rule 2; the explicit rejection of blastn's GI-indexed masks on more than one
+  thread, where NCBI stops or crashes in some runs, rule 3; Owner-delegated, standing instruction
+  2026-09-29, restated 2026-10-07; numbered after 1.60)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1280,6 +1284,22 @@ file would differ, and NCBI's programs still could not open the database).
   268,435,455 ranges) is computed without overflow. Fixtures `LOSAT/tests/seqdb/gi_mask`
   (`make_gi_mask_fixtures.py`), tests `LOSAT/tests/makeblastdb_gi_mask.rs` and
   `LOSAT/src/writedb/gi_mask_tests.rs`.
+- The readers of GI-indexed masks (version 1.61, 2026-11-21, line NP item M4c-2): `blastdbcmd`
+  (`-info`, `-outfmt %m`, `-mask_sequence_with`) and `blastn` (`-db_soft_mask`, `-db_hard_mask`)
+  read the masks that an alias file's `MASKLIST` names as NCBI's reader does
+  (`seqdbalias.cpp:117-139`, `seqdbgimask.cpp`), with its deterministic defects: the masks apply
+  only when `-db` is one name whose own alias file has `MASKLIST` (in an alias file over the
+  database or with several names they are passed over without a message); the mask files are
+  looked for from the current directory and `BLASTDB`, not from the database's directory
+  (`Could not open gi-mask index files.` from elsewhere); a sequence without a GI takes the masks
+  of GI 4294967295 when that GI is in the files (`(Uint4)` of `INVALID_GI`); with equal GIs the
+  record is the one NCBI's binary search reaches; a data volume that was never written gives
+  NCBI's memory-map text with the empty name (`To be memory mapped the file must exist: ''`);
+  the algorithm ids and names are those of `MASKLIST`, with NCBI's names table in the errors of
+  an unknown id or name. A protein in FASTA with such masks is approved difference 5 of
+  PD-LOSAT-BLASTDBCMD-DEVIATIONS, as with mask columns. Fixtures `LOSAT/tests/seqdb/gi_mask_read`
+  (`make_gi_mask_read_fixtures.py`, NCBI BLAST+ 2.17.0), tests `LOSAT/tests/gi_mask_read.rs` and
+  `LOSAT/src/seqdb/gi_mask_tests.rs`.
 - Defects without an effect on the output that LOSAT follows: the negative `Int4`
   offset of `BlastGetStartForGappedAlignmentNucl`, the out-of-range read of
   `hard_ranges[1]` for the last subject chunk, the out-of-range `double` to `Int4`
@@ -1817,6 +1837,18 @@ file would differ, and NCBI's programs still could not open the database).
   sequence with a GI (and so write nothing) the input is refused all the same. Unit tests in
   `LOSAT/src/writedb/gi_mask_tests.rs`, cases `w25`, `w25b` and `m04` of
   `LOSAT/tests/seqdb/gi_mask` (`make_gi_mask_fixtures.py`).
+- blastn `-db_soft_mask` and `-db_hard_mask` on a database whose masks are indexed by GI, with
+  `-num_threads` above 1 (version 1.61, 2026-11-21, line NP item M4c-2, Owner-delegated, standing
+  instruction 2026-09-29, restated 2026-10-07). Each search thread of NCBI reads the masks of the
+  sequences it fetches (`seqsrc_seqdb.cpp:316-321`, `seqdbgimask.cpp:65-112`); NCBI BLAST+ 2.17.0
+  then gives the one-thread result in most runs and in the others stops with `BLAST engine error:
+  Database memory map file error` (exit status 3) or crashes (SIGSEGV): in 20 runs with 4 threads
+  of each of eight masked searches of the fixtures, five searches failed once each (four the error, one
+  the crash), and the runs with one thread always gave the same bytes. LOSAT refuses the search
+  where NCBI starts it, after NCBI's checks (exit 1, "-db_soft_mask
+  with -num_threads above 1 on a database whose masks are indexed by GI ... is not supported by
+  LOSAT's BLASTN"); with one thread the search is NCBI's. Test `LOSAT/tests/gi_mask_read.rs`
+  (every masked search of the fixtures again with `-num_threads 4`).
 - psiblast and tblastn `-in_pssm` (version 1.45, 2026-11-16, line RG item D3-1, Owner-delegated,
   standing instruction 2026-09-29, restated 2026-10-07): LOSAT reads the PSSM's ASN.1 text as
   NCBI's reader does (every member of every type it reaches) and indexes the query's annotations

@@ -1,47 +1,29 @@
-//! `-oid_masks` of makeblastdb: the OID mask file of a volume (`CWriteDB_OidList`), `.pxm` or
-//! `.nxm` for `EOidMaskType::fExcludeModel` (0x01), the one type makeblastdb 2.17.0 has.
-//!
-//! The file is the volume's last OID as a big-endian `Int4`, then one bit per OID, the first
-//! OID of each byte in its most significant bit: 1 for an OID that stays, 0 for an OID whose
-//! ids are all predicted RefSeq accessions (`XP_`, `XM_`, `XR_`, ...). A volume of no OID
-//! writes no file. The reader of the alias key `OID_MASK_TYPE` reads these files.
-
-// NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/seqdbcommon.hpp:147-150
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:2707-2717
+//! `-oid_masks` of makeblastdb: the OID mask file of each volume (`CWriteDB_OidList`) and the
+//! test of a model sequence; the mask types, the file's name and layout belong to
+//! `seqdb::oid_mask`, which the reader of the alias key `OID_MASK_TYPE` shares.
 
 use super::files::WriteDbFile;
 use super::WriteDbError;
-use crate::seqid::accguide::{identify_seq_id, parse_flags, F_PREDICTED};
+pub(crate) use crate::seqdb::oid_mask::EXCLUDE_MODEL;
+use crate::seqdb::oid_mask::{exclude_model_extension, is_predicted};
+use crate::seqid::accguide::SeqIdWarning;
 use crate::seqid::ParsedSeqId;
-
-/// `EOidMaskType::fExcludeModel`.
-pub(crate) const EXCLUDE_MODEL: u64 = 0x01;
-
-/// `SeqDB_GetOidMaskFileExt` of `fExcludeModel`.
-pub(crate) fn exclude_model_extension(protein: bool) -> &'static str {
-    if protein {
-        "pxm"
-    } else {
-        "nxm"
-    }
-}
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_volume.cpp:293-308
 /// Whether `CWriteDB_Volume::WriteSequence` adds the OID of a sequence of the ids `ids` to the
 /// list of models: every id that is not a GI is a predicted accession
 /// (`IdentifyAccession() & fAcc_predicted`). A sequence with no id but GIs is one, as in
-/// makeblastdb 2.17.0 (line RG item D3b probe `p_v4`).
-pub(crate) fn is_model(ids: &[ParsedSeqId]) -> bool {
-    ids.iter()
+/// makeblastdb 2.17.0 (line RG item D3b probe `p_v4`). Every id that is not a GI is identified,
+/// also after one that is no model, and `warn` gets the accession guide's warnings of each
+/// (review probe `sc`).
+pub(crate) fn is_model(ids: &[ParsedSeqId], warn: &mut dyn FnMut(SeqIdWarning)) -> bool {
+    let (models, accessions) = ids
+        .iter()
         .filter(|id| !matches!(id, ParsedSeqId::Gi(_)))
-        .all(|id| {
-            identify_seq_id(
-                id,
-                parse_flags::ANY_RAW | parse_flags::ANY_LOCAL,
-                &mut |_| {},
-            ) & F_PREDICTED
-                != 0
-        })
+        .fold((0usize, 0usize), |(models, accessions), id| {
+            (models + usize::from(is_predicted(id, warn)), accessions + 1)
+        });
+    models == accessions
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_volume.cpp:572-645
@@ -97,7 +79,10 @@ mod tests {
     /// (probe `p_ps1`: `0000000957bf`), written to a file of its own.
     #[test]
     fn the_mask_file_is_makeblastdb_s() {
-        let dir = std::env::temp_dir().join(format!("losat-oidlist-{}", std::process::id()));
+        let dir = crate::utils::test_dir::temp_dir().join(format!(
+            "losat-oidlist-{}",
+            crate::utils::test_dir::process_id()
+        ));
         std::fs::create_dir_all(&dir).unwrap();
         let base = dir.join("db").to_string_lossy().into_owned();
         let mut list = OidList::exclude_model(&base, true, 0, 0);

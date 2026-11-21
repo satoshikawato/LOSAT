@@ -2543,4 +2543,55 @@ pub(super) const V5_CASES: &[V5Case] = &[
             ("db.pto", Expected::Bytes(b"\x03\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x02\x00\x00\x00")),
         ],
     },
+    V5Case {
+        name: "O_warn_all",
+        runs: &[
+            V5Run {
+                words: &["-in", "tests/writedb_v5/oid_sc.fa", "-dbtype", "prot", "-out", "{D}/db", "-title", "t", "-parse_seqids", "-oid_masks", "1"],
+                status: 0,
+                stdout: b"\
+                    \n\nBuilding a new DB, current time: <T>\nNew DB name:   <D>/db\nNew DB title:  t\nSeque\
+                    nce type: Protein\nKeep MBits: T\nMaximum file size: 3000000000B\nAdding sequences from \
+                    FASTA; added 2 sequences in <S> seconds.\n\n\n",
+                stderr: b"\
+                    Warning: (1306.11) [makeblastdb] AAAAA01P000027: Protein flag found with unexpected divi\
+                    sion 0\nWarning: (1306.11) [makeblastdb] AAAAA01P000027: Protein flag found with unexpec\
+                    ted division 0\nWarning: (1306.11) [makeblastdb] AAAAA01P000027: Protein flag found with\
+                    \x20unexpected division 0\n",
+            },
+        ],
+        date: "Nov 21, 2026  9:02 AM",
+        log: None,
+        files: &[
+            ("db.pdb", Expected::Digest(32768, 0x5d69d085f64eb2c9)),
+            ("db.phr", Expected::Bytes(b"\
+                0\x800\x80\xa0\x80\x1a\x01x\x00\x00\xa1\x800\x80\xa9\x800\x80\xa1\x80\x1a\tNP_000001\x00\
+                \x00\xa3\x80\x02\x01\x01\x00\x00\x00\x00\x00\x00\xa4\x800\x80\xa1\x80\x1a\x0eAAAAA01P000\
+                027\x00\x00\xa3\x80\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xa2\x80\x02\x01\
+                \x00\x00\x00\x00\x00\x00\x000\x800\x80\xa0\x80\x1a\x01y\x00\x00\xa1\x800\x80\xa9\x800\
+                \x80\xa1\x80\x1a\tXP_000002\x00\x00\xa3\x80\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\
+                \x00\x00\xa2\x80\x02\x01\x00\x00\x00\x00\x00\x00\x00")),
+            ("db.pin", Expected::Bytes(b"\
+                \x00\x00\x00\x05\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x01t\x00\x00\x00\x06db.pdb\
+                \x00\x00\x00\x19Nov 21, 2026  9:02 AM\x00\x00\x00\x00\x00\x00\x00\x02\x14\x00\x00\x00\
+                \x00\x00\x00\x00\x00\x00\x00\n\x00\x00\x00\x00\x00\x00\x00_\x00\x00\x00\x9b\x00\x00\x00\
+                \x01\x00\x00\x00\x0c\x00\x00\x00\x17")),
+            ("db.pjs", Expected::Bytes(b"\
+                {\n  \"version\": \"1.2\",\n  \"dbname\": \"db\",\n  \"dbtype\": \"Protein\",\n  \"db-ve\
+                rsion\": 5,\n  \"description\": \"t\",\n  \"number-of-letters\": 20,\n  \"number-of-sequ\
+                ences\": 2,\n  \"last-updated\": \"2026-11-21T09:02:00\",\n  \"number-of-volumes\": 1,\n\
+                \x20 \"bytes-total\": 49580,\n  \"bytes-to-cache\": 119,\n  \"files\": [\n    \"db.pdb\"\
+                ,\n    \"db.phr\",\n    \"db.pin\",\n    \"db.pog\",\n    \"db.pos\",\n    \"db.pot\",\n\
+                \x20   \"db.psq\",\n    \"db.ptf\",\n    \"db.pto\",\n    \"db.pxm\"\n  ]\n}\n")),
+            ("db.pog", Expected::Bytes(b"\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x04\x00\x00\x00\x02\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xff\xff\xff\xff\xff\xff\xff\xff")),
+            ("db.pos", Expected::Bytes(b"\
+                \x02\x00\x00\x00\x00\x00\x00\x00\x1d\x00\x00\x00\x00\x00\x00\x00)\x00\x00\x00\x00\x00\
+                \x00\x00\x10AAAAA01P000027.1\x0bNP_000001.1\x0bXP_000002.1")),
+            ("db.pot", Expected::Bytes(b"\x02\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x02\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00")),
+            ("db.psq", Expected::Bytes(b"\x00\x0c\n\x13\x0b\x01\x01\x07\t\x13\x01\x00\x0c\n\x13\x0b\x01\x01\x07\t\x13\x03\x00")),
+            ("db.ptf", Expected::Digest(16384, 0xc29f655d5a3815f8)),
+            ("db.pto", Expected::Bytes(b"\x02\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00")),
+            ("db.pxm", Expected::Bytes(b"\x00\x00\x00\x01\xbf")),
+        ],
+    },
 ];

@@ -431,10 +431,11 @@ impl WriteDb {
     // volume: makeblastdb 2.17.0 indexes `gnl|bl_ord_id|<that oid>` for OID 0 of the new
     // volume and checks it for duplicates there (s3b/probe: `-hash_index -max_file_sz 4000`
     // on 3 long and 20 short proteins stops with "Duplicate seq_ids are found:
-    // GNL|BL_ORD_ID|6"). The ids are needed by a volume with indices only.
+    // GNL|BL_ORD_ID|6"). The ids are needed by a volume with indices and by the OID mask of
+    // `-oid_masks` (`writedb::oid_list::is_model`).
     /// `x_CookHeader`: the header record with the number the sequence gets
     /// in the current volume; the first cooking of a sequence also sets `m_Ids` (with
-    /// indices) and `m_TaxIds`.
+    /// indices or OID masks) and `m_TaxIds`.
     fn cook_header(&mut self, title: &[u8]) -> Vec<u8> {
         let oid = self.volumes.last().map_or(0, Volume::oid);
         let mut bad = Vec::new();

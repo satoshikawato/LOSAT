@@ -1600,7 +1600,7 @@ fn metadata_output_prefix_runs_as_makeblastdb() {
 /// whose bit is 0 for a sequence whose ids but GIs are all predicted RefSeq accessions, with and
 /// without `-parse_seqids`, the values 0 and 2 (no file), -1 and `0x01`, a database without models,
 /// several volumes, version 4 with a GI alone (a model) and the accession guide's warnings that
-/// the mask posts again (line RG item D3b).
+/// the mask posts again, for every id (line RG item D3b).
 #[test]
 #[cfg_attr(
     target_os = "wasi",

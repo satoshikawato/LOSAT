@@ -236,6 +236,11 @@ pub(super) struct RedoInputs<'a, P> {
     /// (`kappa::evalue_adjust_contexts`).
     pub(super) evalue_adjust_contexts: &'a [kappa::EvalueAdjustContext],
     pub(super) build_redo_align_params: &'a P,
+    /// The marks of the lists that the redo reaches and its fetch excludes, by query and place
+    /// (`database::exclude_fetched`; empty without a database or a negative seqid list): only the
+    /// status of the Smith-Waterman redo reads them (`one_thread_redo`); the X-drop redo has no
+    /// status, so its paths read the lists without them.
+    pub(super) fetch_excluded: &'a [super::database::FetchExcludedMatch],
     pub(super) x_win_expand: bool,
     pub(super) ordinary_traceback: bool,
     #[cfg(all(
@@ -1019,6 +1024,50 @@ fn sw_endless(batch_start: usize) -> anyhow::Error {
     .into()
 }
 
+/// NCBI's Smith-Waterman redo at a list whose subject its fetch excludes (`mark`, a list that
+/// `database::exclude_fetched` removed; `batch_heaps`, the heaps of the list's query batch): the
+/// list is freed without a change of the status when the early termination test holds, and
+/// otherwise the excluded fetch sets the status back to 0, which clears an earlier failure of
+/// the batch (`sw_last_failed`). Nothing is fetched, redone or inserted.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3540
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3560-3575
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:306-314
+#[inline]
+fn fetch_excluded_reached(
+    mark: &super::database::FetchExcludedMatch,
+    batch_heaps: &[BlastCompoHeap],
+    sw_last_failed: &mut bool,
+) {
+    if !blast_compo_early_termination(mark.best_evalue, batch_heaps) {
+        *sw_last_failed = false;
+    }
+}
+
+/// NCBI's Smith-Waterman redo at the lists of one query whose subjects its fetch excludes
+/// (`marks`, in stream order), read after the query's loop. `status_position` is the place of
+/// the query's last kept list whose redo set the status (`None` where no redo of the query did).
+/// A list before that place changes nothing, since that redo sets the status again. After it no
+/// list of the query enters a heap (each one ends early), so each later excluded list meets the
+/// heaps as they are after the loop (`batch_heaps`) and goes through `fetch_excluded_reached`.
+/// With no such redo the query changed no heap, and every excluded list goes through it.
+///
+/// No NCBI counterpart: NCBI tests each list in stream order in its loop. The status this gives
+/// is NCBI's one-thread status of the batch.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3774-3779
+fn query_fetch_excluded_reached(
+    marks: &[super::database::FetchExcludedMatch],
+    status_position: Option<usize>,
+    batch_heaps: &[BlastCompoHeap],
+    sw_last_failed: &mut bool,
+) {
+    let after_status = status_position.map_or(0, |at| at + 1);
+    for mark in marks.iter().filter(|mark| mark.position >= after_status) {
+        fetch_excluded_reached(mark, batch_heaps, sw_last_failed);
+    }
+}
+
 /// The one-thread loop: the queries redone in order on the calling thread, each query's matches
 /// in stream order, each query's compact list expanded when the loop reaches it and its preliminary
 /// list freed after its redo (counted in `x_prelim_freed`). It is the only path of a build without
@@ -1054,6 +1103,7 @@ where
         kappa_query_batches,
         evalue_adjust_contexts,
         build_redo_align_params,
+        fetch_excluded,
         ..
     } = *redo;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3329-3334
@@ -1079,12 +1129,27 @@ where
         .use_sw_tback
         .then(kappa::smith_waterman::SwMatchScratch::new);
     let mut sw_last_failed = false;
+    // The marks of the lists that the Smith-Waterman redo reaches and whose fetch excludes the
+    // subject (`fetch_excluded_reached`), by query; the X-drop redo reads none.
+    let mut fetch_excluded = if sw_scratch.is_some() {
+        fetch_excluded
+    } else {
+        &[][..]
+    };
 
     for q_idx in 0..kappa_query_batches.len() {
         let batch = kappa_query_batches[q_idx].clone();
         if batch.start == q_idx {
             sw_last_failed = false;
         }
+        let excluded_here = fetch_excluded
+            .iter()
+            .take_while(|mark| mark.query == q_idx)
+            .count();
+        let (excluded_here, excluded_after) = fetch_excluded.split_at(excluded_here);
+        fetch_excluded = excluded_after;
+        // The place of the query's last list whose Smith-Waterman redo set the status.
+        let mut x_status_position = None;
         let redo_align_params = build_redo_align_params(q_idx)?;
 
         let ctx = &contexts[q_idx];
@@ -1200,10 +1265,12 @@ where
                 ) {
                     Ok(postprocessed) => {
                         sw_last_failed = false;
+                        x_status_position = Some(x_match_position);
                         postprocessed
                     }
                     Err(error) if error.is::<kappa::smith_waterman::SwRedoFailed>() => {
                         sw_last_failed = true;
+                        x_status_position = Some(x_match_position);
                         continue;
                     }
                     Err(error) if error.is::<kappa::smith_waterman::SwRedoEndless>() => {
@@ -1238,6 +1305,14 @@ where
                 redone_match.insert(hsp_list, best_evalue, best_score, s_idx);
             }
         }
+        // The excluded lists of the query, read after its loop (none without `-use_sw_tback`, so
+        // the loop above has no test of them).
+        query_fetch_excluded_reached(
+            excluded_here,
+            x_status_position,
+            &redone_matches[batch.clone()],
+            &mut sw_last_failed,
+        );
         // Nothing reads this query's preliminary list after its redo; it is freed here as NCBI
         // frees each list it has redone (`x_prelim_free.rs`).
         preliminary_hit_lists[q_idx] = None;
@@ -1265,4 +1340,104 @@ where
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::algorithm::blastp::hsp::BlastpHspList;
+
+    // Line RG item X4-excl: at a list whose fetch is excluded the Smith-Waterman status is cleared
+    // unless the early termination test holds (every heap of the batch filled to its cutoff and
+    // the list's best e-value above 5 times the cutoff); the heaps are read only.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3575
+    #[test]
+    fn an_excluded_list_clears_the_status_unless_the_redo_terminates_early() {
+        let mark = |best_evalue| super::super::database::FetchExcludedMatch {
+            query: 0,
+            position: 0,
+            best_evalue,
+        };
+        let empty = [BlastCompoHeap::new(1, 0.002)];
+        let mut filled = BlastCompoHeap::new(1, 0.002);
+        let list = BlastpHspList {
+            oid: 0,
+            query_index: 0,
+            hsps: Vec::new(),
+            best_evalue: 1e-40,
+        };
+        filled.insert(list, 1e-40, 400, 0);
+        assert!(filled.filled_to_cutoff());
+        let filled = [filled];
+        // A batch of two queries, the second heap empty: the test does not hold.
+        let mixed = [filled[0].clone(), BlastCompoHeap::new(1, 0.002)];
+        for (heaps, best_evalue, cleared) in [
+            (&empty[..], 0.04, true),
+            (&filled[..], 0.04, false),
+            (&filled[..], 0.01, true),
+            (&filled[..], 1e-30, true),
+            (&mixed[..], 0.04, true),
+        ] {
+            for failed_before in [true, false] {
+                let mut failed = failed_before;
+                fetch_excluded_reached(&mark(best_evalue), heaps, &mut failed);
+                let expected = failed_before && !cleared;
+                assert_eq!(failed, expected, "{best_evalue} {}", heaps.len());
+            }
+        }
+    }
+
+    #[test]
+    fn only_excluded_lists_after_the_last_status_count() {
+        let mark = |position, best_evalue| super::super::database::FetchExcludedMatch {
+            query: 0,
+            position,
+            best_evalue,
+        };
+        let empty = [BlastCompoHeap::new(1, 0.002)];
+        let mut filled = BlastCompoHeap::new(1, 0.002);
+        let list = BlastpHspList {
+            oid: 0,
+            query_index: 0,
+            hsps: Vec::new(),
+            best_evalue: 1e-40,
+        };
+        filled.insert(list, 1e-40, 400, 0);
+        let filled = [filled];
+        // `position` counts the kept lists before an excluded one: 2 is after the kept list at
+        // place 1 and before the one at place 2.
+        for (marks, status_position, heaps, cleared) in [
+            // Before, at and after the place of the last status: only after it clears.
+            (vec![mark(0, 0.04)], Some(1), &empty[..], false),
+            (vec![mark(1, 0.04)], Some(1), &empty[..], false),
+            (vec![mark(2, 0.04)], Some(1), &empty[..], true),
+            (
+                vec![mark(0, 0.04), mark(2, 0.04)],
+                Some(1),
+                &empty[..],
+                true,
+            ),
+            // After it, but the early termination holds: nothing changes.
+            (vec![mark(2, 0.04)], Some(1), &filled[..], false),
+            (
+                vec![mark(2, 0.04), mark(2, 0.005)],
+                Some(1),
+                &filled[..],
+                true,
+            ),
+            // No redo of the query set the status (a failure of an earlier query of the batch
+            // stands): every excluded list counts.
+            (vec![mark(0, 0.04)], None, &empty[..], true),
+            (vec![mark(0, 0.04)], None, &filled[..], false),
+            (vec![mark(0, 0.04), mark(0, 1e-30)], None, &filled[..], true),
+            (Vec::new(), None, &empty[..], false),
+        ] {
+            for failed_before in [true, false] {
+                let mut failed = failed_before;
+                query_fetch_excluded_reached(&marks, status_position, heaps, &mut failed);
+                let expected = failed_before && !cleared;
+                assert_eq!(failed, expected, "{status_position:?} {}", marks.len());
+            }
+        }
+    }
 }

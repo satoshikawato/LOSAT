@@ -263,13 +263,13 @@ pub(crate) trait RpsTblastnSearch: std::fmt::Debug + Send + Sync {
     /// The run's search over `database`, once per run before the first byte of the reports
     /// (`native::run_inner`): LOSAT's refusals of the database's files and of the options come
     /// there, NCBI's own errors of the files where NCBI's search of a batch raises them.
-    /// `strategy` is whether the run writes a search strategy, whose requests hold what the
-    /// search's set-up writes into the options handle (`handle_sets`).
+    /// `requests` is whether the run writes an archive or a search strategy, whose requests hold
+    /// what the search's set-up writes into the options handle (`handle_sets`).
     fn for_database(
         &self,
         options: &ResolvedOptions,
         database: Option<&super::database::BlastxDatabase>,
-        strategy: bool,
+        requests: bool,
     ) -> Result<std::sync::Arc<dyn RpsTblastnSearch>>;
     /// `native::run_query_batches` of RPSTBLASTN: the query batches of `read`, searched against
     /// the profile volumes of `database`, each handed to `take` (the search strategy's request,
@@ -292,9 +292,10 @@ pub(crate) trait RpsTblastnSearch: std::fmt::Debug + Send + Sync {
         ) -> Result<()>,
     ) -> Result<usize>;
     /// What each query batch's set-up of the search writes into NCBI's options handle beyond the
-    /// batch's search space (`rps_search::volumes::search_sets`), which the search strategy's
-    /// requests after the first hold: the search that `for_database` returned for a run that
-    /// writes a strategy knows it.
+    /// batch's search space (`rps_search::volumes::search_sets`), which the requests of the archive
+    /// and of the search strategy hold (the archive's of a batch after its set-up, the strategy's
+    /// after the first batch's): the search that `for_database` returned for a run that writes
+    /// one knows it.
     fn handle_sets(&self) -> Vec<crate::report::archive::options::Param>;
     /// Whether the batches' results are merged over a database of several volumes, as NCBI's
     /// `CLocalRPSBlast` merges them: the merge keeps only NCBI's messages of error severity (no

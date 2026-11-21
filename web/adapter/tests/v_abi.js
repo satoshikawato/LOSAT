@@ -814,6 +814,201 @@ function checkFiles(reactor) {
   assert.equal(reactor.call("losat_web2_file_release", begun.status).status, 0);
 }
 
+// -logfile names (abi_v2.md §4 *start*; line WQA's sweep, D11, 2026-11-20): a name is read as the CLI on Linux reads it
+// in a working directory where the name's directories exist. BLASTN and TBLASTX with -max_target_seqs 1 (TBLASTX
+// writes the warning where -logfile sends the diagnostics) on the outfmt11 inputs, without and with a `.ncbirc` that
+// NCBI cannot read (the one byte 0xEF: the usage report's error, which the CLI writes to its standard error at once and
+// to a -logfile file when it opens it), each against the CLI run in a new directory that has the name's directories, one
+// run per format with -out: outfmt 0, 6 and 7; stream 3 is the CLI's standard error of outfmt 6; stream 8 holds the file
+// that the name makes, under the name, or, for the names of the standard output, what the CLI writes there (its whole
+// standard output, the reports being in -out); stream 10 says where the warning went. `<dir>` is the run's directory.
+const LOG_NAMES = ["run.log", "logs/run.log", "a/b/run.log", "./run.log", "<dir>/abs/run.log", "/dev/stdout", "/dev/fd/1",
+  "-", "/dev/stderr", "/dev/fd/2", "/proc/self/fd/2", "//dev/stderr", ".", "..", "logs/", "logs/.", "", "/dev/null", "//dev/null",
+  // Line WQA's D11 round 2 (2026-11-20): names that NCBI reads otherwise than the system: a trailing '/' names the file
+  // without it, the spaces at the ends of a relative name are cut, and a file system that reports no free space
+  // (procfs: /dev/fd, /proc) gets no message; and devices whose writes are lost.
+  "run.log/", "logs//", "a/b/", "<dir>/abs/run.log/", " run.log", "run.log ", " logs/run.log", "  ", "/proc/thread-self/fd/2",
+  "/dev/fd/../stderr", "/dev/full", "/dev/zero",
+  // What the system does not open (a file descriptor that the run has not opened, a file that the user may not write, a
+  // name in a device), and what it opens otherwise than by the name: the standard input (the null device), a file of
+  // procfs (no free space) and a file of the working directory through procfs.
+  "/dev/fd/3", "/proc/self/status", "/dev/null/x", "/dev/stdout/../stderr", "/dev/stdin", "/dev/fd/0", "/proc/self/comm",
+  "/proc/self/cwd/run.log",
+  // Round 3: a directory of '/'s only is none (`CDirEntry::Reset` empties `//`), a user makes no file in a directory of
+  // root's and opens none of its devices but those whose writes are lost (a new terminal's master).
+  "//run.log", "/run.log", "/etc/run.log", "/var/log/run.log", "/home/run.log", "/dev/run.log", "/dev/kmsg", "/dev/console",
+  "/dev/ptmx",
+  // Round 4: one rule of owners (a user makes files in the working directory, a home and the directories where every user
+  // does; every other directory is root's, where only root makes one), the links of Linux (`/var/lock` is `/run/lock`,
+  // `/bin` is `/usr/bin`), and the system's limits of a path (a component of 255 bytes). `<id>` is a name of this run's
+  // own, for the files that the CLI makes outside the run's directory.
+  "/var/lock/<id>.log", "/var/run/../tmp/<id>.log", "/data/run.log", "/lost+found/run.log", "/snap/run.log",
+  "/bin/../tmp/<id>.log", "/var/lock/../tmp/<id>.log", "/dev/fd/../../tmp/<id>.log", "a".repeat(256),
+  `logs/${"b".repeat(256)}`,
+  // Round 5: a name climbs out of directories of root's that the model does not list, as the CLI passes them.
+  "/etc/default/../../tmp/<id>.log", "/usr/share/doc/../../../tmp/<id>.log",
+  // Round 6: a name looks nothing up in a directory that a user cannot search (mode 0700, root's), as the CLI's EACCES.
+  "/root/../tmp/<id>.log", "/var/cache/ldconfig/../../../tmp/<id>.log",
+  // Round 7: the system follows 40 links in a lookup (`/var/lock` is one) and refuses the 41st, as the CLI's ELOOP.
+  `${"/var/lock/../..".repeat(40)}/tmp/<id>.log`, `${"/var/lock/../..".repeat(41)}/tmp/<id>.log`];
+
+// The rows of `/`-names (LOG_NAMES) compare the Web with the CLI of the host, which must be a Linux like LOSAT Web's
+// (Ubuntu 24.04, as CI's runner): a user that is not root, `/var/lock` and `/var/run` links to `/run/lock` and `/run`,
+// `/run/lock` and `/tmp` where every user makes files (mode 1777), `/etc/default` and `/usr/share/doc`, and `/root` and
+// `/var/cache/ldconfig` that the user cannot search. Returns why this host differs, or undefined.
+function hostDiffers() {
+  const sticky = (directory) => {
+    try {
+      return (fs.statSync(directory).mode & 0o1777) === 0o1777;
+    } catch {
+      return false;
+    }
+  };
+  const resolves = (link, target) => {
+    try {
+      return fs.realpathSync(link) === target;
+    } catch {
+      return false;
+    }
+  };
+  const isDirectory = (directory) => {
+    try {
+      return fs.statSync(directory).isDirectory();
+    } catch {
+      return false;
+    }
+  };
+  const closed = (directory) => {
+    if (!isDirectory(directory)) return false;
+    try {
+      fs.accessSync(directory, fs.constants.X_OK);
+      return false;
+    } catch {
+      return true;
+    }
+  };
+  const differences = [
+    [process.getuid?.() === 0, "the run is root's"],
+    [!resolves("/var/lock", "/run/lock"), "/var/lock is not /run/lock"],
+    [!resolves("/var/run", "/run"), "/var/run is not /run"],
+    [!sticky("/run/lock"), "/run/lock is not mode 1777"],
+    [!sticky("/tmp"), "/tmp is not mode 1777"],
+    [!isDirectory("/etc/default"), "no /etc/default"],
+    [!isDirectory("/usr/share/doc"), "no /usr/share/doc"],
+    [!closed("/root"), "the user searches /root, or it is not there"],
+    [!closed("/var/cache/ldconfig"), "the user searches /var/cache/ldconfig, or it is not there"],
+  ].filter(([differs]) => differs).map(([, why]) => why);
+  return differences.length > 0 ? differences.join(", ") : undefined;
+}
+
+// The CLI's run with its standard output and error on pipes, as a shell's `|` or a terminal gives them: node's child
+// processes get sockets, which `/dev/stdout` and `/dev/stderr` cannot open (ENXIO), so that NCBI and the CLI send the
+// log to `cerr` (python's subprocess makes pipes). Its standard input is the null device, as LOSAT Web's run has none.
+function nativeOnPipes(native, argv, directory) {
+  const outFile = path.join(directory, ".stdout"), errFile = path.join(directory, ".stderr");
+  const script = "import subprocess, sys\n" +
+    "p = subprocess.run(sys.argv[3:], capture_output=True, stdin=subprocess.DEVNULL)\n" +
+    "open(sys.argv[1], 'wb').write(p.stdout); open(sys.argv[2], 'wb').write(p.stderr); sys.exit(p.returncode)\n";
+  const result = require("node:child_process").spawnSync("python3", ["-I", "-c", script, outFile, errFile, native, ...argv],
+                                                         { cwd: directory, env: { PATH: process.env.PATH, HOME: directory } });
+  assert.equal(result.stderr.length, 0, `python3: ${result.stderr}`);
+  const stdout = fs.readFileSync(outFile), stderr = fs.readFileSync(errFile);
+  fs.rmSync(outFile);
+  fs.rmSync(errFile);
+  return { status: result.status, stdout, stderr };
+}
+
+// The regular files under `directory`, as paths.
+function filesIn(directory) {
+  return fs.readdirSync(directory, { recursive: true, withFileTypes: true })
+    .filter((entry) => entry.isFile())
+    .map((entry) => path.join(entry.parentPath ?? entry.path, entry.name));
+}
+
+async function checkLogfileNames(reactor, native, scratch, engine, waitForWorkers) {
+  const differs = hostDiffers();
+  assert.ok(differs === undefined, `-logfile names: this host is not a Linux like LOSAT Web's (${differs}); ` +
+            "run V-ABI as a user on Ubuntu 24.04 or a Linux like it");
+  const inputs = path.join(ROOT, "LOSAT/tests/fasta/outfmt11");
+  const query = path.join(inputs, "arch_tbx_q.fna"), subject = path.join(inputs, "arch_tbx_s.fna");
+  const standardOutput = new Set(["/dev/stdout"]);
+  const device = (name) => name === "-" || name === "" || /^\/+(dev|proc|sys)\//.test(name);
+  let rows = 0;
+  for (const program of ["blastn", "tblastx"]) {
+    const handles = [0, 1].map((role) => {
+      const registered = reactor.call("losat_web2_register", program, role, fs.readFileSync(role === 0 ? query : subject));
+      assert.ok(registered.status > 0, registered.error);
+      return registered.status;
+    });
+    for (const ncbirc of [false, true]) {
+      let registry;
+      if (ncbirc) {
+        const begun = reactor.call("losat_web2_file_begin", 2, ".ncbirc", 1);
+        assert.ok(begun.status > 0, begun.error);
+        assert.equal(reactor.call("losat_web2_file_chunk", begun.status, Buffer.from([0xef])).status, 0);
+        assert.equal(reactor.call("losat_web2_file_end", begun.status).status, 0);
+        registry = begun.status;
+      }
+      for (const template of LOG_NAMES) {
+        const directory = fs.mkdtempSync(path.join(scratch, "logfile."));
+        const name = template.replace("<dir>", directory).replace("<id>", `losat-v-abi-${process.pid}-${engine}-${rows}`);
+        // The file that the CLI makes outside the run's directory: the path that NCBI opens, the name read lexically.
+        const outside = template.includes("<id>") ? path.posix.normalize(name) : undefined;
+        const label = `${engine} ${program}${ncbirc ? " .ncbirc 0xEF" : ""} -logfile ${JSON.stringify(name)}`;
+        // The directories that the name gives: the one that NCBI checks (the name's, without its trailing '/'s) and that
+        // of the file it opens (the name without the spaces at its ends).
+        // Not outside it: a user makes no directory of root's (`/data`), which the CLI then does not find.
+        if (!device(name) && (!name.trim().startsWith("/") || name.startsWith(directory))) {
+          for (const given of [name.replace(/\/+$/, ""), name.trim().replace(/\/+$/, "")]) {
+            const slash = given.lastIndexOf("/");
+            if (slash > 0) fs.mkdirSync(path.resolve(directory, given.slice(0, slash)), { recursive: true });
+          }
+        }
+        if (ncbirc) fs.writeFileSync(path.join(directory, ".ncbirc"), Buffer.from([0xef]));
+        const before = new Set(filesIn(directory));
+        const words = [program, "-query", query, "-subject", subject, "-max_target_seqs", "1"];
+        const outputs = new Map();
+        let cli;
+        for (const format of FORMATS[program]) {
+          const out = path.join(directory, `native.${format}.out`);
+          const result = nativeOnPipes(native, [...words, "-outfmt", String(format), "-num_threads", "1", "-out", out, "-logfile", name], directory);
+          assert.equal(result.status, 0, `${label}: native outfmt ${format}: ${result.stderr}`);
+          outputs.set(format, fs.readFileSync(out));
+          fs.rmSync(out);
+          // The file that the run made (NCBI's name for it: `logs` for `logs/`, `run.log` for ` run.log`).
+          const madeFiles = filesIn(directory).filter((file) => !before.has(file));
+          if (outside !== undefined && fs.existsSync(outside)) madeFiles.push(outside);
+          assert.ok(madeFiles.length <= 1, `${label}: native outfmt ${format} made ${madeFiles}`);
+          const made = madeFiles.length === 1 ? fs.readFileSync(madeFiles[0]) : undefined;
+          // The next format's run appends to the file: each run starts without it.
+          if (made !== undefined) fs.rmSync(madeFiles[0]);
+          if (format === 6) cli = { stderr: result.stderr, stdout: result.stdout, made };
+        }
+        const files = standardOutput.has(name) ? [[name, cli.stdout]] : cli.made === undefined ? [] : [[name, cli.made]];
+        if (!standardOutput.has(name)) assert.equal(cli.stdout.length, 0, `${label}: the CLI's standard output with -out`);
+        const run = reactor.call("losat_web2_run", [...words, "-logfile", name, "-num_threads", "1"].join("\0"), ...handles);
+        if (waitForWorkers) await waitForWorkers();
+        assert.equal(run.status, 0, `${label}: ${run.error}`);
+        for (const format of FORMATS[program]) {
+          assert.equal(sha256(run.streams.get(format) || Buffer.alloc(0)), sha256(outputs.get(format)), `${label}: outfmt ${format}`);
+        }
+        assert.equal((run.streams.get(3) || Buffer.alloc(0)).toString(), cli.stderr.toString(), `${label}: stream 3 is the CLI's standard error`);
+        const sent = run.streams.has(8) ? storedZipEntries(run.streams.get(8)).map(([entry, bytes]) => [entry, bytes.toString()]) : [];
+        assert.deepEqual(sent, files.map(([entry, bytes]) => [entry, bytes.toString()]), `${label}: the files of the run (stream 8)`);
+        const warning = `Warning: [${program}] Examining 5 or more matches is recommended\n`;
+        const place = run.streams.get(10).readUInt32LE(0);
+        const where = cli.stderr.toString().includes(warning) ? 3 : files.some(([, bytes]) => bytes.toString().includes(warning)) ? 8 : 0xffffffff;
+        assert.equal(place, where, `${label}: where the run's messages go (stream 10)`);
+        fs.rmSync(directory, { recursive: true, force: true });
+        rows++;
+      }
+      if (registry !== undefined) assert.equal(reactor.call("losat_web2_file_release", registry).status, 0);
+    }
+    for (const handle of handles) assert.equal(reactor.call("losat_web2_release", handle).status, 0);
+  }
+  return rows;
+}
+
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "losat-v-abi-"));
@@ -829,6 +1024,8 @@ async function main() {
     assert.equal(reactor.exports.losat_web2_abi_version(), 7);
     checkSurface(reactor, options.native);
     console.log(`ok ${engine.name} describe, validate, register, scan`);
+    const logRows = await checkLogfileNames(reactor, options.native, scratch, engine.name, waitForWorkers);
+    console.log(`ok ${engine.name} -logfile names: ${logRows} runs as the CLI's`);
     const subjects = new Map(); // "program subject" -> handle, kept across runs
     const counts = new Map(); // the -window_masker_db value or taxid file name -> { handle, file }, kept across runs
     let countsRegistered = 0, countsKept = 0;

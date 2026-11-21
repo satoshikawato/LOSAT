@@ -196,6 +196,8 @@ impl RpstblastnArgs {
             subject_loc: None,
             db: self.db,
             db_filter: Default::default(),
+            // rpstblastn has no database masks (NCBI's unknown arguments).
+            db_mask: Default::default(),
             // `-dbsize`, `-searchsp` and `OLD_FSC` (BLASTX's resolve reads the environment):
             // BLASTX's effective lengths of the frames, the search space over the frames in the
             // hit cutoff (`rps_search::engine`), per volume with `-dbsize` on several volumes.

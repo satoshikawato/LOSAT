@@ -68,6 +68,13 @@ impl SeqIdError {
     pub fn what(&self) -> Vec<u8> {
         self.exception().what()
     }
+
+    /// `CException::what()` in NCBI's words (before `crate::wording::losat_bytes`), with the
+    /// message's bytes as NCBI's `std::string` holds them: windowmasker posts it for an id of a
+    /// list, which may be any bytes.
+    pub(crate) fn ncbi_what_bytes(&self) -> Vec<u8> {
+        self.exception().ncbi_what()
+    }
 }
 
 const SEQ_ID_CPP: &str = "src/objects/seq/../seqloc/Seq_id.cpp";

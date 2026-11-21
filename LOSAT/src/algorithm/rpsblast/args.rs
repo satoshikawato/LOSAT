@@ -187,6 +187,8 @@ impl RpsblastArgs {
             subject: None,
             db: self.db,
             db_filter: Default::default(),
+            // rpsblast has no database masks (NCBI's unknown arguments).
+            db_mask: Default::default(),
             dbsize: self.dbsize,
             show_gis: self.show_gis,
             parse_deflines: self.parse_deflines,

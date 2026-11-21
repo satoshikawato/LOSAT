@@ -13,6 +13,7 @@ from importlib.metadata import PackageNotFoundError, version
 
 from ._api import (
     PROGRAMS,
+    Alignment,
     Batch,
     Batches,
     Database,
@@ -54,6 +55,7 @@ except PackageNotFoundError:
 __all__ = [
     "ENGINE_VERSION",
     "PROGRAMS",
+    "Alignment",
     "ArgumentError",
     "Batch",
     "Batches",

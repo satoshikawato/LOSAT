@@ -121,6 +121,7 @@ impl IdLookup<'_> {
     /// order, inside a file the order of LMDB's duplicates (`memcmp` of the 4 little-endian
     /// bytes). NCBI sets its OID list up first, so its check keeps the included OIDs.
     pub fn accession_to_oids(&self, acc: &[u8]) -> Result<Vec<u32>, SeqDbError> {
+        self.db.oid_list_ready()?;
         self.db.set_up_oid_list();
         let mut oids = Vec::new();
         for entry in &self.entries {
@@ -148,6 +149,9 @@ impl IdLookup<'_> {
         oids: &mut Vec<Option<u32>>,
     ) -> Result<(), SeqDbError> {
         entries_accessions_to_oids(&self.entries, accs, oids)?;
+        if oids.iter().any(Option::is_some) {
+            self.db.oid_list_ready()?;
+        }
         for slot in oids.iter_mut() {
             if slot.is_some_and(|oid| !self.db.check_oid(oid)) {
                 *slot = None;
@@ -172,6 +176,7 @@ impl IdLookup<'_> {
         acc: &[u8],
         simplified: &SimplifiedAccession,
     ) -> Result<Option<Vec<u32>>, SeqDbError> {
+        self.db.oid_list_ready()?;
         self.db.set_up_oid_list();
         if simplified.id_type == SeqDbIdType::Oid {
             let oid = u32::try_from(simplified.num_id).ok();
@@ -362,6 +367,7 @@ impl IdLookup<'_> {
                 continue;
             };
             let mut oid = found;
+            self.db.oid_list_ready()?;
             if self.db.check_or_find_oid(&mut oid) && oid == found {
                 return Ok(Some(oid));
             }

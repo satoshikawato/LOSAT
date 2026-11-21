@@ -3,9 +3,10 @@
 //! LOSAT reads the keys a multi-volume database of makeblastdb uses, `TITLE`
 //! and `DBLIST`, the counts NCBI's reader takes from its walks of the alias
 //! tree (`NSEQ`, `LENGTH`, `MIN_SEQ_LENGTH`, `STATS_NSEQ`, `STATS_TOTLEN`:
-//! `walk_totals`) and the OID ranges `FIRST_OID` / `LAST_OID` (`compute_masks`,
-//! `range_mask`). The keys that select sequences by a list, an OID mask or a
-//! membership bit, and `MASKLIST`, are explicit errors (not supported yet);
+//! `walk_totals`), the OID ranges `FIRST_OID` / `LAST_OID` and the OID lists of
+//! `OIDLIST` (`compute_masks`, `alias_oid_mask`). The keys that select sequences
+//! by a list of ids or a membership bit, `OID_MASK_TYPE` and `MASKLIST` are
+//! explicit errors (not supported yet);
 //! unknown keys, `VDBLIST` and `MAX_SEQ_LENGTH` among them, are ignored, as in
 //! NCBI.
 //!
@@ -22,6 +23,7 @@ use std::ffi::OsStr;
 use std::path::{Path, MAIN_SEPARATOR};
 
 use super::file::DbFile;
+use super::oid_list::{self, OidListError, OidListFile};
 use super::volume::with_extension;
 use super::{SeqDbError, SeqType};
 use crate::ncbi_exception::NcbiException;
@@ -38,6 +40,12 @@ pub(super) struct AliasNode {
     /// `FIRST_OID` / `LAST_OID` of the alias file as `ComputeMasks` reads them
     /// (`compute_masks`); `None` before it ran and for a node without them.
     pub range: Option<OidRange>,
+    /// The path of the OID list file of the alias file's `OIDLIST` as `ComputeMasks`
+    /// resolves it (`compute_masks`); `None` before it ran and for a node without the key.
+    pub oid_list: Option<String>,
+    /// The directory of the alias file (`m_DBPath`), which a relative `OIDLIST` is joined to;
+    /// empty for the top node.
+    pub db_path: String,
     /// Alias files named in `DBLIST`, in order.
     pub subnodes: Vec<AliasNode>,
     /// Volumes named in `DBLIST` (paths without extension), in order.
@@ -98,20 +106,20 @@ pub(super) struct AliasTree {
 }
 
 /// Alias keys that LOSAT recognises and does not support: they select
-/// sequences by a list, an OID mask or a membership bit (alias_files.txt
-/// "Type: filter"), or name masks LOSAT does not read (`MASKLIST`). They are
-/// the keys NCBI's reader looks up (seqdbalias.cpp) but those LOSAT reads:
-/// `TITLE`, `DBLIST`, the counts of the walks (`walk_totals`) and the OID
-/// ranges (`compute_masks`). `MAX_SEQ_LENGTH`, which NCBI never applies
+/// sequences by a list of ids or a membership bit (alias_files.txt "Type:
+/// filter"), remove the definition lines of model sequences (`OID_MASK_TYPE`),
+/// or name masks LOSAT does not read (`MASKLIST`). They are the keys NCBI's
+/// reader looks up (seqdbalias.cpp) but those LOSAT reads: `TITLE`, `DBLIST`,
+/// the counts of the walks (`walk_totals`), the OID ranges and the OID lists
+/// (`compute_masks`). `MAX_SEQ_LENGTH`, which NCBI never applies
 /// (seqdbimpl.cpp:972-976 takes the maximum from the volumes), and `VDBLIST`,
 /// which only NCBI's VDB tools read (vdbalias.cpp; `CSeqDBAliasNode` looks it
 /// up nowhere), are ignored as unknown keys are.
-const UNSUPPORTED_KEYS: [&str; 8] = [
+const UNSUPPORTED_KEYS: [&str; 7] = [
     "GILIST",
     "TILIST",
     "SEQIDLIST",
     "TAXIDLIST",
-    "OIDLIST",
     "MEMB_BIT",
     "MASKLIST",
     "OID_MASK_TYPE",
@@ -690,8 +698,14 @@ impl Resolver<'_> {
                     if let Some(key) = UNSUPPORTED_KEYS.iter().find(|k| k.as_bytes() == other) {
                         return Err(unsupported(format!(
                             "alias file key {key} is not supported; LOSAT reads TITLE, DBLIST, NSEQ, \
-                             LENGTH, STATS_NSEQ, STATS_TOTLEN, MIN_SEQ_LENGTH, FIRST_OID and LAST_OID"
+                             LENGTH, STATS_NSEQ, STATS_TOTLEN, MIN_SEQ_LENGTH, FIRST_OID, LAST_OID \
+                             and OIDLIST"
                         )));
+                    }
+                    if other == b"OIDLIST" && std::str::from_utf8(value).is_err() {
+                        return Err(unsupported(
+                            "the OIDLIST value is not valid UTF-8".to_string(),
+                        ));
                     }
                 }
             }
@@ -707,6 +721,7 @@ impl Resolver<'_> {
         let mut node = AliasNode {
             this_name: Some(path.to_string_lossy().into_owned()),
             values,
+            db_path: dir_name(base).to_string(),
             ..AliasNode::default()
         };
         let result = self.expand(&mut node, dir_name(base), base, &entries, false);
@@ -838,7 +853,7 @@ fn collect_volumes(node: &AliasNode, out: &mut Vec<String>) {
 // A volume reached from several nodes (an alias file and a name of `-db`, or
 // two alias files) is one entry of the set, so it is opened once and its OIDs
 // are numbered once; NCBI's walks still count it once per node that names it
-// (`walk_totals`), and its OIDs are those of every path to it (`range_mask`).
+// (`walk_totals`), and its OIDs are those of every path to it (`alias_oid_mask`).
 // A node lists a volume once however often its `DBLIST` names it
 // (`push_unique`, seqdbalias.cpp:789-798, 864-873, 905-914). Volumes of the
 // same base name in different directories (two databases of one name, `-db
@@ -1242,14 +1257,21 @@ pub(super) fn walk_totals(root: &AliasNode, volume: &dyn Fn(&str) -> (u32, u64))
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:1963-1980
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:1963-2014
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:2094-2097
 // The rest of the range is cited at `OidRange::bounds`. NCBI's constructor runs this first
-// (`m_Aliases.HasFilters()`, seqdbimpl.cpp:96), before any count walk. The other filter keys
-// are refused when the alias file is read, so a node's filters are its range alone.
-/// `ComputeMasks` of the top node: `FIRST_OID`, then `LAST_OID`, of every node from the top
-/// down, a node before its sub-nodes (`NStr::StringToUInt`); the first value that does not
-/// convert is the error.
+// (`m_Aliases.HasFilters()`, seqdbimpl.cpp:96), before any count walk. The keys of the lists of
+// ids and `MEMB_BIT` are refused when the alias file is read, so the filters of a node are its
+// range and its OID list. The path of `OIDLIST` is its value joined to the directory of the alias
+// file (`combine_path`: an absolute value stays as it is, an empty one is the directory); when
+// that is not a regular file (`exists`) and the node names volumes itself, it is the value joined
+// to the directory of the first of them (probes I5, I7, I8 and I1b of line RG D1b: a volume
+// found through `BLASTDB` or in the current directory moves it there). The file is read where
+// NCBI builds its OID list (`alias_oid_mask`). `OID_MASK_TYPE`, which NCBI converts here after
+// `OIDLIST`, is refused when the alias file is read.
+/// `ComputeMasks` of the top node: `FIRST_OID`, then `LAST_OID` (`NStr::StringToUInt`), then the
+/// path of `OIDLIST`, of every node from the top down, a node before its sub-nodes; the first value
+/// that does not convert is the error.
 pub(super) fn compute_masks(node: &mut AliasNode) -> Result<(), NcbiException> {
     let first_oid = node.value("FIRST_OID").map(string_to_uint).transpose()?;
     let last_oid = node.value("LAST_OID").map(string_to_uint).transpose()?;
@@ -1259,73 +1281,146 @@ pub(super) fn compute_masks(node: &mut AliasNode) -> Result<(), NcbiException> {
             last_oid,
         });
     }
+    if let Some(value) = node.value("OIDLIST") {
+        let value = String::from_utf8_lossy(value).into_owned();
+        let mut path = combine_path(&node.db_path, &value);
+        if !exists(Path::new(&path)) {
+            if let Some(first) = node.vol_names.first() {
+                path = combine_path(dir_name(first), &value);
+            }
+        }
+        node.oid_list = Some(path);
+    }
     for subnode in &mut node.subnodes {
         compute_masks(subnode)?;
     }
     Ok(())
 }
 
-/// Whether some node of the tree has an OID range (`CSeqDB_FilterTree::HasFilter`, the filters
-/// being ranges alone).
-pub(super) fn has_ranges(node: &AliasNode) -> bool {
-    node.range.is_some() || node.subnodes.iter().any(has_ranges)
+/// Whether some node of the tree has a filter, an OID range or an OID list
+/// (`CSeqDB_FilterTree::HasFilter`).
+pub(super) fn has_filters(node: &AliasNode) -> bool {
+    node.range.is_some() || node.oid_list.is_some() || node.subnodes.iter().any(has_filters)
 }
 
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:91-99
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:1510-1556
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:1598-1611
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:109-112
+// The explorer looks at the keys, not at their values (probe K1: `NSEQ abc` beside `OIDLIST`
+// is never converted), and the walk does not go below a node whose `Explore` ends it. The
+// other keys of lists are refused, so `OIDLIST` is the one that asks for a scan here.
+/// Whether NCBI's constructor scans the totals of the included OIDs for the alias tree under
+/// `node` (`NeedTotalsScan`): a node with `OIDLIST` is reached without passing a node that has
+/// both `NSEQ` and `LENGTH`.
+pub(super) fn needs_totals_scan(node: &AliasNode) -> bool {
+    if node.value("NSEQ").is_some() && node.value("LENGTH").is_some() {
+        return false;
+    }
+    if node.value("OIDLIST").is_some() {
+        return true;
+    }
+    node.subnodes.iter().any(needs_totals_scan)
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:80-99
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:130-177
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:191-207
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbfilter.cpp:38-55
-// The tree of one volume keeps the branches that reach it and lifts a node without a filter
-// into its parent. A node's OIDs of the volume are its range (the whole volume without one)
-// intersected with the volume when the node names the volume, else with the union of its
-// sub-nodes' OIDs; a sub-node's OIDs below a node that names the volume are inside the whole
-// volume, so ignoring them changes nothing. By distribution the OIDs of a volume are therefore
-// the union, over the paths from the top node to each node that names the volume, of the
-// intersection of the ranges on the path with the volume, which is what is computed here.
-// The ranges count the OIDs of the whole volume set (`vol_start`, `vol_end` are global).
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:219-234
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:290-291
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbbitset.hpp:104-114
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbbitset.cpp:208-220
 // (The whole of `IntersectWith` is cited at `BitSetShape::intersect_with`.)
-// The `int` bounds of a range become `size_t`: a negative one is sign-extended past every OID
-// (line RG D1a-2, survey A M2), so a negative `FIRST_OID` keeps no OID and a negative
+// For each volume in order, the tree specialised to it (`specialize`): a node that names the
+// volume starts from all of its OIDs and does not look at its sub-nodes, any other node from the
+// union of its sub-nodes; the node's range and OID list are then ANDed in, the range first. So
+// the OID lists are read in that order, a sub-node's before its parent's, and only on the branches
+// that reach the volume without passing a node that names it: the first file that fails is
+// NCBI's error (`oid_list::OidListError`). An OID list is read relative to each volume (bit `i` is
+// the volume's OID `i`, probe F1 of line RG D1b); the ranges count the OIDs of the whole volume
+// set. The `int` bounds of a range become `size_t`: a negative one is sign-extended past every
+// OID (line RG D1a-2, survey A M2), so a negative `FIRST_OID` keeps no OID and a negative
 // `LAST_OID` is no upper bound, as `bound` reads them.
-/// The OIDs that the OID ranges of the tree include, one bit per OID of the volume set (bit
-/// `oid % 64` of word `oid / 64`); `volume` gives the global OIDs `[start, end)` of a volume
-/// path. `None` when no node has a range: NCBI builds no OID list then, and every OID is
-/// included.
-pub(super) fn range_mask(
+/// The OIDs that the alias tree `root` includes, one bit per OID of the volume set (bit
+/// `oid % 64` of word `oid / 64`): `volumes` are the volume paths in NCBI's order with their
+/// global OIDs `[start, end)`. `None` when no node has a filter: NCBI builds no OID list then,
+/// and every OID is included. The OID list files are read once each (`files`).
+pub(super) fn alias_oid_mask(
     root: &AliasNode,
-    volume: &dyn Fn(&str) -> (u32, u32),
+    volumes: &[(&str, u32, u32)],
     num_oids: u32,
-) -> Option<Vec<u64>> {
-    if !has_ranges(root) {
-        return None;
+) -> Result<Option<Vec<u64>>, OidListError> {
+    if !has_filters(root) {
+        return Ok(None);
     }
-    fn mark(
-        node: &AliasNode,
-        lo: u64,
-        hi: u64,
-        volume: &dyn Fn(&str) -> (u32, u32),
-        words: &mut [u64],
-    ) {
-        let (lo, hi) = match node.range {
-            Some(range) => {
-                let (begin, end) = range.bounds();
-                (lo.max(bound(begin)), hi.min(bound(end)))
-            }
-            None => (lo, hi),
-        };
-        for path in &node.vol_names {
-            let (start, end) = volume(path);
-            set_bits(words, lo.max(u64::from(start)), hi.min(u64::from(end)));
-        }
-        for subnode in &node.subnodes {
-            mark(subnode, lo, hi, volume, words);
-        }
-    }
+    let mut files = std::collections::HashMap::new();
     let mut words = vec![0u64; (num_oids as usize).div_ceil(64)];
-    mark(root, 0, u64::MAX, volume, &mut words);
-    Some(words)
+    for &(name, start, end) in volumes {
+        let Some(node) = specialize(root, name) else {
+            continue;
+        };
+        let oids = volume_oids(&node, start, end, &mut files)?;
+        or_at(&mut words, &oids, start);
+    }
+    Ok(Some(words))
+}
+
+/// The OIDs `[start, end)` of one volume (volume-relative bits, `alias_oid_mask`) that the
+/// specialised tree `node` keeps (`CSeqDBOIDList::x_ComputeFilters`).
+fn volume_oids<'a>(
+    node: &VolumeNode<'a>,
+    start: u32,
+    end: u32,
+    files: &mut std::collections::HashMap<&'a str, OidListFile>,
+) -> Result<Vec<u64>, OidListError> {
+    let len = end - start;
+    let mut map = vec![0u64; (len as usize).div_ceil(64)];
+    if node.volumes > 0 {
+        set_bits(&mut map, 0, u64::from(len));
+    } else {
+        for sub in &node.nodes {
+            let bits = volume_oids(sub, start, end, files)?;
+            for (word, bit) in map.iter_mut().zip(bits) {
+                *word |= bit;
+            }
+        }
+    }
+    if let Some(range) = node.range {
+        let (first, last) = range.bounds();
+        let from = bound(first).max(u64::from(start)) - u64::from(start);
+        let to = bound(last)
+            .min(u64::from(end))
+            .saturating_sub(u64::from(start));
+        let mut kept = vec![0u64; map.len()];
+        set_bits(&mut kept, from, to);
+        for (word, keep) in map.iter_mut().zip(kept) {
+            *word &= keep;
+        }
+    }
+    if let Some(path) = node.oid_list {
+        let file = match files.entry(path) {
+            std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
+            std::collections::hash_map::Entry::Vacant(entry) => entry.insert(oid_list::read(path)?),
+        };
+        for (word, keep) in map.iter_mut().zip(file.volume_words(len)?) {
+            *word &= keep;
+        }
+    }
+    Ok(map)
+}
+
+/// ORs the volume-relative bits `bits` into the global bits `words` from OID `start`.
+fn or_at(words: &mut [u64], bits: &[u64], start: u32) {
+    let shift = start % 64;
+    let first = (start / 64) as usize;
+    for (at, &word) in bits.iter().enumerate() {
+        if word == 0 {
+            continue;
+        }
+        words[first + at] |= word << shift;
+        if shift > 0 && first + at + 1 < words.len() {
+            words[first + at + 1] |= word >> (64 - shift);
+        }
+    }
 }
 
 /// NCBI's `size_t` of an `int` bound of an OID range (`CSeqDB_BitSet(mask.GetBegin(), ...)`).
@@ -1436,20 +1531,30 @@ impl BitSetShape {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbfilter.cpp:57-78
-// (The first half of `Specialize` is cited at `range_mask`.) The filters of a node are its
-// OID range, the only alias filter LOSAT reads (`UNSUPPORTED_KEYS`).
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbfilter.cpp:38-55
+// The filters of a node are its OID range and its OID list, the alias filters LOSAT reads
+// (`UNSUPPORTED_KEYS`).
 /// A node of NCBI's filter tree specialised to one volume (`CSeqDB_FilterTree::Specialize`):
-/// its OID range, its sub-nodes, and how many times it names the volume.
-struct VolumeNode {
+/// its OID range and OID list, its sub-nodes, and how many times it names the volume.
+struct VolumeNode<'a> {
     range: Option<OidRange>,
-    nodes: Vec<VolumeNode>,
+    oid_list: Option<&'a str>,
+    nodes: Vec<VolumeNode<'a>>,
     volumes: usize,
 }
 
+impl VolumeNode<'_> {
+    /// Whether the node has a filter of its own (`GetFilters()` not empty).
+    fn has_filters(&self) -> bool {
+        self.range.is_some() || self.oid_list.is_some()
+    }
+}
+
 /// `Specialize(volume)` of the tree under `node`; `None` when no branch reaches the volume.
-fn specialize(node: &AliasNode, volume: &str) -> Option<VolumeNode> {
+fn specialize<'a>(node: &'a AliasNode, volume: &str) -> Option<VolumeNode<'a>> {
     let mut clone = VolumeNode {
         range: node.range,
+        oid_list: node.oid_list.as_deref(),
         nodes: Vec::new(),
         volumes: 0,
     };
@@ -1458,7 +1563,7 @@ fn specialize(node: &AliasNode, volume: &str) -> Option<VolumeNode> {
         .iter()
         .filter_map(|sub| specialize(sub, volume))
     {
-        if sub.range.is_some() {
+        if sub.has_filters() {
             clone.nodes.push(sub);
         } else {
             clone.nodes.extend(sub.nodes);
@@ -1466,7 +1571,7 @@ fn specialize(node: &AliasNode, volume: &str) -> Option<VolumeNode> {
         }
     }
     clone.volumes += node.vol_names.iter().filter(|name| *name == volume).count();
-    while clone.range.is_none() && clone.volumes == 0 && clone.nodes.len() == 1 {
+    while !clone.has_filters() && clone.volumes == 0 && clone.nodes.len() == 1 {
         clone = clone.nodes.pop().expect("one sub-node");
     }
     (!clone.nodes.is_empty() || clone.volumes > 0).then_some(clone)
@@ -1492,6 +1597,10 @@ fn volume_bits(node: &VolumeNode, start: u64, end: u64) -> BitSetShape {
         filter =
             filter.intersect_with(BitSetShape::new(bound(first), bound(last), Special::AllSet));
     }
+    // An OID list is a bit array (`x_GetOidMask`).
+    if node.oid_list.is_some() {
+        filter = filter.intersect_with(BitSetShape::new(start, end, Special::None));
+    }
     map.intersect_with(filter)
 }
 
@@ -1500,12 +1609,13 @@ fn volume_bits(node: &VolumeNode, start: u64, end: u64) -> BitSetShape {
 // `m_AllBits` starts as a bit array over every OID, all clear. It becomes the special all-set
 // only by the copy of a volume's special all-set that covers every OID: the `-db` names reach
 // one volume (that holds OIDs), and at least one path of the alias tree to it crosses no
-// `FIRST_OID`-`LAST_OID` range that cuts the volume (a union of special sets stays special only
-// when one covers the others; two ranges whose union is the volume make a bit array). Its
+// `FIRST_OID`-`LAST_OID` range that cuts the volume and no OID list (a union of special sets
+// stays special only when one covers the others; two ranges whose union is the volume make a bit
+// array; an OID list is a bit array). Its
 // `m_Bits` then takes the empty vector of the copy, and keeps the array of the volume set as
 // its capacity (`vector::operator=` reuses the storage).
 /// Whether NCBI's OID bit set of the volume set (`CSeqDBOIDList::m_AllBits`) is the special
-/// all-set one after the OID ranges of the alias tree `root` (`x_Setup`), the volumes `names`
+/// all-set one after the filters of the alias tree `root` (`x_Setup`), the volumes `names`
 /// (in NCBI's order) holding the global OIDs `starts[i]..starts[i + 1]`.
 pub(super) fn all_bits_special_set(root: &AliasNode, names: &[String], starts: &[u32]) -> bool {
     let mut all = BitSetShape::new(0, u64::from(starts[names.len()]), Special::None);
@@ -1523,17 +1633,21 @@ pub(super) fn all_bits_special_set(root: &AliasNode, names: &[String], starts: &
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:247-258
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:183-201
 // The filter tree's top node has one sub-node per alias file of the top node
-// (`BuildFilterTree`, seqdbalias.cpp:1880-1894), and a node's only filter is its range (the
-// other filter keys are refused). The bounds are NCBI's `int`s (`OidRange::bounds`), negative
+// (`BuildFilterTree`, seqdbalias.cpp:1880-1894); a node with an OID list besides its range has
+// two filters (the other filter keys are refused). The bounds are NCBI's `int`s
+// (`OidRange::bounds`), negative
 // for a value of 2^31 or more: a negative `oid_begin` starts at 0, a negative `oid_end` ends at
 // 0, and `LAST_OID 0` (`oid_end` 0) ends at the last OID.
 /// The iteration range NCBI sets on its first OID-list build when the top node has exactly one
-/// alias file and that file has an OID range: `[begin, end)` as `SetIterationRange` clamps it
+/// alias file and that file's only filter is an OID range: `[begin, end)` as `SetIterationRange` clamps it
 /// to the `num_oids` OIDs of the volume set. `None` in every other case.
 pub(super) fn top_iteration_range(root: &AliasNode, num_oids: u32) -> Option<(u32, u32)> {
     let [only] = root.subnodes.as_slice() else {
         return None;
     };
+    if only.oid_list.is_some() {
+        return None;
+    }
     let (oid_begin, oid_end) = only.range?.bounds();
     let num_oids = i64::from(num_oids);
     let mut restrict_begin = i64::from(oid_begin.max(0));

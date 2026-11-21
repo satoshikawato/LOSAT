@@ -1,0 +1,419 @@
+BLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: oidlist k
+           12 sequences; 1,704 total letters
+
+
+
+Query= ENST00000320868.9 cdna chromosome:GRCh38:16:176680:177522:1
+gene:ENSG00000206172.10 gene_biotype:protein_coding
+transcript_biotype:protein_coding gene_symbol:HBA1
+description:hemoglobin subunit alpha 1 [Source:HGNC
+Symbol;Acc:HGNC:4823]
+
+Length=577
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  286     2e-104
+Q9TS35.2 RecName: Full=Hemoglobin subunit alpha-1; AltName: Full=...  281     1e-102
+P63107.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  278     3e-101
+P01942.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  253     3e-91 
+P60529.1 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  242     4e-87 
+P01946.3 RecName: Full=Hemoglobin subunit alpha-1/2; AltName: Ful...  209     1e-73 
+P01999.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  205     3e-72 
+P09105.2 RecName: Full=Hemoglobin subunit theta-1; AltName: Full=...  181     6e-63 
+P02008.2 RecName: Full=Hemoglobin subunit zeta; AltName: Full=HBA...  175     1e-60 
+Q9PRL9.1 RecName: Full=Hemoglobin subunit alpha-1; AltName: Full=...  173     8e-60 
+Q90487.3 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  152     2e-51 
+P11251.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  150     9e-51 
+
+
+>P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain; Contains: RecName: 
+Full=Hemopressin [Homo sapiens] >sp|P69906.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: 
+Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan paniscus] >sp|P69907.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin 
+alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan troglodytes]
+ P01972.1 RecName: Full=Hemoglobin subunit alpha-1/2; AltName: Full=Alpha-1/2-globin; 
+AltName: Full=Hemoglobin alpha-1/2 chain [Odocoileus 
+virginianus virginianus]
+Length=142
+
+ Score = 286 bits (732),  Expect = 2e-104, Method: Compositional matrix adjust.
+ Identities = 142/142 (100%), Positives = 142/142 (100%), Gaps = 0/142 (0%)
+ Frame = +2
+
+Query  38   MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  217
+            MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG
+Sbjct  1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+
+Query  218  KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  397
+            KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP
+Sbjct  61   KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+
+Query  398  AVHASLDKFLASVSTVLTSKYR  463
+            AVHASLDKFLASVSTVLTSKYR
+Sbjct  121  AVHASLDKFLASVSTVLTSKYR  142
+
+
+ Score = 15.0 bits (27),  Expect = 9.1, Method: Compositional matrix adjust.
+ Identities = 6/6 (100%), Positives = 6/6 (100%), Gaps = 0/6 (0%)
+ Frame = -2
+
+Query  450  VSTVLT  433
+            VSTVLT
+Sbjct  133  VSTVLT  138
+
+
+>Q9TS35.2 RecName: Full=Hemoglobin subunit alpha-1; AltName: Full=Alpha-1-globin; 
+AltName: Full=Hemoglobin alpha-1 chain; Contains: 
+RecName: Full=Hemopressin [Hylobates lar]
+ Q7LZC3.1 RecName: Full=Hemoglobin subunit alpha-A; AltName: Full=Alpha-A-globin; 
+AltName: Full=Hemoglobin alpha-A chain [Streptopelia 
+orientalis]
+Length=142
+
+ Score = 281 bits (720),  Expect = 1e-102, Method: Compositional matrix adjust.
+ Identities = 140/142 (99%), Positives = 141/142 (99%), Gaps = 0/142 (0%)
+ Frame = +2
+
+Query  38   MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  217
+            MVLSPADKTNVKAAWGKVGAHAG+YGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG
+Sbjct  1    MVLSPADKTNVKAAWGKVGAHAGDYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+
+Query  218  KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  397
+            KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAH PAEFTP
+Sbjct  61   KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHHPAEFTP  120
+
+Query  398  AVHASLDKFLASVSTVLTSKYR  463
+            AVHASLDKFLASVSTVLTSKYR
+Sbjct  121  AVHASLDKFLASVSTVLTSKYR  142
+
+
+ Score = 15.0 bits (27),  Expect = 8.8, Method: Compositional matrix adjust.
+ Identities = 6/6 (100%), Positives = 6/6 (100%), Gaps = 0/6 (0%)
+ Frame = -2
+
+Query  450  VSTVLT  433
+            VSTVLT
+Sbjct  133  VSTVLT  138
+
+
+>P63107.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain; Contains: RecName: 
+Full=Hemopressin [Macaca fuscata fuscata] >sp|P63108.2| 
+RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain; Contains: RecName: 
+Full=Hemopressin [Macaca mulatta]
+ P01986.2 RecName: Full=Hemoglobin subunit alpha-A; AltName: Full=Alpha-A-globin; 
+AltName: Full=Hemoglobin alpha-A chain [Anas platyrhynchos]
+Length=142
+
+ Score = 278 bits (712),  Expect = 3e-101, Method: Compositional matrix adjust.
+ Identities = 138/142 (97%), Positives = 139/142 (98%), Gaps = 0/142 (0%)
+ Frame = +2
+
+Query  38   MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  217
+            MVLSPADK+NVKAAWGKVG HAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG
+Sbjct  1    MVLSPADKSNVKAAWGKVGGHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+
+Query  218  KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  397
+            KKVADALT AV HVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP
+Sbjct  61   KKVADALTLAVGHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+
+Query  398  AVHASLDKFLASVSTVLTSKYR  463
+            AVHASLDKFLASVSTVLTSKYR
+Sbjct  121  AVHASLDKFLASVSTVLTSKYR  142
+
+
+ Score = 15.0 bits (27),  Expect = 9.2, Method: Compositional matrix adjust.
+ Identities = 6/6 (100%), Positives = 6/6 (100%), Gaps = 0/6 (0%)
+ Frame = -2
+
+Query  450  VSTVLT  433
+            VSTVLT
+Sbjct  133  VSTVLT  138
+
+
+>P01942.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain; Contains: RecName: 
+Full=Hemopressin [Mus musculus]
+Length=142
+
+ Score = 253 bits (646),  Expect = 3e-91, Method: Compositional matrix adjust.
+ Identities = 122/142 (86%), Positives = 131/142 (92%), Gaps = 0/142 (0%)
+ Frame = +2
+
+Query  38   MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  217
+            MVLS  DK+N+KAAWGK+G H  EYGAEALERMF SFPTTKTYFPHFD+SHGSAQVKGHG
+Sbjct  1    MVLSGEDKSNIKAAWGKIGGHGAEYGAEALERMFASFPTTKTYFPHFDVSHGSAQVKGHG  60
+
+Query  218  KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  397
+            KKVADAL +A  H+DD+P ALSALSDLHAHKLRVDPVNFKLLSHCLLVTLA+H PA+FTP
+Sbjct  61   KKVADALASAAGHLDDLPGALSALSDLHAHKLRVDPVNFKLLSHCLLVTLASHHPADFTP  120
+
+Query  398  AVHASLDKFLASVSTVLTSKYR  463
+            AVHASLDKFLASVSTVLTSKYR
+Sbjct  121  AVHASLDKFLASVSTVLTSKYR  142
+
+
+ Score = 15.0 bits (27),  Expect = 8.1, Method: Compositional matrix adjust.
+ Identities = 6/6 (100%), Positives = 6/6 (100%), Gaps = 0/6 (0%)
+ Frame = -2
+
+Query  450  VSTVLT  433
+            VSTVLT
+Sbjct  133  VSTVLT  138
+
+
+>P60529.1 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain; Contains: RecName: 
+Full=Hemopressin [Canis lupus familiaris]
+Length=141
+
+ Score = 242 bits (618),  Expect = 4e-87, Method: Compositional matrix adjust.
+ Identities = 118/141 (84%), Positives = 127/141 (90%), Gaps = 0/141 (0%)
+ Frame = +2
+
+Query  41   VLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHGK  220
+            VLSPADKTN+K+ W K+G HAG+YG EAL+R F SFPTTKTYFPHFDLS GSAQVK HGK
+Sbjct  1    VLSPADKTNIKSTWDKIGGHAGDYGGEALDRTFQSFPTTKTYFPHFDLSPGSAQVKAHGK  60
+
+Query  221  KVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTPA  400
+            KVADALT AVAH+DD+P ALSALSDLHA+KLRVDPVNFKLLSHCLLVTLA H P EFTPA
+Sbjct  61   KVADALTTAVAHLDDLPGALSALSDLHAYKLRVDPVNFKLLSHCLLVTLACHHPTEFTPA  120
+
+Query  401  VHASLDKFLASVSTVLTSKYR  463
+            VHASLDKF A+VSTVLTSKYR
+Sbjct  121  VHASLDKFFAAVSTVLTSKYR  141
+
+
+ Score = 15.4 bits (28),  Expect = 6.6, Method: Compositional matrix adjust.
+ Identities = 6/13 (46%), Positives = 8/13 (62%), Gaps = 1/13 (8%)
+ Frame = +1
+
+Query  454  QIPLSW-SLGGHA  489
+             I  +W  +GGHA
+Sbjct  9    NIKSTWDKIGGHA  21
+
+
+ Score = 14.6 bits (26),  Expect = 10.0, Method: Compositional matrix adjust.
+ Identities = 6/6 (100%), Positives = 6/6 (100%), Gaps = 0/6 (0%)
+ Frame = -2
+
+Query  450  VSTVLT  433
+            VSTVLT
+Sbjct  132  VSTVLT  137
+
+
+>P01946.3 RecName: Full=Hemoglobin subunit alpha-1/2; AltName: Full=Alpha-1/2-globin; 
+AltName: Full=Hemoglobin alpha-1/2 chain; Contains: 
+RecName: Full=Hemopressin [Rattus norvegicus]
+Length=142
+
+ Score = 209 bits (531),  Expect = 1e-73, Method: Compositional matrix adjust.
+ Identities = 111/142 (78%), Positives = 120/142 (85%), Gaps = 0/142 (0%)
+ Frame = +2
+
+Query  38   MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  217
+            MVLS  DKTN+K  WGK+G H GEYG EAL+RMF +FPTTKTYF H D+S GSAQVK HG
+Sbjct  1    MVLSADDKTNIKNCWGKIGGHGGEYGEEALQRMFAAFPTTKTYFSHIDVSPGSAQVKAHG  60
+
+Query  218  KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  397
+            KKVADAL  A  HV+D+P ALS LSDLHAHKLRVDPVNFK LSHCLLVTLA H P +FTP
+Sbjct  61   KKVADALAKAADHVEDLPGALSTLSDLHAHKLRVDPVNFKFLSHCLLVTLACHHPGDFTP  120
+
+Query  398  AVHASLDKFLASVSTVLTSKYR  463
+            A+HASLDKFLASVSTVLTSKYR
+Sbjct  121  AMHASLDKFLASVSTVLTSKYR  142
+
+
+ Score = 15.0 bits (27),  Expect = 8.6, Method: Compositional matrix adjust.
+ Identities = 10/26 (38%), Positives = 13/26 (50%), Gaps = 1/26 (4%)
+ Frame = -2
+
+Query  507  EAQGARSMATEAPA*RYL-EVSTVLT  433
+               G  + A  A   ++L  VSTVLT
+Sbjct  113  HHPGDFTPAMHASLDKFLASVSTVLT  138
+
+
+>P01999.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain [Alligator mississippiensis]
+Length=142
+
+ Score = 205 bits (521),  Expect = 3e-72, Method: Compositional matrix adjust.
+ Identities = 95/142 (67%), Positives = 110/142 (77%), Gaps = 0/142 (0%)
+ Frame = +2
+
+Query  38   MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  217
+            MVLS  DK+NVKA WGK   H  EYGAEALERMF ++P TK YFPHFD+SH SAQ++ HG
+Sbjct  1    MVLSMEDKSNVKAIWGKASGHLEEYGAEALERMFCAYPQTKIYFPHFDMSHNSAQIRAHG  60
+
+Query  218  KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  397
+            KKV  AL  AV H+DD+P AL  LS+LHAH LRVDPVNFK L+HC+LV  A H P+  +P
+Sbjct  61   KKVFSALHEAVNHIDDLPGALCRLSELHAHSLRVDPVNFKFLAHCVLVVFAIHHPSALSP  120
+
+Query  398  AVHASLDKFLASVSTVLTSKYR  463
+             +HASLDKFL +VS VLTSKYR
+Sbjct  121  EIHASLDKFLCAVSAVLTSKYR  142
+
+
+>P09105.2 RecName: Full=Hemoglobin subunit theta-1; AltName: Full=Hemoglobin 
+theta-1 chain; AltName: Full=Theta-1-globin [Homo sapiens]
+Length=142
+
+ Score = 181 bits (460),  Expect = 6e-63, Method: Compositional matrix adjust.
+ Identities = 88/142 (62%), Positives = 110/142 (77%), Gaps = 0/142 (0%)
+ Frame = +2
+
+Query  38   MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  217
+            M LS  D+  V+A W K+G++ G Y  EALER FL+FP TKTYF H DLS GS+QV+ HG
+Sbjct  1    MALSAEDRALVRALWKKLGSNVGVYTTEALERTFLAFPATKTYFSHLDLSPGSSQVRAHG  60
+
+Query  218  KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  397
+            +KVADAL+ AV  +DD+P+ALSALS LHA +LRVDP +F+LL HCLLVTLA H P +F+P
+Sbjct  61   QKVADALSLAVERLDDLPHALSALSHLHACQLRVDPASFQLLGHCLLVTLARHYPGDFSP  120
+
+Query  398  AVHASLDKFLASVSTVLTSKYR  463
+            A+ ASLDKFL+ V + L S+YR
+Sbjct  121  ALQASLDKFLSHVISALVSEYR  142
+
+
+>P02008.2 RecName: Full=Hemoglobin subunit zeta; AltName: Full=HBAZ; AltName: 
+Full=Hemoglobin zeta chain; AltName: Full=Zeta-globin 
+[Homo sapiens]
+Length=142
+
+ Score = 175 bits (444),  Expect = 1e-60, Method: Compositional matrix adjust.
+ Identities = 85/142 (60%), Positives = 104/142 (73%), Gaps = 0/142 (0%)
+ Frame = +2
+
+Query  38   MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  217
+            M L+  ++T + + W K+   A   G E LER+FLS P TKTYFPHFDL  GSAQ++ HG
+Sbjct  1    MSLTKTERTIIVSMWAKISTQADTIGTETLERLFLSHPQTKTYFPHFDLHPGSAQLRAHG  60
+
+Query  218  KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  397
+             KV  A+ +AV  +DD+  ALS LS+LHA+ LRVDPVNFKLLSHCLLVTLAA  PA+FT 
+Sbjct  61   SKVVAAVGDAVKSIDDIGGALSKLSELHAYILRVDPVNFKLLSHCLLVTLAARFPADFTA  120
+
+Query  398  AVHASLDKFLASVSTVLTSKYR  463
+              HA+ DKFL+ VS+VLT KYR
+Sbjct  121  EAHAAWDKFLSVVSSVLTEKYR  142
+
+
+>Q9PRL9.1 RecName: Full=Hemoglobin subunit alpha-1; AltName: Full=Alpha-1-globin; 
+AltName: Full=Hemoglobin alpha-1 chain; AltName: 
+Full=Hemoglobin alpha-I chain [Naja naja]
+Length=141
+
+ Score = 173 bits (439),  Expect = 8e-60, Method: Compositional matrix adjust.
+ Identities = 87/141 (62%), Positives = 102/141 (72%), Gaps = 0/141 (0%)
+ Frame = +2
+
+Query  41   VLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHGK  220
+            VL+  DK  V+A+W  VG +A  YG+E L RMF + PTTKTYFPHFDLS GS  ++ HGK
+Sbjct  1    VLTDEDKARVRASWVPVGKNAELYGSETLTRMFAAHPTTKTYFPHFDLSPGSNNLRAHGK  60
+
+Query  221  KVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTPA  400
+            KV DA+T AV ++DD+   LS LSDLHA KLRVDPVNFKLL+HCLLVT+AAH      P 
+Sbjct  61   KVIDAITEAVNNLDDVAGTLSKLSDLHAQKLRVDPVNFKLLAHCLLVTIAAHNGGVLKPE  120
+
+Query  401  VHASLDKFLASVSTVLTSKYR  463
+            V  SLDKFL  +S  L SKYR
+Sbjct  121  VIVSLDKFLGDLSKDLVSKYR  141
+
+
+>Q90487.3 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin 
+aa1; AltName: Full=Hemoglobin alpha chain [Danio rerio]
+Length=143
+
+ Score = 152 bits (384),  Expect = 2e-51, Method: Compositional matrix adjust.
+ Identities = 76/143 (53%), Positives = 97/143 (68%), Gaps = 1/143 (1%)
+ Frame = +2
+
+Query  38   MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHF-DLSHGSAQVKGH  214
+            M LS  DK  VKA W K+   A E GAEAL RM   +P TKTYF H+ DLS GS  VK H
+Sbjct  1    MSLSDTDKAVVKAIWAKISPKADEIGAEALARMLTVYPQTKTYFSHWADLSPGSGPVKKH  60
+
+Query  215  GKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFT  394
+            GK +  A+  A++ +DD+   L+ALS+LHA KLRVDP NFK+LSH ++V +A   PA+FT
+Sbjct  61   GKTIMGAVGEAISKIDDLVGGLAALSELHAFKLRVDPANFKILSHNVIVVIAMLFPADFT  120
+
+Query  395  PAVHASLDKFLASVSTVLTSKYR  463
+            P VH S+DKF  +++  L+ KYR
+Sbjct  121  PEVHVSVDKFFNNLALALSEKYR  143
+
+
+ Score = 15.8 bits (29),  Expect = 4.6, Method: Compositional matrix adjust.
+ Identities = 5/7 (71%), Positives = 6/7 (86%), Gaps = 0/7 (0%)
+ Frame = -1
+
+Query  94  ADLTPGG  74
+           ADL+PG 
+Sbjct  48  ADLSPGS  54
+
+
+>P11251.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain [Salmo salar]
+Length=143
+
+ Score = 150 bits (379),  Expect = 9e-51, Method: Compositional matrix adjust.
+ Identities = 82/143 (57%), Positives = 100/143 (70%), Gaps = 1/143 (1%)
+ Frame = +2
+
+Query  38   MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHF-DLSHGSAQVKGH  214
+            M L+  DK+ V A WGK+   A   GAEAL RM  ++P TKTYF H+ DLS GSA VK H
+Sbjct  1    MSLTARDKSVVNAFWGKIKGKADVVGAEALGRMLTAYPQTKTYFSHWADLSPGSAPVKKH  60
+
+Query  215  GKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFT  394
+            G  +  A+ NAV  +DD+   +S LSDLHA KLRVDP NFK+LSH +LVTLA H PA+FT
+Sbjct  61   GGVIMGAIGNAVGLMDDLVGGMSGLSDLHAFKLRVDPGNFKILSHNILVTLAIHFPADFT  120
+
+Query  395  PAVHASLDKFLASVSTVLTSKYR  463
+            P VH ++DKFLA++S  L  KYR
+Sbjct  121  PEVHIAVDKFLAALSAALADKYR  143
+
+
+ Score = 16.2 bits (30),  Expect = 3.2, Method: Compositional matrix adjust.
+ Identities = 9/21 (43%), Positives = 11/21 (52%), Gaps = 6/21 (29%)
+ Frame = -1
+
+Query  94  ADLTPGGLDVGLVGRRQHHGG  32
+           ADL+PG   V      + HGG
+Sbjct  48  ADLSPGSAPV------KKHGG  62
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 204768
+
+
+  Database: oidlist k
+    Posted date:  Oct 30, 2026  12:55 PM
+  Number of letters in database: 1,704
+  Number of sequences in database:  12
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 12
+Window for multiple hits: 40

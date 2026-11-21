@@ -1203,6 +1203,7 @@ impl TaxIdLookup<'_> {
         if oids.is_empty() {
             return Err(SeqDbError::NotFound(tax_ids_not_found(&self.entries)));
         }
+        self.db.oid_list_ready()?;
         Ok(oids
             .into_iter()
             .filter(|&oid| self.db.check_oid(oid))
@@ -1221,7 +1222,8 @@ impl TaxIdLookup<'_> {
     /// visits where the alias files have ranges), ascending.
     pub fn db_tax_ids(&self) -> Result<BTreeSet<i32>, SeqDbError> {
         let mut tax_ids = BTreeSet::new();
-        if self.db.filter.is_some() {
+        if self.db.filter.is_some() || self.db.oid_list_error.is_some() {
+            self.db.oid_list_ready()?;
             self.db.set_up_oid_list();
             let oids: Vec<u32> = self.db.oid_walk().collect();
             entries_oid_tax_ids(&self.entries, &oids, &mut tax_ids)?;
@@ -1383,6 +1385,20 @@ impl SeqDb {
     /// ([`SeqDb::check_or_find_oid`]) sees the iteration range.
     pub fn set_up_oid_list(&self) {
         self.oid_list_set_up.store(true, Ordering::Relaxed);
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:229-246
+    // `m_OidListSetup` stays false when the build throws, so every later use throws again.
+    /// The error of NCBI's first build of its OID list (`x_GetOidList`) where it fails: an alias
+    /// file's OID list file that fails when NCBI opened the database without building the list
+    /// (`read_alias_tree`). Each reader that builds the list calls this where NCBI builds it
+    /// (blastdbcmd's requests, the maskers' `GetBioseq`, the lookups); a search meets it at its
+    /// first read of a sequence (`Volume::fail_sequence_reads`).
+    pub fn oid_list_ready(&self) -> Result<(), SeqDbError> {
+        match &self.oid_list_error {
+            Some(failure) => Err(failure.to_error()),
+            None => Ok(()),
+        }
     }
 
     /// Whether NCBI's OID list was built before this call, which builds it (a call that reads
@@ -1932,23 +1948,49 @@ impl SeqDb {
         num_oids: u32,
         rule: Option<DeflineRule>,
     ) -> Result<(), SeqDbError> {
+        // The constructor builds the OID list to scan: an alias file's OID list that fails is
+        // its error, after the list's own (`CSeqDBGiListSet` resolves the list first).
+        self.oid_list_ready()?;
         let range = match &self.filter {
-            Some(ranges) => {
-                for (word, range) in words.iter_mut().zip(&ranges.words) {
-                    *word &= range;
+            Some(alias) => {
+                for (word, kept) in words.iter_mut().zip(&alias.words) {
+                    *word &= kept;
                 }
-                ranges.range()
+                self.alias_range
             }
             None => (0, num_oids),
         };
-        let list = OidFilter::new(words, num_oids).with_range(range);
-        let scan = self.scan_walk(&list, list.walk(false))?;
-        let filter = list.with_range((0, num_oids));
         if let Some(rule) = rule.map(Arc::new) {
             for (volume, &start) in self.volumes.iter_mut().zip(&self.volume_starts) {
                 volume.set_defline_rule(Arc::clone(&rule), start);
             }
         }
+        self.list_applied = true;
+        self.constructor_scan(OidFilter::new(words, num_oids).with_range(range))
+            .map(|_| ())
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:117-132
+    // The alias files' own scan (`alias::needs_totals_scan`), as the constructor makes it with a
+    // list (`apply_filter`): the reports, which open the database again without a list, scan
+    // the same OIDs, so the printed counts are this scan (probes B1, B2, U1 of line RG D1b).
+    /// Scans the totals of the alias files' OID list `list` (with its iteration range) as NCBI's
+    /// constructor does without a list: the counts and the printed counts are the scan.
+    pub(super) fn scan_alias(&mut self, list: OidFilter) -> Result<(), SeqDbError> {
+        let scan = self.constructor_scan(list)?;
+        self.alias_scanned = true;
+        self.printed_num_seqs = scan.count as i32;
+        self.printed_total_length = scan.total;
+        Ok(())
+    }
+
+    /// The constructor's scan of the OID list `list` (`x_ScanTotals` over the OIDs of its first
+    /// `x_CheckOrFindOID` loop, `OidFilter::walk`) and its `SetIterationRange(0, 0)`: the list,
+    /// with every OID in range, becomes the database's, and the counts are the scan.
+    fn constructor_scan(&mut self, list: OidFilter) -> Result<ScanTotals, SeqDbError> {
+        let num_oids = self.num_oids();
+        let scan = self.scan_walk(&list, list.walk(false))?;
+        let filter = list.with_range((0, num_oids));
         // `x_ScanTotals` counts the OIDs in an `int` (the volume set holds fewer than 2^31 OIDs:
         // `open_tree`) and keeps the shortest length without the `<= 0` fallback.
         self.num_seqs = filter.count();
@@ -1958,12 +2000,12 @@ impl SeqDb {
             max_length: scan.longest,
             min_length: scan.shortest as i32,
         };
-        self.list_applied = true;
         self.oid_list_set_up.store(true, Ordering::Relaxed);
         // The scan is that of `included_length` when it visited every included OID.
         self.set_included_length((scan.count == filter.count()).then_some(scan.total));
         self.filter = Some(Box::new(filter));
-        self.update_first_oid_length()
+        self.update_first_oid_length()?;
+        Ok(scan)
     }
 
     /// The database restricted to the OIDs that `keep` takes, as a list that names them does:
@@ -1997,6 +2039,33 @@ impl SeqDb {
         }
         #[cfg(not(any(test, feature = "parallel")))]
         let _ = length;
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:846-862
+    // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:545-555 (at
+    // `blastdbcmd::write_info_head`)
+    // A database whose constructor scanned the totals scans them again with exact lengths,
+    // over the OIDs of its list set up with every OID in range (`x_CheckOrFindOID`), and keeps
+    // the longest length of that scan, which blastdbcmd `-info` prints after the total.
+    /// `GetExactTotalLength`, with the `GetMaxLength` after it: the total and the longest exact
+    /// length of the included OIDs where the database scanned its totals (a list, an alias
+    /// file's `OIDLIST`), else [`SeqDb::total_length`] and [`SeqDb::max_length`].
+    pub fn exact_totals(&self) -> Result<(u64, u32), SeqDbError> {
+        let filter = match &self.filter {
+            Some(filter) if self.alias_scanned || self.list_applied => filter,
+            _ => return Ok((self.counts.total_length, self.counts.max_length)),
+        };
+        let (mut total, mut longest) = (0u64, 0u32);
+        for oid in filter.walk(true).oids(filter) {
+            let at = self.locate_oid(oid)?;
+            let length = match self.seqtype {
+                SeqType::Protein => self.volumes[at.volume].protein_length(at.vol_oid)?,
+                SeqType::Nucleotide => self.nucleotide_length_at(at)? as u32,
+            };
+            total += u64::from(length);
+            longest = longest.max(length);
+        }
+        Ok((total, longest))
     }
 
     /// NCBI's totals of the OIDs of the walk `walk` of the list `list` (`OidFilter::walk`).

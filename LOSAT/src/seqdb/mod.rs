@@ -48,6 +48,7 @@ pub mod isam_num;
 pub mod lmdb_read;
 pub mod lookup;
 pub mod mask;
+pub(crate) mod oid_list;
 pub(crate) mod rps;
 pub mod seqidlist;
 pub mod tax_files;
@@ -210,6 +211,12 @@ pub enum SeqDbError {
     /// whose message is `message` followed by [`NCBI_CRASHES_ON_IT`]
     /// ([`SeqDbError::ncbi_crashes`]).
     NcbiCrashes { path: PathBuf, message: String },
+    /// A `CSeqDBException` of the code `eMemoryMappingFailure` whose message is NCBI's (an OID
+    /// list file of an alias file's `OIDLIST` that is not a file, `oid_list::OidListError`): a
+    /// search program reports `Database memory map file error - <message>`
+    /// ([`SeqDbError::ncbi_message`]), blastdbcmd the message alone
+    /// ([`SeqDbError::ncbi_request_message`]).
+    MemoryMap(Vec<u8>),
     /// A request outside the database (ordinal id, block range).
     Range(String),
     /// An exception of NCBI's C++ Toolkit that is not a `CSeqDBException`: the
@@ -222,7 +229,9 @@ pub enum SeqDbError {
 impl std::fmt::Display for SeqDbError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            SeqDbError::NotFound(message) => f.write_str(&String::from_utf8_lossy(message)),
+            SeqDbError::NotFound(message) | SeqDbError::MemoryMap(message) => {
+                f.write_str(&String::from_utf8_lossy(message))
+            }
             SeqDbError::Range(message) => f.write_str(message),
             SeqDbError::Open { path, source } | SeqDbError::Io { path, source } => {
                 write!(f, "{}: {}", path.display(), source)
@@ -348,6 +357,10 @@ impl SeqDbError {
     pub fn ncbi_message(&self) -> Option<Vec<u8>> {
         match self {
             SeqDbError::NotFound(message) => Some(message.clone()),
+            // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:191-197
+            SeqDbError::MemoryMap(message) => {
+                Some([b"Database memory map file error - ".as_slice(), message].concat())
+            }
             SeqDbError::Format { message, .. } => (NCBI_FORMAT_MESSAGES
                 .contains(&message.as_str())
                 || message.starts_with(NCBI_EMPTY_DBLIST_PREFIX)
@@ -409,6 +422,18 @@ impl SeqDbError {
             _ => Some("Database memory map file error"),
         }
     }
+
+    // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:890-891
+    /// The text blastdbcmd gives for this error where a request meets it (its `catch` posts
+    /// `Error: [blastdbcmd] <GetMsg()>`, exit status 1): the message of a
+    /// [`SeqDbError::MemoryMap`] without the search programs' `Database memory map file error - `,
+    /// else [`Self::ncbi_message`].
+    pub fn ncbi_request_message(&self) -> Option<Vec<u8>> {
+        match self {
+            SeqDbError::MemoryMap(message) => Some(message.clone()),
+            _ => self.ncbi_message(),
+        }
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiexpt.cpp:444-450
@@ -440,8 +465,12 @@ impl SeqDbError {
 // ...`, exit 3; blastp and blastn: `Error: mdb_dbi_open: ...`, exit 255; review 1 of line DBID
 // pfoff-1, L4). So no text of the reader's table below is GetDbi's: its one throw that NCBI's
 // programs reach is the lookup's (`lookup_throw_site`).)
+// NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbatlas.hpp:699-722
+// (The OID list file of an alias file's `OIDLIST` that is not a file, `SeqDbError::MemoryMap`:
+// segmasker 2.17.0 names the line 718 of the official build and the function without a module,
+// probe mk of line RG D1b.)
 /// The places of NCBI's throws of a database error of the reader, by the start of its text.
-const DATABASE_ERROR_SITES: [(&str, ThrowSite); 5] = [
+const DATABASE_ERROR_SITES: [(&str, ThrowSite); 6] = [
     (
         "No alias or index file found for ",
         seqdb_site(
@@ -482,6 +511,14 @@ const DATABASE_ERROR_SITES: [(&str, ThrowSite); 5] = [
             "BLASTDB::ncbi::CSeqDBExtFile::CSeqDBExtFile",
         ),
     ),
+    (
+        "To be memory mapped the file must exist: '",
+        seqdb_site(
+            "include/objtools/blast/seqdb_reader/impl/seqdbatlas.hpp",
+            718,
+            "ncbi::CSeqDBFileMemMap::Init",
+        ),
+    ),
 ];
 
 /// The place of `CBlastLMDBManager::CBlastEnv::GetDbi`'s throw of a version 5 database's missing
@@ -511,7 +548,8 @@ const fn seqdb_site(file: &'static str, line: u32, function: &'static str) -> Th
 /// `seqmasks_io::bdb_reader`; a lookup's own throw is [`lookup_throw_site`]'s). Each place
 /// reports the code `eInvalid` (`CSeqDBException` names none). `None` for every other text, of
 /// which LOSAT does not know the place: also the texts that `ncbi_message` gives of the codes
-/// `eTooManyOpenFiles` and `eMemoryMappingFailure`, which are the texts of the programs'
+/// `eTooManyOpenFiles` and `eMemoryMappingFailure` (but the message of a
+/// [`SeqDbError::MemoryMap`], `ncbi_request_message`), which are the texts of the programs'
 /// `CATCH_ALL` and not the exception's own message, and `DB contains no ...`, which NCBI's reader
 /// never throws (it throws lmdb's error first, `InitDbi` cited above).
 pub(crate) fn throw_site(message: &[u8]) -> Option<ThrowSite> {
@@ -727,6 +765,18 @@ pub struct SeqDb {
     oid_list_set_up: AtomicBool,
     /// Whether a list was applied (`SeqDb::restrict`): NCBI's `CSeqDB` then scans the totals.
     list_applied: bool,
+    /// Whether the alias files make NCBI's `CSeqDB` scan the totals without a list (an
+    /// `OIDLIST` not covered by `NSEQ` and `LENGTH`, `alias::needs_totals_scan`): the counts and
+    /// the printed counts are then the scan of the included OIDs.
+    alias_scanned: bool,
+    /// The iteration range that NCBI's first build of the alias files' OID list sets
+    /// (`alias::top_iteration_range`, every OID without it), inside which a list's scan starts
+    /// (`SeqDb::restrict`).
+    alias_range: (u32, u32),
+    /// The failure of an OID list file of the alias files where NCBI meets it at the first use
+    /// of its OID list, not when it opens the database (no totals scan): the readers that use
+    /// the list fail with it (`SeqDb::oid_list_ready`, `Volume::fail_sequence_reads`).
+    oid_list_error: Option<oid_list::OidListError>,
     /// NCBI's OID list (the alias files' ranges, a list) and its iteration range, when there
     /// is one: ordinal id `i` is the `i`-th OID of the list inside the range.
     filter: Option<Box<filter::OidFilter>>,
@@ -811,7 +861,8 @@ impl SeqDb {
     /// [`SeqDb::open_in`] without the errors of the alias files' counts, which depend on a
     /// list that the caller applies next ([`SeqDb::restrict`]); the caller then calls
     /// [`SeqDb::check_alias_values`] before it reads the database. The errors of the OID
-    /// ranges (`FIRST_OID`, `LAST_OID`) come here, as NCBI's `ComputeMasks` runs first.
+    /// ranges (`FIRST_OID`, `LAST_OID`) come here, as NCBI's `ComputeMasks` runs first, and
+    /// those of the alias files' OID lists where NCBI's constructor scans the totals.
     pub fn open_search_in(
         name: &str,
         seqtype: SeqType,
@@ -836,8 +887,9 @@ impl SeqDb {
         self.name_records = match names.as_slice() {
             [one] if one == name => {
                 // The reports' database is this one opened again without the list: after a
-                // list, its walks of the counts meet their errors here (`check_alias_values`).
-                if self.list_applied {
+                // list, its walks of the counts meet their errors here (`check_alias_values`),
+                // unless its alias files make it scan the totals too.
+                if self.list_applied && !self.alias_scanned {
                     use alias::WalkKey;
                     self.walk_errors(&[WalkKey::Nseq, WalkKey::Length, WalkKey::MinSeqLength])?;
                 }
@@ -1165,6 +1217,9 @@ impl SeqDb {
             all_bits_special_set: false,
             oid_list_set_up: AtomicBool::new(false),
             list_applied: false,
+            alias_scanned: false,
+            alias_range: (0, num_oids as u32),
+            oid_list_error: None,
             filter: None,
             search_path: None,
             reports_show_gis: false,
@@ -1189,15 +1244,20 @@ impl SeqDb {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:94-139
-    // `HasFilters` runs `ComputeMasks` (the OID ranges, `alias::compute_masks`) after the
-    // volumes and the LMDB files are open. The walks of a value that does not convert fail
-    // where NCBI's constructor reaches them, which depends on the list (`check_alias_values`).
-    // `x_GetNumSeqs` and `x_GetNumSeqsStats` are the `int` of the walks' `Int8`
-    // (seqdbimpl.cpp:948-949); the ranges make the OID list (`alias::range_mask`), which a
-    // list later intersects (`restrict`), and the iteration range that its first build sets
-    // (`alias::top_iteration_range`), inside which a search reads the list's OIDs.
-    /// Reads the counts, the OID ranges and their errors from the alias tree `root` of the
-    /// volumes `names` (the volume paths in the order of `self.volumes`).
+    // `HasFilters` runs `ComputeMasks` (the OID ranges and the paths of the OID lists,
+    // `alias::compute_masks`) after the volumes and the LMDB files are open. The walks of a value
+    // that does not convert fail where NCBI's constructor reaches them, which depends on the list
+    // and on the scan (`check_alias_values`). `x_GetNumSeqs` and `x_GetNumSeqsStats` are the `int`
+    // of the walks' `Int8` (seqdbimpl.cpp:948-949); the filters make the OID list
+    // (`alias::alias_oid_mask`), which a list later intersects (`restrict`), and the iteration
+    // range that its first build sets (`alias::top_iteration_range`), inside which a search reads
+    // the list's OIDs. An `OIDLIST` that no node with both `NSEQ` and `LENGTH` covers makes the
+    // constructor build the list and scan the totals (`alias::needs_totals_scan`, `scan_alias`):
+    // an OID list file that fails is then the constructor's error (probes G1, G3, G6, G7 of line
+    // RG D1b, exit status 2); else NCBI builds the list at its first use, where that error comes
+    // (`oid_list_error`: `-info` never meets it, probe G2a).
+    /// Reads the counts, the OID ranges and lists and their errors from the alias tree `root` of
+    /// the volumes `names` (the volume paths in the order of `self.volumes`).
     fn read_alias_tree(
         &mut self,
         root: &mut alias::AliasNode,
@@ -1215,14 +1275,26 @@ impl SeqDb {
             (volume.num_oids(), volume.index().volume_length)
         });
         let num_oids = self.num_oids();
-        let mask = alias::range_mask(
-            root,
-            &|path| {
-                let at = at(path);
-                (self.volume_starts[at], self.volume_starts[at + 1])
-            },
-            num_oids,
-        );
+        let scan = alias::needs_totals_scan(root);
+        let volumes: Vec<(&str, u32, u32)> = names
+            .iter()
+            .enumerate()
+            .map(|(at, name)| {
+                (
+                    name.as_str(),
+                    self.volume_starts[at],
+                    self.volume_starts[at + 1],
+                )
+            })
+            .collect();
+        let mask = match alias::alias_oid_mask(root, &volumes, num_oids) {
+            Ok(mask) => mask,
+            Err(failure) if scan => return Err(failure.to_error()),
+            Err(failure) => {
+                self.oid_list_error = Some(failure);
+                None
+            }
+        };
         // `(int)` of the `Int8` walks.
         let nseq = totals.nseq.as_ref().map_or(0, |&value| value as i32);
         let length = totals.length.as_ref().map_or(0, |&value| value);
@@ -1242,15 +1314,24 @@ impl SeqDb {
         self.printed_num_seqs = nseq;
         self.printed_total_length = length;
         self.all_bits_special_set = alias::all_bits_special_set(root, names, &self.volume_starts);
+        self.alias_totals = totals;
         if let Some(words) = mask {
             let range = alias::top_iteration_range(root, num_oids).unwrap_or((0, num_oids));
+            self.alias_range = range;
             let filter = filter::OidFilter::new(words, num_oids).with_range(range);
+            if scan {
+                return self.scan_alias(filter);
+            }
             self.num_seqs = filter.count();
             self.filter = Some(Box::new(filter));
             self.set_included_length(None);
         }
-        self.alias_totals = totals;
         self.update_first_oid_length()?;
+        if let Some(failure) = &self.oid_list_error {
+            for volume in &mut self.volumes {
+                volume.fail_sequence_reads(failure.clone());
+            }
+        }
         Ok(())
     }
 
@@ -1368,7 +1449,7 @@ impl SeqDb {
         path: &SearchPath,
     ) -> Result<Self, SeqDbError> {
         let mut db = Self::open_search_in(name, seqtype, path)?;
-        db.walk_errors(UNLISTED_WALK_KEYS)?;
+        db.check_alias_values()?;
         db.include_every_oid();
         Ok(db)
     }
@@ -1533,14 +1614,15 @@ impl SeqDb {
     /// The errors and LOSAT's refusals of the alias files' values that NCBI's `CSeqDB` of the
     /// search meets (`read_alias_tree`): without a list the walks of `NSEQ`, `LENGTH`,
     /// `MIN_SEQ_LENGTH`, `STATS_NSEQ`, `STATS_TOTLEN` in that order; after a list
-    /// ([`SeqDb::restrict`]), which makes NCBI scan the totals, those of `STATS_NSEQ` and
-    /// `STATS_TOTLEN` (the reports' database, opened again without the list, reads the others:
+    /// ([`SeqDb::restrict`]) or with an `OIDLIST` that makes NCBI scan the totals
+    /// (`alias::needs_totals_scan`), those of `STATS_NSEQ` and `STATS_TOTLEN` (the reports'
+    /// database, opened again without the list, reads the others unless it scans too:
     /// [`SeqDb::read_name_records`]). NCBI's error is `SeqDbError::Ncbi`. [`SeqDb::open_in`]
     /// calls this; a search program opens with [`SeqDb::open_search_in`] and calls it after its
     /// list.
     pub fn check_alias_values(&self) -> Result<(), SeqDbError> {
         use alias::WalkKey;
-        let keys: &[WalkKey] = if self.list_applied {
+        let keys: &[WalkKey] = if self.list_applied || self.alias_scanned {
             &[WalkKey::StatsNseq, WalkKey::StatsTotlen]
         } else {
             UNLISTED_WALK_KEYS

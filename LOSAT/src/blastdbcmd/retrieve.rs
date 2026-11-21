@@ -60,10 +60,10 @@ impl Stop {
 
 impl From<SeqDbError> for Stop {
     /// A reader error inside the request: NCBI's own (`CSeqDBException`) is caught like any
-    /// exception there (exit status 1, not the 2 of an error at opening); LOSAT's is a
-    /// refusal.
+    /// exception there (exit status 1, not the 2 of an error at opening), with its message
+    /// (`SeqDbError::ncbi_request_message`); LOSAT's is a refusal.
     fn from(error: SeqDbError) -> Stop {
-        match error.ncbi_message() {
+        match error.ncbi_request_message() {
             Some(text) => Stop::NcbiBytes(text),
             None => Stop::refused(error.to_string()),
         }
@@ -856,6 +856,7 @@ impl Run<'_, '_, '_> {
         // check keeps (`SeqDb::check_oid`, `SeqDb::oid_walk`), or, for `-ipg`, the OID of a
         // PIG whose volume holds it (`PigToOid`), kept or not.
         if self.formatter.reads_deflines() {
+            self.source.db.oid_list_ready()?;
             self.source.db.set_up_oid_list();
         }
         self.formatter
@@ -870,6 +871,7 @@ impl Run<'_, '_, '_> {
     /// D1a-2, survey A, pattern 3).
     fn dump_all(&mut self, config: &Config) -> Result<(), Stop> {
         let db = self.source.db;
+        db.oid_list_ready()?;
         for oid in db.oid_walk() {
             self.write(oid, config, None)?;
         }

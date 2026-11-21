@@ -174,8 +174,16 @@ fn run_body(
             "{name}: the date of the database is not UTF-8 text"
         )));
     }
+    let exact = if args.given("exact_length") {
+        match db.exact_totals() {
+            Ok(totals) => Some(totals),
+            Err(error) => return database_error(diag, error),
+        }
+    } else {
+        None
+    };
     let mut text = Vec::new();
-    write_info_head(&mut text, &db);
+    write_info_head(&mut text, &db, exact);
     let masks = db
         .mask_algorithms()
         .and_then(|algorithms| algorithms.descriptions());
@@ -271,12 +279,12 @@ fn database_error(diag: &mut Diag, error: SeqDbError) -> i32 {
 /// The text of `-info` for `db` up to its filtering algorithms.
 ///
 /// The counts are `GetNumSeqs` and `GetTotalLength` of the database opened without a list:
-/// the walks of the alias tree (`SeqDb::printed_num_seqs`). `-exact_length` changes nothing
-/// here: NCBI's exact total differs from the total only when its totals are counted over a
-/// filtered list of sequences (an alias file with `GILIST`, `SEQIDLIST`, `OIDLIST`, ...,
-/// seqdbimpl.cpp:104-131), which LOSAT's reader refuses; the OID ranges (`FIRST_OID`,
-/// `LAST_OID`) do not make NCBI scan.
-fn write_info_head(out: &mut Vec<u8>, db: &SeqDb) {
+/// the walks of the alias tree, or the scan of the included OIDs that an alias file's
+/// `OIDLIST` asks for (`SeqDb::printed_num_seqs`). `exact` is `-exact_length`'s exact total and
+/// the longest length after it (`SeqDb::exact_totals`), which differ from the others only where
+/// NCBI scanned the totals (the OID ranges `FIRST_OID`, `LAST_OID` do not make it scan).
+fn write_info_head(out: &mut Vec<u8>, db: &SeqDb, exact: Option<(u64, u32)>) {
+    let (total, longest) = exact.unwrap_or((db.printed_total_length(), db.max_length()));
     let letters = match db.seqtype() {
         SeqType::Protein => "residues",
         SeqType::Nucleotide => "bases",
@@ -289,10 +297,10 @@ fn write_info_head(out: &mut Vec<u8>, db: &SeqDb) {
         "\t{} sequences; {} total {letters}\n\nDate: {}\tLongest sequence: {} {letters}\n\n\
          BLASTDB Version: {}\n",
         int_with_commas(db.printed_num_seqs()),
-        with_commas(db.printed_total_length()),
+        with_commas(total),
         db.date(),
-        // `GetMaxLength` is NCBI's `int` of the index files' longest length.
-        int_with_commas(db.max_length() as i32),
+        // `GetMaxLength` is NCBI's `int` of the index files' longest length (of the scan's).
+        int_with_commas(longest as i32),
         if db.is_version5() { "5" } else { "4" },
     );
 }

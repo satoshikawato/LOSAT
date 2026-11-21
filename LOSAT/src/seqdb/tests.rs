@@ -941,7 +941,7 @@ fn alias_value_errors_come_in_ncbis_order() {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:131-206
-// (cited at `alias::range_mask`): a node's range is ANDed with its parent's, the paths to one
+// (cited at `alias::alias_oid_mask`): a node's range is ANDed with its parent's, the paths to one
 // volume are ORed, and the OIDs count the whole volume set.
 #[test]
 fn alias_oid_ranges_select_ncbis_oids() {
@@ -1061,6 +1061,81 @@ fn alias_oid_ranges_select_ncbis_oids() {
     write("f31p1.pal", "DBLIST prot_old\nFIRST_OID 2147483649\n");
     let db = SeqDb::open(&names("f31p1", "prot_v4"), SeqType::Protein).unwrap();
     assert_eq!(oids(&db), (10..20).collect::<Vec<u32>>());
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:191-234
+// (cited at `alias::alias_oid_mask`): an OID list is ANDed after the node's range, relative to
+// each volume; with one the constructor scans the totals of the included OIDs
+// (`alias::needs_totals_scan`) and the counts are that scan's.
+#[test]
+fn alias_oid_lists_select_ncbis_oids() {
+    let dir = temp_dir("oidlist");
+    copy_database("prot_v4", &["pin", "psq", "phr"], &dir);
+    copy_database("prot_old", &["pin", "psq", "phr"], &dir);
+    let write = |file: &str, bytes: &[u8]| std::fs::write(dir.join(file), bytes).unwrap();
+    let open = |name: &str| SeqDb::open(dir.join(name).to_str().unwrap(), SeqType::Protein);
+    let oids = |db: &SeqDb| {
+        (0..db.num_seqs())
+            .map(|at| db.oid(at).get())
+            .collect::<Vec<u32>>()
+    };
+    let lengths = |db: &SeqDb| {
+        (0..db.num_seqs())
+            .map(|at| u64::from(db.protein_length(at).unwrap()))
+            .sum::<u64>()
+    };
+    // OIDs 0, 2 and 9 of each volume.
+    write("m.msk", &[0, 0, 0, 9, 0b1010_0000, 0b0100_0000]);
+    write("o.pal", b"DBLIST prot_v4\nOIDLIST m.msk\n");
+    let db = open("o").unwrap();
+    assert_eq!(oids(&db), [0, 2, 9]);
+    assert_eq!(db.ncbi_num_seqs(), 3);
+    assert_eq!(db.total_length(), lengths(&db));
+    assert_eq!(db.included_length().unwrap(), lengths(&db));
+    // The scan's counts are printed; the walks of NSEQ and LENGTH are not made.
+    write("on.pal", b"DBLIST prot_v4\nOIDLIST m.msk\nNSEQ 5\n");
+    let db = open("on").unwrap();
+    assert_eq!((db.ncbi_num_seqs(), db.total_length()), (3, lengths(&db)));
+    // Relative to each volume.
+    write("v.pal", b"DBLIST prot_old prot_v4\nOIDLIST m.msk\n");
+    assert_eq!(oids(&open("v").unwrap()), [0, 2, 9, 10, 12, 19]);
+    // The node's range, then its list.
+    write("r.pal", b"DBLIST prot_v4\nOIDLIST m.msk\nFIRST_OID 2\n");
+    assert_eq!(oids(&open("r").unwrap()), [2, 9]);
+    // Two alias files over one volume: the union, with a range of another node.
+    write("g.pal", b"DBLIST prot_v4\nFIRST_OID 4\nLAST_OID 6\n");
+    write("u.pal", b"DBLIST o g\n");
+    let db = open("u").unwrap();
+    assert_eq!(oids(&db), [0, 2, 3, 4, 5, 9]);
+    assert_eq!(db.ncbi_num_seqs(), 6);
+    // A missing file is the constructor's error when it scans.
+    write("x.pal", b"DBLIST prot_v4\nOIDLIST none.msk\n");
+    let missing = dir.join("none.msk").to_str().unwrap().to_string();
+    let text = format!("To be memory mapped the file must exist: '{missing}'");
+    let error = open("x").unwrap_err();
+    assert!(
+        matches!(&error, SeqDbError::MemoryMap(message) if message == text.as_bytes()),
+        "{error}"
+    );
+    // NSEQ and LENGTH on the node end the scan: the error comes at the list's first use, and
+    // the first read of a sequence.
+    write(
+        "l.pal",
+        b"DBLIST prot_v4\nOIDLIST none.msk\nNSEQ 7\nLENGTH 70\n",
+    );
+    let db = open("l").unwrap();
+    assert_eq!((db.ncbi_num_seqs(), db.total_length()), (7, 70));
+    assert!(matches!(db.oid_list_ready(), Err(SeqDbError::MemoryMap(_))));
+    assert!(matches!(
+        db.volumes()[0].open_sequence_file(),
+        Err(SeqDbError::MemoryMap(_))
+    ));
+    // A node above them with NSEQ and LENGTH also ends it; one without does not.
+    write("ab.pal", b"DBLIST x\nNSEQ 1\nLENGTH 2\n");
+    assert_eq!(open("ab").unwrap().ncbi_num_seqs(), 1);
+    write("an.pal", b"DBLIST x\nNSEQ 1\n");
+    assert!(matches!(open("an"), Err(SeqDbError::MemoryMap(_))));
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
@@ -1452,7 +1527,6 @@ fn every_filtering_alias_key_is_rejected() {
         "TILIST",
         "SEQIDLIST",
         "TAXIDLIST",
-        "OIDLIST",
         "MEMB_BIT",
         "MASKLIST",
         "OID_MASK_TYPE",
@@ -2628,6 +2702,16 @@ fn the_places_of_ncbis_throws_are_known_by_the_start_of_their_texts() {
     );
     assert_eq!(place("Error: File (x.pin) not found.").1, 128);
     assert_eq!(place("Database name is required.").1, 162);
+    // The message of an OID list file that is not a file (`SeqDbError::MemoryMap`), as segmasker
+    // 2.17.0 names its place (probe mk of line RG D1b).
+    assert_eq!(
+        place("To be memory mapped the file must exist: '/x/none.msk'"),
+        (
+            "include/objtools/blast/seqdb_reader/impl/seqdbatlas.hpp",
+            718,
+            "ncbi::CSeqDBFileMemMap::Init"
+        )
+    );
     // The texts of `CATCH_ALL` for the codes `eTooManyOpenFiles` and `eMemoryMappingFailure`
     // (`SeqDbError::ncbi_message`), and every other text, have no known place.
     for text in [

@@ -605,6 +605,10 @@ impl IndexFile {
     /// the arrays in the file, `chunk_entries` entries at a time: the header array in one pass,
     /// then the sequence array (with the ambiguity array beside it for nucleotide) in one
     /// pass that notes the first fault of each kind and reports them in `check_offsets`' order.
+    // Out of line, so the registers of its per-sequence loop do not depend on what the caller
+    // that opens the database holds: inlined into `SeqDb::open_search_in`, the loop took one more
+    // stack load per sequence when that caller held one more value (line NP M4c-2, perf g2).
+    #[inline(never)]
     fn check_streamed(&self, path: &Path, chunk_entries: usize) -> Result<(), SeqDbError> {
         let format = |message: String| SeqDbError::Format {
             path: path.to_path_buf(),

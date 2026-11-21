@@ -2203,8 +2203,9 @@ piece `WW` before a masked `W`; `s2` [30, 60) and [63, 90), the piece `WWW`; `s3
 shorter than the word (aa_ungapped.c:762-766, no raise of the range's end), where a word read at the piece's start
 would have given `s1` the same alignment; with `-db_soft_mask` it reads no word of `s4` at all, whose first scan range
 is shorter than the word. The rows `*.w0.*` of `pe_tiny`, `pe_gap2` and `pe_adjacent` search the hand masks of `p5`
-with pieces of two and no letters the same way. The ungapped rows are BLASTX's only: LOSAT's BLASTP refuses `-ungapped`
-(`cli::RUN_REFUSALS`).
+with pieces of two and no letters the same way. The rows `*.ungapped.*` of BLASTP (restored after dev's BLASTP
+`-ungapped`, #1420, and `ps5`/`ph5` with seg masks) search each hard piece's ungapped hits and merge them as the
+gapped pieces are merged.
 
 ## A database title outside the visible ASCII range (M4a-1b part 5, M4a-1b2)
 

@@ -8,9 +8,10 @@
 //!   read every letter (`BlastpPrelimKernel::search_subject_in` with the ranges, the scan of
 //!   `-lcase_masking`'s subjects).
 //! - `-db_hard_mask`: each range between the masks is searched as a sequence of its own (a hard
-//!   chunk: its scan, extensions, gapped stage and purge), its HSPs moved by the chunk's offset
-//!   and merged; then the E-values of the whole sequence and the reap by the preliminary E-value
-//!   (`BlastpPrelimKernel::subject_lists`).
+//!   chunk: its scan, extensions, gapped stage and purge, or with `-ungapped` its ungapped hits),
+//!   its HSPs moved by the chunk's offset and merged; then the E-values of the whole sequence and
+//!   the reap by the preliminary E-value (`BlastpPrelimKernel::subject_lists`, or
+//!   `BlastpPrelimKernel::ungapped_lists`).
 //!
 //! The masks come from `SeqDb::read_mask_block`, a window of sequences at a time
 //! (`algorithm::common::db_mask_search::SubjectMasks`); the first read error by ordinal id ends
@@ -152,6 +153,11 @@ impl BlastpDbMasking<'_> {
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:869-899
 // After the chunks, the E-values of the sequence's HSPs with its whole length and the reap by
 // the preliminary E-value.
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:560-562,1482-1541
+// An ungapped search (`-ungapped`) makes each chunk's list of its ungapped hits sorted by score
+// (`BLAST_GetUngappedHSPList`) and merges it as above (the merge's gap flag only matters for HSPs
+// in the overlap, of which there are none); after the chunks, the HSPs of a negative length go,
+// then the E-values with the whole length and the reaps (`BlastpPrelimKernel::ungapped_lists`).
 /// The hard chunks of a sequence with masks (`masked.stored`), searched one by one into the HSPs
 /// of the sequence, and its HSP lists per query in `subject_result`. A chunk shorter than the
 /// word finds nothing in NCBI's one-hit and two-hit scans alike and is passed over
@@ -213,12 +219,23 @@ fn hard_chunks(
     // The merge's order: by score, then the subject's offset and end, then the query's (a total
     // order among one query's HSPs, which are split by query below in this order).
     masked.hits.sort_by(preliminary_score_compare);
-    kernel.subject_lists(
-        scratch,
-        s_idx,
-        subject.aa_len,
-        values,
-        &mut masked.hits,
-        subject_result,
-    );
+    if kernel.args.ungapped {
+        kernel.ungapped_lists(
+            scratch,
+            s_idx,
+            subject.aa_len,
+            values,
+            &mut masked.hits,
+            subject_result,
+        );
+    } else {
+        kernel.subject_lists(
+            scratch,
+            s_idx,
+            subject.aa_len,
+            values,
+            &mut masked.hits,
+            subject_result,
+        );
+    }
 }

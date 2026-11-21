@@ -1,6 +1,6 @@
 - psiblast and tblastn `-in_pssm`: a PSSM query residue that its coding does not have (`*` or `-` in iupacaa, a
   lower-case ncbieaa letter, an ncbistdaa code of 28 or more, a byte NCBI's reader repairs as `#`) now stops the run
-  as NCBI BLAST+ 2.17.0 does: `BLAST engine error: Warning: Invalid residues found at positions <list> ` (the first
+  as NCBI BLAST+ 2.17.0 does: `LOSAT engine error: Warning: Invalid residues found at positions <list> ` (the first
   20), exit status 3, after the outfmt 0 prolog, the search strategy and psiblast's round-1 `-out_pssm`. LOSAT refused
   such a PSSM, and searched a `*` of iupacaa as the stop residue. `-out_ascii_pssm` of such a query is refused (NCBI
   prints the residue's letter from memory it never set).

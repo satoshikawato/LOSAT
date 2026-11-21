@@ -1,7 +1,7 @@
 - `-db` with version 5 databases made with and without `makeblastdb -parse_seqids` side by side (`-db "a b"`, or an alias
   file that lists them), in every search program: LOSAT now searches such a list as NCBI BLAST+ does, where it refused the
   list when it opened it. Every run whose reports look no parsed Seq-id up in a database without the accession table is
-  written as NCBI writes it: the Seq-annots and the archive (`-outfmt 8`, `9`, `11`, `12`, unless `PRE_FETCH_SEQS_LIMIT`
+  written as NCBI writes it (apart from the `ident` of the archive, which holds LOSAT's version): the Seq-annots and the archive (`-outfmt 8`, `9`, `11`, `12`, unless `PRE_FETCH_SEQS_LIMIT`
   makes the Seq-annots prefetch), hits only in the databases
   without parsed Seq-ids or in ones made with `-input_type blastdb`, an alias file whose `FIRST_OID`-`LAST_OID` range or a
   `-taxids` list keeps no parsed sequence, gi Seq-ids. Where a reported parsed Seq-id (an accession, a name, a giim) would be looked up in a database without the

@@ -34,7 +34,7 @@ The other items are rare cases in which NCBI BLAST+ crashes, reads outside its m
 
 ### One-hit gapped starts past the end of a sequence
 
-- **What you see.** The same output as NCBI where NCBI does not crash, and a result where NCBI sometimes crashes.
+- **What you see.** The same output as NCBI (apart from the version line, which names LOSAT) where NCBI does not crash, and a result where NCBI sometimes crashes.
 - **When.** `blastp`, `blastx` or `tblastn` with `-window_size 0` (one-hit word finder) and a low `-threshold`, when the 11-letter window of a one-hit alignment passes the end of a sequence.
 - **Why.** NCBI reads memory outside its buffer there. LOSAT reads the letters past the end as the end marker. Under valgrind, NCBI's output is LOSAT's output in all the cases of the test.
 - **Record.** [The decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
@@ -98,13 +98,13 @@ The other items are rare cases in which NCBI BLAST+ crashes, reads outside its m
 
 ### A taxonomy record past NCBI's mapping of `taxdb.btd`
 
-- **What you see.** LOSAT writes what NCBI writes when NCBI completes. Whether NCBI completes depends on its memory map: it may crash on the same files.
+- **What you see.** LOSAT writes what NCBI writes (apart from the version line, which names LOSAT) when NCBI completes. Whether NCBI completes depends on its memory map: it may crash on the same files.
 - **When.** A damaged `taxdb.btd` whose record ends past NCBI's mapping, where the output does not write the bytes read there. Output that would write those bytes is refused (see [What LOSAT refuses](refusals.md)).
 - **Record.** [The decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
 
 ### `-db` output does not depend on `-num_threads`
 
-- **What you see.** LOSAT's `-db` output is NCBI's output for `-num_threads 1`, at every `-num_threads`. NCBI's own `-db` output can depend on the thread count (with composition-based statistics, `blastp` ends the redo of a query early by the hit lists of its batch, and with more threads NCBI keeps one set per thread: 42 rows differed in one test).
+- **What you see.** LOSAT's `-db` output is NCBI's output for `-num_threads 1` (apart from the version line, which names LOSAT), at every `-num_threads`. NCBI's own `-db` output can depend on the thread count (with composition-based statistics, `blastp` ends the redo of a query early by the hit lists of its batch, and with more threads NCBI keeps one set per thread: 42 rows differed in one test).
 - **`-mt_mode`.** `-mt_mode 0`, `1` and `2` are accepted by `blastn`, `blastp`, `blastx` and `tblastn` and do not change the output, which is always that of `-num_threads 1`. NCBI's `-mt_mode 1` writes the end of an outfmt 0 report, or each XML document, once per batch of queries; LOSAT does not.
 - **Record.** [The decision record on database search](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-DATABASE-SEARCH.md).
 
@@ -129,7 +129,7 @@ These cases are about what the program prints around the search, not the search 
 ### Threads with `-subject`
 
 - **What you see.** With `-subject`, NCBI BLAST+ ignores `-num_threads` and writes `'num_threads' is currently ignored when 'subject' is specified.` on the standard error. LOSAT uses the threads you ask for and does not print the line. Above the CPU count NCBI also writes `Number of threads was reduced to N to match the number of available CPUs`; LOSAT does not.
-- **Why.** The output is the same at every thread count, so using the threads only makes the search faster. Every other byte of standard output and standard error equals NCBI's, apart from `blastn`'s progress bar on a terminal (next section).
+- **Why.** The output is the same at every thread count, so using the threads only makes the search faster. Every other byte of standard output and standard error equals NCBI's, apart from the version line and the error prefixes, which name LOSAT, and `blastn`'s progress bar on a terminal (next section).
 
 ### `blastn`'s progress bar on a terminal
 

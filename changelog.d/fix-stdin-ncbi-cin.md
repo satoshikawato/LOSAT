@@ -11,5 +11,5 @@
 - blastx reads `-subject -` from standard input as NCBI BLAST+ reads it, from a pipe or a
   redirected file. With `-query -` (or no `-query`) as well, the subjects take all of standard
   input and no query is read, as in NCBI BLAST+: outfmt 7 writes `# BLAST processed 0 queries`.
-  An empty standard input ends with "BLAST engine error: Empty CBlastQueryVector" and exit status
+  An empty standard input ends with "LOSAT engine error: Empty CBlastQueryVector" and exit status
   3. Before, LOSAT refused `-subject -`.

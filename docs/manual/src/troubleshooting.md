@@ -92,7 +92,7 @@ These apply when you run `losat.wasm` yourself. See [Platforms and WebAssembly](
 
 ## Memory and threads
 
-- **`-num_threads` sets the number of threads.** The default is 1. The output is the same at every thread count, and it is what NCBI BLAST+ writes with `-num_threads 1`. `-mt_mode` is accepted and changes nothing in the output (`blastn`, `blastp`, `blastx` and `tblastn` take 0, 1 or 2; `rpsblast` and `rpstblastn` take 0 or 1; `tblastx` and `psiblast` have no `-mt_mode`, as in NCBI BLAST+ 2.17.0). `-num_threads` takes an integer of 1 or more (`rpsblast` also reads 0 as one thread for each volume of the database).
+- **`-num_threads` sets the number of threads.** The default is 1. The output is the same at every thread count, and it is what NCBI BLAST+ writes with `-num_threads 1` (apart from the version line, which names LOSAT). `-mt_mode` is accepted and changes nothing in the output (`blastn`, `blastp`, `blastx` and `tblastn` take 0, 1 or 2; `rpsblast` and `rpstblastn` take 0 or 1; `tblastx` and `psiblast` have no `-mt_mode`, as in NCBI BLAST+ 2.17.0). `-num_threads` takes an integer of 1 or more (`rpsblast` also reads 0 as one thread for each volume of the database).
 - **Threads and memory.** The page [Threads, speed and memory](performance.md) explains how threads and memory use relate.
 - **A search of a compressed file needs room for the copy.** See "A compressed input fails" above.
 - **Development variables.** Variables that start with `LOSAT_X_`, and `LOSAT_TIMING`, are for development; leave them unset.

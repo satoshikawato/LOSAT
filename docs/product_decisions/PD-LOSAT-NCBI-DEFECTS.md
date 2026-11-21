@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.64
+- Version: 1.65
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -272,7 +272,12 @@
   `int` in psiblast `-in_msa`, line PS item PS6b, PR #1440; proposed under the standing instruction
   2026-09-29, restated 2026-10-07, on the Owner's rules of 2026-10-10 「NCBI のバグを再現する必要はない」
   and 2026-10-22 「広い型になおしましょう」, and accepted by the maintainer on 2026-11-21 by marking
-  PR #1440 ready for review, as the PR asked; numbered after 1.63)
+  PR #1440 ready for review, as the PR asked; numbered after 1.63);
+  1.65 2026-11-21 (`losat blastn -use_index true`, line RG item D5b-1: the explicit rejections,
+  rule 3, of an empty first MegaBLAST index volume, whose header NCBI reads through a null
+  pointer, of a new-style index volume whose sequence count NCBI reads from words its stream never
+  set, and of an `-index_name` range of volumes whose loop NCBI never ends; Owner-delegated,
+  standing instruction 2026-09-29, restated 2026-10-07)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -2136,6 +2141,25 @@ every query (NCBI's bytes for a query with a next query are deterministic, rule 
   allocator, not of its reader, refused as the reads past an OID list file's page above. Inside the array's last byte the
   clearing is harmless and no OID is kept (probe D1a_Q, case A237). LOSAT refuses where the list is
   first used (cases A238 and A241 of `blastdbcmd_alias_keys.rs`, `alias::OidSet::clears_outside`).
+
+- `losat blastn -use_index true` of a megablast search (version 1.65, 2026-11-21, line RG item
+  D5b-1, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07), where NCBI's
+  loader of the MegaBLAST database index meets one of these. LOSAT refuses each (exit 1) before
+  the search:
+  - The first index volume (`<name>.NN.idx`, new or old style) is a file of 0 bytes. NCBI maps it
+    as no memory and reads its header through a null pointer when it checks the word size
+    (SIGSEGV, exit status 139, also without read access; fixture row `used_old_empty` of
+    `tests/blastn_mb_index`). A first volume that is not a regular file, does not open or has a
+    word size field above 15 gives NCBI's warning and its search without the index (rows
+    `failread_*`); one shorter than its header reads zeros past its end, as NCBI's mapping does.
+  - A new-style index volume of 36 to 39 bytes, or one NCBI cannot open: NCBI's count of its
+    sequences reads a word that its stream never set, an uninitialized value (row
+    `undefined_idx38`, where NCBI printed 42,008,582). Shorter volumes give NCBI's exception
+    (`at start oid`, `at end oid`), reproduced.
+  - An `-index_name` range whose last volume converts to the largest `unsigned long` (a last
+    volume of -1, such as `oidx,,0,-1`), or whose last volume is past `LONG_MAX` while its first
+    is not: NCBI's loop over the volume numbers never ends (row `old_endless`). Other ranges,
+    negative ones too, end and are reproduced.
 
 ## Explicit rejections of a taxonomy record past NCBI's mapping (rule 3, version 1.43)
 

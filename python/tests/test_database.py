@@ -161,7 +161,9 @@ def test_an_alignment_query_is_query_0_of_the_rows(case, tmp_path):
     inputs = pylosat.Database(subject) if database else pylosat.Sequences.from_fasta(subject)
     search = pylosat.Search("psiblast", **options)
     outcome = search.run(pylosat.Alignment.from_file(alignment), inputs, outfmt="6")
-    rows = outcome.reports[0].text.splitlines()
+    # The rows of every round; a search that converged ends with a blank line and NCBI's
+    # `Search has CONVERGED!`, which are not rows.
+    rows = [line for line in outcome.reports[0].text.splitlines() if "\t" in line]
     assert rows and len(rows) == len(outcome.hsps)
     for row, hsp in zip(rows, outcome.hsps, strict=True):
         assert row.split("\t")[0] == hsp.query_id

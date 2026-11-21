@@ -59,9 +59,11 @@ impl Error {
     }
 
     /// The engine's error as the API reports it: the error and its causes joined by `: `
-    /// (anyhow's alternate form), the shape of LOSAT Web ABI v2 (docs/web/abi_v2.md §4).
+    /// (anyhow's alternate form), the shape of LOSAT Web ABI v2 (docs/web/abi_v2.md §4), without
+    /// its last line feeds (an error that holds the command line's whole line, psiblast's
+    /// `-in_msa` reader's, ends with one).
     pub(crate) fn search(error: &anyhow::Error) -> Self {
-        Error::Search(chain_bytes(error))
+        Error::Search(without_line_feeds(chain_bytes(error)))
     }
 
     /// The error of a run that failed after writing `text` to its standard error: that text,

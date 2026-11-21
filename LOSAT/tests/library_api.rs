@@ -2517,11 +2517,12 @@ fn a_query_alignment_that_fails_gives_the_command_lines_message() {
     ] {
         let search = validate(Program::Psiblast, words).unwrap();
         let error = run_collect(&search, Inputs::msa(&alignment, &subjects), &["6"]).unwrap_err();
-        assert_eq!(
-            error.message().trim_ascii_end(),
-            msa_cli_error(&alignment, words).trim_ascii_end(),
-            "{alignment:?} {words:?}: {error}"
-        );
+        // The message is the command line's text without its last line feeds (`Error`).
+        let mut cli = msa_cli_error(&alignment, words);
+        while cli.last() == Some(&b'\n') {
+            cli.pop();
+        }
+        assert_eq!(error.message(), cli, "{alignment:?} {words:?}: {error}");
     }
     // The alignment is psiblast's: another program refuses it, as it refuses a PSSM it cannot take.
     let alignment = directory.join("ps6_b_db_0.aln");

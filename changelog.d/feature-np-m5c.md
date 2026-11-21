@@ -5,6 +5,6 @@
   sequences are written as NCBI writes them once a list has named them (a DDBJ accession of the
   list makes GenBank ids of the same prefix come out as DDBJ ids).
 - `losat dustmasker`, `losat segmasker` and `losat windowmasker` with `-outfmt seqloc_*` or
-  `maskinfo_*`: a sequence with several Seq-ids is named by its gi, else its first accession-type
+  `maskinfo_*`: a sequence with several Seq-ids is named by its gi (not gi 0), else its first accession-type
   id (GenBank, RefSeq, ...), else its first Seq-id, as NCBI BLAST+ 2.17.0 does (LOSAT wrote the
   first Seq-id).

@@ -338,3 +338,7 @@ db_t5b_names_past_page_maskinfo_asn1_text	-infmt blastdb -in ../db_search/t5b/nm
 access_int_ps	-in in/access.fa -parse_seqids
 access_seqloc_asn1_text_ps	-in in/access.fa -outfmt seqloc_asn1_text -parse_seqids
 access_maskinfo_asn1_text_ps	-in in/access.fa -outfmt maskinfo_asn1_text -parse_seqids
+# A gi of 0 is not a gi for GetAccessSeq_id_Handle (IsGi asks for a non-zero packed value): the Seq-id that seqloc_* and maskinfo_* print (line NP M5 final review B1, NCBI BLAST+ 2.17.0 on ws, 2026-11-21)
+access_gi0_int_ps	-in in/access_gi0.fa -parse_seqids
+access_gi0_seqloc_asn1_text_ps	-in in/access_gi0.fa -outfmt seqloc_asn1_text -parse_seqids
+access_gi0_maskinfo_asn1_text_ps	-in in/access_gi0.fa -outfmt maskinfo_asn1_text -parse_seqids

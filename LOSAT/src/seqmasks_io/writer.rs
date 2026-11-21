@@ -95,7 +95,7 @@ pub(crate) struct MaskInfoWriter {
     algo_id: i32,
     program: FilterProgram,
     options: Vec<u8>,
-    /// `m_ListOfMasks`: the first Seq-id and the mask of each sequence with a mask.
+    /// `m_ListOfMasks`: the Seq-id that names each sequence with a mask (`seq_id`) and its mask.
     masks: Vec<(ParsedSeqId, Vec<(u32, u32)>)>,
 }
 
@@ -252,13 +252,17 @@ fn seq_id<'s>(seq: &'s MaskedBioseq<'_>) -> &'s ParsedSeqId {
 
 /// The Seq-id of `CBioseq_Handle::GetAccessSeq_id_Handle()` of a sequence whose Seq-ids are `ids`
 /// (a handle of `CBioseq_CI` has no Seq-id of its own): its first gi, else its first Textseq-id,
-/// else its first Seq-id.
+/// else its first Seq-id. A gi of 0 is not a gi there (`IsGi()` asks for a non-zero packed
+/// value, and gi 0's handle packs 0): `>gi|0|gb|AB000001.1|` is named `genbank`, `>lcl|x|gi|0`
+/// `local`, and only a sequence whose first id is gi 0 and that has no Textseq-id `gi 0`.
 ///
 /// NCBI reference (598d8ae6): c++/src/objmgr/bioseq_handle.cpp:939-985
 /// NCBI reference (598d8ae6): c++/src/objmgr/scope_impl.cpp:2102-2106
+/// NCBI reference (598d8ae6): c++/include/objects/seqloc/seq_id_handle.hpp:279-282
+/// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:609-627
 pub(crate) fn access_seq_id(ids: &[ParsedSeqId]) -> &ParsedSeqId {
     ids.iter()
-        .find(|id| matches!(id, ParsedSeqId::Gi(_)))
+        .find(|id| matches!(id, ParsedSeqId::Gi(gi) if *gi != 0))
         .or_else(|| ids.iter().find(|id| id.textseq().is_some()))
         .or_else(|| ids.first())
         .expect("a sequence has a Seq-id")

@@ -65,18 +65,12 @@ fn run(input: &[u8], protein: bool, parse_seqids: bool) -> Run {
     }
 }
 
-/// `CSeq_id::GetStringDescr(bioseq, eFormat_FastA)`: the FASTA forms of the ids, joined by
-/// `|` (the test's own form, for the comparison with the masking programs' id lines).
-fn fasta_ids(ids: &[ParsedSeqId]) -> String {
-    let forms: Vec<String> = ids
-        .iter()
-        .map(|id| {
-            let mut out = Vec::new();
-            label::fasta(id, &mut out);
-            String::from_utf8(out).unwrap()
-        })
-        .collect();
-    forms.join("|")
+/// `CSeq_id::GetStringDescr(bioseq, eFormat_FastA)` of a record with the ids `ids`, as the
+/// masking programs write it in their id lines (`label::bioseq_fasta`: its gi and best id).
+fn fasta_ids(ids: &[ParsedSeqId], protein: bool) -> String {
+    let mut out = Vec::new();
+    label::bioseq_fasta(ids, protein, &mut out);
+    String::from_utf8(out).unwrap()
 }
 
 /// One case of a `cases.tsv` that the reader decides.
@@ -200,7 +194,7 @@ fn check(case: &Case) -> Vec<String> {
         }
         if case.parse_seqids {
             let ncbi_ids = defline.split(' ').next().unwrap_or_default();
-            let ids = fasta_ids(&record.ids);
+            let ids = fasta_ids(&record.ids, case.segmasker);
             if ids != ncbi_ids {
                 problems.push(format!("record {index}: ids {ids}, NCBI {ncbi_ids}"));
             }

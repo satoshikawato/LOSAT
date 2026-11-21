@@ -38,22 +38,6 @@ fn files_of(dir: &Path) -> Vec<String> {
     names
 }
 
-/// The bytes of `file` without the creation time of a column's index file (`.?aa`, `.?ba`,
-/// ...: the second string after its 32-byte head), which the writer takes from the clock.
-fn without_column_date(file: &str, mut bytes: Vec<u8>) -> Vec<u8> {
-    let extension = file.rsplit('.').next().unwrap_or("").as_bytes();
-    let column_index = extension.len() == 3
-        && matches!(extension[0], b'p' | b'n')
-        && extension[2] == b'a'
-        && crate::writedb::column::COLUMN_LETTERS.contains(&extension[1]);
-    if column_index && bytes.len() > 33 {
-        let at = 33 + usize::from(bytes[32]);
-        let len = usize::from(bytes[at]);
-        bytes.splice(at..at + 1 + len, []);
-    }
-    bytes
-}
-
 /// The text mask file `file` of the fixtures with its Seq-ids `local id k` as the parsed ids of
 /// the FASTA file's `k`th sequence, `local str "m0k"` (`mask_nucl.fna` names them `m01` to
 /// `m08`).
@@ -161,7 +145,9 @@ fn assert_copy_is_the_original(
         "{label}: a mask column in {files:?}"
     );
     for file in &files {
-        let read = |dir: &Path| without_column_date(file, std::fs::read(dir.join(file)).unwrap());
+        let read = |dir: &Path| {
+            crate::writedb::tests::mask_column_date(file, std::fs::read(dir.join(file)).unwrap())
+        };
         let (original, copied) = (read(&source_dir), read(&copy_dir));
         assert!(
             original == copied,

@@ -1,4 +1,4 @@
-//! `ParseBlastOutput` and `_TOfflDomQuery` (offl_cd_align_proc.cpp:17-317, quoted at the
+//! `ParseBlastOutput` and `_TOfflDomQuery` (offl_cd_align_proc.cpp:17-317, cited at the
 //! functions): the getters of OPTIONAL members, the E-value cutoff, the reading frames, the
 //! commits and their memory, the segments and residues of `ParseAlignStrings`, libstdc++'s
 //! `replace`, and what LOSAT refuses.
@@ -29,7 +29,9 @@ fn query(length: i32) -> OfflineQuery {
 
 fn message(error: &ProcessError) -> String {
     match error {
-        ProcessError::Exception(exception) => exception.get_msg().to_string(),
+        ProcessError::Exception(exception) => {
+            String::from_utf8(exception.get_msg().to_vec()).unwrap()
+        }
         ProcessError::Std(what) | ProcessError::Unsupported(what) => what.clone(),
     }
 }
@@ -217,7 +219,7 @@ fn undefined_reads_and_writes() {
 }
 
 // `GetQuery_from() - COORDSBASE`, `GetQuery_to() - COORDSBASE` and `GetHit_from() - COORDSBASE`
-// of `-2147483648` overflow `int` (offl_cd_align_proc.cpp:166-167, 234, quoted at `parse_hsp`;
+// of `-2147483648` overflow `int` (offl_cd_align_proc.cpp:166-167, 234, cited at `parse_hsp`;
 // undefined): computed as their value, `INT_MIN - 1`, which `m_iFrom`, `m_iTo` and the domain's
 // start keep (PD-LOSAT-NCBI-DEFECTS exception 12). Each equals NCBI's result for `-2147483647`
 // (no overflow) moved by one: the `replace` at `m_iFrom`'s `size_t` throws one position lower
@@ -308,7 +310,7 @@ fn domain_positions_that_overflow_int() {
     );
 }
 
-// The `int` positions of an alignment string (offl_cd_align_proc.cpp:51-122, 190-228, quoted at
+// The `int` positions of an alignment string (offl_cd_align_proc.cpp:51-122, 190-228, cited at
 // `parse_hsp` and `parse_align_strings`): `++alnResIdx` and `++start` pass `INT_MAX` in an
 // `Hsp_qseq` of 2^31 letters or more and are computed as their values (PD-LOSAT-NCBI-DEFECTS
 // exception 12, line PS `DECISIONS.md` 59; checked end to end on ws, PS16-Q1 oracle `q31`, an

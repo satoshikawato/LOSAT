@@ -9,7 +9,7 @@ interface MemoryBlock {
 }
 
 export interface MemoryBlockStoreOptions {
-  /** Memory budget in bytes; unlimited by default (the application sets MEMORY_RESULTS_CAPACITY_BYTES). */
+  /** Memory budget in bytes; unlimited by default (the application sets MEMORY_RESULTS_CAPACITY_BYTES of ports/data.ts). */
   readonly capacityBytes?: number;
   /** The message of the StorageFullError beyond the budget. */
   readonly fullMessage?: string;

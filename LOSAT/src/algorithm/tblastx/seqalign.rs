@@ -22,29 +22,6 @@
 //!   (with `-query_loc` / `-subject_loc`, of the intervals), whose starts the remaps add.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1606-1626
-//! ```c++
-//!         GetFilteredRedundantSeqids(*seqinfo_src, hsp_list->oid, seqid_list, subject_id->IsGi());
-//!         // stores a CSeq_align for each matching sequence
-//!         vector<CRef<CSeq_align > > hit_align;
-//!         if (is_gapped) {
-//!                 BLASTHspListToSeqAlign(prog,
-//!                                        hsp_list,
-//!                                        query_id,
-//!                                        subject_id,
-//!                                        query_length,
-//!                                        subj_length,
-//!                                        is_ooframe,
-//!                                        seqid_list,
-//!                                        hit_align);
-//!         } else {
-//!                 BLASTUngappedHspListToSeqAlign(prog,
-//!                                                hsp_list,
-//!                                                query_id,
-//!                                                subject_id,
-//!                                                query_length,
-//!                                                subj_length,
-//!                                                seqid_list,
-//! ```
 
 use anyhow::Result;
 

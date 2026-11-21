@@ -5,38 +5,6 @@
 //! `CBioseq`; the writer reads it as `CWriteDB_Impl` reads the `CBioseq`.
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1007-1036
-// ```c++
-//         switch(sd.Which()) {
-//         case CSeq_data::e_Ncbistdaa:
-//             WriteDB_StdaaToBinary(si, m_Sequence);
-//             break;
-//
-//         case CSeq_data::e_Ncbieaa:
-//             WriteDB_EaaToBinary(si, m_Sequence);
-//             break;
-//
-//         case CSeq_data::e_Iupacaa:
-//             WriteDB_IupacaaToBinary(si, m_Sequence);
-//             break;
-//
-//         case CSeq_data::e_Ncbi2na:
-//             WriteDB_Ncbi2naToBinary(si, m_Sequence);
-//             break;
-//
-//         case CSeq_data::e_Ncbi4na:
-//             WriteDB_Ncbi4naToBinary(si, m_Sequence, m_Ambig);
-//             break;
-//
-//         case CSeq_data::e_Iupacna:
-//              WriteDB_IupacnaToBinary(si, m_Sequence, m_Ambig);
-//              break;
-//
-//         default:
-//             msg = "Unable to process sequence for entry [";
-//             msg += (m_Bioseq->GetId().front())->GetSeqIdString(false);
-//             msg += "].";
-//         }
-// ```
 /// `CSeq_data` of a sequence: the choice and its bytes exactly as NCBI holds
 /// them (one letter per residue for the text codings, 4 bases per byte for
 /// ncbi2na, 2 bases per byte for ncbi4na; the last byte is padded with zero

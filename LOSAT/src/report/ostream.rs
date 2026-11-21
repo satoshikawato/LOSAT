@@ -1,363 +1,11 @@
-//! The report's output stream as NCBI's writes it: the buffers of NCBI's streams (`NcbiStdio`,
-//! `NcbiBuffer`), the command line's report stream (`ReportStream`), the stream that NCBI's
-//! formatter writes to (`NcbiOstream`) and the tie of standard error to standard output
-//! (`tie_standard_output`).
+//! The report's output stream as NCBI's writes it: the command line's report stream
+//! (`ReportStream`), behind NCBI's buffer of the stream (`cli::NcbiBuffer`, the one model of it,
+//! `cli/stdio_buffer.rs`), the stream that NCBI's formatter writes to (`NcbiOstream`) and the tie of
+//! standard error to standard output (`tie_standard_output`).
 
-// NCBI reference (glibc 2.17 to 2.39): libio/filedoalloc.c `_IO_file_doallocate`
-// ```c
-//   size = BUFSIZ;
-//   if (fp->_fileno >= 0 && __builtin_expect (_IO_SYSSTAT (fp, &st), 0) >= 0)
-//     {
-//       if (S_ISCHR (st.st_mode))
-// 	{
-// 	  /* Possibly a tty.  */
-// 	  if (
-// #ifdef DEV_TTY_P
-// 	      DEV_TTY_P (&st) ||
-// #endif
-// 	      local_isatty (fp->_fileno))
-// 	    fp->_flags |= _IO_LINE_BUF;
-// 	}
-// #if defined _STATBUF_ST_BLKSIZE
-//       if (st.st_blksize > 0 && st.st_blksize < BUFSIZ)
-// 	size = st.st_blksize;
-// #endif
-//     }
-// ```
-/// The size of glibc's buffer of standard output (`cout` writes into it, synchronized with C's
-/// `stdout`): `st_blksize` of the standard output where it is below `BUFSIZ`, else `BUFSIZ` (4096
-/// for a pipe and for most files, 1024 for a terminal); 4096 where LOSAT cannot ask.
-pub fn stdio_buffer_size() -> usize {
-    #[cfg(unix)]
-    let block = rustix::fs::fstat(std::io::stdout())
-        .ok()
-        .and_then(|stat| usize::try_from(stat.st_blksize).ok())
-        .filter(|&size| size > 0 && size < NCBI_BUFSIZ)
-        .unwrap_or(NCBI_BUFSIZ);
-    #[cfg(not(unix))]
-    let block = 4096;
-    block
-}
-
-/// glibc's and libstdc++'s `BUFSIZ`.
-pub const NCBI_BUFSIZ: usize = 8192;
-
-/// NCBI's buffer of a report stream, which decides when the bytes inserted into the stream reach
-/// the file or device (`NcbiBuffer`). The buffers are those of NCBI's builds of BLAST+ and
-/// rpsbproc, which are Linux builds (glibc, GCC 13's libstdc++); LOSAT keeps their counts on every
-/// platform.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum NcbiStdio {
-    /// `cout`, synchronized with C's `stdout` (NCBI does not call `sync_with_stdio(false)`):
-    /// each insertion is an `fwrite` into glibc's buffer of `block` bytes (`stdio_buffer_size`),
-    /// which writes at each newline too where `lines` is set (a terminal: `_IO_LINE_BUF`).
-    Cout { block: usize, lines: bool },
-    /// An `ofstream` (`-out`, rpsbproc's `-o`): libstdc++'s `basic_filebuf` with a buffer of
-    /// `BUFSIZ` bytes, of which an insertion that does not fit in what is left is written
-    /// directly with it.
-    File,
-}
-
-impl NcbiStdio {
-    /// The stream of a report on standard output: glibc's buffer of it, line-buffered on a
-    /// terminal (`_IO_file_doallocate`, quoted at `stdio_buffer_size`: `local_isatty`, as
-    /// `is_terminal`).
-    pub fn cout() -> Self {
-        use std::io::IsTerminal;
-        NcbiStdio::Cout {
-            block: stdio_buffer_size(),
-            lines: std::io::stdout().is_terminal(),
-        }
-    }
-}
-
-/// What NCBI's buffer of a report stream (`NcbiStdio`) holds of the bytes inserted into it: the
-/// last `held` bytes; the others are written to the file or device. One model for the organism
-/// report's streams (`ReportStream`) and rpsbproc's report (`rpsbproc::Report`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct NcbiBuffer {
-    stream: NcbiStdio,
-    held: usize,
-    /// Whether glibc has made `stdout`'s buffer (at the first insertion of a byte).
-    allocated: bool,
-}
-
-impl NcbiBuffer {
-    /// The empty buffer of `stream`.
-    pub fn new(stream: NcbiStdio) -> Self {
-        NcbiBuffer {
-            stream,
-            held: 0,
-            allocated: false,
-        }
-    }
-
-    /// The buffer's stream.
-    pub fn stream(&self) -> NcbiStdio {
-        self.stream
-    }
-
-    /// How many of the bytes inserted the buffer holds (the last ones).
-    pub fn held(&self) -> usize {
-        self.held
-    }
-
-    /// An insertion of fewer bytes than this is held without a write (`sputn`'s first branch:
-    /// the buffer has room for it); 0 where `sputn` must read it (`stdout` before its buffer is
-    /// made; a terminal's, which writes at its newlines).
-    pub fn room(&self) -> usize {
-        match self.stream {
-            NcbiStdio::File => NCBI_BUFSIZ - 1 - self.held,
-            NcbiStdio::Cout {
-                block,
-                lines: false,
-            } if self.allocated => block - self.held + 1,
-            NcbiStdio::Cout { .. } => 0,
-        }
-    }
-
-    /// An insertion of `n` bytes (`sputn`: a string or a number), the last `n` bytes of `stream`
-    /// (the stream's bytes up to the insertion's end; a line-buffered `cout` reads the insertion's
-    /// newlines).
-    // NCBI reference (glibc 2.17 to 2.39): libio/fileops.c `_IO_new_file_xsputn`
-    // ```c
-    //   /* First figure out how much space is available in the buffer. */
-    //   ...
-    //   else if (f->_IO_write_end > f->_IO_write_ptr)
-    //     count = f->_IO_write_end - f->_IO_write_ptr; /* Space available. */
-    //   ...
-    //   if (to_do + must_flush > 0)
-    //     {
-    //       size_t block_size, do_write;
-    //       /* Next flush the (full) buffer. */
-    //       if (_IO_OVERFLOW (f, EOF) == EOF)
-    //     ...
-    //       block_size = f->_IO_buf_end - f->_IO_buf_base;
-    //       do_write = to_do - (block_size >= 128 ? to_do % block_size : 0);
-    // ```
-    // Before the first insertion `stdout` has no buffer (no space available): `_IO_OVERFLOW`
-    // makes it, and the first insertion keeps `n % block` (glibc 2.39, `T/t2/fix2/
-    // glibc_first_write.c` on a file of `st_blksize` 4096: an `fwrite` of 4,096 bytes is written at
-    // once, 4,095 and then 1 are held, and 10 more write 4,096).
-    // NCBI reference (GCC 13 libstdc++): include/c++/13/bits/fstream.tcc:766-778
-    // (`basic_filebuf::xsputn`)
-    // ```c++
-    // 	  streamsize __bufavail = this->epptr() - this->pptr();
-    //
-    // 	  // Don't mistake 'uncommitted' mode buffered with unbuffered.
-    // 	  if (!_M_writing && _M_buf_size > 1)
-    // 	    __bufavail = _M_buf_size - 1;
-    //
-    // 	  if (__n >= __bufavail)
-    // 	    {
-    // 	      const streamsize __buffill = this->pptr() - this->pbase();
-    // 	      const char* __buf = reinterpret_cast<const char*>(this->pbase());
-    // 	      __ret = _M_file.xsputn_2(__buf, __buffill,
-    // 				       reinterpret_cast<const char*>(__s),
-    // 				       __n);
-    // ```
-    // A line-buffered `stdout` (a terminal, `_IO_LINE_BUF` from `_IO_file_doallocate`): the same
-    // function's branch for it copies, of an insertion that fits, up to its last newline and then
-    // writes the buffer (`must_flush`); what follows is written with it where the buffer is under
-    // 128 bytes (`do_write` is all of it), else put byte by byte (`_IO_default_xsputn`), where
-    // `_IO_new_file_overflow` writes at each newline, as the rest of an insertion that does not
-    // fit; so the buffer keeps what follows the last newline of what it keeps (glibc 2.39,
-    // `T/t2/fix3/glibc_tty_lines.c` on a pty of `st_blksize` 1024: 100 then 50 ending in a newline
-    // write 150; 1000 then 30 with a newline at 27 write 1,028; 500 then 2,000 with newlines at 100
-    // and 1,900 write 2,401; line RG T2 review 5's `T/t2/review5/glibc/line_small.c`, three
-    // `fwrite`s of `xxxxx\nyyy` with a line buffer of 64 bytes write 9, 18 and 27 bytes, of 1,024
-    // bytes 6, 15 and 24).
-    // NCBI reference (glibc 2.17 to 2.39): libio/fileops.c `_IO_new_file_xsputn`
-    // ```c
-    //   if ((f->_flags & _IO_LINE_BUF) && (f->_flags & _IO_CURRENTLY_PUTTING))
-    //     {
-    //       count = f->_IO_buf_end - f->_IO_write_ptr;
-    //       if (count >= n)
-    //         {
-    //           const char *p;
-    //           for (p = s + n; p > s; )
-    //             {
-    //               if (*--p == '\n')
-    //                 {
-    //                   count = p - s + 1;
-    //                   must_flush = 1;
-    //                   break;
-    //                 }
-    //             }
-    //         }
-    //     }
-    //   ...
-    //   /* Then fill the buffer. */
-    //   if (count > 0)
-    //     {
-    //       if (count > to_do)
-    // 	count = to_do;
-    //       f->_IO_write_ptr = __mempcpy (f->_IO_write_ptr, s, count);
-    //       s += count;
-    //       to_do -= count;
-    //     }
-    //   ...
-    //       /* Now write out the remainder.  Normally, this will fit in the
-    // 	 buffer, but it's somewhat messier for line-buffered files,
-    // 	 so we let _IO_default_xsputn handle the general case. */
-    //       if (to_do)
-    // 	to_do -= _IO_default_xsputn (f, s+do_write, to_do);
-    // ```
-    // NCBI reference (glibc 2.17 to 2.39): libio/fileops.c `_IO_new_file_overflow`
-    // ```c
-    //   if ((f->_flags & _IO_UNBUFFERED)
-    //       || ((f->_flags & _IO_LINE_BUF) && ch == '\n'))
-    //     if (_IO_do_write (f, f->_IO_write_base,
-    // 		      f->_IO_write_ptr - f->_IO_write_base) == EOF)
-    // ```
-    pub fn sputn(&mut self, n: usize, stream: &[u8]) {
-        if n == 0 {
-            return;
-        }
-        self.held = match self.stream {
-            NcbiStdio::Cout { block, lines } => {
-                let insertion = &stream[stream.len() - n..];
-                // `count`: the bytes of the insertion copied into the buffer, up to its last
-                // newline where a line-buffered stream's insertion fits (`must_flush`).
-                let room = if self.allocated { block - self.held } else { 0 };
-                // glibc looks for the newline only in its line-buffered branch, when the
-                // insertion fits; a fully buffered stream never scans the bytes.
-                let last_newline = || insertion.iter().rposition(|&byte| byte == b'\n');
-                let (count, must_flush) = match (lines && n <= room).then(last_newline).flatten() {
-                    Some(at) => (at + 1, true),
-                    None => (n.min(room), false),
-                };
-                let to_do = n - count;
-                if to_do == 0 && !must_flush {
-                    self.held + n
-                } else {
-                    // The buffer is written (`_IO_OVERFLOW`, which makes it before the first
-                    // insertion), then `do_write` bytes of the rest; the buffer keeps the others,
-                    // a line-buffered one what follows their last newline.
-                    let do_write = if block >= 128 {
-                        to_do - to_do % block
-                    } else {
-                        to_do
-                    };
-                    let kept = &insertion[n - (to_do - do_write)..];
-                    match lines
-                        .then(|| kept.iter().rposition(|&byte| byte == b'\n'))
-                        .flatten()
-                    {
-                        Some(at) => kept.len() - at - 1,
-                        None => kept.len(),
-                    }
-                }
-            }
-            NcbiStdio::File => {
-                if n >= NCBI_BUFSIZ - 1 - self.held {
-                    0
-                } else {
-                    self.held + n
-                }
-            }
-        };
-        self.allocated = true;
-    }
-
-    /// An insertion of one `char` (`put`, `sputc`), the last byte of `stream` (as `sputn`'s): the
-    /// buffer takes it while it has room; a full buffer is written with it
-    /// (`basic_filebuf::overflow`). NCBI rpsbproc 0.5.1, both builds, with 8,190 bytes held
-    /// before a tab of the `SESSION` line (line RG E1c review 2, `s_same_mat8165`,
-    /// `s_same_ev8156`). On `cout` the `char` is glibc's `putc` (`stdio_sync_filebuf::overflow`),
-    /// which a full or unallocated buffer passes to `__overflow`: the buffer is made or written,
-    /// then it keeps the byte (an `fwrite` of one byte keeps none where the buffer is under 128
-    /// bytes, `sputn`), and a line-buffered `stdout` writes it with what it holds at a newline.
-    // NCBI reference (GCC 13 libstdc++): include/c++/13/ostream:570-576 (a `char` is put, not
-    // written with `sputn`)
-    // ```c++
-    //   template<typename _Traits>
-    //     inline basic_ostream<char, _Traits>&
-    //     operator<<(basic_ostream<char, _Traits>& __out, char __c)
-    //     {
-    //       if (__out.width() != 0)
-    // 	return __ostream_insert(__out, &__c, 1);
-    //       __out.put(__c);
-    //       return __out;
-    //     }
-    // ```
-    // NCBI reference (GCC 13 libstdc++): include/ext/stdio_sync_filebuf.h `overflow`
-    // ```c++
-    //       virtual int_type
-    //       overflow(int_type __c = traits_type::eof())
-    //       {
-    // 	int_type __ret;
-    // 	if (traits_type::eq_int_type(__c, traits_type::eof()))
-    // 	  {
-    // 	    if (std::fflush(_M_file))
-    // 	      __ret = traits_type::eof();
-    // 	    else
-    // 	      __ret = traits_type::not_eof(__c);
-    // 	  }
-    // 	else
-    // 	  __ret = std::putc(__c, _M_file);
-    // 	return __ret;
-    //       }
-    // ```
-    // NCBI reference (glibc 2.17 to 2.39): libio/fileops.c `_IO_new_file_overflow` (`putc` calls it
-    // when `_IO_write_ptr >= _IO_write_end`: a full or unallocated buffer, and every `char` of a
-    // line-buffered stream, whose `_IO_write_end` stays at `_IO_write_base`)
-    // ```c
-    //   if ((f->_flags & _IO_CURRENTLY_PUTTING) == 0 || f->_IO_write_base == NULL)
-    //     {
-    //       /* Allocate a buffer if needed. */
-    //       if (f->_IO_write_base == NULL)
-    // 	{
-    // 	  _IO_doallocbuf (f);
-    //     ...
-    //       if (f->_mode <= 0 && f->_flags & (_IO_LINE_BUF | _IO_UNBUFFERED))
-    // 	f->_IO_write_end = f->_IO_write_ptr;
-    //     }
-    //   ...
-    //   if (f->_IO_write_ptr == f->_IO_buf_end ) /* Buffer is really full */
-    //     if (_IO_do_flush (f) == EOF)
-    //       return EOF;
-    //   *f->_IO_write_ptr++ = ch;
-    //   if ((f->_flags & _IO_UNBUFFERED)
-    //       || ((f->_flags & _IO_LINE_BUF) && ch == '\n'))
-    //     if (_IO_do_write (f, f->_IO_write_base,
-    // 		      f->_IO_write_ptr - f->_IO_write_base) == EOF)
-    //       return EOF;
-    // ```
-    pub fn sputc(&mut self, stream: &[u8]) {
-        match self.stream {
-            NcbiStdio::Cout { block, lines } => {
-                self.held = if lines && stream.last() == Some(&b'\n') {
-                    0
-                } else if !self.allocated || self.held == block {
-                    1
-                } else {
-                    self.held + 1
-                };
-                self.allocated = true;
-            }
-            NcbiStdio::File => {
-                self.held = if self.held < NCBI_BUFSIZ - 1 {
-                    self.held + 1
-                } else {
-                    0
-                };
-            }
-        }
-    }
-
-    /// The stream flushed (`flush`, `endl`, a write to `cerr`, which is tied to `cout`): the
-    /// buffer writes what it holds.
-    pub fn flush(&mut self) {
-        self.held = 0;
-    }
-}
+use crate::cli::{NcbiBuffer, NcbiStdio, NCBI_BUFSIZ};
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:116-119
-// ```c++
-//     m_OrigExceptionMask = m_Outfile.exceptions();
-//     m_Outfile.exceptions(NcbiBadbit);
-// ```
 /// NCBI's region of the report where an insertion is made: what NCBI's code does where the
 /// stream's exception (`exceptions(badbit)`, which `CBlastFormat` sets) is thrown. The formatter
 /// declares it (`ReportWrite::site`) before it writes there; a report starts in `Report`.
@@ -439,36 +87,18 @@ impl Site {
 enum Failure {
     /// The exception reached `CATCH_ALL` after the texts `posts` (each ending in a line feed).
     Thrown { posts: String },
-    /// `std::terminate`: libstdc++'s verbose handler, then `abort()`.
+    /// `std::terminate`: the C++ runtime's text, then an abort.
     Terminate,
 }
 
-// NCBI reference (GCC 13 libstdc++): libsupc++/vterminate.cc `__verbose_terminate_handler`
-// ```c++
-// 	  fputs("terminate called after throwing an instance of '", stderr);
-// 	  fputs(dem, stderr);
-// 	  fputs("'\n", stderr);
-//       ...
-// 	      fputs("  what():  ", stderr);
-// 	      fputs(w, stderr);
-// 	      fputs("\n", stderr);
-// ```
-/// The text of `std::terminate` after the report's stream threw (`basic_ios::clear` of a stream
-/// whose `exceptions(badbit)` is set and whose state has `badbit`), before `abort()`.
+/// The text that NCBI BLAST+ 2.17.0 (its Linux build) writes to standard error when its report's
+/// stream throws where nothing catches it (a tabular report's destructor flush), before it
+/// aborts (exit status 134). Observed, not read from a source: the runs of the device rows of
+/// `tests/db_search_manifest/*.device.tsv` (NCBI's standard error frozen as `<row_id>.err`).
 pub const TERMINATE_TEXT: &str = "terminate called after throwing an instance of \
 'std::__ios_failure'\n  what():  basic_ios::clear: iostream error\n";
 
 // NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:317-324
-// ```c++
-// CObjectOStream::~CObjectOStream(void)
-// {
-//     try {
-//         Close();
-//         ResetLocalHooks();
-//     }
-//     NCBI_CATCH_X(4, "Cannot close serializing output stream")
-// }
-// ```
 /// The post of `~CObjectOStream` whose `Close` flushed the failed report stream of `program`
 /// (`[program]` is the application's name in NCBI's posts).
 pub fn cannot_close_post(program: &str) -> String {
@@ -565,19 +195,6 @@ fn undecided_failure() -> std::io::Error {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:745-764
-// ```c++
-// 	query_label = string("Q(")+NStr::NumericToString(index) +
-// 	    string("/")+ NStr::NumericToString(data->GetNumQueries() );
-// 	try{
-//         s_BlastXMLAddIteration(bxmlout, data->GetAlignment(index), *seqloc,
-//         ...
-// 	}
-// 	...
-// 	catch(...){
-// 	    ERR_POST(Error << "Failed s_BlastXMLAddIteration " << query_label  );
-// 	    return;
-// 	}
-// ```
 /// The post of `BlastXML_FormatReport`'s catch of a failed insertion of an `Iteration` of
 /// `program` (`std::ios_base::failure` is no `CException`: no `what()` follows the label, which
 /// NCBI writes without its `)`; each call formats one query, `Q(0/1`).
@@ -602,15 +219,6 @@ fn iteration_post(program: &str) -> String {
 /// destructor throws (`std::terminate`). The `-out` file is not tied: a text on standard error
 /// does not write it.
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:317-323
-// ```c++
-// CBlastFormat::~CBlastFormat()
-// {
-//     try {
-//         m_Outfile.exceptions(m_OrigExceptionMask);
-//     } catch (...) {/*ignore exceptions*/}
-//     m_Outfile.flush();
-// }
-// ```
 pub struct ReportStream(std::sync::Arc<std::sync::Mutex<Core>>);
 
 /// What `ReportStream` holds.
@@ -781,7 +389,7 @@ impl Core {
     fn model(&mut self) -> Option<NcbiBuffer> {
         let held = self.held.len() - self.out;
         self.buffer.as_mut().map(|buffer| {
-            buffer.held = held;
+            buffer.set_held(held);
             *buffer
         })
     }
@@ -816,9 +424,9 @@ impl Core {
         };
         let mut buffer = before;
         buffer.sputn(buf.len(), buf);
-        let kept = buffer.held;
+        let kept = buffer.held();
         self.buffer = Some(buffer);
-        if kept == before.held + buf.len() {
+        if kept == before.held() + buf.len() {
             // NCBI's buffer takes it (a terminal's insertion without a newline).
             self.held.extend_from_slice(buf);
             self.update_room();
@@ -893,17 +501,14 @@ impl Core {
             let end = end.max(at);
             let n = end - at;
             if n > 0 {
-                if n < buffer.room() {
-                    buffer.held += n;
-                } else {
-                    let held = buffer.held;
-                    buffer.sputn(n, &report[..end]);
-                    if buffer.held != held + n {
-                        let mut write = self.write_here(false, None);
-                        write.end = start + (end - from - buffer.held) as u64;
-                        self.pending.push(write);
-                        written = Some(end - from - buffer.held);
-                    }
+                let held = buffer.held();
+                // An insertion within the room is held whole (`NcbiBuffer::room`).
+                buffer.sputn(n, &report[..end]);
+                if buffer.held() != held + n {
+                    let mut write = self.write_here(false, None);
+                    write.end = start + (end - from - buffer.held()) as u64;
+                    self.pending.push(write);
+                    written = Some(end - from - buffer.held());
                 }
             }
             at = end;
@@ -1007,12 +612,6 @@ impl Core {
 
     // NCBI reference (598d8ae6): c++/src/connect/ncbi_socket.c:866-873 (NCBI keeps the default
     // action of SIGPIPE unless SOCK starts, which only the usage report does, after the run)
-    // ```c
-    // #ifdef NCBI_OS_UNIX
-    //         if (s_SigPipeIgnored == eOff) {
-    //             ...
-    //                 signal(SIGPIPE, SIG_IGN);
-    // ```
     /// NCBI's write `write` failed: the stream is bad, and NCBI's end is the region's (`Site`). A
     /// pipe whose reader closed it is such a write too (`EPIPE`: Rust's runtime ignores
     /// SIGPIPE). NCBI, whose SIGPIPE keeps its default action, is ended by it (exit status 141,
@@ -1075,18 +674,6 @@ impl Core {
     }
 
     // NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:373-383
-    // ```c++
-    // CObjectOStream::TFailFlags CObjectOStream::SetFailFlags(TFailFlags flags,
-    //                                                         const char* message)
-    // {
-    //     TFailFlags old = m_Fail;
-    //     m_Fail |= flags;
-    //     if ( !old && flags ) {
-    //         // first fail
-    //         ERR_POST_X(5, "CObjectOStream: error at "<<
-    //                    GetPosition()<<": "<<GetStackTrace() << ": " << message);
-    //     }
-    // ```
     /// The write fault of an object written to the bad stream after the formatter
     /// (`undecided` without the exception mask): `Close` posts 802.5 at `position`, the bytes that
     /// the object stream had put into its buffer at its first write, with an empty stack; the
@@ -1199,16 +786,6 @@ impl Core {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:884-890
-    // ```c++
-    // 	catch(CException &e){
-    // 	    ERR_POST(Error << e.GetMsg() << e.what() );
-    // 	    return;
-    // 	}
-    // 	catch(...){
-    // 	    ERR_POST(Error << "JSON format failed" );
-    // 	    return;
-    // 	}
-    // ```
     /// The catch of a report of outfmt 16 or 15 (`json`) whose insertion failed: `Close`'s 802.4
     /// while the exception unwinds, then the catch's post; the run goes on.
     #[cold]
@@ -1329,12 +906,12 @@ impl Core {
             None => result,
             Some(Failure::Thrown { posts }) => Err(crate::cli::NativeError {
                 exit: 6,
-                message: posts + "BLAST failed to write output\n",
+                message: [posts.as_bytes(), b"BLAST failed to write output\n"].concat(),
             }
             .into()),
             Some(Failure::Terminate) => Err(crate::cli::NativeError {
                 exit: -6,
-                message: TERMINATE_TEXT.to_string(),
+                message: TERMINATE_TEXT.as_bytes().to_vec(),
             }
             .into()),
         }
@@ -1426,14 +1003,30 @@ impl ReportStream {
     /// (NCBI's `basic_filebuf`, `NcbiStdio::File`: `BUFSIZ - 2` bytes held, the 8191st written
     /// with them) or, with `None`, standard output (glibc's buffer, `NcbiStdio::cout`, tied to
     /// standard error).
-    pub fn of_cli(out_file: Option<std::fs::File>, program: &'static str, outfmt: &str) -> Self {
+    ///
+    /// Nearest the device is the hold of a run whose strategy file `strategy` LOSAT refuses
+    /// (`strategy::hold_report`): until NCBI's first request the stream's device writes are
+    /// held, and the request point drops them or the run's end writes them.
+    pub fn of_cli(
+        out_file: Option<std::fs::File>,
+        program: &'static str,
+        outfmt: &str,
+        strategy: Option<&crate::report::archive::strategy::StrategyExport>,
+    ) -> Self {
+        use crate::report::archive::strategy::hold_report;
         let number = crate::blastinput::app::parse_formatting_string(outfmt)
             .map_or(0, |choice| choice.number);
         let stream = match out_file {
-            Some(file) => Self::file(Box::new(file), program, Site::of_format(number)),
-            None => {
-                Self::standard_output(standard_output_device(), program, Site::of_format(number))
-            }
+            Some(file) => Self::file(
+                hold_report(strategy, Box::new(file)),
+                program,
+                Site::of_format(number),
+            ),
+            None => Self::standard_output(
+                hold_report(strategy, standard_output_device()),
+                program,
+                Site::of_format(number),
+            ),
         };
         if crate::cli::is_command_line_run() {
             *lock(&RUN_PROGRAM) = Some(program);
@@ -1985,18 +1578,6 @@ impl CutCursor<'_> {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1911-1931
-// ```c++
-// void CDisplaySeqalign::DisplaySeqalign(CNcbiOstream& out)
-// {
-//     CSeq_align_set actual_aln_list;
-//     CAlignFormatUtil::ExtractSeqalignSetFromDiscSegs(actual_aln_list,
-//                                                      *m_SeqalignSetRef);
-//     if (actual_aln_list.Get().empty()){
-//         return;
-//     }
-//     ...
-//     unique_ptr<CObjectOStream> out2(CObjectOStream::Open(eSerial_AsnText, out));
-// ```
 /// NCBI's `DisplaySeqalign` of a query's alignments: from its first alignment (none shown: no
 /// call that writes) they are written in its region (`Site::Alignments`), and at their end the
 /// destructor of its `out2` flushes the stream (`CObjectOStream::Close`, `objostr.cpp:338-354`),
@@ -2028,9 +1609,6 @@ impl DisplaySeqalign {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:456
-// ```c++
-//     m_Outfile << NcbiEndl;
-// ```
 /// `out << NcbiEndl` (`endl`): a line feed, then NCBI's flush (`ReportWrite::ncbi_flush`), as at
 /// the start of each query's footer and twice at the start of a pairwise report's epilog.
 pub fn ncbi_endl<W: ReportWrite + ?Sized>(out: &mut W) -> std::io::Result<()> {
@@ -2048,9 +1626,9 @@ pub fn insert(out: &mut (impl std::io::Write + ?Sized), bytes: &[u8]) -> std::io
 /// One insertion of NCBI's of `len` bytes that LOSAT streams instead of holding (the organism
 /// report, whose runs of about 4 GiB of spaces `tax_report` keeps as counts): `fill` gives the bytes to
 /// the `Insertion`, which writes them in pieces that NCBI's buffers (`NcbiBuffer`) write as they
-/// write the whole. Each piece is longer than a buffer (`basic_filebuf` writes it with what it
-/// holds and keeps nothing; glibc keeps `(held + n) % block`, which adds up over the pieces as
-/// over the whole), and each but the last ends in `NCBI_BUFSIZ` bytes without a newline (so a
+/// write the whole. Each piece is longer than a buffer (an output file's buffer writes it with
+/// what it holds and keeps nothing; standard output's keeps `(held + n) % block`, which adds up
+/// over the pieces as over the whole, `cli::NcbiBuffer::sputn`), and each but the last ends in `NCBI_BUFSIZ` bytes without a newline (so a
 /// line-buffered `cout` keeps its whole remainder there, as within the whole); the last is the
 /// rest. A string without such a place is written in one piece.
 pub fn insert_streamed<W: std::io::Write + ?Sized>(
@@ -2106,7 +1684,11 @@ impl<W: std::io::Write + ?Sized> Insertion<'_, W> {
         Ok(())
     }
 
-    /// Writes the piece where it may end (`insert_streamed`) once it is `PIECE` bytes long.
+    /// Writes the piece where it may end (`insert_streamed`) once it is `PIECE` bytes long. A
+    /// piece ends only if more than `NCBI_BUFSIZ` bytes follow it, which is at least a block (a
+    /// block never exceeds `NCBI_BUFSIZ`), so the last piece always takes the buffer's branch of
+    /// an insertion longer than the room, as the whole insertion does; a final piece that exactly
+    /// filled a block would differ from the whole.
     fn end_piece(&mut self) -> std::io::Result<()> {
         let n = self.piece.len() as u64;
         if n >= Self::PIECE as u64
@@ -2122,10 +1704,6 @@ impl<W: std::io::Write + ?Sized> Insertion<'_, W> {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:68-93
-// ```c
-// CBlastFormat::CBlastFormat(..., CNcbiOstream& outfile, ...)
-//     : m_FormatType(format_type), ..., m_Outfile(outfile),
-// ```
 /// The stream of a report as NCBI's formatter writes to it (`CBlastFormat::m_Outfile`), with
 /// nothing of a program's before it: each write is one insertion of NCBI's (`out << value`,
 /// `insert`, `insert_streamed`), passed on as one write. A writer becomes one only through the
@@ -2302,44 +1880,8 @@ impl ReportWrite for NcbiOstream<'_> {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:768-778
-// ```c++
-// BlastXML2_FormatReport(const IBlastXML2ReportData* data, string file_name)
-// {
-// 	blastxml2::CBlastOutput2 bxmlout;
-// 		CNcbiOfstream out_stream;
-// 		out_stream.open(file_name.c_str(), IOS_BASE::out);
-// 		...
-// 		s_FillBlastOutput(bxmlout, data);
-// 		s_WriteXML2Object(bxmlout, &out_stream);
-// }
-// ```
 // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:893-896 (`COStreamBuffer::FlushBuffer`)
-// ```c++
-//         if ( !m_Output.write(m_Buffer, count) ) {
-//             m_Error = "write fault";
-//             NCBI_THROW(CIOException,eWrite,m_Error);
-//         }
-// ```
 // NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:339-354, :385-395
-// ```c++
-// void CObjectOStream::Close(void)
-// {
-//     if (m_Fail != fNotOpen) {
-//         try {
-//             DefaultFlush();
-//             ...
-//         catch (CException& exc) {
-//             if ( InGoodState() )
-//                 RethrowError(fWriteError, "cannot close output stream",exc);
-//         }
-// ...
-// bool CObjectOStream::InGoodState(void)
-// {
-//     ...
-//     else if ( m_Output.fail() ) {
-//         // IO exception thrown without setting fail flag
-//         SetFailFlags(fWriteError, m_Output.GetError());
-// ```
 /// Writes `document`, the report of a side file of outfmt 13 or 14, to `file` as NCBI's
 /// `CNcbiOfstream` (no exception mask; `basic_filebuf`, `NcbiStdio::File`) gets it from the buffer
 /// of its object stream: `pieces` are that buffer's writes (`out_buffer::xml_pieces`,
@@ -2413,19 +1955,12 @@ fn side_file_failure(
             );
             return Err(crate::cli::NativeError {
                 exit: 0,
-                message: post,
+                message: post.into_bytes(),
             }
             .into());
         }
     }
     // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:899-907 (`COStreamBuffer::Flush`)
-    // ```c++
-    //     STemporarilyClearStreamState state(m_Output);
-    //     FlushBuffer();
-    //     if ( !m_Output.flush() ) {
-    //         NCBI_THROW(CIOException,eFlush,"COStreamBuffer::Flush: failed");
-    //     }
-    // ```
     let position = end;
     let chain = format!(
         "Error: (802.5) [{program}] CObjectOStream: error at byte {position}: stack is empty: \
@@ -2471,13 +2006,28 @@ pub fn tie_standard_output() -> std::io::Result<()> {
 /// `write_all` of the stream, which `std::io::Stderr` writes under one lock of standard error, so
 /// that no other thread's message comes inside it. An empty write is no write of NCBI's to `cerr`
 /// (a query without warnings, whose `ERR_POST` NCBI does not make): it writes nothing of the
-/// report.
+/// report. Where the standard error is the file of `-logfile` (tblastx's, rpsblast's and
+/// rpstblastn's run, `DiagTarget::into_standard_error`), a failed write is dropped, as NCBI's
+/// handler of that file drops it: `CFileHandleDiagHandler::Post` ignores what the write returns
+/// (NCBI BLAST+ 2.17.0 tblastx `-logfile /dev/full` runs and writes its report; line WQA's D11
+/// round 2, 2026-11-20).
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:6695-6696
 pub struct CliStderr(std::io::Stderr);
 
 impl CliStderr {
     /// The process's standard error.
     pub fn process() -> Self {
         CliStderr(std::io::stderr())
+    }
+
+    /// `result` of a write, dropped where the standard error is the file of `-logfile`.
+    fn logged<T: Default>(result: std::io::Result<T>) -> std::io::Result<T> {
+        match result {
+            Err(_) if crate::blastinput::ncbi_environment::terminal_stderr().is_some() => {
+                Ok(T::default())
+            }
+            result => result,
+        }
     }
 }
 
@@ -2487,7 +2037,7 @@ impl std::io::Write for CliStderr {
             return Ok(0);
         }
         tie_standard_output()?;
-        self.0.write(buf)
+        Self::logged(self.0.write_all(buf)).map(|()| buf.len())
     }
 
     fn write_all(&mut self, buf: &[u8]) -> std::io::Result<()> {
@@ -2495,7 +2045,7 @@ impl std::io::Write for CliStderr {
             return Ok(());
         }
         tie_standard_output()?;
-        self.0.write_all(buf)
+        Self::logged(self.0.write_all(buf))
     }
 
     fn write_fmt(&mut self, args: std::fmt::Arguments<'_>) -> std::io::Result<()> {
@@ -2508,921 +2058,5 @@ impl std::io::Write for CliStderr {
 }
 
 #[cfg(all(test, unix))]
-mod tests {
-    use super::*;
-
-    /// A device that takes nothing (`/dev/full`), counting the bytes offered to it.
-    struct Full(std::sync::Arc<std::sync::atomic::AtomicUsize>);
-
-    impl std::io::Write for Full {
-        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-            self.0
-                .fetch_add(buf.len(), std::sync::atomic::Ordering::Relaxed);
-            Err(std::io::Error::other("full"))
-        }
-
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
-    }
-
-    #[test]
-    fn the_organism_reports_file_buffer_writes_at_its_8191st_byte() {
-        // probe `T/t2/fix1` `f1.d5.*` and `stdout_probe.sh`: NCBI exits 0 for a report that its
-        // buffer holds to the end, 6 where the buffer writes.
-        use std::io::Write;
-        let offered = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let mut buffer =
-            ReportStream::file(Box::new(Full(offered.clone())), "blastn", Site::Report);
-        buffer.write_all(&[b'x'; 8190]).unwrap();
-        buffer.flush().unwrap();
-        assert_eq!(offered.load(std::sync::atomic::Ordering::Relaxed), 0);
-        // The 8191st byte makes NCBI's write, which LOSAT makes before anything else is written
-        // (`Core::sync`): all 8,191 bytes at once.
-        buffer.write_all(b"x").unwrap();
-        assert_eq!(lock(&buffer.0).ncbi_written(), 8191);
-        assert!(lock(&buffer.0).sync().is_err());
-        assert_eq!(offered.load(std::sync::atomic::Ordering::Relaxed), 8191);
-        // What a buffer holds at the end is written, a failure unreported.
-        let quiet = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let mut buffer = ReportStream::file(Box::new(Full(quiet.clone())), "blastn", Site::Report);
-        buffer.write_all(b"held").unwrap();
-        drop(buffer);
-        assert_eq!(quiet.load(std::sync::atomic::Ordering::Relaxed), 4);
-    }
-
-    /// A device that takes everything, keeping the size of each write.
-    struct Writes(std::sync::Arc<std::sync::Mutex<Vec<usize>>>);
-
-    impl std::io::Write for Writes {
-        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-            lock(&self.0).push(buf.len());
-            Ok(buf.len())
-        }
-
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
-    }
-
-    #[test]
-    fn the_organism_reports_standard_output_writes_where_glibc_writes() {
-        // glibc 2.39 `_IO_new_file_xsputn` on a file of `st_blksize` 4096
-        // (`T/t2/fix2/glibc_first_write.log`): the writes end at multiples of the block and the
-        // rest stays held; the first `fwrite` has no buffer yet; a flush empties the buffer.
-        use std::io::Write;
-        let run = |pieces: &[usize]| {
-            let writes = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-            let mut after = Vec::new();
-            let mut buffer = ReportStream::new(
-                Box::new(Writes(writes.clone())),
-                Some(NcbiBuffer::new(NcbiStdio::Cout {
-                    block: 4096,
-                    lines: false,
-                })),
-                false,
-                "blastn",
-                Site::Report,
-            );
-            for &piece in pieces {
-                match piece {
-                    0 => lock(&buffer.0).flush().unwrap(),
-                    n => buffer.write_all(&vec![b'x'; n]).unwrap(),
-                }
-                after.push(lock(&buffer.0).ncbi_written() as usize);
-            }
-            drop(buffer);
-            let total = lock(&writes).iter().sum::<usize>();
-            (after, total)
-        };
-        // `4000 200 4000`: 4,096 written at the second, 8,192 at the third, 8 held to the end.
-        assert_eq!(run(&[4000, 200, 4000]), (vec![0, 4096, 8192], 8200));
-        assert_eq!(run(&[4096, 10]), (vec![4096, 4096], 4106));
-        assert_eq!(run(&[4095, 1, 10]), (vec![0, 0, 4096], 4106));
-        assert_eq!(run(&[8192, 1]), (vec![8192, 8192], 8193));
-        assert_eq!(run(&[100, 4096]), (vec![0, 4096], 4196));
-        // `100 f 4096 1` (0: the flush of a write to `cerr`, which is tied to `cout`).
-        assert_eq!(run(&[100, 0, 4096, 1]), (vec![0, 100, 100, 4196], 4197));
-        assert_eq!(run(&[8000, 300]), (vec![4096, 8192], 8300));
-    }
-
-    /// The bytes that `buffer` has written to its device after each step of `steps`
-    /// (`Ok(bytes)`: one insertion; `Err(())`: a flush, as before a write to `cerr`), and in all.
-    fn written_after(
-        stream: NcbiStdio,
-        steps: &[Result<Vec<u8>, ()>],
-    ) -> (Vec<usize>, usize, usize) {
-        use std::io::Write;
-        let writes = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-        let mut after = Vec::new();
-        let mut buffer = ReportStream::new(
-            Box::new(Writes(writes.clone())),
-            Some(NcbiBuffer::new(stream)),
-            false,
-            "blastn",
-            Site::Report,
-        );
-        for step in steps {
-            match step {
-                Ok(bytes) => buffer.write_all(bytes).unwrap(),
-                Err(()) => lock(&buffer.0).flush().unwrap(),
-            }
-            after.push(lock(&buffer.0).ncbi_written() as usize);
-        }
-        drop(buffer);
-        let writes = lock(&writes);
-        (after, writes.iter().sum(), writes.len())
-    }
-
-    #[test]
-    fn a_terminals_standard_output_writes_at_its_newlines_as_glibc_does() {
-        // glibc 2.39 on a pty of `st_blksize` 1024 (`T/t2/fix3/glibc_tty_lines.log`): `N` is an
-        // `fwrite` of N bytes, `N:K` with a newline at K, `f` a flush.
-        let tty = NcbiStdio::Cout {
-            block: 1024,
-            lines: true,
-        };
-        let run = |steps: &str| {
-            let steps = steps
-                .split(' ')
-                .map(|step| match step {
-                    "f" => Err(()),
-                    _ => {
-                        let mut parts = step.split(':').map(|n| n.parse::<usize>().unwrap());
-                        let mut bytes = vec![b'x'; parts.next().unwrap()];
-                        parts.for_each(|at| bytes[at] = b'\n');
-                        Ok(bytes)
-                    }
-                })
-                .collect::<Vec<_>>();
-            written_after(tty, &steps).0
-        };
-        assert_eq!(run("100"), [0]);
-        assert_eq!(run("100 50:49"), [0, 150]);
-        assert_eq!(run("100 50:10"), [0, 111]);
-        assert_eq!(run("3000"), [2048]);
-        assert_eq!(run("3000:2500"), [2501]);
-        assert_eq!(run("1000 30"), [0, 1024]);
-        assert_eq!(run("1000 24 1"), [0, 0, 1024]);
-        assert_eq!(run("1000 30:5"), [0, 1024]);
-        assert_eq!(run("1000 30:27"), [0, 1028]);
-        assert_eq!(run("500 2000:100"), [0, 2048]);
-        assert_eq!(run("500 2000:100:1900"), [0, 2401]);
-        assert_eq!(run("f 100 f 50"), [0, 0, 100, 100]);
-    }
-
-    #[test]
-    fn a_char_on_standard_output_is_kept_as_glibcs_putc_keeps_it() {
-        // glibc 2.39 (`T/t2/fix4/glibc_putc.log`, and line RG T2 review 5's
-        // `T/t2/review5/glibc/line_small.log`): `stdout` with a buffer of `block` bytes (`setvbuf`,
-        // full or line buffering) on a file; `cN` is N `putc` of 'x', `n` a `putc` of a newline,
-        // `wN` an `fwrite` of N bytes (`wN:K`: with a newline at K), `W` an `fwrite` of a newline;
-        // the file's size after each step. `putc` keeps its byte after a full or unallocated
-        // buffer, where an `fwrite` of one byte into a buffer under 128 bytes keeps none; a line
-        // buffer under 128 bytes keeps none of an `fwrite` that fits with a newline either.
-        let run = |lines: bool, block: usize, steps: &str| -> Vec<usize> {
-            let mut buffer = NcbiBuffer::new(NcbiStdio::Cout { block, lines });
-            let mut stream = Vec::new();
-            steps
-                .split(' ')
-                .map(|step| {
-                    let mut numbers = step[1..].split(':').map(|n| n.parse::<usize>());
-                    let count = numbers.next().and_then(Result::ok).unwrap_or(1);
-                    match step.as_bytes()[0] {
-                        b'c' => (0..count).for_each(|_| {
-                            stream.push(b'x');
-                            buffer.sputc(&stream);
-                        }),
-                        b'n' => {
-                            stream.push(b'\n');
-                            buffer.sputc(&stream);
-                        }
-                        b'w' => {
-                            let start = stream.len();
-                            stream.resize(start + count, b'x');
-                            numbers.for_each(|at| stream[start + at.unwrap()] = b'\n');
-                            buffer.sputn(count, &stream);
-                        }
-                        _ => {
-                            stream.push(b'\n');
-                            buffer.sputn(1, &stream);
-                        }
-                    }
-                    stream.len() - buffer.held()
-                })
-                .collect()
-        };
-        assert_eq!(run(false, 64, "c1"), [0]);
-        assert_eq!(run(false, 64, "w1"), [1]);
-        assert_eq!(run(false, 64, "w63 c64 c1 w1"), [63, 63, 127, 127]);
-        assert_eq!(run(false, 64, "w63 c64 w1"), [63, 63, 128]);
-        assert_eq!(run(false, 64, "w64 c1"), [64, 64]);
-        assert_eq!(run(false, 64, "w64 w1"), [64, 64]);
-        assert_eq!(run(false, 4096, "w4096 c1"), [4096, 4096]);
-        assert_eq!(run(false, 4096, "w4096 w1"), [4096, 4096]);
-        assert_eq!(run(false, 4096, "w4095 c1 c1"), [0, 0, 4096]);
-        assert_eq!(run(false, 4096, "w4095 w1 w1"), [0, 0, 4096]);
-        assert_eq!(run(true, 64, "c1"), [0]);
-        assert_eq!(run(true, 64, "n"), [1]);
-        assert_eq!(run(true, 64, "W"), [1]);
-        assert_eq!(run(true, 64, "c10 n"), [0, 11]);
-        assert_eq!(run(true, 64, "w63 c1 c1"), [63, 63, 63]);
-        assert_eq!(run(true, 64, "w63 w1 w1"), [63, 63, 63]);
-        assert_eq!(run(true, 64, "c64 c1"), [0, 64]);
-        assert_eq!(run(true, 64, "c63 n"), [0, 64]);
-        assert_eq!(run(true, 64, "c64 n"), [0, 65]);
-        assert_eq!(run(true, 1024, "c100 n c5"), [0, 101, 101]);
-        assert_eq!(run(true, 64, "w9:5 w9:5 w9:5"), [9, 18, 27]);
-        assert_eq!(run(true, 1024, "w9:5 w9:5 w9:5"), [6, 15, 24]);
-    }
-
-    #[test]
-    fn a_streamed_insertion_is_written_as_the_whole_insertion() {
-        // `insert_streamed` writes pieces; every model of NCBI's buffers must write what it writes
-        // for the whole insertion as one write, before it and after it. A row of 70,000 bytes
-        // ends 99 bytes after a newline: no piece may end there (a terminal would keep only 99).
-        let row = [&[b'r'; 69_900][..], b"\n", &[b'r'; 99]].concat();
-        let segments: &[(&[u8], u64)] = &[
-            (b"\n  Organism Report\nrow\n", 200_000),
-            (&row, 3_000),
-            (b"|x\ny", 5_000),
-            (b"z", 70_000),
-            (b"tail\nend", 0),
-        ];
-        let mut whole = Vec::new();
-        for (bytes, spaces) in segments {
-            whole.extend_from_slice(bytes);
-            whole.resize(whole.len() + *spaces as usize, b' ');
-        }
-        let streamed = |out: &mut dyn std::io::Write| {
-            insert_streamed(out, whole.len() as u64, |insertion| {
-                for (bytes, spaces) in segments {
-                    insertion.bytes(bytes)?;
-                    insertion.spaces(*spaces)?;
-                }
-                Ok(())
-            })
-            .unwrap()
-        };
-        let mut flat = Vec::new();
-        streamed(&mut flat);
-        assert_eq!(flat, whole);
-        for stream in [
-            NcbiStdio::File,
-            NcbiStdio::Cout {
-                block: 4096,
-                lines: false,
-            },
-            NcbiStdio::Cout {
-                block: 1024,
-                lines: true,
-            },
-            NcbiStdio::Cout {
-                block: 100,
-                lines: false,
-            },
-        ] {
-            for before in [0, 1, 1000, 4095, 4096, 8000] {
-                for after in [&b"ab"[..], b"ab\ncd", &[b'y'; 9000]] {
-                    let lead = vec![b'w'; before];
-                    // The whole as one insertion, between the same insertions.
-                    let one = written_after(
-                        stream,
-                        &[Ok(lead.clone()), Ok(whole.clone()), Ok(after.to_vec())],
-                    );
-                    // The whole streamed.
-                    let writes = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-                    let mut buffer = ReportStream::new(
-                        Box::new(Writes(writes.clone())),
-                        Some(NcbiBuffer::new(stream)),
-                        false,
-                        "blastn",
-                        Site::Report,
-                    );
-                    let mut pieces = Vec::new();
-                    std::io::Write::write_all(&mut buffer, &lead).unwrap();
-                    pieces.push(lock(&buffer.0).ncbi_written() as usize);
-                    streamed(&mut buffer);
-                    pieces.push(lock(&buffer.0).ncbi_written() as usize);
-                    std::io::Write::write_all(&mut buffer, after).unwrap();
-                    pieces.push(lock(&buffer.0).ncbi_written() as usize);
-                    drop(buffer);
-                    let total = lock(&writes).iter().sum::<usize>();
-                    assert_eq!((pieces, total), (one.0, one.1), "{stream:?} {before}");
-                }
-            }
-        }
-        // In pieces: the run of 200,000 spaces ends three, the rest is the last.
-        let pieces = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-        streamed(&mut Writes(pieces.clone()));
-        assert_eq!(*lock(&pieces), [65_559, 65_536, 65_536, 151_405]);
-    }
-
-    /// A device that takes `0` more bytes and then fails (a file at its size limit,
-    /// `prlimit --fsize`: the write that reaches the limit is cut there, the next fails).
-    struct FailAt(usize);
-
-    impl std::io::Write for FailAt {
-        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-            if self.0 == 0 {
-                return Err(std::io::Error::other("File too large"));
-            }
-            let n = buf.len().min(self.0);
-            self.0 -= n;
-            Ok(n)
-        }
-
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
-    }
-
-    fn native(result: anyhow::Result<()>) -> (i32, String) {
-        let error = result.expect_err("the run fails");
-        let native = error
-            .downcast_ref::<crate::cli::NativeError>()
-            .expect("NCBI's end");
-        (native.exit, native.message.clone())
-    }
-
-    #[test]
-    fn a_tabular_report_that_fails_at_byte_n_terminates_as_ncbis() {
-        use std::io::Write;
-        // Held to the end: the flush of the last `CBlastTabularInfo` fails while it throws.
-        let mut stream = ReportStream::file(Box::new(FailAt(10)), "blastn", Site::Tabular);
-        stream.write_all(&[b'x'; 100]).unwrap();
-        assert_eq!(
-            native(stream.finish(Ok(()))),
-            (-6, TERMINATE_TEXT.to_string())
-        );
-        // Where NCBI's buffer writes: the insertion fails, and every later one.
-        let mut stream = ReportStream::file(Box::new(FailAt(10)), "blastn", Site::Tabular);
-        stream.write_all(&[b'x'; 8000]).unwrap();
-        let failed = stream.write_all(&[b'x'; 500]).unwrap_err();
-        assert!(is_report_write_failure(&failed));
-        assert!(stream.write_all(b"x").is_err());
-        assert_eq!(native(stream.finish(Err(failed.into()))).0, -6);
-    }
-
-    #[test]
-    fn the_alignments_post_802_4_in_a_file_and_on_standard_output_at_their_flush() {
-        use std::io::Write;
-        let post = "Error: (802.4) [blastp] [Cannot close serializing output stream] \
-                    Exception: basic_ios::clear: iostream error\nBLAST failed to write output\n";
-        let mut stream = ReportStream::file(Box::new(FailAt(5)), "blastp", Site::Report);
-        let mut ostream = NcbiOstream::report(stream_of(&mut stream));
-        ostream.write_all(b"prolog\n").unwrap();
-        let mut display = DisplaySeqalign::default();
-        display.enter(&mut ostream).unwrap();
-        ostream.write_all(b"> subject\n").unwrap();
-        // `out2`'s flush is NCBI's write; LOSAT makes it before anything else is written.
-        let left = display
-            .leave(&mut ostream)
-            .and_then(|()| lock(&stream.0).sync());
-        assert!(left.is_err());
-        drop(ostream);
-        assert_eq!(native(stream.finish(Ok(()))), (6, post.to_string()));
-        // Standard output: a failed insertion leaves glibc's buffer empty (no post); the flush
-        // at the end of the alignments posts, and the post's tie terminates.
-        let mut stream = ReportStream::new(
-            Box::new(FailAt(5)),
-            Some(NcbiBuffer::new(NcbiStdio::Cout {
-                block: 4096,
-                lines: false,
-            })),
-            true,
-            "blastp",
-            Site::Alignments,
-        );
-        assert!(stream.write_all(&[b'x'; 5000]).is_err());
-        let message = "BLAST failed to write output\n".to_string();
-        assert_eq!(native(stream.finish(Ok(()))), (6, message));
-        let mut stream = ReportStream::new(
-            Box::new(FailAt(5)),
-            Some(NcbiBuffer::new(NcbiStdio::Cout {
-                block: 4096,
-                lines: false,
-            })),
-            true,
-            "blastp",
-            Site::Alignments,
-        );
-        stream.write_all(b"> subject\n").unwrap();
-        lock(&stream.0).flush().unwrap();
-        assert!(lock(&stream.0).sync().is_err());
-        assert_eq!(native(stream.finish(Ok(()))).0, -6);
-    }
-
-    /// A second stream on the device of `stream` (the test's `NcbiOstream::report` owns it).
-    fn stream_of(stream: &mut ReportStream) -> ReportStream {
-        ReportStream(stream.0.clone())
-    }
-
-    #[test]
-    fn a_failure_after_the_formatter_or_of_sam_is_not_reported() {
-        use std::io::Write;
-        // Held to the end, written after `~CBlastFormat`: unreported.
-        let mut stream = ReportStream::file(Box::new(FailAt(0)), "blastn", Site::Report);
-        stream.write_all(b"held").unwrap();
-        assert!(stream.finish(Ok(())).is_ok());
-        assert!(stream.failed());
-        // SAM writes after `~CBlastFormat`.
-        let mut stream = ReportStream::file(Box::new(FailAt(0)), "blastn", Site::Silent);
-        stream.write_all(&[b'x'; 9000]).unwrap();
-        stream.write_all(b"more").unwrap();
-        assert!(stream.finish(Ok(())).is_ok());
-    }
-
-    /// The posts of `stream` go to a buffer, which is returned.
-    fn posts_of(stream: &ReportStream) -> std::sync::Arc<std::sync::Mutex<Vec<u8>>> {
-        let posts = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-        lock(&stream.0).diagnostics = Some(Box::new(Writes2(posts.clone())));
-        posts
-    }
-
-    /// A device that keeps what it is given.
-    struct Writes2(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
-
-    impl std::io::Write for Writes2 {
-        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-            lock(&self.0).extend_from_slice(buf);
-            Ok(buf.len())
-        }
-
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
-    }
-
-    #[test]
-    fn an_xml_iteration_that_fails_is_posted_once_and_the_run_goes_on_to_the_epilog() {
-        use std::io::Write;
-        // probe `T/t6/survey` blastn.f5.qm full2: one post per query from the failing one, then
-        // the epilog's insertion throws: "BLAST failed to write output", exit 6.
-        let mut stream = ReportStream::file(Box::new(FailAt(0)), "blastn", Site::Report);
-        let posts = posts_of(&stream);
-        let mut ostream = NcbiOstream::report(stream_of(&mut stream));
-        let mut cuts = Cuts::default();
-        cuts.push(0, Cut::Site(Site::Report));
-        cuts.push(100, Cut::Site(Site::XmlIteration));
-        cuts.push(8200, Cut::Insertion);
-        cuts.push(8300, Cut::Site(Site::Report));
-        let report = vec![b'x'; 8300];
-        let failed = cuts
-            .cursor()
-            .write(&mut ostream, &report, 0, report.len())
-            .unwrap_err();
-        assert!(is_caught_report_write_failure(&failed));
-        // The next query's `Iteration` fails at its first insertion.
-        let mut next = Cuts::default();
-        next.push(0, Cut::Site(Site::XmlIteration));
-        next.push(10, Cut::Insertion);
-        let failed = next
-            .cursor()
-            .write(&mut ostream, &report[..20], 0, 20)
-            .unwrap_err();
-        assert!(is_caught_report_write_failure(&failed));
-        let post = "Error: [blastn] Failed s_BlastXMLAddIteration Q(0/1\n";
-        assert_eq!(
-            String::from_utf8(lock(&posts).clone()).unwrap(),
-            post.repeat(2)
-        );
-        // The epilog, outside the `try`.
-        ostream.site(Site::Report).unwrap();
-        let failed = ostream.write_all(b"</BlastOutput>").unwrap_err();
-        assert!(is_report_write_failure(&failed) && !is_caught_report_write_failure(&failed));
-        drop(ostream);
-        assert_eq!(
-            native(stream.finish(Err(failed.into()))),
-            (6, "BLAST failed to write output\n".to_string())
-        );
-        // On standard output the post's tie throws: `std::terminate`, no post.
-        let mut stream = ReportStream::new(
-            Box::new(FailAt(0)),
-            Some(NcbiBuffer::new(NcbiStdio::Cout {
-                block: 4096,
-                lines: false,
-            })),
-            true,
-            "blastn",
-            Site::XmlIteration,
-        );
-        let posts = posts_of(&stream);
-        let failed = stream.write_all(&[b'x'; 5000]).unwrap_err();
-        assert!(!is_caught_report_write_failure(&failed));
-        assert!(lock(&posts).is_empty());
-        assert_eq!(native(stream.finish(Err(failed.into()))).0, -6);
-    }
-
-    #[test]
-    fn a_report_held_to_its_epilogs_flush_fails_there() {
-        // A small BLAST XML report that `basic_filebuf` holds: `endl` at the epilog flushes it
-        // while the formatter lives (exit 6); without that flush the bytes would reach the device
-        // after `~CBlastFormat`, unreported.
-        let mut stream = ReportStream::file(Box::new(FailAt(0)), "blastp", Site::Report);
-        let mut ostream = NcbiOstream::report(stream_of(&mut stream));
-        let mut cuts = Cuts::default();
-        cuts.push(0, Cut::Site(Site::Report));
-        cuts.push(5, Cut::Insertion);
-        cuts.push(6, Cut::Flush);
-        // The epilog's flush is NCBI's write, made at the stream's end at the latest.
-        let written = cuts.cursor().write(&mut ostream, b"<x/>\n\n", 0, 6);
-        drop(ostream);
-        assert_eq!(native(stream.finish(written.map_err(Into::into))).0, 6);
-    }
-
-    /// One Seq-annot written as `seqalign::write_query_to` writes it: whole, `Close`'s flush, and
-    /// NCBI's pieces where the whole insertion fails.
-    fn serial_object(
-        ostream: &mut NcbiOstream<'_>,
-        len: usize,
-        pieces: &[usize],
-    ) -> std::io::Result<()> {
-        use std::io::Write;
-        ostream.site(Site::Serial { whole: true })?;
-        match ostream
-            .write_all(&vec![b'x'; len])
-            .and_then(|()| ostream.ncbi_flush())
-        {
-            Err(error) if is_undecided_report_write_failure(&error) => {
-                ostream.resolve_object(pieces)?
-            }
-            written => written?,
-        }
-        ostream.site(Site::Report)
-    }
-
-    #[test]
-    fn a_serial_object_that_fails_inside_ends_the_run_and_one_that_fails_at_close_goes_on() {
-        let post = "Error: (802.4) [blastn] [Cannot close serializing output stream] Exception: \
-                    basic_ios::clear: iostream error\n";
-        let failed = "BLAST failed to write output\n";
-        let pieces = [4096, 4096, 1808];
-        // `basic_filebuf` holds the first piece and writes 8,192 bytes at the second: past 8,000
-        // bytes that write fails inside the object (802.4 at `Close`, then `CATCH_ALL`).
-        let mut stream = ReportStream::file(Box::new(FailAt(8000)), "blastn", Site::Report);
-        let posts = posts_of(&stream);
-        let mut ostream = NcbiOstream::report(stream_of(&mut stream));
-        let error = serial_object(&mut ostream, 10_000, &pieces).unwrap_err();
-        drop(ostream);
-        assert!(lock(&posts).is_empty());
-        assert_eq!(
-            native(stream.finish(Err(error.into()))),
-            (6, format!("{post}{failed}"))
-        );
-        // Up to 9,000 bytes that write succeeds and only `Close`'s flush fails: posted, the run
-        // goes on, and the next object's first insertion throws.
-        let mut stream = ReportStream::file(Box::new(FailAt(9000)), "blastn", Site::Report);
-        let posts = posts_of(&stream);
-        let mut ostream = NcbiOstream::report(stream_of(&mut stream));
-        serial_object(&mut ostream, 10_000, &pieces).unwrap();
-        assert_eq!(String::from_utf8(lock(&posts).clone()).unwrap(), post);
-        let error = serial_object(&mut ostream, 50, &[50]).unwrap_err();
-        drop(ostream);
-        assert_eq!(
-            native(stream.finish(Err(error.into()))),
-            (6, format!("{post}{failed}"))
-        );
-        // A report that the file's buffer holds to `Close`: its flush fails, the run ends well
-        // (NCBI 2.17.0, `blastp.f9.q1`: exit 0 after one 802.4).
-        let mut stream = ReportStream::file(Box::new(FailAt(0)), "blastp", Site::Report);
-        let posts = posts_of(&stream);
-        let mut ostream = NcbiOstream::report(stream_of(&mut stream));
-        serial_object(&mut ostream, 3000, &[3000]).unwrap();
-        drop(ostream);
-        assert!(stream.finish(Ok(())).is_ok());
-        assert_eq!(lock(&posts).len(), post.len());
-        // On standard output the post's tie throws.
-        let mut stream = ReportStream::new(
-            Box::new(FailAt(0)),
-            Some(NcbiBuffer::new(NcbiStdio::Cout {
-                block: 4096,
-                lines: false,
-            })),
-            true,
-            "blastn",
-            Site::Report,
-        );
-        let mut ostream = NcbiOstream::report(stream_of(&mut stream));
-        let error = serial_object(&mut ostream, 3000, &[3000]).unwrap_err();
-        drop(ostream);
-        assert_eq!(native(stream.finish(Err(error.into()))).0, -6);
-    }
-
-    #[test]
-    fn an_error_archive_into_the_failed_stream_is_a_write_fault() {
-        use std::io::Write;
-        // `PrintErrorArchive` after `CATCH_ALL` (probe `T/t6/survey` blastn.f11.q1 full2: 802.5
-        // at byte 356, the error archive's length).
-        let mut stream = ReportStream::file(Box::new(FailAt(0)), "blastn", Site::Report);
-        let posts = posts_of(&stream);
-        let failed = stream.write_all(&[b'x'; 9000]).unwrap_err();
-        assert_eq!(native(stream.finish(Err(failed.into()))).0, 6);
-        stream.site(Site::Serial { whole: true }).unwrap();
-        let error = stream.write_all(&[b'a'; 356]).unwrap_err();
-        assert!(is_undecided_report_write_failure(&error));
-        stream.write_fault(356).unwrap();
-        stream.site(Site::Report).unwrap();
-        assert_eq!(
-            String::from_utf8(lock(&posts).clone()).unwrap(),
-            "Error: (802.5) [blastn] CObjectOStream: error at byte 356: stack is empty: write \
-             fault\n"
-        );
-    }
-
-    #[test]
-    fn an_xml2_report_that_fails_is_caught_after_its_close() {
-        // probe blastn.f16: 802.4 at `Close`, then the catch's post; the run goes on.
-        let mut stream = ReportStream::file(Box::new(FailAt(100)), "blastn", Site::Report);
-        let posts = posts_of(&stream);
-        let mut ostream = NcbiOstream::report(stream_of(&mut stream));
-        let report = [
-            &b"<BlastOutput2>\n"[..],
-            &b"  <x>12345</x>\n".repeat(700),
-            b"</BlastOutput2>\n",
-        ]
-        .concat();
-        let mut cuts = Cuts::default();
-        cuts.push(0, Cut::Site(Site::Xml2Report { json: false }));
-        cuts.push(report.len(), Cut::Flush);
-        cuts.push(report.len(), Cut::Site(Site::Report));
-        let error = cuts
-            .cursor()
-            .write(&mut ostream, &report, 0, report.len())
-            .unwrap_err();
-        assert!(is_caught_report_write_failure(&error));
-        assert_eq!(
-            String::from_utf8(lock(&posts).clone()).unwrap(),
-            "Error: (802.4) [blastn] [Cannot close serializing output stream] Exception: \
-             basic_ios::clear: iostream error\nError: [blastn] XML format failed\n"
-        );
-    }
-
-    #[test]
-    fn a_held_xml2_report_caught_at_its_close_ends_the_run_at_what_follows_it() {
-        // review D4 (outfmt 16 with `-subject`): the report that `PrintEpilog` writes is caught
-        // (802.4, `XML format failed`), and the end of the document after it throws.
-        let mut stream = ReportStream::file(Box::new(FailAt(100)), "blastn", Site::Report);
-        let posts = posts_of(&stream);
-        let mut ostream = NcbiOstream::report(stream_of(&mut stream));
-        let report = [&b"  <x>12345</x>\n".repeat(700)[..], b"</BlastXML2>\n"].concat();
-        let tail = report.len() - b"</BlastXML2>\n".len();
-        let mut cuts = Cuts::default();
-        cuts.push(0, Cut::Site(Site::Xml2Report { json: false }));
-        cuts.push(tail, Cut::Flush);
-        cuts.push(tail, Cut::Site(Site::Report));
-        let error = cuts
-            .cursor()
-            .write(&mut ostream, &report, 0, report.len())
-            .unwrap_err();
-        assert!(is_report_write_failure(&error) && !is_caught_report_write_failure(&error));
-        drop(ostream);
-        assert_eq!(
-            native(stream.finish(Err(error.into()))),
-            (6, "BLAST failed to write output\n".to_string())
-        );
-        assert_eq!(
-            String::from_utf8(lock(&posts).clone()).unwrap(),
-            "Error: (802.4) [blastn] [Cannot close serializing output stream] Exception: \
-             basic_ios::clear: iostream error\nError: [blastn] XML format failed\n"
-        );
-    }
-
-    #[test]
-    fn a_tabular_report_flushed_at_each_query_fails_before_the_next_querys_post() {
-        // review D2: `~CBlastTabularInfo` flushes after each query; on `-out /dev/full` the first
-        // query's flush terminates, before the second query's warning.
-        use std::io::Write;
-        let mut stream = ReportStream::file(Box::new(FailAt(0)), "blastn", Site::Tabular);
-        let posts = posts_of(&stream);
-        let mut ostream = NcbiOstream::report(stream_of(&mut stream));
-        ostream.write_all(b"w1\tsubject\t100.000\n").unwrap();
-        ostream.ncbi_flush().unwrap();
-        // The warning of the next query: NCBI's writes before it are made first, and fail.
-        let error = lock(&stream.0)
-            .post("Warning: [blastn] wN: ...\n")
-            .unwrap_err();
-        assert!(is_report_write_failure(&error));
-        drop(ostream);
-        assert!(lock(&posts).is_empty());
-        assert_eq!(native(stream.finish(Err(error.into()))).0, -6);
-    }
-
-    /// A device that takes `limit` bytes and fails after them, keeping what it took.
-    struct Limited {
-        took: std::sync::Arc<std::sync::Mutex<Vec<u8>>>,
-        limit: usize,
-    }
-
-    impl std::io::Write for Limited {
-        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-            let mut took = lock(&self.took);
-            let room = self.limit - took.len();
-            if room == 0 {
-                return Err(std::io::Error::other("File too large"));
-            }
-            let n = buf.len().min(room);
-            took.extend_from_slice(&buf[..n]);
-            Ok(n)
-        }
-
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
-    }
-
-    /// What a run of `steps` on a stream of `stream` (`standard_output`) over a device of `limit`
-    /// bytes shows: the bytes the device took, the posts, and the run's end; the formatter stops at
-    /// an error, and after a caught one goes on in the report's region. `immediate`: every write
-    /// of NCBI's made where NCBI makes it.
-    fn shown(
-        steps: &[Step],
-        stream: NcbiStdio,
-        standard_output: bool,
-        limit: usize,
-        immediate: bool,
-    ) -> (Vec<u8>, String, Result<(), (i32, String)>) {
-        use std::io::Write;
-        let took = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-        let mut report = ReportStream::new(
-            Box::new(Limited {
-                took: took.clone(),
-                limit,
-            }),
-            Some(NcbiBuffer::new(stream)),
-            standard_output,
-            "blastn",
-            Site::Report,
-        );
-        lock(&report.0).immediate = immediate;
-        let posts = posts_of(&report);
-        let mut ostream = NcbiOstream::report(stream_of(&mut report));
-        let mut result = Ok(());
-        let mut skipping = false;
-        for step in steps {
-            let done = match step {
-                Step::Insert(_) if skipping => Ok(()),
-                Step::Insert(bytes) => ostream.write_all(bytes),
-                Step::Run(..) if skipping => Ok(()),
-                Step::Run(bytes, ends) => {
-                    let mut cuts = Cuts::default();
-                    for &end in ends {
-                        cuts.push(end, Cut::Insertion);
-                    }
-                    cuts.cursor().write(&mut ostream, bytes, 0, bytes.len())
-                }
-                Step::Flush if skipping => Ok(()),
-                Step::Flush => ostream.ncbi_flush(),
-                Step::Sync => lock(&report.0).sync(),
-                Step::Site(site) => {
-                    skipping = false;
-                    match ostream.site(*site) {
-                        // The region before ended caught; the new one has started.
-                        Err(error) if is_caught_report_write_failure(&error) => Ok(()),
-                        other => other,
-                    }
-                }
-                // A post in a region whose failure was caught belongs to what NCBI no longer
-                // makes (the reads of the `Iteration`'s later `Hit`s).
-                Step::Post(_) if skipping => Ok(()),
-                Step::Post(text) => lock(&report.0).post(text),
-            };
-            match done {
-                Err(error) if is_caught_report_write_failure(&error) => {
-                    skipping = true;
-                    ostream.site(Site::Report).unwrap();
-                }
-                Err(error) => {
-                    result = Err(error);
-                    break;
-                }
-                Ok(()) => {}
-            }
-        }
-        drop(ostream);
-        let end = report.finish(result.map_err(Into::into)).map_err(|error| {
-            let native = error
-                .downcast_ref::<crate::cli::NativeError>()
-                .expect("NCBI's end");
-            (native.exit, native.message.clone())
-        });
-        drop(report);
-        let took = lock(&took).clone();
-        let posts = String::from_utf8(lock(&posts).clone()).unwrap();
-        (took, posts, end)
-    }
-
-    #[derive(Clone, Debug)]
-    enum Step {
-        Insert(Vec<u8>),
-        /// Insertions of the bytes up to each end (`Cuts`), in one call.
-        Run(Vec<u8>, Vec<usize>),
-        Flush,
-        Sync,
-        Site(Site),
-        Post(String),
-    }
-
-    #[test]
-    fn ncbis_writes_made_later_together_end_a_run_as_where_ncbi_makes_them() {
-        // A small deterministic generator (xorshift) of runs of insertions, flushes, regions and
-        // posts; every limit of the device from 0 to past the report.
-        let mut seed = 0x9e37_79b9_7f4a_7c15u64;
-        let mut next = |n: u64| {
-            seed ^= seed << 13;
-            seed ^= seed >> 7;
-            seed ^= seed << 17;
-            seed % n
-        };
-        let sites = [
-            Site::Report,
-            Site::Alignments,
-            Site::Tabular,
-            Site::XmlIteration,
-        ];
-        for case in 0..120 {
-            let mut steps = Vec::new();
-            let mut total = 0usize;
-            for _ in 0..(5 + next(40)) {
-                let step = match next(12) {
-                    0..=4 => {
-                        let large = next(4) == 0;
-                        let n = 1 + next(if large { 9000 } else { 300 }) as usize;
-                        let mut bytes = vec![b'x'; n];
-                        if next(2) == 0 {
-                            bytes[next(n as u64) as usize] = b'\n';
-                        }
-                        Step::Insert(bytes)
-                    }
-                    5 | 6 => {
-                        let n = 1 + next(20_000) as usize;
-                        let mut ends: Vec<usize> =
-                            (0..next(30)).map(|_| next(n as u64) as usize).collect();
-                        ends.sort_unstable();
-                        Step::Run(vec![b'r'; n], ends)
-                    }
-                    7 => Step::Flush,
-                    8 => Step::Sync,
-                    9 | 10 => Step::Site(sites[next(4) as usize]),
-                    _ => Step::Post(format!("Warning: post {case}\n")),
-                };
-                if let Step::Insert(bytes) | Step::Run(bytes, _) = &step {
-                    total += bytes.len();
-                }
-                steps.push(step);
-            }
-            for (stream, standard_output) in [
-                (NcbiStdio::File, false),
-                (
-                    NcbiStdio::Cout {
-                        block: 4096,
-                        lines: false,
-                    },
-                    true,
-                ),
-            ] {
-                let limits = (0..=total + 1).step_by(1 + total / 97);
-                for limit in limits.chain([0, 1, 8190, 8191, 8192, 4096]) {
-                    let deferred = shown(&steps, stream, standard_output, limit, false);
-                    let reference = shown(&steps, stream, standard_output, limit, true);
-                    let brief = |shown: &(Vec<u8>, String, Result<(), (i32, String)>)| {
-                        (shown.0.len(), shown.1.clone(), shown.2.clone())
-                    };
-                    let steps: Vec<String> = steps
-                        .iter()
-                        .map(|step| match step {
-                            Step::Insert(bytes) => format!("I{}", bytes.len()),
-                            Step::Run(bytes, ends) => format!("R{}{ends:?}", bytes.len()),
-                            other => format!("{other:?}"),
-                        })
-                        .collect();
-                    assert!(
-                        deferred == reference,
-                        "case {case} {stream:?} limit {limit}: {:?} vs reference {:?}: {steps:?}",
-                        brief(&deferred),
-                        brief(&reference)
-                    );
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn a_post_while_standard_output_failed_terminates() {
-        use std::io::Write;
-        let mut stream = ReportStream::new(
-            Box::new(FailAt(0)),
-            Some(NcbiBuffer::new(NcbiStdio::Cout {
-                block: 4096,
-                lines: false,
-            })),
-            true,
-            "blastn",
-            Site::Report,
-        );
-        stream.write_all(b"held").unwrap();
-        // `cerr`'s tie writes what `cout` holds and fails inside the post's destructor.
-        assert!(lock(&stream.0).tie().is_err());
-        assert_eq!(native(stream.finish(Ok(()))).0, -6);
-    }
-}
+#[path = "ostream_tests.rs"]
+mod tests;

@@ -5,21 +5,6 @@
 //! and then classifies the hits (`Calculate`, per reading frame for a nucleotide query).
 //!
 //! NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/offl_cd_align_proc.hpp:46-57
-//! ```c++
-//! struct _TOfflDomQuery: public TDomQuery
-//! {
-//! 	_TOfflDomQuery(void):
-//! 		TDomQuery(),
-//! 		m_strMessage(), m_dimTranslated() {};
-//! 	void ParseAlignStrings(const std::string &qseq, const std::string &hseq, SeqPos_t qf, SeqPos_t hf, SeqPos_t start, SeqLen_t n, SeqLen_t qofs, TDomSeqAlignment &dst, READINGFRAME::TFRAMEINDEX rfidx = 0);
-//!
-//! 	std::string m_strMessage;
-//! 	std::string m_dimTranslated[READINGFRAME::TOTAL_RFS];
-//! 	// -- internals
-//! 	void NACommit(void);
-//! 	void PRCommit(void);
-//! };
-//! ```
 //!
 //! The HSPs are processed as the reader reads them (`OfflineQuery::hsp`), in NCBI's order, so a
 //! query keeps its hits and its strings, not the text of its alignments. What `ParseBlastOutput`
@@ -88,24 +73,6 @@ pub(crate) struct OfflineQuery {
 
 impl OfflineQuery {
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/offl_cd_align_proc.cpp:125-142
-    // ```c++
-    // void COfflCdAlignProcessor::ParseBlastOutput(_TOfflDomQuery &dst, const CIteration &blastout, vector<PssmId_t> &missed, double evcut) const
-    // {
-    // 	dst.m_vecAlignments.clear();
-    //
-    // 	if (blastout.CanGetQuery_ID())
-    // 		dst.m_strCleanedInput = dst.m_strAccession = blastout.GetQuery_ID();
-    //
-    // 	if (blastout.CanGetQuery_def())
-    // 		dst.m_strTitle = blastout.GetQuery_def();	//length of original sequence, could be na
-    //
-    // 	if (blastout.CanGetQuery_len())
-    // 		dst.m_uiSeqLen = blastout.GetQuery_len();	//length of original sequence, could be na
-    //
-    //
-    // 	if (blastout.CanGetMessage())
-    // 		dst.m_strMessage = blastout.GetMessage();	//length of original sequence, could be na
-    // ```
     // (The Iteration's members come before its hits; `m_strMessage` is never printed.)
     /// `Iteration_query-ID`.
     pub(crate) fn set_accession(&mut self, id: &[u8]) {
@@ -135,32 +102,6 @@ impl OfflineQuery {
     /// strings of more than a billion bytes, as does a query of half a billion bases: NCBI then
     /// holds 1 GiB and more, which LOSAT refuses (DECISIONS 37, 40).
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/offl_cd_align_proc.cpp:17-41
-    // ```c++
-    // void _TOfflDomQuery::NACommit(void)
-    // {
-    // 	m_bIsNa = true;
-    // 	//m_iMolType = CSeq_inst::eMol_na;
-    // 	SeqLen_t aaLen = m_uiSeqLen / 3;
-    //
-    // 	m_dimTranslated[0].clear();
-    // 	m_dimTranslated[0].append(aaLen, '-');
-    //
-    // 	m_dimTranslated[3] = m_dimTranslated[0];
-    //
-    // 	aaLen = (m_uiSeqLen - 1) / 3;
-    //
-    // 	m_dimTranslated[1].clear();
-    // 	m_dimTranslated[1].append(aaLen, '-');
-    //
-    // 	m_dimTranslated[4] = m_dimTranslated[1];
-    //
-    // 	aaLen = (m_uiSeqLen - 2) / 3;
-    //
-    // 	m_dimTranslated[2].clear();
-    // 	m_dimTranslated[2].append(aaLen, '-');
-    // 	m_dimTranslated[5] = m_dimTranslated[2];
-    // }
-    // ```
     fn na_commit(&mut self) -> Result<(), ProcessError> {
         let len = self.length;
         let frames = [len / 3, len.wrapping_sub(1) / 3, len.wrapping_sub(2) / 3];
@@ -182,16 +123,7 @@ impl OfflineQuery {
 
     /// `PRCommit`: a protein query, its residues `-` (NCBI then copies them to `m_strSeqData`:
     /// a query of half a billion residues or more is refused as `na_commit` refuses).
-    // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/offl_cd_align_proc.cpp:43-49
-    // ```c++
-    // void _TOfflDomQuery::PRCommit(void)
-    // {
-    // 	m_bIsNa = false;
-    // 	//m_iMolType = CSeq_inst::eMol_aa;
-    // 	m_dimTranslated[0].clear();
-    // 	m_dimTranslated[0].append(m_uiSeqLen, '-');
-    // }
-    // ```
+    // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/offl_cd_align_proc.cpp:42-49
     fn pr_commit(&mut self) -> Result<(), ProcessError> {
         let len = self.length;
         let total = 2 * u64::from(len);
@@ -218,157 +150,9 @@ impl OfflineQuery {
         }
     }
 
-    // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/offl_cd_align_proc.cpp:143-280
-    // ```c++
-    // 	if (blastout.CanGetHits())
-    // 	{
-    // 		const CIteration::THits &hits = blastout.GetHits();	//list< CRef< CHit > >
-    // 		if (!hits.empty())
-    // 		{
-    // 			dst.m_vecAlignments.reserve(hits.size() * 3);	//estimated
-    //
-    // 			TDomSeqAlignment alnVal;
-    //
-    // 			for (CIteration::THits::const_iterator iterHit = hits.begin(), iterHitEnd = hits.end(); iterHitEnd != iterHit; ++iterHit)
-    // 			{
-    // 				PssmId_t pssmid = (unsigned int)atoi((*iterHit)->GetAccession().c_str());
-    //
-    // 				SeqLen_t cdLen = (*iterHit)->GetLen();
-    // 				const CHit::THsps &hsps = (*iterHit)->GetHsps();	//list< CRef< CHsp > > THsps
-    // 				for (CHit::THsps::const_iterator iterHsp = hsps.begin(), iterHspEnd = hsps.end(); iterHspEnd != iterHsp; ++iterHsp)
-    // 				{
-    // 					double eval = (*iterHsp)->GetEvalue();
-    // 					if (eval > evcut) continue;
-    //
-    // 					dst.m_vecAlignments.push_back(alnVal);
-    // 					TDomSeqAlignment &currAlign = *dst.m_vecAlignments.rbegin();
-    //
-    // 					currAlign.m_uiPssmId = pssmid;
-    // 					currAlign.m_uiAlignedLen = (*iterHsp)->GetAlign_len();
-    // 					currAlign.m_iScore = (int)((*iterHsp)->GetScore() + 0.5);
-    // 					currAlign.m_dEValue = eval;
-    // 					currAlign.m_dBitScore = (*iterHsp)->GetBit_score();
-    // 					currAlign.m_iNumIdent = (*iterHsp)->GetIdentity();
-    // 					currAlign.m_dSeqIdentity = (double)currAlign.m_iNumIdent / (double)cdLen * 100.0;
-    // 					//currAlign.m_ReadingFrame = (*iterHsp)->GetQuery_frame();
-    //
-    // 					currAlign.m_iFrom = (*iterHsp)->GetQuery_from() - COORDSBASE;
-    // 					currAlign.m_iTo = (*iterHsp)->GetQuery_to() - COORDSBASE;
-    //
-    // 					int rf = (*iterHsp)->GetQuery_frame();
-    //
-    //
-    // 					if (rf > 0)	//NA committed
-    // 					{
-    // 						currAlign.m_ReadingFrame = READINGFRAME::PlusId2PlusRFIdx(rf, dst.m_uiSeqLen);
-    // 						if (dst.m_dimTranslated[0].empty())	//not filled yet
-    // 							dst.NACommit();
-    // 					}
-    // 					else if (rf < 0)	//NA determined.
-    // 					{
-    // 						currAlign.m_ReadingFrame = READINGFRAME::MinusId2PlusRFIdx(rf, dst.m_uiSeqLen) | ((currAlign.m_iTo / 3) << 2);
-    // 						if (dst.m_dimTranslated[0].empty())	//not filled yet
-    // 							dst.NACommit();
-    // 					}
-    // 					else if (dst.m_dimTranslated[0].empty())	//not filled yet
-    // 						dst.PRCommit();
-    //
-    //
-    //
-    // 					// -- start to parse sequence
-    // 					const string &qseq = (*iterHsp)->GetQseq(), hseq = (*iterHsp)->GetHseq();
-    // 					SeqLen_t alnLen = qseq.size();
-    // 					SeqPos_t alnResIdx = 0;	//assume qseq.size() == hseq.size()
-    //
-    // 					// -- incase of blast problem...
-    // 					// -- trim unaligned regions from beginning
-    // 					while (alnResIdx < alnLen && ('-' == qseq[alnResIdx] || '-' == hseq[alnResIdx])) ++alnResIdx;
-    //
-    // 					// -- see if NA
-    // 					if (dst.m_dimTranslated[0].empty())	//not filled yet
-    // 					{
-    // 						SeqLen_t aaRes = 0;
-    // 						SeqPos_t t0 = alnResIdx;
-    //
-    // 						while (t0 < alnLen)
-    // 						{
-    // 							if ('-' == qseq[t0])
-    // 								++t0;
-    // 							else
-    // 							{
-    // 								size_t t1 = qseq.find('-', t0);
-    // 								if (string::npos == t1)	//
-    // 									t1 = alnLen;
-    // 								aaRes += t1 - t0;
-    // 								t0 = t1 + 1;
-    // 							}
-    // 						}
-    // 						if (aaRes == currAlign.m_iTo - currAlign.m_iFrom + 1)
-    // 							dst.PRCommit();
-    // 						else if (aaRes * 3 == currAlign.m_iTo - currAlign.m_iFrom + 1)
-    // 							dst.NACommit();
-    // 					}
-    //
-    // 					//if (dst.m_iMolType == CSeq_inst::eMol_aa)
-    // 					if (!dst.m_bIsNa)
-    // 					{
-    // 						currAlign.m_ReadingFrame = 0;	//0 is invalid for real reading frames, but a sign for protein sequence
-    // 						currAlign.m_eAlignType = TSeqAlignment::eNormal;
-    // 						//currAlign.m_eStrand = eNa_strand_unknown;
-    // 						currAlign.m_bIsMinus = false;
-    // 						SeqPos_t qfrom = currAlign.m_iFrom, hfrom = (*iterHsp)->GetHit_from() - COORDSBASE;
-    //
-    // 						dst.ParseAlignStrings(qseq, hseq, qfrom, hfrom, alnResIdx, alnLen, 0, currAlign, 0);
-    // 						dst.m_strSeqData = dst.m_dimTranslated[0];
-    // 					}
-    // 					else// if (dst.m_iMolType == CSeq_inst::eMol_na)	//na
-    // 					{
-    //
-    //
-    // 						currAlign.m_eAlignType = TSeqAlignment::ePr2Na;
-    // 						SeqLen_t alignedLen = currAlign.m_ReadingFrame >> 2;
-    //
-    //
-    // 						// -- calculate
-    // 						int rfidx = currAlign.m_ReadingFrame & READINGFRAME::RF_SIZE;
-    //
-    // 						if (0 == alignedLen)	//plus
-    // 						{
-    // 							//currAlign.m_eStrand = eNa_strand_plus;
-    // 							currAlign.m_bIsMinus = false;
-    // 							//currAlign.m_ReadingFrame -= 1;	//from 1, 2, 3 to 0, 1 ,2
-    //
-    // 							SeqPos_t qfrom = READINGFRAME::PlusNA2PlusPr(currAlign.m_iFrom, currAlign.m_ReadingFrame, dst.m_uiSeqLen),
-    // 								hfrom = (*iterHsp)->GetHit_from() - COORDSBASE;
-    //
-    // 							//SeqPos_t qfrom = currAlign.NAPlus2Pr(currAlign.m_iFrom),
-    //
-    //
-    // 							dst.ParseAlignStrings(qseq, hseq, qfrom, hfrom, alnResIdx, alnLen, 0, currAlign, rfidx);
-    //
-    //
-    // 						}	//plus strand
-    // 						else	//minus strand
-    // 						{
-    // 							rfidx = READINGFRAME::PlusRFIdx2MinusRFIdx(rfidx, dst.m_uiSeqLen);
-    //
-    // 							//currAlign.m_eStrand = eNa_strand_minus;
-    // 							currAlign.m_bIsMinus = true;
-    // 							// -- squeeze m_uiSeqLen in currAlign.m_ReadingFrame, rf -1, -2, -3 -> 0, 1, 2
-    // 							//currAlign.m_ReadingFrame = (-currAlign.m_ReadingFrame - 1) | (m_uiSeqLen << 2);
-    // 							int qfrom = READINGFRAME::PlusNA2MinusPr(currAlign.m_iTo, rfidx, dst.m_uiSeqLen),
-    // 								hfrom = (*iterHsp)->GetHit_from() - COORDSBASE;
-    //
-    // 							dst.ParseAlignStrings(qseq, hseq, qfrom, hfrom, alnResIdx, alnLen, dst.m_dimTranslated[rfidx].size() - alignedLen, currAlign, rfidx);
-    //
-    // 						}
-    // 					}
-    // 					...
-    // 				}
-    // 			}
-    // ```
+    // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/offl_cd_align_proc.cpp:142-281
     // The getters of OPTIONAL members without a default throw `CUnassignedMember` when the
-    // document lacks them (`unassigned_member`, quoted there): `Hsp_align-len`,
+    // document lacks them (`unassigned_member`, cited there): `Hsp_align-len`,
     // `Hsp_identity` and `Hsp_query-frame`, in this order, after the E-value test. What the
     // types decide: `GetQuery_from() - COORDSBASE` (and `GetQuery_to()`'s, `GetHit_from()`'s)
     // overflows `int` for `-2147483648` (undefined): computed as its value, `INT_MIN - 1`, which
@@ -496,82 +280,7 @@ impl OfflineQuery {
     /// `ParseAlignStrings`: the segments of an alignment from its strings (from `start`), on the
     /// query from residue `qf` (less `qofs`) and on the domain from `hf`, and the query's residues
     /// written into its string of frame `rfidx`.
-    // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/offl_cd_align_proc.cpp:51-122
-    // ```c++
-    // void _TOfflDomQuery::ParseAlignStrings(const string &qseq, const string &hseq, SeqPos_t qf, SeqPos_t hf, SeqPos_t start, SeqLen_t n, SeqLen_t qofs, TDomSeqAlignment &dst, READINGFRAME::TFRAMEINDEX rfidx)
-    // {
-    //
-    // 	SeqLen_t segLen = 0;
-    // 	bool bEffSeg = true;
-    //
-    // 	while (start < n)
-    // 	{
-    //
-    // 		if (bEffSeg)	//initially, both chains are in effect
-    // 		{
-    // 			if ('-' != qseq[start] && '-' != hseq[start])
-    // 				++segLen;
-    // 			else
-    // 			{
-    //
-    // 				bEffSeg = false;
-    //
-    // 				dst.m_vecMStarts.push_back(qf - qofs);
-    // 				dst.m_vecSStarts.push_back(hf);
-    // 				dst.m_vecLens.push_back(segLen);
-    //
-    // 				// -- write in master sequence data
-    // 				m_dimTranslated[rfidx].replace(qf, segLen, qseq, start - segLen, segLen);
-    //
-    // 				qf += segLen;
-    // 				hf += segLen;
-    // 				segLen = 0;
-    // 				if ('-' == qseq[start])
-    // 					--qf;
-    // 				else
-    // 				{
-    // 					--hf;
-    // 					//write in one more residue
-    // 					m_dimTranslated[rfidx][qf] = qseq[start];
-    // 				}
-    // 			}
-    // 		}
-    // 		else	//not in effective seg
-    // 		{
-    // 			//!bEffSeg
-    // 			bool segStart = true;
-    // 			if ('-' != qseq[start])
-    // 			{
-    // 				++qf;
-    // 				m_dimTranslated[rfidx][qf] = qseq[start];
-    // 			}
-    // 			else
-    // 				segStart = false;
-    //
-    // 			if ('-' != hseq[start])
-    // 				++hf;
-    // 			else
-    // 				segStart = false;
-    //
-    // 			if ((bEffSeg = segStart)) ++segLen;
-    //
-    // 		}
-    //
-    // 		++start;
-    // 	}//while
-    // 	// -- last segment
-    // 	if (bEffSeg && segLen > 0)
-    // 	{
-    //
-    // 		dst.m_vecMStarts.push_back(qf - qofs);
-    // 		dst.m_vecSStarts.push_back(hf);
-    // 		dst.m_vecLens.push_back(segLen);
-    //
-    // 		m_dimTranslated[rfidx].replace(qf, segLen, qseq, start - segLen, segLen);
-    // 	}
-    //
-    // }
-    // ```
+    // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/offl_cd_align_proc.cpp:50-122
     // (`qf - qofs`, `qf += segLen`, `hf += segLen` and `start - segLen` are `unsigned int`
     // arithmetic (of `qf`'s and `hf`'s values modulo 2^32), stored in an `int` or passed as a
     // `size_t`; `++start` of an `Hsp_qseq` of 2^31 letters or more passes `INT_MAX` (undefined):
@@ -670,43 +379,15 @@ impl OfflineQuery {
     /// The query of the Iteration (`ParseBlastOutput`'s classification of its hits), or what
     /// it threw or LOSAT refuses.
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/offl_cd_align_proc.cpp:286-315
-    // ```c++
-    // 			// -- calculate
-    // 			if (!dst.m_vecAlignments.empty())
-    // 			{
-    // 				size_t ttlAligns = dst.m_vecAlignments.size();
-    // 				//if (CSeq_inst::eMol_aa == dst.m_iMolType)	//protein
-    // 				if (!dst.m_bIsNa)	//protein
-    // 				{
-    // 					vector<size_t> ttlIndice;
-    // 					ttlIndice.reserve(ttlAligns);
-    // 					for (size_t i = 0; i < ttlAligns; ++i)
-    // 						ttlIndice.push_back(i);
-    // 					Calculate(dst.m_vecAlignments, ttlIndice, dst.m_dimSplitAligns[0], missed);
-    // 				}
-    // 				else
-    // 				{
-    // 					vector<size_t> rfIndice[READINGFRAME::TOTAL_RFS];
-    // 					for (size_t i = 0; i < READINGFRAME::TOTAL_RFS; ++i)
-    // 						rfIndice[i].reserve(ttlAligns);
-    //
-    // 					SortReadingFrames(dst.m_vecAlignments, rfIndice, dst.m_uiSeqLen);
-    //
-    // 					for (size_t i = 0; i < READINGFRAME::TOTAL_RFS; ++i)
-    // 						Calculate(dst.m_vecAlignments, rfIndice[i], dst.m_dimSplitAligns[i], missed);
-    // 				}
-    // 			}
-    // ```
     // (A NaN E-value or bit score is kept, as in an archive (`query::process_cd_query`):
-    // `domains::calculate` sorts the hits as NCBI's `std::sort` does and refuses only where that
-    // sort would read outside its vector. `Calculate` of a frame without hits gives an empty
-    // classification. `missed`, the PSSM-IDs that the data lack, is never printed.)
+    // `domains::calculate` sorts it after every number. `Calculate` of a frame without hits gives
+    // an empty classification. `missed`, the PSSM-IDs that the data lack, is never printed.)
     pub(crate) fn finish(self, data: &CddData) -> Result<DomQuery, ProcessError> {
         if let Some(failure) = self.failure {
             return Err(failure);
         }
         // The sites of a protein query read `m_strSeqData`, those of a nucleotide query
-        // `m_dimTranslated` (rpsbproc_main.cpp:1370-1379, quoted at `nucleotide::print_features`).
+        // `m_dimTranslated` (rpsbproc_main.cpp:1370-1379, cited at `nucleotide::print_features`).
         let mut translated = self.translated;
         let (residues, translated) = match (self.is_na, self.seq_data_is_translated) {
             (true, true) => (translated[0].clone(), Some(Box::new(translated))),
@@ -729,16 +410,14 @@ impl OfflineQuery {
         }
         if !query.is_na {
             let all: Vec<usize> = (0..query.aligns.len()).collect();
-            query.frames[0] =
-                calculate(&mut query.aligns, &all, data).map_err(ProcessError::Unsupported)?;
+            query.frames[0] = calculate(&mut query.aligns, &all, data);
             return Ok(query);
         }
         let frames = sort_reading_frames(&query.aligns, query.length)
             .map_err(|what| ProcessError::Std(what.to_string()))?;
         for (frame, selected) in frames.iter().enumerate() {
             if !selected.is_empty() {
-                query.frames[frame] = calculate(&mut query.aligns, selected, data)
-                    .map_err(ProcessError::Unsupported)?;
+                query.frames[frame] = calculate(&mut query.aligns, selected, data);
             }
         }
         Ok(query)
@@ -777,23 +456,10 @@ impl AlignedQuery for [u8] {
     }
 }
 
-/// "see if NA" of `ParseBlastOutput` (quoted at `OfflineQuery::parse_hsp`): `aaRes`, the letters of
+/// "see if NA" of `ParseBlastOutput` (cited at `OfflineQuery::parse_hsp`): `aaRes`, the letters of
 /// `qseq` from `alnResIdx` on, which `parse_hsp` compares with the hit's span.
-// 						SeqLen_t aaRes = 0;
-// 						SeqPos_t t0 = alnResIdx;
-// 						while (t0 < alnLen)
-// 						{
-// 							if ('-' == qseq[t0])
+// NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/offl_cd_align_proc.cpp:209-214
 // 								++t0;
-// 							else
-// 							{
-// 								size_t t1 = qseq.find('-', t0);
-// 								if (string::npos == t1)	//
-// 									t1 = alnLen;
-// 								aaRes += t1 - t0;
-// 								t0 = t1 + 1;
-// 							}
-// 						}
 // (`offl_cd_align_proc.cpp`, `ParseBlastOutput`.) `t0 < alnLen` compares as `unsigned int` (`alnLen`
 // is the length modulo 2^32); `++t0` is computed as its value (exception 12, `DECISIONS.md` 59);
 // `aaRes += t1 - t0` adds modulo 2^32. `t0 = t1 + 1` stores a `size_t` in the `int` (modulo 2^32,
@@ -873,34 +539,7 @@ fn write_residue(text: &mut [u8], at: i64, c: u8) -> Result<(), ProcessError> {
 /// libstdc++'s `basic_string::replace(pos, n1, str, pos2, n2)`: `n1` bytes from `pos` (fewer at
 /// the end) replaced by `n2` bytes of `str` from `pos2` (fewer at its end); the string may grow.
 /// Its `std::out_of_range` when a position is past its string's length, `pos2` checked first.
-// NCBI reference (GCC 13 libstdc++): include/c++/13/bits/basic_string.h:395-402,2311-2316,2352-2358
-// ```c++
-//       size_type
-//       _M_check(size_type __pos, const char* __s) const
-//       {
-// 	if (__pos > this->size())
-// 	  __throw_out_of_range_fmt(__N("%s: __pos (which is %zu) > "
-// 				       "this->size() (which is %zu)"),
-// 				   __s, __pos, this->size());
-// 	return __pos;
-//       }
-// ...
-//       basic_string&
-//       replace(size_type __pos1, size_type __n1, const basic_string& __str,
-// 	      size_type __pos2, size_type __n2 = npos)
-//       { return this->replace(__pos1, __n1, __str._M_data()
-// 			     + __str._M_check(__pos2, "basic_string::replace"),
-// 			     __str._M_limit(__pos2, __n2)); }
-// ...
-//       basic_string&
-//       replace(size_type __pos, size_type __n1, const _CharT* __s,
-// 	      size_type __n2)
-//       {
-// 	__glibcxx_requires_string_len(__s, __n2);
-// 	return _M_replace(_M_check(__pos, "basic_string::replace"),
-// 			  _M_limit(__pos, __n1), __s, __n2);
-//       }
-// ```
+// libstdc++ (GCC 13): include/c++/13/bits/basic_string.h:395-402,2311-2316,2352-2358
 // (`_M_limit(pos, n)` is `min(n, size() - pos)`. `qf`, an `int` (its value past `int`'s range
 // where exception 12 took it there), is the `size_t` `pos`: a negative one is beyond any length.)
 fn string_replace(

@@ -24,20 +24,6 @@
 //!   given.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:518-531
-//! ```c
-//!             query = query_blk->sequence +
-//!                 query_info->contexts[hsp->context].query_offset;
-//!             query_nomask = query_blk->sequence_nomask +
-//!                 query_info->contexts[hsp->context].query_offset;
-//!         }
-//!
-//!         /* Translate subject if needed. */
-//!         if (program_number == eBlastTypeTblastn) {
-//!             ...
-//!         }
-//!         else
-//!             status = Blast_HSPGetNumIdentitiesAndPositives(query_nomask, subject, hsp, scoring_options, 0, sbp);
-//! ```
 
 use anyhow::Result;
 
@@ -77,13 +63,6 @@ impl EngineCounts {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1199-1203
-    // ```c++
-    //     // Set the identity score
-    //     if (hsp->num_ident >= 0) {
-    //         static const string kNumIdent("num_ident");
-    //         scores.push_back(s_MakeScore(kNumIdent, 0.0, hsp->num_ident, true));
-    //     }
-    // ```
     /// The Seq-align's `num_ident` of the HSP at `key` whose identities are now `shown`: the
     /// engine's, if the recount replaced them (as `query_records` writes it).
     pub(crate) fn num_ident(&self, key: HspKey, shown: usize) -> usize {
@@ -92,10 +71,12 @@ impl EngineCounts {
 }
 
 /// Writes the documents of every query of `hit_lists` (indexed by query) to `writer`, each
-/// query's warnings before it (`write_hit_list_seqaligns`).
+/// query's warnings before it (`write_hit_list_seqaligns`). `gapped` is `!args.ungapped`: an
+/// ungapped search's HSPs are Dense-diag Seq-aligns (`report::serial::seqalign`).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn write_blastp_seqalign(
     format: SerialFormat,
+    gapped: bool,
     hit_lists: &[Option<BlastpHitList>],
     queries: &QueryNames<'_>,
     subjects: SubjectNames<'_>,
@@ -107,7 +88,11 @@ pub(crate) fn write_blastp_seqalign(
     let run = RunRecord {
         program: Program::Blastp,
         db_title: subjects.db_title(),
-        gapped: true,
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1397-1440
+        // (`BLASTUngappedHspListToSeqAlign`, cited at `report::serial::seqalign`): an ungapped
+        // search's HSPs are Dense-diags (no gap information: `ops` is empty, the strands are
+        // unknown as in the Dense-seg of a gapped one).
+        gapped,
     };
     write_hit_list_seqaligns(
         format,

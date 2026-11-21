@@ -1,9 +1,9 @@
 // ThreadHost (web/packages/losat/src/infra/engine-worker/thread-host.ts) with fake thread workers: preparing
 // them, starting a thread, a thread worker that does not start in time, the keeper of the
-// shared memory, and the use count of the threads. The real thread workers run in the
-// browsers (tests/e2e/engine.spec.ts).
+// shared memory, their links to the main thread (link.ts), and the use count of the threads. The real thread workers
+// run in the browsers (tests/e2e/engine.spec.ts).
 import { Worker as NodeWorker } from 'node:worker_threads';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { InstanceUse } from '../../../packages/losat/src/infra/engine-worker/instance-use';
 import {
   SLOT_ENDED,
@@ -14,14 +14,23 @@ import {
   START_PENDING,
   START_TAKEN,
   type KeeperCommand,
+  type LinkRole,
   type ThreadCommand,
   type ThreadFault,
 } from '../../../packages/losat/src/infra/engine-worker/protocol';
 import { ThreadHost, ThreadHostError } from '../../../packages/losat/src/infra/engine-worker/thread-host';
 
-type Behaviour = 'ready-and-start' | 'ready-never-start' | 'never-ready';
+type Behaviour = 'ready-and-start' | 'ready-never-start' | 'never-ready' | 'not-loaded';
+
+/** Every port of a test, closed after it. */
+const ports: MessagePort[] = [];
+afterEach(() => {
+  for (const port of ports.splice(0)) port.close();
+});
 
 class FakeThreadWorker {
+  /** The worker's end of its link to the main thread. */
+  faults: MessagePort | undefined;
   state: Int32Array | undefined;
   use: InstanceUse | undefined;
   pendingStart: Int32Array | undefined;
@@ -34,9 +43,12 @@ class FakeThreadWorker {
 
   postMessage(command: ThreadCommand): void {
     if (command.type === 'prepare') {
+      this.faults = command.faults;
       this.state = new Int32Array(command.slot);
       this.use = new InstanceUse(command.use);
-      if (this.behaviour !== 'never-ready') Atomics.store(this.state, 0, SLOT_READY);
+      // A script that does not load fires a plain Event, without a message.
+      if (this.behaviour === 'not-loaded') setTimeout(() => this.onerror?.(new Event('error') as ErrorEvent), 1);
+      else if (this.behaviour !== 'never-ready') Atomics.store(this.state, 0, SLOT_READY);
       return;
     }
     const started = new Int32Array(command.started);
@@ -117,8 +129,9 @@ class FakeMemory {
 function host(behaviour: Behaviour, readyTimeoutMs = 100, keeperBehaviour: KeeperBehaviour = 'ready', startTimeoutMs = 50) {
   const workers: FakeThreadWorker[] = [];
   const keepers: FakeKeeper[] = [];
-  const faultChannel = `test-faults-${Math.random()}`;
-  const keeperChannel = `test-keeper-${Math.random()}`;
+  /** The main thread's ends of the links, in the order the host made them, and the faults that the host told it. */
+  const links: Array<{ readonly role: LinkRole; readonly port: MessagePort }> = [];
+  const faults: ThreadFault[] = [];
   const use = InstanceUse.create();
   const memory = new FakeMemory(() => ({
     threadWorkers: workers.map((worker) => worker.terminated),
@@ -130,8 +143,15 @@ function host(behaviour: Behaviour, readyTimeoutMs = 100, keeperBehaviour: Keepe
     module: {} as WebAssembly.Module,
     memory: memory as unknown as WebAssembly.Memory,
     maximumPages: 65_535,
-    faultChannel,
-    keeperChannel,
+    main: {
+      link: (role) => {
+        const channel = new MessageChannel();
+        ports.push(channel.port1, channel.port2);
+        links.push({ role, port: channel.port2 });
+        return channel.port1;
+      },
+      fault: (fault) => void faults.push(fault),
+    },
     use,
     readyTimeoutMs,
     startTimeoutMs,
@@ -149,7 +169,7 @@ function host(behaviour: Behaviour, readyTimeoutMs = 100, keeperBehaviour: Keepe
       endedWaits.push({ grows: memory.grows.length, threadWorkersEnded: workers.map((worker) => worker.terminated) });
     },
   });
-  return { threads, workers, keepers, memory, faultChannel, keeperChannel, use, endedWaits };
+  return { threads, workers, keepers, memory, links, faults, use, endedWaits };
 }
 
 describe('ThreadHost', () => {
@@ -196,12 +216,16 @@ describe('ThreadHost', () => {
     threads.terminate();
   });
 
-  it('gives the shared memory and its channel to a keeper, waits for it, and ends it with the thread workers', async () => {
-    const { threads, workers, keepers, memory, keeperChannel } = host('ready-and-start');
+  it('gives the shared memory and its link to a keeper, waits for it, and ends it with the thread workers', async () => {
+    const { threads, workers, keepers, memory, links } = host('ready-and-start');
     expect(keepers).toHaveLength(1);
     const keeper = keepers[0]!;
-    expect(keeper.received).toEqual([{ type: 'keep', memory, maximumPages: 65_535, channel: keeperChannel }]);
+    expect(keeper.received).toEqual([{ type: 'keep', memory, maximumPages: 65_535, port: expect.any(MessagePort) }]);
+    expect(links.map((link) => link.role)).toEqual(['keeper']);
     await threads.prepare(1);
+    // Each thread worker gets a link of its own.
+    expect(links.map((link) => link.role)).toEqual(['keeper', 'thread']);
+    expect(workers[0]!.faults).toBeInstanceOf(MessagePort);
     threads.terminate();
     expect(keeper.terminated).toBe(true);
     expect(workers.every((worker) => worker.terminated)).toBe(true);
@@ -311,6 +335,13 @@ describe('ThreadHost', () => {
     expect(threads.terminate()).toBe(true);
   });
 
+  // The second review of line WQA's D1 and D2, L3 (2026-11-19): such a worker read "a thread worker failed: undefined".
+  it('fails to prepare with a sentence when a thread worker\'s script does not load', async () => {
+    const { threads } = host('not-loaded', 5_000);
+    await expect(threads.prepare(1)).rejects.toThrow(/^a thread worker failed: its script did not load$/);
+    threads.terminate();
+  });
+
   it('fails to prepare when the keeper does not start in time, or fails', async () => {
     const late = host('ready-and-start', 100, 'never-ready');
     await expect(late.threads.prepare(1)).rejects.toThrow('the memory keeper did not start in time');
@@ -345,11 +376,7 @@ describe('ThreadHost', () => {
   });
 
   it('abandons a thread that does not start in time, reports a fault, and the thread can no longer start', async () => {
-    const { threads, workers, faultChannel, use } = host('ready-never-start');
-    const faults = new BroadcastChannel(faultChannel);
-    const received = new Promise<ThreadFault>((resolve) => {
-      faults.onmessage = (event: MessageEvent<ThreadFault>) => resolve(event.data);
-    });
+    const { threads, workers, faults, use } = host('ready-never-start');
     await threads.prepare(1);
     expect(threads.spawn(1000)).toBe(-1);
     const worker = workers[0]!;
@@ -358,9 +385,33 @@ describe('ThreadHost', () => {
     // The thread that did not start is not counted.
     expect(use.uses()).toBe(0);
     expect(worker.startLate()).toBe(false);
-    expect(await received).toEqual({ type: 'fault', tid: 1, message: 'The engine stopped: thread 1 did not start in time' });
+    expect(faults).toEqual([{ type: 'fault', tid: 1, message: 'The engine stopped: thread 1 did not start in time' }]);
     await expect(threads.prepare(1)).rejects.toThrow('thread 1 did not start');
-    faults.close();
+    threads.terminate();
+  });
+});
+
+// Line WQA's sweep, D8 (2026-11-20): where the site's data is blocked, Firefox refuses `new BroadcastChannel()` with
+// SecurityError in every worker. The host opened one to report a thread that did not start in time, inside the engine's
+// call of `thread-spawn`, which then threw instead of returning -1. The Engine worker tells the main thread itself.
+describe("ThreadHost where the site's data is blocked", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('abandons a thread that does not start in time and tells the main thread', async () => {
+    vi.stubGlobal(
+      'BroadcastChannel',
+      class {
+        constructor() {
+          throw new DOMException('The operation is insecure.', 'SecurityError');
+        }
+      },
+    );
+    const { threads, faults } = host('ready-never-start');
+    await threads.prepare(1);
+    expect(threads.spawn(1000)).toBe(-1);
+    expect(faults).toEqual([{ type: 'fault', tid: 1, message: 'The engine stopped: thread 1 did not start in time' }]);
     threads.terminate();
   });
 });

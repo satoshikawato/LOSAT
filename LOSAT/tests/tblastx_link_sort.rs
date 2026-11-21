@@ -7,20 +7,7 @@
 //! line to check that the path ran, not only that the report is equal.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:483-486
-//! ```c
-//! /* Sort by (reverse) position. */
-//! if (kTranslatedQuery) {
-//!    qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
-//!          s_RevCompareHSPsTbx);
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:990-994
-//! ```c
-//! if (kTranslatedQuery) {
-//!    qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
-//!          s_RevCompareHSPsTransl);
-//!    qsort(link_hsp_array, total_number_of_hsps,sizeof(LinkHSPStruct*),
-//!          s_FwdCompareHSPsTransl);
-//! ```
 //! The expected report (`tests/fixtures/tblastx_link_fast/short_hsp.ncbi_2.17.0.fmt6.out`) was
 //! produced by NCBI BLAST+ 2.17.0.
 //!
@@ -142,13 +129,6 @@ fn check_stats(stderr: &str, what: &str) -> (u64, u64) {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:990-994
-// ```c
-// if (kTranslatedQuery) {
-//    qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
-//          s_RevCompareHSPsTransl);
-//    qsort(link_hsp_array, total_number_of_hsps,sizeof(LinkHSPStruct*),
-//          s_FwdCompareHSPsTransl);
-// ```
 // The default search: the report is NCBI's and the subject's two linking calls each sort their
 // output order once. One thread runs the reference frame loop, four, eight and sixteen threads the
 // unit path (the `[X_STATS] PAIRPAR` line tells which). The counters also count the index sorts of

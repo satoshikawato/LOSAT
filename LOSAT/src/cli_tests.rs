@@ -1,0 +1,237 @@
+use super::*;
+use std::os::unix::ffi::OsStringExt;
+
+// Line DBID pfoff-1 (DECISIONS 62): `CATCH_ALL` reports a `CSeqDBException` (blastp 2.17.0,
+// outfmt 13 of `pP pU` with the prefetch off: `BLAST Database error: DB contains no accession
+// info.`, exit 2) before any other `CException` (`Error: ` and `what()`, exit 255).
+#[test]
+fn catch_all_reports_a_seqdb_exception_as_a_database_error() {
+    use crate::ncbi_exception::{NcbiException, ThrowSite};
+    let site = crate::seqdb::lookup_throw_site(b"DB contains no accession info.").unwrap();
+    let error = NativeError::exception(&NcbiException::new(site, "DB contains no accession info."));
+    assert_eq!(error.exit, 2);
+    assert_eq!(
+        error.message,
+        b"BLAST Database error: DB contains no accession info.\n"
+    );
+    let other = NcbiException::new(
+        ThrowSite {
+            file: "src/corelib/ncbistr.cpp",
+            line: 852,
+            kind: "CStringException::eConvert",
+            function: Some("ncbi::NStr::StringToInt8"),
+        },
+        "x",
+    );
+    let error = NativeError::exception(&other);
+    assert_eq!(error.exit, 255);
+    assert_eq!(
+        error.message,
+        [b"Error: ".as_slice(), &other.what(), b"\n"].concat()
+    );
+}
+
+fn blastn_argv(words: Vec<OsString>) -> Vec<OsString> {
+    let mut argv = vec![
+        OsString::from("losat"),
+        OsString::from("blastn"),
+        OsString::from("-query"),
+        OsString::from("q.fa"),
+        OsString::from("-subject"),
+        OsString::from("s.fa"),
+    ];
+    argv.extend(words);
+    argv
+}
+
+// Without `main`'s `post_errors_in_run` (a library caller of the command line entries such as
+// `api::run_blastn`), the run writes no error text of its own: the text stays in the error.
+// No unit test calls `post_errors_in_run`.
+#[test]
+fn a_run_outside_main_posts_no_error_text() {
+    let text = "BLAST query error: Could not construct seq-id from 'gi|abc'\n";
+    let error: anyhow::Error = NativeError {
+        exit: 1,
+        message: text.to_string().into(),
+    }
+    .into();
+    post_native_error(&error);
+    assert!(!posted(text.as_bytes()));
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:266-270 keeps the bytes of a string value; LOSAT
+// rejects a value that is not UTF-8 explicitly, in both spellings of an option.
+#[test]
+fn option_values_that_are_not_utf8_are_rejected_explicitly() {
+    for (option, value) in [
+        ("-query_loc", vec![0xff]),
+        ("-subject_loc", b"1-\xff".to_vec()),
+        ("-dust", vec![0xfe]),
+    ] {
+        let separate = blastn_argv(vec![
+            OsString::from(option),
+            OsString::from_vec(value.clone()),
+        ]);
+        let mut inline = format!("{option}=").into_bytes();
+        inline.extend(&value);
+        let joined = blastn_argv(vec![OsString::from_vec(inline)]);
+        for argv in [separate, joined] {
+            let error = try_parse_from::<Cli, _, _>(argv).unwrap_err();
+            let message = render_message(&error);
+            assert!(
+                message.contains(&format!("the value of {option} is not UTF-8"))
+                    && message.contains("not supported by LOSAT's BLASTN"),
+                "{message}"
+            );
+        }
+    }
+}
+
+// makeblastdb keeps its values as UTF-8 strings: a value that is not UTF-8 (a file name of
+// `-in`, `-out`, `-mask_data`, `-taxid_map`, `-logfile`, a `-title`) is LOSAT's explicit
+// rejection, where the parser's own error named no option (line LIB-B, probe 2026-11-21).
+#[test]
+fn makeblastdb_rejects_values_that_are_not_utf8_explicitly() {
+    for option in [
+        "-in",
+        "-out",
+        "-mask_data",
+        "-taxid_map",
+        "-logfile",
+        "-title",
+    ] {
+        let argv = vec![
+            OsString::from("losat"),
+            OsString::from("makeblastdb"),
+            OsString::from("-dbtype"),
+            OsString::from("nucl"),
+            // `-taxid_map` requires it: the parser's errors come before the rejection.
+            OsString::from("-parse_seqids"),
+            OsString::from(option),
+            OsString::from_vec(b"n\xe9.x".to_vec()),
+        ];
+        let error = try_parse_from::<Cli, _, _>(argv).unwrap_err();
+        let message = render_message(&error);
+        assert_eq!(error.kind(), ErrorKind::InvalidUtf8, "{option}: {message}");
+        assert!(
+            message.contains(&format!("the value of {option} is not UTF-8"))
+                && message.contains("not supported by LOSAT's MAKEBLASTDB"),
+            "{message}"
+        );
+    }
+}
+
+// BLASTX reads both ranges (line SX, SXd1), excludes `-subject_loc` with `-db` as the other
+// programs do, and rejects an option's value that is not UTF-8 with their text (DECISIONS 10
+// (c) of line SX).
+#[test]
+fn blastx_reads_the_ranges_and_rejects_values_that_are_not_utf8() {
+    let parsed = try_parse_from::<Cli, _, _>([
+        "losat",
+        "blastx",
+        "-query",
+        "q.fa",
+        "-subject",
+        "s.faa",
+        "-query_loc",
+        "1-10",
+        "-subject_loc",
+        "2-5",
+    ])
+    .unwrap();
+    let Commands::Blastx(args) = parsed.command else {
+        panic!("a BLASTX command line");
+    };
+    assert_eq!(args.query_loc.as_deref(), Some("1-10"));
+    assert_eq!(args.subject_loc.as_deref(), Some("2-5"));
+    let error = try_parse_from::<Cli, _, _>([
+        "losat",
+        "blastx",
+        "-query",
+        "q.fa",
+        "-db",
+        "d",
+        "-subject_loc",
+        "2-5",
+    ])
+    .unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::ArgumentConflict);
+    for (option, value) in [
+        ("-query_loc", vec![0xff]),
+        ("-subject_loc", b"1-\xff".to_vec()),
+        ("-outfmt", vec![0xfe]),
+    ] {
+        let mut argv = blastn_argv(vec![OsString::from(option), OsString::from_vec(value)]);
+        argv[1] = OsString::from("blastx");
+        let message = render_message(&try_parse_from::<Cli, _, _>(argv).unwrap_err());
+        assert!(
+            message.contains(&format!("the value of {option} is not UTF-8"))
+                && message.contains("not supported by LOSAT's BLASTX"),
+            "{message}"
+        );
+    }
+}
+
+// The rejection comes after the parser, as NCBI reads the value only after its
+// arguments parse: `-help` and the parser's errors come first.
+#[test]
+fn help_and_parser_errors_come_before_a_value_that_is_not_utf8() {
+    let mut argv = vec![OsString::from("losat"), OsString::from("blastn")];
+    argv.push(OsString::from("-help"));
+    argv.push(OsString::from("-query_loc"));
+    argv.push(OsString::from_vec(vec![0xff]));
+    let error = try_parse_from::<Cli, _, _>(argv).unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::DisplayHelp);
+    let argv = blastn_argv(vec![
+        OsString::from("-query_loc"),
+        OsString::from_vec(vec![0xff]),
+        OsString::from("-no_such_option"),
+    ]);
+    let message = render_message(&try_parse_from::<Cli, _, _>(argv).unwrap_err());
+    assert!(!message.contains("not UTF-8"), "{message}");
+}
+
+// `try_parse_from` is generic: a caller's own type can name an option with letters that are
+// not ASCII, here U+FFFD (3 bytes), which a byte that is not UTF-8 also reads as in the
+// word's lossy text. The value of `-name=value` starts after the first `=` of the bytes,
+// not `name.len()` bytes on (which skipped `\xfe\xfd` and read `abc`).
+#[test]
+fn inline_value_starts_after_the_first_equals_sign() {
+    #[derive(clap::Parser)]
+    enum Own {
+        Blastn(OwnArgs),
+    }
+    #[derive(clap::Args)]
+    struct OwnArgs {
+        #[arg(long = "q\u{fffd}")]
+        q: Option<String>,
+    }
+    let argv = vec![
+        OsString::from("losat"),
+        OsString::from("blastn"),
+        OsString::from_vec(b"-q\xff=\xfe\xfdabc".to_vec()),
+    ];
+    let error = try_parse_from::<Own, _, _>(argv)
+        .err()
+        .expect("a value that is not UTF-8");
+    assert_eq!(error.kind(), ErrorKind::InvalidUtf8);
+}
+
+// A file name keeps its bytes in both spellings (`check_utf8_file_name` reads it).
+#[test]
+fn file_names_keep_their_bytes_in_both_spellings() {
+    let name = b"q\xff.fa".to_vec();
+    let mut inline = b"-query=".to_vec();
+    inline.extend(&name);
+    let argv = vec![
+        OsString::from("losat"),
+        OsString::from("blastn"),
+        OsString::from_vec(inline),
+        OsString::from("-subject"),
+        OsString::from("s.fa"),
+    ];
+    let Commands::Blastn(args) = try_parse_from::<Cli, _, _>(argv).unwrap().command else {
+        panic!("not blastn");
+    };
+    assert_eq!(args.query.into_os_string(), OsString::from_vec(name));
+}

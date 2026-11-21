@@ -3,10 +3,11 @@
 // (src/infra/data-worker), so every argument and result is structured-cloneable. The
 // outputs of a run arrive over the MessagePort that `openRun` returns
 // (losat/ports: run-output.ts), not through these methods.
-import type { CUSTOM_OUTPUT, FastaParserKind, InputRole, OutputFormat, ProgramId, RecordKey, RunOutput } from 'losat/domain';
+import type { CUSTOM_OUTPUT, FastaReader, OutputFormat, OutputPlace, RecordKey, RunOutput } from 'losat/domain';
 import type { HspRecord, InputCheck } from 'losat/ports';
 import type { DatasetRevision } from '../domain/dataset';
 import type { HspTable } from '../domain/hsp-table';
+import { withUnit } from '../domain/units';
 
 export interface SourceRef {
   readonly sourceId: string;
@@ -35,10 +36,11 @@ export interface DatasetStore {
    */
   addSource(file: File): Promise<SourceRef>;
   /**
-   * Builds the record table of a source with the index scan of `parser` and the SHA-256
-   * of every record. Rejects with the parser's error.
+   * Builds the record table of a source with the index scan of the engine's reader `reader` (its
+   * program, role and data loaders) and the SHA-256 of every record. Rejects with the reader's
+   * error, or its refusal in the CLI's words.
    */
-  indexSource(sourceId: string, parser: FastaParserKind): Promise<DatasetRevision>;
+  indexSource(sourceId: string, reader: FastaReader): Promise<DatasetRevision>;
   /** A new revision of the same record table that leaves out the records `excluded`. */
   reviseDataset(revisionId: string, excluded: readonly number[]): Promise<DatasetRevision>;
   /**
@@ -48,11 +50,11 @@ export interface DatasetStore {
    */
   buildRunInput(revisionIds: readonly string[]): Promise<RunInput>;
   /**
-   * The engine's reading of the run input of the revisions for `program` and `role`
-   * (losat/ports: input-check.ts). Resolves with the engine's verdict; rejects only when the
-   * check itself cannot run.
+   * The engine's reading of the run input of the revisions with the reader `reader` (its program,
+   * role and data loaders; losat/ports: input-check.ts). Resolves with the engine's verdict;
+   * rejects only when the check itself cannot run.
    */
-  checkInput(program: ProgramId, role: InputRole, revisionIds: readonly string[]): Promise<InputCheck>;
+  checkInput(reader: FastaReader, revisionIds: readonly string[]): Promise<InputCheck>;
   /** The first `maxBytes` bytes of a source, for its preview. */
   previewSource(sourceId: string, maxBytes: number): Promise<Uint8Array>;
   /**
@@ -68,6 +70,27 @@ export interface ResultSetRef {
   /** The bytes of each output of the run: the formats that every run writes, and the output of its -outfmt where it has one. */
   readonly byteLengths: Readonly<Record<OutputFormat, number> & Partial<Record<typeof CUSTOM_OUTPUT, number>>>;
   readonly hitCount: number;
+  /**
+   * The outputs that the run could not write, by stream number: those that the engine said failed (its signal of
+   * stream 9, docs/web/abi_v2.md §5: a format that failed alone, or the formats of a search that failed in a run of
+   * two searches), each with where its error is, as the engine said. Each is empty (line WQA's sweep, D7, 2026-11-19
+   * and 2026-11-20).
+   */
+  readonly failed: readonly FailedOutput[];
+}
+
+/** An output that a run could not write, and where its error is (`ResultSetRef.failed`). */
+export interface FailedOutput {
+  readonly output: RunOutput;
+  readonly error: OutputPlace;
+}
+
+/** What `RunStore.keepFailedRun` keeps of a failed run: its outputs, and its warnings. */
+export interface KeptRun {
+  /** The outputs that the run wrote before its error; undefined where no kept output has bytes, and the run is dropped. */
+  readonly result?: ResultSetRef;
+  /** What the run wrote to the CLI's standard error before its error; '' where it wrote nothing. */
+  readonly diagnostics: string;
 }
 
 /** The committed runs whose stored outputs cannot be read back (`RunStore.checkStoredResults`), in the order of the runs. */
@@ -96,6 +119,17 @@ export interface RunStore {
   commitRun(runId: string): Promise<ResultSetRef>;
   /** Drops a staged run. Committed and unknown runs are left alone. */
   discardRun(runId: string): Promise<void>;
+  /**
+   * Keeps a staged run that the engine failed after it began to write (its rejection says so: `runOutputFailedOf`),
+   * once its `fail` arrived (losat/ports run-output.ts): the outputs that the engine did not discard, the bytes that the
+   * CLI leaves in the output of the argv before its error, are committed as a completed run's are, to be read and
+   * exported (`readOutput`, `readOutputRange`), and the warnings that the run wrote to stream 3 before its error come
+   * back (UTF-8, as `readDiagnostics` reads a committed run's; docs/web/abi_v2.md §5). The run has no HSP records. Line
+   * WQA's sweep, D15, 2026-11-20 (before, a failed run was dropped and only its warnings were read: D3, 2026-11-19).
+   * Resolves to undefined, and drops the run, where its output arrived incomplete or could not be stored, and for a run
+   * that is not staged.
+   */
+  keepFailedRun(runId: string): Promise<KeptRun | undefined>;
   readOutput(runId: string, output: RunOutput): Promise<Uint8Array>;
   /** Bytes [start, end) of one output of a committed run (an HSP's row or section). */
   readOutputRange(runId: string, output: RunOutput, start: number, end: number): Promise<Uint8Array>;
@@ -119,16 +153,39 @@ export interface RunStore {
 
 export type StorageBackend = 'opfs' | 'memory';
 
+/**
+ * Results kept in memory (no OPFS) may take at most this many bytes in a tab (S09). Memory
+ * is then the only copy of the results, so running out of it would end the tab and lose
+ * every result; the budget makes it the same recoverable failure as a full OPFS instead.
+ * The engine's own memory comes on top (up to 4 GiB less one page, plan TD-7).
+ */
+export const MEMORY_RESULTS_CAPACITY_BYTES = 512 * 1024 * 1024;
+/**
+ * MEMORY_RESULTS_CAPACITY_BYTES as the page says it, "512 MB" (of 1024 × 1024 bytes): in the
+ * message when it is reached, and in the note that says results are kept in memory. The number and
+ * its unit are joined by a no-break space, so that the note never breaks "at most 512" / "MB" on a
+ * narrow screen (line WQA's sweep, D9, 2026-11-19).
+ */
+export const MEMORY_RESULTS_CAPACITY = withUnit(MEMORY_RESULTS_CAPACITY_BYTES / (1024 * 1024), 'MB');
+
 /** Removal of the temporary data that closed tabs left behind (plan §5.6). */
 export type CleanupState =
   | { readonly state: 'pending' }
   | { readonly state: 'done'; readonly removedSessions: number }
-  | { readonly state: 'unavailable'; readonly reason: string };
+  | {
+      readonly state: 'unavailable';
+      /** In LOSAT's words, never the browser's message. */
+      readonly reason: string;
+      /** The error behind it, "<name>: <message>", for developers (data-error). */
+      readonly error?: string;
+    };
 
 export interface StorageInfo {
   readonly backend: StorageBackend;
-  /** Why OPFS is not used, when the backend is memory. */
+  /** Why OPFS is not used, when the backend is memory: LOSAT's words, never the browser's message. */
   readonly fallbackReason?: string;
+  /** The error behind fallbackReason, "<name>: <message>", for developers (data-error). */
+  readonly fallbackError?: string;
   /** Bytes that this working session holds in temporary storage. */
   readonly sessionBytes: number;
   /** The browser's estimate for the whole site (`navigator.storage.estimate`); not a guarantee. */

@@ -7,10 +7,6 @@
 //! `src/algorithm/blastp/x_query_blocks.rs` `x_bp_aa_block_spare`), on whole searches.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1635-1636
-//! ```c
-//!                 status = s_DoSegSequenceData(seqData, eBlastTypeBlastp,
-//!                                              subject_maybe_biased);
-//! ```
 //! Both switches are in the strict set (on unless `0`) and change only what is kept in memory: a
 //! masked range is a function of its subject, range and SEG parameters, so a window that masks a
 //! range again gets the same bytes (the lib test

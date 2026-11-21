@@ -2,7 +2,10 @@
 # Its own build root: nothing under LOSAT/ depends on it, and Arrow and PyO3 stay out of LOSAT.
 [package]
 name = "pylosat"
-version = "0.1.0"
+# LOSAT's version (LOSAT/Cargo.toml): pylosat is published under the number of the LOSAT it holds,
+# so that `pip install pylosat==0.2.0` is LOSAT v0.2.0 (python/tests/test_results.py holds the two
+# equal).
+version = "0.2.0"
 edition = "2021"
 rust-version = "1.92"
 publish = false

@@ -13,82 +13,8 @@
 //! (`BackChar` takes back the `>` of a tag) and 0 for ASN.1 binary.
 //!
 //! NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:46-52
-//! ```c++
-//! static const size_t KInitialBufferSize = 4096;
-//!
-//! static inline
-//! size_t BiggerBufferSize(size_t size) THROWS1_NONE
-//! {
-//!     return size * 2;
-//! }
-//! ```
 //! NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:871-947
-//! ```c++
-//! void COStreamBuffer::FlushBuffer(bool fullBuffer)
-//!     THROWS1((CIOException))
-//! {
-//!     ...
-//!     size_t used = GetUsedSpace();
-//!     size_t count;
-//!     size_t leave;
-//!     if ( fullBuffer ) {
-//!         count = used;
-//!         leave = 0;
-//!     }
-//!     else {
-//!         leave = m_BackLimit;
-//!         if ( used < leave )
-//!             return; // none to flush
-//!         count = used - leave;
-//!     }
-//!     if ( count != 0 ) {
-//!         if ( !m_Output.write(m_Buffer, count) ) {
-//!     ...
-//! char* COStreamBuffer::DoReserve(size_t count)
-//!     THROWS1((CIOException, bad_alloc))
-//! {
-//!     FlushBuffer(false);
-//!     size_t usedSize = m_CurrentPos - m_Buffer;
-//!     size_t needSize = usedSize + count;
-//!     size_t bufferSize = m_BufferEnd - m_Buffer;
-//!     if ( bufferSize < needSize ) {
-//!         // realloc too small buffer
-//!         do {
-//!             bufferSize = BiggerBufferSize(bufferSize);
-//!         } while ( bufferSize < needSize );
-//!     ...
-//! ```
 //! NCBI reference (598d8ae6): c++/include/util/strbuffer.inl:281-339
-//! ```c++
-//! inline
-//! char* COStreamBuffer::Skip(size_t count)
-//!     THROWS1((CIOException, bad_alloc))
-//! {
-//!     char* pos = m_CurrentPos;
-//!     char* end = pos + count;
-//!     if ( end <= m_BufferEnd ) {
-//!         // enough space in buffer
-//!         m_CurrentPos = end;
-//!         m_LineLength += count;
-//!         return pos;
-//!     }
-//!     else {
-//!         return DoSkip(count);
-//!     }
-//! }
-//! ...
-//! inline
-//! void COStreamBuffer::PutString(const char* str, size_t length)
-//!     THROWS1((CIOException, bad_alloc))
-//! {
-//!     if ( length < 1024 ) {
-//!         memcpy(Skip(length), str, length);
-//!     }
-//!     else {
-//!         Write(str, length);
-//!     }
-//! }
-//! ```
 //! (`PutChar` is `Skip(1)`; `PutEol` is `Reserve(1)` and the end of line, then `PutIndent`, a
 //! `Skip` of the indentation; `PutInt4` and `PutInt8` are one `Skip` of the digits.)
 //!
@@ -112,21 +38,7 @@ impl Stream {
     /// `COStreamBuffer::m_BackLimit` of the stream.
     ///
     /// NCBI reference (598d8ae6): c++/src/serial/objostrasn.cpp:64-69
-    /// ```c++
-    /// CObjectOStreamAsn::CObjectOStreamAsn(CNcbiOstream& out,
-    ///                                      EFixNonPrint how)
-    ///     : CObjectOStream(eSerial_AsnText, out)
-    /// {
-    ///     FixNonPrint(how);
-    ///     m_Output.SetBackLimit(80);
-    /// ```
     /// NCBI reference (598d8ae6): c++/src/serial/objostrxml.cpp:84-87
-    /// ```c++
-    ///       m_SkipIndent( false ), m_SkipNextTag( false )
-    /// {
-    ///     m_Output.SetBackLimit(1);
-    /// }
-    /// ```
     /// (`CObjectOStreamAsnBinary` and `CObjectOStreamJson` set none: `m_BackLimit(0)` of the
     /// `COStreamBuffer` constructor, util/strbuffer.cpp:783-796.)
     pub(crate) fn back_limit(self) -> usize {
@@ -146,19 +58,7 @@ impl Stream {
     /// (`BAD_CHAR`, with NCBI's signed `char`: no byte from 0x80 on).
     ///
     /// NCBI reference (598d8ae6): c++/include/serial/impl/objistr.inl:455-459
-    /// ```c++
-    /// inline
-    /// bool GoodVisibleChar(char c)
-    /// {
-    ///     return c >= ' ' && c <= '~';
-    /// }
-    /// ```
     /// NCBI reference (598d8ae6): c++/src/serial/objostrxml.cpp:548-550
-    /// ```c++
-    /// inline bool BAD_CHAR(char x) {
-    ///     return (x < 0x20 && x > 0x0 && x != 0x9 && x != 0xA && x != 0xD);
-    /// }
-    /// ```
     #[inline(always)]
     pub const fn replaces(self, byte: u8) -> bool {
         match self {
@@ -305,27 +205,6 @@ impl OutBuffer {
     /// `PutString(str, length)`: `Skip` below 1024 bytes, `Write` from 1024.
     ///
     /// NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:1143-1161
-    /// ```c++
-    /// void COStreamBuffer::Write(const char* data, size_t dataLength)
-    ///     THROWS1((CIOException, bad_alloc))
-    /// {
-    ///     while ( dataLength > 0 ) {
-    ///         size_t available = GetAvailableSpace();
-    ///         if ( available == 0 ) {
-    ///             FlushBuffer(false);
-    ///             available = GetAvailableSpace();
-    ///         }
-    ///         if ( available >= dataLength )
-    ///             break; // current chunk will fit in buffer
-    ///         memcpy(m_CurrentPos, data, available);
-    ///         m_CurrentPos += available;
-    ///         data += available;
-    ///         dataLength -= available;
-    ///     }
-    ///     memcpy(m_CurrentPos, data, dataLength);
-    ///     m_CurrentPos += dataLength;
-    /// }
-    /// ```
     fn put_string(&mut self, mut length: usize) {
         if length < 1024 {
             self.skip(length);
@@ -350,27 +229,6 @@ impl OutBuffer {
     /// (the reader's last `Read` finds no room first).
     ///
     /// NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:1164-1182
-    /// ```c++
-    /// void COStreamBuffer::Write(CByteSourceReader& reader)
-    ///     THROWS1((CIOException, bad_alloc))
-    /// {
-    ///     for ( ;; ) {
-    ///         size_t available = GetAvailableSpace();
-    ///         if ( available == 0 ) {
-    ///             FlushBuffer(false);
-    ///             available = GetAvailableSpace();
-    ///         }
-    ///         size_t count = reader.Read(m_CurrentPos, available);
-    ///         if ( count == 0 ) {
-    ///             if ( reader.EndOfData() )
-    ///                 return;
-    ///             else
-    ///                 NCBI_THROW(CIOException,eRead,"buffer read fault");
-    ///         }
-    ///         m_CurrentPos += count;
-    ///     }
-    /// }
-    /// ```
     /// (The reader of a delay buffer reads at most one of its chunks per call: the buffer fills
     /// and flushes at the same bytes.)
     fn write_reader(&mut self, mut length: usize) {
@@ -398,14 +256,6 @@ impl OutBuffer {
     /// text separator after it, objostrasn.cpp:941-945).
     ///
     /// NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:559-564
-    /// ```c++
-    /// void CObjectOStream::EndOfWrite(void)
-    /// {
-    ///     FlushBuffer();
-    ///     if ( m_Objects )
-    ///         m_Objects->Clear();
-    /// }
-    /// ```
     pub(super) fn put(
         &mut self,
         piece: Piece,
@@ -425,13 +275,6 @@ impl OutBuffer {
         }
         if piece == Piece::End && self.stream == Stream::AsnText {
             // NCBI reference (598d8ae6): c++/src/serial/objostrasn.cpp:941-945
-            // ```c++
-            // void CObjectOStreamAsn::WriteSeparator(void)
-            // {
-            //     m_Output.PutString(GetSeparator());
-            //     FlushBuffer();
-            // }
-            // ```
             // `EndOfWrite`'s `FlushBuffer()` writes the document, then the auto-separator (`\n`,
             // objostrasn.cpp:70-71) is a write of its own.
             self.end_of_write();
@@ -468,21 +311,6 @@ impl OutBuffer {
     /// `WriteKeywordValue`), `PutEol` (`Reserve(1)`) and the indentation (`Skip`).
     ///
     /// NCBI reference (598d8ae6): c++/src/serial/objostrjson.cpp:797-809
-    /// ```c++
-    /// void CObjectOStreamJson::WriteValue(const string& value, EStringType type)
-    /// {
-    ///     BeginValue();
-    ///     x_WriteString(value,type);
-    ///     m_ExpectValue = false;
-    /// }
-    ///
-    /// void CObjectOStreamJson::WriteKeywordValue(const string& value)
-    /// {
-    ///     BeginValue();
-    ///     m_Output.PutString(value);
-    ///     m_ExpectValue = false;
-    /// }
-    /// ```
     /// (`x_WriteString`, `WriteEscapedChar` and `NameSeparator` are quoted at
     /// `json::JsonEncoder`.)
     fn json(&mut self, piece: Piece, bytes: &[u8]) {
@@ -618,32 +446,6 @@ impl OutBuffer {
     /// `PutString(" }")`; zero, a NaN and an infinity are one `PutString`.
     ///
     /// NCBI reference (598d8ae6): c++/src/serial/objostrasn.cpp:198-222
-    /// ```c++
-    ///     if ( data == 0.0 ) {
-    ///         double zero = 0.;
-    ///         if (memcmp(&data, &zero, sizeof(double)) == 0) {
-    ///             m_Output.PutString("{ 0, 10, 0 }");
-    ///         } else {
-    ///             m_Output.PutString("{ -0, 10, 0 }");
-    ///         }
-    ///         return;
-    ///     }
-    ///
-    ///     char buffer[128];
-    ///     if (m_FastWriteDouble) {
-    ///         int dec, sign;
-    ///         size_t len = NStr::DoubleToString_Ecvt(
-    ///             data, digits, buffer, sizeof(buffer), &dec, &sign);
-    ///         _ASSERT(len > 0);
-    ///         m_Output.PutString("{ ");
-    ///         if (sign < 0) {
-    ///             m_Output.PutString("-");
-    ///         }
-    ///         m_Output.PutString(buffer,len);
-    ///         m_Output.PutString(", 10, ");
-    ///         m_Output.PutInt4(dec - (int)(len-1));
-    ///         m_Output.PutString(" }");
-    /// ```
     fn asn_text_real(&mut self, bytes: &[u8]) {
         if !bytes.starts_with(b"{ ") || bytes == b"{ 0, 10, 0 }" || bytes == b"{ -0, 10, 0 }" {
             self.skip(bytes.len());
@@ -681,42 +483,7 @@ impl OutBuffer {
     /// digits one `WriteBytes` (`PutString`).
     ///
     /// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:831-872
-    /// ```c++
-    /// void CObjectOStreamAsnBinary::WriteString(const string& str, EStringType type)
-    /// {
-    ///     size_t length = str.size(), fixed = 0;
-    ///     WriteStringTag(type);
-    ///     ...
-    ///     WriteLength(length - fixed);
-    ///     if ( type == eStringTypeVisible && x_FixCharsMethod() != eFNP_Allow ) {
-    ///         size_t done = 0;
-    ///         for ( size_t i = 0; i < length; ++i ) {
-    ///             char c = str[i];
-    ///             if ( !GoodVisibleChar(c) ) {
-    ///                 ...
-    ///                 if ( i > done ) {
-    ///                     WriteBytes(str.data() + done, i - done);
-    ///                 }
-    ///                 c = ReplaceVisibleChar(c, x_FixCharsMethod(), this, str, x_FixCharsSubst());
-    ///                 if (c != 0) {
-    ///                     WriteByte(c);
-    ///                 }
-    ///                 done = i + 1;
-    ///             }
-    ///         }
-    ///         if ( done < length ) {
-    ///             WriteBytes(str.data() + done, length - done);
-    ///         }
-    ///     }
-    /// ```
-    /// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:798-813
-    /// ```c++
-    ///     WriteLength(width + 1);
-    ///     if (width) {
-    ///         ...
-    ///         WriteByte(type);
-    ///         WriteBytes(buffer, width);
-    /// ```
+    /// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:798-815
     /// (`WriteBytes` puts nothing for 0 bytes, objostrasnb.cpp:230-247.)
     fn asn_binary(&mut self, piece: Piece, bytes: &[u8], posts: &[usize], written: &mut Vec<u64>) {
         match piece {
@@ -822,27 +589,6 @@ impl OutBuffer {
     /// (a `value` attribute follows).
     ///
     /// NCBI reference (598d8ae6): c++/src/serial/objostrxml.cpp:1089-1132
-    /// ```c++
-    ///     case TFrame::eFrameClassMember:
-    ///     case TFrame::eFrameChoiceVariant:
-    ///         {
-    ///             bool attlist = m_Attlist;
-    ///             if (!x_IsStdXml()) {
-    ///                 PrintTagName(level + 1);
-    ///                 m_Output.PutChar('_');
-    ///                 m_Attlist = true;
-    ///             }
-    ///             WriteTag(frame.GetMemberId().GetName());
-    ///             ...
-    ///     case TFrame::eFrameArrayElement:
-    ///         {
-    ///             PrintTagName(level + 1);
-    ///             if (!x_IsStdXml()) {
-    ///                 m_Output.PutString("_E");
-    ///             }
-    ///             return;
-    ///         }
-    /// ```
     /// (ASN.1 member names start with a lower-case letter, so a piece `E` is an element.)
     fn xml_markup(&mut self, bytes: &[u8]) -> (usize, bool) {
         let mut i = 0;
@@ -896,26 +642,6 @@ impl OutBuffer {
     /// `PutChar`); the bytes that it wrote.
     ///
     /// NCBI reference (598d8ae6): c++/src/serial/objostrxml.cpp:502-538
-    /// ```c++
-    ///     case '&':
-    ///         m_Output.PutString("&amp;");
-    ///         break;
-    ///     ...
-    ///     default:
-    ///         if ((unsigned int)c < 0x20) {
-    ///             m_Output.PutString("&#x");
-    ///             Uint1 ch = c;
-    ///             unsigned hi = ch >> 4;
-    ///             unsigned lo = ch & 0xF;
-    ///             if ( hi ) {
-    ///                 m_Output.PutChar("0123456789abcdef"[hi]);
-    ///             }
-    ///             m_Output.PutChar("0123456789abcdef"[lo]);
-    ///             m_Output.PutChar(';');
-    ///         } else {
-    ///             m_Output.PutChar(c);
-    ///         }
-    /// ```
     fn xml_char(&mut self, bytes: &[u8]) -> usize {
         if bytes[0] != b'&' {
             self.skip(1);
@@ -1087,198 +813,5 @@ fn xml_calls(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{OutBuffer, Piece, Stream};
-
-    /// What NCBI had written at each post of `bytes` (one `piece`) after `before` bytes of the
-    /// same kind of call.
-    fn written_at(
-        stream: Stream,
-        before: &[(Piece, &[u8])],
-        piece: Piece,
-        bytes: &[u8],
-        posts: &[usize],
-    ) -> Vec<u64> {
-        let mut buffer = OutBuffer::new(stream);
-        for (piece, bytes) in before {
-            buffer.put(*piece, bytes, &[], &mut Vec::new());
-        }
-        let mut written = Vec::new();
-        buffer.put(piece, bytes, posts, &mut written);
-        written
-    }
-
-    #[test]
-    fn a_full_buffer_keeps_its_back_limit() {
-        // 4096 bytes of `PutChar` fill the buffer; the next one flushes it first: ASN.1 text
-        // keeps 80 bytes, XML 1, binary none. A post before that byte comes before the flush.
-        let chars = vec![b'a'; 4098];
-        assert_eq!(
-            written_at(Stream::AsnText, &[], Piece::Str, &chars, &[4096, 4097]),
-            [0, 4016]
-        );
-        for (stream, written) in [(Stream::Xml, 4095), (Stream::AsnBinary, 4096)] {
-            let mut buffer = OutBuffer::new(stream);
-            buffer.put(Piece::Octets, &chars[..4097], &[], &mut Vec::new());
-            assert_eq!(buffer.written(), written);
-        }
-        // The next flush comes when the buffer is full again.
-        let chars = vec![b'a'; 8200];
-        assert_eq!(
-            written_at(Stream::AsnText, &[], Piece::Str, &chars, &[8112, 8113]),
-            [4016, 8032]
-        );
-    }
-
-    #[test]
-    fn a_call_that_does_not_fit_flushes_before_it() {
-        // 4090 bytes, then a name of 10 bytes: the buffer is flushed before the name (4010 of
-        // 4090 bytes written, 80 kept), not at 4096.
-        let mut buffer = OutBuffer::new(Stream::AsnText);
-        buffer.put(Piece::Str, &[b'a'; 4090], &[], &mut Vec::new());
-        buffer.put(Piece::Number, b"1234567890", &[], &mut Vec::new());
-        assert_eq!(buffer.written(), 4010);
-        assert_eq!(buffer.used, 90);
-    }
-
-    #[test]
-    fn a_long_string_fills_the_buffer_up() {
-        // ASN.1 binary: a run of 1100 bytes of a string after 3004 bytes goes through `Write`,
-        // which fills the buffer (4096 written) without growing it; a run of 1000 bytes that
-        // does not fit is one `Skip`, which flushes first.
-        let mut string = vec![0x1a, 0x82, 0x05, 0xdc];
-        string.extend(std::iter::repeat_n(b'L', 1500));
-        string[4 + 1100] = b'#';
-        let before: &[(Piece, &[u8])] = &[(Piece::Markup, &[0u8; 3000])];
-        assert_eq!(
-            written_at(Stream::AsnBinary, before, Piece::Str, &string, &[4 + 1100]),
-            [4096]
-        );
-        string[4 + 1100] = b'L';
-        string[4 + 1000] = b'#';
-        let before: &[(Piece, &[u8])] = &[(Piece::Markup, &[0u8; 3500])];
-        assert_eq!(
-            written_at(Stream::AsnBinary, before, Piece::Str, &string, &[4 + 1000]),
-            [3504]
-        );
-    }
-
-    /// The buffer after a number of `before` digits (one `Skip` in ASN.1 text and XML) and the
-    /// calls of `piece`.
-    fn after(stream: Stream, before: usize, piece: Piece, bytes: &[u8]) -> OutBuffer {
-        let mut buffer = OutBuffer::new(stream);
-        buffer.put(Piece::Number, &vec![b'1'; before], &[], &mut Vec::new());
-        buffer.put(piece, bytes, &[], &mut Vec::new());
-        buffer
-    }
-
-    #[test]
-    fn asn_text_header_enum_and_real_are_split_as_ncbi_calls_them() {
-        // `WriteFileHeader`: `WriteId(name)` (14 bytes fit at 4080) and `PutString(" ::= ")`,
-        // which flushes 4094 - 80 bytes; one call of 19 bytes would flush at 4080.
-        let buffer = after(Stream::AsnText, 4080, Piece::Header, b"Blast4-archive ::= ");
-        assert_eq!((buffer.written(), buffer.used), (4014, 85));
-        // `WriteEnum`: `PutChar` of the first letter (the 4096th byte), then `PutString` of the
-        // rest, which flushes.
-        let buffer = after(Stream::AsnText, 4095, Piece::Enum, b"plus");
-        assert_eq!((buffer.written(), buffer.used), (4016, 83));
-        // `WriteDouble2`: `{ ` fits at 4090, the 9 digits flush 4092 - 80 bytes; then `, 10, `,
-        // the exponent and ` }`.
-        let buffer = after(Stream::AsnText, 4090, Piece::Real, b"{ 123456789, 10, -9 }");
-        assert_eq!((buffer.written(), buffer.used), (4012, 99));
-        // A negative mantissa puts its sign alone.
-        let buffer = after(Stream::AsnText, 4093, Piece::Real, b"{ -12, 10, 3 }");
-        assert_eq!((buffer.written(), buffer.used), (4016, 80 + 2 + 6 + 1 + 2));
-        // Zero is one `PutString`, which flushes before it.
-        let buffer = after(Stream::AsnText, 4090, Piece::Real, b"{ 0, 10, 0 }");
-        assert_eq!((buffer.written(), buffer.used), (4010, 92));
-    }
-
-    #[test]
-    fn asn_text_octets_wrap_with_one_byte_calls() {
-        // `BeginBytes` (`'`), two `PutChar`s per byte with `WrapAt(78, false)`'s end of line
-        // (`PutEol(false)`: `Reserve(1)`, no indentation) between them, then `PutString("'H")`:
-        // the 97th of the one-byte calls flushes 4096 - 80 bytes.
-        let mut octets = b"'".to_vec();
-        octets.extend(b"AB".repeat(39));
-        octets.push(b'\n');
-        octets.extend(b"CD".repeat(10));
-        octets.extend(b"'H");
-        let buffer = after(Stream::AsnText, 4000, Piece::Octets, &octets);
-        assert_eq!((buffer.written(), buffer.used), (4016, 80 + 4 + 2));
-    }
-
-    #[test]
-    fn a_text_post_after_a_wrap_of_its_string_counts_the_wrap() {
-        // The string's wrap (`PutEolAtWordEnd`) inserted one end of line, `Reserve(1)`, before
-        // the replaced byte: the post after 112 one-byte calls follows the flush at the 107th.
-        let mut string = b"\"".to_vec();
-        string.extend([b'a'; 90]);
-        string.push(b'\n');
-        string.extend([b'b'; 20]);
-        string.extend(b"#\"");
-        let before: &[(Piece, &[u8])] = &[(Piece::Markup, &[b'x'; 3990])];
-        assert_eq!(
-            written_at(Stream::AsnText, before, Piece::Str, &string, &[112]),
-            [4016]
-        );
-        // Without the flush: the same string at the start of the buffer.
-        assert_eq!(
-            written_at(Stream::AsnText, &[], Piece::Str, &string, &[112]),
-            [0]
-        );
-    }
-
-    #[test]
-    fn an_xml_character_reference_is_a_put_string_and_one_byte_calls() {
-        // `&#x9;`: `PutString("&#x")` fits at 4092, `PutChar('9')` ends the buffer and
-        // `PutChar(';')` flushes 4095 bytes (XML keeps 1); one call of 5 bytes would flush at
-        // 4092.
-        let buffer = after(Stream::Xml, 4092, Piece::Str, b"&#x9;");
-        assert_eq!((buffer.written(), buffer.used), (4095, 2));
-        // An entity of a markup character is one `PutString`.
-        let buffer = after(Stream::Xml, 4093, Piece::Str, b"&amp;");
-        assert_eq!((buffer.written(), buffer.used), (4092, 6));
-    }
-
-    #[test]
-    fn a_call_larger_than_the_buffer_doubles_it() {
-        // `DoReserve`: a `Skip` of 5000 bytes flushes and doubles the buffer to 8192; the next
-        // call that does not fit flushes again and keeps that size.
-        let mut buffer = after(Stream::AsnText, 100, Piece::Markup, &[b'n'; 5000]);
-        assert_eq!(
-            (buffer.written(), buffer.used, buffer.capacity),
-            (20, 5080, 8192)
-        );
-        buffer.put(Piece::Markup, &[b'n'; 4000], &[], &mut Vec::new());
-        assert_eq!(
-            (buffer.written(), buffer.used, buffer.capacity),
-            (5020, 4080, 8192)
-        );
-        // Two doublings for a call of more than twice the buffer.
-        let buffer = after(Stream::AsnText, 0, Piece::Markup, &[b'n'; 9000]);
-        assert_eq!(
-            (buffer.written(), buffer.used, buffer.capacity),
-            (0, 9000, 16384)
-        );
-    }
-
-    #[test]
-    fn an_xml_value_attribute_takes_the_tag_end_back() {
-        // `<T_b>` ends the buffer; `value` replaces its `>`: one byte of the buffer is given
-        // back before the attribute.
-        let mut buffer = OutBuffer::new(Stream::Xml);
-        buffer.put(Piece::Markup, b"\n<T_b>", &[], &mut Vec::new());
-        buffer.put(Piece::Bool, b" value=\"true\"/>", &[], &mut Vec::new());
-        assert_eq!(buffer.used, 6 - 1 + 15);
-        // An element whose tag opens in the same call.
-        let mut buffer = OutBuffer::new(Stream::Xml);
-        buffer.put(
-            Piece::Enum,
-            b"\n  <T_E value=\"plus\"/>",
-            &[],
-            &mut Vec::new(),
-        );
-        assert_eq!(buffer.used, 22);
-    }
-}
+#[path = "out_buffer_tests.rs"]
+mod tests;

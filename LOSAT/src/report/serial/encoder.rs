@@ -10,24 +10,6 @@
 //! primitive values, then `EndOfWrite`.
 //!
 //! NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:610-625
-//! ```c++
-//! void CObjectOStream::Write(TConstObjectPtr object, TTypeInfo typeInfo)
-//! {
-//!     // root writer
-//!     BEGIN_OBJECT_FRAME2(eFrameNamed, typeInfo);
-//!
-//!     WriteFileHeader(typeInfo);
-//!
-//!     WriteObject(object, typeInfo);
-//!
-//!     EndOfWrite();
-//!
-//!     END_OBJECT_FRAME();
-//!
-//!     if ( GetAutoSeparator() )
-//!         Separator(*this);
-//! }
-//! ```
 //!
 //! The calls below are those pairs, one method each; a type writer calls them in the member
 //! order of the ASN.1 module and skips an absent OPTIONAL member. `tag` is the member's or
@@ -87,7 +69,7 @@ impl std::fmt::Display for SerialError {
                 f,
                 "a character 0x{byte:02x} outside the visible ASCII range in an ASN.1 VisibleString is not supported by LOSAT"
             ),
-            SerialError::Utf8(error) => f.write_str(error.exception().get_msg()),
+            SerialError::Utf8(error) => f.write_str(&String::from_utf8_lossy(error.exception().get_msg())),
             SerialError::XmlUnsupported(what) => {
                 write!(f, "an XML {what} is not supported by LOSAT")
             }
@@ -108,19 +90,7 @@ impl std::error::Error for SerialError {}
 /// end of line written), the offset of the binary stream (`GetStreamPos()`, 0 at its start).
 ///
 /// NCBI reference (598d8ae6): c++/src/serial/objostrasn.cpp:100-103
-/// ```c++
-/// string CObjectOStreamAsn::GetPosition(void) const
-/// {
-///     return "line "+NStr::SizetToString(m_Output.GetLine());
-/// }
-/// ```
 /// NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:510-513
-/// ```c++
-/// string CObjectOStream::GetPosition(void) const
-/// {
-///     return "byte "+NStr::Int8ToString(NcbiStreamposToInt8(GetStreamPos()));
-/// }
-/// ```
 /// (`CObjectOStreamXml::GetPosition`, objostrxml.cpp:192-195, is the text stream's.)
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StreamPosition {
@@ -132,34 +102,6 @@ pub enum StreamPosition {
 /// `ERR_POST_X(7, message)` of `Serial_IStream` (error 803.7: the function is in objistr.cpp).
 ///
 /// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1855-1897
-/// ```c++
-/// char ReplaceVisibleChar(char c, EFixNonPrint fix_method,
-///     const CObjectStack* io, const CTempString& str, char subst)
-/// {
-///     ...
-///     if ( fix_method != eFNP_Replace ) {
-///         string message;
-///         if (io != NULL) {
-///             message += io->GetStackTrace() + "\n";
-///         }
-///         message += "Bad char [0x" +
-///                    NStr::NumericToString((unsigned char)c,0,16)+
-///                    "] in string";
-///         if (io != NULL) {
-///             message += " at " + io->GetPosition();
-///         }
-///         if (!str.empty()) {
-///             message += "\n" + str;
-///         }
-///         switch (fix_method) {
-///         case eFNP_ReplaceAndWarn:
-///             ...
-///             ERR_POST_X(7, message);
-///             ...
-///     }
-///     return subst;
-/// }
-/// ```
 /// The text and binary streams pass the whole string as `str`, the XML stream `kEmptyStr`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReplacedChar {
@@ -532,33 +474,6 @@ pub(crate) enum StackStep<'a> {
 /// variant frame and `.E` for each container element.
 ///
 /// NCBI reference (598d8ae6): c++/src/serial/objstack.cpp:80-120
-/// ```c++
-///     string stack = FetchFrameFromBottom(0).HasTypeInfo() ?
-///         FetchFrameFromBottom(0).m_TypeInfo->GetName() : "?";
-///     for ( size_t i = 1; i < GetStackDepth(); ++i ) {
-///         const TFrame& frame = FetchFrameFromBottom(i);
-///         switch ( frame.m_FrameType ) {
-///         case TFrame::eFrameClassMember:
-///         case TFrame::eFrameChoiceVariant:
-///             {
-///                 ...
-///                     const CMemberId& id = *frame.m_MemberId;
-///                     stack += '.';
-///                     if ( !id.GetName().empty() ) {
-///                         stack += id.GetName();
-///                     }
-///                     ...
-///             }
-///             break;
-///         case TFrame::eFrameArrayElement:
-///             stack += ".E";
-///             break;
-///         default:
-///             break;
-///         }
-///     }
-///     return stack;
-/// ```
 /// (A member without a name, `.[tag]`, is not in LOSAT's types.)
 pub(crate) fn object_stack_trace<'a>(
     root: &str,
@@ -632,26 +547,6 @@ impl<E: Encoder, P> Traced<E, P> {
     /// XML stream has no element frame for it.
     ///
     /// NCBI reference (598d8ae6): c++/src/serial/objostrxml.cpp:1186-1202
-    /// ```c++
-    /// bool CObjectOStreamXml::WillHaveName(TTypeInfo elementType)
-    /// {
-    ///     while ( elementType->GetName().empty() ) {
-    ///         if ( elementType->GetTypeFamily() != eTypeFamilyPointer )
-    ///             return false;
-    ///         elementType = CTypeConverter<CPointerTypeInfo>::SafeCast(
-    ///             elementType)->GetPointedType();
-    ///     }
-    ///     // found named type
-    ///     return true;
-    /// }
-    ///
-    /// void CObjectOStreamXml::BeginContainerElement(TTypeInfo elementType)
-    /// {
-    ///     if ( !WillHaveName(elementType) ) {
-    ///         BeginArrayElement(elementType);
-    ///     }
-    /// }
-    /// ```
     /// (`WriteContainerContents`, 1255-1316, pushes `eFrameArrayElement` under the same test.)
     /// An anonymous type (an empty name, or the open member's tag that the writers pass for one,
     /// `xml::anonymous_type`) has no name, so its element keeps its frame.

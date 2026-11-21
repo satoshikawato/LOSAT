@@ -8,33 +8,7 @@
 //! refusals (the taxonomy database's names, `TblastxReportRun::tabular_names`, the ids of a
 //! database sequence) come before the first byte of the report.
 //!
-//! NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:763-834
-//! ```c++
-//!     CConstRef<CSeq_align_set> aln_set = results.GetSeqAlign();
-//!     if (m_IsUngappedSearch && results.HasAlignments()) {
-//!         aln_set.Reset(CDisplaySeqalign::PrepareBlastUngappedSeqalign(*aln_set));
-//!     }
-//!     ...
-//!         if (results.HasAlignments()) {
-//!     	    CSeq_align_set copy_aln_set;
-//!             CBlastFormatUtil::PruneSeqalign(*aln_set, copy_aln_set, m_HitlistSize);
-//!
-//!             {
-//!             	unsigned int scores = CBlastFormatUtil::eNoQuerySubjCov;
-//!             	if(string::npos != m_CustomOutputFormatSpec.find("qcovs"))
-//!             		scores |= CBlastFormatUtil::eQueryCovPerSubj ;
-//!             	if(string::npos != m_CustomOutputFormatSpec.find("qcovus") &&
-//!             			ncbi::NStr::ToLower(m_Program) == string("blastn"))
-//!             		scores |= CBlastFormatUtil::eQueryCovPerUniqSubj ;
-//!             ...
-//!             tabinfo.SetQueryGeneticCode(m_QueryGenCode);
-//!             tabinfo.SetDbGeneticCode(m_DbGenCode);
-//!             ITERATE(CSeq_align_set::Tdata, itr, copy_aln_set.Get()) {
-//!                     const CSeq_align& s = **itr;
-//!                     tabinfo.SetFields(s, *m_Scope, &m_ScoringMatrix);
-//!                     tabinfo.Print();
-//!             }
-//! ```
+//! NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:762-834
 //! TBLASTX is ungapped: each HSP is a Seq-align of one Std-seg (`PrepareBlastUngappedSeqalign`
 //! splits the subject's `diags` Seq-align), with the scores of `s_BuildScoreList` (the score, the
 //! e-value or the sum e-value of a linked set, the bit score, the engine's identities and
@@ -68,22 +42,6 @@ const PROGRAM: &str = "TBLASTX";
 const PROGRAM_VERSION: &str = concat!("TBLASTX ", crate::ncbi_blast_version!());
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:970-986
-// ```c++
-//     if (x_IsFieldRequested(eQuerySeq) ||
-//         x_IsFieldRequested(eSubjectSeq) ||
-//         x_IsFieldRequested(ePositives) ||
-//         x_IsFieldRequested(ePercentPositives) ||
-//         x_IsFieldRequested(eBTOP) ||
-//         (x_IsFieldRequested(eNumIdentical) && !kNoFetchSequence) ||
-//         (x_IsFieldRequested(eMismatches) && !kNoFetchSequence) ||
-//         (x_IsFieldRequested(ePercentIdentical) && !kNoFetchSequence)) {
-//
-//         alnVec->SetGapChar('-');
-//         alnVec->SetGenCode(m_QueryGeneticCode, 0);
-//         alnVec->SetGenCode(m_DbGeneticCode, 1);
-//         alnVec->GetWholeAlnSeqString(0, m_QuerySeq);
-//         alnVec->GetWholeAlnSeqString(1, m_SubjectSeq);
-// ```
 /// The fields that make that block read the two rows, from which it counts the identities and
 /// positives again (TBLASTX fetches the sequences: blast_format.cpp:791-792 sets no-fetch for
 /// BLASTN alone).
@@ -111,11 +69,6 @@ pub(crate) fn reads_letters(fields: &[TabularField]) -> bool {
 /// (`common::tabular::write_tabular_prolog`); nothing for the other kinds.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:348-357
-/// ```c++
-///     if (m_FormatType == CFormattingArgs::eCommaSeparatedValuesWithHeader) {
-///     ...
-///         tabinfo.PrintFieldSpecs();
-/// ```
 pub(super) fn write_tabular_prolog(
     spec: &TabularSpec,
     taxdb_found: bool,
@@ -165,14 +118,6 @@ pub(super) fn write_tblastx_tabular(
     let needs = spec.needs();
     let taxdb_found = args.tabular_taxdb.unwrap_or(false);
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-842
-    // ```c++
-    //        		const CBioseq_Handle& subject_bh =
-    //                 scope.GetBioseqHandle(align.GetSeq_id(1));
-    //             if(setSubjectId) {
-    //             	SetSubjectId(subject_bh);
-    //             }
-    //             m_SubjectLength = subject_bh.GetBioseqLength();
-    // ```
     // `slen` is the length of the subject's Bioseq: the whole record with `-subject_loc` (the
     // XML's `Hit_len`), a database sequence's stored length.
     let record_length = |s_idx: usize| {
@@ -281,12 +226,6 @@ pub(super) fn write_tblastx_tabular(
     // NCBI makes a formatter for each query's report and for outfmt 7's epilog, and each warns
     // when the field list asks for a name of the taxonomy database that it cannot find.
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:139-158
-    // ```c++
-    // CBlastTabularInfo::CBlastTabularInfo(CNcbiOstream& ostr, const string& format,
-    // ...
-    //     x_CheckTaxDB();
-    // }
-    // ```
     let taxdb_warning =
         (spec.checks_taxdb() && !taxdb_found).then(|| taxdb_warning_line("tblastx"));
     let warn = |writer: &mut dyn Write, warnings: Option<&mut QueryWarnings<'_>>| -> Result<()> {
@@ -335,25 +274,7 @@ pub(super) fn write_tblastx_tabular(
         let query_letters = query.seq();
         let searched_length = query_letters.len();
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:787-790
-        // ```c++
-        //             if(m_QueryRange.NotEmpty())
-        //             	m_QueryLength = m_QueryRange.GetLength();
-        //             else
-        //             	m_QueryLength = query_bh.GetBioseqLength();
-        // ```
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:595-605
-        // ```c++
-        //     CConstRef<CBioseq> query_bioseq = query_handle.GetCompleteBioseq();
-        //     int query_len = 0;
-        //     if(query_range.NotEmpty())
-        //     {
-        //     	query_len = query_range.GetLength();
-        //     }
-        //     else if (!query_bioseq.Empty() && query_bioseq->IsSetLength())
-        //     {
-        //     	query_len = query_bioseq->GetLength();
-        //     }
-        // ```
         // `qlen` and the `qcovs` of the subjects: the length of the `-query_loc` range as given,
         // else the nucleotide record's.
         let query_length = run.ranges.input.range_length.unwrap_or(searched_length);
@@ -365,7 +286,7 @@ pub(super) fn write_tblastx_tabular(
             query_length,
         );
         let query_hits = &by_query[q_idx];
-        // NCBI c++/src/algo/blast/api/local_blast.cpp:177-180,204-208: a skipped search has a
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-180,204-208: a skipped search has a
         // null alignment set, so outfmt 7 has no count line (`report::write_tabular`).
         table.query_header(
             &mut buf,
@@ -390,16 +311,6 @@ pub(super) fn write_tblastx_tabular(
             let s_idx = s_idx as usize;
             let values = subjects.values(s_idx, spec, PROGRAM)?;
             // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:2969-2985
-            // ```c++
-            //     ITERATE(CSeq_align_set::Tdata, iter, alnset.Get()) {
-            //         CRange<TSeqPos> seq_range = (*iter)->GetSeqRange(0);
-            //         //for minus strand
-            //         if(seq_range.GetFrom() > seq_range.GetTo()){
-            //             seq_range.Set(seq_range.GetTo(), seq_range.GetFrom());
-            //         }
-            //         temp.push_back(seq_range);
-            //     }
-            // ```
             // The HSPs of one subject are one group of `InsertSubjectScores` (consecutive
             // Seq-aligns of one subject); their query intervals in nucleotides (the Std-seg's
             // query location), which a `-query_loc` shift moves alike.
@@ -431,11 +342,7 @@ pub(super) fn write_tblastx_tabular(
             for &hsp_index in group {
                 let hsp = &hits[hsp_index];
                 let hit = &hsp.hit;
-                // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:762-768
-                // ```c++
-                //         CAlignFormatUtil::GetAlnScores(align, score, bit_score, evalue, sum_n,
-                //                                        num_ident, use_this_gi);
-                // ```
+                // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:762-768,771-772
                 // `num_ident` decides whether `nident` alone enters the block above: the
                 // Seq-align's (the engine's identities, `hsp_engine_counts`), counted only then.
                 let engine_ident = if spec.has(TabularField::NumIdentical) && !counts_block {
@@ -453,10 +360,6 @@ pub(super) fn write_tblastx_tabular(
                 let rows_read =
                     reads_rows && !subject.throws() && (counts_block || engine_ident > 0);
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:837-838
-                // ```c++
-                //        		const CBioseq_Handle& subject_bh =
-                //                 scope.GetBioseqHandle(align.GetSeq_id(1));
-                // ```
                 // A row that reads the subject (`TabularSpec::subject_fetch`, by the engine's
                 // identities for `nident` alone) loads it first where the query's batch did not
                 // prefetch it: the texts of its taxonomy lookups follow the rows before it
@@ -508,29 +411,7 @@ pub(super) fn write_tblastx_tabular(
                 let (q_low, q_high) = (hit.q_start.min(hit.q_end), hit.q_start.max(hit.q_end));
                 let (s_low, s_high) = (hit.s_start.min(hit.s_end), hit.s_start.max(hit.s_end));
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1072-1084
-                // ```c++
-                //     if (kTranslated) {
-                //         if (x_IsFieldRequested(eQueryFrame) || x_IsFieldRequested(eFrames)) {
-                //             query_frame = CAlignFormatUtil::
-                //                 GetFrame (q_start - 1, ds.GetSeqStrand(kQueryRow),
-                //                           scope.GetBioseqHandle(align.GetSeq_id(0)));
-                //         }
-                //
-                //         if (x_IsFieldRequested(eSubjFrame) || x_IsFieldRequested(eFrames)) {
-                //             subject_frame = CAlignFormatUtil::
-                //                 GetFrame (s_start - 1, ds.GetSeqStrand(kSubjectRow),
-                //                           scope.GetBioseqHandle(align.GetSeq_id(1)));
-                //         }
-                // ```
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1233-1244
-                // ```c++
-                //     int frame = 0;
-                //     if (strand == eNa_strand_plus) {
-                //         frame = (start % 3) + 1;
-                //     } else if (strand == eNa_strand_minus) {
-                //         frame = -(((int)handle.GetBioseqLength() - start - 1)
-                //                   % 3 + 1);
-                // ```
                 // The start of a minus strand is its higher end (the row's start), so both frames
                 // are read in their whole records as the XML's `Hsp_query-frame` and
                 // `Hsp_hit-frame` (`translation_frame`).
@@ -566,13 +447,9 @@ pub(super) fn write_tblastx_tabular(
                     s_frame,
                     rows: rows_read.then_some((qrow.as_slice(), srow.as_slice())),
                     end_gaps: true,
+                    stored_gaps: [&[], &[]],
                     qcovhsp: if group.len() > 1 {
                         // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1222-1225
-                        // ```c++
-                        //     if(query_length > 0) {
-                        //             static const string kQueryCovHsp("hsp_percent_coverage");
-                        //             double hsp_coverage = Blast_HSPGetQueryCoverage( hsp, query_length);
-                        // ```
                         // The Seq-align of an HSP split from its subject's (the scores of its
                         // Std-seg): `Blast_HSPGetQueryCoverage` divides the HSP's residues in its
                         // query frame by the length that `BlastHitList2SeqAlign_OMF` gives, the
@@ -584,31 +461,7 @@ pub(super) fn write_tblastx_tabular(
                         )
                     } else {
                         // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:737-746
-                        // ```c++
-                        // void CBlastTabularInfo::x_SetQueryCovSeqalign(const CSeq_align & align, int query_len)
-                        // {
-                        // 	double tmp = 0;
-                        // 	if(!align.GetNamedScore("hsp_percent_coverage", tmp)) {
-                        // 		int len = abs((int) (align.GetSeqStop(0) - align.GetSeqStart(0))) + 1;
-                        // 		tmp = 100.0 * len/(double) query_len;
-                        // 		if(tmp  < 99)
-                        // 			tmp +=0.5;
-                        // 	}
-                        // 	m_QueryCovSeqalign = (int)tmp;
-                        // ```
-                        // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3170-3183
-                        // ```c++
-                        //         if(seg.Which() == CSeq_align::C_Segs::e_Std){
-                        //             if(seg.GetStd().size() > 1){
-                        //     ...
-                        //                     if((*iterStdseg)->IsSetScores()){
-                        //                         aln->SetScore() = (*iterStdseg)->GetScores();
-                        //                     }
-                        //     ...
-                        //             } else {
-                        //                 alnSetRef->Set().push_back(*iter);
-                        //             }
-                        // ```
+                        // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3169-3183
                         // A subject with one HSP keeps its `diags` Seq-align, whose scores are on
                         // its Std-seg, and `GetNamedScore` reads the Seq-align's own: the HSP's
                         // nucleotide span over the query length of `qlen`.
@@ -643,12 +496,6 @@ pub(super) fn write_tblastx_tabular(
         crate::report::ostream::ReportWrite::ncbi_flush(writer)?;
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2233-2236
-    // ```c++
-    //     if (m_FormatType == CFormattingArgs::eTabularWithComments) {
-    //         CBlastTabularInfo tabinfo(m_Outfile, m_CustomOutputFormatSpec);
-    //         tabinfo.PrintNumProcessed(m_QueriesFormatted);
-    //         return;
-    // ```
     // A search that stops at a query batch writes no epilog (`report::write_tabular`).
     if spec.kind == TabularKind::Commented && run.epilog {
         warn(&mut *writer, warnings)?;
@@ -659,45 +506,5 @@ pub(super) fn write_tblastx_tabular(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    // NCBI blast_format.cpp:348-357: outfmt 20's line of the field names, after the warning of its
-    // formatter when `taxdb.bti` is not found and a plural name is shown.
-    #[test]
-    fn outfmt_20_writes_its_line_and_its_formatter_s_warning() {
-        let spec = |outfmt: &str| match crate::algorithm::tblastx::report::output_format(outfmt) {
-            crate::algorithm::tblastx::report::TblastxOutputFormat::CustomTabular(spec) => spec,
-            other => panic!("{outfmt}: {other:?}"),
-        };
-        let (mut out, mut err) = (Vec::new(), Vec::new());
-        write_tabular_prolog(spec("20 qseqid sscinames"), false, &mut out, &mut err).unwrap();
-        assert_eq!(out, b"qseqid,sscinames\n");
-        assert_eq!(err, taxdb_warning_line("tblastx").as_bytes());
-        let (mut out, mut err) = (Vec::new(), Vec::new());
-        write_tabular_prolog(spec("20 delim=| qseqid"), true, &mut out, &mut err).unwrap();
-        assert_eq!(
-            (out.as_slice(), err.as_slice()),
-            (&b"qseqid\n"[..], &b""[..])
-        );
-        let (mut out, mut err) = (Vec::new(), Vec::new());
-        write_tabular_prolog(spec("10 sscinames"), false, &mut out, &mut err).unwrap();
-        assert!(out.is_empty() && err.is_empty());
-    }
-
-    // NCBI tabular.cpp:900-908 and 970-986: `nident` alone enters the block (and reads the rows)
-    // with a positive engine count only; the other count fields always, the row fields read the
-    // rows.
-    #[test]
-    fn the_counts_block_and_the_row_fields_are_ncbis() {
-        for field in ROW_FIELDS {
-            assert!(
-                field == TabularField::NumIdentical || COUNTS_BLOCK.contains(&field),
-                "{field:?}"
-            );
-        }
-        assert!(!COUNTS_BLOCK.contains(&TabularField::NumIdentical));
-        assert!(!COUNTS_BLOCK.contains(&TabularField::Frames));
-        assert!(!COUNTS_BLOCK.contains(&TabularField::SubjectFrame));
-    }
-}
+#[path = "tabular_tests.rs"]
+mod tests;

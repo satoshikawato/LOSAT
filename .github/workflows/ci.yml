@@ -47,7 +47,7 @@ jobs:
         with:
           workspaces: LOSAT -> target
           save-if: ${{ github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main' }}
-      # NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1379-1381
+      # NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1379-1381
       # calls qsort for HSP ordering. This fail-fast ratchet prevents LOSAT from
       # adding another project-owned native implementation boundary.
       - name: Pure-Rust runtime boundary
@@ -60,6 +60,16 @@ jobs:
         run: python3 LOSAT/tests/check_lint_allow_ratchet.py --root .
       - name: Lint-allow ratchet tests
         run: python3 -m unittest discover -s LOSAT/tests -p 'test_check_lint_allow_ratchet.py'
+      # No NCBI counterpart: comments cite source code by path and lines and hold no source text,
+      # NCBI's included; NCBI's is cited in the pinned tree (598d8ae6), whose files and line counts
+      # are LOSAT/tests/ncbi_source_lines.tsv (maintainer, 2026-11-20, AGENTS.md rule 4). The
+      # check's tables are the one list of what in NCBI's tree is not NCBI's.
+      - name: Source-quote and citation check
+        run: python3 LOSAT/tests/check_foreign_quotes.py --root .
+      - name: Source-quote and citation check tests
+        run: python3 -m unittest discover -s LOSAT/tests -p 'test_check_foreign_quotes.py'
+      - name: NCBI citation reader tests
+        run: python3 -m unittest discover -s LOSAT/tests -p 'test_ncbi_ref.py'
       # No reference between the programs under LOSAT/src/algorithm/ that
       # LOSAT/tests/program_edges.tsv does not list, and none up the layering
       # common < blastn < tblastx < blastp < tblastn < blastx (SWEBOK 2026-11-04 audit, KA3).
@@ -75,6 +85,36 @@ jobs:
         run: python3 LOSAT/tests/check_manifest_sizes.py --root .
       - name: Manifest size check tests
         run: python3 -m unittest discover -s LOSAT/tests -p 'test_check_manifest_sizes.py'
+      # No NCBI counterpart: the source files that only unit tests read (`#[cfg(test)] mod x_tests;`,
+      # a table a test `include!`s) stay out of the published crate (`exclude` in LOSAT/Cargo.toml),
+      # and every file the build reads stays in. Without cargo: the package list is Git's file list
+      # less what `exclude` matches, as Cargo computes it (`cargo package --list` needs the registry).
+      # A unit test is a sibling `<stem>_tests.rs` file, never an inline `#[cfg(test)] mod x { ... }`
+      # of a packaged source file (`check_inline_test_modules.py --fix` moves it).
+      - name: Crate test files
+        run: |
+          python3 LOSAT/tests/check_crate_test_files.py --root .
+          python3 LOSAT/tests/check_inline_test_modules.py --root .
+      - name: Crate test-file check tests
+        run: |
+          python3 -m unittest discover -s LOSAT/tests -p 'test_check_crate_test_files.py'
+          python3 -m unittest discover -s LOSAT/tests -p 'test_check_inline_test_modules.py'
+      # No NCBI counterpart: crates.io refuses a .crate file over 10 MiB, and publish-crate.yml uploads
+      # the release's crate there. `cargo package --no-verify` packs what `cargo publish` would,
+      # without the build.
+      - name: Crate size (crates.io takes 10 MiB)
+        working-directory: LOSAT
+        run: |
+          set -euo pipefail
+          cargo package --locked --no-verify
+          crate=$(ls target/package/losat-*.crate)
+          bytes=$(stat -c %s "$crate")
+          echo "$(basename "$crate"): $bytes bytes, $((bytes * 100 / 10485760)) % of the 10 MiB that crates.io takes" | tee -a "$GITHUB_STEP_SUMMARY"
+          [ "$bytes" -le 8912896 ] || echo "::warning::the crate is over 85 % of the 10 MiB that crates.io takes ($bytes bytes)"
+          if [ "$bytes" -gt 10485760 ]; then
+            echo "::error::the crate is over the 10 MiB that crates.io takes; see .github/workflows/publish-crate.yml"
+            exit 1
+          fi
       # No NCBI counterpart: CI wiring. Every test_*.py and test_*.js file is named in a `run:`
       # command of a workflow that runs on push, pull request or schedule, or one it calls (SWEBOK
       # 2026-11-04 audit, KA5: five files and 35 tests ran in none); python/tests/ runs as a
@@ -83,6 +123,17 @@ jobs:
         run: python3 LOSAT/tests/check_tests_in_ci.py --root .
       - name: Tests-in-CI checker tests
         run: python3 -m unittest discover -s LOSAT/tests -p 'test_check_tests_in_ci.py'
+      # No NCBI counterpart: the license texts of the code in LOSAT's binaries. THIRD_PARTY_LICENSES is
+      # generated from the three Cargo.lock files, the Rust standard library inputs and wasi-libc
+      # (scripts/third_party_licenses.py); a dependency change that leaves it stale fails here, and so
+      # does a copy of LICENSE or THIRD_PARTY_NOTICES (LOSAT/, python/) that differs from the root file.
+      # It runs `cargo fetch --locked` (network) for the crates' license files.
+      - name: Third-party licenses are up to date
+        run: python3 scripts/third_party_licenses.py --check
+      - name: Third-party licenses script tests
+        run: python3 -m unittest discover -s LOSAT/tests -p 'test_third_party_licenses.py'
+      - name: Wheel smoke license check tests
+        run: python3 -m unittest discover -s LOSAT/tests -p 'test_wheel_smoke_licenses.py'
       - name: Public API checker tests
         run: python3 -m unittest discover -s LOSAT/tests -p 'test_check_public_api.py'
       - name: Release-candidate tooling tests
@@ -100,8 +151,7 @@ jobs:
       # No NCBI counterpart: the merge of the coverage shards of nightly.yml (a report).
       - name: Coverage summary tooling tests
         run: python3 -m unittest discover -s LOSAT/tests -p 'test_coverage_summary.py'
-      # NCBI reference (598d8ae6): ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
-      # x_PrintField(*iter); m_Ostream << "\n";
+      # NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108
       # The Gate A tools compare NCBI's and LOSAT's raw outfmt 6/7 bytes (set A of
       # docs/release/v0.2.0_certification_plan.md, Gate A of the losat-gates skill):
       # certify_integrated_runtime_v010.py drives the other four, which
@@ -119,16 +169,14 @@ jobs:
       # tests run stand-in runners; the tool also calls node and git (both on the runner image).
       - name: WASI benchmark tooling tests
         run: python3 -m unittest discover -s LOSAT/tests -p 'test_benchmark_wasm_threading.py'
-      # NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:143-143
-      # result *= expl(-z * z) / z;
+      # Boost (NCBI 598d8ae6 copy): c++/src/algo/blast/core/boost_erf.c:143 (a long-double product)
       # LOSAT's one mul_add emulates that long-double line; nothing else may fuse or
       # reassociate floating-point operations (docs/agents/diagnostics.md, "Floating-point contract").
       - name: Floating-point contract (sources and cargo configuration)
         run: python3 LOSAT/tests/check_fp_contract.py source
       - name: Floating-point contract checker tests
         run: python3 -m unittest discover -s LOSAT/tests -p 'test_check_fp_contract.py'
-      # NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1098-1108
-      # x_PrintField(*iter); m_Ostream << "\n";
+      # NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1098-1108
       # The certification driver compares these raw bytes on Windows and macOS only
       # when dispatched; its tests also bind frozen_mismatch_allowlist.json to the
       # Gate A plan, so an entry that does not bind to the plan fails here first.
@@ -141,6 +189,12 @@ jobs:
         run: python3 LOSAT/tests/ncbi_unit_case_ledger.py check --root .
       - name: Ledger checker tests
         run: python3 -m unittest discover -s LOSAT/tests -p 'test_ncbi_unit_case_ledger.py'
+      # NCBI's Linux build: makeblastdb's dates come from glibc's localtime. The unit tests of
+      # LOSAT/src/writedb/local_offset.rs compare LOSAT's local time with the fixture
+      # LOSAT/tests/unit/local_time_glibc_vectors.tsv; this compares the fixture with this runner's
+      # glibc (every form of TZ and TZDIR of the fixture, under a second, 2026-11-20).
+      - name: Local time is glibc's
+        run: python3 -I scripts/local_time_glibc_vectors.py --check
       # No NCBI counterpart: release bookkeeping. Pending CHANGELOG entries are one file per pull
       # request (changelog.d/README.md), so two pull requests never conflict in CHANGELOG.md.
       - name: Changelog fragments
@@ -397,12 +451,54 @@ jobs:
             echo "::warning title=semver checks::cargo semver-checks exited with $status: see the job summary (a report until the first publication)"
           fi
 
+  # CodeQL of the workflows of a pull request that changes .github/ (Owner 2026-11-19 「C」): 31 of the
+  # 35 alerts open on main on 2026-11-19 were in workflows (actions/cache-poisoning,
+  # actions/missing-workflow-permissions), raised a week after they merged. codeql.yml scans the
+  # pull request's merge commit for language actions only (about a minute) and fails on an open
+  # alert; `rust` requires it, so such a pull request does not merge. Other pull requests skip it.
+  workflow-changes:
+    name: workflow changes
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read
+    outputs:
+      changed: ${{ steps.files.outputs.changed }}
+    steps:
+      - name: Does the pull request change .github/?
+        id: files
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          files=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$NUMBER/files" --paginate --jq '.[].filename')
+          if grep -q '^\.github/' <<< "$files"; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  workflow-codeql:
+    needs: workflow-changes
+    if: needs.workflow-changes.outputs.changed == 'true'
+    uses: ./.github/workflows/codeql.yml
+    with:
+      own_commit: true
+      languages: '["actions"]'
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+
   # The check to require in the rulesets: it always runs and fails if a job it needs failed or was
-  # cancelled (`semver checks (report)` is not one of them).
+  # cancelled (`semver checks (report)` is not one of them; the two workflow jobs are skipped on a
+  # pull request that does not change .github/ and on pushes).
   rust:
     name: rust
     if: always()
-    needs: [rust-lint, rust-tests, rust-tests-run, public-api]
+    needs: [rust-lint, rust-tests, rust-tests-run, public-api, workflow-changes, workflow-codeql]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

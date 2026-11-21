@@ -8,6 +8,8 @@ import io
 import json
 import os
 import re
+import shlex
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -26,6 +28,7 @@ import xinclude_fixtures as xinclude  # noqa: E402
 from frozen_allowlist import Allowlist  # noqa: E402
 
 sys.path.insert(0, str(fast.FIXTURE_DIR))
+import check_losat  # noqa: E402  (the -subject fixtures' checker)
 import run_oracle  # noqa: E402  (the outfmt 0 manifest's reader and writer)
 
 FROZEN, KNOWN, OTHER = "f" * 64, "a" * 64, "0" * 64
@@ -78,22 +81,15 @@ class SamClRuleTests(unittest.TestCase):
             (Path(tmp) / "t.6.out").write_bytes(self.WITH)
             self.assertEqual(db_fixtures.frozen_stdout({"row_id": "t.6", "outfmt": "6"}, other_build), other_build)
 
-    def test_a_freeze_keeps_the_frozen_report_of_a_run_that_ncbi_ends_by_a_signal(self):
-        # NCBI's crash in a refused row (SIGSEGV) cuts its report at a point that depends on its heap and
-        # the environment: the same binary wrote 17 bytes on ws where the frozen prolog has 349.
+    def test_a_frozen_file_other_than_sam_is_replaced_by_ncbi_s_stdout(self):
+        # Outside outfmt 17 the freeze writes NCBI's stdout as it is, also where it is the start of the frozen
+        # file or the frozen file is its start (no prefix rule: a run that ends by a signal stops the freeze).
         prolog = b"BLASTX 2.17.0+\n\n\nReference: ...\n\nDatabase: x2g\n"
         with tempfile.TemporaryDirectory() as tmp, unittest.mock.patch.object(db_fixtures, "FROZEN", Path(tmp)):
             (Path(tmp) / "c.1.out").write_bytes(prolog)
             row = {"row_id": "c.1", "outfmt": "1"}
-            shorter, longer = prolog[:17], prolog + b"\nQuery= q1\n"
-            for cut in (shorter, longer, prolog):
-                self.assertEqual(db_fixtures.frozen_stdout(row, cut, -11), prolog)
-            # A report that differs before the cut is a new answer, and a run that exits is frozen as it is.
-            other = prolog.replace(b"x2g", b"x3g")
-            self.assertEqual(db_fixtures.frozen_stdout(row, other, -11), other)
-            self.assertEqual(db_fixtures.frozen_stdout(row, shorter, 1), shorter)
-            self.assertEqual(db_fixtures.frozen_stdout(row, shorter), shorter)
-            self.assertEqual(db_fixtures.frozen_stdout({"row_id": "new.1", "outfmt": "1"}, shorter, -11), shorter)
+            for stdout in (prolog[:17], prolog + b"\nQuery= q1\n", prolog.replace(b"x2g", b"x3g"), b""):
+                self.assertEqual(db_fixtures.frozen_stdout(row, stdout), stdout)
 
     def test_the_rule_applies_to_outfmt_17_only(self):
         for outfmt in ("17", "17 SQ", " 17 SR ", "17 SQ SR"):
@@ -171,13 +167,43 @@ class DbSearchFixtureTests(unittest.TestCase):
         for r in rows:
             if r["kind"] != "ncbi":
                 self.assertFalse(db_fixtures.under_valgrind(r), r["row_id"])
+                self.assertIsNone(db_fixtures.copies_cell(r), r["row_id"])
+                # A rejection row whose stdout is a near input's NCBI run (`ncbi-near:`, the bytes LOSAT writes
+                # before it refuses): the stdout cells of that `ncbi` row of its own run, or of its first N bytes
+                # (`ncbi-near: ROW_ID first N bytes`), and no file of its own.
+                near, cut = db_fixtures.near_row_id(r), db_fixtures.near_cut(r)
+                if near:
+                    source = by_id[near]
+                    self.assertEqual((r["kind"], source["kind"], db_fixtures.near_row_id(source), source["outfmt"]),
+                                     ("losat-rejection", "ncbi", None, r["outfmt"]), r["row_id"])
+                    self.assertFalse((db_fixtures.FROZEN / f"{r['row_id']}.out").exists(), r["row_id"])
+                    if cut is None:
+                        self.assertEqual([source[k] for k in ("stdout_sha256", "stdout_bytes")],
+                                         [r[k] for k in ("stdout_sha256", "stdout_bytes")], r["row_id"])
+                    else:
+                        self.assertLessEqual(cut, int(source["stdout_bytes"]), r["row_id"])
+                        self.assertEqual(r["stdout_bytes"], str(cut), r["row_id"])
+                if r["stdout_bytes"]:
+                    self.assertTrue((db_fixtures.FROZEN / f"{db_fixtures.frozen_id(r)}.out").exists(), r["row_id"])
+                    data = db_fixtures.expected_stdout(r)
+                    self.assertEqual([db_fixtures.sha256(data), str(len(data))],
+                                     [r["stdout_sha256"], r["stdout_bytes"]], r["row_id"])
                 continue
+            # A copy row's expectation is the cut of its whole NCBI output (`ncbi-copies:`).
+            if db_fixtures.copies_cell(r) is not None:
+                self.assertEqual(db_fixtures.copy_row_problems(r), [], r["row_id"])
+                self.assertEqual(r["rc"], "0", r["row_id"])
+                # Its stderr, where NCBI writes one, is a warning of the arguments that names no copy.
+                err = db_fixtures.FROZEN / f"{r['row_id']}.err"
+                self.assertFalse(err.exists() and db_fixtures.COPY_PREFIX.encode() in err.read_bytes(), r["row_id"])
             # A row that expects a near input's NCBI run (`ncbi-near:`) reads that row's files and has its columns.
             near = db_fixtures.near_row_id(r)
             # A row frozen from NCBI under valgrind (`ncbi-valgrind`) has frozen files of its own run.
             self.assertFalse(near and db_fixtures.under_valgrind(r), r["row_id"])
             if near:
                 source = by_id[near]
+                # An ncbi row takes all of its near row's bytes (rc and stderr too).
+                self.assertIsNone(db_fixtures.near_cut(r), r["row_id"])
                 self.assertEqual((source["kind"], db_fixtures.near_row_id(source), source["outfmt"]),
                                  ("ncbi", None, r["outfmt"]), r["row_id"])
                 self.assertEqual([source[k] for k in ("rc", "stdout_sha256", "stdout_bytes", "stderr_sha256")],
@@ -190,6 +216,23 @@ class DbSearchFixtureTests(unittest.TestCase):
             err = db_fixtures.FROZEN / f"{frozen}.err"
             self.assertEqual(db_fixtures.sha256(err.read_bytes()) if err.exists() else "", r["stderr_sha256"], r["row_id"])
 
+    def test_near_marker_names_a_row_and_its_first_bytes(self):
+        def near(covers):
+            return db_fixtures.near_row({"row_id": "r", "covers": covers})
+        self.assertIsNone(near("a crash | expect: frees memory"))
+        self.assertEqual(near("a | ncbi-near: db.x.1"), ("db.x.1", None))
+        self.assertEqual(near("a | ncbi-near: db.x.1 | expect: b"), ("db.x.1", None))
+        self.assertEqual(near("a | ncbi-near: db.x.1 first 349 bytes | expect: b"), ("db.x.1", 349))
+        self.assertEqual(near("ncbi-near: db.x.1 first 0 bytes"), ("db.x.1", 0))
+        self.assertEqual((db_fixtures.near_row_id({"covers": "ncbi-near: db.x.1 first 9 bytes"}),
+                          db_fixtures.near_cut({"covers": "ncbi-near: db.x.1 first 9 bytes"})), ("db.x.1", 9))
+        self.assertEqual((db_fixtures.near_row_id({"covers": "x"}), db_fixtures.near_cut({"covers": "x"})),
+                         (None, None))
+        # Any other words in the marker's part stop the tool (a cut must not be read as prose, or prose as a cut).
+        for bad in ("ncbi-near: db.x.1 first bytes", "ncbi-near: db.x.1 349", "ncbi-near: db.x.1 first 349 byte",
+                    "ncbi-near: db.x.1 first -1 bytes", "ncbi-near: db.x.1 (the first 349 bytes)", "ncbi-near: | x"):
+            with self.assertRaises(SystemExit, msg=bad):
+                near(bad)
 
     def test_valgrind_marker_is_a_part_of_covers(self):
         self.assertTrue(db_fixtures.under_valgrind({"covers": "RG-J2A: windows past the buffers | ncbi-valgrind"}))
@@ -246,7 +289,7 @@ class DbSearchFixtureTests(unittest.TestCase):
                       and db_fixtures.rps_cell(r["db"]) is None)
         rps = first(lambda r: r["kind"] == "ncbi" and db_fixtures.rps_cell(r["db"]) is not None)
         rejection = first(lambda r: r["kind"] == "losat-rejection" and r["stdout_bytes"]
-                          and not xinclude.wants_pssm(r))
+                          and not xinclude.wants_pssm(r) and not db_fixtures.near_row_id(r))
         with tempfile.TemporaryDirectory() as tmp:
             bin_dir, frozen = Path(tmp) / "bin", Path(tmp) / "frozen"
             bin_dir.mkdir()
@@ -265,6 +308,385 @@ class DbSearchFixtureTests(unittest.TestCase):
             for row in (plain, rps, rejection):
                 self.assertEqual((frozen / f"{row['row_id']}.out").read_bytes(), b"false", row["row_id"])
             self.assertEqual(len(written), 1)
+
+    @unittest.skipUnless(os.name == "posix", "the stand-in NCBI program is a shell script")
+    def test_freeze_gives_a_rejection_row_the_stdout_cells_of_its_near_row(self):
+        # A rejection row with `ncbi-near:` takes the stdout cells of its near row and keeps its own rc; NCBI runs
+        # only for the near row (the stand-in counts its runs), which may come after the rejection row in the
+        # manifest, and no frozen file is written for the rejection row.
+        rows = db_fixtures.read_manifest()[1]
+        rejection = dict(next(r for r in rows if r["kind"] == "losat-rejection" and db_fixtures.near_row_id(r)
+                              and db_fixtures.near_cut(r) is None))
+        near = dict(next(r for r in rows if r["row_id"] == db_fixtures.near_row_id(rejection)))
+        with tempfile.TemporaryDirectory() as tmp:
+            bin_dir, frozen, runs = Path(tmp) / "bin", Path(tmp) / "frozen", Path(tmp) / "runs"
+            bin_dir.mkdir()
+            script = bin_dir / near["program"]
+            script.write_text(f'#!/bin/sh\necho run >> "{runs}"\nprintf "the near run\\n"\nexit 3\n')
+            script.chmod(0o755)
+            written = []
+            with unittest.mock.patch.object(db_fixtures, "read_manifest", lambda: ({}, [rejection, near])), \
+                    unittest.mock.patch.object(db_fixtures, "write_manifest", lambda *a: written.append(a)), \
+                    unittest.mock.patch.object(db_fixtures, "FROZEN", frozen), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                args = argparse.Namespace(ncbi_bin=str(bin_dir), program="", only="", valgrind="")
+                self.assertEqual(db_fixtures.freeze(args), 0)
+            self.assertEqual(runs.read_text(), "run\n")
+            self.assertFalse((frozen / f"{rejection['row_id']}.out").exists())
+            self.assertEqual((frozen / f"{near['row_id']}.out").read_bytes(), b"the near run\n")
+            self.assertEqual([rejection[k] for k in ("stdout_sha256", "stdout_bytes", "rc")],
+                             [near["stdout_sha256"], "13", "1"])
+            self.assertEqual(near["rc"], "3")
+            self.assertEqual(len(written), 1)
+
+    @staticmethod
+    def stand_in(bin_dir: Path, program: str, body: str) -> None:
+        bin_dir.mkdir(exist_ok=True)
+        script = bin_dir / program
+        script.write_text("#!/bin/sh\n" + body)
+        script.chmod(0o755)
+
+    def freeze_rows(self, rows: list[dict[str, str]], bin_dir: Path, frozen: Path) -> list[tuple]:
+        """`freeze` of `rows` alone with the NCBI programs of `bin_dir`, the frozen files in `frozen`: the
+        write_manifest calls (none when the freeze stops)."""
+        written = []
+        with unittest.mock.patch.object(db_fixtures, "read_manifest", lambda: ({}, rows)), \
+                unittest.mock.patch.object(db_fixtures, "write_manifest", lambda *a: written.append(a)), \
+                unittest.mock.patch.object(db_fixtures, "FROZEN", frozen), \
+                contextlib.redirect_stdout(io.StringIO()):
+            db_fixtures.freeze(argparse.Namespace(ncbi_bin=str(bin_dir), program="", only="", valgrind=""))
+        return written
+
+    @unittest.skipUnless(os.name == "posix", "the stand-in NCBI program is a shell script")
+    def test_freeze_gives_a_cut_near_row_the_cells_of_the_first_bytes_of_its_near_run(self):
+        # `ncbi-near: ROW_ID first N bytes` (the crash rows of db.x2g.bx.of, whose stdout is NCBI's prolog): NCBI
+        # runs only for the near row; the rejection row's cells are the sha256 and size of the near run's first N
+        # bytes, its rc stays LOSAT's, and a near run shorter than N stops the freeze.
+        rows = db_fixtures.read_manifest()[1]
+        rejection = dict(next(r for r in rows if r["kind"] == "losat-rejection" and db_fixtures.near_cut(r)))
+        near = dict(next(r for r in rows if r["row_id"] == db_fixtures.near_row_id(rejection)))
+        cut = db_fixtures.near_cut(rejection)
+        with tempfile.TemporaryDirectory() as tmp:
+            bin_dir, frozen, runs = Path(tmp) / "bin", Path(tmp) / "frozen", Path(tmp) / "runs"
+            (Path(tmp) / "near.out").write_bytes(b"P" * cut + b"\n\nQuery= q\n")
+            self.stand_in(bin_dir, near["program"], f'echo run >> "{runs}"\ncat "{tmp}/near.out"\nexit 255\n')
+            self.assertEqual(len(self.freeze_rows([rejection, near], bin_dir, frozen)), 1)
+            self.assertEqual(runs.read_text(), "run\n")
+            self.assertFalse((frozen / f"{rejection['row_id']}.out").exists())
+            self.assertEqual([rejection[k] for k in ("stdout_sha256", "stdout_bytes", "rc")],
+                             [db_fixtures.sha256(b"P" * cut), str(cut), "1"])
+            self.assertEqual((near["rc"], near["stdout_bytes"]), ("255", str(cut + 11)))
+            (Path(tmp) / "near.out").write_bytes(b"P" * (cut - 1))
+            with self.assertRaisesRegex(SystemExit, f"{re.escape(rejection['row_id'])}: ncbi-near .* fewer than"):
+                self.freeze_rows([rejection, near], bin_dir, frozen)
+            # An ncbi row takes all of its near row's bytes: a cut there stops the freeze.
+            twin = dict(rejection, kind="ncbi")
+            with self.assertRaisesRegex(SystemExit, "takes all of its near row's bytes"):
+                self.freeze_rows([twin, near], bin_dir, frozen)
+
+    @unittest.skipUnless(os.name == "posix", "the stand-in NCBI program is a shell script")
+    def test_freeze_stops_where_ncbi_ends_a_run_by_a_signal(self):
+        # A crash cuts NCBI's report where its heap and the environment decide: no row takes such a stdout. The
+        # freeze stops before it writes the row's files or the manifest, for a rejection row with stdout cells and
+        # no near row as for an ncbi row; a rejection row with a near row is not run at all.
+        rows = db_fixtures.read_manifest()[1]
+        rejection = dict(next(r for r in rows if r["kind"] == "losat-rejection" and r["stdout_bytes"]
+                              and not xinclude.wants_pssm(r) and not db_fixtures.near_row_id(r)))
+        plain = dict(next(r for r in rows if r["kind"] == "ncbi" and not xinclude.wants_files(r)
+                          and not xinclude.wants_pssm(r) and db_fixtures.rps_cell(r["db"]) is None
+                          and not db_fixtures.under_valgrind(r) and not db_fixtures.near_row_id(r)))
+        with tempfile.TemporaryDirectory() as tmp:
+            bin_dir, frozen = Path(tmp) / "bin", Path(tmp) / "frozen"
+            for row in (rejection, plain):
+                self.stand_in(bin_dir, row["program"], 'printf "BLASTP 2.17.0+\\n"\nkill -SEGV $$\n')
+                with self.assertRaisesRegex(SystemExit, f"{re.escape(row['row_id'])}: NCBI ended its run by signal 11"):
+                    self.freeze_rows([dict(row)], bin_dir, frozen)
+                self.assertFalse((frozen / f"{row['row_id']}.out").exists(), row["row_id"])
+                self.assertFalse((frozen / f"{row['row_id']}.err").exists(), row["row_id"])
+            # The same rows with an exit status are frozen as NCBI wrote them.
+            for row in (rejection, plain):
+                self.stand_in(bin_dir, row["program"], 'printf "BLASTP 2.17.0+\\n"\nexit 3\n')
+                row = dict(row)
+                self.assertEqual(len(self.freeze_rows([row], bin_dir, frozen)), 1)
+                self.assertEqual((frozen / f"{row['row_id']}.out").read_bytes(), b"BLASTP 2.17.0+\n")
+                self.assertEqual(row["stdout_bytes"], "15")
+            # A crash of the near row stops the freeze too; the rejection row that names it is never run.
+            cut_row = dict(next(r for r in rows if r["kind"] == "losat-rejection" and db_fixtures.near_cut(r)))
+            near = dict(next(r for r in rows if r["row_id"] == db_fixtures.near_row_id(cut_row)))
+            self.stand_in(bin_dir, near["program"], 'kill -SEGV $$\n')
+            with self.assertRaisesRegex(SystemExit, f"{re.escape(near['row_id'])}: NCBI ended its run by signal 11"):
+                self.freeze_rows([cut_row, near], bin_dir, frozen)
+
+    @unittest.skipUnless(os.name == "posix", "the stand-in LOSAT program is a shell script")
+    def test_check_compares_a_cut_near_row_with_the_first_bytes_of_its_near_run(self):
+        # `check` of a rejection row with `ncbi-near: ROW_ID first N bytes` expects exactly the first N bytes of
+        # ROW_ID's frozen stdout (the prolog of the db.x2g.bx.of rows), and LOSAT's rc and expected stderr text.
+        rows = db_fixtures.read_manifest()[1]
+        row = dict(next(r for r in rows if r["kind"] == "losat-rejection" and db_fixtures.near_cut(r)))
+        whole = (db_fixtures.FROZEN / f"{db_fixtures.near_row_id(row)}.out").read_bytes()
+        cut = db_fixtures.near_cut(row)
+        self.assertGreater(len(whole), cut)
+        self.assertEqual(db_fixtures.expected_stdout(row), whole[:cut])
+        with tempfile.TemporaryDirectory() as tmp:
+            losat, out = Path(tmp) / "losat", Path(tmp) / "out"
+            losat.write_text(f'#!/bin/sh\ncat "{out}"\nprintf "BLAST engine error: %s\\n" '
+                             f'{shlex.quote(db_fixtures.expected_text(row))} >&2\nexit {row["rc"]}\n')
+            losat.chmod(0o755)
+            env = db_fixtures.clean_env(dict(os.environ), tmp)
+            for stdout, status in ((whole[:cut], "rejection"), (whole, "differs"), (whole[:cut - 1], "differs"),
+                                   (b"", "differs")):
+                out.write_bytes(stdout)
+                self.assertEqual(db_fixtures.check_row(row, losat, 1, env)[0], status, len(stdout))
+
+
+def pairwise_report(query: str, hits: list[str]) -> str:
+    """A query's report of NCBI's outfmt 0 (the shape of BLASTP 2.17.0's), with one alignment per hit."""
+    table = "".join(f"{hit} a protein                                                   19.6    3.2  \n" for hit in hits)
+    body = ("Sequences producing significant alignments:                          (Bits)  Value\n\n"
+            f"{table}\n\n" + "".join(f">{hit} a protein\nLength=40\n\n Score = 19.6 bits (39),  Expect = 3.2\n\n"
+                                       "Query  1  MKV  3\n           MKV\nSbjct  1  MKV  3\n\n\n" for hit in hits)
+            if hits else "\n\n***** No hits found *****\n\n")
+    return (f"Query= {query}\n\nLength=82\n" + body + "\n"
+            "Lambda      K        H        a         alpha\n   0.318    0.136    0.374    0.792     4.96 \n\n"
+            "Effective search space used: 1998016\n\n\n")
+
+
+PAIRWISE_HEAD = ("BLASTP 2.17.0+\n\n\nReference: ...\n\n\n\nDatabase: PajaWSV proteins\n"
+                 "           86 sequences; 66,738 total letters\n\n\n\n")
+PAIRWISE_TAIL = ("  Database: PajaWSV proteins\n    Posted date:  Oct 13, 2026  1:44 PM\n"
+                 "  Number of letters in database: 66,738\n  Number of sequences in database:  86\n\n\n\n"
+                 "Matrix: BLOSUM62\nGap Penalties: Existence: 11, Extension: 1\n")
+
+
+def tabular_block(query: str, rows: list[str]) -> str:
+    """A query's block of NCBI's outfmt 7."""
+    fields = "# Fields: query acc.ver, subject acc.ver, evalue\n" if rows else ""
+    return (f"# BLASTP 2.17.0+\n# Query: {query}\n# Database: tests/db_search/paja\n{fields}# {len(rows)} hits found\n"
+            + "".join(f"{query.split()[0]}\t{row}\n" for row in rows))
+
+
+def xml_iteration(number: int, query: str, hits: list[str]) -> str:
+    """A query's `<Iteration>` element of NCBI's outfmt 5."""
+    return (f"<Iteration>\n  <Iteration_iter-num>{number}</Iteration_iter-num>\n"
+            f"  <Iteration_query-ID>Query_{number}</Iteration_query-ID>\n  <Iteration_query-def>{query}</Iteration_query-def>\n"
+            "  <Iteration_hits>\n" + "".join(f"<Hit>\n  <Hit_id>{hit}</Hit_id>\n</Hit>\n" for hit in hits)
+            + "  </Iteration_hits>\n</Iteration>\n")
+
+
+XML_HEAD = "<?xml version=\"1.0\"?>\n<BlastOutput>\n  <BlastOutput_query-def>A a protein</BlastOutput_query-def>\n<BlastOutput_iterations>\n"
+XML_TAIL = "</BlastOutput_iterations>\n</BlastOutput>\n\n"
+
+
+class CopyRowTests(unittest.TestCase):
+    """Copy rows (`ncbi-copies:`): the cut of NCBI's output on a query file with copies, NCBI's query batches and
+    the checks of the oracle file."""
+
+    def test_query_batches_take_queries_until_the_batch_size_is_reached(self):
+        self.assertEqual(db_fixtures.query_batches([250, 310, 200, 60], 260), [[0, 1], [2, 3]])
+        self.assertEqual(db_fixtures.query_batches([250, 250, 200, 200], 300), [[0, 1], [2, 3]])
+        self.assertEqual(db_fixtures.query_batches([100, 100], 10000), [[0, 1]])
+        self.assertEqual(db_fixtures.query_batches([100, 100], 1), [[0], [1]])
+        self.assertEqual(db_fixtures.query_batches([100, 100, 5], 200), [[0, 1], [2]])
+        self.assertEqual(db_fixtures.query_batches([], 10), [])
+        self.assertEqual(db_fixtures.batch_size({}), 10000)
+        self.assertEqual(db_fixtures.batch_size({"BATCH_SIZE": "260"}), 260)
+
+    def test_outfmt_6_drops_the_copies_rows(self):
+        whole = b"A\ts1\t1e-5\nA\ts2\t3.2\nB\ts1\t0.1\nCOPY\ts1\t0.2\nCOPY2\ts3\t9\n"
+        self.assertEqual(db_fixtures.cut_copies(whole, "6", 2), b"A\ts1\t1e-5\nA\ts2\t3.2\nB\ts1\t0.1\n")
+        self.assertEqual(db_fixtures.cut_copies(b"", "6", 1), b"")
+        self.assertEqual(db_fixtures.subjects_per_query(whole, "6"), [2, 1, 1, 1])
+
+    def test_outfmt_7_drops_the_copies_blocks_and_counts_the_queries_kept(self):
+        a, b = tabular_block("A a protein", ["s1\t1e-5", "s2\t3.2"]), tabular_block("B", [])
+        copy, copy2 = tabular_block("COPY", ["s1\t0.2"]), tabular_block("COPY2", [])
+        whole = (a + copy + b + copy2 + "# BLAST processed 4 queries\n").encode()
+        self.assertEqual(db_fixtures.cut_copies(whole, "7", 2), (a + b + "# BLAST processed 2 queries\n").encode())
+        trailing = (a + b + copy + "# BLAST processed 3 queries\n").encode()
+        self.assertEqual(db_fixtures.cut_copies(trailing, "7", 1), (a + b + "# BLAST processed 2 queries\n").encode())
+        self.assertEqual(db_fixtures.subjects_per_query(whole, "7"), [2, 1])
+        for wrong in (whole.replace(b"4 queries", b"3 queries"), whole[:-len(b"# BLAST processed 4 queries\n")]):
+            with self.assertRaises(ValueError):
+                db_fixtures.cut_copies(wrong, "7", 2)
+        with self.assertRaises(ValueError):
+            db_fixtures.cut_copies(whole, "7", 1)
+
+    def test_outfmt_0_drops_the_copies_reports_up_to_the_next_query_or_the_footer(self):
+        a, b = pairwise_report("A a protein", ["s1", "s2"]), pairwise_report("B", [])
+        copy, copy2 = pairwise_report("COPY", ["s1"]), pairwise_report("COPY2", [])
+        whole = (PAIRWISE_HEAD + a + copy + b + copy2 + PAIRWISE_TAIL).encode()
+        self.assertEqual(db_fixtures.cut_copies(whole, "0", 2), (PAIRWISE_HEAD + a + b + PAIRWISE_TAIL).encode())
+        self.assertEqual(db_fixtures.subjects_per_query(whole, "0"), [2, 1, 0, 0])
+        with self.assertRaises(ValueError):
+            db_fixtures.cut_copies(whole, "0", 1)
+        with self.assertRaises(ValueError):
+            db_fixtures.cut_copies((PAIRWISE_HEAD + a + copy).encode(), "0", 1)
+
+    def test_outfmt_5_drops_a_last_copy_only(self):
+        a, b = xml_iteration(1, "A a protein", ["s1", "s2"]), xml_iteration(2, "B", [])
+        whole = (XML_HEAD + a + b + xml_iteration(3, "COPY", ["s1"]) + XML_TAIL).encode()
+        self.assertEqual(db_fixtures.cut_copies(whole, "5", 1), (XML_HEAD + a + b + XML_TAIL).encode())
+        self.assertEqual(db_fixtures.subjects_per_query(whole, "5"), [2, 0, 1])
+        middle = (XML_HEAD + a + xml_iteration(2, "COPY", []) + xml_iteration(3, "B", []) + XML_TAIL).encode()
+        two = (XML_HEAD + a + xml_iteration(2, "COPY", []) + xml_iteration(3, "COPY2", []) + XML_TAIL).encode()
+        for wrong, copies in ((middle, 1), (two, 2), (whole, 2)):
+            with self.assertRaises(ValueError):
+                db_fixtures.cut_copies(wrong, "5", copies)
+
+    def test_other_formats_have_no_rule(self):
+        for outfmt in ("11", "10", "6 qseqid sseqid", "17"):
+            with self.assertRaises(ValueError):
+                db_fixtures.cut_copies(b"A\ts1\n", outfmt, 1)
+
+    def oracle_row(self, tmp: Path, query: list[str], oracle: list[str], **cells: str) -> dict[str, str]:
+        (tmp / "q.faa").write_text("".join(query))
+        (tmp / "o.faa").write_text("".join(oracle))
+        words = cells.pop("words", "")
+        row = {"row_id": "db.x.c.6", "program": "blastp", "kind": "ncbi", "query": str(tmp / "q.faa"),
+               "extra_args": "-comp_based_stats 2u", "outfmt": "6",
+               "covers": f"a copy row | ncbi-copies: {tmp / 'o.faa'}{words}"}
+        return {**row, **cells}
+
+    def test_the_oracle_file_is_checked_against_the_query_file_and_the_batches(self):
+        a, b = ">A a protein\nMKVLA\nGG\n", ">B\nWWWW\n"
+        copy_a, copy_b, copy2_b = ">COPY\nMKVLAGG\n", ">COPY\nWWWW\n", ">COPY2\nWWWW\n"
+        with tempfile.TemporaryDirectory() as name:
+            tmp = Path(name)
+            self.assertEqual(db_fixtures.copy_oracle_problems(self.oracle_row(tmp, [a, b], [a, b, copy_b])), [])
+            self.assertEqual(db_fixtures.copy_count(self.oracle_row(tmp, [a, b], [a, b, copy_b])), 1)
+            for outfmt in ("0", "5", "7"):
+                self.assertEqual(db_fixtures.copy_oracle_problems(
+                    self.oracle_row(tmp, [a, b], [a, b, copy_b], outfmt=outfmt)), [], outfmt)
+            # Two batches of LOSAT's run (BATCH_SIZE=1): each query is followed by its copy, and the oracle's
+            # BATCH_SIZE (8: 7 + 7 and 4 + 4) makes each copy end a batch.
+            two = self.oracle_row(tmp, [a, b], [a, copy_a, b, copy2_b], extra_args="BATCH_SIZE=1 -comp_based_stats 2u",
+                                  words=" BATCH_SIZE=8")
+            self.assertEqual(db_fixtures.copies_cell(two)[1], {"BATCH_SIZE": "8"})
+            self.assertEqual(db_fixtures.copy_oracle_problems(two), [])
+            # Without the oracle's own BATCH_SIZE each query is alone in its batch, and the copies too.
+            self.assertTrue(db_fixtures.copy_oracle_problems({**two, "covers": f"ncbi-copies: {tmp / 'o.faa'}"}))
+            # A hit-list limit is allowed: NCBI's redo ends no match of a query that another query follows.
+            for limit, outfmt in (("-max_target_seqs 1", "6"), ("-num_descriptions 1 -num_alignments 1", "0")):
+                self.assertEqual(db_fixtures.copy_oracle_problems(self.oracle_row(
+                    tmp, [a, b], [a, b, copy_b], extra_args=f"{limit} -comp_based_stats 2u", outfmt=outfmt)), [], limit)
+            # A batch-ending query without its copy, a copy of other residues or before its query, a copy row of
+            # outfmt 5 whose copy is not last, another program, format or kind.
+            wrong = [
+                self.oracle_row(tmp, [a, b], [a, b]),
+                self.oracle_row(tmp, [a, b], [a, b, copy_a]),
+                self.oracle_row(tmp, [a, b], [copy_b, a, b]),
+                self.oracle_row(tmp, [a, b], [a, copy_a, b, copy2_b]),
+                self.oracle_row(tmp, [a, b], [a, copy_a, b, copy2_b], extra_args="BATCH_SIZE=1", words=" BATCH_SIZE=8",
+                                outfmt="5"),
+                self.oracle_row(tmp, [a, b], [a, b, copy_b], program="psiblast"),
+                self.oracle_row(tmp, [a, b], [a, b, copy_b], outfmt="6 qseqid sseqid"),
+                self.oracle_row(tmp, [a, b], [a, b, copy_b], outfmt="11"),
+                self.oracle_row(tmp, [a, ">B other\nWWWW\n"], [a, b, copy_b]),
+                self.oracle_row(tmp, [a, copy_b], [a, copy_b, ">COPY2\nWWWW\n"]),
+            ]
+            for row in wrong:
+                self.assertTrue(db_fixtures.copy_oracle_problems(row), (row["query"], row["outfmt"], row["program"]))
+            with self.assertRaises(SystemExit):
+                db_fixtures.copies_cell({**two, "covers": f"ncbi-copies: {tmp / 'o.faa'} -evalue 1"})
+            # Only the variables that place the queries in batches and chunks may differ in the oracle run.
+            with self.assertRaises(SystemExit):
+                db_fixtures.copies_cell({**two, "covers": f"ncbi-copies: {tmp / 'o.faa'} ADAPTIVE_CBS=1"})
+            self.assertEqual(db_fixtures.copies_cell({**two, "covers": "ncbi-copies: o.faa OVERLAP_CHUNK_SIZE=50"}),
+                             ("o.faa", {"OVERLAP_CHUNK_SIZE": "50"}))
+
+    def test_query_chunks_follow_ncbis_split(self):
+        self.assertEqual(db_fixtures.query_chunks(19799, {}), 1)
+        self.assertEqual(db_fixtures.query_chunks(19800, {}), 2)
+        self.assertEqual(db_fixtures.query_chunks(249, {"CHUNK_SIZE": "200"}), 2)
+        self.assertEqual(db_fixtures.query_chunks(249, {"CHUNK_SIZE": "180"}), 3)
+        self.assertEqual(db_fixtures.query_chunks(249, {"CHUNK_SIZE": "350"}), 1)
+        self.assertEqual(db_fixtures.query_chunks(249, {"CHUNK_SIZE": "150", "OVERLAP_CHUNK_SIZE": "50"}), 2)
+        # A chunk size not above the overlap, or a blank value (the default), splits nothing.
+        self.assertEqual(db_fixtures.query_chunks(249, {"CHUNK_SIZE": "100"}), 1)
+        self.assertEqual(db_fixtures.query_chunks(19800, {"CHUNK_SIZE": " "}), 2)
+
+    def test_a_copy_stays_in_its_batch_and_each_batch_is_searched_in_one_chunk(self):
+        a, b, copy_b = ">A a protein\nMKVLA\nGG\n", ">B\nWWWW\n", ">COPY\nWWWW\n"
+        with tempfile.TemporaryDirectory() as name:
+            tmp = Path(name)
+            # [A, B] is one batch of LOSAT's run (11 residues); with BATCH_SIZE=11 for the oracle the batch ends at B
+            # and the copy leaves it.
+            self.assertEqual(db_fixtures.copy_oracle_problems(self.oracle_row(tmp, [a, b], [a, b, copy_b])), [])
+            leaves = db_fixtures.copy_oracle_problems(self.oracle_row(tmp, [a, b], [a, b, copy_b], words=" BATCH_SIZE=11"))
+            self.assertTrue(any("does not end with its one copy" in problem for problem in leaves), leaves)
+            # CHUNK_SIZE=106 (6 residues a chunk beside the overlap of 100): LOSAT's batch of 11 residues is one chunk,
+            # the oracle's of 15 two; the oracle's own CHUNK_SIZE=200 keeps it in one.
+            row = self.oracle_row(tmp, [a, b], [a, b, copy_b], extra_args="CHUNK_SIZE=106 -comp_based_stats 2u")
+            self.assertEqual(db_fixtures.copy_oracle_problems(row),
+                             ["the oracle batch of queries [0, 1, 2] (15 residues) is searched in 2 chunks; a copy "
+                              "row's batches are searched in one"])
+            self.assertEqual(db_fixtures.copy_oracle_problems({**row, "covers": f"ncbi-copies: {tmp / 'o.faa'} "
+                                                                                 "CHUNK_SIZE=200"}), [])
+            # CHUNK_SIZE=105: LOSAT's own batch of 11 residues is split too.
+            both = db_fixtures.copy_oracle_problems({**row, "extra_args": "CHUNK_SIZE=105 -comp_based_stats 2u"})
+            self.assertEqual([problem.split(" (")[0] for problem in both],
+                             ["the oracle batch of queries [0, 1, 2]", "the LOSAT batch of queries [0, 1]"])
+
+    @unittest.skipUnless(os.name == "posix", "the stand-in NCBI program is a shell script")
+    def test_freeze_keeps_the_whole_output_and_writes_its_cut(self):
+        # A stand-in NCBI that prints the query file it was given as outfmt 6 rows: the oracle's, never the row's.
+        a, b, copy_b = ">A\nMKV\n", ">B\nWW\n", ">COPY\nWW\n"
+        with tempfile.TemporaryDirectory() as name:
+            tmp = Path(name)
+            row = {**self.oracle_row(tmp, [a, b], [a, b, copy_b]), "rc": "", "stdout_sha256": "",
+                   "stdout_bytes": "", "stderr_sha256": "", "db": "d"}
+            bin_dir, frozen = tmp / "bin", tmp / "frozen"
+            bin_dir.mkdir()
+            frozen.mkdir()
+            script = bin_dir / "blastp"
+            script.write_text('#!/bin/sh\nwhile [ "$1" != -query ]; do shift; done\n'
+                              'grep ">" "$2" | sed "s/>//; s/$/\ts1\t${BATCH_SIZE-none}/"\n')
+            script.chmod(0o755)
+            written = []
+            with unittest.mock.patch.object(db_fixtures, "read_manifest", lambda: ({}, [row])), \
+                    unittest.mock.patch.object(db_fixtures, "write_manifest", lambda *a: written.append(a)), \
+                    unittest.mock.patch.object(db_fixtures, "FROZEN", frozen), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(db_fixtures.freeze(argparse.Namespace(ncbi_bin=str(bin_dir), program="", only="")), 0)
+                self.assertEqual(db_fixtures.copy_row_problems(row), [])
+                (frozen / "db.x.c.6.out").write_bytes(b"A\ts1\tnone\n")
+                self.assertEqual(db_fixtures.copy_row_problems(row), ["the cut of db.x.c.6.copies.out is not db.x.c.6.out"])
+            self.assertEqual((frozen / "db.x.c.6.copies.out").read_bytes(), b"A\ts1\tnone\nB\ts1\tnone\nCOPY\ts1\tnone\n")
+            self.assertEqual(row["stdout_bytes"], str(len(b"A\ts1\tnone\nB\ts1\tnone\n")))
+            self.assertEqual((row["rc"], row["stderr_sha256"]), ("0", ""))
+            # The copy's own report changes from run to run (NCBI reads past its array): a whole output whose cut is
+            # the new run's is kept; one whose cut differs is replaced.
+            (frozen / "db.x.c.6.copies.out").write_bytes(b"A\ts1\tnone\nB\ts1\tnone\nCOPY\ts9\tother\n")
+            for whole, kept in ((b"A\ts1\tnone\nB\ts1\tnone\nCOPY\ts9\tother\n", True), (b"A\ts2\tnone\n", False)):
+                (frozen / "db.x.c.6.copies.out").write_bytes(whole)
+                with unittest.mock.patch.object(db_fixtures, "read_manifest", lambda: ({}, [row])), \
+                        unittest.mock.patch.object(db_fixtures, "write_manifest", lambda *a: None), \
+                        unittest.mock.patch.object(db_fixtures, "FROZEN", frozen), \
+                        contextlib.redirect_stdout(io.StringIO()):
+                    db_fixtures.freeze(argparse.Namespace(ncbi_bin=str(bin_dir), program="", only=""))
+                self.assertEqual((frozen / "db.x.c.6.copies.out").read_bytes(),
+                                 whole if kept else b"A\ts1\tnone\nB\ts1\tnone\nCOPY\ts1\tnone\n")
+            # A stderr that names no copy (a warning of the arguments) is the row's own and is frozen; NCBI's oracle
+            # run must exit 0 with a stderr that names no copy.
+            script.write_text(script.read_text() + "echo 'Warning: [blastp] Examining 5 or more matches is "
+                                                   "recommended' >&2\n")
+            with unittest.mock.patch.object(db_fixtures, "read_manifest", lambda: ({}, [row])), \
+                    unittest.mock.patch.object(db_fixtures, "write_manifest", lambda *a: None), \
+                    unittest.mock.patch.object(db_fixtures, "FROZEN", frozen), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                db_fixtures.freeze(argparse.Namespace(ncbi_bin=str(bin_dir), program="", only=""))
+                self.assertEqual(db_fixtures.copy_row_problems(row), [])
+            warning = b"Warning: [blastp] Examining 5 or more matches is recommended\n"
+            self.assertEqual((frozen / "db.x.c.6.err").read_bytes(), warning)
+            self.assertEqual(row["stderr_sha256"], db_fixtures.sha256(warning))
+            for stand_in in ("#!/bin/sh\necho 'Warning: [blastp] Query_3 COPY: an invalid query' >&2\n",
+                             "#!/bin/sh\nexit 3\n"):
+                script.write_text(stand_in)
+                with unittest.mock.patch.object(db_fixtures, "read_manifest", lambda: ({}, [row])), \
+                        unittest.mock.patch.object(db_fixtures, "write_manifest", lambda *a: None), \
+                        unittest.mock.patch.object(db_fixtures, "FROZEN", frozen), \
+                        contextlib.redirect_stdout(io.StringIO()), self.assertRaises(SystemExit):
+                    db_fixtures.freeze(argparse.Namespace(ncbi_bin=str(bin_dir), program="", only=""))
 
 
 def fake_search(directory: Path, master: bytes, sides: list[bytes], stdout: bytes = b"", extra: str = "") -> list[str]:
@@ -497,133 +919,6 @@ class XincludeFixtureTests(unittest.TestCase):
             xinclude.extension("16")
         self.assertEqual(xinclude.side_name("id", 3, "13"), "id.out_3.json")
 
-    def test_the_libm_rule_accepts_only_the_last_of_15_digits_of_a_real(self):
-        # PD-LOSAT-PLATFORM-LIBM (macOS, WASI): the cases of `the_libm_rule_accepts_only_a_last_digit_of_a_real`
-        # (LOSAT/tests/outfmt11_blastx.rs), in a Seq-align's score and in psiblast's ASN.1 PSSM.
-        rule = xinclude.libm_last_digit_differences
-
-        def archive(m: str, e: str = "-80", tail: str = "") -> bytes:
-            return f"evalue real {{ {m}, 10, {e} }},\nscore 7{tail}".encode()
-
-        want = archive("693693758698357")
-        self.assertEqual(rule(want, want), 0)
-        for m in ("693693758698358", "693693758698356"):
-            self.assertEqual(rule(archive(m), want), 1, m)
-        for got in (archive("693693758698359"), archive("693693758698355"),  # 2 apart
-                    archive("693693758698358", "-79"),  # another exponent
-                    archive("69369375869836"),  # another digit count
-                    archive("693693758698357", tail=" "),  # any other byte
-                    b"evalue real { 693693758698358, 10, -80 },\nscore 8",
-                    b"evalue real { 693693758698358, 10, -80 },\nscore",
-                    b"evalue 693693758698358,\nscore 7",
-                    b"evalue real { 693693758698358, 2, -80 },\nscore 7"):  # not a REAL of base 10
-            self.assertIsNone(rule(got, want), got)
-
-        # Each value is judged on its own; a second, different one fails the whole file.
-        def pssm(a: str, b: str, zero: str = "0") -> bytes:
-            return (f"lambda {{ {a}, 10, -15 }},\ninformationContent {{\n  {{ {zero}, 10, 0 }},\n"
-                    f"  {{ -{b}, 10, -3 }}\n}}\n").encode()
-
-        want = pssm("347923230575626", "100000000000001")
-        self.assertEqual(rule(pssm("347923230575625", "100000000000002"), want), 2)
-        self.assertEqual(rule(pssm("347923230575627", "100000000000001"), want), 1)
-        self.assertIsNone(rule(pssm("347923230575625", "100000000000003"), want))
-        # A shorter mantissa (NCBI drops the trailing zeros) 1 away is not a last digit of 15.
-        self.assertIsNone(rule(pssm("347923230575626", "100000000000001", "1"), want))
-        self.assertIsNone(rule(b"{ 6, 10, -1 }", b"{ 5, 10, -1 }"))
-        # A missing or added value is a difference of the bytes around the values.
-        self.assertIsNone(rule(want + b"{ 347923230575626, 10, -15 }", want))
-
-    def test_pssm_files_follow_the_libm_rule_only_when_the_caller_asks(self):
-        # Without a reference every byte counts (the native gates); with one (the WASI commands), a frozen
-        # file is the expectation, and a file over 64 KB is compared with the reference's bytes, which must
-        # have the frozen SHA-256.
-        pad = b"\n" + b"x" * xinclude.FREEZE_LIMIT
-        small = b"informationContent {\n  { 347923230575626, 10, -15 }\n}\n"
-        big = small + pad
-        files = [("r.asn", small), ("r.asn.1", big)]
-        row = {"row_id": "r", "files": xinclude.PSSM_ASN, "side_sha256": xinclude.pssm_cell(files, "r", xinclude.PSSM_ASN)}
-        first_difference = lambda want, got: "differs at a line"  # noqa: E731
-
-        def run(*data: bytes) -> xinclude.PssmResult:
-            return xinclude.PssmResult(None, [(name, value) for (name, _), value in zip(files, data)])
-
-        last = small.replace(b"626", b"625")
-        with tempfile.TemporaryDirectory() as tmp:
-            frozen = Path(tmp)
-            xinclude.freeze_pssm(xinclude.PssmResult(None, files), frozen, "r", xinclude.PSSM_ASN)
-            self.assertEqual(sorted(path.name for path in frozen.iterdir()), ["r.asn"])
-            reference = dict(files).get
-            self.assertEqual(xinclude.pssm_problems(run(small, big), row, frozen, first_difference), [])
-            # exact: both files differ
-            problems = xinclude.pssm_problems(run(last, last + pad), row, frozen, first_difference)
-            self.assertEqual(problems, ["r.asn differs at a line", problems[1]])
-            self.assertIn("r.asn.1 differs (sha256", problems[1])
-            # the rule: both are the same, and each is listed
-            accepted: list[str] = []
-            self.assertEqual(xinclude.pssm_problems(run(last, last + pad), row, frozen, first_difference,
-                                                    reference, accepted), [])
-            self.assertEqual(accepted, ["r.asn: 1 values", "r.asn.1: 1 values"])
-            # 2 apart, or another byte, still differ under the rule
-            two = small.replace(b"626", b"624")
-            for got in ((two, big), (small, two + pad), (small, last + pad + b"x")):
-                problems = xinclude.pssm_problems(run(*got), row, frozen, first_difference, reference, [])
-                self.assertEqual(len(problems), 1, got[1][:60])
-            # a reference whose file is not the frozen one gives no expectation
-            problems = xinclude.pssm_problems(run(small, last + pad), row, frozen, first_difference,
-                                              {"r.asn.1": last + pad}.get, [])
-            self.assertEqual(len(problems), 1)
-            self.assertIn("reference run's file has sha256", problems[0])
-            problems = xinclude.pssm_problems(run(small, last + pad), row, frozen, first_difference, {}.get, [])
-            self.assertIn("reference run's file has sha256 none", problems[0])
-
-    @unittest.skipUnless(os.name == "posix", "the stand-in LOSAT commands are scripts with a #! line")
-    def test_db_check_applies_the_libm_rule_to_pssm_files_only(self):
-        # `db_search_fixtures.py check --libm-last-digit NATIVE` (what check_wasm_threading.py runs for the
-        # WASI commands): a psiblast row whose ASN.1 PSSM (over 64 KB, not frozen) differs in the last
-        # digit of a REAL is `libm-last-digit`; without the option it differs; the report stays exact.
-        value = b"informationContent {\n  { 347923230575626, 10, -15 }\n}\n" + b"x" * xinclude.FREEZE_LIMIT
-        report = b"lambda real { 347923230575626, 10, -15 }\n"
-        with tempfile.TemporaryDirectory() as tmp:
-            directory, frozen = Path(tmp), Path(tmp) / "frozen"
-            frozen.mkdir()
-
-            def command(name: str, asn: bytes, stdout: bytes = report) -> Path:
-                script = directory / name
-                script.write_text(f"#!{sys.executable}\nimport sys\n"
-                                  "path = sys.argv[sys.argv.index('-out_pssm') + 1]\n"
-                                  f"open(path, 'wb').write({asn!r})\nsys.stdout.buffer.write({stdout!r})\n")
-                script.chmod(0o755)
-                return script
-
-            (frozen / "r.out").write_bytes(report)
-            row = {"row_id": "r", "program": "psiblast", "kind": "ncbi", "db": "d", "query": "q", "extra_args": "",
-                   "outfmt": "11", "rc": "0", "stdout_sha256": xinclude.sha256(report),
-                   "stdout_bytes": str(len(report)), "stderr_sha256": "", "covers": "", "files": xinclude.PSSM_ASN,
-                   "side_sha256": xinclude.pssm_cell([("r.asn", value)], "r", xinclude.PSSM_ASN)}
-            native = command("native", value)
-            last = value.replace(b"626", b"625", 1)
-            env = dict(os.environ)
-            with unittest.mock.patch.object(db_fixtures, "FROZEN", frozen):
-                def check(losat: Path, libm: Path | None) -> tuple[str, str]:
-                    return db_fixtures.check_row(row, losat, 1, env, libm_native=libm)
-
-                self.assertEqual(check(native, None), ("same", ""))
-                self.assertEqual(check(native, native), ("same", ""))
-                wasi = command("wasi", last)
-                status, detail = check(wasi, None)
-                self.assertEqual(status, "differs")
-                self.assertIn("r.asn differs (sha256", detail)
-                self.assertEqual(check(wasi, native), ("libm-last-digit", "r.asn: 1 values"))
-                # 2 apart; a reference that does not give the frozen bytes
-                self.assertEqual(check(command("two", value.replace(b"626", b"624", 1)), native)[0], "differs")
-                self.assertEqual(check(wasi, command("other", last))[0], "differs")
-                # the report is compared byte for byte, also with the option
-                moved = command("moved", last, report.replace(b"626", b"625"))
-                status, detail = check(moved, native)
-                self.assertEqual(status, "differs")
-                self.assertIn("stdout line 1", detail)
-
 
 class SelectionTests(unittest.TestCase):
     def test_paths_select_programs(self):
@@ -645,6 +940,64 @@ class SelectionTests(unittest.TestCase):
         self.assertIn("tblastx", blastn)
         for program in fast.PROGRAMS:
             self.assertIn(program, fast.program_dependents()[program])
+
+
+class OutputFormatSelectionTests(unittest.TestCase):
+    """`--outfmts` of the two fixture checkers, and the rows that check_wasm_threading.py runs with it: blastx's
+    BLAST XML, XML2 and JSON rows through each WASI command (`blastx_prescan_checkers`)."""
+
+    CELLS = ["5", "1", "16", "13", "6 qseqid sseqid", "15", "14", "0"]
+
+    def test_a_row_is_kept_by_the_first_word_of_its_format_whole(self):
+        rows = [{"row_id": f"r{index}", "program": "blastx", "outfmt": cell} for index, cell in enumerate(self.CELLS)]
+
+        def kept(outfmts: str, program: str = "blastx") -> list[str]:
+            args = argparse.Namespace(only="", program=program, outfmts=outfmts)
+            return [row["outfmt"] for row in rows if db_fixtures.selected(row, args)]
+
+        self.assertEqual(kept("5,13,14,15,16"), ["5", "16", "13", "15", "14"])
+        self.assertEqual(kept("1"), ["1"])
+        self.assertEqual(kept("6"), ["6 qseqid sseqid"])
+        self.assertEqual(kept(""), self.CELLS)
+        self.assertEqual(kept("5", "blastp"), [])
+        # `freeze` has no --outfmts: every row.
+        self.assertEqual(sum(db_fixtures.selected(row, argparse.Namespace(only="", program="")) for row in rows), 8)
+        # check_losat.py: the same rule, an empty cell being outfmt 0.
+        rows = [{"fixture_id": f"x{index}", "program": "blastx", "outfmt": cell}
+                for index, cell in enumerate(["", *self.CELLS])]
+        rows.append({"fixture_id": "y", "program": "blastp", "outfmt": "5"})
+
+        def subject(outfmts: str, programs: str = "blastx", only: str = "") -> list[str]:
+            return [row["fixture_id"] for row in check_losat.selected_rows(rows, programs, only, outfmts)]
+
+        self.assertEqual(subject("0"), ["x0", "x8"])
+        self.assertEqual(subject("5,16"), ["x1", "x3"])
+        self.assertEqual(subject("5", "blastx,blastp"), ["x1", "y"])
+        self.assertEqual(subject("", "blastx", "x1"), ["x1"])
+        self.assertEqual(len(subject("")), 9)
+
+    def test_the_wasi_section_runs_every_blastx_xml_and_json_row_of_both_sets(self):
+        import check_wasm_threading as wasm
+
+        formats = wasm.BLASTX_PRESCAN_FORMATS.split(",")
+        self.assertEqual(formats, ["5", "13", "14", "15", "16"])
+        subject = check_losat.selected_rows(run_oracle.read_manifest()[2], "blastx", "", wasm.BLASTX_PRESCAN_FORMATS)
+        args = argparse.Namespace(only="", program="blastx", outfmts=wasm.BLASTX_PRESCAN_FORMATS)
+        db = [row for row in db_fixtures.read_manifest()[1] if db_fixtures.selected(row, args)]
+        # Every format, in the -subject and the -db rows; every blastx row of these formats and no other.
+        for rows, every, number in [
+                (subject, [row for row in run_oracle.read_manifest()[2] if row["program"] == "blastx"],
+                 lambda row: run_oracle.outfmt(row).split()[0]),
+                (db, [row for row in db_fixtures.read_manifest()[1] if row["program"] == "blastx"],
+                 db_fixtures.format_number)]:
+            self.assertEqual(sorted({number(row) for row in rows}, key=int), formats)
+            self.assertEqual(rows, [row for row in every if number(row) in formats])
+        # The section's command lines are the checkers' own: with a prefix that no row has, each selects nothing
+        # and passes (no LOSAT runs).
+        for name, checker, _ in wasm.blastx_prescan_checkers(Path("no-such-losat")):
+            run = subprocess.run([sys.executable, *checker, "--only", "no-such-row"], capture_output=True, text=True)
+            self.assertEqual(run.returncode, 0, (name, run.stderr))
+            self.assertRegex(run.stdout.splitlines()[-1], r"^# (fixtures=0 differing=\[\]|rows=0 differing=0 )", name)
 
 
 class StartupTraceNoticeTests(unittest.TestCase):
@@ -794,6 +1147,89 @@ class NcbiUsageReportOffTests(unittest.TestCase):
                 self.assertEqual(fixtures.run_case(str(bin_dir / program), [], "x", "", "").stdout, b"true")
             self.assertEqual((fixtures_dir / f"{case[0]}.out").read_bytes(), b"false")
             self.assertIn("of false (", (fixtures_dir / "manifest.tsv").read_text())
+
+
+
+class WasmDbTotalRowsTests(unittest.TestCase):
+    """The -db rows that check_wasm_threading.py runs through each WASI command for a database total of 2^32
+    letters or more (`DB_TOTAL_ROWS`): NCBI's rows of one database whose alias file declares such a `LENGTH`
+    (below 2^63: from there NCBI's `Int8` is negative, and the statistics read the length of OID 0)."""
+
+    def test_the_rows_are_every_ncbi_row_of_one_database_of_2_to_the_32_letters_or_more(self):
+        import check_wasm_threading as watcher
+
+        def alias_length(row: dict[str, str]) -> int:
+            names = row["db"].split()
+            if len(names) != 1 or ":" in names[0]:
+                return 0
+            for suffix in (".nal", ".pal"):
+                alias = db_fixtures.ENGINE / (names[0] + suffix)
+                if alias.is_file():
+                    for line in alias.read_text().splitlines():
+                        key, _, value = line.partition(" ")
+                        if key == "LENGTH":
+                            return int(value)
+            return 0
+
+        rows = db_fixtures.read_manifest()[1]
+        expected = [row["row_id"] for row in rows if row["kind"] == "ncbi" and 2**32 <= alias_length(row) < 2**63]
+        self.assertEqual(sorted(watcher.DB_TOTAL_ROWS), sorted(expected))
+        self.assertEqual(len(set(watcher.DB_TOTAL_ROWS)), 16)
+        # The watcher selects each row by `--only` (a prefix of the row id): it names that row alone.
+        for row_id in watcher.DB_TOTAL_ROWS:
+            self.assertEqual([row["row_id"] for row in rows if row["row_id"].startswith(row_id)], [row_id])
+
+
+
+class WasmLocalTimeTests(unittest.TestCase):
+    """The local times that check_wasm_threading.py puts aside in the outputs of makeblastdb, blastdbcmd -info and
+    a search report of its local-time-and-path block (`local_times`), and its test that each is the local time of
+    its run (`is_local_time_of`)."""
+
+    def test_each_form_is_read_and_put_aside(self):
+        import calendar
+        import check_wasm_threading as watcher
+
+        log = (b"\n\nBuilding a new DB, current time: 11/18/2026 21:27:29\nNew DB name:   /w/db\n"
+               b"Adding sequences from FASTA; added 3 sequences in 0.00400209 seconds.\n")
+        self.assertEqual(watcher.local_times(log), (
+            b"\n\nBuilding a new DB, current time: <time>\nNew DB name:   /w/db\n"
+            b"Adding sequences from FASTA; added 3 sequences in <seconds> seconds.\n",
+            [(calendar.timegm((2026, 11, 18, 21, 27, 29)), 1)]))
+        # makeblastdb 2.17.0's form of a short build time.
+        self.assertEqual(watcher.local_times(b"added 1 sequences in 5.5e-05 seconds.\n")[0],
+                         b"added 1 sequences in <seconds> seconds.\n")
+        info = b"Database: t\n\t3 sequences; 2,700 total bases\n\nDate: Nov 8, 2026  9:07 PM\tLongest sequence: 900 bases\n"
+        self.assertEqual(watcher.local_times(info), (
+            b"Database: t\n\t3 sequences; 2,700 total bases\n\nDate: <time>\tLongest sequence: 900 bases\n",
+            [(calendar.timegm((2026, 11, 8, 21, 7, 0)), 60)]))
+        report = b"  Database: t\n    Posted date:  Jan 1, 2027  12:05 AM\n  Number of letters in database: 2,700\n"
+        self.assertEqual(watcher.local_times(report), (
+            b"  Database: t\n    Posted date:  <time>\n  Number of letters in database: 2,700\n",
+            [(calendar.timegm((2027, 1, 1, 0, 5, 0)), 60)]))
+        self.assertEqual(watcher.local_times(b"Date: Dec 31, 2026  12:59 PM\t")[1],
+                         [(calendar.timegm((2026, 12, 31, 12, 59, 0)), 60)])
+        # Text that only looks like a time stays.
+        other = b"Query= Date: Nov 8, 2026  9:07 PM\nbuilt 11/18/2026 21:27:29\n"
+        self.assertEqual(watcher.local_times(other), (other, []))
+
+    def test_a_time_is_the_local_time_of_its_run_in_the_zone(self):
+        import check_wasm_threading as watcher
+
+        started, ended = 1_795_000_000.4, 1_795_000_002.9
+        jst = 32400
+        # The log, to the second: any second of the run, one second of slack at each end.
+        for printed in [1_795_000_000 + jst, 1_795_000_002 + jst, 1_794_999_999 + jst, 1_795_000_003 + jst]:
+            self.assertTrue(watcher.is_local_time_of(printed, 1, jst, started, ended), printed)
+        for printed in [1_794_999_998 + jst, 1_795_000_004 + jst, 1_795_000_001]:
+            self.assertFalse(watcher.is_local_time_of(printed, 1, jst, started, ended), printed)
+        # The date, to the minute: the minute of the run's start or end.
+        minute = (1_795_000_000 + jst) // 60 * 60
+        self.assertTrue(watcher.is_local_time_of(minute, 60, jst, started, ended))
+        self.assertFalse(watcher.is_local_time_of(minute - 60, 60, jst, started, ended))
+        self.assertFalse(watcher.is_local_time_of(minute - jst, 60, jst, started, ended))
+        # UTC is the zone of offset 0.
+        self.assertTrue(watcher.is_local_time_of(1_795_000_001, 1, 0, started, ended))
 
 
 if __name__ == "__main__":

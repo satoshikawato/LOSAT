@@ -10,15 +10,14 @@ from wasm_performance import execute, digest, validate_thread_evidence
 ROOT = Path(__file__).resolve().parents[2]
 TESTS = ROOT / 'LOSAT/tests'
 
-# NCBI reference: c++/src/algo/blast/core/blast_hits.c:1984-2003
+# NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1984-2003
 # if (hsp->evalue > cutoff) { hsp_array[index] = Blast_HSPFree(hsp_array[index]); }
 # A threshold sweep compares full raw rows, never only the number of HSPs.
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ['native', 'threaded', 'oracle', 'output-dir']:
         parser.add_argument('--'+name, type=Path, required=True)
-    # NCBI reference: c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
-    # m_NumThreads = CThreadable::kMinNumThreads; m_MTMode = eNotSupported;
+    # NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
     parser.add_argument('--serial', type=Path, help='opt in to serial compatibility checks')
     parser.add_argument('--node', default='node')
     args = parser.parse_args(); out = args.output_dir.resolve(); out.mkdir(parents=True, exist_ok=True)
@@ -34,8 +33,7 @@ def main():
     env = {k:v for k,v in os.environ.items() if not k.startswith(('LOSAT_','RAYON_')) and k!='BL2SEQ_LEGACY'}
     env.update(LC_ALL='C',NODE_NO_WARNINGS='1')
     records=[]
-    # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:173-180
-    # (*thread)->Run(); (*thread)->Join(&result);
+    # NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:173-180
     prefixes = [
         ('native',1,[str(args.native.resolve())]),
         ('threaded',4,[args.node,str(TESTS/'run_losat_wasi_threads.js'),str(args.threaded.resolve())]),
@@ -47,7 +45,7 @@ def main():
         oracle=execute([str(args.oracle.resolve()),*common,'-num_threads','1'],ROOT,out/f'e{threshold}'/'oracle',env,900)
         assert oracle['status']=='PASS'
         records.append({**oracle,'evalue':threshold,'kind':'oracle'})
-        # NCBI reference: c++/src/algo/blast/core/blast_hits.c:1984-2003
+        # NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1984-2003
         # if (hsp->evalue > cutoff) { hsp_array[index] = Blast_HSPFree(hsp_array[index]); }
         for kind,n,prefix in prefixes:
             directory=out/f'e{threshold}'/kind

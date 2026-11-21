@@ -88,19 +88,6 @@ pub(super) const PARSED_SEQIDS: &str =
      database distributed by NCBI), which the decoder of the ordinal ids does not read";
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2208-2218
-// ```c++
-//     CTempString raw_data = x_GetHdrAsn1Binary(oid);
-//
-//     if (! raw_data.size()) {
-//         return bdls;
-//     }
-//
-//     // Now create an ASN.1 object from the memory chunk provided here.
-//
-//     CObjectIStreamAsnBinary inpstr(raw_data.data(), raw_data.size());
-//
-//     bdls.Reset(new objects::CBlast_def_line_set);
-// ```
 /// Decodes the `Blast-def-line-set` of the sequence `oid` (volume-relative). An empty record
 /// gives no definition line, as in NCBI.
 #[cfg(test)]
@@ -227,31 +214,8 @@ fn decode_defline(
         }
     }
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:903-908
-    // ```c++
-    // void CWriteDB_Impl::x_CookHeader()
-    // {
-    //     int OID = -1;
-    //     if (! m_ParseIDs) {
-    //         OID = (m_Volume ) ? m_Volume->GetOID() : 0;
-    //     }
-    // ```
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:866-872
-    // ```c++
-    //     if (OID>=0) {
-    //         // Re-inject the BL_ORD_ID
-    //         CRef<CSeq_id> gnl_id(new CSeq_id);
-    //         gnl_id->SetGeneral().SetDb("BL_ORD_ID");
-    //         gnl_id->SetGeneral().SetTag().SetId(OID);
-    //         CRef<CBlast_def_line_set> bdls = s_EditDeflineSet(deflines);
-    //         bdls->Set().front()->SetSeqid().front() = gnl_id;
-    // ```
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2712-2715
-    // ```c++
-    //     case eOID:
-    //         // Converted to OID directly.
-    //         oids.push_back((int) ident);
-    //         break;
-    // ```
     // Without `-parse_seqids` makeblastdb gives each sequence the id `gnl|BL_ORD_ID|<its number in
     // the volume>`, cooked again when the sequence goes to a new volume (writedb_impl.cpp:1214-1215).
     // With `-parse_seqids` it stores a FASTA id `gnl|BL_ORD_ID|n` as written. NCBI reads n plus the
@@ -273,14 +237,6 @@ fn decode_defline(
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2231-2236
-// ```c++
-//                 if (seqid.Which() == CSeq_id::e_General) {
-//                     CDbtag & dbt = seqid.SetGeneral();
-//
-//                     if (dbt.GetDb() == "BL_ORD_ID") {
-//                         int vol_oid = dbt.GetTag().GetId();
-//                         dbt.SetTag().SetId(m_VolStart + vol_oid);
-// ```
 /// Decodes one `Seq-id`, which must be `general { db "BL_ORD_ID", tag id n }`.
 fn decode_ordinal_id(ber: &mut Reader<'_>) -> Result<u32, HeaderError> {
     let tag = ber.tag()?;

@@ -812,7 +812,7 @@ const SELF1: &[(u32, u32, u32, &str)] = &[
     (0, 2, 155, "3PK3GS3SD3ST3TK3EH3IG3ML3TS1-P-W10"),
 ];
 
-// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmerger.cpp:499-501 (quoted at `aln_mix::Mix::place`):
+// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmerger.cpp:499-501 (cited at `aln_mix::Mix::place`):
 // the first match placed on the query sets the `m_DsIdx` of its second row. In z.self1 (one record as the
 // query, `-query_loc 1-48`, and as the subject, `-subject_loc 49-223`, `-parse_deflines -comp_based_stats 0`,
 // review of line RG T3a, `T/t3/review_t3a/`) the subject is the query's own Bioseq: `Add` presets its row
@@ -898,7 +898,7 @@ const LO24: &[(u32, u32, u32, &str)] = &[
     (0, 2, 96, "2FY1YC2ETKA1MI1-D2ETIH1VS1YIGT9EG2RL4VS5SA3WPDE1"),
 ];
 
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3050, 3060 and 3089 (quoted at
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3050, 3060 and 3089 (cited at
 // `column`). lo24 of review 2 of line RG T3a (`T/t3/review2_t3a/`: `-query in2/lo24.fa -subject
 // in2/lo24.fa -parse_deflines -query_loc 1-54 -subject_loc 55-355 -outfmt 1`, row `db.of1.bp.lo24.f1`):
 // the longest segment (q14-52, 39 columns) is the third HSP's, after its insertion of D, so the
@@ -930,8 +930,8 @@ lo24  281  ........P........MQ...G.E...M.R.........E........SEL..  335
     );
 }
 
-// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnseq.cpp:266-283 and alnsegments.cpp:286-338
-// (quoted at `aln_mix::Mix::build_rows` and `fill_unaligned_regions`). zs3 of the review
+// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnseq.cpp:266-283 and c++/src/objtools/alnmgr/alnsegments.cpp:286-338
+// (cited at `aln_mix::Mix::build_rows` and `fill_unaligned_regions`). zs3 of the review
 // (`-query in/selfseg3.fa -subject in/selfseg3.fa -parse_deflines -seg yes -outfmt 1`): SEG splits the
 // record's self diagonal into q1-30 (added first) and q111-150 (the longest segment). The latter's match
 // sets the subject's row to its HSP and goes to an extra row; q1-30 goes to a second one, so the

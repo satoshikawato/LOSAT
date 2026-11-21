@@ -16,34 +16,9 @@
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1547-1548,1579-1584
 //! (`CBlastFormat::PrintOneResultSet`, formats 0 to 4)
-//! ```c++
-//!     TMaskedQueryRegions masklocs;
-//!     results.GetMaskedQueryRegions(masklocs);
-//!     ...
-//!     display.SetMasterGeneticCode(m_QueryGenCode);
-//!     display.SetSlaveGeneticCode(m_DbGenCode);
-//!     display.SetSeqLocChar(CDisplaySeqalign::eLowerCase);
-//!     TSeqLocInfoVector subj_masks;
-//!     results.GetSubjectMasks(subj_masks);
-//!     display.SetSubjectMasks(subj_masks);
-//! ```
 //! NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2100-2101
-//! ```c++
-//!                 avRef->SetGenCode(m_SlaveGeneticCode);
-//!                 avRef->SetGenCode(m_MasterGeneticCode, 0);
-//! ```
 //! NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1244-1251
-//! ```c++
-//!     // Mask locations for queries (first elem) and subjects (all other rows)
-//!     vector<TSAlnSeqlocInfoList> masked_regions(rowNum);
-//!     x_FillLocList(masked_regions[0], m_Seqloc);
-//!
-//!     for (int row = 1; row < rowNum; row++) {
-//!         const CSeq_id& id = m_AV->GetSeqId(row);
-//!         x_FillLocList(masked_regions[row], &m_SubjectMasks[id]);
-//!     }
-//! ```
-//! (`x_FillSeqid`, the labels: showalign.cpp:4545-4572, quoted at `query_anchored::fill_seqid`.)
+//! (`x_FillSeqid`, the labels: showalign.cpp:4545-4572, cited at `query_anchored::fill_seqid`.)
 
 use std::collections::HashMap;
 

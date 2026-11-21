@@ -7,4 +7,4 @@ const scope = self as unknown as {
   postMessage(message: unknown): void;
 };
 const keeper = new MemoryKeeper();
-scope.onmessage = (event) => scope.postMessage(keeper.receive(event.data));
+scope.onmessage = (event) => void keeper.receive(event.data).then((ready) => scope.postMessage(ready));

@@ -1,23 +1,25 @@
-//! Property tests of the index scan's parser kinds 1 (nucleotide flags) and 2 (protein
-//! flags) against the engine's reader (`FastaInputSource::from_bytes`, NCBI BLAST+'s
-//! `CFastaReader` with data loaders on): the records, IDs, lengths, residue counts and
-//! reader errors agree with the reader; the offsets and the line layout agree with a
-//! reference walk that records where every residue is (a pull-based model of NCBI's line
-//! reader over the same bytes, itself checked against the reader's records); a record's
-//! residues are found again from its layout (the uniform formula, or the read-forward
-//! rules from every checkpoint); and scanning in chunks of any size gives the same result
-//! as scanning at once.
+//! Property tests of the index scan with the reader of nucleotide input and of protein input,
+//! NCBI's data loaders on and off, against the engine's reader (`FastaInputSource::from_bytes`,
+//! NCBI BLAST+'s `CFastaReader`): the records, IDs, lengths and residue counts (a `>?` gap
+//! line's letters included), the reader's errors and its refusals (a first line that may be a
+//! Seq-id, with the loaders on) agree with the reader; the offsets agree with a reference walk
+//! (a pull-based model of NCBI's line reader over the same bytes, itself checked against the
+//! reader's records); and scanning in chunks of any size gives the same result as scanning at
+//! once.
 //!
 //! Inputs cover LF, CRLF, CR only and mixed line ends (a CR inside an LF file, an LF
 //! inside a CR file, the tail that a file loses after a second pushback), no final line
 //! end, comment and blank lines, a first record without a defline, `>?` gap lines,
 //! `-`, `;`, interior white space, invalid residues, non-ASCII and non-UTF-8 bytes, empty
-//! records, a BOM, Seq-id first lines, implausible first data lines, and records longer
-//! than the checkpoint spacing.
+//! records, a BOM, Seq-id first lines, implausible first data lines, and long records.
 
 use losat::api::FastaRecord;
 use losat::web_adapter::{FastaInputSource, ParseErrorCode, ReadError, ReaderConfig};
-use losat_web_adapter::scan::{scan_ncbi, LineLayout, NcbiScanner, ScanRecord, CHECKPOINT_EVERY};
+use losat_web_adapter::scan::{scan_ncbi, NcbiScanner, ScanError, ScanRecord};
+
+/// A long record's length in the generated inputs (the old checkpoint spacing of the index's
+/// line layout, which line WQA's D13 removed on 2026-11-20).
+const LONG: u64 = 65_536;
 
 /// A small deterministic generator (xorshift64*).
 struct Random(u64);
@@ -53,9 +55,14 @@ enum EngineEnd {
     Unsupported(String),
 }
 
-fn engine(input: &[u8], protein: bool) -> (Vec<FastaRecord>, EngineEnd) {
-    let mut source =
-        FastaInputSource::from_bytes(input, ReaderConfig::subject("SCAN", protein, true));
+/// The reader that the scan models: the subject reader of a program, with NCBI's data loaders on
+/// or off.
+fn config(protein: bool, data_loaders: bool) -> ReaderConfig {
+    ReaderConfig::subject("SCAN", protein, data_loaders)
+}
+
+fn engine(input: &[u8], config: ReaderConfig) -> (Vec<FastaRecord>, EngineEnd) {
+    let mut source = FastaInputSource::from_bytes(input, config);
     let mut records = Vec::new();
     loop {
         if source.end() {
@@ -70,8 +77,12 @@ fn engine(input: &[u8], protein: bool) -> (Vec<FastaRecord>, EngineEnd) {
             Err(ReadError::Parse { message, line, .. }) => {
                 return (records, EngineEnd::Parse { message, line })
             }
-            Err(ReadError::Unsupported(error)) => {
-                return (records, EngineEnd::Unsupported(format!("{error:#}")))
+            Err(error @ ReadError::Unsupported(_)) => {
+                let message = format!("{:#}", error.into_app_error());
+                return (
+                    records,
+                    EngineEnd::Unsupported(message.trim_end_matches('\n').to_string()),
+                );
             }
             Err(ReadError::Write(error)) => panic!("{error}"),
         }
@@ -440,8 +451,8 @@ struct RefRecord {
     header_offset: usize,
     sequence_offset: usize,
     end_offset: usize,
-    /// Stored residues (upper-cased) and where they are (none for a gap's residues).
-    residues: Vec<(u8, Option<usize>)>,
+    /// Stored residues (upper-cased), a gap's letters included.
+    residues: Vec<u8>,
     /// The number of the line that ended the record (`u64::MAX` at the end of the input).
     close_line: u64,
 }
@@ -449,8 +460,8 @@ struct RefRecord {
 #[derive(Debug, Default)]
 struct Reference {
     records: Vec<RefRecord>,
-    /// The first gap line.
-    gap_line: Option<u64>,
+    /// A gap line was read.
+    gap: bool,
     joins: bool,
     lost: bool,
 }
@@ -529,15 +540,18 @@ fn title(defline: &[u8]) -> Vec<u8> {
     text[..last].to_vec()
 }
 
-fn reference(input: &[u8], protein: bool) -> Reference {
+fn reference(input: &[u8], protein: bool, data_loaders: bool) -> Reference {
     let mut lines = Lines::new(input);
     let mut out = Reference::default();
     let total = input.len();
     let bytes = |line: &[usize]| line.iter().map(|&o| input[o]).collect::<Vec<u8>>();
     while !lines.at_eof() {
-        // ReadOneSeq of CBlastInputReader: the first line is tried as a Seq-id.
-        lines.next_line();
-        lines.unget_line();
+        // ReadOneSeq of CBlastInputReader: with the data loaders on, the first line is tried as
+        // a Seq-id.
+        if data_loaders {
+            lines.next_line();
+            lines.unget_line();
+        }
         let mut need_defline = true;
         let mut record = RefRecord {
             title: Vec::new(),
@@ -578,10 +592,10 @@ fn reference(input: &[u8], protein: bool) -> Reference {
             }
             let line = modify(line, input);
             if starts_with(&line, input, b">?") {
-                out.gap_line.get_or_insert(lines.line_number);
+                out.gap = true;
                 let gap = if protein { b'X' } else { b'N' };
                 for _ in 0..gap_length(&bytes(&line)) {
-                    record.residues.push((gap, None));
+                    record.residues.push(gap);
                 }
                 continue;
             }
@@ -591,7 +605,7 @@ fn reference(input: &[u8], protein: bool) -> Reference {
                     break;
                 }
                 if residue_type(byte, protein) {
-                    record.residues.push((stored(byte, protein), Some(offset)));
+                    record.residues.push(stored(byte, protein));
                 }
             }
         }
@@ -606,98 +620,29 @@ fn reference(input: &[u8], protein: bool) -> Reference {
 }
 
 // ---------------------------------------------------------------------------------------
-// The layout as the application uses it.
-
-/// The uniform layout of residue offsets, if they have one.
-fn uniform(offsets: &[usize], sequence_offset: usize) -> Option<(u64, u64)> {
-    if offsets.is_empty() {
-        return Some((0, 1));
-    }
-    if offsets[0] != sequence_offset {
-        return None;
-    }
-    let Some(width) = (1..offsets.len()).find(|&i| offsets[i] != offsets[i - 1] + 1) else {
-        return Some((offsets.len() as u64, 1));
-    };
-    let eol = offsets[width] - offsets[width - 1] - 1;
-    offsets
-        .iter()
-        .enumerate()
-        .all(|(i, &o)| o == sequence_offset + i / width * (width + eol) + i % width)
-        .then_some((width as u64, eol as u64))
-}
-
-/// The read-forward rules (docs/web/abi_v2.md §9, kinds 1 and 2) from a checkpoint:
-/// the offsets of at most `count` residues, the checkpoint's first.
-fn read_forward(input: &[u8], from: usize, count: usize, protein: bool) -> Vec<usize> {
-    #[derive(PartialEq)]
-    enum State {
-        LineStart,
-        Data,
-        Skip,
-    }
-    let mut state = State::Data;
-    let mut found = Vec::new();
-    let mut offset = from;
-    while found.len() < count && offset < input.len() {
-        let byte = input[offset];
-        if byte == b'\r' || byte == b'\n' {
-            state = State::LineStart;
-        } else {
-            if state == State::LineStart && !matches!(byte, b' ' | b'\t' | 0x0b | 0x0c) {
-                state = if matches!(byte, b'!' | b'#' | b';') {
-                    State::Skip
-                } else {
-                    State::Data
-                };
-            }
-            if state == State::Data {
-                if byte == b';' {
-                    state = State::Skip;
-                } else if residue_type(byte, protein) {
-                    found.push(offset);
-                }
-            }
-        }
-        offset += 1;
-    }
-    found
-}
-
-/// Whether the read-forward rules find the residues from every checkpoint.
-fn readable(input: &[u8], offsets: &[usize], protein: bool) -> bool {
-    let every = CHECKPOINT_EVERY as usize;
-    (0..offsets.len()).step_by(every).all(|start| {
-        let count = every.min(offsets.len() - start);
-        read_forward(input, offsets[start], count, protein) == offsets[start..start + count]
-    })
-}
-
-// ---------------------------------------------------------------------------------------
 // The expected scan.
 
 #[derive(Debug)]
 enum Expected {
-    Records(Vec<(RefRecord, LineLayout)>),
-    SeqId,
-    Gap(u64),
+    Records(Vec<RefRecord>),
+    SeqId(String),
     Parse(String),
-    NotReadable(usize),
 }
 
 /// What the generated inputs exercised.
 #[derive(Default, Debug)]
 struct Coverage {
     records: usize,
-    uniform: usize,
-    checkpoints: usize,
     large: usize,
     empty: usize,
     headerless: usize,
     seq_id: usize,
+    /// A first line that the reader refuses as a Seq-id with the data loaders on, read with them
+    /// off.
+    seq_id_read: usize,
+    /// Records read with a gap line's letters.
     gap: usize,
     parse: usize,
-    not_readable: usize,
     joins: usize,
     lost: usize,
     crlf: usize,
@@ -705,17 +650,21 @@ struct Coverage {
     non_utf8: usize,
 }
 
-fn expected(input: &[u8], protein: bool, context: &str, coverage: &mut Coverage) -> Expected {
-    let (records, end) = engine(input, protein);
-    let reference = reference(input, protein);
+fn expected(
+    input: &[u8],
+    config: ReaderConfig,
+    context: &str,
+    coverage: &mut Coverage,
+) -> Expected {
+    let (records, end) = engine(input, config);
+    let reference = reference(input, config.protein, config.data_loaders);
     // The reference reads the reader's records (titles and residues).
     for (index, record) in records.iter().enumerate() {
         let want = &reference.records[index];
         assert_eq!(record.title, want.title, "{context}: title {index}");
-        let residues: Vec<u8> = want.residues.iter().map(|&(r, _)| r).collect();
         assert_eq!(
             record.sequence.to_ascii_uppercase(),
-            residues,
+            want.residues,
             "{context}: residues {index}"
         );
     }
@@ -725,152 +674,107 @@ fn expected(input: &[u8], protein: bool, context: &str, coverage: &mut Coverage)
     let stop_line = match &end {
         EngineEnd::Unsupported(message) => {
             assert!(
-                message.contains("may be a sequence identifier"),
+                config.data_loaders && message.contains("may be a sequence identifier"),
                 "{context}: {message}"
             );
             coverage.seq_id += 1;
-            return Expected::SeqId;
+            return Expected::SeqId(message.clone());
         }
         EngineEnd::Parse { line, .. } => *line,
         EngineEnd::Done => u64::MAX,
     };
-    // The first rejection, by line: a gap line, or a record that the layout cannot locate
-    // (rejected when the line that ends it starts).
-    let mut rejection: Option<(u64, Expected)> = reference
-        .gap_line
-        .filter(|&line| line < stop_line)
-        .map(|line| (line, Expected::Gap(line)));
     coverage.joins += reference.joins as usize;
     coverage.lost += reference.lost as usize;
-    let mut layouts = Vec::new();
-    for (index, record) in reference.records.iter().enumerate() {
-        // Records that close before the reader's error (or at the end of the input).
-        let closes = record.close_line < stop_line
-            || (stop_line == u64::MAX && record.close_line == u64::MAX);
-        if !closes {
-            break;
-        }
-        if rejection
-            .as_ref()
-            .is_some_and(|(line, _)| *line <= record.close_line)
-        {
-            break;
-        }
-        if record.residues.iter().any(|(_, offset)| offset.is_none()) {
-            break; // a gap: rejected at the gap line
-        }
-        let offsets: Vec<usize> = record.residues.iter().map(|&(_, o)| o.unwrap()).collect();
-        let layout = match uniform(&offsets, record.sequence_offset) {
-            Some((width, eol)) => LineLayout::Uniform { width, eol },
-            None if readable(input, &offsets, protein) => LineLayout::Checkpoints {
-                offsets: offsets
-                    .iter()
-                    .step_by(CHECKPOINT_EVERY as usize)
-                    .map(|&o| o as u64)
-                    .collect(),
-            },
-            None => {
-                rejection = Some((record.close_line, Expected::NotReadable(index)));
-                break;
-            }
-        };
-        layouts.push((record.clone(), layout));
-        if record.close_line == u64::MAX {
-            break;
-        }
-    }
-    if let Some((_, rejection)) = rejection {
-        match rejection {
-            Expected::Gap(_) => coverage.gap += 1,
-            _ => coverage.not_readable += 1,
-        }
-        return rejection;
-    }
+    coverage.gap += reference.gap as usize;
     if let EngineEnd::Parse { message, .. } = end {
         coverage.parse += 1;
         return Expected::Parse(message);
     }
-    Expected::Records(layouts)
+    let closed = reference
+        .records
+        .iter()
+        .take_while(|record| {
+            record.close_line < stop_line
+                || (stop_line == u64::MAX && record.close_line == u64::MAX)
+        })
+        .cloned()
+        .collect();
+    Expected::Records(closed)
 }
 
 fn check(input: &[u8], random: &mut Random, context: &str, coverage: &mut Coverage) {
-    for protein in [false, true] {
-        let context = format!("{context} kind {}", 1 + protein as u8);
-        let want = expected(input, protein, &context, coverage);
-        let scanned = scan_ncbi(input, protein);
-        match (&want, &scanned) {
-            (Expected::Records(records), Ok(scanned)) => {
-                assert_eq!(scanned.len(), records.len(), "{context}: record count");
-                for (index, ((record, layout), got)) in records.iter().zip(scanned).enumerate() {
-                    check_record(input, protein, record, layout, got, random, &context, index);
-                    coverage.records += 1;
-                    match layout {
-                        LineLayout::Uniform { width, .. } if *width > 0 => coverage.uniform += 1,
-                        LineLayout::Checkpoints { .. } => coverage.checkpoints += 1,
-                        _ => {}
+    let mut refused_with_loaders = [false; 2];
+    for data_loaders in [true, false] {
+        for protein in [false, true] {
+            let context = format!(
+                "{context} {} loaders {}",
+                if protein { "protein" } else { "nucleotide" },
+                if data_loaders { "on" } else { "off" }
+            );
+            let config = config(protein, data_loaders);
+            let want = expected(input, config, &context, coverage);
+            let scanned = scan_ncbi(input, config);
+            match (&want, &scanned) {
+                (Expected::Records(records), Ok(scanned)) => {
+                    assert_eq!(scanned.len(), records.len(), "{context}: record count");
+                    if refused_with_loaders[protein as usize] {
+                        coverage.seq_id_read += 1;
                     }
-                    if got.length == 0 {
-                        coverage.empty += 1;
-                    }
-                    if got.length > 2 * CHECKPOINT_EVERY {
-                        coverage.large += 1;
-                    }
-                    if index == 0 && got.header_offset == got.sequence_offset {
-                        coverage.headerless += 1;
+                    for (index, (record, got)) in records.iter().zip(scanned).enumerate() {
+                        check_record(record, got, &context, index);
+                        coverage.records += 1;
+                        if got.length == 0 {
+                            coverage.empty += 1;
+                        }
+                        if got.length > LONG {
+                            coverage.large += 1;
+                        }
+                        if index == 0 && got.header_offset == got.sequence_offset {
+                            coverage.headerless += 1;
+                        }
                     }
                 }
+                (Expected::SeqId(message), Err(error)) => {
+                    refused_with_loaders[protein as usize] = true;
+                    assert_eq!(
+                        error,
+                        &ScanError::Refused {
+                            message: message.clone(),
+                            record: 0
+                        },
+                        "{context}: refusal"
+                    )
+                }
+                (Expected::Parse(message), Err(error)) => {
+                    assert_eq!(
+                        error,
+                        &ScanError::Reader(message.clone()),
+                        "{context}: reader error"
+                    )
+                }
+                _ => panic!("{context}: expected {want:?}, scanned {scanned:?}"),
             }
-            (Expected::SeqId, Err(error)) => assert!(
-                error.contains("may be a sequence identifier")
-                    && error.contains("not supported in the browser"),
-                "{context}: {error}"
-            ),
-            (Expected::Gap(line), Err(error)) => assert!(
-                error.starts_with(&format!("line {line} is a gap line"))
-                    && error.contains("not supported in the browser"),
-                "{context}: {error}"
-            ),
-            (Expected::Parse(message), Err(error)) => {
-                assert_eq!(error, message, "{context}: reader error")
+            // Chunked scans give the same result.
+            for chunking in 0..3 {
+                let mut scanner = NcbiScanner::new(config);
+                let mut at = 0;
+                while at < input.len() {
+                    let size = match chunking {
+                        0 => 1,
+                        1 => 1 + random.below(7) as usize,
+                        _ => 1 + random.below(9000) as usize,
+                    };
+                    let end = (at + size).min(input.len());
+                    scanner.feed(&input[at..end]);
+                    at = end;
+                }
+                assert_eq!(scanner.finish(), scanned, "{context}: chunking {chunking}");
             }
-            (Expected::NotReadable(index), Err(error)) => assert!(
-                error.starts_with(&format!("record {} ", index + 1))
-                    && error.contains("reads two of its lines as one")
-                    && error.contains("not supported in the browser"),
-                "{context}: {error}"
-            ),
-            _ => panic!("{context}: expected {want:?}, scanned {scanned:?}"),
-        }
-        // Chunked scans give the same result.
-        for chunking in 0..3 {
-            let mut scanner = NcbiScanner::new(protein);
-            let mut at = 0;
-            while at < input.len() {
-                let size = match chunking {
-                    0 => 1,
-                    1 => 1 + random.below(7) as usize,
-                    _ => 1 + random.below(9000) as usize,
-                };
-                let end = (at + size).min(input.len());
-                scanner.feed(&input[at..end]);
-                at = end;
-            }
-            assert_eq!(scanner.finish(), scanned, "{context}: chunking {chunking}");
         }
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn check_record(
-    input: &[u8],
-    protein: bool,
-    record: &RefRecord,
-    layout: &LineLayout,
-    got: &ScanRecord,
-    random: &mut Random,
-    context: &str,
-    index: usize,
-) {
+fn check_record(record: &RefRecord, got: &ScanRecord, context: &str, index: usize) {
     let first_word = record
         .title
         .split(|&b| b == b' ')
@@ -899,48 +803,13 @@ fn check_record(
         "{context}: length {index}"
     );
     let mut counts = [0u64; 256];
-    for &(residue, _) in &record.residues {
+    for &residue in &record.residues {
         counts[residue as usize] += 1;
     }
     assert_eq!(
         *got.residue_counts, counts,
         "{context}: residue counts {index}"
     );
-    assert_eq!(&got.layout, layout, "{context}: layout {index}");
-    // The layout locates the residues: the formula, or reading forward from checkpoints.
-    let offsets: Vec<usize> = record.residues.iter().map(|&(_, o)| o.unwrap()).collect();
-    let length = offsets.len();
-    let samples: Vec<usize> = if length <= 4096 {
-        (0..length).collect()
-    } else {
-        (0..512)
-            .map(|_| random.below(length as u64) as usize)
-            .chain([0, length - 1])
-            .collect()
-    };
-    for residue in samples {
-        let at = match &got.layout {
-            LineLayout::Uniform { width, eol } => {
-                let r = residue as u64;
-                (got.sequence_offset + r / width * (width + eol) + r % width) as usize
-            }
-            LineLayout::Checkpoints { offsets: points } => {
-                let every = CHECKPOINT_EVERY as usize;
-                let from = points[residue / every] as usize;
-                let read = read_forward(input, from, residue % every + 1, protein);
-                read[residue % every]
-            }
-        };
-        assert_eq!(
-            at, offsets[residue],
-            "{context}: residue {residue} of {index}"
-        );
-        assert_eq!(
-            stored(input[at], protein),
-            record.residues[residue].0,
-            "{context}: residue byte"
-        );
-    }
 }
 
 // ---------------------------------------------------------------------------------------
@@ -1060,7 +929,7 @@ fn generate(random: &mut Random) -> Vec<u8> {
         }
         let length = match random.below(12) {
             0 => 0,
-            1 => CHECKPOINT_EVERY * 2 + random.below(CHECKPOINT_EVERY),
+            1 => LONG * 2 + random.below(LONG),
             _ => random.below(400),
         };
         let uniform = random.chance(50);
@@ -1178,15 +1047,13 @@ fn ncbi_scan_agrees_with_the_reader_on_generated_inputs() {
     eprintln!("{coverage:?}");
     let Coverage {
         records,
-        uniform,
-        checkpoints,
         large,
         empty,
         headerless,
         seq_id,
+        seq_id_read,
         gap,
         parse,
-        not_readable,
         joins,
         lost,
         crlf,
@@ -1195,15 +1062,13 @@ fn ncbi_scan_agrees_with_the_reader_on_generated_inputs() {
     } = coverage;
     assert!(
         records >= 3000
-            && uniform >= 500
-            && checkpoints >= 500
             && large >= 50
             && empty >= 50
             && headerless >= 50
             && seq_id >= 20
+            && seq_id_read >= 10
             && gap >= 20
             && parse >= 50
-            && not_readable >= 50
             && joins >= 300
             && lost >= 5
             && crlf >= 300
@@ -1286,7 +1151,7 @@ fn ncbi_scan_agrees_with_the_reader_on_edge_cases() {
             }
         }
     }
-    // A record past the checkpoint spacing with irregular lines, and a uniform one.
+    // Long records with irregular lines, and a uniform one.
     let mut long = b">long\n".to_vec();
     for line in 0..3000 {
         long.extend(std::iter::repeat_n(b'A', 40 + line % 50));
@@ -1304,4 +1169,40 @@ fn ncbi_scan_agrees_with_the_reader_on_edge_cases() {
         check(input, &mut random, &format!("edge {index}"), &mut coverage);
     }
     eprintln!("{coverage:?}");
+}
+
+// A record longer than LOSAT reads (2,147,483,647 letters, gaps included) is refused in the CLI's
+// words, at the record, and the records before it are whole (line WQA's D13 (d), 2026-11-20). A
+// gap line gives the letters without the bytes: the scan does not hold them, so no 2 GiB input is
+// made.
+#[test]
+fn a_record_longer_than_losat_reads_is_refused_in_the_cli_words() {
+    let at_limit = b">a\nACGT\n>b\n>?2147483647\n>c\nGG\n";
+    let scanned = scan_ncbi(at_limit, ReaderConfig::query("BLASTN", false, true)).unwrap();
+    let lengths: Vec<u64> = scanned.iter().map(|record| record.length).collect();
+    assert_eq!(lengths, [4, 2_147_483_647, 2]);
+    assert_eq!(scanned[1].residue_counts[b'N' as usize], 2_147_483_647);
+    for (input, config, message) in [
+        (
+            &b">a\nACGT\n>b\n>?2147483647\nA\n>c\nGG\n"[..],
+            ReaderConfig::query("BLASTN", false, true),
+            "a query record longer than 2147483647 letters is not supported by LOSAT's BLASTN",
+        ),
+        (
+            b">a\nACGT\n>b\nMK\n>?2147483646\n",
+            ReaderConfig::subject("BLASTP", true, false),
+            "a subject record longer than 2147483647 letters is not supported by LOSAT's BLASTP",
+        ),
+    ] {
+        let refused = ScanError::Refused {
+            message: message.to_string(),
+            record: 8,
+        };
+        assert_eq!(scan_ncbi(input, config), Err(refused.clone()));
+        let mut scanner = NcbiScanner::new(config);
+        for byte in input {
+            scanner.feed(std::slice::from_ref(byte));
+        }
+        assert_eq!(scanner.finish(), Err(refused));
+    }
 }

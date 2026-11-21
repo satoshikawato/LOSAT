@@ -2,7 +2,7 @@
 //! `-parse_seqids`).
 //!
 //! The expected values are what makeblastdb printed and what its databases hold
-//! (`makeblastdb_cases`, and the values quoted in the tests). The tests add the part of
+//! (`makeblastdb_cases`, and the values cited in the tests). The tests add the part of
 //! `CBuildDatabase::AddSequences` that decides whether a sequence is stored (`run`), so
 //! that a whole input compares with makeblastdb's messages and database.
 
@@ -98,7 +98,7 @@ fn run<R: Read>(input: R, protein: bool) -> Outcome {
             Ok(Some(bioseq)) => bioseq,
             Ok(None) => break,
             Err(error) => {
-                outcome.error = Some(error.message);
+                outcome.error = Some(String::from_utf8(error.message).unwrap());
                 return outcome;
             }
         };
@@ -733,7 +733,7 @@ fn read_error_ends_the_reading() {
     assert_eq!(
         first,
         Err(SourceError {
-            message: "Read error: the disk is gone".to_string(),
+            message: b"Read error: the disk is gone".to_vec(),
             kind: SourceErrorKind::Creation,
         })
     );
@@ -764,7 +764,7 @@ fn a_delta_that_cannot_be_allocated_is_an_error() {
     assert!(fix_bioseq_deltas(delta(u64::MAX - 1)).is_err());
     let error = SourceError::out_of_memory();
     assert_eq!(error.kind, SourceErrorKind::OutOfMemory);
-    assert_eq!(error.message, "BLAST ran out of memory");
+    assert_eq!(error.message, b"BLAST ran out of memory");
 }
 
 /// NCBIstdaa: the residue at position `i` has the code `i`
@@ -831,7 +831,7 @@ fn fasta_files_match_their_makeblastdb_databases() {
                 Ok(Some(bioseq)) => bioseq,
                 Ok(None) => break,
                 Err(source_error) => {
-                    error = Some(source_error.message);
+                    error = Some(String::from_utf8(source_error.message).unwrap());
                     break;
                 }
             };

@@ -1,0 +1,27 @@
+# TBLASTN 2.17.0+
+# Query: BDT63074.1
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/sbh_s.fna)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 10 hits found
+BDT63074.1	ns0_halves	95.201	896	43	0	1	896	5562	2875	0.0	1314
+BDT63074.1	ns0_same	84.694	882	133	1	8	887	107	2752	0.0	1086
+BDT63074.1	ns0_indel	85.532	705	90	12	1	698	64	2163	0.0	952
+BDT63074.1	ns0_indel	86.813	91	10	2	808	897	2476	2745	7.70e-39	148
+BDT63074.1	ns0_indel	88.235	17	1	1	747	763	2116	2163	0.002	33.1
+BDT63074.1	ns0_nest	88.430	121	14	0	21	141	1320	958	1.52e-55	191
+BDT63074.1	ns0_nest	70.922	141	39	1	8	146	495	73	1.53e-44	159
+BDT63074.1	ns0_nest	21.429	42	33	0	485	526	749	874	6.9	21.2
+BDT63074.1	ns0_edge	88.710	62	7	0	3	64	714	899	4.73e-29	109
+BDT63074.1	ns1_same	37.500	24	15	0	498	521	3234	3305	9.4	20.8
+# TBLASTN 2.17.0+
+# Query: BDT63075.1
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/sbh_s.fna)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 6 hits found
+BDT63075.1	ns1_halves	95.622	1142	50	0	1	1142	4	3429	0.0	2054
+BDT63075.1	ns1_same	85.027	1122	168	0	11	1132	6942	3577	0.0	1697
+BDT63075.1	ns1_indel	85.912	1157	128	32	1	1142	6993	3583	0.0	1672
+BDT63075.1	ns1_edge	96.667	60	2	0	4	63	426	247	4.10e-34	125
+BDT63075.1	ns1_nest	84.507	71	11	0	16	86	947	1159	5.89e-33	125
+BDT63075.1	ns0_indel	28.571	35	24	1	964	997	10110	10214	3.3	22.7
+# BLAST processed 2 queries

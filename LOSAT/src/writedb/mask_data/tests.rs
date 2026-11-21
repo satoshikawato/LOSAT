@@ -505,11 +505,11 @@ fn a_column_is_not_created_in_an_open_volume() {
     let error = db
         .register_mask_algorithm(FILTER_PROGRAM_SEG, b"", b"seg")
         .unwrap_err();
-    assert!(
-        error
-            .to_string()
-            .contains("before the first sequence is published"),
-        "{error}"
+    assert_eq!(
+        error.to_string(),
+        "losat makeblastdb: the columns of a database (the mask column too) and their metadata \
+         are made before its first volume is written; LOSAT does not add a column, a masking \
+         algorithm or column metadata to an open volume"
     );
 }
 

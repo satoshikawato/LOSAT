@@ -4,7 +4,8 @@ import { resolve } from 'node:path';
 import { toProgramDescription } from 'losat';
 import { CUSTOM_OUTPUT, type ProgramId } from 'losat/domain';
 import {
-  BLASTN_DATABASE_MASK_FLAGS,
+  DATABASE_MASK_FLAGS,
+  DATABASE_MASK_PROGRAMS,
   buildArgv,
   commandWords,
   DATABASE_FLAGS,
@@ -97,13 +98,17 @@ describe('buildArgv', () => {
     ).toThrow(message);
   });
 
-  // WA-FM-04 and WA-FM-05: the CLI prints its help for these words, and its message for the
-  // others names -subject or -num_threads, which the browser sets itself.
+  // WA-FM-04: the CLI's message for these words names -subject or -num_threads, which the browser sets itself.
   const extra = (program: ProgramId, words: readonly string[]) => () =>
     buildArgv({ program, queryName: 'q.fa', subjectName: 's.fa', parameters: [], extra: words });
-  it.each(['-h', '-help', '-help-full', '-xmlhelp', '--help'])('refuses %s, which asks the CLI for its help, in a few words', (word) => {
-    for (const program of PROGRAMS) expect(extra(program.id, ['-evalue', '1', word]), program.id).toThrow(`${word} is not available in the browser`);
-  });
+  // Line WQA's D14, 2026-11-20: the engine prints the command line's help or version for these words, as the CLI does
+  // (WA-FM-05 refused the help words).
+  it.each(['-h', '-help', '-help-full', '-xmlhelp', '--help', '-version', '-version-full', '-version-full-xml', '-version-full-json'])(
+    'passes %s, which asks the CLI for its help or version, to the engine',
+    (word) => {
+      for (const program of PROGRAMS) expect(extra(program.id, ['-evalue', '1', word])(), program.id).toContain(word);
+    },
+  );
 
   it('refuses the database options, also written -flag=value, as the browser build cannot search a database', () => {
     for (const program of PROGRAMS) {
@@ -114,20 +119,32 @@ describe('buildArgv', () => {
     }
   });
 
-  // The BLASTN CLI's database masks: its parser would name -subject, which the browser sets
-  // itself (WA-FM-04); the other modes' engines refuse them by name.
-  it('refuses the database masks of BLASTN, also written -flag=value', () => {
-    for (const flag of BLASTN_DATABASE_MASK_FLAGS) {
-      expect(extra('blastn', [flag, '11']), flag).toThrow(`${flag} (a database search filter) is not supported in the browser yet`);
-      expect(extra('blastn', [`${flag}=dust`]), flag).toThrow(`${flag} (a database search filter) is not supported in the browser yet`);
+  // The database masks of every mode's CLI: their parser would name -subject, which the browser
+  // sets itself (WA-FM-04).
+  it('refuses the database masks of every mode, also written -flag=value', () => {
+    expect(DATABASE_MASK_PROGRAMS).toEqual(['blastn', 'blastp', 'blastx', 'tblastn', 'tblastx']);
+    for (const program of DATABASE_MASK_PROGRAMS) {
+      for (const flag of DATABASE_MASK_FLAGS) {
+        expect(extra(program, [flag, '11']), `${program} ${flag}`).toThrow(`${flag} (a database search filter) is not supported in the browser yet`);
+        expect(extra(program, [`${flag}=dust`]), `${program} ${flag}`).toThrow(`${flag} (a database search filter) is not supported in the browser yet`);
+      }
     }
-    expect(extra('blastp', ['-db_soft_mask', '21'])()).toEqual(['blastp', '-query', 'q.fa', '-subject', 's.fa', '-db_soft_mask', '21']);
   });
 
-  it("lists BLASTN's database masks in its engine's options (describe)", () => {
+  // BLASTN's -filtering_db searches a BLAST database of repeats, which the browser build cannot read.
+  it('refuses the database of repeats of BLASTN, also written -flag=value', () => {
+    for (const words of [['-filtering_db', 'repeats'], ['-filtering_db=repeats']]) {
+      expect(extra('blastn', words)).toThrow(/^-filtering_db \(a BLAST database of repeats\) is not supported in the browser yet$/);
+    }
+  });
+
+  it("lists the database masks in the engine's options of the modes that have them (describe)", () => {
     const described = JSON.parse(readFileSync(resolve(import.meta.dirname, '../../src/infra/fake/describe.json'), 'utf8')) as Record<string, unknown>;
-    const flags = toProgramDescription(described['blastn']).parameters.map((option) => option.flag);
-    expect(flags).toEqual(expect.arrayContaining([...BLASTN_DATABASE_MASK_FLAGS]));
+    for (const program of PROGRAMS) {
+      const flags = toProgramDescription(described[program.id]).parameters.map((option) => option.flag);
+      const has = DATABASE_MASK_FLAGS.filter((flag) => flags.includes(flag));
+      expect(has, program.id).toEqual(DATABASE_MASK_PROGRAMS.includes(program.id) ? [...DATABASE_MASK_FLAGS] : []);
+    }
   });
 
   it("lists the database options of every mode's engine (describe)", () => {
@@ -263,7 +280,7 @@ describe('refusedFields', () => {
   });
   it('names "Additional options" for the options typed there, also those of the form', () => {
     expect(fields('-evalue is set in the form: Expect threshold', '-evalue abc')).toEqual({ extra: true, flags: [] });
-    expect(fields("error: unknown option or argument '-foo'; use -help for CLI v2 syntax", '-qcov_hsp_perc 50 -foo')).toEqual({
+    expect(fields("error: unknown option or argument '-foo'; use -help to list the options", '-qcov_hsp_perc 50 -foo')).toEqual({
       extra: true,
       flags: ['-help'],
     });
@@ -285,13 +302,13 @@ describe('refusedFields', () => {
   it('names "Additional options" for a word typed there that is not an option name', () => {
     expect(fields('--help is not available in the browser', '--help')).toEqual({ extra: true, flags: [] });
     expect(fields('--help is not available in the browser', '-strand plus')).toEqual({ extra: false, flags: [] });
-    expect(fields("error: unknown option or argument 'evalue'; use -help for CLI v2 syntax", 'evalue 1e-5')).toEqual({
+    expect(fields("error: unknown option or argument 'evalue'; use -help to list the options", 'evalue 1e-5')).toEqual({
       extra: true,
       flags: ['-help'],
     });
     expect(fields("error: unknown option or argument 'evalue'", '-strand plus')).toEqual({ extra: false, flags: [] });
     // The engine quotes the whole word, with its =value.
-    expect(fields("error: unknown option or argument '--evalue=1e-5'; use -help for CLI v2 syntax", '--evalue=1e-5')).toEqual({
+    expect(fields("error: unknown option or argument '--evalue=1e-5'; use -help to list the options", '--evalue=1e-5')).toEqual({
       extra: true,
       flags: ['-help'],
     });

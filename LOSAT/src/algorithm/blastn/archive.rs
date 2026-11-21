@@ -1,13 +1,7 @@
 //! BLASTN's BLAST archive (outfmt 11): the request options from the arguments, the archive of
 //! each query batch from the batch's report data, and the error archive.
 //!
-//! NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:302-306
-//! ```c++
-//!             if (isArchiveFormat) {
-//!                 formatter.WriteArchive(*queries, *m_OptsHndl, *results, 0, m_Bah.GetMessages());
-//!                 m_Bah.ResetMessages();
-//!             } else {
-//! ```
+//! NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:302-307
 //! One archive per query batch, written after the batch's search; `report::archive` writes
 //! the document, this module gathers what it holds from the hit lists, the query masks and
 //! the Karlin-Altschul blocks that BLASTN keeps for its other formats.
@@ -51,8 +45,8 @@ pub(crate) fn option_inputs(args: &BlastnArgs, dust: Option<&str>) -> OptionInpu
     inputs.word_size = args.word_size.map(|size| size as i32);
     inputs.perc_identity = args.percent_identity;
     inputs.qcov_hsp_perc = args.qcov_hsp_perc;
-    // (`-ungapped` with outfmt 11 is refused, `cli_output_formats`; the search strategy records
-    // it, probe `ung` of RG-F1.)
+    // (An ungapped search's archive: `UngappedMode TRUE`, no gapped `ka-block`, Dense-diags;
+    // the search strategy records it too, probe `ung` of RG-F1.)
     inputs.ungapped = args.ungapped;
     inputs.max_hsps = args.max_hsps_per_subject.map(|count| count as i32);
     inputs.penalty = args.penalty;
@@ -82,9 +76,12 @@ pub(crate) fn option_inputs(args: &BlastnArgs, dust: Option<&str>) -> OptionInpu
             },
         });
     inputs.soft_masking = Some(args.soft_masking());
+    inputs.filtering_db = args.filtering_db.clone();
     inputs.window_masker_db = args.window_masker_db.clone();
     inputs.window_masker_taxid = args.window_masker_taxid;
     inputs.culling_limit = args.culling_limit;
+    inputs.best_hit_overhang = args.best_hit_overhang;
+    inputs.best_hit_score_edge = args.best_hit_score_edge;
     inputs.subject_besthit = args.subject_besthit;
     // The X-drops and the window as given (CGenericSearchArgs and CWindowSizeArg set them
     // only then, blast_args.cpp:280-286,487-489) and `-no_greedy` (the algorithms); the
@@ -93,7 +90,9 @@ pub(crate) fn option_inputs(args: &BlastnArgs, dust: Option<&str>) -> OptionInpu
     inputs.xdrop_gap_final = args.xdrop_gap_final;
     inputs.window_size = args.window_size;
     inputs.no_greedy = args.no_greedy;
-    inputs.mb_index_name = args.megablast_index_name().map(str::to_string);
+    inputs.mb_index_name = args
+        .megablast_index_name()
+        .map(|(name, _)| name.to_string());
     inputs.hitlist_size = args
         .max_target_seqs
         .or(args.num_alignments)
@@ -152,6 +151,10 @@ pub(crate) struct CallBatches<'a> {
     /// made for every query; with `-window_masker_db` (`window_masker`) the WindowMasker masks.
     /// Only the archive reads them (empty without it).
     pub dust_masks: &'a [Vec<MaskedInterval>],
+    /// With `-filtering_db`, the repeat hits of the call's queries (0-based, inclusive, in the
+    /// searched letters; `repeat_filter::RepeatFilter::hits`), empty for a query without one.
+    /// Only the archive reads them (empty without it or without the option).
+    pub repeat_hits: &'a [Vec<(usize, usize)>],
     pub unsearched: &'a [bool],
     pub lcase_masking: bool,
     pub window_masker: bool,
@@ -159,6 +162,9 @@ pub(crate) struct CallBatches<'a> {
     pub minus_strand: bool,
     /// The queries of each batch of the call, in order; empty for a call that is one batch.
     pub spans: &'a [Range<usize>],
+    /// The search is not `-ungapped`: an ungapped search has no gapped Karlin-Altschul block
+    /// (`ka-blocks`) and its Seq-aligns are Dense-diags (`RunRecord::gapped`).
+    pub gapped: bool,
 }
 
 /// What the archive of a call needs: the call's batches and their results.
@@ -237,16 +243,6 @@ impl<'a> AlignSource for BlastnAligns<'a> {
 /// The intervals of a query's `LCaseMask` parameter, in record coordinates.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/dust_filter.cpp:110-127
-/// ```c++
-///     SetDiagFilter(eDiagFilter_Post, "!(1305.31)");
-///     CRef<CSeq_loc_Mapper> mapper = s_CreateSeqLocMapper(*query_id, seqloc,
-///                                                         scope);
-///     query_masks.Reset(mapper->Map(*query_masks));
-///
-///     const int kTopFlags = CSeq_loc::fStrand_Ignore|CSeq_loc::fMerge_All|CSeq_loc::fSort;
-///     if (orig_query_mask.NotEmpty() && !orig_query_mask->IsNull()) {
-///         CRef<CSeq_loc> tmp = orig_query_mask->Add(*query_masks,  kTopFlags, 0);
-/// ```
 /// The query vector's mask is the lower case of the whole record (`-lcase_masking`, read
 /// before any `-query_loc` cut, for both strands) merged with the DUST intervals of the
 /// searched range, which the mapper puts in the order of the query's strand. A merge
@@ -259,17 +255,6 @@ impl<'a> AlignSource for BlastnAligns<'a> {
 /// which replaced the others: every interval once for each frame, in the masker's order.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/winmask_filter.cpp:179-189
-/// ```c++
-///         if (mqr) {
-///             CRef<CSeqLocInfo> info_plus
-///                 (new CSeqLocInfo(&* ival, CSeqLocInfo::eFramePlus1));
-///             mqr->push_back(info_plus);
-///
-///             CRef<CSeqLocInfo> info_minus
-///                 (new CSeqLocInfo(&* ival, CSeqLocInfo::eFrameMinus1));
-///             mqr->push_back(info_minus);
-///         }
-/// ```
 fn lcase_mask_intervals(
     record: &FastaRecord,
     dust: &[MaskedInterval],
@@ -317,6 +302,42 @@ fn lcase_mask_intervals(
     merged
         .iter()
         .flat_map(|&interval| std::iter::repeat_n(interval, times))
+        .collect()
+}
+
+/// The `LCaseMask` intervals of a query whose repeat search (`-filtering_db`) found `hits` (in the
+/// searched letters, which start at `offset`): the query vector's masks before the search (the
+/// lower case of the whole record with `-lcase_masking`, DUST's of the searched letters) combined
+/// with the hits (`repeat_filter::combine`), in ascending order, each interval for both strands,
+/// whatever `-strand` is.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/repeats_filter_cxx.cpp:290-304
+fn repeat_mask_intervals(
+    record: &FastaRecord,
+    dust: &[MaskedInterval],
+    offset: usize,
+    lcase_masking: bool,
+    hits: &[(usize, usize)],
+) -> Vec<(i32, i32)> {
+    let mut all: Vec<(usize, usize)> = if lcase_masking {
+        collect_lowercase_masks(record.archive_letters())
+            .iter()
+            .map(|mask| (mask.start, mask.end - 1))
+            .collect()
+    } else {
+        Vec::new()
+    };
+    all.extend(
+        dust.iter()
+            .map(|mask| (mask.start + offset, mask.end + offset - 1)),
+    );
+    all.extend(hits.iter().map(|&(from, to)| (from + offset, to + offset)));
+    super::repeat_filter::combine(all)
+        .into_iter()
+        .flat_map(|(from, to)| {
+            let interval = (from as i32, to as i32);
+            [interval, interval]
+        })
         .collect()
 }
 
@@ -373,15 +394,24 @@ pub(crate) fn for_each_batch(
             }
             // The `LCaseMask` parameters are the masks of NCBI's query vector, which every
             // query has, valid or not and searched or not (`x_CalculateMasks`).
-            let intervals = lcase_mask_intervals(
-                record,
-                &call.dust_masks[index],
-                offset,
-                call.lcase_masking,
-                call.window_masker,
-                call.both_strands,
-                call.minus_strand,
-            );
+            let intervals = match call.repeat_hits.get(index).filter(|hits| !hits.is_empty()) {
+                Some(hits) => repeat_mask_intervals(
+                    record,
+                    &call.dust_masks[index],
+                    offset,
+                    call.lcase_masking,
+                    hits,
+                ),
+                None => lcase_mask_intervals(
+                    record,
+                    &call.dust_masks[index],
+                    offset,
+                    call.lcase_masking,
+                    call.window_masker,
+                    call.both_strands,
+                    call.minus_strand,
+                ),
+            };
             if !intervals.is_empty() {
                 lcase_masks.push(MaskEntry {
                     id: record.local_id.clone(),
@@ -395,7 +425,12 @@ pub(crate) fn for_each_batch(
         let ka_blocks = match &context.karlin {
             Some(blocks) => [
                 ka_block(&blocks.ungapped, false),
-                ka_block(&blocks.gapped, true),
+                // An ungapped search has no gapped block (`KaBlock::missing`, as BLASTX's).
+                if call.gapped {
+                    ka_block(&blocks.gapped, true)
+                } else {
+                    KaBlock::missing(true)
+                },
             ],
             None => [KaBlock::missing(false), KaBlock::missing(true)],
         };
@@ -438,7 +473,7 @@ pub(crate) fn write_blastn_archives(
     let run = RunRecord {
         program: Program::Blastn,
         db_title: call.subjects.db_title(),
-        gapped: true,
+        gapped: call.batches.gapped,
     };
     for_each_batch(&call.batches, first_context, |span, batch| {
         for index in span.clone() {
@@ -467,247 +502,5 @@ pub(crate) fn write_blastn_archives(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::cli::{try_parse_from, Cli, Commands};
-    use crate::report::archive::options::{self, algorithm_options, ParamValue};
-    use crate::report::serial::real::double_to_string_posix;
-
-    // The `algorithm-options` that NCBI BLAST+ 2.17.0 wrote in the OF8 design's probes
-    // (S/probe8/out, `check_archive_layout.py opts`), without the `EffectiveSearchSpace` that
-    // each archive adds: the probe's name, the options given besides the inputs, and the
-    // list as `Name=variant:value`.
-    const CASES: &[(&str, &[&str], &str)] = &[
-    ("b_n_allN_db_fmt11", &[], "EvalueThreshold=cutoff:e-value:10 MaskAtHash=boolean:True UngappedMode=boolean:False HitlistSize=integer:500"),
-    // DI-6 (the frozen archives xdrop.*.11 of tests/outfmt0_manifest.tsv): the X-drops and the window
-    // as given, -no_greedy's algorithms (eDynProgScoreOnly, eDynProgTbck = 0), the window of
-    // dc-megablast replaced in its place, pyani ANIb's options.
-    ("di6_nogreedy", &["-no_greedy", "-gapopen", "5", "-gapextend", "2"], "EvalueThreshold=cutoff:e-value:10 GapOpeningCost=integer:5 GapExtensionCost=integer:2 GapExtnAlgorithm=integer:0 GapTracebackAlgorithm=integer:0 MaskAtHash=boolean:True UngappedMode=boolean:False HitlistSize=integer:500"),
-    ("di6_xdrops", &["-xdrop_ungap", "5", "-xdrop_gap", "12.5", "-xdrop_gap_final", "150", "-window_size", "40"], "EvalueThreshold=cutoff:e-value:10 GapXDropoff=real:12.5 GapXDropoffFinal=real:150 MaskAtHash=boolean:True UngappedMode=boolean:False WindowSize=integer:40 HitlistSize=integer:500"),
-    ("di6_dc_win0", &["-task", "dc-megablast", "-window_size", "0"], "EvalueThreshold=cutoff:e-value:10 MBTemplateType=integer:0 MBTemplateLength=integer:18 WordSize=integer:11 WindowSize=integer:0 MaskAtHash=boolean:True UngappedMode=boolean:False HitlistSize=integer:500"),
-    ("di6_anib", &["-task", "blastn", "-xdrop_gap_final", "150", "-dust", "no", "-evalue", "1e-15", "-max_target_seqs", "1"], "EvalueThreshold=cutoff:e-value:1e-15 GapXDropoffFinal=real:150 MaskAtHash=boolean:True DustFiltering=boolean:False UngappedMode=boolean:False HitlistSize=integer:1"),
-    // DI-6b (the frozen archives minraw.*.11): the value is not recorded (the remote options'
-    // eBlastOpt_CutoffScore is `if (0)`, api/blast_options_cxx.cpp:435-442).
-    ("di6b_minraw", &["-min_raw_gapped_score", "15"], "EvalueThreshold=cutoff:e-value:10 MaskAtHash=boolean:True UngappedMode=boolean:False HitlistSize=integer:500"),
-    ("e_n_badpair_fmt11", &["-reward", "2", "-penalty", "-7"], "EvalueThreshold=cutoff:e-value:10 MismatchPenalty=integer:-7 MatchReward=integer:2 MaskAtHash=boolean:True UngappedMode=boolean:False HitlistSize=integer:500"),
-    ("in_n_dust_minus_fmt11", &["-strand", "minus"], "EvalueThreshold=cutoff:e-value:10 MaskAtHash=boolean:True UngappedMode=boolean:False HitlistSize=integer:500"),
-    ("in_n_lcase_mask_fmt11", &["-lcase_masking"], "EvalueThreshold=cutoff:e-value:10 MaskAtHash=boolean:True UngappedMode=boolean:False HitlistSize=integer:500"),
-    // SM-3 (the frozen archives sm3.*.11 of tests/outfmt0_manifest.tsv): the value as given.
-    ("sm3_hard", &["-soft_masking", "false"], "EvalueThreshold=cutoff:e-value:10 MaskAtHash=boolean:False UngappedMode=boolean:False HitlistSize=integer:500"),
-    ("sm3_soft", &["-soft_masking", "true"], "EvalueThreshold=cutoff:e-value:10 MaskAtHash=boolean:True UngappedMode=boolean:False HitlistSize=integer:500"),
-    ("in_n_mts1_fmt11", &["-task", "blastn", "-max_target_seqs", "1"], "EvalueThreshold=cutoff:e-value:10 MaskAtHash=boolean:True UngappedMode=boolean:False HitlistSize=integer:1"),
-    ("in_n_qloc_fmt11", &["-query_loc", "10-300"], "EvalueThreshold=cutoff:e-value:10 MaskAtHash=boolean:True UngappedMode=boolean:False HitlistSize=integer:500"),
-    ("in_n_qloc_full_fmt11", &["-query_loc", "1-480"], "EvalueThreshold=cutoff:e-value:10 MaskAtHash=boolean:True UngappedMode=boolean:False HitlistSize=integer:500"),
-    ("m_n_dust_plus_fmt11", &["-strand", "plus"], "EvalueThreshold=cutoff:e-value:10 MaskAtHash=boolean:True UngappedMode=boolean:False HitlistSize=integer:500"),
-    ("m_n_lc_minus_fmt11", &["-lcase_masking", "-strand", "minus"], "EvalueThreshold=cutoff:e-value:10 MaskAtHash=boolean:True UngappedMode=boolean:False HitlistSize=integer:500"),
-    ("opt_blastn_g1", &["-word_size", "20", "-evalue", "1e-5", "-perc_identity", "90", "-max_hsps", "1", "-qcov_hsp_perc", "50"], "EvalueThreshold=cutoff:e-value:1e-05 WordSize=integer:20 PercentIdentity=real:90 QueryCovHspPerc=real:50 MaxHspsPerSubject=integer:1 MaskAtHash=boolean:True UngappedMode=boolean:False HitlistSize=integer:500"),
-    ("opt_blastn_g10", &["-gapopen", "2", "-gapextend", "2"], "EvalueThreshold=cutoff:e-value:10 GapOpeningCost=integer:2 GapExtensionCost=integer:2 MaskAtHash=boolean:True UngappedMode=boolean:False HitlistSize=integer:500"),
-    ("opt_blastn_g1rev", &["-qcov_hsp_perc", "50", "-max_hsps", "1", "-perc_identity", "90", "-evalue", "1e-5", "-word_size", "20"], "EvalueThreshold=cutoff:e-value:1e-05 WordSize=integer:20 PercentIdentity=real:90 QueryCovHspPerc=real:50 MaxHspsPerSubject=integer:1 MaskAtHash=boolean:True UngappedMode=boolean:False HitlistSize=integer:500"),
-    ("opt_blastn_g2", &["-penalty", "-3", "-culling_limit", "1", "-strand", "plus", "-dust", "no"], "EvalueThreshold=cutoff:e-value:10 MismatchPenalty=integer:-3 MaskAtHash=boolean:True DustFiltering=boolean:False UngappedMode=boolean:False Culling=integer:1 HitlistSize=integer:500"),
-    ("opt_blastn_g3", &["-reward", "2", "-penalty", "-3", "-gapopen", "5", "-gapextend", "2", "-subject_besthit", "-lcase_masking"], "EvalueThreshold=cutoff:e-value:10 GapOpeningCost=integer:5 GapExtensionCost=integer:2 MismatchPenalty=integer:-3 MatchReward=integer:2 MaskAtHash=boolean:True UngappedMode=boolean:False UseSubjectBestHit=boolean:True HitlistSize=integer:500"),
-    ("opt_blastn_g4", &["-max_target_seqs", "1", "-dust", "20 64 1", "-query_loc", "10-300", "-subject_loc", "10-300", "-dbsize", "1000000"], "EvalueThreshold=cutoff:e-value:10 DbLength=big-integer:1000000 MaskAtHash=boolean:True DustFilteringLevel=integer:20 DustFilteringWindow=integer:64 DustFilteringLinker=integer:1 UngappedMode=boolean:False HitlistSize=integer:1"),
-    ("opt_blastn_g5", &["-num_descriptions", "5", "-num_alignments", "5", "-strand", "minus"], "EvalueThreshold=cutoff:e-value:10 MaskAtHash=boolean:True UngappedMode=boolean:False HitlistSize=integer:5"),
-    ("opt_blastn_g6", &["-task", "dc-megablast", "-template_type", "coding", "-template_length", "16", "-word_size", "12"], "EvalueThreshold=cutoff:e-value:10 MBTemplateType=integer:0 MBTemplateLength=integer:16 WordSize=integer:12 WindowSize=integer:40 MaskAtHash=boolean:True UngappedMode=boolean:False HitlistSize=integer:500"),
-    ("opt_blastn_g7", &["-task", "blastn-short"], "EvalueThreshold=cutoff:e-value:1000 MatchReward=integer:1 MismatchPenalty=integer:-3 WordSize=integer:7 DustFiltering=boolean:False SegFiltering=boolean:False RepeatFiltering=boolean:False MaskAtHash=boolean:True UngappedMode=boolean:False HitlistSize=integer:500"),
-    ("short_max_hsps1", &["-task", "blastn-short", "-max_hsps", "1"], "EvalueThreshold=cutoff:e-value:1000 MatchReward=integer:1 MismatchPenalty=integer:-3 WordSize=integer:7 DustFiltering=boolean:False SegFiltering=boolean:False RepeatFiltering=boolean:False MaskAtHash=boolean:True MaxHspsPerSubject=integer:1 UngappedMode=boolean:False HitlistSize=integer:500"),
-    ("short_perc_identity90", &["-task", "blastn-short", "-perc_identity", "90"], "EvalueThreshold=cutoff:e-value:1000 MatchReward=integer:1 MismatchPenalty=integer:-3 WordSize=integer:7 DustFiltering=boolean:False SegFiltering=boolean:False RepeatFiltering=boolean:False MaskAtHash=boolean:True PercentIdentity=real:90 UngappedMode=boolean:False HitlistSize=integer:500"),
-    ("opt_blastn_g8", &["-task", "blastn", "-word_size", "7", "-dust", "yes"], "EvalueThreshold=cutoff:e-value:10 WordSize=integer:7 MaskAtHash=boolean:True DustFiltering=boolean:True UngappedMode=boolean:False HitlistSize=integer:500"),
-    ("opt_blastn_g9", &["-task", "megablast", "-word_size", "28", "-evalue", "10", "-strand", "both", "-dust", "yes"], "EvalueThreshold=cutoff:e-value:10 WordSize=integer:28 MaskAtHash=boolean:True DustFiltering=boolean:True UngappedMode=boolean:False HitlistSize=integer:500"),
-    ("optdb_blastn_g4", &["-max_target_seqs", "1", "-dust", "20 64 1", "-query_loc", "10-300", "-dbsize", "1000000"], "EvalueThreshold=cutoff:e-value:10 DbLength=big-integer:1000000 MaskAtHash=boolean:True DustFilteringLevel=integer:20 DustFilteringWindow=integer:64 DustFilteringLinker=integer:1 UngappedMode=boolean:False HitlistSize=integer:1"),
-    ("t_n_cull0_fmt11", &["-culling_limit", "0"], "EvalueThreshold=cutoff:e-value:10 MaskAtHash=boolean:True UngappedMode=boolean:False Culling=integer:0 HitlistSize=integer:500"),
-    ("t_n_dmb_opt_fmt11", &["-task", "dc-megablast", "-template_type", "optimal", "-template_length", "21"], "EvalueThreshold=cutoff:e-value:10 MBTemplateType=integer:1 MBTemplateLength=integer:21 WordSize=integer:11 WindowSize=integer:40 MaskAtHash=boolean:True UngappedMode=boolean:False HitlistSize=integer:500"),
-    ("t_n_naln_fmt11", &["-num_alignments", "3"], "EvalueThreshold=cutoff:e-value:10 MaskAtHash=boolean:True UngappedMode=boolean:False HitlistSize=integer:3"),
-    ("t_n_ndesc_fmt11", &["-num_descriptions", "3"], "EvalueThreshold=cutoff:e-value:10 MaskAtHash=boolean:True UngappedMode=boolean:False HitlistSize=integer:500"),
-    ("t_n_pid0_fmt11", &["-perc_identity", "0"], "EvalueThreshold=cutoff:e-value:10 PercentIdentity=real:0 MaskAtHash=boolean:True UngappedMode=boolean:False HitlistSize=integer:500"),
-    ("t_n_strandplus_lc_fmt11", &["-lcase_masking", "-strand", "plus"], "EvalueThreshold=cutoff:e-value:10 MaskAtHash=boolean:True UngappedMode=boolean:False HitlistSize=integer:500"),
-];
-
-    fn posix(value: f64) -> String {
-        let mut digits = Vec::new();
-        double_to_string_posix(value, 15, &mut digits);
-        String::from_utf8(digits).unwrap()
-    }
-
-    fn render(params: &[crate::report::archive::options::Param]) -> String {
-        params
-            .iter()
-            .map(|param| {
-                let value = match &param.value {
-                    ParamValue::Evalue(value) => format!("cutoff:e-value:{}", posix(*value)),
-                    ParamValue::Integer(value) => format!("integer:{value}"),
-                    ParamValue::BigInteger(value) => format!("big-integer:{value}"),
-                    ParamValue::Boolean(true) => "boolean:True".to_string(),
-                    ParamValue::Boolean(false) => "boolean:False".to_string(),
-                    ParamValue::Real(value) => format!("real:{}", posix(*value)),
-                    ParamValue::Str(value) => format!("string:{value}"),
-                    ParamValue::IntegerList(values) => format!("integer-list:{values:?}"),
-                };
-                format!("{}={value}", param.name)
-            })
-            .collect::<Vec<_>>()
-            .join(" ")
-    }
-
-    fn parse(extra: &[&str]) -> Option<BlastnArgs> {
-        let mut argv = vec!["losat", "blastn", "-query", "q.fa", "-subject", "s.fa"];
-        argv.extend_from_slice(extra);
-        argv.extend_from_slice(&["-outfmt", "11"]);
-        let cli: Cli = try_parse_from(argv).ok()?;
-        match cli.command {
-            Commands::Blastn(args) => Some(args),
-            _ => None,
-        }
-    }
-
-    #[test]
-    fn the_option_lists_equal_those_of_ncbis_probes() {
-        let mut compared = 0;
-        for &(name, extra, expected) in CASES {
-            let args = parse(extra).unwrap_or_else(|| panic!("{name} {extra:?} does not parse"));
-            let dust = args.dust_filtering.clone();
-            let inputs = option_inputs(&args, dust.as_deref());
-            assert_eq!(
-                render(&algorithm_options(&inputs)),
-                expected,
-                "{name} {extra:?}"
-            );
-            compared += 1;
-        }
-        assert!(compared >= 27, "{compared}");
-    }
-
-    fn dust(ranges: &[(usize, usize)]) -> Vec<MaskedInterval> {
-        ranges
-            .iter()
-            .map(|&(start, end)| MaskedInterval::new(start, end))
-            .collect()
-    }
-
-    #[test]
-    fn lcase_mask_is_the_query_vector_mask() {
-        use crate::blastinput::fasta_reader::RecordSource;
-        // Lower case at 0..20 of the record, the range starts at 29: the lower case outside
-        // the range is kept, in record coordinates, once per strand.
-        let mut whole = vec![b'a'; 20];
-        whole.extend(std::iter::repeat_n(b'C', 280));
-        let mut record = FastaRecord::new("Query_1", b"q", &whole[29..]);
-        record.source = Some(Box::new(RecordSource {
-            defline: b">q".to_vec(),
-            uncut: Some(whole),
-            ..RecordSource::default()
-        }));
-        assert_eq!(
-            lcase_mask_intervals(&record, &[], 29, true, false, true, false),
-            vec![(0, 19), (0, 19)]
-        );
-        // Without -lcase_masking there is no user mask.
-        assert!(lcase_mask_intervals(&record, &[], 29, false, false, true, false).is_empty());
-        // DUST intervals of the range are mapped by the range's start, merged with the lower
-        // case when they overlap or abut, and sorted.
-        assert_eq!(
-            lcase_mask_intervals(
-                &record,
-                &dust(&[(0, 5), (30, 40)]),
-                20,
-                true,
-                false,
-                true,
-                false
-            ),
-            vec![(0, 24), (0, 24), (50, 59), (50, 59)]
-        );
-        // A DUST-only mask: ascending once on a single strand, descending with -strand minus,
-        // twice with both strands.
-        let plain = FastaRecord::new("Query_2", b"q", &[b'A'; 100]);
-        let intervals = dust(&[(5, 10), (20, 30)]);
-        assert_eq!(
-            lcase_mask_intervals(&plain, &intervals, 0, false, false, false, false),
-            vec![(5, 9), (20, 29)]
-        );
-        assert_eq!(
-            lcase_mask_intervals(&plain, &intervals, 0, false, false, false, true),
-            vec![(20, 29), (5, 9)]
-        );
-        assert_eq!(
-            lcase_mask_intervals(&plain, &intervals, 0, false, false, true, false),
-            vec![(5, 9), (5, 9), (20, 29), (20, 29)]
-        );
-        // A query with lower case is ascending even with -strand minus.
-        let mut lower = vec![b'A'; 100];
-        lower[50] = b'c';
-        let lower = FastaRecord::new("Query_3", b"q", &lower);
-        assert_eq!(
-            lcase_mask_intervals(&lower, &intervals, 0, true, false, false, true),
-            vec![(5, 9), (5, 9), (20, 29), (20, 29), (50, 50), (50, 50)]
-        );
-        // WindowMasker's masks replace the others: each interval twice (the plus and minus
-        // frames), in the masker's order, with every strand option (NCBI 2.17.0's archives of
-        // `-window_masker_db`, line NP M2).
-        for (both, minus) in [(true, false), (false, false), (false, true)] {
-            assert_eq!(
-                lcase_mask_intervals(&lower, &intervals, 3, true, true, both, minus),
-                vec![(8, 12), (8, 12), (23, 32), (23, 32)]
-            );
-        }
-    }
-
-    #[test]
-    fn the_service_follows_the_task() {
-        for (task, service) in [
-            ("megablast", "megablast"),
-            ("dc-megablast", "megablast"),
-            ("blastn", "plain"),
-            ("blastn-short", "plain"),
-        ] {
-            assert_eq!(options::service(Program::Blastn, task), service);
-        }
-    }
-
-    #[test]
-    fn error_lines_are_ncbis_error_texts_only() {
-        let native = |message: &str| {
-            anyhow::Error::from(crate::cli::NativeError {
-                exit: 1,
-                message: message.to_string(),
-            })
-        };
-        let lines = error_lines(
-            &native(
-                "BLAST query/options error: bad  option\nPlease refer to the BLAST+ user manual.\n",
-            ),
-            false,
-        )
-        .unwrap();
-        assert_eq!(
-            lines,
-            vec![
-                (ERROR, b"BLAST query/options error: bad option".to_vec()),
-                (ERROR, b"Please refer to the BLAST+ user manual.".to_vec()),
-            ]
-        );
-        assert!(error_lines(&native("Command line argument error: x\n"), false).is_none());
-        let subject = error_lines(
-            &native("Command line argument error: Argument \"subject\". File is not accessible:  `a.fa'\n"),
-            true,
-        )
-        .unwrap();
-        assert_eq!(
-            subject,
-            vec![(
-                ERROR,
-                b"Command line argument error: Argument \"subject\". File is not accessible: `a.fa'".to_vec()
-            )]
-        );
-        assert!(error_lines(&anyhow::anyhow!("unsupported by LOSAT"), false).is_none());
-        // `CATCH_ALL`'s report of a `std::exception` (exit status 255, blast_app_util.hpp:260-263):
-        // one error message (line RG D3-1, `Error: vector::reserve` of the `-in_pssm` reader).
-        let std_exception =
-            anyhow::Error::from(crate::cli::NativeError::std_exception("vector::reserve"));
-        assert_eq!(
-            error_lines(&std_exception, false).unwrap(),
-            vec![(ERROR, b"Error: vector::reserve".to_vec())]
-        );
-        // A text with `Error: ` and another exit status is not one of `CATCH_ALL`'s reports.
-        assert!(error_lines(&native("Error: something\n"), false).is_none());
-    }
-}
+#[path = "archive_tests.rs"]
+mod tests;

@@ -6,6 +6,7 @@
 // high contrast), the selected mode, tab and row are marked in a system colour.
 import { expect, type Locator, type Page } from '@playwright/test';
 import { test } from './support/test';
+import { axeViolations } from './support/axe';
 import { BUILD_HAS_ENGINE } from './support/browser';
 import { focused } from './support/live';
 import { chooseRun, openParameters, openSearch, paste, program, submit, waitStatus } from './support/search';
@@ -27,6 +28,19 @@ async function expectAccepted(control: Locator): Promise<void> {
   await expect(control).not.toHaveAttribute('aria-describedby');
 }
 
+// Line WQA's random walk (2026-11-19): the error colour was 4.3:1 on the page's ground under these two
+// messages, in the three engines (tests/unit/colour-contrast.test.ts checks the colours themselves).
+test('axe finds nothing in a refused Run\'s message and in a refusal of "Additional options"', async ({ page }) => {
+  await openSearch(page);
+  await submit(page);
+  await expect(page.getByTestId('search-message')).toHaveText('Add the query sequences: paste them or open FASTA files.');
+  expect(await axeViolations(page, ['[data-testid="search-message"]'])).toEqual([]);
+  await openParameters(page);
+  await page.getByTestId('param-extra').fill('-evalue abc');
+  await expect(page.getByTestId('argv-validation')).toHaveText('-evalue is set in the form: Expect threshold');
+  expect(await axeViolations(page, ['[data-testid="argv-validation"]'])).toEqual([]);
+});
+
 test('a refusal of "Additional options" marks its text box, which points to the message, until it is fixed', async ({ page }) => {
   await openSearch(page);
   await openParameters(page);
@@ -41,8 +55,8 @@ test('a refusal of "Additional options" marks its text box, which points to the 
   await expect(page.locator(`#${REFUSAL}`)).toHaveText('-evalue is set in the form: Expect threshold');
   // The engine's refusal of an option typed there.
   await extra.fill('-qcov_hsp_perc 50 -foo');
-  await expect(validation).toHaveText("error: unknown option or argument '-foo'; use -help for CLI v2 syntax");
-  await expectRefused(extra, "error: unknown option or argument '-foo'; use -help for CLI v2 syntax");
+  await expect(validation).toHaveText("error: unknown option or argument '-foo'; use -help to list the options");
+  await expectRefused(extra, "error: unknown option or argument '-foo'; use -help to list the options");
   // A message about its text.
   await extra.fill("-strand 'plus");
   await expect(validation).toHaveText("Additional options: a quote (') is not closed");
@@ -211,6 +225,7 @@ test('two "?" helps are not open by the pointer at once, where one "?" is inside
 
 /** A run of the FakeEngine (or the engine) with HSPs on three subjects, shown on the results page. */
 async function threeSubjects(page: Page): Promise<void> {
+  // Test protein: N-terminal part of E. coli AsnA (RefSeq NP_418200.1), Cys51 changed to Ala.
   const protein = 'MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQFEVVHSLAKWKRQTLGQHDFSAGEGLYTHMKALRPDEDRLSPLHSVYVDQWDWERVMGDGERQFSTLKSTVEAIWAGIKATEAAVSEEFGLAPFLPDQIHFVHSQELLSRYPDLDAKGRERAIAKDLGAVFLVGIGGKLSDGHRHDVRAPDYDDWEAVTLGEQ';
   await openSearch(page);
   await program(page, 'blastp');

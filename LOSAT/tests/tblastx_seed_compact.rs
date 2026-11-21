@@ -11,14 +11,6 @@
 //! unit path runs, that none was), not only that the report is equal.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:367-372
-//! ```c
-//!     ungapped_data->q_start = q_start;
-//!     ungapped_data->s_start = s_start;
-//!     ungapped_data->length = len;
-//!     ungapped_data->score = score;
-//!
-//!     BLAST_SaveInitialHit(ungapped_hsps, q_off, s_off, ungapped_data);
-//! ```
 //! NCBI saves an initial HSP as these values and its two seed offsets; the compact record is that
 //! record and the context index, and the switch changes how LOSAT holds the lists, not a value.
 //! For the fixture pair the expected output
@@ -159,14 +151,6 @@ fn assert_compact_ran(stderr: &str, subjects: u64, what: &str) {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:367-372
-// ```c
-//     ungapped_data->q_start = q_start;
-//     ungapped_data->s_start = s_start;
-//     ungapped_data->length = len;
-//     ungapped_data->score = score;
-//
-//     BLAST_SaveInitialHit(ungapped_hsps, q_off, s_off, ungapped_data);
-// ```
 // With no variable for the switch (it is on by default) the fixture pair runs on the compact lists
 // at one, four, eight and sixteen threads (one subject, all its units and init HSPs as records) and
 // the report is NCBI's.
@@ -182,9 +166,6 @@ fn the_switch_keeps_compact_lists_and_gives_ncbis_report() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:367-372
-// ```c
-//     BLAST_SaveInitialHit(ungapped_hsps, q_off, s_off, ungapped_data);
-// ```
 // `LOSAT_X_SEEDCOMPACT=0` turns the switch off: no SEEDCOMPACT line, the same report.
 #[test]
 fn the_switch_follows_its_variable() {
@@ -202,11 +183,6 @@ fn the_switch_follows_its_variable() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:503-505
-// ```c
-//     /* scan the subject sequence for hits */
-//     hits = scansub(lookup_wrap, subject,
-//                               offset_pairs, array_size, scan_range);
-// ```
 // The cost rule of `LOSAT_X_PAIRPARGATE` (set to 1 after the helper's 0) leaves the fixture pair at
 // one thread to the reference frame loop (`[X_STATS] PAIRPAR units=0`): no unit runs, so no compact
 // list is made. The line is still printed (the switch is on) with zero counters, and the report is
@@ -244,12 +220,6 @@ fn record(defline: &str, letters: &str) -> String {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:479-491
-// ```c
-// status = s_GetNextSubjectChunk(subject, &backup, kNucleotide,
-//                                dbseq_chunk_overlap);
-// ...
-// BlastInitHitListReset(init_hitlist);
-// ```
 // A database search (the inputs of tests/tblastx_db_search.rs: the first 6 kb of MjeNMV against
 // a database of MelaMJNV and PemoMJNVA made by `losat makeblastdb`) at one, four, eight and sixteen
 // threads: with the switch (on by default) both subjects run on the compact lists, and the report

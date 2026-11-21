@@ -1,7 +1,7 @@
 //! EXPERIMENT (SEEDBUCKET, graduated on 2026-10-22: no variable): the two-hit
 //! stage of the TBLASTX word finder with the hits grouped by diagonal range.
 //!
-//! NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:492-614
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:492-614
 //! (`BlastAaWordFinder_TwoHit`): the subject is scanned left to right, and
 //! every hit `(q_off, s_off)` is tested against — and updates — exactly one
 //! cell of the diagonal table, `diag_array[(q_off - s_off) & diag_mask]`.
@@ -35,22 +35,6 @@
 //! a subject of a few megabases pass: 2^32 hits per subject-frame scan.)
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-538,588-606
-//! ```c
-//! Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
-//! Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
-//! ...
-//! diag_coord = (query_offset - subject_offset) & diag_mask;
-//! ...
-//! if (diag_array[diag_coord].flag) {
-//! ...
-//!     last_hit = diag_array[diag_coord].last_hit - diag_offset;
-//!     diff = subject_offset - last_hit;
-//! ...
-//!     if (score >= cutoffs->cutoff_score)
-//!         BlastSaveInitHsp(ungapped_hsps, hsp_q, hsp_s,
-//!                          query_offset, subject_offset, hsp_len,
-//!                          score);
-//! ```
 //! This is the per-hit body of BlastAaWordFinder_TwoHit that the bucketed order applies. The Rust
 //! code runs the same statements on a hit in the same way; only the order across diagonals
 //! (which cell is visited next) differs. Within one diagonal the hits arrive in scan order, so
@@ -59,13 +43,7 @@
 //! NCBI's output.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:306-309
-//! ```c
-//! void Blast_InitHitListSortByScore(BlastInitHitList * init_hitlist)
-//! {
-//!     qsort(init_hitlist->init_hsp_array, init_hitlist->total,
-//!           sizeof(BlastInitHSP), score_compare_match);
-//! ```
-//! NCBI sorts the hit list by score after the scan (called at aa_ungapped.c:282). Equal scores
+//! NCBI sorts the hit list by score after the scan (called at c++/src/algo/blast/core/aa_ungapped.c:282). Equal scores
 //! occur, and the order of the result among them follows the order of the input, so the saved HSPs
 //! must be in scan order before the sort. `restore_flush_order` puts them back, flush by flush.
 //!
@@ -121,15 +99,6 @@ pub(crate) fn min_cells() -> usize {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:502-516
-// ```c
-// while (scan_range[1] <= scan_range[2]) {
-// ...
-//     for (i = 0; i < hits; ++i) {
-//         Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
-//         Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
-// ...
-//         diag_coord = (query_offset - subject_offset) & diag_mask;
-// ```
 // Dispatch point: chooses between the scan-order loop (the port of the C loop above) and the
 // bucketed order, by table size.
 /// Whether a diagonal table of `cells` cells takes the bucketed order: from `min_cells()` up.
@@ -173,9 +142,6 @@ fn capped_budget(setting: Option<usize>) -> usize {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516
-// ```c
-// diag_coord = (query_offset - subject_offset) & diag_mask;
-// ```
 // A bucket is a range of consecutive values of `diag_coord`, the index of the diagonal table.
 /// Diagonal cells per bucket (LOSAT_X_SEEDBUCKET_CELLS, default 32768: a
 /// 128 KiB slice of the diagonal table).
@@ -191,12 +157,6 @@ fn cells_per_bucket() -> u32 {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-516
-// ```c
-// Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
-// Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
-// ...
-// diag_coord = (query_offset - subject_offset) & diag_mask;
-// ```
 // A buffered hit: the (q_off, s_off) of one offset pair, and `seq`, its position among the hits
 // buffered since the last flush (used to restore the scan order of the HSPs that flush saves).
 #[derive(Clone, Copy, Default)]
@@ -207,15 +167,6 @@ struct Hit {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:502-516
-// ```c
-// while (scan_range[1] <= scan_range[2]) {
-// ...
-//     for (i = 0; i < hits; ++i) {
-//         Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
-//         Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
-// ...
-//         diag_coord = (query_offset - subject_offset) & diag_mask;
-// ```
 // The buckets hold the hits buffered since the last flush (one or more calls of scansub in the C
 // loop), grouped by range of diag_coord. Within a bucket the hits are in scan order.
 pub(crate) struct SeedBuckets {
@@ -266,13 +217,6 @@ impl SeedBuckets {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-516
-    // ```c
-    // for (i = 0; i < hits; ++i) {
-    //     Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
-    //     Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
-    // ...
-    //     diag_coord = (query_offset - subject_offset) & diag_mask;
-    // ```
     // The C loop processes the offset pairs in scan order. This processes them bucket by bucket; the
     // hits of one diagonal share a bucket and keep their order, so every diagonal cell sees the
     // same sequence of hits.
@@ -294,12 +238,6 @@ impl SeedBuckets {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:588-591
-// ```c
-// if (score >= cutoffs->cutoff_score)
-//     BlastSaveInitHsp(ungapped_hsps, hsp_q, hsp_s,
-//                      query_offset, subject_offset, hsp_len,
-//                      score);
-// ```
 // NCBI saves an HSP when the hit that produced it is processed, so the saved list is in scan
 // order (the sort at blast_extend.c:306-309 follows). A flush saves its HSPs bucket by bucket;
 // this puts them back into scan order. Every hit of a flush comes after every hit of the flush
@@ -325,127 +263,5 @@ pub(crate) fn restore_flush_order<T: Copy>(items: &mut [T], start: usize, seq_ke
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    // No NCBI counterpart: checks the order bookkeeping of the bucketed two-hit stage; it does
-    // not compute any value NCBI computes.
-    #[test]
-    fn restore_flush_order_sorts_only_the_last_flush() {
-        // Three items of earlier flushes, already in scan order, then four saved in bucket order.
-        let mut items: Vec<u32> = vec![100, 101, 102, 13, 10, 12, 11];
-        let mut keys: Vec<u32> = vec![7, 0, 5, 2];
-        restore_flush_order(&mut items, 3, &mut keys);
-        assert_eq!(items, vec![100, 101, 102, 10, 11, 12, 13]);
-        assert!(keys.is_empty());
-
-        // Keys up to the bound of a flush (2^32 - 3, see `budget`) order as unsigned numbers.
-        let mut items: Vec<u32> = vec![1, 3, 2, 0];
-        let mut keys: Vec<u32> = vec![3_000_000_000, u32::MAX - 2, 4_000_000_000, 5];
-        restore_flush_order(&mut items, 0, &mut keys);
-        assert_eq!(items, vec![0, 1, 2, 3]);
-
-        // Nothing or one item saved: unchanged, keys emptied.
-        let mut items: Vec<u32> = vec![5, 4];
-        let mut keys: Vec<u32> = Vec::new();
-        restore_flush_order(&mut items, 2, &mut keys);
-        assert_eq!(items, vec![5, 4]);
-        let mut keys: Vec<u32> = vec![9];
-        restore_flush_order(&mut items, 1, &mut keys);
-        assert_eq!(items, vec![5, 4]);
-        assert!(keys.is_empty());
-    }
-
-    // No NCBI counterpart: drives the buckets the way the two callers do (push the hits of a
-    // scan call, flush when the budget is reached, restore after each flush) and checks that the
-    // saved items come out in scan order although the position restarts at every flush.
-    #[test]
-    fn saved_items_are_in_scan_order_across_flushes() {
-        // 2^20 cells: several buckets (32 with the default bucket size), so a flush hands the
-        // hits out in an order that is not the scan order.
-        let diag_array_size: u32 = 1 << 20;
-        let mut buckets = SeedBuckets::new(diag_array_size, diag_array_size - 1);
-        assert!(
-            buckets.buckets.len() > 1,
-            "the test needs more than one bucket"
-        );
-        let budget = 1000usize;
-        // Flushes whose saved items were out of scan order before the restore.
-        let mut flushes_out_of_order = 0u32;
-        // (scan position, per-flush position) of every saved hit.
-        let mut saved: Vec<(u64, u32)> = Vec::new();
-        let mut seq_keys: Vec<u32> = Vec::new();
-        let mut flushes = 0u32;
-        let mut largest_seq = 0u32;
-        let mut scan_position = 0u64;
-        // A deterministic stream: 300 scan calls of 0 to 96 hits on scattered diagonals.
-        let mut state = 0x9e37_79b9_7f4a_7c15u64;
-        let mut next = move || {
-            state ^= state << 13;
-            state ^= state >> 7;
-            state ^= state << 17;
-            state
-        };
-        // The hits buffered since the last flush, in scan order, with their scan position.
-        let mut pending: Vec<(u32, u32, u64)> = Vec::new();
-        for call in 0..300 {
-            let hits = (next() % 97) as usize;
-            for _ in 0..hits {
-                let q_off = (next() % (1 << 20)) as u32;
-                let s_off = (next() % (1 << 20)) as u32;
-                buckets.push(q_off, s_off);
-                pending.push((q_off, s_off, scan_position));
-                scan_position += 1;
-            }
-            let last_call = call == 299;
-            if buckets.flush_due(budget) || last_call {
-                let start = saved.len();
-                let flushed = buckets.total;
-                let mut seen = 0usize;
-                buckets.flush(|q, s, seq| {
-                    // The per-flush number is the index into this flush's hits.
-                    let (pq, ps, position) = pending[seq as usize];
-                    assert_eq!((pq, ps), (q, s));
-                    seen += 1;
-                    largest_seq = largest_seq.max(seq);
-                    // Save about a third of the hits.
-                    if position % 3 == 0 {
-                        saved.push((position, seq));
-                        seq_keys.push(seq);
-                    }
-                });
-                assert_eq!(seen, flushed);
-                if saved[start..].windows(2).any(|w| w[0].0 > w[1].0) {
-                    flushes_out_of_order += 1;
-                }
-                restore_flush_order(&mut saved, start, &mut seq_keys);
-                pending.clear();
-                flushes += 1;
-            }
-        }
-        assert!(flushes > 5, "the stream must span several flushes");
-        assert!(
-            flushes_out_of_order > 5,
-            "the buckets must have changed the order within several flushes"
-        );
-        // The position restarted: it never reached the number of hits of the whole stream.
-        assert!(u64::from(largest_seq) < scan_position / 4);
-        assert!((largest_seq as usize) < budget + 96);
-        // Every third hit was saved, in scan order.
-        let positions: Vec<u64> = saved.iter().map(|&(p, _)| p).collect();
-        let expected: Vec<u64> = (0..scan_position).filter(|p| p % 3 == 0).collect();
-        assert_eq!(positions, expected);
-    }
-
-    // No NCBI counterpart: the cap that keeps the per-flush position within a u32.
-    #[test]
-    fn budget_cap_keeps_the_flush_position_in_u32() {
-        assert_eq!(capped_budget(None), 1 << 21);
-        assert_eq!(capped_budget(Some(4096)), 4096);
-        assert_eq!(capped_budget(Some(MAX_BUDGET)), MAX_BUDGET);
-        assert_eq!(capped_budget(Some(usize::MAX)), MAX_BUDGET);
-        // budget - 1 buffered hits, then one scan call of at most i32::MAX hits.
-        let most_buffered = (capped_budget(Some(usize::MAX)) as u64 - 1) + i32::MAX as u64;
-        assert!(most_buffered < u64::from(u32::MAX));
-    }
-}
+#[path = "x_seed_bucket_tests.rs"]
+mod tests;

@@ -41,7 +41,7 @@
 //! for a subject that the redo reads. Only a database changed after its preliminary read can fail
 //! there.
 //!
-//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1381-1385, quoted above
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1381-1385, cited above
 //! `ListedSubjects::read`: NCBI's redo fetches each match's sequence from the database in the
 //! encoding of the search.
 //!
@@ -52,6 +52,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use anyhow::Result;
 
 use super::encoding::EncodedProtein;
+use crate::algorithm::common::db_mask_search::{mask_protein_letters, SubjectMasks};
 use crate::seqdb::{SeqDb, SequenceBlock};
 
 /// The stored residues of pyrrolysine (O) and of the gap character (`blast_engine.rs` `STORED_O`,
@@ -83,6 +84,9 @@ pub(crate) struct XDbSubjects<'a> {
     /// (`ListedSubjects::x_recounted`). The redo of a match reads its subject before it can reach a
     /// final hit list.
     pub(crate) recounted: &'a [AtomicBool],
+    /// `-db_hard_mask`: the algorithm whose masks every read writes `X` over
+    /// ([`XDbSubjects::mask_hard`]); `None` otherwise.
+    pub(crate) hard_mask: Option<i32>,
 }
 
 /// A subject as the redo reads it: its residues, without the sentinels.
@@ -156,19 +160,50 @@ impl<'a> XRedoSubjects<'a> {
 }
 
 impl XDbSubjects<'_> {
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1381-1385, quoted above
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1381-1385, cited above
     // `ListedSubjects::read`: the redo fetches each match's sequence from the database.
     /// Reads the subject of rank `rank`.
     #[inline(never)]
     fn read(&self, rank: u32) -> Result<SequenceBlock> {
         let ordinal = self.ordinals[rank as usize];
-        let block = self.db.read_sequence(ordinal).map_err(|error| {
+        let mut block = self.db.read_sequence(ordinal).map_err(|error| {
             crate::algorithm::common::database::database_error(error, self.program)
         })?;
         if x_has_recounted_residue(block.protein(0)) {
             self.recounted[rank as usize].store(true, Ordering::Relaxed);
         }
+        if let Some(algo_id) = self.hard_mask {
+            self.mask_hard(&mut block, rank, algo_id)?;
+        }
         Ok(block)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:328-353 and
+    // c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1631-1636
+    // With `-db_hard_mask`, each fetch after the preliminary stage (the composition-based redo,
+    // the traceback) is a copy with `X` over the sequence's masks. The reports read the stored
+    // letters again (`ListedSubjects::x_read_shown`) and count the identities and positives of
+    // the subject's HSPs on them.
+    /// Writes `X` over the residues of the subject of rank `rank` in `block` that the stored masks
+    /// of the algorithm `algo_id` cover, and marks the subject for the recount of its HSPs on the
+    /// stored letters (`recount_shown_identities`) when it has masks.
+    #[cold]
+    #[inline(never)]
+    fn mask_hard(&self, block: &mut SequenceBlock, rank: u32, algo_id: i32) -> Result<()> {
+        let ordinal = self.ordinals[rank as usize];
+        let mut reader = SubjectMasks::with_window(1);
+        let masks = reader.of(
+            self.db,
+            ordinal,
+            algo_id,
+            crate::algorithm::common::database::database_error_of,
+            self.program,
+        )?;
+        if !masks.is_empty() {
+            mask_protein_letters(block.protein_mut(0), masks);
+            self.recounted[rank as usize].store(true, Ordering::Relaxed);
+        }
+        Ok(())
     }
 }
 

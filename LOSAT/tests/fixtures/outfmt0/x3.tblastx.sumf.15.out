@@ -1,0 +1,935 @@
+{
+"BlastOutput2": [
+{
+    "report": {
+      "program": "tblastx",
+      "version": "TBLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 1e-20,
+        "filter": "L;",
+        "query_gencode": 1,
+        "db_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_1",
+            "query_title": "LC738868.1 MAG: Marsupenaeus japonicus endogenous nimavirus Ginoza2017 DNA, complete genome",
+            "query_len": 20000,
+            "query_masking": [
+              {
+                "from": 240,
+                "to": 270
+              },
+              {
+                "from": 399,
+                "to": 441
+              },
+              {
+                "from": 510,
+                "to": 579
+              },
+              {
+                "from": 711,
+                "to": 738
+              },
+              {
+                "from": 1065,
+                "to": 1095
+              },
+              {
+                "from": 1278,
+                "to": 1338
+              },
+              {
+                "from": 1428,
+                "to": 1506
+              },
+              {
+                "from": 1515,
+                "to": 1542
+              },
+              {
+                "from": 1566,
+                "to": 1602
+              },
+              {
+                "from": 1671,
+                "to": 1704
+              },
+              {
+                "from": 1830,
+                "to": 1872
+              },
+              {
+                "from": 2616,
+                "to": 2640
+              },
+              {
+                "from": 2667,
+                "to": 2694
+              },
+              {
+                "from": 2931,
+                "to": 2964
+              },
+              {
+                "from": 3123,
+                "to": 3159
+              },
+              {
+                "from": 3240,
+                "to": 3276
+              },
+              {
+                "from": 3357,
+                "to": 3393
+              },
+              {
+                "from": 4089,
+                "to": 4110
+              },
+              {
+                "from": 4182,
+                "to": 4281
+              },
+              {
+                "from": 4614,
+                "to": 4647
+              },
+              {
+                "from": 4680,
+                "to": 4722
+              },
+              {
+                "from": 4734,
+                "to": 4767
+              },
+              {
+                "from": 4791,
+                "to": 4827
+              },
+              {
+                "from": 5061,
+                "to": 5100
+              },
+              {
+                "from": 5121,
+                "to": 5160
+              },
+              {
+                "from": 5541,
+                "to": 5586
+              },
+              {
+                "from": 5805,
+                "to": 5826
+              },
+              {
+                "from": 6774,
+                "to": 6801
+              },
+              {
+                "from": 6978,
+                "to": 7020
+              },
+              {
+                "from": 7248,
+                "to": 7326
+              },
+              {
+                "from": 7350,
+                "to": 7392
+              },
+              {
+                "from": 7434,
+                "to": 7482
+              },
+              {
+                "from": 7596,
+                "to": 7650
+              },
+              {
+                "from": 8127,
+                "to": 8181
+              },
+              {
+                "from": 8226,
+                "to": 8271
+              },
+              {
+                "from": 8439,
+                "to": 8475
+              },
+              {
+                "from": 8481,
+                "to": 8538
+              },
+              {
+                "from": 8574,
+                "to": 8604
+              },
+              {
+                "from": 9312,
+                "to": 9366
+              },
+              {
+                "from": 9459,
+                "to": 9492
+              },
+              {
+                "from": 9603,
+                "to": 9651
+              },
+              {
+                "from": 9735,
+                "to": 9771
+              },
+              {
+                "from": 11310,
+                "to": 11349
+              },
+              {
+                "from": 11841,
+                "to": 11865
+              },
+              {
+                "from": 11901,
+                "to": 11937
+              },
+              {
+                "from": 12009,
+                "to": 12045
+              },
+              {
+                "from": 12114,
+                "to": 12153
+              },
+              {
+                "from": 12171,
+                "to": 12228
+              },
+              {
+                "from": 12258,
+                "to": 12342
+              },
+              {
+                "from": 12429,
+                "to": 12465
+              },
+              {
+                "from": 12816,
+                "to": 12849
+              },
+              {
+                "from": 12852,
+                "to": 12876
+              },
+              {
+                "from": 12900,
+                "to": 13002
+              },
+              {
+                "from": 13035,
+                "to": 13068
+              },
+              {
+                "from": 13266,
+                "to": 13335
+              },
+              {
+                "from": 13347,
+                "to": 13413
+              },
+              {
+                "from": 13488,
+                "to": 13539
+              },
+              {
+                "from": 13587,
+                "to": 13647
+              },
+              {
+                "from": 13662,
+                "to": 13719
+              },
+              {
+                "from": 13788,
+                "to": 13821
+              },
+              {
+                "from": 13857,
+                "to": 13881
+              },
+              {
+                "from": 14106,
+                "to": 14127
+              },
+              {
+                "from": 14184,
+                "to": 14265
+              },
+              {
+                "from": 14295,
+                "to": 14361
+              },
+              {
+                "from": 14802,
+                "to": 14835
+              },
+              {
+                "from": 15114,
+                "to": 15156
+              },
+              {
+                "from": 15984,
+                "to": 16002
+              },
+              {
+                "from": 16410,
+                "to": 16455
+              },
+              {
+                "from": 16533,
+                "to": 16560
+              },
+              {
+                "from": 17115,
+                "to": 17169
+              },
+              {
+                "from": 17757,
+                "to": 17784
+              },
+              {
+                "from": 17937,
+                "to": 17976
+              },
+              {
+                "from": 17982,
+                "to": 18018
+              },
+              {
+                "from": 19434,
+                "to": 19524
+              },
+              {
+                "from": 19560,
+                "to": 19596
+              },
+              {
+                "from": 448,
+                "to": 475
+              },
+              {
+                "from": 523,
+                "to": 562
+              },
+              {
+                "from": 1060,
+                "to": 1084
+              },
+              {
+                "from": 1204,
+                "to": 1237
+              },
+              {
+                "from": 1429,
+                "to": 1558
+              },
+              {
+                "from": 1564,
+                "to": 1600
+              },
+              {
+                "from": 1606,
+                "to": 1660
+              },
+              {
+                "from": 1834,
+                "to": 1879
+              },
+              {
+                "from": 2002,
+                "to": 2050
+              },
+              {
+                "from": 2374,
+                "to": 2416
+              },
+              {
+                "from": 2518,
+                "to": 2554
+              },
+              {
+                "from": 2614,
+                "to": 2641
+              },
+              {
+                "from": 2668,
+                "to": 2695
+              },
+              {
+                "from": 2800,
+                "to": 2869
+              },
+              {
+                "from": 4087,
+                "to": 4108
+              },
+              {
+                "from": 4207,
+                "to": 4258
+              },
+              {
+                "from": 4678,
+                "to": 4714
+              },
+              {
+                "from": 4732,
+                "to": 4762
+              },
+              {
+                "from": 4825,
+                "to": 4864
+              },
+              {
+                "from": 4972,
+                "to": 5011
+              },
+              {
+                "from": 5545,
+                "to": 5584
+              },
+              {
+                "from": 5926,
+                "to": 5953
+              },
+              {
+                "from": 6355,
+                "to": 6391
+              },
+              {
+                "from": 6736,
+                "to": 6823
+              },
+              {
+                "from": 6964,
+                "to": 7024
+              },
+              {
+                "from": 7258,
+                "to": 7312
+              },
+              {
+                "from": 7351,
+                "to": 7381
+              },
+              {
+                "from": 7393,
+                "to": 7429
+              },
+              {
+                "from": 8572,
+                "to": 8602
+              },
+              {
+                "from": 8797,
+                "to": 8830
+              },
+              {
+                "from": 9214,
+                "to": 9280
+              },
+              {
+                "from": 9319,
+                "to": 9358
+              },
+              {
+                "from": 9946,
+                "to": 9994
+              },
+              {
+                "from": 10924,
+                "to": 10957
+              },
+              {
+                "from": 11080,
+                "to": 11125
+              },
+              {
+                "from": 11818,
+                "to": 11845
+              },
+              {
+                "from": 12091,
+                "to": 12154
+              },
+              {
+                "from": 12172,
+                "to": 12307
+              },
+              {
+                "from": 12313,
+                "to": 12334
+              },
+              {
+                "from": 12364,
+                "to": 12400
+              },
+              {
+                "from": 12694,
+                "to": 12739
+              },
+              {
+                "from": 12853,
+                "to": 12916
+              },
+              {
+                "from": 13036,
+                "to": 13075
+              },
+              {
+                "from": 13417,
+                "to": 13459
+              },
+              {
+                "from": 13504,
+                "to": 13555
+              },
+              {
+                "from": 13642,
+                "to": 13696
+              },
+              {
+                "from": 13939,
+                "to": 13978
+              },
+              {
+                "from": 14125,
+                "to": 14155
+              },
+              {
+                "from": 16186,
+                "to": 16225
+              },
+              {
+                "from": 16411,
+                "to": 16459
+              },
+              {
+                "from": 16531,
+                "to": 16561
+              },
+              {
+                "from": 16702,
+                "to": 16747
+              },
+              {
+                "from": 16804,
+                "to": 16837
+              },
+              {
+                "from": 17149,
+                "to": 17206
+              },
+              {
+                "from": 18196,
+                "to": 18250
+              },
+              {
+                "from": 18391,
+                "to": 18454
+              },
+              {
+                "from": 18559,
+                "to": 18604
+              },
+              {
+                "from": 18676,
+                "to": 18721
+              },
+              {
+                "from": 18847,
+                "to": 18892
+              },
+              {
+                "from": 18955,
+                "to": 18988
+              },
+              {
+                "from": 19471,
+                "to": 19528
+              },
+              {
+                "from": 19540,
+                "to": 19561
+              },
+              {
+                "from": 176,
+                "to": 209
+              },
+              {
+                "from": 314,
+                "to": 335
+              },
+              {
+                "from": 377,
+                "to": 416
+              },
+              {
+                "from": 530,
+                "to": 563
+              },
+              {
+                "from": 980,
+                "to": 1022
+              },
+              {
+                "from": 1409,
+                "to": 1448
+              },
+              {
+                "from": 1514,
+                "to": 1544
+              },
+              {
+                "from": 1577,
+                "to": 1643
+              },
+              {
+                "from": 1835,
+                "to": 1880
+              },
+              {
+                "from": 1991,
+                "to": 2024
+              },
+              {
+                "from": 2486,
+                "to": 2528
+              },
+              {
+                "from": 2576,
+                "to": 2639
+              },
+              {
+                "from": 2666,
+                "to": 2690
+              },
+              {
+                "from": 2819,
+                "to": 2846
+              },
+              {
+                "from": 3776,
+                "to": 3809
+              },
+              {
+                "from": 4088,
+                "to": 4109
+              },
+              {
+                "from": 4193,
+                "to": 4259
+              },
+              {
+                "from": 4544,
+                "to": 4559
+              },
+              {
+                "from": 4916,
+                "to": 4964
+              },
+              {
+                "from": 5141,
+                "to": 5168
+              },
+              {
+                "from": 5315,
+                "to": 5342
+              },
+              {
+                "from": 5543,
+                "to": 5585
+              },
+              {
+                "from": 6773,
+                "to": 6800
+              },
+              {
+                "from": 6869,
+                "to": 6908
+              },
+              {
+                "from": 7001,
+                "to": 7055
+              },
+              {
+                "from": 7235,
+                "to": 7325
+              },
+              {
+                "from": 8126,
+                "to": 8147
+              },
+              {
+                "from": 8162,
+                "to": 8204
+              },
+              {
+                "from": 8228,
+                "to": 8267
+              },
+              {
+                "from": 8465,
+                "to": 8516
+              },
+              {
+                "from": 8780,
+                "to": 8822
+              },
+              {
+                "from": 8879,
+                "to": 8969
+              },
+              {
+                "from": 9212,
+                "to": 9266
+              },
+              {
+                "from": 9314,
+                "to": 9353
+              },
+              {
+                "from": 9530,
+                "to": 9572
+              },
+              {
+                "from": 9899,
+                "to": 9932
+              },
+              {
+                "from": 9950,
+                "to": 9995
+              },
+              {
+                "from": 10214,
+                "to": 10247
+              },
+              {
+                "from": 11441,
+                "to": 11486
+              },
+              {
+                "from": 11996,
+                "to": 12062
+              },
+              {
+                "from": 12119,
+                "to": 12179
+              },
+              {
+                "from": 12257,
+                "to": 12314
+              },
+              {
+                "from": 12404,
+                "to": 12428
+              },
+              {
+                "from": 12623,
+                "to": 12665
+              },
+              {
+                "from": 12698,
+                "to": 12749
+              },
+              {
+                "from": 12839,
+                "to": 12875
+              },
+              {
+                "from": 13034,
+                "to": 13064
+              },
+              {
+                "from": 14105,
+                "to": 14192
+              },
+              {
+                "from": 14204,
+                "to": 14261
+              },
+              {
+                "from": 14297,
+                "to": 14342
+              },
+              {
+                "from": 14954,
+                "to": 15005
+              },
+              {
+                "from": 16034,
+                "to": 16073
+              },
+              {
+                "from": 16532,
+                "to": 16562
+              },
+              {
+                "from": 16736,
+                "to": 16769
+              },
+              {
+                "from": 17120,
+                "to": 17198
+              },
+              {
+                "from": 17786,
+                "to": 17819
+              },
+              {
+                "from": 17879,
+                "to": 17921
+              },
+              {
+                "from": 18164,
+                "to": 18197
+              },
+              {
+                "from": 18413,
+                "to": 18464
+              },
+              {
+                "from": 18950,
+                "to": 19010
+              },
+              {
+                "from": 19202,
+                "to": 19253
+              },
+              {
+                "from": 19358,
+                "to": 19412
+              },
+              {
+                "from": 19442,
+                "to": 19502
+              },
+              {
+                "from": 19559,
+                "to": 19595
+              }
+            ],
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "LC738869.1",
+                    "title": "LC738869.1 MAG: Penaeus monodon endogenous nimavirus Mikawa2016 DNA, complete genome"
+                  }
+                ],
+                "len": 20000,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 408.415,
+                    "score": 885,
+                    "evalue": 4.98971e-116,
+                    "identity": 163,
+                    "positive": 213,
+                    "query_from": 13269,
+                    "query_to": 14096,
+                    "query_frame": 3,
+                    "hit_from": 930,
+                    "hit_to": 1757,
+                    "hit_frame": 3,
+                    "align_len": 276,
+                    "gaps": 0,
+                    "qseq": "ERKRRYKYMSINVILGHLKRFLEWACAEANYPLCEMTKREHAFYSKLCRRKGDVENMNRKVAEYVPTIGEMGPLIRCSKHRVIVDGLIERPRETLAEYSIDLIHAALAWPLIIRAGARTGVVRNLLVSEVLEAVDTSDGVIVKVKKHKTSSLYGPYQIGLPAREHNMLVNFIRHRNWESDYVFSTSRGNPFSLANIQRFMRKLFQRYGLPHLRIASVRKFLTTQAHSAGDDRIQEATASLLKHSMKTAKRDYKAMQRDRDALDTANRLSRILQDQL",
+                    "hseq": "ELVKKYKHLSISVILGHVKRFVDWACSEADYVISPRVRREHELYTKLCRRKGGRENFDRKIEEYLPTLRDIGPLIHSVKHRYIINGLLERPSETIENESIDLIHATIAWPCILKSGVRTGVLMNMCVNEVLGATKYQEGFIIRVRNHKTSEHYGPYQIGLNEEEYAIIFNFIRNRTWTSDYVFSTRGGKKFSLSNIQRFMRVLFNIYGLRDMRITTIRKFLTSHIHKEGNDNMIEATASLLKHSIKTARRDYKAMQHDRDALKTANNLAHMLKDQL",
+                    "midline": "E  ++YK++SI+VILGH+KRF++WAC+EA+Y +    +REH  Y+KLCRRKG  EN +RK+ EY+PT+ ++GPLI   KHR I++GL+ERP ET+   SIDLIHA +AWP I+++G RTGV+ N+ V+EVL A    +G I++V+ HKTS  YGPYQIGL   E+ ++ NFIR+R W SDYVFST  G  FSL+NIQRFMR LF  YGL  +RI ++RKFLT+  H  G+D + EATASLLKHS+KTA+RDYKAMQ DRDAL TAN L+ +L+DQL"
+                  },
+                  {
+                    "num": 2,
+                    "bit_score": 123.409,
+                    "score": 263,
+                    "evalue": 3.11418e-30,
+                    "identity": 54,
+                    "positive": 65,
+                    "query_from": 15710,
+                    "query_to": 16015,
+                    "query_frame": -2,
+                    "hit_from": 14001,
+                    "hit_to": 14306,
+                    "hit_frame": 3,
+                    "align_len": 102,
+                    "gaps": 0,
+                    "qseq": "DKLPNCSSLKELTMTTNPRGKTALKRTLKMFQNFSHLTTLTLIPFRRYASFHWVIGPVVQYCRKLKEFHLVYHGGSLEKSGWGIEDLVQCPELVLLWLFDYS",
+                    "hseq": "DNLWKCSNLKELSLTTAPHAIIDEKSAASMFNNFSHLTTLLLVPSGGKVSFHWVIDHVIRSCPFLKEFHVAYDGRKLKDNGGGIEKLVQCQNLVSLCLYDFS",
+                    "midline": "D L  CS+LKEL++TT P      K    MF NFSHLTTL L+P     SFHWVI  V++ C  LKEFH+ Y G  L+ +G GIE LVQC  LV L L+D+S"
+                  },
+                  {
+                    "num": 3,
+                    "bit_score": 94.5419,
+                    "score": 200,
+                    "evalue": 1.52482e-21,
+                    "identity": 56,
+                    "positive": 71,
+                    "query_from": 13688,
+                    "query_to": 14035,
+                    "query_frame": -2,
+                    "hit_from": 1349,
+                    "hit_to": 1696,
+                    "hit_frame": -2,
+                    "align_len": 116,
+                    "gaps": 0,
+                    "qseq": "CMAL*SRLAVFMLCFNSDAVAS*IRSSPAL*ACVVRNFLTLAILRCGRPYRWKSFRMNR*MLASEKGLPRLVENT*SDSQFLWRMKLTSILCSLAGSPIW*GPYSDDVLCFFTLTM",
+                    "hseq": "CIAL*SLLAVLILCFRRDAVASIILSFPSL*I*LVKNFLIVVILISLSPYMLNNTLINLCIFDRENFLPPLVENT*SEVHVLFLIKLNIMAYSSSLSPI**GP*CSEVL*FRTLIM",
+                    "midline": "C+AL*S LAV +LCF  DAVAS I S P+L*  +V+NFL + IL    PY   +  +N  +   E  LP LVENT*S+   L+ +KL  +  S + SPI *GP   +VL F TL M"
+                  },
+                  {
+                    "num": 4,
+                    "bit_score": 93.1672,
+                    "score": 197,
+                    "evalue": 3.95386e-21,
+                    "identity": 51,
+                    "positive": 61,
+                    "query_from": 13295,
+                    "query_to": 13627,
+                    "query_frame": -2,
+                    "hit_from": 956,
+                    "hit_to": 1288,
+                    "hit_frame": -2,
+                    "align_len": 111,
+                    "gaps": 0,
+                    "qseq": "PVLAPALMIRGHASAAWIRSILYSARVSRGRSIRPSTMTRCFEQRIRGPISPIVGTYSATFLFMFSTSPFLRHSLE*KACSRLVISHRG*LASAHAHSRNRLRCPRMTLML",
+                    "hseq": "PVLTPLLSIQGQAMVA*IRSMLSFSIVSDGLSNKPFIMYLCLTE*MSGPISLSVGRYSSIFLSKFSLPPFLLQSFVYSSCSLLTLGEIT*SASEHAQSTNLFT*PNMTLIL",
+                    "midline": "PVL P L I+G A  A IRS+L  + VS G S +P  M  C  + + GPIS  VG YS+ FL  FS  PFL  S    +CS L +    * AS HA S N    P MTL+L"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 35,
+              "eff_space": 43970161,
+              "kappa": 0.133956144488482,
+              "lambda": 0.317605957635731,
+              "entropy": 0.401214524497119
+            }
+          }
+        ]
+      }
+    }
+  }
+]
+}

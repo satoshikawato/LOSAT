@@ -2,14 +2,6 @@
 //! `src/sequence/packed_subject.rs`), on whole searches and with a subject range.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:515-520
-//! ```c
-//!     virtual SBlastSequence GetCompressedPlusStrand() {
-//!         SBlastSequence retval(size());
-//!         string ncbi4na = kEmptyStr;
-//!         m_SeqVector.GetSeqData(m_SeqVector.begin(), m_SeqVector.end(), ncbi4na);
-//!         s_Ncbi4naToNcbi2na(ncbi4na, size(), retval.data.get());
-//!         return retval;
-//! ```
 //! NCBI keeps the subjects in its scope and makes each one's search forms from it. With
 //! `LOSAT_X_TBNSTORE` on (a switch of the strict set: on unless it is `0`) the reader's records
 //! keep their deflines and the letters are held packed (2 bits per base, the runs of ambiguous
@@ -232,14 +224,6 @@ fn hit_subjects(report: &[u8]) -> std::collections::BTreeSet<String> {
 const NO_STORE: (&str, &str) = ("LOSAT_X_TBNSTORE", "0");
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:773-789
-// ```c
-//         catch(CBlastException & e ) {
-//         	// Skip bad subject sequence
-//         	if(e.GetErrCode() == CBlastException::eInvalidArgument) {
-//         		seqblk_vec->push_back(subj);
-//         ...
-//         		warning += "Subject sequence contains no data";
-// ```
 // Every search below gives one report and the same messages (the warning of the subject without
 // letters among them) with the switch off and on (the default): tabular, commented tabular and pairwise
 // reports, the default options and `-lcase_masking` at one and three threads, another genetic

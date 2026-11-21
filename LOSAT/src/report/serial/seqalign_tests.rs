@@ -19,7 +19,7 @@
 //! files; an e-value or bit score as its 15 printed digits, which give back the same double).
 
 use super::encoder::{Encoder, ReplacedChar, SerialError, StreamPosition, Traced};
-use super::{write_query, SeqAlignError, SerialFormat};
+use super::{write_query, SerialFormat};
 use crate::blastinput::app::Program;
 use crate::common::GapEditOp::{self, Del, Ins, Sub};
 use crate::report::record::{HspRecord, QueryRecord, RunRecord, SubjectRecord};
@@ -447,33 +447,354 @@ fn score_zero_hsps_write_nothing() {
     assert_eq!(buf, b"kept");
 }
 
-/// The ungapped searches whose Seq-aligns would be Dense-diags (BLASTN, BLASTP; neither runs
-/// an ungapped search) are refused, not written.
+/// The HSPs of `blastp -ungapped -comp_based_stats 0 -query fixture/q4.faa` (Query_1, 109 aa)
+/// against six subjects of `PajaWSV.faa`: (subject, query start, subject start, length, score,
+/// e-value, bit score, identities, positives). Subject 2 has two HSPs. The e-values and bit
+/// scores as their 15 printed digits.
+const BP_UNGAPPED_HSPS: [(u32, i32, i32, i32, i32, f64, f64, i32, i32); 7] = [
+    (
+        0,
+        16,
+        796,
+        26,
+        43,
+        651688149968565e-15,
+        229109485291396e-13,
+        9,
+        12,
+    ),
+    (
+        1,
+        25,
+        146,
+        69,
+        40,
+        171302022762502e-14,
+        215166600089639e-13,
+        15,
+        26,
+    ),
+    (
+        2,
+        4,
+        32,
+        23,
+        39,
+        236412288450052e-14,
+        210518971689053e-13,
+        8,
+        11,
+    ),
+    (
+        2,
+        74,
+        252,
+        12,
+        35,
+        857630603424144e-14,
+        19192845808671e-12,
+        6,
+        8,
+    ),
+    (
+        3,
+        41,
+        971,
+        22,
+        39,
+        236412288450052e-14,
+        210518971689053e-13,
+        8,
+        13,
+    ),
+    (
+        4,
+        9,
+        1640,
+        19,
+        38,
+        326270345375192e-14,
+        205871343288467e-13,
+        7,
+        10,
+    ),
+    (
+        5,
+        15,
+        961,
+        19,
+        38,
+        326270345375192e-14,
+        205871343288467e-13,
+        6,
+        14,
+    ),
+];
+
+/// The ordinal ids (`-db`) and the record numbers (`-subject`) of the six subjects.
+const BP_UNGAPPED_SUBJECTS: [u32; 6] = [4, 83, 24, 22, 82, 11];
+
+/// `blastp -ungapped` against a database (`db_title`) or with `-subject` (`None`): one `diags`
+/// Seq-align per subject, a Dense-diag per HSP, `unknown` strands on both rows, and no subject
+/// remap of the strands (BLASTP `-subject` writes `unknown`, unlike its gapped Dense-segs).
+fn blastp_ungapped_documents(format: SerialFormat, db_title: Option<&[u8]>) -> Vec<u8> {
+    let run = RunRecord {
+        program: Program::Blastp,
+        db_title,
+        gapped: false,
+    };
+    let subjects: Vec<SubjectRecord<'_>> = BP_UNGAPPED_SUBJECTS
+        .iter()
+        .map(|&number| match db_title {
+            Some(_) => subject(
+                SeqId::BlOrdId(crate::seqdb::Oid::of_unrestricted(number - 1)),
+                1000,
+            ),
+            None => subject(SeqId::Local(SUBJECT_NAMES[number as usize]), 1000),
+        })
+        .collect();
+    let hsps: Vec<HspRecord<'_>> = BP_UNGAPPED_HSPS
+        .iter()
+        .map(
+            |&(subject, q_start, s_start, len, score, evalue, bit_score, ident, positives)| {
+                HspRecord {
+                    subject,
+                    q_offset: q_start,
+                    q_end: q_start + len,
+                    s_offset: s_start,
+                    s_end: s_start + len,
+                    q_frame: 0,
+                    s_frame: 0,
+                    score,
+                    num: 0,
+                    evalue,
+                    bit_score,
+                    num_ident: ident,
+                    num_positives: positives,
+                    comp_adjust: 0,
+                    ops: &[],
+                }
+            },
+        )
+        .collect();
+    let mut buf = Vec::new();
+    assert_eq!(
+        write_query(
+            format,
+            &run,
+            &query("Query_1", 109),
+            &subjects,
+            &hsps,
+            &mut buf
+        ),
+        Ok(true)
+    );
+    buf
+}
+
+/// `Subject_N` of the record numbers of `BP_UNGAPPED_SUBJECTS`.
+const SUBJECT_NAMES: [&str; 84] = {
+    let mut names = [""; 84];
+    names[4] = "Subject_4";
+    names[83] = "Subject_83";
+    names[24] = "Subject_24";
+    names[22] = "Subject_22";
+    names[82] = "Subject_82";
+    names[11] = "Subject_11";
+    names
+};
+
+/// The Dense-diag Seq-aligns of an ungapped BLASTP search, in the three encodings, against
+/// NCBI BLAST+ 2.17.0 (`blastp -query q4.faa -subject s.faa|-db sdb -ungapped -comp_based_stats 0
+/// -outfmt 8|9|12`; the score list without `comp_adjustment_method`, `unknown` strands).
 #[test]
-fn untranslated_ungapped_runs_are_refused() {
-    let subjects = [subject(SeqId::Local("Subject_1"), 100)];
-    let ops = [Sub(10)];
-    let one = hsp(0, (0, 0), (1, 0), 30, 1.0, 1.0, (10, 0, 0), &ops);
-    for (program, gapped) in [(Program::Blastn, false), (Program::Blastp, false)] {
-        let run = RunRecord {
-            program,
-            db_title: None,
-            gapped,
-        };
+fn blastp_ungapped_dendiag_documents_equal_ncbi() {
+    assert_same_bytes(
+        &blastp_ungapped_documents(SerialFormat::AsnText, None),
+        fixture!("blastp_ungapped_subject_fmt8.out"),
+    );
+    assert_same_bytes(
+        &blastp_ungapped_documents(SerialFormat::AsnBinary, None),
+        fixture!("blastp_ungapped_subject_fmt9.out"),
+    );
+    assert_same_bytes(
+        &blastp_ungapped_documents(SerialFormat::Json, None),
+        fixture!("blastp_ungapped_subject_fmt12.out"),
+    );
+    assert_same_bytes(
+        &blastp_ungapped_documents(SerialFormat::AsnText, Some(b"in/s.faa")),
+        fixture!("blastp_ungapped_db_fmt8.out"),
+    );
+    assert_same_bytes(
+        &blastp_ungapped_documents(SerialFormat::AsnBinary, Some(b"in/s.faa")),
+        fixture!("blastp_ungapped_db_fmt9.out"),
+    );
+    assert_same_bytes(
+        &blastp_ungapped_documents(SerialFormat::Json, Some(b"in/s.faa")),
+        fixture!("blastp_ungapped_db_fmt12.out"),
+    );
+}
+
+/// The HSPs of `blastn -task megablast -ungapped -query mix_q.fa -subject mix_s.fa` (Query_1,
+/// 1000 nt; Subject_1 with four HSPs, Subject_2 with two): (subject, query start in the query's
+/// context, subject start, length, minus strand, score, e-value, bit score, identities). The
+/// minus-strand HSPs start at `1000 - end` in the output; the context's offset is `end - length`.
+const BN_UNGAPPED_HSPS: [(u32, i32, i32, i32, bool, i32, f64, f64, i32); 6] = [
+    (
+        0,
+        99,
+        99,
+        302,
+        false,
+        302,
+        177234191655786e-183,
+        581339129949787e-12,
+        302,
+    ),
+    (
+        0,
+        300,
+        500,
+        200,
+        true,
+        200,
+        192662373350162e-124,
+        3852249544608e-10,
+        200,
+    ),
+    (
+        0,
+        749,
+        799,
+        152,
+        false,
+        152,
+        116563164172467e-96,
+        292935930701277e-12,
+        152,
+    ),
+    (
+        0,
+        120,
+        1000,
+        140,
+        false,
+        140,
+        102802205877556e-89,
+        269863674761396e-12,
+        140,
+    ),
+    (
+        1,
+        400,
+        0,
+        300,
+        true,
+        300,
+        254754008593196e-182,
+        577493753959806e-12,
+        300,
+    ),
+    (
+        1,
+        600,
+        380,
+        200,
+        false,
+        200,
+        192662373350162e-124,
+        3852249544608e-10,
+        200,
+    ),
+];
+
+/// `blastn -ungapped` with `-subject`: the Dense-diags of plus-strand and minus-strand HSPs
+/// (`minus, plus` strands; the query start of a minus HSP is `1000 - end`), in the three
+/// encodings, against NCBI BLAST+ 2.17.0 (`-outfmt 8|9|12`).
+#[test]
+fn blastn_ungapped_dendiag_documents_equal_ncbi() {
+    let run = RunRecord {
+        program: Program::Blastn,
+        db_title: None,
+        gapped: false,
+    };
+    let subjects = [
+        subject(SeqId::Local("Subject_1"), 1848),
+        subject(SeqId::Local("Subject_2"), 1000),
+    ];
+    let hsps: Vec<HspRecord<'_>> = BN_UNGAPPED_HSPS
+        .iter()
+        .map(
+            |&(subject, q_start, s_start, len, minus, score, evalue, bit_score, ident)| HspRecord {
+                subject,
+                q_offset: q_start,
+                q_end: q_start + len,
+                s_offset: s_start,
+                s_end: s_start + len,
+                q_frame: if minus { -1 } else { 1 },
+                s_frame: 1,
+                score,
+                num: 0,
+                evalue,
+                bit_score,
+                num_ident: ident,
+                num_positives: 0,
+                comp_adjust: 0,
+                ops: &[],
+            },
+        )
+        .collect();
+    for (format, name) in [
+        (
+            SerialFormat::AsnText,
+            &fixture!("blastn_ungapped_mix_fmt8.out")[..],
+        ),
+        (
+            SerialFormat::AsnBinary,
+            &fixture!("blastn_ungapped_mix_fmt9.out")[..],
+        ),
+        (
+            SerialFormat::Json,
+            &fixture!("blastn_ungapped_mix_fmt12.out")[..],
+        ),
+    ] {
         let mut buf = Vec::new();
         assert_eq!(
             write_query(
-                SerialFormat::AsnText,
+                format,
                 &run,
-                &query("Query_1", 10),
+                &query("Query_1", 1000),
                 &subjects,
-                &[one],
+                &hsps,
                 &mut buf
             ),
-            Err(SeqAlignError::Unsupported(program))
+            Ok(true)
         );
-        assert!(buf.is_empty());
+        assert_same_bytes(&buf, name);
     }
+}
+
+/// A query without an HSP writes nothing in an ungapped search (`results.HasAlignments()`).
+#[test]
+fn an_ungapped_query_without_hsps_writes_nothing() {
+    let run = RunRecord {
+        program: Program::Blastn,
+        db_title: None,
+        gapped: false,
+    };
+    let mut buf = Vec::new();
+    assert_eq!(
+        write_query(
+            SerialFormat::AsnText,
+            &run,
+            &query("Query_1", 10),
+            &[],
+            &[],
+            &mut buf
+        ),
+        Ok(false)
+    );
+    assert!(buf.is_empty());
 }
 
 /// `WriteEscapedChar`: quotes and backslashes escaped, bytes below 0x20 as `\u00XX`

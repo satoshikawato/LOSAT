@@ -1,0 +1,5 @@
+Error: NCBI C++ Exception:
+    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/objmgr/tse_info.cpp", line 901: Error: (CObjMgrException::eAddDataError) ncbi::objects::CTSE_Info::x_SetBioseqIds() - duplicate Bioseq id emb|AAA0000111.1| present in
+  seq1: emb|AAA0000111.1|
+  seq2: emb|AAA0000111.1|
+

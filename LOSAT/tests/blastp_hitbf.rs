@@ -2,22 +2,6 @@
 //! `src/algorithm/blastp/x_seed_fused.rs`, module header) on whole searches.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:538-551
-//! ```c
-//!                 if (diff >= window) {
-//!                     /* We are beyond the window for this diagonal; start a
-//!                        new hit */
-//!                     diag_array[diag_coord].last_hit =
-//!                         subject_offset + diag_offset;
-//!                     continue;
-//!                 }
-//!
-//!                 /* If the difference is less than the wordsize (i.e. last
-//!                    hit and this hit overlap), give up */
-//!
-//!                 if (diff < wordsize) {
-//!                     continue;
-//!                 }
-//! ```
 //! The switch is in the strict set (on unless it is `0`).
 //! The per-hit loop takes these two outcomes without a branch where its range holds and hands the
 //! others to the reference's statements, with the same entries and the same calls of the

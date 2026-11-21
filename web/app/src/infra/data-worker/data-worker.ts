@@ -88,6 +88,7 @@ const service = started.then(
     new DataService({
       store: session.store,
       ...(session.fallbackReason === undefined ? {} : { fallbackReason: session.fallbackReason }),
+      ...(session.fallbackError === undefined ? {} : { fallbackError: session.fallbackError }),
       cleanup: session.cleanup,
       scanner,
       inflater,
@@ -145,6 +146,7 @@ const endpoint = Promise.all([service, examples, counts]).then(
     describe: (program) => control.describe(program),
     start: (argv) => control.start(argv),
     validate: (argv, registry) => control.validate(argv, registry),
+    lifeLock: async () => (await started).lock,
   }),
 );
 

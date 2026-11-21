@@ -219,21 +219,26 @@ fn run_once(binary: &Path, case: &Case, dir: &Path, one: Option<fs::File>) -> St
     }
 }
 
+/// NCBI's frozen bytes of the row, in LOSAT's words (NCBI's bytes through `losat::wording`,
+/// AGENTS.md rule 8: the posts, the messages of the archives).
 fn expected(case: &Case) -> Streams {
-    let read = |ext: &str| {
+    let frozen = |ext: &str| {
         fs::read(fixtures().join("ncbi").join(format!("{}.{ext}", case.name))).unwrap_or_default()
     };
+    let read = |ext: &str| losat::wording::losat_output_bytes(&frozen(ext)).into_owned();
     let merged = fixtures()
         .join("ncbi")
         .join(format!("{}.merged", case.name));
-    let status = String::from_utf8(read("rc")).unwrap();
+    let status = String::from_utf8(frozen("rc")).unwrap();
     Streams {
         out: read("out"),
         strat: read("strat"),
         log: read("log"),
         stdout: read("stdout"),
         stderr: read("err"),
-        merged: fs::read(merged).ok(),
+        merged: fs::read(merged)
+            .ok()
+            .map(|bytes| losat::wording::losat_output_bytes(&bytes).into_owned()),
         status: match status.trim() {
             "" => 0,
             text => text.parse().unwrap(),

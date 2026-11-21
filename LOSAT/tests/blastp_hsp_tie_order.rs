@@ -2,19 +2,7 @@
 //! redo (BLASTP, `-comp_based_stats 2`).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1574-1577
-//! ```c++
-//!         // Sort HSPs with e-values as first priority and scores as
-//!         // tie-breakers, since that is the order we want to see them in
-//!         // in Seq-aligns.
-//!         Blast_HSPListSortByEvalue(hsp_list);
-//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1392-1395
-//! ```c
-//!     const double epsilon = 1.0e-180;
-//!     if (evalue1 < epsilon && evalue2 < epsilon) {
-//!         return 0;
-//!     }
-//! ```
 //! The redo sorts the HSPs by their scaled scores (48512 and 48503 here) and rounds them to the
 //! reported score (1516 for both) only afterwards. Both E-values are below 1.0e-180, so the
 //! Seq-align conversion ties them and orders them by ScoreCompareHSPs: the smaller subject

@@ -3,7 +3,7 @@
 //! and the subjects' names that the Seq-align, archive and SAM writers take.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:708-755 (the XML, XML2 and
-//! SAM branches of `CBlastFormat::x_PrintStructuredReport`, quoted in `write_structured_xml` and
+//! SAM branches of `CBlastFormat::x_PrintStructuredReport`, cited in `write_structured_xml` and
 //! `write_sam`). The refusals have no NCBI counterpart (see `refuse_anchored_reports`).
 //!
 //! This module is a child of `run` for what `run` keeps private (the types `BlastnReportInputs` and
@@ -150,7 +150,7 @@ pub(super) fn refuse_anchored_reports(
 /// Adds the queries of the call to the run's SAM document (outfmt 17) and, in the call that ends the
 /// run, writes it. The posts of the queries (`before_query`) come first, then the document is filled,
 /// then `finish`. Its NCBI counterpart, the SAM branch of
-/// `CBlastFormat::x_PrintStructuredReport`, is quoted at the top of the body.
+/// `CBlastFormat::x_PrintStructuredReport`, is cited at the top of the body.
 pub(super) fn write_sam(
     sam_target: &mut Option<SamTarget<'_>>,
     report: &BlastnReportInputs<'_>,
@@ -160,14 +160,6 @@ pub(super) fn write_sam(
     writer: &mut crate::cli::NcbiOstream<'_>,
 ) -> Result<()> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:750-755
-    // ```c++
-    //     else if (m_FormatType == CFormattingArgs::eSAM) {
-    //         if(results.HasAlignments()) {
-    //             m_SamFormatter->Print(*(results.GetSeqAlign()));
-    //         }
-    //         return;
-    //     }
-    // ```
     // The queries' records are added to the run's document, which NCBI writes when its
     // formatter is destroyed (`SamDocument::finish`): after the last call, or in a call
     // that is the run's only one.
@@ -199,6 +191,7 @@ pub(super) fn write_sam(
             };
             sam::add_blastn_sam(
                 target.document,
+                report.ungapped,
                 hit_lists,
                 &names,
                 report.queries_before,
@@ -224,6 +217,7 @@ pub(super) fn write_sam(
             };
             sam::add_blastn_sam(
                 target.document,
+                report.ungapped,
                 hit_lists,
                 &names,
                 report.queries_before,
@@ -271,19 +265,7 @@ pub(super) struct XmlDocument<'a> {
 /// not searched; `subject_title` is the database's title.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:708-710
-/// ```c++
-///     } else if (m_FormatType == CFormattingArgs::eXml) {
-///         CRef<CSearchResults> res(const_cast<CSearchResults*>(&results));
-///         res->TrimSeqAlign(m_HitlistSize);
-/// ```
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:745-749
-/// ```c++
-///     else if(m_FormatType == CFormattingArgs::eXml2 || m_FormatType == CFormattingArgs::eJson ||
-///             m_FormatType == CFormattingArgs::eXml2_S || m_FormatType == CFormattingArgs::eJson_S) {
-///     	x_PrintXML2Report(results, queries);
-///     	return;
-///     }
-/// ```
 /// The BLAST XML, XML2 and JSON branches of `CBlastFormat::x_PrintStructuredReport`.
 pub(super) fn write_structured_xml(
     structured: XmlDocument<'_>,
@@ -303,16 +285,6 @@ pub(super) fn write_structured_xml(
         side_sink,
     } = structured;
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1432-1444
-    // ```c++
-    //     if (m_FormatType == CFormattingArgs::eAsnText
-    //       || m_FormatType == CFormattingArgs::eAsnBinary
-    //       || m_FormatType == CFormattingArgs::eXml
-    //       ...
-    //     {
-    //         x_PrintStructuredReport(results, queries);
-    //         return;
-    //     }
-    // ```
     // The CBlastOutput document of the queries (`blast_xml`).
     let is_database = report.database.is_some();
     let xml_stats = super::blastn_xml_stats(report, query_lengths)?;
@@ -343,6 +315,7 @@ pub(super) fn write_structured_xml(
     let filter = crate::report::blast_xml::filter::filter_string(
         report.dust,
         None,
+        report.repeat_filter,
         report.window_masker,
         report.soft_masking,
     );

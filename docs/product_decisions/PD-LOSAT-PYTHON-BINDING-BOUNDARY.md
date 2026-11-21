@@ -1,12 +1,15 @@
 # Product Decision: LOSAT Python binding boundary
 
 - Decision ID: `PD-LOSAT-PYTHON-BINDING-BOUNDARY`
-- Version: 1.0
-- Date: 2026-11-05
+- Version: 1.1
+- Date: 2026-11-05 (1.1: 2026-11-20)
 - Status: The maintainer decided the placement, the rules and the name on 2026-11-05 (decisions 2,
   3 and 6 of [`docs/losat_library_surface_plan.md`](../losat_library_surface_plan.md) §10.1: outside
-  `LOSAT/`, the rules of `web/`, PyPI name `pylosat`). This text takes effect with the maintainer's
-  merge.
+  `LOSAT/`, the rules of `web/`, PyPI name `pylosat`). Version 1.1 adds rule 6 and the publication
+  on PyPI: on 2026-11-20 the maintainer decided that v0.2.0 is published on PyPI and that `pylosat`
+  takes LOSAT's version number
+  ([`docs/decisions/OWNER_DECISIONS.md`](../decisions/OWNER_DECISIONS.md)). This text takes effect
+  with the maintainer's merge.
 
 ## Scope
 
@@ -62,10 +65,15 @@ comments and the parity gates.
 5. **Panics.** The binding's release profile is a copy of `LOSAT/Cargo.toml`'s with `panic = "unwind"`
    in place of `abort`, so that a panic reaches Python as an exception instead of ending the
    interpreter. An allocation failure still aborts, as on the command line.
+6. **Version.** `pylosat` is published under the version number of the LOSAT it holds:
+   `pip install pylosat==0.2.0` is LOSAT v0.2.0, and `pylosat.__version__` equals
+   `pylosat.ENGINE_VERSION` (`python/tests/test_results.py` holds the two equal). The number of a
+   release that changes only the binding is decided when one is needed.
 
 ## Consequences
 
 - `python/tests` compares reports, diagnostics and table rows with the `losat` executable of the
   same commit. The table's numbers that a report prints cut to a few digits stay covered by
   `LOSAT/tests/library_api.rs`.
-- Publishing (wheels, PyPI) is stage 4 of the plan and needs its own review.
+- From v0.2.0 `pylosat` is published on PyPI (wheels and a source distribution). The upload is the
+  maintainer's act.

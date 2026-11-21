@@ -44,30 +44,8 @@ pub(crate) struct RegistryRead {
 /// entry's last line. `[NCBI] .Inherits` joins its values instead.
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:783-799
-/// ```c++
-///                 if (NStr::EqualNocase(section, "NCBI")
-///                     &&  NStr::EqualNocase(name, ".Inherits")
-///                     &&  HasEntry(section, name, flags)) {
-///                     ...
-///                 } else if (was_empty  &&  HasEntry(section, name, flags)) {
-///                     ERR_POST_X(8, Warning
-///                                << "Found multiple [" << section << "] "
-///                                << name << " settings" << in_path
-///                                << "; using the one from line " << line);
-///                 }
-/// ```
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:983-990 (`HasEntry` without
 /// `fCountCleared` counts an entry whose value is not empty)
-/// ```c++
-///     TEntries::const_iterator eit = entries.find(name);
-///     if (eit == entries.end()) {
-///         return false;
-///     } else if ((flags & fCountCleared) != 0) {
-///         return true;
-///     } else {
-///         return !eit->second.value.empty();
-///     }
-/// ```
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct RepeatedEntry {
     pub(crate) section: String,
@@ -93,15 +71,6 @@ impl RegistryRead {
     /// case), as NCBI stores it.
     ///
     /// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:794-800
-    /// ```c++
-    ///                 } else if (was_empty  &&  HasEntry(section, name, flags)) {
-    ///                     ERR_POST_X(8, Warning
-    ///                                << "Found multiple [" << section << "] "
-    ///                                << name << " settings" << in_path
-    ///                                << "; using the one from line " << line);
-    ///                 }
-    ///                 Set(section, name, value, set_flags, comment);
-    /// ```
     pub(crate) fn last_value(&self, section: &str, name: &str) -> Option<&[u8]> {
         last_value(&self.entries, section, name)
     }
@@ -126,19 +95,6 @@ pub(crate) fn last_value<'a>(
 /// (`.ncbirc`), the whole text of one load, ending with its line end.
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:1650-1663
-/// ```c++
-///     try {
-///         CMetaRegistry::SEntry entry
-///             = CMetaRegistry::Load("ncbi", CMetaRegistry::eName_RcOrIni,
-///                                   0, flags, m_SysRegistry.GetPointer());
-///         ...
-///     } catch (CRegistryException& e) {
-///         ERR_POST_X(6, Critical << "CNcbiRegistry: "
-///                       "Syntax error in system-wide configuration file: "
-///                       << e.what());
-///         return false;
-///     }
-/// ```
 /// `<< e.what()` writes a C string, which ends at the first NUL byte (NCBI BLAST+ 2.17.0, g_reg
 /// probe `nul`: the line ends there, and no empty line follows). The post is a `Critical` of
 /// `Corelib_Reg` (110, error_codes.hpp:53), which the old post format writes as
@@ -161,58 +117,31 @@ pub(crate) fn running_syntax_error_notice(error: &NcbiException, program: &str) 
 /// The post of `syntax_error_notice` of `program` with the diagnostics' `prefix`.
 fn syntax_error_post(error: &NcbiException, program: &str, prefix: &str) -> String {
     let what = error.what_in(crate::ncbi_exception::build_root(program));
-    let what = what.split('\0').next().unwrap_or_default();
-    format!(
-        "Critical: (110.6) {prefix}CNcbiRegistry: Syntax error in system-wide configuration file: {what}\n"
+    let what = what.split(|&byte| byte == 0).next().unwrap_or_default();
+    registry_text(
+        [
+            format!("Critical: (110.6) {prefix}CNcbiRegistry: Syntax error in system-wide configuration file: ")
+                .as_bytes(),
+            what,
+            b"\n",
+        ]
+        .concat(),
     )
+}
+
+/// The report of an exception of a registry read as text: such an exception holds only UTF-8
+/// (`registry_exception` refuses a line that is not), so nothing is lost.
+pub(crate) fn registry_text(report: Vec<u8>) -> String {
+    String::from_utf8_lossy(&report).into_owned()
 }
 
 /// The registry that NCBI reads a file into, which decides how often the byte order mark is
 /// checked before the lines.
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:605-627
-/// ```c++
-/// IRWRegistry* IRWRegistry::Read(CNcbiIstream& is, TFlags flags,
-///                                const string& path)
-/// {
-///     ...
-///     if ( !is ) {
-///         return NULL;
-///     }
-///
-///     // Ensure that x_Read gets a stream it can handle.
-///     EEncodingForm ef = GetTextEncodingForm(is, eBOM_Discard);
-///     if (ef == eEncodingForm_Utf16Native  ||  ef == eEncodingForm_Utf16Foreign) {
-///         CStringUTF8 s;
-///         ReadIntoUtf8(is, &s, ef);
-///         CNcbiIstrstream iss(s);
-///         return x_Read(iss, flags, path);
-///     } else {
-///         return x_Read(is, flags, path);
-///     }
-/// }
-/// ```
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:1687-1692 (`CNcbiRegistry::x_Read`, the
 /// first read of an application's registry)
-/// ```c++
-///     CConstRef<IRegistry> main_reg(FindByName(sm_MainRegName));
-///     if (main_reg->Empty()  &&  m_FileRegistry->Empty()) {
-///         m_FileRegistry->Read(is, flags & ~fWithNcbirc);
-///         LoadBaseRegistries(flags, 0, path);
-///         IncludeNcbircIfAllowed(flags);
-///         return NULL;
-/// ```
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:2080-2091 (`m_SysRegistry`'s class)
-/// ```c++
-/// IRWRegistry* CCompoundRWRegistry::x_Read(CNcbiIstream& in, TFlags flags,
-///                                          const string& path)
-/// {
-///     ...
-///     IRWRegistry::x_Read(in, flags, path);
-///     LoadBaseRegistries(lbr_flags, 0, path);
-///     return NULL;
-/// }
-/// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Layer {
     /// `.ncbirc`, read into `m_SysRegistry` (a `CCompoundRWRegistry`): `Read` checks the mark
@@ -250,12 +179,6 @@ impl LineEnds {
 /// end; LOSAT's reads fail so only before the first line, with an empty line read.
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:813-816
-/// ```c++
-///     if ( !is.eof() ) {
-///         ERR_POST_X(4, "Error reading the registry after line " << line
-///                    << in_path << ": " << str);
-///     }
-/// ```
 /// `in_path` is empty: `CMetaRegistry` reads a file with `Read(ifs, flags)`, without a path
 /// (metareg.cpp:90). The post is an `Error` of `Corelib_Reg` (110, error_codes.hpp:53), which the
 /// old post format writes as `Error: (110.4) ` before the text (`SDiagMessage::x_OldWrite`,
@@ -283,53 +206,6 @@ enum Encoding<'a> {
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistre.cpp:782-826
-// ```c++
-// EEncodingForm GetTextEncodingForm(CNcbiIstream& input,
-//                                   EBOMDiscard   discard_bom)
-// {
-//     EEncodingForm ef = eEncodingForm_Unknown;
-//     if (input.good()) {
-//         const int bom_max = 4;
-//         char tmp[bom_max];
-//         memset(tmp, 0, bom_max);
-//         Uint2* us = reinterpret_cast<Uint2*>(tmp);
-//         Uchar* uc = reinterpret_cast<Uchar*>(tmp);
-//         input.get(tmp[0]);
-//         int n = (int) input.gcount();
-//         if (n == 1  &&  (uc[0] == 0xEF  ||  uc[0] == 0xFE  ||  uc[0] == 0xFF)){
-//             input.get(tmp[1]);
-//             if (input.gcount() == 1) {
-//                 ++n;
-//                 if (us[0] == 0xFEFF) {
-//                     ef = eEncodingForm_Utf16Native;
-//                 } else if (us[0] == 0xFFFE) {
-//                     ef = eEncodingForm_Utf16Foreign;
-//                 } else if (uc[1] == 0xBB) {
-//                     input.get(tmp[2]);
-//                     if (input.gcount() == 1) {
-//                         ++n;
-//                         if (uc[2] == 0xBF) {
-//                             ef = eEncodingForm_Utf8;
-//                         }
-//                     }
-//                 }
-//             }
-//         }
-//         if (ef == eEncodingForm_Unknown) {
-//             if (n > 1) {
-//                 CStreamUtils::Pushback(input, tmp, n);
-//             } else if (n == 1) {
-//                 input.unget();
-//             }
-//         } else {
-//             if (discard_bom == eBOM_Keep) {
-//                 CStreamUtils::Pushback(input, tmp, n);
-//             }
-//         }
-//     }
-//     return ef;
-// }
-// ```
 // `us[0]` is 0xFEFF or 0xFFFE for the bytes FF FE and FE FF on either byte order. The second
 // `get` of a one-byte file fails at the end (`eofbit | failbit`), and `unget` of that stream
 // clears `eofbit` and fails again: the stream has failed and is not at its end. NCBI 2.17.0 reads
@@ -361,58 +237,10 @@ fn text_encoding_form(data: &[u8]) -> Encoding<'_> {
 /// The lines of a stream as `NcbiGetlineEOL` reads them.
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbistre.cpp:196-208
-/// ```c++
-/// CNcbiIstream& NcbiGetlineEOL(CNcbiIstream& is, string& str, SIZE_TYPE* count)
-/// {
-/// #if   defined(NCBI_OS_MSWIN)
-///     NcbiGetline(is, str, '\n', count);
-///     if (!str.empty()  &&  str[str.length() - 1] == '\r')
-///         str.resize(str.length() - 1);
-/// #elif defined(NCBI_OS_DARWIN)
-///     NcbiGetline(is, str, "\r\n", count);
-/// #else /* assume UNIX-like EOLs */
-///     NcbiGetline(is, str, '\n', count);
-/// #endif //NCBI_OS_...
-///     return is;
-/// }
-/// ```
-/// NCBI reference (598d8ae6): c++/src/corelib/ncbistre.cpp:90-103 (the delimiters of a string:
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbistre.cpp:88-103 (the delimiters of a string:
 /// `\r\n` back to back is one end)
-/// ```c++
-///         SIZE_TYPE delim_pos = delims.find(CT_TO_CHAR_TYPE(ch));
-///         if (delim_pos != NPOS) {
-///             // Special case -- if two different delimiters are back to
-///             // back and in the same order as in delims, treat them as
-///             // a single delimiter (necessary for correct handling of
-///             // DOS/MAC-style CR/LF endings).
-///             ch = is.rdbuf()->sgetc();
-///             if (!CT_EQ_INT_TYPE(ch, CT_EOF)
-///                 &&  delims.find(CT_TO_CHAR_TYPE(ch), delim_pos + 1) != NPOS) {
-///                 is.rdbuf()->sbumpc();
-///                 delim_count = 2;
-///             } else {
-///                 delim_count = 1;
-///             }
-///             break;
-///         }
-/// ```
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbistre.cpp:153-176 (one delimiter: a read at the
 /// end with nothing read fails, which ends the reading)
-/// ```c++
-///     do {
-///         CT_INT_TYPE nextc = is.get();
-///         if (CT_EQ_INT_TYPE(nextc, CT_EOF)
-///             ||  CT_EQ_INT_TYPE(nextc, CT_TO_INT_TYPE(delim))) {
-///             ++size;
-///             break;
-///         }
-///         ...
-///     } while ( is.good() );
-/// #endif
-///
-///     if (is.rdstate() == NcbiEofbit  &&  str.empty())
-///         is.setstate(NcbiFailbit);
-/// ```
 /// A last line without an end is read (its read reaches the end with text); the read after it,
 /// like the read after a last end, fails. A NUL byte is part of a line.
 struct Lines<'a> {
@@ -459,30 +287,6 @@ impl<'a> Lines<'a> {
 /// application's file with `fWithNcbirc`).
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:59-81
-/// ```c++
-/// inline bool s_IsNameSectionSymbol(char ch, IRegistry::TFlags flags)
-/// {
-///     return (isalnum((unsigned char) ch)
-///             ||  ch == '_'  ||  ch == '-' ||  ch == '.'  ||  ch == '/'
-///             ||  ((flags & IRegistry::fInternalSpaces)  &&  ch == ' '));
-/// }
-///
-///
-/// bool IRegistry::IsNameSection(const string& str, TFlags flags)
-/// {
-///     // Allow empty section name in case of fSectionlessEntries set
-///     if (str.empty() && !(flags & IRegistry::fSectionlessEntries) ) {
-///         return false;
-///     }
-///
-///     ITERATE (string, it, str) {
-///         if (!s_IsNameSectionSymbol(*it, flags)) {
-///             return false;
-///         }
-///     }
-///     return true;
-/// }
-/// ```
 fn is_name(name: &[u8]) -> bool {
     !name.is_empty()
         && name
@@ -493,17 +297,6 @@ fn is_name(name: &[u8]) -> bool {
 /// `s_Backslashed(s, pos)`: an odd number of backslashes ends just before `pos`.
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:140-148
-/// ```c++
-/// // Does pos follow an odd number of backslashes?
-/// inline bool s_Backslashed(const string& s, SIZE_TYPE pos)
-/// {
-///     if (pos == 0) {
-///         return false;
-///     }
-///     SIZE_TYPE last_non_bs = s.find_last_not_of("\\", pos - 1);
-///     return (pos - last_non_bs) % 2 == 0;
-/// }
-/// ```
 /// (With backslashes only before `pos`, `last_non_bs` is `NPOS`, and `pos - NPOS` is `pos + 1`.)
 fn backslashed(s: &[u8], pos: usize) -> bool {
     s[..pos].iter().rev().take_while(|&&c| c == b'\\').count() % 2 == 1
@@ -581,124 +374,9 @@ fn read_registry_with(bytes: &[u8], layer: Layer, ends: LineEnds) -> Result<Regi
 /// `IRWRegistry::x_Read` of the lines of `data`.
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:652-680
-/// ```c++
-///     for (line = 1;  NcbiGetlineEOL(is, str);  ++line) {
-///         try {
-///             SIZE_TYPE len = str.length();
-///             SIZE_TYPE beg = 0;
-///
-///             while (beg < len  &&  isspace((unsigned char) str[beg])) {
-///                 ++beg;
-///             }
-///             // If this line is empty, all comments
-///             // that have just been read go to the current section.
-///             if (beg == len) {
-///                 ...
-///                 continue;
-///             }
-///
-///             switch (str[beg]) {
-///
-///             case '#':  { // file comment
-///                 SetComment(GetComment() + str + '\n');
-///                 break;
-///             }
-///
-///             case ';':  { // section or entry comment
-/// ```
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:694-711
-/// ```c++
-///             case '[':  { // section name
-///                 ++beg;
-///                 SIZE_TYPE end = str.find_first_of(']', beg + 1);
-///                 if (end == NPOS) {
-///                     NCBI_THROW2(CRegistryException, eSection,
-///                                 "Invalid registry section" + in_path
-///                                 + " (']' is missing): `" + str + "'", line);
-///                 }
-///                 section = NStr::TruncateSpaces(str.substr(beg, end - beg));
-///                 if (section.empty()) {
-///                     NCBI_THROW2(CRegistryException, eSection,
-///                                 "Unnamed registry section" + in_path + ": `"
-///                                 + str + "'", line);
-///                 } else if ( !IsNameSection(section, flags) ) {
-///                     NCBI_THROW2(CRegistryException, eSection,
-///                                 "Invalid registry section name" + in_path
-///                                 + ": `" + str + "'", line);
-///                 }
-/// ```
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:719-751
-/// ```c++
-///             default:  { // regular entry
-///                 string name, value;
-///                 if ( !NStr::SplitInTwo(str, "=", name, value) ) {
-///                     NCBI_THROW2(CRegistryException, eEntry,
-///                                 "Invalid registry entry format" + in_path
-///                                 + ": '" + str + "'", line);
-///                 }
-///                 NStr::TruncateSpacesInPlace(name);
-///                 if ( !IsNameEntry(name, flags) ) {
-///                     NCBI_THROW2(CRegistryException, eEntry,
-///                                 "Invalid registry entry name" + in_path + ": '"
-///                                 + str + "'", line);
-///                 }
-///
-///                 NStr::TruncateSpacesInPlace(value);
-///                 ...
-///                 // read continuation lines, if any
-///                 string cont;
-///                 while (s_Backslashed(value, value.size())
-///                        &&  NcbiGetlineEOL(is, cont)) {
-///                     ++line;
-///                     value[value.size() - 1] = '\n';
-///                     value += NStr::TruncateSpaces(cont);
-///                     str   += 'n' + cont; // for presentation in exceptions
-///                 }
-/// ```
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:753-801
-/// ```c++
-///                 // Historically, " may appear unescaped at the beginning,
-///                 // end, both, or neither.
-///                 beg = 0;
-///                 SIZE_TYPE end = value.size();
-///                 for (SIZE_TYPE pos = value.find('\"');
-///                      pos < end  &&  pos != NPOS;
-///                      pos = value.find('\"', pos + 1)) {
-///                     if (s_Backslashed(value, pos)) {
-///                         continue;
-///                     } else if (pos == beg) {
-///                         ++beg;
-///                     } else if (pos == end - 1) {
-///                         --end;
-///                     } else {
-///                         NCBI_THROW2(CRegistryException, eValue,
-///                                     "Single(unescaped) '\"' in the middle "
-///                                     "of registry value" + in_path + ": '"
-///                                     + str + "'", line);
-///                     }
-///                 }
-///
-///                 try {
-///                     value = NStr::ParseEscapes(value.substr(beg, end - beg));
-///                 } catch (CStringException&) {
-///                     NCBI_THROW2(CRegistryException, eValue,
-///                                 "Badly placed '\\' in the registry value"
-///                                 + in_path + ": '" + str + "'", line);
-///
-///                 }
-///                 TFlags set_flags = flags & ~fJustCore;
-///                 if (NStr::EqualNocase(section, "NCBI")
-///                     &&  NStr::EqualNocase(name, ".Inherits")
-///                     &&  HasEntry(section, name, flags)) {
-///                     ...
-///                 } else if (was_empty  &&  HasEntry(section, name, flags)) {
-///                     ERR_POST_X(8, Warning
-///                                << "Found multiple [" << section << "] "
-///                                << name << " settings" << in_path
-///                                << "; using the one from line " << line);
-///                 }
-///                 Set(section, name, value, set_flags, comment);
-/// ```
 /// `in_path` is empty (`error_reading_post`). `SplitInTwo` with no flag cuts at the first `=`. A
 /// comment changes no entry. `Set` keeps no entry before the first section (`IRWRegistry::Set`,
 /// ncbireg.cpp:833-837: the section "" is not a name). The read records each repeated entry

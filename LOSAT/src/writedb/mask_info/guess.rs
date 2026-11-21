@@ -13,64 +13,9 @@ use std::io::Read;
 use super::MaskFileFormat;
 use crate::utils::format_guess::FormatGuess;
 
-// NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:453-509
-// ```c++
-// CFormatGuess::EFormat
-// CFormatGuess::GuessFormat( EOnError onerror )
-// {
-//     ...
-//     if (!EnsureTestBuffer()) {
-//         ...
-//         if(TestFormatNewick(eQuick)) {
-//             return CFormatGuess::eNewick;
-//         }
-//         return CFormatGuess::eUnknown;
-//     }
-//
-//     EMode mode = eQuick;
-//
-//     // First, try to use hints
-//     if ( !m_Hints.IsEmpty() ) {
-//         for (size_t f = 0; f < sm_CheckOrder_Size; ++f) {
-//             EFormat fmt = EFormat( sm_CheckOrder[f] );
-//             if (m_Hints.IsPreferred(fmt)  &&  x_TestFormat(fmt, mode)) {
-//                 return fmt;
-//             }
-//         }
-//     }
-//
-//     // Check other formats, skip the ones that are disabled through hints
-//     for (size_t f = 0; f < sm_CheckOrder_Size; ++f) {
-//         EFormat fmt = EFormat( sm_CheckOrder[f] );
-//         if ( ! m_Hints.IsDisabled(fmt)  &&  x_TestFormat(fmt, mode) ) {
-//             return fmt;
-//         }
-//     }
-//     return eUnknown;
-// }
-// ```
+// NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:452-509
 // NCBI reference (598d8ae6): c++/include/util/format_guess.hpp:420-424
-// ```c++
-// CFormatGuess::CFormatHints::DisableAllNonpreferred(void)
-// {
-//     m_Disabled = ~m_Preferred;
-//     return *this;
-// }
-// ```
 // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp:46-88
-// ```c++
-// static const CFormatGuess::EFormat sm_CheckOrder[] =
-// {
-//     ...
-//     CFormatGuess::eFasta,
-//     CFormatGuess::eTextASN,
-//     CFormatGuess::eAlignment,
-//     CFormatGuess::eTaxplot,
-//     CFormatGuess::eTable,
-//     CFormatGuess::eBinaryASN,
-//     ...
-// };
-// ```
 /// The format of the mask file `input`, `None` for `eUnknown` (and `eNewick`), with the bytes
 /// taken from `input` for the guess (the start of the file; NCBI gives them back to the stream).
 pub(super) fn guess_format<R: Read>(input: &mut R) -> Option<(MaskFileFormat, Vec<u8>)> {

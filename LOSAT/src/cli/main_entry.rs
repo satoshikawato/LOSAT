@@ -5,21 +5,10 @@ use std::io::Write;
 
 use anyhow::Result;
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:47-49
-// ```c++
-//     static const string kProgram("blastx");
-//     arg.Reset(new CProgramDescriptionArgs(kProgram,
-//                                   "Translated Query-Protein Subject BLAST"));
-// ```
 use crate::algorithm::{blastn, blastp, blastx, psiblast, tblastn, tblastx};
 use crate::cli::{Cli, Commands};
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:407-410
-// ```c++
-// int NcbiSys_main(int argc, ncbi::TXChar* argv[])
-// {
-//     return CBlastnApp().AppMain(argc, argv);
-// }
-// ```
 // NCBI builds one executable per application, each a `main` that runs its application's
 // `AppMain`. The `losat` binary is all of them (an executable named `blastn` is `losat blastn`,
 // `cli::entry_argv`); the arms below cite each program's own entry.
@@ -56,15 +45,6 @@ fn run_main_entry() -> Result<()> {
     // counterpart; it reads the clock only with LOSAT_TIMING.
     crate::utils::xtiming::start();
     // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:3719-3725
-    // ```c++
-    // bool CDir::SetCwd(const string& dir)
-    // {
-    //     if ( NcbiSys_chdir(_T_XCSTRING(dir)) != 0 ) {
-    //         LOG_ERROR_ERRNO(51, "CDir::SetCwd(): Cannot change directory to: " + dir);
-    //         return false;
-    //     }
-    //     return true;
-    // ```
     // NCBI file readers resolve lexical filenames against the caller's cwd.
     // WASI starts at /; the existing command host supplies its cwd in PWD.
     // Set libc's cwd once before argument parsing, without rewriting filenames.
@@ -85,27 +65,17 @@ fn run_main_entry() -> Result<()> {
         eprintln!("[startup] enter main");
     }
     // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:1295-1298
-    // ```c++
-    // int main(int argc, const char* argv[] /*, const char* envp[]*/)
-    // {
-    //     return CBlastDBCmdApp().AppMain(argc, argv);
-    // }
-    // ```
     // `losat blastdbcmd` reads its command line with NCBI's argument reader
     // (`ncbi_app::args`), not clap's: the words after `blastdbcmd` go to it as they are.
     // An executable called `blastn` is `losat blastn` (`cli::entry_argv`).
     let argv: Vec<std::ffi::OsString> = crate::cli::entry_argv(std::env::args_os());
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_usage_report.cpp:84-86
-    // ```c++
-    // CBlastUsageReport::CBlastUsageReport()
-    // {
-    // 	x_CheckBlastUsageEnv();
-    // ```
-    // Every NCBI BLAST+ program's application but dustmasker's and segmasker's has a usage
+    // Every NCBI BLAST+ program's application but the maskers' (dustmasker, segmasker,
+    // windowmasker) has a usage
     // report, made with the application before `AppMain` runs; it reads `.ncbirc`
     // (`ncbi_environment::ApplicationStart`), and its messages go to stderr at once, before
     // `-version` and before blastdbcmd's `-logfile` is read. The start of the others (dustmasker,
-    // segmasker, rpsbproc) writes nothing here.
+    // segmasker, windowmasker, rpsbproc) writes nothing here.
     // The program's application start, made once here and given to what reads after it.
     let start = argv
         .get(1)
@@ -130,40 +100,30 @@ fn run_main_entry() -> Result<()> {
         std::process::exit(crate::blastdbcmd::run(&argv[2..], start));
     }
     // NCBI reference (598d8ae6): c++/src/app/dustmasker/main.cpp:39-42
-    // ```c++
-    // int main( int argc, char * argv[] )
-    // {
-    //     return CDustMaskApplication().AppMain(argc, argv);
-    // }
-    // ```
     // `losat dustmasker` reads its command line with NCBI's argument reader (`ncbi_app`), as
     // blastdbcmd does.
     if let Some(start) = started("dustmasker") {
         std::process::exit(crate::dustmasker::run(&argv[2..], start));
     }
     // NCBI reference (598d8ae6): c++/src/app/segmasker/segmasker.cpp:265-272
-    // ```c++
-    // int main(int argc, const char* argv[])
-    // {
-    //     // Execute main application function
-    //     return SegMaskerApplication().AppMain(argc, argv);
-    // }
-    // ```
     // `losat segmasker` too.
     if let Some(start) = started("segmasker") {
         std::process::exit(crate::segmasker::run(&argv[2..], start));
     }
+    // NCBI reference (598d8ae6): c++/src/app/winmasker/main.cpp:39-42
+    // `losat windowmasker` too.
+    if let Some(start) = started("windowmasker") {
+        std::process::exit(crate::windowmasker::run(&argv[2..], start));
+    }
     // NCBI reference (598d8ae6): c++/src/app/blastdb/convert2blastmask.cpp:259-263
-    // ```c++
-    // int main(int argc, const char* argv[])
-    // {
-    //     // Execute main application function
-    //     return CConvert2BlastMaskApplication().AppMain(argc, argv);
-    // }
-    // ```
     // `losat convert2blastmask` too.
     if let Some(start) = started("convert2blastmask") {
         std::process::exit(crate::convert2blastmask::run(&argv[2..], start));
+    }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/makeindex/main.cpp:51-54
+    // `losat makembindex` too.
+    if let Some(start) = started("makembindex") {
+        std::process::exit(crate::makembindex::run(&argv[2..], start));
     }
     // No NCBI counterpart: makes those names (`cli::install_shims`). Read before clap, as the
     // top level has no options of its own.
@@ -193,12 +153,6 @@ fn run_main_entry() -> Result<()> {
         }
     }
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:868-871
-    // ```c++
-    //     // Setup logging as soon as possible.
-    //     // Setup for diagnostics
-    //     try {
-    //         CDiagContext::SetupDiag(diag, 0, eDCM_NoChange, m_LogFile);
-    // ```
     // The diagnostics go to the file of `-logfile`, which NCBI reads anywhere before `--`
     // (`ncbi_environment::log_file`), opened before `-version`: `blastn -version -logfile F`
     // makes F, with the usage report's messages.
@@ -210,7 +164,7 @@ fn run_main_entry() -> Result<()> {
         None => crate::blastinput::ncbi_environment::DiagTarget::Stderr,
     };
     if let Some(start) = &start {
-        start.write_log_setup(&mut target);
+        start.write_log_setup(&mut target, &mut std::io::stderr());
     }
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:926-1001 (`-version` and the full
     // versions are read before the program's arguments and before the configuration load,
@@ -225,7 +179,7 @@ fn run_main_entry() -> Result<()> {
         return Ok(());
     }
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:413-424 (`x_TryInit`: the
-    // configuration is loaded before the arguments are read; quoted at
+    // configuration is loaded before the arguments are read; cited at
     // `ncbi_environment::ApplicationStart`). Its messages go where the diagnostics go, and a
     // `<program>.ini` that NCBI reports as malformed ends the program with exit status 2, `-h`
     // included.
@@ -241,7 +195,7 @@ fn run_main_entry() -> Result<()> {
             crate::blastinput::ncbi_environment::preparse(&argv[2..]),
             crate::blastinput::ncbi_environment::Preparsed::Words { dryrun: true, .. }
         );
-    // NCBI blastinput/cmdline_flags.cpp:46-94: kArgQuery("query"), kArgSubject("subject").
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-94: kArgQuery("query"), kArgSubject("subject").
     let parsed = match &start {
         Some(start) => crate::cli::try_parse_from_start(argv, start),
         None => crate::cli::try_parse_from(argv),
@@ -256,36 +210,7 @@ fn run_main_entry() -> Result<()> {
         unreachable!("a command is named by its program, one of ENTRY_NAMES")
     };
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:705-707, 292-296
-    // ```c++
-    //             try {
-    //                 *exit_code = m_DryRun ? DryRun() : Run();
-    //             }
-    // ...
-    // int CNcbiApplicationAPI::DryRun(void)
-    // {
-    //     ERR_POST_X(1, Info << "DryRun: default implementation does nothing");
-    //     return 0;
-    // }
-    // ```
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:424-431, 1035-1041
-    // ```c++
-    //     CDiagContext::SetupDiag(diag, m_Config, eDCM_Flush, m_LogFile);
-    //     CDiagContext::x_FinalizeSetupDiag();
-    //
-    //     // Setup the standard features from the config file.
-    //     // Don't call till after LoadConfig()
-    //     // NOTE: this will override environment variables,
-    //     // except DIAG_POST_LEVEL which is Set*Fixed*.
-    //     x_HonorStandardSettings();
-    // ...
-    //     string post_level = m_Environ->Get(DIAG_POST_LEVEL);
-    //     if ( !post_level.empty() ) {
-    //         EDiagSev sev;
-    //         if (CNcbiDiag::StrToSeverityLevel(post_level.c_str(), sev)) {
-    //             SetDiagFixedPostLevel(sev);
-    //         }
-    //     }
-    // ```
     // `-dryrun` (`ncbi_environment::preparse`): the arguments have passed their definitions (the
     // parser above), and NCBI's BLAST programs, makeblastdb and blastdbcmd keep the default
     // `DryRun`: nothing else runs, exit status 0 (NCBI BLAST+ 2.17.0: a missing `-query` or `-db`
@@ -336,36 +261,11 @@ fn run_main_entry() -> Result<()> {
 
     match cli.command {
         // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:277-281
-        // ```c++
-        //                 CLocalBlast lcl_blast(queries, m_OptsHndl, db_adapter);
-        //                 lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
-        //                 results = lcl_blast.Run();
-        // 	        BLAST_PROF_STOP( APP.LOOP.BLAST );
-        //             }
-        // ```
         // Native serial search passes actual final results to the BLASTX formatter.
         Commands::Blastx(args) => {
             // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:177-180
-            // ```c++
-            //     catch (const CArgException& e) {                                        \
-            //         LOG_POST(Error << "Command line argument error: " << e.GetMsg());   \
-            //         exit_code = BLAST_INPUT_ERROR;                                      \
-            //     }                                                                       \
-            // ```
             // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:225-227
-            // ```c++
-            //         } else {                                                            \
-            //             LOG_POST(Error << "BLAST engine error: " << e.GetMsg());        \
-            //             exit_code = BLAST_ENGINE_ERROR;                                 \
-            // ```
             // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:251-255
-            // ```c++
-            //     }                                                                       \
-            //     catch (const std::ios::failure&) {                                      \
-            //         LOG_POST(Error << "BLAST failed to write output");                  \
-            //         exit_code = BLAST_OUTPUT_ERROR;                                     \
-            //     }                                                                       \
-            // ```
             // NCBI's application layer reads its environment and registry files before blastx's
             // own code runs; LOSAT rejects the settings that change the output first, before any
             // option or file of the run, and `native::run` runs with them.
@@ -379,26 +279,10 @@ fn run_main_entry() -> Result<()> {
             }
         }
         // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:172-175,225-227
-        // ```c++
-        //     catch (const blast::CInputException& e) {                               \
-        //         LOG_POST(Error << "BLAST query/options error: " << e.GetMsg());     \
-        //         LOG_POST(Error << "Please refer to the BLAST+ user manual.");       \
-        //         exit_code = BLAST_INPUT_ERROR;                                      \
-        // ...
-        //             LOG_POST(Error << "BLAST engine error: " << e.GetMsg());        \
-        //             exit_code = BLAST_ENGINE_ERROR;                                 \
-        // ```
         Commands::Blastn(mut args) => {
             // The `@PG` line of SAM (outfmt 17) shows the command line.
             args.command_line = Some(crate::cli::command_line_bytes());
-            // NCBI reference: ncbi-blast/c++/src/corelib/ncbiapp.cpp:1031-1044
-            // ```c
-            //     // Setup some debugging features from environment variables.
-            //     if ( !m_Environ->Get(DIAG_TRACE).empty() ) {
-            //         SetDiagTrace(eDT_Enable, eDT_Enable);
-            //     }
-            //     string post_level = m_Environ->Get(DIAG_POST_LEVEL);
-            // ```
+            // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1031-1044
             // NCBI's application layer reads its environment and registry files before
             // blastn's own code runs; LOSAT rejects the settings that change the output.
             let settings = start.settings().map_err(anyhow::Error::msg)?;
@@ -408,14 +292,7 @@ fn run_main_entry() -> Result<()> {
             }
         }
         Commands::Blastp(args) => {
-            // NCBI reference: ncbi-blast/c++/src/corelib/ncbiapp.cpp:1031-1044
-            // ```c
-            //     // Setup some debugging features from environment variables.
-            //     if ( !m_Environ->Get(DIAG_TRACE).empty() ) {
-            //         SetDiagTrace(eDT_Enable, eDT_Enable);
-            //     }
-            //     string post_level = m_Environ->Get(DIAG_POST_LEVEL);
-            // ```
+            // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1031-1044
             // NCBI's application layer reads its environment and registry files before
             // blastp's own code runs; LOSAT rejects the settings that change the output.
             let settings = start.settings().map_err(anyhow::Error::msg)?;
@@ -424,15 +301,7 @@ fn run_main_entry() -> Result<()> {
                 return Err(error);
             }
         }
-        // NCBI reference: ncbi-blast/c++/src/app/blast/blast_app_util.hpp:225-227,252-255
-        // ```c
-        //             LOG_POST(Error << "BLAST engine error: " << e.GetMsg());        \
-        //             exit_code = BLAST_ENGINE_ERROR;                                 \
-        //     ...
-        //     catch (const std::ios::failure&) {                                      \
-        //         LOG_POST(Error << "BLAST failed to write output");                  \
-        //         exit_code = BLAST_OUTPUT_ERROR;                                     \
-        // ```
+        // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:225-227,252-255
         Commands::Tblastx(args) => {
             // NCBI's application layer reads its environment and registry files before
             // tblastx's own code runs (as for BLASTN); LOSAT rejects the settings that change
@@ -443,39 +312,10 @@ fn run_main_entry() -> Result<()> {
                 return Err(error);
             }
         }
-        // NCBI c++/src/app/blast/tblastn_app.cpp:288-301:
-        // results = lcl_blast.Run();
-        // formatter.PrintOneResultSet(**result, query);
+        // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:288-301:
         // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1322-1333
-        // ```c++
-        // int CMakeBlastDBApp::Run(void)
-        // {
-        //     SetDiagPostLevel(eDiag_Warning);
-        //     SetDiagPostPrefix("makeblastdb");
-        //
-        //     int status = 0;
-        //     try { x_BuildDatabase(); }
-        //     CATCH_ALL(status)
-        //     x_AddCmdOptions();
-        //     m_UsageReport.AddParam(CBlastUsageReport::eExitStatus, status);
-        //     return status;
-        // }
-        // ```
         Commands::Makedb(args) => {
             // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1031-1041
-            // ```c++
-            //     // Setup some debugging features from environment variables.
-            //     if ( !m_Environ->Get(DIAG_TRACE).empty() ) {
-            //         SetDiagTrace(eDT_Enable, eDT_Enable);
-            //     }
-            //     string post_level = m_Environ->Get(DIAG_POST_LEVEL);
-            //     if ( !post_level.empty() ) {
-            //         EDiagSev sev;
-            //         if (CNcbiDiag::StrToSeverityLevel(post_level.c_str(), sev)) {
-            //             SetDiagFixedPostLevel(sev);
-            //         }
-            //     }
-            // ```
             // makeblastdb is an NCBI application like the search programs: its application
             // layer reads the same environment and registry files (`makeblastdb.ini`, then
             // `.ncbirc`) before `Run`, and LOSAT rejects the settings that change the output.
@@ -491,25 +331,17 @@ fn run_main_entry() -> Result<()> {
             )
             .map_err(anyhow::Error::msg)?;
             // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1134-1136
-            // ```c++
-            //     const string dont_scan_bioseq =
-            //         GetEnvironment().Get("NCBI_MAKEBLASTDB_DONT_SCAN_BIOSEQ_FOR_CFASTAREADER_USER_OBJECTS");
-            //     const bool scan_bioseq_4_cfastareader_usrobj = static_cast<bool>(dont_scan_bioseq.empty());
-            // ```
             // The variables that makeblastdb reads itself.
-            crate::writedb::makeblastdb::check_environment(&|name: &str| std::env::var_os(name))
-                .map_err(anyhow::Error::msg)?;
+            crate::writedb::makeblastdb::check_environment(&args, &|name: &str| {
+                std::env::var_os(name)
+            })
+            .map_err(anyhow::Error::msg)?;
             let status = crate::writedb::makeblastdb::run(&args, &settings);
             if status != 0 {
                 std::process::exit(status);
             }
         }
         // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:583-585
-        // ```c++
-        // int main(int argc, const char* argv[] /*, const char* envp[]*/)
-        // {
-        //     return CPsiBlastApp().AppMain(argc, argv);
-        // ```
         Commands::Psiblast(args) => {
             // psiblast is an NCBI application as blastp: its application layer reads its
             // environment and registry files (`psiblast.ini`, then `.ncbirc`) before its own
@@ -521,11 +353,6 @@ fn run_main_entry() -> Result<()> {
             }
         }
         // NCBI reference (598d8ae6): c++/src/app/blast/rpsblast_app.cpp:324-328
-        // ```c++
-        // int main(int argc, const char* argv[] /*, const char* envp[]*/)
-        // {
-        // 	int status = CRPSBlastApp().AppMain(argc, argv);
-        // ```
         Commands::Rpsblast(args) => {
             // rpsblast is an NCBI application as blastp: its application layer reads its
             // environment and registry files (`rpsblast.ini`, then `.ncbirc`) before its own
@@ -537,12 +364,6 @@ fn run_main_entry() -> Result<()> {
             }
         }
         // NCBI reference (598d8ae6): c++/src/app/blast/rpstblastn_app.cpp:319-322
-        // ```c++
-        // int main(int argc, const char* argv[] /*, const char* envp[]*/)
-        // {
-        //     return CRPSTBlastnApp().AppMain(argc, argv);
-        // }
-        // ```
         Commands::Rpstblastn(args) => {
             // NCBI's `-help` and `-h` texts, which its reader writes before the application runs.
             if let Some(text) = args.ncbi_help_text() {
@@ -560,9 +381,6 @@ fn run_main_entry() -> Result<()> {
             }
         }
         // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:1870
-        // ```c++
-        // 	return CRpsbProcApp().AppMain(argc, argv);
-        // ```
         // rpsbproc ends with its own status (`exit_rpsbproc`).
         Commands::Rpsbproc(args) => {
             let target =
@@ -647,11 +465,15 @@ fn exit_rpsbproc(outcome: crate::rpsbproc::Outcome) {
 }
 
 /// No NCBI counterpart: an error of LOSAT's argument parser (`cli::try_parse_from`) or one of its
-/// refusals, written as clap writes it, and its exit status. The help that stopped the parser is
-/// written as its error's text is, but the XML of `-xmlhelp`, which `cli::xml_help_text` writes
-/// (NCBI's `PrintUsageXml(cout)`, exit status 0: ncbiapp.cpp:685-697, quoted at `ncbi_xmlhelp`).
+/// refusals, written as clap writes it, and its exit status. The help that stopped the parser, and
+/// the XML of `-xmlhelp` (as NCBI's application writes them; cited at `cli::printed_text`), are
+/// written to the standard output, exit status 0 (`cli::printed_text`, which
+/// gives LOSAT Web's ABI v2 the same text).
 fn exit_on_parse_error(error: &clap::Error, argv_is_rpsbproc: bool) -> ! {
-    if let Some(text) = crate::cli::xml_help_program(error).and_then(crate::cli::xml_help_text) {
+    // rpsbproc's arguments are not the single-dash words of the BLAST programs. rpsbproc's
+    // messages and help are written without a panic on a closed stream
+    // (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 9).
+    if let Some(text) = crate::cli::printed_text(error, argv_is_rpsbproc) {
         if argv_is_rpsbproc {
             crate::rpsbproc::write_stdout(&text);
         } else {
@@ -659,29 +481,16 @@ fn exit_on_parse_error(error: &clap::Error, argv_is_rpsbproc: bool) -> ! {
         }
         std::process::exit(0);
     }
-    // rpsbproc's arguments are not the single-dash words of the BLAST programs.
-    let message = if argv_is_rpsbproc {
-        crate::cli::render_rpsbproc_message(error)
-    } else {
-        crate::cli::render_message(error)
-    };
-    // rpsbproc's messages and help are written without a panic on a closed stream
-    // (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 9).
+    let message = crate::cli::command_line_message(error, argv_is_rpsbproc);
     if argv_is_rpsbproc {
-        if error.use_stderr() {
-            crate::rpsbproc::write_stderr(&message);
-        } else {
-            crate::rpsbproc::write_stdout(&message);
-        }
-    } else if error.use_stderr() {
-        write_dropping_errors(&mut std::io::stderr(), &message);
+        crate::rpsbproc::write_stderr(&message);
     } else {
-        write_dropping_errors(&mut std::io::stdout(), &message);
+        write_dropping_errors(&mut std::io::stderr(), &message);
     }
     std::process::exit(error.exit_code());
 }
 
-// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:972-977 (quoted at
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:972-977 (cited at
 // `ncbi_version::print`: the version is written to `cout`, whose failure NCBI never checks)
 /// Writes `text` (a version, a help text, a message of LOSAT's argument parser) to `stream` as
 /// NCBI writes its version, help and usage to `cout` and `cerr`: a write that fails is dropped

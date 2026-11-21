@@ -71,21 +71,30 @@ pub(crate) fn x_tbx_scan_byte() -> crate::algorithm::tblastx::x_scan_byte::XScan
     *MODE.get_or_init(|| crate::algorithm::tblastx::x_scan_byte::x_mode("LOSAT_X_TBXSCANBYTE"))
 }
 
-// No NCBI counterpart: the presence bytes of a table, made once per table.
-/// EXPERIMENT (LOSAT_X_TBXSCANBYTE): the presence bytes of `lookup` when `x_tbx_scan_byte` scans
-/// it (on, the table `fits`, sparse if the mode asks), else `None` (NCBI's loop).
-pub(crate) fn x_tbx_presence(
-    lookup: &BlastAaLookupTable,
-) -> Option<crate::algorithm::tblastx::x_scan_byte::XPresence> {
+// No NCBI counterpart: chooses LOSAT's scan for a table, once per table.
+/// EXPERIMENT (LOSAT_X_TBXSCANBYTE): whether `x_tbx_scan_byte` scans `lookup` on presence bytes
+/// (on, the table `fits`, sparse if the mode asks; decided from `pv`, `x_table_takes`), else
+/// NCBI's loop. The unit path makes the bytes after it has built the batch's tables
+/// (`x_tbx_presence`).
+pub(crate) fn x_tbx_scans_byte(lookup: &BlastAaLookupTable) -> bool {
     let mode = x_tbx_scan_byte();
     if !mode.on() {
-        return None;
+        return false;
     }
-    let kept = crate::algorithm::tblastx::x_scan_byte::x_table_presence(lookup);
-    let keep = crate::algorithm::tblastx::x_scan_byte::x_kept_presence(mode, &kept).is_some();
-    let taken = kept.filter(|_| keep).map(|(bytes, _)| bytes);
-    crate::utils::xreach::x_reach!("LOSAT_X_TBXSCANBYTE", taken.is_some());
+    let taken = crate::algorithm::tblastx::x_scan_byte::x_table_takes(mode, lookup);
+    crate::utils::xreach::x_reach!("LOSAT_X_TBXSCANBYTE", taken);
     taken
+}
+
+// No NCBI counterpart: the presence bytes of a table, made once per table.
+/// EXPERIMENT (LOSAT_X_TBXSCANBYTE): the presence bytes of a table `x_tbx_scans_byte` took. The
+/// unit path makes them once every table of the batch is built (`x_pair_par.rs`
+/// `XPairPar::prepare`), not between the tables (`XGroup::presence`), and frees them with the
+/// table.
+pub(crate) fn x_tbx_presence(
+    lookup: &BlastAaLookupTable,
+) -> crate::algorithm::tblastx::x_scan_byte::XPresence {
+    crate::algorithm::tblastx::x_scan_byte::x_build_presence(lookup)
 }
 
 // No NCBI counterpart: the record of `LOSAT_X_REACH` for a table `x_tbx_presence` is not asked
@@ -97,7 +106,7 @@ pub(crate) fn x_reach_scan_byte_not_taken() {
     }
 }
 
-// NCBI reference: c++/src/algo/blast/core/blast_aascan.c:75-130 (quoted at `x_scan_subject_bf`).
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:75-130 (cited at `x_scan_subject_bf`).
 /// EXPERIMENT (LOSAT_X_TBXSCANBYTE): `s_blast_aa_scan_subject` with each range scanned by
 /// `x_scan_one_range_byte` on `presence` (`x_tbx_presence`). Same arguments, same result, same
 /// `s_range`; `offset_pairs` must hold `array_size + X_SCAN_BYTE_SLACK` entries.
@@ -175,10 +184,7 @@ fn x_table_sparse(lookup: &BlastAaLookupTable) -> bool {
     2 * set < lookup.backbone.len() as u64
 }
 
-// NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:509-511
-// ```c
-// hits = scansub(lookup_wrap, subject, offset_pairs, array_size, scan_range);
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-511
 /// EXPERIMENT (LOSAT_X_TBXSCANBF): `s_blast_aa_scan_subject`, or `x_scan_subject_bf` when
 /// `branch_free` (`x_scan_bf_for` of the table; the offset array then from `x_offset_pairs_len`).
 #[inline]
@@ -212,25 +218,7 @@ pub(crate) fn x_scan_subject(
     }
 }
 
-// NCBI reference: c++/src/algo/blast/core/blast_aascan.c:75-130
-// ```c
-// while (s_DetermineScanningOffsets(subject, word_length, word_length, s_range)) {
-//     s_first=subject->sequence + s_range[1];
-//     s_last=subject->sequence + s_range[2];
-//     ...
-//     for (s = s_first; s <= s_last; s++) {
-//         ...
-//             if (numhits <= (array_size - totalhits)) {
-//                 ...
-//             } else {
-//                 s_range[1] = (Int4)(s - subject->sequence);
-//                 return totalhits;
-//             }
-//     }
-//     s_range[1] = (Int4)(s - subject->sequence);
-// }
-// return totalhits;
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:75-130
 /// EXPERIMENT (LOSAT_X_TBXSCANBF): `s_blast_aa_scan_subject` with each range scanned by
 /// `x_scan_one_range_bf`. Same arguments, same result, same `s_range`; `offset_pairs` must hold
 /// `array_size + X_SCAN_BF_SLACK` entries.
@@ -318,7 +306,7 @@ fn x_popcnt() -> bool {
     *ON.get_or_init(|| std::arch::is_x86_feature_detected!("popcnt"))
 }
 
-// NCBI reference: c++/src/algo/blast/core/blast_aascan.c:75-130 (as above `x_scan_subject_bf`)
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:75-130 (as above `x_scan_subject_bf`)
 /// `x_scan_subject_bf` for a table compacted by `x_compact` (`rank` is the rank it returned):
 /// the same words, the same cells, the same offset pairs and `s_range`; `offset_pairs` must hold
 /// `array_size + X_SCAN_BF_SLACK` entries.
@@ -410,7 +398,7 @@ fn x_scan_subject_compact_in(
     totalhits
 }
 
-// NCBI reference: c++/src/algo/blast/core/blast_aascan.c:75-127 (as above `x_scan_one_range_bf`,
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:75-127 (as above `x_scan_one_range_bf`,
 // tblastx/x_aascan_bf.rs)
 /// `x_scan_one_range_bf` on a compacted table: the candidates are the same words (the presence
 /// vector is the table's), and the cell of a candidate's index is found through `rank`.
@@ -445,7 +433,7 @@ fn x_scan_one_range_compact(
     let s_first = s_range[1] as usize;
     let s_last = s_range[2] as usize;
 
-    // NCBI reference: c++/include/algo/blast/core/blast_lookup.h:96-107 (ComputeTableIndex)
+    // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_lookup.h:96-107 (ComputeTableIndex)
     let mut index: usize = 0;
     for i in 0..(word_length - 1) {
         // SAFETY: as in `x_scan_one_range_bf`: the scan range follows NCBI's sentinel-backed
@@ -481,7 +469,7 @@ fn x_scan_one_range_compact(
             };
             let numhits = cell.num_used;
             if numhits > array_size - totalhits {
-                // NCBI reference: c++/src/algo/blast/core/blast_aascan.c:118-123
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:118-123
                 s_range[1] = s_off as i32;
                 return totalhits;
             }
@@ -510,190 +498,11 @@ fn x_scan_one_range_compact(
         block_first = block_last + 1;
     }
 
-    // NCBI reference: c++/src/algo/blast/core/blast_aascan.c:125-127
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:125-127
     s_range[1] = (s_last + 1) as i32;
     totalhits
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::algorithm::tblastx::lookup::build_ncbi_lookup;
-    use crate::algorithm::tblastx::translation::generate_frames;
-    use crate::config::ScoringMatrix;
-    use crate::stats::lookup_protein_params_ungapped;
-    use crate::utils::genetic_code::GeneticCode;
-
-    struct XorShift(u64);
-
-    impl XorShift {
-        fn next(&mut self) -> u64 {
-            self.0 ^= self.0 << 13;
-            self.0 ^= self.0 >> 7;
-            self.0 ^= self.0 << 17;
-            self.0
-        }
-        fn below(&mut self, n: usize) -> usize {
-            (self.next() % n as u64) as usize
-        }
-    }
-
-    // The calls of the reference loop (aa_ungapped.c:500-516) for one subject: (offset pairs,
-    // s_range) after each call of `scan` (pairs, array_size, s_range -> hits).
-    fn calls(
-        word_length: i32,
-        seq_ranges: &[(i32, i32)],
-        array_size: usize,
-        scan: &mut dyn FnMut(&mut [BlastOffsetPair], i32, &mut [i32; 3]) -> i32,
-    ) -> Vec<(Vec<(u32, u32)>, [i32; 3])> {
-        let slack = X_SCAN_BF_SLACK.max(crate::algorithm::tblastx::x_scan_byte::X_SCAN_BYTE_SLACK);
-        let mut pairs = vec![BlastOffsetPair::default(); array_size + slack];
-        let mut scan_range = [0, seq_ranges[0].0, seq_ranges[0].1 - word_length];
-        let mut out = Vec::new();
-        while scan_range[1] <= scan_range[2] {
-            let hits = scan(&mut pairs, array_size as i32, &mut scan_range);
-            let got = pairs[..hits as usize]
-                .iter()
-                .map(|pair| (pair.q_off, pair.s_off))
-                .collect();
-            out.push((got, scan_range));
-            assert!(out.len() < 1_000_000, "scan does not advance");
-        }
-        out
-    }
-
-    // NCBI reference: c++/src/algo/blast/core/blast_aascan.c:48-131 (the function compared
-    // against, as `s_blast_aa_scan_subject`). Not a port of an NCBI unit case: the pairs and the
-    // `s_range` of every call must equal the reference's, for TBLASTX tables (the six frames of
-    // nucleotide queries), subjects of one or several ranges (as masked subjects have, ranges of
-    // fewer letters than a word among them) and offset arrays that stop the scan after a few words
-    // (as aascan_unit_test.cpp's ScanOffsetTest scans).
-    #[test]
-    fn x_scan_subject_bf_and_compact_equal_ncbi_scan_on_random_subjects() {
-        let mut rng = XorShift(0x2545_f491_4f6c_dd1d);
-        let code = GeneticCode::from_id(1);
-        let karlin = lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
-        let mut compared = 0usize;
-        let mut stops = 0usize;
-        let mut range_stops = 0usize;
-        for case in 0..24 {
-            let num_queries = [1, 1, 2, 6][case % 4];
-            let queries: Vec<_> = (0..num_queries)
-                .map(|_| {
-                    let len = 30 + rng.below(1_200);
-                    let dna: Vec<u8> = (0..len).map(|_| b"ACGT"[rng.below(4)]).collect();
-                    generate_frames(&dna, &code)
-                })
-                .collect();
-            let threshold = [13, 11, 15][case % 3];
-            let (lookup, _) = build_ncbi_lookup(&queries, threshold, &karlin, true);
-            let (mut compact, _) = build_ncbi_lookup(&queries, threshold, &karlin, true);
-            let rank = x_compact(&mut compact);
-            assert!(compact.backbone.len() < lookup.backbone.len());
-            // LOSAT_X_TBXSCANBYTE: the scan on presence bytes, on any table that `fits`.
-            let presence = crate::algorithm::tblastx::x_scan_byte::x_table_presence(&lookup)
-                .filter(|_| x_tbx_scan_byte().on())
-                .map(|(bytes, _)| bytes);
-            let longest = lookup.longest_chain.max(1) as usize;
-            // A translated frame in ncbistdaa: residues 1..=25 (X = 21, stop = 25 included),
-            // sentinel 0 after the last one.
-            let len = [3, 4, 255, 256, 257, 1_000, 20_000][case % 7];
-            let mut subject: Vec<u8> = (0..len).map(|_| 1 + rng.below(25) as u8).collect();
-            subject.push(0);
-            // One range; three ranges, the middle one shorter than a word; ranges every ~300
-            // letters with gaps between them.
-            let mut cuts = vec![(0, len)];
-            let mut three = vec![(0, len / 3), (len / 2, len / 2 + 2), (2 * len / 3, len)];
-            three.retain(|&(l, r)| l < r);
-            let mut many = Vec::new();
-            let mut left = rng.below(20) as i32;
-            while left < len {
-                let right = (left + 1 + rng.below(600) as i32).min(len);
-                many.push((left, right));
-                left = right + rng.below(40) as i32;
-            }
-            for ranges in [&mut cuts, &mut three, &mut many] {
-                if ranges.is_empty() {
-                    continue;
-                }
-                for array_size in [
-                    longest,
-                    longest + 1,
-                    longest + 2,
-                    3 * longest,
-                    4096 + longest,
-                ] {
-                    let wl = lookup.word_length;
-                    let want = calls(wl, ranges, array_size, &mut |p, a, r| {
-                        s_blast_aa_scan_subject(&lookup, &subject, ranges, p, a, r)
-                    });
-                    let got = calls(wl, ranges, array_size, &mut |p, a, r| {
-                        x_scan_subject_bf(&lookup, &subject, ranges, p, a, r)
-                    });
-                    assert_eq!(
-                        got, want,
-                        "case {case} ranges {ranges:?} array_size {array_size}"
-                    );
-                    if let Some(presence) = &presence {
-                        let byte_got = calls(wl, ranges, array_size, &mut |p, a, r| {
-                            x_scan_subject_byte(&lookup, presence, &subject, ranges, p, a, r)
-                        });
-                        assert_eq!(
-                            byte_got, want,
-                            "byte: case {case} ranges {ranges:?} array_size {array_size}"
-                        );
-                    }
-                    // The compacted table (`x_compact`), with the scan's dispatch and with the
-                    // portable rank.
-                    let compact_got = calls(wl, ranges, array_size, &mut |p, a, r| {
-                        x_scan_subject_compact(&compact, &rank, &subject, ranges, p, a, r)
-                    });
-                    assert_eq!(
-                        compact_got, want,
-                        "compact: case {case} ranges {ranges:?} array_size {array_size}"
-                    );
-                    let portable_got = calls(wl, ranges, array_size, &mut |p, a, r| {
-                        x_scan_subject_compact_in(&compact, &rank, &subject, ranges, p, a, r)
-                    });
-                    assert_eq!(
-                        portable_got, want,
-                        "portable rank: case {case} ranges {ranges:?} array_size {array_size}"
-                    );
-                    compared += want.iter().map(|(pairs, _)| pairs.len()).sum::<usize>();
-                    stops += want.len().saturating_sub(1);
-                    range_stops += want.iter().filter(|(_, r)| r[0] > 0).count();
-                }
-            }
-        }
-        // The cases above must reach the capacity stop, later ranges and many hits.
-        assert!(compared > 100_000, "{compared} pairs compared");
-        assert!(stops > 100, "{stops} capacity stops");
-        assert!(
-            range_stops > 100,
-            "{range_stops} calls ending past the first range"
-        );
-    }
-
-    // No NCBI counterpart: the choice of `x_scan_bf_for` (module text). A short query's table has
-    // its presence bit in fewer than half of the cells; with half of the cells set, NCBI's loop.
-    #[test]
-    fn x_table_sparse_counts_the_presence_bits() {
-        let mut rng = XorShift(0x0123_4567_89ab_cdef);
-        let dna: Vec<u8> = (0..2_000).map(|_| b"ACGT"[rng.below(4)]).collect();
-        let code = GeneticCode::from_id(1);
-        let karlin = lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
-        let (mut lookup, _) = build_ncbi_lookup(&[generate_frames(&dna, &code)], 13, &karlin, true);
-        assert!(x_table_sparse(&lookup));
-        let cells = lookup.backbone.len();
-        lookup.pv.fill(0);
-        for index in 0..cells / 2 {
-            lookup.pv[index >> 5] |= 1 << (index & 31);
-        }
-        assert!(!x_table_sparse(&lookup), "half of {cells} cells set");
-        lookup.pv[(cells / 2 - 1) >> 5] &= !(1 << ((cells / 2 - 1) & 31));
-        assert!(
-            x_table_sparse(&lookup),
-            "one cell fewer than half of {cells}"
-        );
-    }
-}
+#[path = "x_scan_bf_tests.rs"]
+mod tests;

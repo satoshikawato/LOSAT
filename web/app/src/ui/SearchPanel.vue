@@ -247,7 +247,8 @@ function onThreads(event: Event): void {
         </button>
       </h3>
       <div v-if="open" id="algorithm-parameters-body" class="parameters-body">
-        <div class="parameters-tools">
+        <!-- Options that were not read have no values to mark or restore (ParameterForm; the review of D1, L1). -->
+        <div v-if="!state.descriptionUnavailable" class="parameters-tools">
           <p class="parameters-note">
             Parameter values that differ from the default are highlighted in yellow and marked with
             <span aria-hidden="true">♦</span><span class="visually-hidden">a diamond</span> sign

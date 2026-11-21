@@ -377,12 +377,10 @@ fn the_start_refuses_the_report_sums_before_its_first_byte() {
             refused
         };
         assert!(refused(&overflow), "{kind:?}");
-        // `-0` in the serial XML only (outfmt 14 and 16); JSON writes INT64_MIN.
-        assert_eq!(
-            refused(&int64_min),
-            matches!(kind, Xml2Kind::Single16 | Xml2Kind::Files14),
-            "{kind:?}"
-        );
+        // NCBI's serial XML (outfmt 14 and 16) prints INT64_MIN as `-0`, its JSON the digits:
+        // LOSAT writes the digits in every format (PD-LOSAT-NCBI-DEFECTS approved exception 17,
+        // Int8 -2^63 written as digits).
+        assert!(!refused(&int64_min), "{kind:?}");
         // A call that writes no report (a run without a query) prints no count.
         let mut writer = Xml2Writer::new(kind, params(Xml2Target::Database));
         let mut out = Vec::new();
@@ -396,7 +394,9 @@ fn the_start_refuses_the_report_sums_before_its_first_byte() {
     let mut blast_xml = crate::report::blast_xml::BlastXmlWriter::new(0);
     let mut out = Vec::new();
     assert!(blast_xml.start(Some(&overflow), &mut out).is_err());
-    assert!(blast_xml.start(Some(&int64_min), &mut out).is_err());
+    assert!(crate::report::blast_xml::BlastXmlWriter::new(0)
+        .start(Some(&int64_min), &mut Vec::new())
+        .is_ok());
     let mut count = run(None, "d");
     count.db_num = i64::from(i32::MAX) + 1;
     assert!(blast_xml.start(Some(&count), &mut out).is_err());
@@ -645,6 +645,37 @@ fn one_hsp_named(
         .unwrap();
     writer.finish(&mut out).unwrap();
     String::from_utf8(out).unwrap()
+}
+
+// PD-LOSAT-NCBI-DEFECTS approved exception 17, Int8 -2^63 written as digits (review C of line RG
+// D1a-4, SF1): XML2's
+// `db-len` of exactly -2^63, NCBI's `-0` in its serial XML (outfmt 14, 16; probe q17b of review
+// C), is written as its digits, as NCBI's JSON writes it (outfmt 13, 15).
+#[test]
+fn a_db_len_of_minus_two_to_the_63_is_written_as_its_digits() {
+    let matrix = FormattingMatrix::new("BLOSUM62").unwrap();
+    let mut run = run(Some(&matrix), "db/sprot");
+    run.db_len = i64::MIN;
+    for (kind, written) in [
+        (Xml2Kind::Single16, "<db-len>-9223372036854775808</db-len>"),
+        (Xml2Kind::Single15, "\"db_len\": -9223372036854775808"),
+    ] {
+        let mut writer = Xml2Writer::new(kind, params(Xml2Target::Database));
+        let query = XmlQuery {
+            id: b"Query_1",
+            title: b"",
+            len: 12,
+            stats: XmlStats::NONE,
+            message: None,
+            searched: true,
+            masks: &[],
+        };
+        let mut out = Vec::new();
+        writer.query(&run, &query, &mut out, |_| Ok(())).unwrap();
+        writer.finish(&mut out).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert!(text.contains(written), "{kind:?}: {text}");
+    }
 }
 
 #[test]
@@ -1013,7 +1044,7 @@ fn a_side_file_that_cannot_be_opened_is_ncbis_argument_error_and_earlier_files_s
     assert_eq!(native.exit, 1);
     assert_eq!(
         native.message,
-        "Command line argument error: Cannot open output file\n"
+        b"Command line argument error: Cannot open output file\n"
     );
     assert_eq!(stored.borrow().len(), 1);
     assert!(master.is_empty());
@@ -1130,8 +1161,8 @@ fn a_receiver_that_fails_is_the_side_file_write_error() {
     let error = put(&mut document, b"q2\n", &mut master).unwrap_err();
     let native = error.downcast_ref::<crate::cli::NativeError>().unwrap();
     assert_eq!(
-        (native.exit, native.message.as_str()),
-        (6, "BLAST failed to write output\n")
+        (native.exit, native.message.as_slice()),
+        (6, b"BLAST failed to write output\n".as_slice())
     );
     assert_eq!(received.files.lock().unwrap().len(), 1);
     assert!(master.is_empty());
@@ -1363,9 +1394,13 @@ fn a_16_report_posts_its_control_characters_and_its_exception_as_ncbi_writes_the
     assert!(out[..cut].ends_with(b"<title>s1 a"));
     assert_eq!(posts[0].at, cut);
     let post = String::from_utf8(posts[0].text.clone()).unwrap();
-    assert!(post.starts_with("Error: [blastp]  Frame type= eFrameNamed, Object type= BlastOutput2NCBI C++ Exception:\n"), "{post}");
+    // NCBI's text in LOSAT's words (`crate::wording::losat_text`).
+    let first = crate::wording::losat_text("Error: [blastp]  Frame type= eFrameNamed, Object type= BlastOutput2NCBI C++ Exception:\n    T0 \"/src/corelib/ncbistr.cpp\", line 6901: Error: (CStringException::eConvert) ncbi::CUtf8::SymbolToChar() - Failed to convert symbol to requested encoding (m_Pos = 0)\n");
+    assert!(post.starts_with(&*first), "{post}");
     assert!(
-        post.ends_with("Object type= BlastOutput2 (m_Pos = 0)\n\n"),
+        post.ends_with(&*crate::wording::losat_text(
+            "Object type= BlastOutput2 (m_Pos = 0)\n\n"
+        )),
         "{post}"
     );
 }

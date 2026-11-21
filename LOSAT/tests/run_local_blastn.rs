@@ -189,23 +189,8 @@ fn the_cli_writes_a_cl_tag_and_the_library_none() {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/app/blast/blast_formatter.cpp:429-467
-// ```c
-// CRef<CSearchResultSet> results = m_RmtBlast->GetResultSet();
-// formatter.PrintProlog();
-// ...
-// ITERATE(CSearchResultSet, result, *results) {
-//     ...
-//         formatter.PrintOneResultSet(**result, queries);
-//     ...
-// }
-// ```
-// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2894-2978
-// ```c
-// if (args.Exist(kArgMaxTargetSequences) && args[kArgMaxTargetSequences]) {
-//    hitlist_size = args[kArgMaxTargetSequences].AsInteger();
-// }
-// ```
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:429-467
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2894-2978
 #[test]
 fn every_format_of_one_search_matches_the_cli_run_of_that_format() {
     let inputs = Inputs::new();
@@ -253,12 +238,6 @@ fn every_format_of_one_search_matches_the_cli_run_of_that_format() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:770-786
-// ```c++
-//     if (m_FormatType == CFormattingArgs::eTabular ||
-//         m_FormatType == CFormattingArgs::eTabularWithComments ||
-//         m_FormatType == CFormattingArgs::eCommaSeparatedValues ||
-//         m_FormatType == CFormattingArgs::eCommaSeparatedValuesWithHeader) {
-// ```
 // The tabular reports with a field list or a delimiter, and outfmt 10 and 20 (line CLI C2), of
 // one search: each equals its run alone and the CLI run of that format, beside the default 6.
 #[test]
@@ -305,13 +284,7 @@ fn custom_tabular_formats_of_one_search_match_the_cli_run_of_that_format() {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/app/blast/blastn_app.cpp:261-274,299-300
-// ```c
-//         CBatchSizeMixer mixer(SplitQuery_GetChunkSize(opt.GetProgram())-1000);
-//     ...
-//                 if (!batch_size)
-//                     input.SetBatchSize(mixer.GetBatchSize(lcl_blast.GetNumExtensions()));
-// ```
+// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:261-274,299-300
 // LOSAT searches NCBI's query batches, so an invalid query after the first batch is
 // reported with the batch that holds it: every format succeeds, as the CLI run does (the
 // bytes against NCBI are checked by docs/evidence/losat_web_e2f/check_inputs.py).
@@ -349,24 +322,8 @@ fn an_invalid_query_after_the_first_batch_is_reported_with_its_batch() {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:773-788
-// ```c
-//         catch(CBlastException & e ) {
-//         	// Skip bad subject sequence
-//         	if(e.GetErrCode() == CBlastException::eInvalidArgument) {
-//         		seqblk_vec->push_back(subj);
-//         ...
-//         		warning += "Subject sequence contains no data";
-//         		ERR_POST(Warning << warning);
-// ```
-// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:632-636
-// ```c
-//         } catch (const CException& e) {
-//             // FIXME: is index this the right value for the 2nd arg? Also, how
-//             // to determine whether the message should contain a warning or
-//             // error?
-//             CRef<CSearchMessage> m
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:773-788
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:632-636
 // A record without residues stays in its role (oracle BI e01, e02, e06, e10): a subject
 // gets its warning before the search, counts in the database statistics and never hits; a
 // query gets its warning before its report, which has no hits, and is counted.
@@ -426,20 +383,6 @@ fn records_without_residues_are_kept_with_ncbis_warnings() {
         "{commented}"
     );
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1431-1452
-    // ```c++
-    //     if (m_FormatType == CFormattingArgs::eAsnText
-    //       ...
-    //       || m_FormatType == CFormattingArgs::eJsonSeqalign
-    //       || m_FormatType == CFormattingArgs::eSAM)
-    //     {
-    //         x_PrintStructuredReport(results, queries);
-    //         return;
-    //     }
-    //     ...
-    //     if (results.HasWarnings()) {
-    //         ERR_POST(Warning << results.GetWarningStrings());
-    //     }
-    // ```
     // The warnings go with the first format (outfmt 0 here); outfmt 5, 8, 9 and 12 write no query
     // result warnings, so their CLI runs equal `run_local` with that format alone (outfmt 15 and 16
     // return the same way, `x_PrintStructuredReport`).

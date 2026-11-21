@@ -77,14 +77,6 @@ pub fn trace_match_target(
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1095-1101
 // (`s_BlastSegGetTranslatedOffsets`, `Int4` arithmetic)
-// ```c
-//    if (segment->frame < 0)	{
-//       *start = seq_length - CODON_LENGTH*segment->offset + segment->frame;
-//       *end = seq_length - CODON_LENGTH*segment->end + segment->frame + 1;
-//    } else if (segment->frame > 0)	{
-//       *start = CODON_LENGTH*(segment->offset) + segment->frame - 1;
-//       *end = CODON_LENGTH*segment->end + segment->frame - 2;
-// ```
 // Diagnostics: the 1-based nucleotide coordinates that `convert_coords`
 // (extension/mod.rs) gives the reports for an HSP, with its ends read as NCBI's `Int4`
 // (`UngappedHit::q_end_int4`) and computed in `i64`: an HSP of the one-hit word finder of length 0

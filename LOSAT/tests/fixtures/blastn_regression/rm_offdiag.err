@@ -1,0 +1,2 @@
+BLAST query/options error: off_diagonal_range is only useful in 2-hit algorithm
+Please refer to the BLAST+ user manual.

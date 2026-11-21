@@ -1,0 +1,17 @@
+# TBLASTN 2.17.0+
+# Query: P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin [Homo sapiens] >P69906.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin [Pan paniscus] >P69907.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin [Pan troglodytes]
+# Database: tests/db_search/oidlist/n_n
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 11 hits found
+P69905.2	ENST00000320868.9	100.000	142	0	0	1	142	38	463	1.65e-104	286
+P69905.2	ENST00000320868.9	44.444	27	15	0	49	75	256	176	0.23	19.2
+P69905.2	ENST00000320868.9	100.000	6	0	0	133	138	450	433	7.0	15.0
+P69905.2	ENSDART00000101709.5	56.643	143	61	1	1	142	42	470	2.55e-51	151
+P69905.2	ENSDART00000053077.6	38.889	144	80	3	4	141	144	569	7.19e-32	102
+P69905.2	ENST00000396895.3	39.007	141	78	3	7	141	77	493	1.21e-31	102
+P69905.2	ENST00000292901.8	44.762	105	50	3	3	101	235	543	1.14e-25	86.7
+P69905.2	ENSDART00000066384.5	38.710	124	70	2	24	141	143	514	1.33e-25	85.9
+P69905.2	ENST00000652335.1	51.786	56	27	0	1	56	380	547	3.53e-18	66.2
+P69905.2	ENST00000652335.1	43.750	16	9	0	35	50	148	195	4.3	15.4
+P69905.2	FBtr0078640	24.324	37	24	1	1	37	192	290	0.66	18.1
+# BLAST processed 1 queries

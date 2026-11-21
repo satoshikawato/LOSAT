@@ -3,8 +3,8 @@
 This directory holds the tables, scripts and raw row files of a compute-program
 benchmark of LOSAT `-db` searches against NCBI BLAST+ 2.17.0 `-db` searches. It
 characterizes program output and wall-clock execution; it is not a biological
-interpretation of the input sequences. The summary is in the repository
-[README](../../README.md#database-searches).
+interpretation of the input sequences. The other benchmark sets are listed in
+[benchmarks/README.md](../README.md).
 
 ## What was measured and why
 

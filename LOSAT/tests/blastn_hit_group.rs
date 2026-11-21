@@ -2,12 +2,6 @@
 //! `src/algorithm/blastn/blast_engine/run.rs` `PrelimHitCollector::x_add_grouped`) on whole searches.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_collector.c:116-161
-//! ```c
-//!       for (index = 0; index < hsp_list->hspcnt; index++) {
-//!          Int4 query_index;
-//!          hsp = hsp_list->hsp_array[index];
-//!          query_index = Blast_GetQueryIndexFromContext(hsp->context, program);
-//! ```
 //! The switch is in the strict set (`src/utils/xswitch.rs`): it is on unless its variable is `0`.
 //! It changes how the lists of one subject are made, not what they hold (the lib test
 //! `grouped_hit_lists_equal_the_lists_per_query`), so the property under test is that the report

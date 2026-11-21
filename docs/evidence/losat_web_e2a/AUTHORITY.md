@@ -242,19 +242,7 @@ BLASTX's `write_blastx_alignment` already follows NCBI (`pairwise.rs:2616-2625`)
 
 `-task blastn -word_size 7` or `8` on `multi_query.fasta` × `multi_subject.fasta` panics at `LOSAT/src/algorithm/blastn/alignment/gapped.rs:559` (`index out of bounds: the len is 400 but the index is 18446744073709551615`), with any E-value. `blast_get_start_for_gapped_alignment_nucl` walks backwards from the gapped start and stops at the query start but not at the subject start. NCBI's loops check the query pointer only:
 
-```c
-/* src/algo/blast/core/blast_gapalign.c:3340-3349 */
-    while ((q-query < q_len) && (*q++ == *s++)) {
-        score++;
-        if (score > hspMaxIdentRun) return;
-    }
-    q = query + q_start;
-    s = subject + s_start;
-    while ((q-query >= 0) && (*q-- == *s--)) {
-        score++;
-        if (score > hspMaxIdentRun) return;
-    }
-```
+NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3340-3348
 
 They stop at the subject ends because the subject buffer has sentinel bytes. The traceback passes `subject = subject_blk->sequence;` (`src/algo/blast/core/blast_traceback.c:342`) to `BlastGetStartForGappedAlignmentNucl(query, subject, hsp);` (`blast_traceback.c:457`). For a local subject that pointer is one byte past a sentinel: `src/algo/blast/api/seqsrc_multiseq.cpp:353-358` (`That buffer has an extra sentinel byte for blastn` … `args->seq->sequence = args->seq->sequence_start + 1;`). The buffer has sentinels at both ends (`src/algo/blast/api/blast_setup_cxx.cpp:1219-1225`: `case eBlastEncodingNucleotide: // Used for nucleotide blastn queries` / `if (sentinel == eSentinels) {` … `retval = sequence_length + 2;`), and the sentinel is `const Uint1 kNuclSentinel = 0xF;` (`src/algo/blast/core/blast_encoding.c:121`), which differs from every base code, so the comparison fails there and the loop ends. The Rust equivalent stops the backward walk when the subject index is 0, and the forward walk at the subject length. A scratch build with exactly that change ([`run-20260929T000046Z/probe-gapped-start-bound.diff`](run-20260929T000046Z/probe-gapped-start-bound.diff)) matched NCBI outfmt 6 byte for byte on this input at word sizes 4–8 with E-values 10 and 1000 (up to 3,762 HSPs), and on all 34 fixtures ([`run-20260929T000046Z/precheck-probe.tsv`](run-20260929T000046Z/precheck-probe.tsv)). The worktree file was restored afterwards; no code is committed in S06. Handling: S07 fixes it first, as its own engine change with this NCBI reference and a regression test on `multi.ws7_e1000.blastn`.
 

@@ -7,6 +7,7 @@ import type { InputRole } from 'losat/domain';
 import type { SearchDraft } from '../application/draft';
 import type { DatasetRecord } from '../domain/dataset';
 import { regionFromPositions, regionProblem, regionProblemFields, regionRange, swappedRegion, type RegionText } from '../domain/region';
+import { withUnit } from '../domain/units';
 import { formatCount } from './format';
 import { refusedMark } from './refusal';
 
@@ -94,7 +95,7 @@ function up(): void {
     </div>
     <div class="region-scale muted">
       <span>1</span>
-      <span>{{ formatCount(record.length) }} {{ unit }}</span>
+      <span>{{ withUnit(formatCount(record.length), unit) }}</span>
     </div>
     <div class="region-fields">
       <label>

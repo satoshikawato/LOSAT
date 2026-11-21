@@ -17,6 +17,13 @@ use super::SeqDbError;
 /// only gives NCBI more zeros to read past the file, where LOSAT then refuses or reads none.
 pub(crate) const MAP_PAGE: u64 = 4096;
 
+/// The bytes that NCBI's mapping of a file of `len` bytes holds (`MAP_PAGE`): whole pages, the
+/// part of the last one after the end of the file zeros. The one form of `taxdb.btd` and
+/// RPS-BLAST's `.rps` (`rps::RpsVolumeFiles::row_after_rows`).
+pub(crate) fn mapped_length(len: u64) -> u64 {
+    len.div_ceil(MAP_PAGE).saturating_mul(MAP_PAGE)
+}
+
 /// Where `DbFile::read_range_in` puts the bytes it reads.
 enum RangeBuffer<'a> {
     /// A new buffer (`read_range`).
@@ -40,78 +47,28 @@ pub struct DbFile {
 
 impl DbFile {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbfile.cpp:123-129
-    // ```c++
-    //     if (! m_File.Open(CSeqDB_Path(m_FileName))) {
-    //         //m_Atlas.Unlock(locked);
-    //
-    //         string msg = string("Error: File (") + m_FileName + ") not found.";
-    //
-    //         NCBI_THROW(CSeqDBException, eFileErr, msg);
-    //     }
-    // ```
     // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbfile.hpp:93-105
-    // ```c++
-    //     bool Open(const CSeqDB_Path & name)
-    //     {
-    //         _ASSERT(name.Valid());
-    //
-    //         // FIXME: should use path even in atlas code
-    //         bool success = m_Atlas.GetFileSizeL(name.GetPathS(), m_Length);
-    //
-    //         if (success) {
-    //             m_FileName = name.GetPathS();
-    //         }
-    //
-    //         return success;
-    //     }
-    // ```
     // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:5932-5946
-    // ```c++
-    //         // Open file
-    //         errno = 0;
-    //         m_Handle->hMap = NcbiSys_open(_T_XCSTRING(m_FileName), m_Attrs->file_access);
-    //         if ( m_Handle->hMap < 0 ) {
-    //             errmsg = NcbiSys_strerror(errno);
-    //             break;
-    //         }
-    // #endif
-    //         // Success
-    //         return;
-    //     }
-    //     // Error: close and cleanup
-    //     x_Close();
-    //     NCBI_THROW(CFileException, eMemoryMap,
-    //                "CMemoryFile: Cannot memory map file '" + m_FileName + "':" + errmsg);
-    // ```
     // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbatlas.hpp:709-720
-    // ```c++
-    //             try {
-    //                 m_MappedFile = m_Atlas.GetMemoryFile(m_Filename);
-    //             }
-    //             catch (const CFileException& e) {
-    //                 if (e.GetErrCode() == CFileException::eMemoryMap &&
-    //                     NStr::Find(e.GetMsg(), "Too many open files") != NPOS) {
-    //                     NCBI_THROW(CSeqDBException, eTooManyOpenFiles, e.GetMsg());
-    //                 }
-    //                 else {
-    //                     NCBI_THROW(CSeqDBException, eMemoryMappingFailure, e.GetMsg());
-    //                 }
-    //             }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:5600-5656
     // NCBI first asks whether the file exists (`GetFileSizeL`: `stat`
-    // succeeds and names a regular file, quoted at `alias::exists`) and gives
+    // succeeds and names a regular file, cited at `alias::exists`) and gives
     // "not found" otherwise; it then opens the file to map it, and an `open`
     // that fails is its memory-mapping error. LOSAT takes the same two steps
-    // with a plain `open` in place of the mapping.
+    // with a plain `open` in place of the mapping. NCBI maps the whole file
+    // there, and a mapping that fails is an error of that place too: LOSAT
+    // reads the first byte of a file that is not empty (`opened`), so a file
+    // whose bytes the system does not give fails where NCBI's fails (line WQA
+    // D18, 2026-11-21).
     /// Opens `path` for reading. A path that is no regular file is NCBI's
     /// "Error: File (...) not found."; a regular file that cannot be opened is
-    /// [`SeqDbError::Open`].
+    /// [`SeqDbError::Open`], one whose first byte cannot be read
+    /// [`SeqDbError::Map`].
     pub fn open(path: &Path) -> Result<Self, SeqDbError> {
         if !super::alias::exists(path) {
-            return Err(SeqDbError::NotFound(format!(
-                "Error: File ({}) not found.",
-                path.display()
-            )));
+            return Err(SeqDbError::NotFound(
+                format!("Error: File ({}) not found.", path.display()).into(),
+            ));
         }
         let file = File::open(path).map_err(|source| SeqDbError::Open {
             path: path.to_path_buf(),
@@ -124,14 +81,41 @@ impl DbFile {
                 source,
             })?
             .len();
-        Ok(Self {
+        #[cfg(all(test, target_os = "linux"))]
+        let file = refused_reads::handle(path, file);
+        Self::opened(path, file, len)
+    }
+
+    /// The file `path` of `len` bytes, open on `file`: the one constructor (`open`, and the
+    /// tests' `with_handle`). It reads the first byte of a file that is not empty, as NCBI maps
+    /// the whole file where it opens it; a read that the system refuses there is
+    /// [`SeqDbError::Map`], NCBI's failed mapping of the file.
+    fn opened(path: &Path, file: File, len: u64) -> Result<Self, SeqDbError> {
+        let opened = Self {
             path: path.to_path_buf(),
             len,
             #[cfg(any(unix, windows))]
             file,
             #[cfg(not(any(unix, windows)))]
             file: std::sync::Mutex::new(file),
-        })
+        };
+        if len > 0 {
+            opened
+                .read_exact_at_impl(&mut [0u8; 1], 0)
+                .map_err(|source| SeqDbError::Map {
+                    path: path.to_path_buf(),
+                    len,
+                    source,
+                })?;
+        }
+        Ok(opened)
+    }
+
+    /// The file `path` of `len` bytes open on the handle `file`, through the constructor of
+    /// `open` (the tests: a handle whose reads the system refuses, a directory's).
+    #[cfg(all(test, target_os = "linux"))]
+    pub(crate) fn with_handle(path: &Path, file: File, len: u64) -> Result<Self, SeqDbError> {
+        Self::opened(path, file, len)
     }
 
     /// Path this file was opened with.
@@ -150,14 +134,13 @@ impl DbFile {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1802-1817
-    // ```c++
-    //         *buffer = m_Seq->GetFileDataPtr(start_offset-1) + 1;
-    //         ...
-    //         *buffer = m_Seq->GetFileDataPtr(start_offset);
-    // ```
     // NCBI returns a pointer at `offset` of the mapped file; LOSAT fills `buf`
     // from the same offset. A range that passes the end of the file, which
-    // NCBI would read past its mapping, is an explicit format error.
+    // NCBI would read past its mapping, is an explicit format error. A read
+    // that the system refuses here, after the file's first byte was read where
+    // it was opened, is where NCBI reads mapped bytes that the system no
+    // longer gives and ends by SIGBUS: LOSAT's own error,
+    // [`SeqDbError::Read`] ("cannot be read"; line WQA D18, 2026-11-21).
     /// Fills `buf` with the bytes at `offset`.
     pub fn read_exact_at(&self, buf: &mut [u8], offset: u64) -> Result<(), SeqDbError> {
         let end = offset.checked_add(buf.len() as u64);
@@ -173,7 +156,7 @@ impl DbFile {
             });
         }
         self.read_exact_at_impl(buf, offset)
-            .map_err(|source| SeqDbError::Io {
+            .map_err(|source| SeqDbError::Read {
                 path: self.path.clone(),
                 source,
             })
@@ -318,3 +301,12 @@ impl DbFile {
         file.read_exact(buf)
     }
 }
+
+/// The tests' files whose bytes the system does not give: `DbFile::open` of a path listed here
+/// reads, in place of the file, through a handle that the test names (a directory's, whose read
+/// fails with EISDIR; a file shorter than the listed one, whose read past its end fails), with
+/// the listed file's length. A test reaches the reads of `DbFile` through the readers that open
+/// the file (`SeqDb::has_parsed_seqids`, `SeqDb::deflines`).
+#[cfg(all(test, target_os = "linux"))]
+#[path = "file_refused_reads_tests.rs"]
+pub(crate) mod refused_reads;

@@ -38,7 +38,7 @@ Trace the corresponding LOSAT path from CLI options to formatted output. A match
 
 ## Port behavior faithfully
 
-Copy the relevant NCBI snippet into a Rust comment with the source path and lines, as required by `AGENTS.md`. Preserve timing, state transitions, sentinel handling, precision, comparison order, and edge cases.
+Cite the NCBI source path and lines in a Rust comment (`NCBI reference (598d8ae6): c++/<path>:<lines>`), without copying the source text, as required by `AGENTS.md`; `scripts/ncbi_ref.py <file>[:<line>]` prints the cited lines. Preserve timing, state transitions, sentinel handling, precision, comparison order, and edge cases.
 
 Make Rust-only changes for ownership, bounds safety, data layout, or parallel scheduling only when they preserve the same observable behavior and asymptotic complexity. Unsupported behavior must fail explicitly.
 

@@ -1,7 +1,7 @@
 //! The set-up of a TBLASTX query batch that `search_query_batch` does before its subjects: the
-//! search's flags and word values (`batch_flags`), the six frames of the batch's queries with
-//! their masks (`query_frames`), and the batch's lookup table with its contexts and X-dropoffs
-//! (`batch_lookup`).
+//! search's flags and word values (`batch_flags`), the frames of the batch's queries (six, or
+//! the three of the strand that `-strand` names) with their masks (`query_frames`), and the
+//! batch's lookup table with its contexts and X-dropoffs (`batch_lookup`).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:158-277
 //! (`BlastInitialWordParametersNew`); c++/src/algo/blast/api/blast_setup_cxx.cpp:484-658
@@ -20,6 +20,7 @@ use super::{
     x_drop_raw_score, x_pair_par, x_query_frames, DiagnosticCounters, GeneticCode, KarlinParams,
     QueryContext, QueryFrame, SegMasker, Subjects, TblastxArgs, TbxScore,
 };
+use crate::algorithm::blastn::args::QueryStrand;
 use crate::algorithm::tblastx::lookup::BlastAaLookupTable;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::utils::threading::SearchPool;
@@ -63,13 +64,7 @@ pub(super) fn batch_flags<S: TbxScore>(
     args: &TblastxArgs,
     parallel_pool: &SearchPool<'_>,
 ) -> BatchFlags {
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:575-582
-    // ```c
-    // score = s_BlastAaExtendTwoHit(matrix, subject, query,
-    //     last_hit + wordsize, subject_offset, query_offset,
-    //     cutoffs->x_dropoff, &hsp_q, &hsp_s, &hsp_len, use_pssm,
-    //     wordsize, &right_extend, &s_last_off);
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:575-582
     // LOSAT-only existing diagnostics: capture configuration once per search;
     // the NCBI extension inputs and all biological decisions stay unchanged.
     let extension_debug_enabled = crate::utils::xdiag::var("LOSAT_DEBUG_EXTENSION").is_ok();
@@ -77,61 +72,20 @@ pub(super) fn batch_flags<S: TbxScore>(
     let timing_enabled = std::env::var_os("LOSAT_TIMING").is_some();
     let t_total = Instant::now();
 
-    // NCBI reference: ncbi-blast/c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
-    // ```c
-    // CMTArgs(...)
-    // {
-    // #ifdef NCBI_NO_THREADS
-    //     m_NumThreads = CThreadable::kMinNumThreads;
-    //     m_MTMode = eNotSupported;
-    // #endif
-    // }
-    // ```
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
-    // ```c
-    // const int kMaxValue = static_cast<int>(CSystemInfo::GetCpuCount());
-    // ...
-    // int num_threads = args[kArgNumThreads].AsInteger();
-    // if (num_threads > kMaxValue) {
-    //     m_NumThreads = kMaxValue;
-    // } else {
-    //     m_NumThreads = num_threads;
-    // }
-    // ```
-    // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
-    // TBlastThreads the_threads(GetNumberOfThreads());
-    // (*thread)->Run(); (*thread)->Join(&result);
+    // NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_args.hpp:1290-1297
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:145-188
     let num_threads = parallel_pool.threads();
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:82-88
-    // ```c
-    // if (num_threads > 1) {
-    //     SetNumberOfThreads(num_threads);
-    // }
-    // ```
-    // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
-    // TBlastThreads the_threads(GetNumberOfThreads());
-    // (*thread)->Run(); (*thread)->Join(&result);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:82-88
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:145-188
     let requested_parallel = parallel_pool.enabled();
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1002-1003
-    // ```c
-    // status = s_BlastSetUpAuxStructures(..., aux_struct);
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1002-1003
     //
     // The scan-chunk experiment keeps the canonical two-hit state serial inside
     // each NCBI WordFinder search unit, so subject-level parallelism is disabled
     // while this gate is active.
     let use_serial_scan_chunks = std::env::var_os("LOSAT_TBLASTX_SERIAL_SCAN_CHUNKS").is_some();
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1048-1055
-    // ```c
-    //     if (m_Target == eQuery && args[kArgQueryGeneticCode]) {
-    //         opt.SetQueryGeneticCode(args[kArgQueryGeneticCode].AsInteger());
-    //     }
-    //
-    //     if (m_Target == eDatabase && args[kArgDbGeneticCode] &&
-    //         (program == eTblastn || program == eTblastx) ) {
-    //         opt.SetDbGeneticCode(args[kArgDbGeneticCode].AsInteger());
-    //     }
-    // ```
     // Setting each code makes its table (`AddGeneticCode`, which calls `FindGeneticCode`,
     // c++/src/algo/blast/api/blast_options_cxx.cpp:1478-1483 `SetQueryGeneticCode`, :2411-2416
     // `SetDbGeneticCode`, c++/src/algo/blast/api/blast_aux.cpp:653-660). The queries are
@@ -152,14 +106,11 @@ pub(super) fn batch_flags<S: TbxScore>(
     let wordsize: i32 = sc.word() as i32;
 
     // NCBI BLAST computes x_dropoff per-context using kbp[context]->Lambda:
-    //   p->cutoffs[context].x_dropoff_init =
-    //       (Int4)(sbp->scale_factor * ceil(word_options->x_dropoff * NCBIMATH_LN2 / kbp->Lambda));
-    // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:219-221
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:219-221
     //
     // For translated queries, NCBI computes kbp_std per context and applies check_ideal:
-    //   if (check_ideal && kbp->Lambda >= sbp->kbp_ideal->Lambda)
-    //      Blast_KarlinBlkCopy(kbp, sbp->kbp_ideal);
-    // Reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2778-2797
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2796-2797
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2778-2797
     // We still maintain per-context structure for parity.
     //
     // x_dropoff_per_context is populated after build_ncbi_lookup() creates the contexts.
@@ -168,23 +119,13 @@ pub(super) fn batch_flags<S: TbxScore>(
     let diag_enabled = diagnostics_enabled();
     let debug_cutoffs_all = crate::utils::xdiag::var_os("LOSAT_DEBUG_CUTOFFS_ALL").is_some();
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3265-3274
-    // ```c
-    // #if _BLAST_DEBUG
-    // ...
-    //     arg_desc.AddFlag("verbose", "Produce verbose output (show BLAST options)",
-    //                      true);
-    //     arg_desc.AddFlag("remote_verbose",
-    //                      "Produce verbose output for remote searches", true);
-    // ...
-    // #endif /* _BLAST_DEBUG */
-    // ```
     let debug_output_filter = std::env::var_os("LOSAT_DEBUG_OUTPUT_FILTER").is_some();
     let debug_hsp_saving = crate::utils::xdiag::var_os("LOSAT_DEBUG_HSP_SAVING").is_some();
     let diagnostics = std::sync::Arc::new(DiagnosticCounters::default());
 
     // Debug: optional scan output dump around a specific subject offset.
     // The offset_pairs correspond to s_BlastAaScanSubject copy loop.
-    // Reference: ncbi-blast/c++/src/algo/blast/core/blast_aascan.c:99-115
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:99-115
     let scan_debug_center = crate::utils::xdiag::var("LOSAT_DEBUG_SCAN_SOFF")
         .ok()
         .and_then(|v| v.parse::<i32>().ok());
@@ -247,33 +188,10 @@ pub(super) fn query_frames(
     // NCBI tblastx low-complexity filtering uses SEG on translated protein sequences.
     // No nucleotide-level DUST masking is applied.
     //
-    // NCBI reference (verbatim):
-    //   else if (*ptr == 'L' || *ptr == 'T')
-    //   { /* do low-complexity filtering; dust for blastn, otherwise seg.*/
-    //       if (program_number == eBlastTypeBlastn
-    //           || program_number == eBlastTypeMapping)
-    //           SDustOptionsNew(&dustOptions);
-    //       else
-    //           SSegOptionsNew(&segOptions);
-    //       ptr++;
-    //   }
-    // Source: ncbi-blast/c++/src/algo/blast/core/blast_filter.c:572-580
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:572-580
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:576-588 (the six
     // contexts of a tblastx query, each translated with the query's genetic code)
-    // ```c
-    // for (unsigned int i = 0; i < kNumContexts; i++) {
-    //     if (qinfo->contexts[ctx_index + i].query_length <= 0) {
-    //         continue;
-    //     }
-    //     int offset = qinfo->contexts[ctx_index + i].query_offset;
-    //     BLAST_GetTranslation(sequence.data.get() + 1,
-    //                          seqbuf_rev,
-    //                          na_length,
-    //                          qinfo->contexts[ctx_index + i].frame,
-    //                          & buf.get()[offset], gc);
-    // }
-    // ```
     // Diagnostic (LOSAT_TIMING): the queries' six-frame translation for the common line
     // (utils/xtiming.rs). No NCBI counterpart.
     let t_translate = crate::utils::xtiming::clock();
@@ -281,10 +199,22 @@ pub(super) fn query_frames(
         .iter()
         .map(|r| generate_frames(r.seq(), query_code))
         .collect();
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:200-215 (with
+    // `-strand plus` contexts 3-5 of every query, with `minus` contexts 0-2, have length 0;
+    // `s_QueryInfo_SetContext` at :65-87 gives such a context no letters in the buffer and no
+    // separator, and marks it invalid)
+    // The frames of the strand that is not searched are dropped here, once per batch: the batch's
+    // buffer, lookup table, Karlin blocks, cutoffs and search spaces then hold the searched
+    // frames only, as NCBI's (a frame of no letters is already absent, `generate_frames`).
+    let (plus, minus) = QueryStrand::from_option(&args.strand).searched();
+    if !(plus && minus) {
+        for frames in &mut query_frames {
+            frames.retain(|frame| if frame.frame > 0 { plus } else { minus });
+        }
+    }
     crate::utils::xtiming::add(crate::utils::xtiming::Phase::Translate, t_translate);
 
-    // NCBI blast_args.cpp:404-406: opt.SetSegFilteringWindow(...);
-    // opt.SetSegFilteringLocut(...); opt.SetSegFilteringHicut(...);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:404-406
     if args.lcase_masking {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1239-1256 (see
         // `mask_lcase`): the lower-case runs join the SEG intervals of each frame.
@@ -305,24 +235,12 @@ pub(super) fn query_frames(
         let t_seg = crate::utils::xtiming::clock();
         let seg = SegMasker::new(params.window, params.locut, params.hicut);
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1280-1290
-        // ```c
-        //     for (context = query_info->first_context;
-        //          context <= query_info->last_context; ++context) {
-        // ...
-        //         status = s_GetFilteringLocationsForOneContext(query_blk,
-        // ```
         // Dispatch point (LOSAT_X_TBXQFRAMES, strict set): with two or more threads the frames
         // are masked on the search pool, one task per frame; otherwise, and with the switch off,
         // the frames are masked one after the other as before (tblastx/x_query_frames.rs, which
         // holds the per-frame bodies `mask_frame` and `mask_frame_soft`).
         //
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:621-624
-        // ```c
-        //     if (!mask_at_hash) {
-        //         BlastSetUp_MaskQuery(query_blk, query_info, filter_maskloc,
-        //                              program_number);
-        //     }
-        // ```
         // `-soft_masking true` keeps the intervals for the lookup table and the frames' letters.
         if args.soft_masking() {
             x_query_frames::mask_soft(&mut query_frames, &seg, parallel_pool);
@@ -397,31 +315,21 @@ pub(super) fn batch_lookup<S: TbxScore>(inputs: &LookupInputs<'_, S>) -> BatchLo
     // Note: karlin_params argument is now unused - computed per context in build_ncbi_lookup()
     // We still pass it for x_dropoff calculation (which uses ideal params for all contexts in tblastx)
     // NCBI lookup build always precomputes neighbors (no lazy mode).
-    // Reference: ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:446-543
-    // NCBI reference (exact match indexing before neighbor expansion):
-    // ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:454-456
-    // ```c
-    // BlastLookupIndexQueryExactMatches(exact_backbone, lookup->word_length,
-    //                                   lookup->charsize, lookup->word_length,
-    //                                   query, location);
-    // ```
-    // NCBI reference: c++/src/algo/blast/core/blast_aalookup.c:245
-    // ```c
-    //     lookup->threshold = (Int4)opt->threshold;
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:446-543
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:454-456 (exact match indexing before neighbor expansion)
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:245
     // The x86-64 conversion: `INT_MIN` for a threshold beyond `Int4` (every word).
     //
-    // NCBI reference: c++/src/algo/blast/api/blast_setup_cxx.cpp:813-826
-    // ```c
-    //     BlastSeqBlkSetSeqRanges(subj, (SSeqRange*) masked_ranges.get_data(),
-    //                              masked_ranges.size() + 1, true, eSoftSubjMasking);
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:813-826
     // `-lcase_masking` with a lower-case letter in a subject: only the reference frame loop scans
     // ranges (`x_soft_subject_calls`), so the batch takes it as a debugging run does. A `-db`
     // subject has no case.
-    let x_soft_subjects = args.lcase_masking
+    // A masked `-db` search (`-db_soft_mask`, `-db_hard_mask`; series NP, M4b PR 2) takes it too:
+    // every subject's frames have their own ranges or chunks (`x_db_mask_calls`).
+    let x_soft_subjects = (args.lcase_masking
         && matches!(subjects, Subjects::Fasta(records)
-            if records.iter().any(|record| record.seq().iter().any(u8::is_ascii_lowercase)));
+            if records.iter().any(|record| record.seq().iter().any(u8::is_ascii_lowercase))))
+        || matches!(subjects, Subjects::Stream(stream) if stream.mask().is_some());
     // EXPERIMENT (PAIRLUT, graduated on 2026-10-22), dispatch point 0 (per batch, at the
     // lookup build): when PAIRPAR will run the seed stage of every subject of this batch
     // as units, the units' tables (one per query-context group) are built directly from the
@@ -432,13 +340,6 @@ pub(super) fn batch_lookup<S: TbxScore>(inputs: &LookupInputs<'_, S>) -> BatchLo
     // disagrees. When the unit path will not run, the reference builder below runs.
     //
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:93-97
-    // ```c
-    // BlastAaLookupTableNew(lookup_options, (BlastAaLookupTable* *)
-    //                       &lookup_wrap->lut);
-    // ((BlastAaLookupTable*)lookup_wrap->lut)->use_pssm = has_pssm;
-    // BlastAaLookupIndexQuery( (BlastAaLookupTable*) lookup_wrap->lut, matrix,
-    //                           query, lookup_segments, 0);
-    // ```
     // PAIRLUT builds the group tables with the search's matrix (SC7b; `XLutEarly::sc`), and the
     // batch's full table of TBXLUT holds the scores and words of the search's matrix and word size.
     let mut x_pair_lut_batch = {
@@ -498,19 +399,9 @@ pub(super) fn batch_lookup<S: TbxScore>(inputs: &LookupInputs<'_, S>) -> BatchLo
                 sc.word(),
             );
             if !S::BLOSUM62 {
-                // NCBI reference: c++/src/algo/blast/core/blast_setup.c:812-822 (the alpha and
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:812-822 (the alpha and
                 // beta of the length adjustment: the matrix's ungapped row,
                 // `BLAST_GetAlphaBeta`, for the Karlin block of every context)
-                // ```c
-                //          BLAST_GetAlphaBeta(sbp->name, &alpha, &beta,
-                //                             scoring_options->gapped_calculation,
-                //                             scoring_options->gap_open,
-                //                             scoring_options->gap_extend,
-                //                             sbp->kbp_std[index]);
-                //       }
-                //       BLAST_ComputeLengthAdjustment(kbp->K, kbp->logK,
-                //                                     alpha/kbp->Lambda, beta,
-                // ```
                 // (`compute_karlin_params_ungapped` gives every block BLOSUM62's.)
                 for ctx in contexts.iter_mut().filter(|ctx| ctx.is_valid) {
                     ctx.karlin_params.alpha = ungapped_params_for_xdrop.alpha;
@@ -527,17 +418,14 @@ pub(super) fn batch_lookup<S: TbxScore>(inputs: &LookupInputs<'_, S>) -> BatchLo
 
     // NCBI BLAST: word_params->cutoffs[context].x_dropoff_init
     // Compute per-context x_dropoff using kbp[context]->Lambda.
-    // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:219-221
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:219-221
     //
     // For translated queries, NCBI computes kbp_std per context and applies check_ideal:
     //   if (check_ideal && kbp->Lambda >= kbp_ideal->Lambda) Blast_KarlinBlkCopy(kbp, kbp_ideal);
-    // Reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2778-2797
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2778-2797
     //
-    // NCBI BLAST dynamic x_dropoff (ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:380-383):
-    //   if (curr_cutoffs->x_dropoff_init == 0)
+    // NCBI BLAST dynamic x_dropoff (c++/src/algo/blast/core/blast_parameters.c:380-383):
     //      curr_cutoffs->x_dropoff = new_cutoff;  // x_dropoff = cutoff_score
-    //   else
-    //      curr_cutoffs->x_dropoff = curr_cutoffs->x_dropoff_init;
     //
     // For TBLASTX, x_dropoff_init is non-zero, so this dynamic update is not triggered.
     // However, we store x_dropoff_init here and apply the logic during subject processing

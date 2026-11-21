@@ -308,9 +308,11 @@ test('a first line that is an accession and NCBI BLAST+ would fetch as a Seq-id 
   test.skip(!BUILD_HAS_ENGINE, 'the reason is the adapter scan of the engine build');
   const away = await stubSources(page);
   await openSearch(page);
-  // The adapter's reason is NCBI's text and the defline; the card adds the Fetch sentence for an accession.
-  const reason = (line: string) =>
-    `This input cannot be read: the first line ("${line}") is not a defline and may be a sequence identifier that NCBI BLAST+ fetches through a data loader (from GenBank or a BLAST database), which is not supported in the browser (start the input with a '>' defline)`;
+  // The reason is the CLI's (the engine's reader's words, which name the role and the program; line WQA's D13 (c),
+  // 2026-11-20: before, LOSAT Web's own "not supported in the browser"); the card adds the Fetch sentence for an
+  // accession.
+  const reason = (role: string, program_: string, line: string) =>
+    `This input cannot be read: the first line of the ${role} ("${line}") is not a defline and may be a sequence identifier that NCBI BLAST+ fetches through a data loader (from GenBank or a BLAST database), which is not supported by LOSAT's ${program_.toUpperCase()} (start the ${role} with a '>' defline, or set DATA_LOADERS=none in the [BLAST] section of .ncbirc)`;
   const fetchSentence = 'To fetch accessions, put only the accessions in the box, one per line.';
   for (const [role, text, line] of [
     ['query', 'AB000001.1\n>x\nACGTACGT', 'AB000001.1'],
@@ -318,7 +320,7 @@ test('a first line that is an accession and NCBI BLAST+ would fetch as a Seq-id 
     ['subject', ' NR_074540.1 \nACGTACGT', 'NR_074540.1'],
   ] as const) {
     await paste(page, role, text);
-    await expect(page.getByTestId(`${role}-source-0-error`)).toHaveText(reason(line));
+    await expect(page.getByTestId(`${role}-source-0-error`)).toHaveText(reason(role, 'blastn', line));
     await expect(page.getByTestId(`${role}-source-0-fetch-hint`)).toHaveText(fetchSentence);
     // The press puts '>' before the first line (the next test); "Add the line" would make the line data.
     await expect(page.getByTestId(`${role}-source-0-put-defline-mark`)).toHaveText("Put '>' before the first line");
@@ -335,14 +337,14 @@ test('a first line that is an accession and NCBI BLAST+ would fetch as a Seq-id 
   ] as const) {
     await program(page, program_);
     await paste(page, role, text);
-    await expect(page.getByTestId(`${role}-source-0-error`)).toHaveText(reason(line));
+    await expect(page.getByTestId(`${role}-source-0-error`)).toHaveText(reason(role, program_, line));
     await expect(page.getByTestId(`${role}-source-0-fetch-hint`)).toHaveCount(0);
     await expect(page.getByTestId(`${role}-source-0-put-defline-mark`)).toBeVisible();
   }
   await program(page, 'blastn');
   // Accessions only, more than one on a line: the reason and the press that splits them.
   await paste(page, 'subject', 'NR_074540.1\nAB000001.1 MH011443.1');
-  await expect(page.getByTestId('subject-source-0-error')).toHaveText(reason('NR_074540.1'));
+  await expect(page.getByTestId('subject-source-0-error')).toHaveText(reason('subject', 'blastn', 'NR_074540.1'));
   // The press that splits them says the same as the sentence, and '>' would leave the list unread: only the split press.
   await expect(page.getByTestId('subject-source-0-split-accessions')).toBeVisible();
   await expect(page.getByTestId('subject-source-0-fetch-hint')).toHaveCount(0);

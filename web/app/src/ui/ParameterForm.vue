@@ -27,7 +27,9 @@ function pairOf(row: string | undefined, fields: readonly Field[]): PairRow | un
   const pair = pairRows(programById(props.state.program)).find((p) => p.row === row);
   return pair !== undefined && fields.length === 2 && fields.every((field) => pair.flags.includes(field.flag)) ? pair : undefined;
 }
+/** None when the options were not read (`descriptionUnavailable`): the form says so instead. */
 const sections = computed(() => {
+  if (props.state.descriptionUnavailable === true) return [];
   const options = props.state.description?.parameters;
   const values = props.state.values[props.state.program];
   return sectionsAt(programById(props.state.program), options, 'algorithm').filter((section) =>
@@ -56,7 +58,11 @@ function onConffile(event: Event): void {
 
 <template>
   <div class="parameter-form" data-testid="parameter-form">
-    <p v-if="state.descriptionError" class="error">The engine's options could not be read: {{ state.descriptionError }}</p>
+    <!-- A part of LOSAT that could not be loaded is said once, for the page (AppView; line WQA's sweep, D1); the options
+         were not read, which the form says once, as an input card does, where it showed every number field blank (the
+         review of D1, L1, 2026-11-19). -->
+    <p v-if="state.descriptionError && !state.descriptionUnavailable" class="error">The engine's options could not be read: {{ state.descriptionError }}</p>
+    <p v-if="state.descriptionUnavailable" class="muted" data-testid="parameters-unread">Not read.</p>
     <!-- A group, not a fieldset: its rows share the form's label column (CSS subgrid), which
          Chromium does not give a fieldset. Keyed by program: a control's own state ("Other", an
          open help) does not pass to another program's control of the same flag. -->

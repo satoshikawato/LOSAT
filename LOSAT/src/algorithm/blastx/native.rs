@@ -376,6 +376,7 @@ fn run_inner(
                 name,
                 &settings,
                 list.as_ref(),
+                args.db_mask.option().as_ref(),
                 &mut stderr,
                 program.upper,
             )?
@@ -601,6 +602,18 @@ fn run_inner(
     // batches of a run without `BATCH_SIZE` are, and its report is written when its last unit
     // is searched. (`batch_size` is read above, for the reads before the search.)
     let batch_size = batch_size?;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:140-153 (cited at
+    // `blastinput::db_mask::DbMaskOption::resolve`)
+    // The formatter resolves the database masking (`-db_soft_mask`, `-db_hard_mask`; series NP,
+    // M4b) before its other work (`BlastxDatabase::resolve_mask_option`).
+    if let (Some(database), Some(option)) = (&database, args.db_mask.option()) {
+        options.db_mask = database.resolve_mask_option(
+            &option,
+            archive.as_ref(),
+            strategy.as_ref(),
+            &mut *stderr,
+        )?;
+    }
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:773-789
     write_empty_subject_warnings(&subjects, &mut *stderr)?;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:251-254
@@ -610,6 +623,11 @@ fn run_inner(
     // `BL2SEQ_LEGACY` makes NCBI search each `-subject` sequence on its own and write the
     // bl2seq report; LOSAT refuses it before the search, where an empty query has already ended
     // the run as NCBI ends it (`Query is Empty!`, exit status 0).
+    // LOSAT's refusals of the masked search (`ResolvedMask::check_losat_limits`) come where NCBI
+    // starts the search, after its checks.
+    if let (Some(database), Some(mask)) = (&database, options.db_mask.as_ref()) {
+        database.check_mask_limits(mask)?;
+    }
     app::check_search_environment(program.upper, database.is_none())?;
     // RPSTBLASTN's refusals of the database's files and of its options, before the first byte
     // of the reports, as rpsblast refuses them (`args::RpsTblastnSearch::for_database`, once per
@@ -633,7 +651,9 @@ fn run_inner(
     if database.is_none() && crate::seqdb::x_dbidxread() != crate::seqdb::XDbIdxRead::Off {
         crate::utils::xreach::x_reach!("LOSAT_X_DBIDXREAD", false);
     }
-    let pairwise_database = database.as_ref().map(BlastxDatabase::pairwise_database);
+    let pairwise_database = database
+        .as_ref()
+        .map(|database| database.pairwise_database_masked(options.db_mask.as_ref()));
     let no_reported = ReportedSubjects::default();
     let records_parsed = if args.parse_deflines {
         report::RecordsParsed::of(&subjects, args.show_gis, |parsed| {
@@ -1302,7 +1322,12 @@ pub(super) fn reported_batch(
         crate::report::db_subject::FormatThrow::of_run([asks.throw]),
     );
     super::x_timing::run(XRun::Titles, x_t);
-    let reported = reported.map_err(reported_error)?;
+    let mut reported = reported.map_err(reported_error)?;
+    // `-db_soft_mask` and `-db_hard_mask`: the rows of outfmt 0 to 4 show the stored masks in
+    // lower case (`ReportedSubjects::shown_db_masks`).
+    if let Some(mask) = options.db_mask.as_ref().filter(|_| asks.pairwise) {
+        reported.read_db_masks(database, mask.id)?;
+    }
     if let Some(scopes) = query_scopes {
         reported.refuse_ids_of_queries(results, options.gapped, scopes)?;
     }

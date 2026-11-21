@@ -333,6 +333,8 @@ impl PsiblastArgs {
             db: self.db,
             // blastp's database filters (line DI-8), which every round searches with.
             db_filter: self.db_filter,
+            // psiblast has no database masks (NCBI's unknown arguments).
+            db_mask: Default::default(),
             dbsize: self.dbsize,
             show_gis: self.show_gis,
             parse_deflines: self.parse_deflines,

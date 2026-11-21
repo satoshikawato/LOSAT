@@ -19,6 +19,7 @@ use std::time::Instant;
 
 use crate::algorithm::blastn::blast_engine::QueryReading;
 use crate::algorithm::blastn::interval_tree::{BlastIntervalTree, IndexMethod, TreeHsp};
+use crate::algorithm::common::db_mask_search::SearchMask;
 use crate::algorithm::tblastx::blast_aascan::{
     s_blast_aa_scan_subject_one_range, BlastOffsetPair as OffsetPair,
 };
@@ -57,6 +58,9 @@ use crate::utils::matrix::standard_score;
 
 mod culling;
 mod database;
+// `-db_soft_mask` and `-db_hard_mask` (series NP, M4b): the kernels of a masked database search,
+// chosen once per call in place of the kernel (`prelim_run::run_preliminary_with`).
+mod db_masked;
 // The kernel of one subject (`BlastpPrelimKernel::search_subject`): its scan and ungapped
 // extensions, then its gapped half, from the subject's letters to its HSP lists.
 mod prelim_kernel;
@@ -279,6 +283,10 @@ struct BlastpSubjectScratch {
     preliminary_gap_scratch: GapAlignScratch,
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3830-3831
     preliminary_interval_tree: BlastIntervalTree,
+    // `-db_soft_mask` and `-db_hard_mask`: the masked kernels' reader, plan and buffers
+    // (`db_masked.rs`), made at a worker's first masked sequence; a search without them keeps
+    // `None` (one word in the scratch).
+    db_mask: Option<Box<db_masked::BlastpMaskScratch>>,
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1633-1681
@@ -483,6 +491,7 @@ impl BlastpSubjectScratch {
             preliminary_gap_scratch: GapAlignScratch::new(),
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3830-3831
             preliminary_interval_tree: BlastIntervalTree::new(0, query_span, 0, 1),
+            db_mask: None,
         }
     }
 
@@ -4484,6 +4493,7 @@ fn open_search_database(
                 settings,
                 args.app.name(),
                 list,
+                resolved.db_mask.as_ref(),
                 outputs.diagnostics,
             )?
             .showing_gis(args.show_gis);
@@ -5676,7 +5686,7 @@ fn blastp_xml_matrix_failure(
 /// (`read_query_batches`), the search of the batches that NCBI searches and their reports.
 #[allow(clippy::too_many_arguments)]
 fn search(
-    args: ResolvedBlastpArgs,
+    mut args: ResolvedBlastpArgs,
     query_records: &[FastaRecord],
     reading: QueryReading,
     subjects: &SubjectSet<'_>,
@@ -5718,6 +5728,26 @@ fn search(
     // The batch size is read before the formatter is made and before the queries, which
     // NCBI reads one batch at a time after the outfmt 0 prolog (`read_query_batches`).
     let batch_size = args.query_batch_size()?;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:140-153 (cited at
+    // `blastinput::db_mask::DbMaskOption::resolve`)
+    // The formatter resolves the database masking (`-db_soft_mask`, `-db_hard_mask`; series NP,
+    // M4b) before its other work (`shared::resolve_database_masking`).
+    if let (Some(database), Some(option)) = (database, args.db_mask.as_ref()) {
+        let diagnostics = &mut *outputs.diagnostics;
+        let archive = args.archive.as_ref();
+        args.db_mask_resolved = crate::algorithm::common::database::resolve_database_masking(
+            database.seqdb(),
+            database.name(),
+            option,
+            args.app.name(),
+            archive,
+            args.strategy.as_ref(),
+            &mut |text| match archive {
+                Some(handle) => handle.write_warning(diagnostics, text),
+                None => diagnostics.write_all(text),
+            },
+        )?;
+    }
     // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:225-227
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:773-789
     // The formatter, made after the query batch size and before the outfmt 0 prolog, sets
@@ -5768,6 +5798,15 @@ fn search(
             seq_range::QueryInput::whole(query_records),
         ),
     };
+    // LOSAT's refusals of the masked search (`ResolvedMask::check_losat_limits`) come where NCBI
+    // starts the search, after its checks.
+    if let (Some(database), Some(mask)) = (database, args.db_mask_resolved.as_ref()) {
+        mask.check_losat_limits(
+            database.seqdb(),
+            args.app.name(),
+            crate::blastinput::db_mask::HardScan::Protein,
+        )?;
+    }
     check_blastp_environment(args.app, database.is_none())?;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:253-259
     // What the run writes before its query batches ends here.
@@ -7245,7 +7284,7 @@ fn write_pairwise_prologs(
     let (num_sequences, total_letters) = subject_source.shown_totals();
     let pairwise_database = subject_source
         .database()
-        .map(database::BlastpDatabase::pairwise_database);
+        .map(|database| database.pairwise_database_masked(args.db_mask_resolved.as_ref()));
     for format in outputs.formats.iter_mut() {
         let number = crate::blastinput::app::parse_formatting_string(format.outfmt)?.number;
         if blastp_pairwise_view_of(args.app, number).is_some() {
@@ -7289,7 +7328,7 @@ fn write_reports_without_queries(
     let (num_sequences, total_db_len) = subject_source.shown_totals();
     let pairwise_database = subject_source
         .database()
-        .map(database::BlastpDatabase::pairwise_database);
+        .map(|database| database.pairwise_database_masked(args.db_mask_resolved.as_ref()));
     for format in outputs.formats.iter_mut() {
         // A Seq-annot format writes nothing without a query. BLAST XML writes the epilog's end
         // of line alone: `m_Outfile << m_BlastXMLIncremental->m_SerialXmlEnd << endl`, with the
@@ -9296,7 +9335,7 @@ fn run_call(
         prelim_hitlist_size,
         prelim_evalue,
     } = call_setup::prelim_cutoffs(&call_statistics, preliminary_exact_spaces)?;
-    // The statistics of each subject (`per_subject`), which `process_own_subject` reads.
+    // The statistics of each subject (`per_subject`), which `prelim_run::run_preliminary_with` reads.
     let subject_parameters = call_setup::subject_parameters(
         &call_statistics,
         &preliminary_option_spaces,
@@ -9354,8 +9393,9 @@ fn run_call(
         sum_stats: sum_stats.as_ref(),
     };
     // The kernel of one subject (`prelim_kernel::BlastpPrelimKernel::search_subject`: its scan,
-    // ungapped extensions and gapped half) with what it reads of the call; `process_subject` and
-    // `process_own_subject` below call it with the subject's preliminary statistics `values`.
+    // ungapped extensions and gapped half) with what it reads of the call; the preliminary stage
+    // calls it with the subject's preliminary statistics `values` (`prelim_run::
+    // run_preliminary_with`), alone or inside the masked kernels (`db_masked.rs`).
     let kernel = prelim_kernel::BlastpPrelimKernel {
         args: &args,
         query_ids: &query_ids,
@@ -9378,109 +9418,105 @@ fn run_call(
         timing_enabled,
         timing: &timing,
     };
-    // The kernel with the setup's statistics, and with the subject's own where NCBI computes the
-    // statistics of each subject (`per_subject`: only a database's blocks, which take the one or
-    // the other once per call below, so that the default path has no test per subject).
-    let process_subject = |scratch: &mut BlastpSubjectScratch,
-                           s_idx: usize,
-                           subject: BlastpSubjectRef<'_>,
-                           subject_result: &mut BlastpSubjectResult| {
-        kernel.search_subject(scratch, s_idx, subject, subject_result, &batch_values)
-    };
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1434-1443
-    // Once per subject that has letters, before its scan: the kernel reads the subject's own
-    // statistics (`subject_parameters`).
-    let process_own_subject =
-        |scratch: &mut BlastpSubjectScratch,
-         s_idx: usize,
-         subject: BlastpSubjectRef<'_>,
-         subject_result: &mut BlastpSubjectResult| {
-            if subject.aa_len == 0 {
-                return kernel.search_subject(
-                    scratch,
-                    s_idx,
-                    subject,
-                    subject_result,
-                    &batch_values,
-                );
-            }
-            match subject_parameters(subject.aa_len) {
-                Ok(parameters) => kernel.search_subject(
-                    scratch,
-                    s_idx,
-                    subject,
-                    subject_result,
-                    &parameters.values(args.evalue),
-                ),
-                Err(overflow) => {
-                    subject_result.reset(s_idx);
-                    subject_space_overflow.note(overflow);
-                }
-            }
-        };
-
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1409-1498
     // The preliminary stage (`blast_engine/prelim_run.rs`): the choice of the pool and the call's
     // branch, into the hit lists and the culling writer; RPS-BLAST's gapped K and its volumes'
     // merge are read below.
+    // `-db_soft_mask` and `-db_hard_mask` (`db_masked.rs`): a database search with either searches
+    // its sequences with the masked kernels below, chosen once here.
+    let db_masking = database
+        .zip(SearchMask::of(args.db_mask_resolved.as_ref()))
+        .map(|(database, mask)| db_masked::BlastpDbMasking {
+            db: database.seqdb(),
+            mask,
+            program: args.app.name(),
+            error: std::sync::Mutex::new(None),
+        });
+    let prelim_stage = prelim_run::PrelimRun {
+        args: &args,
+        query_records,
+        subject_source,
+        subject_label,
+        blastp_parallel_pool,
+        ranges,
+        reports,
+        query_batches: &query_batches,
+        query_batch_skipped: &query_batch_skipped,
+        query_chunk,
+        rps_recount_identities: recounts_rps_identities(&requested_formats),
+        database,
+        subjects,
+        x_soft_subjects,
+        query_frames,
+        x_blocks: &x_blocks,
+        x_block_call: x_block_inputs.is_some(),
+        lookup: &lookup,
+        contexts: &contexts,
+        gapped_params: &gapped_params,
+        gapped_gumbel: &gapped_gumbel,
+        exact_search_spaces: &exact_search_spaces,
+        preliminary_exact_spaces,
+        preliminary_search_spaces,
+        preliminary_option_spaces: &preliminary_option_spaces,
+        per_subject,
+        num_subjects,
+        cutoff_subject_length,
+        rps_units,
+        prelim_hitlist_size,
+        prelim_evalue,
+        subject_space_overflow: &subject_space_overflow,
+        db_masking: db_masking.as_ref(),
+        window,
+        diag_mask,
+        offset_array_size,
+        diag_array_size,
+        total_query_span,
+        timing_enabled,
+        timing: &timing,
+        #[cfg(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        ))]
+        blastp_num_threads,
+    };
     let prelim_run::PrelimOutcome {
         rps_gapped_k,
         rps_multi_volume,
         rps_unlisted,
-    } = prelim_run::run_preliminary(
-        &prelim_run::PrelimRun {
-            args: &args,
-            query_records,
-            subject_source,
-            subject_label,
-            blastp_parallel_pool,
-            ranges,
-            reports,
-            query_batches: &query_batches,
-            query_batch_skipped: &query_batch_skipped,
-            query_chunk,
-            rps_recount_identities: recounts_rps_identities(&requested_formats),
-            database,
-            subjects,
-            x_soft_subjects,
-            query_frames,
-            x_blocks: &x_blocks,
-            x_block_call: x_block_inputs.is_some(),
-            lookup: &lookup,
-            contexts: &contexts,
-            gapped_params: &gapped_params,
-            gapped_gumbel: &gapped_gumbel,
-            exact_search_spaces: &exact_search_spaces,
-            preliminary_exact_spaces,
-            preliminary_search_spaces,
-            preliminary_option_spaces: &preliminary_option_spaces,
-            per_subject,
-            num_subjects,
-            cutoff_subject_length,
-            rps_units,
-            prelim_hitlist_size,
-            prelim_evalue,
-            subject_space_overflow: &subject_space_overflow,
-            window,
-            diag_mask,
-            offset_array_size,
-            diag_array_size,
-            total_query_span,
-            timing_enabled,
-            timing: &timing,
-            #[cfg(all(
-                feature = "parallel",
-                any(not(target_arch = "wasm32"), feature = "wasm-threads")
-            ))]
-            blastp_num_threads,
-        },
-        &process_subject,
-        &process_own_subject,
-        &mut preliminary_hit_lists,
-        &mut x_compact_hit_lists,
-        &mut culling,
-        outputs,
-    )?;
+    } = match db_masking.as_ref() {
+        None => prelim_run::run_preliminary_with(
+            &prelim_stage,
+            &|scratch: &mut BlastpSubjectScratch,
+              s_idx: usize,
+              subject: BlastpSubjectRef<'_>,
+              subject_result: &mut BlastpSubjectResult,
+              values: &BlastpPrelimValues<'_>| {
+                kernel.search_subject(scratch, s_idx, subject, subject_result, values)
+            },
+            &batch_values,
+            &subject_parameters,
+            &mut preliminary_hit_lists,
+            &mut x_compact_hit_lists,
+            &mut culling,
+            outputs,
+        )?,
+        Some(masking) => prelim_run::run_preliminary_with(
+            &prelim_stage,
+            &|scratch: &mut BlastpSubjectScratch,
+              s_idx: usize,
+              subject: BlastpSubjectRef<'_>,
+              subject_result: &mut BlastpSubjectResult,
+              values: &BlastpPrelimValues<'_>| {
+                masking.search_subject(&kernel, scratch, s_idx, subject, subject_result, values)
+            },
+            &batch_values,
+            &subject_parameters,
+            &mut preliminary_hit_lists,
+            &mut x_compact_hit_lists,
+            &mut culling,
+            outputs,
+        )?,
+    };
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/rpsblast_local.cpp:155-180
     // The merge of several volumes gives each query an alignment set, empty for a batch
     // that was not searched, so outfmt 7 counts `# 0 hits found` there (review A of
@@ -9613,7 +9649,13 @@ fn run_call(
     // The subject set of a `-subject` search, which the reports read after the redo.
     let subject_set: &[EncodedProtein] = subjects;
     let subjects = match (listed_subjects.as_ref(), database) {
-        (Some(listed), Some(database)) => listed.redo_subjects(database),
+        // `-db_hard_mask`: the redo and the traceback read the subjects with `X` over their masks.
+        (Some(listed), Some(database)) => listed.redo_subjects(
+            database,
+            SearchMask::of(args.db_mask_resolved.as_ref())
+                .filter(|mask| mask.hard())
+                .map(|mask| mask.algo_id),
+        ),
         _ => super::x_redo_subjects::XRedoSubjects::Encoded(subject_set),
     };
     // The redo reads lists of full HSPs. With more than one thread its parallel paths read the
@@ -10289,7 +10331,9 @@ fn run_call(
         }
         _ => Vec::new().into(),
     };
-    let pairwise_database = database.map(database::BlastpDatabase::pairwise_database);
+    // `-db_soft_mask` and `-db_hard_mask`: the `Masked using:` lines of each name.
+    let pairwise_database =
+        database.map(|database| database.pairwise_database_masked(args.db_mask_resolved.as_ref()));
     // The reported database sequences with parsed Seq-ids by rank (empty without them).
     let listed_parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>] = listed_titles
         .as_ref()

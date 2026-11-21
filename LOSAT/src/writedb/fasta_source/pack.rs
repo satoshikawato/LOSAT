@@ -219,7 +219,7 @@ pub(super) fn pack_iupacna(src: &[u8]) -> Vec<Segment> {
 /// The NCBI2na code of the unambiguous IUPACna letters (`CIupacnaTo2na`'s rows `A`: 0,
 /// `C`: 1, `G`: 2, `T` and `U`: 3; the table has the code shifted to each of the four
 /// places of a byte). Only these letters reach an NCBI2na segment.
-const fn ncbi2na_code(residue: u8) -> u8 {
+pub(crate) const fn ncbi2na_code(residue: u8) -> u8 {
     match residue {
         b'C' => 1,
         b'G' => 2,
@@ -234,7 +234,7 @@ const fn ncbi2na_code(residue: u8) -> u8 {
 /// hyphen of a reader without `fParseGaps` among them.
 ///
 /// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_tables.cpp:392-394,409-410
-const fn ncbi4na_code(residue: u8) -> u8 {
+pub(crate) const fn ncbi4na_code(residue: u8) -> u8 {
     match residue.to_ascii_uppercase() {
         b'A' => 1,
         b'C' => 2,

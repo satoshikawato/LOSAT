@@ -67,6 +67,7 @@ static TOOL: Tool = Tool {
     descs: DESCS,
     dependencies: no_dependencies,
     post_prefix: None,
+    components: &[],
 };
 
 // NCBI reference (598d8ae6): c++/src/app/dustmasker/main.cpp:39-42

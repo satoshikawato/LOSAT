@@ -915,6 +915,7 @@ mod x_db_cut_blocks {
             blastdb_version: 4,
             max_file_sz: max_file_sz.to_string(),
             metadata_output_prefix: None,
+            oid_masks: None,
             logfile: None,
             parse_seqids: false,
             hash_index: false,

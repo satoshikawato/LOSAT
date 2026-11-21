@@ -42,7 +42,7 @@ outcome.diagnostics                     # what the command line writes to its st
 
 ## What it runs
 
-`pylosat.PROGRAMS` names the six search programs: `blastn`, `blastp`, `blastx`, `tblastn`, `tblastx` and `psiblast`. The tools `makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker` and `convert2blastmask` are functions of their own ([below](#database-and-masking-tools)). `rpsblast`, `rpstblastn` and `rpsbproc` run only on the [command line](../installation.md).
+`pylosat.PROGRAMS` names the six search programs: `blastn`, `blastp`, `blastx`, `tblastn`, `tblastx` and `psiblast`. The tools `makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask` and `makembindex` are functions of their own ([below](#database-and-masking-tools)). `rpsblast`, `rpstblastn` and `rpsbproc` run only on the [command line](../installation.md).
 
 ## Options
 
@@ -59,7 +59,7 @@ search = pylosat.Search.from_argv("blastn", ["-task", "dc-megablast", "-evalue",
 
 An unknown keyword, or a value of the wrong Python type, raises `TypeError`. The command line's parser checks everything else, so an option means, and fails, as it does there (`ArgumentError`, with the parser's message).
 
-`-query`, `-subject`, `-db`, `-in_pssm`, `-out` and `-outfmt` are not options here: the inputs, the formats and the output file are arguments of `run`, `batches` and `run_to_file`. `psiblast` runs its rounds (`num_iterations`) as on the command line, and its PSSM files (`out_pssm` and `out_ascii_pssm`, with `save_pssm_after_last_round` and `save_each_pssm`) are written where the command line writes them. `psiblast`'s `-in_msa`, `-msa_master_idx` and `-ignore_msa_master` (a PSSM made from a Clustal alignment) are not accepted either: the query of a search is its sequences or a `Pssm`; make the PSSM on the command line with `losat psiblast -in_msa ... -out_pssm`, then read it with `Pssm.from_file`.
+`-query`, `-subject`, `-db`, `-in_pssm`, `-in_msa`, `-out` and `-outfmt` are not options here: the inputs, the formats and the output file are arguments of `run`, `batches` and `run_to_file`. `psiblast` runs its rounds (`num_iterations`) as on the command line, and its PSSM files (`out_pssm` and `out_ascii_pssm`, with `save_pssm_after_last_round` and `save_each_pssm`) are written where the command line writes them. `psiblast` starts from a Clustal alignment as `-in_msa` does: give an `Alignment` as the query, and choose its master with `msa_master_idx` or `ignore_msa_master`, which are options of `Search` like the others (the command line takes them with `-in_msa` only: a search of another query fails with the parser's message).
 
 ## Inputs
 
@@ -67,6 +67,7 @@ An unknown keyword, or a value of the wrong Python type, raises `TypeError`. The
 - **`Sequences.from_text(text)`** and **`Sequences.from_pairs([(title, sequence), ...])`** make FASTA input in memory.
 - **`Database(name)`** is `-db name`. It is found as the command line finds it (`BLASTDB`, `.ncbirc`; see [BLAST databases](../databases.md)). The options of a database search (`taxids`, `seqidlist`, ...) go to `Search` with the others. In a database search, `hsp.s_idx` is the sequence's ordinal id, the same in every search of that database.
 - **`Pssm.from_file(path)`** is `-in_pssm path` of `psiblast` and `tblastn`: a PSSM file as `psiblast -out_pssm` writes it. Its one query is the PSSM's sequence (query 0).
+- **`Alignment.from_file(path)`** is `-in_msa path` of `psiblast`: a multiple sequence alignment, which the search reads as the command line reads it (a file it cannot read fails with the command line's message). Its one query is the alignment's master (query 0), the first row or the one `msa_master_idx` names; the PSSM is built from the alignment as NCBI BLAST+ builds it.
 
 ```python
 search = pylosat.Search("blastn", taxids="9606", evalue=1e-5, num_threads=4)
@@ -122,7 +123,7 @@ The GIL is released while a search runs, so other Python threads go on. Python c
 
 ## Database and masking tools
 
-`makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker` and `convert2blastmask` take the command line's words and return a `ToolOutput`: what the tool writes to standard output (`.bytes`, `.text`) and to standard error (`.diagnostics_bytes`, `.diagnostics`). Each text has one U+FFFD per maximal ill-formed subpart of its bytes. `input=` (text or bytes) is what the tool reads as standard input, so you can build a database from FASTA in memory, give ids to `blastdbcmd -entry_batch -`, or mask sequences in memory.
+`makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask` and `makembindex` take the command line's words and return a `ToolOutput`: what the tool writes to standard output (`.bytes`, `.text`) and to standard error (`.diagnostics_bytes`, `.diagnostics`). Each text has one U+FFFD per maximal ill-formed subpart of its bytes. `input=` (text or bytes) is what the tool reads as standard input, so you can build a database from FASTA in memory, give ids to `blastdbcmd -entry_batch -`, or mask sequences in memory.
 
 ```python
 pylosat.makeblastdb("-dbtype", "prot", "-title", "proteins", "-out", "proteins", input=fasta_text)

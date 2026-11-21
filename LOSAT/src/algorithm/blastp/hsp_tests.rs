@@ -1,5 +1,17 @@
 use super::*;
 
+#[test]
+fn an_hsp_of_length_zero_sorts_after_a_longer_one_that_starts_alike() {
+    // Both start at subject offset 162; the longer one ends later and so comes first.
+    assert_eq!(subject_offset_end(163, 162), (162, 162));
+    assert_eq!(subject_offset_end(163, 169), (162, 169));
+    assert_eq!(subject_offset_end(1, 0), (0, 0));
+    let empty = make_hit(16, 26, 25, 163, 162);
+    let longer = make_hit(16, 26, 32, 163, 169);
+    assert_eq!(score_compare_hits(&longer, &empty), Ordering::Less);
+    assert_eq!(score_compare_hits(&empty, &longer), Ordering::Greater);
+}
+
 fn make_hit(score: i32, q_start: usize, q_end: usize, s_start: usize, s_end: usize) -> Hit {
     Hit {
         identity: 0.0,

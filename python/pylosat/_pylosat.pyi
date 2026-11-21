@@ -154,7 +154,7 @@ class Batches:
         cls,
         program: str,
         argv: list[str],
-        query: tuple[bytes | str, str] | str,
+        query: tuple[bytes | str, str] | str | dict[str, str],
         subject: tuple[bytes | str | None, str],
     ) -> Batches: ...
     @property
@@ -179,7 +179,7 @@ def dry_run(program: str, argv: list[str]) -> bool: ...
 def run(
     program: str,
     argv: list[str],
-    query: tuple[bytes | str, str] | str,
+    query: tuple[bytes | str, str] | str | dict[str, str],
     subject: tuple[bytes | str | None, str],
     formats: list[str],
 ) -> tuple[
@@ -192,7 +192,7 @@ def run(
 def run_to_file(
     program: str,
     argv: list[str],
-    query: tuple[bytes | str, str] | str,
+    query: tuple[bytes | str, str] | str | dict[str, str],
     subject: tuple[bytes | str | None, str],
     outfmt: str,
     path: str,
@@ -201,4 +201,6 @@ def makeblastdb(argv: list[str], input: bytes) -> tuple[bytes, bytes]: ...
 def blastdbcmd(argv: list[str], input: bytes) -> tuple[bytes, bytes]: ...
 def dustmasker(argv: list[str], input: bytes) -> tuple[bytes, bytes]: ...
 def segmasker(argv: list[str], input: bytes) -> tuple[bytes, bytes]: ...
+def windowmasker(argv: list[str], input: bytes) -> tuple[bytes, bytes]: ...
 def convert2blastmask(argv: list[str], input: bytes) -> tuple[bytes, bytes]: ...
+def makembindex(argv: list[str], input: bytes) -> tuple[bytes, bytes]: ...

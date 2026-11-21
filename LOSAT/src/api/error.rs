@@ -38,7 +38,7 @@ use super::id::DebugBytes;
 ///   not open or does not parse) is the start's text without its last newline.
 ///
 /// Text that a search writes to its standard error before the failure (warnings, notices) is not
-/// in the message. It is in the diagnostics where the call returns them: [`run`](super::run) and
+/// in the message. It is in the diagnostics where the call returns them: [`run`](super::run()) and
 /// [`run_to_file`](super::run_to_file) have written it to their writer;
 /// [`run_collect`](super::run_collect) and [`run_batches`](super::run_batches) do not return it
 /// with an error.

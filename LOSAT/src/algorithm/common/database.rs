@@ -374,13 +374,27 @@ pub(crate) fn database_error_of(error: &SeqDbError, program: &str) -> anyhow::Er
             message: [b"BLAST Database error: ".as_slice(), &text, b"\n"].concat(),
         }
         .into(),
-        None => refusal(&error.to_string(), program),
+        None => anyhow::Error::msg(losat_reader_error(error, program)),
     }
 }
 
 /// LOSAT's refusal of a database that `program` does not search as NCBI does.
 pub(crate) fn refusal(reason: &str, program: &str) -> anyhow::Error {
     anyhow::anyhow!("{reason}; this database is not supported by LOSAT's {program}")
+}
+
+/// The text of a reader error that is not NCBI's (`SeqDbError::ncbi_message` `None`), as LOSAT
+/// reports it: a file whose bytes the system does not give is LOSAT's error as it is
+/// (`SeqDbError::is_unreadable`: "cannot be read", where NCBI ends by SIGBUS; review M1 of line
+/// WQA D18, 2026-11-21), any other LOSAT's refusal of the database in `program`'s name
+/// ([`refusal`]). The one place of that choice for the search programs, blastdbcmd and the
+/// maskers' database reader; each ends with LOSAT's exit status of its own errors.
+pub(crate) fn losat_reader_error(error: &SeqDbError, program: &str) -> String {
+    if error.is_unreadable() {
+        error.to_string()
+    } else {
+        refusal(&error.to_string(), program).to_string()
+    }
 }
 
 /// What LOSAT refuses where the statistics read 0 sequences of a positive total length
@@ -443,7 +457,7 @@ pub(crate) fn search_read_error(error: SeqDbError, program: &str) -> anyhow::Err
 pub(crate) fn search_read_error_of(error: &SeqDbError, program: &str) -> anyhow::Error {
     match error.ncbi_search_message() {
         Some(text) => PreliminaryReadError(text).into(),
-        None => refusal(&error.to_string(), program),
+        None => anyhow::Error::msg(losat_reader_error(error, program)),
     }
 }
 
@@ -1097,8 +1111,12 @@ impl<'a> FetchExcluded<'a> {
     }
 
     /// LOSAT's refusal (in `program`'s name) of a search whose fetch of `ordinal` cannot read
-    /// its header (`error`), where NCBI's search fails (`FetchRefusal`).
+    /// its header (`error`), where NCBI's search fails (`FetchRefusal`); a header file whose
+    /// bytes the system does not give is LOSAT's error as it is (`losat_reader_error`).
     pub(crate) fn refusal((ordinal, error): (u32, SeqDbError), program: &str) -> anyhow::Error {
+        if error.is_unreadable() {
+            return FetchRefusal(losat_reader_error(&error, program)).into();
+        }
         FetchRefusal(
             refusal(
                 &format!(

@@ -61,7 +61,8 @@ function formatGib(value: number): string {
 /**
  * Grows a shared memory to its maximum, so that no thread can grow it any more: the keeper
  * of the memory does so when the Gateway asks, before the Gateway ends the Engine worker and
- * its thread workers during a search (memory-keeper.ts). WebKit
+ * its thread workers while the threaded instance is in use (memory-keeper.ts,
+ * engine-worker/instance-use.ts). WebKit
  * (JavaScriptCore, webkit-2311) crashes the page when a thread grows a shared memory while
  * the instances of workers that end are taken off it (`SharedArrayBufferContents::grow`
  * reads a null instance); a memory at its maximum is not grown, so that cannot happen

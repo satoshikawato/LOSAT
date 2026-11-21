@@ -15,6 +15,7 @@ import type { ReactorArtifact } from '../reactor/artifact';
 import { instantiateSerial, instantiateThreadedMain, type ReactorInstance } from '../reactor/instance';
 import { createSharedMemory } from '../reactor/shared-memory';
 import { RunOutputWriter } from '../run-output/writer';
+import type { InstanceUse } from './instance-use';
 import type { RuntimePath, WorkerRun, WorkerRunResult } from './protocol';
 import { ThreadHost } from './thread-host';
 import { warmUp } from './warm-up';
@@ -27,11 +28,16 @@ export interface RuntimeOptions {
   /** The channel of the keeper of the threaded instance's shared memory (memory-keeper.ts). */
   readonly keeperChannel: string;
   /**
-   * Told before a search runs on the threaded instance: the Engine worker tells the Gateway,
-   * which then has the keeper grow the memory if it ends the worker during the search
-   * (gateway.ts, retire).
+   * Whether the threaded instance is in use, shared with the Gateway (instance-use.ts): the
+   * calls into it and the threads of its search pool count, and the Gateway ends this worker
+   * during a use only after the keeper's grow (gateway.ts, retire). Undefined where the page
+   * cannot share memory with a worker: the threaded module does not start then.
    */
-  readonly onThreadedSearch?: () => void;
+  readonly use: InstanceUse | undefined;
+  /** Test builds only: called before each output of a search, which it may stop by throwing. */
+  readonly beforeOutput?: () => void;
+  /** Test builds only: called at the start of each use of the threaded instance (a search, a warm-up). */
+  readonly onUse?: () => void;
 }
 
 interface Retained {
@@ -92,7 +98,25 @@ export class EngineRuntime {
       }
     }
     loaded ??= await this.load('serial');
-    if (loaded.path === 'threaded') this.options.onThreadedSearch?.();
+    // The calls into the threaded instance are a use from the first until the last has
+    // returned; its threads count themselves (ThreadHost.spawn). The search is synchronous.
+    const use = loaded.path === 'threaded' ? this.options.use : undefined;
+    if (use !== undefined && !use.enter()) throw new Error(ENDING);
+    try {
+      if (use !== undefined) this.options.onUse?.();
+      return this.search(loaded, request, fallbackReason, phase);
+    } finally {
+      use?.leave();
+    }
+  }
+
+  /** The search of `run` on the instance that `run` chose. */
+  private search(
+    loaded: Loaded,
+    request: WorkerRun,
+    fallbackReason: string | undefined,
+    phase: (phase: EnginePhase) => void,
+  ): WorkerRunResult {
     const threads = loaded.path === 'threaded' ? request.threads : 1;
     const argv = [...request.argv, '-num_threads', String(threads)];
     const abi = loaded.instance.abi;
@@ -120,6 +144,7 @@ export class EngineRuntime {
       loaded.instance.wasi.clear();
       phase('running');
       abi.run(argv, query.handle, subject.handle, (stream, bytes) => {
+        this.options.beforeOutput?.();
         if (OUTPUT_STREAMS.includes(stream as OutputStream)) writer.write(stream as OutputStream, bytes);
       });
       const linearBytesAfter = abi.memoryBytes();
@@ -141,7 +166,11 @@ export class EngineRuntime {
       };
     } finally {
       if (abi.stoppedBy === undefined) releaseQuery();
-      else this.dispose();
+      // A stopped threaded instance keeps its thread workers and the keeper: threads of the
+      // search may still run and grow the memory. They count as a use, so the Gateway, which
+      // ends the runtime on the stop, ends this worker once the keeper has grown the memory
+      // (gateway.ts, retire).
+      else if (loaded.path === 'serial') this.dispose();
     }
   }
 
@@ -185,17 +214,31 @@ export class EngineRuntime {
   private warmUp(loaded: Loaded, argv: readonly string[]): void {
     const key = argv.join('\0');
     if (loaded.ran.has(key)) return;
-    loaded.ran.add(key);
-    warmUp(loaded.instance.abi, argv);
-    loaded.instance.wasi.clear();
+    // Its calls into the threaded instance are a use, as a search's are (run).
+    const use = loaded.path === 'threaded' ? this.options.use : undefined;
+    if (use !== undefined && !use.enter()) return;
+    try {
+      if (use !== undefined) this.options.onUse?.();
+      loaded.ran.add(key);
+      warmUp(loaded.instance.abi, argv);
+      loaded.instance.wasi.clear();
+    } finally {
+      use?.leave();
+    }
     // The next search loads the module again.
     if (loaded.instance.abi.stoppedBy !== undefined) this.dispose();
   }
 
-  /** Ends the instance and its thread workers. */
-  dispose(): void {
-    this.loaded?.threads?.terminate();
+  /**
+   * Ends the instance and its thread workers, and returns true; false, ending nothing, once the
+   * Gateway ends this runtime: it may be waiting for the answer of the keeper, which ends with
+   * the thread workers (ThreadHost.terminate).
+   */
+  dispose(): boolean {
+    const threads = this.loaded?.threads;
+    if (threads !== undefined ? !threads.terminate() : this.options.use?.retiring() === true) return false;
     this.loaded = undefined;
+    return true;
   }
 
   /** The subject handle: the retained one if its key matches, else a new registration. */
@@ -214,7 +257,8 @@ export class EngineRuntime {
   private async load(path: RuntimePath): Promise<Loaded> {
     const current = this.loaded;
     if (current?.path === path && current.instance.abi.stoppedBy === undefined) return current;
-    this.dispose();
+    // A second keeper on the Gateway's channel could answer for the other memory.
+    if (!this.dispose()) throw new Error(ENDING);
     if (path === 'serial') {
       const instance = await instantiateSerial(await this.options.serial());
       this.loaded = { path, instance, runs: 0, retained: undefined, ran: new Set() };
@@ -222,12 +266,14 @@ export class EngineRuntime {
     }
     const unsupported = threadedSupport();
     if (unsupported !== undefined) throw new Error(unsupported);
+    const { use } = this.options;
+    if (use === undefined) throw new Error('this page cannot share memory with the engine worker');
     const { module, artifact } = await this.options.threads();
     // The maximum that the module declares, or a smaller one where the browser cannot
     // reserve it; never a larger one (plan TD-7).
     const { memory, maximumPages } = createSharedMemory(artifact.memory);
     const { faultChannel, keeperChannel } = this.options;
-    const threads = new ThreadHost({ module, memory, maximumPages, faultChannel, keeperChannel });
+    const threads = new ThreadHost({ module, memory, maximumPages, faultChannel, keeperChannel, use });
     try {
       const instance = await instantiateThreadedMain(module, memory, threads.spawn);
       this.loaded = { path, instance, threads, runs: 0, retained: undefined, ran: new Set() };
@@ -238,6 +284,9 @@ export class EngineRuntime {
     }
   }
 }
+
+/** A runtime that the Gateway ends starts nothing and makes no call into its threaded instance. */
+const ENDING = 'the runtime is ending';
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);

@@ -164,8 +164,7 @@ describe('WasmEngine', () => {
 
   it('during a search on the threaded instance, ends the worker once the keeper of its memory grew it', async () => {
     const ends: string[] = [];
-    // Far beyond the answer: only the keeper's answer can end the worker in this test.
-    const { engine, workers } = setup(undefined, { keeperTimeoutMs: 60_000, onRuntimeEnd: (end) => ends.push(end) });
+    const { engine, workers } = setup(undefined, { onRuntimeEnd: (end) => ends.push(end) });
     const run = engine.run(request('r1', 4), output(), () => {});
     const worker = await posted(() => workers[0], 1);
     const asked: Array<{ message: unknown; terminated: boolean }> = [];
@@ -204,28 +203,43 @@ describe('WasmEngine', () => {
     other.close();
   });
 
-  it('ends the worker after the timeout when the keeper does not answer, not before', async () => {
+  it('waits for the keeper however long its grow takes, also after the search returned', async () => {
     const ends: string[] = [];
-    const { engine, workers } = setup(undefined, { keeperTimeoutMs: 1_000, onRuntimeEnd: (end) => ends.push(end) });
+    const { engine, workers } = setup(undefined, { onRuntimeEnd: (end) => ends.push(end) });
     const run = engine.run(request('r1', 4), output(), () => {});
     const worker = await posted(() => workers[0], 1);
+    let asked = 0;
+    const keeper = fakeKeeper(worker, () => {
+      asked++;
+      return undefined;
+    });
     worker.send({ type: 'threaded-search', generation: 1 });
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     try {
       engine.cancel('r1');
       await expect(run).rejects.toBeInstanceOf(RunCancelledError);
-      await vi.advanceTimersByTimeAsync(999);
-      expect(worker.terminated).toBe(false);
-      await vi.advanceTimersByTimeAsync(1);
-      expect(worker.terminated).toBe(true);
-      expect(ends).toEqual(['timeout']);
+      await vi.advanceTimersByTimeAsync(60_000);
     } finally {
       vi.useRealTimers();
     }
+    await until(() => asked === 1);
+    // The ended search returned meanwhile: its threads stopped, but the keeper may still be
+    // growing the memory, and it is a thread on the memory too.
+    worker.send({ type: 'done', generation: 1, runId: 'r1', ok: true, result: RESULT });
+    worker.send({ type: 'done', generation: 1, runId: 'r1', ok: false, error: { name: 'Error', message: 'not stopped' } });
+    worker.send({ type: 'done', generation: 1, runId: 'r1', ok: false, error: { name: 'EngineStoppedError', message: 'trapped', stopped: true } });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(worker.terminated).toBe(false);
+    expect(ends).toEqual([]);
+    keeper.postMessage({ type: 'grown' });
+    await until(() => worker.terminated);
+    expect(ends).toEqual(['grown']);
+    keeper.close();
   });
 
+
   it('a thread fault during a threaded search ends the worker once the keeper grew the memory', async () => {
-    const { engine, workers } = setup(undefined, { keeperTimeoutMs: 60_000 });
+    const { engine, workers } = setup();
     const run = engine.run(request('r1', 4), output(), () => undefined);
     const worker = await posted(() => workers[0], 1);
     let terminatedWhenAsked: boolean | undefined;
@@ -243,24 +257,37 @@ describe('WasmEngine', () => {
     keeper.close();
   });
 
-  it('ends the worker of a stopped instance at once: the Engine worker already ended its keeper', async () => {
+  it('ends the worker of an instance that stopped during a threaded search once the keeper grew the memory', async () => {
     const ends: string[] = [];
-    const { engine, workers } = setup(undefined, { keeperTimeoutMs: 60_000, onRuntimeEnd: (end) => ends.push(end) });
+    const { engine, workers } = setup(undefined, { onRuntimeEnd: (end) => ends.push(end) });
     const run = engine.run(request('r1', 4), output(), () => undefined);
     const worker = await posted(() => workers[0], 1);
-    let asked = 0;
+    // Threads of the search may still run: the Engine worker kept them and the keeper.
+    let answer: () => void = () => undefined;
     const keeper = fakeKeeper(worker, () => {
-      asked++;
+      answer = () => keeper.postMessage({ type: 'grown' });
       return undefined;
     });
     worker.send({ type: 'threaded-search', generation: 1 });
     worker.send({ type: 'done', generation: 1, runId: 'r1', ok: false, error: { name: 'EngineStoppedError', message: 'trapped', stopped: true } });
     await expect(run).rejects.toThrow('trapped');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(worker.terminated).toBe(false);
+    answer();
+    await until(() => worker.terminated);
+    expect(ends).toEqual(['grown']);
+    keeper.close();
+  });
+
+  it('ends the worker of an instance that stopped at once when no search ran on the threaded instance', async () => {
+    const ends: string[] = [];
+    const { engine, workers } = setup(undefined, { onRuntimeEnd: (end) => ends.push(end) });
+    const run = engine.run(request('r1'), output(), () => undefined);
+    const worker = await posted(() => workers[0], 1);
+    worker.send({ type: 'done', generation: 1, runId: 'r1', ok: false, error: { name: 'EngineStoppedError', message: 'trapped', stopped: true } });
+    await expect(run).rejects.toThrow('trapped');
     expect(worker.terminated).toBe(true);
     expect(ends).toEqual(['at-once']);
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(asked).toBe(0);
-    keeper.close();
   });
 
   it('an observer that throws does not keep a cancel from settling', async () => {

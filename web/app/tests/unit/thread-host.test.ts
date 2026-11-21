@@ -77,16 +77,42 @@ class FakeKeeper {
   }
 }
 
+/** A shared memory that records each grow and which workers had ended by then. */
+class FakeMemory {
+  pages = 2;
+  /** A memory whose size cannot be read: growToMaximum throws. */
+  unreadable = false;
+  readonly grows: Array<{ pages: number; threadWorkersEnded: boolean[]; keeperEnded: boolean[] }> = [];
+
+  constructor(private readonly ended: () => { threadWorkers: boolean[]; keepers: boolean[] }) {}
+
+  get buffer(): { byteLength: number } {
+    if (this.unreadable) throw new Error('not readable');
+    return { byteLength: this.pages * 65_536 };
+  }
+
+  grow(delta: number): number {
+    const { threadWorkers, keepers } = this.ended();
+    this.grows.push({ pages: delta, threadWorkersEnded: threadWorkers, keeperEnded: keepers });
+    const old = this.pages;
+    this.pages += delta;
+    return old;
+  }
+}
+
 /** `readyTimeoutMs` bounds only the cases that fail; a test whose worker must become ready in time raises it. */
 function host(behaviour: Behaviour, readyTimeoutMs = 100, keeperBehaviour: KeeperBehaviour = 'ready') {
   const workers: FakeThreadWorker[] = [];
   const keepers: FakeKeeper[] = [];
   const faultChannel = `test-faults-${Math.random()}`;
   const keeperChannel = `test-keeper-${Math.random()}`;
-  const memory = {} as WebAssembly.Memory;
+  const memory = new FakeMemory(() => ({
+    threadWorkers: workers.map((worker) => worker.terminated),
+    keepers: keepers.map((keeper) => keeper.terminated),
+  }));
   const threads = new ThreadHost({
     module: {} as WebAssembly.Module,
-    memory,
+    memory: memory as unknown as WebAssembly.Memory,
     maximumPages: 65_535,
     faultChannel,
     keeperChannel,
@@ -159,6 +185,34 @@ describe('ThreadHost', () => {
     threads.terminate();
     expect(keeper.terminated).toBe(true);
     expect(workers.every((worker) => worker.terminated)).toBe(true);
+  });
+
+  it('grows the memory to its maximum before it ends the workers while a thread runs, and not when none runs', async () => {
+    // A thread that runs may be growing the memory: WebKit crashes the page when workers
+    // with instances on it end then (a thread of a pool that has not returned when the
+    // runtime moves to the other module, runtime.ts load).
+    const running = host('ready-and-start');
+    await running.threads.prepare(2);
+    expect(running.threads.spawn(1000)).toBe(1);
+    running.threads.terminate();
+    expect(running.memory.grows).toEqual([{ pages: 65_533, threadWorkersEnded: [false, false], keeperEnded: [false] }]);
+    expect(running.workers.every((worker) => worker.terminated)).toBe(true);
+    expect(running.keepers[0]!.terminated).toBe(true);
+
+    const idle = host('ready-and-start');
+    await idle.threads.prepare(2);
+    idle.threads.terminate();
+    expect(idle.memory.grows).toEqual([]);
+    expect(idle.workers.every((worker) => worker.terminated)).toBe(true);
+
+    // A grow that fails does not keep the workers from ending.
+    const broken = host('ready-and-start');
+    await broken.threads.prepare(1);
+    expect(broken.threads.spawn(1000)).toBe(1);
+    broken.memory.unreadable = true;
+    expect(() => broken.threads.terminate()).not.toThrow();
+    expect(broken.workers.every((worker) => worker.terminated)).toBe(true);
+    expect(broken.keepers[0]!.terminated).toBe(true);
   });
 
   it('fails to prepare when the keeper does not start in time, or fails', async () => {

@@ -171,6 +171,28 @@ describe('MemoryKeeper', () => {
       keeper.close();
     }
   });
+
+  it('answers also when the grow throws: the Gateway ends the runtime only on the answer', async () => {
+    const keeper = new MemoryKeeper();
+    const broken = {
+      get buffer(): ArrayBuffer {
+        throw new Error('not readable');
+      },
+    } as unknown as WebAssembly.Memory;
+    const name = `test-keeper-${Math.random()}`;
+    keeper.receive({ type: 'keep', memory: broken, maximumPages: 6, channel: name });
+    const gateway = new BroadcastChannel(name);
+    try {
+      const answer = new Promise<KeeperGrown>((resolve) => {
+        gateway.onmessage = (event: MessageEvent<KeeperGrown>) => resolve(event.data);
+      });
+      gateway.postMessage({ type: 'grow' });
+      expect(await answer).toEqual({ type: 'grown' });
+    } finally {
+      gateway.close();
+      keeper.close();
+    }
+  });
 });
 
 describe('pointers of 2 GiB or more', () => {

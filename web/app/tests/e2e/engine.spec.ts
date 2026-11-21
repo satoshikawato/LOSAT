@@ -335,6 +335,37 @@ test('a cancelled search ends its runtime; the next search runs in a new one wit
   record('cancel', browserName, rows);
 });
 
+test('an instance that stops during a search ends its runtime', async ({ context }) => {
+  const page = await openHarness(context, isolated);
+  const vbr = vbrCases()[0]!;
+  for (const threads of [1, 4]) {
+    const result = await page.evaluate((s) => window.losatHarness!.engine.stopDuringSearch(s), searchOf(vbr, threads));
+    expect(result.stopped.status).toBe('failed');
+    expect(result.stopped.record.error).toContain('a test stopped the engine at its first output');
+    // A serial instance is never in use as a threaded one. On 4 threads the engine writes its
+    // outputs after its pool's threads have been joined (web/adapter/src/run.rs, with_run_pool),
+    // so whether one of them has not yet returned when the Gateway ends the runtime is a matter
+    // of timing; the use count decides it either way (instance-use.ts, and the unit tests).
+    expect(result.runtimeEnds).toHaveLength(1);
+    if (threads === 1) expect(result.runtimeEnds).toEqual(['at-once']);
+    else expect(['at-once', 'grown']).toContain(result.runtimeEnds[0]);
+  }
+});
+
+test('a cancel while the threaded instance warms up ends its runtime once the keeper grew the memory', async ({ context }) => {
+  const page = await openHarness(context, isolated);
+  const vbr = vbrCases()[0]!;
+  const result = await page.evaluate((s) => window.losatHarness!.engine.cancelDuringWarmUp(s), searchOf(vbr, 4));
+  expect(result.cancelled).toBe('cancelled');
+  // A warm-up sends no message, but its calls into the threaded instance are a use of it
+  // (instance-use.ts): the Gateway ends the runtime after the keeper's grow, not at once.
+  expect(result.runtimeEnds).toEqual(['grown']);
+  expect(result.next.status, result.next.record.error).toBe('completed');
+  expect(result.next.record.runtimeGeneration).toBe(2);
+  expect(result.next.record.runtimePath).toBe('threaded');
+  expect(result.next.sha256[0]).toBe(vbr.frozen[0]!.sha256);
+});
+
 test('a runtime renewed after every search gives the same bytes and registers the subject again', async ({ context }) => {
   const page = await openHarness(context, isolated);
   const vbr = vbrCases()[1]!;

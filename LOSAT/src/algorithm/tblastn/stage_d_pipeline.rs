@@ -1,6 +1,8 @@
 //! Internal local-subject TBLASTN Stage C to D composition pipeline.
 //! The public CLI remains gated while Stage D and Stage E are incomplete.
 
+#[allow(unused_imports)]
+use crate::utils::glibc_fma_libm::GlibcLibm;
 use std::collections::HashMap;
 #[cfg(feature = "parallel")]
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -1767,7 +1769,7 @@ fn run_local_search_with_pool(
             best_evalue: postredo.best_evalue,
             best_score: postredo.hsps[0].hsp.score,
         };
-        let bits = normalize_postredo_scores(&mut postredo, scaled.lambda, gapped.k.ln(), 32.0);
+        let bits = normalize_postredo_scores(&mut postredo, scaled.lambda, gapped.k.glibc_ln(), 32.0);
         let mut target = TargetTranslation::of(subject, &code);
         let mut owned: Vec<_> = survivors.into_iter().map(Some).collect();
         let payloads = postredo
@@ -3809,7 +3811,7 @@ fn finish_local_mode0_no_sum_stats(
                     )?;
                 Ok(KappaHspPayload {
                     bit_score: (hsp.hsp.score as f64 * gapped_params[context].lambda
-                        - gapped_params[context].k.ln())
+                        - gapped_params[context].k.glibc_ln())
                         / std::f64::consts::LN_2,
                     num_ident: i32::try_from(ident)?,
                     num_positives: positives,

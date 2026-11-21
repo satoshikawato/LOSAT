@@ -1,4 +1,6 @@
 //! BLASTX HSP statistics; protein-subject lengths remain in amino acids.
+#[allow(unused_imports)]
+use crate::utils::glibc_fma_libm::GlibcLibm;
 use super::{
     args::ResolvedOptions,
     linking::{link_even, link_parameters, link_uneven, LinkedHsp, LinkedHspList},
@@ -140,7 +142,7 @@ pub fn evaluate_gapped(
                 ),
                 None => {
                     parameters[h.context].search_space as f64
-                        * (-ka.lambda * h.score as f64 + ka.k.ln()).exp()
+                        * (-ka.lambda * h.score as f64 + ka.k.glibc_ln()).glibc_exp()
                 }
             },
             source_index,
@@ -327,7 +329,7 @@ pub fn normalize_scores(list: &mut LinkedHspList, options: &ResolvedOptions) -> 
                 let value = h.hsp.score as f64 / scale;
                 h.hsp.score = (value + if value >= 0.0 { 0.5 } else { -0.5 }) as i32;
             }
-            (h.hsp.score as f64 * (ka.lambda / scale) * scale - ka.k.ln()) / std::f64::consts::LN_2
+            (h.hsp.score as f64 * (ka.lambda / scale) * scale - ka.k.glibc_ln()) / std::f64::consts::LN_2
         })
         .collect()
 }
@@ -522,7 +524,7 @@ pub(crate) fn evaluate_ungapped(
                 hsp: h.clone(),
                 num: 0,
                 evalue: p.search_space as f64
-                    * (-p.ungapped.lambda * h.score as f64 + p.ungapped.k.ln()).exp(),
+                    * (-p.ungapped.lambda * h.score as f64 + p.ungapped.k.glibc_ln()).glibc_exp(),
                 source_index,
             }
         })

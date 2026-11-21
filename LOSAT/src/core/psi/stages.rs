@@ -3,6 +3,8 @@
 //! keep NCBI's types (`Uint4` sizes wrap as NCBI's do); the floating-point operations are NCBI's,
 //! in NCBI's order, with the C library's `log`, `exp` and `pow`.
 
+#[allow(unused_imports)]
+use crate::utils::glibc_fma_libm::GlibcLibm;
 use super::{
     KarlinBlk, PsiDiagnostics, PsiDiagnosticsRequest, PsiError, PsiMsa, PsiMsaCell, PsiScoreBlk,
 };
@@ -1422,7 +1424,7 @@ fn initialize_exp_num_observations(background: &[f64; 20]) -> [f64; MAX_IND_OBSE
     for (j, value) in expno.iter_mut().enumerate().skip(1) {
         let mut weighted_sum = 0.0;
         for &probability in background.iter().take(EFFECTIVE_ALPHABET) {
-            weighted_sum += (j as f64 * (1.0 - probability).ln()).exp();
+            weighted_sum += (j as f64 * (1.0 - probability).glibc_ln()).glibc_exp();
         }
         *value = EFFECTIVE_ALPHABET as f64 - weighted_sum;
     }
@@ -1615,7 +1617,7 @@ fn column_specific_pseudocounts(
     for c in 0..EFFECTIVE_ALPHABET {
         let adjusted = intermediate_sums[c] / overall_sum;
         if adjusted > K_POS_EPSILON {
-            relative_entropy += adjusted * (adjusted / background[c]).ln();
+            relative_entropy += adjusted * (adjusted / background[c]).glibc_ln();
         }
     }
     if relative_entropy < K_POS_EPSILON {
@@ -1716,7 +1718,7 @@ pub(super) fn convert_freq_ratios_to_pssm(
             internal.scaled_pssm[i][j] = if q_over_p_estimate == 0.0 || std_probs[j] < K_EPSILON {
                 BLAST_SCORE_MIN
             } else {
-                let tmp = q_over_p_estimate.ln() / ideal_lambda;
+                let tmp = q_over_p_estimate.glibc_ln() / ideal_lambda;
                 blast_nint(K_PSI_SCALE_FACTOR as f64 * tmp) as i32
             };
             if (j == X as usize || j == STAR as usize)
@@ -1730,7 +1732,7 @@ pub(super) fn convert_freq_ratios_to_pssm(
                 internal.pssm[i][j] = sbp.matrix[k_residue][j];
                 let ratio = sbp.freq_ratios[k_residue][j];
                 internal.scaled_pssm[i][j] = if ratio != 0.0 {
-                    let tmp = (K_PSI_SCALE_FACTOR * sbp.bit_scale_factor) as f64 * ratio.ln()
+                    let tmp = (K_PSI_SCALE_FACTOR * sbp.bit_scale_factor) as f64 * ratio.glibc_ln()
                         / NCBIMATH_LN2;
                     blast_nint(tmp) as i32
                 } else {
@@ -2355,7 +2357,7 @@ pub(super) fn save_diagnostics(
                     if seq_weights.std_prob[r] > K_EPSILON {
                         let q_over_p_estimate = ratios[r] / seq_weights.std_prob[r];
                         if q_over_p_estimate > K_EPSILON {
-                            info_sum += ratios[r] * q_over_p_estimate.ln() / NCBIMATH_LN2;
+                            info_sum += ratios[r] * q_over_p_estimate.glibc_ln() / NCBIMATH_LN2;
                         }
                     }
                 }

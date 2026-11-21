@@ -8,6 +8,8 @@
 //! - ncbi-blast/c++/src/algo/blast/core/blast_setup.c
 //! - ncbi-blast/c++/src/algo/blast/core/blast_stat.c
 
+#[allow(unused_imports)]
+use crate::utils::glibc_fma_libm::GlibcLibm;
 use crate::stats::KarlinParams;
 
 /// Smallest float to avoid floating point exception in BlastKarlinEtoS_simple
@@ -241,9 +243,9 @@ pub fn cutoff_score_from_evalue(
     // NCBI out of memory or time with no output, LOSAT 88,562 rows); LOSAT keeps the finite value
     // there as well (Owner 2026-11-12, line PS DECISIONS 36; PD-LOSAT-NCBI-DEFECTS exception 8).
     let log_value = if k_times_searchsp_over_e.is_finite() {
-        k_times_searchsp_over_e.ln()
+        k_times_searchsp_over_e.glibc_ln()
     } else {
-        karlin_params.k.ln() + searchsp.ln() - e.ln()
+        karlin_params.k.glibc_ln() + searchsp.glibc_ln() - e.glibc_ln()
     };
     let score_before_ceil = log_value / karlin_params.lambda;
     let score = score_before_ceil.ceil();
@@ -692,7 +694,7 @@ mod tests {
         let gapped = blosum62_gapped();
         // 0.041 * (2^63 - 1) / 1e-297 = 3.8e314: past f64::MAX. E below kSmallFloat is
         // raised to it. ceil((ln 0.041 + ln 9.223372036854775807e18 + 297 ln 10) / 0.267).
-        let expected = ((0.041f64.ln() + (i64::MAX as f64).ln() - 1.0e-297f64.ln()) / 0.267).ceil();
+        let expected = ((0.041f64.glibc_ln() + (i64::MAX as f64).glibc_ln() - 1.0e-297f64.glibc_ln()) / 0.267).ceil();
         assert_eq!(expected, 2713.0);
         for evalue in [1e-300, 1e-297] {
             assert_eq!(cutoff_score_from_evalue(evalue, i64::MAX, &gapped), 2713);
@@ -704,7 +706,7 @@ mod tests {
         let finite = cutoff_score_from_evalue(1e-297, last_finite, &gapped);
         assert_eq!(
             finite,
-            ((0.041 * last_finite as f64 / 1.0e-297).ln() / 0.267).ceil() as i32
+            ((0.041 * last_finite as f64 / 1.0e-297).glibc_ln() / 0.267).ceil() as i32
         );
         let past = (last_finite as f64 * (1.0 + 1e-9)) as i64;
         assert!(!(0.041 * past as f64 / 1.0e-297).is_finite());

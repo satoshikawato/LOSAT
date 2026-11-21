@@ -14,6 +14,8 @@
 //!   - The implementation matches NCBI BLAST exactly, with only minor differences
 //!     due to floating-point precision between C and Rust.
 
+#[allow(unused_imports)]
+use crate::utils::glibc_fma_libm::GlibcLibm;
 use super::tables::KarlinParams;
 
 /// Result of length adjustment computation
@@ -62,7 +64,7 @@ pub fn compute_length_adjustment_ncbi(
     let n_seqs = db_num_seqs as f64;
 
     let k = params.k;
-    let log_k = k.ln();
+    let log_k = k.glibc_ln();
     let alpha_d_lambda = params.alpha / params.lambda;
     let beta = params.beta;
 
@@ -105,7 +107,7 @@ pub fn compute_length_adjustment_ncbi(
     for i in 1..=MAX_ITERATIONS {
         let ell = ell_next;
         let ss = (m - ell) * (n - n_seqs * ell);
-        let ell_bar = alpha_d_lambda * (log_k + ss.ln()) + beta;
+        let ell_bar = alpha_d_lambda * (log_k + ss.glibc_ln()) + beta;
 
         if ell_bar >= ell {
             // ell is no bigger than the true fixed point
@@ -151,7 +153,7 @@ pub fn compute_length_adjustment_ncbi(
         let ell_ceil = ell_min.ceil();
         if ell_ceil <= ell_max {
             let ss = (m - ell_ceil) * (n - n_seqs * ell_ceil);
-            if alpha_d_lambda * (log_k + ss.ln()) + beta >= ell_ceil {
+            if alpha_d_lambda * (log_k + ss.glibc_ln()) + beta >= ell_ceil {
                 // ceil(ell_min) == floor(ell_fixed)
                 length_adjustment = ell_ceil as i64;
             }

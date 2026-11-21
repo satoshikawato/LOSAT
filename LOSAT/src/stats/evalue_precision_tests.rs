@@ -7,6 +7,8 @@
 //!   - blast_stat.c: BLAST_SmallGapSumE, s_BlastSumP
 //!   - ncbi_math.c: BLAST_LnFactorial, BLAST_LnGammaInt
 
+#[allow(unused_imports)]
+use crate::utils::glibc_fma_libm::GlibcLibm;
 use crate::stats::sum_statistics::{
     blast_ln_factorial, e_to_p, normalize_score, p_to_e, small_gap_sum_e,
 };
@@ -17,10 +19,10 @@ fn test_ln_factorial_int_small() {
     // For small n, direct calculation should be very accurate
     let test_cases = vec![
         (1, 0.0),
-        (2, 2.0_f64.ln()),
-        (3, 6.0_f64.ln()),
-        (5, 120.0_f64.ln()),
-        (10, 3628800.0_f64.ln()),
+        (2, 2.0_f64.glibc_ln()),
+        (3, 6.0_f64.glibc_ln()),
+        (5, 120.0_f64.glibc_ln()),
+        (10, 3628800.0_f64.glibc_ln()),
     ];
 
     for (n, expected) in test_cases {
@@ -56,8 +58,8 @@ fn test_ln_factorial_int_medium() {
     for n in test_cases {
         let direct = blast_ln_factorial(n as f64);
         // Stirling's approximation: ln(n!) ≈ n*ln(n) - n + 0.5*ln(2*pi*n)
-        let stirling = (n as f64) * (n as f64).ln() - (n as f64)
-            + 0.5 * (2.0 * std::f64::consts::PI * n as f64).ln();
+        let stirling = (n as f64) * (n as f64).glibc_ln() - (n as f64)
+            + 0.5 * (2.0 * std::f64::consts::PI * n as f64).glibc_ln();
         let relative_error = ((direct - stirling) / stirling).abs();
         // For medium n, direct calculation should still be accurate
         // but may have some accumulated error
@@ -83,8 +85,8 @@ fn test_ln_factorial_int_large() {
     for n in test_cases {
         let direct = blast_ln_factorial(n as f64);
         // Stirling's approximation
-        let stirling = (n as f64) * (n as f64).ln() - (n as f64)
-            + 0.5 * (2.0 * std::f64::consts::PI * n as f64).ln();
+        let stirling = (n as f64) * (n as f64).glibc_ln() - (n as f64)
+            + 0.5 * (2.0 * std::f64::consts::PI * n as f64).glibc_ln();
         let relative_error = ((direct - stirling) / stirling).abs();
         // For large n, expect some accumulated error but still reasonable
         // NCBI uses lgamma which is more stable, but direct calculation
@@ -107,7 +109,7 @@ fn test_small_gap_sum_e_single_hsp() {
     let searchsp = 1_000_000_i64;
     let result = small_gap_sum_e(50, 1, xsum, 100, 1000, searchsp, 1.0);
 
-    let expected = (searchsp as f64) * (-xsum).exp();
+    let expected = (searchsp as f64) * (-xsum).glibc_exp();
     let relative_error = ((result - expected) / expected).abs();
     assert!(
         relative_error < 1e-10,
@@ -221,7 +223,7 @@ fn test_small_gap_sum_e_large_chain() {
 fn test_xsum_accumulation_precision() {
     let lambda: f64 = 0.267;
     let k: f64 = 0.041;
-    let log_k = k.ln();
+    let log_k = k.glibc_ln();
 
     // Simulate accumulating xsum for 400 HSPs
     let num_hsps = 400;

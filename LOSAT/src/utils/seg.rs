@@ -10,6 +10,8 @@
 //! - Wootton & Federhen (1993) "Statistics of local complexity in amino acid sequences and sequence databases"
 //! - Wootton & Federhen (1996) Methods Enzymol. 266:554-71
 
+#[allow(unused_imports)]
+use crate::utils::glibc_fma_libm::GlibcLibm;
 use crate::utils::dust::MaskedInterval;
 
 use super::seg_lnfact::LNFAC;
@@ -59,7 +61,7 @@ fn s_lnfact(n: usize) -> f64 {
         LNFAC[n]
     } else {
         let nf = n as f64;
-        (nf + 0.5) * nf.ln() - nf + 0.9189385332
+        (nf + 0.5) * nf.glibc_ln() - nf + 0.9189385332
     }
 }
 
@@ -567,7 +569,7 @@ fn entropy_from_state_vector_reference(state: &[i32]) -> f64 {
             if count == 0 {
                 break;
             }
-            ent += (count as f64) * ((count as f64) / total_f).ln() / NCBIMATH_LN2;
+            ent += (count as f64) * ((count as f64) / total_f).glibc_ln() / NCBIMATH_LN2;
         }
     }
 

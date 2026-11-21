@@ -1,5 +1,7 @@
 //! TBLASTN local-subject statistical inputs before preliminary search.
 
+#[allow(unused_imports)]
+use crate::utils::glibc_fma_libm::GlibcLibm;
 use crate::algorithm::tblastx::ncbi_cutoffs::{
     cutoff_score_from_evalue, cutoff_score_sum_stats, gap_trigger_raw_score, x_drop_raw_score,
 };
@@ -698,8 +700,8 @@ mod tests {
     #[test]
     fn positive_uneven_gap_pair_matches_ncbi_double_bits() {
         let params = lookup_protein_params_gapped(ScoringMatrix::Blosum62);
-        let first = params.lambda * 331.0 - params.k.ln();
-        let second = params.lambda * 329.0 - params.k.ln();
+        let first = params.lambda * 331.0 - params.k.glibc_ln();
+        let second = params.lambda * 329.0 - params.k.glibc_ln();
         let divisor = crate::stats::sum_statistics::gap_decay_divisor(0.1, 2);
         let actual = crate::stats::sum_statistics::uneven_gap_sum_e(
             50,

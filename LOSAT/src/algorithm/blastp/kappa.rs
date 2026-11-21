@@ -4,6 +4,8 @@
 //! Reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c
 //! Reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c
 
+#[allow(unused_imports)]
+use crate::utils::glibc_fma_libm::GlibcLibm;
 use anyhow::Result;
 use std::collections::HashMap;
 use std::ffi::c_void;
@@ -1782,7 +1784,7 @@ fn get_evalues(
             let search_space = query_workspace.redo_query_info.eff_search_space;
             for hsp in &mut hsp_list.hsps {
                 hsp.e_value = search_space
-                    * (-eval_params.lambda * hsp.raw_score as f64 + eval_params.k.ln()).exp();
+                    * (-eval_params.lambda * hsp.raw_score as f64 + eval_params.k.glibc_ln()).glibc_exp();
             }
         }
     }
@@ -1842,7 +1844,7 @@ fn evaluate_and_purge(
             hsp_list,
             crate::core::link_hsps::LinkContext {
                 lambda: eval_params.lambda,
-                log_k: eval_params.k.ln(),
+                log_k: eval_params.k.glibc_ln(),
                 query_length: query_workspace.query_length,
                 length_adjustment: query_workspace.length_adjustment,
                 eff_searchsp: query_workspace.redo_query_info.eff_search_space as i64,

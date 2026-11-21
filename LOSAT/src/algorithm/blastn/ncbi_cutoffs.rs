@@ -7,6 +7,8 @@
 //! - ncbi-blast/c++/src/algo/blast/core/blast_parameters.c
 //! - ncbi-blast/c++/include/algo/blast/core/blast_options.h
 
+#[allow(unused_imports)]
+use crate::utils::glibc_fma_libm::GlibcLibm;
 use crate::core::blast_util::ncbi_int4_from_double;
 use crate::stats::KarlinParams;
 
@@ -77,7 +79,7 @@ pub fn cutoff_score_max_from_evalue(
         let searchsp = eff_searchsp as f64;
         let k_times_searchsp = gapped_params.k * searchsp;
         let k_times_searchsp_over_e = k_times_searchsp / e;
-        let log_value = k_times_searchsp_over_e.ln();
+        let log_value = k_times_searchsp_over_e.glibc_ln();
         let score_before_ceil = log_value / gapped_params.lambda;
         let es = ncbi_int4_from_double(score_before_ceil.ceil());
 
@@ -212,7 +214,7 @@ pub fn compute_blastn_cutoff_score_ungapped(
         let searchsp_f64 = searchsp as f64;
         let k_times_searchsp = ungapped_params.k * searchsp_f64;
         let k_times_searchsp_over_e = k_times_searchsp / e_adjusted;
-        let log_value = k_times_searchsp_over_e.ln();
+        let log_value = k_times_searchsp_over_e.glibc_ln();
         let score_before_ceil = log_value / ungapped_params.lambda;
         let es = ncbi_int4_from_double(score_before_ceil.ceil());
 

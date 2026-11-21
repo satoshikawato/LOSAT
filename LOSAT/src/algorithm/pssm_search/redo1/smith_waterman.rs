@@ -38,6 +38,8 @@
 //! (`compo_scale::SwRedo`), so that the X-drop redo's instance keeps one caller and psiblast's
 //! machine code (DECISIONS 11 and 63 of line PS); the evaluation is a copy (`evaluate`).
 
+#[allow(unused_imports)]
+use crate::utils::glibc_fma_libm::GlibcLibm;
 use super::{
     blast_nint, preliminary_test_near_identical, reap_contained, score_compare, Align, RedoMatch,
     RedoRun, Redone, SCALING_FACTOR,
@@ -96,7 +98,7 @@ pub(crate) struct SwEndless;
 /// }
 /// ```
 fn evalue_from_score(score: i32, lambda: f64, log_k: f64, searchsp: f64) -> f64 {
-    searchsp * (-(lambda * f64::from(score)) + log_k).exp()
+    searchsp * (-(lambda * f64::from(score)) + log_k).glibc_exp()
 }
 
 impl RedoMatch<'_> {

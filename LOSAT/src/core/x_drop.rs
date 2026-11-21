@@ -43,6 +43,8 @@
 //!             break;
 //! ```
 
+#[allow(unused_imports)]
+use crate::utils::glibc_fma_libm::GlibcLibm;
 use crate::core::blast_util::ncbi_int4_from_double;
 
 /// NCBI's `NCBIMATH_LN2` (`0.69314718055994530941723212145818`, the same double).
@@ -66,7 +68,7 @@ const NCBIMATH_LN2: f64 = std::f64::consts::LN_2;
 /// ```
 #[inline]
 pub(crate) fn gap_trigger_raw_score(bits: f64, lambda: f64, k: f64) -> i32 {
-    ncbi_int4_from_double((bits * NCBIMATH_LN2 + k.ln()) / lambda)
+    ncbi_int4_from_double((bits * NCBIMATH_LN2 + k.glibc_ln()) / lambda)
 }
 
 /// A context's ungapped X-drop (`x_dropoff_init`) from the X-drop in bits, the context's ungapped

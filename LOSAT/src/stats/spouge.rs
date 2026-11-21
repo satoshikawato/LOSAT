@@ -1,3 +1,5 @@
+#[allow(unused_imports)]
+use crate::utils::glibc_fma_libm::GlibcLibm;
 use crate::config::ProteinScoringSpec;
 use crate::utils::x87::X87;
 
@@ -635,18 +637,18 @@ pub fn blast_spouge_stoe(
     let sqrt_vi_y = vi_y.sqrt();
     let m_f = m_li_y / sqrt_vi_y;
     let p_m_f = erfc_ncbi(-m_f / 2.0_f64.sqrt()) / 2.0;
-    let p1 = m_li_y * p_m_f + sqrt_vi_y * const_val * (-0.5 * m_f * m_f).exp();
+    let p1 = m_li_y * p_m_f + sqrt_vi_y * const_val * (-0.5 * m_f * m_f).glibc_exp();
 
     let n_lj_y = n - (ai_hat * y + bi_hat);
     let vj_y = (2.0 * alphai_hat / lambda).max(alphai_hat * y + betai_hat);
     let sqrt_vj_y = vj_y.sqrt();
     let n_f = n_lj_y / sqrt_vj_y;
     let p_n_f = erfc_ncbi(-n_f / 2.0_f64.sqrt()) / 2.0;
-    let p2 = n_lj_y * p_n_f + sqrt_vj_y * const_val * (-0.5 * n_f * n_f).exp();
+    let p2 = n_lj_y * p_n_f + sqrt_vj_y * const_val * (-0.5 * n_f * n_f).glibc_exp();
 
     let c_y = (2.0 * sigma_hat / lambda).max(sigma_hat * y + tau_hat);
     let area = p1 * p2 + c_y * p_m_f * p_n_f;
-    area * k * (-lambda * y).exp() * db_scale_factor
+    area * k * (-lambda * y).glibc_exp() * db_scale_factor
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:5236-5263
@@ -680,7 +682,7 @@ pub fn blast_spouge_etos(
         1.0
     };
     let e0 = evalue.max(f64::MIN_POSITIVE);
-    let mut b = ((db_scale_factor / e0).ln() / kbp.lambda) as i32;
+    let mut b = ((db_scale_factor / e0).glibc_ln() / kbp.lambda) as i32;
     if b < 2 {
         b = 2;
     }

@@ -3,6 +3,8 @@
 //! `s_SequenceGetProteinRange` in a buffer of the translation buffer's length plus 2, and the
 //! composition range of a window that ends before it begins (`-strand plus|minus`).
 
+#[allow(unused_imports)]
+use crate::utils::glibc_fma_libm::GlibcLibm;
 use super::*;
 use crate::algorithm::pssm_search::gapalign::PssmGapScratch;
 use crate::algorithm::pssm_search::rows::QueryPssm;
@@ -49,7 +51,7 @@ fn run_of(consensus: &[u8]) -> RedoRun<'_> {
             alpha: 1.9,
             beta: -30.0,
         },
-        0.041f64.ln(),
+        0.041f64.glibc_ln(),
         (11, 1),
         (25.0, 0),
         QueryPssm {

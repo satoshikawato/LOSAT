@@ -14,6 +14,8 @@
 //!
 //! Reference: blast_traceback.c:637-669
 
+#[allow(unused_imports)]
+use crate::utils::glibc_fma_libm::GlibcLibm;
 use super::super::alignment::ContextQuery;
 use super::super::hsp::{adjust_blastn_offsets, BlastnHsp};
 // NCBI reference: c++/include/algo/blast/core/blast_hits.h:153-166
@@ -1660,7 +1662,7 @@ pub fn reevaluate_hsp_with_ambiguities_gapped_ex(
 
         // Bit score calculation
         // NCBI reference: blast_stat.c BLAST_KarlinStoE_simple
-        let log_k = params.k.ln();
+        let log_k = params.k.glibc_ln();
         hit.bit_score = ((params.lambda * (score as f64)) - log_k) / LN2;
 
         // E-value calculation
@@ -1686,7 +1688,7 @@ pub fn reevaluate_hsp_with_ambiguities_gapped_ex(
         if params.eff_searchsp > 0 {
             hit.e_value = params.k
                 * (params.eff_searchsp as f64)
-                * (-params.lambda * (evalue_score as f64)).exp();
+                * (-params.lambda * (evalue_score as f64)).glibc_exp();
         }
     }
 

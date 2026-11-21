@@ -24,6 +24,8 @@
 //! `preliminary_hit_from_local_match_hsp`, `query_nomask_sequence`, `X_NEWTON_LANES_MATCHES`, and
 //! for the parallel paths' choice `blastp_should_parallelize_stage` and `x_prelim_hsplist_count`.
 
+#[allow(unused_imports)]
+use crate::utils::glibc_fma_libm::GlibcLibm;
 use std::ops::Range;
 use std::sync::OnceLock;
 
@@ -200,7 +202,7 @@ impl RedoParamsBuilder<'_> {
             // ```
             alphsize: BLASTAA_SIZE as i32,
             composition_test_index: i32::from(args.comp_based_stats.unified_p),
-            log_k: gapped_params.k.ln(),
+            log_k: gapped_params.k.glibc_ln(),
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3584-3690
             // ```c
             // localScalingFactor      /* i */

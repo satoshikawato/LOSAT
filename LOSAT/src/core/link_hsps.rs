@@ -34,6 +34,8 @@
 //!    Blast_HSPListSortByScore(hsp_list);
 //! ```
 
+#[allow(unused_imports)]
+use crate::utils::glibc_fma_libm::GlibcLibm;
 use std::cmp::Ordering;
 
 use crate::stats::sum_statistics::defaults::{GAP_SIZE, OVERLAP_SIZE};
@@ -275,19 +277,19 @@ pub(crate) fn calculate_link_hsp_cutoffs(
         (subject_length as i32, db_length)
     };
     // `BLAST_Nint`: rounds half away from zero.
-    let expected = (kbp.k * query_length as f64 * subject_length as f64).ln() / kbp.h;
+    let expected = (kbp.k * query_length as f64 * subject_length as f64).glibc_ln() / kbp.h;
     let expected_length = (expected + if expected >= 0.0 { 0.5 } else { -0.5 }) as i32;
     query_length = (query_length - expected_length).max(1);
     subject_length = (subject_length - expected_length).max(1);
     let y_variable = if db_length > subject_length as i64 {
-        (db_length as f64 / subject_length as f64).ln() * kbp.k / gap_decay_rate
+        (db_length as f64 / subject_length as f64).glibc_ln() * kbp.k / gap_decay_rate
     } else {
-        ((subject_length + expected_length) as f64 / subject_length as f64).ln() * kbp.k
+        ((subject_length + expected_length) as f64 / subject_length as f64).glibc_ln() * kbp.k
             / gap_decay_rate
     };
     let search_sp = query_length as i64 * subject_length as i64;
     let mut x_variable = 0.25 * y_variable * search_sp as f64;
-    let cutoff = |x: f64| (x.ln() / kbp.lambda).floor() as i32 + 1;
+    let cutoff = |x: f64| (x.glibc_ln() / kbp.lambda).floor() as i32 + 1;
     let (gap_prob, cutoff_small_gap, cutoff_big_gap) = if search_sp > 8 * window_size * window_size
     {
         x_variable /= 1.0 - gap_prob + K_EPSILON;
@@ -1582,7 +1584,7 @@ mod tests {
         // BLOSUM62 11/1 gapped Lambda and K (blast_stat.c), a query of 300 letters.
         LinkContext {
             lambda: 0.267,
-            log_k: 0.041f64.ln(),
+            log_k: 0.041f64.glibc_ln(),
             query_length: 300,
             length_adjustment: 40,
             eff_searchsp: 260 * 960,
@@ -1620,7 +1622,7 @@ mod tests {
         assert_eq!(out.len(), 1);
         assert_eq!((out[0].index, out[0].num), (0, 1));
         let xsum = 80.0 * ctx.lambda - ctx.log_k;
-        let expected = (ctx.eff_searchsp as f64) * (-xsum).exp() / 0.9;
+        let expected = (ctx.eff_searchsp as f64) * (-xsum).glibc_exp() / 0.9;
         assert_eq!(out[0].evalue, expected);
     }
 

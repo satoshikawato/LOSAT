@@ -3,6 +3,8 @@
 //! Reference: ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c
 //! Reference: ncbi-blast/c++/include/algo/blast/core/blast_aalookup.h
 
+#[allow(unused_imports)]
+use crate::utils::glibc_fma_libm::GlibcLibm;
 use super::{ilog2, PV_ARRAY_BTS, PV_ARRAY_MASK};
 use crate::algorithm::tblastx::scan::OffsetPair;
 use crate::config::ScoringMatrix;
@@ -1330,7 +1332,7 @@ fn compressed_score_matrix_of(
             for &aa in group {
                 val += matrix_info.start_freq_ratios[q][aa] * compressed_prob[aa];
             }
-            let val = if val < 1.0e-8 { min_freq } else { val.ln() };
+            let val = if val < 1.0e-8 { min_freq } else { val.glibc_ln() };
             scores[q][s] = blast_nint(val * matrix_scale_factor);
         }
     }

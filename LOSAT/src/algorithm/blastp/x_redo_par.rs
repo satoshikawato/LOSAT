@@ -130,6 +130,8 @@
 //!         for (b = 0; b < numMatches; ++b) {
 //! ```
 
+#[allow(unused_imports)]
+use crate::utils::glibc_fma_libm::GlibcLibm;
 use std::ops::Range;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
@@ -2526,7 +2528,7 @@ mod tests {
             compo_adjust_mode: BlastCompoAdjustMode::CompositionMatrixAdjust,
             alphsize: crate::utils::matrix::BLASTAA_SIZE as i32,
             composition_test_index: 0,
-            log_k: fixture.gapped_params.k.ln(),
+            log_k: fixture.gapped_params.k.glibc_ln(),
             score_divisor: SCALE,
             smith_waterman: false,
             near_identical_cutoff: 1.74 * std::f64::consts::LN_2 / scaled_lambda,

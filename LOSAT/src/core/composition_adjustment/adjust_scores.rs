@@ -6,6 +6,8 @@
 //! Reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/unified_pvalues.c
 //! Reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/matrix_frequency_data.c
 
+#[allow(unused_imports)]
+use crate::utils::glibc_fma_libm::GlibcLibm;
 use anyhow::{bail, Result};
 use std::sync::OnceLock;
 
@@ -1422,7 +1424,7 @@ fn freq_ratio_to_score_square(
             if *value == 0.0 {
                 *value = COMPO_SCORE_MIN as f64;
             } else {
-                *value = value.ln() / lambda;
+                *value = value.glibc_ln() / lambda;
             }
         }
     }
@@ -1479,9 +1481,9 @@ fn calc_lambda_full_precision_from_scores(
         // `fold` takes f before f is evaluated again, so the Newton test
         // below compares this iteration's f with the previous iteration's f.
         let fold = f;
-        let lambda = -x.ln();
+        let lambda = -x.glibc_ln();
         let was_newton = is_newton;
-        let x_pow_max_score = (-max_score * lambda).exp();
+        let x_pow_max_score = (-max_score * lambda).glibc_exp();
         f = -x_pow_max_score;
         let mut slope = max_score * f / x;
 
@@ -1495,7 +1497,7 @@ fn calc_lambda_full_precision_from_scores(
                 }
                 let ff = if max_score != score[i][j] {
                     let diff_score = max_score - score[i][j];
-                    let ff = row_prob[i] * col_p * (-lambda * diff_score).exp();
+                    let ff = row_prob[i] * col_p * (-lambda * diff_score).glibc_exp();
                     slope += diff_score * ff / x;
                     ff
                 } else {
@@ -1553,7 +1555,7 @@ fn calc_lambda_full_precision_from_scores(
     }
 
     if k < K_LAMBDA_ITERATION_LIMIT {
-        (-x.ln(), k)
+        (-x.glibc_ln(), k)
     } else {
         (-1.0, k)
     }
@@ -1576,10 +1578,10 @@ pub fn blast_get_relative_entropy(
         let temp = (a[i] + b[i]) / 2.0;
         if temp > 0.0 {
             if a[i] > 0.0 {
-                value += a[i] * (a[i] / temp).ln() / 2.0;
+                value += a[i] * (a[i] / temp).glibc_ln() / 2.0;
             }
             if b[i] > 0.0 {
-                value += b[i] * (b[i] / temp).ln() / 2.0;
+                value += b[i] * (b[i] / temp).glibc_ln() / 2.0;
             }
         }
     }
@@ -2493,7 +2495,7 @@ fn evaluate_re_functions(
     values[0] = 0.0;
     values[1] = 0.0;
     for k in 0..alphsize * alphsize {
-        let mut temp = (x[k] / q[k]).ln();
+        let mut temp = (x[k] / q[k]).glibc_ln();
         values[0] += x[k] * temp;
         grads[0][k] = temp + 1.0;
         if constrain_rel_entropy {
@@ -2518,7 +2520,7 @@ fn compute_scores_from_probs(
     for i in 0..alphsize {
         for j in 0..alphsize {
             let k = i * alphsize + j;
-            scores[k] = (target_freqs[k] / (row_freqs[i] * col_freqs[j])).ln();
+            scores[k] = (target_freqs[k] / (row_freqs[i] * col_freqs[j])).glibc_ln();
         }
     }
 }
@@ -2856,7 +2858,7 @@ pub fn blast_composition_pvalue(lambda: f64) -> f64 {
 pub fn blast_overall_p_value(p_comp: f64, p_alignment: f64) -> f64 {
     let product = p_comp * p_alignment;
     if product > 0.0 {
-        product * (1.0 - product.ln())
+        product * (1.0 - product.glibc_ln())
     } else {
         product
     }
@@ -3799,7 +3801,7 @@ mod tests {
     fn test_blast_overall_p_value_matches_fisher_style_formula() {
         let combined = blast_overall_p_value(0.2, 0.3);
         let product = 0.06f64;
-        assert!((combined - (product * (1.0 - product.ln()))).abs() < 1.0e-12);
+        assert!((combined - (product * (1.0 - product.glibc_ln()))).abs() < 1.0e-12);
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:686-687,693-696
@@ -4016,9 +4018,9 @@ mod tests {
         let mut k = 0;
         while k < K_LAMBDA_ITERATION_LIMIT {
             let fold = f;
-            let lambda = -x.ln();
+            let lambda = -x.glibc_ln();
             let was_newton = is_newton;
-            let x_pow_max_score = (-max_score * lambda).exp();
+            let x_pow_max_score = (-max_score * lambda).glibc_exp();
             f = -x_pow_max_score;
             let mut slope = max_score * f / x;
             for i in 0..alphsize {
@@ -4028,7 +4030,7 @@ mod tests {
                     }
                     let ff = if max_score != score[i][j] {
                         let diff_score = max_score - score[i][j];
-                        let ff = row_prob[i] * col_prob[j] * (-lambda * diff_score).exp();
+                        let ff = row_prob[i] * col_prob[j] * (-lambda * diff_score).glibc_exp();
                         slope += diff_score * ff / x;
                         ff
                     } else {
@@ -4074,7 +4076,7 @@ mod tests {
             k += 1;
         }
         let lambda = if k < K_LAMBDA_ITERATION_LIMIT {
-            -x.ln()
+            -x.glibc_ln()
         } else {
             -1.0
         };
@@ -4122,7 +4124,7 @@ mod tests {
             let mut phi = -1.0;
             for i in 0..2 {
                 for j in 0..2 {
-                    phi += rows[i] * cols[j] * (lambda * matrix[i][j]).exp();
+                    phi += rows[i] * cols[j] * (lambda * matrix[i][j]).glibc_exp();
                 }
             }
             assert!(phi.abs() <= 1.0e-12, "case {name}: phi {phi}");

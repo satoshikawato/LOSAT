@@ -19,6 +19,8 @@
 //! is total, so every list is inserted into the one hit list of the query in the lists' order, at
 //! every thread count.
 
+#[allow(unused_imports)]
+use crate::utils::glibc_fma_libm::GlibcLibm;
 use anyhow::Result;
 
 use super::evalue::EvalueStats;
@@ -295,7 +297,7 @@ impl<R: PssmRows> PssmTraceback0<'_, R> {
         //          (hsp->score*kbp[hsp->context]->Lambda -
         //           kbp[hsp->context]->logK) / NCBIMATH_LN2;
         // ```
-        let log_k = self.karlin.k.ln();
+        let log_k = self.karlin.k.glibc_ln();
         for hsp in &mut hsp_list.hsps {
             hsp.bit_score =
                 (hsp.raw_score as f64 * self.karlin.lambda - log_k) / std::f64::consts::LN_2;

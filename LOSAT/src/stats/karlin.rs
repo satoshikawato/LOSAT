@@ -1,3 +1,5 @@
+#[allow(unused_imports)]
+use crate::utils::glibc_fma_libm::GlibcLibm;
 use super::tables::KarlinParams;
 
 /// Calculate bit score from raw score using Karlin-Altschul statistics
@@ -5,8 +7,8 @@ use super::tables::KarlinParams;
 /// Formula: S' = (lambda * S - ln(K)) / ln(2)
 /// where S is the raw score, S' is the bit score
 pub fn bit_score(raw_score: i32, params: &KarlinParams) -> f64 {
-    let ln2 = 2.0_f64.ln();
-    (params.lambda * (raw_score as f64) - params.k.ln()) / ln2
+    let ln2 = 2.0_f64.glibc_ln();
+    (params.lambda * (raw_score as f64) - params.k.glibc_ln()) / ln2
 }
 
 /// Calculate E-value from raw score and search space (NCBI BLAST_KarlinStoE_simple compatible)
@@ -19,7 +21,7 @@ pub fn evalue_from_raw_score(raw_score: i32, params: &KarlinParams, search_space
     if params.lambda < 0.0 || params.k < 0.0 {
         return -1.0;
     }
-    search_space * ((-params.lambda * (raw_score as f64)) + params.k.ln()).exp()
+    search_space * ((-params.lambda * (raw_score as f64)) + params.k.glibc_ln()).glibc_exp()
 }
 
 #[cfg(test)]
@@ -44,7 +46,7 @@ mod tests {
         assert!(bs > 0.0);
 
         // Verify the formula: S' = (lambda * S - ln(K)) / ln(2)
-        let expected = (0.267 * 100.0 - 0.041_f64.ln()) / 2.0_f64.ln();
+        let expected = (0.267 * 100.0 - 0.041_f64.glibc_ln()) / 2.0_f64.glibc_ln();
         assert!((bs - expected).abs() < 0.001);
     }
 }

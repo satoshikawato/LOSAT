@@ -1,5 +1,7 @@
 //! BLASTX's linking with sum statistics in internal context coordinates: the uneven-gap linking
 //! (`link_uneven`) and the even-gap linking of the ungapped search (`link_even`, `core::link_hsps`).
+#[allow(unused_imports)]
+use crate::utils::glibc_fma_libm::GlibcLibm;
 use super::{
     args::ResolvedOptions,
     parameters::ContextParameters,
@@ -847,9 +849,9 @@ pub fn link_uneven(
                 )
             } else {
                 lengths[context].search_space as f64
-                    * (-kbp.lambda * hsp.score as f64 + kbp.k.ln()).exp()
+                    * (-kbp.lambda * hsp.score as f64 + kbp.k.glibc_ln()).glibc_exp()
             } / gap_decay_divisor(link.gap_decay_rate, 1);
-            let sum_score = kbp.lambda * hsp.score as f64 - kbp.k.ln();
+            let sum_score = kbp.lambda * hsp.score as f64 - kbp.k.glibc_ln();
             WorkHsp {
                 value: LinkedHsp {
                     hsp,
@@ -1002,7 +1004,7 @@ pub(crate) fn link_even(
             let p = &parameters[context];
             LinkContext {
                 lambda: p.ungapped.lambda,
-                log_k: p.ungapped.k.ln(),
+                log_k: p.ungapped.k.glibc_ln(),
                 query_length: batch.contexts[context].length as i32,
                 length_adjustment: p.length_adjustment,
                 eff_searchsp: p.search_space,

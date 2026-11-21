@@ -1,4 +1,6 @@
 //! Native serial BLASTX runtime returning actual final HSPs and ancillary state.
+#[allow(unused_imports)]
+use crate::utils::glibc_fma_libm::GlibcLibm;
 use super::{
     args::ResolvedOptions,
     input::FastaRecord,
@@ -1141,7 +1143,7 @@ impl Runtime<'_> {
                     let p = &params[h.hsp.context];
                     let mut payload = payloads[h.source_index].clone();
                     payload.bit_score = (h.hsp.score as f64 * p.ungapped.lambda
-                        - p.ungapped.k.ln())
+                        - p.ungapped.k.glibc_ln())
                         / std::f64::consts::LN_2;
                     payload.hsp = h.hsp;
                     payload.num = h.num;
@@ -1827,7 +1829,7 @@ impl PreliminarySink for Runtime<'_> {
                 for mut list in lists {
                     for h in &mut list.hsps {
                         let p = &full[h.hsp.context];
-                        h.bit_score = (h.hsp.score as f64 * p.ungapped.lambda - p.ungapped.k.ln())
+                        h.bit_score = (h.hsp.score as f64 * p.ungapped.lambda - p.ungapped.k.glibc_ln())
                             / std::f64::consts::LN_2;
                     }
                     queries[list.query_index].update_observed(list, self.observer);

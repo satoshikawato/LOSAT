@@ -6,6 +6,8 @@
 //!
 //! Reference: NCBI BLAST source code (blast_stat.c)
 
+#[allow(unused_imports)]
+use crate::utils::glibc_fma_libm::GlibcLibm;
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/ncbi_math.h:152-163
 const LOGDERIV_ORDER_MAX: usize = 4;
 const POLYGAMMA_ORDER_MAX: usize = LOGDERIV_ORDER_MAX;
@@ -75,7 +77,7 @@ const PRECOMPUTED_FACTORIAL: [f64; 35] = [
 pub(crate) fn blast_expm1(x: f64) -> f64 {
     let absx = x.abs();
     if absx > 0.33 {
-        return x.exp() - 1.0;
+        return x.glibc_exp() - 1.0;
     }
     if absx < 1.0e-16 {
         return x;
@@ -98,7 +100,7 @@ pub(crate) fn blast_expm1(x: f64) -> f64 {
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/ncbi_math.c:64-83
 fn blast_log1p(x: f64) -> f64 {
     if x.abs() >= 0.2 {
-        return (x + 1.0).ln();
+        return (x + 1.0).glibc_ln();
     }
     let mut sum = 0.0;
     let mut y = x;
@@ -163,7 +165,7 @@ fn s_log_derivative(order: i32, u: &[f64]) -> f64 {
     match order {
         0 => {
             if u[0] > 0.0 {
-                u[0].ln()
+                u[0].glibc_ln()
             } else {
                 f64::INFINITY
             }
@@ -223,10 +225,10 @@ fn s_general_ln_gamma(x: f64, order: i32) -> f64 {
     let mut tmp = tx + 0.5;
     match order {
         0 => {
-            value += (NCBIMATH_LNPI + NCBIMATH_LN2) / 2.0 + (xx + 0.5) * tmp.ln() - tmp;
+            value += (NCBIMATH_LNPI + NCBIMATH_LN2) / 2.0 + (xx + 0.5) * tmp.glibc_ln() - tmp;
         }
         1 => {
-            value += tmp.ln() - xgamma_dim / tmp;
+            value += tmp.glibc_ln() - xgamma_dim / tmp;
         }
         2 => {
             value += (tmp + xgamma_dim) / (tmp * tmp);
@@ -271,7 +273,7 @@ fn s_poly_gamma(x: f64, order: i32) -> f64 {
             if (x < -0.1 && ((x.ceil() == x) || sx < 2.0 * DBL_EPSILON)) || sx == 0.0 {
                 return f64::INFINITY;
             }
-            value += NCBIMATH_LNPI - sx.ln();
+            value += NCBIMATH_LNPI - sx.glibc_ln();
         } else {
             let mut y = [0.0; POLYGAMMA_ORDER_MAX + 1];
             let mut tmp = 1.0;
@@ -291,7 +293,7 @@ fn s_poly_gamma(x: f64, order: i32) -> f64 {
             if x == 0.0 {
                 return f64::INFINITY;
             }
-            value -= x.ln();
+            value -= x.glibc_ln();
         } else {
             let tmp = blast_factorial(order - 1) * blast_powi(x, -order);
             value += if order % 2 == 0 { tmp } else { -tmp };
@@ -313,13 +315,13 @@ fn blast_factorial(n: i32) -> f64 {
     if (n as usize) < PRECOMPUTED_FACTORIAL.len() {
         return PRECOMPUTED_FACTORIAL[n as usize];
     }
-    (s_ln_gamma(n as f64 + 1.0)).exp()
+    (s_ln_gamma(n as f64 + 1.0)).glibc_exp()
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/ncbi_math.c:323-329
 fn blast_ln_gamma_int(n: i32) -> f64 {
     if n > 1 && (n as usize) < PRECOMPUTED_FACTORIAL.len() {
-        return PRECOMPUTED_FACTORIAL[(n - 1) as usize].ln();
+        return PRECOMPUTED_FACTORIAL[(n - 1) as usize].glibc_ln();
     }
     s_ln_gamma(n as f64)
 }
@@ -430,10 +432,10 @@ fn blast_sum_p_calc(r: i32, s: f64) -> f64 {
 
     if r == 1 {
         if s > 8.0 {
-            return (-s).exp();
+            return (-s).glibc_exp();
         }
         // -BLAST_Expm1(-exp(-s))
-        return -blast_expm1(-(-s).exp());
+        return -blast_expm1(-(-s).glibc_exp());
     }
     if r < 1 {
         return 0.0;
@@ -474,7 +476,7 @@ fn blast_sum_p_calc(r: i32, s: f64) -> f64 {
     }
 
     // mean is close to the mode and is readily calculated
-    let logr = rf.ln();
+    let logr = rf.glibc_ln();
     let mean = rf * (1.0 - logr) - 0.5;
     if s <= mean - stddev4 {
         return 1.0;
@@ -493,17 +495,17 @@ fn blast_sum_p_calc(r: i32, s: f64) -> f64 {
 
     // Callback for outer integral
     let outer_integral = |x: f64, adj2: f64, sdvir: f64| -> f64 {
-        let y = (x - sdvir).exp();
+        let y = (x - sdvir).glibc_exp();
         if !y.is_finite() {
             return 0.0;
         }
         if num_hsps_minus_2 == 0 {
-            return (adj2 - y).exp();
+            return (adj2 - y).glibc_exp();
         }
         if x == 0.0 {
             return 0.0;
         }
-        ((num_hsps_minus_2 as f64) * x.ln() + adj2 - y).exp()
+        ((num_hsps_minus_2 as f64) * x.glibc_ln() + adj2 - y).glibc_exp()
     };
 
     // Callback for inner integral (calls outer via Romberg)
@@ -564,7 +566,7 @@ fn blast_sum_p_calc_reused(r: i32, s: f64) -> f64 {
 fn blast_sum_p(r: i32, s: f64) -> f64 {
     // Faithful port of NCBI BLAST's s_BlastSumP.
     if r == 1 {
-        return -blast_expm1(-(-s).exp());
+        return -blast_expm1(-(-s).glibc_exp());
     }
 
     if r <= 4 {
@@ -576,7 +578,7 @@ fn blast_sum_p(r: i32, s: f64) -> f64 {
 
         if s >= rf * rf + (r1 as f64) {
             let a = ln_gamma_int(r + 1);
-            return rf * ((r1 as f64) * s.ln() - s - a - a).exp();
+            return rf * ((r1 as f64) * s.glibc_ln() - s - a - a).glibc_exp();
         }
 
         if s > -2.0 * rf {
@@ -704,14 +706,14 @@ pub fn small_gap_sum_e(
     let mut sum_e: f64;
 
     if num_hsps == 1 {
-        sum_e = (searchsp_eff as f64) * (-xsum).exp();
+        sum_e = (searchsp_eff as f64) * (-xsum).glibc_exp();
     } else {
         let pair_search_space = (subject_length as f64) * (query_length as f64);
         let num = num_hsps as i32;
 
         let mut adjusted_xsum = xsum;
         adjusted_xsum -=
-            pair_search_space.ln() + 2.0 * ((num - 1) as f64) * (starting_points as f64).ln();
+            pair_search_space.glibc_ln() + 2.0 * ((num - 1) as f64) * (starting_points as f64).glibc_ln();
         adjusted_xsum -= ln_factorial_int(num);
 
         let sum_p = blast_sum_p(num, adjusted_xsum);
@@ -758,15 +760,15 @@ pub fn uneven_gap_sum_e(
     let mut sum_e: f64;
 
     if num_hsps == 1 {
-        sum_e = (searchsp_eff as f64) * (-xsum).exp();
+        sum_e = (searchsp_eff as f64) * (-xsum).glibc_exp();
     } else {
         let pair_search_space = (subject_length as f64) * (query_length as f64);
         let num = num_hsps as i32;
 
         let mut adjusted_xsum = xsum;
-        adjusted_xsum -= pair_search_space.ln()
+        adjusted_xsum -= pair_search_space.glibc_ln()
             + ((num - 1) as f64)
-                * ((query_start_points as f64).ln() + (subject_start_points as f64).ln());
+                * ((query_start_points as f64).glibc_ln() + (subject_start_points as f64).glibc_ln());
         adjusted_xsum -= ln_factorial_int(num);
 
         let sum_p = blast_sum_p(num, adjusted_xsum);
@@ -806,11 +808,11 @@ pub fn ncbi_large_gap_sum_e(
 ) -> f64 {
     let mut sum_e: f64;
     if num_hsps == 1 {
-        sum_e = (searchsp_eff as f64) * (-xsum).exp();
+        sum_e = (searchsp_eff as f64) * (-xsum).glibc_exp();
     } else {
         let num = num_hsps as i32;
         let prod = (subject_length as f64) * (query_length as f64);
-        let adjusted_xsum = xsum - ((num as f64) * prod.ln() - ln_factorial_int(num));
+        let adjusted_xsum = xsum - ((num as f64) * prod.glibc_ln() - ln_factorial_int(num));
         let sum_p = blast_sum_p(num, adjusted_xsum);
         sum_e = p_to_e(sum_p) * ((searchsp_eff as f64) / prod);
     }
@@ -862,10 +864,10 @@ mod tests {
         assert!((blast_ln_factorial(1.0) - 0.0).abs() < 1e-10);
 
         // ln(2!) = ln(2) ≈ 0.693
-        assert!((blast_ln_factorial(2.0) - 2.0_f64.ln()).abs() < 1e-10);
+        assert!((blast_ln_factorial(2.0) - 2.0_f64.glibc_ln()).abs() < 1e-10);
 
         // ln(5!) = ln(120) ≈ 4.787
-        assert!((blast_ln_factorial(5.0) - 120.0_f64.ln()).abs() < 1e-10);
+        assert!((blast_ln_factorial(5.0) - 120.0_f64.glibc_ln()).abs() < 1e-10);
     }
 
     #[test]
@@ -888,7 +890,7 @@ mod tests {
         let searchsp = 1000000_i64;
         let result = small_gap_sum_e(50, 1, xsum, 100, 1000, searchsp, 1.0);
 
-        let expected = (searchsp as f64) * (-xsum).exp();
+        let expected = (searchsp as f64) * (-xsum).glibc_exp();
         assert!((result - expected).abs() / expected < 0.01);
     }
 
@@ -896,7 +898,7 @@ mod tests {
     fn test_normalize_score() {
         let lambda: f64 = 0.267;
         let k: f64 = 0.041;
-        let log_k = k.ln();
+        let log_k = k.glibc_ln();
         let score = 100;
 
         let xsum = normalize_score(score, lambda, log_k);

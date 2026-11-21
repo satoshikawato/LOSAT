@@ -10,6 +10,8 @@
 //! needs by position. A value that NCBI would read out of bounds (undefined behaviour there) is
 //! an `Err` here.
 
+#[allow(unused_imports)]
+use crate::utils::glibc_fma_libm::GlibcLibm;
 use std::collections::BTreeSet;
 
 use super::lmdb_read::{Env, ReadAt};
@@ -694,7 +696,7 @@ pub fn get_oids_for_tax_ids<R1: ReadAt + ?Sized, R2: ReadAt + ?Sized>(
     let oids_sz = oids.len();
     // NCBI: sort when `oids_sz * log(oids_sz) < m_NumOids`, else scan the bit vector. (For 0 the
     // product is NaN and the scan finds nothing.) Both give ascending unique OIDs.
-    if (oids_sz as f64) * (oids_sz as f64).ln() < num_oids as f64 {
+    if (oids_sz as f64) * (oids_sz as f64).glibc_ln() < num_oids as f64 {
         oids.sort_unstable();
     } else {
         oids.clear();

@@ -18,6 +18,8 @@
 //! hit list per query as NCBI's one thread does, at every thread count (NCBI's merge of the
 //! threads' capped results can keep more lists for `-culling_limit` and `-qcov_hsp_perc` with
 //! several threads; LOSAT's output is that of NCBI's `-num_threads 1`).
+#[allow(unused_imports)]
+use crate::utils::glibc_fma_libm::GlibcLibm;
 use anyhow::Result;
 
 use super::super::gapalign::{
@@ -427,7 +429,7 @@ impl OrdinaryTraceback<'_> {
         //          (hsp->score*kbp[hsp->context]->Lambda -
         //           kbp[hsp->context]->logK) / NCBIMATH_LN2;
         // ```
-        let log_k = self.karlin.k.ln();
+        let log_k = self.karlin.k.glibc_ln();
         for hsp in &mut hsp_list.hsps {
             hsp.bit_score =
                 (hsp.raw_score as f64 * self.karlin.lambda - log_k) / std::f64::consts::LN_2;
@@ -454,7 +456,7 @@ impl OrdinaryTraceback<'_> {
                     self.search_spaces[hsp_list.query_index as usize].effective_space;
                 for hsp in &mut hsp_list.hsps {
                     hsp.e_value = search_space
-                        * (-self.karlin.lambda * hsp.raw_score as f64 + self.karlin.k.ln()).exp();
+                        * (-self.karlin.lambda * hsp.raw_score as f64 + self.karlin.k.glibc_ln()).glibc_exp();
                 }
             }
         }

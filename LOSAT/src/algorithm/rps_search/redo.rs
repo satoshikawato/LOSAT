@@ -37,6 +37,8 @@
 //!           s_BlastHSPListRPSUpdate(program_number, hsp_list);
 //! ```
 
+#[allow(unused_imports)]
+use crate::utils::glibc_fma_libm::GlibcLibm;
 use anyhow::Result;
 
 use super::traceback::{sort_by_score, swap_roles, RpsTraceScratch, RpsTraceback, RpsTraced};
@@ -249,7 +251,7 @@ impl RpsTraceback<'_> {
                     k,
                     ..self.gapped
                 },
-                k.ln(),
+                k.glibc_ln(),
                 (redo.gap_open, redo.gap_extend),
                 (redo.x_drop_final_bits, self.x_drop_final),
                 matrix,

@@ -126,6 +126,8 @@
 //! thread and 242 -> 222 at eight. `groups` of the first linking call 0.011 -> 0.002 s and
 //! `assemble` 0.010 -> 0.000 s (the pair, one thread).
 
+#[allow(unused_imports)]
+use crate::utils::glibc_fma_libm::GlibcLibm;
 #[cfg(test)]
 use super::x_hsp_inplace::x_assert_same_hits;
 use super::x_hsp_inplace::{buffer_pools, group_starts, GroupArgs};
@@ -899,7 +901,7 @@ mod tests {
     #[test]
     fn the_slices_give_the_reference_list_serially_and_on_pools() {
         let (params, contexts) = two_query_contexts();
-        let log_k: Vec<f64> = contexts.iter().map(|c| c.karlin_params.k.ln()).collect();
+        let log_k: Vec<f64> = contexts.iter().map(|c| c.karlin_params.k.glibc_ln()).collect();
         let cutoffs = cutoff_sets();
         let cases: usize = std::env::var("LOSAT_FUZZ_CASES")
             .ok()
@@ -1021,7 +1023,7 @@ mod tests {
     #[test]
     fn empty_single_and_one_group_lists() {
         let (params, contexts) = two_query_contexts();
-        let log_k: Vec<f64> = contexts.iter().map(|c| c.karlin_params.k.ln()).collect();
+        let log_k: Vec<f64> = contexts.iter().map(|c| c.karlin_params.k.glibc_ln()).collect();
         let linking = LinkingParams {
             subject_len_nucl: 300_000,
             gap_decay_rate: 0.5,

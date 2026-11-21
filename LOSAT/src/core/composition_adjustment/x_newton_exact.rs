@@ -91,6 +91,8 @@
 //! and order are kept (see the list above). The rest of this module changes only the data layout
 //! and which independent elements are advanced together.
 
+#[allow(unused_imports)]
+use crate::utils::glibc_fma_libm::GlibcLibm;
 use super::adjust_scores::{
     COMPO_NUM_TRUE_AA, K_COMPO_ADJUST_ERR_TOLERANCE, K_COMPO_ADJUST_ITERATION_LIMIT,
 };
@@ -191,7 +193,7 @@ const P: usize = 24;
 /// `ln(1.0)` as the libm of this process computes it (not constant-folded).
 pub(super) fn ln_one() -> f64 {
     static LN_ONE: OnceLock<f64> = OnceLock::new();
-    *LN_ONE.get_or_init(|| std::hint::black_box(1.0f64).ln())
+    *LN_ONE.get_or_init(|| std::hint::black_box(1.0f64).glibc_ln())
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:193-208

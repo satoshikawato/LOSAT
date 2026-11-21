@@ -50,6 +50,8 @@
 //! }
 //! ```
 
+#[allow(unused_imports)]
+use crate::utils::glibc_fma_libm::GlibcLibm;
 use crate::core::psi::PsiScoreBlk;
 use crate::stats::karlin_calc::calc_lambda_of_score_probs;
 use crate::utils::matrix::{ncbistdaa, BLASTAA_SIZE};
@@ -373,7 +375,7 @@ fn freq_ratio_to_score<C: RedoInstance>(ratio: f64, lambda: f64) -> f64 {
     if ratio == 0.0 {
         COMPO_SCORE_MIN as f64
     } else {
-        ratio.ln() / lambda
+        ratio.glibc_ln() / lambda
     }
 }
 

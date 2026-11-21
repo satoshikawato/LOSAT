@@ -1,6 +1,8 @@
 //! TBLASTN translated-subject Kappa traceback boundary.
 //! The public TBLASTN CLI remains gated until stages D and E agree.
 
+#[allow(unused_imports)]
+use crate::utils::glibc_fma_libm::GlibcLibm;
 use anyhow::{bail, Context, Result};
 use std::ffi::c_void;
 use std::ptr::NonNull;
@@ -1330,7 +1332,7 @@ mod tests {
             would[2].parse::<f64>().unwrap().to_bits()
         );
         let bit =
-            normalize_postredo_scores(&mut linked, gapped.lambda / 32.0, gapped.k.ln(), 32.0)[0];
+            normalize_postredo_scores(&mut linked, gapped.lambda / 32.0, gapped.k.glibc_ln(), 32.0)[0];
         assert_eq!(linked.hsps[0].hsp.score, heap[3].parse().unwrap());
         assert_eq!(bit.to_bits(), heap[4].parse::<f64>().unwrap().to_bits());
         assert_eq!(
@@ -1839,7 +1841,7 @@ mod tests {
             assert_eq!(linked.hsps[0].hsp.score, would[3].parse().unwrap());
             assert_eq!(would[9], "1");
             let bits =
-                normalize_postredo_scores(&mut linked, gapped.lambda / 32.0, gapped.k.ln(), 32.0);
+                normalize_postredo_scores(&mut linked, gapped.lambda / 32.0, gapped.k.glibc_ln(), 32.0);
             let heap_rows: Vec<_> = heap_trace
                 .lines()
                 .filter(|line| line.starts_with("K_TRACE_HEAP_HSP\t"))
@@ -2552,7 +2554,7 @@ mod tests {
                 would[8].parse::<f64>().unwrap().to_bits()
             );
             assert_eq!(heap.would_insert(candidate), would[9] == "1");
-            let bits = normalize_postredo_scores(&mut postredo, scaled.lambda, gapped.k.ln(), 32.0);
+            let bits = normalize_postredo_scores(&mut postredo, scaled.lambda, gapped.k.glibc_ln(), 32.0);
             let mut target = TargetTranslation::new(subject, &code);
             let identities = postredo_num_ident(align, &query_aa, &mut target).unwrap();
             let heap_hsp: Vec<_> = heap_hsp_rows[redo_index].split('\t').collect();

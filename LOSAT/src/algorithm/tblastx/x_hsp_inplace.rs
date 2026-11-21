@@ -153,6 +153,8 @@
 //! The group step of `link_in_place` is `x_link_slices.rs`, which links the groups as disjoint
 //! sub-slices of the one sorted list (its header has the argument).
 
+#[allow(unused_imports)]
+use crate::utils::glibc_fma_libm::GlibcLibm;
 use super::*;
 // Diagnostic (LOSAT_TIMING): the clock of a linking call (tblastx/x_link_timing.rs). It reads
 // the clock only in a call the batch function armed, and the linking reads nothing from it.
@@ -704,7 +706,7 @@ where
     // Per-context logK, as in the reference.
     let log_k_by_ctx: Vec<f64> = query_contexts
         .iter()
-        .map(|ctx| ctx.karlin_params.k.ln())
+        .map(|ctx| ctx.karlin_params.k.glibc_ln())
         .collect();
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:483-486

@@ -26,6 +26,8 @@
 //!     }
 //! ```
 
+#[allow(unused_imports)]
+use crate::utils::glibc_fma_libm::GlibcLibm;
 use anyhow::Result;
 
 use super::evalue::EvalueStats;
@@ -589,7 +591,7 @@ impl PssmRedo1<'_> {
                 k: self.info.gapped_k,
                 ..*self.karlin
             },
-            self.info.gapped_k.ln(),
+            self.info.gapped_k.glibc_ln(),
             (self.gap_open, self.gap_extend),
             (self.x_drop_final_bits, self.x_drop_final),
             self.pssm.clone(),

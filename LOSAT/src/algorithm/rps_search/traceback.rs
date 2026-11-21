@@ -5,6 +5,8 @@
 //! each alignment), then `s_HSPListPostTracebackUpdate`: the roles swapped back, the e-values at
 //! the database's scale, the scores divided back and the bit scores.
 
+#[allow(unused_imports)]
+use crate::utils::glibc_fma_libm::GlibcLibm;
 use anyhow::Result;
 
 use super::engine::RpsQuery;
@@ -571,7 +573,7 @@ impl RpsTraceback<'_> {
         //          (hsp->score*kbp[hsp->context]->Lambda -
         //           kbp[hsp->context]->logK) / NCBIMATH_LN2;
         // ```
-        let log_k = karlin.k.ln();
+        let log_k = karlin.k.glibc_ln();
         for hsp in &mut hsp_list.hsps {
             hsp.bit_score =
                 (f64::from(hsp.raw_score) * karlin.lambda - log_k) / std::f64::consts::LN_2;

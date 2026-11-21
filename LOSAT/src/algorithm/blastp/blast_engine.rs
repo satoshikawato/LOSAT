@@ -2,6 +2,8 @@
 //!
 //! Reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c
 
+#[allow(unused_imports)]
+use crate::utils::glibc_fma_libm::GlibcLibm;
 use anyhow::{bail, Context, Result};
 #[cfg(all(
     feature = "parallel",
@@ -1782,7 +1784,7 @@ fn x_build_compact_preliminary_hsp_list<'h>(
             .map(|hit| XPrelimHsp {
                 hsp: *hit,
                 e_value: search_space
-                    * (-karlin_params.lambda * hit.raw_score as f64 + karlin_params.k.ln()).exp(),
+                    * (-karlin_params.lambda * hit.raw_score as f64 + karlin_params.k.glibc_ln()).glibc_exp(),
             })
             .collect(),
     };
@@ -1848,7 +1850,7 @@ pub(super) fn blastp_link_context(
 ) -> crate::core::link_hsps::LinkContext {
     crate::core::link_hsps::LinkContext {
         lambda: karlin_params.lambda,
-        log_k: karlin_params.k.ln(),
+        log_k: karlin_params.k.glibc_ln(),
         query_length: query_length as i32,
         length_adjustment: search_space.length_adjustment as i32,
         eff_searchsp: search_space.effective_space as i64,

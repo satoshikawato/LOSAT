@@ -14,6 +14,8 @@
 //! In this branch `log_slice` calls the same libm function (`f64::ln`) on the same arguments in
 //! the same order, so each result is the one NCBI gets on this machine.
 
+#[allow(unused_imports)]
+use crate::utils::glibc_fma_libm::GlibcLibm;
 // No NCBI counterpart: an empty function so that the command entry (`cli/main_entry.rs`) builds
 // with or without the optional patch.
 /// No shadow mode in the strict version (nothing to compare).
@@ -31,6 +33,6 @@ pub fn print_shadow_stats() {}
 pub(crate) fn log_slice(src: &[f64], out: &mut [f64]) {
     debug_assert_eq!(src.len(), out.len());
     for (o, &x) in out.iter_mut().zip(src) {
-        *o = x.ln();
+        *o = x.glibc_ln();
     }
 }

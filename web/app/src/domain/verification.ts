@@ -158,7 +158,7 @@ export function verificationBadge(input: BadgeInput, table: VerificationTable): 
     level: 'certified',
     label: SUPPORTED_LABEL,
     details: [
-      `The program and these options were compared byte for byte with NCBI BLAST+ ${table.ncbi} for outfmt ${list(input.formats)} on LOSAT's test fixtures.`,
+      `The program and these options were compared byte for byte with NCBI BLAST+ ${table.ncbi} for outfmt ${list(input.formats)} on LOSAT's test fixtures, apart from the line that names the program's version (LOSAT names its own).`,
       `The ${input.runtimePath} runtime in the browser was checked against the native engine with ${counts(pathThreads)} ` +
         `${pathThreads.length === 1 && pathThreads[0] === 1 ? 'thread' : 'threads'} in ${list(browser!.browsers)}.`,
       'This is a statement about the engine build and the options, not a comparison of your inputs with NCBI.',

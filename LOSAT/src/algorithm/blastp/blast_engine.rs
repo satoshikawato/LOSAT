@@ -2279,7 +2279,7 @@ fn write_blastp_outfmt7_header<W: Write>(
     batch_skipped: bool,
     iteration: Option<u32>,
 ) -> std::io::Result<()> {
-    let version_str = crate::NCBI_BLAST_VERSION;
+    let version_str = crate::wording::REPORT_VERSION;
     writeln!(
         writer,
         "# {} {}",
@@ -4248,7 +4248,10 @@ pub fn run(
     // theirs (probe F04 of line DI-8), and a list error leaves no `-out`, only the error archive
     // that NCBI's `PrintErrorArchive` writes for outfmt 11 (probe E of line DI-8).
     let list = match &args.db {
-        Some(_) => match args.db_filter.resolve(&settings, &mut *diagnostics) {
+        Some(_) => match args
+            .db_filter
+            .resolve(&settings, args.app.ncbi_name(), &mut *diagnostics)
+        {
             Ok(list) => list,
             Err(error) => {
                 write_run_error_archive(&args, archive.as_ref(), &error);
@@ -5164,9 +5167,9 @@ fn search_database(
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
     // The handler of the database arguments reads the list before the other handlers (`run`).
-    let list = args
-        .db_filter
-        .resolve(&settings, &mut *outputs.diagnostics)?;
+    let list =
+        args.db_filter
+            .resolve(&settings, args.app.ncbi_name(), &mut *outputs.diagnostics)?;
     // `-out` (`run_to_file`) is made where the command line opens it (`run`).
     outputs.open_out()?;
     args.matrix_search = Some(settings.matrix_search.clone());
@@ -7319,7 +7322,7 @@ fn write_pairwise_prologs(
             let mut writer = format.sink.open()?;
             crate::report::pairwise::write_blastp_pairwise_prolog(
                 &mut writer,
-                crate::NCBI_BLAST_VERSION,
+                crate::wording::REPORT_VERSION,
                 args.app.ncbi_name(),
                 blastp_database_name(args, subject_label).as_bytes(),
                 num_sequences,
@@ -7419,7 +7422,7 @@ fn write_reports_without_queries(
         match outfmt {
             OutputFormat::Pairwise => {
                 let report = BlastpPairwiseReport {
-                    version: crate::NCBI_BLAST_VERSION.to_string(),
+                    version: crate::wording::REPORT_VERSION.to_string(),
                     database_name: blastp_database_name(args, subject_label).into(),
                     database_num_sequences: num_sequences,
                     database_total_letters: total_db_len,

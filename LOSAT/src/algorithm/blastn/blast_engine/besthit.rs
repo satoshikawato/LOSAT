@@ -20,32 +20,6 @@ fn int4(length: usize) -> i32 {
     i32::try_from(length).unwrap_or(i32::MAX)
 }
 
-/// The key of an HSP for the lists: its start on the plus strand of the query (a minus context
-/// folds its range over the query length) and its query extent.
-///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:256-266
-/// `qlen` is `BlastQueryInfoGetQueryLength` (the length of the query's searched context);
-/// `query_offset` and `query_end` are the HSP's offsets within its context.
-fn best_hit_key(
-    minus: bool,
-    qlen: i32,
-    query_offset: i32,
-    query_end: i32,
-    score: i32,
-    evalue: f64,
-) -> BestHitKey {
-    BestHitKey {
-        begin: if minus {
-            qlen - query_end
-        } else {
-            query_offset
-        },
-        len: query_end - query_offset,
-        score,
-        evalue,
-    }
-}
-
 /// NCBI's best hit writer in place of the HSP collector (`PrelimHitCollector`): each subject's
 /// preliminary HSPs go into the list of their query, and `finish` makes the hit lists of the
 /// queries. The subjects must come in OID order and the HSPs of a subject in the order of its
@@ -78,7 +52,7 @@ impl PrelimBestHit {
     pub(super) fn add(&mut self, oid: usize, hits: Vec<PrelimHit>) {
         for hit in hits {
             let query = hit.query_idx as usize;
-            let key = best_hit_key(
+            let key = BestHitKey::new(
                 hit.context_idx % 2 == 1,
                 self.query_lengths[query],
                 hit.prelim_qs,
@@ -92,7 +66,7 @@ impl PrelimBestHit {
 
     /// `s_BlastHSPBestHitFinal`: the hit list of each query with kept HSPs.
     ///
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:190-221
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:194-231
     pub(super) fn finish(self) -> PrelimHitLists {
         let mut hit_lists: PrelimHitLists = Vec::with_capacity(self.query_lengths.len());
         hit_lists.resize_with(self.query_lengths.len(), || None);
@@ -146,7 +120,7 @@ pub(super) fn best_hit_traceback(
     for list in std::mem::take(&mut hit_list.hsplist_array) {
         let oid = list.oid;
         for hsp in list.hsps {
-            let key = best_hit_key(
+            let key = BestHitKey::new(
                 hsp.query_frame < 0,
                 qlen,
                 hsp.internal_q_offset_0,

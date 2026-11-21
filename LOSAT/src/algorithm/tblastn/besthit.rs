@@ -45,7 +45,7 @@ type KeptList = (u32, Vec<LinkedHsp>, Vec<KappaHspPayload>);
 /// e-values set, the lists sorted by e-value and saved into a hit list of `prelim_size` lists,
 /// which keeps the lists of the best e-values when there are more (`Blast_HitListUpdate`).
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:190-221
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:194-231
 /// `s_ExportToHitlist` saves the lists into a hit list as large as the HSPs (it is never full,
 /// so `Blast_HitListUpdate` only sets each list's best e-value) and `Blast_HitListSortByEvalue`
 /// sorts it (`compare_result_lists`, a total order: the OIDs differ).

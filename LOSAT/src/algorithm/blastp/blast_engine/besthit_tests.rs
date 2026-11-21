@@ -109,7 +109,7 @@ fn the_writer_drops_an_hsp_inside_a_better_one_of_its_query() {
     assert_eq!(scores(&lists, 1), vec![(2, vec![100])]);
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:200-214: the lists
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:207-221: the lists
 // are sorted by e-value and saved into a hit list of `prelim_hitlist_size`, which keeps the
 // best ones.
 #[test]

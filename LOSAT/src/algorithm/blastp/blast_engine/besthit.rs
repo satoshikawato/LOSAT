@@ -48,7 +48,7 @@ fn save_list<H: HitListHsp>(lists: &mut BestHitLists<H>, query: usize, list: Bla
 /// of `prelim_hitlist_size` lists, which keeps the lists of the best e-values when there are
 /// more (`Blast_HitListUpdate`).
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:190-221
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:194-231
 /// `s_ExportToHitlist` saves the lists into a hit list as large as the HSPs (it is never full,
 /// so `Blast_HitListUpdate` only sets each list's best e-value) and `Blast_HitListSortByEvalue`
 /// sorts it.

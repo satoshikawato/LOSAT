@@ -798,7 +798,7 @@ impl<L: HitListEntry> HitList<L> {
     /// when there are more (`Blast_HitListUpdate`). The writer and the pipe of every program whose
     /// lists are these hit lists (blastn, tblastx) end here.
     ///
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:200-214
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:207-221
     pub(crate) fn best_hit_final(mut lists: Vec<L>, prelim_hitlist_size: usize) -> Self {
         for list in &mut lists {
             list.update_best_evalue();

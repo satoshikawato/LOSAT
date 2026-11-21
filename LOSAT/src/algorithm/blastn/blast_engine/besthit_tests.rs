@@ -56,7 +56,7 @@ fn a_minus_hsp_is_folded_to_the_plus_strand() {
     assert_eq!(scores(&lists, 0), vec![(0, vec![200, 50])]);
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:200-214: the lists
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:207-221: the lists
 // are sorted by e-value and saved into a hit list of `prelim_hitlist_size`, which keeps the
 // best ones.
 #[test]

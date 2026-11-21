@@ -158,7 +158,7 @@ fn the_pipe_saves_the_lists_in_evalue_order() {
     assert_eq!(scores(&queries[0]), vec![(7, vec![500]), (4, vec![300])]);
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:190-221: the writer's
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:194-231: the writer's
 // final step makes each query's hit list apart: one list per subject sorted by score, the lists
 // by e-value, a query without HSPs empty.
 #[test]

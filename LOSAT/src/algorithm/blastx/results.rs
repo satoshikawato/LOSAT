@@ -379,7 +379,7 @@ impl HspStream {
                 }
             }
         }
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:190-221
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:194-231
         if let Some(writer) = self.besthit.take() {
             self.queries = writer.finalize(self.queries.len(), self.max);
         }

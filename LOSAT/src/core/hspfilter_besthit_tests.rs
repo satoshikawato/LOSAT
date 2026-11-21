@@ -71,7 +71,7 @@ fn a_better_hsp_removes_the_ones_it_contains() {
     assert_eq!(kept(lists), vec![(0, vec![(1, vec![2]), (3, vec![4])])]);
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:265-267: an
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:291-296: an
 // overhang whose `Int4` overflows is `INT_MIN` (the oracle's conversion), and the new HSP
 // removes nothing; a smaller overhang removes the HSP it holds.
 #[test]
@@ -91,7 +91,7 @@ fn an_overhang_past_int4_removes_nothing() {
     );
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:190-221: the
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:194-231: the
 // subjects come in the order of their first HSP in the list (by start), each list sorted.
 #[test]
 fn the_lists_follow_the_starts_and_queries_apart() {
@@ -109,7 +109,7 @@ fn the_lists_follow_the_starts_and_queries_apart() {
     );
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:85-182,322-327:
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:88-186,340-345:
 // past twice `prelim_hitlist_size` HSPs the list is rebuilt without the overhangs, so an
 // HSP that the stored overhang of another held is no longer dropped.
 #[test]

@@ -116,7 +116,7 @@ fn the_writer_drops_an_hsp_inside_a_better_one_of_its_query() {
     assert_eq!(summary(lists[2].as_ref().unwrap()), vec![(1, vec![100])]);
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:200-214: the lists of
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:207-221: the lists of
 // a query are sorted by e-value and saved into a hit list of `prelim_hitlist_size`, which keeps
 // the best ones (blast_hits.c:3243-3297: the full hit list sorts the HSPs of its lists by
 // e-value).
@@ -178,7 +178,7 @@ fn the_pipe_reads_the_lists_by_evalue() {
     assert_eq!(tags, vec![vec![41, 42], vec![91]]);
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:85-182,520-539: the pipe
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:88-186,520-539: the pipe
 // saves the HSPs of a list in the list's own order (by score here), not by e-value. With a hit
 // list size of 2 the fifth HSP rebuilds the query's list, which drops the overhang of the HSPs
 // saved so far: the HSP of score 300 saved first then no longer holds the HSP of subject 2 that

@@ -94,7 +94,35 @@ pub(crate) struct BestHitKey {
     pub(crate) evalue: f64,
 }
 
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:42-49
+impl BestHitKey {
+    /// The key of an HSP of a query that has strands or frames: a minus context folds the HSP's
+    /// range in its context (`query_offset`, `query_end`) over `qlen`, the query's
+    /// `BlastQueryInfoGetQueryLength` (for a translated query a length of nucleotides while the
+    /// offsets are residues of the frame: NCBI mixes the two units, and so does the key).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:256-266
+    pub(crate) fn new(
+        minus: bool,
+        qlen: i32,
+        query_offset: i32,
+        query_end: i32,
+        score: i32,
+        evalue: f64,
+    ) -> Self {
+        Self {
+            begin: if minus {
+                qlen - query_end
+            } else {
+                query_offset
+            },
+            len: query_end - query_offset,
+            score,
+            evalue,
+        }
+    }
+}
+
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:43-50
 /// `hsp` is the slot of the payload in the arena. `begin` and `end` are the range with the
 /// overhang of the stage (or without it after the list was rebuilt, `s_ImportFromHitlist`);
 /// `key_begin` is the range's start without it, which a rebuild reads again from the HSP.
@@ -149,7 +177,7 @@ impl<H> BestHitLists<H> {
         Self::new(params.overhang, params.score_edge, prelim_hitlist_size)
     }
 
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:65-78
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:67-80
     fn new(overhang: f64, score_edge: f64, prelim_hitlist_size: usize) -> Self {
         let size = i64::try_from(prelim_hitlist_size).unwrap_or(i64::MAX);
         Self {
@@ -286,7 +314,7 @@ impl<H> BestHitLists<H> {
     /// dropped (an HSP list of NCBI's applications holds any number of HSPs, `BlastHspNumMax`),
     /// and the next rebuild waits for twice as many HSPs.
     ///
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:85-182
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:88-186
     fn rebuild(&mut self, query: usize) {
         let list = std::mem::take(&mut self.lists[query]);
         let mut grouped: Vec<Vec<LinkedHspBh>> = Vec::new();
@@ -320,7 +348,7 @@ impl<H> BestHitLists<H> {
     /// the lists by e-value and saves them into a hit list of `prelim_hitlist_size`
     /// (`Blast_HitListSortByEvalue`, `Blast_HitListUpdate`).
     ///
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:190-221
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:194-231
     pub(crate) fn finalize(
         mut self,
         mut cmp: impl FnMut(&H, &H) -> Ordering,

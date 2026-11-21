@@ -31,18 +31,14 @@ use super::report::HitFilters;
 /// residues, as in NCBI.
 fn best_hit_key(hsp: &TblastxHsp, qlen: i32) -> BestHitKey {
     let hit = &hsp.hit;
-    let offset = hit.sort_query_offset as i32;
-    let end = hit.sort_query_end as i32;
-    BestHitKey {
-        begin: if hit.query_frame < 0 {
-            qlen - end
-        } else {
-            offset
-        },
-        len: end - offset,
-        score: hit.raw_score,
-        evalue: hit.e_value,
-    }
+    BestHitKey::new(
+        hit.query_frame < 0,
+        qlen,
+        hit.sort_query_offset as i32,
+        hit.sort_query_end as i32,
+        hit.raw_score,
+        hit.e_value,
+    )
 }
 
 /// The kept lists of a query as `TblastxHspList`s, each sorted by score

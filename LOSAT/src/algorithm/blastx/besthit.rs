@@ -51,20 +51,17 @@ impl QueryFrames {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:40-49
         let query = context / CONTEXTS_PER_QUERY;
         let first = query * CONTEXTS_PER_QUERY;
-        let (q_start, q_end) = (hsp.hsp.q_start, hsp.hsp.q_end);
-        let begin = if self.minus[context] {
-            translated_query_length(&self.lengths[first..first + CONTEXTS_PER_QUERY]) - q_end
-        } else {
-            q_start
-        };
+        let qlen = translated_query_length(&self.lengths[first..first + CONTEXTS_PER_QUERY]);
         (
             query,
-            BestHitKey {
-                begin,
-                len: q_end - q_start,
-                score: hsp.hsp.score,
-                evalue: hsp.evalue,
-            },
+            BestHitKey::new(
+                self.minus[context],
+                qlen,
+                hsp.hsp.q_start,
+                hsp.hsp.q_end,
+                hsp.hsp.score,
+                hsp.evalue,
+            ),
         )
     }
 
@@ -85,7 +82,7 @@ impl QueryFrames {
 /// keeps those of the best e-values when there are more than `max`). A query without kept HSPs has
 /// an empty hit list.
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:190-221
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:194-231
 /// `s_ExportToHitlist` saves the lists into a hit list as large as the HSPs (never full, so
 /// `Blast_HitListUpdate` only sets each list's best e-value) and `Blast_HitListSortByEvalue`
 /// sorts it (`s_EvalueCompareHSPLists`, `compare_list`: total for the lists of distinct OIDs).

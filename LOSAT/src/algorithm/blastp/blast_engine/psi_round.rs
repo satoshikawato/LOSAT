@@ -383,6 +383,12 @@ fn run_queries(
                     .psi_search
                     .as_deref()
                     .and_then(|psi| psi.bioseq_letters.clone());
+                // And its molecule: a query of the molecule `other` is unreadable for the
+                // reports of every round (`PsiSearch::query_other_coding`).
+                search.query_other_coding = args
+                    .psi_search
+                    .as_deref()
+                    .and_then(|psi| psi.query_other_coding);
                 // A query that NCBI splits: round 1's query, which the round searches, and the query
                 // of its set-up (`RoundQuery::split`).
                 let (query_now, split_setup) = if split {

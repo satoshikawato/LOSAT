@@ -1,0 +1,190 @@
+Seq-loc ::= packed-int {
+  {
+    from 22,
+    to 35,
+    id swissprot {
+      accession "P12345",
+      release "reviewed"
+    }
+  },
+  {
+    from 68,
+    to 76,
+    id swissprot {
+      accession "P12345",
+      release "reviewed"
+    }
+  },
+  {
+    from 137,
+    to 152,
+    id swissprot {
+      accession "P12345",
+      release "reviewed"
+    }
+  },
+  {
+    from 161,
+    to 176,
+    id swissprot {
+      accession "P12345",
+      release "reviewed"
+    }
+  },
+  {
+    from 193,
+    to 205,
+    id swissprot {
+      accession "P12345",
+      release "reviewed"
+    }
+  },
+  {
+    from 393,
+    to 406,
+    id swissprot {
+      accession "P12345",
+      release "reviewed"
+    }
+  },
+  {
+    from 485,
+    to 497,
+    id swissprot {
+      accession "P12345",
+      release "reviewed"
+    }
+  }
+}
+Seq-loc ::= packed-int {
+  {
+    from 22,
+    to 35,
+    id gi 7
+  },
+  {
+    from 68,
+    to 76,
+    id gi 7
+  },
+  {
+    from 137,
+    to 152,
+    id gi 7
+  },
+  {
+    from 161,
+    to 176,
+    id gi 7
+  },
+  {
+    from 193,
+    to 205,
+    id gi 7
+  },
+  {
+    from 393,
+    to 406,
+    id gi 7
+  },
+  {
+    from 485,
+    to 497,
+    id gi 7
+  }
+}
+Seq-loc ::= packed-int {
+  {
+    from 22,
+    to 35,
+    id other {
+      accession "NP_000001",
+      version 1
+    }
+  },
+  {
+    from 68,
+    to 76,
+    id other {
+      accession "NP_000001",
+      version 1
+    }
+  },
+  {
+    from 137,
+    to 152,
+    id other {
+      accession "NP_000001",
+      version 1
+    }
+  },
+  {
+    from 161,
+    to 176,
+    id other {
+      accession "NP_000001",
+      version 1
+    }
+  },
+  {
+    from 193,
+    to 205,
+    id other {
+      accession "NP_000001",
+      version 1
+    }
+  },
+  {
+    from 393,
+    to 406,
+    id other {
+      accession "NP_000001",
+      version 1
+    }
+  },
+  {
+    from 485,
+    to 497,
+    id other {
+      accession "NP_000001",
+      version 1
+    }
+  }
+}
+Seq-loc ::= packed-int {
+  {
+    from 22,
+    to 35,
+    id gi 9
+  },
+  {
+    from 68,
+    to 76,
+    id gi 9
+  },
+  {
+    from 137,
+    to 152,
+    id gi 9
+  },
+  {
+    from 161,
+    to 176,
+    id gi 9
+  },
+  {
+    from 193,
+    to 205,
+    id gi 9
+  },
+  {
+    from 393,
+    to 406,
+    id gi 9
+  },
+  {
+    from 485,
+    to 497,
+    id gi 9
+  }
+}

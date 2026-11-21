@@ -38,6 +38,10 @@ pub(crate) struct BdbRecord {
     /// (`report::defline::BioseqFacts::has_source`); asked only for a title as `taxname` (else
     /// `false`, which writes the same title).
     pub has_source: bool,
+    /// Whether the Bioseq has a source at all (a definition line with a positive taxid,
+    /// seqdbvol.cpp:1126-1176, whatever the taxonomy database holds), from which
+    /// `sequence::GetTitle` makes an empty title (windowmasker's `-ids`).
+    pub any_source: bool,
     /// IUPACna letters of a nucleotide, NCBIstdaa codes of a protein.
     pub residues: Vec<u8>,
     /// The `ERR_POST` texts of the taxonomy database that NCBI's `GetBioseq` writes while it
@@ -237,7 +241,8 @@ impl MaskBdbReader {
             && (bioseq_title_from_source(&title, || bioseq_facts(&ids))
                 || (self.molecule == SeqType::Protein
                     && crate::report::defline::protein_title_suffix_adjustable(&title)));
-        let has_source = source_shown && set.first_source_taxid(None).is_some();
+        let any_source = set.first_source_taxid(None).is_some();
+        let has_source = source_shown && any_source;
         let taxname = if has_source {
             self.source_taxname(oid, &set)?
         } else {
@@ -249,6 +254,7 @@ impl MaskBdbReader {
                 title,
                 taxname,
                 has_source,
+                any_source,
                 residues,
                 texts,
             },

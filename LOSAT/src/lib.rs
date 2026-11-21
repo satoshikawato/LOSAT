@@ -75,7 +75,7 @@ pub(crate) mod seqdb;
 pub(crate) mod seqid;
 
 /// The mask readers and writers of NCBI's masking tools (`dustmasker`, `segmasker`,
-/// `convert2blastmask`).
+/// `windowmasker`, `convert2blastmask`); makembindex reads its sequences through them too.
 pub(crate) mod seqmasks_io;
 // NCBI objtools/blast/seqdb_writer (CWriteDB) and c++/src/app/blastdb/makeblastdb.cpp:
 // writer of BLAST database volumes.
@@ -86,6 +86,9 @@ pub(crate) mod blastdbcmd;
 pub(crate) mod dustmasker;
 // NCBI reference (598d8ae6): c++/src/app/segmasker/segmasker.cpp: the masker of low-complexity protein regions.
 pub(crate) mod segmasker;
+// NCBI reference (598d8ae6): c++/src/app/winmasker/win_mask_app.cpp: the masker of over-represented nucleotide
+// regions by unit counts (WindowMasker).
+pub(crate) mod windowmasker;
 // NCBI reference (598d8ae6): c++/src/app/blastdb/convert2blastmask.cpp: the masking information of lower case FASTA input.
 pub(crate) mod convert2blastmask;
 // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex: the megablast database index (CDbIndex) and its sequence streams.
@@ -93,7 +96,7 @@ pub(crate) mod dbindex;
 // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/makeindex/mkindex_app.cpp: the writer of megablast indices.
 pub(crate) mod makembindex;
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp and c++/src/corelib/ncbiargs.cpp: the application and argument reader of
-// blastdbcmd, dustmasker, segmasker, convert2blastmask and makembindex.
+// blastdbcmd, dustmasker, segmasker, windowmasker, convert2blastmask and makembindex.
 pub(crate) mod ncbi_app;
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiexpt.cpp: the reports of NCBI's exceptions (`CException::what()`).
 pub(crate) mod ncbi_exception;

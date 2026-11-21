@@ -93,6 +93,7 @@ static TOOL: Tool = Tool {
     descs: DESCS,
     dependencies,
     post_prefix: None,
+    components: &[],
 };
 
 /// Runs `makembindex` with `words` (the command line after `losat makembindex`), after its

@@ -710,6 +710,7 @@ fn blastx_query_warnings_follow_the_reports_before_them() {
         window_size: 40,
         gapped_karlin: Default::default(),
         gumbel: None,
+        gapped: true,
         num_descriptions: usize::MAX,
         num_alignments: usize::MAX,
     };
@@ -1033,6 +1034,7 @@ fn a_blastp_report_written_in_windows_is_the_report_written_at_once() {
         window_size: 40,
         gapped_karlin: karlin,
         gumbel: None,
+        gapped: true,
         num_descriptions: 500,
         num_alignments: 250,
     };

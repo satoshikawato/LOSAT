@@ -710,13 +710,6 @@ fn blastn_group_check(
     group: &[Output],
 ) -> Result<(), String> {
     use losat::web_adapter::{check_losat_limits, check_scoring_options};
-    // Nor a database of repeats (the engine's own refusal, `run_local`).
-    if args.filtering_db.is_some() {
-        return Err(
-            "-filtering_db (a BLAST database of repeats) is not supported in the browser yet"
-                .to_string(),
-        );
-    }
     let outfmts: Vec<i32> = group.iter().map(|output| output.number as i32).collect();
     // `process_options` sets the counts that the checks read.
     let (counts, _) = losat::web_adapter::run_report_counts(
@@ -1510,8 +1503,12 @@ fn give_counts(
     counts: Option<&Arc<dyn CountsSource>>,
     settings: &ApplicationSettings,
 ) {
-    if let (Commands::Blastn(args), Some(counts)) = (command, counts) {
+    if let (Commands::Blastn(args), Some(counts)) = (&mut *command, counts) {
         give_blastn_counts(args, counts, settings);
+    }
+    // The repeat search of `-filtering_db` (a `-db` search gives it itself; the same call).
+    if let Commands::Blastn(args) = command {
+        losat::web_adapter::resolve_blastn_repeat_filter(args, settings);
     }
 }
 
@@ -2881,7 +2878,7 @@ mod tests {
             "BLAST query error: CFastaReader: Input doesn't start with a defline or comment around line 1"
         );
         crate::files::release(file).unwrap();
-        // BLASTN's database of repeats is refused too (line RG item D4).
+        // BLASTN's database of repeats is accepted as on the command line (line RG item D4).
         let repeats = [
             "blastn",
             "-query",
@@ -2891,10 +2888,7 @@ mod tests {
             "-filtering_db",
             "repeats",
         ];
-        assert_eq!(
-            validate(&repeats).unwrap_err(),
-            "-filtering_db (a BLAST database of repeats) is not supported in the browser yet"
-        );
+        validate(&repeats).unwrap();
         // `-db` with `-subject` is the parser's conflict, as on the command line.
         let both = ["blastp", "-query", "q", "-subject", "s", "-db", "swissprot"];
         assert!(validate(&both).unwrap_err().contains("cannot be used with"));

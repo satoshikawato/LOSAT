@@ -1230,8 +1230,11 @@ async function main() {
     const databases = new Map(); // a -db search's directory -> the engine's instance whose "/work" it is
     for (const search of all) {
       const program = search.program;
-      if (search.database && !databases.has(search.cwd)) databases.set(search.cwd, await engine.open(search.cwd));
-      const instance = search.database ? databases.get(search.cwd) : { reactor: own, waitForWorkers };
+      // A search with `"run_directory"` has a subject like any other and files in its directory too (the repeat
+      // database of BLASTN `-filtering_db`, line RG item D4): it runs on the instance of that directory.
+      const inDirectory = search.database || search.run_directory;
+      if (inDirectory && !databases.has(search.cwd)) databases.set(search.cwd, await engine.open(search.cwd));
+      const instance = inDirectory ? databases.get(search.cwd) : { reactor: own, waitForWorkers };
       const reactor = instance.reactor;
       const query = inputPath(search, "-query"), subject = search.database ? undefined : inputPath(search, "-subject");
       const expected = nativeOutputs(options.native, search, scratch);
@@ -1245,7 +1248,7 @@ async function main() {
       const custom = search.outfmt === undefined ? [] : ["-outfmt", search.outfmt];
       const first = reactor.call("losat_web2_validate", [...search.argv, ...custom, "-num_threads", "1"].join("\0"));
       const dataLoaders = first.status === 0 ? JSON.parse(first.streams.get(2).toString()).data_loaders : true;
-      const subjectKey = `${program} ${subject} ${dataLoaders}`;
+      const subjectKey = `${program} ${subject} ${dataLoaders} ${inDirectory ? search.cwd : ""}`;
       // An input that the CLI's reader refuses (a first line that may be a Seq-id with the data loaders on) fails
       // the search as the CLI fails, before any hit: the subject first, as the CLI reads it first. The application
       // shows the error on the input and runs nothing; the CLI has written no output for a subject (read with the

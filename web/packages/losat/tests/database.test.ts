@@ -1,4 +1,4 @@
-// A run of -db through the package's host in Node (line WQA D12a, 2026-11-20): the serial reactor of
+// A run of -db through the package's host in Node (line WQA D12a, 2026-11-20; -filtering_db, line RG item D4): the serial reactor of
 // LOSAT_WEB_REACTORS (web/adapter/tools/build_reactors.py's output), the run's directory (RunDirectory) holding the
 // files that a folder pick of the database gives (every file of the database's folder) and the list of a filter, and
 // a reader that reads each Blob's bytes from its file as FileReaderSync reads a File in a worker. The engine opens the
@@ -90,11 +90,19 @@ describe.skipIf(REACTORS === undefined)('a run of -db through the host', () => {
     const reader = osReader(paths);
     const directory = new RunDirectory(undefined, reader.read);
     const { abi } = await instantiateSerial(module, directory);
-    const rows = manifestRows(['db.blastn.mega.6', 'db.d1.6', 'db.blastx.default.6', 'db.tblastn.default.6', 'db.tblastx.default.6', 'db.sl.bp.bsl.6', 'db.tf.bp.nosql.6']);
+    const rows = manifestRows(['db.blastn.mega.6', 'db.d1.6', 'db.blastx.default.6', 'db.tblastn.default.6', 'db.tblastx.default.6', 'db.sl.bp.bsl.6', 'db.tf.bp.nosql.6', 'db.rpt.mb.6', 'db.rpt.bn.6', 'db.rpt.plus.6']);
     for (const row of rows) {
       const files = await folder(dirname(row.db), paths);
       const list = row.extra.indexOf('-seqidlist');
       if (list >= 0) files.push(...(await folder(dirname(row.extra[list + 1]!), paths)).filter(({ name }) => name === row.extra[list + 1]));
+      // BLASTN's -filtering_db is a second database in the run's directory (line RG item D4): its files, by the
+      // names that start with the option's value and a dot, join the folder's.
+      const repeats = row.extra.indexOf('-filtering_db');
+      const repeatsName = repeats >= 0 ? row.extra[repeats + 1]! : undefined;
+      if (repeatsName !== undefined) {
+        const names = new Set(files.map(({ name }) => name));
+        files.push(...(await folder(dirname(repeatsName), paths)).filter(({ name }) => name.startsWith(`${repeatsName}.`) && !names.has(name)));
+      }
       directory.open(files);
       const argv = [row.program, '-db', row.db, '-query', row.query, ...row.extra, '-num_threads', '1'];
       // The query is read with the data loaders that the verdict on the argv gives (ABI v2 §9).
@@ -117,7 +125,7 @@ describe.skipIf(REACTORS === undefined)('a run of -db through the host', () => {
       // another file of the folder (2.8 MB in all). A file may be read more than once in a run (its index at each
       // open of the database, its sequences by the search and again by the traceback and the report), as the CLI
       // reads it (line WQA D12a review, low 5).
-      const own = new Set(files.filter(({ name }) => name.startsWith(`${row.db}.`) || row.extra.includes(name)).map(({ name }) => join(LOSAT, name)));
+      const own = new Set(files.filter(({ name }) => name.startsWith(`${row.db}.`) || (repeatsName !== undefined && name.startsWith(`${repeatsName}.`)) || row.extra.includes(name)).map(({ name }) => join(LOSAT, name)));
       const read = [...reader.byFile].map(([path, bytes]) => `${path.slice(LOSAT.length + 1)} ${bytes}/${statSync(path).size}`);
       console.log(`${row.id}: read ${reader.bytes() - before} bytes: ${read.join(', ')}`);
       expect([...reader.byFile.keys()].filter((path) => !own.has(path)), row.id).toEqual([]);

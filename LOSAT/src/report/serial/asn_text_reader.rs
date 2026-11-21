@@ -196,8 +196,8 @@ pub(crate) trait AsnSource {
     fn scan(&mut self, mut pos: usize, mut more: impl FnMut(u8) -> bool) -> (usize, Option<u8>) {
         loop {
             let rest = self.rest(pos);
-            if let Some((i, &c)) = rest.iter().enumerate().find(|&(_, &c)| !more(c)) {
-                return (pos + i, Some(c));
+            if let Some(i) = rest.iter().position(|&c| !more(c)) {
+                return (pos + i, Some(rest[i]));
             }
             pos += rest.len();
             if !self.fill(pos) {
@@ -556,26 +556,40 @@ impl<S: AsnSource> Reader<S> {
     /// and the byte.
     #[inline]
     pub(crate) fn white_space_at(&mut self, pos: usize) -> Result<(usize, u8)> {
-        // A value or a punctuation mark at the position: nothing to skip.
-        match self.src.byte_at(pos) {
-            Some(c) if !matches!(c, b' ' | b'\t' | b'\r' | b'\n' | b'-') => Ok((pos, c)),
-            _ => self.white_space_from(pos),
+        // A value or a punctuation mark at the position: nothing to skip. A byte not kept yet is
+        // read by `white_space_from`.
+        if let Some(&c) = self.src.rest(pos).first() {
+            if !matches!(c, b' ' | b'\t' | b'\r' | b'\n' | b'-') {
+                return Ok((pos, c));
+            }
+        }
+        match self.white_space_from(pos) {
+            (pos, Some(c)) => Ok((pos, c)),
+            (pos, None) => {
+                self.pos = pos;
+                Err(self.end_of_text_in_white_space())
+            }
         }
     }
 
-    /// [`white_space_at`](Self::white_space_at) from a byte that may be white space, a comment
-    /// or the end of the text.
+    /// [`white_space_at`](Self::white_space_at) from a byte that may be white space, a comment,
+    /// not kept yet or past the end of the text: the position of the byte found and the byte, or
+    /// the position where the text ends and `None`. (Two words, which a call returns in
+    /// registers.)
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:207-274
     // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:213-253
     #[inline(never)]
-    fn white_space_from(&mut self, mut pos: usize) -> Result<(usize, u8)> {
-        // The line ends found, added to `line` at the end (when there are any).
+    fn white_space_from(&mut self, mut pos: usize) -> (usize, Option<u8>) {
+        // The line ends found, added to `line` once (when there are any).
         let mut lines = 0;
-        let found = 'skip: loop {
+        loop {
             // Spaces, tabs and line ends are read from the kept bytes in locals; the source is
             // asked for more only at their end.
             let rest = self.src.rest(pos);
             let mut i = 0;
+            // What ends the white space in `rest` when it needs another look: the end of `rest`
+            // (`None`), a `-` (a comment, or a value), or a line end that is the last byte of
+            // `rest` (its complement may be in the next block).
             let c = loop {
                 // A run of spaces (the indentation of a text written with line ends) in one
                 // tight loop.
@@ -594,45 +608,52 @@ impl<S: AsnSource> Reader<S> {
                                     i += 1;
                                 }
                             }
-                            // The complement may be in the next block.
                             None => break Some(c),
                         }
                     }
-                    _ => break Some(c),
+                    b'-' => break Some(c),
+                    // The byte found.
+                    _ => {
+                        self.add_lines(lines);
+                        return (pos + i, Some(c));
+                    }
                 }
             };
             pos += i;
             match c {
                 None => {
                     if !self.src.fill(pos) {
-                        break None;
+                        break;
                     }
                 }
-                Some(c @ (b'\r' | b'\n')) => pos = self.end_of_line_at(pos, c),
                 Some(b'-') => match self.src.byte_at(pos + 1) {
                     // The end of the text after a `-`: `PeekChar(1)` fails at the `-`.
-                    None => break None,
+                    None => break,
                     Some(b'-') => match self.comment_at(pos + 2) {
                         Some((end, end_lines)) => (pos, lines) = (end, lines + end_lines),
                         None => {
-                            pos = self.pos;
-                            break 'skip None;
+                            // `comment_at` set `pos` where the text ends.
+                            self.add_lines(lines);
+                            return (self.pos, None);
                         }
                     },
-                    Some(_) => break Some(b'-'),
+                    Some(_) => {
+                        self.add_lines(lines);
+                        return (pos, Some(b'-'));
+                    }
                 },
-                Some(c) => break Some(c),
+                Some(c) => pos = self.end_of_line_at(pos, c),
             }
-        };
+        }
+        self.add_lines(lines);
+        (pos, None)
+    }
+
+    /// Adds `lines` line ends to `line` (no access to `line` when there are none).
+    #[inline]
+    fn add_lines(&mut self, lines: usize) {
         if lines != 0 {
             self.line += lines;
-        }
-        match found {
-            Some(c) => Ok((pos, c)),
-            None => {
-                self.pos = pos;
-                Err(self.end_of_text_in_white_space())
-            }
         }
     }
 
@@ -903,6 +924,8 @@ impl<S: AsnSource> Reader<S> {
     /// `NextElement`: whether another element follows (its `,` taken), or the block ends. The
     /// bytes before it are not read again (`AsnSource::release_before`).
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1205-1223
+    // (Called once per element by the loops over elements, into which it is inlined.)
+    #[inline]
     pub(crate) fn next_element(&mut self, block_start: &mut bool) -> Result<bool> {
         let (pos, more) = self.next_element_at(self.pos, block_start)?;
         self.pos = pos;

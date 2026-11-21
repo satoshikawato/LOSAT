@@ -752,7 +752,7 @@ impl<S: AsnSource> TypedReader<'_, S> {
 
     /// The end of the text inside a number that starts at `start`: `PeekChar`'s, at `start`.
     #[cold]
-    fn end_of_number<S: AsnSource>(r: &mut Reader<S>, start: usize) -> ReadError {
+    fn end_of_number(r: &mut Reader<S>, start: usize) -> ReadError {
         r.pos = start;
         r.end_of_text().into()
     }

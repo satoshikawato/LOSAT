@@ -1277,7 +1277,6 @@ fn pairwise_metadata(
         gapped: options.gapped,
         show_linked_set_size: !options.gapped && options.sum_stats,
         // BLASTX's sections read the counts of `BlastxPairwiseOptions` (`write_blastx_pairwise_report`).
-        gapped: true,
         num_descriptions: usize::MAX,
         num_alignments: usize::MAX,
     }

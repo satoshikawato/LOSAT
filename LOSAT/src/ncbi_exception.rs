@@ -244,6 +244,11 @@ impl NcbiException {
             .into_owned()
     }
 
+    /// NCBI's text of [`NcbiException::what`], which LOSAT's maps (`crate::wording::losat_bytes`).
+    pub(crate) fn ncbi_what(&self) -> Vec<u8> {
+        self.ncbi_what_in(NCBI_BUILD_ROOT)
+    }
+
     /// NCBI's text of [`NcbiException::what_in`], which LOSAT's maps.
     fn ncbi_what_in(&self, root: &str) -> Vec<u8> {
         let mut os = b"NCBI C++ Exception:\n".to_vec();

@@ -65,18 +65,12 @@ fn run(input: &[u8], protein: bool, parse_seqids: bool) -> Run {
     }
 }
 
-/// `CSeq_id::GetStringDescr(bioseq, eFormat_FastA)`: the FASTA forms of the ids, joined by
-/// `|` (the test's own form, for the comparison with the masking programs' id lines).
-fn fasta_ids(ids: &[ParsedSeqId]) -> String {
-    let forms: Vec<String> = ids
-        .iter()
-        .map(|id| {
-            let mut out = Vec::new();
-            label::fasta(id, &mut out);
-            String::from_utf8(out).unwrap()
-        })
-        .collect();
-    forms.join("|")
+/// `CSeq_id::GetStringDescr(bioseq, eFormat_FastA)` of a record with the ids `ids`, as the
+/// masking programs write it in their id lines (`label::bioseq_fasta`: its gi and best id).
+fn fasta_ids(ids: &[ParsedSeqId], protein: bool) -> String {
+    let mut out = Vec::new();
+    label::bioseq_fasta(ids, protein, &mut out);
+    String::from_utf8(out).unwrap()
 }
 
 /// One case of a `cases.tsv` that the reader decides.
@@ -200,7 +194,7 @@ fn check(case: &Case) -> Vec<String> {
         }
         if case.parse_seqids {
             let ncbi_ids = defline.split(' ').next().unwrap_or_default();
-            let ids = fasta_ids(&record.ids);
+            let ids = fasta_ids(&record.ids, case.segmasker);
             if ids != ncbi_ids {
                 problems.push(format!("record {index}: ids {ids}, NCBI {ncbi_ids}"));
             }
@@ -464,10 +458,54 @@ fn a_failed_read_is_the_read_error() {
 /// arrangement of literals). The reader stores the residues in upper case.
 #[test]
 fn both_codings_give_the_same_letters() {
-    let bases = b"ACGTU";
-    assert_eq!(
-        ncbi2na_letters(&iupacna_to_ncbi2na(bases), bases.len()),
-        ncbi4na_letters(&iupacna_to_ncbi4na(bases), bases.len())
+    for &base in b"ACGTU" {
+        assert_eq!(
+            IUPACNA_FROM[0][usize::from(base)],
+            IUPACNA_FROM[1][usize::from(base)]
+        );
+    }
+    let mut odd = *b"-N@";
+    read_back(&mut odd, Coding::Ncbi4na);
+    assert_eq!(&odd, b"NNN");
+}
+
+/// Each residue reads back in place as it reads back from the data that `pack` makes of a
+/// literal: every byte, at every place of a packed byte and in a last, partial byte.
+#[test]
+fn letters_read_back_in_place_as_from_the_packed_data() {
+    let residues: Vec<u8> = (0..=255u8).chain(0..=255u8).skip(1).take(509).collect();
+    for shift in 0..4 {
+        let literal = &residues[shift..];
+        let packed = pack::iupacna_to_ncbi2na(literal);
+        let unpacked: Vec<u8> = (0..literal.len())
+            .map(|i| b"ACGT"[usize::from(packed[i / 4] >> (6 - 2 * (i % 4)) & 3)])
+            .collect();
+        let mut letters = literal.to_vec();
+        read_back(&mut letters, Coding::Ncbi2na);
+        assert_eq!(letters, unpacked, "NCBI2na from {shift}");
+        let packed = pack::iupacna_to_ncbi4na(literal);
+        let unpacked: Vec<u8> = (0..literal.len())
+            .map(|i| b"NACMGRSVTWYHKDBN"[usize::from(packed[i / 2] >> (4 - 4 * (i % 2)) & 0xf)])
+            .collect();
+        let mut letters = literal.to_vec();
+        read_back(&mut letters, Coding::Ncbi4na);
+        assert_eq!(letters, unpacked, "NCBI4na from {shift}");
+    }
+}
+
+/// A raw sequence (one literal) and a delta (literals of both codings) give the letters in
+/// the buffer of the residues; the reader then reads the next record as before.
+#[test]
+fn raw_and_delta_records_and_the_next_one() {
+    let read = run(
+        b">r\nACGTACGTAC\n>d\nACGTNNNNNNNNNNNNNNNNACGTU\n>r2\nRYKM\n",
+        false,
+        false,
     );
-    assert_eq!(ncbi4na_letters(&iupacna_to_ncbi4na(b"-N@"), 3), b"NNN");
+    assert!(read.error.is_none());
+    let letters: Vec<&[u8]> = read.records.iter().map(|r| &r.letters[..]).collect();
+    assert_eq!(
+        letters,
+        [&b"ACGTACGTAC"[..], b"ACGTNNNNNNNNNNNNNNNNACGTT", b"RYKM"]
+    );
 }

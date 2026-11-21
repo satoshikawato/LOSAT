@@ -575,6 +575,28 @@ error: the NCBI BLAST+ option -randomize is not supported by LOSAT's makeblastdb
 
 </details>
 
+## windowmasker
+
+`windowmasker` masks with a counts file (`-ustat`) and runs every option of its `-help` for that (`-xmlhelp` on the command line only). The options that only make or convert counts files (`-checkdup`, `-fa_list`, `-mem`, `-unit`, `-genome_size`, `-sformat`, `-smem`) are refused with `-ustat` by NCBI's own argument check, as in NCBI's; `-meta` is accepted and does nothing, as in NCBI's.
+
+| Option or input | What happens |
+| :--- | :--- |
+| `-mk_counts`, `-convert` | Refused. LOSAT does not make or convert counts files yet. |
+| An `-ids` or `-exclude_ids` file matched as text (without `-text_match F`) with an empty id (a line that starts with a space or a tab, `>`, `\|` or `>\|`) | Refused. NCBI writes outside its list of ids and crashes. |
+| A counts file whose `##pct:` line holds a word that NCBI reads as a number with the C++ runtime, such as `inf` or `0x10`, with a `-t_*_pct` option | Refused. Plain decimal numbers are read as NCBI reads them. |
+| An `ascii` counts file with units of 17 letters or more | Refused. NCBI's result is undefined. |
+| A FASTA record or database sequence of 4,294,967,296 letters or more | Refused. NCBI counts positions in 32 bits. |
+
+<details>
+<summary>Rare inputs</summary>
+
+- An optimized ascii counts file is refused when the third line, which holds the hash parameters, leaves a value unread that NCBI then checks uninitialised.
+- An `obinary` counts file with units of 1 or 2 letters is refused: NCBI reads past an empty array.
+- `-ids` or `-exclude_ids` matched as text (without `-text_match F`) with a database sequence that has no title and a tax id is refused. NCBI matches the ids against a title made from the taxonomy names.
+- The database and serial-writer refusals of `dustmasker` apply to `windowmasker` too.
+
+</details>
+
 ## segmasker
 
 `segmasker` runs every option of its `-help` (`-xmlhelp` on the command line only).
@@ -627,7 +649,8 @@ error: the NCBI BLAST+ option -randomize is not supported by LOSAT's makeblastdb
 
 ## On the list for a later release
 
-- The programs `deltablast`, `makeprofiledb`, `blast_formatter` and `windowmasker`.
+- The programs `deltablast`, `makeprofiledb` and `blast_formatter`.
+- `windowmasker -mk_counts` and `-convert`, which make and convert counts files.
 - `psiblast -phi_pattern`, and `psiblast -in_msa` with an alignment that is not in Clustal format.
 - The `psiblast` output formats other than `0`, `6`, `7`, `10` and `20` (with `-in_pssm`: `0`, `6`, `7`).
 - The `rpsblast` output formats other than `0`, `5`, `6`, `7`, `10` and `11`, and the `rpstblastn` ones other than `0` to `7`, `10` and `11`.

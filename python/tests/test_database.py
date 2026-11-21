@@ -307,6 +307,15 @@ def test_a_tool_reads_its_input_as_the_command_line_reads_standard_input(losat):
         output = pylosat.segmasker(*words, input=data)
         assert output.bytes == stdout
         assert output.diagnostics == stderr.decode()
+    counts = engine_file("windowmasker/in/nopct.ascii")
+    fasta = engine_file("windowmasker/in/multi.fa")
+    with open(fasta, "rb") as file:
+        data = file.read()
+    for words in (("-ustat", counts), ("-ustat", counts, "-outfmt", "fasta", "-dust", "T")):
+        stdout, stderr = losat("windowmasker", "-in", fasta, *words)
+        output = pylosat.windowmasker(*words, input=data)
+        assert output.bytes == stdout
+        assert output.diagnostics == stderr.decode()
     words = ("-masking_algorithm", "dust", "-masking_options", "o", "-outfmt", "interval")
     output = pylosat.convert2blastmask(*words, input=">a\nACGTacgt\n")
     assert output.bytes == b"4 - 7\n"

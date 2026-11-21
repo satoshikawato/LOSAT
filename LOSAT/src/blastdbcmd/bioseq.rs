@@ -54,14 +54,24 @@ impl DbBioseq {
         target_id: fn(&str) -> Result<ParsedSeqId, Stop>,
         out: &mut Output<'_, '_>,
     ) -> Result<Option<DbBioseq>, Stop> {
-        let (set, header) = if with_header {
+        let read = if with_header {
             source.deflines_with_header(oid)?
         } else {
-            (source.deflines(oid)?, Vec::new())
+            source.deflines(oid)?.map(|set| (set, Vec::new()))
         };
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1328-1348
+        // NCBI's null set (a stored header of no bytes): no Bioseq, and the second call's read
+        // of a target's line throws (probes za, zb, zd of line RG-Dbc).
+        let Some((set, header)) = read else {
+            if let Some(target) = target {
+                target_id(target)?;
+                return Err(super::retrieve::null_pointer());
+            }
+            return Ok(None);
+        };
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1362-1386
         // `GetBioseq` looks the taxids up for a Bioseq it gives, one with definition lines and
-        // letters (seqdbvol.cpp:1362-1386), the first call for `oid` and the second for the
-        // target or `oid` again.
+        // letters, the first call for `oid` and the second for the target or `oid` again.
         let length = if set.deflines.is_empty() {
             0
         } else {
@@ -144,7 +154,7 @@ impl BioseqFormatter {
     /// sequence NCBI's `GetBioseq` gives no Bioseq for), after the texts of the taxonomy lookups
     /// of NCBI's two `GetBioseq` calls.
     pub fn write(
-        &mut self,
+        &self,
         source: &Source,
         oid: u32,
         target: Option<&str>,
@@ -154,7 +164,9 @@ impl BioseqFormatter {
             return Ok(());
         };
         let shown = bioseq.shown();
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:955-1018
         let title = shown.bioseq_title();
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1099-1189
         // `x_GetTaxonomy`: a source for each positive taxid of the lines, the target's first,
         // with the names of the taxonomy database where its lookup finds the taxid.
         let sources = bioseq
@@ -164,16 +176,18 @@ impl BioseqFormatter {
             .map(|taxid| Ok((taxid, source.tax_names(taxid)?)))
             .collect::<Result<Vec<(i32, Arc<SourceNames>)>, Stop>>()?;
         let data = source.seq_data(oid)?;
-        let mut descr = vec![Seqdesc::Title(&title)];
-        // `x_GetAsnDefline`: no user object for an empty header.
-        if !bioseq.header.is_empty() {
-            descr.push(Seqdesc::User(UserObject {
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1269-1303
+        // `x_GetAsnDefline`: the header is never empty here (a Bioseq is made of a stored header
+        // with bytes, `DbBioseq::load`), so the user object is always written.
+        let mut descr = vec![
+            Seqdesc::Title(&title),
+            Seqdesc::User(UserObject {
                 type_str: ASN_DEFLINE_LABEL,
                 label: ASN_DEFLINE_LABEL,
                 num: Some(1),
                 data: UserData::Oss(&bioseq.header),
-            }));
-        }
+            }),
+        ];
         for (taxid, names) in &sources {
             let names = names.names();
             descr.push(Seqdesc::Source(OrgSource {

@@ -143,10 +143,11 @@ impl FormatSpec {
         if !self.get_defline {
             return print(None, &mut line);
         }
-        let set = source.deflines(oid)?;
-        if set.deflines.is_empty() {
+        // A null set writes nothing; a set of no lines writes `%d`'s empty document, no line
+        // of the others, and throws for a target (probes e1-e8, z1-z9 of line RG-Dbc).
+        let Some(set) = source.deflines(oid)? else {
             return Ok(());
-        }
+        };
         if self.asks_asn_text() {
             return write_asn_deflines(&set, target, out);
         }
@@ -247,13 +248,6 @@ impl FormatSpec {
                     if let Some(mask) = masks.next() {
                         line.extend_from_slice(mask.as_bytes());
                     }
-                }
-                // `%d` is refused before the first line.
-                b'd' => {
-                    return Err(Stop::Refused(format!(
-                        "the -outfmt specifier %d is not supported by LOSAT's {}",
-                        super::PROGRAM
-                    )));
                 }
                 other => {
                     let mut message = b"Unrecognized format specification: '%".to_vec();

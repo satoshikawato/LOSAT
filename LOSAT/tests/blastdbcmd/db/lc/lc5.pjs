@@ -1,0 +1,24 @@
+{
+  "version": "1.2",
+  "dbname": "lc5",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "lc.fa",
+  "number-of-letters": 79,
+  "number-of-sequences": 4,
+  "last-updated": "2026-11-21T10:30:00",
+  "number-of-volumes": 1,
+  "bytes-total": 49777,
+  "bytes-to-cache": 204,
+  "files": [
+    "lc5.pdb",
+    "lc5.phr",
+    "lc5.pin",
+    "lc5.pog",
+    "lc5.pos",
+    "lc5.pot",
+    "lc5.psq",
+    "lc5.ptf",
+    "lc5.pto"
+  ]
+}

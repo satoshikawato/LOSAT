@@ -543,16 +543,21 @@ impl Volume {
         self.decode_kept_set(oid, &record, path)
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2202-2212
     /// `defline_set` and the stored record it was decoded from, `None` in place of the record
     /// when the definition-line rule dropped a line of it (`x_GetFilteredHeader`'s `changed`,
-    /// `SeqDb::defline_set_with_record_at`).
+    /// `SeqDb::defline_set_with_header_at`). `None` for a stored header of no bytes, which NCBI's
+    /// read gives as no set (`x_GetHdrAsn1`), where `defline_set` gives a set of no lines.
     pub fn defline_set_with_record(
         &self,
         oid: u32,
-    ) -> Result<(crate::seqid::DeflineSet, Option<Vec<u8>>), SeqDbError> {
+    ) -> Result<Option<(crate::seqid::DeflineSet, Option<Vec<u8>>)>, SeqDbError> {
         let (record, path) = self.header_record(oid)?;
+        if record.is_empty() {
+            return Ok(None);
+        }
         let (set, dropped) = self.decode_kept_set_dropped(oid, &record, path)?;
-        Ok((set, (!dropped).then_some(record)))
+        Ok(Some((set, (!dropped).then_some(record))))
     }
 
     /// Restricts the definition lines that the reads of this volume give to those `rule`
@@ -1437,10 +1442,13 @@ const PACKED_TO_NCBI4NA: [[u8; 2]; 256] = {
     table
 };
 
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:729-786
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:728-786
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:803-844
 /// Calls `set(position, ncbi4na)` for each base of the ambiguity runs `runs` (in stored order)
-/// inside a sequence of `length` bases: the bases of a run outside it are skipped, and the runs
-/// after one that starts at or past its end are not read.
+/// inside a sequence of `length` bases, as NCBI's rebuilds of the 4-bit (`s_SeqDBRebuildDNA_NA4`,
+/// [`SequenceBlock::nucleotide_seq_data`]) and 8-bit letters (`s_SeqDBRebuildDNA_NA8`,
+/// [`SequenceBlock::nucleotide_iupac`]) place them: the bases of a run outside it are skipped, and
+/// the runs after one that starts at or past its end are not read.
 fn for_each_ambiguous_base(runs: &[AmbiguityRun], length: usize, mut set: impl FnMut(usize, u8)) {
     let region_end = length as i64;
     for run in runs {
@@ -1717,12 +1725,14 @@ impl SequenceBlock {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1380-1424
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2350-2385
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:896-945
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:403-442
-    /// The `Seq-data` of nucleotide `i` in the Bioseq that NCBI's `GetBioseq` makes: without
-    /// ambiguity data, the stored 2-bit bytes of its bases with the count bits of the last byte
-    /// cleared and its bits after the last base as stored (`ncbi2na`, `true`); with them
-    /// (`x_GetAmbChar` gives words, even a count of no run), NCBI4na (`false`), two bases a
+    /// The `Seq-data` of nucleotide `i` in the Bioseq that NCBI's `GetBioseq` makes: with fewer
+    /// than 4 bytes of ambiguity data (`x_GetAmbChar` reads whole 4-byte words: none), the stored
+    /// 2-bit bytes of its bases with the count bits of the last byte cleared and its bits after
+    /// the last base as stored (`ncbi2na`, `true`); with a word (even a count of no run), NCBI4na
+    /// (`false`), two bases a
     /// byte from the high bits, made from the stored bytes whose bits past the length are
     /// cleared first (`s_SeqDBMapNA2ToNA4`: the half byte after the last base of an odd length
     /// is the A of those bits), with each ambiguity run written over it
@@ -1731,7 +1741,7 @@ impl SequenceBlock {
         let (packed, length) = self.nucleotide_packed_len(i)?;
         let whole = length / 4;
         let remainder = length % 4;
-        if self.ambiguity_bytes(i).is_empty() {
+        if self.ambiguity_bytes(i).len() < 4 {
             // The last stored byte of a length not a multiple of 4 with its count bits cleared:
             // the bits after the last base stay as stored.
             let mut data = Vec::with_capacity(whole + 1);
@@ -1874,10 +1884,12 @@ mod tests {
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:896-945
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:403-442
-    /// `GetBioseq`'s data of two nucleotides of 5 bases whose last stored byte holds bits after
-    /// the last base (as NCBI's distributed databases have): without ambiguity data `ncbi2na`
-    /// keeps those bits and clears the count; with ambiguity data (a run of N over the last base)
-    /// `ncbi4na` clears them first, so the half byte after the last base is A (1).
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2350-2385
+    /// `GetBioseq`'s data of three nucleotides of 5 bases whose last stored byte holds bits after
+    /// the last base (as NCBI's distributed databases have): without a word of ambiguity data (none,
+    /// or 3 bytes) `ncbi2na` keeps those bits and clears the count; with ambiguity data (a run of N
+    /// over the last base) `ncbi4na` clears them first, so the half byte after the last base is A
+    /// (1).
     #[test]
     fn seq_data_keeps_the_stored_bits_of_ncbi2na_and_clears_them_for_ncbi4na() {
         let block = SequenceBlock {
@@ -1888,13 +1900,18 @@ mod tests {
             data: vec![
                 0x1B, 0xBD, // ACGT, G and the bits 1111, count 1
                 0x1B, 0xBD, 0, 0, 0, 1, 0xF0, 0, 0, 4, // the same, one run: N at base 4
+                0x1B, 0xBD, 0x80, 0, 0, // the same, 3 bytes of ambiguity data: no word
             ],
             data_start: 0,
-            seq_offsets: vec![0, 2, 12],
-            amb_offsets: vec![2, 4],
+            seq_offsets: vec![0, 2, 12, 17],
+            amb_offsets: vec![2, 4, 14],
         };
         assert_eq!(
             block.nucleotide_seq_data(0).unwrap(),
+            (true, vec![0x1B, 0xBC])
+        );
+        assert_eq!(
+            block.nucleotide_seq_data(2).unwrap(),
             (true, vec![0x1B, 0xBC])
         );
         assert_eq!(

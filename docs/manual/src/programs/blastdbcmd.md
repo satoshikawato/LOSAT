@@ -50,7 +50,7 @@ For every option: `losat blastdbcmd -help`.
 
 ### Output specifiers
 
-`-outfmt` takes a text in which these specifiers are replaced for each sequence (one line per sequence). `%f` (FASTA) is the default; if you give `%f`, `%b` or `%d`, other specifiers are ignored, and two of these three together are an error, as in NCBI.
+`-outfmt` takes a text in which these specifiers are replaced: one line for each definition line of a sequence (with `-target_only`, the target's line), or one line per sequence when no specifier reads the definition lines. `%f`, `%b` and `%d` write a FASTA record or an ASN.1 text document per sequence instead. `%f` (FASTA) is the default; if you give `%f`, `%b` or `%d`, other specifiers are ignored, and two of these three together are an error, as in NCBI.
 
 | Specifier | Meaning |
 | --- | --- |

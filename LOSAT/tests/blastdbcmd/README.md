@@ -49,6 +49,15 @@ which is not copied here.
 `db/pl4` (`Q330`, `Q331`) is NCBI makeblastdb's version 4 database (`-parse_seqids`; its `.pin .phr .psq`) of two
 proteins read as ASN.1 text Bioseqs whose `ASN1_BlastDefLine` user objects hold definition lines with memberships and
 other-info (makeblastdb drops their links): `remaining-gaps-20261112/D/dbc/probe/mk/make_links.py`.
+`db/pe4`, `db/pz4` (`Q332`-`Q340`, with its `.pni .pnd`) and `db/pz5/pl5` (`Q341`-`Q343`, version 5, with taxids) are
+`db/pl4` and its version 5 build with a header changed by hand, which makeblastdb never writes (it refuses a
+set without lines: "No deflines provided."): `pe4` holds a set of no lines at OID 1, `pz4` a header of no bytes at
+OID 1, `pz5/pl5` one at OID 0. NCBI writes an empty `Blast-def-line-set` for the first and nothing for the second, and
+its read of a target's line, or of any line with `-taxids` and `-target_only`, stops on the second with
+`Attempt to access NULL pointer.`.
+`db/lc/lc4`, `db/lc/lc5` (`Q344`-`Q383`) are makeblastdb `-parse_seqids` databases (version 4 and 5) of `db/lc/lc.fa`, four
+proteins with local ids (`lcl|myprot9`, the bare `myprot13`, `lcl|12345`) and one RefSeq id, read with `-target_only`
+in `%b`, `%d`, `%f` and `%a`.
 
 - `db/`: databases of that probe. `p5` (version 5, `-parse_seqids`) and `p4` (version 4)
   are proteins with every Seq-id type, `n5` / `n4` the nucleotides, `p5n` / `p4n` / `n5n` /

@@ -146,19 +146,39 @@ impl<'a> Source<'a> {
         }
     }
 
-    /// `GetHdr(oid)`: the definition lines with their Seq-ids.
-    pub fn deflines(&self, oid: u32) -> Result<DeflineSet, Stop> {
-        let set = self.db.defline_set_at(self.at(oid)?)?;
+    /// `GetHdr(oid)`: the definition lines with their Seq-ids; `None`, NCBI's null set, for a
+    /// stored header of no bytes ([`Source::null_set`]).
+    pub fn deflines(&self, oid: u32) -> Result<Option<DeflineSet>, Stop> {
+        let Some(set) = self.db.header_set_at(self.at(oid)?)? else {
+            return self.null_set();
+        };
         check_read_bytes(oid, &set)?;
-        Ok(set)
+        Ok(Some(set))
     }
 
     /// `GetHdr(oid)` and the header that `GetBioseq` keeps in the Bioseq's user object
-    /// (`SeqDb::defline_set_with_header_at`).
-    pub fn deflines_with_header(&self, oid: u32) -> Result<(DeflineSet, Vec<u8>), Stop> {
-        let (set, header) = self.db.defline_set_with_header_at(self.at(oid)?)?;
+    /// (`SeqDb::defline_set_with_header_at`); `None` as for [`Source::deflines`].
+    pub fn deflines_with_header(&self, oid: u32) -> Result<Option<(DeflineSet, Vec<u8>)>, Stop> {
+        let Some((set, header)) = self.db.defline_set_with_header_at(self.at(oid)?)? else {
+            return self.null_set();
+        };
         check_read_bytes(oid, &set)?;
-        Ok((set, header))
+        Ok(Some((set, header)))
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1997-2003
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2202-2212
+    // A database opened with a taxid list (`-taxids`, `-taxidlist` with `-target_only`) filters
+    // the set it read, also the null one (probes w1-w4 of line RG-Dbc); without a list the readers
+    // see no set: the `%` formatter writes nothing, `GetBioseq` gives no Bioseq, and its read of
+    // a target's line throws (probes z1-z9, za-zd).
+    /// The read of a sequence whose stored header has no bytes: `None`, or NCBI's null pointer
+    /// exception where the database filters its definition lines.
+    fn null_set<T>(&self) -> Result<Option<T>, Stop> {
+        if self.db.is_restricted() {
+            return Err(null_pointer());
+        }
+        Ok(None)
     }
 
     /// The `Seq-data` of `GetBioseq(oid)`: the stored NCBIstdaa of a protein, the stored 2-bit
@@ -410,6 +430,15 @@ impl Formatter {
 
 /// `CSeqDB::kOidNotFound` (seqdb.cpp:53).
 pub(super) const OID_NOT_FOUND: &str = "OID not found";
+
+// NCBI reference (598d8ae6): c++/include/corelib/ncbiobj.hpp:965-975
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiobj.cpp:1002-1013
+/// The exception of NCBI's `CRef` read of no object (`CObject::ThrowNullPointerException`), whose
+/// message `x_ProcessSearchRequest` posts: a read of the null set of a stored header of no bytes
+/// ([`Source::null_set`], `GetBioseq` of a target).
+pub(super) fn null_pointer() -> Stop {
+    Stop::Ncbi("Attempt to access NULL pointer.".to_string())
+}
 
 /// `NStr::StringToNumeric<Int8>(text, fConvErr_NoThrow)` with `errno` clear: the number of
 /// a text that is one (an optional sign and digits that fit 64 bits).

@@ -6,3 +6,7 @@
   protein and nucleotide databases of version 4 and 5. Both were refused before. As in NCBI,
   `%b` and `%d` replace the rest of the format, `-range` and `-strand` do not change `%b`, and
   two of `%f`, `%b` and `%d` together are an error.
+- blastdbcmd: a sequence whose stored header is a set without definition lines, or has no
+  bytes (databases that makeblastdb does not write), gives NCBI's output in every format; with
+  `-target_only` and `%a` a set without lines wrote nothing before, where NCBI stops with
+  "Failed to find target id".

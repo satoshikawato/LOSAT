@@ -438,8 +438,14 @@ fn retrieval_is_ncbi_s_bytes() {
 /// those of `MATCHES`, the volumes of `j/lst` with `-taxids` and `-no_taxid_expansion`, `db/m/pmg`
 /// (PIGs), several names in `-db` (`db/n5 db/n5n`, `db/p5 db/p5n`: the ordinal ids of the second
 /// database's definition lines are database-wide, so the header in `%b` is written again) and the
-/// Seq-id module's databases (`../seqid/db`: every Seq-id form that makeblastdb writes) and `db/pl4`
-/// (definition lines with memberships and other-info).
+/// Seq-id module's databases (`../seqid/db`: every Seq-id form that makeblastdb writes), `db/pl4`
+/// (definition lines with memberships and other-info), and `db/pe4`, `db/pz4` and `db/pz5/pl5`:
+/// `db/pl4` and `db/pl5` with a header made by hand, which makeblastdb never writes (a set of no
+/// lines at OID 1; no bytes at OID 1, or at OID 0 of a database with taxids): NCBI's reader tells
+/// a set of no lines from no set. `db/lc/lc4` and `db/lc/lc5` (makeblastdb `-parse_seqids`, version 4
+/// and 5) hold local ids, read with `-target_only` in each format: `%b` reads the target with
+/// `fParse_AnyRaw` (a bare local id is "Malformatted ID", a number is a GI that matches the local
+/// id of its label), the other formats with the lookup's flags.
 #[rustfmt::skip]
 const ASN_TEXTS: &[(&str, &[&str], i32)] = &[
     ("Q101", &["-db", "db/p5", "-entry", "all", "-outfmt", "%d"], 0),
@@ -543,6 +549,58 @@ const ASN_TEXTS: &[(&str, &[&str], i32)] = &[
     ("Q328", &["-db", "db/n4n db/n5", "-entry", "all", "-outfmt", "%b"], 2),
     ("Q330", &["-db", "db/pl4", "-dbtype", "prot", "-entry", "all", "-outfmt", "%d"], 0),
     ("Q331", &["-db", "db/pl4", "-dbtype", "prot", "-entry", "all", "-outfmt", "%b"], 0),
+    ("Q332", &["-db", "db/pe4", "-dbtype", "prot", "-entry", "all", "-outfmt", "%d"], 0),
+    ("Q333", &["-db", "db/pe4", "-dbtype", "prot", "-entry", "5003", "-outfmt", "%d"], 0),
+    ("Q334", &["-db", "db/pe4", "-dbtype", "prot", "-entry", "5003", "-target_only", "-outfmt", "%d"], 1),
+    ("Q335", &["-db", "db/pe4", "-dbtype", "prot", "-entry", "5003", "-target_only", "-outfmt", "%a"], 1),
+    ("Q336", &["-db", "db/pe4", "-dbtype", "prot", "-entry", "5003", "-target_only", "-outfmt", "%b"], 1),
+    ("Q337", &["-db", "db/pz4", "-dbtype", "prot", "-entry", "all", "-outfmt", "%d"], 0),
+    ("Q338", &["-db", "db/pz4", "-dbtype", "prot", "-entry", "5003", "-target_only", "-outfmt", "%b"], 1),
+    ("Q339", &["-db", "db/pz4", "-dbtype", "prot", "-entry", "5003", "-target_only"], 1),
+    ("Q340", &["-db", "db/pz4", "-dbtype", "prot", "-entry", "5003", "-target_only", "-outfmt", "%a"], 0),
+    ("Q341", &["-db", "db/pz5/pl5", "-dbtype", "prot", "-taxids", "9606", "-target_only", "-outfmt", "%d"], 1),
+    ("Q342", &["-db", "db/pz5/pl5", "-dbtype", "prot", "-taxids", "9606", "-target_only", "-outfmt", "%a"], 1),
+    ("Q343", &["-db", "db/pz5/pl5", "-dbtype", "prot", "-taxids", "9606", "-outfmt", "%d"], 0),
+    ("Q344", &["-db", "db/lc/lc4", "-entry", "myprot9", "-target_only", "-outfmt", "%b"], 1),
+    ("Q345", &["-db", "db/lc/lc4", "-entry", "myprot9", "-target_only", "-outfmt", "%d"], 0),
+    ("Q346", &["-db", "db/lc/lc4", "-entry", "myprot9", "-target_only", "-outfmt", "%f"], 0),
+    ("Q347", &["-db", "db/lc/lc4", "-entry", "myprot9", "-target_only", "-outfmt", "%a"], 0),
+    ("Q348", &["-db", "db/lc/lc4", "-entry", "lcl|myprot9", "-target_only", "-outfmt", "%b"], 0),
+    ("Q349", &["-db", "db/lc/lc4", "-entry", "lcl|myprot9", "-target_only", "-outfmt", "%d"], 0),
+    ("Q350", &["-db", "db/lc/lc4", "-entry", "lcl|myprot9", "-target_only", "-outfmt", "%f"], 0),
+    ("Q351", &["-db", "db/lc/lc4", "-entry", "lcl|myprot9", "-target_only", "-outfmt", "%a"], 0),
+    ("Q352", &["-db", "db/lc/lc4", "-entry", "myprot13", "-target_only", "-outfmt", "%b"], 1),
+    ("Q353", &["-db", "db/lc/lc4", "-entry", "myprot13", "-target_only", "-outfmt", "%d"], 0),
+    ("Q354", &["-db", "db/lc/lc4", "-entry", "myprot13", "-target_only", "-outfmt", "%f"], 0),
+    ("Q355", &["-db", "db/lc/lc4", "-entry", "myprot13", "-target_only", "-outfmt", "%a"], 0),
+    ("Q356", &["-db", "db/lc/lc4", "-entry", "12345", "-target_only", "-outfmt", "%b"], 0),
+    ("Q357", &["-db", "db/lc/lc4", "-entry", "12345", "-target_only", "-outfmt", "%d"], 0),
+    ("Q358", &["-db", "db/lc/lc4", "-entry", "12345", "-target_only", "-outfmt", "%f"], 0),
+    ("Q359", &["-db", "db/lc/lc4", "-entry", "12345", "-target_only", "-outfmt", "%a"], 0),
+    ("Q360", &["-db", "db/lc/lc4", "-entry", "lcl|12345", "-target_only", "-outfmt", "%b"], 0),
+    ("Q361", &["-db", "db/lc/lc4", "-entry", "lcl|12345", "-target_only", "-outfmt", "%d"], 0),
+    ("Q362", &["-db", "db/lc/lc4", "-entry", "lcl|12345", "-target_only", "-outfmt", "%f"], 0),
+    ("Q363", &["-db", "db/lc/lc4", "-entry", "lcl|12345", "-target_only", "-outfmt", "%a"], 0),
+    ("Q364", &["-db", "db/lc/lc5", "-entry", "myprot9", "-target_only", "-outfmt", "%b"], 1),
+    ("Q365", &["-db", "db/lc/lc5", "-entry", "myprot9", "-target_only", "-outfmt", "%d"], 0),
+    ("Q366", &["-db", "db/lc/lc5", "-entry", "myprot9", "-target_only", "-outfmt", "%f"], 0),
+    ("Q367", &["-db", "db/lc/lc5", "-entry", "myprot9", "-target_only", "-outfmt", "%a"], 0),
+    ("Q368", &["-db", "db/lc/lc5", "-entry", "lcl|myprot9", "-target_only", "-outfmt", "%b"], 0),
+    ("Q369", &["-db", "db/lc/lc5", "-entry", "lcl|myprot9", "-target_only", "-outfmt", "%d"], 0),
+    ("Q370", &["-db", "db/lc/lc5", "-entry", "lcl|myprot9", "-target_only", "-outfmt", "%f"], 0),
+    ("Q371", &["-db", "db/lc/lc5", "-entry", "lcl|myprot9", "-target_only", "-outfmt", "%a"], 0),
+    ("Q372", &["-db", "db/lc/lc5", "-entry", "myprot13", "-target_only", "-outfmt", "%b"], 1),
+    ("Q373", &["-db", "db/lc/lc5", "-entry", "myprot13", "-target_only", "-outfmt", "%d"], 0),
+    ("Q374", &["-db", "db/lc/lc5", "-entry", "myprot13", "-target_only", "-outfmt", "%f"], 0),
+    ("Q375", &["-db", "db/lc/lc5", "-entry", "myprot13", "-target_only", "-outfmt", "%a"], 0),
+    ("Q376", &["-db", "db/lc/lc5", "-entry", "12345", "-target_only", "-outfmt", "%b"], 0),
+    ("Q377", &["-db", "db/lc/lc5", "-entry", "12345", "-target_only", "-outfmt", "%d"], 0),
+    ("Q378", &["-db", "db/lc/lc5", "-entry", "12345", "-target_only", "-outfmt", "%f"], 0),
+    ("Q379", &["-db", "db/lc/lc5", "-entry", "12345", "-target_only", "-outfmt", "%a"], 0),
+    ("Q380", &["-db", "db/lc/lc5", "-entry", "lcl|12345", "-target_only", "-outfmt", "%b"], 0),
+    ("Q381", &["-db", "db/lc/lc5", "-entry", "lcl|12345", "-target_only", "-outfmt", "%d"], 0),
+    ("Q382", &["-db", "db/lc/lc5", "-entry", "lcl|12345", "-target_only", "-outfmt", "%f"], 0),
+    ("Q383", &["-db", "db/lc/lc5", "-entry", "lcl|12345", "-target_only", "-outfmt", "%a"], 0),
 ];
 
 /// The cases of `%d` and `%b` that read a taxonomy database (`BLASTDB`, a directory of

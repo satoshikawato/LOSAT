@@ -2016,6 +2016,18 @@ impl SeqDb {
         self.ordinal_set(at.volume, self.location_oid(&at), set)
     }
 
+    /// [`SeqDb::defline_set_at`] as NCBI's `GetHdr` gives it: `None` where the stored header has
+    /// no bytes, which `defline_set_at` gives as a set of no lines
+    /// (`Volume::defline_set_with_record`).
+    pub fn header_set_at(&self, at: SeqLocation) -> Result<Option<DeflineSet>, SeqDbError> {
+        match self.volumes[at.volume].defline_set_with_record(at.vol_oid)? {
+            Some((set, _)) => self
+                .ordinal_set(at.volume, self.location_oid(&at), set)
+                .map(Some),
+            None => Ok(None),
+        }
+    }
+
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2319-2346
     /// The definition lines of the sequence at `at` (`defline_set_at`) and the header that
     /// NCBI's `GetBioseq` keeps in the Bioseq's `ASN1_BlastDefLine` user object
@@ -2023,20 +2035,23 @@ impl SeqDb {
     /// (`writedb::header::encode_defline_set`, NCBI's `CObjectOStreamAsnBinary`) where NCBI's read
     /// changed it: a `general` id `BL_ORD_ID` of a volume after the first, whose tag the read made
     /// the OID in the database (`x_GetHdrAsn1`), or a line that the definition-line rule dropped
-    /// (`x_GetFilteredHeader`).
+    /// (`x_GetFilteredHeader`). `None` where the stored header has no bytes: NCBI's `GetHdr` gives
+    /// no set there (`Volume::defline_set_with_record`).
     pub fn defline_set_with_header_at(
         &self,
         at: SeqLocation,
-    ) -> Result<(DeflineSet, Vec<u8>), SeqDbError> {
+    ) -> Result<Option<(DeflineSet, Vec<u8>)>, SeqDbError> {
         let volume = at.volume;
-        let (mut set, record) = self.volumes[volume].defline_set_with_record(at.vol_oid)?;
-        let adjusted = adjust_ordinal_tags(&mut set, self.volume_starts[volume])
-            .map_err(|error| error.error(self.volumes[volume].base(), self.location_oid(&at)))?;
+        let Some((mut set, record)) = self.volumes[volume].defline_set_with_record(at.vol_oid)?
+        else {
+            return Ok(None);
+        };
+        let adjusted = self.adjust_ordinals(volume, self.location_oid(&at), &mut set)?;
         let header = match record {
             Some(record) if !adjusted => record,
             _ => crate::writedb::header::encode_defline_set(&set, &mut Vec::new()),
         };
-        Ok((set, header))
+        Ok(Some((set, header)))
     }
 
     /// `set`, the definition lines of the sequence `oid` (its OID, which the messages name) in
@@ -2048,9 +2063,21 @@ impl SeqDb {
         oid: u32,
         mut set: DeflineSet,
     ) -> Result<DeflineSet, SeqDbError> {
-        adjust_ordinal_tags(&mut set, self.volume_starts[volume])
-            .map_err(|error| error.error(self.volumes[volume].base(), oid))?;
+        self.adjust_ordinals(volume, oid, &mut set)?;
         Ok(set)
+    }
+
+    /// Makes the tag of each `general` id `BL_ORD_ID` of `set`, the definition lines of the
+    /// sequence `oid` in `volume`, its OID in the database (`adjust_ordinal_tags`, with the
+    /// reader's error naming `oid`); whether a tag changed.
+    fn adjust_ordinals(
+        &self,
+        volume: usize,
+        oid: u32,
+        set: &mut DeflineSet,
+    ) -> Result<bool, SeqDbError> {
+        adjust_ordinal_tags(set, self.volume_starts[volume])
+            .map_err(|error| error.error(self.volumes[volume].base(), oid))
     }
 
     /// The Blast-def-line `taxid` of each definition line of `ordinal`, 0 for none: read

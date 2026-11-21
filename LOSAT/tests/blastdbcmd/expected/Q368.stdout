@@ -1,0 +1,27 @@
+Bioseq ::= {
+  id {
+    local str "myprot9"
+  },
+  descr {
+    title "first",
+    user {
+      type str "ASN1_BlastDefLine",
+      data {
+        {
+          label str "ASN1_BlastDefLine",
+          num 1,
+          data oss {
+            '30803080A0801A0566697273740000A1803080A080A1801A076D7970726F743900
+00000000000000A280020100000000000000'H
+          }
+        }
+      }
+    }
+  },
+  inst {
+    repr raw,
+    mol aa,
+    length 19,
+    seq-data ncbistdaa '0C0A12011609010A0F100F091106130A110806'H
+  }
+}

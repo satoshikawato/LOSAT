@@ -196,11 +196,20 @@ pub enum SeqDbError {
         path: PathBuf,
         source: std::io::Error,
     },
-    /// The operating system failed to read the bytes of an open file of `len` bytes (its length
-    /// when it was opened): what NCBI meets where it maps the file ([`SeqDbError::ncbi_message`]).
-    Read {
+    /// The operating system failed to read the first byte of a file of `len` bytes where it was
+    /// opened (`file::DbFile::open`): what NCBI meets where it maps the file
+    /// ([`SeqDbError::ncbi_message`]).
+    Map {
         path: PathBuf,
         len: u64,
+        source: std::io::Error,
+    },
+    /// The operating system failed to read bytes of a file after its first byte was read where
+    /// it was opened (a file that a disk or the network stopped giving, a file that became
+    /// shorter): where NCBI reads mapped bytes that the system no longer gives and ends by
+    /// SIGBUS. LOSAT's own error ("cannot be read"; line WQA D18, 2026-11-21).
+    Read {
+        path: PathBuf,
         source: std::io::Error,
     },
     /// A file is not a valid database file.
@@ -232,9 +241,12 @@ impl std::fmt::Display for SeqDbError {
         match self {
             SeqDbError::NotFound(message) => f.write_str(&String::from_utf8_lossy(message)),
             SeqDbError::Range(message) => f.write_str(message),
-            SeqDbError::Open { path, source }
-            | SeqDbError::Io { path, source }
-            | SeqDbError::Read { path, source, .. } => write!(f, "{}: {}", path.display(), source),
+            SeqDbError::Open { path, source } | SeqDbError::Io { path, source } => {
+                write!(f, "{}: {}", path.display(), source)
+            }
+            SeqDbError::Map { path, source, .. } | SeqDbError::Read { path, source } => {
+                write!(f, "{} cannot be read: {}", path.display(), source)
+            }
             SeqDbError::Format { path, message } | SeqDbError::Integrity { path, message } => {
                 write!(f, "{}: {}", path.display(), message)
             }
@@ -273,6 +285,20 @@ impl SeqDbError {
         matches!(self, SeqDbError::NcbiCrashes { .. })
     }
 
+    /// Whether this is a file whose bytes the system does not give, in LOSAT's words: a read
+    /// that fails after the file's first byte was read ([`SeqDbError::Read`], where NCBI ends by
+    /// SIGBUS), or a first byte that cannot be read without NCBI's text for it
+    /// ([`SeqDbError::Map`] whose [`SeqDbError::ncbi_message`] is `None`). A program reports it
+    /// as LOSAT's error, not as a database that LOSAT does not read (line WQA D18 review M1,
+    /// 2026-11-21).
+    pub fn is_unreadable(&self) -> bool {
+        match self {
+            SeqDbError::Read { .. } => true,
+            SeqDbError::Map { .. } => self.ncbi_message().is_none(),
+            _ => false,
+        }
+    }
+
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:247-250
     // `BLAST_UNKNOWN_ERROR` is 255 (blast_app_util.hpp:161); blastdbcmd catches the exception the
     // same way (`CATCH_ALL`). NCBI's guess of a database type moves on to the nucleotide
@@ -292,6 +318,7 @@ impl std::error::Error for SeqDbError {
         match self {
             SeqDbError::Open { source, .. }
             | SeqDbError::Io { source, .. }
+            | SeqDbError::Map { source, .. }
             | SeqDbError::Read { source, .. } => Some(source),
             _ => None,
         }
@@ -301,7 +328,7 @@ impl std::error::Error for SeqDbError {
 /// The texts of `SeqDbError::Format` that are NCBI's own: the errors NCBI
 /// raises for the same file with the same words. Every other format error is
 /// LOSAT's (a damaged file that NCBI reads past the end of its mapping).
-const NCBI_FORMAT_MESSAGES: [&str; 13] = [
+const NCBI_FORMAT_MESSAGES: [&str; 15] = [
     // seqdbfile.cpp:181-185
     "Error: Not a valid version 4 or 5 database.",
     // seqdbfile.cpp:222-226
@@ -324,6 +351,11 @@ const NCBI_FORMAT_MESSAGES: [&str; 13] = [
     "CBlastDbBlob::x_ReadRaw: hit end of data",
     // seqdbimpl.cpp:2375-2376
     "Error in stored mask algorithm description data.",
+    // seqdb_lmdb.cpp:418-420, 678-680: an empty `.pos`/`.nos` or `.pot`/`.not`
+    // (`tax_files::OidIndex::open`; NCBI BLAST+ 2.17.0 with -negative_seqidlist
+    // and -negative_taxids: line WQA D18 review M4, probe 10 of round 2).
+    "Failed to open oid-to-seqid lookup file",
+    "Failed to open oid-to-taxids lookup file",
 ];
 
 /// seqdbvol.cpp:3365-3382 (the title or the counts follow), seqdbimpl.cpp:2456-2459 (the volume
@@ -350,18 +382,21 @@ impl SeqDbError {
     // is `eTooManyOpenFiles` when that text holds "Too many open files" (the
     // `strerror` text of EMFILE and of ENFILE), the text then NCBI's own, and
     // `eMemoryMappingFailure` otherwise, `Database memory map file error - `
-    // and the exception's text. NCBI maps a file whole where it opens it, so a
-    // read that fails later (LOSAT reads what it needs where it needs it) has
-    // the text of that mapping too (NCBI BLAST+ 2.17.0 with `mmap()` failing
-    // with EIO, and a 3 GiB header file: `length=3221225472`; line WQA D18
-    // probe 3, 2026-11-21). A read that fails without a system code (the file
-    // became shorter after it was opened) stays LOSAT's: NCBI ends by SIGBUS
-    // where its mapped bytes are gone. On Windows NCBI's text comes from
-    // another call, which LOSAT does not reproduce: the error is LOSAT's there.
+    // and the exception's text. NCBI maps a file whole where it opens it:
+    // LOSAT reads the file's first byte there, and a first byte that the
+    // system does not give has the text of that mapping (NCBI BLAST+ 2.17.0
+    // with `mmap()` failing with EIO, and a 3 GiB header file:
+    // `length=3221225472`; line WQA D18 probe 3, 2026-11-21). A read that
+    // fails later ([`SeqDbError::Read`]: the system stopped giving the bytes,
+    // the file became shorter) is where NCBI reads mapped bytes that are gone
+    // and ends by SIGBUS: LOSAT's own error (review M1 of D18, 2026-11-21). On
+    // Windows NCBI's text comes from another call, which LOSAT does not
+    // reproduce: the error is LOSAT's there.
     /// The text NCBI BLAST+ gives for this error, when it is one of NCBI's
     /// own: a search program prints `BLAST Database error: <text>` and ends
     /// with exit status 2. `None`: the error is LOSAT's (a database that
-    /// LOSAT refuses, a damaged file, a read that ended early), to be reported
+    /// LOSAT refuses, a damaged file, a read that fails after the file's
+    /// first byte: [`SeqDbError::is_unreadable`]), to be reported
     /// in LOSAT's words. The text is bytes ([`SeqDbError::NotFound`]).
     pub fn ncbi_message(&self) -> Option<Vec<u8>> {
         match self {
@@ -373,7 +408,7 @@ impl SeqDbError {
                     .iter()
                     .any(|prefix| message.starts_with(prefix)))
             .then(|| message.clone().into_bytes()),
-            SeqDbError::Open { .. } | SeqDbError::Read { .. } => {
+            SeqDbError::Open { .. } | SeqDbError::Map { .. } => {
                 let exception = self.memory_file_exception()?;
                 let message = exception.get_msg();
                 if message
@@ -386,6 +421,7 @@ impl SeqDbError {
                 }
             }
             SeqDbError::Io { .. }
+            | SeqDbError::Read { .. }
             | SeqDbError::Integrity { .. }
             | SeqDbError::Unsupported { .. }
             | SeqDbError::NcbiCrashes { .. }
@@ -398,21 +434,21 @@ impl SeqDbError {
     // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:5600-5656
     /// The `CFileException` (`eMemoryMap`) of NCBI's `CMemoryFile` for this error, where it is
     /// one: a file that does not open ([`SeqDbError::Open`], `CMemoryFileMap::x_Open`) or whose
-    /// bytes cannot be had ([`SeqDbError::Read`], the mapping of the whole file,
-    /// `CMemoryFileSegment`), with the system's text (`utils::os_error_text::ncbi_strerror`;
+    /// first byte cannot be had where it was opened ([`SeqDbError::Map`], the mapping of the
+    /// whole file, `CMemoryFileSegment`), with the system's text (`utils::os_error_text::ncbi_strerror`;
     /// `None` without one). The database reader's atlas rethrows it as its own error
     /// ([`SeqDbError::ncbi_message`]); the lookup files that NCBI maps without the atlas give it
     /// to the program as it is (`filter::lookup_file_error`).
     pub(crate) fn memory_file_exception(&self) -> Option<crate::ncbi_exception::NcbiException> {
         let (path, strerror) = match self {
-            SeqDbError::Open { path, source } | SeqDbError::Read { path, source, .. } => {
+            SeqDbError::Open { path, source } | SeqDbError::Map { path, source, .. } => {
                 (path, crate::utils::os_error_text::ncbi_strerror(source)?)
             }
             _ => return None,
         };
         let path = crate::utils::os_bytes::path_bytes(path);
         let (line, function, message) = match self {
-            SeqDbError::Read { len, .. } => (
+            SeqDbError::Map { len, .. } => (
                 5650,
                 "ncbi::CMemoryFileSegment::CMemoryFileSegment",
                 [
@@ -456,7 +492,7 @@ impl SeqDbError {
     /// `.pto` of mode 000: line WQA D18 probe 8, 2026-11-21).
     pub(crate) fn ncbi_exception_message(&self) -> Option<Vec<u8>> {
         match self {
-            SeqDbError::Open { .. } | SeqDbError::Read { .. } => self
+            SeqDbError::Open { .. } | SeqDbError::Map { .. } => self
                 .memory_file_exception()
                 .map(|exception| exception.get_msg().to_vec()),
             SeqDbError::Ncbi(exception) => Some(exception.get_msg().to_vec()),
@@ -1380,9 +1416,10 @@ impl SeqDb {
     /// (`deflines`), whose error for any other Seq-id is `SeqDbError::Unsupported`
     /// (`SeqDbError::is_parsed_seqids`). `Ok(true)` when some volume's first header holds
     /// parsed Seq-ids; any other error of a first header is returned. A volume whose header
-    /// file cannot be opened or mapped (missing, an `open` that fails, bytes that the system
-    /// does not give: [`SeqDbError::Read`]) is not checked: NCBI opens and maps a header file at
-    /// its first read, and the error comes there (after the outfmt 0 prolog; line WQA D18).
+    /// file cannot be opened, mapped or read (missing, an `open` that fails, a first byte that
+    /// the system does not give: [`SeqDbError::Map`], or a later read: [`SeqDbError::Read`]) is
+    /// not checked: NCBI opens and maps a header file at its first read, and its error, or its
+    /// SIGBUS, comes there (after the outfmt 0 prolog; line WQA D18).
     pub fn has_parsed_seqids(&self) -> Result<bool, SeqDbError> {
         let mut parsed = false;
         for (at, volume) in self.volumes.iter().enumerate() {
@@ -1390,7 +1427,10 @@ impl SeqDb {
                 match self.first_deflines(at) {
                     Ok(_)
                     | Err(
-                        SeqDbError::NotFound(_) | SeqDbError::Open { .. } | SeqDbError::Read { .. },
+                        SeqDbError::NotFound(_)
+                        | SeqDbError::Open { .. }
+                        | SeqDbError::Map { .. }
+                        | SeqDbError::Read { .. },
                     ) => {}
                     Err(error) if error.is_parsed_seqids() => parsed = true,
                     Err(error) => return Err(error),

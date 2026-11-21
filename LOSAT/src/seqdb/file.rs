@@ -57,14 +57,13 @@ impl DbFile {
     // that fails is its memory-mapping error. LOSAT takes the same two steps
     // with a plain `open` in place of the mapping. NCBI maps the whole file
     // there, and a mapping that fails is an error of that place too: LOSAT
-    // reads the first byte of a file that is not empty, so a file whose bytes
-    // the system does not give fails where NCBI's fails (a picked file of
-    // LOSAT Web that changed or was removed after the pick: its reads fail
-    // with EIO; line WQA D18, 2026-11-21).
+    // reads the first byte of a file that is not empty (`opened`), so a file
+    // whose bytes the system does not give fails where NCBI's fails (line WQA
+    // D18, 2026-11-21).
     /// Opens `path` for reading. A path that is no regular file is NCBI's
     /// "Error: File (...) not found."; a regular file that cannot be opened is
     /// [`SeqDbError::Open`], one whose first byte cannot be read
-    /// [`SeqDbError::Read`].
+    /// [`SeqDbError::Map`].
     pub fn open(path: &Path) -> Result<Self, SeqDbError> {
         if !super::alias::exists(path) {
             return Err(SeqDbError::NotFound(
@@ -82,6 +81,16 @@ impl DbFile {
                 source,
             })?
             .len();
+        #[cfg(all(test, target_os = "linux"))]
+        let file = refused_reads::handle(path, file);
+        Self::opened(path, file, len)
+    }
+
+    /// The file `path` of `len` bytes, open on `file`: the one constructor (`open`, and the
+    /// tests' `with_handle`). It reads the first byte of a file that is not empty, as NCBI maps
+    /// the whole file where it opens it; a read that the system refuses there is
+    /// [`SeqDbError::Map`], NCBI's failed mapping of the file.
+    fn opened(path: &Path, file: File, len: u64) -> Result<Self, SeqDbError> {
         let opened = Self {
             path: path.to_path_buf(),
             len,
@@ -91,23 +100,22 @@ impl DbFile {
             file: std::sync::Mutex::new(file),
         };
         if len > 0 {
-            opened.read_exact_at(&mut [0u8; 1], 0)?;
+            opened
+                .read_exact_at_impl(&mut [0u8; 1], 0)
+                .map_err(|source| SeqDbError::Map {
+                    path: path.to_path_buf(),
+                    len,
+                    source,
+                })?;
         }
         Ok(opened)
     }
 
-    /// A file of `len` bytes read through the handle `file` (the tests: a handle whose reads the
-    /// system refuses, a directory's on Linux).
+    /// The file `path` of `len` bytes open on the handle `file`, through the constructor of
+    /// `open` (the tests: a handle whose reads the system refuses, a directory's).
     #[cfg(all(test, target_os = "linux"))]
-    pub(crate) fn with_handle(path: &Path, file: File, len: u64) -> Self {
-        Self {
-            path: path.to_path_buf(),
-            len,
-            #[cfg(any(unix, windows))]
-            file,
-            #[cfg(not(any(unix, windows)))]
-            file: std::sync::Mutex::new(file),
-        }
+    pub(crate) fn with_handle(path: &Path, file: File, len: u64) -> Result<Self, SeqDbError> {
+        Self::opened(path, file, len)
     }
 
     /// Path this file was opened with.
@@ -129,8 +137,10 @@ impl DbFile {
     // NCBI returns a pointer at `offset` of the mapped file; LOSAT fills `buf`
     // from the same offset. A range that passes the end of the file, which
     // NCBI would read past its mapping, is an explicit format error. A read
-    // that the system refuses is [`SeqDbError::Read`], NCBI's failed mapping of
-    // the file (cited at `SeqDbError::ncbi_message`).
+    // that the system refuses here, after the file's first byte was read where
+    // it was opened, is where NCBI reads mapped bytes that the system no
+    // longer gives and ends by SIGBUS: LOSAT's own error,
+    // [`SeqDbError::Read`] ("cannot be read"; line WQA D18, 2026-11-21).
     /// Fills `buf` with the bytes at `offset`.
     pub fn read_exact_at(&self, buf: &mut [u8], offset: u64) -> Result<(), SeqDbError> {
         let end = offset.checked_add(buf.len() as u64);
@@ -148,7 +158,6 @@ impl DbFile {
         self.read_exact_at_impl(buf, offset)
             .map_err(|source| SeqDbError::Read {
                 path: self.path.clone(),
-                len: self.len,
                 source,
             })
     }
@@ -290,5 +299,41 @@ impl DbFile {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         file.seek(SeekFrom::Start(offset))?;
         file.read_exact(buf)
+    }
+}
+
+/// The tests' files whose bytes the system does not give: `DbFile::open` of a path listed here
+/// reads, in place of the file, through a handle that the test names (a directory's, whose read
+/// fails with EISDIR; a file shorter than the listed one, whose read past its end fails), with
+/// the listed file's length. A test reaches the reads of `DbFile` through the readers that open
+/// the file (`SeqDb::has_parsed_seqids`, `SeqDb::deflines`).
+#[cfg(all(test, target_os = "linux"))]
+pub(crate) mod refused_reads {
+    use std::fs::File;
+    use std::path::{Path, PathBuf};
+    use std::sync::Mutex;
+
+    static PATHS: Mutex<Vec<(PathBuf, PathBuf)>> = Mutex::new(Vec::new());
+
+    /// Lists `path` (a path of the test's own directory), to be read through `with`.
+    pub(crate) fn refuse(path: &Path, with: &Path) {
+        PATHS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push((path.to_path_buf(), with.to_path_buf()));
+    }
+
+    /// The handle `DbFile::open` reads `path` through: `with`'s for a listed path.
+    pub(super) fn handle(path: &Path, file: File) -> File {
+        let with = PATHS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .iter()
+            .find(|(listed, _)| listed == path)
+            .map(|(_, with)| with.clone());
+        match with {
+            Some(with) => File::open(with).expect("the test's handle opens"),
+            None => file,
+        }
     }
 }

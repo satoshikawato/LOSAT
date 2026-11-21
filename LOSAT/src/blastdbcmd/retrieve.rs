@@ -62,11 +62,15 @@ impl From<SeqDbError> for Stop {
     /// A reader error inside the request: NCBI's own (`CSeqDBException`, or the `CFileException`
     /// of a lookup file) is caught like any exception there, its message
     /// (`SeqDbError::ncbi_exception_message`) with exit status 1, not the 2 of an error at
-    /// opening; LOSAT's is a refusal.
+    /// opening; LOSAT's is its error of a file that cannot be read or a refusal
+    /// (`common::database::losat_reader_error`).
     fn from(error: SeqDbError) -> Stop {
         match error.ncbi_exception_message() {
             Some(text) => Stop::NcbiBytes(text),
-            None => Stop::refused(error.to_string()),
+            None => Stop::Refused(crate::algorithm::common::database::losat_reader_error(
+                &error,
+                super::PROGRAM,
+            )),
         }
     }
 }

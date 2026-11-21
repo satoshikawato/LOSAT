@@ -2,7 +2,8 @@
 //! directory in place of the file, for the files of version 4 and 5 databases of both molecule
 //! types, an alias file and a member of an alias, and the lookup files that `-taxids`,
 //! `-negative_taxids`, `-seqidlist` and `-negative_seqidlist` open, in the search programs and in
-//! blastdbcmd. The expected bytes and exit
+//! blastdbcmd; and an empty lookup or LMDB file (`.pos`, `.pot`, `.ptf`, `.pdb`: review M4 of D18,
+//! probe 10 of its round 2; NCBI's texts are cited at `seqdb::NCBI_FORMAT_MESSAGES`). The expected bytes and exit
 //! statuses are NCBI BLAST+ 2.17.0's, run as a user that is not the superuser
 //! (tests/seqdb/expected/unreadable_files.tsv, frozen from the probes of D18); NCBI is not run here.
 //! A superuser reads a file of mode 000, so there only the rows of a directory are compared.
@@ -109,7 +110,7 @@ fn unescape(field: &str) -> String {
 }
 
 /// A fresh directory with the set's files (and the alias and list files of the probes), the
-/// row's file made unreadable.
+/// row's file made unreadable (`how`: mode 000, a directory, or empty).
 fn prepare(dir: &Path, set: &str, file: &str, how: &str) {
     if dir.exists() {
         let _ = fs::set_permissions(dir, fs::Permissions::from_mode(0o755));
@@ -134,6 +135,7 @@ fn prepare(dir: &Path, set: &str, file: &str, how: &str) {
             fs::remove_file(dir.join(file)).unwrap();
             fs::create_dir(dir.join(file)).unwrap();
         }
+        "empty" => fs::write(dir.join(file), b"").unwrap(),
         _ => assert_eq!(how, "none"),
     }
 }
@@ -222,7 +224,7 @@ fn database_files_that_cannot_be_read_give_ncbis_bytes() {
         compared += 1;
     }
     assert!(
-        compared >= if superuser { 15 } else { 105 },
+        compared >= if superuser { 29 } else { 119 },
         "{compared} rows"
     );
     let _ = fs::set_permissions(&probe, fs::Permissions::from_mode(0o644));

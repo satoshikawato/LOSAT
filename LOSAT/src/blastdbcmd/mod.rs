@@ -264,7 +264,9 @@ fn database_error(diag: &mut Diag, error: SeqDbError) -> i32 {
             diag.post_bytes(&[b"BLAST Database error: ".as_slice(), &text].concat());
             2
         }
-        None => diag.refuse(&refusal(&error.to_string())),
+        None => diag.refuse(&crate::algorithm::common::database::losat_reader_error(
+            &error, PROGRAM,
+        )),
     }
 }
 

@@ -605,7 +605,8 @@ impl LazyTaxDb {
                 // The file that failed, and what the system said of it.
                 SeqDbError::Open { path, source }
                 | SeqDbError::Io { path, source }
-                | SeqDbError::Read { path, source, .. } => (path, source.to_string()),
+                | SeqDbError::Map { path, source, .. }
+                | SeqDbError::Read { path, source } => (path, source.to_string()),
                 SeqDbError::Format { path, message } => (path, message),
                 other => (PathBuf::from("taxdb.bti"), other.to_string()),
             })

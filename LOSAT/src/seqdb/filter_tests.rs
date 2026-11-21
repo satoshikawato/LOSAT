@@ -759,7 +759,8 @@ fn unreadable_lmdb_and_lookup_files_give_ncbis_errors() {
         path: PathBuf::from("/d/tm_psi.pos"),
         source: std::io::Error::from_raw_os_error(code),
     };
-    let read = |code: i32| SeqDbError::Read {
+    // The first byte, read where the file is opened (`DbFile::open`): NCBI's mapping.
+    let read = |code: i32| SeqDbError::Map {
         path: PathBuf::from("/d/tm_psi.pos"),
         len: 1234,
         source: std::io::Error::from_raw_os_error(code),
@@ -809,11 +810,21 @@ fn unreadable_lmdb_and_lookup_files_give_ncbis_errors() {
             "Cannot map file '/d/tm_psi.pos' to memory (offset=0, length=1234): Input/output error"
         )
     );
-    // A read that ends early has no system code: LOSAT's own refusal (NCBI ends by SIGBUS).
-    let short = SeqDbError::Read {
+    // A first byte that cannot be read without a system code, and a read that fails after the
+    // first byte (where NCBI ends by SIGBUS), are LOSAT's own errors.
+    let short = SeqDbError::Map {
         path: PathBuf::from("/d/tm_psi.pos"),
         len: 1234,
         source: std::io::Error::from(std::io::ErrorKind::UnexpectedEof),
     };
-    assert!(matches!(lookup_file_error(short), SeqDbError::Read { .. }));
+    assert!(matches!(lookup_file_error(short), SeqDbError::Map { .. }));
+    let later = || SeqDbError::Read {
+        path: PathBuf::from("/d/tm_psi.pos"),
+        source: std::io::Error::from_raw_os_error(5),
+    };
+    assert!(matches!(
+        lookup_file_error(later()),
+        SeqDbError::Read { .. }
+    ));
+    assert!(matches!(lmdb_file_error(later()), SeqDbError::Read { .. }));
 }

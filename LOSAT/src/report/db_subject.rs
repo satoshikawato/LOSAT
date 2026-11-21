@@ -273,11 +273,12 @@ impl LookupFailure {
 
     /// The failure of a lookup with the error `error`: NCBI's message where it is one of NCBI's
     /// (`SeqDbError::ncbi_message`), NCBI's crash where LOSAT refuses a file that NCBI crashes on
-    /// (`SeqDbError::ncbi_crashes`), else LOSAT's text.
+    /// (`SeqDbError::ncbi_crashes`) or where the bytes of a file that NCBI has mapped are not
+    /// given (`SeqDbError::is_unreadable`: SIGBUS; line WQA D18, 2026-11-21), else LOSAT's text.
     pub fn of_error(error: &crate::seqdb::SeqDbError) -> Self {
         match error.ncbi_message() {
             Some(message) => Self::ncbi(message),
-            None if error.ncbi_crashes() => Self {
+            None if error.ncbi_crashes() || error.is_unreadable() => Self {
                 message: error.to_string().into_bytes(),
                 ncbi: NcbiFailure::Crashes,
             },

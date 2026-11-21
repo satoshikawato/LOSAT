@@ -38,8 +38,8 @@ pub(crate) struct BdbRecord {
     /// (`report::defline::BioseqFacts::has_source`); asked only for a title as `taxname` (else
     /// `false`, which writes the same title).
     pub has_source: bool,
-    /// `sequence::GetTitle` of the Bioseq (`sequence::title::get_title`), when the reader was
-    /// asked for it (`MaskBdbReader::ask_get_title`: windowmasker's `-ids` matched as text,
+    /// `sequence::GetTitle` of the Bioseq (`sequence::title::get_title`) of a sequence with letters,
+    /// when the reader was asked for it (`MaskBdbReader::ask_get_title`: windowmasker's `-ids` matched as text,
     /// makembindex's `-idmap`). An empty title is made from the Bioseq's first source, which it
     /// has for a definition line with a positive taxid whatever the taxonomy database holds
     /// (seqdbvol.cpp:1126-1176).
@@ -259,7 +259,9 @@ impl MaskBdbReader {
         } else {
             None
         };
-        let get_title = if self.get_title {
+        // `GetBioseq` gives no Bioseq for a sequence without letters, before its lookups: none
+        // is made, and the callers skip the record (windowmasker) or refuse it (makembindex).
+        let get_title = if self.get_title && has_letters {
             Some(crate::sequence::title::get_title(
                 &ids,
                 &title,

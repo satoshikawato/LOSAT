@@ -11,6 +11,7 @@ Usage: python3 -I make_fixtures.py --ncbi-bin <dir of windowmasker and makeblast
 (--only: those rows, and only the databases that are missing; the other rows' files stay.)"""
 import argparse
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -42,7 +43,7 @@ def cases():
         name, arguments = line.split("\t", 1)
         words = shlex.split(arguments)
         variables = {}
-        while words and "=" in words[0] and words[0].split("=", 1)[0].isupper():
+        while words and re.fullmatch(r"[A-Z_]+=.*", words[0], re.S):
             name_, value = words.pop(0).split("=", 1)
             variables[name_] = value
         stdin = None

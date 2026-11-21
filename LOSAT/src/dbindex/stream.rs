@@ -305,8 +305,19 @@ impl SequenceStream for BlastDbStream {
         else {
             return Ok(None);
         };
-        let mut bases = Bases::default();
         let length = ambiguity.length();
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1380-1386
+        // `GetBioseq` gives a null Bioseq for a sequence without letters, which `next` dereferences:
+        // a `CCoreException` (`eNullPtr`) whose report prints a stack trace with the run's memory
+        // addresses (PD-LOSAT-NCBI-DEFECTS rule 3).
+        if length == 0 {
+            return Err(StreamError::Refused(super::unsupported(&format!(
+                "sequence {oid} of the database, which has no letters (NCBI's makembindex reads the \
+                 null sequence its database reader gives for it and stops with a report of the run's \
+                 memory addresses),"
+            ))));
+        }
+        let mut bases = Bases::default();
         let mut from = 0;
         while from < length {
             let to = length.min(from + READ_BLOCK);

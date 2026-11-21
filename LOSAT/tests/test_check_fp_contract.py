@@ -29,13 +29,16 @@ fn x_product_error(a: f64, b: f64, product: f64) -> f64 {
 }
 
 #[cfg(test)]
-mod tests {
-    #[test]
-    fn x_dekker_product_error_matches_fused_multiply_add() {
-        let s = "not a.mul_add(call) // in a string";
-        let q = '"';
-        let fused = a.mul_add(b, -product);
-    }
+#[path = "spouge_tests.rs"]
+mod tests;
+"""
+
+SPOUGE_TESTS = """\
+#[test]
+fn x_dekker_product_error_matches_fused_multiply_add() {
+    let s = "not a.mul_add(call) // in a string";
+    let q = '"';
+    let fused = a.mul_add(b, -product);
 }
 """
 
@@ -48,12 +51,15 @@ impl Fma for Fused {
 }
 
 #[cfg(test)]
-mod tests {
-    #[test]
-    fn the_emulated_fma_rounds_once() {
-        let fused = a.mul_add(b, c);
-        let other = x.mul_add(y, z);
-    }
+#[path = "glibc_fma_libm_tests.rs"]
+mod tests;
+"""
+
+LIBM_TESTS = """\
+#[test]
+fn the_emulated_fma_rounds_once() {
+    let fused = a.mul_add(b, c);
+    let other = x.mul_add(y, z);
 }
 """
 
@@ -63,7 +69,9 @@ def write_tree(root: Path, spouge: str = SPOUGE, other: str = "", config: str = 
     (root / "LOSAT/src/utils").mkdir(parents=True)
     (root / "LOSAT/.cargo").mkdir(parents=True)
     (root / "LOSAT/src/stats/spouge.rs").write_text(spouge, encoding="utf-8")
+    (root / "LOSAT/src/stats/spouge_tests.rs").write_text(SPOUGE_TESTS, encoding="utf-8")
     (root / "LOSAT/src/utils/glibc_fma_libm.rs").write_text(LIBM, encoding="utf-8")
+    (root / "LOSAT/src/utils/glibc_fma_libm_tests.rs").write_text(LIBM_TESTS, encoding="utf-8")
     (root / "LOSAT/src/other.rs").write_text(other, encoding="utf-8")
     (root / "LOSAT/.cargo/config.toml").write_text(config, encoding="utf-8")
 

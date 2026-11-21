@@ -214,7 +214,9 @@ fn argument_dependencies_follow_ncbis_order() {
 /// does not register besides; its one mandatory argument is the one clap requires.
 #[test]
 fn the_declaration_order_holds_every_argument() {
-    let command = MakedbArgs::augment_args(clap::Command::new("makeblastdb"));
+    // The subcommand as LOSAT registers it.
+    let cli = <crate::cli::Cli as clap::CommandFactory>::command();
+    let command = cli.find_subcommand("makeblastdb").unwrap();
     let mut registered: Vec<String> = command
         .get_arguments()
         .map(|arg| match arg.get_id().as_str() {

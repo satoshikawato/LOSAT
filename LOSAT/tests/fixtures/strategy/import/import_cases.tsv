@@ -102,6 +102,8 @@ I.blastn.minraw.alone	blastn	-import_search_strategy {ss}/blastn.minraw.ss	0	18d
 I.blastn.minraw.f5	blastn	-import_search_strategy {ss}/blastn.minraw.ss -outfmt 5	0	be936b407c761075	c7d9e175b47ef7bc
 I.blastn.offdiag.alone	blastn	-import_search_strategy {ss}/blastn.offdiag.ss	1	-	4b99724f194e543c
 I.blastn.offdiag.f5	blastn	-import_search_strategy {ss}/blastn.offdiag.ss -outfmt 5	1	-	4b99724f194e543c
+I.blastn.besthit.alone	blastn	-import_search_strategy {ss}/blastn.besthit.ss	0	b1a0a8c7a8a7d0ae	c7d9e175b47ef7bc
+I.blastn.besthit.f5	blastn	-import_search_strategy {ss}/blastn.besthit.ss -outfmt 5	0	d797d43674340c8f	c7d9e175b47ef7bc
 I.blastn.subbest.alone	blastn	-import_search_strategy {ss}/blastn.subbest.ss	0	18d4dad5d024ef63	c7d9e175b47ef7bc
 I.blastn.subbest.f5	blastn	-import_search_strategy {ss}/blastn.subbest.ss -outfmt 5	0	be936b407c761075	c7d9e175b47ef7bc
 I.blastn.wmdb.alone	blastn	-import_search_strategy {ss}/blastn.wmdb.ss	3	-	e6ddb898b784d77e
@@ -377,6 +379,7 @@ I.tblastx.db.lcm	tblastx	-import_search_strategy {ss}/tblastx.db.ss -lcase_maski
 I.tblastx.db.qloc	tblastx	-import_search_strategy {ss}/tblastx.db.ss -query_loc 10-60	0	b1cce80459758c39	d6dbca01209bf9a6
 I.tblastx.db.pd	tblastx	-import_search_strategy {ss}/tblastx.db.ss -parse_deflines	0	7ff23939bbfddac0	d6dbca01209bf9a6
 I.tblastx.db.dbsize	tblastx	-import_search_strategy {ss}/tblastx.db.ss -dbsize 1000	0	f153bc90307b54d1	d6dbca01209bf9a6
+I.tblastx.db.strand	tblastx	-import_search_strategy {ss}/tblastx.db.ss -strand minus	0	306969cdd9b3c9cc	d6dbca01209bf9a6
 I.tblastx.db.db	tblastx	-import_search_strategy {ss}/tblastx.db.ss -db tests/db_search/arch_tbx_snucl	0	f153bc90307b54d1	0939cacf4e0498aa
 I.tblastx.db.dbdbsize	tblastx	-import_search_strategy {ss}/tblastx.db.ss -db tests/db_search/arch_tbx_snucl -dbsize 1000	0	5300281558b84a2f	0939cacf4e0498aa
 I.tblastx.db.taxids	tblastx	-import_search_strategy {ss}/tblastx.db.ss -taxids 9606	0	f153bc90307b54d1	fe71601548aee3e1
@@ -401,6 +404,7 @@ I.tblastx.sub.lcm	tblastx	-import_search_strategy {ss}/tblastx.sub.ss -lcase_mas
 I.tblastx.sub.qloc	tblastx	-import_search_strategy {ss}/tblastx.sub.ss -query_loc 10-60	0	8d014e277abaeda7	d6dbca01209bf9a6
 I.tblastx.sub.pd	tblastx	-import_search_strategy {ss}/tblastx.sub.ss -parse_deflines	0	73ec371814b2cbdf	d6dbca01209bf9a6
 I.tblastx.sub.dbsize	tblastx	-import_search_strategy {ss}/tblastx.sub.ss -dbsize 1000	0	3bcd5eb1b7e906e0	d6dbca01209bf9a6
+I.tblastx.sub.strand	tblastx	-import_search_strategy {ss}/tblastx.sub.ss -strand minus	0	64a1f3e19c37b4d6	d6dbca01209bf9a6
 I.tblastx.sub.sub	tblastx	-import_search_strategy {ss}/tblastx.sub.ss -subject tests/fasta/outfmt11/arch_tbx_s.fna	0	1c789eb06aad2891	0939cacf4e0498aa
 I.tblastx.sub.ws	tblastx	-import_search_strategy {ss}/tblastx.sub.ss -word_size 2	0	3bcd5eb1b7e906e0	3a6aeb3e243fddc9
 I.tblastx.bat.alone	tblastx	-import_search_strategy {ss}/tblastx.bat.ss	0	c03aa69eef595d88	d6dbca01209bf9a6
@@ -433,7 +437,11 @@ I.tblastx.sub_strand.alone	tblastx	-import_search_strategy {ss}/tblastx.sub_stra
 I.blastn.sub_lcase.alone	blastn	-import_search_strategy {ss}/blastn.sub_lcase.ss	0	2333d3284980beed	c7d9e175b47ef7bc
 I.blastn.sub_qloc.alone	blastn	-import_search_strategy {ss}/blastn.sub_qloc.ss	0	27b13821c97a93f1	c7d9e175b47ef7bc
 I.blastn.sub_strand.alone	blastn	-import_search_strategy {ss}/blastn.sub_strand.ss	0	2333d3284980beed	c7d9e175b47ef7bc
+C.tblastx.from.blastn.db	tblastx	-import_search_strategy {ss}/blastn.db.ss	0	7d416daf860e5ef5	d6dbca01209bf9a6
+C.blastn.from.tblastx.db	blastn	-import_search_strategy {ss}/tblastx.db.ss	0	f153bc90307b54d1	c7d9e175b47ef7bc
 C.blastp.from.psiblast.pssm	blastp	-import_search_strategy {ss}/psiblast.pssm.ss	3	-	291e9cdad2fca72f
+C.tblastx.from.blastx.db	tblastx	-import_search_strategy {ss}/blastx.db.ss	0	9df0120fd047fcb6	d6dbca01209bf9a6
+C.blastx.from.tblastx.db	blastx	-import_search_strategy {ss}/tblastx.db.ss	0	f153bc90307b54d1	aadd0ca47f19a2cc
 S.blastn.missing	blastn	-import_search_strategy in/no_such.ss	1	-	56dd453f9943cec3
 S.blastp.missing	blastp	-import_search_strategy in/no_such.ss	1	-	56dd453f9943cec3
 E.blastn.empty	blastn	-import_search_strategy {ss}/craft/blastn.empty	1	-	4b99724f194e543c
@@ -520,6 +528,7 @@ I.blastp.db.cbs2	blastp	-import_search_strategy {ss}/blastp.db.ss -comp_based_st
 I.blastn.db.ws28	blastn	-import_search_strategy {ss}/blastn.db.ss -word_size 28	0	18d4dad5d024ef63	76741e324aad49e4
 I.blastn.nogreedy2.alone	blastn	-import_search_strategy {ss}/blastn.nogreedy2.ss	0	d59a7ebf928b88e9	c7d9e175b47ef7bc
 I.blastn.offdiag2.alone	blastn	-import_search_strategy {ss}/blastn.offdiag2.ss	0	3ea0f8e4e78c2515	c7d9e175b47ef7bc
+I.blastp.ungap2.alone	blastp	-import_search_strategy {ss}/blastp.ungap2.ss	0	7687d308a9c3394e	1fc42b53917c7075
 I.blastn.gt.alone	blastn	-import_search_strategy {ss}/blastn.gt.ss	0	1df8aed660d96850	c7d9e175b47ef7bc
 R.blastn.db	blastn	-query {ss}/render/blastn.db.fa -db tests/db_search/arch_snucl	0	18d4dad5d024ef63	-
 R.blastn.sub	blastn	-query {ss}/render/blastn.sub.fa -subject tests/fasta/outfmt11/arch_s.fna	0	b1f99a767c33cc4c	-

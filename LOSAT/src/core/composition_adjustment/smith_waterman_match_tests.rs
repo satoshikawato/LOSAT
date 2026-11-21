@@ -326,7 +326,7 @@ fn the_batch_errors_name_the_program() {
     let failed = sw_batch_failed_error("tblastn", false);
     assert!(failed
         .to_string()
-        .contains("BLAST engine error: Traceback failed"));
+        .contains("LOSAT engine error: Traceback failed"));
     let endless = sw_endless_error("blastp", "why").to_string();
     assert_eq!(
         endless,

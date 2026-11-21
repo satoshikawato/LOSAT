@@ -224,7 +224,8 @@ fn input_directory<'a>(program: &str, case: &'a Case) -> Option<&'a str> {
 }
 
 /// NCBI's stdout, stderr and exit status for the row `name` of `program`, as frozen; the standard
-/// error in LOSAT's words (NCBI's bytes through `losat::wording`, AGENTS.md rule 8).
+/// output and error in LOSAT's words (NCBI's bytes through `losat::wording`, AGENTS.md rule 8:
+/// `-xmlhelp`'s version of the program, the prefixes).
 fn expected_row(program: &str, name: &str) -> Streams {
     let file = |extension: &str| {
         fixtures(program)
@@ -250,7 +251,7 @@ fn expected_row(program: &str, name: &str) -> Streams {
         err
     };
     (
-        fs::read(file("out")).unwrap(),
+        losat::wording::losat_output_bytes(&fs::read(file("out")).unwrap()).into_owned(),
         losat::wording::losat_bytes(&err).into_owned(),
         status.trim().parse().unwrap(),
     )

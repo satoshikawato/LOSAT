@@ -161,9 +161,10 @@ fn makembindex_refuses_a_database_sequence_without_letters() {
             (err.as_str(), run.status.code(), run.stdout.len()),
             (
                 "creating @D@/z.00.idx...\nError: sequence 0 of the database, which has no \
-                 letters (NCBI's makembindex reads the null sequence its database reader gives \
-                 for it and stops with a report of the run's memory addresses), is not supported \
-                 by LOSAT's MAKEMBINDEX\n",
+                 letters or no definition line left by the alias files' OID_MASK_TYPE (NCBI's \
+                 makembindex reads the null sequence its database reader gives for it and stops \
+                 with a report of the run's memory addresses), is not supported by LOSAT's \
+                 MAKEMBINDEX\n",
                 Some(1),
                 0
             ),

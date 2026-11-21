@@ -6,9 +6,6 @@
 //! does BLAST XML, whose windows are single queries.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1411
-//! ```c++
-//! CBlastFormat::PrintOneResultSet(const blast::CSearchResults& results,
-//! ```
 //! NCBI makes and prints the alignments of one query's result set at a time. A row is a function
 //! of its HSP alone (`build_pairwise_hits`), so the rows of a window are the rows that the
 //! queries of the window have among the rows of every query, in the same order.

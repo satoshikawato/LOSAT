@@ -32,16 +32,7 @@ mod tests {
         score: i32,
         query_frame: i32,
     ) -> BlastnHsp {
-        // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:125-148
-        // ```c
-        // typedef struct BlastHSP {
-        //    Int4 score;
-        //    double evalue;
-        //    BlastSeg query;
-        //    BlastSeg subject;
-        //    Int4 context;
-        // } BlastHSP;
-        // ```
+        // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:125-148
         BlastnHsp {
             identity: 100.0,
             length: q_end - q_start + 1,
@@ -54,13 +45,7 @@ mod tests {
             e_value: 0.0,
             bit_score: score as f64,
             num_ident: q_end - q_start + 1,
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1122-1132
-            // ```c
-            // if (hsp->query.frame != hsp->subject.frame) {
-            //    *q_end = query_length - hsp->query.offset;
-            //    *q_start = *q_end - hsp->query.end + hsp->query.offset + 1;
-            // }
-            // ```
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1122-1132
             query_frame,
             query_length: 1000,
             q_idx: 0,

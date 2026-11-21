@@ -176,19 +176,6 @@ impl TblastxDatabase {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:164-168,183-187
-    // ```c++
-    // s_SeqDbGetNumSeqs(void* seqdb_handle, void*)
-    // {
-    //     CSeqDB & seqdb = **(TSeqDBData *) seqdb_handle;
-    //     return seqdb.GetNumSeqs();
-    // }
-    // ...
-    // s_SeqDbGetTotLen(void* seqdb_handle, void*)
-    // {
-    //     CSeqDB & seqdb = **(TSeqDBData *) seqdb_handle;
-    //     return seqdb.GetTotalLength();
-    // }
-    // ```
     /// The numbers of the database that the statistics read (`SeqDb::statistics`: the setup's
     /// total and NCBI's `Int4` count, `BlastSeqSrcGetTotLen` for the linking, the average subject
     /// length), with `-dbsize`.
@@ -269,14 +256,6 @@ impl TblastxDatabase {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:844-851
-    // ```c++
-    //             	CRef<CBlast_def_line_set> bdlRef =
-    //             			CSeqDB::ExtractBlastDefline(subject_bh);
-    //     ...
-    //             	if(setSubjectTaxInfoAll) {
-    //             		x_SetTaxInfoAll(subject_bh, bdlRef);
-    //             	}
-    // ```
     /// The taxonomy of the tabular fields (`staxid`, `staxids`) of every reported sequence that a
     /// report loads (`ReportedSubjects::loads`), by rank (every rank is made from a hit,
     /// `reported_subjects`; `algorithm::common::tabular::tabular_taxonomy`). A header that does
@@ -336,15 +315,6 @@ pub(crate) fn drop_unaligned(database: &TblastxDatabase, ordered: &mut Vec<Tblas
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:283-293
-// ```c++
-//     m_TbackSearch.Reset(new CBlastTracebackSearch(m_QueryFactory,
-//                                                   m_InternalData,
-//                                                   m_Opts,
-//                                                   seqinfo_src,
-//                                                   search_msgs));
-//     ...
-//     CRef<CSearchResultSet> retval = m_TbackSearch->Run();
-// ```
 /// Reads the definition lines of the sequences that the reported hits `ordered` of a query
 /// batch name (in report order: query by query, in hit-list order; the subject index is the
 /// ordinal id, the query index counts from the batch's first query `first_query`) into
@@ -801,7 +771,7 @@ pub(crate) fn query_hits(ordered: &[TblastxHsp], queries: std::ops::Range<usize>
     &ordered[from..to.max(from)]
 }
 
-// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:728-753 (quoted at
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:728-753 (cited at
 // `common::database::prefetch_may_be_off`: `s_PreFetchSeqs` counts the Seq-aligns of one batch's
 // results against `PRE_FETCH_SEQS_LIMIT`)
 /// Whether the batch of each query of the reported hits `ordered` (in report order, by query of
@@ -1054,16 +1024,7 @@ mod tests {
             .expect("a database without parsed Seq-ids opens with SEQ_ID_PREFER_ACCESSION_OVER_GI");
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:904-910
-    // ```c
-    //    Int8 total_length = -1;
-    //    Int4 num_seqs = -1;
-    //
-    //    if (seq_src) {
-    //       total_length = BlastSeqSrcGetTotLenStats(seq_src);
-    //       if (total_length <= 0)
-    //           total_length = BlastSeqSrcGetTotLen(seq_src);
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:904-911
     // An alias file's `LENGTH` of 2^32 letters or more over the 16 sequences of
     // `tests/db_search/taxfilter/tfn` (`tests/db_search/dbcounts`, row db.cnt.avg2p32.tx) is
     // NCBI's `Int8` on every target, wasm32's 32-bit `usize` included: the database opens with

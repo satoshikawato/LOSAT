@@ -133,14 +133,6 @@ const NCBI4NA_TO_BASE: [u8; 16] = {
 /// of lower-case letters.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:515-520
-/// ```c
-///     virtual SBlastSequence GetCompressedPlusStrand() {
-///         SBlastSequence retval(size());
-///         string ncbi4na = kEmptyStr;
-///         m_SeqVector.GetSeqData(m_SeqVector.begin(), m_SeqVector.end(), ncbi4na);
-///         s_Ncbi4naToNcbi2na(ncbi4na, size(), retval.data.get());
-///         return retval;
-/// ```
 /// The packed bases of a `-subject` record are those NCBI's subject set-up makes: an ambiguous
 /// base is resolved by `CRandom(length)` in order (`encode_subject_ncbi2na_packed`). The runs keep
 /// the real codes, which the traceback and the reports read.
@@ -260,17 +252,6 @@ impl PackedNucleotide {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:834-842
-    // ```c++
-    //         if (position + row_len <= region.begin)
-    //             continue;
-    //
-    //         if(position >= region.end)
-    //         	break;
-    //
-    //         for (int j = 0; j < row_len; ++j, ++position)
-    //             if ( position >= region.begin  && position < region.end)
-    //                 seq[position] = trans_ch;
-    // ```
     /// A sequence of a BLAST database as stored (`seqdb::volume::SequenceBlock`): `packed` is
     /// its 2-bit data (`nucleotide_packed`: the bases makeblastdb stored, each ambiguous base
     /// replaced by one of its bases, in the layout of a subject's packed bytes), `length` its
@@ -947,7 +928,7 @@ mod tests {
         }
     }
 
-    /// NCBI's reader applying `runs` to the letters of `packed` (seqdbvol.cpp:834-842), as
+    /// NCBI's reader applying `runs` to the letters of `packed` (c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:834-842), as
     /// ncbi4na codes.
     fn ncbi_letters(packed: &[u8], length: usize, runs: &[AmbiguityRun]) -> Vec<u8> {
         let mut seq: Vec<u8> = (0..length)

@@ -4,15 +4,7 @@
 //! Boost (NCBI 598d8ae6 copy): c++/src/algo/blast/core/boost_erf.c:143).
 //!
 //! NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:2479-2481
-//! ```c++
-//!     unsigned int first, second=0;
-//!     long double mult = __NLG(1.);
-//!     long double value = val;
-//! ```
 //! NCBI reference (598d8ae6): c++/include/corelib/ncbitype.h:243
-//! ```c++
-//! #  define NCBI_CONST_LONGDOUBLE(v)   v##L
-//! ```
 //! Boost (NCBI 598d8ae6 copy): c++/src/algo/blast/core/boost_erf.c:143,171,199,229
 //! (Boost's notice and the Boost Software License 1.0: `stats::spouge` and THIRD_PARTY_NOTICES,
 //! section 3.)
@@ -85,7 +77,7 @@ impl X87 {
         (self.negative, self.exponent, self.significand)
     }
 
-    /// `long double value = val;` (`fldl`): exact, subnormal doubles included, because the
+    /// Widening a double to a long double (`fldl`): exact, subnormal doubles included, because the
     /// 80-bit format has 11 more significand bits and a wider exponent range than a double.
     pub(crate) fn from_f64(x: f64) -> X87 {
         debug_assert!(x.is_finite());
@@ -115,7 +107,7 @@ impl X87 {
         }
     }
 
-    /// `t1 = first;` (`fild` of an unsigned int): exact.
+    /// Loading an unsigned int into a long double (`fild`): exact.
     pub(crate) fn from_u32(v: u32) -> X87 {
         if v == 0 {
             return X87::ZERO;
@@ -129,11 +121,6 @@ impl X87 {
     }
 
     // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:1159-1161
-    // ```c++
-    //     if ( first_mul > 1 ) {
-    //         _ASSERT(first);
-    //         ret = ((long double)first * first_mul + second)* second_mul + third;
-    // ```
     // No NCBI counterpart: the 80-bit value of an integer below 2^64 (`StringToDoublePosix`'s
     // mantissa of up to 18 digits, `blastinput::pssm_text`), which the 64-bit significand holds
     // exactly.
@@ -151,11 +138,6 @@ impl X87 {
     }
 
     // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:1271-1273
-    // ```c++
-    //     if ( sign < 0 ) {
-    //         ret = -ret;
-    //     }
-    // ```
     // No NCBI counterpart: `fchs`, exact.
     /// The value with its sign changed.
     pub(crate) fn neg(self) -> X87 {
@@ -174,15 +156,6 @@ impl X87 {
     }
 
     // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:1056-1057, 1159-1161, 1206-1207
-    // ```c++
-    //                 second_mul *= NCBI_CONST_LONGDOUBLE(10.);
-    //                 third = third * NCBI_CONST_LONGDOUBLE(10.) + c;
-    //     ...
-    //         ret = ((long double)first * first_mul + second)* second_mul + third;
-    //     ...
-    //                     for ( exponent >>= 4; exponent; --exponent ) {
-    //                         ret *= NCBI_CONST_LONGDOUBLE(1e256);
-    // ```
     // No NCBI counterpart: the `fmul` of `StringToDoublePosix`, whose product passes the largest
     // 80-bit value for a mantissa of some 4,900 digits and more (`ncbi_str::double`).
     /// `mul`, or `None` where the x87 unit gives the infinity of an overflow: the product rounded
@@ -230,11 +203,6 @@ impl X87 {
     }
 
     // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:1057, 1159-1161
-    // ```c++
-    //                 third = third * NCBI_CONST_LONGDOUBLE(10.) + c;
-    //     ...
-    //         ret = ((long double)first * first_mul + second)* second_mul + third;
-    // ```
     // No NCBI counterpart: the `fadd` of `StringToDoublePosix`'s mantissa of more than 18 digits
     // (`ncbi_str::double`), whose operands are nonnegative.
     /// `fadd` of two nonnegative values with precision control 64 bits and round to nearest, ties

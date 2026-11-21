@@ -46,18 +46,7 @@
 //! builds' vectors give the same answer.
 //!
 //! NCBI reference (598d8ae6): c++/src/objects/seqtable/BVector_data.cpp:73-82
-//! ```c++
-//! void CBVector_data::x_CreateBitVector(void) const
-//! {
-//!     CMutexGuard guard(sx_PrepareMutex_bvector);
-//!     if ( !m_BitVector ) {
-//!         // make bvector
-//!         AutoPtr<bm::bvector<> > bv(new bm::bvector<>(GetSize()));
-//!         bm::deserialize(*bv, (const unsigned char*)&GetData()[0]);
-//!         m_BitVector.reset(bv.release());
-//!     }
-//! }
-//! ```
+//!
 //! The module has no `crate::` imports, so that `rustc --edition 2021 --test bitmagic.rs` builds it
 //! and its tests alone (the differential driver of `bitmagic_tests.rs`).
 

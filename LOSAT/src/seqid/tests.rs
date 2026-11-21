@@ -602,7 +602,7 @@ fn textseq(accession: Option<&str>, name: Option<&str>, version: Option<i32>) ->
 }
 
 /// Forms that no fixture holds (makeblastdb does not write them from FASTA), by NCBI's rules
-/// quoted in `label` and `rank`.
+/// cited in `label` and `rank`.
 #[test]
 fn printings_of_forms_without_a_fixture() {
     let giim = ParsedSeqId::Giim(GiimportId {

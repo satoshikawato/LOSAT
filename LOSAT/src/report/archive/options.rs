@@ -2,9 +2,6 @@
 //! request): the parameters that the `Set*` calls of NCBI's application record.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_cxx.cpp:257-269
-//! ```c++
-//! void CBlastOptions::x_AttachValue(CRef<CBlast4_parameter> p) ...
-//! ```
 //! With `-outfmt 11` the options handle is local and remote (blast_args.cpp:3624-3627), so
 //! every `Set*` call made outside defaults mode records a Blast4 parameter: appended when it
 //! is first set and replaced in place when it is set again. The list is therefore a fold of
@@ -90,47 +87,10 @@ pub fn seg_filter(value: &str) -> Option<Filter> {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_handle.cpp:73-88
-// ```c++
-// void
-// CBlastOptionsHandle::SetDefaults()
-// {
-//     if (m_Opts->GetLocality() != CBlastOptions::eRemote) {
-//         m_Opts->SetDefaultsMode(true);
-//         SetLookupTableDefaults();
-//         ...
-//         m_Opts->SetDefaultsMode(false);
-//     }
-//     SetRemoteProgramAndService_Blast3();
-// }
-// ```
 // NCBI reference (598d8ae6): c++/include/algo/blast/api/psiblast_options.hpp:82-84
-// ```c++
-//     virtual void SetRemoteProgramAndService_Blast3()
-//     {
-//         m_Opts->SetRemoteProgramAndService_Blast3("blastp", "psi");
-// ```
 // NCBI reference (598d8ae6): c++/include/algo/blast/api/blast_rps_options.hpp:122-124
-// ```c++
-//     virtual void SetRemoteProgramAndService_Blast3()
-//     {
-//         m_Opts->SetRemoteProgramAndService_Blast3("blastp", "rpsblast");
-// ```
 // NCBI reference (598d8ae6): c++/include/algo/blast/api/rpstblastn_options.hpp:74-76
-// ```c++
-//     virtual void SetRemoteProgramAndService_Blast3()
-//     {
-//         m_Opts->SetRemoteProgramAndService_Blast3("tblastn", "rpsblast");
-// ```
-// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastn_args.cpp:138-145
-// ```c++
-//     if (args.Exist(kArgPSIInputChkPntFile) && args[kArgPSIInputChkPntFile]) {
-//        CPSIBlastOptionsHandle * rv(new CPSIBlastOptionsHandle(locality));
-//        rv->SetPSITblastnDefaults();
-//        if (args[kTask].AsString() == "blastx-fast") {
-//            rv->SetWordSize(6);
-//            rv->SetOptions().SetLookupTableType(eCompressedAaLookupTable);
-//            rv->SetWordThreshold(21.0);
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastn_args.cpp:138-146
 /// The kind of a run's request: its options handle (the `program` and `service` it names, the
 /// setters of its constructor) and the argument classes of its application, in their order. The
 /// five search programs, and the applications whose handle is another one's: psiblast with a
@@ -179,18 +139,7 @@ impl RequestKind {
     }
 
     // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:418-421
-    // ```c++
-    //         // Allow the fasta reader to complain on invalid sequence input
-    //         SetDiagPostLevel(eDiag_Warning);
-    //         SetDiagPostPrefix("psiblast");
-    //         SetDiagHandler(&m_bah, false);
-    // ```
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:120-122
-    // ```c++
-    // 	SetDiagPostLevel(eDiag_Warning);
-    // 	SetDiagPostPrefix("tblastn");
-    // 	SetDiagHandler(&m_Bah, false);
-    // ```
     /// The application's name, which NCBI's diagnostics write as the prefix of its posts
     /// (`[psiblast]`; rpsblast_app.cpp:119, rpstblastn_app.cpp:119, and the program of the five
     /// search programs). rpstblastn's `-mt_mode 1` with several threads posts as `rpstblastn_mt`
@@ -214,33 +163,7 @@ impl RequestKind {
         matches!(self, RequestKind::Rpsblast | RequestKind::Rpstblastn)
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_options.cpp:46-67
-    // ```c++
-    // CPSIBlastOptionsHandle::CPSIBlastOptionsHandle(EAPILocality locality)
-    //     : CBlastAdvancedProteinOptionsHandle(locality)
-    // {
-    //     SetDefaults();
-    //     m_Opts->SetProgram(ePSIBlast);
-    //     if (m_Opts->GetLocality() == CBlastOptions::eRemote) {
-    //         return;
-    //     }
-    //     SetPSIBlastDefaults();
-    // }
-    // ...
-    // void CPSIBlastOptionsHandle::SetPSIBlastDefaults(void)
-    // {
-    //     m_Opts->SetInclusionThreshold(PSI_INCLUSION_ETHRESH);
-    //     m_Opts->SetPseudoCount(PSI_PSEUDO_COUNT_CONST);
-    // }
-    //
-    // void CPSIBlastOptionsHandle::SetPSITblastnDefaults(void)
-    // {
-    //     m_Opts->SetProgram(ePSITblastn);
-    //     m_Opts->SetSmithWatermanMode(false);
-    //     m_Opts->SetDbGeneticCode(BLAST_GENETIC_CODE);
-    //     m_Opts->SetWordThreshold(BLAST_WORD_THRESHOLD_TBLASTN);
-    // }
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_options.cpp:46-74
     /// The setters that the handle's constructor calls after defaults mode, after the
     /// `EvalueThreshold` that every handle records: psiblast's PSSM engine defaults
     /// (`PSI_INCLUSION_ETHRESH` 0.002, `PSI_PSEUDO_COUNT_CONST` 0), and for PSI-TBLASTN then
@@ -410,12 +333,6 @@ impl OptionInputs {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:257-260
-// ```c++
-//     int gap_open=0, gap_extend=0;
-//     if (args.Exist(kArgMatrixName) && args[kArgMatrixName])
-//          BLAST_GetProteinGapExistenceExtendParams
-//              (args[kArgMatrixName].AsString().c_str(), &gap_open, &gap_extend);
-// ```
 /// The `(gap open, gap extend)` that `-matrix` implies (`BLAST_GetProteinGapExistenceExtendParams`:
 /// the matrix's default row, which BLOSUM45 puts at 14 / 2). A matrix that NCBI does not know
 /// leaves both at 0 (blast_stat.c:3383-3384), which NCBI BLAST+ 2.17.0 records in the search
@@ -440,25 +357,6 @@ fn suggested_window(matrix: &str) -> i32 {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:586-602
-// ```c++
-// static bool
-// s_IsDefaultWordThreshold(EProgram program, double threshold)
-// {
-//     int word_threshold = static_cast<int>(threshold);
-//     bool retval = true;
-//     if (program == eBlastp &&
-//         word_threshold != BLAST_WORD_THRESHOLD_BLASTP) {
-//         retval = false;
-//     } else if (program == eBlastx &&
-//         word_threshold != BLAST_WORD_THRESHOLD_BLASTX) {
-//         retval = false;
-//     } else if (program == eTblastn &&
-//                word_threshold != BLAST_WORD_THRESHOLD_TBLASTN) {
-//         retval = false;
-//     }
-//     return retval;
-// }
-// ```
 /// Whether the word threshold set before the threshold class (`value`) is the default that the
 /// matrix's suggestion replaces: BLASTP, BLASTX and TBLASTN keep any other value; every other
 /// program (psiblast's `ePSIBlast`, TBLASTX, ...) takes the suggestion whatever was set.
@@ -487,15 +385,7 @@ fn task_calls(task: &str) -> Vec<Param> {
             // `ClearFilterOptions` ends with `SetMaskAtHash(false)` (api/blast_options_cxx.cpp:1022-1031).
             p("MaskAtHash", Boolean(false)),
         ],
-        // NCBI reference: c++/src/algo/blast/api/blast_options_handle.cpp:365-370
-        // ```c++
-        //         }else if ( !NStr::CompareNocase(task, "rmblastn") )
-        //         {
-        //             // -RMH- This blastn only supports full matrix scoring.
-        //             opts->SetMatchReward(0);
-        //             opts->SetMismatchPenalty(0);
-        //         }
-        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_handle.cpp:365-370
         "rmblastn" => vec![
             p("MatchReward", Integer(0)),
             p("MismatchPenalty", Integer(0)),
@@ -555,20 +445,6 @@ enum Class {
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/psiblast_args.cpp:102-113 (the end of
 // psiblast's `m_Args` pushes; rpsblast_args.cpp:70-127 and rpstblastn_args.cpp:45-118 for the RPS
 // programs)
-// ```c++
-//     arg.Reset(new CCompositionBasedStatsArgs);
-//     m_Args.push_back(arg);
-//
-//     arg.Reset(new CGapTriggerArgs(kQueryIsProtein));
-//     m_Args.push_back(arg);
-//
-//     m_PsiBlastArgs.Reset(new CPsiBlastArgs(CPsiBlastArgs::eProteinDb));
-//     arg.Reset(m_PsiBlastArgs);
-//     m_Args.push_back(arg);
-//
-//     arg.Reset(new CPssmEngineArgs);
-//     m_Args.push_back(arg);
-// ```
 /// The argument classes of a program in the order of `<program>_args.cpp` (the order of
 /// the `m_Args` pushes).
 fn class_order(kind: RequestKind) -> &'static [Class] {
@@ -774,14 +650,7 @@ pub fn algorithm_options(inputs: &OptionInputs) -> Vec<Param> {
                 if let Some(reward) = inputs.reward {
                     list.set("MatchReward", Integer(reward));
                 }
-                // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:681-685
-                // ```c++
-                //     if (cmd_line_args.Exist(kArgNoGreedyExtension) &&
-                //         cmd_line_args[kArgNoGreedyExtension]) {
-                //         options.SetGapExtnAlgorithm(eDynProgScoreOnly);
-                //         options.SetGapTracebackAlgorithm(eDynProgTbck);
-                //     }
-                // ```
+                // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:681-685
                 // Both enumerators are 0 (blast_options.h: eDynProgScoreOnly, eDynProgTbck).
                 if inputs.no_greedy {
                     list.set("GapExtnAlgorithm", Integer(0));
@@ -851,27 +720,12 @@ pub fn algorithm_options(inputs: &OptionInputs) -> Vec<Param> {
                     }
                 }
                 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_cxx.cpp:1357-1363
-                // ```c++
-                //     if (m_Remote) {
-                //         if (value) {
-                //             m_Remote->SetValue(eBlastOpt_WindowMaskerTaxId, value);
-                //         } else {
-                //             m_Remote->ResetValue(CBlast4Field::Get(eBlastOpt_WindowMaskerTaxId));
-                //         }
-                // ```
                 // (`SetWindowMaskerTaxId`, called by the filtering handler before it reads
                 // `-window_masker_db`, blast_args.cpp:437-444: the taxid 0 is no parameter.)
                 if let Some(taxid) = inputs.window_masker_taxid.filter(|&taxid| taxid != 0) {
                     list.set("WindowMaskerTaxId", Integer(taxid));
                 }
                 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:446-459
-                // ```c++
-                //     if (args.Exist(kArgWindowMaskerDatabase) &&
-                //         args[kArgWindowMaskerDatabase]) {
-                //         const string& stat_file = args[kArgWindowMaskerDatabase].AsString();
-                //         ...
-                //         opt.SetWindowMaskerDatabase(stat_file.c_str());
-                // ```
                 if let Some(database) = &inputs.window_masker_db {
                     list.set("WindowMaskerDatabase", Str(database.clone()));
                 }
@@ -922,18 +776,6 @@ pub fn algorithm_options(inputs: &OptionInputs) -> Vec<Param> {
                 }
             }
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:485-498
-            // ```c++
-            //     if (args[kArgWindowSize]) {
-            //         opt.SetWindowSize(args[kArgWindowSize].AsInteger());
-            //     } else {
-            //         int window = -1;
-            //         BLAST_GetSuggestedWindowSize(opt.GetProgramType(),
-            //                                      opt.GetMatrixName(),
-            //                                      &window);
-            //         if (window != -1) {
-            //             opt.SetWindowSize(window);
-            //         }
-            // ```
             // The RPS searches have no suggestion (`p9.rps.tk.f6`, `p9.rtn.nq4.f6`).
             Class::Window => {
                 if let Some(size) = inputs.window_size {
@@ -943,17 +785,6 @@ pub fn algorithm_options(inputs: &OptionInputs) -> Vec<Param> {
                 }
             }
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_cxx.cpp:2619-2632
-            // ```c++
-            // void CBlastOptions::SetUseIndex(
-            //         bool use_index, const string & index_name,
-            //         bool force_index, bool old_style_index )
-            // {
-            //     ...
-            //     if (m_Remote) {
-            //         m_Remote->SetValue(eBlastOpt_ForceMbIndex, force_index);
-            //         if ( !index_name.empty() ) {
-            //             m_Remote->SetValue(eBlastOpt_MbIndexName, index_name.c_str());
-            // ```
             // `CMbIndexArgs` sets both (`force_index` true, the `-db` name); the index that
             // does not load sets `SetUseIndex(false)` (api/setup_factory.cpp:455-459), whose
             // defaults make the first FALSE in its place and leave the name.
@@ -967,12 +798,6 @@ pub fn algorithm_options(inputs: &OptionInputs) -> Vec<Param> {
             Class::Intron => list.set("LongestIntronLength", Integer(inputs.max_intron_length)),
             Class::QueryGeneticCode => list.set("QueryGeneticCode", Integer(inputs.query_gencode)),
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1050-1055
-            // ```c++
-            //     if (m_Target == eDatabase && args[kArgDbGeneticCode] &&
-            //         (program == eTblastn || program == eTblastx) ) {
-            //         opt.SetDbGeneticCode(args[kArgDbGeneticCode].AsInteger());
-            //     }
-            // ```
             // PSI-TBLASTN (`ePSITblastn`) keeps the constructor's code 1 in its place.
             Class::DbGeneticCode => {
                 if kind != RequestKind::PsiTblastn {
@@ -981,21 +806,7 @@ pub fn algorithm_options(inputs: &OptionInputs) -> Vec<Param> {
             }
             Class::Formatting => list.set("HitlistSize", Integer(inputs.hitlist_size)),
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:879-885
-            // ```c++
-            //         opt.SetCompositionBasedStats(compo_mode);
-            //         if (program == eBlastp &&
-            //             compo_mode != eNoCompositionBasedStats &&
-            //             tolower(comp_stat_string[1]) == 'u') {
-            //             opt.SetUnifiedP(1);
-            //         }
-            //         opt.SetSmithWatermanMode(smith_waterman_value);
-            // ```
-            // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:866-868
-            // ```c++
-            //         if(program == ePSITblastn) {
-            //             compo_mode = eNoCompositionBasedStats;
-            //         }
-            // ```
+            // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:866-869
             // `UnifiedP` is BLASTP's only (psiblast's handle is `ePSIBlast`); `-use_sw_tback` is
             // recorded in every mode, 0 included; PSI-TBLASTN records mode 0 whatever is given.
             Class::Cbs => {
@@ -1011,33 +822,11 @@ pub fn algorithm_options(inputs: &OptionInputs) -> Vec<Param> {
                 list.set("SmithWatermanMode", Boolean(inputs.use_sw_tback));
             }
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1073-1078
-            // ```c++
-            // CGapTriggerArgs::ExtractAlgorithmOptions(const CArgs& args,
-            //                                          CBlastOptions& opt)
-            // {
-            //     if (args[kArgGapTrigger]) {
-            //         opt.SetGapTrigger(args[kArgGapTrigger].AsDouble());
-            //     }
-            // ```
             // The argument has a default (22), so it is always set.
             Class::GapTrigger => list.set("GapTrigger", Real(inputs.gap_trigger)),
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1329-1331
-            // ```c++
-            //         if (!m_IsDeltaBlast) {
-            //             opt.SetIgnoreMsaMaster(args[kArgIgnoreMsaMaster]);
-            //         }
-            // ```
             Class::PsiBlast => list.set("IgnoreMsaMaster", Boolean(inputs.ignore_msa_master)),
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1113-1119
-            // ```c++
-            //     if (args[kArgPSIPseudocount]) {
-            //         opt.SetPseudoCount(args[kArgPSIPseudocount].AsInteger());
-            //     }
-            //
-            //     if (args[kArgPSIInclusionEThreshold]) {
-            //         opt.SetInclusionThreshold(args[kArgPSIInclusionEThreshold].AsDouble());
-            //     }
-            // ```
             // Both have defaults: set in the places of the constructor's.
             Class::PssmEngine => {
                 list.set("PseudoCountWeight", Integer(inputs.pseudocount));
@@ -1172,7 +961,7 @@ mod tests {
 
     #[test]
     fn the_matrix_suggestions_ignore_the_case_of_the_name() {
-        // NCBI compares the names with `strcasecmp` (blast_options.c:1174-1236).
+        // NCBI compares the names with `strcasecmp` (c++/src/algo/blast/core/blast_options.c:1174-1236).
         for (matrix, threshold, window) in [
             ("BLOSUM62", 11, 40),
             ("blosum62", 11, 40),

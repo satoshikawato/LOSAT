@@ -48,8 +48,7 @@ class BlastnOptions(TypedDict, total=False):
     """Multi-thread mode: 0 auto, 1 split by queries, 2 split by database (accepted; the output
     does not depend on it)"""
     use_index: bool
-    """Use MegaBLAST database index (an index that would be used is not supported) [default:
-    false]"""
+    """Use MegaBLAST database index [default: false]"""
     index_name: str
     """MegaBLAST database index name (deprecated; use only for old style indices)"""
     evalue: float

@@ -12,8 +12,8 @@ use std::io::{self, Write};
 /// sentinel, whose text and URL are empty.
 ///
 /// NCBI reference (598d8ae6): c++/include/algo/blast/api/version.hpp:69-79
-/// (The whole table is ported: PHI-BLAST, indexed megablast and DELTA-BLAST, which LOSAT does
-/// not run, are read only by the tests of NCBI's unit cases.)
+/// (The whole table is ported: PHI-BLAST and DELTA-BLAST, which LOSAT does not run, are read
+/// only by the tests of NCBI's unit cases.)
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[allow(dead_code)]
 pub(crate) enum Publication {
@@ -272,21 +272,23 @@ pub(crate) fn write_reference<W: Write + ?Sized>(
 
 /// The references of `CBlastFormat::PrintProlog` after the version line and its two newlines, and
 /// the two newlines before the database report: the megablast reference for a megablast search
-/// (`megablast`), else the Gapped BLAST reference; then psiblast's compositionally adjusted
+/// (`megablast`), else the Gapped BLAST reference; after a newline, the database indexing
+/// reference of a megablast search with a MegaBLAST database index (`indexed_megablast`,
+/// `m_IndexedMegablast`); then psiblast's compositionally adjusted
 /// matrices, and the composition-based statistics of psiblast (`starting in round 2`) and blastp,
 /// each after a newline. `program` is NCBI's `m_Program` (`blastp`, `psiblast`, `rpsblast`,
 /// `blastn`, ...; compared without case, so the callers may pass the version line's name).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:395-437
-/// (The `NcbiEndl` pair is the callers': their flushes differ. LOSAT has no deltablast, refuses
-/// `-use_index true` with an index (`m_IndexedMegablast`) and has no domain database: their
-/// branches are not taken.)
+/// (The `NcbiEndl` pair is the callers': their flushes differ. LOSAT has no deltablast and no
+/// domain database: their branches are not taken.)
 pub(crate) fn write_prolog_references<W: Write + ?Sized>(
     out: &mut W,
     html: bool,
     protocol: &[u8],
     program: &str,
     megablast: bool,
+    indexed_megablast: bool,
 ) -> io::Result<()> {
     let psiblast = program.eq_ignore_ascii_case("psiblast");
     let primary = if megablast {
@@ -295,6 +297,10 @@ pub(crate) fn write_prolog_references<W: Write + ?Sized>(
         Publication::GappedBlast
     };
     write_reference(out, html, protocol, primary, false)?;
+    if megablast && indexed_megablast {
+        crate::cli::insert(out, b"\n")?;
+        write_reference(out, html, protocol, Publication::IndexedMegablast, false)?;
+    }
     if psiblast {
         crate::cli::insert(out, b"\n")?;
         write_reference(

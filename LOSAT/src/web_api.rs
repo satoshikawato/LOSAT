@@ -215,6 +215,8 @@ fn parse_blastn_args(
         // ... and no database masks (series NP, M4a-2).
         db_mask: Default::default(),
         db_mask_resolved: None,
+        // ... and no MegaBLAST database index (line RG item D5b).
+        megablast_index_loaded: None,
         formatting: Default::default(),
         dbsize: None,
         show_gis: false,

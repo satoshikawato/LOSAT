@@ -526,3 +526,28 @@ fn masks_are_read_from_each_volume_s_first_column() {
         ["copy.paa", "copy.pab", "copy.pac", "copy.pba", "copy.pbb"]
     );
 }
+
+/// NCBI's memory of its last algorithm lookup (`GetVolAlgo`): a failed lookup asked again at
+/// once answers with the id of another lookup; any other question in between (a volume that
+/// knows the algorithm, another volume, another algorithm) is asked anew. A sequence without
+/// mask data asks nothing, so it does not come between.
+#[test]
+fn the_memory_of_algorithm_lookups_is_ncbi_s() {
+    let mut memory = super::VolAlgoMemory::default();
+    // One algorithm: volume 0 does not know it, volume 1 does.
+    assert!(!memory.reads_a_kept_id(0, 0, false));
+    assert!(!memory.reads_a_kept_id(1, 0, true));
+    assert!(!memory.reads_a_kept_id(0, 0, false));
+    assert!(memory.reads_a_kept_id(0, 0, false));
+    assert!(memory.reads_a_kept_id(0, 0, false));
+    // Two algorithms: the questions alternate, so a failed lookup is always asked again.
+    let mut memory = super::VolAlgoMemory::default();
+    for _ in 0..3 {
+        assert!(!memory.reads_a_kept_id(0, 0, false));
+        assert!(!memory.reads_a_kept_id(0, 1, false));
+    }
+    // Repeated lookups that succeed answer from the memory with the right id.
+    let mut memory = super::VolAlgoMemory::default();
+    assert!(!memory.reads_a_kept_id(2, 0, true));
+    assert!(!memory.reads_a_kept_id(2, 0, true));
+}

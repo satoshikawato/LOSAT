@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.68
+- Version: 1.69
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -294,7 +294,11 @@
   the merges of dev that brought line RG item X5's 1.54, then line RG item X6's 1.55 and line RG
   item D1a-4's 1.56 and 1.57, then line RG's 1.58 to 1.61, then the 1.62 to 1.65 of lines LIB-O,
   RG and PS, then line NP's 1.66);
-  1.68 2026-11-21 (alias files with `OID_MASK_TYPE`, line RG item D1b-2: the explicit rejection, rule 3,
+  1.68 2026-11-21 (approved exception 20, TBLASTX's linking of a query batch whose average query
+  length is 0 against one subject, where NCBI crashes: LOSAT's sums in 64 bits, whose rows no run
+  that NCBI completes gives; decided by the Owner on 2026-11-21 (「O2b-Q1=A」, line NP item O2b's
+  question Q1, line NP `DECISIONS.md` 42); line NP item O2b; numbered after 1.67);
+  1.69 2026-11-21 (alias files with `OID_MASK_TYPE`, line RG item D1b-2: the explicit rejection, rule 3,
   of a Seq-id on which NCBI's accession guide posts a warning under the key, which NCBI posts again at
   each read of the header that its cache does not answer; the rejection of 1.61 extended to an old
   style `losat makembindex` index of a sequence whose every definition line the key erases;
@@ -303,8 +307,8 @@
   as NCBI's decoder writes its error for them before they are removed; the rejection of 1.56
   extended to a reported RPS profile of a database of several volumes whose lines the key removes,
   in the classes of 1.10 and 1.37; Owner-delegated, standing instruction 2026-09-29, restated
-  2026-10-07; numbered after 1.67; first 1.65, then 1.66 at the merges of dev that brought line RG
-  item D5b-1's 1.65, then line NP's 1.66 and line LIB-S's 1.67)
+  2026-10-07; numbered after 1.68; first 1.65, then 1.66 and 1.68 at the merges of dev that brought line RG
+  item D5b-1's 1.65, then line NP's 1.66 and line LIB-S's 1.67, then line NP's 1.68)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -2099,7 +2103,7 @@ query with a NaN E-value or bit score, with the number of such blocks and lines 
   `db.rps.3v.fo3.*`, `db.rpstbn.3v.fo11.*`; for `OIDLIST` `db.ol.rps.rej.no2w`, `db.ol.rps.rej.only2w`,
   `db.ol.rtbn.rej.no2w` and `db.ol.rps.only2w.mts1.6`).
 - RPSBLAST and RPSTBLASTN over an alias file whose `OID_MASK_TYPE` removes a definition line of a
-  profile, in a database of several volumes (version 1.68, 2026-11-21, line RG item D1b-2,
+  profile, in a database of several volumes (version 1.69, 2026-11-21, line RG item D1b-2,
   Owner-delegated, the form above): NCBI searches the volumes bare (`rpsblast_local.cpp:380-399`),
   so its Seq-aligns keep a profile that the key leaves without a line under its stored Seq-id,
   while its formatter, over the `-db` name with the key, does not find it (probe xp3v of D1b-2,
@@ -2206,7 +2210,7 @@ query with a NaN E-value or bit score, with the number of such blocks and lines 
   (exit 1) at that sequence. windowmasker skips such a sequence, as NCBI's, and makes no title or
   taxonomy lookup for it.
 - `losat makembindex -old_style_index true -iformat blastdb` of an alias file whose `OID_MASK_TYPE`
-  erases every definition line of a sequence (version 1.68, 2026-11-21, line RG item D1b-2,
+  erases every definition line of a sequence (version 1.69, 2026-11-21, line RG item D1b-2,
   Owner-delegated): `CSeqDBVol::GetBioseq` gives no Bioseq for it either (`seqdbvol.cpp:1362-1366`),
   dereferenced as above (probe `mk_old_ntall` of D1b-2: exit status 3, a stack trace). LOSAT refuses
   (exit 1) at that sequence; a new style index reads no alias key, as NCBI's. NCBI's dustmasker stops
@@ -2394,6 +2398,59 @@ accepted by the maintainer on 2026-11-21 by marking PR #1448 ready for review, a
     gives NCBI's output at 1073741773, 536870886 or 1073741823 (the rows `hitlist.*.bh*` with those
     contracts). Every smaller size gives NCBI's bytes. Before version 1.66 LOSAT
     reproduced the wrapped sizes (rule 2) and rejected those on which NCBI crashes (rule 3).
+
+## Approved exception (TBLASTX, a query batch whose average query length is 0, against one subject, version 1.68)
+
+Decided by the Owner on 2026-11-21 (「O2b-Q1=A」, line NP item O2b's question Q1, line NP
+`DECISIONS.md` 42), under the Owner's rule of 2026-10-10 「Int4は気にせず続けてください」. Rule 1
+asks for a run that NCBI completes to check the result; none gives LOSAT's rows here, and the Owner
+chose this on the question's statement that no NCBI result can check them. The last paragraph of
+the item was found after the decision, for this record, and was put to the Owner in the pull
+request that added it.
+
+20. **A TBLASTX query batch whose average query length is 0, linked against one subject.** The
+    linking of TBLASTX's sum statistics takes one query length per query batch: the end of the last
+    context in the batch's concatenated query (its letters and one separator after each context
+    that has letters) divided by the number of contexts, all six of every query
+    (`blast_parameters.c:1023-1026`). With `-strand plus` or `minus` the contexts of the other
+    strand have no letters, so a batch of one 1,200-nt query and 300 queries of 3 nt averages 0, as
+    one with 1,300 such queries does with both strands. NCBI's expected length is then
+    `(Int4)BLAST_Nint(log(0) / H)`, the low 32 bits of the `long` of minus infinity, 0 on x86-64
+    (`blast_parameters.c:1036-1037`). When the subjects together hold more protein letters than
+    the subject, NCBI completes, and LOSAT gives its bytes (rule 2; the cases `strand.plus_avg0`
+    and `strand.minus_avg0` of `LOSAT/tests/tblastx_regression_fixtures.py`). With one subject
+    (`-subject` of one sequence, or a database of one), the database's length divided by 3 is the
+    subject's, so the linking's `y_variable` and `x_variable` are 0 and its big-gap cutoff is
+    `(Int4)floor(log(0) / Lambda) + 1`, `INT_MIN + 1` (`blast_parameters.c:1046-1076`). The
+    linking's `Int4` sums with `cutoff[1]` (`link_hsps.c:868`, `942-943`) then overflow, and NCBI
+    BLAST+ 2.17.0 stops with SIGSEGV in `BLAST_LinkHsps` (exit status 139, no output; with
+    `-subject` and with a one-sequence `-db`). LOSAT computes the same cutoff and adds those sums
+    in 64 bits. With a subject of up to 60,002 bases the linking keeps big gaps only, so each pass
+    takes the chain of the most HSPs and, among those, of the highest score: the limit of NCBI's
+    choice as the cutoff falls without bound. With a longer subject the search space passes
+    8 x 50^2 and each pass chooses between that chain and the small-gap chain by their e-values,
+    as NCBI does (`blast_parameters.c:1062-1070`). The default linking kernel and the literal port
+    of NCBI's (`LOSAT_LINKING_LEGACY`) give the same rows at 1, 4 and 8 threads, and `-subject` and
+    `-db` give the same rows. `LOSAT/tests/tblastx_avg0_one_subject.rs` keeps them against the
+    3,000-nt subject `Sa0mut`: 15 rows with `-strand plus`, 25 with `minus`, 40 with both strands
+    and 1,300 queries of 3 nt; and against `Sa0mut` followed by 57,003 N (60,003 nt), 13 rows with
+    `-strand minus`.
+
+    Found after the decision: NCBI divides the database's and the subject's lengths by 3 before it
+    compares them, so it takes the same branch, and crashes, when the other subjects add fewer than
+    3 bases in all (more exactly, when the subject's length modulo 3 and their lengths add up to
+    less than 3). With `Sa0mut` and a second subject of 2 nt, `-strand plus`, NCBI exits with
+    status 139 and LOSAT writes the 15 alignments above with the e-values of two subjects, which the
+    same test keeps. NCBI's nearest runs that complete add a second subject of 12 bases (4 protein
+    letters) of N, which has no hits, with `-dbsize 3000` (the cases
+    `strand.plus_avg0_pad_subject`, `strand.minus_avg0_pad_subject` and
+    `strand.both_avg0_pad_subject`, where LOSAT gives NCBI's bytes): their big-gap cutoff is -4. A
+    second subject of 3 N gives the lowest cutoff that a completing run reaches, -8, and the same
+    bytes. They write 15, 20 and 35 rows, each of whose alignments is one of LOSAT's rows above, but
+    LOSAT's linking joins 5 more weak HSPs (15 to 18 bits) into sets with `-strand minus` and with
+    both strands, so the sets and their e-values differ: with `-searchsp 1000000` in both runs, 6
+    of NCBI's 9 rows, 3 of 17 and 9 of 26 are LOSAT's byte for byte. Until PR #1401 LOSAT raised an
+    average of 0 to 1 and wrote the rows of other cutoffs here.
 
 ## Explicit rejections of deterministic results (rule 2, version 1.10)
 

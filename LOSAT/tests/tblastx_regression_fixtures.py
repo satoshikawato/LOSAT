@@ -264,12 +264,24 @@ _CASES = [
                                               " -query_loc 2001-9000 -strand plus -outfmt 11", ""),
     # A batch whose average query length is 0 (blast_parameters.c:1023-1026): one query of 1,200
     # nt and 300 of 3 nt, one strand. NCBI's expected length is then 0 (the `long` of -inf, cut to
-    # Int4); with several subjects NCBI completes. (With one subject its big-gap cutoff is
-    # INT_MIN + 1 and NCBI crashes in the linking, so no such case here.)
+    # Int4); with several subjects NCBI completes. With one subject (or other subjects of fewer than
+    # 3 bases in all) its big-gap cutoff is INT_MIN + 1 and NCBI crashes in the linking: approved
+    # exception 20 of PD-LOSAT-NCBI-DEFECTS (version 1.68), whose rows, LOSAT's alone, are those of
+    # tests/tblastx_avg0_one_subject.rs, not cases here. The `avg0_pad_subject` cases are the
+    # nearest runs that NCBI completes: that subject (Sa0mut) with a second one of 12 N, which makes
+    # the database 12 bases (4 protein letters) longer than the subject (a big-gap cutoff of -4),
+    # and -dbsize of the subject alone; `strand.both_avg0_pad_subject` searches both strands of a
+    # batch with 1,300 queries of 3 nt, which averages 0 too.
     ("strand.plus_avg0", f"-query {I}/avg0_query.fa -subject {I}/culling_multi_subject.fa -strand plus"
                          " -outfmt 6", ""),
     ("strand.minus_avg0", f"-query {I}/avg0_query.fa -subject {I}/culling_multi_subject.fa -strand minus"
                           " -outfmt 6", ""),
+    ("strand.plus_avg0_pad_subject", f"-query {I}/avg0_query.fa -subject {I}/avg0_pad_subject.fa -dbsize 3000"
+                                     " -strand plus -outfmt 6", ""),
+    ("strand.minus_avg0_pad_subject", f"-query {I}/avg0_query.fa -subject {I}/avg0_pad_subject.fa -dbsize 3000"
+                                      " -strand minus -outfmt 6", ""),
+    ("strand.both_avg0_pad_subject", f"-query {I}/avg0_both_query.fa -subject {I}/avg0_pad_subject.fa"
+                                     " -dbsize 3000 -outfmt 6", ""),
     # A first query of 2 nt (no frame +1) with -searchsp: the archive's EffectiveSearchSpace is the
     # option's value for every strand (split_query_aux_priv.cpp:157-161).
     ("strand.both_short2_first_searchsp_fmt11", f"-query {I}/short2_query.fa {SUBJECTS} -searchsp 1000000"
@@ -308,9 +320,23 @@ def command_generate(_args) -> int:
     # nt: with one strand the batch's average query length is 0 (line NP, O2b).
     culling = (INPUTS / "culling_multi_query.fa").read_text().split(">")[1]
     first = "".join(culling.split("\n", 1)[1].split())[:1200]
-    (INPUTS / "avg0_query.fa").write_text(
-        ">long 1200 nt\n" + "".join(first[i:i + 60] + "\n" for i in range(0, 1200, 60))
-        + "".join(f">t{n}\nATG\n" for n in range(1, 301)))
+    long_query = ">long 1200 nt\n" + "".join(first[i:i + 60] + "\n" for i in range(0, 1200, 60))
+    (INPUTS / "avg0_query.fa").write_text(long_query + "".join(f">t{n}\nATG\n" for n in range(1, 301)))
+    # With 1,300 queries of 3 nt the batch averages 0 with both strands. The subject Sa0mut (of
+    # culling_multi, committed) alone, with a second subject of 2 nt (no codon: the database's
+    # length in protein letters stays Sa0mut's), and as the first 3,000 nt of a subject of 60,003 nt
+    # (the rest N, a search space past 8 windows squared, so NCBI's linking keeps small gaps), on
+    # which NCBI crashes (approved exception 20 of PD-LOSAT-NCBI-DEFECTS); and with a subject of 12 N
+    # after it, which has no hits (the nearest runs that NCBI completes).
+    (INPUTS / "avg0_both_query.fa").write_text(long_query + "".join(f">t{n}\nATG\n" for n in range(1, 1301)))
+    mutated = next(record for record in (INPUTS / "culling_multi_subject.fa").read_text().split(">")[1:]
+                   if record.startswith("Sa0mut"))
+    (INPUTS / "avg0_one_subject.fa").write_text(">" + mutated)
+    (INPUTS / "avg0_pad_subject.fa").write_text(">" + mutated + ">pad\n" + "N" * 12 + "\n")
+    (INPUTS / "avg0_two_subject.fa").write_text(">" + mutated + ">tiny\nAC\n")
+    letters = "".join(mutated.split("\n", 1)[1].split()) + "N" * 57003
+    (INPUTS / "avg0_long_subject.fa").write_text(
+        ">Sa0long Sa0mut and 57,003 N\n" + "".join(letters[i:i + 60] + "\n" for i in range(0, len(letters), 60)))
     (INPUTS / "short4_query.fa").write_text(">" + records[1] + ">s4 four\nACGT\n>" + records[2]
                                             + ">sN3 three N\nNNN\n>" + records[3])
     code4_query = (ENGINE / O / "tblastx_code4_query.fasta").read_text()

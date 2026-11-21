@@ -8,10 +8,11 @@ reads LOSAT's runs the same way), and the directory's path in the standard error
 @OUT@. First makes db/wm and db/wm_ps with NCBI makeblastdb from in/multi.fa (the second with
 -parse_seqids), db/multi_ids and db/wm_b from in/multi_ids.fa (the first with -parse_seqids),
 db/cd from in/cd.fa, and the counts files of the -convert rows in counts/ with NCBI windowmasker
-(units of 4 letters of dm2L_60k.fa in each format; the ascii file without its ##pct lines; the
-optimized binary file of -t_high 1000, whose counts above 511 overflow; the files of
--t_high_pct 0; the binary counts written to the standard output). NCBI is run here only, never
-by the tests.
+(units of 4 letters of dm2L_60k.fa in each format; the ascii file without its ##pct lines, with
+a unit size of 0 and of 256, and with ##pct lines whose values NCBI fails to read; the binary
+file with a cut ##pct line; the optimized binary file of -t_high 1000, whose counts above 511
+overflow; the files of -t_high_pct 0; the binary counts written to the standard output). NCBI is
+run here only, never by the tests.
 
 Usage: python3 -I make_fixtures.py --ncbi-bin <dir of windowmasker and makeblastdb>"""
 import argparse
@@ -77,6 +78,26 @@ def make_counts(windowmasker, env):
         lines = f.read().split(b"\n")
     with open(os.path.join(counts, "u4_nopct.ascii"), "wb") as f:
         f.write(b"\n".join(line for line in lines if not line.startswith(b"##pct:")))
+    # The unit-size line (the first line after the metadata) 0, and 256 (0 as NCBI's Uint1).
+    first = next(i for i, line in enumerate(lines) if not line.startswith(b"##"))
+    for name, size in (("u0.ascii", b"0"), ("u256.ascii", b"256")):
+        with open(os.path.join(counts, name), "wb") as f:
+            f.write(b"\n".join(lines[:first] + [size] + lines[first + 1:]))
+    # ##pct: lines that NCBI's istringstream reads with failed or missing values (each 0).
+    words = [b"##pct: 0 0", b"##pct: 1", b"##pct: abc 50", b"##pct: 3 xyz", b"##pct: -4 12.5",
+             b"##pct: 99999999999 13", b"##pct: 6 99.5 extra words", b"##pct:7 100"]
+    kept = [line for line in lines if not line.startswith(b"##pct:")]
+    at = next(i for i, line in enumerate(kept) if not line.startswith(b"##"))
+    with open(os.path.join(counts, "u4_pctwords.ascii"), "wb") as f:
+        f.write(b"\n".join(kept[:at] + words + kept[at:]))
+    # The binary file's ##pct: line cut after two values, a word that is not a number between.
+    with open(os.path.join(counts, "u4.binary"), "rb") as f:
+        data = f.read()
+    length = int.from_bytes(data[4:8], "little")
+    metadata = b"\0".join(b"##pct: 500 0 0.1 abc 0.3" if field.startswith(b"##pct:") else field
+                          for field in data[8:8 + length].split(b"\0"))
+    with open(os.path.join(counts, "u4_pctcut.binary"), "wb") as f:
+        f.write(data[:4] + len(metadata).to_bytes(4, "little") + metadata + data[8 + length:])
 
 
 def main():

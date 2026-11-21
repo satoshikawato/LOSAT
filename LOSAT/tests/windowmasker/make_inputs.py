@@ -89,6 +89,10 @@ def main():
         filler.append("ACGT"[(state >> 16) & 3])
     write("cd.fa", f">cd_part\n{wrap(dm[5003:56000])}\n>cd_shift\n{wrap(''.join(filler) + dm[10000:60000])}\n")
     write("ids_cd.txt", "cd_part\n")
+    # A sequence whose first four samples of dm2L_60k.fa (offsets 0 to 30,000) follow each other
+    # 9,995 letters apart from its start: the run's start in it falls 15 letters before 0, which
+    # NCBI prints as a size_t that wraps (review of M5b, 2026-11-21).
+    write("cd_wrap.fa", f">cd_wrap\n{wrap(dm[0:9995] + dm[10000:19995] + dm[20000:29995] + dm[30000:50100])}\n")
     # Id lists of -text_match F (CIdSet_SeqId: each id read as a Seq-id; the first six are those of
     # probe s1 of line NP M5, 2026-11-21): bare words, versions, case, forms, ordinal ids, ids that
     # CSeq_id cannot read (empty, a byte of 0x80 or more, too many parts, ...), a CRLF list.

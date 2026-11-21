@@ -152,6 +152,8 @@ p_nopct_ext_thr	-ustat in/nopct.ascii -in ../fasta/NZ_CP006932.fasta -t_extend_p
 p_nopct_high	-ustat in/nopct.ascii -in ../fasta/NZ_CP006932.fasta -t_high_pct 99
 p_nopct_all	-ustat in/nopct.ascii -in ../fasta/NZ_CP006932.fasta -t_high_pct 99 -t_thres_pct 98 -t_extend_pct 97 -t_low_pct 96
 p_u2	-ustat ../winmask/counts/dm_u2.obinary -in ../winmask/fasta/dm2L_3k.fa -t_thres_pct 50
+p_pct_cut	-ustat counts/u4_pctcut.binary -in ../winmask/fasta/dm2L_3k.fa -t_low_pct 0.05 -t_thres_pct 50
+p_pct_words	-ustat counts/u4_pctwords.ascii -in ../winmask/fasta/dm2L_3k.fa -t_extend_pct 10 -t_thres_pct 50
 # -dust T: CSDustMasker (window 64, linker 1, one random generator for the run) and MergeMaskInfo.
 d_60k	-ustat ../winmask/counts/dm2L_u9.binary -in ../winmask/fasta/dm2L_60k.fa -dust T
 d_edge	-ustat ../winmask/counts/dm2L_u9.binary -in ../winmask/fasta/dm_edge.fa -dust T
@@ -227,6 +229,7 @@ k_gs20	-mk_counts -in ../winmask/fasta/dm2L_3k.fa -genome_size 20 -sformat binar
 k_gs21	-mk_counts -in ../winmask/fasta/dm2L_3k.fa -genome_size 21 -sformat binary
 k_gs1000	-mk_counts -in ../winmask/fasta/dm2L_3k.fa -genome_size 1000 -sformat binary
 k_gs_unit	-mk_counts -in ../winmask/fasta/dm2L_3k.fa -genome_size 1000 -unit 3 -sformat binary
+k_gs_neg	-mk_counts -in ../winmask/fasta/dm2L_3k.fa -genome_size -5 -mem 1 -sformat binary
 k_short	-mk_counts -in in/short.fa -sformat binary
 # The thresholds: -t_low, -t_high, and the -t_*_pct percentages, which a file alone takes (Q3).
 k_tlow	-mk_counts -in ../winmask/fasta/dm2L_60k.fa -unit 5 -t_low 30 -sformat binary
@@ -237,6 +240,8 @@ k_tlow_gt_thigh	-mk_counts -in ../winmask/fasta/dm2L_60k.fa -unit 5 -t_low 50 -t
 k_thigh1000	-mk_counts -in ../winmask/fasta/dm2L_60k.fa -unit 4 -t_high 1000 -sformat binary
 k_thigh1000_ob	-mk_counts -in ../winmask/fasta/dm2L_60k.fa -unit 4 -t_high 1000 -sformat obinary
 k_thigh1000_oa	-mk_counts -in ../winmask/fasta/dm2L_60k.fa -unit 4 -t_high 1000 -sformat oascii
+k_count_u16_ob	-mk_counts -in ../fasta/MG1655.fna -unit 2 -t_high 10000000 -sformat obinary
+k_count_u16_oa	-mk_counts -in ../fasta/MG1655.fna -unit 2 -t_high 10000000 -sformat oascii
 k_pct_file	-mk_counts -in ../winmask/fasta/dm2L_60k.fa -unit 5 -t_low_pct 80 -t_extend_pct 95 -t_thres_pct 97 -t_high_pct 99.9 -sformat binary -out @OUT@/c.counts
 k_pct_stdout	-mk_counts -in ../winmask/fasta/dm2L_60k.fa -unit 5 -t_low_pct 80 -t_extend_pct 95 -t_thres_pct 97 -t_high_pct 99.9 -sformat binary
 k_pct_small	-mk_counts -in ../winmask/fasta/dm2L_60k.fa -unit 5 -t_low_pct 0.0001 -t_extend_pct 0 -out @OUT@/c.counts
@@ -249,6 +254,7 @@ k_thigh_pct_both	-mk_counts -in ../winmask/fasta/dm2L_60k.fa -unit 5 -t_high 20 
 # -mem: the passes over the prefixes of the units, each a read of the input with the reader's messages (Q15); -smem: the optimized formats' megabytes through atoi into 16 bits (Q2).
 k_mem1	-mk_counts -in ../winmask/fasta/dm_edge.fa -unit 10 -mem 1 -t_low 3 -sformat binary
 k_mem1_tlow_thigh	-mk_counts -in ../winmask/fasta/dm_edge.fa -unit 10 -mem 1 -t_low 3 -t_high 9 -sformat binary
+k_u16_mem1	-mk_counts -in ../winmask/fasta/dm2L_3k.fa -unit 16 -mem 1 -sformat binary
 k_smem0	-mk_counts -in ../winmask/fasta/dm2L_3k.fa -unit 5 -smem 0 -sformat obinary
 k_smem65536	-mk_counts -in ../winmask/fasta/dm2L_3k.fa -unit 5 -smem 65536 -sformat obinary -out @OUT@/c.counts
 k_smem65536_oa	-mk_counts -in ../winmask/fasta/dm2L_3k.fa -unit 5 -smem 65536 -sformat oascii
@@ -305,6 +311,7 @@ cd_warn	-mk_counts -in ../winmask/fasta/dm_edge.fa,../winmask/fasta/dm2L_60k.fa,
 cd_db	-mk_counts -infmt blastdb -in db/cd,db/cd -checkdup T -unit 3 -sformat binary
 cd_missing	-mk_counts -in ../winmask/fasta/dm2L_60k.fa,in/cd.fa,in/nonexistent.fa -checkdup T -unit 3
 cd_f	-mk_counts -in ../winmask/fasta/dm2L_60k.fa,../winmask/fasta/dm2L_60k.fa -checkdup F -unit 3 -sformat binary
+cd_wrap	-mk_counts -in ../winmask/fasta/dm2L_60k.fa,in/cd_wrap.fa -checkdup T -unit 3 -sformat binary
 # -convert (CWinMaskCountsConverter): the counts files of counts/ (make_fixtures.py, NCBI's -mk_counts) and of ../winmask/counts in each format.
 v_ascii_to_ascii	-convert -in counts/u4.ascii -sformat ascii
 v_ascii_to_binary	-convert -in counts/u4.ascii -sformat binary
@@ -339,6 +346,11 @@ v_out_unwritable	-convert -in counts/u4.ascii -sformat binary -out @OUT@/no/c.co
 v_smem65536	-convert -in counts/u4.ascii -sformat obinary -smem 65536 -out @OUT@/c.counts
 v_smem1	-convert -in counts/u4.ascii -sformat obinary -smem 1
 v_pct	-convert -in counts/u4.ascii -sformat ascii -t_thres_pct 50
+v_pct_cut	-convert -in counts/u4_pctcut.binary -sformat ascii
+v_pct_words	-convert -in counts/u4_pctwords.ascii -sformat binary
+v_u0_ascii	-convert -in counts/u0.ascii -sformat ascii
+v_u0_binary	-convert -in counts/u0.ascii -sformat binary
+v_u256_ascii	-convert -in counts/u256.ascii -sformat ascii
 v_dryrun	-convert -in counts/u4.ascii -dryrun
 # -text_match F with -infmt blastdb: each id of the list read as a Seq-id (CIdSet_SeqId) and matched against the database sequence's Seq-ids; an id that CSeq_id cannot read is posted and skipped (probe s1 of line NP M5; rows added 2026-11-21 by M5c).
 s_wm_ids_db	-ustat ../winmask/counts/dm2L_u9.binary -infmt blastdb -in db/wm -ids in/ids_db.txt -text_match F

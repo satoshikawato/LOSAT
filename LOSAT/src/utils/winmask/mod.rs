@@ -111,9 +111,9 @@ pub enum WinMaskError {
     SequenceTooLong { length: usize },
     /// `CSeqMaskerUsetHash::eBadIndex` (`seq_masker_uset_hash.cpp:95-99`).
     BadIndex { key: u32, value: u32 },
-    /// A `##pct:` line that the windowmasker application's `-t_*_pct` settings read and whose
-    /// words NCBI reads by the C++ runtime's number parser (`pct::count_map`): LOSAT refuses it.
-    PctLine { line: String },
+    /// A `##pct:` line whose reading by NCBI (`pct::count_map`) depends on the C++ library or
+    /// is undefined, `why` (a verb phrase): LOSAT refuses it.
+    PctLine { line: String, why: &'static str },
 }
 
 impl WinMaskError {
@@ -157,10 +157,9 @@ impl fmt::Display for WinMaskError {
             ),
             // NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_uset_hash.cpp:95-99
             Self::BadIndex { key, value } => write!(f, "bad index at key {key} : {value}"),
-            Self::PctLine { line } => write!(
-                f,
-                "the percentage line '{line}' of the counts file is not one that WindowMasker writes (counts of digits, then decimal percentages), so LOSAT does not read it"
-            ),
+            Self::PctLine { line, why } => {
+                write!(f, "the percentage line '{line}' of the counts file {why}")
+            }
         }
     }
 }

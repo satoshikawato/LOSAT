@@ -16,7 +16,7 @@ use crate::seqmasks_io::run::post_read_texts;
 use crate::utils::os_bytes::path_from_bytes;
 use crate::utils::winmask::{
     convert_counts, generate, CountsFormat, CountsWriter, FinalizeError, GenCountsSettings,
-    GenError, GenomeSource, MaskerParams, PctSettings, DEFAULT_TH,
+    GenError, GenomeSource, MaskerParams, PctSettings, WinMaskError, DEFAULT_TH,
 };
 
 use super::checkdup::check_duplicates;
@@ -215,6 +215,7 @@ impl GenomeInput<'_, '_, '_, '_> {
     fn read_files(&mut self, f: &mut RecordFn<'_>) -> Result<(), Failure> {
         for name in &self.files {
             let mut source: Box<dyn SequenceSource> = if self.database {
+                // Names that are not UTF-8 were refused before (`make_counts`).
                 database_source(&String::from_utf8_lossy(name), self.registry, false)?
             } else {
                 let file = File::open(path_from_bytes(name.as_slice()))
@@ -347,14 +348,23 @@ fn make_counts(
     stdout: &mut Ostream<'_>,
     diag: &mut Diag,
 ) -> Result<i32, Failure> {
+    let input = args.value("in").expect("-in has a default");
+    let files = file_list(input, args.boolean("fa_list").unwrap_or(false));
+    let database = infmt == "blastdb";
+    // NCBI's CSeqDB opens a database by the bytes of its name; LOSAT's database reader takes
+    // names of text, so a -fa_list line that is not UTF-8 is refused before anything is written.
+    if database && files.iter().any(|name| std::str::from_utf8(name).is_err()) {
+        return Err(Failure::Refused(unsupported(
+            "-infmt blastdb with a -fa_list line (a database name) that is not UTF-8 text",
+        )));
+    }
     let output = args.value("out").expect("-out has a default");
     let format = counts_format(args);
     let mut sink = open_sink(output, format, stdout);
-    let input = args.value("in").expect("-in has a default");
     let mut writer = CountsWriter::new(format, args.value("meta").unwrap_or_default().as_bytes());
     let mut source = GenomeInput {
-        files: file_list(input, args.boolean("fa_list").unwrap_or(false)),
-        database: infmt == "blastdb",
+        files,
+        database,
         lists,
         registry: match &settings.blastdb {
             Ok(value) => Ok(value.as_deref()),
@@ -419,6 +429,20 @@ fn convert_run(args: &Args, out: &mut dyn Write, diag: &mut Diag) -> Result<i32,
     output_then(&mut stdout, result)
 }
 
+/// An error of `-convert` of the counts file `file` (`-in <name>`): LOSAT's refusals in the words
+/// of the conversion, else as [`winmask_failure`] gives it.
+fn convert_failure(file: &str, error: WinMaskError) -> Failure {
+    match error {
+        WinMaskError::PctLine { .. } => {
+            Failure::Refused(unsupported(&format!("-convert of {file}: {error};")))
+        }
+        WinMaskError::UnitSize { unit } => Failure::Refused(unsupported(&format!(
+            "-convert of {file}, whose units of {unit} letters NCBI BLAST+ converts without an error while its reverse complement of a unit shifts the 32-bit unit by 32 bits or more (undefined behaviour in C++),"
+        ))),
+        error => winmask_failure(file, error),
+    }
+}
+
 /// `CWinMaskCountsConverter` of `-in` to `-out`.
 fn convert_file(args: &Args, stdout: &mut Ostream<'_>, diag: &mut Diag) -> Result<i32, Failure> {
     let input = args.value("in").expect("-in has a default");
@@ -438,7 +462,7 @@ fn convert_file(args: &Args, stdout: &mut Ostream<'_>, diag: &mut Diag) -> Resul
     )?;
     let count_map = istat
         .count_map()
-        .map_err(|error| winmask_failure(&file, error))?;
+        .map_err(|error| convert_failure(&file, error))?;
     let meta = args.value("meta").unwrap_or_default();
     let metadata = if meta.is_empty() {
         istat.note()
@@ -454,7 +478,7 @@ fn convert_file(args: &Args, stdout: &mut Ostream<'_>, diag: &mut Diag) -> Resul
     convert_counts(&istat, count_map, &mut writer, &mut |line| {
         closed = closed || post_after_output(stdout, diag, line.as_bytes()).is_err();
     })
-    .map_err(|error| winmask_failure(&file, error))?;
+    .map_err(|error| convert_failure(&file, error))?;
     if closed {
         return Err(Failure::ClosedPipe);
     }

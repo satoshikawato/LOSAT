@@ -338,26 +338,31 @@ impl CountsWriter {
     }
 
     /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_ostat_ascii.cpp:114-134
+    /// The text goes out in blocks of 64 KiB: the standard output is line-buffered, so a write
+    /// per line would be a system call per unit.
     fn write_ascii(&self, counts: &[u32], out: &mut dyn Write) -> io::Result<()> {
-        out.write_all(&self.text_metadata())?;
-        writeln!(out, "{}", self.unit_size)?;
-        let mut line = Vec::new();
+        let mut text = Vec::with_capacity(1 << 16);
+        text.extend_from_slice(&self.text_metadata());
+        writeln!(text, "{}", self.unit_size)?;
         for (&unit, &count) in self.units.iter().zip(counts) {
-            line.clear();
-            writeln!(line, "{unit:x} {count}")?;
-            out.write_all(&line)?;
+            writeln!(text, "{unit:x} {count}")?;
+            if text.len() >= 1 << 16 {
+                out.write_all(&text)?;
+                text.clear();
+            }
         }
-        out.write_all(b"\n")?;
+        text.push(b'\n');
         for comment in &self.comments {
-            out.write_all(b"#")?;
-            out.write_all(comment)?;
-            out.write_all(b"\n")?;
+            text.push(b'#');
+            text.extend_from_slice(comment);
+            text.push(b'\n');
         }
-        out.write_all(b"\n")?;
+        text.push(b'\n');
         for (name, value) in PARAMS.iter().zip(self.params) {
-            writeln!(out, ">{name} {value}")?;
+            writeln!(text, ">{name} {value}")?;
         }
-        out.write_all(b"\n")
+        text.push(b'\n');
+        out.write_all(&text)
     }
 
     /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_ostat_bin.cpp:87-103
@@ -384,14 +389,14 @@ impl CountsWriter {
 
     /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_ostat_opt_ascii.cpp:76-95
     fn write_oascii(&self, t: &OptTables, out: &mut dyn Write) -> io::Result<()> {
-        out.write_all(&self.text_metadata())?;
-        out.write_all(b"AAAA\n")?;
-        writeln!(out, "{}", self.unit_size)?;
-        writeln!(out, "{} {} {} {}", t.m, t.k, t.roff, t.bc)?;
-        for value in self.params {
-            writeln!(out, "{value}")?;
-        }
         let mut text = Vec::with_capacity(1 << 16);
+        text.extend_from_slice(&self.text_metadata());
+        text.extend_from_slice(b"AAAA\n");
+        writeln!(text, "{}", self.unit_size)?;
+        writeln!(text, "{} {} {} {}", t.m, t.k, t.roff, t.bc)?;
+        for value in self.params {
+            writeln!(text, "{value}")?;
+        }
         let table_words = t.ht[..1usize << t.k].iter().copied();
         for value in table_words.chain(t.vt.iter().map(|&v| u32::from(v))) {
             writeln!(text, "{value}")?;
@@ -437,8 +442,10 @@ impl CountsWriter {
 /// unit size of `istat`, the count of each unit that is not above its reverse complement and
 /// whose stored count (`trueat`) is not 0, in ascending order, the four parameters of the
 /// reader, its counts algorithm's version and its percentages (`count_map`, none when empty);
-/// `log` gets NCBI's messages. Units of more than 16 letters (an ascii file's) are refused:
-/// NCBI's reverse complement then shifts past 32 bits (undefined behaviour in C++).
+/// `log` gets NCBI's messages. Units of more than 16 letters (an ascii file's) are refused
+/// ([`WinMaskError::UnitSize`]): NCBI converts them without an error, but its reverse complement
+/// of a unit (`CSeqMaskerUtil::reverse_complement`, called for each unit) then shifts the 32-bit
+/// unit by 32 bits or more (undefined behaviour in C++).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_counts_converter.cpp:85-136
 pub fn convert_counts(
@@ -532,7 +539,10 @@ fn memory_exception(line: u32) -> FinalizeError {
 /// The key size is a `Uint1` and the bound `2u-7` an `int`: with units of 1 to 3 letters and
 /// no memory (`-smem` a multiple of 65536), the first loop takes `k` below 0, where it wraps,
 /// and stops when the halved estimate reaches 0, at 253; the second loop then allocates 8 GiB
-/// and shifts by 253 bits (undefined behaviour in C++): LOSAT refuses that case.
+/// and shifts by 253 bits (undefined behaviour in C++): LOSAT refuses that case. With units of 0
+/// letters (an ascii file's unit size line of 0, or of a multiple of 256, read as a `Uint1`) the
+/// key size starts at 255 and the loop that sizes the estimate counts a `Uint1` up to 257, so it
+/// never ends (undefined behaviour in C++ for a loop without side effects): refused too.
 fn optimize(
     unit_size: u8,
     units: &[u32],
@@ -540,6 +550,11 @@ fn optimize(
     size_requested: u16,
     cba_textend: Option<u32>,
 ) -> Result<OptTables, FinalizeError> {
+    if unit_size == 0 {
+        return Err(FinalizeError::Refused(
+            "the optimized formats (oascii, obinary) of units of 0 letters, where NCBI BLAST+'s search for the size of its hash table never ends (undefined behaviour in C++)".to_string(),
+        ));
+    }
     let ubs = 2 * i32::from(unit_size);
     let limit = u64::from(size_requested) * MB;
     if ubs < 7 && limit == 0 {

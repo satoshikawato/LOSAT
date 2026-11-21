@@ -1128,19 +1128,35 @@ impl<R: Read> Stream<'_, R> {
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_istat_factory.cpp:361-366
 /// The binary formats read the first `##pct:` line only (the loop breaks after it), the ascii
 /// ones every such line. A line of exactly those six letters throws `std::out_of_range` from
-/// `substr( 7 )`; the text is libstdc++'s, as in NCBI's Linux builds. The percentages themselves
-/// are used only by the application's `-t_*_pct` settings (`pct::apply_pct`).
+/// `substr( 7 )`; the text is libstdc++'s, as in NCBI's Linux builds. A binary line whose
+/// largest count reads as `u32::MAX` (also a larger number, which the stream stores as that) is
+/// refused whether or not the percentages are used: NCBI's table has room for the count plus
+/// one, 0 in 32 bits, and its loop reads past it (undefined behaviour in C++). The percentages
+/// themselves are used only by the application's `-t_*_pct` settings (`pct::apply_pct`) and
+/// `-convert` (`pct::count_map`).
 fn check_pct_lines(metadata: &[Vec<u8>], stat_type: StatType) -> Result<(), WinMaskError> {
     let mut pct = metadata.iter().filter(|line| line.starts_with(b"##pct:"));
-    let short = match stat_type {
-        StatType::Binary | StatType::OBinary => pct.next().is_some_and(|line| line.len() == 6),
-        StatType::Ascii | StatType::OAscii => pct.any(|line| line.len() == 6),
-        StatType::Unknown => false,
+    let (short, first) = match stat_type {
+        StatType::Binary | StatType::OBinary => {
+            let first = pct.next();
+            (first.is_some_and(|line| line.len() == 6), first)
+        }
+        StatType::Ascii | StatType::OAscii => (pct.any(|line| line.len() == 6), None),
+        StatType::Unknown => (false, None),
     };
     if short {
         return Err(WinMaskError::CreateFail {
             message: "could not create a unit counts container: basic_string::substr: __pos (which is 7) > this->size() (which is 6)".to_string(),
         });
+    }
+    if let Some(line) = first {
+        let mut at = 0;
+        if extract_uint(&line[7..], &mut at).is_some_and(|(max, _)| max == u32::MAX) {
+            return Err(WinMaskError::PctLine {
+                line: String::from_utf8_lossy(line).into_owned(),
+                why: super::pct::MAX_COUNT_WRAPS,
+            });
+        }
     }
     Ok(())
 }
@@ -1292,41 +1308,12 @@ impl<R: Read> TextLines<R> {
 /// * A stream that has failed, or that reached the end of the text while accumulating a field,
 ///   stores nothing more.
 pub(super) fn extract_uints<const N: usize>(line: &[u8]) -> ([u32; N], usize) {
-    let is_space = |byte: u8| matches!(byte, b' ' | b'\t' | b'\n' | 0x0b | 0x0c | b'\r');
     let mut values = [0u32; N];
     let mut stored = 0;
     let mut at = 0;
     while stored < N {
-        while at < line.len() && is_space(line[at]) {
-            at += 1;
-        }
-        if at == line.len() {
+        let Some((value, failed)) = extract_uint(line, &mut at) else {
             break;
-        }
-        let negative = line[at] == b'-';
-        if matches!(line[at], b'-' | b'+') {
-            at += 1;
-        }
-        let first_digit = at;
-        let mut magnitude = 0u64;
-        let mut too_large = false;
-        while at < line.len() && line[at].is_ascii_digit() {
-            magnitude = magnitude * 10 + u64::from(line[at] - b'0');
-            if magnitude > u64::from(u32::MAX) {
-                // Past this the magnitude only has to stay above the limit.
-                too_large = true;
-                magnitude = u64::from(u32::MAX) + 1;
-            }
-            at += 1;
-        }
-        let (value, failed) = if at == first_digit {
-            (0, true)
-        } else if too_large {
-            (u32::MAX, true)
-        } else if negative {
-            ((magnitude as u32).wrapping_neg(), false)
-        } else {
-            (magnitude as u32, false)
         };
         values[stored] = value;
         stored += 1;
@@ -1335,4 +1322,47 @@ pub(super) fn extract_uints<const N: usize>(line: &[u8]) -> ([u32; N], usize) {
         }
     }
     (values, stored)
+}
+
+/// The white space that `>>` skips (the "C" locale's `isspace`).
+pub(super) fn is_c_space(byte: u8) -> bool {
+    matches!(byte, b' ' | b'\t' | b'\n' | 0x0b | 0x0c | b'\r')
+}
+
+/// One `>>` of an `unsigned int` from `line` at `*at` (by the rules of [`extract_uints`]), which
+/// moves past what it read: `None` when the text ends at white space (nothing stored, the
+/// stream has failed); else the value stored and whether the stream has failed. A stream that
+/// has failed, or that has reached the end of the text, stores nothing more.
+pub(super) fn extract_uint(line: &[u8], at: &mut usize) -> Option<(u32, bool)> {
+    while *at < line.len() && is_c_space(line[*at]) {
+        *at += 1;
+    }
+    if *at == line.len() {
+        return None;
+    }
+    let negative = line[*at] == b'-';
+    if matches!(line[*at], b'-' | b'+') {
+        *at += 1;
+    }
+    let first_digit = *at;
+    let mut magnitude = 0u64;
+    let mut too_large = false;
+    while *at < line.len() && line[*at].is_ascii_digit() {
+        magnitude = magnitude * 10 + u64::from(line[*at] - b'0');
+        if magnitude > u64::from(u32::MAX) {
+            // Past this the magnitude only has to stay above the limit.
+            too_large = true;
+            magnitude = u64::from(u32::MAX) + 1;
+        }
+        *at += 1;
+    }
+    Some(if *at == first_digit {
+        (0, true)
+    } else if too_large {
+        (u32::MAX, true)
+    } else if negative {
+        ((magnitude as u32).wrapping_neg(), false)
+    } else {
+        (magnitude as u32, false)
+    })
 }

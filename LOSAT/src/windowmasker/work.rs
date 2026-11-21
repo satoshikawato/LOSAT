@@ -433,9 +433,7 @@ pub(super) fn winmask_failure(file: &str, error: WinMaskError) -> Failure {
         WinMaskError::BadIndex { .. } => {
             Failure::Ncbi(NcbiException::new(BAD_INDEX, error.to_string()))
         }
-        WinMaskError::PctLine { .. } => Failure::Refused(unsupported(&format!(
-            "{file} with a -t_*_pct setting or -convert: {error};"
-        ))),
+        WinMaskError::PctLine { .. } => Failure::Refused(unsupported(&format!("{file}: {error};"))),
         _ => Failure::Refused(unsupported(&format!(
             "{file}, which gives an error that NCBI BLAST+ does not report as such ({error}),"
         ))),

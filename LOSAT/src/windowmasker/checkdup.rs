@@ -150,7 +150,7 @@ impl Tracker<'_> {
         out: &mut Ostream<'_>,
         diag: &mut Diag,
     ) -> Result<(), Failure> {
-        let main = std::mem::take(&mut self.main_list);
+        let mut main = std::mem::take(&mut self.main_list);
         let (mut r, mut it) = (0, 0);
         let start = |loc: SampleLoc, count| Run {
             count,
@@ -188,7 +188,10 @@ impl Tracker<'_> {
                 it += 1;
             }
         }
-        self.main_list = std::mem::take(&mut self.aux_list);
+        // The old list, emptied, takes the next runs: both lists keep their room, as NCBI's
+        // `clear` and `swap` keep it.
+        main.clear();
+        self.main_list = std::mem::replace(&mut self.aux_list, main);
         Ok(())
     }
 

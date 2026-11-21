@@ -814,17 +814,34 @@ pub(super) fn refuse_unreportable(
     // search never takes a database with them (`database::x_titles_allow_blocks`). Were a block
     // search to reach it, it would refuse in the call of the query's block as the abort above,
     // after the reports of the blocks before (NCBI's bytes for their queries).
-    // rpsblast's BLAST XML (outfmt 5): the same collision of an entry's generated id with a query
-    // of its batch, where NCBI's XML takes the query's title for the entry (the archive,
-    // outfmt 11, is NCBI's bytes with it): refused here before any byte, for the reported
-    // entries only (`ListedTitles::refuse_generated_ids`; PS15a-1, followup
-    // `rps_lcl_query_title.md`). Outfmt 0, 6 and 7 are line RG item X7's.
+    // rpsblast's BLAST XML, XML2 and JSON (outfmt 5, 13 to 16): the same collision of an entry's
+    // generated id with a query of its batch, where NCBI's documents take the query's title for
+    // the entry (the archive, outfmt 11, and the Seq-annots, 8, 9 and 12, are NCBI's bytes with
+    // it): refused here before any byte, for the reported entries only
+    // (`ListedTitles::refuse_generated_ids`; PS15a-1 and PS15a-2, followup
+    // `rps_lcl_query_title.md`). Outfmt 0, 6, 7 and 10 are line RG item X7's.
     let rps_xml = args.rps_search.is_some()
         && format_plans
             .iter()
-            .any(|outfmt| matches!(outfmt, BlastpReport::Xml));
+            .any(|outfmt| matches!(outfmt, BlastpReport::Xml | BlastpReport::Xml2(_)));
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:891-898
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:996-1000
+    // rpsblast's organism report (outfmt 18) and comma-separated values with a header line
+    // (outfmt 20) whose fields read the sequence that NCBI's formatter finds by the entry's
+    // Seq-align id (`TabularSpec::reads_subject`; the organism report reads every one): NCBI's
+    // rows show the query's letters, titles, ids and taxonomy for it (PS15a-2). Refused as the
+    // documents above; a table of other fields is NCBI's bytes.
+    let rps_tables = args.rps_search.is_some()
+        && format_plans.iter().any(|outfmt| {
+            matches!(outfmt, BlastpReport::CustomTabular(spec)
+                if matches!(
+                    spec.kind,
+                    crate::report::tabular::TabularKind::CsvWithHeader
+                        | crate::report::tabular::TabularKind::TaxReport
+                ) && spec.reads_subject(crate::blastinput::app::Program::Blastp))
+        });
     if let (true, false, Some(titles)) = (
-        anchored_view.is_some() || rps_xml,
+        anchored_view.is_some() || rps_xml || rps_tables,
         args.parse_deflines,
         listed_titles.as_ref(),
     ) {
@@ -852,6 +869,13 @@ pub(super) fn refuse_unreportable(
                 hit_lists,
                 &scope_of,
                 crate::algorithm::common::database::XML_EFFECT,
+            )?;
+        }
+        if rps_tables {
+            titles.refuse_generated_ids(
+                hit_lists,
+                &scope_of,
+                crate::algorithm::common::database::TABLE_EFFECT,
             )?;
         }
         if anchored_view.is_some() {

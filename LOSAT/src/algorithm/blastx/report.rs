@@ -73,6 +73,72 @@ pub(super) fn reported(list: &super::results::HspList, gapped: bool) -> bool {
     list.hsps.iter().any(|hsp| has_seqalign(hsp, gapped))
 }
 
+/// RPSTBLASTN: the scopes of the batches (`AnchoredBatchScopes`) where a profile of the database
+/// can have the generated id (`lcl|Query_N`) of a query of the batch that reports it, which NCBI's
+/// scope finds as that query (PS15a-1, PS15a-2, followup `rps_lcl_query_title.md`); `None` for
+/// every other program, a subject set and queries read with `-parse_deflines`.
+pub(super) fn rps_generated_scopes(
+    options: &ResolvedOptions,
+    queries: &[FastaRecord],
+    shown: &ShownSubjects<'_>,
+    batches: &[BatchResults],
+) -> Option<crate::blastinput::query_batch::AnchoredBatchScopes> {
+    if options.rpstblastn.is_none() || !matches!(shown, ShownSubjects::Database { .. }) {
+        return None;
+    }
+    let ids: Vec<(
+        &str,
+        Option<&crate::blastinput::fasta_reader::believed::BelievedIds>,
+    )> = queries
+        .iter()
+        .map(|query| (query.internal_id.as_str(), query.believed()))
+        .collect();
+    let scopes = crate::blastinput::query_batch::AnchoredBatchScopes::of_ids(
+        &ids,
+        batches
+            .iter()
+            .map(|batch| batch.query_ordinal..batch.query_ordinal + batch.queries.len())
+            .collect(),
+    );
+    scopes.generated().then_some(scopes)
+}
+
+/// The refusal of a reported list of the query `ordinal` (`lists`, those that `reported` keeps
+/// and `takes_query` picks) whose profile has the generated id of a query of its batch
+/// (`rps_generated_scopes`, `common::database::refuse_generated_query_id`), with what NCBI does
+/// with it in the format asked for (`effect`).
+pub(super) fn refuse_rps_generated_ids(
+    scopes: &crate::blastinput::query_batch::AnchoredBatchScopes,
+    shown: &ShownSubjects<'_>,
+    lists: &[super::results::HspList],
+    ordinal: usize,
+    options: &ResolvedOptions,
+    takes_query: impl Fn(&super::results::HspList) -> bool,
+    effect: &str,
+) -> Result<()> {
+    let ShownSubjects::Database {
+        reported: names, ..
+    } = shown
+    else {
+        return Ok(());
+    };
+    for list in lists
+        .iter()
+        .filter(|list| reported(list, options.gapped) && takes_query(list))
+    {
+        if let Some(subject) = names.parsed_subject(list.oid) {
+            crate::algorithm::common::database::refuse_generated_query_id(
+                subject,
+                names.oid(list.oid),
+                scopes.of_query(ordinal),
+                options.program().upper,
+                effect,
+            )?;
+        }
+    }
+    Ok(())
+}
+
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:900-904 (cited at
 // `report::tabular::TabularSpec::subject_fetch`)
 /// Whether a report whose batch's prefetch is off reads the subject of the hit list `list`: one
@@ -798,6 +864,45 @@ pub(super) fn render_queries_with(
             options.outfmt
         )
     })?;
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:900-924
+    // NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:964-968
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:996-1000
+    // RPSTBLASTN's organism report (outfmt 18) and comma-separated values with a header line
+    // (outfmt 20, item PS15a-2): a profile whose Seq-align id is the generated id of a query of
+    // its batch is that query for NCBI's formatter. Rows that read the sequence found by that id
+    // (`TabularSpec::reads_subject`, every one of the organism report) show the query's for it,
+    // and a row of outfmt 20 that enters the alignment block (`TabularSpec::opens_counts`) makes
+    // the translated Dense-seg of two nucleotide sequences from one that has its widths and stops
+    // with an exception after the header line. Refused before any byte, as the documents above;
+    // outfmt 6, 7 and 10 of the same rows are line RG item X7's.
+    if matches!(
+        spec.kind,
+        crate::report::tabular::TabularKind::CsvWithHeader
+            | crate::report::tabular::TabularKind::TaxReport
+    ) {
+        if let Some(scopes) = rps_generated_scopes(options, queries, shown, batches) {
+            let reads = spec.reads_subject(crate::blastinput::app::Program::Blastx);
+            for batch in batches.iter() {
+                for qidx in 0..batch.queries.len() {
+                    refuse_rps_generated_ids(
+                        &scopes,
+                        shown,
+                        batch.shown_lists(qidx, options),
+                        batch.query_ordinal + qidx,
+                        options,
+                        |list| {
+                            reads
+                                || list.hsps.iter().any(|hsp| {
+                                    has_seqalign(hsp, options.gapped)
+                                        && spec.opens_counts(&hsp.identity)
+                                })
+                        },
+                        crate::algorithm::common::database::TABLE_EFFECT,
+                    )?;
+                }
+            }
+        }
+    }
     super::tabular::write_blastx_tabular(
         writer, stderr, options, spec, queries, subjects, shown, batches, probe, first_hsp,
     )

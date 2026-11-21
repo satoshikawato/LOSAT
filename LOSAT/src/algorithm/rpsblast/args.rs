@@ -1,6 +1,6 @@
 //! Command-line arguments for RPS-BLAST (`losat rpsblast`).
 
-use anyhow::{bail, Result};
+use anyhow::Result;
 use clap::Args;
 use std::path::PathBuf;
 
@@ -384,7 +384,9 @@ mod tests {
     // `-html` is a later item's (line RG T4c).
     #[test]
     fn options_of_later_items_are_refused() {
-        for outfmt in ["1", "4", "5", "8", "9", "11", "12", "13", "14", "15", "16", "18", "20"] {
+        for outfmt in [
+            "1", "4", "5", "8", "9", "11", "12", "13", "14", "15", "16", "18", "20",
+        ] {
             parse(&["-outfmt", outfmt, "-out", "x.out"])
                 .unwrap()
                 .into_blastp_args()

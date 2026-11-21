@@ -311,14 +311,6 @@ mod tests {
         }
     }
 
-    fn refusal(extra: &[&str]) -> String {
-        parse(extra)
-            .unwrap()
-            .into_blastx_args()
-            .unwrap_err()
-            .to_string()
-    }
-
     /// The refusal of `check_options`, once per run.
     fn late_refusal(extra: &[&str]) -> String {
         search(extra).check_options().unwrap_err().to_string()
@@ -429,7 +421,9 @@ mod tests {
     // that NCBI's rpstblastn runs is BLASTX's report (items PS15a-1, PS15a-2).
     #[test]
     fn options_of_later_items_are_refused() {
-        for outfmt in ["1", "4", "5", "8", "9", "11", "12", "13", "14", "15", "16", "18", "20"] {
+        for outfmt in [
+            "1", "4", "5", "8", "9", "11", "12", "13", "14", "15", "16", "18", "20",
+        ] {
             parse(&["-outfmt", outfmt, "-out", "x.out"])
                 .unwrap()
                 .into_blastx_args()

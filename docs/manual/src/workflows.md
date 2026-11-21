@@ -82,11 +82,11 @@ losat rpstblastn -query contigs.fna -db Cdd -evalue 0.01 -outfmt 6 -num_threads 
 
 Both write the same output at every `-num_threads`: NCBI BLAST+'s output with `-num_threads 1`.
 
-For the domain, site and motif annotation of `losat rpsbproc`, you need a BLAST archive (`-outfmt 11`). In v0.2.0, LOSAT's `rpsblast` writes formats `0`, `6`, `7` and `10`, and `rpstblastn` also `1` to `4`, but not `11`. Make the archive with NCBI BLAST+'s own `rpsblast` or `rpstblastn`, then annotate it with LOSAT. `cdd_data` is a folder with the six CDD data files listed on the [rpsbproc](programs/rpsbproc.md) page:
+For the domain, site and motif annotation of `losat rpsbproc`, you need a BLAST archive (`-outfmt 11`), which LOSAT's `rpsblast` and `rpstblastn` write as NCBI BLAST+'s do. Annotate it with LOSAT. `cdd_data` is a folder with the six CDD data files listed on the [rpsbproc](programs/rpsbproc.md) page:
 
 ```bash
-# Step 1: the archive, with NCBI BLAST+'s rpsblast (give its full path if the NCBI names run LOSAT)
-/path/to/ncbi-blast-2.17.0+/bin/rpsblast -query proteins.faa -db Cdd -evalue 0.01 -outfmt 11 -out hits.asn
+# Step 1: the archive
+losat rpsblast -query proteins.faa -db Cdd -evalue 0.01 -outfmt 11 -out hits.asn
 
 # Step 2: domains, sites and motifs, with LOSAT
 losat rpsbproc -i hits.asn -d cdd_data -t both -m rep -f -o domains.txt

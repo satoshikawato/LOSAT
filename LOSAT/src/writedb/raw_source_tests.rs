@@ -307,6 +307,43 @@ fn the_errors_before_the_copy_are_makeblastdb_s() {
     assert_eq!(files_of(&tmp.0), Vec::<String>::new());
 }
 
+/// An alias file whose OID list file NCBI cannot read as a list (no byte: SIGSEGV; the header
+/// alone: an assertion whose text names NCBI's source file) is LOSAT's refusal of the input, in
+/// its words, before any file is written (exit status 1). The lists NCBI reads are the cases
+/// `B_al_*` of `blastdb_input_runs_as_makeblastdb`.
+#[test]
+#[cfg_attr(
+    target_os = "wasi",
+    ignore = "runs makeblastdb on files named from the working directory (tests/...): a WASI module has none, the runner preopens /"
+)]
+fn oid_list_files_ncbi_cannot_read_are_refused() {
+    let tmp = TempDir::new("raw-oidlist");
+    let out = tmp.base("db");
+    for (name, file) in [("p_empty", "empty.msk"), ("p_hdr", "hdr.msk")] {
+        let input = format!("tests/db_search/oidlist/{name}");
+        let (status, log, err) = makeblastdb(&[
+            "-in",
+            &input,
+            "-input_type",
+            "blastdb",
+            "-dbtype",
+            "prot",
+            "-out",
+            &out,
+        ]);
+        assert_eq!((status, log.as_str()), (1, ""), "{name}: {err}");
+        assert!(
+            err.starts_with("losat makeblastdb: ") && err.contains(file),
+            "{name}: {err}"
+        );
+        assert!(
+            err.ends_with("this database is not supported as input by LOSAT's makeblastdb\n"),
+            "{name}: {err}"
+        );
+        assert_eq!(files_of(&tmp.0), Vec::<String>::new(), "{name}");
+    }
+}
+
 /// Writes with LOSAT's writer the protein database `base` of three sequences (no `-parse_seqids`,
 /// ids `<prefix>1` to `<prefix>3`) with a user column `comedy` whose blobs the first and third
 /// sequences have; `masks` first registers a seg algorithm (the mask column is then the first

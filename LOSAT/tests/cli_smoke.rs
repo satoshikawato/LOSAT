@@ -274,9 +274,25 @@ fn blastp_ungapped_length_zero_hsp_at_subject_start_ends_with_ncbi_exception() {
             .arg("-subject")
             .arg(&subject)
             .args([
-                "-window_size", "0", "-word_size", "3", "-threshold", "1", "-matrix", "BLOSUM62",
-                "-evalue", "1e5", "-seg", "no", "-ungapped", "-comp_based_stats", "0", "-outfmt",
-                "6", "-num_threads", threads,
+                "-window_size",
+                "0",
+                "-word_size",
+                "3",
+                "-threshold",
+                "1",
+                "-matrix",
+                "BLOSUM62",
+                "-evalue",
+                "1e5",
+                "-seg",
+                "no",
+                "-ungapped",
+                "-comp_based_stats",
+                "0",
+                "-outfmt",
+                "6",
+                "-num_threads",
+                threads,
             ])
             .output()
             .expect("run blastp -ungapped -window_size 0");
@@ -285,7 +301,11 @@ fn blastp_ungapped_length_zero_hsp_at_subject_start_ends_with_ncbi_exception() {
     let _ = std::fs::remove_file(&query);
     let _ = std::fs::remove_file(&subject);
     for (threads, output) in outputs {
-        assert_eq!(output.status.code(), Some(255), "threads {threads}: {output:?}");
+        assert_eq!(
+            output.status.code(),
+            Some(255),
+            "threads {threads}: {output:?}"
+        );
         assert!(output.stdout.is_empty(), "threads {threads}: {output:?}");
         if threads == "1" {
             assert_eq!(String::from_utf8_lossy(&output.stderr), expected);

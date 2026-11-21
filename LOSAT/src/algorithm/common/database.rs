@@ -4103,10 +4103,14 @@ impl TaxdbRun {
         let Some(search_path) = db.search_path() else {
             return Ok(());
         };
-        let texts = self
-            .taxdb(search_path)
-            .open()
-            .map_err(|error| taxdb_error(error, program))?;
+        let texts = match self.taxdb(search_path).open() {
+            Ok(texts) => texts,
+            // A file that does not open throws at each lookup and writes nothing: the rows decide
+            // (the organism report leaves the HSP out, `report::tax_report::TaxLookups::look_up`;
+            // a name field is refused, `tabular_names`).
+            Err(SeqDbError::TaxdbThrows { .. }) => return Ok(()),
+            Err(error) => return Err(taxdb_error(error, program)),
+        };
         self.rows_open()
             .lock()
             .expect("the texts of opening")
@@ -4558,12 +4562,14 @@ fn taxdb_error(error: SeqDbError, program: &str) -> anyhow::Error {
         // The Bioseq's taxonomy catches only a `CSeqDBException`: the load throws `CMemoryFile`'s
         // exception, and each report then reads the subject as its own `catch` decides (line WQA
         // D18b probe 12: `Unknown` ids and titles, `N/A` names, alignments without sequences, or
-        // the exception, exit status 255), which LOSAT does not write.
+        // the exception, exit status 255), which LOSAT does not write. The formats that NCBI
+        // writes the same are not refused (`report::db_subject::unchanged_by_load_throws`); the
+        // words say what the user can do.
         return anyhow::Error::new(TaxonomyRefusal {
             text: format!(
-                "{error}, where NCBI BLAST+ 2.17.0 fails to load each database sequence with a \
-                 taxid and reports such a sequence without its ids, titles and names, or ends; \
-                 this is not supported by LOSAT's {program}"
+                "{error}; NCBI BLAST+ 2.17.0 then fails at each taxonomy lookup and writes this \
+                 output differently or stops, which LOSAT's {program} does not support; make the \
+                 file readable, or move it off the BLASTDB path"
             ),
             load_throws: true,
         });
@@ -4871,7 +4877,8 @@ pub(crate) fn tabular_names<'t>(
                 run.taxdb(search_path),
                 Some(std::sync::Arc::clone(run.rows_open())),
                 taxdb_error,
-            ),
+            )
+            .where_loads_throw(run.load_throws(db)),
             program,
         )));
     }
@@ -5162,9 +5169,9 @@ pub(crate) struct PrefetchQueries<'a> {
     /// The outfmt 5 reports of the queries before the batch, where outfmt 5 is the first format
     /// of a program that writes them after the stop ([`PrefetchQueries::after_xml_reports`]).
     xml_before: Option<&'a XmlReportsBefore<'a>>,
-    /// Whether no report of the run reads a subject
-    /// ([`PrefetchQueries::where_reports_read_no_subject`]).
-    reports_read_no_subject: bool,
+    /// Whether the reports of the run write the same where every load of a subject with a
+    /// positive taxid throws ([`PrefetchQueries::where_reports_unchanged_by_load_throws`]).
+    reports_unchanged_by_load_throws: bool,
 }
 
 impl<'a> PrefetchQueries<'a> {
@@ -5179,19 +5186,19 @@ impl<'a> PrefetchQueries<'a> {
             scope,
             unrecorded_calls: false,
             xml_before: None,
-            reports_read_no_subject: false,
+            reports_unchanged_by_load_throws: false,
         }
     }
 
-    /// The same batch of a run none of whose formats reads a subject (`none`:
-    /// `report::db_subject::FormatThrow::none_reads` of the run's formats, a table of fields that
-    /// read nothing of the subject). NCBI's reports of such a run load nothing, so a load that
-    /// throws where a file of the taxonomy database does not open fails the batch's prefetch
-    /// alone, which catches it with the warning ([`batch_prefetch`]); a run whose reports read the
-    /// subjects is refused there ([`TaxonomyRefusal`]).
-    pub(crate) fn where_reports_read_no_subject(self, none: bool) -> Self {
+    /// The same batch of a run whose formats write the same where every load of a subject with a
+    /// positive taxid throws (`unchanged`: `report::db_subject::unchanged_by_load_throws` of each
+    /// format). Where a file of the taxonomy database does not open, such a load throws at the
+    /// batch's prefetch, which catches it with the warning ([`batch_prefetch`]), and then at the
+    /// loads of the reports, which such a run writes as LOSAT does; another run is refused there
+    /// ([`TaxonomyRefusal`]).
+    pub(crate) fn where_reports_unchanged_by_load_throws(self, unchanged: bool) -> Self {
         Self {
-            reports_read_no_subject: self.reports_read_no_subject || none,
+            reports_unchanged_by_load_throws: self.reports_unchanged_by_load_throws || unchanged,
             ..self
         }
     }
@@ -5430,7 +5437,8 @@ pub(crate) fn batch_prefetch<'s, 'b>(
         program,
     ) {
         Err(error)
-            if queries.reports_read_no_subject && TaxonomyRefusal::of_load_that_throws(&error) =>
+            if queries.reports_unchanged_by_load_throws
+                && TaxonomyRefusal::of_load_that_throws(&error) =>
         {
             fails = true;
             Vec::new()

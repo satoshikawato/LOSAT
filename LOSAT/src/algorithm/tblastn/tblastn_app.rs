@@ -2285,8 +2285,8 @@ fn search(
                         )
                         .after_unrecorded_calls(args.first_query_ordinal > 0)
                         .after_xml_reports(xml_before.as_ref())
-                        .where_reports_read_no_subject(
-                            crate::report::db_subject::FormatThrow::none_reads_outfmts(
+                        .where_reports_unchanged_by_load_throws(
+                            crate::report::db_subject::unchanged_by_load_throws_outfmts(
                                 outputs.formats.iter().map(|format| format.outfmt),
                                 crate::blastinput::app::Program::Tblastn,
                                 crate::report::archive::options::RequestKind::Tblastn,

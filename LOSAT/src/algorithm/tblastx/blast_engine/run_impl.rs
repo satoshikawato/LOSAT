@@ -3261,12 +3261,14 @@ fn run_batch_loop(
     let run_loads = crate::report::db_subject::RunLoads::new(super::super::database::after_throw(
         outputs.formats.iter().map(|format| format.outfmt),
     ));
-    // Whether the batches' prefetches are the run's only loads (`FormatThrow::none_reads`).
-    let reports_read_no_subject = crate::report::db_subject::FormatThrow::none_reads_outfmts(
-        outputs.formats.iter().map(|format| format.outfmt),
-        crate::blastinput::app::Program::Tblastx,
-        crate::report::archive::options::RequestKind::Tblastx,
-    );
+    // Whether the reports write the same where every load of a subject with a positive taxid throws
+    // (`db_subject::unchanged_by_load_throws`).
+    let reports_unchanged_by_load_throws =
+        crate::report::db_subject::unchanged_by_load_throws_outfmts(
+            outputs.formats.iter().map(|format| format.outfmt),
+            crate::blastinput::app::Program::Tblastx,
+            crate::report::archive::options::RequestKind::Tblastx,
+        );
     let (query_code, db_code) = (
         crate::utils::genetic_code::GeneticCode::from_id(args.query_gencode),
         crate::utils::genetic_code::GeneticCode::from_id(args.db_gencode),
@@ -3818,7 +3820,9 @@ fn run_batch_loop(
                         &crate::algorithm::common::database::PrefetchQueries::new(start, &scope)
                             .after_unrecorded_calls(unrecorded_calls)
                             .after_xml_reports(xml_before.as_ref())
-                            .where_reports_read_no_subject(reports_read_no_subject),
+                            .where_reports_unchanged_by_load_throws(
+                                reports_unchanged_by_load_throws,
+                            ),
                     );
                     drop(reads);
                     let messages = match prefetch {

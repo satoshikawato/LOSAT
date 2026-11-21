@@ -702,14 +702,14 @@ fn the_check_accepts_what_the_check_before_it_accepted() {
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1146-1155
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:768-790
 /// A load of a subject with a taxid where a file of the taxonomy database does not open
-/// (`SeqDbError::TaxdbThrows`) is LOSAT's refusal, in words that say what NCBI does, which the
-/// batch's prefetch alone catches (`batch_prefetch`, in a run whose formats read no subject:
-/// `FormatThrow::none_reads`); any other refusal of the taxonomy database is not caught there
-/// (line WQA D18b, 2026-11-21).
+/// (`SeqDbError::TaxdbThrows`) is LOSAT's refusal, in words that say what the user can do, which
+/// the batch's prefetch alone catches (`batch_prefetch`, in a run whose formats NCBI writes the
+/// same: `db_subject::unchanged_by_load_throws`); any other refusal of the taxonomy database is
+/// not caught there (line WQA D18b, 2026-11-21; review 1, L1: `slen` and the organism report are
+/// written the same).
 #[test]
 fn a_taxonomy_file_that_throws_is_a_refusal_that_the_prefetch_alone_catches() {
     use crate::blastinput::app::Program;
-    use crate::report::db_subject::FormatThrow;
     let path = std::path::PathBuf::from("/d/taxdb.bti");
     let exception = SeqDbError::Open {
         path: path.clone(),
@@ -729,9 +729,9 @@ fn a_taxonomy_file_that_throws_is_a_refusal_that_the_prefetch_alone_catches() {
     assert!(TaxonomyRefusal::of_load_that_throws(&error));
     assert_eq!(
         format!("{error:#}"),
-        "/d/taxdb.bti cannot be opened: Permission denied, where NCBI BLAST+ 2.17.0 fails to \
-         load each database sequence with a taxid and reports such a sequence without its ids, \
-         titles and names, or ends; this is not supported by LOSAT's BLASTP"
+        "/d/taxdb.bti cannot be opened: Permission denied; NCBI BLAST+ 2.17.0 then fails at \
+         each taxonomy lookup and writes this output differently or stops, which LOSAT's BLASTP \
+         does not support; make the file readable, or move it off the BLASTDB path"
     );
     let other = taxdb_error(
         SeqDbError::Unsupported {
@@ -742,23 +742,29 @@ fn a_taxonomy_file_that_throws_is_a_refusal_that_the_prefetch_alone_catches() {
     );
     assert!(other.is::<TaxonomyRefusal>());
     assert!(!TaxonomyRefusal::of_load_that_throws(&other));
-    // The formats that read no subject: a table of fields of the alignment alone, the Seq-annots.
-    for (outfmts, none) in [
+    // The formats that NCBI writes the same: a table of fields that load no subject (`slen` and
+    // the coordinates included, not the letters or the subject's ids), the organism report, the
+    // Seq-annots.
+    for (outfmts, unchanged) in [
         (&["6 qseqid evalue bitscore"][..], true),
+        (&["6 qseqid slen"][..], true),
+        (&["6 qseqid sstart send length"][..], true),
+        (&["18"][..], true),
         (&["8"][..], true),
         (&["6 qseqid sseqid"][..], false),
+        (&["6 qseqid pident"][..], false),
         (&["6"][..], false),
         (&["6 qseqid evalue bitscore", "0"][..], false),
         (&["5"][..], false),
         (&["15"][..], false),
     ] {
         assert_eq!(
-            FormatThrow::none_reads_outfmts(
+            crate::report::db_subject::unchanged_by_load_throws_outfmts(
                 outfmts.iter().copied(),
                 Program::Blastp,
                 crate::report::archive::options::RequestKind::Blastp,
             ),
-            none,
+            unchanged,
             "{outfmts:?}"
         );
     }

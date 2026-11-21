@@ -8960,9 +8960,9 @@ fn run_in_pool(
             let prefetch_queries =
                 crate::algorithm::common::database::PrefetchQueries::new(start, &scope)
                     .after_unrecorded_calls(args.first_query_ordinal > 0)
-                    .where_reports_read_no_subject(database::reports_read_no_subject(
-                        &output_formats,
-                    ));
+                    .where_reports_unchanged_by_load_throws(
+                        database::reports_unchanged_by_load_throws(&output_formats),
+                    );
             let prefetch = if run_loads.ended() {
                 None
             } else if output_formats

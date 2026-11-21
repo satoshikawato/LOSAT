@@ -148,6 +148,23 @@ impl BlastnOutputFormat {
         }
     }
 
+    /// Whether the format writes the same where every load of a subject with a positive taxid
+    /// throws (`report::db_subject::unchanged_by_load_throws`, of which this is BLASTN's form).
+    pub(crate) fn unchanged_by_load_throws(&self) -> bool {
+        match *self {
+            BlastnOutputFormat::CustomTabular(spec) => {
+                spec.unchanged_by_load_throws(crate::blastinput::app::Program::Blastn)
+            }
+            BlastnOutputFormat::Seqalign(_) | BlastnOutputFormat::Archive => true,
+            BlastnOutputFormat::Tabular
+            | BlastnOutputFormat::TabularWithComments
+            | BlastnOutputFormat::Xml2(_)
+            | BlastnOutputFormat::Pairwise(_)
+            | BlastnOutputFormat::Xml
+            | BlastnOutputFormat::Sam(_) => false,
+        }
+    }
+
     /// Whether NCBI prefetches the subjects that each query batch reports before the batch's
     /// reports and the report shows no taxonomy of them (outfmt 0, 5, 6, 7 and 17; with
     /// `PRE_FETCH_SEQS_LIMIT=2147483647` also 8, 9 and 12, `database::prefetches_subjects`): as

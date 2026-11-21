@@ -1007,6 +1007,9 @@ pub(super) struct ReportedAsks {
     /// What the reports do with a subject whose lookup throws where a batch's prefetch is off
     /// (`FormatThrow::and` of the reports, for `HitLoads::of`).
     throw: crate::report::db_subject::FormatThrow,
+    /// Whether a report writes otherwise where every load of a subject with a positive taxid
+    /// throws (not `report::db_subject::unchanged_by_load_throws`), for the batches' prefetch.
+    changed_by_load_throws: bool,
 }
 
 impl ReportedAsks {
@@ -1054,6 +1057,16 @@ impl ReportedAsks {
                         crate::blastinput::app::Program::Blastx,
                     )
                 }),
+            changed_by_load_throws: !crate::blastinput::app::ReportFormat::from_number(i32::from(
+                options.outfmt,
+            ))
+            .is_some_and(|format| {
+                crate::report::db_subject::unchanged_by_load_throws(
+                    format,
+                    options.tabular,
+                    crate::blastinput::app::Program::Blastx,
+                )
+            }),
         }
     }
 
@@ -1087,6 +1100,7 @@ impl ReportedAsks {
             prefetched: self.prefetched || other.prefetched,
             prefetch_runs: self.prefetch_runs || other.prefetch_runs,
             throw: self.throw.and(other.throw),
+            changed_by_load_throws: self.changed_by_load_throws || other.changed_by_load_throws,
         }
     }
 }
@@ -1411,9 +1425,8 @@ pub(super) fn reported_batch(
                     database,
                     results,
                     options.gapped,
-                    &prefetch_queries.where_reports_read_no_subject(
-                        crate::report::db_subject::FormatThrow::none_reads([asks.throw]),
-                    ),
+                    &prefetch_queries
+                        .where_reports_unchanged_by_load_throws(!asks.changed_by_load_throws),
                 )
                 .map_err(reported_error)?;
             messages.write(diagnostics, None)?;

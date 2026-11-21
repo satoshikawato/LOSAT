@@ -1308,9 +1308,12 @@ prints it, the same on every machine), with and without `NSEQ` and `LENGTH`, and
 `olonly2.msk` as `rps_mini.msk`); `segmasker` and `dustmasker` read them in their rows `db_oidlist_*`.
 
 `x4b2/`: rows `db.x4b2.fail.w.db.*`, `db.x4b2.dbsize1.w.db.*`, `db.x4b2.rej.crash.db.*`, `db.x4b2.ctx.*.db.*`,
-`db.x4b2.rej.ungapped.ac.b1.db.*` and `db.x4b2.excl.*` (line RG, item X4b-2: blastx `-use_sw_tback`).
+`db.x4b2.rej.ungapped.ac.b1.db.*`, `db.x4b2.excl.*` and `db.x4b2.past.excl.nolist.*` (line RG, item X4b-2: blastx
+`-use_sw_tback`).
 `x4b2/make_x4b2.py` (its docstring has the usage and the records) writes the queries `tests/fasta/x4b2/*.fna` (X4's
-crafted proteins back-translated with one codon per letter, and cuts of `bslice_q.fna`), the subjects
+crafted proteins back-translated with one codon per letter, and cuts of `bslice_q.fna`; the `*_pad.fna` files are
+query files whose batches are followed by queries without a hit, NCBI's runs of which are the expectations of the rows
+`db.x4b2.past.*`, approved exception 20 of PD-LOSAT-NCBI-DEFECTS), the subjects
 `tests/fasta/x4b2/ok_fail.faa`, and with NCBI BLAST+ 2.17.0 makeblastdb (version 5, `-parse_seqids`) the protein
 databases `x4b2/fail` (sok1 and sfail, on which tks_W's Smith-Waterman redo fails) and `x4b2/excl` (the same and, at
 OID 2, a weaker copy of sfail's first half whose only line has a ti). `x4b2/neg.txt` lists an id that no database

@@ -57,7 +57,7 @@ fn run_in(dir: &Path, program: &str, words: &[&str]) -> Output {
 
 /// The programs, NCBI's version of each (the first line of its `-version-full`, probes `vf`, and
 /// the numbers of its XML and JSON `version_info`), and an option of each that takes a value.
-const PROGRAMS: [(&str, &str, [&str; 3], &str); 15] = [
+const PROGRAMS: [(&str, &str, [&str; 3], &str); 16] = [
     ("blastn", "2.17.0+", ["2", "17", "0"], "-out"),
     ("blastp", "2.17.0+", ["2", "17", "0"], "-out"),
     ("blastx", "2.17.0+", ["2", "17", "0"], "-out"),
@@ -73,6 +73,7 @@ const PROGRAMS: [(&str, &str, [&str; 3], &str); 15] = [
     ("segmasker", "1.0.0", ["1", "0", "0"], "-out"),
     ("windowmasker", "1.0.0", ["1", "0", "0"], "-out"),
     ("convert2blastmask", "2.17.0+", ["2", "17", "0"], "-out"),
+    ("makembindex", "2.17.0", ["2", "17", "0"], "-input"),
 ];
 
 /// LOSAT's package: its version, and its numbers in the XML and JSON.
@@ -312,6 +313,7 @@ fn the_library_s_tools_print_the_versions_as_the_command_line() {
                 | "segmasker"
                 | "windowmasker"
                 | "convert2blastmask"
+                | "makembindex"
         );
         for word in [
             "-version",

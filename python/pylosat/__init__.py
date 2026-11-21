@@ -13,6 +13,7 @@ from importlib.metadata import PackageNotFoundError, version
 
 from ._api import (
     PROGRAMS,
+    Alignment,
     Batch,
     Batches,
     Database,
@@ -34,6 +35,7 @@ from ._api import (
     describe,
     dustmasker,
     makeblastdb,
+    makembindex,
     segmasker,
     windowmasker,
 )
@@ -55,6 +57,7 @@ except PackageNotFoundError:
 __all__ = [
     "ENGINE_VERSION",
     "PROGRAMS",
+    "Alignment",
     "ArgumentError",
     "Batch",
     "Batches",
@@ -83,6 +86,7 @@ __all__ = [
     "describe",
     "dustmasker",
     "makeblastdb",
+    "makembindex",
     "segmasker",
     "windowmasker",
 ]

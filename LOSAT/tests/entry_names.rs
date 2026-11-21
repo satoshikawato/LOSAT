@@ -46,7 +46,7 @@ fn install(dir: &Path) -> Output {
 }
 
 /// The programs that the binary links, in the order it lists them.
-const PROGRAMS: [&str; 15] = [
+const PROGRAMS: [&str; 16] = [
     "blastn",
     "blastp",
     "blastx",
@@ -61,6 +61,7 @@ const PROGRAMS: [&str; 15] = [
     "segmasker",
     "windowmasker",
     "convert2blastmask",
+    "makembindex",
     "rpsbproc",
 ];
 
@@ -95,7 +96,8 @@ fn a_shim_prints_what_the_subcommand_prints() {
     for name in installed_names(&installed).iter().map(String::as_str) {
         // `blastn -version` is what tools read the version from (`blastn: 2.17.0+`; rpsbproc,
         // which is not part of BLAST+, and the maskers have their own: `rpsbproc: 0.5.1`,
-        // `dustmasker: 1.0.0`, `segmasker: 1.0.0`, `windowmasker: 1.0.0`).
+        // `dustmasker: 1.0.0`, `segmasker: 1.0.0`, `windowmasker: 1.0.0`; makembindex prints the
+        // release without the `+`: `makembindex: 2.17.0`).
         let version = run(shim(&dir, name), &["-version"]);
         assert!(version.status.success(), "{name}: {version:?}");
         let first_line = match name {
@@ -103,6 +105,7 @@ fn a_shim_prints_what_the_subcommand_prints() {
             "dustmasker" => "dustmasker: 1.0.0\n".to_string(),
             "segmasker" => "segmasker: 1.0.0\n".to_string(),
             "windowmasker" => "windowmasker: 1.0.0\n".to_string(),
+            "makembindex" => "makembindex: 2.17.0\n".to_string(),
             _ => format!("{name}: 2.17.0+\n"),
         };
         assert!(
@@ -289,6 +292,7 @@ fn top_level_help_names_every_program() {
             "segmasker",
             "windowmasker",
             "convert2blastmask",
+            "makembindex",
         ] {
             let line = text
                 .lines()

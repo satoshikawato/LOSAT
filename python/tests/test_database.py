@@ -117,6 +117,100 @@ def test_a_pssm_query_is_query_0_of_the_rows(case, tmp_path):
     assert len(batch.hsps) == len(outcome.hsps)
 
 
+# Line LIB item 1.6: an alignment query (`-in_msa` of psiblast, PS6's alignments), against a
+# database and against records: (alignment under LOSAT/tests/fixtures/msa, subject, whether it is a
+# database, the options as `Search` takes them, the same options as words).
+ALIGNMENT_QUERIES = [
+    ("ps6_b_db_0.aln", "db_search/paja", True, {}, []),
+    ("ps6_b_db_0.aln", "fasta/PajaWSV.faa", False, {}, []),
+    ("ps6_b_db_0.aln", "db_search/paja", True, {"msa_master_idx": 2}, ["-msa_master_idx", "2"]),
+    ("ps6_b_db_0.aln", "db_search/paja", True, {"ignore_msa_master": True}, ["-ignore_msa_master"]),
+    (
+        "ps6_nc_db_0.aln",
+        "db_search/paja",
+        True,
+        {"msa_master_idx": 2, "num_iterations": 2},
+        ["-msa_master_idx", "2", "-num_iterations", "2"],
+    ),
+]
+
+
+def alignment_file(name: str) -> str:
+    return engine_file(f"fixtures/msa/{name}")
+
+
+@pytest.mark.parametrize("case", ALIGNMENT_QUERIES, ids=lambda case: f"{case[0]}-{case[1]}-{case[4]}")
+@pytest.mark.parametrize("outfmt", ["6", "0"])
+def test_an_alignment_query_gives_the_bytes_of_the_command_line(case, outfmt, losat):
+    name, subject, database, options, words = case
+    alignment, subject = alignment_file(name), engine_file(subject)
+    flag = "-db" if database else "-subject"
+    stdout, stderr = losat("psiblast", "-in_msa", alignment, flag, subject, *words, "-outfmt", outfmt)
+    inputs = pylosat.Database(subject) if database else pylosat.Sequences.from_fasta(subject)
+    outcome = pylosat.Search("psiblast", **options).run(
+        pylosat.Alignment.from_file(alignment), inputs, outfmt=outfmt
+    )
+    assert outcome.reports[0].bytes == stdout
+    assert outcome.diagnostics == stderr.decode()
+
+
+@pytest.mark.parametrize("case", ALIGNMENT_QUERIES, ids=lambda case: f"{case[0]}-{case[1]}-{case[4]}")
+def test_an_alignment_query_is_query_0_of_the_rows(case, tmp_path):
+    name, subject, database, options, _ = case
+    alignment, subject = alignment_file(name), engine_file(subject)
+    inputs = pylosat.Database(subject) if database else pylosat.Sequences.from_fasta(subject)
+    search = pylosat.Search("psiblast", **options)
+    outcome = search.run(pylosat.Alignment.from_file(alignment), inputs, outfmt="6")
+    # The rows of every round; a search that converged ends with a blank line and NCBI's
+    # `Search has CONVERGED!`, which are not rows.
+    rows = [line for line in outcome.reports[0].text.splitlines() if "\t" in line]
+    assert rows and len(rows) == len(outcome.hsps)
+    for row, hsp in zip(rows, outcome.hsps, strict=True):
+        assert row.split("\t")[0] == hsp.query_id
+        assert hsp.q_idx == 0
+    assert len(outcome.query_stats) == 1 and outcome.query_stats[0] is not None
+    # The file of `run_to_file` holds the same report, and one batch the same records.
+    out = tmp_path / "out.6"
+    search.run_to_file(pylosat.Alignment.from_file(Path(alignment)), inputs, outfmt="6", path=out)
+    assert out.read_bytes() == outcome.reports[0].bytes
+    batches = search.batches(pylosat.Alignment.from_file(alignment), inputs)
+    assert batches.query_count == 1
+    [batch] = list(batches)
+    assert batch.query_indices == range(0, 1)
+    assert len(batch.hsps) == len(outcome.hsps)
+
+
+@pytest.mark.parametrize(
+    ("name", "words", "options"),
+    [
+        ("ps6_f_unknown.aln", [], {}),
+        ("ps6_nc_db_0.aln", ["-msa_master_idx", "27"], {"msa_master_idx": 27}),
+    ],
+)
+def test_an_alignment_that_fails_is_the_command_lines_error(name, words, options, losat_fails):
+    alignment, subject = alignment_file(name), fasta("PajaWSV.faa")
+    stderr = losat_fails(
+        "psiblast", "-in_msa", alignment, "-subject", subject, *words, "-outfmt", "6"
+    )
+    with pytest.raises(pylosat.LosatError) as raised:
+        pylosat.Search("psiblast", **options).run(
+            pylosat.Alignment.from_file(alignment), pylosat.Sequences.from_fasta(subject), outfmt="6"
+        )
+    # The engine's error is the command line's standard error, its last line feed included.
+    assert raised.value.message_bytes == stderr
+
+
+def test_an_alignment_is_psiblasts_query():
+    alignment = pylosat.Alignment.from_file(alignment_file("ps6_b_db_0.aln"))
+    subject = pylosat.Sequences.from_text(f">s\n{PROTEIN}\n")
+    with pytest.raises(pylosat.ArgumentError, match="is searched by psiblast, not by blastp"):
+        pylosat.Search("blastp").run(alignment, subject)
+    # The master options go with the alignment: any other query is the parser's message.
+    search = pylosat.Search("psiblast", msa_master_idx=2)
+    with pytest.raises(pylosat.ArgumentError):
+        search.run(pylosat.Sequences.from_text(f">q\n{PROTEIN}\n"), subject)
+
+
 def test_batches_of_a_database_are_the_whole_search():
     search = pylosat.Search("blastp")
     query = pylosat.Sequences.from_fasta(engine_file("seqdb/prot.faa"))
@@ -226,6 +320,22 @@ def test_a_tool_reads_its_input_as_the_command_line_reads_standard_input(losat):
     output = pylosat.convert2blastmask(*words, input=">a\nACGTacgt\n")
     assert output.bytes == b"4 - 7\n"
     assert output.diagnostics == ""
+
+
+def test_makembindex_writes_the_index_of_fasta_input(tmp_path, losat):
+    base = str(tmp_path / "idx")
+    data = ">a\n" + "ACGTTGCAAGGCTTAACCGGTTAACCGGATCG" * 4 + "\n"
+    words = ("-old_style_index", "true", "-nmer", "8", "-output")
+    output = pylosat.makembindex(*words, base, input=data)
+    assert output.bytes == b""
+    assert output.diagnostics == (
+        f"creating {base}.00.idx...done\ncreating {base}.01.idx...removed (empty)\n"
+    )
+    fasta = tmp_path / "a.fa"
+    fasta.write_text(data)
+    losat("makembindex", *words, base + "_cli", "-input", str(fasta))
+    with open(base + ".00.idx", "rb") as api_file, open(base + "_cli.00.idx", "rb") as cli_file:
+        assert api_file.read() == cli_file.read()
 
 
 def test_a_tool_fails_with_the_command_lines_text(tmp_path):

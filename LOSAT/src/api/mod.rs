@@ -128,13 +128,20 @@
 //! - A PSSM query of psiblast and tblastn (the command line's `-in_pssm`) is an input:
 //!   [`Inputs::pssm`] and [`Inputs::pssm_database`] name the file, which the search reads; its one
 //!   query is the PSSM's sequence, query 0 of the results, in one batch of [`run_batches`].
+//! - A query alignment of psiblast (the command line's `-in_msa`) is an input the same way:
+//!   [`Inputs::msa`] and [`Inputs::msa_database`] name the alignment file, which the search reads
+//!   as the command line reads it, errors included; its one query is the alignment's master,
+//!   query 0 of the results, in one batch of [`run_batches`]. `-msa_master_idx` and
+//!   `-ignore_msa_master` are options of the argv ([`validate`] takes them; a search of other
+//!   inputs fails with the parser's message, as the command line does without `-in_msa`).
 //! - The API writes no search strategy file either: every program refuses
 //!   `-export_search_strategy` ([`validate`]); the command line writes it.
 //! - [`run_makeblastdb`] and [`run_blastdbcmd`] are the two database programs, and
 //!   [`run_dustmasker`] and [`run_segmasker`] the maskers of low-complexity regions (nucleotide,
-//!   protein), [`run_windowmasker`] the masker of over-represented nucleotide regions, and
-//!   [`run_convert2blastmask`] the converter of lower case masks: the command
-//!   line's words, with the caller's reader and writers for its standard streams.
+//!   protein), [`run_windowmasker`] the masker of over-represented nucleotide regions,
+//!   [`run_convert2blastmask`] the converter of lower case masks and [`run_makembindex`] the
+//!   writer of megablast indices: the command line's words, with the caller's reader and writers
+//!   for its standard streams.
 //!
 //! # Items
 //!
@@ -147,7 +154,7 @@
 //! - The results: [`Outcome`], [`Batches`], [`Batch`], [`Report`], [`HspRecord`], [`Id`],
 //!   [`QueryStats`], [`QueryRounds`], [`Strand`], [`QueryHits`], [`SubjectHits`]
 //! - The tools: [`run_makeblastdb`], [`run_blastdbcmd`], [`run_dustmasker`], [`run_segmasker`],
-//!   [`run_windowmasker`], [`run_convert2blastmask`]
+//!   [`run_windowmasker`], [`run_convert2blastmask`], [`run_makembindex`]
 //! - The failures: [`Error`]
 //! - The engine's version: [`VERSION`]
 
@@ -180,8 +187,8 @@ pub use run::{
 pub(crate) use search::file_options;
 pub use search::{validate, Search, API_OWNED};
 pub use tools::{
-    run_blastdbcmd, run_convert2blastmask, run_dustmasker, run_makeblastdb, run_segmasker,
-    run_windowmasker,
+    run_blastdbcmd, run_convert2blastmask, run_dustmasker, run_makeblastdb, run_makembindex,
+    run_segmasker, run_windowmasker,
 };
 pub use view::{QueryHits, SubjectHits};
 

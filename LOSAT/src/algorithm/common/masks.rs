@@ -73,10 +73,7 @@ where
     masks.sort_by_key(|r| r.0);
     let mut result: Vec<(T, T)> = Vec::new();
     for mask in masks {
-        if let Some(last) = result
-            .last_mut()
-            .filter(|r| r.1 + link_value > mask.0)
-        {
+        if let Some(last) = result.last_mut().filter(|r| r.1 + link_value > mask.0) {
             last.1 = last.1.max(mask.1);
         } else {
             result.push(mask);

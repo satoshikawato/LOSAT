@@ -46,6 +46,7 @@ function refusedWord(program: ProgramId, word: string): string | undefined {
   if (RESERVED_FLAGS.includes(flag) || (flag === '-mt_mode' && MT_MODE_PROGRAMS.includes(program))) return `${flag} is managed by LOSAT`;
   if (HELP_WORDS.includes(word)) return `${word} is not available in the browser`;
   if (flag === '-db') return '-db (a database search) is not supported in the browser yet';
+  if (program === 'blastn' && flag === '-filtering_db') return '-filtering_db (a BLAST database of repeats) is not supported in the browser yet';
   if (DATABASE_FLAGS.includes(flag) || (program === 'blastn' && BLASTN_DATABASE_MASK_FLAGS.includes(flag))) {
     return `${flag} (a database search filter) is not supported in the browser yet`;
   }

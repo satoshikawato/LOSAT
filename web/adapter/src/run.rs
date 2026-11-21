@@ -547,6 +547,13 @@ fn blastn_group_check(
     if args.db.is_some() {
         return Err("-db (a database search) is not supported in the browser yet".to_string());
     }
+    // Nor a database of repeats (the engine's own refusal, `run_local`).
+    if args.filtering_db.is_some() {
+        return Err(
+            "-filtering_db (a BLAST database of repeats) is not supported in the browser yet"
+                .to_string(),
+        );
+    }
     let outfmts: Vec<i32> = group.iter().map(|output| output.number as i32).collect();
     // `process_options` sets the counts that the checks read.
     let (counts, _) = losat::web_adapter::run_report_counts(
@@ -2463,6 +2470,20 @@ mod tests {
         assert_eq!(
             run(&words, &query, &subject).unwrap_err(),
             "-db (a database search) is not supported in the browser yet"
+        );
+        // BLASTN's database of repeats is refused too (line RG item D4).
+        let repeats = [
+            "blastn",
+            "-query",
+            "q",
+            "-subject",
+            "s",
+            "-filtering_db",
+            "repeats",
+        ];
+        assert_eq!(
+            validate(&repeats).unwrap_err(),
+            "-filtering_db (a BLAST database of repeats) is not supported in the browser yet"
         );
         // `-db` with `-subject` is the parser's conflict, as on the command line.
         let both = ["blastp", "-query", "q", "-subject", "s", "-db", "swissprot"];

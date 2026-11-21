@@ -124,6 +124,13 @@ describe('buildArgv', () => {
     expect(extra('blastp', ['-db_soft_mask', '21'])()).toEqual(['blastp', '-query', 'q.fa', '-subject', 's.fa', '-db_soft_mask', '21']);
   });
 
+  // BLASTN's -filtering_db searches a BLAST database of repeats, which the browser build cannot read.
+  it('refuses the database of repeats of BLASTN, also written -flag=value', () => {
+    for (const words of [['-filtering_db', 'repeats'], ['-filtering_db=repeats']]) {
+      expect(extra('blastn', words)).toThrow(/^-filtering_db \(a BLAST database of repeats\) is not supported in the browser yet$/);
+    }
+  });
+
   it("lists BLASTN's database masks in its engine's options (describe)", () => {
     const described = JSON.parse(readFileSync(resolve(import.meta.dirname, '../../src/infra/fake/describe.json'), 'utf8')) as Record<string, unknown>;
     const flags = toProgramDescription(described['blastn']).parameters.map((option) => option.flag);

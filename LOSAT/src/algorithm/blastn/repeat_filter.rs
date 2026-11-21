@@ -180,7 +180,10 @@ impl RepeatFilter {
             .map_err(RepeatError::Search)?;
         let lists = super::blast_engine::repeat_search_hits(args, &records, self, pool)?;
         let mut found: Vec<Vec<(usize, usize)>> = vec![Vec::new(); records.len()];
-        for hit in lists.iter().flat_map(|list: &Arc<Vec<PairwiseHit>>| list.iter()) {
+        for hit in lists
+            .iter()
+            .flat_map(|list: &Arc<Vec<PairwiseHit>>| list.iter())
+        {
             let (from, to) = (
                 hit.hit.q_start.min(hit.hit.q_end),
                 hit.hit.q_start.max(hit.hit.q_end),
@@ -210,43 +213,14 @@ impl RepeatFilter {
     ) -> Result<(), RepeatError> {
         let found = self.hits(strand, queries, pool)?;
         for (index, (query_masks, hits)) in masks.iter_mut().zip(found).enumerate() {
-            if hits.is_empty() {
-                continue;
+            if !hits.is_empty() {
+                *query_masks = join(
+                    &hits,
+                    query_masks,
+                    queries.length(index),
+                    outside.get_mut(index),
+                );
             }
-            let last = queries.length(index) as i64 - 1;
-            let mut intervals: Vec<(i64, i64)> = hits
-                .iter()
-                .copied()
-                .chain(query_masks.iter().map(|mask| (mask.start, mask.end - 1)))
-                .map(|(left, right)| (left as i64, right as i64))
-                .collect();
-            let mut outside = outside.get_mut(index);
-            if let Some(outside) = outside.as_deref() {
-                if let Some(before) = outside.nearest_before() {
-                    intervals.push((-(before as i64), -(before as i64)));
-                }
-                if let Some(after) = outside.after {
-                    intervals.push((last + after as i64, last + after as i64));
-                }
-            }
-            let combined = combine(intervals);
-            if let Some(outside) = outside.as_deref_mut() {
-                for &(left, right) in combined.iter().filter(|interval| interval.0 < 0) {
-                    for k in 0..REACH {
-                        let letter = -(k as i64) - 1;
-                        if left <= letter && letter <= right {
-                            outside.before |= 1 << k;
-                        }
-                    }
-                }
-            }
-            *query_masks = combined
-                .into_iter()
-                .filter_map(|(left, right)| {
-                    let (left, right) = (left.max(0), right.min(last));
-                    (left <= right).then(|| MaskedInterval::new(left as usize, right as usize + 1))
-                })
-                .collect();
         }
         Ok(())
     }
@@ -255,6 +229,51 @@ impl RepeatFilter {
     pub(crate) fn database(&self) -> &str {
         &self.database
     }
+}
+
+/// The masks of a query of `length` letters with its repeat `hits` (0-based, inclusive) joined to
+/// its `masks` (`combine`), in the record's letters with the masks `outside` its interval, then
+/// cut to the interval; the letters before the interval that the combination joins are added to
+/// `outside` (`RepeatFilter::add_masks`).
+fn join(
+    hits: &[(usize, usize)],
+    masks: &[MaskedInterval],
+    length: usize,
+    mut outside: Option<&mut MasksOutside>,
+) -> Vec<MaskedInterval> {
+    let last = length as i64 - 1;
+    let mut intervals: Vec<(i64, i64)> = hits
+        .iter()
+        .copied()
+        .chain(masks.iter().map(|mask| (mask.start, mask.end - 1)))
+        .map(|(left, right)| (left as i64, right as i64))
+        .collect();
+    if let Some(outside) = outside.as_deref() {
+        if let Some(before) = outside.nearest_before() {
+            intervals.push((-(before as i64), -(before as i64)));
+        }
+        if let Some(after) = outside.after {
+            intervals.push((last + after as i64, last + after as i64));
+        }
+    }
+    let combined = combine(intervals);
+    if let Some(outside) = outside.as_deref_mut() {
+        for &(left, right) in combined.iter().filter(|interval| interval.0 < 0) {
+            for k in 0..REACH {
+                let letter = -(k as i64) - 1;
+                if left <= letter && letter <= right {
+                    outside.before |= 1 << k;
+                }
+            }
+        }
+    }
+    combined
+        .into_iter()
+        .filter_map(|(left, right)| {
+            let (left, right) = (left.max(0), right.min(last));
+            (left <= right).then(|| MaskedInterval::new(left as usize, right as usize + 1))
+        })
+        .collect()
 }
 
 /// A query's masks with its repeat hits (0-based, inclusive): `BlastSeqLocCombine` with
@@ -341,6 +360,61 @@ mod tests {
         assert_eq!(args.num_threads, 4);
         assert!(args.one_query_batch);
         assert!(args.filtering_db.is_none());
+    }
+
+    #[test]
+    fn lower_case_next_to_the_interval() {
+        // The interval is letters 6..10 ("ACGT"); lower case 1 and 5 letters before it, and 3
+        // after it.
+        let record = b"AaCGTaACGTAAcGT";
+        let outside = MasksOutside::lower_case(record, 6, 4);
+        assert_eq!(outside.before, 0b10001);
+        assert_eq!(outside.nearest_before(), Some(1));
+        assert_eq!(outside.after, Some(3));
+        assert_eq!(
+            MasksOutside::lower_case(b"ACGT", 0, 4),
+            MasksOutside::default()
+        );
+        assert_eq!(MasksOutside::before_part(Some(2)).before, 0b10);
+        assert_eq!(MasksOutside::before_part(Some(6)).before, 0);
+    }
+
+    #[test]
+    fn hits_join_masks_within_four_letters() {
+        let masks = |pairs: &[(usize, usize)]| -> Vec<MaskedInterval> {
+            pairs
+                .iter()
+                .map(|&(start, end)| MaskedInterval::new(start, end))
+                .collect()
+        };
+        // A gap of three letters joins (4 + 5 > 8), one of four does not (12 + 5 > 17 is false).
+        assert_eq!(
+            join(&[(8, 12)], &masks(&[(0, 5), (17, 20)]), 30, None),
+            masks(&[(0, 13), (17, 20)])
+        );
+        // The lower case 3 letters before the interval joins a hit that starts at its letter 1,
+        // which masks letter 0, and the letters it joins before the interval are recorded; the
+        // lower case 3 letters after its last letter (26) joins a hit that ends on letter 25,
+        // which masks letter 26.
+        let mut outside = MasksOutside {
+            before: 0b100,
+            after: Some(3),
+        };
+        assert_eq!(
+            join(&[(1, 10), (20, 25)], &[], 27, Some(&mut outside)),
+            masks(&[(0, 11), (20, 27)])
+        );
+        assert_eq!(outside.before, 0b111);
+        // Without a hit near them the masks outside add nothing.
+        let mut outside = MasksOutside {
+            before: 0b10000,
+            after: Some(5),
+        };
+        assert_eq!(
+            join(&[(3, 10)], &[], 20, Some(&mut outside)),
+            masks(&[(3, 11)])
+        );
+        assert_eq!(outside.before, 0b10000);
     }
 
     #[test]

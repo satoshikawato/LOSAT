@@ -47,9 +47,9 @@
   exception 13: the SAM `@PG CL:` tag, recording `docs/decisions/OWNER_DECISIONS.md` entry 7 of
   2026-10-19, Owner-delegated, which said the difference goes into a product decision; found by
   line MAN's review); 1.24 2026-11-21 (`losat windowmasker` in the scope and in exception 10; line
-  NP, item M5a; Owner-delegated, the same standing instruction); 1.25 2026-11-21 (every search or
-  tool call of the library API runs the application start at its beginning, as the command line
-  runs it in every run; line LIB item E1; Owner-delegated, standing instruction 2026-09-29,
+  NP, item M5a; Owner-delegated, the same standing instruction); 1.25 2026-11-21 (every search
+  call of the library API runs the application start at its beginning, as its tool calls and the
+  command line do; line LIB item E1; Owner-delegated, standing instruction 2026-09-29,
   restated 2026-10-07)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++ (E2g), on the items
   that the BLASTN inventory (`docs/evidence/losat_web_e2g/INVENTORY.tsv`, moved to a release

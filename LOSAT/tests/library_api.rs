@@ -3333,6 +3333,7 @@ fn a_report_that_cannot_be_written_fails_as_the_command_lines_out() {
 /// to write output` and its newline, exit status 6 there (line LIB E1, review N5). A short report,
 /// held to the end, passes on both sides
 /// (`a_report_that_cannot_be_written_fails_as_the_command_lines_out`).
+#[cfg(target_os = "linux")]
 #[test]
 fn a_long_organism_report_that_cannot_be_written_fails_as_the_command_lines_out() {
     if !Path::new("/dev/full").exists() {

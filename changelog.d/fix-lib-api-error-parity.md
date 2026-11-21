@@ -3,8 +3,8 @@
   a full disk, fails with `BLAST failed to write output` (the command line's exit status 6), where it gave the
   system's error (`No space left on device`); a short organism report that the command line writes without an error
   no longer fails. A directory given as the query or subject file (`read_input_file`, pylosat `Sequences.from_fasta`)
-  is read as an empty input, where it was refused with `Is a directory`. `run_makeblastdb` writes an argument that
-  its parser refuses to its diagnostics too, as the command line writes it to its standard error.
+  is read as an empty input, where it was refused with `Is a directory`. `run_makeblastdb` writes the message of an
+  argument that its parser refuses to its diagnostics too, as the command line writes it to its standard error.
 - Every search call of the library API and pylosat reads `.ncbirc`, `<program>.ini` and the `NCBI_*` variables as the
   command line does at its start, and refuses what the command line refuses (such as
   `NCBI_CONFIG__BLAST__BLAST_USAGE_REPORT=maybe`). Before, a search of sequences did so only with `-logfile`,

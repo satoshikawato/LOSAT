@@ -1060,7 +1060,7 @@ impl SeqDb {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb.cpp:1726
     /// Resolves the one database at the path `name` as `SeqDb::open_one_name` does and reads
     /// the header of each volume's index file as NCBI's constructor of `CSeqDB` reads it
-    /// ([`IndexFile::read_mapped_header`]: a file that ends early reads as zeros to the end of
+    /// ([`index::IndexFile::read_mapped_header`]: a file that ends early reads as zeros to the end of
     /// its page), without opening the other files of the volumes and without reading the
     /// offset arrays: the cost does not grow with the number of sequences. Returns what
     /// `CSeqDB::GetDBMetaData` reads of the opened database: the title (`GetTitle`: the alias

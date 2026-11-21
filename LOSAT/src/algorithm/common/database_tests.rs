@@ -698,3 +698,74 @@ fn the_check_accepts_what_the_check_before_it_accepted() {
         );
     }
 }
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1146-1155
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:768-790
+/// A load of a subject with a taxid where a file of the taxonomy database does not open
+/// (`SeqDbError::TaxdbThrows`) is LOSAT's refusal, in words that say what the user can do, which
+/// the batch's prefetch alone catches (`batch_prefetch`, in a run whose formats NCBI writes the
+/// same: `db_subject::unchanged_by_load_throws`); any other refusal of the taxonomy database is
+/// not caught there (line WQA D18b, 2026-11-21; review 1, L1: `slen` and the organism report are
+/// written the same).
+#[test]
+fn a_taxonomy_file_that_throws_is_a_refusal_that_the_prefetch_alone_catches() {
+    use crate::blastinput::app::Program;
+    let path = std::path::PathBuf::from("/d/taxdb.bti");
+    let exception = SeqDbError::Open {
+        path: path.clone(),
+        source: std::io::Error::from_raw_os_error(13),
+    }
+    .memory_file_exception()
+    .unwrap();
+    let error = taxdb_error(
+        SeqDbError::TaxdbThrows {
+            path: path.clone(),
+            reason: "Permission denied".to_owned(),
+            exception: Box::new(exception),
+        },
+        "BLASTP",
+    );
+    assert!(error.is::<TaxonomyRefusal>());
+    assert!(TaxonomyRefusal::of_load_that_throws(&error));
+    assert_eq!(
+        format!("{error:#}"),
+        "/d/taxdb.bti cannot be opened: Permission denied; NCBI BLAST+ 2.17.0 then fails at \
+         each taxonomy lookup and writes this output differently or stops, which LOSAT's BLASTP \
+         does not support; make the file readable, or move it off the BLASTDB path"
+    );
+    let other = taxdb_error(
+        SeqDbError::Unsupported {
+            path,
+            message: "Permission denied (os error 13)".to_owned(),
+        },
+        "BLASTP",
+    );
+    assert!(other.is::<TaxonomyRefusal>());
+    assert!(!TaxonomyRefusal::of_load_that_throws(&other));
+    // The formats that NCBI writes the same: a table of fields that load no subject (`slen` and
+    // the coordinates included, not the letters or the subject's ids), the organism report, the
+    // Seq-annots.
+    for (outfmts, unchanged) in [
+        (&["6 qseqid evalue bitscore"][..], true),
+        (&["6 qseqid slen"][..], true),
+        (&["6 qseqid sstart send length"][..], true),
+        (&["18"][..], true),
+        (&["8"][..], true),
+        (&["6 qseqid sseqid"][..], false),
+        (&["6 qseqid pident"][..], false),
+        (&["6"][..], false),
+        (&["6 qseqid evalue bitscore", "0"][..], false),
+        (&["5"][..], false),
+        (&["15"][..], false),
+    ] {
+        assert_eq!(
+            crate::report::db_subject::unchanged_by_load_throws_outfmts(
+                outfmts.iter().copied(),
+                Program::Blastp,
+                crate::report::archive::options::RequestKind::Blastp,
+            ),
+            unchanged,
+            "{outfmts:?}"
+        );
+    }
+}

@@ -3,14 +3,14 @@
 //! sets (`CCdAlignProcessor::Calculate`), and the records that the DOMAINS output prints
 //! (`TDomSeqAlignIndex::CreateRecordSets`).
 
+use std::cmp::Ordering;
 use std::collections::HashMap;
 
 use super::archive::{Align, DenseSeg, StdLoc, StdPair};
-use super::data::{dom_acc_type, CddData, TOTALSIGS};
+use super::data::{dom_acc_type, sort_ties_in_input_order, CddData, TOTALSIGS};
 use super::frames::{minus_pr_to_plus_na, plus_pr_to_plus_na, plus_rf_idx_to_minus, RF_SIZE};
 use super::segset::SegSet;
 use super::sites::ResiduePos;
-use crate::utils::std_sort::{try_std_sort, OutOfRange};
 
 /// `TDomSeqAlignment::GAP_THRESHOLD`.
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/basedata.hpp:1203-1205
@@ -390,22 +390,15 @@ struct Facility {
 // (`m_uiLength - (sstart + len)` is `unsigned int` arithmetic stored in an `int`, of the start's
 // value modulo 2^32 where the XML input took it past `int` (`SubjectStarts`); `iNMissing` is
 // that value (PD-LOSAT-NCBI-DEFECTS exception 12); the ratios
-// divide doubles, so a model of length 0 gives an infinity or a NaN as NCBI's does. A NaN E-value
-// or bit score makes `TDomAlignOrderByEValue` no strict weak order (`order_by_e_value`): libstdc++'s
-// sort, which `try_std_sort` follows step by step, is then still defined while it reads inside the
-// vector, and LOSAT gives its order. The comparison stays irreflexive and asymmetric with a NaN, so
-// the median-of-three and partition sentinels of `__unguarded_partition` hold; the walk of the
-// final insertion sort past the first 16 has a sentinel left of it in every part right of a
-// partition, but not in the leftmost part when the depth limit hands it to the heap sort (no input
-// with rpsbproc's comparison was found that reaches it: PS16d delta review S3-1). Where a loop would
-// read outside the vector (`OutOfRange`), NCBI's result is its undefined read: refused, `Err` with
-// the refusal. PS16d review S3-3; the permutations against libstdc++ 13 in
-// `utils::std_sort` tests.)
-pub(crate) fn calculate(
-    aligns: &mut [DomAlign],
-    selected: &[usize],
-    data: &CddData,
-) -> Result<AlignIndex, String> {
+// divide doubles, so a model of length 0 gives an infinity or a NaN as NCBI's does. The two
+// sorts by `TDomAlignOrderByEValue` are Rust's standard sort with that order made total
+// (`e_value_order`: a NaN E-value or bit score, which NCBI's comparison orders against no number,
+// sorts after every number) and the hit's index as the last key (`sort_ties_in_input_order`;
+// `selected` is in increasing order): hits equal in E-value and bit score keep the order of
+// `selected`, where NCBI's `std::sort` may leave them in another, and so may become the
+// representative or `Specific` hit in NCBI's place (PD-LOSAT-NCBI-DEFECTS 1.67, the order of tied
+// hits).)
+pub(crate) fn calculate(aligns: &mut [DomAlign], selected: &[usize], data: &CddData) -> AlignIndex {
     let mut index = AlignIndex::default();
     let mut gap_sets: Vec<SegSet> = Vec::new();
     let mut non_multi: Vec<Facility> = Vec::new();
@@ -451,10 +444,11 @@ pub(crate) fn calculate(
     }
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/cdalignproc_base.hpp:62-70
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/cdalignproc_base.cpp:197-270
-    try_std_sort(&mut non_multi, &mut |a: &Facility, b: &Facility| {
-        order_by_e_value(&aligns[a.align], &aligns[b.align])
-    })
-    .map_err(sort_out_of_range)?;
+    sort_ties_in_input_order(
+        &mut non_multi,
+        |facility| facility.align,
+        |a, b| e_value_order(&aligns[a.align], &aligns[b.align]),
+    );
     let segs_of = |facility: &Facility, aligns: &[DomAlign], gap_sets: &[SegSet]| {
         let mut segs = SegSet::new();
         segs.add(aligns[facility.align].from, aligns[facility.align].to);
@@ -522,10 +516,11 @@ pub(crate) fn calculate(
     // (`m_uiLength - 1` is `unsigned int`, converted to `SeqPos_t` by `AddSeg`: a model of length
     // 0 gives -1, an empty range.)
     if !structural.is_empty() {
-        try_std_sort(&mut structural, &mut |a: &Facility, b: &Facility| {
-            order_by_e_value(&aligns[a.align], &aligns[b.align])
-        })
-        .map_err(sort_out_of_range)?;
+        sort_ties_in_input_order(
+            &mut structural,
+            |facility| facility.align,
+            |a, b| e_value_order(&aligns[a.align], &aligns[b.align]),
+        );
         let mut covered = SegSet::new();
         for facility in &structural {
             let mut sd_segs = SegSet::new();
@@ -546,25 +541,33 @@ pub(crate) fn calculate(
             }
         }
     }
-    Ok(index)
+    index
 }
 
-/// `TDomAlignOrderByEValue`: the E-value ascending, then the bit score descending (with C++'s
-/// comparisons of doubles: a NaN is neither less nor greater).
+/// `TDomAlignOrderByEValue` made a total order: the E-value ascending, then the bit score
+/// descending, the numbers compared as C++'s `<` and `>` compare doubles (-0.0 and 0.0 are equal);
+/// a NaN, which NCBI's comparison orders against no number, after every number, and two NaNs
+/// equal. Hits equal in both keep their order (`sort_ties_in_input_order`); NCBI's `std::sort` may
+/// leave them in another (PD-LOSAT-NCBI-DEFECTS 1.67, the order of tied hits).
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/cdalignproc_base.hpp:62-70
-fn order_by_e_value(a: &DomAlign, b: &DomAlign) -> bool {
-    if a.e_value < b.e_value {
-        true
-    } else if a.e_value > b.e_value {
-        false
-    } else {
-        a.bit_score > b.bit_score
-    }
+fn e_value_order(a: &DomAlign, b: &DomAlign) -> Ordering {
+    key_order(a.e_value, b.e_value, false).then_with(|| key_order(a.bit_score, b.bit_score, true))
 }
 
-/// The refusal of a sort of hits that would read outside NCBI's vector (`try_std_sort`).
-fn sort_out_of_range(_: OutOfRange) -> String {
-    "hits whose NaN E-values or bit scores make NCBI's std::sort of them read outside its vector (undefined) are not supported by LOSAT's rpsbproc".to_string()
+/// One key of `e_value_order`: two numbers in C++'s order (`descending`: reversed), a NaN after
+/// every number.
+fn key_order(x: f64, y: f64, descending: bool) -> Ordering {
+    match (x.is_nan(), y.is_nan()) {
+        (false, false) => {
+            let order = x.partial_cmp(&y).expect("two numbers are ordered");
+            if descending {
+                order.reverse()
+            } else {
+                order
+            }
+        }
+        (x_nan, y_nan) => x_nan.cmp(&y_nan),
+    }
 }
 
 /// `CCdAlignProcessor::SortReadingFrames`: the indices of the alignments of each reading frame

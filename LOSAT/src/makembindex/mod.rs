@@ -80,15 +80,14 @@ fn dependencies() -> Vec<(&'static str, Dep, &'static str)> {
     ]
 }
 
-/// makembindex as NCBI's application runs it (`ncbi_app`): the toolkit's version of the BLAST
-/// package (`2.17.0`; makembindex sets no version of its own), no usage report and no prefix on
-/// its diagnostics.
+/// makembindex as NCBI's application runs it (`ncbi_app`): LOSAT's version where NCBI's prints
+/// the toolkit's release of the BLAST package (`2.17.0`; makembindex sets no version of its own),
+/// no usage report and no prefix on its diagnostics.
 // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/makeindex/main.cpp:51-54
 // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/makeindex/mkindex_app.hpp:41-56
 static TOOL: Tool = Tool {
     program: "makembindex",
     refusal_name: crate::dbindex::PROGRAM,
-    version: crate::NCBI_BLAST_RELEASE,
     help: HELP,
     descs: DESCS,
     dependencies,

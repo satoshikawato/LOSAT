@@ -341,3 +341,81 @@ fn ends_on_the_plus_strand() {
     let positions = translated_pos_map(&set, &dom, 5000).unwrap();
     assert_eq!(positions[0].curr, 134);
 }
+
+// `key_order`, one key of `e_value_order`: numbers as C++'s `<` and `>` compare doubles (-0.0 and
+// 0.0 equal, the infinities ordered), a NaN after every number in either direction, two NaNs equal
+// (PD-LOSAT-NCBI-DEFECTS 1.67).
+#[test]
+fn a_key_orders_numbers_as_cpp_and_a_nan_last() {
+    use std::cmp::Ordering::{Equal, Greater, Less};
+    let nan = f64::NAN;
+    let (inf, ninf) = (f64::INFINITY, f64::NEG_INFINITY);
+    for descending in [false, true] {
+        assert_eq!(key_order(-0.0, 0.0, descending), Equal);
+        assert_eq!(key_order(0.0, -0.0, descending), Equal);
+        assert_eq!(key_order(nan, -nan, descending), Equal);
+        for number in [ninf, -1e300, -0.0, 0.0, 1e-300, 3.15371e-14, 1e300, inf] {
+            assert_eq!(
+                key_order(nan, number, descending),
+                Greater,
+                "{number} {descending}"
+            );
+            assert_eq!(
+                key_order(number, nan, descending),
+                Less,
+                "{number} {descending}"
+            );
+        }
+    }
+    assert_eq!(key_order(ninf, -1e300, false), Less);
+    assert_eq!(key_order(inf, 1e300, false), Greater);
+    assert_eq!(key_order(1e-5, 2e-5, false), Less);
+    // The bit score, descending: the larger first.
+    assert_eq!(key_order(inf, 1e300, true), Less);
+    assert_eq!(key_order(ninf, -1e300, true), Greater);
+    assert_eq!(key_order(70.4332, 28.0864, true), Less);
+}
+
+// `e_value_order` (`TDomAlignOrderByEValue` made total): the E-value first, then the bit score
+// descending; a NaN E-value after every E-value that is a number whatever the bit scores, a NaN bit
+// score last among the hits of one E-value; ties keep their order (`sort_ties_in_input_order`).
+#[test]
+fn hits_sort_by_e_value_then_bit_score_with_nan_last() {
+    use std::cmp::Ordering::{Equal, Greater, Less};
+    let hit = |e_value: f64, bit_score: f64| DomAlign::new(0, 0, 10, e_value, bit_score);
+    let nan = f64::NAN;
+    assert_eq!(
+        e_value_order(&hit(nan, 1000.0), &hit(1e300, -1000.0)),
+        Greater
+    );
+    assert_eq!(
+        e_value_order(&hit(nan, nan), &hit(f64::INFINITY, nan)),
+        Greater
+    );
+    assert_eq!(e_value_order(&hit(1e300, nan), &hit(nan, 1000.0)), Less);
+    assert_eq!(
+        e_value_order(&hit(1e-5, nan), &hit(1e-5, f64::NEG_INFINITY)),
+        Greater
+    );
+    assert_eq!(e_value_order(&hit(1e-5, 50.0), &hit(1e-5, 40.0)), Less);
+    assert_eq!(e_value_order(&hit(-0.0, 5.0), &hit(0.0, 5.0)), Equal);
+    assert_eq!(e_value_order(&hit(nan, nan), &hit(-nan, nan)), Equal);
+
+    let aligns = [
+        hit(nan, 10.0),
+        hit(1e-3, 20.0),
+        hit(-0.0, 5.0),
+        hit(0.0, 5.0),
+        hit(1e-3, nan),
+        hit(1e-3, 30.0),
+        hit(f64::INFINITY, 1.0),
+        hit(1e-3, 30.0),
+    ];
+    let mut order: Vec<usize> = (0..aligns.len()).collect();
+    sort_ties_in_input_order(
+        &mut order,
+        |&i| i,
+        |&a, &b| e_value_order(&aligns[a], &aligns[b]),
+    );
+    assert_eq!(order, [2, 3, 5, 7, 1, 4, 6, 0]);
+}

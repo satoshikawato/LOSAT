@@ -60,7 +60,7 @@ fn lists_of_e_value_zero_are_ordered_by_score_then_ordinal_id() {
 fn kept_oids(lists: &[(u32, i32, f64)]) -> Vec<u32> {
     let size = crate::algorithm::blastn::hsp::get_prelim_hitlist_size(1, false, true);
     assert_eq!(size, 10);
-    let mut hit_list = BlastpHitList::new(size as usize);
+    let mut hit_list = BlastpHitList::new(size);
     for &(oid, score, e_value) in lists {
         hit_list.update(prelim_list(oid, score, e_value));
     }

@@ -166,12 +166,13 @@ fn sanity_check_failures() {
     let data = load("noindex.sqlite3");
     let e = TaxonomySqlite::open_named(&data, "/db/taxonomy4blast.sqlite3")
         .err()
-        .unwrap();
+        .unwrap()
+        .to_string();
     assert_eq!(
         e,
         "Database '/db/taxonomy4blast.sqlite3' does not have index TaxidInfoCompositeIdx_parent. Please run the following command or contact your system administrator to install it:\nupdate_blastdb.pl --decompress taxdb"
     );
-    let e = TaxonomySqlite::open(&data).err().unwrap();
+    let e = TaxonomySqlite::open(&data).err().unwrap().to_string();
     assert!(
         e.starts_with("Database 'taxonomy4blast.sqlite3' does not have index "),
         "{}",
@@ -179,7 +180,7 @@ fn sanity_check_failures() {
     );
     // an empty file is an empty database: both missing, the index is reported first
     let empty = load("empty.bin");
-    let e = TaxonomySqlite::open(&empty).err().unwrap();
+    let e = TaxonomySqlite::open(&empty).err().unwrap().to_string();
     assert!(
         e.contains("does not have index TaxidInfoCompositeIdx_parent"),
         "{}",
@@ -187,7 +188,7 @@ fn sanity_check_failures() {
     );
     // the table row removed from sqlite_master, the index there
     let d = load("notable.sqlite3");
-    let e = TaxonomySqlite::open(&d).err().unwrap();
+    let e = TaxonomySqlite::open(&d).err().unwrap().to_string();
     assert!(
         e.contains("does not have table TaxidInfo. Please run"),
         "{}",
@@ -198,11 +199,12 @@ fn sanity_check_failures() {
 #[test]
 fn not_a_database() {
     let d = load("notdb.bin");
-    let e = TaxonomySqlite::open(&d).err().unwrap();
+    let e = TaxonomySqlite::open(&d).err().unwrap().to_string();
     assert!(e.ends_with("[26] file is not a database"), "{}", e);
     let e = TaxonomySqlite::open(&b"SQLite format 3\0"[..])
         .err()
-        .unwrap();
+        .unwrap()
+        .to_string();
     assert!(e.contains("not a database"), "{}", e);
 }
 
@@ -211,7 +213,7 @@ fn wal_refused() {
     let mut d = load("p512.sqlite3");
     d[18] = 2;
     d[19] = 2;
-    let e = TaxonomySqlite::open(&d).err().unwrap();
+    let e = TaxonomySqlite::open(&d).err().unwrap().to_string();
     assert!(e.contains("WAL"), "{}", e);
 }
 
@@ -322,7 +324,7 @@ impl ReadAt for FileSrc {
     fn len(&self) -> u64 {
         self.1
     }
-    fn read_exact_at(&self, buf: &mut [u8], offset: u64) -> Result<(), String> {
+    fn read_exact_at(&self, buf: &mut [u8], offset: u64) -> Result<(), ReadError> {
         ReadAt::read_exact_at(&self.0, buf, offset)
     }
 }
@@ -370,5 +372,90 @@ fn real_file_equals_sqlite3() {
     println!(
         "{} taxids equal to sqlite3 ({} descendants in all)",
         count, total
+    );
+}
+
+/// The bytes of `data`, whose reads from `from` fail as the system's do
+/// ([`ReadError::Unreadable`]).
+struct FailsFrom<'a> {
+    data: &'a [u8],
+    from: u64,
+}
+
+impl ReadAt for FailsFrom<'_> {
+    fn len(&self) -> u64 {
+        self.data.len() as u64
+    }
+
+    fn read_exact_at(&self, buf: &mut [u8], offset: u64) -> Result<(), ReadError> {
+        if offset + buf.len() as u64 > self.from {
+            return Err(ReadError::Unreadable(crate::seqdb::SeqDbError::Read {
+                path: PathBuf::from("taxonomy4blast.sqlite3"),
+                source: std::io::Error::from_raw_os_error(5),
+            }));
+        }
+        ReadAt::read_exact_at(self.data, buf, offset)
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/db/sqlite/sqlitewrapp.cpp:649-655 (cited at
+// `QueryReadFailure`)
+/// A read that the system fails after the sanity check, while the query steps, is
+/// `ReadError::Unreadable` of `descendants`, for which the callers write NCBI's texts
+/// (`QueryReadFailure`: NCBI BLAST+ 2.17.0 with the reads of `tests/db_search/taxfilter`'s file
+/// failing with EIO from offset 4096, line WQA D18b round 2, probe L3); one that fails at the
+/// sanity check is `Unreadable` of `open`, which the callers take as a file that is not there.
+#[test]
+fn a_read_that_fails_in_the_query_gives_ncbis_sqlite_texts() {
+    let data = std::fs::read(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/db_search/taxfilter/taxonomy4blast.sqlite3"),
+    )
+    .unwrap();
+    let late = FailsFrom {
+        data: &data,
+        from: 4096,
+    };
+    let db = TaxonomySqlite::open(&late).expect("the sanity check reads page 1 alone");
+    assert!(matches!(
+        db.descendants(9606),
+        Err(ReadError::Unreadable(crate::seqdb::SeqDbError::Read { .. }))
+    ));
+    let early = FailsFrom {
+        data: &data,
+        from: 100,
+    };
+    assert!(matches!(
+        TaxonomySqlite::open(&early),
+        Err(ReadError::Unreadable(_))
+    ));
+    let root = crate::ncbi_exception::NCBI_BUILD_ROOT;
+    let place = |line: u32, kind: &str, function: &str| {
+        format!(
+            "    T0 \"{root}/src/db/sqlite/sqlitewrapp.cpp\", line {line}: Error: \
+             (CSQLITE_Exception::{kind}) ncbi::{function}() - "
+        )
+    };
+    let ncbi_finalize = format!(
+        "Error: (1010.3) [blastp] [Error in x_Finalize()] Exception: NCBI C++ Exception:\n\
+         {}Error from sqlite3: [266] disk I/O error\n\
+         {}Cannot finalize statement\n\n",
+        place(193, "eStmtFinalize", "s_ProcessErrorCode"),
+        place(684, "eStmtFinalize", "CSQLITE_Statement::x_Finalize"),
+    );
+    assert_eq!(
+        String::from_utf8(QueryReadFailure::finalize_post("blastp")).unwrap(),
+        crate::wording::losat_text(&ncbi_finalize)
+    );
+    let ncbi_step = format!(
+        "NCBI C++ Exception:\n\
+         {}Error from sqlite3: [266] disk I/O error\n\
+         {}Error stepping through statement results\n",
+        place(193, "eStmtStep", "s_ProcessErrorCode"),
+        place(762, "eStmtStep", "CSQLITE_Statement::Step"),
+    );
+    assert_eq!(
+        String::from_utf8(QueryReadFailure::step().what()).unwrap(),
+        crate::wording::losat_text(&ncbi_step)
     );
 }

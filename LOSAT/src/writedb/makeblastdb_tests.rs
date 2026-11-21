@@ -1,6 +1,36 @@
 use super::*;
 use crate::blastinput::ncbi_environment::DiagTarget;
 
+/// The refusals of an index file that NCBI cannot read as a database are LOSAT's own, printed
+/// with makeblastdb's prefix and ended with exit status 1, and their text is the one of
+/// `SeqDbError` (one producer: `NCBI_CRASHES_ON_IT` ends the one where NCBI crashes).
+#[test]
+fn a_refused_index_file_is_printed_as_a_refusal() {
+    let path = std::path::PathBuf::from("o/db.pin");
+    let crashes = MakedbError::Database(SeqDbError::NcbiCrashes {
+        path: path.clone(),
+        message: "the index file has no bytes".to_string(),
+    });
+    assert_eq!(crashes.exit_code(), 1);
+    let text = crashes.to_string();
+    assert!(text.starts_with("losat makeblastdb: o/db.pin: "), "{text}");
+    assert!(text.ends_with(crate::seqdb::NCBI_CRASHES_ON_IT), "{text}");
+    let depends = MakedbError::Database(SeqDbError::Unsupported {
+        path,
+        message: "a field past the mapping".to_string(),
+    });
+    assert_eq!(depends.exit_code(), 1);
+    assert!(depends
+        .to_string()
+        .starts_with("losat makeblastdb: o/db.pin: "));
+    // NCBI's own error stays NCBI's: exit status 2, "BLAST Database error: ".
+    let ncbi = MakedbError::Database(SeqDbError::Format {
+        path: std::path::PathBuf::from("o/db.pin"),
+        message: "Error: Not a valid version 4 or 5 database.".to_string(),
+    });
+    assert_eq!(ncbi.exit_code(), 2);
+}
+
 // makedb-v5 DECISIONS 12: `[BLAST] MAX_SEQID_LENGTH` is refused with `-parse_seqids`
 // (build_db.cpp:739-747, cited at `check_registry_settings`), the library's argument
 // rules are makeblastdb's (makeblastdb.cpp:322-329, cited at `check_arguments`).
@@ -52,6 +82,10 @@ fn registry_and_argument_rules_of_parse_seqids() {
     }
     let error = check_registry_settings(&parsed, Err("the registry file x sets ...")).unwrap_err();
     assert!(error.starts_with("the registry file x sets ..."), "{error}");
+    // The FASTA reader is the only reader of the entry.
+    let mut copied = parsed.clone();
+    copied.input_type = "blastdb".to_string();
+    assert_eq!(check_registry_settings(&copied, Ok(Some("100"))), Ok(()));
     let mut map = parse(&["--dbtype", "prot"]);
     map.taxid_map = Some("m.txt".to_string());
     let error = check_arguments(&map).unwrap_err();
@@ -87,13 +121,22 @@ fn the_variable_that_changes_stored_titles_is_refused() {
     let with = |name: &'static str, value: &'static str| {
         move |asked: &str| (asked == name).then(|| std::ffi::OsString::from(value))
     };
-    assert!(check_environment(&|_: &str| None).is_ok());
-    let error = check_environment(&with(DONT_SCAN, "1")).unwrap_err();
+    let fasta = crate::writedb::tests::parse_makedb_words(&["-dbtype".into(), "nucl".into()]);
+    assert!(check_environment(&fasta, &|_: &str| None).is_ok());
+    let error = check_environment(&fasta, &with(DONT_SCAN, "1")).unwrap_err();
     assert!(error.contains(DONT_SCAN), "{error}");
     // An empty value is no value for makeblastdb.
-    assert!(check_environment(&with(DONT_SCAN, "")).is_ok());
+    assert!(check_environment(&fasta, &with(DONT_SCAN, "")).is_ok());
     // Read by the source of ASN.1 input only.
-    assert!(check_environment(&with("NCBI_MAKEBLASTDB_SKIP_UNVERIFIED_BIOSEQS", "1")).is_ok());
+    assert!(check_environment(
+        &fasta,
+        &with("NCBI_MAKEBLASTDB_SKIP_UNVERIFIED_BIOSEQS", "1")
+    )
+    .is_ok());
+    // The sequences of a database are copied as stored: the variable changes nothing there.
+    let mut blastdb = fasta.clone();
+    blastdb.input_type = "blastdb".to_string();
+    assert!(check_environment(&blastdb, &with(DONT_SCAN, "1")).is_ok());
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1199-1201 (cited at

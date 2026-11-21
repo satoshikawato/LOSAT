@@ -52,12 +52,17 @@ fn run_on(
     subject: &[u8],
 ) -> (Result<(), String>, BTreeMap<u32, Vec<u8>>) {
     let program = Program::parse(words[0]).unwrap();
-    let (query, _) = crate::store::register(words[0], 0, query).unwrap();
-    let (subject, _) = crate::store::register(words[0], 1, subject).unwrap();
+    let (query, _) = crate::store::register(words[0], 0, true, query).unwrap();
+    let (subject, _) = crate::store::register(words[0], 1, true, subject).unwrap();
     crate::emit::EMITTED.with(|emitted| emitted.borrow_mut().clear());
-    let result = crate::store::with_inputs(program, query, subject, words, |queries, subjects| {
-        run(words, queries, subjects)
-    });
+    let result = crate::store::with_inputs(
+        program,
+        query,
+        subject,
+        words,
+        Some(true),
+        |queries, subjects| run(words, queries, subjects),
+    );
     crate::store::release(query).unwrap();
     crate::store::release(subject).unwrap();
     let mut streams = BTreeMap::new();

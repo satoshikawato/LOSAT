@@ -2034,8 +2034,9 @@ enum BlastpReport {
     /// Outfmt 0 to 4 (`Text` holds 6 and 7 only).
     Pairwise(crate::report::pairwise::PairwiseView),
     Text(OutputFormat),
-    /// NCBI's `CBlastTabularInfo` with a field list or a delimiter (`TabularSpec::of`), through
-    /// the shared writer (`report::tabular`, `tabular::write_blastp_tabular`).
+    /// NCBI's `CBlastTabularInfo` with a field list or a delimiter
+    /// (`tabular::custom_tabular_spec`, `TabularSpec::of_app`), through the shared writer
+    /// (`report::tabular`, `tabular::write_blastp_tabular`).
     CustomTabular(&'static crate::report::tabular::TabularSpec),
     Seqalign(crate::report::serial::SerialFormat),
     Xml,
@@ -2135,6 +2136,18 @@ fn blastp_seqalign_format(outfmt: &str) -> Option<crate::report::serial::SerialF
     )?)
 }
 
+/// Whether rpsblast recounts the identities of its HSPs for the reports of the call: none of them is
+/// a custom table, whose spec reads them its own way, or the BLAST archive, whose Seq-aligns show
+/// the traceback's count (`PrelimRun::rps_recount_identities`).
+fn recounts_rps_identities(reports: &[BlastpReport]) -> bool {
+    reports.iter().all(|report| {
+        !matches!(
+            report,
+            BlastpReport::CustomTabular(_) | BlastpReport::Archive
+        )
+    })
+}
+
 /// The pairwise view (`PairwiseView::of`) of the format number `number` where `app` writes it:
 /// outfmt 0, and BLASTP's query-anchored 1 to 4 (`Program::writes`; psiblast and rpsblast refuse
 /// those, line RG PS15). NCBI's application writes 0 to 4 through one frame (`PrintProlog`, the
@@ -2150,27 +2163,39 @@ fn blastp_pairwise_view_of(
         })
 }
 
+/// The format of a `-outfmt` value that is outfmt 0, 6 or 7 to LOSAT's own writers (not a custom
+/// table, `tabular::custom_tabular_spec`), its number read as NCBI reads it
+/// (`app::parse_formatting_string`: `06` and `+6` are 6), on the command line (its value
+/// `FormatChoice::normalized`) and in the library (the caller's value as given) alike; an error
+/// for the other numbers.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2829
+fn blastp_text_format(outfmt: &str) -> std::result::Result<OutputFormat, String> {
+    match crate::blastinput::app::parse_formatting_string(outfmt).map(|choice| choice.number) {
+        Ok(0) => Ok(OutputFormat::Pairwise),
+        Ok(6) => Ok(OutputFormat::Tabular),
+        Ok(7) => Ok(OutputFormat::TabularWithComments),
+        _ => Err(format!(
+            "Unsupported output format: {}. Supported: 0, 6, 7",
+            OutputFormat::split_fields(outfmt).0
+        )),
+    }
+}
+
 /// The query-anchored view of a `-outfmt` value of 1 to 4 that `app` writes
-/// (`blastp_pairwise_view_of`), read as NCBI reads the value; `None` for the other formats. A
-/// field list after the number is refused, as outfmt 0's is: the library's value keeps the words
-/// after the number (`OutputFormat::split_fields`), the command line's drops them as NCBI does
+/// (`blastp_pairwise_view_of`), read as NCBI reads the value; `None` for the other formats. The
+/// words after the number (the library's value as given) are dropped, as NCBI drops them for
+/// every format but the tables (`parse_formatting_string`) and the command line's value does
 /// (`FormatChoice::normalized`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2845-2851
 fn blastp_query_anchored_view(
     app: BlastpApp,
     outfmt: &str,
-) -> Result<Option<crate::report::pairwise::PairwiseView>> {
-    let Ok(choice) = crate::blastinput::app::parse_formatting_string(outfmt) else {
-        return Ok(None);
-    };
-    let view = blastp_pairwise_view_of(app, choice.number)
-        .filter(|view| *view != crate::report::pairwise::PairwiseView::Pairwise);
-    if view.is_some() && OutputFormat::split_fields(outfmt).1.is_some() {
-        bail!(
-            "blastp outfmt {} does not accept custom field lists",
-            choice.number
-        );
-    }
-    Ok(view)
+) -> Option<crate::report::pairwise::PairwiseView> {
+    let choice = crate::blastinput::app::parse_formatting_string(outfmt).ok()?;
+    blastp_pairwise_view_of(app, choice.number)
+        .filter(|view| *view != crate::report::pairwise::PairwiseView::Pairwise)
 }
 
 /// Whether a `-outfmt` value is the BLAST archive (outfmt 11), read as NCBI reads it (a
@@ -2460,6 +2485,7 @@ fn write_blastp_tabular_hit_lists(
     epilog: bool,
     queries_before: usize,
     iteration: Option<u32>,
+    query_other_coding: Option<i32>,
 ) -> Result<()> {
     let config = OutputConfig::ncbi_compat();
     // Index of the next HSP in the final hit list (collect_hits_from_hit_lists order).
@@ -2506,6 +2532,15 @@ fn write_blastp_tabular_hit_lists(
                 warnings.subject_read(q_idx, first.s_idx, &mut *writer)?;
             }
             for hsp in &hsp_list.hsps {
+                // The default fields read the letters of the query (`pident`, `mismatch`): a query
+                // whose molecule is `other` ends the run at the first row.
+                if let Some(coding) = query_other_coding {
+                    return Err(crate::report::tabular::query_sequence_end(
+                        writer,
+                        &[],
+                        coding,
+                    ));
+                }
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108
                 // One row per HSP; the probe marks the row without changing its bytes.
                 if let Some(probe) = probe.as_mut() {
@@ -4122,14 +4157,16 @@ pub fn run(
     // `ArchiveFormatRequested` parses `-outfmt` (blast_args.cpp:2745-2748) before the
     // option handlers run; a format that NCBI runs and LOSAT does not write is rejected
     // there too. `GetExportSearchStrategyStream` comes first: it creates the search strategy
-    // file (`strategy::open_strategy_file`), which an error after it leaves empty.
+    // file (`strategy::open_strategy_file`), which an error after it leaves empty; with it a
+    // value that does not parse is left to the formatting handler
+    // (`app::early_format_choice`).
     let strategy_file = crate::report::archive::strategy::open_strategy_file(
         args.export_search_strategy.as_deref(),
         args.out.as_deref(),
         args.app.name(),
     )?;
-    let choice = app::parse_formatting_string(&args.outfmt)?;
-    let format = app::report_format(&choice, app::Program::Blastp, args.out.as_deref())?;
+    let choice = app::early_format_choice(&args.outfmt, strategy_file.is_some())?;
+    let format = choice.report_format(app::Program::Blastp, args.out.as_deref())?;
     // The BLAST archive (outfmt 11): its request, before anything is read or written.
     // The error archives follow the `-outfmt` text (`writes_error_archive`).
     // The run's options handle, which its archive and its search strategy share.
@@ -4146,7 +4183,7 @@ pub fn run(
             anyhow::Ok(crate::report::archive::strategy::StrategyExport::for_run(
                 file,
                 super::archive::option_inputs(&args),
-                choice.number,
+                choice.number(),
                 crate::report::archive::strategy::HitlistArgs {
                     max_target_seqs: args.max_target_seqs,
                     num_descriptions: args.num_descriptions,
@@ -4241,25 +4278,22 @@ pub fn run(
         format.is_some_and(|format| blastp_pairwise_view_of(args.app, format as i32).is_some());
     // The organism report's `-out` file is written as NCBI's buffer writes it.
     let tax_report = format == Some(crate::blastinput::app::ReportFormat::TaxFormat);
-    // LOSAT's reports read the format number and the custom fields that NCBI keeps; blastp's
-    // custom tabular report of a delimiter, which `normalized` drops, reads the value as given, as
-    // NCBI does (`tabular::custom_tabular_spec`).
-    //
-    // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:245-249
-    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:501-505
-    // psiblast's formatter gets no custom delimiter (its fields are checked against it,
-    // `formatting_handler_check`): its reports read the value without it.
-    let custom_delimiter = args.app == BlastpApp::Blastp
-        && !choice.delimiter.is_empty()
-        && format.is_some_and(|format| {
-            crate::report::tabular::TabularSpec::of(format, &choice).is_some()
-        });
-    let outfmt = if custom_delimiter {
-        args.outfmt.clone()
-    } else {
-        choice.normalized()
+    // LOSAT's reports read the format number and the custom fields that NCBI keeps; a custom
+    // tabular report of a delimiter, which `normalized` drops, reads the value as given, as the
+    // library's: whether the app's formatter gets the delimiter (blastp's does, psiblast's and
+    // rpsblast's do not, so their `6 delim=@` is the default outfmt 6) is the spec's, the one
+    // that the reports read (`tabular::custom_tabular_spec`, `TabularSpec::of_app`).
+    // A value not read yet (`EarlyFormat::Deferred`) fails at the options' handlers below.
+    let outfmt = match choice.parsed() {
+        Some(parsed)
+            if parsed.delimiter.is_empty()
+                || super::tabular::custom_tabular_spec(&args.outfmt, args.app).is_none() =>
+        {
+            parsed.normalized()
+        }
+        _ => args.outfmt.clone(),
     };
-    let mut stream = crate::cli::ReportStream::of_cli(out_file, tax_report);
+    let mut stream = crate::cli::ReportStream::of_cli(out_file, tax_report, args.strategy.as_ref());
     let strategy = args.strategy.clone();
     let result = {
         let mut outputs =
@@ -4336,7 +4370,7 @@ fn write_run_error_archive(
         return;
     };
     if let Ok(out_file) = open_out_file(args) {
-        let mut report = crate::cli::ReportStream::of_cli(out_file, false);
+        let mut report = crate::cli::ReportStream::of_cli(out_file, false, None);
         let _ = crate::report::archive::write_error_archive_after_post(
             handle,
             error,
@@ -4577,7 +4611,7 @@ fn subject_taxonomy(
         outputs
             .formats
             .iter()
-            .filter_map(|format| super::tabular::custom_tabular_spec(format.outfmt)),
+            .filter_map(|format| super::tabular::custom_tabular_spec(format.outfmt, args.app)),
     )?;
     resolved.subject_taxdb = taxonomy.taxdb;
     resolved.subject_taxdb_found = taxonomy.found.unwrap_or(false);
@@ -4592,7 +4626,7 @@ fn search_cli(
     query_file: Option<crate::blastinput::input_files::InputFile>,
     subjects: &SubjectSet<'_>,
     outputs: &mut ReportOutputs<'_>,
-    choice: crate::blastinput::app::FormatChoice,
+    choice: crate::blastinput::app::EarlyFormat,
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
 ) -> Result<()> {
     use crate::blastinput::fasta_reader::{
@@ -4635,7 +4669,7 @@ fn search_cli(
             database.as_ref(),
             "",
             outputs,
-            choice_to_standard_output.then_some(&choice),
+            choice.parsed().filter(|_| choice_to_standard_output),
         );
     }
     // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:202-216
@@ -4689,20 +4723,23 @@ fn search_cli(
     let QueryRecords { records, end } = read_queries(&mut query_source);
     crate::utils::xtiming::add(crate::utils::xtiming::Phase::ReadFasta, t_read_fasta);
     drop(query_source);
+    // The XInclude formats fail only on standard output; to a file they take its name as the
+    // base of their side files.
+    let choice_to_standard_output = resolved
+        .out
+        .as_deref()
+        .is_none_or(|path| path.as_os_str() == "-");
+    let xinclude = choice.parsed().filter(|_| choice_to_standard_output);
     // The refusal of a PSSM file that LOSAT cannot write as NCBI does (one of the report
     // streams, a named pipe) comes before the first byte (`check_psiblast_pssm_files`). (A query
     // title with a byte that NCBI's stream replaces is written as NCBI writes it:
     // `pssm::file_posts`.)
-    check_psiblast_pssm_files(&resolved, &records, &pssm_check_scope(&args))?;
+    check_psiblast_pssm_files(&resolved, &records, &pssm_check_scope(&args), xinclude)?;
     let reading = match end {
         QueryEnd::Input => QueryReading::End,
         QueryEnd::EofError => QueryReading::BlankLines,
         QueryEnd::Error { error, warnings } => QueryReading::Error { error, warnings },
     };
-    let choice_to_standard_output = resolved
-        .out
-        .as_deref()
-        .is_none_or(|path| path.as_os_str() == "-");
     search(
         resolved,
         &records,
@@ -4711,9 +4748,7 @@ fn search_cli(
         database.as_ref(),
         "",
         outputs,
-        // The XInclude formats fail only on standard output; to a file they take its name as
-        // the base of their side files.
-        choice_to_standard_output.then_some(&choice),
+        xinclude,
     )
 }
 
@@ -4845,7 +4880,13 @@ fn search_pssm_query(
                 .map(|choice| choice.number)
         })
         .collect::<Result<Vec<i32>>>()?;
-    crate::algorithm::psiblast::in_pssm::check_in_pssm_options(&resolved, psi, &outfmts)?;
+    // An XInclude format without a file name ends the run with NCBI's error where the formatter
+    // is made (below, psiblast_app.cpp:503), before the prolog and the search: LOSAT's refusals of
+    // the search's reports wait for it (`xinclude_error_comes`; NCBI 2.17.0, line RG F/d36 probe
+    // ps.pssm.o14: `Please provide a file name for outfmt 14.`).
+    if !xinclude_error_comes(xinclude) {
+        crate::algorithm::psiblast::in_pssm::check_in_pssm_options(&resolved, psi, &outfmts)?;
+    }
     // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:482-484 (the formatter's
     // `believe_query` is `-parse_deflines`, with `-in_pssm` too)
     // With `-parse_deflines` the reports believe the PSSM query's local Seq-id as they believe
@@ -4864,13 +4905,15 @@ fn search_pssm_query(
     record.warnings = psi.annot.posts.text();
     let records = vec![record];
     // The PSSM files of `-in_pssm`'s rounds (item PS5b), checked as a FASTA query's
-    // (`check_psiblast_pssm_files`).
+    // (`check_psiblast_pssm_files`: not where NCBI's error of the format comes first).
     if let Some(request) = resolved
         .psi_rounds
         .as_deref()
         .and_then(crate::algorithm::psiblast::rounds::PsiRoundPlan::file_request)
-        .filter(|_| searches)
+        .filter(|_| searches && !xinclude_error_comes(xinclude))
     {
+        // The strategy's request before the PSSM file (`check_psiblast_pssm_files`).
+        crate::report::archive::strategy::check_report_stream(resolved.strategy.as_ref())?;
         crate::algorithm::psiblast::pssm::check_pssm_files(
             request,
             records.len(),
@@ -4912,12 +4955,19 @@ fn pssm_query(args: &BlastpArgs) -> bool {
 /// command line reads from a file that is not empty (no records: the file of `Query is Empty!`,
 /// before the queries are read). `scope` says which queries the check covers: the call's
 /// `records`, or the run's in the first of the library's query batches (none in the later ones).
+/// Where the run ends with NCBI's error of an XInclude format without a file name (`xinclude`,
+/// `xinclude_error_comes`) NCBI writes no PSSM file (its formatter is made before `DoIterations`,
+/// psiblast_app.cpp:503 before :517), so nothing is refused.
 fn check_psiblast_pssm_files(
     resolved: &ResolvedBlastpArgs,
     records: &[FastaRecord],
     scope: &crate::algorithm::psiblast::pssm::PssmCheckScope,
+    xinclude: Option<&crate::blastinput::app::FormatChoice>,
 ) -> Result<()> {
     use crate::algorithm::psiblast::pssm::PssmCheckScope;
+    if xinclude_error_comes(xinclude) {
+        return Ok(());
+    }
     let queries = match scope {
         PssmCheckScope::Call => records.len(),
         PssmCheckScope::Run { queries } => *queries,
@@ -4929,6 +4979,9 @@ fn check_psiblast_pssm_files(
             .as_deref()
             .and_then(crate::algorithm::psiblast::rounds::PsiRoundPlan::file_request)
     }) {
+        // NCBI writes the strategy's request (`SaveSearchStrategy`, psiblast_app.cpp:340) before
+        // the PSSM file (`SavePssmToFile`, :385): LOSAT's refusal of the strategy file comes first.
+        crate::report::archive::strategy::check_report_stream(resolved.strategy.as_ref())?;
         crate::algorithm::psiblast::pssm::check_pssm_files(
             request,
             queries,
@@ -4939,6 +4992,15 @@ fn check_psiblast_pssm_files(
         )?;
     }
     Ok(())
+}
+
+/// Whether the run ends with NCBI's error of the XInclude format `xinclude` (13 or 14 without a file
+/// name, which `search` gives where NCBI makes its formatter, `xinclude_check`): LOSAT's refusals of
+/// what NCBI writes only after that point (psiblast's PSSM files, `-in_pssm`'s options) wait for
+/// it. The command line hands over its choice whenever it writes to standard output, the records'
+/// entries their first format without a file (`xinclude_format`).
+fn xinclude_error_comes(xinclude: Option<&crate::blastinput::app::FormatChoice>) -> bool {
+    xinclude.is_some_and(|choice| crate::blastinput::app::xinclude_check(choice).is_err())
 }
 
 /// The queries that the call's checks of its PSSM files cover (`PsiblastArgs::pssm_check`).
@@ -5022,7 +5084,7 @@ fn run_local_formats(
         );
     }
     if !query_records.is_empty() {
-        check_psiblast_pssm_files(&args, query_records, &scope)?;
+        check_psiblast_pssm_files(&args, query_records, &scope, xinclude.as_ref())?;
     }
     search(
         args,
@@ -5114,7 +5176,12 @@ fn search_database(
         );
     }
     if !query_records.is_empty() {
-        check_psiblast_pssm_files(&resolved, query_records, &pssm_check_scope(&args))?;
+        check_psiblast_pssm_files(
+            &resolved,
+            query_records,
+            &pssm_check_scope(&args),
+            xinclude.as_ref(),
+        )?;
     }
     search(
         resolved,
@@ -5128,23 +5195,14 @@ fn search_database(
     )
 }
 
-/// The first requested format that has no report after the formatting handler's checks (an
-/// XInclude format, 13 or 14, without a file: `app::report_format`), which `search` refuses where
-/// the command line refuses its `-outfmt` (after `Query is Empty!` and the subjects without
-/// letters).
+/// The first requested format that is an XInclude format (13 or 14) without a file
+/// (`ReportOutputs::xinclude_choice`), which `search` refuses where the command line refuses its
+/// `-outfmt` (after `Query is Empty!` and the subjects without letters).
 fn xinclude_format(
     args: &BlastpArgs,
     outputs: &ReportOutputs<'_>,
 ) -> Result<Option<crate::blastinput::app::FormatChoice>> {
-    use crate::blastinput::app;
-    for format in &outputs.formats {
-        let choice = app::parse_formatting_string(format.outfmt)?;
-        let out = format.side_out(args.out.as_deref());
-        if app::report_format(&choice, app::Program::Blastp, out)?.is_none() {
-            return Ok(Some(choice));
-        }
-    }
-    Ok(None)
+    outputs.xinclude_choice(args.out.as_deref())
 }
 
 /// LOSAT's rejection of a protein subject title of punctuation that NCBI's
@@ -5722,8 +5780,8 @@ fn search(
     // of the field names comes with the first report (or `write_pairwise_prologs`), after LOSAT's
     // refusals.
     for format in outputs.formats.iter() {
-        if let Some(spec) =
-            super::tabular::custom_tabular_spec(format.outfmt).filter(|spec| spec.checks_taxdb())
+        if let Some(spec) = super::tabular::custom_tabular_spec(format.outfmt, args.app)
+            .filter(|spec| spec.checks_taxdb())
         {
             let taxdb_found = match database {
                 Some(database) => database.taxdb_found(),
@@ -5817,6 +5875,14 @@ fn search(
     // LOSAT's refusal of two queries of one scope with one id comes before any report.
     if let Some(refusal) = batches.query_refusal.take() {
         return Err(refusal);
+    }
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:259-262
+    // LOSAT's refusal of a strategy file on a report stream comes where NCBI writes its first
+    // request: once its first batch is read, before it is searched (`first_request_end`; this
+    // search writes the requests where its call ends, after the searches, which would hold the
+    // reports).
+    if batches.first_request_end().is_some() {
+        crate::report::archive::strategy::check_report_stream(args.strategy.as_ref())?;
     }
     // LOSAT's limits come where NCBI starts the search, after its checks: a run that stops at its
     // first batch (`batches.starts` empty: a reader's error, NCBI's check of a PSSM, the object
@@ -6610,8 +6676,8 @@ fn x_query_block_plan(
                 format.refusal,
                 crate::api::local_blast::FormatRefusal::FailsAlone
             ) && matches!(
-                OutputFormat::parse(format.outfmt),
-                Ok((OutputFormat::Pairwise, _))
+                blastp_text_format(format.outfmt),
+                Ok(OutputFormat::Pairwise)
             )
         })
         && queries
@@ -6620,7 +6686,7 @@ fn x_query_block_plan(
     {
         return None;
     }
-    // Outfmt 1 to 4, 8, 9, 12, 5, 15 and 16 are the ones `OutputFormat::parse` does not know.
+    // Outfmt 1 to 4, 8, 9, 12, 5, 15 and 16 are the ones `blastp_text_format` does not know.
     // The custom tabular reports of outfmt 6 and 7 (a field list or a delimiter, `tabular`) as
     // the default ones: each query's lines depend only on its final list and fixed inputs (the
     // subjects' ids, lengths and titles, a `-subject` search's taxonomy database warning), outfmt
@@ -6636,11 +6702,11 @@ fn x_query_block_plan(
             subject_source.database().is_some() && (needs.all_deflines || needs.taxonomy);
         (!db_reads_more).then_some(spec.kind)
     };
-    let default_kind = |outfmt: &str| match OutputFormat::parse(outfmt) {
-        Ok((OutputFormat::Tabular | OutputFormat::TabularWithComments, _)) => {
+    let default_kind = |outfmt: &str| match blastp_text_format(outfmt) {
+        Ok(OutputFormat::Tabular | OutputFormat::TabularWithComments) => {
             Some(XBlockReport::Tabular)
         }
-        Ok((OutputFormat::Pairwise, _)) => Some(XBlockReport::Pairwise),
+        Ok(OutputFormat::Pairwise) => Some(XBlockReport::Pairwise),
         // Outfmt 1 to 4 (BLASTP's, `blastp_pairwise_view_of`): outfmt 0's report with each
         // query's alignments as one section, which reads only that query's hits and the
         // sequences (`report::query_anchored`).
@@ -6667,7 +6733,7 @@ fn x_query_block_plan(
         _ => None,
     };
     // A custom tabular report of outfmt 6 or 7 takes the default one's kind.
-    let kind_of = |outfmt: &str| match super::tabular::custom_tabular_spec(outfmt) {
+    let kind_of = |outfmt: &str| match super::tabular::custom_tabular_spec(outfmt, args.app) {
         Some(spec) => match custom_kind(spec) {
             Some(crate::report::tabular::TabularKind::Tabular) => default_kind("6"),
             Some(crate::report::tabular::TabularKind::Commented) => default_kind("7"),
@@ -7248,7 +7314,7 @@ fn write_pairwise_prologs(
             let mut writer = format.sink.open()?;
             writer.write_all(&crate::report::blast_xml2::framing::prolog_bytes(kind))?;
             writer.flush()?;
-        } else if let Some(spec) = super::tabular::custom_tabular_spec(format.outfmt)
+        } else if let Some(spec) = super::tabular::custom_tabular_spec(format.outfmt, args.app)
             .filter(|spec| spec.kind == crate::report::tabular::TabularKind::CsvWithHeader)
         {
             let mut writer = format.sink.open()?;
@@ -7290,7 +7356,7 @@ fn write_reports_without_queries(
         }
         // The custom tabular reports: outfmt 20's line of the field names, outfmt 7's count of 0
         // queries (`tabular::write_tabular_without_queries`).
-        if let Some(spec) = super::tabular::custom_tabular_spec(format.outfmt) {
+        if let Some(spec) = super::tabular::custom_tabular_spec(format.outfmt, args.app) {
             let taxdb_found = spec.checks_taxdb()
                 && match subject_source.database() {
                     Some(database) => database.taxdb_found(),
@@ -7326,14 +7392,10 @@ fn write_reports_without_queries(
             continue;
         }
         // Outfmt 1 to 4 write what outfmt 0 writes without a query.
-        let view = blastp_query_anchored_view(args.app, format.outfmt)?;
+        let view = blastp_query_anchored_view(args.app, format.outfmt);
         let outfmt = match view {
             Some(_) => OutputFormat::Pairwise,
-            None => {
-                OutputFormat::parse(format.outfmt)
-                    .map_err(anyhow::Error::msg)?
-                    .0
-            }
+            None => blastp_text_format(format.outfmt).map_err(anyhow::Error::msg)?,
         };
         let mut writer = format.sink.open()?;
         match outfmt {
@@ -9391,6 +9453,7 @@ fn run_call(
         query_batches: &query_batches,
         query_batch_skipped: &query_batch_skipped,
         query_chunk,
+        rps_recount_identities: recounts_rps_identities(&requested_formats),
         database,
         subjects,
         x_soft_subjects,

@@ -225,7 +225,7 @@ fn run_inner(
     // messages of each archive are the diagnostics posted since the previous one.
     let mut archive_stderr = crate::cli::CliStderr::process();
     let mut archive_tee;
-    let tax_report = choice.number == 18;
+    let tax_report = choice.number() == Some(18);
     let mut stderr: Box<dyn Write + '_> = match &archive {
         Some(handle) => {
             archive_tee = crate::report::archive::DiagTee::new(&mut archive_stderr, handle.clone());
@@ -265,7 +265,10 @@ fn run_inner(
     // with lower case only) read the whole record.
     if let Some(range) = &subject_range {
         // Outfmt 0 to 4: the rows of outfmt 0 and the query-anchored sections (1 to 4).
-        let shows_lower_case = args.lcase_masking && (0..=4).contains(&choice.number);
+        let shows_lower_case = args.lcase_masking
+            && choice
+                .number()
+                .is_some_and(|number| (0..=4).contains(&number));
         for record in &mut subjects {
             let (from, to_exclusive) =
                 crate::blastinput::seq_range::record_cut(range, record.sequence.len())?;
@@ -289,14 +292,14 @@ fn run_inner(
     // Outfmt 13 and 14 write side files next to `-out` and the master file at `-out`: with no
     // file name they stop at NCBI's `xinclude_check` below (`Please provide a file name`).
     let out_file = args.out.as_deref().filter(|p| *p != Path::new("-"));
-    let structured_xml = match choice.number {
-        5 | 15 | 16 => true,
-        13 | 14 => out_file.is_some(),
+    let structured_xml = match choice.number() {
+        Some(5 | 15 | 16) => true,
+        Some(13 | 14) => out_file.is_some(),
         _ => false,
     };
     // The hold of the side files of outfmt 13 and 14 follows the master file's.
     let side_files = out_file.and_then(|out| {
-        let kind = app::ReportFormat::from_number(choice.number).and_then(Xml2Kind::of)?;
+        let kind = app::ReportFormat::from_number(choice.number()?).and_then(Xml2Kind::of)?;
         kind.is_files()
             .then(|| super::blast_xml::HeldSideFiles::new(Box::new(FsSideFiles::new(out, kind))))
     });
@@ -307,13 +310,16 @@ fn run_inner(
     // of standard output. Every other format's: LOSAT's buffer before the file or standard output,
     // behind the held document.
     let stream = match out_file {
-        Some(path) if tax_report => crate::cli::NcbiOstream::file(create(path)?),
-        None if tax_report => crate::cli::NcbiOstream::standard_output(),
+        Some(path) if tax_report => crate::cli::NcbiOstream::file(create(path)?, strategy.as_ref()),
+        None if tax_report => crate::cli::NcbiOstream::standard_output(strategy.as_ref()),
         out_file => {
-            let destination: Box<dyn Write> = match out_file {
-                None => Box::new(io::stdout().lock()),
-                Some(path) => Box::new(create(path)?),
-            };
+            let destination: Box<dyn Write> = crate::report::archive::strategy::hold_report(
+                strategy.as_ref(),
+                match out_file {
+                    None => Box::new(io::stdout().lock()),
+                    Some(path) => Box::new(create(path)?),
+                },
+            );
             crate::cli::NcbiOstream::buffered(match structured_xml {
                 true => Box::new(
                     held.insert(super::blast_xml::HeldOutput::new(
@@ -353,6 +359,8 @@ fn run_inner(
         args.query_loc.as_deref(),
         crate::blastinput::seq_range::RangeRole::Query,
     )?;
+    // A value that the early reading left to this handler (`EarlyFormat::Deferred`) fails here.
+    let choice = choice.at_formatting_handler(&args.outfmt)?;
     app::formatting_handler_check(&choice, Program::Blastx)?;
     // The warnings of the hit list size and of an ignored -num_descriptions
     // (`blastinput::report_counts`).

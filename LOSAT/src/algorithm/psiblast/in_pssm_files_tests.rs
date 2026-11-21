@@ -191,7 +191,7 @@ fn rounds_input_keeps_the_id_and_refuses_what_ncbi_writes_otherwise() {
         &request(true, false),
     ))
     .unwrap();
-    let (asn, _) = input.files(&request(true, false)).unwrap();
+    let (asn, _, _) = input.files(&request(true, false)).unwrap();
     let asn = String::from_utf8(asn.unwrap()).unwrap();
     assert!(
         asn.contains("comment \"x\"")
@@ -285,6 +285,7 @@ fn the_write_back_sets_the_searched_blocks() {
     let text = input
         .written_back(&request(true, false), ungapped, GAPPED)
         .unwrap()
+        .0
         .unwrap();
     let read = crate::blastinput::pssm_text::read_pssm_with_parameters(&text).unwrap();
     let data = read.pssm.final_data.unwrap();
@@ -296,7 +297,8 @@ fn the_write_back_sets_the_searched_blocks() {
     assert_eq!(
         input
             .written_back(&request(false, true), ungapped, GAPPED)
-            .unwrap(),
+            .unwrap()
+            .0,
         None
     );
 }

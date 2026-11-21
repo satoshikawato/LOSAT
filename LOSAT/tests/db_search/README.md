@@ -1284,6 +1284,20 @@ without a line, and NCBI's fetch of the Smith-Waterman redo excludes them after 
 match, which sets the redo's status back to 0: a failed match before such a match does not fail the batch. On version 4
 the list masks a gi-only sequence, which is then never searched, hence version 5 (as `ll2/prot_v5`).
 
+## Alias files with OIDLIST (line RG, series D, D1b-1)
+
+`oidlist/` (`make_oidlist.py`): alias files with `OIDLIST` over taxfilter's `tfp` (23 proteins) and `tfn` (two volumes of
+12 and 4 nucleotides), and their OID list files (the big-endian index of the last OID, then one bit per OID, the most
+significant bit first, set for a kept OID): `k.msk` keeps 12 OIDs of `tfp`, `n.msk` six OIDs of each volume of `tfn`
+(read relative to each volume), `h1.msk` and `h2.msk` the bits past the header's last OID and past the file's end,
+`wrap.msk` the last OID 0xFFFFFFFF (no OID), `hdr.msk` the header alone and `empty.msk` no byte. `p_k`, `p_kn` (with
+`NSEQ`), `p_kr` (with `FIRST_OID` and `LAST_OID`), `p_ku` (`p_k` and `aliaskeys/p_range` over one volume) and `n_n` make
+NCBI's constructor scan the kept OIDs; `p_knl`, `n_nnl` (with `NSEQ` and `LENGTH`) and `p_kpn` (`NSEQ` above `p_knl`)
+do not. `p_miss`, `p_missl`, `n_miss` and `n_missl` name the absolute path of a file that does not exist (NCBI's error
+prints it, the same on every machine), with and without `NSEQ` and `LENGTH`, and `p_dir` the directory `/`. The rows are
+`db.ol.*` (every search program; `rps/olrps.pal` and `olwrps.pal` over `rps_mini` with `olall.msk`, `olno2.msk` or
+`olonly2.msk` as `rps_mini.msk`); `segmasker` and `dustmasker` read them in their rows `db_oidlist_*`.
+
 ## Ungapped nucleotide databases (line NP, O4a-1)
 
 `ungapped_abr` (the 33 genes of `LOSAT/tests/fixtures/blastn_regression/inputs/culling_abricate_genes.fa`, as `ungapped_abr.fna`) is built like
@@ -1308,7 +1322,7 @@ rows `db.minraw.*` (DI-6b: `-min_raw_gapped_score`; the queries
     losat makeblastdb -dbtype nucl -in tests/fasta/MejoMJNV.fasta -title MejoMJNV -out tests/db_search/mejo -blastdb_version 4
     rm tests/db_search/mejo.njs
 
-The row `db.blastn.ungapped_rej.17` (outfmt 17 with `-ungapped`) is a refusal until O4a-2; the rows `db.blastn.ungapped.{mb,bn}.{8,9,11,12}` (O4b) are NCBI's Dense-diag Seq-aligns of the same search.
+The rows `db.blastn.ungapped.{mb,bn}.{8,9,11,12}` (O4b) are NCBI's Dense-diag Seq-aligns of the same search; the rows `db.blastn.ungapped.mb.17` and `db.blastn.ungapped.bn.17b` (O4a-2) are its SAM (outfmt 17: one record per subject, its HSPs joined).
 
 ## Several databases in -db (DI-8f)
 

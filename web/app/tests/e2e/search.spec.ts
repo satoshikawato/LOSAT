@@ -706,11 +706,10 @@ test('empty inputs, every record excluded, a sequence without a defline, and the
   await program(page, 'blastn');
   await submit(page);
   await expect(page.getByTestId('search-message')).toHaveText('Add the query sequences: paste them or open FASTA files.');
-  // A gap line fails the index: NCBI's reader reads it as data of the record before it.
+  // A gap line is read as the CLI reads it: ten N of the record before it (line WQA's D13 (a), 2026-11-20; before,
+  // "gap lines are not supported in the browser").
   await paste(page, 'query', '>q\nACGT\n>?10\nACGT\n');
-  await expect(page.getByTestId('query-source-0-error')).toHaveText(
-    "This input cannot be read: line 3 is a gap line ('>?'), whose residues have no bytes in the input for LOSAT's index to locate; gap lines are not supported in the browser",
-  );
+  await expect(page.getByTestId('query-source-0-summary')).toHaveText('1 record · 18 nt');
   if (BUILD_HAS_ENGINE) {
     // A first line that NCBI's data loaders would fetch as a Seq-id fails; '>' can go before it (a defline line
     // would make it the first data line).
@@ -991,11 +990,12 @@ test('a GenBank, EMBL or FASTQ file is read as FASTA text, as the command line d
 
 test('"Add the line" keeps the focus on the card, not the page\'s body (WA2-AX-04)', async ({ page }) => {
   await program(page, 'blastn');
-  // Not a defline, and the gap line fails it again after the defline: the card stays, with the button.
-  await paste(page, 'query', 'ACGTACGTACGT\n>?10\nACGT\n');
-  await expect(page.getByTestId('query-source-0-error')).toContainText('gap line');
+  // Not a defline, and a later line that NCBI's reader refuses fails it again after the defline: the card stays, with
+  // the button. (Until line WQA's D13, 2026-11-20, a `>?` gap line did this; LOSAT Web now reads it as the CLI does.)
+  await paste(page, 'query', 'ACGTACGTACGT\n>x\nNM_000518.5 1234 5678\n');
+  await expect(page.getByTestId('query-source-0-error')).toContainText("doesn't look like plausible data");
   await page.getByTestId('query-source-0-add-defline').click();
-  await expect(page.getByTestId('query-input')).toHaveValue('>pasted_query\nACGTACGTACGT\n>?10\nACGT\n');
+  await expect(page.getByTestId('query-input')).toHaveValue('>pasted_query\nACGTACGTACGT\n>x\nNM_000518.5 1234 5678\n');
   await expect(page.getByTestId('query-source-0')).toBeFocused();
 });
 

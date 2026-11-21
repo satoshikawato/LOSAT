@@ -1,5 +1,14 @@
 use super::*;
 
+/// The spec of an application whose formatter gets the custom delimiter (blastp's).
+fn blastp_spec(format: ReportFormat, choice: &FormatChoice) -> Option<TabularSpec> {
+    TabularSpec::of_app(
+        format,
+        choice,
+        crate::report::archive::options::RequestKind::Blastp,
+    )
+}
+
 #[test]
 fn fields_follow_ncbis_rules() {
     assert_eq!(parse_fields(""), STD_FIELDS.to_vec());
@@ -173,13 +182,65 @@ fn default_reports_have_no_spec() {
         spec: spec.to_string(),
         delimiter: delimiter.to_string(),
     };
-    assert!(TabularSpec::of(ReportFormat::Tabular, &choice("", "")).is_none());
-    assert!(TabularSpec::of(ReportFormat::Tabular, &choice("std", "\t")).is_none());
-    assert!(TabularSpec::of(ReportFormat::TabularWithComments, &choice("", "")).is_none());
-    let csv = TabularSpec::of(ReportFormat::CommaSeparatedValues, &choice("", "")).unwrap();
+    assert!(blastp_spec(ReportFormat::Tabular, &choice("", "")).is_none());
+    assert!(blastp_spec(ReportFormat::Tabular, &choice("std", "\t")).is_none());
+    assert!(blastp_spec(ReportFormat::TabularWithComments, &choice("", "")).is_none());
+    let csv = blastp_spec(ReportFormat::CommaSeparatedValues, &choice("", "")).unwrap();
     assert_eq!((csv.delimiter.as_str(), csv.fields.len()), (",", 12));
-    let piped = TabularSpec::of(ReportFormat::Tabular, &choice("std", "|")).unwrap();
+    let piped = blastp_spec(ReportFormat::Tabular, &choice("std", "|")).unwrap();
     assert_eq!(piped.delimiter, "|");
+}
+
+// NCBI 2.17.0 (line RG F/d36 probes ps.f10at, ps.f20at, ps.f6at, ps.pssm.f10at, bp.f20at,
+// bp.f6at, rps.f10at, rps.f6at, rpst.f10at): `-outfmt "10 delim=@ qseqid sseqid evalue"`
+// writes `,` in psiblast, rpsblast and rpstblastn, `@` in blastp; `6 delim=@` is the default
+// outfmt 6 of the first three.
+#[test]
+fn only_the_apps_that_set_the_delimiter_take_it() {
+    use crate::report::archive::options::RequestKind;
+    let choice = |number: i32, spec: &str| FormatChoice {
+        number,
+        spec: spec.to_string(),
+        delimiter: "@".to_string(),
+    };
+    let csv = choice(10, "qseqid sseqid evalue");
+    let std6 = choice(6, "");
+    let header = choice(20, "qseqid");
+    for app in [
+        RequestKind::Blastn,
+        RequestKind::Blastp,
+        RequestKind::Blastx,
+        RequestKind::Tblastn,
+        RequestKind::PsiTblastn,
+        RequestKind::Tblastx,
+    ] {
+        let spec = TabularSpec::of_app(ReportFormat::CommaSeparatedValues, &csv, app).unwrap();
+        assert_eq!(
+            (spec.kind, spec.delimiter.as_str(), spec.fields.len()),
+            (TabularKind::Csv, "@", 3),
+            "{app:?}"
+        );
+        let spec = TabularSpec::of_app(ReportFormat::Tabular, &std6, app).unwrap();
+        assert_eq!(spec.delimiter, "@", "{app:?}");
+    }
+    for app in [
+        RequestKind::Psiblast,
+        RequestKind::Rpsblast,
+        RequestKind::Rpstblastn,
+    ] {
+        let spec = TabularSpec::of_app(ReportFormat::CommaSeparatedValues, &csv, app).unwrap();
+        assert_eq!(
+            (spec.kind, spec.delimiter.as_str(), spec.fields.len()),
+            (TabularKind::Csv, ",", 3),
+            "{app:?}"
+        );
+        let spec = TabularSpec::of_app(ReportFormat::CommaSeparatedValuesWithHeader, &header, app);
+        assert_eq!(spec.unwrap().delimiter, ",", "{app:?}");
+        assert!(TabularSpec::of_app(ReportFormat::Tabular, &std6, app).is_none());
+        let commented = choice(7, "qseqid");
+        let spec = TabularSpec::of_app(ReportFormat::TabularWithComments, &commented, app);
+        assert_eq!(spec.unwrap().delimiter, "\t", "{app:?}");
+    }
 }
 
 #[test]
@@ -206,7 +267,7 @@ fn taxonomy_names_get_ncbis_fillers() {
             spec: fields.to_string(),
             delimiter: String::new(),
         };
-        let spec = TabularSpec::of(format, &choice).unwrap();
+        let spec = blastp_spec(format, &choice).unwrap();
         let writer = TabularWriter::new(&spec, "BLASTN 2.17.0+", None);
         let subject = TabularSubject {
             id: b"s",
@@ -349,7 +410,7 @@ fn taxonomy_names_get_ncbis_fillers() {
 // texts at each lookup: the plural names' lookups before the singular one's.
 #[test]
 fn row_messages_follow_the_lookups() {
-    let spec = TabularSpec::of(
+    let spec = blastp_spec(
         ReportFormat::Tabular,
         &FormatChoice {
             number: 6,
@@ -393,7 +454,7 @@ fn row_messages_follow_the_lookups() {
 #[test]
 fn protein_rows_frames_and_rounds_are_ncbis() {
     let spec = |format: ReportFormat, fields: &str| {
-        TabularSpec::of(
+        blastp_spec(
             format,
             &FormatChoice {
                 number: 6,
@@ -492,7 +553,7 @@ fn protein_rows_frames_and_rounds_are_ncbis() {
 // query's id is its `qseqid`, `qacc` and `qaccver` alike.
 #[test]
 fn id_columns_are_the_subject_s_own() {
-    let spec = TabularSpec::of(
+    let spec = blastp_spec(
         ReportFormat::Tabular,
         &FormatChoice {
             number: 6,
@@ -556,7 +617,7 @@ fn id_columns_are_the_subject_s_own() {
 /// The rows of `subjects` (failed or found, in order) of one query under `fields`, with a
 /// nucleotide HSP of 450 letters (qcovs 99, qcovhsp 50) and query length 900.
 fn failed_rows(fields: &str, subjects: &[TabularSubject<'_>]) -> String {
-    let spec = TabularSpec::of(
+    let spec = blastp_spec(
         ReportFormat::Tabular,
         &FormatChoice {
             number: 6,
@@ -771,7 +832,7 @@ fn a_load_that_throws_writes_the_kept_row() {
     // The refusals before the report: a first row with `sacc`, `saccver` (the default fields)
     // or `staxid`; a later one has a result.
     let spec = |fields: &str| {
-        TabularSpec::of(
+        blastp_spec(
             ReportFormat::Tabular,
             &FormatChoice {
                 number: 6,
@@ -843,7 +904,7 @@ fn a_rows_fields_say_what_its_throw_does() {
     use crate::blastinput::app::Program;
     use crate::report::db_subject::{AfterThrow, FormatThrow, RunThrow};
     let spec = |fields: &str| {
-        TabularSpec::of(
+        blastp_spec(
             ReportFormat::CommaSeparatedValues,
             &FormatChoice {
                 number: 10,
@@ -894,7 +955,7 @@ fn a_rows_fields_say_what_its_throw_does() {
         );
     }
     // The organism report (outfmt 18) leaves out the HSPs of a throwing subject and goes on.
-    let report = TabularSpec::of(
+    let report = blastp_spec(
         ReportFormat::TaxFormat,
         &FormatChoice {
             number: 18,
@@ -1018,7 +1079,7 @@ fn a_lookup_failing_after_the_first_definition_line_keeps_its_ids() {
 #[test]
 fn failed_lookups_stop_where_ncbi_has_no_result() {
     let spec = |fields: &str| {
-        TabularSpec::of(
+        blastp_spec(
             ReportFormat::CommaSeparatedValues,
             &FormatChoice {
                 number: 10,
@@ -1123,4 +1184,17 @@ fn end_gaps_are_spaces_in_the_rows_and_btop() {
     out.clear();
     write_btop(&mut out, b"MASLK", b"MASL-", true, [&[], &[4]]);
     assert_eq!(out, b"4K-");
+}
+
+/// The exception of a query of the molecule `other` names the coding of its Seq-data (NCBI's
+/// object manager converts it to the coding 1).
+#[test]
+fn the_sequence_exception_names_the_codings_of_the_query() {
+    for coding in [2, 8, 10] {
+        let message = query_sequence_exception(coding).get_msg().to_vec();
+        assert_eq!(
+            message,
+            format!("Incompatible sequence codings: {coding} -> 1").into_bytes()
+        );
+    }
 }

@@ -1,0 +1,146 @@
+# NCBI BLAST+ 2.17.0 official Linux build (ncbi-blast-2.17.0+-x64-linux; sha256 of its bin/makeblastdb c1ffdcf6f15d1d8d75377cc9f37afa42bc9fa06678903bad77c2641e60778fce):
+# `prlimit --fsize=<limit> -- makeblastdb -in in.fa -dbtype <prot|nucl> -parse_seqids -blastdb_version 4 [-hash_index | -max_file_sz 2000B] -out o/db`
+# with SIGXFSZ ignored (a full disk: every output file that passes <limit> bytes fails), the input of tests/makeblastdb_failed_index.rs;
+# host: the Owner's WSL2 machine (Ubuntu), under the oracle lock, 2026-11-21. Kinds: p4 (3 proteins), n4 (6 nucleotide sequences of 300 bases),
+# m6 (130 proteins in 6 volumes). Version 5 databases cannot be frozen with prlimit: the LMDB file fails first, in both programs.
+# Line per field: `case <kind> <limit>`, `rc`, `err`/`out` (stderr and stdout, \n \t \\ escaped, the output directory <D>, the time <T> and
+# the duration <S> masked, the date string that failed to parse in `Time string '...'` as <DATE>), `files` (the number of files of the output
+# directory, then `name:size` of its index, alias and metadata files, `*` for the size of a file that holds the build's date), `pjs` (the
+# metadata file, its last-updated masked). rc -11 is NCBI's SIGSEGV, which LOSAT refuses (exit status 1). The rows of exit status 255 cut the
+# date inside "Nov" (limit 24) and after "Nov " (limit 25): a cut inside the digits of the day or the time gives another message
+# depending on the day and the hour, which the date table (index_dates.tsv) covers.
+# Frozen again under a fixed clock (2026-11-21, 2026-11-05 and later days 2026-02-09 .. 2027-01-01 checked): the shim faketime.c (kept with the
+# line's records, library-20261031/PUB/O/O1e/datefix/) is LD_PRELOADed on every process of the run (time, gettimeofday and clock_gettime of
+# CLOCK_REALTIME return FAKE_TIME), TZ=UTC, the same binary and command as above, same host, 2026-11-21. At 2026-11-21 05:07 (day of two digits,
+# hour of one digit: the class of the original run) the 18 rows below are byte-identical to the original run, which validates the shim. At
+# 2026-11-05 05:07 (day of one digit) 15 of the 18 cases are identical and m6 95, 100 and 111 differ (the cut lands one byte later in the date of
+# the alias file or of a volume's index): their rows of that class follow the others, with the tag `d1` after the limit on the `case` line. An
+# untagged row holds for every day unless a `d1` row of the same case exists; the test picks the class by the length of the date LOSAT writes.
+# The same outcomes came out at 2026-02-09, 2026-03-09, 2027-01-01 (one digit) and 2026-03-10, 2026-05-31, 2026-07-10, 2026-09-21, 2026-12-31 (two
+# digits): the month's name has 3 letters and the year 4 digits, so only the digits of the day and of the hour change the date's length.
+case	p4	0
+rc	-11
+err	
+out	\n\nBuilding a new DB, current time: <T>\nNew DB name:   <D>/o/db\nNew DB title:  in.fa\nSequence type: Protein\nKeep MBits: T\nMaximum file size: 3000000000B\nAdding sequences from FASTA; added 3 sequences in <S> seconds.\n\n\n
+files	10 db.pin:*
+pjs	
+case	p4	1
+rc	2
+err	BLAST Database error: Error: Not a valid version 4 or 5 database.\n
+out	\n\nBuilding a new DB, current time: <T>\nNew DB name:   <D>/o/db\nNew DB title:  in.fa\nSequence type: Protein\nKeep MBits: T\nMaximum file size: 3000000000B\nAdding sequences from FASTA; added 3 sequences in <S> seconds.\n\n\n
+files	10 db.pin:*
+pjs	
+case	p4	2
+rc	2
+err	BLAST Database error: Error: Not a valid version 4 or 5 database.\n
+out	\n\nBuilding a new DB, current time: <T>\nNew DB name:   <D>/o/db\nNew DB title:  in.fa\nSequence type: Protein\nKeep MBits: T\nMaximum file size: 3000000000B\nAdding sequences from FASTA; added 3 sequences in <S> seconds.\n\n\n
+files	10 db.pin:*
+pjs	
+case	p4	7
+rc	2
+err	BLAST Database error: Error: requested sequence type does not match DB.\n
+out	\n\nBuilding a new DB, current time: <T>\nNew DB name:   <D>/o/db\nNew DB title:  in.fa\nSequence type: Protein\nKeep MBits: T\nMaximum file size: 3000000000B\nAdding sequences from FASTA; added 3 sequences in <S> seconds.\n\n\n
+files	10 db.pin:*
+pjs	
+case	p4	8
+rc	6
+err	Error: (802.5) [makeblastdb] CObjectOStream: error at byte 407: stack is empty: cannot close output stream\nError: (CIOException::eFlush) [makeblastdb] COStreamBuffer::Flush: failed\nError: (CSerialException::eIoError) [makeblastdb] byte 407: cannot close output stream\nError: (802.4) [makeblastdb] Cannot close serializing output stream (CSerialException::eIoError) byte 407: cannot close output stream\nBLAST failed to write output: COStreamBuffer::Flush: failed\n
+out	\n\nBuilding a new DB, current time: <T>\nNew DB name:   <D>/o/db\nNew DB title:  in.fa\nSequence type: Protein\nKeep MBits: T\nMaximum file size: 3000000000B\nAdding sequences from FASTA; added 3 sequences in <S> seconds.\n\n\n
+files	11 db.pin:* db.pjs:*
+pjs	{\n  "ver
+case	p4	9
+rc	6
+err	Error: (802.5) [makeblastdb] CObjectOStream: error at byte 407: stack is empty: cannot close output stream\nError: (CIOException::eFlush) [makeblastdb] COStreamBuffer::Flush: failed\nError: (CSerialException::eIoError) [makeblastdb] byte 407: cannot close output stream\nError: (802.4) [makeblastdb] Cannot close serializing output stream (CSerialException::eIoError) byte 407: cannot close output stream\nBLAST failed to write output: COStreamBuffer::Flush: failed\n
+out	\n\nBuilding a new DB, current time: <T>\nNew DB name:   <D>/o/db\nNew DB title:  in.fa\nSequence type: Protein\nKeep MBits: T\nMaximum file size: 3000000000B\nAdding sequences from FASTA; added 3 sequences in <S> seconds.\n\n\n
+files	11 db.pin:* db.pjs:*
+pjs	{\n  "vers
+case	p4	56
+rc	6
+err	Error: (802.5) [makeblastdb] CObjectOStream: error at byte 435: stack is empty: cannot close output stream\nError: (CIOException::eFlush) [makeblastdb] COStreamBuffer::Flush: failed\nError: (CSerialException::eIoError) [makeblastdb] byte 435: cannot close output stream\nError: (802.4) [makeblastdb] Cannot close serializing output stream (CSerialException::eIoError) byte 435: cannot close output stream\nBLAST failed to write output: COStreamBuffer::Flush: failed\n
+out	\n\nBuilding a new DB, current time: <T>\nNew DB name:   <D>/o/db\nNew DB title:  in.fa\nSequence type: Protein\nKeep MBits: T\nMaximum file size: 3000000000B\nAdding sequences from FASTA; added 3 sequences in <S> seconds.\n\n\n
+files	11 db.pin:* db.pjs:*
+pjs	{\n  "version": "1.2",\n  "dbname": "db",\n  "dbtype": "Pro
+case	p4	95
+rc	6
+err	Error: (802.5) [makeblastdb] CObjectOStream: error at byte 435: stack is empty: cannot close output stream\nError: (CIOException::eFlush) [makeblastdb] COStreamBuffer::Flush: failed\nError: (CSerialException::eIoError) [makeblastdb] byte 435: cannot close output stream\nError: (802.4) [makeblastdb] Cannot close serializing output stream (CSerialException::eIoError) byte 435: cannot close output stream\nBLAST failed to write output: COStreamBuffer::Flush: failed\n
+out	\n\nBuilding a new DB, current time: <T>\nNew DB name:   <D>/o/db\nNew DB title:  in.fa\nSequence type: Protein\nKeep MBits: T\nMaximum file size: 3000000000B\nAdding sequences from FASTA; added 3 sequences in <S> seconds.\n\n\n
+files	11 db.pin:* db.pjs:*
+pjs	{\n  "version": "1.2",\n  "dbname": "db",\n  "dbtype": "Protein",\n  "db-version": 4,\n  "descriptio
+case	m6	0
+rc	2
+err	BLAST Database error: No database names were found in alias file [<D>/o/db].\n
+out	\n\nBuilding a new DB, current time: <T>\nNew DB name:   <D>/o/db\nNew DB title:  in.fa\nSequence type: Protein\nKeep MBits: T\nMaximum file size: 0B\nAdding sequences from FASTA; added 130 sequences in <S> seconds.\n\n\n
+files	781 db.000.pin:* db.001.pin:* db.002.pin:* db.003.pin:* db.004.pin:* db.005.pin:* db.006.pin:* db.007.pin:* db.008.pin:* db.009.pin:* db.010.pin:* db.011.pin:* db.012.pin:* db.013.pin:* db.014.pin:* db.015.pin:* db.016.pin:* db.017.pin:* db.018.pin:* db.019.pin:* db.020.pin:* db.021.pin:* db.022.pin:* db.023.pin:* db.024.pin:* db.025.pin:* db.026.pin:* db.027.pin:* db.028.pin:* db.029.pin:* db.030.pin:* db.031.pin:* db.032.pin:* db.033.pin:* db.034.pin:* db.035.pin:* db.036.pin:* db.037.pin:* db.038.pin:* db.039.pin:* db.040.pin:* db.041.pin:* db.042.pin:* db.043.pin:* db.044.pin:* db.045.pin:* db.046.pin:* db.047.pin:* db.048.pin:* db.049.pin:* db.050.pin:* db.051.pin:* db.052.pin:* db.053.pin:* db.054.pin:* db.055.pin:* db.056.pin:* db.057.pin:* db.058.pin:* db.059.pin:* db.060.pin:* db.061.pin:* db.062.pin:* db.063.pin:* db.064.pin:* db.065.pin:* db.066.pin:* db.067.pin:* db.068.pin:* db.069.pin:* db.070.pin:* db.071.pin:* db.072.pin:* db.073.pin:* db.074.pin:* db.075.pin:* db.076.pin:* db.077.pin:* db.078.pin:* db.079.pin:* db.080.pin:* db.081.pin:* db.082.pin:* db.083.pin:* db.084.pin:* db.085.pin:* db.086.pin:* db.087.pin:* db.088.pin:* db.089.pin:* db.090.pin:* db.091.pin:* db.092.pin:* db.093.pin:* db.094.pin:* db.095.pin:* db.096.pin:* db.097.pin:* db.098.pin:* db.099.pin:* db.100.pin:* db.101.pin:* db.102.pin:* db.103.pin:* db.104.pin:* db.105.pin:* db.106.pin:* db.107.pin:* db.108.pin:* db.109.pin:* db.110.pin:* db.111.pin:* db.112.pin:* db.113.pin:* db.114.pin:* db.115.pin:* db.116.pin:* db.117.pin:* db.118.pin:* db.119.pin:* db.120.pin:* db.121.pin:* db.122.pin:* db.123.pin:* db.124.pin:* db.125.pin:* db.126.pin:* db.127.pin:* db.128.pin:* db.129.pin:* db.pal:*
+pjs	
+case	m6	60
+rc	2
+err	BLAST Database error: No database names were found in alias file [<D>/o/db].\n
+out	\n\nBuilding a new DB, current time: <T>\nNew DB name:   <D>/o/db\nNew DB title:  in.fa\nSequence type: Protein\nKeep MBits: T\nMaximum file size: 0B\nAdding sequences from FASTA; added 130 sequences in <S> seconds.\n\n\n
+files	781 db.000.pin:* db.001.pin:* db.002.pin:* db.003.pin:* db.004.pin:* db.005.pin:* db.006.pin:* db.007.pin:* db.008.pin:* db.009.pin:* db.010.pin:* db.011.pin:* db.012.pin:* db.013.pin:* db.014.pin:* db.015.pin:* db.016.pin:* db.017.pin:* db.018.pin:* db.019.pin:* db.020.pin:* db.021.pin:* db.022.pin:* db.023.pin:* db.024.pin:* db.025.pin:* db.026.pin:* db.027.pin:* db.028.pin:* db.029.pin:* db.030.pin:* db.031.pin:* db.032.pin:* db.033.pin:* db.034.pin:* db.035.pin:* db.036.pin:* db.037.pin:* db.038.pin:* db.039.pin:* db.040.pin:* db.041.pin:* db.042.pin:* db.043.pin:* db.044.pin:* db.045.pin:* db.046.pin:* db.047.pin:* db.048.pin:* db.049.pin:* db.050.pin:* db.051.pin:* db.052.pin:* db.053.pin:* db.054.pin:* db.055.pin:* db.056.pin:* db.057.pin:* db.058.pin:* db.059.pin:* db.060.pin:* db.061.pin:* db.062.pin:* db.063.pin:* db.064.pin:* db.065.pin:* db.066.pin:* db.067.pin:* db.068.pin:* db.069.pin:* db.070.pin:* db.071.pin:* db.072.pin:* db.073.pin:* db.074.pin:* db.075.pin:* db.076.pin:* db.077.pin:* db.078.pin:* db.079.pin:* db.080.pin:* db.081.pin:* db.082.pin:* db.083.pin:* db.084.pin:* db.085.pin:* db.086.pin:* db.087.pin:* db.088.pin:* db.089.pin:* db.090.pin:* db.091.pin:* db.092.pin:* db.093.pin:* db.094.pin:* db.095.pin:* db.096.pin:* db.097.pin:* db.098.pin:* db.099.pin:* db.100.pin:* db.101.pin:* db.102.pin:* db.103.pin:* db.104.pin:* db.105.pin:* db.106.pin:* db.107.pin:* db.108.pin:* db.109.pin:* db.110.pin:* db.111.pin:* db.112.pin:* db.113.pin:* db.114.pin:* db.115.pin:* db.116.pin:* db.117.pin:* db.118.pin:* db.119.pin:* db.120.pin:* db.121.pin:* db.122.pin:* db.123.pin:* db.124.pin:* db.125.pin:* db.126.pin:* db.127.pin:* db.128.pin:* db.129.pin:* db.pal:*
+pjs	
+case	m6	95
+rc	6
+err	Error: (802.5) [makeblastdb] CObjectOStream: error at byte 742: stack is empty: cannot close output stream\nError: (CIOException::eFlush) [makeblastdb] COStreamBuffer::Flush: failed\nError: (CSerialException::eIoError) [makeblastdb] byte 742: cannot close output stream\nError: (802.4) [makeblastdb] Cannot close serializing output stream (CSerialException::eIoError) byte 742: cannot close output stream\nBLAST failed to write output: COStreamBuffer::Flush: failed\n
+out	\n\nBuilding a new DB, current time: <T>\nNew DB name:   <D>/o/db\nNew DB title:  in.fa\nSequence type: Protein\nKeep MBits: T\nMaximum file size: 0B\nAdding sequences from FASTA; added 130 sequences in <S> seconds.\n\n\n
+files	782 db.000.pin:* db.001.pin:* db.002.pin:* db.003.pin:* db.004.pin:* db.005.pin:* db.006.pin:* db.007.pin:* db.008.pin:* db.009.pin:* db.010.pin:* db.011.pin:* db.012.pin:* db.013.pin:* db.014.pin:* db.015.pin:* db.016.pin:* db.017.pin:* db.018.pin:* db.019.pin:* db.020.pin:* db.021.pin:* db.022.pin:* db.023.pin:* db.024.pin:* db.025.pin:* db.026.pin:* db.027.pin:* db.028.pin:* db.029.pin:* db.030.pin:* db.031.pin:* db.032.pin:* db.033.pin:* db.034.pin:* db.035.pin:* db.036.pin:* db.037.pin:* db.038.pin:* db.039.pin:* db.040.pin:* db.041.pin:* db.042.pin:* db.043.pin:* db.044.pin:* db.045.pin:* db.046.pin:* db.047.pin:* db.048.pin:* db.049.pin:* db.050.pin:* db.051.pin:* db.052.pin:* db.053.pin:* db.054.pin:* db.055.pin:* db.056.pin:* db.057.pin:* db.058.pin:* db.059.pin:* db.060.pin:* db.061.pin:* db.062.pin:* db.063.pin:* db.064.pin:* db.065.pin:* db.066.pin:* db.067.pin:* db.068.pin:* db.069.pin:* db.070.pin:* db.071.pin:* db.072.pin:* db.073.pin:* db.074.pin:* db.075.pin:* db.076.pin:* db.077.pin:* db.078.pin:* db.079.pin:* db.080.pin:* db.081.pin:* db.082.pin:* db.083.pin:* db.084.pin:* db.085.pin:* db.086.pin:* db.087.pin:* db.088.pin:* db.089.pin:* db.090.pin:* db.091.pin:* db.092.pin:* db.093.pin:* db.094.pin:* db.095.pin:* db.096.pin:* db.097.pin:* db.098.pin:* db.099.pin:* db.100.pin:* db.101.pin:* db.102.pin:* db.103.pin:* db.104.pin:* db.105.pin:* db.106.pin:* db.107.pin:* db.108.pin:* db.109.pin:* db.110.pin:* db.111.pin:* db.112.pin:* db.113.pin:* db.114.pin:* db.115.pin:* db.116.pin:* db.117.pin:* db.118.pin:* db.119.pin:* db.120.pin:* db.121.pin:* db.122.pin:* db.123.pin:* db.124.pin:* db.125.pin:* db.126.pin:* db.127.pin:* db.128.pin:* db.129.pin:* db.pal:* db.pjs:*
+pjs	{\n  "version": "1.2",\n  "dbname": "db",\n  "dbtype": "Protein",\n  "db-version": 4,\n  "descriptio
+case	m6	100
+rc	2
+err	BLAST Database error: Could not find volume or alias file (db.00) referenced in alias file (<D>/o/db).\n
+out	\n\nBuilding a new DB, current time: <T>\nNew DB name:   <D>/o/db\nNew DB title:  in.fa\nSequence type: Protein\nKeep MBits: T\nMaximum file size: 0B\nAdding sequences from FASTA; added 130 sequences in <S> seconds.\n\n\n
+files	781 db.000.pin:* db.001.pin:* db.002.pin:* db.003.pin:* db.004.pin:* db.005.pin:* db.006.pin:* db.007.pin:* db.008.pin:* db.009.pin:* db.010.pin:* db.011.pin:* db.012.pin:* db.013.pin:* db.014.pin:* db.015.pin:* db.016.pin:* db.017.pin:* db.018.pin:* db.019.pin:* db.020.pin:* db.021.pin:* db.022.pin:* db.023.pin:* db.024.pin:* db.025.pin:* db.026.pin:* db.027.pin:* db.028.pin:* db.029.pin:* db.030.pin:* db.031.pin:* db.032.pin:* db.033.pin:* db.034.pin:* db.035.pin:* db.036.pin:* db.037.pin:* db.038.pin:* db.039.pin:* db.040.pin:* db.041.pin:* db.042.pin:* db.043.pin:* db.044.pin:* db.045.pin:* db.046.pin:* db.047.pin:* db.048.pin:* db.049.pin:* db.050.pin:* db.051.pin:* db.052.pin:* db.053.pin:* db.054.pin:* db.055.pin:* db.056.pin:* db.057.pin:* db.058.pin:* db.059.pin:* db.060.pin:* db.061.pin:* db.062.pin:* db.063.pin:* db.064.pin:* db.065.pin:* db.066.pin:* db.067.pin:* db.068.pin:* db.069.pin:* db.070.pin:* db.071.pin:* db.072.pin:* db.073.pin:* db.074.pin:* db.075.pin:* db.076.pin:* db.077.pin:* db.078.pin:* db.079.pin:* db.080.pin:* db.081.pin:* db.082.pin:* db.083.pin:* db.084.pin:* db.085.pin:* db.086.pin:* db.087.pin:* db.088.pin:* db.089.pin:* db.090.pin:* db.091.pin:* db.092.pin:* db.093.pin:* db.094.pin:* db.095.pin:* db.096.pin:* db.097.pin:* db.098.pin:* db.099.pin:* db.100.pin:* db.101.pin:* db.102.pin:* db.103.pin:* db.104.pin:* db.105.pin:* db.106.pin:* db.107.pin:* db.108.pin:* db.109.pin:* db.110.pin:* db.111.pin:* db.112.pin:* db.113.pin:* db.114.pin:* db.115.pin:* db.116.pin:* db.117.pin:* db.118.pin:* db.119.pin:* db.120.pin:* db.121.pin:* db.122.pin:* db.123.pin:* db.124.pin:* db.125.pin:* db.126.pin:* db.127.pin:* db.128.pin:* db.129.pin:* db.pal:*
+pjs	
+case	m6	111
+rc	2
+err	BLAST Database error: Error: File (<D>/o/db.pin) not found.\n
+out	\n\nBuilding a new DB, current time: <T>\nNew DB name:   <D>/o/db\nNew DB title:  in.fa\nSequence type: Protein\nKeep MBits: T\nMaximum file size: 0B\nAdding sequences from FASTA; added 130 sequences in <S> seconds.\n\n\n
+files	781 db.000.pin:* db.001.pin:* db.002.pin:* db.003.pin:* db.004.pin:* db.005.pin:* db.006.pin:* db.007.pin:* db.008.pin:* db.009.pin:* db.010.pin:* db.011.pin:* db.012.pin:* db.013.pin:* db.014.pin:* db.015.pin:* db.016.pin:* db.017.pin:* db.018.pin:* db.019.pin:* db.020.pin:* db.021.pin:* db.022.pin:* db.023.pin:* db.024.pin:* db.025.pin:* db.026.pin:* db.027.pin:* db.028.pin:* db.029.pin:* db.030.pin:* db.031.pin:* db.032.pin:* db.033.pin:* db.034.pin:* db.035.pin:* db.036.pin:* db.037.pin:* db.038.pin:* db.039.pin:* db.040.pin:* db.041.pin:* db.042.pin:* db.043.pin:* db.044.pin:* db.045.pin:* db.046.pin:* db.047.pin:* db.048.pin:* db.049.pin:* db.050.pin:* db.051.pin:* db.052.pin:* db.053.pin:* db.054.pin:* db.055.pin:* db.056.pin:* db.057.pin:* db.058.pin:* db.059.pin:* db.060.pin:* db.061.pin:* db.062.pin:* db.063.pin:* db.064.pin:* db.065.pin:* db.066.pin:* db.067.pin:* db.068.pin:* db.069.pin:* db.070.pin:* db.071.pin:* db.072.pin:* db.073.pin:* db.074.pin:* db.075.pin:* db.076.pin:* db.077.pin:* db.078.pin:* db.079.pin:* db.080.pin:* db.081.pin:* db.082.pin:* db.083.pin:* db.084.pin:* db.085.pin:* db.086.pin:* db.087.pin:* db.088.pin:* db.089.pin:* db.090.pin:* db.091.pin:* db.092.pin:* db.093.pin:* db.094.pin:* db.095.pin:* db.096.pin:* db.097.pin:* db.098.pin:* db.099.pin:* db.100.pin:* db.101.pin:* db.102.pin:* db.103.pin:* db.104.pin:* db.105.pin:* db.106.pin:* db.107.pin:* db.108.pin:* db.109.pin:* db.110.pin:* db.111.pin:* db.112.pin:* db.113.pin:* db.114.pin:* db.115.pin:* db.116.pin:* db.117.pin:* db.118.pin:* db.119.pin:* db.120.pin:* db.121.pin:* db.122.pin:* db.123.pin:* db.124.pin:* db.125.pin:* db.126.pin:* db.127.pin:* db.128.pin:* db.129.pin:* db.pal:*
+pjs	
+case	p4	24
+rc	255
+err	Error: NCBI C++ Exception:\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/corelib/ncbitime.cpp", line 865: Error: (CTimeException::eFormat) ncbi::CTime::x_Init() - Time string '<DATE>' is too short for time format 'b d, Y  H:m P'\n\n
+out	\n\nBuilding a new DB, current time: <T>\nNew DB name:   <D>/o/db\nNew DB title:  in.fa\nSequence type: Protein\nKeep MBits: T\nMaximum file size: 3000000000B\nAdding sequences from FASTA; added 3 sequences in <S> seconds.\n\n\n
+files	10 db.pin:*
+pjs	
+case	p4	25
+rc	255
+err	Error: NCBI C++ Exception:\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/corelib/ncbistr.cpp", line 861: Error: (CStringException::eConvert) ncbi::NStr::StringToInt8() - Cannot convert string '' to Int8 (m_Pos = 0)\n\n
+out	\n\nBuilding a new DB, current time: <T>\nNew DB name:   <D>/o/db\nNew DB title:  in.fa\nSequence type: Protein\nKeep MBits: T\nMaximum file size: 3000000000B\nAdding sequences from FASTA; added 3 sequences in <S> seconds.\n\n\n
+files	10 db.pin:*
+pjs	
+case	n4	0
+rc	-11
+err	
+out	\n\nBuilding a new DB, current time: <T>\nNew DB name:   <D>/o/db\nNew DB title:  in.fa\nSequence type: Nucleotide\nKeep MBits: T\nMaximum file size: 3000000000B\nAdding sequences from FASTA; added 6 sequences in <S> seconds.\n\n\n
+files	6 db.nin:*
+pjs	
+case	n4	7
+rc	6
+err	Error: (802.5) [makeblastdb] CObjectOStream: error at byte 354: stack is empty: cannot close output stream\nError: (CIOException::eFlush) [makeblastdb] COStreamBuffer::Flush: failed\nError: (CSerialException::eIoError) [makeblastdb] byte 354: cannot close output stream\nError: (802.4) [makeblastdb] Cannot close serializing output stream (CSerialException::eIoError) byte 354: cannot close output stream\nBLAST failed to write output: COStreamBuffer::Flush: failed\n
+out	\n\nBuilding a new DB, current time: <T>\nNew DB name:   <D>/o/db\nNew DB title:  in.fa\nSequence type: Nucleotide\nKeep MBits: T\nMaximum file size: 3000000000B\nAdding sequences from FASTA; added 6 sequences in <S> seconds.\n\n\n
+files	7 db.nin:* db.njs:*
+pjs	{\n  "ve
+case	n4	25
+rc	255
+err	Error: NCBI C++ Exception:\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/corelib/ncbistr.cpp", line 861: Error: (CStringException::eConvert) ncbi::NStr::StringToInt8() - Cannot convert string '' to Int8 (m_Pos = 0)\n\n
+out	\n\nBuilding a new DB, current time: <T>\nNew DB name:   <D>/o/db\nNew DB title:  in.fa\nSequence type: Nucleotide\nKeep MBits: T\nMaximum file size: 3000000000B\nAdding sequences from FASTA; added 6 sequences in <S> seconds.\n\n\n
+files	6 db.nin:*
+pjs	
+case	m6	95	d1
+rc	2
+err	BLAST Database error: Could not find volume or alias file (d) referenced in alias file (<D>/o/db).\n
+out	\n\nBuilding a new DB, current time: <T>\nNew DB name:   <D>/o/db\nNew DB title:  in.fa\nSequence type: Protein\nKeep MBits: T\nMaximum file size: 0B\nAdding sequences from FASTA; added 130 sequences in <S> seconds.\n\n\n
+files	781 db.000.pin:* db.001.pin:* db.002.pin:* db.003.pin:* db.004.pin:* db.005.pin:* db.006.pin:* db.007.pin:* db.008.pin:* db.009.pin:* db.010.pin:* db.011.pin:* db.012.pin:* db.013.pin:* db.014.pin:* db.015.pin:* db.016.pin:* db.017.pin:* db.018.pin:* db.019.pin:* db.020.pin:* db.021.pin:* db.022.pin:* db.023.pin:* db.024.pin:* db.025.pin:* db.026.pin:* db.027.pin:* db.028.pin:* db.029.pin:* db.030.pin:* db.031.pin:* db.032.pin:* db.033.pin:* db.034.pin:* db.035.pin:* db.036.pin:* db.037.pin:* db.038.pin:* db.039.pin:* db.040.pin:* db.041.pin:* db.042.pin:* db.043.pin:* db.044.pin:* db.045.pin:* db.046.pin:* db.047.pin:* db.048.pin:* db.049.pin:* db.050.pin:* db.051.pin:* db.052.pin:* db.053.pin:* db.054.pin:* db.055.pin:* db.056.pin:* db.057.pin:* db.058.pin:* db.059.pin:* db.060.pin:* db.061.pin:* db.062.pin:* db.063.pin:* db.064.pin:* db.065.pin:* db.066.pin:* db.067.pin:* db.068.pin:* db.069.pin:* db.070.pin:* db.071.pin:* db.072.pin:* db.073.pin:* db.074.pin:* db.075.pin:* db.076.pin:* db.077.pin:* db.078.pin:* db.079.pin:* db.080.pin:* db.081.pin:* db.082.pin:* db.083.pin:* db.084.pin:* db.085.pin:* db.086.pin:* db.087.pin:* db.088.pin:* db.089.pin:* db.090.pin:* db.091.pin:* db.092.pin:* db.093.pin:* db.094.pin:* db.095.pin:* db.096.pin:* db.097.pin:* db.098.pin:* db.099.pin:* db.100.pin:* db.101.pin:* db.102.pin:* db.103.pin:* db.104.pin:* db.105.pin:* db.106.pin:* db.107.pin:* db.108.pin:* db.109.pin:* db.110.pin:* db.111.pin:* db.112.pin:* db.113.pin:* db.114.pin:* db.115.pin:* db.116.pin:* db.117.pin:* db.118.pin:* db.119.pin:* db.120.pin:* db.121.pin:* db.122.pin:* db.123.pin:* db.124.pin:* db.125.pin:* db.126.pin:* db.127.pin:* db.128.pin:* db.129.pin:* db.pal:*
+pjs	
+case	m6	100	d1
+rc	6
+err	Error: (802.5) [makeblastdb] CObjectOStream: error at byte 850: stack is empty: cannot close output stream\nError: (CIOException::eFlush) [makeblastdb] COStreamBuffer::Flush: failed\nError: (CSerialException::eIoError) [makeblastdb] byte 850: cannot close output stream\nError: (802.4) [makeblastdb] Cannot close serializing output stream (CSerialException::eIoError) byte 850: cannot close output stream\nBLAST failed to write output: COStreamBuffer::Flush: failed\n
+out	\n\nBuilding a new DB, current time: <T>\nNew DB name:   <D>/o/db\nNew DB title:  in.fa\nSequence type: Protein\nKeep MBits: T\nMaximum file size: 0B\nAdding sequences from FASTA; added 130 sequences in <S> seconds.\n\n\n
+files	782 db.000.pin:* db.001.pin:* db.002.pin:* db.003.pin:* db.004.pin:* db.005.pin:* db.006.pin:* db.007.pin:* db.008.pin:* db.009.pin:* db.010.pin:* db.011.pin:* db.012.pin:* db.013.pin:* db.014.pin:* db.015.pin:* db.016.pin:* db.017.pin:* db.018.pin:* db.019.pin:* db.020.pin:* db.021.pin:* db.022.pin:* db.023.pin:* db.024.pin:* db.025.pin:* db.026.pin:* db.027.pin:* db.028.pin:* db.029.pin:* db.030.pin:* db.031.pin:* db.032.pin:* db.033.pin:* db.034.pin:* db.035.pin:* db.036.pin:* db.037.pin:* db.038.pin:* db.039.pin:* db.040.pin:* db.041.pin:* db.042.pin:* db.043.pin:* db.044.pin:* db.045.pin:* db.046.pin:* db.047.pin:* db.048.pin:* db.049.pin:* db.050.pin:* db.051.pin:* db.052.pin:* db.053.pin:* db.054.pin:* db.055.pin:* db.056.pin:* db.057.pin:* db.058.pin:* db.059.pin:* db.060.pin:* db.061.pin:* db.062.pin:* db.063.pin:* db.064.pin:* db.065.pin:* db.066.pin:* db.067.pin:* db.068.pin:* db.069.pin:* db.070.pin:* db.071.pin:* db.072.pin:* db.073.pin:* db.074.pin:* db.075.pin:* db.076.pin:* db.077.pin:* db.078.pin:* db.079.pin:* db.080.pin:* db.081.pin:* db.082.pin:* db.083.pin:* db.084.pin:* db.085.pin:* db.086.pin:* db.087.pin:* db.088.pin:* db.089.pin:* db.090.pin:* db.091.pin:* db.092.pin:* db.093.pin:* db.094.pin:* db.095.pin:* db.096.pin:* db.097.pin:* db.098.pin:* db.099.pin:* db.100.pin:* db.101.pin:* db.102.pin:* db.103.pin:* db.104.pin:* db.105.pin:* db.106.pin:* db.107.pin:* db.108.pin:* db.109.pin:* db.110.pin:* db.111.pin:* db.112.pin:* db.113.pin:* db.114.pin:* db.115.pin:* db.116.pin:* db.117.pin:* db.118.pin:* db.119.pin:* db.120.pin:* db.121.pin:* db.122.pin:* db.123.pin:* db.124.pin:* db.125.pin:* db.126.pin:* db.127.pin:* db.128.pin:* db.129.pin:* db.pal:* db.pjs:*
+pjs	{\n  "version": "1.2",\n  "dbname": "db",\n  "dbtype": "Protein",\n  "db-version": 4,\n  "description": "
+case	m6	111	d1
+rc	2
+err	BLAST Database error: Could not find volume or alias file (db.) referenced in alias file (<D>/o/db).\n
+out	\n\nBuilding a new DB, current time: <T>\nNew DB name:   <D>/o/db\nNew DB title:  in.fa\nSequence type: Protein\nKeep MBits: T\nMaximum file size: 0B\nAdding sequences from FASTA; added 130 sequences in <S> seconds.\n\n\n
+files	781 db.000.pin:* db.001.pin:* db.002.pin:* db.003.pin:* db.004.pin:* db.005.pin:* db.006.pin:* db.007.pin:* db.008.pin:* db.009.pin:* db.010.pin:* db.011.pin:* db.012.pin:* db.013.pin:* db.014.pin:* db.015.pin:* db.016.pin:* db.017.pin:* db.018.pin:* db.019.pin:* db.020.pin:* db.021.pin:* db.022.pin:* db.023.pin:* db.024.pin:* db.025.pin:* db.026.pin:* db.027.pin:* db.028.pin:* db.029.pin:* db.030.pin:* db.031.pin:* db.032.pin:* db.033.pin:* db.034.pin:* db.035.pin:* db.036.pin:* db.037.pin:* db.038.pin:* db.039.pin:* db.040.pin:* db.041.pin:* db.042.pin:* db.043.pin:* db.044.pin:* db.045.pin:* db.046.pin:* db.047.pin:* db.048.pin:* db.049.pin:* db.050.pin:* db.051.pin:* db.052.pin:* db.053.pin:* db.054.pin:* db.055.pin:* db.056.pin:* db.057.pin:* db.058.pin:* db.059.pin:* db.060.pin:* db.061.pin:* db.062.pin:* db.063.pin:* db.064.pin:* db.065.pin:* db.066.pin:* db.067.pin:* db.068.pin:* db.069.pin:* db.070.pin:* db.071.pin:* db.072.pin:* db.073.pin:* db.074.pin:* db.075.pin:* db.076.pin:* db.077.pin:* db.078.pin:* db.079.pin:* db.080.pin:* db.081.pin:* db.082.pin:* db.083.pin:* db.084.pin:* db.085.pin:* db.086.pin:* db.087.pin:* db.088.pin:* db.089.pin:* db.090.pin:* db.091.pin:* db.092.pin:* db.093.pin:* db.094.pin:* db.095.pin:* db.096.pin:* db.097.pin:* db.098.pin:* db.099.pin:* db.100.pin:* db.101.pin:* db.102.pin:* db.103.pin:* db.104.pin:* db.105.pin:* db.106.pin:* db.107.pin:* db.108.pin:* db.109.pin:* db.110.pin:* db.111.pin:* db.112.pin:* db.113.pin:* db.114.pin:* db.115.pin:* db.116.pin:* db.117.pin:* db.118.pin:* db.119.pin:* db.120.pin:* db.121.pin:* db.122.pin:* db.123.pin:* db.124.pin:* db.125.pin:* db.126.pin:* db.127.pin:* db.128.pin:* db.129.pin:* db.pal:*
+pjs	

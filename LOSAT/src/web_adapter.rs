@@ -125,6 +125,10 @@ pub use crate::api::input::{parse_deflines_of, read_search_inputs};
 pub use crate::blastinput::fasta_reader::{
     read_all, FastaInputSource, ParseErrorCode, ReadError, ReaderConfig, RecordSource,
 };
+// The reader's own counts for LOSAT Web's index scan (`web/adapter/src/scan/ncbi.rs`), which reads
+// the inputs as the reader does without holding their letters: the letters of a `>?` gap line and
+// the refusal of a record longer than LOSAT reads.
+pub use crate::blastinput::fasta_reader::{gap_line_letters, record_too_long, MAX_RECORD_LETTERS};
 pub use crate::blastinput::input_files::is_blank;
 
 /// The options of `program`'s command line that the browser's searches of records do not take:

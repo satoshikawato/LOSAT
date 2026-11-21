@@ -85,19 +85,25 @@ impl RequestInputs<'_> {
     /// Whether `encoding` writes the strings of the request's Bioseqs and Seq-locs as they are
     /// (`BioseqInput::written_as_is`); the `LCaseMask` parameters, the masks and the Seq-aligns
     /// of the archive hold the same Seq-ids (the subjects of `-db` have the database's, which
-    /// its reader refuses or replaces where NCBI would post). A PSSM query's strings are visible
-    /// ASCII, written as they are: NCBI's reader of `-in_pssm` replaces any other byte by `#`, with
-    /// its own error message, before the request is made (`CObjectIStreamAsn`), and LOSAT refuses
-    /// such a PSSM where it reads it (`pssm_search::in_pssm::psi_search_and_object`).
+    /// its reader refuses or replaces where NCBI would post). The strings of a PSSM query are
+    /// those of the PSSM's own text document (`pssm::asn_text_with_karlin`: one owner of what the
+    /// ASN.1 text stream replaces): an `-in_pssm` file's are visible ASCII (NCBI's reader replaces
+    /// any other byte before the request is made), a title that `-in_msa` takes from a defline
+    /// need not be. The PSSM is only ever a strategy file's (ASN.1 text) here.
     pub fn written_as_is(&self, encoding: ArchiveEncoding) -> bool {
-        let queries = match self.queries {
-            RequestQueries::Bioseqs(queries) => queries,
-            RequestQueries::Pssm(_) => &[],
+        let (queries, pssm_as_is) = match self.queries {
+            RequestQueries::Bioseqs(queries) => (queries, true),
+            RequestQueries::Pssm(pssm) => (
+                &[][..],
+                encoding != ArchiveEncoding::Text
+                    || crate::report::serial::pssm::asn_text_with_karlin(pssm, None).is_ok(),
+            ),
         };
-        queries
-            .iter()
-            .chain(self.subjects)
-            .all(|bioseq| bioseq.written_as_is(encoding))
+        pssm_as_is
+            && queries
+                .iter()
+                .chain(self.subjects)
+                .all(|bioseq| bioseq.written_as_is(encoding))
     }
 }
 

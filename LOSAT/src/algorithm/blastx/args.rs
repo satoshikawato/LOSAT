@@ -507,7 +507,7 @@ pub struct ResolvedOptions {
     /// `-show_gis`: the labels of the query-anchored sections (outfmt 1 to 4) show a sequence's GI.
     pub show_gis: bool,
     /// The tabular report with a field list or a delimiter (outfmt 6 and 7), or outfmt 10 or
-    /// 20 (`TabularSpec::of`); `None` for the default outfmt 6 and 7 (the `std` fields and a
+    /// 20 (`TabularSpec::of_app`); `None` for the default outfmt 6 and 7 (the `std` fields and a
     /// tab, `TabularSpec::std`, which the reports write with the same shared writer, `tabular.rs`)
     /// and the other formats.
     pub tabular: Option<&'static crate::report::tabular::TabularSpec>,
@@ -759,19 +759,15 @@ impl BlastxArgs {
         let hitlist_size = counts.hitlist_size as i32;
         // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:250
         // rpstblastn_app.cpp does not set it (as rpsblast's and psiblast's apps): its tabular
-        // formats keep their own delimiter, the tab or the comma (`delim=` is still checked).
-        let without_delimiter;
-        let choice = if self.rpstblastn.is_some() && !choice.delimiter.is_empty() {
-            without_delimiter = crate::blastinput::app::FormatChoice {
-                delimiter: String::new(),
-                ..choice.clone()
-            };
-            &without_delimiter
+        // formats keep their own delimiter, the tab or the comma (`TabularSpec::of_app`;
+        // `delim=` is still checked).
+        let app = if self.rpstblastn.is_some() {
+            crate::report::archive::options::RequestKind::Rpstblastn
         } else {
-            choice
+            crate::report::archive::options::RequestKind::Blastx
         };
         let tabular = crate::blastinput::app::ReportFormat::from_number(choice.number)
-            .and_then(|format| crate::report::tabular::TabularSpec::of(format, choice))
+            .and_then(|format| crate::report::tabular::TabularSpec::of_app(format, choice, app))
             .map(crate::report::tabular::TabularSpec::intern);
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:43-70 (the
         // preliminary hit list size through NCBI's `int`; `blastn/hsp.rs`)

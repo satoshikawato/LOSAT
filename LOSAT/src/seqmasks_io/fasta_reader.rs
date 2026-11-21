@@ -302,9 +302,7 @@ fn iupac_letters<R: Read>(inst: SeqInst, reader: &mut FastaReader<R>) -> Vec<u8>
             seq_data: SeqData::Ncbieaa(mut residues),
             ..
         } => {
-            for residue in &mut residues {
-                *residue = ncbieaa_to_iupacaa(*residue);
-            }
+            iupacaa_letters(&mut residues);
             residues
         }
         SeqInst::Raw {
@@ -391,6 +389,16 @@ const IUPACNA_FROM: [[u8; 256]; 2] = {
     }
     table
 };
+
+/// Replaces each NCBIeaa residue of a protein by its IUPACaa letter. Out of line: inlined into
+/// the reader, LTO vectorized the loop at half the width of its own function (segmasker on
+/// proteins, 0.05 % more instructions than the copy it replaces).
+#[inline(never)]
+fn iupacaa_letters(residues: &mut [u8]) {
+    for residue in residues {
+        *residue = ncbieaa_to_iupacaa(*residue);
+    }
+}
 
 /// The IUPACaa letter of an NCBIeaa residue of the reader (a letter, `*` or `-`): the
 /// `ncbieaa` to `iupacaa` map of NCBI's code tables, from `*` (42) on.

@@ -259,8 +259,9 @@ pub struct OptionInputs {
     pub ungapped: bool,
     /// `-no_greedy` (BLASTN): the dynamic programming algorithms are recorded.
     pub no_greedy: bool,
-    /// The database whose MegaBLAST index a BLASTN run asked for and did not use (`-use_index
-    /// true`, `-db`, task megablast; `blastn::blast_engine::run` `megablast_index`).
+    /// The name of the MegaBLAST index that a BLASTN run asked for and did not use (`-use_index
+    /// true`, task megablast: the `-index_name` value, else `-db`;
+    /// `blastn::blast_engine::mb_index`).
     pub mb_index_name: Option<String>,
     pub max_intron_length: i32,
     pub query_gencode: i32,
@@ -811,11 +812,14 @@ pub fn algorithm_options(inputs: &OptionInputs) -> Vec<Param> {
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_cxx.cpp:2619-2632
             // `CMbIndexArgs` sets both (`force_index` true, the `-db` name); the index that
             // does not load sets `SetUseIndex(false)` (api/setup_factory.cpp:455-459), whose
-            // defaults make the first FALSE in its place and leave the name.
+            // defaults make the first FALSE in its place and leave the name. An empty name
+            // (`-index_name ''`) is not set.
             Class::MbIndex => {
                 if let Some(name) = &inputs.mb_index_name {
                     list.set("ForceMbIndex", Boolean(false));
-                    list.set("MbIndexName", Str(name.clone()));
+                    if !name.is_empty() {
+                        list.set("MbIndexName", Str(name.clone()));
+                    }
                 }
             }
             Class::Gapped => list.set("UngappedMode", Boolean(inputs.ungapped)),

@@ -383,6 +383,12 @@ fn run_queries(
                     .psi_search
                     .as_deref()
                     .and_then(|psi| psi.bioseq_letters.clone());
+                // And its molecule: a query of the molecule `other` is unreadable for the
+                // reports of every round (`PsiSearch::query_other_coding`).
+                search.query_other_coding = args
+                    .psi_search
+                    .as_deref()
+                    .and_then(|psi| psi.query_other_coding);
                 // A query that NCBI splits: round 1's query, which the round searches, and the query
                 // of its set-up (`RoundQuery::split`).
                 let (query_now, split_setup) = if split {
@@ -766,7 +772,7 @@ fn write_round_epilogs(
             _ => continue,
         }
         let report = crate::report::BlastpPairwiseReport {
-            version: crate::NCBI_BLAST_VERSION.to_string(),
+            version: crate::wording::REPORT_VERSION.to_string(),
             database_name: blastp_database_name(args, subject_label).into(),
             database_num_sequences: num_sequences,
             database_total_letters: total_letters,
@@ -1007,7 +1013,8 @@ impl SubjectKeys<'_> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:445-450
     /// NCBI's warning for each Seq-align whose letters the PSSM cannot read, by subject
     /// (`query_pssm`'s `unread`): the Seq-align id as a FASTA string, each with its subject. Only
-    /// subjects with parsed Seq-ids can fail to be read.
+    /// a database's subjects can fail to be read: one with parsed Seq-ids by that id, one without
+    /// them by its ordinal id `gnl|BL_ORD_ID|<oid>` where its load throws (`PssmReads`).
     pub(super) fn unread_warnings(
         &self,
         program: &str,
@@ -1015,18 +1022,26 @@ impl SubjectKeys<'_> {
         out: &mut crate::algorithm::psiblast::pssm::PssmReadMessages,
     ) {
         for &s_idx in unread {
-            if let Some(subject) = self.parsed.get(s_idx as usize).and_then(Option::as_deref) {
-                let mut text = b"Failed to retrieve sequence ".to_vec();
-                text.extend_from_slice(&subject.alignment_fasta());
-                // A post of NCBI's main thread (`ncbi_exception::post_line`).
-                let line = crate::ncbi_exception::post_line(
-                    crate::ncbi_exception::Severity::Warning,
-                    None,
-                    Some(program),
-                    &text,
-                );
-                out.push(s_idx, line);
-            }
+            let id = match self.parsed.get(s_idx as usize).and_then(Option::as_deref) {
+                Some(subject) => subject.alignment_fasta(),
+                None => match self.listed_ordinals {
+                    Some((ordinals, oids)) => {
+                        format!("gnl|BL_ORD_ID|{}", oids.oid(ordinals[s_idx as usize]).get())
+                            .into_bytes()
+                    }
+                    None => continue,
+                },
+            };
+            let mut text = b"Failed to retrieve sequence ".to_vec();
+            text.extend_from_slice(&id);
+            // A post of NCBI's main thread (`ncbi_exception::post_line`).
+            let line = crate::ncbi_exception::post_line(
+                crate::ncbi_exception::Severity::Warning,
+                None,
+                Some(program),
+                &text,
+            );
+            out.push(s_idx, line);
         }
     }
     pub(super) fn key(&self, s_idx: u32) -> SetKey {

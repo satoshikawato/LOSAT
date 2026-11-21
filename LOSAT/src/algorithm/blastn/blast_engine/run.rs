@@ -6,6 +6,7 @@
 use crate::api::local_blast::{FormatOutput, FormatProbe, OutputSink, ReportOutputs};
 use crate::common::GapEditOp;
 use crate::utils::glibc_fma_libm::GlibcLibm;
+use crate::wording::{ENGINE_ERROR, QUERY_OPTIONS_ERROR};
 use anyhow::{Context, Result};
 use std::sync::Arc;
 
@@ -154,6 +155,10 @@ mod x_rpt_stream;
 // types).
 #[path = "database.rs"]
 mod database;
+// `-use_index true`: NCBI's loader of the MegaBLAST database index, its error lines and its
+// warning, and LOSAT's refusal of an index that NCBI searches with (line RG item D5b).
+#[path = "mb_index.rs"]
+mod mb_index;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_culling.c (whole file)
 // BLASTN `-culling_limit`: the culling writer of the preliminary stage and the culling pipe of
@@ -4961,7 +4966,7 @@ fn blastn_pairwise_report(
     // The defaults are 500 descriptions and 250 alignments (format_flags.cpp:219,221).
     let (num_descriptions, num_alignments) = (report.num_descriptions, report.num_alignments);
     let pairwise_report = BlastnPairwiseReport {
-        version: crate::NCBI_BLAST_VERSION.to_string(),
+        version: crate::wording::REPORT_VERSION.to_string(),
         intro: BlastnIntro {
             megablast: report.megablast,
             matrix_only: report.matrix_only,
@@ -5267,7 +5272,7 @@ fn finish_query_hit_list(
             hit_list,
             query_len,
             culling_limit,
-            usize::try_from(get_prelim_hitlist_size(hitlist_size, false, !ungapped)).unwrap_or(0),
+            get_prelim_hitlist_size(hitlist_size, false, !ungapped),
         );
     }
     // NCBI's best hit pipe is there in its place (`-best_hit_overhang`, `-best_hit_score_edge`;
@@ -5278,7 +5283,7 @@ fn finish_query_hit_list(
             hit_list,
             query_len,
             params,
-            usize::try_from(get_prelim_hitlist_size(hitlist_size, false, !ungapped)).unwrap_or(0),
+            get_prelim_hitlist_size(hitlist_size, false, !ungapped),
         );
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:836-867
@@ -6165,7 +6170,10 @@ pub fn run(
     // theirs (probe F04 of line DI-8), and a list error leaves no `-out`, only the error archive
     // that NCBI's `PrintErrorArchive` writes for outfmt 11 (probe E of line DI-8).
     let list = match args.database_name() {
-        Some(_) => match args.db_filter.resolve(&settings, &mut *diagnostics) {
+        Some(_) => match args
+            .db_filter
+            .resolve(&settings, "blastn", &mut *diagnostics)
+        {
             Ok(list) => list,
             Err(error) => {
                 write_run_error_archive(&args, archive.as_ref(), &error);
@@ -6354,7 +6362,7 @@ fn read_cli_subjects(
         return Err(crate::cli::NativeError {
             exit: 1,
             message: format!(
-                "BLAST query/options error: Either a BLAST database or subject sequence(s) must be specified\n{}\n",
+                "{QUERY_OPTIONS_ERROR} Either a BLAST database or subject sequence(s) must be specified\n{}\n",
                 crate::wording::USER_MANUAL_FOOTER
             ).into(),
         }
@@ -6746,7 +6754,7 @@ pub(crate) fn check_subjects_not_empty<R>(subjects: &[R]) -> Result<()> {
     if subjects.is_empty() {
         return Err(crate::cli::NativeError {
             exit: 3,
-            message: "BLAST engine error: Empty CBlastQueryVector\n".into(),
+            message: format!("{ENGINE_ERROR} Empty CBlastQueryVector\n").into(),
         }
         .into());
     }
@@ -7073,10 +7081,11 @@ pub(crate) fn repeat_search_hits(
     result.map_err(|error| match error.downcast::<crate::cli::NativeError>() {
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:650-651
         // The search's set-up that finds no valid query stops with its messages, which the
-        // command line writes after `BLAST engine error: `.
+        // command line writes after its prefix (`ENGINE_ERROR`, NCBI's `BLAST engine error:`).
         Ok(native) => match native
             .message
-            .strip_prefix(b"BLAST engine error: ")
+            .strip_prefix(ENGINE_ERROR.as_bytes())
+            .and_then(|text| text.strip_prefix(b" "))
             .and_then(|text| text.strip_suffix(b"\n"))
         {
             Some(text) if native.exit == 3 => RepeatError::Posted(text.to_vec()),
@@ -7100,7 +7109,7 @@ fn search_database(
     // The handler of the database arguments reads the list before the other handlers (`run`).
     let list = args
         .db_filter
-        .resolve(&settings, &mut *outputs.diagnostics)?;
+        .resolve(&settings, "blastn", &mut *outputs.diagnostics)?;
     // `-out` (`run_to_file`) is made where the command line opens it (`run`).
     outputs.open_out()?;
     args.resolve_dust()?;
@@ -7147,103 +7156,6 @@ enum SearchQueries<'a> {
     Taken(&'a x_query_drop::Store),
 }
 
-/// What `-use_index true` found (`megablast_index`).
-enum MegablastIndex {
-    /// NCBI does not ask for an index (`BlastnArgs::megablast_index_name`), or asked, found
-    /// none, warned and searches without one.
-    NotAsked,
-    /// A file of the database's index: NCBI searches with the index, which LOSAT does not.
-    Found(std::path::PathBuf),
-    /// A `-db` value with a comma, which NCBI's loader of old-style indices reads as a range of
-    /// index volumes (`blast_dbindex.cpp:964-995`) that LOSAT does not read.
-    VolumeRange,
-}
-
-impl MegablastIndex {
-    /// LOSAT's refusal of a search that NCBI runs with a MegaBLAST database index.
-    fn check(&self) -> Result<()> {
-        match self {
-            Self::NotAsked => Ok(()),
-            Self::Found(file) => anyhow::bail!(
-                "-use_index true with a database that has a MegaBLAST index ({}) is not supported by LOSAT's BLASTN",
-                file.display()
-            ),
-            Self::VolumeRange => anyhow::bail!(
-                "-use_index true with a -db value that has a comma (old-style index volumes) is not supported by LOSAT's BLASTN"
-            ),
-        }
-    }
-}
-
-// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:216-221
-// NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:447-459
-// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_dbindex.cpp:1145-1168
-/// `-use_index true` of a megablast search of `-db` (`BlastnArgs::megablast_index_name`): NCBI
-/// looks for the database's MegaBLAST index (new style, then old style). Without one it writes
-/// the two loaders' exceptions as one warning, with the source paths of the official Linux x64
-/// build as LOSAT's other NCBI exceptions (`NCBI_BUILD_ROOT`), and searches as without
-/// `-use_index`; the archive records the name (`report::archive::options`). With one, NCBI
-/// searches with the index, which LOSAT refuses (`MegablastIndex::check`).
-fn megablast_index(
-    args: &BlastnArgs,
-    database: &database::BlastnDatabase,
-    diagnostics: &mut (dyn std::io::Write + Send),
-) -> Result<MegablastIndex> {
-    let Some(index_name) = args.megablast_index_name() else {
-        return Ok(MegablastIndex::NotAsked);
-    };
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:440-446
-    // A megablast search with a template (`-template_type` and `-template_length`, which
-    // require each other) looks for no index.
-    let warning = if args.template_length.is_some() {
-        "Warning: (1.1) [blastn] Database indexing is not available for discontiguous searches. Database index will not be used.\n".as_bytes().to_vec()
-    } else {
-        if index_name.contains(',') {
-            return Ok(MegablastIndex::VolumeRange);
-        }
-        if let Some(file) = database.megablast_index_file(index_name) {
-            return Ok(MegablastIndex::Found(file));
-        }
-        use crate::ncbi_exception::{NcbiException, ThrowSite};
-        // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_dbindex.cpp:794-797
-        const NO_VOLUME_INDEX: ThrowSite = ThrowSite {
-            file: "src/algo/blast/api/blast_dbindex.cpp",
-            line: 795,
-            kind: "CDbIndex_Exception::bad index creation option",
-            function: Some("BLAST::ncbi::blast::CIndexedDb_New::CIndexedDb_New"),
-        };
-        // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_dbindex.cpp:1023-1027
-        const NO_INDEX_FILE: ThrowSite = ThrowSite {
-            file: "src/algo/blast/api/blast_dbindex.cpp",
-            line: 1026,
-            kind: "CDbIndex_Exception::bad index creation option",
-            function: Some("BLAST::ncbi::blast::CIndexedDb_Old::CIndexedDb_Old"),
-        };
-        let new_style = NcbiException::new(NO_VOLUME_INDEX, "no database volume has an index");
-        let old_style = NcbiException::new(
-            NO_INDEX_FILE,
-            format!("no index file specified or index '{index_name}*' not found."),
-        );
-        // `DbIndexInit`'s `result` (blast_dbindex.cpp:1145-1168): the new-style loader's
-        // `e.what()`, a line feed, the old-style loader's `e.what()`; `ERR_POST_EX` adds
-        // " Database index will not be used." (setup_factory.cpp:455).
-        [
-            b"Warning: (1.1) [blastn] ".as_slice(),
-            &new_style.what(),
-            b"\n",
-            &old_style.what(),
-            b" Database index will not be used.\n",
-        ]
-        .concat()
-    };
-    // One diagnostic: the archive saves it as one message.
-    match &args.archive {
-        Some(handle) => handle.write_warning(diagnostics, &warning)?,
-        None => diagnostics.write_all(&warning)?,
-    }
-    Ok(MegablastIndex::NotAsked)
-}
-
 #[allow(clippy::too_many_arguments)]
 fn search(
     mut args: BlastnArgs,
@@ -7273,11 +7185,13 @@ fn search(
         return Ok(());
     }
     // The database's MegaBLAST index that `-use_index true` asks for, after `Query is Empty!`
-    // and before the formatter (`megablast_index`); LOSAT's refusal of an index comes with its
-    // other limits below.
+    // and before the formatter (`mb_index::megablast_index`); LOSAT's refusal of an index comes
+    // with its other limits below.
     let megablast_index = match subjects {
-        Subjects::Database(database) => megablast_index(&args, database, outputs.diagnostics)?,
-        Subjects::Records(_) => MegablastIndex::NotAsked,
+        Subjects::Database(database) => {
+            mb_index::megablast_index(&args, database, outputs.diagnostics)?
+        }
+        Subjects::Records(_) => mb_index::MegablastIndex::NotUsed,
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:140-153 (cited at
     // `blastinput::db_mask::DbMaskOption::resolve`)
@@ -8159,7 +8073,7 @@ fn run_in_pool(
         write_pairwise_prologs(outputs, &output_formats, intro, &shown, false)?;
         return Err(crate::cli::NativeError {
             exit: 3,
-            message: "BLAST engine error: Empty CBlastQueryVector\n".into(),
+            message: format!("{ENGINE_ERROR} Empty CBlastQueryVector\n").into(),
         }
         .into());
     }
@@ -8368,7 +8282,7 @@ fn run_in_pool(
             batch_title_warnings.write(&mut *outputs.diagnostics, archive)?;
             return Err(crate::cli::NativeError {
                 exit: 3,
-                message: "BLAST engine error: Empty CBlastQueryVector\n".into(),
+                message: format!("{ENGINE_ERROR} Empty CBlastQueryVector\n").into(),
             }
             .into());
         }
@@ -8572,7 +8486,7 @@ fn run_in_pool(
                 before(outputs)?;
             }
             batch_title_warnings.write(&mut *outputs.diagnostics, archive)?;
-            let mut message = String::from("BLAST engine error: ");
+            let mut message = format!("{ENGINE_ERROR} ");
             for _ in start..end {
                 message.push_str("Warning: ");
                 message.push_str(NO_DATA_MESSAGE);
@@ -8959,7 +8873,10 @@ fn run_in_pool(
             // batches before with a database of its own, whose loads nothing here records.
             let prefetch_queries =
                 crate::algorithm::common::database::PrefetchQueries::new(start, &scope)
-                    .after_unrecorded_calls(args.first_query_ordinal > 0);
+                    .after_unrecorded_calls(args.first_query_ordinal > 0)
+                    .where_reports_unchanged_by_load_throws(
+                        database::reports_unchanged_by_load_throws(&output_formats),
+                    );
             let prefetch = if run_loads.ended() {
                 None
             } else if output_formats
@@ -9490,7 +9407,7 @@ fn write_format_prolog(
         let mut writer = format.sink.open()?;
         write_blastn_pairwise_prolog(
             &mut writer,
-            crate::NCBI_BLAST_VERSION,
+            crate::wording::REPORT_VERSION,
             intro,
             shown.name.as_bytes(),
             // Printed for a subject set only (a database prints `database`).

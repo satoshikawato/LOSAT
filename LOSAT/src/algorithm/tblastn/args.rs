@@ -300,8 +300,6 @@ pub struct ResolvedTblastnArgs {
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:263-265
     /// `-line_length`, `-sorthits` and `-sorthsps` of the pairwise report.
     pub formatting: crate::blastinput::report_counts::FormattingArgs,
-    /// Whether -max_target_seqs was given (the text of LOSAT's limit on the hit list size).
-    pub max_target_seqs_given: bool,
     /// The -max_hsps value, or 0 (every HSP).
     pub max_hsps: usize,
     /// The -qcov_hsp_perc value, or 0 (no filter).
@@ -601,7 +599,6 @@ impl TblastnArgs {
             num_descriptions: counts.num_descriptions,
             formatting: self.formatting,
             num_alignments: counts.num_alignments,
-            max_target_seqs_given: self.max_target_seqs.is_some(),
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:313-319: SetQueryCovHspPerc, SetMaxHspsPerSubject.
             max_hsps: self.max_hsps.unwrap_or(0),
             query_cov_hsp_perc: self.qcov_hsp_perc.unwrap_or(0.0),
@@ -699,16 +696,6 @@ pub(super) fn check_search_limits(args: &ResolvedTblastnArgs) -> Result<()> {
     crate::blastinput::protein_options_check::check_evalue_limit(
         args.evalue,
         compo_adjust_mode.is_enabled(),
-        "TBLASTN",
-    )?;
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:43-70 (the
-    // preliminary hit list size through NCBI's `int`; `blastn/hsp.rs`)
-    // A hit list size whose preliminary size is not positive crashes NCBI.
-    crate::algorithm::blastn::hsp::check_prelim_hitlist_size(
-        args.hitlist_size,
-        args.max_target_seqs_given,
-        compo_adjust_mode.is_enabled(),
-        args.gapped,
         "TBLASTN",
     )?;
     Ok(())

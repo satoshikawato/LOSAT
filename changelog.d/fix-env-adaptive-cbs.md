@@ -5,7 +5,3 @@
   it, blastx ignored the variable, and tblastn and rpsblast refused it. On an input built to show it, the
   reported subjects now match NCBI's (for example 400 where blastp reported 500 and blastx 350). Without the
   variable nothing changes.
-- blastx refuses a `-max_target_seqs` whose preliminary hit list size overflows NCBI's 32-bit int
-  (1073741799 to 2147483622 with composition-based statistics), with which NCBI BLAST+ crashes, as blastp and
-  tblastn already did. Larger sizes, and sizes from 2^30 without composition-based statistics, wrap to NCBI's
-  small preliminary size (2147483647: 48 subjects; without the statistics 10) instead of keeping every subject.

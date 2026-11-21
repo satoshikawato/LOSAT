@@ -30,6 +30,7 @@ import {
   messagesSignal,
   PLACE_NOWHERE,
   PLACE_RUN,
+  PRINTED_STREAM,
   ReactorAbi,
   ROLE_QUERY,
   ROLE_SUBJECT,
@@ -173,10 +174,10 @@ function fakeExports(
     losat_web2_start: (ptr: number, len: number) => {
       log.push(`start ${text(ptr, len).split('\0').join(' ')}`);
       if (options.start === 'fail') {
-        error = "error: unexpected argument '-version' found";
+        error = 'psiblast is not available in the browser (ABI v2)';
         return -1;
       }
-      respond(options.start ?? '{"conffile":"c.ini","log_file":"run.log","dry_run":true,"register_inputs":false}');
+      respond(options.start ?? '{"conffile":"c.ini","log_file":"run.log","dry_run":true,"register_inputs":false,"prints":null}');
       return 0;
     },
     losat_web2_validate: (ptr: number, len: number) => {
@@ -219,13 +220,13 @@ function fakeExports(
 
 describe('the ABI binding of the start and of a registry file', () => {
   it('reads the start JSON of an argv, or the CLI message of one that the engine cannot start', () => {
-    expect(fakeExports().abi.start(['tblastx', '-dryrun'])).toEqual({ ok: true, start: { conffile: 'c.ini', logFile: 'run.log', dryRun: true, registerInputs: false } });
+    expect(fakeExports().abi.start(['tblastx', '-dryrun'])).toEqual({ ok: true, start: { conffile: 'c.ini', logFile: 'run.log', dryRun: true, registerInputs: false, prints: null } });
     // -parse_deflines: the run's inputs are read together (line WQA's sweep, D7, 2026-11-19).
-    expect(fakeExports({ start: '{"conffile":null,"log_file":null,"dry_run":false,"register_inputs":true}' }).abi.start(['blastn', '-parse_deflines'])).toEqual({
+    expect(fakeExports({ start: '{"conffile":null,"log_file":null,"dry_run":false,"register_inputs":true,"prints":null}' }).abi.start(['blastn', '-parse_deflines'])).toEqual({
       ok: true,
-      start: { conffile: null, logFile: null, dryRun: false, registerInputs: true },
+      start: { conffile: null, logFile: null, dryRun: false, registerInputs: true, prints: null },
     });
-    expect(fakeExports({ start: 'fail' }).abi.start(['blastn', '-version'])).toEqual({ ok: false, message: "error: unexpected argument '-version' found" });
+    expect(fakeExports({ start: 'fail' }).abi.start(['psiblast'])).toEqual({ ok: false, message: 'psiblast is not available in the browser (ABI v2)' });
   });
 
   it('loads a file as kind 2: begin with its size, its bytes, end; a file that the engine refuses is released', async () => {
@@ -361,13 +362,13 @@ describe("the Data worker's validate with the registry file of -conffile", () =>
     ]);
     expect(opened).toBe(2);
     // The verdict and start are the engine's.
-    const { abi } = fakeExports({ validate: 'BLAST query/options error: bad' });
-    const engine = reactorControl(async () => abi, async () => fakeExports({ validate: 'BLAST query/options error: bad' }).abi);
+    const { abi } = fakeExports({ validate: 'LOSAT query/options error: bad' });
+    const engine = reactorControl(async () => abi, async () => fakeExports({ validate: 'LOSAT query/options error: bad' }).abi);
     expect(await engine.validate(['blastp', '-conffile', 'c.ini'], { name: 'c.ini', file: new Blob(['[BLAST]\n']) })).toEqual({
       ok: false,
-      message: 'BLAST query/options error: bad',
+      message: 'LOSAT query/options error: bad',
     });
-    expect(await engine.start(['blastp', '-dryrun'])).toEqual({ ok: true, start: { conffile: 'c.ini', logFile: 'run.log', dryRun: true, registerInputs: false } });
+    expect(await engine.start(['blastp', '-dryrun'])).toEqual({ ok: true, start: { conffile: 'c.ini', logFile: 'run.log', dryRun: true, registerInputs: false, prints: null } });
   });
 
   // line WQA's D13 round 3, L1, 2026-11-20: the engine sends the data loaders of the argv's registry before its option
@@ -485,6 +486,8 @@ function fakeAbi(
     discard?: Uint8Array;
     warnings?: readonly Uint8Array[];
     messages?: Uint8Array | 'none';
+    /** The run prints this text in place of a search (its start says `prints: 'help'`). */
+    printed?: Uint8Array;
     /** The data loaders that `validate` finds in the argv's registry (on when not given). */
     dataLoaders?: () => boolean;
   } = {},
@@ -512,7 +515,7 @@ function fakeAbi(
     // The start of an argv: -parse_deflines reads the inputs of the run together (line WQA's sweep, D7, 2026-11-19).
     start: (argv: readonly string[]) => ({
       ok: true,
-      start: { conffile: null, logFile: null, dryRun: false, registerInputs: argv.includes('-parse_deflines') },
+      start: { conffile: null, logFile: null, dryRun: false, registerInputs: argv.includes('-parse_deflines'), prints: options.printed === undefined ? null : 'help' },
     }),
     memoryBytes: () => 1,
     register: (_program: string, role: number, _dataLoaders: boolean, bytes: Uint8Array) => {
@@ -529,9 +532,16 @@ function fakeAbi(
     },
     release: (h: number) => void calls.push(`release ${h}`),
     fileRelease: (file: number) => void calls.push(`file release ${file}`),
-    run: (_argv: readonly string[], _query: number, _subject: number, sink: (stream: number, bytes: Uint8Array) => void) => {
+    run: (_argv: readonly string[], query: number, subject: number, sink: (stream: number, bytes: Uint8Array) => void) => {
       calls.push('run');
       if (options.messages !== 'none') sink(MESSAGES_STREAM, options.messages ?? placeSignal(3));
+      if (options.printed !== undefined) {
+        calls.push(`run handles ${query} ${subject}`);
+        const half = options.printed.length >> 1;
+        sink(PRINTED_STREAM, options.printed.subarray(0, half));
+        sink(PRINTED_STREAM, options.printed.subarray(half));
+        return;
+      }
       sink(6, encode('q\ts\n'));
       for (const chunk of options.warnings ?? []) sink(3, chunk);
       if (options.discard !== undefined) {
@@ -611,7 +621,7 @@ function workerRun(words: readonly string[], conffile?: RegistryFile) {
   return { run, delivered, close };
 }
 
-const LOG: RunFile = { name: 'run.log', bytes: encode('BLAST engine error: The average subject length is too short\n') };
+const LOG: RunFile = { name: 'run.log', bytes: encode('LOSAT engine error: The average subject length is too short\n') };
 const CONFFILE = { name: 'c.ini', file: new Blob(['[BLAST]\n']) };
 
 describe("the Engine worker's runtime and the files of a run", () => {
@@ -752,6 +762,24 @@ describe("the Engine worker's runtime and the files of a run", () => {
     }
   });
 
+  // Line WQA's D14, 2026-11-20: a run whose start says that it prints the command line's help or version reads no input
+  // (handles 0) and gives the text of stream 11 with its result, joined, and no chunk to the Data worker.
+  it("runs an argv that prints the command line's text without inputs, and gives the text with its result", async () => {
+    const help = encode('USAGE\n  losat tblastx [OPTIONS]\n');
+    const { abi, calls } = fakeAbi({ printed: help });
+    const { run, delivered, close } = workerRun(['-help']);
+    const result = await runtimeWith(abi).run(run, () => undefined);
+    expect(result.printed).toEqual(help);
+    expect(result.messages).toBe('diagnostics');
+    expect(calls).toEqual(['validate tblastx -query q.fa -subject s.fa -help -num_threads 1', 'run', 'run handles 0 0']);
+    expect(await delivered()).toEqual([{ type: 'end', chunks: 0, bytes: 0 }]);
+    close();
+    // A search gives no printed text.
+    const search = workerRun([]);
+    expect('printed' in (await runtimeWith(fakeAbi().abi).run(search.run, () => undefined))).toBe(false);
+    search.close();
+  });
+
   // line WQA's sweep, D7, 2026-11-20: where the run's messages went is the engine's word (its signal of stream 10), which
   // the run gives with its result, not a stream for the Data worker; a run without it, or with a place that holds no
   // messages, breaks the ABI.
@@ -783,13 +811,13 @@ describe("the Engine worker's runtime and the files of a run", () => {
   });
 
   it("gives a failed run's files with its error, releases what it registered, and sends fail, not end", async () => {
-    const { abi, calls } = fakeAbi({ runFiles: storedZip([[LOG.name, LOG.bytes]]), fail: 'BLAST engine error: The average subject length is too short' });
+    const { abi, calls } = fakeAbi({ runFiles: storedZip([[LOG.name, LOG.bytes]]), fail: 'LOSAT engine error: The average subject length is too short' });
     const { run, delivered, close } = workerRun(['-logfile', 'run.log'], CONFFILE);
     const error = await runtimeWith(abi)
       .run(run, () => undefined)
       .catch((e: unknown) => e);
     expect(error).toBeInstanceOf(EngineCallError);
-    expect((error as Error).message).toBe('BLAST engine error: The average subject length is too short');
+    expect((error as Error).message).toBe('LOSAT engine error: The average subject length is too short');
     expect(runFilesOf(error)).toEqual([LOG]);
     expect(calls.slice(-2)).toEqual(['release 102', 'file release 101']);
     // The chunk written before the failure, then fail, and no end.
@@ -809,12 +837,12 @@ describe("the Engine worker's runtime and the files of a run", () => {
     // Two chunks that split the two bytes of é.
     const cut = text.indexOf(0xc3) + 1;
     const warnings = [text.subarray(0, cut), text.subarray(cut)];
-    const { abi } = fakeAbi({ warnings, fail: 'BLAST engine error: The average subject length is too short' });
+    const { abi } = fakeAbi({ warnings, fail: 'LOSAT engine error: The average subject length is too short' });
     const { run, delivered, close } = workerRun([]);
     const error = await runtimeWith(abi)
       .run(run, () => undefined)
       .catch((e: unknown) => e);
-    expect((error as Error).message).toBe('BLAST engine error: The average subject length is too short');
+    expect((error as Error).message).toBe('LOSAT engine error: The average subject length is too short');
     expect(runOutputFailedOf(error)).toBe(true);
     expect('diagnostics' in (error as Error)).toBe(false);
     expect(runFilesOf(error)).toBeUndefined();
@@ -827,7 +855,7 @@ describe("the Engine worker's runtime and the files of a run", () => {
     close();
     // A failed run without warnings ends with `fail` too; a stop sends nothing after its chunks.
     const silent = workerRun([]);
-    const failed = await runtimeWith(fakeAbi({ fail: 'BLAST engine error: Empty CBlastQueryVector' }).abi)
+    const failed = await runtimeWith(fakeAbi({ fail: 'LOSAT engine error: Empty CBlastQueryVector' }).abi)
       .run(silent.run, () => undefined)
       .catch((e: unknown) => e);
     expect(runOutputFailedOf(failed)).toBe(true);
@@ -876,12 +904,12 @@ describe("the Engine worker's runtime and the files of a run", () => {
     await expect(runtimeWith(completed.abi).run(first.run, () => undefined)).rejects.toThrow('entry 1 is not stored (method 8)');
     expect(await first.delivered()).toEqual([{ type: 'chunk', stream: 6, bytes: encode('q\ts\n') }]);
     first.close();
-    const failed = fakeAbi({ runFiles: broken, fail: 'BLAST engine error: x' });
+    const failed = fakeAbi({ runFiles: broken, fail: 'LOSAT engine error: x' });
     const second = workerRun(['-logfile', 'run.log']);
     const error = await runtimeWith(failed.abi)
       .run(second.run, () => undefined)
       .catch((e: unknown) => e);
-    expect((error as Error).message).toMatch(/^BLAST engine error: x \(the engine's archive of the run's files \(ABI v2 stream 8\) cannot be read: entry 1 is not stored/);
+    expect((error as Error).message).toMatch(/^LOSAT engine error: x \(the engine's archive of the run's files \(ABI v2 stream 8\) cannot be read: entry 1 is not stored/);
     expect(runFilesOf(error)).toBeUndefined();
     second.close();
   });
@@ -941,9 +969,9 @@ describe('the gateway and the files of a run', () => {
 
     const failed = engine.run(request('r2'), channel.port1, () => undefined);
     await runPosted(2);
-    send({ type: 'done', generation: 1, runId: 'r2', ok: false, error: { name: 'EngineCallError', message: 'BLAST engine error: x', runFiles: [LOG] } });
+    send({ type: 'done', generation: 1, runId: 'r2', ok: false, error: { name: 'EngineCallError', message: 'LOSAT engine error: x', runFiles: [LOG] } });
     const error = await failed.catch((e: unknown) => e);
-    expect(error).toMatchObject({ name: 'EngineCallError', message: 'BLAST engine error: x' });
+    expect(error).toMatchObject({ name: 'EngineCallError', message: 'LOSAT engine error: x' });
     expect(runFilesOf(error)).toEqual([LOG]);
 
     const plain = engine.run(request('r3'), channel.port1, () => undefined);
@@ -1023,9 +1051,12 @@ describe.skipIf(reactors === undefined)('the start and the files of a run in the
     const { abi } = await instantiateSerial(module!);
     expect(abi.start(['tblastx', '-conffile', 'a.ini', '-conffile=c.ini', '-logfile', 'x.log', '-dryrun'])).toEqual({
       ok: true,
-      start: { conffile: 'c.ini', logFile: 'x.log', dryRun: true, registerInputs: false },
+      start: { conffile: 'c.ini', logFile: 'x.log', dryRun: true, registerInputs: false, prints: null },
     });
-    expect(abi.start(['blastn', '-version'])).toMatchObject({ ok: false });
+    expect(abi.start(['psiblast'])).toMatchObject({ ok: false });
+    // The command line's help and version are printed in place of a search (line WQA's D14, 2026-11-20).
+    expect(abi.start(['blastn', '-version', '-dryrun'])).toEqual({ ok: true, start: { conffile: null, logFile: null, dryRun: false, registerInputs: false, prints: 'version' } });
+    expect(abi.start(['tblastx', '-dryrun', '-h'])).toMatchObject({ ok: true, start: { dryRun: false, prints: 'help' } });
     // -parse_deflines reads the inputs of a run together, but not those of a dry run (line WQA's sweep, D7, 2026-11-19).
     expect(abi.start(['blastn', '-query', 'q', '-subject', 's', '-parse_deflines'])).toMatchObject({ ok: true, start: { registerInputs: true } });
     expect(abi.start(['blastn', '-query', 'q', '-subject', 's', '-parse_deflines', '-dryrun'])).toMatchObject({ ok: true, start: { registerInputs: false } });
@@ -1041,13 +1072,13 @@ describe.skipIf(reactors === undefined)('the start and the files of a run in the
     const [file] = readStoredZip(failed.joined(RUN_FILES_STREAM));
     expect(file!.name).toBe('run.log');
     expect(new TextDecoder().decode(file!.bytes)).toBe(
-      'Warning: [tblastx] Subject_1 s1 alpha: Subject sequence contains no data\nBLAST engine error: The average subject length is too short\n',
+      'Warning: [tblastx] Subject_1 s1 alpha: Subject sequence contains no data\nLOSAT engine error: The average subject length is too short\n',
     );
     expect(failed.streams.has(3)).toBe(false);
     // Without -logfile the warning before the error is on stream 3, where the command line writes it
     // (NCBI BLAST+ 2.17.0; line WQA's sweep, D3, 2026-11-19), and the error is the run's.
     const plain = run(abi, [], encode('>s1 alpha\n'));
-    expect((plain.error as Error).message).toBe('BLAST engine error: The average subject length is too short\n');
+    expect((plain.error as Error).message).toBe('LOSAT engine error: The average subject length is too short\n');
     expect(new TextDecoder().decode(plain.joined(3))).toBe('Warning: [tblastx] Subject_1 s1 alpha: Subject sequence contains no data\n');
   }, 120_000);
 

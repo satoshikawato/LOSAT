@@ -146,6 +146,8 @@ export interface WorkerRunResult {
   readonly countsBytes?: number;
   /** The files that the run made besides its outputs (stream 8), when it made any. */
   readonly runFiles?: readonly RunFile[];
+  /** The text that the run printed in place of a search (stream 11; `RuntimeInfo.printed`). */
+  readonly printed?: Uint8Array;
 }
 
 export interface WorkerError {

@@ -673,7 +673,7 @@ describe('ResultsBrowser', () => {
     // One full stop at the end of the reason, whatever it ends with (WA-RN-02).
     for (const [error, said] of [
       ['Earlier results are kept.', 'Earlier results are kept.'],
-      ['BLAST engine error: Warning: Sequence contains no data \n', 'BLAST engine error: Warning: Sequence contains no data.'],
+      ['LOSAT engine error: Warning: Sequence contains no data \n', 'LOSAT engine error: Warning: Sequence contains no data.'],
       ['Is it full?', 'Is it full?'],
       ['The file (see the log.)', 'The file (see the log.)'],
       ['', 'no reason was recorded.'],
@@ -684,20 +684,20 @@ describe('ResultsBrowser', () => {
     }
 
     // A failed run that made the file of its -logfile keeps it (line RG E1w-3b).
-    const logged = setup({ status: 'failed', error: 'BLAST engine error: The average subject length is too short', record: { runFiles: [{ name: 'run.log', bytes: new Uint8Array([65]) }] } });
+    const logged = setup({ status: 'failed', error: 'LOSAT engine error: The average subject length is too short', record: { runFiles: [{ name: 'run.log', bytes: new Uint8Array([65]) }] } });
     await logged.results.open('r1');
     expect(logged.results.state.get().message).toBe(
-      'Run 1 failed: BLAST engine error: The average subject length is too short. It keeps the file of its -logfile, run.log.',
+      'Run 1 failed: LOSAT engine error: The average subject length is too short. It keeps the file of its -logfile, run.log.',
     );
     // A failed run keeps the warnings written before its error (line WQA's sweep, D3, 2026-11-19); white space alone is none.
     const warned = setup({
       status: 'failed',
-      error: 'BLAST engine error: The average subject length is too short',
+      error: 'LOSAT engine error: The average subject length is too short',
       record: { diagnostics: 'Warning: [blastn] Subject_1 empty record: Subject sequence contains no data\n' },
     });
     await warned.results.open('r1');
     expect(warned.results.state.get().message).toBe(
-      'Run 1 failed: BLAST engine error: The average subject length is too short. It keeps the warnings written before the error.',
+      'Run 1 failed: LOSAT engine error: The average subject length is too short. It keeps the warnings written before the error.',
     );
     const blank = setup({ status: 'failed', error: 'boom', record: { diagnostics: '\n' } });
     await blank.results.open('r1');
@@ -843,6 +843,19 @@ describe('ResultsBrowser', () => {
     const searched = setup({ specs: [] });
     await searched.results.open('r1');
     expect(noHspReason(searched.results.state.get())).toBe('no-hits');
+  });
+
+  // Line WQA's D14, 2026-11-20: a run of a help or version word completes without a search: its notice says so and where
+  // the text is, in place of "no hits", also when the argv has -dryrun (the command line prints the text first).
+  it("says that a completed run printed the command line's help or version and searched nothing", async () => {
+    for (const prints of ['help', 'version'] as const) {
+      const { results } = setup({ specs: [], snapshot: { prints, dryRun: true } });
+      await results.open('r1');
+      expect(results.state.get().phase).toBe('ready');
+      expect(noHspReason(results.state.get())).toBe(`printed-${prints}`);
+    }
+    expect(NO_HSP_TEXT['printed-help']).toBe("This run printed the command line's help and ran no search. The text is in Outputs.");
+    expect(NO_HSP_TEXT['printed-version']).toBe("This run printed the command line's version and ran no search. The text is in Outputs.");
   });
 
   // WA-FM-07: the command of a run without results is read with the grammar too.

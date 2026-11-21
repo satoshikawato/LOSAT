@@ -399,7 +399,7 @@ impl PreparedXml {
     ) -> Result<()> {
         let run = self.positives.as_ref().map(|positives| XmlRun {
             program: "tblastn",
-            version: concat!("TBLASTN ", crate::ncbi_blast_version!()),
+            version: concat!("TBLASTN ", crate::wording::report_version!()),
             reference: REFERENCE_GAPPED_BLAST,
             db_name: &self.db_name,
             matrix: Some(&self.matrix_name),

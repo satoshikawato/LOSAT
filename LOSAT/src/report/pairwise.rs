@@ -47,6 +47,10 @@ pub struct PairwiseConfig {
     /// The alignment section: outfmt 0's alignments, or the query-anchored section of outfmt 1
     /// to 4. The rest of the report is the same.
     pub view: PairwiseView,
+    /// A query whose sequence NCBI's alignment display cannot read (psiblast's PSSM query of the
+    /// molecule `other`): the alignments of outfmt 0 are one line each. `None` for every other
+    /// report.
+    pub unreadable_query: Option<UnreadableQuery>,
 }
 
 impl Default for PairwiseConfig {
@@ -58,7 +62,55 @@ impl Default for PairwiseConfig {
             protein_matrix: ScoringMatrix::Blosum62,
             sort: Default::default(),
             view: PairwiseView::Pairwise,
+            unreadable_query: None,
         }
+    }
+}
+
+impl PairwiseConfig {
+    /// The Seq-id text of NCBI's line in place of each alignment of the subject `s_idx` where the
+    /// query's sequence cannot be read (`UnreadableQuery`); `None` for a readable query.
+    fn unreadable_query_id(
+        &self,
+        parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
+        s_idx: u32,
+    ) -> Option<Vec<u8>> {
+        self.unreadable_query
+            .as_ref()
+            .map(|query| query.skipped_id(parsed, s_idx))
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:108-140
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3956-3966
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1950-1981
+/// A query whose sequence NCBI's alignment display cannot read: a PSSM query of the molecule
+/// `other` has the sequence data of a protein under a molecule that is none, so the sequence
+/// vector of its row, which the display reads before it writes anything of the alignment
+/// (`x_PrepareRowData`), cannot convert its letters and throws. The catch of the display writes
+/// `Sequence with id <id> no longer exists in database...alignment skipped` for each HSP, no
+/// heading and no score lines: the same line as where a heading's title cannot be made
+/// (`write_skipped_alignment`), for every subject, so the Seq-id text of each subject's
+/// Seq-align id is the one thing to know of it (`skipped_id`).
+#[derive(Clone, Debug, Default)]
+pub struct UnreadableQuery {
+    /// The OIDs of a database's listed subjects by subject index (`ListedSubjects::ordinals` in
+    /// the opened database), for the ones without parsed Seq-ids, whose id is
+    /// `gnl|BL_ORD_ID|<oid>`. `None` for `-subject` records.
+    pub oids: Option<Arc<[u32]>>,
+}
+
+impl UnreadableQuery {
+    /// The Seq-id text of the Seq-align id of the subject `s_idx` (`CSeq_id::GetSeqIdString`):
+    /// its parsed id; else `BL_ORD_ID:<oid>` of a database sequence, whose only id is the
+    /// general one of its OID; else the local id `Subject_N` of a `-subject` record
+    /// (`subject_skipped_id`).
+    fn skipped_id(
+        &self,
+        parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
+        s_idx: u32,
+    ) -> Vec<u8> {
+        subject_skipped_id(parsed, self.oids.as_deref(), s_idx)
     }
 }
 
@@ -592,7 +644,7 @@ fn write_subject_alignments_part<W: Write>(
         match heading {
             Ok(_) => write_hsp(writer, hit)?,
             Err(super::defline::UnknownEncoding) => {
-                write_skipped_alignment(writer, &record_skipped_id(parsed, s_idx))?
+                write_skipped_alignment(writer, &subject_skipped_id(parsed, None, s_idx))?
             }
         }
         if let Some(probe) = probe.as_mut() {
@@ -688,6 +740,9 @@ pub enum DatabaseHeading<'a> {
     Title(&'a [u8], &'a super::defline::SourceTaxname),
     /// With whether every definition line is shown (`ParsedSubject::heading`).
     Parsed(&'a crate::report::db_subject::ParsedSubject, bool),
+    /// No heading and one line in place of each alignment, whose Seq-id text this is
+    /// (`UnreadableQuery`).
+    Skipped(&'a [u8]),
 }
 
 impl<'a> DatabaseHeading<'a> {
@@ -703,6 +758,7 @@ impl<'a> DatabaseHeading<'a> {
             DatabaseHeading::Parsed(subject, every_line) => {
                 subject.heading_skipped_id(protein, every_line)
             }
+            DatabaseHeading::Skipped(id) => Some(id.to_vec()),
         }
     }
 
@@ -722,6 +778,7 @@ impl<'a> DatabaseHeading<'a> {
                     Err(id) => Ok(Some(id)),
                 };
             }
+            DatabaseHeading::Skipped(id) => return Ok(Some(id.to_vec())),
         };
         let generated;
         let heading: &[u8] = if title.is_empty() {
@@ -2018,7 +2075,8 @@ fn write_blastp_query_footer_spacing<W: Write>(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2266-2268
-// libstdc++ (GCC 13): include/c++/13/ostream:661-670
+// Observed, not taken from a library's source: inserting a null `const char*` into NCBI's
+// stream sets `badbit` (see `write_matrix_line`).
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_rps_options.cpp:96-103
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:73-83 (cited at
 // `rps_search::volumes::search_sets`: `CreateRpsStructures` names the database's matrix in the
@@ -2764,6 +2822,18 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
         part: std::ops::Range<usize>,
     ) -> io::Result<()> {
         let config = self.config;
+        if let Some(id) = config.unreadable_query_id(self.parsed_subjects, s_idx) {
+            return write_database_subject_alignments_part(
+                writer,
+                probe,
+                DatabaseHeading::Skipped(&id),
+                true,
+                &group.subject_hits[&s_idx],
+                &group.subject_hit_indices[&s_idx],
+                part,
+                |_, _| unreachable!("a skipped alignment is written by its line"),
+            );
+        }
         let parsed = parsed_subject(self.parsed_subjects, s_idx);
         if self.database.is_some() || parsed.is_some() {
             let heading = match parsed {
@@ -3175,17 +3245,21 @@ fn parsed_subject(
         .filter(|subject| !subject.shown_as_record())
 }
 
-/// The id of NCBI's line in place of each alignment of `-subject` record `s_idx` whose heading
-/// it cannot make (`write_subject_alignments_part`): `GetSeqIdString` of the Seq-align id, the local id
-/// `Subject_N` (N = `s_idx` + 1) of a record without parsed ids, else its parsed id (`parsed`:
-/// `ParsedSubject::skipped_id`, `Subject_9` of `lcl|Subject_9`).
-fn record_skipped_id(
+/// The id of NCBI's line in place of each alignment of the subject `s_idx` whose alignment NCBI
+/// cannot write (`write_subject_alignments_part`, `UnreadableQuery`): `GetSeqIdString` of the
+/// Seq-align id. A subject with parsed ids has its parsed id (`ParsedSubject::skipped_id`,
+/// `Subject_9` of `lcl|Subject_9`); a database sequence without them (`oids`, the OIDs of the
+/// listed subjects) the general id `BL_ORD_ID:<oid>`; a `-subject` record the local id
+/// `Subject_N` (N = `s_idx` + 1).
+fn subject_skipped_id(
     parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
+    oids: Option<&[u32]>,
     s_idx: u32,
 ) -> Vec<u8> {
-    match parsed.get(s_idx as usize).and_then(Option::as_deref) {
-        Some(subject) => subject.skipped_id(),
-        None => format!("Subject_{}", u64::from(s_idx) + 1).into_bytes(),
+    match (parsed.get(s_idx as usize).and_then(Option::as_deref), oids) {
+        (Some(subject), _) => subject.skipped_id(),
+        (None, Some(oids)) => format!("BL_ORD_ID:{}", oids[s_idx as usize]).into_bytes(),
+        (None, None) => format!("Subject_{}", u64::from(s_idx) + 1).into_bytes(),
     }
 }
 

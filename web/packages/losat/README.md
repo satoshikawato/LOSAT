@@ -10,7 +10,7 @@ runs its searches through this package.
 - `losat-web-threads.wasm` runs a search on several threads. It needs memory that is shared
   between threads, which a browser allows only on a cross-origin isolated page (below).
 
-The two builds speak the same ABI (ABI v2 at version 8, `docs/web/abi_v2.md` in the repository). A search
+The two builds speak the same ABI (ABI v2 at version 10, `docs/web/abi_v2.md` in the repository). A search
 gets an argv, as on the command line, and FASTA bytes. It writes outfmt 0, 6 and 7 byte for byte
 as the command line does, and it also writes an HSP record for each hit. This holds for a host that
 drops the output that the engine tells it to discard (stream 9, in "Use").
@@ -27,7 +27,7 @@ ABI version that the reactors report (`losat_web2_abi_version`):
 
 | package | engine | ABI |
 |---|---|---|
-| 0.2.0 | 0.2.0 | 8 |
+| 0.2.0 | 0.2.0 | 10 |
 
 `losat/reactors/artifacts.json` is the record of the build of the two modules: how they were built
 and the SHA-256 of each as it was built. The threaded module in the package is that build with a guard

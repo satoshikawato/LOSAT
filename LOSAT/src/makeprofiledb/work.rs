@@ -82,7 +82,14 @@ impl From<ProfileError> for RunError {
 /// `CSeqDBException`s (2).
 impl From<WriteDbError> for RunError {
     fn from(error: WriteDbError) -> Self {
+        // A GI-only query between queries with other ids in a version 5 database: NCBI's writer
+        // aborts at its close (survey I01g, I01x), as makeblastdb's does; LOSAT's refusal is
+        // makeblastdb's (makedb-v5 DECISIONS 10).
+        let gi_only = crate::writedb::writer::is_gi_only_between_keys(&error);
         match error {
+            WriteDbError::CreationBytes(message) if gi_only => {
+                RunError::Refused(String::from_utf8_lossy(&message).into_owned())
+            }
             WriteDbError::Creation(message) | WriteDbError::Options(message) => {
                 RunError::Exception(message.into_bytes())
             }
@@ -593,10 +600,9 @@ fn post_writer(diag: &mut Diag, output_db: &mut WriteDb) {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:1366-1473
+// NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:1366-1492
 // On an error the volume's writer is destroyed, which closes it (`~CWriteDB`): the profiles
-// added stay in the database's files, and a close that fails there (in the unwinding of the
-// first exception) ends NCBI's process (`std::terminate`), which LOSAT refuses.
+// added stay in the database's files.
 /// `x_MakeVol`: the volume `vol` (`None`: the only one) of the profiles `smps`.
 fn make_vol(
     params: &mut Params<'_>,
@@ -647,27 +653,39 @@ fn make_vol(
     );
     output_db.set_max_file_size(MAX_FILE_SIZE);
     let result = add_profiles(params, diag, &mut rps, &mut output_db, smps);
-    match result {
-        Ok(()) => {
-            let closed = output_db.close();
-            post_writer(diag, &mut output_db);
-            closed?;
-            rps.close()?;
-            Ok(())
+    // `output_db->Close()` after the loop, or the writer's destructor in the unwinding of an
+    // error (`~CWriteDB_Impl` closes it).
+    let closed = output_db.close();
+    post_writer(diag, &mut output_db);
+    if let Err(close_error) = closed {
+        // A `Close` that threw: the destructor's `Close` returns at once and the writer's members
+        // close (the last volume under its numbered name, the LMDB files).
+        output_db.destroy_after_failed_close();
+        post_writer(diag, &mut output_db);
+        let Err(error) = result else {
+            return Err(close_error.into());
+        };
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:100-108
+        // In the unwinding the destructor posts a `CWriteDBException` and the first error goes
+        // on; any other exception leaves the destructor and ends NCBI's process
+        // (`std::terminate`), which LOSAT refuses.
+        let creation = matches!(
+            close_error,
+            WriteDbError::Creation(_) | WriteDbError::CreationBytes(_)
+        ) && !crate::writedb::writer::is_gi_only_between_keys(&close_error);
+        if !creation {
+            let close = RunError::from(close_error);
+            return Err(RunError::Refused(format!(
+                "the error {error:?} left a database whose close fails ({close:?}), where NCBI \
+                 makeprofiledb 2.17.0 aborts"
+            )));
         }
-        Err(error) => {
-            let closed = output_db.close();
-            post_writer(diag, &mut output_db);
-            if let Err(close_error) = closed {
-                let close = RunError::from(close_error);
-                return Err(RunError::Refused(format!(
-                    "the error {error:?} left a database whose close fails ({close:?}), where \
-                     NCBI makeprofiledb 2.17.0 aborts"
-                )));
-            }
-            Err(error)
-        }
+        diag.err_post_bytes(&close_error.message());
+        return Err(error);
     }
+    result?;
+    rps.close()?;
+    Ok(())
 }
 
 /// The profiles of a volume added to its writer and its RPS files (the loop of `x_MakeVol`).

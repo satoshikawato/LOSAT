@@ -1049,7 +1049,7 @@ impl WriteDb {
 /// The refusal of a version 5 database with `-parse_seqids` in which the sequence of OID `oid`
 /// (first id `name`) has GIs only and lies between sequences with other ids.
 fn gi_only_between_keys_error(oid: u32, name: &[u8]) -> WriteDbError {
-    let mut message = b"Input id list not in ascending oid order: the sequence ".to_vec();
+    let mut message = GI_ONLY_BETWEEN_KEYS.to_vec();
     message.extend_from_slice(name);
     message.extend_from_slice(
         format!(
@@ -1060,6 +1060,16 @@ fn gi_only_between_keys_error(oid: u32, name: &[u8]) -> WriteDbError {
         .as_bytes(),
     );
     WriteDbError::CreationBytes(message)
+}
+
+/// The start of `gi_only_between_keys_error`'s message.
+const GI_ONLY_BETWEEN_KEYS: &[u8] = b"Input id list not in ascending oid order: the sequence ";
+
+/// Whether `error` is LOSAT's refusal of a GI-only sequence between sequences with keys
+/// (`gi_only_between_keys_error`), which makeprofiledb reports as a refusal where NCBI's writer
+/// aborts the same way.
+pub(crate) fn is_gi_only_between_keys(error: &WriteDbError) -> bool {
+    matches!(error, WriteDbError::CreationBytes(message) if message.starts_with(GI_ONLY_BETWEEN_KEYS))
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp:749-761

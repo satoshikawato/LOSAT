@@ -42,7 +42,7 @@ The Rust library (`losat::api`) is the same crate, and the Python binding `pylos
 
 These are on the list for a later release:
 
-- the programs `deltablast`, `makeprofiledb` and `blast_formatter`, and the making and the conversion of counts files by `windowmasker` (`-mk_counts`, `-convert`);
+- the programs `deltablast` and `blast_formatter`, `makeprofiledb -binary`, `-dbtype delta` and `-dbtype cobalt`, and the making and the conversion of counts files by `windowmasker` (`-mk_counts`, `-convert`);
 - `psiblast -phi_pattern`;
 - the `psiblast` output formats other than `0`, `6`, `7`, `10` and `20` (with `-in_pssm`: `0`, `6`, `7`);
 - the `rpsblast` output formats other than `0`, `5`, `6`, `7`, `10` and `11`, and the `rpstblastn` ones other than `0` to `7`, `10` and `11`;

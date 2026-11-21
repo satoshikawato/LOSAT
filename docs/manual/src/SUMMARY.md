@@ -28,6 +28,7 @@
 - [segmasker](programs/segmasker.md)
 - [convert2blastmask](programs/convert2blastmask.md)
 - [makembindex](programs/makembindex.md)
+- [makeprofiledb](programs/makeprofiledb.md)
 
 # Libraries and WebAssembly
 

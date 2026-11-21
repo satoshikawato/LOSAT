@@ -655,13 +655,32 @@ error: the NCBI BLAST+ option -randomize is not supported by LOSAT's makeblastdb
 | A FASTA record of 4,294,967,296 letters or more (`-old_style_index true`) | Refused. |
 | An index volume of more than 4 GiB of packed sequences, which needs a `-volsize` of about 18,000 or more and more than 16 Gbp of sequences in one index volume | Refused when the sequence that passes 4 GiB is read. NCBI writes an index whose sizes and positions wrap at 32 bits. |
 
+## makeprofiledb
+
+`makeprofiledb` runs every option of its `-help` for `-dbtype rps` (`-xmlhelp` on the command line only).
+
+| Input | What happens |
+| :--- | :--- |
+| `-binary` | Refused (PSSM files in ASN.1 binary are not read yet). |
+| `-dbtype delta`, `-dbtype cobalt` | Refused. |
+| `-max_smp_vol 0` | Refused. NCBI's `makeprofiledb` crashes (division by zero). |
+| `-in` naming a directory | Refused. NCBI's `makeprofiledb` never ends. |
+| An empty `-out` | Refused. NCBI's `makeprofiledb` stops with an unknown exception, or aborts after another error. |
+| A profile stored by row (`byRow TRUE`) with more than 28 positions | Refused. NCBI's `makeprofiledb` reads its frequency ratios from outside its data. |
+| A frequency ratio whose value times 10^9 does not fit a 64-bit integer (such as `1e300`), or a list of frequency ratios shorter than the profile | Refused. NCBI's conversion has no defined result, or it reads past the list. |
+| A word score threshold (times the scale factor) that is not a number, a `-scale` beyond 32-bit integers | Refused. |
+| A sequence with only a GI id between sequences with other ids, in a version 5 database with `-index true` | Refused with `makeblastdb`'s message. NCBI's `makeprofiledb` aborts; `-blastdb_version 4` builds it. |
+| A query letter that NCBI's PSSM engine cannot code (a lower-case letter of a profile with frequency ratios only) | Refused. |
+| A command-line word that is not UTF-8 | Refused. |
+
 ## Programs LOSAT does not provide
 
 `blastdb_aliastool`, `blast_formatter_vdb`, `blast_vdb_cmd`, `blastn_vdb`, `tblastn_vdb`, `blastdbcheck`, `legacy_blast.pl`, `update_blastdb.pl`, `get_species_taxids.sh` and `cleanup-blastdb-volumes.py`.
 
 ## On the list for a later release
 
-- The programs `deltablast`, `makeprofiledb` and `blast_formatter`.
+- The programs `deltablast` and `blast_formatter`.
+- `makeprofiledb -binary` and `-dbtype delta` or `cobalt`.
 - `windowmasker -mk_counts` and `-convert`, which make and convert counts files.
 - `psiblast -phi_pattern`.
 - The `psiblast` output formats other than `0`, `6`, `7`, `10` and `20` (with `-in_pssm`: `0`, `6`, `7`).

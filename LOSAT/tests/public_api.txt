@@ -310,6 +310,8 @@ impl core::panic::unwind_safe::UnwindSafe for losat::api::Id
 pub struct losat::api::Inputs<'a>
 impl<'a> losat::api::Inputs<'a>
 pub fn losat::api::Inputs<'a>::database(&'a [losat::api::FastaRecord], &'a str) -> Self
+pub fn losat::api::Inputs<'a>::msa(&'a std::path::Path, &'a [losat::api::FastaRecord]) -> Self
+pub fn losat::api::Inputs<'a>::msa_database(&'a std::path::Path, &'a str) -> Self
 pub fn losat::api::Inputs<'a>::named(self, &'a str, &'a str) -> Self
 pub fn losat::api::Inputs<'a>::new(&'a [losat::api::FastaRecord], &'a [losat::api::FastaRecord]) -> Self
 pub fn losat::api::Inputs<'a>::pssm(&'a std::path::Path, &'a [losat::api::FastaRecord]) -> Self

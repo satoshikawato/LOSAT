@@ -385,7 +385,7 @@ fn open_errors_are_ncbis_database_errors_or_losats_refusals() {
         native(error),
         (
             2,
-            "BLAST Database error: Database name is required.\n".to_string()
+            "LOSAT database error: Database name is required.\n".to_string()
         )
     );
     // A protein database is not found as a nucleotide one.
@@ -397,7 +397,7 @@ fn open_errors_are_ncbis_database_errors_or_losats_refusals() {
         assert_eq!(exit, 2);
         assert!(
             message.starts_with(
-                "BLAST Database error: No alias or index file found for nucleotide database ["
+                "LOSAT database error: No alias or index file found for nucleotide database ["
             ),
             "{message}"
         );
@@ -420,7 +420,7 @@ fn open_errors_are_ncbis_database_errors_or_losats_refusals() {
     .expect("NCBI's error of the search stage");
     assert_eq!(
         read.to_string(),
-        "BLAST engine error: Database memory map file error"
+        "LOSAT engine error: Database memory map file error"
     );
 }
 
@@ -759,7 +759,7 @@ fn titles_are_read_for_the_final_hit_lists_in_ncbis_order() {
     assert_eq!(
         String::from_utf8(native.message.clone()).unwrap(),
         format!(
-            "BLAST Database error: Error: File ({}) not found.\n",
+            "LOSAT database error: Error: File ({}) not found.\n",
             dir.canonicalize().unwrap().join(&missing[1]).display()
         )
     );

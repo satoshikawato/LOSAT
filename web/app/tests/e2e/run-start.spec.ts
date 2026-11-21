@@ -284,7 +284,7 @@ test('the file of -logfile of TBLASTX holds what the CLI writes for the run\'s o
   const warnings = page.getByTestId('run-diagnostics');
   await expect(warnings).toBeVisible();
   expect(await warnings.evaluate((element) => element.textContent ?? '')).toBe(
-    'Warning: [tblastx] Examining 5 or more matches is recommended\nBLAST query/options error: No hits are being saved\nPlease refer to the LOSAT user manual.\n',
+    'Warning: [tblastx] Examining 5 or more matches is recommended\nLOSAT query/options error: No hits are being saved\nPlease refer to the LOSAT user manual.\n',
   );
 });
 

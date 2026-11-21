@@ -164,7 +164,7 @@ pub fn assert_missing_database(output: &std::process::Output, label: &str) {
     assert_eq!(output.status.code(), Some(2), "{label}");
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.starts_with("BLAST Database error: No alias or index file found for"),
+        stderr.starts_with("LOSAT database error: No alias or index file found for"),
         "{label}: {stderr}"
     );
     assert!(
@@ -669,7 +669,7 @@ fn a_title_in_the_batch_that_a_missing_header_file_fails_is_not_written() {
                 clean.stderr
             );
             assert!(
-                clean.stderr.contains("BLAST Database error: Error: File ("),
+                clean.stderr.contains("LOSAT database error: Error: File ("),
                 "{}: stderr {}",
                 what("no title"),
                 clean.stderr

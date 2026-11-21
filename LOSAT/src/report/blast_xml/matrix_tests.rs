@@ -55,7 +55,7 @@ fn the_xml_formats_fail_for_a_name_ncbi_does_not_spell() {
         (native.exit, native.message.as_slice()),
         (
             3,
-            b"BLAST engine error: unsupported score matrix\n".as_slice()
+            b"LOSAT engine error: unsupported score matrix\n".as_slice()
         )
     );
 }

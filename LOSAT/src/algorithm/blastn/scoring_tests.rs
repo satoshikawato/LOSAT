@@ -96,7 +96,7 @@ fn no_greedy_and_off_diagonal_range_are_checked() {
     assert!(check_scoring_options(&args(&["-task", "blastn", "-no_greedy"])).is_ok());
     assert_eq!(
         message(check_scoring_options(&args(&["-off_diagonal_range", "2"]))),
-        "BLAST query/options error: off_diagonal_range is only useful in 2-hit algorithm\nPlease refer to the LOSAT user manual.\n"
+        "LOSAT query/options error: off_diagonal_range is only useful in 2-hit algorithm\nPlease refer to the LOSAT user manual.\n"
     );
     assert!(check_scoring_options(&args(&["-off_diagonal_range", "0"])).is_ok());
     assert!(
@@ -131,7 +131,7 @@ fn no_greedy_and_off_diagonal_range_are_checked() {
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1518: the e-value check needs a cutoff score of 0 or below too.
 #[test]
 fn min_raw_gapped_score_above_zero_allows_an_evalue_of_zero() {
-    const REFUSED: &str = "BLAST query/options error: expect value or cutoff score must be greater than zero\nPlease refer to the LOSAT user manual.\n";
+    const REFUSED: &str = "LOSAT query/options error: expect value or cutoff score must be greater than zero\nPlease refer to the LOSAT user manual.\n";
     for words in [
         &["-evalue", "0"][..],
         &["-evalue", "0", "-min_raw_gapped_score", "0"],
@@ -157,7 +157,7 @@ fn options_are_checked_in_ncbi_order() {
         message(check_scoring_options(&args(&[
             "-task", "blastn", "-penalty", "0", "-gapopen", "0", "-gapextend", "0"
         ]))),
-        "BLAST query/options error: BLASTN penalty must be negative\nPlease refer to the LOSAT user manual.\n"
+        "LOSAT query/options error: BLASTN penalty must be negative\nPlease refer to the LOSAT user manual.\n"
     );
     assert!(message(check_scoring_options(&args(&["-gapopen", "3"])))
         .contains("BLASTN gap extension penalty cannot be 0"));
@@ -214,7 +214,7 @@ fn run_checks_with(words: &[&str], outfmts: &[i32], ungapped: bool) -> anyhow::R
     let args = args(words);
     let (counts, _) = report_counts_of(&args, outfmts).unwrap();
     check_scoring_options_with(&args, &counts, ungapped)?;
-    check_losat_limits_with(&args, &counts, ungapped)
+    check_losat_limits(&args)
 }
 
 #[test]
@@ -227,37 +227,21 @@ fn the_counts_a_run_derives_give_the_refusals_of_the_options() {
     ]));
     assert_eq!(
         error,
-        "BLAST query/options error: No hits are being saved\nPlease refer to the LOSAT user manual.\n"
+        "LOSAT query/options error: No hits are being saved\nPlease refer to the LOSAT user manual.\n"
     );
     // The hit list of format 0 is the larger of the two numbers.
     assert!(run_checks(&["-num_alignments", "0"]).is_ok());
     assert!(run_checks(&["-num_descriptions", "0"]).is_ok());
     assert!(run_checks(&["-num_descriptions", "1", "-num_alignments", "0"]).is_ok());
-    // The preliminary hit list size overflows.
-    let error = run_checks(&["-num_alignments", "2147483598"])
-        .unwrap_err()
-        .to_string();
-    assert!(
-        error.contains("(-num_descriptions / -num_alignments)")
-            && error.contains("not supported by LOSAT's BLASTN"),
-        "{error}"
-    );
-    let error = run_checks(&["-num_descriptions", "2147483598"])
-        .unwrap_err()
-        .to_string();
-    assert!(
-        error.contains("whose preliminary hit list size overflows"),
-        "{error}"
-    );
-    // `-max_target_seqs` keeps its own wording (the default path, before O1b).
-    let error = run_checks(&["-max_target_seqs", "2147483598"])
-        .unwrap_err()
-        .to_string();
-    assert!(
-        error.contains("a -max_target_seqs of 2147483598")
-            && error.contains("whose preliminary hit list size overflows"),
-        "{error}"
-    );
+    // A hit list size whose preliminary size overflows NCBI's `int` runs (LOSAT computes the
+    // size without overflow; PD-LOSAT-NCBI-DEFECTS, hit list sizes past `Int4`).
+    for words in [
+        &["-num_alignments", "2147483598"][..],
+        &["-num_descriptions", "2147483647"],
+        &["-max_target_seqs", "2147483647"],
+    ] {
+        assert!(run_checks(words).is_ok(), "{words:?}");
+    }
     // Without the counts of a run (`args.report_counts` at its default), no hit list is empty.
     assert!(
         check_scoring_options(&args(&["-num_descriptions", "0", "-num_alignments", "0"])).is_ok()
@@ -269,7 +253,7 @@ fn table_errors_repeat_for_each_query_of_the_batch() {
     let error = karlin_error("Substitution scores 1 and -6 are not supported", [false; 2]);
     assert_eq!(
         error.downcast::<NativeError>().unwrap().message,
-        b"BLAST engine error: Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and -6 are not supported \n"
+        b"LOSAT engine error: Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and -6 are not supported \n"
     );
     // A query without letters keeps its warning after the error (NCBI 2.17.0).
     let error = karlin_error(
@@ -278,7 +262,7 @@ fn table_errors_repeat_for_each_query_of_the_batch() {
     );
     assert_eq!(
         error.downcast::<NativeError>().unwrap().message,
-        b"BLAST engine error: Error: Substitution scores 1 and -6 are not supported Warning: Sequence contains no data Error: Substitution scores 1 and -6 are not supported \n"
+        b"LOSAT engine error: Error: Substitution scores 1 and -6 are not supported Warning: Sequence contains no data Error: Substitution scores 1 and -6 are not supported \n"
     );
 }
 
@@ -406,9 +390,10 @@ fn ungapped_option_checks_follow_gapped_calculation() {
     // is matrix-only scoring.
     assert!(run_checks_with(&["-reward", "0"], &[6], true).is_err());
     assert!(run_checks_with(&["-reward", "0", "-penalty", "0"], &[6], true).is_ok());
-    // The preliminary hit list of an ungapped search is the hit list: 2147483598 is accepted.
+    // The preliminary hit list size of 2147483598 runs, ungapped (the size itself, as NCBI) and
+    // gapped (without NCBI's overflow).
     assert!(run_checks_with(&["-num_alignments", "2147483598"], &[0], true).is_ok());
-    assert!(run_checks_with(&["-num_alignments", "2147483598"], &[0], false).is_err());
+    assert!(run_checks_with(&["-num_alignments", "2147483598"], &[0], false).is_ok());
 }
 
 // NCBI 2.17.0's greedy offsets (`greedy_xdrop_offset`, x86-64 `Int4`) and the refusals of

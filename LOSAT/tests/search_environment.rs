@@ -277,7 +277,7 @@ fn a_header_file_that_ncbi_cannot_read_comes_before_the_prefetch() {
         };
         // The path as LOSAT prints it on this platform (Windows: `\` throughout).
         let error = format!(
-            "BLAST Database error: Error: File ({}) not found.\n",
+            "LOSAT database error: Error: File ({}) not found.\n",
             std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("tests")
                 .join("db_search")
@@ -376,11 +376,14 @@ fn old_fsc_is_the_statistics_of_searchsp_0() {
             "ps.subj.sp.zero.tk.0",
         ),
     ] {
-        let expected = std::fs::read(format!(
-            "{}/tests/fixtures/outfmt0/{frozen}.out",
-            env!("CARGO_MANIFEST_DIR")
-        ))
-        .expect("frozen -searchsp 0 report");
+        let expected = losat::wording::losat_output_bytes(
+            &std::fs::read(format!(
+                "{}/tests/fixtures/outfmt0/{frozen}.out",
+                env!("CARGO_MANIFEST_DIR")
+            ))
+            .expect("frozen -searchsp 0 report"),
+        )
+        .into_owned();
         for value in ["1", ""] {
             let output = run_files(program, query, subject, "0", Some(("OLD_FSC", value)), &[]);
             assert_eq!(

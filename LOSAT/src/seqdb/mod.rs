@@ -242,6 +242,18 @@ pub enum SeqDbError {
     /// `alias::compute_masks`). NCBI's programs report it as `Error: <what()>` with exit
     /// status 255 ([`SeqDbError::ncbi_exception`]).
     Ncbi(crate::ncbi_exception::NcbiException),
+    /// A file of the taxonomy database (`taxdb.bti`, `taxdb.btd`) that does not open or whose
+    /// first byte cannot be read (`taxdb::TaxDb::open`), with the system's text `reason`: NCBI's
+    /// taxonomy file object throws `CMemoryFile`'s exception `exception`
+    /// ([`SeqDbError::memory_file_exception`]) at every name lookup of the run, and so does every
+    /// load of a database sequence with a positive taxid (line WQA D18b, 2026-11-21). Where
+    /// nothing catches it, NCBI's programs report it as `Error: <what()>` with exit status 255
+    /// ([`SeqDbError::ncbi_exception`]). The exception is boxed: the error stays small.
+    TaxdbThrows {
+        path: PathBuf,
+        reason: String,
+        exception: Box<crate::ncbi_exception::NcbiException>,
+    },
 }
 
 impl std::fmt::Display for SeqDbError {
@@ -271,6 +283,9 @@ impl std::fmt::Display for SeqDbError {
             ),
             SeqDbError::Ncbi(exception) => {
                 f.write_str(String::from_utf8_lossy(&exception.what()).trim_end())
+            }
+            SeqDbError::TaxdbThrows { path, reason, .. } => {
+                write!(f, "{} cannot be opened: {reason}", path.display())
             }
         }
     }
@@ -318,6 +333,7 @@ impl SeqDbError {
     pub fn ncbi_exception(&self) -> Option<&crate::ncbi_exception::NcbiException> {
         match self {
             SeqDbError::Ncbi(exception) => Some(exception),
+            SeqDbError::TaxdbThrows { exception, .. } => Some(exception.as_ref()),
             _ => None,
         }
     }
@@ -447,7 +463,8 @@ impl SeqDbError {
             | SeqDbError::Unsupported { .. }
             | SeqDbError::NcbiCrashes { .. }
             | SeqDbError::Range(_)
-            | SeqDbError::Ncbi(_) => None,
+            | SeqDbError::Ncbi(_)
+            | SeqDbError::TaxdbThrows { .. } => None,
         }
     }
 
@@ -570,10 +587,13 @@ impl SeqDbError {
     /// cannot map without the search programs' text before it (`memory_map_message`), the message
     /// of an exception of NCBI's that is not a `CSeqDBException` (`SeqDbError::Ncbi`: a lookup
     /// file's `CFileException`, `filter::lookup_file_error`; NCBI BLAST+ 2.17.0's blastdbcmd with
-    /// a `.pto` of mode 000: line WQA D18 probe 8, 2026-11-21), else [`Self::ncbi_message`].
+    /// a `.pto` of mode 000: line WQA D18 probe 8, 2026-11-21) or of a taxonomy file
+    /// (`SeqDbError::TaxdbThrows`, made by `memory_file_exception`: blastdbcmd's FASTA of a
+    /// sequence with a taxid, line WQA D18b probe 12), else [`Self::ncbi_message`].
     pub fn ncbi_request_message(&self) -> Option<Vec<u8>> {
         match self {
             SeqDbError::Ncbi(exception) => Some(exception.get_msg().to_vec()),
+            SeqDbError::TaxdbThrows { exception, .. } => Some(exception.get_msg().to_vec()),
             _ => self.memory_map_message().or_else(|| self.ncbi_message()),
         }
     }

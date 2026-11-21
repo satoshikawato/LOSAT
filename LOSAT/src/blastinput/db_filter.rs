@@ -8,6 +8,7 @@
 //! `-gilist` and `-negative_gilist` stay refused; NCBI's exclusions with them are therefore
 //! not declared here.
 
+use crate::wording::DATABASE_ERROR;
 use std::collections::BTreeSet;
 use std::io::Write;
 
@@ -20,7 +21,8 @@ use crate::cli::NativeError;
 use crate::ncbi_exception::{NcbiException, ThrowSite};
 use crate::ncbi_str::{string_to_int, ALLOW_LEADING_SPACES, ALLOW_TRAILING_SPACES};
 use crate::seqdb::file::DbFile;
-use crate::seqdb::tax_sqlite::TaxonomySqlite;
+use crate::seqdb::lmdb_read::ReadError;
+use crate::seqdb::tax_sqlite::{QueryReadFailure, TaxonomySqlite};
 use crate::seqdb::{seqidlist, DbList, SearchPath, SeqidList, TaxidList};
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2257-2299
@@ -176,11 +178,13 @@ impl DbFilterArgs {
 
     /// The list of the command line, read (and a taxid list expanded) as NCBI reads it, with
     /// the warnings NCBI writes while reading (a missing taxonomy file, a dropped token of a
-    /// seqid list) written to `warnings`. `Ok(None)`: no list, or one without an id (NCBI
-    /// then searches the whole database).
+    /// seqid list, the taxonomy file's read error) written to `warnings` as the application
+    /// `program` (its diagnostic prefix) writes them. `Ok(None)`: no list, or one without an id
+    /// (NCBI then searches the whole database).
     pub fn resolve(
         &self,
         settings: &ApplicationSettings,
+        program: &str,
         warnings: &mut dyn Write,
     ) -> Result<Option<DbList>> {
         if self.seqid_list().is_none() && self.list().is_none() {
@@ -228,7 +232,9 @@ impl DbFilterArgs {
         let taxonomy = match &source {
             Some(file) => match TaxonomySqlite::open(file) {
                 Ok(taxonomy) => Some(taxonomy),
-                Err(_) => {
+                // Every exception of NCBI's constructor, a read that SQLite fails included
+                // (`tax_sqlite::QueryReadFailure`; review 1 of line WQA D18b, L3).
+                Err(ReadError::Unreadable(_) | ReadError::Format(_)) => {
                     warnings.write_all(NO_TAXONOMY_WARNING.as_bytes())?;
                     None
                 }
@@ -248,7 +254,17 @@ impl DbFilterArgs {
                 tax_ids.insert(taxid);
             } else if let Some(taxonomy) = &taxonomy {
                 tax_ids.insert(taxid);
-                tax_ids.extend(taxonomy.descendants(taxid).map_err(|_| invalid())?);
+                match taxonomy.descendants(taxid) {
+                    Ok(descendants) => tax_ids.extend(descendants),
+                    // A read that SQLite fails: the statement's destructor posts the error before
+                    // the per-id `catch` (`tax_sqlite::QueryReadFailure`; review 1 of line WQA
+                    // D18b, L3).
+                    Err(ReadError::Unreadable(_)) => {
+                        warnings.write_all(&QueryReadFailure::finalize_post(program))?;
+                        return Err(invalid());
+                    }
+                    Err(ReadError::Format(_)) => return Err(invalid()),
+                }
             }
         }
         if tax_ids.is_empty() {
@@ -283,7 +299,7 @@ impl DbFilterArgs {
         let mut cerr = Vec::new();
         let file = seqidlist::read_si_list(&bytes, &mut cerr).map_err(|text| NativeError {
             exit: 2,
-            message: format!("BLAST Database error: {text}\n").into(),
+            message: format!("{DATABASE_ERROR} {text}\n").into(),
         })?;
         for line in cerr {
             warnings.write_all(line.as_bytes())?;

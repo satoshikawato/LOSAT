@@ -80,7 +80,7 @@ losat rpsblast -query proteins.faa -db Cdd -evalue 0.01 -outfmt 6 -num_threads 8
 losat rpstblastn -query contigs.fna -db Cdd -evalue 0.01 -outfmt 6 -num_threads 8
 ```
 
-Both write the same output at every `-num_threads`: NCBI BLAST+'s output with `-num_threads 1`.
+Both write the same output at every `-num_threads`: NCBI BLAST+'s output with `-num_threads 1` (apart from the version line, which names LOSAT).
 
 For the domain, site and motif annotation of `losat rpsbproc`, you need a BLAST archive (`-outfmt 11`), which LOSAT's `rpsblast` and `rpstblastn` write as NCBI BLAST+'s do. Annotate it with LOSAT. `cdd_data` is a folder with the six CDD data files listed on the [rpsbproc](programs/rpsbproc.md) page:
 
@@ -114,6 +114,6 @@ export PATH="$HOME/.local/share/losat-shims:$PATH"
 blastp -version
 ```
 
-`blastp -version` now prints `Package: LOSAT 0.2.0, output compatible with blast 2.17.0` on its second line. The tools need no changes. LOSAT's benchmark ran the BLAST command lines of published tools on their own test data, among them ABRicate, AMRFinderPlus, BUSCO, Kaptive, mlst, OrthoFinder, Prokka, Roary and Trinotate; each output was the same as NCBI BLAST+ 2.17.0's (for BUSCO, whose NCBI BLAST+ output changes with the thread count, the same as its 1-thread output) ([Threads, speed and memory](performance.md)).
+`blastp -version` now prints `blastp: LOSAT 0.2.0` on its first line and `Package: LOSAT 0.2.0, output compatible with blast 2.17.0` on its second line. The tools need no changes. LOSAT's benchmark ran the BLAST command lines of published tools on their own test data, among them ABRicate, AMRFinderPlus, BUSCO, Kaptive, mlst, OrthoFinder, Prokka, Roary and Trinotate; each output was the same as NCBI BLAST+ 2.17.0's, apart from the line that names the program's version in the formats that have one (for BUSCO, whose NCBI BLAST+ output changes with the thread count, the same as its 1-thread output) ([Threads, speed and memory](performance.md)).
 
 [Coming from NCBI BLAST+](from-ncbi-blast.md) explains the names, how they are made on each platform, and what the command does when a file of the same name is already there.

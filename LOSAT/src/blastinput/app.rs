@@ -4,6 +4,7 @@
 //! `-comp_based_stats` strings that NCBI reads in its option handlers, after the input and
 //! output files are opened.
 
+use crate::wording::{ENGINE_ERROR, QUERY_ERROR, QUERY_OPTIONS_ERROR};
 use std::path::Path;
 
 use crate::blastinput::value_parsers::SegSpec;
@@ -26,7 +27,8 @@ pub fn options_error_bytes(message: &[u8]) -> anyhow::Error {
     NativeError {
         exit: 1,
         message: [
-            b"BLAST query/options error: ".as_slice(),
+            QUERY_OPTIONS_ERROR.as_bytes(),
+            b" ",
             message,
             format!("\n{USER_MANUAL_FOOTER}\n").as_bytes(),
         ]
@@ -42,7 +44,7 @@ pub fn options_error_bytes(message: &[u8]) -> anyhow::Error {
 pub fn engine_error(message: &str) -> anyhow::Error {
     NativeError {
         exit: 3,
-        message: format!("BLAST engine error: {message}\n").into(),
+        message: format!("{ENGINE_ERROR} {message}\n").into(),
     }
     .into()
 }
@@ -55,7 +57,7 @@ pub fn engine_error(message: &str) -> anyhow::Error {
 pub fn query_error(message: &str) -> anyhow::Error {
     NativeError {
         exit: 1,
-        message: format!("BLAST query error: {message}\n").into(),
+        message: format!("{QUERY_ERROR} {message}\n").into(),
     }
     .into()
 }

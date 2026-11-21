@@ -303,8 +303,12 @@ fn a_library_run_with_an_unreported_taxonomy_name_writes_ncbis_bytes() {
     let env = [("BLASTDB", taxdb.to_str().unwrap())];
     let fixtures = engine().join("tests/fixtures/outfmt16");
     for outfmt in ["15", "16"] {
-        let frozen = std::fs::read(fixtures.join(format!("mixtax_blastx_badname_{outfmt}.out")))
-            .expect("NCBI's bytes");
+        // NCBI's bytes in LOSAT's words (`losat::wording`).
+        let frozen = losat::wording::losat_output_bytes(
+            &std::fs::read(fixtures.join(format!("mixtax_blastx_badname_{outfmt}.out")))
+                .expect("NCBI's bytes"),
+        )
+        .into_owned();
         // The frozen run names the database as it was given from the fixtures' directory.
         let mut command = Command::new(example_binary("library_command_line"));
         clear_environment(&mut command, &dir.0.join("home"));

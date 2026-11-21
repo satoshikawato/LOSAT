@@ -237,9 +237,13 @@ fn the_errors_before_the_copy_are_makeblastdb_s() {
     let tmp = TempDir::new("raw-errors");
     let dir = tmp.0.to_string_lossy().into_owned();
     let out = tmp.base("db");
-    let same_name = "BLAST options error: Cannot create a BLAST database from an existing one \
-                     without changing the output name, please provide a (different) database \
-                     name using -out\n";
+    // NCBI's message in LOSAT's words (AGENTS.md rule 8).
+    let same_name = crate::wording::losat_text(
+        "BLAST options error: Cannot create a BLAST database from an existing one without \
+         changing the output name, please provide a (different) database name using -out\n",
+    )
+    .into_owned();
+    let same_name = same_name.as_str();
     let words = ["-input_type", "blastdb", "-dbtype", "nucl"];
     let run = |more: &[&str]| {
         let mut all = words.to_vec();
@@ -261,7 +265,10 @@ fn the_errors_before_the_copy_are_makeblastdb_s() {
         (
             1,
             String::new(),
-            "BLAST options error: Please provide a title using -title\n".to_string()
+            crate::wording::losat_text(
+                "BLAST options error: Please provide a title using -title\n"
+            )
+            .into_owned()
         )
     );
     // e_missing
@@ -301,7 +308,10 @@ fn the_errors_before_the_copy_are_makeblastdb_s() {
         (
             1,
             log_head(&dir),
-            "BLAST options error: No valid input FASTA file or BLAST db is found.\n"
+            crate::wording::losat_text(
+                "BLAST options error: No valid input FASTA file or BLAST db is found.\n"
+            )
+            .as_ref()
         )
     );
     assert_eq!(files_of(&tmp.0), Vec::<String>::new());

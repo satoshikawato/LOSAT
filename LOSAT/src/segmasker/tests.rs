@@ -21,13 +21,14 @@ fn the_short_usage_is_the_head_of_the_help() {
 }
 
 #[test]
-fn the_version_is_segmasker_s() {
+fn the_version_is_losat_s() {
     assert_eq!(
         run_words(&["-version"], b""),
         (
             0,
             format!(
-                "segmasker: 1.0.0\n Package: LOSAT {}, output compatible with blast {}\n",
+                "segmasker: LOSAT {}\n Package: LOSAT {}, output compatible with blast {}\n",
+                env!("CARGO_PKG_VERSION"),
                 env!("CARGO_PKG_VERSION"),
                 crate::NCBI_BLAST_RELEASE
             ),
@@ -181,7 +182,7 @@ fn the_full_versions_are_segmasker_s() {
     ] {
         assert_eq!(
             run_words(&["-out", word], b""),
-            (0, print(request, "segmasker", "1.0.0"), String::new()),
+            (0, print(request, "segmasker"), String::new()),
             "{word}"
         );
     }

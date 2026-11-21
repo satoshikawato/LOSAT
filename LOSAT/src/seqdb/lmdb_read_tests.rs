@@ -183,6 +183,7 @@ fn p5_literals() {
     assert!(env
         .first_value(&acc, b"")
         .unwrap_err()
+        .to_string()
         .contains("MDB_BAD_VALSIZE"));
     // unknown database name
     assert_eq!(env.open_db(b"taxid2offset").unwrap(), None);
@@ -447,6 +448,7 @@ fn overflow_values_and_named_records() {
     assert!(env
         .open_db(b"small")
         .unwrap_err()
+        .to_string()
         .contains("MDB_INCOMPATIBLE"));
     // corrupt overflow: claims more bytes than its pages hold
     let mut bad = file.clone();
@@ -471,22 +473,33 @@ fn open_errors() {
     let (good, _) = synthetic(1, 2);
     assert!(Env::open(&Vec::<u8>::new())
         .unwrap_err()
+        .to_string()
         .contains("too small"));
-    assert!(Env::open(&good[..100]).unwrap_err().contains("too small"));
+    assert!(Env::open(&good[..100])
+        .unwrap_err()
+        .to_string()
+        .contains("too small"));
     let mut bad = good.clone();
     bad[16] ^= 1;
-    assert!(Env::open(&bad).unwrap_err().contains("magic"));
+    assert!(Env::open(&bad).unwrap_err().to_string().contains("magic"));
     let mut bad = good.clone();
     bad[20] = 2;
     assert!(Env::open(&bad)
         .unwrap_err()
+        .to_string()
         .contains("MDB_VERSION_MISMATCH"));
     let mut bad = good.clone();
     bad[10] = 0;
-    assert!(Env::open(&bad).unwrap_err().contains("not a meta page"));
+    assert!(Env::open(&bad)
+        .unwrap_err()
+        .to_string()
+        .contains("not a meta page"));
     let mut bad = good.clone();
     bad[40..44].copy_from_slice(&3000u32.to_le_bytes());
-    assert!(Env::open(&bad).unwrap_err().contains("page size"));
+    assert!(Env::open(&bad)
+        .unwrap_err()
+        .to_string()
+        .contains("page size"));
     // second meta page cut off
     assert!(Env::open(&good[..4096 + 100]).is_err());
     // a text file

@@ -1254,7 +1254,7 @@ fn pairwise_metadata(
         ),
     };
     BlastpPairwiseReport {
-        version: crate::NCBI_BLAST_VERSION.into(),
+        version: crate::wording::REPORT_VERSION.into(),
         database_name,
         database_num_sequences: num_sequences,
         database_total_letters: total,

@@ -295,12 +295,13 @@ fn queries_without_residues_are_kept_and_a_batch_of_them_stops() {
         assert_eq!(code, Some(3), "{stderr}");
         assert_eq!(
             stderr,
-            "BLAST engine error: Warning: Sequence contains no data Warning: Sequence contains no data \n"
+            "LOSAT engine error: Warning: Sequence contains no data Warning: Sequence contains no data \n"
         );
         let report = String::from_utf8_lossy(&stdout);
         if outfmt == "0" {
             assert!(
-                report.starts_with("TBLASTN 2.17.0+\n") && report.ends_with(" total letters\n\n"),
+                report.starts_with(concat!("TBLASTN (LOSAT ", env!("CARGO_PKG_VERSION"), ")\n"))
+                    && report.ends_with(" total letters\n\n"),
                 "{report}"
             );
         } else {
@@ -326,7 +327,7 @@ fn a_short_average_subject_length_without_the_gumbel_block_is_ncbis_engine_error
     let path = subject.0.display().to_string();
     let subjects_warning = "Warning: [tblastn] Subject_2 b: Subject sequence contains no data\n\
                             Warning: [tblastn] Subject_3 c: Subject sequence contains no data\n";
-    let error = "BLAST engine error: The average subject length is too short\n";
+    let error = "LOSAT engine error: The average subject length is too short\n";
     // The prolog's database line wraps a long path as NCBI's does, so only its end is compared.
     let prolog_end = "           3 sequences; 1 total letters\n\n";
     for (args, env, first_batch) in [
@@ -352,13 +353,13 @@ fn a_short_average_subject_length_without_the_gumbel_block_is_ncbis_engine_error
             );
             match (outfmt, first_batch) {
                 ("0", false) => assert!(
-                    stdout.starts_with("TBLASTN 2.17.0+\n")
+                    stdout.starts_with(concat!("TBLASTN (LOSAT ", env!("CARGO_PKG_VERSION"), ")\n"))
                         && stdout.contains("Database: User specified sequence set (Input:")
                         && stdout.ends_with(prolog_end),
                     "{stdout}"
                 ),
                 ("0", true) => assert!(
-                    stdout.starts_with("TBLASTN 2.17.0+\n")
+                    stdout.starts_with(concat!("TBLASTN (LOSAT ", env!("CARGO_PKG_VERSION"), ")\n"))
                         && stdout.contains("Database: User specified sequence set (Input:")
                         && stdout.ends_with(&format!(
                             "{prolog_end}\n\nQuery= qx all X\n\nLength=30\n\n\n***** No hits found *****\n\n\n\nLambda      K        H\n   -1.00    -1.00    -1.00 \n\nGapped\nLambda      K        H\n   -1.00    -1.00    -1.00 \n\nEffective search space used: 0\n"
@@ -368,7 +369,7 @@ fn a_short_average_subject_length_without_the_gumbel_block_is_ncbis_engine_error
                 ("7", true) => assert_eq!(
                     stdout,
                     format!(
-                        "# TBLASTN 2.17.0+\n# Query: qx all X\n# Database: User specified sequence set (Input: {path})\n"
+                        concat!("# TBLASTN (LOSAT ", env!("CARGO_PKG_VERSION"), ")\n# Query: qx all X\n# Database: User specified sequence set (Input: {path})\n"), path = path
                     )
                 ),
                 _ => assert!(stdout.is_empty(), "{args:?} {env:?}: {stdout}"),

@@ -1998,12 +1998,14 @@ fn the_frozen_ncbi_rows_of_outfmt_13_and_14_are_written_by_two_blocks() {
         // The side files are `<row>.out_<n>.<ext>` next to the master `<row>.out`.
         let mut expected: Vec<(String, Vec<u8>)> = vec![(
             format!("{row}.out"),
-            std::fs::read(frozen.join(format!("{row}.out"))).unwrap(),
+            temp_support::expected_losat_bytes(
+                std::fs::read(frozen.join(format!("{row}.out"))).unwrap(),
+            ),
         )];
         for n in 1.. {
             let name = format!("{row}.out_{n}.{extension}");
             match std::fs::read(frozen.join(&name)) {
-                Ok(bytes) => expected.push((name, bytes)),
+                Ok(bytes) => expected.push((name, temp_support::expected_losat_bytes(bytes))),
                 Err(_) => break,
             }
         }

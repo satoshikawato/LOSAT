@@ -202,7 +202,7 @@ fn read_all_deflines(
 /// in the CLI's words (a first line that NCBI's data loaders would fetch as a Seq-id, a record
 /// longer than LOSAT reads), before the reader holds such a record, and ends at the reader's own
 /// error (`CheckDataLine`). The engine's reader then reads the records: a subject's every record,
-/// or the reader's own error with the CLI's text (`BLAST query error: ...`), as the CLI reads every
+/// or the reader's own error with the CLI's text (`LOSAT query error: ...`), as the CLI reads every
 /// subject before its first query; a query's records as the CLI's query batches read them
 /// (`read_query_records`): the records before the reader's error, and the error (`QueryEnd`),
 /// which a run meets in the batch that reads the record, after the reports of the batches before,
@@ -627,6 +627,12 @@ fn set_sources(store: &mut Store, handles: [u32; 2], give: bool) {
 mod tests {
     use super::*;
 
+    /// NCBI's text in LOSAT's words (`losat::web_adapter::losat_text`): the tests state what NCBI
+    /// writes and compare it with what LOSAT writes.
+    fn ncbi_in_losat_words(ncbi: &str) -> String {
+        losat::web_adapter::losat_text(ncbi).into_owned()
+    }
+
     // `register` stops when the scan and the reader disagree on the records.
     #[test]
     fn a_scan_that_disagrees_with_the_reader_fails_register() {
@@ -812,28 +818,28 @@ mod tests {
         release(handle).unwrap();
         // A subject's reader error fails `register`; a query's ends its records, and a run meets it
         // in its batch (line WQA's D10, 2026-11-19): the response says it.
-        const CLI: &str = "BLAST query error: CFastaReader: Near line 4, there's a line that doesn't look like plausible data, but it's not marked as defline or comment.";
+        let cli = ncbi_in_losat_words("BLAST query error: CFastaReader: Near line 4, there's a line that doesn't look like plausible data, but it's not marked as defline or comment.");
         let bad = b">p\nMKV\n>q\n1234567890123456789012345\n>r\nMKV\n";
         assert_eq!(
             register("blastp", ROLE_SUBJECT, true, bad).unwrap_err(),
-            CLI
+            cli
         );
         let (handle, response) = register("blastp", ROLE_QUERY, true, bad).unwrap();
         assert_eq!(
             &response[response.find("\"records\":").unwrap()..],
-            format!(r#""records":[{{"index":0,"id":"p","length":3}}],"reader_error":"{CLI}"}}"#)
+            format!(r#""records":[{{"index":0,"id":"p","length":3}}],"reader_error":"{cli}"}}"#)
         );
         release(handle).unwrap();
         // With the loaders off the reader's check of the data line ends the records, as the CLI's:
         // a subject's fails `register`, a query's is its first record's error.
-        const DATA: &str = "BLAST query error: CFastaReader: Near line 1, there's a line that doesn't look like plausible data, but it's not marked as defline or comment.";
+        let data = ncbi_in_losat_words("BLAST query error: CFastaReader: Near line 1, there's a line that doesn't look like plausible data, but it's not marked as defline or comment.");
         assert_eq!(
             register("blastn", ROLE_SUBJECT, false, b"NM_000518.5\n").unwrap_err(),
-            DATA
+            data
         );
         let (handle, response) = register("blastn", ROLE_QUERY, false, b"NM_000518.5\n").unwrap();
         assert!(
-            response.ends_with(&format!(r#""records":[],"reader_error":"{DATA}"}}"#)),
+            response.ends_with(&format!(r#""records":[],"reader_error":"{data}"}}"#)),
             "{response}"
         );
         release(handle).unwrap();

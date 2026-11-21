@@ -311,7 +311,7 @@ pub(super) fn write_structured_xml(
             messages
         })
         .collect();
-    let version = format!("BLASTN {}", crate::NCBI_BLAST_VERSION);
+    let version = format!("BLASTN {}", crate::wording::REPORT_VERSION);
     let filter = crate::report::blast_xml::filter::filter_string(
         report.dust,
         None,

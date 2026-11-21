@@ -13,3 +13,5 @@ makeblastdb -in pn1.faa -dbtype prot -out pn1db
 psiblast -query pn1.faa -db pn1db -num_iterations 1 -out_pssm pn1.asn -save_pssm_after_last_round -num_threads 1
 gzip -9 -n pn1.asn
 ```
+
+`ps6c_other_iupacaa.asn.gz`: NCBI BLAST+ 2.17.0's `-out_pssm` of `psiblast -in_msa tests/fixtures/msa/ps6b_fa_mol_other.aln -db tests/db_search/paja` (a query whose Seq-inst molecule is `other`, `iupacaa` letters), gzipped; the PSSM query of row `db.ps.inpssm.other.0` (line PS, PS6c).

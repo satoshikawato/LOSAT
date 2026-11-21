@@ -38,7 +38,7 @@ function dna(seed: number, length: number): string {
 
 const QUERY = `>q1 first query\n${dna(7, 300)}\n`;
 const EMPTY_RECORD = '>empty record\n';
-const ERROR = 'BLAST engine error: The average subject length is too short';
+const ERROR = 'LOSAT engine error: The average subject length is too short';
 const PROTEIN_QUERY = '>p\nMKVLAAGIVGLLLAAQPAMAMKVLAAGIVGLLLAAQPAMAWRSTY\n';
 
 /** The options of the run shown (`results-run-options`): its command line after the program and the inputs. */
@@ -170,7 +170,7 @@ test('a run of two searches that its format 0 search fails shows the warnings of
 test('a command line whose own -outfmt has no hit list is refused with the command line\'s error', async ({ page }, testInfo) => {
   test.skip(!BUILD_HAS_ENGINE, 'the engine checks the hit list (engine build)');
   const subject = '>s1 ok\nMKVLAAGIVGLLLAAQPAMAMKVLAAGIVGLLLAAQPAMA\n';
-  const error = 'BLAST query/options error: No hits are being saved';
+  const error = 'LOSAT query/options error: No hits are being saved';
   await program(page, 'blastp');
   await paste(page, 'query', PROTEIN_QUERY);
   await paste(page, 'subject', subject);

@@ -10,15 +10,16 @@
 //! root, and the sites of `cddannot*.dat`: title, motif, positions, type, size) with the texts
 //! in one buffer. The definition lines and the site columns no output reads (index, evidence
 //! flags) are read as NCBI reads them, for their errors, but not kept.
-//! The lookups are NCBI's `CPtrMap`: the rows sorted by libstdc++'s `std::sort` with NCBI's
-//! comparison and searched by NCBI's binary search, so that a key held by two rows finds the row
-//! that NCBI finds.
+//! The lookups are NCBI's `CPtrMap`: the rows sorted with NCBI's comparison and searched by
+//! NCBI's binary search. The sort is Rust's standard sort with the row's place in the file as
+//! the last key (`sort_ties_in_input_order`), so rows of one key stay in the order of the file
+//! (NCBI's `std::sort` may leave them in another order; PD-LOSAT-NCBI-DEFECTS 1.67, the order of
+//! tied hits).
 
 use std::io::{BufRead, BufReader};
 
 use crate::ncbi_exception::NcbiException;
 use crate::ncbi_str::{printable_string, string_to_double, string_to_int, string_to_uint};
-use crate::utils::std_sort::std_sort;
 
 /// `INVALIDPSSMID`.
 // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/basedata.hpp:26-30
@@ -173,9 +174,8 @@ impl<'a> Line<'a> {
     }
 
     /// `substr(pos, n)`: `n` clipped to the end; `pos` past the end throws `out_of_range`.
-    // libstdc++ (GCC 13): bits/basic_string.h:385-393
-    // (`substr` calls `_M_check(__pos, "basic_string::substr")`, bits/basic_string.h:3163-3165;
-    // NCBI's rpsbproc printed `Error: (106.6) Application's initialization failed:
+    // The C++ standard's `basic_string::substr` throws `out_of_range` when `pos > size()`; the text
+    // is that of NCBI's build, observed: NCBI's rpsbproc printed `Error: (106.6) Application's initialization failed:
     // basic_string::substr: __pos (which is 18446744073709551615) > this->size() (which is 10)`
     // for a `cdtrack.txt` line of an accession alone, PS16a review oracle A4-1 case `ct3`.)
     //
@@ -491,27 +491,47 @@ impl CddData {
         let clusters = &self.clusters;
         let text = &self.text;
         let span = |s: Span| &text[s.start as usize..(s.start + s.len) as usize];
+        // (LOSAT sorts with Rust's standard sort (`sort_ties_in_input_order`) and the comparisons
+        // that the lookups search with, `int_order` and `compare_bytes`, which order every pair of
+        // keys, then the row's index: rows of one key keep the order of the file, where NCBI's
+        // `sort` may leave them in another. No CDD v3.22 file has two rows of one key.
+        // PD-LOSAT-NCBI-DEFECTS 1.67, the order of tied hits.)
         let mut by_pssm: Vec<u32> = (0..domains.len() as u32).collect();
-        std_sort(&mut by_pssm, &mut |&a: &u32, &b: &u32| {
-            int_order(
-                domains[a as usize].pssm_id as i32,
-                domains[b as usize].pssm_id as i32,
-            ) < 0
-        });
+        sort_ties_in_input_order(
+            &mut by_pssm,
+            |&row| row,
+            |&a, &b| {
+                int_order(
+                    domains[a as usize].pssm_id as i32,
+                    domains[b as usize].pssm_id as i32,
+                )
+                .cmp(&0)
+            },
+        );
         let mut by_acc: Vec<u32> = (0..domains.len() as u32).collect();
-        std_sort(&mut by_acc, &mut |&a: &u32, &b: &u32| {
-            compare_bytes(
-                span(domains[a as usize].accession),
-                span(domains[b as usize].accession),
-            ) < 0
-        });
+        sort_ties_in_input_order(
+            &mut by_acc,
+            |&row| row,
+            |&a, &b| {
+                compare_bytes(
+                    span(domains[a as usize].accession),
+                    span(domains[b as usize].accession),
+                )
+                .cmp(&0)
+            },
+        );
         let mut cl_by_id: Vec<u32> = (0..clusters.len() as u32).collect();
-        std_sort(&mut cl_by_id, &mut |&a: &u32, &b: &u32| {
-            int_order(
-                clusters[a as usize].cluster_id,
-                clusters[b as usize].cluster_id,
-            ) < 0
-        });
+        sort_ties_in_input_order(
+            &mut cl_by_id,
+            |&row| row,
+            |&a, &b| {
+                int_order(
+                    clusters[a as usize].cluster_id,
+                    clusters[b as usize].cluster_id,
+                )
+                .cmp(&0)
+            },
+        );
         self.domain_by_pssm_id = by_pssm;
         self.domain_by_accession = by_acc;
         self.cluster_by_id = cl_by_id;
@@ -641,9 +661,9 @@ impl CddData {
     // The generic file is read without the trims of the specific one (the line, the accession,
     // the index and the title keep their white space). A coordinates field at the line's end
     // (`pos1` is `npos`) makes NCBI reserve `(npos - pos0) * 3` positions, more than a
-    // `vector<int>` can hold whatever `pos0` is, which throws `std::length_error`:
-    // libstdc++ (GCC 13): bits/vector.tcc:64-71
-    // (NCBI's rpsbproc printed `Error: (106.6) Application's initialization failed:
+    // `vector<int>` can hold whatever `pos0` is, which throws `std::length_error` (the C++
+    // standard's `vector::reserve` throws it for a count above `max_size()`; the text is observed:
+    // NCBI's rpsbproc printed `Error: (106.6) Application's initialization failed:
     // vector::reserve` and exited 2, PS16a review oracle A4-1 cases `annot10` and `gen10`.)
     fn load_sites(&mut self, path: &str, specific: bool) -> Result<(), DataError> {
         if !file_exists(path) {
@@ -860,6 +880,23 @@ fn site_data_segs(residues: &mut [i32]) -> Vec<[i32; 2]> {
 /// compares the signed values in both, the order NCBI's maps have.
 fn int_order(a: i32, b: i32) -> i32 {
     (i64::from(a) - i64::from(b)).signum() as i32
+}
+
+/// Sorts `items` by `order`, and items that `order` leaves equal by `position`, their place in the
+/// input, which must increase strictly over `items` as given: the order of a stable sort. LOSAT's
+/// sorts of rpsbproc's hits and data rows (PD-LOSAT-NCBI-DEFECTS 1.67, the order of tied hits). It
+/// uses Rust's `sort_unstable_by`, which sorts in place, because `slice::sort_by` allocates a
+/// buffer of up to the slice's length beyond its short slices; with `position` as the last key no
+/// two items are equal, so the two give the same order.
+pub(crate) fn sort_ties_in_input_order<T, P: Ord>(
+    items: &mut [T],
+    position: impl Fn(&T) -> P,
+    mut order: impl FnMut(&T, &T) -> std::cmp::Ordering,
+) {
+    debug_assert!(items
+        .windows(2)
+        .all(|pair| position(&pair[0]) < position(&pair[1])));
+    items.sort_unstable_by(|a, b| order(a, b).then_with(|| position(a).cmp(&position(b))));
 }
 
 /// `std::string::compare` as a sign: bytes compared as unsigned, a prefix first.

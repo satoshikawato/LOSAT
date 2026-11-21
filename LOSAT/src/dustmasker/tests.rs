@@ -21,13 +21,14 @@ fn the_short_usage_is_the_head_of_the_help() {
 }
 
 #[test]
-fn the_version_is_dustmasker_s() {
+fn the_version_is_losat_s() {
     assert_eq!(
         run_words(&["-version"]),
         (
             0,
             format!(
-                "dustmasker: 1.0.0\n Package: LOSAT {}, output compatible with blast {}\n",
+                "dustmasker: LOSAT {}\n Package: LOSAT {}, output compatible with blast {}\n",
+                env!("CARGO_PKG_VERSION"),
                 env!("CARGO_PKG_VERSION"),
                 crate::NCBI_BLAST_RELEASE
             ),
@@ -62,7 +63,7 @@ fn the_full_versions_are_dustmasker_s() {
     ] {
         assert_eq!(
             run_words(&["-level", "x", word, "-version"]),
-            (0, print(request, "dustmasker", "1.0.0"), String::new()),
+            (0, print(request, "dustmasker"), String::new()),
             "{word}"
         );
     }

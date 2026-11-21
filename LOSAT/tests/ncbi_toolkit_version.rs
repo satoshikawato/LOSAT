@@ -5,8 +5,8 @@
 //! convert2blastmask, which line RG item K3 added during E3, on the official release's binary):
 //! the application prints the first version word before `--` (in an option's value too, before
 //! the configuration is loaded and the arguments are read) and exits 0. The forms are NCBI's, the
-//! values LOSAT's (`ncbi_version::print`, RG DECISIONS E3-1): NCBI's first line (`blastn: 2.17.0+`,
-//! the same in both builds), LOSAT's package, and none of the lines that NCBI's build writes about
+//! values LOSAT's (`ncbi_version::print`, RG DECISIONS E3-1; the Owner, 2026-11-21): LOSAT's first line
+//! (`blastn: LOSAT 0.2.0`; NCBI's is `blastn: 2.17.0+`, the same in both builds), LOSAT's package, and none of the lines that NCBI's build writes about
 //! itself (they differ between NCBI's two builds).
 //!
 //! NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:980-985 (cited at `ncbi_version::print`)
@@ -55,25 +55,27 @@ fn run_in(dir: &Path, program: &str, words: &[&str]) -> Output {
     run_to(dir, program, words, Stdio::piped())
 }
 
-/// The programs, NCBI's version of each (the first line of its `-version-full`, probes `vf`, and
-/// the numbers of its XML and JSON `version_info`), and an option of each that takes a value.
-const PROGRAMS: [(&str, &str, [&str; 3], &str); 16] = [
-    ("blastn", "2.17.0+", ["2", "17", "0"], "-out"),
-    ("blastp", "2.17.0+", ["2", "17", "0"], "-out"),
-    ("blastx", "2.17.0+", ["2", "17", "0"], "-out"),
-    ("tblastn", "2.17.0+", ["2", "17", "0"], "-out"),
-    ("tblastx", "2.17.0+", ["2", "17", "0"], "-out"),
-    ("psiblast", "2.17.0+", ["2", "17", "0"], "-out"),
-    ("rpsblast", "2.17.0+", ["2", "17", "0"], "-out"),
-    ("rpstblastn", "2.17.0+", ["2", "17", "0"], "-out"),
-    ("makeblastdb", "2.17.0+", ["2", "17", "0"], "-title"),
-    ("rpsbproc", "0.5.1", ["0", "5", "1"], "-o"),
-    ("blastdbcmd", "2.17.0+", ["2", "17", "0"], "-out"),
-    ("dustmasker", "1.0.0", ["1", "0", "0"], "-out"),
-    ("segmasker", "1.0.0", ["1", "0", "0"], "-out"),
-    ("windowmasker", "1.0.0", ["1", "0", "0"], "-out"),
-    ("convert2blastmask", "2.17.0+", ["2", "17", "0"], "-out"),
-    ("makembindex", "2.17.0", ["2", "17", "0"], "-input"),
+/// The programs (the first line of the `-version-full` of each is `<program>: LOSAT <version>`:
+/// NCBI's is `<program>: 2.17.0+` (rpsbproc
+/// `0.5.1`, the maskers `1.0.0`, makembindex `2.17.0`), probes `vf`, and its XML and JSON
+/// `version_info` have NCBI's numbers; LOSAT's have LOSAT's), and an option of each that takes a value.
+const PROGRAMS: [(&str, &str); 16] = [
+    ("blastn", "-out"),
+    ("blastp", "-out"),
+    ("blastx", "-out"),
+    ("tblastn", "-out"),
+    ("tblastx", "-out"),
+    ("psiblast", "-out"),
+    ("rpsblast", "-out"),
+    ("rpstblastn", "-out"),
+    ("makeblastdb", "-title"),
+    ("rpsbproc", "-o"),
+    ("blastdbcmd", "-out"),
+    ("dustmasker", "-out"),
+    ("segmasker", "-out"),
+    ("windowmasker", "-out"),
+    ("convert2blastmask", "-out"),
+    ("makembindex", "-input"),
 ];
 
 /// LOSAT's package: its version, and its numbers in the XML and JSON.
@@ -138,12 +140,17 @@ fn components(program: &str) -> (String, String, String) {
 }
 
 /// What LOSAT's `word` prints for `program` (RG DECISIONS E3-1).
-fn expected(program: &str, version: &str, numbers: [&str; 3], word: &str) -> String {
+fn expected(program: &str, word: &str) -> String {
+    let version = concat!("LOSAT ", env!("CARGO_PKG_VERSION"));
     let package = format!(
         " Package: LOSAT {}, output compatible with blast 2.17.0\n",
         env!("CARGO_PKG_VERSION")
     );
-    let [major, minor, patch] = numbers;
+    let (major, minor, patch) = (
+        env!("CARGO_PKG_VERSION_MAJOR"),
+        env!("CARGO_PKG_VERSION_MINOR"),
+        env!("CARGO_PKG_VERSION_PATCH"),
+    );
     let (losat_xml, losat_json) = losat_numbers();
     let (component_text, component_xml, component_json) = components(program);
     match word {
@@ -175,9 +182,9 @@ fn expected(program: &str, version: &str, numbers: [&str; 3], word: &str) -> Str
 #[test]
 fn the_full_versions_are_ncbi_s_forms_with_losat_s_values() {
     let dir = scratch("forms");
-    for (program, version, numbers, value_option) in PROGRAMS {
+    for (program, value_option) in PROGRAMS {
         for word in ["-version-full", "-version-full-xml", "-version-full-json"] {
-            let text = expected(program, version, numbers, word);
+            let text = expected(program, word);
             // NCBI BLAST+ 2.17.0 probes `vf`, `vf_args`, `vf_first`, `vf_val`, `vf_val_args`,
             // `unk_vf`, `vf_unk`, `argerr_vf`, `h_vf`, `vf_h`, `help_vf`, `hf_vf`, `xml_vf`,
             // `vf_dry`, `dry_vf_after`, `vf_twice`, `vf_conf_missing`, `conf_missing_vf`
@@ -222,7 +229,7 @@ fn the_full_versions_are_ncbi_s_forms_with_losat_s_values() {
             let output = run_in(&dir, program, words);
             assert_eq!(
                 String::from_utf8_lossy(&output.stdout),
-                expected(program, version, numbers, word),
+                expected(program, word),
                 "{program} {words:?}"
             );
         }
@@ -233,8 +240,8 @@ fn the_full_versions_are_ncbi_s_forms_with_losat_s_values() {
 #[test]
 fn the_full_versions_come_before_the_configuration() {
     let dir = scratch("start");
-    for (program, version, numbers, _) in PROGRAMS {
-        let text = expected(program, version, numbers, "-version-full");
+    for (program, _) in PROGRAMS {
+        let text = expected(program, "-version-full");
         // A malformed `<program>.ini` and `.ncbirc` are not read (probes `vf_ini_bad`,
         // `vf_ncbirc_bad`); a `-logfile` file is made, empty (`vf_log`, `log_vf`).
         fs::write(dir.join(format!("{program}.ini")), "[x\n").unwrap();
@@ -306,7 +313,7 @@ fn the_library_s_tools_print_the_versions_as_the_command_line() {
             .stdin(Stdio::null());
         command.output().unwrap()
     };
-    for (program, version, numbers, value_option) in PROGRAMS {
+    for (program, value_option) in PROGRAMS {
         let tool = matches!(
             program,
             "makeblastdb"
@@ -323,7 +330,7 @@ fn the_library_s_tools_print_the_versions_as_the_command_line() {
             "-version-full-xml",
             "-version-full-json",
         ] {
-            let text = expected(program, version, numbers, word);
+            let text = expected(program, word);
             for words in [
                 &[word][..],
                 &[value_option, word],

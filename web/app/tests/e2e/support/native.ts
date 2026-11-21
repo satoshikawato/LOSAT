@@ -1,6 +1,8 @@
 // The expectations of V-BR (plan §6.1, §6.2, TD-5): the native CLI of the same commit, run
 // with the argv that the application ran (one format at a time, one thread), as V-ABI does
-// (web/adapter/tests/v_abi.js), and the NCBI-frozen bytes of LOSAT/tests/outfmt0_manifest.tsv.
+// (web/adapter/tests/v_abi.js), and the NCBI-frozen bytes of LOSAT/tests/outfmt0_manifest.tsv in
+// LOSAT's words (LOSAT states its own version and error prefixes, LOSAT/src/wording.rs, AGENTS.md
+// rule 8; the freezes stay NCBI's).
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -26,6 +28,25 @@ function sha256(bytes: Uint8Array | string): string {
 }
 
 const cache = new Map<string, NativeExpectation>();
+
+/**
+ * The SHA-256 of a manifest row's frozen NCBI bytes (LOSAT/tests/fixtures/outfmt0/<fixture_id>.out,
+ * checked against the row's `stdout_sha256`) in LOSAT's words: what LOSAT writes for the row
+ * (`losat_wording.py map-output`, the one mapping of LOSAT/src/wording.rs, as check_losat.py
+ * compares the rows).
+ */
+function frozenInLosatWords(row: Record<string, string>): string {
+  const file = join(REPOSITORY, 'LOSAT/tests/fixtures/outfmt0', `${row['fixture_id']!}.out`);
+  const ncbi = readFileSync(file);
+  if (sha256(ncbi) !== row['stdout_sha256']) throw new Error(`${file} is not the manifest's frozen bytes (stdout_sha256)`);
+  const mapped = spawnSync('python3', ['-I', join(REPOSITORY, 'LOSAT/tests/losat_wording.py'), 'map-output', '-'], {
+    input: ncbi,
+    maxBuffer: 1 << 30,
+  });
+  if (mapped.error) throw mapped.error;
+  if (mapped.status !== 0) throw new Error(`losat_wording.py map-output ${file}: ${mapped.stderr.toString()}`);
+  return sha256(mapped.stdout);
+}
 
 /** Runs the native CLI for every format with `argv` (program first) from `cwd` (relative to the repository, or absolute), with `env` added to the environment. */
 export function nativeExpectation(argv: readonly string[], cwd: string, env: Readonly<Record<string, string>> = {}): NativeExpectation {
@@ -100,7 +121,7 @@ export function manifestCase(id: string, rowIds: readonly string[]): VbrCase {
     }
     vbr = next;
     const format = Number(row['outfmt'] || '0') as OutputFormat;
-    frozen[format] = { sha256: row['stdout_sha256']! };
+    frozen[format] = { sha256: frozenInLosatWords(row) };
   }
   return vbr!;
 }

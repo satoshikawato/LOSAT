@@ -9,7 +9,8 @@ fn commas_group_three_digits() {
 }
 
 // help.txt is NCBI's frozen `-help` text and is not edited or split: this keeps the version
-// that it names and the version that LOSAT writes elsewhere from drifting apart.
+// that it names (which LOSAT's output maps to its own, `crate::wording`) from drifting apart
+// from NCBI's version that LOSAT's sources name elsewhere.
 #[test]
 fn the_frozen_help_names_the_version_that_losat_writes() {
     assert!(HELP.contains(&format!(
@@ -21,12 +22,15 @@ fn the_frozen_help_names_the_version_that_losat_writes() {
 #[test]
 fn the_short_usage_is_the_head_of_the_help() {
     let usage = crate::ncbi_app::short_usage(HELP);
-    assert_eq!(usage.len(), 780);
+    // NCBI's `2.17.0+` is LOSAT's `LOSAT <version>` (`crate::wording`), four bytes longer
+    // than the 780 of NCBI's.
+    assert_eq!(usage.len(), 784);
     assert!(usage.starts_with("USAGE\n  blastdbcmd [-h] [-help] [-db dbname]"));
-    assert!(usage.ends_with(
-        "   BLAST database client, version 2.17.0+\n\nUse '-help' to print detailed \
-             descriptions of command line arguments\n"
-    ));
+    assert!(usage.ends_with(&format!(
+        "   BLAST database client, version LOSAT {}\n\nUse '-help' to print detailed \
+         descriptions of command line arguments\n",
+        env!("CARGO_PKG_VERSION")
+    )));
     assert_eq!(HELP.len(), 9450);
 }
 

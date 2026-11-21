@@ -381,7 +381,9 @@ fn the_logfile_is_a_file_of_the_run() {
 /// the query's name (line WQA's D14, 2026-11-21).
 #[test]
 fn an_argv_without_subjects_fails_as_on_the_command_line() {
-    let error = "BLAST query/options error: Either a BLAST database or subject sequence(s) must be specified\nPlease refer to the LOSAT user manual.\n";
+    let error = losat::web_adapter::losat_text(
+        "BLAST query/options error: Either a BLAST database or subject sequence(s) must be specified\nPlease refer to the LOSAT user manual.\n",
+    );
     for (program, query, _) in SEARCHES {
         for words in [
             vec![program, "-query", "-h"],
@@ -390,12 +392,14 @@ fn an_argv_without_subjects_fails_as_on_the_command_line() {
             vec![program, "-query", query, "-outfmt", "17"],
         ] {
             assert_eq!(prints(&words), None, "{words:?}");
-            assert_eq!(validate(&words).unwrap_err(), error, "{words:?}");
-            assert_eq!(run_of(&words).0.unwrap_err(), error, "{words:?}");
+            assert_eq!(validate(&words).unwrap_err(), *error, "{words:?}");
+            assert_eq!(run_of(&words).0.unwrap_err(), *error, "{words:?}");
         }
         assert_eq!(
             validate(&[program, "-query", query, "-outfmt", "x"]).unwrap_err(),
-            "BLAST query/options error: 'x' is not a valid output format\nPlease refer to the LOSAT user manual.\n"
+            losat::web_adapter::losat_text(
+                "BLAST query/options error: 'x' is not a valid output format\nPlease refer to the LOSAT user manual.\n"
+            )
         );
         validate(&[program, "-query", query, "-dryrun"]).unwrap();
     }
@@ -580,7 +584,10 @@ fn tblastx_writes_its_run_and_its_error_to_the_logfile() {
         run_files(&streams),
         Some(vec![(
             "run.log".to_string(),
-            "BLAST query/options error: expect value or cutoff score must be greater than zero\nPlease refer to the LOSAT user manual.\n".to_string()
+            losat::web_adapter::losat_text(
+                "BLAST query/options error: expect value or cutoff score must be greater than zero\nPlease refer to the BLAST+ user manual.\n"
+            )
+            .into_owned()
         )])
     );
 }
@@ -807,7 +814,8 @@ fn help_and_version_words_print_the_command_lines_text() {
                 // NCBI's forms with LOSAT's values (`ncbi_version::print`; v_abi.js compares the
                 // bytes with the command line's).
                 "-version" | "-version-full" => {
-                    assert!(text.starts_with(&format!("{program}: 2.17.0+\n Package: LOSAT ")));
+                    let version = losat::web_adapter::LOSAT_VERSION;
+                    assert!(text.starts_with(&format!("{program}: {version}\n Package: LOSAT ")));
                     text.clone()
                 }
                 "-version-full-xml" => assert_xml(&text),
@@ -852,7 +860,9 @@ fn a_version_comes_before_the_configuration_and_the_help_after_it() {
     validate(&version).unwrap();
     let (result, streams) = printing_run(&version);
     result.unwrap();
-    assert!(stream_text(&streams, crate::emit::STREAM_PRINTED).starts_with("blastn: 2.17.0+\n"));
+    let losat_version = losat::web_adapter::LOSAT_VERSION;
+    assert!(stream_text(&streams, crate::emit::STREAM_PRINTED)
+        .starts_with(&format!("blastn: {losat_version}\n")));
     let help = argv("blastn", &["-h", "-conffile", "d14_missing.ini"]);
     let critical = "Critical: (106.23) Registry file \"d14_missing.ini\" not found, aborting.";
     assert_eq!(validate(&help).unwrap_err(), critical);

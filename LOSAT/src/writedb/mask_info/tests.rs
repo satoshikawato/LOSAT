@@ -513,10 +513,11 @@ fn every_file_is_read_as_makeblastdb_reads_it() {
                     panic!("{file}: not rejected by the format guess");
                 };
                 // NCBI's stderr names the file as it was given; here the path is absolute.
+                // NCBI's frozen text in LOSAT's words (`crate::wording`, AGENTS.md rule 8).
                 assert_eq!(
-                    run.stderr,
+                    crate::wording::losat_text(&run.stderr),
                     format!(
-                        "BLAST options error: {}\n",
+                        "LOSAT options error: {}\n",
                         text.replace(&path.display().to_string(), file)
                     ),
                     "{file}"
@@ -838,7 +839,7 @@ fn files_that_are_neither_encoding() {
     assert_eq!(
         error.to_string(),
         format!(
-            "BLAST options error: Unknown encoding for mask data in '{}'",
+            "LOSAT options error: Unknown encoding for mask data in '{}'",
             fasta.display()
         )
     );

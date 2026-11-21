@@ -1,6 +1,6 @@
 - `-db` lists of version 5 databases made with and without `makeblastdb -parse_seqids` (`-db "a b"`, or an alias file
   that lists them): where a query batch reports a parsed Seq-id (an accession, a name, a giim) that a database of the
-  list cannot look up, every search program now stops as NCBI BLAST+ does, with `BLAST Database error: DB contains no
+  list cannot look up, every search program now stops as NCBI BLAST+ does, with `LOSAT database error: DB contains no
   accession info.` (exit status 2), after the header and the reports of the batches before it, in every format that
   reads the reported sequences (the pairwise report, the tabular formats, XML, XML2 and JSON documents and side files,
   SAM, and the Seq-annots with `PRE_FETCH_SEQS_LIMIT=2147483647`); LOSAT refused such a run before. With

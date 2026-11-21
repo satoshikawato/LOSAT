@@ -1120,7 +1120,7 @@ fn output_formats_raise_ncbis_errors_where_ncbi_does() {
         (
             1,
             format!(
-                "BLAST query/options error: {text}\n{}\n",
+                "LOSAT query/options error: {text}\n{}\n",
                 crate::wording::USER_MANUAL_FOOTER
             ),
         )

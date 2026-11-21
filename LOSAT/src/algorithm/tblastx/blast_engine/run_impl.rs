@@ -1862,11 +1862,20 @@ pub(crate) struct ReportDatabase<'a> {
     pub oids: crate::seqdb::OidMap<'a>,
 }
 
-/// The `Database:` text of the reports of a local `-subject` search.
+/// The `# Database:` text of the tabular reports of a local `-subject` search: `(Input: )` stays
+/// for the subjects of an imported strategy, which name no input (an empty label).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:797-799
 fn tblastx_database_name(args: &TblastxArgs) -> String {
-    // An imported strategy's subjects name no input (an empty label).
+    format!(
+        "User specified sequence set (Input: {})",
+        args.subject_label()
+    )
+}
+
+/// The `Database:` text of the pairwise reports of a local `-subject` search: the subjects of an
+/// imported strategy name no input (`report::pairwise::scan_mode_definition`).
+fn tblastx_pairwise_database_name(args: &TblastxArgs) -> String {
     crate::report::pairwise::scan_mode_definition(&args.subject_label().to_string())
 }
 
@@ -1898,7 +1907,7 @@ fn write_pairwise_prologs(
                     crate::report::pairwise::write_tblastx_pairwise_prolog(
                         &mut writer,
                         crate::NCBI_BLAST_VERSION,
-                        tblastx_database_name(args).as_bytes(),
+                        tblastx_pairwise_database_name(args).as_bytes(),
                         records.len() as i64,
                         // NCBI's `Int8` sum (c++/src/algo/blast/api/seqsrc_multiseq.cpp:175-181 `m_iTotalLength +=
                         // (Int8) (*iter)->length`).
@@ -2332,7 +2341,11 @@ fn write_tblastx_outputs(
                     );
                     let pairwise_report = crate::report::pairwise::TblastxPairwiseReport {
                         version: crate::NCBI_BLAST_VERSION.to_string(),
-                        database_name: database.clone().into(),
+                        database_name: match &run.database {
+                            Some(_) => database.clone(),
+                            None => tblastx_pairwise_database_name(args),
+                        }
+                        .into(),
                         // `-db`: the `Database:` lines are the database's (`database` below).
                         // NCBI's `Int8` counts (`PairwiseDatabase`); a FASTA set's records are
                         // held in memory.

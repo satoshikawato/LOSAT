@@ -207,19 +207,20 @@ fn soft_chunk_scan_ranges(
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:318-321, 398-405 and
 // c++/src/algo/blast/core/blast_engine.c:757-762, 814-830, 476-486, 221-311
 // A database sequence of a search with `-db_soft_mask` or `-db_hard_mask` comes with the complement
-// of its stored masks as its ranges (one range, the whole sequence, where it has none) and the
-// mask kind. The frames of a translated subject map those ranges (`translated_frame_ranges`) and
-// each frame is cut by them as a protein subject is: with soft masks, the ranges are the scan
-// ranges of the frame's chunks of `MAX_DBSEQ_LEN`; with hard masks, each range is a chunk of its
-// own (cut again past `MAX_DBSEQ_LEN`) that scans its letters from its start. NCBI's "no chunking"
-// branch scans the whole frame, `[0, frame_length)`, from the chunk at the frame's start
+// of its stored masks as its ranges (one range, the whole sequence, where it has none) and the mask
+// kind. The frames of a translated subject map those ranges (`translated_frame_ranges`) and each
+// frame is cut by them as a protein subject is: with soft masks, the ranges are the scan ranges of
+// the frame's chunks of `MAX_DBSEQ_LEN`; with hard masks, each range is a chunk of its own (cut
+// again past `MAX_DBSEQ_LEN`) that scans its letters from its start. NCBI's "no chunking" branch
+// scans the whole frame, `[0, frame_length)`, from the chunk at the frame's start
 // (blast_engine.c:150-152, 162, 264-268), so a whole frame one residue shorter than its strand's
 // first frame, whose one chunk ends on its end sentinel, scans no word there. Where that chunk ends
 // before the frame's end at a mask, LOSAT scans the chunk alone, as NCBI's normal chunks do for the
 // near input, the mask shortened by the fewest bases after which a letter follows the chunk in
-// every frame (an approved NCBI defect, PD-LOSAT-NCBI-DEFECTS exception 18: the Owner's answers
-// Q1 = B and Q2 = B of M4b, 2026-11-21; NCBI's scan past the chunk gives rows that differ from the
-// near input's, in TBLASTX the same row once for each word it reads in the mask, or a crash).
+// every frame; the masked bases stay masked in the traceback and the statistics (an approved NCBI
+// defect, PD-LOSAT-NCBI-DEFECTS exception 18: the Owner's answers Q1 = B and Q2 = B of M4b,
+// 2026-11-21; NCBI's scan past the chunk gives rows that differ from the near input's, in TBLASTX
+// the same row once for each word it reads in the mask, or a crash).
 /// The chunks of frame `frame` (+1..+3, -1..-3, of `frame_length` residues) of a database sequence
 /// with the nucleotide ranges `nucleotide_ranges` (the complement of its stored masks,
 /// `core::subject_split::complement_masks`), each with its scan ranges, in a search with

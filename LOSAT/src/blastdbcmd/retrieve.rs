@@ -59,11 +59,12 @@ impl Stop {
 }
 
 impl From<SeqDbError> for Stop {
-    /// A reader error inside the request: NCBI's own (`CSeqDBException`) is caught like any
-    /// exception there (exit status 1, not the 2 of an error at opening); LOSAT's is a
-    /// refusal.
+    /// A reader error inside the request: NCBI's own (`CSeqDBException`, or the `CFileException`
+    /// of a lookup file) is caught like any exception there, its message
+    /// (`SeqDbError::ncbi_exception_message`) with exit status 1, not the 2 of an error at
+    /// opening; LOSAT's is a refusal.
     fn from(error: SeqDbError) -> Stop {
-        match error.ncbi_message() {
+        match error.ncbi_exception_message() {
             Some(text) => Stop::NcbiBytes(text),
             None => Stop::refused(error.to_string()),
         }

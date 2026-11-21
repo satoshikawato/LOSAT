@@ -50,14 +50,21 @@ impl DbFile {
     // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbfile.hpp:93-105
     // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:5932-5946
     // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbatlas.hpp:709-720
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:5600-5656
     // NCBI first asks whether the file exists (`GetFileSizeL`: `stat`
     // succeeds and names a regular file, cited at `alias::exists`) and gives
     // "not found" otherwise; it then opens the file to map it, and an `open`
     // that fails is its memory-mapping error. LOSAT takes the same two steps
-    // with a plain `open` in place of the mapping.
+    // with a plain `open` in place of the mapping. NCBI maps the whole file
+    // there, and a mapping that fails is an error of that place too: LOSAT
+    // reads the first byte of a file that is not empty, so a file whose bytes
+    // the system does not give fails where NCBI's fails (a picked file of
+    // LOSAT Web that changed or was removed after the pick: its reads fail
+    // with EIO; line WQA D18, 2026-11-21).
     /// Opens `path` for reading. A path that is no regular file is NCBI's
     /// "Error: File (...) not found."; a regular file that cannot be opened is
-    /// [`SeqDbError::Open`].
+    /// [`SeqDbError::Open`], one whose first byte cannot be read
+    /// [`SeqDbError::Read`].
     pub fn open(path: &Path) -> Result<Self, SeqDbError> {
         if !super::alias::exists(path) {
             return Err(SeqDbError::NotFound(
@@ -75,14 +82,32 @@ impl DbFile {
                 source,
             })?
             .len();
-        Ok(Self {
+        let opened = Self {
             path: path.to_path_buf(),
             len,
             #[cfg(any(unix, windows))]
             file,
             #[cfg(not(any(unix, windows)))]
             file: std::sync::Mutex::new(file),
-        })
+        };
+        if len > 0 {
+            opened.read_exact_at(&mut [0u8; 1], 0)?;
+        }
+        Ok(opened)
+    }
+
+    /// A file of `len` bytes read through the handle `file` (the tests: a handle whose reads the
+    /// system refuses, a directory's on Linux).
+    #[cfg(all(test, target_os = "linux"))]
+    pub(crate) fn with_handle(path: &Path, file: File, len: u64) -> Self {
+        Self {
+            path: path.to_path_buf(),
+            len,
+            #[cfg(any(unix, windows))]
+            file,
+            #[cfg(not(any(unix, windows)))]
+            file: std::sync::Mutex::new(file),
+        }
     }
 
     /// Path this file was opened with.
@@ -103,7 +128,9 @@ impl DbFile {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1802-1817
     // NCBI returns a pointer at `offset` of the mapped file; LOSAT fills `buf`
     // from the same offset. A range that passes the end of the file, which
-    // NCBI would read past its mapping, is an explicit format error.
+    // NCBI would read past its mapping, is an explicit format error. A read
+    // that the system refuses is [`SeqDbError::Read`], NCBI's failed mapping of
+    // the file (cited at `SeqDbError::ncbi_message`).
     /// Fills `buf` with the bytes at `offset`.
     pub fn read_exact_at(&self, buf: &mut [u8], offset: u64) -> Result<(), SeqDbError> {
         let end = offset.checked_add(buf.len() as u64);
@@ -119,8 +146,9 @@ impl DbFile {
             });
         }
         self.read_exact_at_impl(buf, offset)
-            .map_err(|source| SeqDbError::Io {
+            .map_err(|source| SeqDbError::Read {
                 path: self.path.clone(),
+                len: self.len,
                 source,
             })
     }

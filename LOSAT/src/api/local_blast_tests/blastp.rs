@@ -814,6 +814,7 @@ fn outfmt_0_alone_refuses_the_masks_of_a_query_that_is_also_a_subject() {
         crate::api::Program::Blastp,
         &command,
         Some(false),
+        true,
         &std::fs::read(&query.0).unwrap(),
         &std::fs::read(&subject.0).unwrap(),
     )

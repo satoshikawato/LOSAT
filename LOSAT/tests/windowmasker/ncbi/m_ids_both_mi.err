@@ -1,0 +1,2 @@
+Error: (CWinMaskConfigException::inconsistent program options) only one of -ids or -exclude_ids can be specified
+Error: (106.16) Application's execution failed (CWinMaskConfigException::inconsistent program options) only one of -ids or -exclude_ids can be specified

@@ -51,6 +51,7 @@ static TOOL: Tool = Tool {
     descs: args::DESCS,
     dependencies: args::dependencies,
     post_prefix: Some("blastdbcmd"),
+    components: &[],
 };
 
 /// Runs `blastdbcmd` with `words` (the command line after `losat blastdbcmd`), after its

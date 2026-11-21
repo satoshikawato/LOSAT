@@ -70,11 +70,12 @@ fn run_main_entry() -> Result<()> {
     // An executable called `blastn` is `losat blastn` (`cli::entry_argv`).
     let argv: Vec<std::ffi::OsString> = crate::cli::entry_argv(std::env::args_os());
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_usage_report.cpp:84-86
-    // Every NCBI BLAST+ program's application but dustmasker's and segmasker's has a usage
+    // Every NCBI BLAST+ program's application but the maskers' (dustmasker, segmasker,
+    // windowmasker) has a usage
     // report, made with the application before `AppMain` runs; it reads `.ncbirc`
     // (`ncbi_environment::ApplicationStart`), and its messages go to stderr at once, before
     // `-version` and before blastdbcmd's `-logfile` is read. The start of the others (dustmasker,
-    // segmasker, rpsbproc) writes nothing here.
+    // segmasker, windowmasker, rpsbproc) writes nothing here.
     // The program's application start, made once here and given to what reads after it.
     let start = argv
         .get(1)
@@ -108,6 +109,11 @@ fn run_main_entry() -> Result<()> {
     // `losat segmasker` too.
     if let Some(start) = started("segmasker") {
         std::process::exit(crate::segmasker::run(&argv[2..], start));
+    }
+    // NCBI reference (598d8ae6): c++/src/app/winmasker/main.cpp:39-42
+    // `losat windowmasker` too.
+    if let Some(start) = started("windowmasker") {
+        std::process::exit(crate::windowmasker::run(&argv[2..], start));
     }
     // NCBI reference (598d8ae6): c++/src/app/blastdb/convert2blastmask.cpp:259-263
     // `losat convert2blastmask` too.
@@ -158,7 +164,7 @@ fn run_main_entry() -> Result<()> {
         None => crate::blastinput::ncbi_environment::DiagTarget::Stderr,
     };
     if let Some(start) = &start {
-        start.write_log_setup(&mut target);
+        start.write_log_setup(&mut target, &mut std::io::stderr());
     }
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:926-1001 (`-version` and the full
     // versions are read before the program's arguments and before the configuration load,

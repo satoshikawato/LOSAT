@@ -220,8 +220,9 @@ pub fn run_batches<'a>(search: &'a Search, inputs: Inputs<'a>) -> Result<Batches
     let mut start = CallStart::new(search, inputs, &mut start_messages)?;
     // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:534-543 (the PSSM's query
     // searched without a `CBlastInput`, cited at `blastp::blast_engine::search_pssm_query`)
-    // A PSSM query (`Inputs::pssm`) is one batch of its own: NCBI reads no query batches then.
-    let lengths: Vec<usize> = match inputs.pssm {
+    // A PSSM or alignment query (`Inputs::pssm`, `Inputs::msa`) is one batch of its own: NCBI
+    // reads no query batches then.
+    let lengths: Vec<usize> = match inputs.query_file {
         Some(_) => vec![0],
         None => inputs
             .query
@@ -255,7 +256,7 @@ pub fn run_batches<'a>(search: &'a Search, inputs: Inputs<'a>) -> Result<Batches
     let command = search.command(inputs)?;
     // A PSSM query is one batch, whose size NCBI does not read (`BATCH_SIZE`; tblastn_app.cpp:
     // 208-221 reads it for a FASTA query only).
-    let sizes = match inputs.pssm {
+    let sizes = match inputs.query_file {
         Some(_) => BatchSizes::Fixed(1),
         None => batch_sizes(&command, inputs, &mut start, &mut start_messages)
             .map_err(|error| Error::search(&error))?,
@@ -279,7 +280,7 @@ pub fn run_batches<'a>(search: &'a Search, inputs: Inputs<'a>) -> Result<Batches
         run_scopes,
         count,
         next_query: 0,
-        end_pending: inputs.pssm.is_none() && !inputs.end().is_input(),
+        end_pending: inputs.query_file.is_none() && !inputs.end().is_input(),
         hsps_before: 0,
         searched_one: false,
         finished: false,
@@ -308,7 +309,7 @@ fn run_scopes(
     inputs: Inputs<'_>,
 ) -> Option<crate::blastinput::query_batch::QueryScopes> {
     use crate::blastinput::query_batch::{QueryScopeSpan, QueryScopes};
-    if !search.parse_deflines() || inputs.database || inputs.pssm.is_some() {
+    if !search.parse_deflines() || inputs.database || inputs.query_file.is_some() {
         return None;
     }
     Some(QueryScopes::new(QueryScopeSpan::Run, program_name(search)))
@@ -320,7 +321,7 @@ fn run_scopes(
 /// (one batch).
 fn batch_count(search: &Search, inputs: Inputs<'_>) -> Option<BatchCount> {
     use crate::blastinput::query_batch::QueryScopeSpan;
-    if !search.parse_deflines() || inputs.pssm.is_some() {
+    if !search.parse_deflines() || inputs.query_file.is_some() {
         return None;
     }
     let span = QueryScopeSpan::of(!inputs.database, false);
@@ -341,8 +342,8 @@ fn program_name(search: &Search) -> &'static str {
 }
 
 impl Batches<'_> {
-    /// How many queries the inputs hold (the records, or the one sequence of a PSSM file,
-    /// `Inputs::pssm`): with `Batch::query_indices`, how far the search is.
+    /// How many queries the inputs hold (the records, or the one sequence of a PSSM or alignment
+    /// file, `Inputs::pssm`, `Inputs::msa`): with `Batch::query_indices`, how far the search is.
     pub fn query_count(&self) -> usize {
         self.lengths.len()
     }
@@ -373,7 +374,7 @@ impl Batches<'_> {
     /// (`reads_on`), and only there (line WQA's D10, 2026-11-19).
     fn search_batch(&mut self, range: Range<usize>, reads_on: bool) -> Result<Batch, Error> {
         let ends_reading = reads_on && range.end == self.lengths.len();
-        let inputs = match self.inputs.pssm {
+        let inputs = match self.inputs.query_file {
             Some(_) => self.inputs,
             None => Inputs {
                 query: &self.inputs.query[range.clone()],

@@ -47,6 +47,26 @@ pub(super) fn is_protein(program: Program, role: Role) -> bool {
     }
 }
 
+/// A query that a file holds in place of FASTA records (`Inputs::pssm`, `Inputs::msa`): the
+/// search reads the file as the command line reads its `-in_pssm` or `-in_msa`, and the one query
+/// is the sequence it gives.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum QueryFile<'a> {
+    /// A PSSM file (`-in_pssm` of psiblast and tblastn).
+    Pssm(&'a std::path::Path),
+    /// A multiple sequence alignment (`-in_msa` of psiblast), made into the query's PSSM.
+    Alignment(&'a std::path::Path),
+}
+
+impl<'a> QueryFile<'a> {
+    /// The file.
+    pub(crate) fn path(self) -> &'a std::path::Path {
+        match self {
+            QueryFile::Pssm(path) | QueryFile::Alignment(path) => path,
+        }
+    }
+}
+
 /// The reader configuration of the command line for the input of `role`: the program's flags,
 /// the data loaders on (the command line without `.ncbirc` or `DATA_LOADERS`). `writes_archive`
 /// is whether the search writes the BLAST archive (outfmt 11), or `None` where its formats are not
@@ -486,10 +506,11 @@ pub fn read_search_inputs(
 /// from [`FastaRecord::new`]. A database subject comes from [`Inputs::database`]: the engine
 /// opens it by its name, as the command line opens `-db`. A PSSM query of psiblast and tblastn
 /// comes from [`Inputs::pssm`] and [`Inputs::pssm_database`]: the engine reads the file, as the
-/// command line reads `-in_pssm`.
+/// command line reads `-in_pssm`. A query alignment of psiblast comes from [`Inputs::msa`] and
+/// [`Inputs::msa_database`]: the engine reads the file as the command line reads `-in_msa`.
 #[derive(Debug, Clone, Copy)]
 pub struct Inputs<'a> {
-    /// The query records (`-query`); none for a PSSM query (`pssm`).
+    /// The query records (`-query`); none for a query file (`query_file`).
     pub(crate) query: &'a [FastaRecord],
     /// The subject records (`-subject`); none for a database.
     pub(crate) subject: &'a [FastaRecord],
@@ -501,8 +522,9 @@ pub struct Inputs<'a> {
     pub(crate) subject_name: &'a str,
     /// Whether the subject is the database `subject_name` (`-db`).
     pub(crate) database: bool,
-    /// The PSSM file whose sequence is the one query (`-in_pssm`), in place of query records.
-    pub(crate) pssm: Option<&'a std::path::Path>,
+    /// The file whose sequence is the one query (`-in_pssm`, `-in_msa`), in place of query
+    /// records.
+    pub(crate) query_file: Option<QueryFile<'a>>,
     /// How the reading of the query records ended (`Inputs::query_end`); `None`: at the end of
     /// the input.
     pub(crate) query_end: Option<&'a QueryEnd>,
@@ -517,7 +539,7 @@ impl<'a> Inputs<'a> {
             query_name: "query",
             subject_name: "subject",
             database: false,
-            pssm: None,
+            query_file: None,
             query_end: None,
         }
     }
@@ -533,7 +555,7 @@ impl<'a> Inputs<'a> {
             query_name: "query",
             subject_name: name,
             database: true,
-            pssm: None,
+            query_file: None,
             query_end: None,
         }
     }
@@ -548,7 +570,7 @@ impl<'a> Inputs<'a> {
     /// show it).
     pub fn pssm(path: &'a std::path::Path, subject: &'a [FastaRecord]) -> Self {
         Self {
-            pssm: Some(path),
+            query_file: Some(QueryFile::Pssm(path)),
             ..Self::new(&[], subject)
         }
     }
@@ -557,15 +579,38 @@ impl<'a> Inputs<'a> {
     /// `-in_pssm path -db name` (`Inputs::pssm`, `Inputs::database`).
     pub fn pssm_database(path: &'a std::path::Path, name: &'a str) -> Self {
         Self {
-            pssm: Some(path),
+            query_file: Some(QueryFile::Pssm(path)),
+            ..Self::database(&[], name)
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1184-1229
+    /// The query of the alignment file `path` against the subject records: the command line's
+    /// `-in_msa path` of psiblast, in place of `-query`. The search reads the file as the command
+    /// line reads it, with its messages and errors (not `-`, the command line's standard input);
+    /// the one query is the alignment's master (query 0 of the results, `HspRecord::query_id` as
+    /// the reports show it), whose row `-msa_master_idx` and `-ignore_msa_master` of the argv
+    /// choose, as on the command line. Only psiblast searches an alignment.
+    pub fn msa(path: &'a std::path::Path, subject: &'a [FastaRecord]) -> Self {
+        Self {
+            query_file: Some(QueryFile::Alignment(path)),
+            ..Self::new(&[], subject)
+        }
+    }
+
+    /// The query of the alignment file `path` against the BLAST database `name`: the command
+    /// line's `-in_msa path -db name` (`Inputs::msa`, `Inputs::database`).
+    pub fn msa_database(path: &'a std::path::Path, name: &'a str) -> Self {
+        Self {
+            query_file: Some(QueryFile::Alignment(path)),
             ..Self::database(&[], name)
         }
     }
 
     /// The same inputs, whose query records end with `end` ([`read_input_records`]): a search
     /// meets it where the command line's query batches meet it, after the reports of the batches
-    /// before ([`QueryEnd`]). Without it the query records are those of a whole input. A PSSM
-    /// query has no records and no end.
+    /// before ([`QueryEnd`]). Without it the query records are those of a whole input. A PSSM or
+    /// alignment query has no records and no end.
     pub fn query_end(self, end: &'a QueryEnd) -> Self {
         Self {
             query_end: Some(end),
@@ -579,16 +624,16 @@ impl<'a> Inputs<'a> {
         self.query_end.unwrap_or(&INPUT)
     }
 
-    /// The number of queries: the records, or the one sequence of a PSSM file.
+    /// The number of queries: the records, or the one sequence of a PSSM or alignment file.
     pub(crate) fn query_count(&self) -> usize {
-        match self.pssm {
+        match self.query_file {
             Some(_) => 1,
             None => self.query.len(),
         }
     }
 
     /// The same inputs, shown with these names (the file names of a command line whose output
-    /// the search is to reproduce). A database keeps its name, a PSSM query its file.
+    /// the search is to reproduce). A database keeps its name, a PSSM or alignment query its file.
     pub fn named(self, query_name: &'a str, subject_name: &'a str) -> Self {
         Self {
             query_name,

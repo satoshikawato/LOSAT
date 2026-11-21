@@ -699,6 +699,11 @@ fn run_local_entry(
     match command {
         Commands::Blastp(mut args) => {
             args.taxdb_setting = taxdb_setting(outputs, start)?;
+            // The file of an ungapped search's `-matrix` that NCBI's tables do not have, looked up
+            // where the options are resolved, as on the command line (`BlastpArgs::matrix_search`).
+            if args.unknown_matrix_name() {
+                args.matrix_search = Some(start.settings(&mut *outputs.diagnostics)?.matrix_search);
+            }
             run_local_blastp(args, query, end, subject, "", "", outputs)
         }
         Commands::Tblastn(mut args) => {

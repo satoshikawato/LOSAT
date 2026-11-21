@@ -77,9 +77,9 @@ and for the rows of outfmt 13 and 14 and psiblast's PSSM files two more, files a
   psiblast losat-rejection row of a subject set); `extra_args` is split like a shell line; `outfmt` is one argument;
   `stdout_sha256`, `stdout_bytes` and `stderr_sha256` are written by `freeze`.
 - A row runs `LOSAT PROGRAM -db DB -query QUERY EXTRA_ARGS -outfmt OUTFMT` from `LOSAT/`.
-- `query`: a path relative to LOSAT/; `pssm-gz:PATH` or `pssm:PATH` is a PSSM query (`-in_pssm`), and a psiblast query `msa:PATH` is an alignment query (`-in_msa PATH`, line PS item PS6; the library API takes none, so such a row is `library-skip`); `stdin:pipe:PATH`,
+- `query`: a path relative to LOSAT/; `pssm-gz:PATH` or `pssm:PATH` is a PSSM query (`-in_pssm`), and a psiblast query `msa:PATH` is an alignment query (`-in_msa PATH`, line PS item PS6; the library API's `Inputs::msa`, line LIB item 1.6); `stdin:pipe:PATH`,
   `stdin:file:PATH` or `stdin:empty` is `-query -` with PATH's bytes through a pipe, the file PATH itself, or an empty pipe
   as standard input (`db_search_fixtures.query_stdin`; such a row has no PSSM or XInclude files and the library skips it).
   psiblast's `stdin-msa:pipe:PATH`, `stdin-msa:file:PATH` and `stdin-msa:empty` are the same with `-in_msa -`; `none:` gives no query argument
-  at all (a row that tests an option that needs `-in_msa`, `-msa_master_idx` or `-ignore_msa_master` without it). A row whose arguments hold one of
-  the three alignment options is `library-skip` (`xinclude_fixtures.ALIGNMENT_OPTIONS`).
+  at all (a row that tests an option that needs `-in_msa`, `-msa_master_idx` or `-ignore_msa_master` without it). A row with `-msa_master_idx` or `-ignore_msa_master` and no `-in_msa`, or with `-in_msa` and
+  `-query` or `-in_pssm`, is `library-skip` (`xinclude_fixtures.ALIGNMENT_OPTIONS`); a row of `-in_msa PATH` runs through the library (`Inputs::msa`).

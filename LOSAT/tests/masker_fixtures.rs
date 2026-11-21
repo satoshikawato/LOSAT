@@ -33,7 +33,7 @@ struct Case {
 /// The words of `line` as the probe's shell split them: blanks between words, double quotes
 /// around a word with blanks or none, and `<` before the file of the standard input (no other
 /// shell syntax is in the table).
-fn shell_words(line: &str) -> (Vec<String>, Option<String>) {
+pub(crate) fn shell_words(line: &str) -> (Vec<String>, Option<String>) {
     let mut words = Vec::new();
     let mut word: Option<String> = None;
     // The open quote: inside `"..."` a `'` is a letter, inside `'...'` a `"`.

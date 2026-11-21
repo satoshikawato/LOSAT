@@ -199,16 +199,17 @@ fn taxonomy_files_that_cannot_be_read_give_ncbis_bytes_or_losats_refusal() {
             let at = format!("{id} -num_threads {}", threads.unwrap_or("-"));
             match losat.as_str() {
                 "same" => {
-                    let ncbi_stderr = place(&row[8]);
-                    // NCBI's report of a C++ exception (exit status 255) in LOSAT's words
-                    // (`losat::wording`, PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 12).
-                    let expected_stderr = if row[6] == "255" {
-                        losat::wording::losat_text(&ncbi_stderr).into_owned()
-                    } else {
-                        ncbi_stderr
-                    };
+                    // NCBI's bytes in LOSAT's words (`losat::wording`): its version line, its
+                    // error prefixes and its report of a C++ exception (exit status 255,
+                    // PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 12).
+                    let expected_stderr = losat::wording::losat_text(&place(&row[8])).into_owned();
+                    let ncbi_stdout = place(&row[7]);
+                    let expected_stdout = String::from_utf8(
+                        losat::wording::losat_output_bytes(ncbi_stdout.as_bytes()).into_owned(),
+                    )
+                    .unwrap();
                     assert_eq!(stderr, expected_stderr, "{at}: stderr");
-                    assert_eq!(stdout, place(&row[7]), "{at}: stdout");
+                    assert_eq!(stdout, expected_stdout, "{at}: stdout");
                     assert_eq!(status.to_string(), row[6], "{at}: exit status");
                 }
                 "refused" => {

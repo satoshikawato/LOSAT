@@ -41,9 +41,9 @@ REPO = Path(__file__).resolve().parents[2]
 # against them.
 MUL_ADD_SITES = {
     ("LOSAT/src/stats/spouge.rs", "x_product_error"): 1,
-    ("LOSAT/src/stats/spouge.rs", "x_dekker_product_error_matches_fused_multiply_add"): 1,
+    ("LOSAT/src/stats/spouge_tests.rs", "x_dekker_product_error_matches_fused_multiply_add"): 1,
     ("LOSAT/src/utils/glibc_fma_libm.rs", "fma"): 1,
-    ("LOSAT/src/utils/glibc_fma_libm.rs", "the_emulated_fma_rounds_once"): 2,
+    ("LOSAT/src/utils/glibc_fma_libm_tests.rs", "the_emulated_fma_rounds_once"): 2,
 }
 
 # No NCBI counterpart: the release-binary functions that hold the `mul_add` sites: the ErfC code of

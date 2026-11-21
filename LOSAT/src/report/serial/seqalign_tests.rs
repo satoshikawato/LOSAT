@@ -116,6 +116,7 @@ const MB_HSP2: [GapEditOp; 9] = [
 fn megablast_documents(format: SerialFormat) -> Vec<u8> {
     let run = RunRecord {
         program: Program::Blastn,
+        rps: false,
         db_title: None,
         gapped: true,
     };
@@ -187,6 +188,7 @@ fn blastp_db_documents(format: SerialFormat, db_title: &[u8]) -> Vec<u8> {
 fn blastp_documents(format: SerialFormat, db_title: Option<&[u8]>) -> Vec<u8> {
     let run = RunRecord {
         program: Program::Blastp,
+        rps: false,
         db_title,
         gapped: true,
     };
@@ -373,6 +375,7 @@ fn long_database_title_without_spaces_breaks_at_column_78() {
 fn score_list_follows_ncbi_conditions() {
     let run = RunRecord {
         program: Program::Blastp,
+        rps: false,
         db_title: None,
         gapped: true,
     };
@@ -420,6 +423,7 @@ fn score_list_follows_ncbi_conditions() {
 fn score_zero_hsps_write_nothing() {
     let run = RunRecord {
         program: Program::Blastn,
+        rps: false,
         db_title: None,
         gapped: true,
     };
@@ -540,6 +544,7 @@ const BP_UNGAPPED_SUBJECTS: [u32; 6] = [4, 83, 24, 22, 82, 11];
 fn blastp_ungapped_documents(format: SerialFormat, db_title: Option<&[u8]>) -> Vec<u8> {
     let run = RunRecord {
         program: Program::Blastp,
+        rps: false,
         db_title,
         gapped: false,
     };
@@ -715,6 +720,7 @@ const BN_UNGAPPED_HSPS: [(u32, i32, i32, i32, bool, i32, f64, f64, i32); 6] = [
 fn blastn_ungapped_dendiag_documents_equal_ncbi() {
     let run = RunRecord {
         program: Program::Blastn,
+        rps: false,
         db_title: None,
         gapped: false,
     };
@@ -779,6 +785,7 @@ fn blastn_ungapped_dendiag_documents_equal_ncbi() {
 fn an_ungapped_query_without_hsps_writes_nothing() {
     let run = RunRecord {
         program: Program::Blastn,
+        rps: false,
         db_title: None,
         gapped: false,
     };
@@ -952,6 +959,7 @@ impl std::io::Write for Combined {
 fn blastp_db_documents_posted(format: SerialFormat, title: &[u8]) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
     let run = RunRecord {
         program: Program::Blastp,
+        rps: false,
         db_title: Some(title),
         gapped: true,
     };
@@ -1069,6 +1077,7 @@ fn subject_remap_drops_std_segs_that_start_or_end_with_a_gap() {
     let segments = |db_title: Option<&'static [u8]>| {
         let run = RunRecord {
             program: Program::Blastx,
+            rps: false,
             db_title,
             gapped: true,
         };
@@ -1103,6 +1112,7 @@ fn subject_remap_drops_std_segs_that_start_or_end_with_a_gap() {
 fn ungapped_translated_hsps_are_diags_seq_aligns() {
     let run = RunRecord {
         program: Program::Tblastx,
+        rps: false,
         db_title: None,
         gapped: false,
     };
@@ -1173,6 +1183,7 @@ fn a_subject_with_strings_writes_the_use_this_seqid_ext() {
             } else {
                 Program::Tblastx
             },
+            rps: false,
             db_title: Some(b"db"),
             gapped,
         };

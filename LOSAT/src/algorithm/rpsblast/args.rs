@@ -177,8 +177,7 @@ pub(crate) fn rps_composition_mode(value: &str) -> u8 {
 }
 
 impl RpsblastArgs {
-    /// blastp's arguments of the RPS-BLAST search, after LOSAT's refusal of the output formats of
-    /// a later item.
+    /// blastp's arguments of the RPS-BLAST search, after NCBI's reading of `-outfmt`.
     pub fn into_blastp_args(self) -> Result<BlastpArgs> {
         Self::check_outfmt(&self.outfmt)?;
         let requested_cbs = rps_composition_mode(&self.comp_based_stats);
@@ -288,46 +287,20 @@ impl RpsblastArgs {
     }
 
     /// NCBI parses `-outfmt` before the option handlers (`app::parse_formatting_string`, its
-    /// errors are NCBI's); the formats that NCBI runs and LOSAT's RPSBLAST does not write yet are
-    /// refused (item PS15a, `check_rps_outfmt`).
+    /// errors are NCBI's; `check_rps_outfmt`).
     pub fn check_outfmt(outfmt: &str) -> Result<()> {
-        check_rps_outfmt(outfmt, "RPSBLAST", false)
+        check_rps_outfmt(outfmt)
     }
 }
 
-/// The refusal of an `-outfmt` that NCBI's RPS programs run and LOSAT's `program` (RPSBLAST,
-/// RPSTBLASTN) does not write yet (item PS15a): every format but 0, 6, 7 and 10, and RPSTBLASTN's
-/// query-anchored formats 1 to 4, which BLASTX's report writes for it (line RG item T3c). Outfmt
-/// 17 goes on to NCBI's own error (`formatting_handler_check`), and with `xinclude_to_ncbi` outfmt
-/// 13 and 14 too (to the standard output: NCBI's "Please provide a file name",
-/// `app::xinclude_check_for`).
-pub(crate) fn check_rps_outfmt(outfmt: &str, program: &str, xinclude_to_ncbi: bool) -> Result<()> {
-    use crate::blastinput::app::ReportFormat;
-    let choice = crate::blastinput::app::parse_formatting_string(outfmt)?;
-    if let Some(format) = ReportFormat::from_number(choice.number) {
-        let ncbi_error =
-            xinclude_to_ncbi && matches!(format, ReportFormat::Json | ReportFormat::Xml2);
-        let query_anchored =
-            program == "RPSTBLASTN" && crate::report::pairwise::PairwiseView::of(format).is_some();
-        if !ncbi_error
-            && !query_anchored
-            && !matches!(
-                format,
-                ReportFormat::Pairwise
-                    | ReportFormat::Tabular
-                    | ReportFormat::TabularWithComments
-                    | ReportFormat::CommaSeparatedValues
-                    | ReportFormat::Sam
-                    | ReportFormat::ArchiveFormat
-                    | ReportFormat::Xml
-            )
-        {
-            bail!(
-                "output format {} is not supported by LOSAT's {program}",
-                choice.number
-            );
-        }
-    }
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2744-2748
+/// NCBI's reading of `-outfmt` before the option handlers of its RPS programs (rpsblast,
+/// rpstblastn), whose errors are NCBI's (`app::parse_formatting_string`). Every format that they
+/// run is written (items PS15a-1 and PS15a-2): RPSBLAST's through BLASTP's reports, RPSTBLASTN's
+/// through BLASTX's. Outfmt 17 goes on to NCBI's own error (`formatting_handler_check`), outfmt 13
+/// and 14 to the standard output to NCBI's "Please provide a file name" (`app::xinclude_check_for`).
+pub(crate) fn check_rps_outfmt(outfmt: &str) -> Result<()> {
+    crate::blastinput::app::parse_formatting_string(outfmt)?;
     Ok(())
 }
 
@@ -407,16 +380,15 @@ mod tests {
         assert_eq!(args.max_hsps_per_subject, None);
     }
 
+    // Every output format that NCBI's rpsblast runs is BLASTP's report (items PS15a-1, PS15a-2);
+    // `-html` is a later item's (line RG T4c).
     #[test]
     fn options_of_later_items_are_refused() {
-        for extra in [&["-outfmt", "8"][..], &["-outfmt", "1"]] {
-            let error = parse(extra).unwrap().into_blastp_args().unwrap_err();
-            assert!(
-                error
-                    .to_string()
-                    .contains("not supported by LOSAT's RPSBLAST"),
-                "{extra:?}: {error}"
-            );
+        for outfmt in ["1", "4", "5", "8", "9", "11", "12", "13", "14", "15", "16", "18", "20"] {
+            parse(&["-outfmt", outfmt, "-out", "x.out"])
+                .unwrap()
+                .into_blastp_args()
+                .unwrap_or_else(|error| panic!("outfmt {outfmt}: {error}"));
         }
         let error = parse(&["-html", "1"]).unwrap_err();
         assert!(

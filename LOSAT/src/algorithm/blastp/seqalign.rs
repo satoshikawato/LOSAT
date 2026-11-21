@@ -73,10 +73,12 @@ impl EngineCounts {
 }
 
 /// Writes the documents of every query of `hit_lists` (indexed by query) to `writer`, each
-/// query's warnings before it (`write_hit_list_seqaligns`).
+/// query's warnings before it (`write_hit_list_seqaligns`); `rps`: the search is rpsblast's
+/// (`RunRecord::rps`).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn write_blastp_seqalign(
     format: SerialFormat,
+    rps: bool,
     hit_lists: &[Option<BlastpHitList>],
     queries: &QueryNames<'_>,
     subjects: SubjectNames<'_>,
@@ -87,6 +89,7 @@ pub(crate) fn write_blastp_seqalign(
 ) -> Result<()> {
     let run = RunRecord {
         program: Program::Blastp,
+        rps,
         db_title: subjects.db_title(),
         gapped: true,
     };

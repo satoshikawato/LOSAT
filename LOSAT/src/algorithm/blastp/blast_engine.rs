@@ -2016,9 +2016,10 @@ fn blastp_seqalign_format(outfmt: &str) -> Option<crate::report::serial::SerialF
 }
 
 /// The pairwise view (`PairwiseView::of`) of the format number `number` where `app` writes it:
-/// outfmt 0, and BLASTP's query-anchored 1 to 4 (`Program::writes`; psiblast and rpsblast refuse
-/// those, line RG PS15). NCBI's application writes 0 to 4 through one frame (`PrintProlog`, the
-/// query batches, `PrintOneResultSet`), and so does LOSAT; `None` for the other formats.
+/// outfmt 0, and the query-anchored 1 to 4 of BLASTP and RPSBLAST (`Program::writes`; psiblast
+/// refuses those, item PS15b). NCBI's application writes 0 to 4 through one frame
+/// (`PrintProlog`, the query batches, `PrintOneResultSet`), and so does LOSAT; `None` for the
+/// other formats.
 fn blastp_pairwise_view_of(
     app: BlastpApp,
     number: i32,
@@ -2026,7 +2027,7 @@ fn blastp_pairwise_view_of(
     crate::blastinput::app::ReportFormat::from_number(number)
         .and_then(crate::report::pairwise::PairwiseView::of)
         .filter(|view| {
-            *view == crate::report::pairwise::PairwiseView::Pairwise || app == BlastpApp::Blastp
+            *view == crate::report::pairwise::PairwiseView::Pairwise || app != BlastpApp::Psiblast
         })
 }
 
@@ -4115,8 +4116,8 @@ pub fn run(
         }
     };
     let out_file = open_out_file(&args)?;
-    // Outfmt 0 to 4 (`blastp_pairwise_view_of`; psiblast and rpsblast refuse 1 to 4 before their
-    // search): the stream of NCBI's `CBlastFormat`.
+    // Outfmt 0 to 4 (`blastp_pairwise_view_of`; psiblast refuses 1 to 4 before its search): the
+    // stream of NCBI's `CBlastFormat`.
     let pairwise =
         format.is_some_and(|format| blastp_pairwise_view_of(args.app, format as i32).is_some());
     // The organism report's `-out` file is written as NCBI's buffer writes it.

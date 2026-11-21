@@ -174,6 +174,7 @@ pub(super) fn write_seqalign(
     };
     seqalign::write_blastp_seqalign(
         serial,
+        view.args.app == BlastpApp::Rpsblast,
         hit_lists,
         &crate::report::record::QueryNames {
             records: query_records,

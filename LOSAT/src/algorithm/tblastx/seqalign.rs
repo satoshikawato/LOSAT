@@ -143,6 +143,7 @@ pub(crate) fn write_tblastx_seqalign(
 ) -> Result<()> {
     let run = RunRecord {
         program: Program::Tblastx,
+        rps: false,
         db_title: match subjects {
             SeqalignSubjects::Records { .. } => None,
             SeqalignSubjects::Database { title, .. } => Some(title),

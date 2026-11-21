@@ -55,6 +55,7 @@ pub(super) fn write_tblastn_seqalign(
 ) -> Result<()> {
     let run = RunRecord {
         program: Program::Tblastn,
+        rps: false,
         db_title: shown.db_title(),
         gapped: true,
     };

@@ -149,20 +149,14 @@ impl RpstblastnArgs {
         }
     }
 
-    /// The RPS search of the arguments (what BLASTX's arguments do not hold), after LOSAT's
-    /// refusal of the output formats that a later item writes (NCBI parses `-outfmt` before its
-    /// option handlers). The refusals of the options that a later item runs (`-use_sw_tback`
+    /// The RPS search of the arguments (what BLASTX's arguments do not hold), after NCBI's reading
+    /// of `-outfmt`, which comes before its option handlers. The refusals of the options that a later item runs (`-use_sw_tback`
     /// with composition-based statistics) come once per run before the first byte, after NCBI's
     /// own errors of the options and the database (`TranslatedRpsSearch::check_options`; review
     /// A of PS12a, N1).
     pub(crate) fn rps_search(&self) -> Result<TranslatedRpsSearch> {
-        // NCBI parses `-outfmt` before the option handlers (`app::parse_formatting_string`);
-        // outfmt 13 and 14 to the standard output get NCBI's own error (BLASTX's).
-        let to_standard_output = self
-            .out
-            .as_deref()
-            .is_none_or(|path| path.as_os_str() == "-");
-        check_rps_outfmt(&self.outfmt, "RPSTBLASTN", to_standard_output)?;
+        // NCBI parses `-outfmt` before the option handlers (`app::parse_formatting_string`).
+        check_rps_outfmt(&self.outfmt)?;
         let requested_cbs = rps_composition_mode(&self.comp_based_stats);
         Ok(TranslatedRpsSearch {
             search: RpsSearch {
@@ -431,32 +425,15 @@ mod tests {
         assert!(search(&["-ungapped", "-comp_based_stats", "0"]).ungapped);
     }
 
-    // The refusals of the options that later items run, before the search.
+    // The refusals of the options that later items run, before the search. Every output format
+    // that NCBI's rpstblastn runs is BLASTX's report (items PS15a-1, PS15a-2).
     #[test]
     fn options_of_later_items_are_refused() {
-        for (extra, text) in [
-            (
-                &["-outfmt", "8"][..],
-                "output format 8 is not supported by LOSAT's RPSTBLASTN",
-            ),
-            (
-                &["-outfmt", "12"],
-                "output format 12 is not supported by LOSAT's RPSTBLASTN",
-            ),
-            (
-                &["-outfmt", "20"],
-                "output format 20 is not supported by LOSAT's RPSTBLASTN",
-            ),
-            (
-                &["-outfmt", "13", "-out", "x.json"],
-                "output format 13 is not supported by LOSAT's RPSTBLASTN",
-            ),
-        ] {
-            assert!(
-                refusal(extra).contains(text),
-                "{extra:?}: {}",
-                refusal(extra)
-            );
+        for outfmt in ["1", "4", "5", "8", "9", "11", "12", "13", "14", "15", "16", "18", "20"] {
+            parse(&["-outfmt", outfmt, "-out", "x.out"])
+                .unwrap()
+                .into_blastx_args()
+                .unwrap_or_else(|error| panic!("outfmt {outfmt}: {error}"));
         }
         // The composition-based statistics of later items, once per run (`check_options`).
         assert!(late_refusal(&["-use_sw_tback"])

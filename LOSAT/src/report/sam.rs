@@ -664,6 +664,7 @@ mod tests {
     ) -> String {
         let run = RunRecord {
             program: crate::blastinput::app::Program::Blastn,
+            rps: false,
             db_title: None,
             gapped: true,
         };
@@ -849,6 +850,7 @@ mod tests {
     fn run_record() -> RunRecord<'static> {
         RunRecord {
             program: crate::blastinput::app::Program::Blastn,
+            rps: false,
             db_title: None,
             gapped: true,
         }

@@ -317,6 +317,7 @@ pub(crate) fn write_blastp_archives(
 ) -> Result<()> {
     let run = RunRecord {
         program: Program::Blastp,
+        rps: false,
         db_title: call.subjects.db_title(),
         // The value cannot differ: `-ungapped` is refused before the search
         // (`validate_requested_blastp_support`), so every BLASTP run is gapped, as in `seqalign.rs`.

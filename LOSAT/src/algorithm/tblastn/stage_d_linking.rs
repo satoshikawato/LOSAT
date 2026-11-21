@@ -337,8 +337,8 @@ pub(super) fn link_even_gap_translated(
     params: &crate::core::link_hsps::EvenGapLinkParams,
 ) -> Result<LinkedHspList> {
     use crate::core::link_hsps::{even_gap_link_hsps, LinkContext, LinkHsp};
-    // NCBI c++/src/algo/blast/core/link_hsps.c:1774-1777: an empty list returns at once (as
-    // `link_preliminary_hsps_on`).
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1774-1777
+    // An empty list returns at once (as in `link_preliminary_hsps_on`).
     if input.is_empty() {
         return Ok(LinkedHspList {
             hsps: Vec::new(),

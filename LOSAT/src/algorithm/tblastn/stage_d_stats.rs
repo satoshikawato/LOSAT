@@ -381,7 +381,8 @@ pub(super) fn local_parameters_for_blocks(
             None => gap_trigger,
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:348-367
             // An ungapped search's word cutoff is the score of e-value 1 (`CUTOFF_E_TBLASTN`) in
-            // the space MIN(subject, query) * subject with the linking's gap decay, at most the
+            // the space of the shorter of subject and query times the subject, with the linking's
+            // gap decay, at most the
             // gap trigger (`ungapped_word_cutoff`).
             // `kbp_array` is `kbp_std` without gapped blocks (blast_parameters.c:298-302),
             // `gap_decay_rate` the linking's, 0 without sum statistics (blast_parameters.c:288,
@@ -434,9 +435,9 @@ pub(super) fn local_parameters_for_blocks(
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4108-4129
 /// The `BLAST_Cutoffs` of an ungapped TBLASTN search's word cutoff (`local_parameters_for_blocks`,
 /// which cites the call): the score of e-value `CUTOFF_E_TBLASTN` (1.0) with the gap decay
-/// `gap_decay_rate` in the search space `MIN(subj_length, query_length) * subj_length` of NCBI's
-/// `Uint8` (the subject length is NCBI's `Uint4` argument, in nucleotides), at least the cutoff of
-/// 1 that NCBI passes in. `cutoff_score_from_evalue` is NCBI's `BlastKarlinEtoS_simple`.
+/// `gap_decay_rate` in the search space (the shorter of subject and query times the subject) of
+/// NCBI's `Uint8` (the subject length is NCBI's `Uint4` argument, in nucleotides), at least the
+/// cutoff of 1 that NCBI passes in. `cutoff_score_from_evalue` is NCBI's `BlastKarlinEtoS_simple`.
 fn ungapped_word_cutoff(
     query_length: usize,
     subj_length: i32,
@@ -840,8 +841,9 @@ mod tests {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:4059-4061
     // The score of an e-value E in a search space N is ceil(ln(K * N / E) / Lambda).
     // The ungapped search's word cutoff: e-value 1 divided by the gap decay divisor (1 - 0.5) in
-    // the space `MIN(subject, query) * subject` (BLOSUM62's ungapped block, Lambda 0.3176, K
-    // 0.134): ceil(ln(0.134 * 30000 / 0.5) / 0.3176) = 29, with a query longer than the subject
+    // the space of the shorter of subject and query times the subject (BLOSUM62's ungapped block,
+    // Lambda 0.3176, K 0.134): ceil(ln(0.134 * 30000 / 0.5) / 0.3176) = 29, with a query longer
+    // than the subject
     // ceil(ln(0.134 * 90000 / 0.5) / 0.3176) = 32, and without the divisor (a decay outside
     // (0, 1)) ceil(ln(0.134 * 30000) / 0.3176) = 27.
     #[test]

@@ -8064,7 +8064,7 @@ mod tests {
         assert_eq!(snapshots.iter().map(Vec::len).collect::<Vec<_>>(), [2; 6]);
     }
 
-    // The HSPs of an ungapped unit (`BLAST_GetUngappedHSPList`, quoted at `ungapped_chunk_hsps`):
+    // The HSPs of an ungapped unit (`BLAST_GetUngappedHSPList`, cited at `ungapped_chunk_hsps`):
     // each initial HSP in the context of its word's query offset (a word at a context's first
     // offset is that context's), the query offsets made the context's, the word's offsets as the
     // gapped start, the subject offsets the chunk's, and the list sorted by score.

@@ -409,7 +409,7 @@ pub struct BlastpPairwiseReport {
     pub gapped_karlin: KarlinParams,
     /// None with `-searchsp` (`PrintKAParameters` without `gbp`).
     pub gumbel: Option<BlastGumbelBlk>,
-    /// `options.GetGappedMode()`: an ungapped search's footers print the ungapped Karlin block
+    /// The options' gapped mode: an ungapped search's footers print the ungapped Karlin block
     /// only and its epilog no `Gap Penalties` line (`gapped_karlin` is then unused).
     pub gapped: bool,
     /// NCBI's `m_ShowLinkedSetSize` (sum statistics in an ungapped search): the description
@@ -2859,7 +2859,7 @@ pub struct BlastnPairwiseReport {
     pub zero_gap_extension_formula: bool,
     /// The two-hit window (`options.GetWindowSize()`): 40 for dc-megablast.
     pub window_size: usize,
-    /// A gapped search (`options.GetGappedMode()`); an ungapped (`-ungapped`) search has no
+    /// A gapped search (the options' gapped mode); an ungapped (`-ungapped`) search has no
     /// Gapped Karlin block in a query's footer and no `Gap Penalties` line in the epilog.
     pub gapped: bool,
     /// Subjects in the description table and with alignments, per query.
@@ -5742,7 +5742,7 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
 
     fn foot<W: Write>(&self, writer: &mut W, q_idx: usize) -> io::Result<()> {
         // An ungapped search's footer has the ungapped Karlin block only (`x_PrintOneQueryFooter`,
-        // quoted at `write_translated_query_footer`).
+        // cited at `write_translated_query_footer`).
         write_translated_query_footer(
             writer,
             &self.queries[q_idx],

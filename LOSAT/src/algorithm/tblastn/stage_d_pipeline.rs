@@ -1134,7 +1134,7 @@ fn run_local_search_with_pool(
     };
     let ungapped = lookup_protein_params_ungapped(scoring.matrix);
     // An ungapped search (`-ungapped`) has no gapped blocks and no Gumbel block
-    // (blast_setup.c:517-527, quoted at `stage_d_stats::LocalUngappedSearch`), and NCBI does not
+    // (blast_setup.c:517-527, cited at `stage_d_stats::LocalUngappedSearch`), and NCBI does not
     // check its gap costs (`BLAST_ValidateOptions` checks them only for a gapped search,
     // blast_options.c:908-936): the matrix's ungapped values stand in for the gapped ones that the
     // setup below reads.
@@ -2664,8 +2664,8 @@ fn query_set_setup<'a>(
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:3128-3130
         // An ungapped search (`-ungapped`) has no gapped blocks (blast_setup.c:517-527): the
         // cutoffs, the linking, the e-values and the bit scores read each context's `kbp`
-        // (`kbp_array = sbp->kbp`, blast_parameters.c:859-864; link_hsps.c:1637-1641), and the
-        // effective lengths its `kbp` with the alpha and beta of the matrix's ungapped row
+        // (the ungapped blocks `sbp->kbp`, blast_parameters.c:859-864; link_hsps.c:1637-1641),
+        // and the effective lengths its `kbp` with the alpha and beta of the matrix's ungapped row
         // (`lookup_protein_params_ungapped`; `compute_karlin_params_ungapped` gives BLOSUM62's).
         // A PSSM query is refused with `-ungapped` (`args::check_search_limits`).
         None if !inputs.scoring.gapped => {
@@ -3363,7 +3363,7 @@ impl<'a> UngappedSubjectSteps<'a> {
         code: &'a GeneticCode,
         total_nt: i64,
     ) -> Self {
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:101-112 (quoted at
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:101-112 (cited at
         // `blastx::linking::link_cutoffs`): the first context of the smallest Lambda.
         let mut smallest_lambda: Option<KarlinParams> = None;
         for context in contexts.iter().filter(|context| context.is_valid) {
@@ -3456,8 +3456,9 @@ fn ungapped_subject_steps(
             });
         }
     }
-    // NCBI blast_hits.c:1162-1164,1234-1235: a subject of fewer than 12 bases has no
-    // translation, which NCBI reads at NULL + 1 (`TargetTranslation::get`).
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1162-1164,1234-1235
+    // A subject of fewer than 12 bases has no translation, which NCBI reads at NULL + 1
+    // (`TargetTranslation::get`).
     if crate::core::blast_hits::target_translation_never_made(subject.len()) {
         return Err(crate::core::blast_hits::x_untranslated_frame_refusal(
             "TBLASTN",
@@ -3610,7 +3611,8 @@ fn finish_local_ungapped(
             payloads,
         })?;
     }
-    // NCBI c++/src/algo/blast/core/blast_traceback.c:1763-1776 (as `finish_local_mode0_no_sum_stats`).
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1763-1776
+    // The results are sorted by e-value as in `finish_local_mode0_no_sum_stats`.
     if profile.subject_set.sorts_results() {
         for result in &mut results {
             result.sort_by_evalue_for_positive_totlen();
@@ -3935,7 +3937,7 @@ mod tests {
         );
     }
 
-    // `BlastSeqSrcGetAvgSeqLen` (quoted at `average_subject_length`), the length of the ungapped
+    // `BlastSeqSrcGetAvgSeqLen` (cited at `average_subject_length`), the length of the ungapped
     // search's word cutoff: a FASTA set's total over its number of records in NCBI's `Uint4`
     // (truncated; 0 for no record), a database's average as the database gives it.
     #[test]

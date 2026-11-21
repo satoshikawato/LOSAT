@@ -280,6 +280,9 @@ pub(crate) struct HspStream {
     sorted: Option<Vec<HspList>>,
     finalized: bool,
     culling: Option<super::culling::Culling>,
+    /// The best hit writer of `-best_hit_overhang` / `-best_hit_score_edge`, in place of the
+    /// collector (`with_best_hit`).
+    besthit: Option<super::besthit::BestHitWriter>,
     max: usize,
 }
 impl HspStream {
@@ -289,8 +292,23 @@ impl HspStream {
             sorted: None,
             finalized: false,
             culling: None,
+            besthit: None,
             max,
         }
+    }
+
+    /// The stream of `num_queries` queries whose writer is the best hit writer `writer`
+    /// (`CSetupFactory::CreateHspWriter` with a best hit score edge), of `max` lists per query.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:305-329
+    pub(crate) fn with_best_hit(
+        writer: super::besthit::BestHitWriter,
+        num_queries: usize,
+        max: usize,
+    ) -> Self {
+        let mut stream = Self::new(num_queries, max);
+        stream.besthit = Some(writer);
+        stream
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_collector.c:105-161
@@ -320,6 +338,11 @@ impl HspStream {
         );
         if let Some(culling) = &mut self.culling {
             culling.write(oid, hsps, trace);
+            return Ok(Vec::new());
+        }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:228-352
+        if let Some(writer) = &mut self.besthit {
+            writer.write(oid, hsps);
             return Ok(Vec::new());
         }
         let mut lists: Vec<Vec<Hsp>> = (0..self.queries.len()).map(|_| Vec::new()).collect();
@@ -358,6 +381,10 @@ impl HspStream {
                     trace.hsps("CULL_FINAL", l.oid, &l.hsps);
                 }
             }
+        }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/hspfilter_besthit.c:190-221
+        if let Some(writer) = self.besthit.take() {
+            self.queries = writer.finalize(self.queries.len(), self.max);
         }
         self.finalized = true;
     }

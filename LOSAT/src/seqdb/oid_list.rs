@@ -1,8 +1,9 @@
 //! The OID list file of an alias file's `OIDLIST` key (`.msk`, and makeblastdb's `.pxm` / `.nxm`
-//! of `-oid_masks`, `seqdb::oid_mask`): the big-endian `Uint4` index of its last OID, then one bit
-//! per OID, the first OID of each byte in its most significant bit, set for an OID the list keeps
-//! (`writedb::oid_list` writes it). The file is read relative to each volume it is applied to: bit
-//! `i` is OID `i` of that volume, whichever volume it is (`alias::alias_oid_mask`).
+//! of `-oid_masks`, `seqdb::oid_mask`), the one owner of its layout: the big-endian `Uint4` index
+//! of its last OID (makeblastdb writes it as an `Int4`, `writedb::oid_list`), then one bit per OID,
+//! the first OID of each byte in its most significant bit, set for an OID the list keeps. The file
+//! is read relative to each volume it is applied to: bit `i` is OID `i` of that volume, whichever
+//! volume it is (`alias::alias_oids`).
 
 use std::path::{Path, PathBuf};
 
@@ -82,7 +83,8 @@ impl OidListError {
             OidListError::RangeOutsideBits(path) => SeqDbError::NcbiCrashes {
                 path: path.clone(),
                 message: "its FIRST_OID-LAST_OID range lies outside the OIDs that the alias files \
-                          below it keep, where NCBI clears bits outside its array of them"
+                          below it keep, where NCBI clears bits outside its array of them, over \
+                          memory that is not the array's"
                     .to_string(),
             },
             OidListError::PastPage { path, read, len } => SeqDbError::NcbiCrashes {

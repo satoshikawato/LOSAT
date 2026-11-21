@@ -1681,7 +1681,7 @@ impl SeqDb {
     // clears every OID of `m_AllBits` (the code above): no OID is searched and each query
     // gets `Filtering resulted in an empty database.` (two or more volumes, or one volume
     // whose every path in the alias files crosses an OID range that cuts it). When `m_AllBits`
-    // is the special all-set (`alias::all_bits_special_set`), the clearing (`ClearBit` below
+    // is the special all-set (`alias::AliasOids::all_bits_special_set`), the clearing (`ClearBit` below
     // 24 OIDs, a `memset` from 24; a release build compiles `_ASSERT(m_Special == eNone)`
     // out) writes into the array its copy left behind, and the set still answers every OID:
     // NCBI searches the whole database

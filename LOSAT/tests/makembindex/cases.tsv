@@ -58,3 +58,9 @@ nmer_abc	-input s1db/s1 -nmer abc
 vol0	-input s1db/s1 -volsize 0
 legacy_missing	-legacy
 positional	-show_filters x
+oidlist_new_n8	-input ol -nmer 8
+oidlist_new_missl_n8	-input olmissl -nmer 8
+oidlist_new_miss_n8	-input olmiss -nmer 8
+oidlist_old_n8	-old_style_index true -iformat blastdb -input ol -output o -nmer 8
+oidlist_old_missl_n8	-old_style_index true -iformat blastdb -input olmissl -output o -nmer 8
+oidlist_old_miss_n8	-old_style_index true -iformat blastdb -input olmiss -output o -nmer 8

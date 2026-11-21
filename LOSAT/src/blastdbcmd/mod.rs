@@ -221,9 +221,10 @@ fn refusal(reason: &str) -> String {
 /// Opens the database `name` (the `-db` value as given, one name or several: blastdbcmd does not
 /// trim it) of the type `dbtype` (`prot`, `nucl`, or `guess`: protein first, then nucleotide),
 /// with the list of its volumes for `-info`, and `prepare`s it (the taxid list of `-target_only`, which NCBI's
-/// constructor applies). With `guess`, an error that NCBI raises too (`ncbi_message`) moves
-/// on to the nucleotide database, and the nucleotide error is the one reported; an error of
-/// LOSAT's is reported at once, since NCBI may open that protein database.
+/// constructor applies). With `guess`, an exception of NCBI's reader
+/// (`SeqDbError::is_seqdb_exception`) moves on to the nucleotide database, and the nucleotide
+/// error is the one reported; a refusal of LOSAT's is reported at once, since NCBI may open that
+/// protein database.
 fn open_database(
     name: &str,
     dbtype: &str,
@@ -249,7 +250,7 @@ fn open_database(
             Ok((db, volumes))
         });
         match opened {
-            Err(error) if types.peek().is_some() && error.ncbi_message().is_some() => {}
+            Err(error) if types.peek().is_some() && error.is_seqdb_exception() => {}
             opened => return opened,
         }
     }

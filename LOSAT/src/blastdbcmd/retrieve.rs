@@ -310,7 +310,7 @@ enum Formatter {
 
 impl Formatter {
     /// Whether the formatter reads the definition lines of a sequence (the FASTA's `GetBioseq`,
-    /// a `%` specifier's `GetHdr`), which set NCBI's OID list up (`SeqDb::set_up_oid_list`).
+    /// a `%` specifier's `GetHdr`), which build NCBI's OID list (`SeqDb::build_oid_list`).
     fn reads_deflines(&self) -> bool {
         match self {
             Formatter::Fasta(_) => true,

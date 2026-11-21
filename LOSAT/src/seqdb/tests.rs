@@ -1224,6 +1224,38 @@ fn oid_lists_over_unions_of_ranges_keep_ncbis_oids() {
 
 // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbatlas.hpp:709-719
 // (cited at `SeqDbError::memory_map_message`): an OID list file that cannot be opened is NCBI's
+// NCBI tests the whole message of a file it cannot map for "Too many open files", also a missing
+// file's, which names its path (review B of line RG D1b-1, N2).
+#[test]
+fn a_memory_map_message_naming_too_many_open_files_is_ncbis_emfile_text() {
+    let error = SeqDbError::MemoryMap(
+        b"To be memory mapped the file must exist: '/x/Too many open files.msk'".to_vec(),
+    );
+    assert_eq!(
+        error.ncbi_message().as_deref(),
+        Some(b"Too many open files, please raise the open file limit".as_slice())
+    );
+    let message = error.ncbi_request_message().unwrap();
+    assert!(throw_site(&message).is_none());
+}
+
+// A failed integrity check is a `CSeqDBException` that NCBI's guess of the type catches, and a
+// refusal of LOSAT's is not (review B of line RG D1b-1, S1).
+#[test]
+fn integrity_errors_are_ncbis_seqdb_exceptions_and_refusals_are_not() {
+    let integrity = SeqDbError::Integrity {
+        path: PathBuf::from("h4.msk"),
+        message: "header alone".to_string(),
+    };
+    assert!(integrity.is_seqdb_exception());
+    let refusal = SeqDbError::NcbiCrashes {
+        path: PathBuf::from("e.msk"),
+        message: "empty".to_string(),
+    };
+    assert!(!refusal.is_seqdb_exception());
+    assert!(SeqDbError::MemoryMap(b"x".to_vec()).is_seqdb_exception());
+}
+
 // `CMemoryFile` text (probe S2 of review A of line RG D1b-1).
 #[cfg(unix)]
 #[test]

@@ -12,6 +12,10 @@ made. `tests/makembindex_fixtures.rs` runs every row in its own copy of `in/` an
 LMDB check refuses a version 5 volume named `b.nin`). `al.nal` is an alias of `mvdb/mv`, `s1db/s1` and `idsdb/ids`;
 `al2.nal` of `s1db/s1` and `adb/zz`, whose volumes NCBI indexes in the order of their base names (`s1` before `zz`),
 not of their paths; `al3.nal` of `ext/b.nin` and `ext/b-2`, where the base name drops the `.nin` (`b` before `b-2`).
+`ol.nal` is an alias of `mvdb/mv` with `OIDLIST ol.msk` (OIDs 0, 3, 5, 6, 8, 10 and 12 of each volume), `olmissl.nal` and
+`olmiss.nal` the same with a missing OID list file, with and without `NSEQ` and `LENGTH` (line RG item D1b-1, review B):
+a new style index reads each volume whole, and an old style one every OID of the alias file, as NCBI does; NCBI's
+open of the alias file scans the list without `NSEQ` and `LENGTH`, and the old style's first read builds it.
 
 `gen/` is made by the test: `big.fa` (one record of 5,100,000 letters with lower case runs, which the index splits into
 chunks, and one of 20,000) and `many.fa` (600 records) from the generator of `makembindex_fixtures.rs`, the databases

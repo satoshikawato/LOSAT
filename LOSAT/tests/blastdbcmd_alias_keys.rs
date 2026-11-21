@@ -382,9 +382,14 @@ const CASES: &[(&str, &[&str], i32)] = &[
     ("A234", &["-db", "db/ak/ol/p_pl", "-dbtype", "prot", "-ipg", "1001", "-outfmt", "%s %a"], 1),
     ("A235", &["-db", "db/ak/ol/p_miss", "-taxids", "9606", "-no_taxid_expansion", "-outfmt", "%o %a"], 2),
     // A range outside the bit array of the union below it: `-info` builds no list (A236); past
-    // the array inside its last byte no OID is kept (A237). Before it, `RANGE_REFUSALS`.
+    // the array inside its last byte no OID is kept (A237). Before it and past its bytes,
+    // `RANGE_REFUSALS`.
     ("A236", &["-db", "db/ak/ol/p_pb", "-info"], 0),
     ("A237", &["-db", "db/ak/ol/p_pa", "-entry", "all", "-outfmt", "%o|%a"], 0),
+    // An OID list file of its header alone fails NCBI's assertion at the constructor's scan, a
+    // `CSeqDBException` that NCBI's guess of the type catches to look for a nucleotide database.
+    ("A239", &["-db", "db/ak/ol/p_h4", "-info"], 2),
+    ("A240", &["-db", "db/ak/ol/p_h4", "-entry", "all", "-outfmt", "%o|%a"], 2),
 ];
 
 /// The cases of probe p4c_c that LOSAT's BLASTDBCMD refuses: `-outfmt %d` and `%b` (the ASN.1
@@ -410,16 +415,19 @@ fn asn1_texts_of_a_pig_outside_the_range_are_refused() {
     }
 }
 
-/// A range that ends before the bit array of the union of the ranges below it: NCBI clears bits
-/// below the array and crashes (SIGSEGV) where it builds its OID list (line RG D1b-1, probe
-/// D1a_P), which LOSAT refuses there.
+/// A range outside the bit array of the union of the ranges below it, where NCBI clears bits
+/// outside the array where it builds its OID list (line RG D1b-1), which LOSAT refuses there:
+/// ending before the array (A238), NCBI crashes (SIGSEGV, probe D1a_P); starting past its bytes
+/// (A241), NCBI writes over its heap, which crashes it unless the bytes stay in the unused end of
+/// the array's allocation, as here (probes RB_pc and RB9 of review B of D1b-1).
 #[rustfmt::skip]
 const RANGE_REFUSALS: &[(&str, &[&str])] = &[
     ("A238", &["-db", "db/ak/ol/p_pb", "-entry", "all", "-outfmt", "%o|%a"]),
+    ("A241", &["-db", "db/ak/ol/p_pc", "-entry", "all", "-outfmt", "%o|%a"]),
 ];
 
 #[test]
-fn ranges_before_the_bit_array_below_them_are_refused() {
+fn ranges_outside_the_bit_array_below_them_are_refused() {
     let config = TestDir::new("range-refusals");
     for &(id, words) in RANGE_REFUSALS {
         let (stdout, stderr, code) = blastdbcmd(words, &config.0);

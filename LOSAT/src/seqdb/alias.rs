@@ -4,7 +4,7 @@
 //! and `DBLIST`, the counts NCBI's reader takes from its walks of the alias
 //! tree (`NSEQ`, `LENGTH`, `MIN_SEQ_LENGTH`, `STATS_NSEQ`, `STATS_TOTLEN`:
 //! `walk_totals`), the OID ranges `FIRST_OID` / `LAST_OID` and the OID lists of
-//! `OIDLIST` (`compute_masks`, `alias_oid_mask`). The keys that select sequences
+//! `OIDLIST` (`compute_masks`, `alias_oids`). The keys that select sequences
 //! by a list of ids or a membership bit, `OID_MASK_TYPE` and `MASKLIST` are
 //! explicit errors (not supported yet);
 //! unknown keys, `VDBLIST` and `MAX_SEQ_LENGTH` among them, are ignored, as in
@@ -853,7 +853,7 @@ fn collect_volumes(node: &AliasNode, out: &mut Vec<String>) {
 // A volume reached from several nodes (an alias file and a name of `-db`, or
 // two alias files) is one entry of the set, so it is opened once and its OIDs
 // are numbered once; NCBI's walks still count it once per node that names it
-// (`walk_totals`), and its OIDs are those of every path to it (`alias_oid_mask`).
+// (`walk_totals`), and its OIDs are those of every path to it (`alias_oids`).
 // A node lists a volume once however often its `DBLIST` names it
 // (`push_unique`, seqdbalias.cpp:789-798, 864-873, 905-914). Volumes of the
 // same base name in different directories (two databases of one name, `-db
@@ -1267,7 +1267,7 @@ pub(super) fn walk_totals(root: &AliasNode, volume: &dyn Fn(&str) -> (u32, u64))
 // that is not a regular file (`exists`) and the node names volumes itself, it is the value joined
 // to the directory of the first of them (probes I5, I7, I8 and I1b of line RG D1b: a volume
 // found through `BLASTDB` or in the current directory moves it there). The file is read where
-// NCBI builds its OID list (`alias_oid_mask`). `OID_MASK_TYPE`, which NCBI converts here after
+// NCBI builds its OID list (`alias_oids`). `OID_MASK_TYPE`, which NCBI converts here after
 // `OIDLIST`, is refused when the alias file is read.
 /// `ComputeMasks` of the top node: `FIRST_OID`, then `LAST_OID` (`NStr::StringToUInt`), then the
 /// path of `OIDLIST`, of every node from the top down, a node before its sub-nodes; the first value
@@ -1640,8 +1640,11 @@ impl OidSet {
     // time at the OID less the array's first. A range that ends before the array's first OID
     // makes the first index wrap below 0: NCBI writes far outside the array and crashes (probes
     // D1a_P, D1a_R of line RG D1b-1, SIGSEGV); one that starts past the array's bytes writes past
-    // them, into memory that is not the array's. Inside the array's last byte the clearing is
-    // harmless (probe D1a_Q: no OID).
+    // them, over NCBI's heap: NCBI aborts or crashes (probes RB9_T200 to RB9_T19990 of review B of
+    // D1b-1), or, where the cleared bytes stay in the unused end of the array's allocation, keeps
+    // no OID (RB_S, RB9_T21), as where it reads past an OID list file's page
+    // (`OidListError::PastPage`). Inside the array's last byte the clearing is harmless (probe
+    // D1a_Q: no OID).
     /// Whether NCBI's `IntersectWith` of this set with `other` clears bits outside this bit
     /// array (`OidListError::RangeOutsideBits`).
     fn clears_outside(&self, other: &Self) -> bool {
@@ -1662,7 +1665,9 @@ impl OidSet {
     // set bit: where the other set has one, the index jumps there and no bit is cleared, so the
     // only bits cleared are those past the other set's last set bit (probes B1 of review A of line
     // RG D1b-1: OIDs 2-4 and 8-10 under an OID list of OID 2 keep OIDs 1 and 2, under one of OID 8
-    // the OIDs 1-3, 7, 8). The result keeps this set's shape.
+    // the OIDs 1-3, 7, 8). The result keeps this set's shape. That loop is modeled for an `other`
+    // that starts at or before this set (the filter over the volume's OIDs of `volume_set`): of an
+    // `other` without set bits that starts later, NCBI keeps this set's bits before it.
     /// `IntersectWith`: this set ANDed with `other` as NCBI computes it.
     fn intersect_with(self, other: Self, frame: Frame) -> Self {
         let (a, b) = (self.shape, other.shape);
@@ -1686,6 +1691,7 @@ impl OidSet {
             (_, Special::AllSet) => self.and_words(frame.range_words(b.start, b.end)),
             _ if a.start == b.start && a.bytes() == b.bytes() => self.and_words(other.bits),
             _ => {
+                debug_assert!(b.start <= a.start, "the other set starts after this one");
                 let last = other
                     .bits
                     .iter()

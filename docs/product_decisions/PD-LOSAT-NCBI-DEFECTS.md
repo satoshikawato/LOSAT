@@ -255,9 +255,10 @@
   OID list file, of bits past the memory page after it and of a file of its header alone, rule 3, and
   the two RPSBLAST and RPSTBLASTN rejections of D1a-4 extended to the profiles `OIDLIST` leaves out
   and to the totals of its scan; the explicit rejection of an alias file's `FIRST_OID`-`LAST_OID`
-  range outside the bit array of the ranges below it, where NCBI clears bits outside that array and
-  crashes (SIGSEGV, probes D1a_P and D1a_R of review A of D1b-1), rule 3; Owner-delegated, standing
-  instruction 2026-09-29, restated 2026-10-07)
+  range outside the bit array of the ranges below it, where NCBI clears bits outside that array
+  (before it a crash, SIGSEGV, probes D1a_P and D1a_R of review A of D1b-1; past it writes over
+  NCBI's heap, probes RB9 of review B), rule 3; Owner-delegated, standing instruction 2026-09-29,
+  restated 2026-10-07)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -2089,9 +2090,14 @@ every query (NCBI's bytes for a query with a next query are deterministic, rule 
   the array's first, so a range that ends before the array's first OID wraps that index below 0 and
   writes far outside the array (SIGSEGV where the OID list is built: `blastdbcmd -entry all`, probes
   D1a_P and D1a_R of review A of D1b-1; `-info` builds no list and works), and one that starts past
-  the array's bytes writes past them. Inside the array's last byte the clearing is harmless and no
-  OID is kept (probe D1a_Q, case A237). LOSAT refuses where the list is first used (case A238 of
-  `blastdbcmd_alias_keys.rs`, `alias::OidSet::clears_outside`).
+  the array's bytes writes past them, over NCBI's heap: NCBI aborts (`free(): invalid pointer`, a
+  failed assertion of glibc's allocator) or crashes (SIGSEGV, a reference counter's overflow) where
+  the clearing reaches 24 to 2,500 bytes from the array's first (probes RB9_T200 to RB9_T19990,
+  RB9_U5000 and RB9_U19990 of review B of D1b-1), and keeps no OID with exit status 0 where it
+  overwrote nothing it uses next (RB_pc, RB9_T21, RB9_U300; DECISIONS D1b1-13): a result of NCBI's
+  allocator, not of its reader, refused as the reads past an OID list file's page above. Inside the array's last byte the
+  clearing is harmless and no OID is kept (probe D1a_Q, case A237). LOSAT refuses where the list is
+  first used (cases A238 and A241 of `blastdbcmd_alias_keys.rs`, `alias::OidSet::clears_outside`).
 
 ## Explicit rejections of a taxonomy record past NCBI's mapping (rule 3, version 1.43)
 

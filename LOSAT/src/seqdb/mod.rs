@@ -345,9 +345,14 @@ const MEMORY_FILE_PREFIX: &str = "CMemoryFile: Cannot memory map file '";
 /// map `eTooManyOpenFiles` (seqdbatlas.hpp:713-715).
 const TOO_MANY_OPEN_FILES: &[u8] = b"Too many open files";
 
-/// Whether `text` holds `part`.
-fn contains(text: &[u8], part: &[u8]) -> bool {
-    text.windows(part.len()).any(|window| window == part)
+// NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbatlas.hpp:712-718
+/// Whether NCBI's exception of a file it cannot map, whose message is `message`, is
+/// `eTooManyOpenFiles`: whatever the message names, also a path (a missing file's message holds
+/// it), NCBI tests the whole text.
+fn too_many_open_files(message: &[u8]) -> bool {
+    message
+        .windows(TOO_MANY_OPEN_FILES.len())
+        .any(|window| window == TOO_MANY_OPEN_FILES)
 }
 
 impl SeqDbError {
@@ -371,10 +376,6 @@ impl SeqDbError {
     pub fn ncbi_message(&self) -> Option<Vec<u8>> {
         match self {
             SeqDbError::NotFound(message) => Some(message.clone()),
-            // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:191-197
-            SeqDbError::MemoryMap(message) => {
-                Some([b"Database memory map file error - ".as_slice(), message].concat())
-            }
             SeqDbError::Format { message, .. } => (NCBI_FORMAT_MESSAGES
                 .contains(&message.as_str())
                 || message.starts_with(NCBI_EMPTY_DBLIST_PREFIX)
@@ -382,9 +383,10 @@ impl SeqDbError {
                     .iter()
                     .any(|prefix| message.starts_with(prefix)))
             .then(|| message.clone().into_bytes()),
-            SeqDbError::Open { .. } => {
+            // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:185-197
+            SeqDbError::MemoryMap(_) | SeqDbError::Open { .. } => {
                 let message = self.memory_map_message()?;
-                if contains(&message, TOO_MANY_OPEN_FILES) {
+                if too_many_open_files(&message) {
                     Some(b"Too many open files, please raise the open file limit".to_vec())
                 } else {
                     Some([b"Database memory map file error - ".as_slice(), &message].concat())
@@ -397,6 +399,16 @@ impl SeqDbError {
             | SeqDbError::Range(_)
             | SeqDbError::Ncbi(_) => None,
         }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb.cpp:110-153
+    /// Whether NCBI's constructor fails here with a `CSeqDBException`, which NCBI's guess of a
+    /// database's type catches to look for the name as a nucleotide database: an error in NCBI's
+    /// words ([`Self::ncbi_message`]) or a failed integrity check ([`SeqDbError::Integrity`], as an
+    /// OID list file of its header alone at the constructor's scan: probes RB_G3 and RB_G4 of
+    /// review B of line RG D1b-1). LOSAT's refusals are not: NCBI may open that database.
+    pub fn is_seqdb_exception(&self) -> bool {
+        self.ncbi_message().is_some() || matches!(self, SeqDbError::Integrity { .. })
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:229-252
@@ -591,7 +603,7 @@ const fn seqdb_site(file: &'static str, line: u32, function: &'static str) -> Th
 /// `CSeqDBFileMemMap::Init`), and `DB contains no ...`, which NCBI's reader never throws (it
 /// throws lmdb's error first, `InitDbi` cited above).
 pub(crate) fn throw_site(message: &[u8]) -> Option<ThrowSite> {
-    if contains(message, TOO_MANY_OPEN_FILES) {
+    if too_many_open_files(message) {
         return None;
     }
     DATABASE_ERROR_SITES

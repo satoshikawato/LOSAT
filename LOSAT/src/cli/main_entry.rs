@@ -365,9 +365,10 @@ fn run_main_entry() -> Result<()> {
         }
         // NCBI reference (598d8ae6): c++/src/app/blast/rpstblastn_app.cpp:319-322
         Commands::Rpstblastn(args) => {
-            // NCBI's `-help` and `-h` texts, which its reader writes before the application runs.
+            // NCBI's `-help` and `-h` texts, which its reader writes before the application runs,
+            // with LOSAT's version (`wording::losat_text`).
             if let Some(text) = args.ncbi_help_text() {
-                write_dropping_errors(&mut std::io::stdout(), text);
+                write_dropping_errors(&mut std::io::stdout(), &crate::wording::losat_text(text));
                 return Ok(());
             }
             // rpstblastn is an NCBI application as blastx: its application layer reads its

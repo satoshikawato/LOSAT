@@ -8,7 +8,7 @@
 //! protein (`sok1`), and their redo succeeds; in `sw_endless_subjects.faa`, `send` (tks_M twice)
 //! gives tks_M the redo that NCBI never ends (M against M). NCBI's one-thread redo keeps the status of the batch's last redone
 //! match: a failed match before another is dropped, a failed last one fails the batch's traceback
-//! (`BLAST engine error: Traceback failed`, exit status 3) after the reports of the batches
+//! (`LOSAT engine error: Traceback failed`, exit status 3) after the reports of the batches
 //! before, unless the batch's first query holds a redone match: NCBI's clean-up then reads that
 //! query's freed heap and crashes (SIGSEGV), and LOSAT refuses the batch after the same reports
 //! (exit status 1; PD-LOSAT-NCBI-DEFECTS 1.53). `qnohit` (W 87 times) has no hit (the subjects
@@ -112,7 +112,7 @@ fn row_queries(stdout: &str) -> Vec<&str> {
         .collect()
 }
 
-const TRACEBACK_FAILED: &str = "BLAST engine error: Traceback failed\n";
+const TRACEBACK_FAILED: &str = "LOSAT engine error: Traceback failed\n";
 /// The part of LOSAT's refusal of a failed batch whose first query holds a redone match.
 const NCBI_CRASHES: &str = "with which NCBI BLAST+ 2.17.0's blastp crashes";
 

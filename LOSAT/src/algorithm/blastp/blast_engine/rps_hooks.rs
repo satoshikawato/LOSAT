@@ -8,6 +8,7 @@
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/rpsblast_app.cpp:129-141
 
+use crate::wording::ENGINE_ERROR;
 use anyhow::{bail, Result};
 
 use super::{database, BlastpRuntimeLookup};
@@ -38,7 +39,7 @@ pub(super) struct RpsEngineError(pub(super) String);
 
 impl std::fmt::Display for RpsEngineError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "BLAST engine error: {}", self.0)
+        write!(f, "{ENGINE_ERROR} {}", self.0)
     }
 }
 

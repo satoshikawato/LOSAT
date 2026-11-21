@@ -26,6 +26,7 @@ use crate::algorithm::common::database::{
     prefetches_subjects, HeaderReadError, PreliminaryReadError,
 };
 use crate::report::blast_xml2::{FsSideFiles, NoSideFiles, RunSideFiles, Xml2Kind};
+use crate::wording::{DATABASE_ERROR, ENGINE_ERROR};
 use anyhow::{bail, Result};
 use std::{
     fmt,
@@ -46,7 +47,7 @@ use run_parts::{read_subjects, ArchiveBatch, RunSetup, SubjectRead};
 pub(crate) fn engine(message: impl fmt::Display) -> anyhow::Error {
     NativeError {
         exit: 3,
-        message: format!("BLAST engine error: {message}\n").into(),
+        message: format!("{ENGINE_ERROR} {message}\n").into(),
     }
     .into()
 }
@@ -131,8 +132,8 @@ pub(super) fn report_error(error: anyhow::Error) -> anyhow::Error {
     } else if error.downcast_ref::<NativeError>().is_some_and(|e| {
         (e.exit == 1 && e.message.starts_with(b"Command line argument error"))
             || (e.exit == 6 && e.message == b"BLAST failed to write output\n")
-            || (e.exit == 3 && e.message.starts_with(b"BLAST engine error: "))
-            || (e.exit == 2 && e.message.starts_with(b"BLAST Database error: "))
+            || (e.exit == 3 && e.message.starts_with(ENGINE_ERROR.as_bytes()))
+            || (e.exit == 2 && e.message.starts_with(DATABASE_ERROR.as_bytes()))
             || e.exit == 255
     }) {
         // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:185-185
@@ -241,7 +242,7 @@ fn run_inner(
     let list = match args.database_name() {
         Some(_) => args
             .db_filter
-            .resolve(&settings, &mut stderr)
+            .resolve(&settings, "blastx", &mut stderr)
             .map_err(early_archive_error)?,
         None => None,
     };
@@ -1012,6 +1013,9 @@ pub(super) struct ReportedAsks {
     /// What the reports do with a subject whose lookup throws where a batch's prefetch is off
     /// (`FormatThrow::and` of the reports, for `HitLoads::of`).
     throw: crate::report::db_subject::FormatThrow,
+    /// Whether a report writes otherwise where every load of a subject with a positive taxid
+    /// throws (not `report::db_subject::unchanged_by_load_throws`), for the batches' prefetch.
+    changed_by_load_throws: bool,
 }
 
 impl ReportedAsks {
@@ -1059,6 +1063,16 @@ impl ReportedAsks {
                         crate::blastinput::app::Program::Blastx,
                     )
                 }),
+            changed_by_load_throws: !crate::blastinput::app::ReportFormat::from_number(i32::from(
+                options.outfmt,
+            ))
+            .is_some_and(|format| {
+                crate::report::db_subject::unchanged_by_load_throws(
+                    format,
+                    options.tabular,
+                    crate::blastinput::app::Program::Blastx,
+                )
+            }),
         }
     }
 
@@ -1092,6 +1106,7 @@ impl ReportedAsks {
             prefetched: self.prefetched || other.prefetched,
             prefetch_runs: self.prefetch_runs || other.prefetch_runs,
             throw: self.throw.and(other.throw),
+            changed_by_load_throws: self.changed_by_load_throws || other.changed_by_load_throws,
         }
     }
 }
@@ -1432,7 +1447,13 @@ pub(super) fn reported_batch(
             // A lookup that fails on a file stops the run here, after the reports of the
             // batches before and this batch's reader messages (`shared::batch_prefetch`).
             let messages = reported
-                .batch_prefetch(database, results, options.gapped, prefetch_queries)
+                .batch_prefetch(
+                    database,
+                    results,
+                    options.gapped,
+                    &prefetch_queries
+                        .where_reports_unchanged_by_load_throws(!asks.changed_by_load_throws),
+                )
                 .map_err(reported_error)?;
             messages.write(diagnostics, None)?;
         }

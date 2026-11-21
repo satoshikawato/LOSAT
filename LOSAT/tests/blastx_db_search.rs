@@ -217,7 +217,7 @@ fn a_listed_database_reads_its_scanned_shortest_length() {
 // valid context, so the sequence file is read by the first batch with one. On a database
 // without its `.psq`, NCBI BLAST+ 2.17.0 reports a first batch of one query of N bases (no
 // valid context: a batch of its own, longer than the 10,002 bases of a BLASTX batch) and
-// fails the second batch with `BLAST engine error: Database memory map file error`.
+// fails the second batch with `LOSAT engine error: Database memory map file error`.
 #[test]
 fn the_sequence_file_is_read_by_the_first_batch_with_a_valid_context() {
     let dir = temp_dir("psq");
@@ -260,7 +260,7 @@ fn the_sequence_file_is_read_by_the_first_batch_with_a_valid_context() {
     );
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.ends_with("BLAST engine error: Database memory map file error\n"),
+        stderr.ends_with("LOSAT engine error: Database memory map file error\n"),
         "{stderr}"
     );
     std::fs::remove_dir_all(&dir).unwrap();
@@ -433,7 +433,7 @@ fn a_refused_database_sequence_is_named_in_ordinal_order_at_every_thread_count()
 
 // blast_args.cpp:2364-2381: `-db` excludes `-subject` (LOSAT's parser reports it);
 // blast_args.cpp:2558-2562: neither is NCBI's options error; blast_app_util.hpp:185-203: a
-// database that is not found is NCBI's `BLAST Database error`, exit status 2.
+// database that is not found is LOSAT's `LOSAT database error` (NCBI's `BLAST Database error`), exit status 2.
 #[test]
 fn database_arguments_are_checked_as_ncbi_checks_them() {
     let query = fasta("MelaMJNV.fasta");
@@ -472,7 +472,7 @@ fn database_arguments_are_checked_as_ncbi_checks_them() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         stderr.starts_with(
-            "BLAST Database error: No alias or index file found for protein database ["
+            "LOSAT database error: No alias or index file found for protein database ["
         ),
         "{stderr}"
     );

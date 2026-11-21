@@ -308,7 +308,7 @@ fn build_version(
     let result = (|| {
         let mut db = BuildDatabase::new(
             out_base,
-            title,
+            title.as_bytes(),
             is_protein,
             &mut log,
             &time_of(date),
@@ -682,7 +682,7 @@ fn an_output_name_with_a_space_is_refused() {
         let (status, log, messages) = makedb(&fasta, &out, "3GB", b"");
         assert_eq!(status, 1, "{out:?}");
         assert_eq!(
-            messages, "BLAST options error: Please provide a database name using -out\n",
+            messages, "LOSAT options error: Please provide a database name using -out\n",
             "{out:?}"
         );
         assert_eq!(log, "", "{out:?}");
@@ -807,7 +807,7 @@ fn a_new_database_that_cannot_be_opened_is_an_error() {
     assert_eq!(
         messages,
         format!(
-            "BLAST Database error: Could not find volume or alias file (db.00) referenced in \
+            "LOSAT database error: Could not find volume or alias file (db.00) referenced in \
              alias file ({}).\n",
             logged_db_name(&log)
         )
@@ -908,7 +908,7 @@ fn a_late_error_removes_the_volumes_already_written() {
     assert_eq!(status, 1);
     assert_eq!(
         messages,
-        "BLAST Database creation error: Near line 30, there's a line that doesn't look like \
+        "LOSAT database creation error: Near line 30, there's a line that doesn't look like \
          plausible data, but it's not marked as defline or comment.\n"
     );
     assert_eq!(
@@ -989,7 +989,7 @@ fn other_errors_end_with_status_255() {
     let (status, log, messages) = makedb(&fasta, &tmp.base("db"), "4GiB", b"");
     assert_eq!(
         (status, messages.as_str()),
-        (1, "BLAST options error: max_file_sz must be < 4 GiB\n")
+        (1, "LOSAT options error: max_file_sz must be < 4 GiB\n")
     );
     assert_eq!(log_with_markers(log.as_bytes()), LOG_HEAD.as_bytes());
     // An existing database of the same name is removed before the value is read, as
@@ -1110,7 +1110,7 @@ fn an_lmdb_lock_file_name_that_is_too_long_stops_the_build_as_lmdb_does() {
         let (status, log, messages) = makedb_version(&two, &out, "3GB", b"", 5);
         assert_eq!(
             (status, messages),
-            (2, format!("BLAST Database error: {error}\n")),
+            (2, format!("LOSAT database error: {error}\n")),
             "{length}"
         );
         assert_eq!(
@@ -1121,7 +1121,7 @@ fn an_lmdb_lock_file_name_that_is_too_long_stops_the_build_as_lmdb_does() {
         let (status, log, messages) = makedb_version(&one, &out, "3GB", b"", 5);
         assert_eq!(
             (status, messages),
-            (1, format!("BLAST Database creation error: {error}\n")),
+            (1, format!("LOSAT database creation error: {error}\n")),
             "{length}"
         );
         assert_eq!(
@@ -1496,8 +1496,10 @@ fn run_v5_case(case: &V5Case) {
     let log = std::fs::read(tmp.0.join("mk.log"))
         .ok()
         .map(|log| v5_markers(&log, &dir));
+    // NCBI's log in LOSAT's words (`crate::wording::losat_bytes`).
+    let expected_log = case.log.map(crate::wording::losat_bytes);
     assert!(
-        log.as_deref() == case.log,
+        log.as_deref() == expected_log.as_deref(),
         "{name}: log file\n{:?}\nexpected\n{:?}",
         log.as_deref().map(show),
         case.log.map(show)
@@ -1513,7 +1515,7 @@ fn run_v5_case(case: &V5Case) {
     let expected: Vec<&str> = case.files.iter().map(|(file, _)| *file).collect();
     assert_eq!(written, expected, "{name}: files");
     for (file, content) in case.files {
-        let actual = std::fs::read(tmp.0.join(file)).unwrap();
+        let actual = mask_column_date(file, std::fs::read(tmp.0.join(file)).unwrap());
         match content {
             Expected::Bytes(bytes) => assert!(
                 actual == *bytes,
@@ -1529,6 +1531,29 @@ fn run_v5_case(case: &V5Case) {
             ),
         }
     }
+}
+
+/// The index file of a column (`.?aa`, `.?ba`, ...: a `p` or `n`, the column's letter, `a`) with
+/// the creation time it stores (the second string after the 32 bytes of its head) as `<C>`, as
+/// the cases have it; another file as it is.
+pub(super) fn mask_column_date(file: &str, mut bytes: Vec<u8>) -> Vec<u8> {
+    let extension = file.rsplit('.').next().unwrap_or("").as_bytes();
+    let is_column_index = extension.len() == 3
+        && matches!(extension[0], b'p' | b'n')
+        && extension[2] == b'a'
+        && crate::writedb::column::COLUMN_LETTERS.contains(&extension[1]);
+    if !is_column_index || bytes.len() < 34 {
+        return bytes;
+    }
+    let title_len = usize::from(bytes[32]);
+    let at = 33 + title_len;
+    let date_len = usize::from(bytes[at]);
+    assert!(
+        title_len < 64 && date_len < 64,
+        "{file}: a column head of short strings"
+    );
+    bytes.splice(at..at + 1 + date_len, *b"\x03<C>");
+    bytes
 }
 
 fn run_v5_cases(prefix: &str) {
@@ -1608,6 +1633,21 @@ fn metadata_output_prefix_runs_as_makeblastdb() {
 )]
 fn oid_masks_runs_as_makeblastdb() {
     run_v5_cases("O_");
+}
+
+/// `-input_type blastdb` as makeblastdb 2.17.0 has it: copies of databases of version 5 and 4 into
+/// either version (sequences with ambiguities, taxids, GIs, local ids, several definition lines,
+/// a source without parsed ids), several volumes in and out, several names (sorted, a name twice),
+/// the mask algorithms (two of one program, an `other` one, `-mask_data` beside them, an id taken
+/// by another name), `-taxid`, `-taxid_map`, `-hash_index`, `-logfile`, `-oid_masks`, a PIG and
+/// membership bits, and the refusals of the command line (line RG item D3c).
+#[test]
+#[cfg_attr(
+    target_os = "wasi",
+    ignore = "runs makeblastdb on files named from the working directory (tests/...): a WASI module has none, the runner preopens /"
+)]
+fn blastdb_input_runs_as_makeblastdb() {
+    run_v5_cases("B_");
 }
 
 /// `-in` files that exist and cannot be opened, as makeblastdb 2.17.0 has them (also a compressed
@@ -1984,7 +2024,7 @@ fn version_5_inputs_makeblastdb_aborts_on_are_refused() {
     assert_eq!(status, 1, "{err}");
     assert_eq!(
         err,
-        "BLAST Database creation error: Input id list not in ascending oid order: the sequence \
+        "LOSAT database creation error: Input id list not in ascending oid order: the sequence \
          gi|42 (OID 1) has only GI ids and lies between sequences with other ids, which \
          makeblastdb 2.17.0 cannot write into the .pos file of a version 5 database (it \
          aborts); LOSAT refuses the database (-blastdb_version 4 writes it)\n"
@@ -2002,7 +2042,7 @@ fn version_5_inputs_makeblastdb_aborts_on_are_refused() {
     assert_eq!(status, 1, "{err}");
     assert_eq!(
         err,
-        "BLAST Database creation error: Error: Duplicate seq_ids are found: \nREF|NP_1.1\n\n"
+        "LOSAT database creation error: Error: Duplicate seq_ids are found: \nREF|NP_1.1\n\n"
     );
     let long_db = format!("E512{}", "z".repeat(505));
     let (status, _, err) = parse_seqids_v5_run(
@@ -2013,7 +2053,7 @@ fn version_5_inputs_makeblastdb_aborts_on_are_refused() {
     assert_eq!(status, 1, "{err}");
     assert!(
         err.starts_with(
-            "BLAST Database creation error: mdb_put: MDB_BAD_VALSIZE: Unsupported size of \
+            "LOSAT database creation error: mdb_put: MDB_BAD_VALSIZE: Unsupported size of \
              key/DB name/data, or wrong DUPFIXED size (the acc2oid key 'E512ZZZ"
         ) && err.ends_with(":T1', 512 bytes; makeblastdb 2.17.0 aborts here)\n"),
         "{err}"

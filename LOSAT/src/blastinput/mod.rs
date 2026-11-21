@@ -12,6 +12,7 @@ pub mod app;
 // of psiblast's `-in_msa`.
 pub(crate) mod aln_reader;
 pub mod compressed;
+pub(crate) mod title_parser;
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp (s_GetTaxIDList): the taxid options of a database search.
 pub mod db_filter;
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2342-2356, c++/src/algo/blast/api/uniform_search.cpp: the database masks of a

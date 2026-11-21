@@ -1267,6 +1267,7 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
         None,
         options.seg.filter_options(),
         None,
+        None,
         options.soft_masking,
     );
     let run = XmlRun {
@@ -1274,7 +1275,7 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
         version: &format!(
             "{} {}",
             options.program().upper,
-            crate::ncbi_blast_version!()
+            crate::wording::report_version!()
         ),
         reference: REFERENCE_GAPPED_BLAST,
         db_name: &db_name,

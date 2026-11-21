@@ -51,4 +51,4 @@ If you parsed `-outfmt 6` or `7` output in v0.1.0, nothing changes: the columns 
 
 ## What is still not available
 
-`deltablast`, `makeprofiledb`, `blast_formatter`, `windowmasker -mk_counts` and `-convert`, `-html`, `psiblast -phi_pattern` and `psiblast -in_msa` with an alignment that is not in Clustal format, and the options that need NCBI's servers (`-remote`, `-entrez_query`) are not in v0.2.0. The [Introduction](introduction.md) lists them, and [What LOSAT refuses](refusals.md) shows the error you get.
+`deltablast`, `makeprofiledb`, `blast_formatter`, `windowmasker -mk_counts` and `-convert`, `-html`, `psiblast -phi_pattern`, and the options that need NCBI's servers (`-remote`, `-entrez_query`) are not in v0.2.0. The [Introduction](introduction.md) lists them, and [What LOSAT refuses](refusals.md) shows the error you get.

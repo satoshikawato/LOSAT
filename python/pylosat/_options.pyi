@@ -48,8 +48,10 @@ class BlastnOptions(TypedDict, total=False):
     """Multi-thread mode: 0 auto, 1 split by queries, 2 split by database (accepted; the output
     does not depend on it)"""
     use_index: bool
-    """Use MegaBLAST database index (a database that has one is not supported) [default:
+    """Use MegaBLAST database index (an index that would be used is not supported) [default:
     false]"""
+    index_name: str
+    """MegaBLAST database index name (deprecated; use only for old style indices)"""
     evalue: float
     """Expectation value (E) threshold for saving hits (default: 10; 1000 for blastn-short)"""
     perc_identity: float
@@ -90,6 +92,8 @@ class BlastnOptions(TypedDict, total=False):
     lcase_masking: bool
     soft_masking: bool
     """Apply filtering locations as soft masks [default: true]"""
+    filtering_db: str
+    """BLAST database containing filtering elements (i.e.: repeats)"""
     window_masker_taxid: int
     """Enable WindowMasker filtering using a Taxonomic ID"""
     window_masker_db: str
@@ -148,6 +152,10 @@ class BlastpOptions(TypedDict, total=False):
     descendants"""
     no_taxid_expansion: bool
     """Do not expand the taxonomy IDs provided to their descendant taxonomy IDs"""
+    db_soft_mask: str
+    """Filtering algorithm ID to apply to the BLAST database as soft masking"""
+    db_hard_mask: str
+    """Filtering algorithm ID to apply to the BLAST database as hard masking"""
     dbsize: int
     """Effective length of the database"""
     show_gis: bool
@@ -192,6 +200,10 @@ class BlastpOptions(TypedDict, total=False):
     culling_limit: int
     """If the query range of a hit is enveloped by that of at least this many higher-scoring
     hits, delete the hit (default: 0, no culling)"""
+    best_hit_overhang: float
+    """Best Hit algorithm overhang value (recommended value: 0.1)"""
+    best_hit_score_edge: float
+    """Best Hit algorithm score edge value (recommended value: 0.1)"""
     subject_besthit: bool
     """Return only the best HSP for each non overlapping query region"""
     ungapped: bool
@@ -246,6 +258,10 @@ class BlastxOptions(TypedDict, total=False):
     descendants"""
     no_taxid_expansion: bool
     """Do not expand the taxonomy IDs provided to their descendant taxonomy IDs"""
+    db_soft_mask: str
+    """Filtering algorithm ID to apply to the BLAST database as soft masking"""
+    db_hard_mask: str
+    """Filtering algorithm ID to apply to the BLAST database as hard masking"""
     dbsize: int
     """Effective length of the database"""
     show_gis: bool
@@ -339,6 +355,10 @@ class TblastnOptions(TypedDict, total=False):
     descendants"""
     no_taxid_expansion: bool
     """Do not expand the taxonomy IDs provided to their descendant taxonomy IDs"""
+    db_soft_mask: str
+    """Filtering algorithm ID to apply to the BLAST database as soft masking"""
+    db_hard_mask: str
+    """Filtering algorithm ID to apply to the BLAST database as hard masking"""
     dbsize: int
     """Effective length of the database"""
     show_gis: bool
@@ -441,6 +461,10 @@ class TblastxOptions(TypedDict, total=False):
     descendants"""
     no_taxid_expansion: bool
     """Do not expand the taxonomy IDs provided to their descendant taxonomy IDs"""
+    db_soft_mask: str
+    """Filtering algorithm ID to apply to the BLAST database as soft masking"""
+    db_hard_mask: str
+    """Filtering algorithm ID to apply to the BLAST database as hard masking"""
     dbsize: int
     """Effective length of the database"""
     show_gis: bool
@@ -567,6 +591,10 @@ class PsiblastOptions(TypedDict, total=False):
     culling_limit: int
     """If the query range of a hit is enveloped by that of at least this many higher-scoring
     hits, delete the hit"""
+    best_hit_overhang: float
+    """Best Hit algorithm overhang value (recommended value: 0.1)"""
+    best_hit_score_edge: float
+    """Best Hit algorithm score edge value (recommended value: 0.1)"""
     subject_besthit: bool
     """Return only the best HSP for each non overlapping query region"""
     xdrop_ungap: float

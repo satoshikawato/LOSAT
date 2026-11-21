@@ -291,7 +291,7 @@ fn open_errors_are_ncbis_database_errors_or_losats_refusals() {
         native(error),
         (
             2,
-            "BLAST Database error: Database name is required.\n".to_string()
+            "LOSAT database error: Database name is required.\n".to_string()
         )
     );
     let Err(error) = BlastpDatabase::open(&fixture("no_such_database"), &settings, "BLASTP") else {
@@ -301,7 +301,7 @@ fn open_errors_are_ncbis_database_errors_or_losats_refusals() {
     assert_eq!(exit, 2);
     assert!(
         message.starts_with(
-            "BLAST Database error: No alias or index file found for protein database ["
+            "LOSAT database error: No alias or index file found for protein database ["
         ),
         "{message}"
     );
@@ -329,14 +329,14 @@ fn reader_errors_of_the_search_and_of_the_other_reads() {
     assert_eq!(read.0, "Database memory map file error");
     assert_eq!(
         read.to_string(),
-        "BLAST engine error: Database memory map file error"
+        "LOSAT engine error: Database memory map file error"
     );
     let native = shared::database_error(unreadable(), "BLASTP");
     let native = native.downcast_ref::<NativeError>().expect("NCBI's error");
     assert_eq!(native.exit, 2);
     assert_eq!(
         native.message,
-        b"BLAST Database error: Database memory map file error - CMemoryFile: Cannot memory map file '/data/db.psq':Permission denied\n"
+        b"LOSAT database error: Database memory map file error - CMemoryFile: Cannot memory map file '/data/db.psq':Permission denied\n"
     );
     let too_many = || SeqDbError::Open {
         path: "/data/db.psq".into(),
@@ -1332,6 +1332,7 @@ fn excluded_lists_leave_marks_of_their_places() {
         &settings,
         "BLASTP",
         Some(&negative),
+        None,
         &mut std::io::sink(),
     )
     .unwrap();
@@ -1404,7 +1405,7 @@ fn listed_subjects_read_the_stored_residues_by_rank() {
         .collect();
     let lengths: Vec<usize> = stored.iter().map(Vec::len).collect();
     assert_eq!(lengths[3], 300);
-    let subjects = listed.redo_subjects(&database);
+    let subjects = listed.redo_subjects(&database, None);
     assert_eq!(subjects.len(), 4);
     for (rank, &length) in lengths.iter().enumerate() {
         assert_eq!(subjects.aa_len(rank), Some(length));
@@ -1433,7 +1434,7 @@ fn listed_subjects_read_the_stored_residues_by_rank() {
         let mut shown = ListedSubjects::x_list(&database, &mut make(), &mut []).unwrap();
         // The redo reads the subjects of the final lists (and finds the O of p03).
         for rank in [1, 3] {
-            shown.redo_subjects(&database).read(rank).unwrap();
+            shown.redo_subjects(&database, None).read(rank).unwrap();
         }
         shown
             .x_read_shown(&database, &final_lists, residues, query_recounted)
@@ -1694,7 +1695,7 @@ fn titles_are_read_for_the_final_hit_lists_in_ncbis_order() {
     assert_eq!(
         String::from_utf8(native.message.clone()).unwrap(),
         format!(
-            "BLAST Database error: Error: File ({}) not found.\n",
+            "LOSAT database error: Error: File ({}) not found.\n",
             dir.canonicalize().unwrap().join("prot_mv.05.phr").display()
         )
     );

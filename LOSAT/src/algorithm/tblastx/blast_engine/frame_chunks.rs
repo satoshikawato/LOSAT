@@ -18,9 +18,9 @@ use super::word_finder::{self, WordFinderCx};
 use super::{
     merge_tblastx_subject_chunk_hits, sort_ungapped_hits_by_score_ncbi,
     tblastx_max_dbseq_len_for_run, tblastx_scan_chunk_size_for_run,
-    ungapped_hits_is_sorted_by_score_ncbi, x_soft_subject_calls, DiagStruct, OffsetPair,
-    OneHitChunkMerge, QueryFrame, SubjectChunk, SubjectChunkStatus, SubjectSplitState, Subjects,
-    TblastxChunkScanResult, TbxScore, UngappedHit, DBSEQ_CHUNK_OVERLAP,
+    ungapped_hits_is_sorted_by_score_ncbi, x_db_mask_calls, x_soft_subject_calls, DiagStruct,
+    OffsetPair, OneHitChunkMerge, QueryFrame, SubjectChunk, SubjectChunkStatus, SubjectSplitState,
+    Subjects, TblastxChunkScanResult, TbxScore, UngappedHit, DBSEQ_CHUNK_OVERLAP,
     TWO_HIT_CHUNK_MERGE_IS_DEFINED,
 };
 use crate::algorithm::tblastx::lookup::BlastAaLookupTable;
@@ -48,6 +48,9 @@ use {
 pub(super) struct SubjectScan<'a> {
     pub(super) subjects: Subjects<'a>,
     pub(super) x_soft_subjects: bool,
+    /// A masked `-db` search (`-db_soft_mask`, `-db_hard_mask`; series NP, M4b PR 2): the
+    /// subject's ranges in bases (`subject_prep::SubjectFrames::x_db_mask`).
+    pub(super) x_db_mask: Option<&'a [(i32, i32)]>,
     pub(super) use_serial_scan_chunks: bool,
     pub(super) use_parallel_chunks: bool,
     pub(super) num_threads: usize,
@@ -108,6 +111,7 @@ pub(super) fn search_subject_frames<S: TbxScore>(
     let &SubjectScan {
         subjects,
         x_soft_subjects,
+        x_db_mask,
         use_serial_scan_chunks,
         use_parallel_chunks,
         num_threads,
@@ -150,11 +154,25 @@ pub(super) fn search_subject_frames<S: TbxScore>(
         let mut split_state = SubjectSplitState::new(s_aa_len);
         let max_dbseq_len = tblastx_max_dbseq_len_for_run();
         // `-lcase_masking`: the scan ranges of this frame's chunks, `None` for a subject
-        // without lower-case letters.
-        let x_soft_calls = if x_soft_subjects {
-            x_soft_subject_calls(subjects, s_idx, s_frame, s_frames_preliminary)
-        } else {
-            None
+        // without lower-case letters. A masked `-db` search: with `-db_soft_mask` the scan ranges
+        // of the frame's chunks, with `-db_hard_mask` its chunks, each scanned whole
+        // (`SubjectSplitState::listed`).
+        let x_soft_calls = match x_db_mask {
+            Some(ranges) => {
+                let hard = matches!(subjects, Subjects::Stream(stream)
+                    if stream.mask().is_some_and(|mask| mask.hard()));
+                let calls = x_db_mask_calls(ranges, hard, s_frame, s_frames_preliminary);
+                if hard {
+                    split_state = SubjectSplitState::listed(s_aa_len, &calls);
+                    None
+                } else {
+                    Some(calls)
+                }
+            }
+            None if x_soft_subjects => {
+                x_soft_subject_calls(subjects, s_idx, s_frame, s_frames_preliminary)
+            }
+            None => None,
         };
 
         // What the word finder reads of this subject and frame (`word_finder::FrameCx`).

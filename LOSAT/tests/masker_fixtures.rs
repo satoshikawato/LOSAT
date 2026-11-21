@@ -25,12 +25,32 @@ fn fixtures(program: &str) -> PathBuf {
         .join(program)
 }
 
-/// One row of the table: its name, the words after the program's name, and the file of
-/// `< file`.
+/// One row of the table: its name, the words after the program's name, the file of `< file`,
+/// and the variables of its first `NAME=value` words.
 struct Case {
     name: String,
     words: Vec<String>,
     stdin: Option<String>,
+    variables: Vec<(String, String)>,
+}
+
+/// The variables of the first words of `words` of the form `NAME=value` (`NAME` in upper case,
+/// such as `BLASTDB`, where the taxonomy database is), taken out of `words`: the shell's
+/// assignments before the command.
+pub(crate) fn take_variables(words: &mut Vec<String>) -> Vec<(String, String)> {
+    let mut variables = Vec::new();
+    while let Some((name, value)) = words.first().and_then(|word| word.split_once('=')) {
+        if name.is_empty()
+            || !name
+                .bytes()
+                .all(|byte| byte.is_ascii_uppercase() || byte == b'_')
+        {
+            break;
+        }
+        variables.push((name.to_string(), value.to_string()));
+        words.remove(0);
+    }
+    variables
 }
 
 /// The words of `line` as the probe's shell split them: blanks between words, double quotes
@@ -75,12 +95,14 @@ fn cases(program: &str) -> Vec<Case> {
             continue;
         }
         let (name, arguments) = line.split_once('\t').unwrap();
-        let (words, stdin) = shell_words(arguments);
+        let (mut words, stdin) = shell_words(arguments);
+        let variables = take_variables(&mut words);
         cases.retain(|case| case.name != name);
         cases.push(Case {
             name: name.to_string(),
             words,
             stdin,
+            variables,
         });
     }
     cases
@@ -118,6 +140,7 @@ fn command(binary: &Path, program: &str, case: &Case) -> Command {
     };
     command
         .env("NCBI_CONFIG_PATH", &dir)
+        .envs(case.variables.iter().map(|(name, value)| (name, value)))
         .current_dir(&dir)
         .arg(program)
         .args(&case.words)
@@ -201,7 +224,8 @@ fn input_directory<'a>(program: &str, case: &'a Case) -> Option<&'a str> {
 }
 
 /// NCBI's stdout, stderr and exit status for the row `name` of `program`, as frozen; the standard
-/// error in LOSAT's words (NCBI's bytes through `losat::wording`, AGENTS.md rule 8).
+/// output and error in LOSAT's words (NCBI's bytes through `losat::wording`, AGENTS.md rule 8:
+/// `-xmlhelp`'s version of the program, the prefixes).
 fn expected_row(program: &str, name: &str) -> Streams {
     let file = |extension: &str| {
         fixtures(program)
@@ -227,7 +251,7 @@ fn expected_row(program: &str, name: &str) -> Streams {
         err
     };
     (
-        fs::read(file("out")).unwrap(),
+        losat::wording::losat_output_bytes(&fs::read(file("out")).unwrap()).into_owned(),
         losat::wording::losat_bytes(&err).into_owned(),
         status.trim().parse().unwrap(),
     )

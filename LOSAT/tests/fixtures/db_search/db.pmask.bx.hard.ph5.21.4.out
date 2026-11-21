@@ -1,0 +1,342 @@
+BLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: seg masks v5 without p4
+Masked using: 'seg', options: 'window=12; locut=2.2; hicut=2.5'
+           6 sequences; 1,600 total letters
+
+
+
+Query= bx1
+
+Length=603
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+p1 Q block and SG block                                               251     4e-88
+p6 p1 homolog                                                         166     1e-54
+p3 EK head and K tail                                                 17.3    1.5  
+p2 random                                                             16.9    2.0  
+p5 random for hand masks                                              16.9    2.1  
+
+
+
+For reading frame +3 of query sequence:
+
+Query_1  3    TLEHWGDSELMQFSCSKAYNGTDCKPDYLCNVCFECNQHGqqqqqqqqqqqqqqqqqqqq  182
+0        61   TLEHWGDFMLMQFACSKAKDGADCKPIYLCNVCFECNAHGqqqqqqqqqqqqqqqqqqqq  120
+4        61   TLQKWRDFMLRQFGCSTAKDGAYCKPNYLCQVCFECNAQGqqqqqqqqqqqqqqqqqqqq  120
+
+Query_1  183  qqqqVRSFPLVTQVAMWRCEVEDNPRIMGNYMSQLDNKRCVQQLQGILCRNGACTQHIHK  362
+0        121  qqqqVASVPLVTQVMMWRCEVEDNPRIMGCYMSQLVNKRCVQQLQGILCVNGACTQHITK  180
+4        121  qqqqRASVTLVTQVMGWRLEDEDRPRIMFCYNAQLVNKRCVDQRQGILCVNGAVTQNITK  180
+1        46                                                            IKA  48
+
+Query_1  363  GYQASHIQPEDVMSELsegaggsgsgsysgsgfgsgsvsggRLRFQIWLMPVVTYFTFGG  542
+0        181  GYQASGIQPEDVMSELYEGAsgsgsgsgsgsgsgsgsgsggKLSFQIWWMPKVTYFTFGD  240
+4        181  GYQVSGWQPEDVMKELYEGYsgsgsgsgsgsgsgsgsgsggKLSFQMWWMWKVTYFTFGN  240
+1        49   GYQMQMKQPE                                                    58
+
+Query_1  543  FHWESDSCGWRMQRDSYMDL  602
+0        241  FHWESDSCGWRMQRDSYMDL  260
+4        241  CHPEDMSCGWRVQRDSYKSI  260
+
+For reading frame -1 of query sequence:
+
+Query_1  279  TYNYPLF*DCPLLHSAT*PLV*RGETI*PvvaavvavavavvavvvvvvvvVDRVDCIRN  100
+2        134  TWNYPLW                                                       140
+
+Query_1  99   KRYRDNLACNPYRCT  55
+2        86           CNPRVCT  92
+
+For reading frame -2 of query sequence:
+
+Query_1  371  LIALVNMLSTRTVSAQDPLELLDTTLIVQL*HIIT  267
+3        148  VIVYVNMVCAPEDPHQHDVMLSNADFIRECAHFIT  182
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 230740
+
+
+Query= bx3
+
+Length=600
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+p3 EK head and K tail                                                 312     1e-113
+p7 PA block                                                           16.9    1.9   
+p1 Q block and SG block                                               16.9    2.4   
+p2 random                                                             16.5    2.5   
+p5 random for hand masks                                              15.4    6.2   
+
+
+
+For reading frame +1 of query sequence:
+
+Query_2  67   LNMFQFSDGENGMPKFGEKWNYMIDCLAILESQVVWKCGWHKAFMEYFNIRRKEYNLHPL  246
+2        23   LNMFQFSDGENIMPKFGEKWNQMIDCLAILESQTVWKRGWHKAFMEYFNIRRKELQLHPL  82
+1        191          GHNFMNMYGQKW                                          202
+
+Query_2  247  CKYCNPRVCTGRDFNDHMDHINDYSANCETTRYHMTKNGERCMVRKFFWNQTWNYPLWEF  426
+2        83   CKYCNPRVCTGRDFNDHMDHINDYSANCETTRAHMTQNGERCMVRKFFWNQTWNYPLWEF  142
+
+Query_2  427  WTGPCMQPTNVSKTKDYVNKMWRVLAVQQSPERTRRCQ  540
+2        143  WTGPCMQLTNVSKTKDYVNHMWRVLAVQQSPERTRRCQ  180
+
+For reading frame -1 of query sequence:
+
+Query_2  495  PPHFVDIVLRFRDISWL  445
+0        4    PLHFQEQFFLHRNMGWV  20
+
+For reading frame -2 of query sequence:
+
+Query_2  380  LTMQRSPFFVIWYRVVSQLAE*SFI*SIWSLKSRPVQTLGLQYLQSGCRLYSFRRILKYS  201
+5        19   LCPDTSPYSITTYRIV                                              34
+3        299                                                       KAICNET  305
+
+Query_2  200  MKALCHPHFQTTCDSKIAKQSII  132
+3        306  LTNVCYQHQYLTCQI-IVKQSDV  327
+
+For reading frame -3 of query sequence:
+
+Query_2  97  FRRPKTETC  71
+5        3   YRGPKAEVC  11
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 229350
+
+
+Query= bx5
+
+Length=1081
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+p5 random for hand masks                                              674     0.0  
+p3 EK head and K tail                                                 18.5    1.3  
+p6 p1 homolog                                                         17.7    2.5  
+p2 random                                                             17.3    2.9  
+p1 Q block and SG block                                               16.9    4.5  
+
+
+
+For reading frame +1 of query sequence:
+
+Query_3  100  TDGCGWSFFAGT*MEILHG*NSQEGFGQGMERC*NVPRM*L*DVEAEILLLIVASRKSND  279
+0        245  SDSCGWRMQRDSYMDL                                              260
+
+Query_3  280  KRVYALAALLGD*TKTLQLCNANNGPKLSEHKSAPNCIRKYGLRPRRPAST*CHAIERGL  459
+
+Query_3  460  YKRMCPLPQTSRSllll*CQ*ARILPTL*KDGCPHHGL*YARVPETLLTHRL*RPSLVGE  639
+
+Query_3  640  CDILYRAIFTVSIVQRVEW*CEKVRMGTVRWRGVLALFPhhmharh**hrPGG*ADDYGT  819
+2        104                                                         NDYSA  108
+
+Query_3  820  YTQYLKGHMQRNINEC  867
+2        109  NCETTRAHMTQNGERC  124
+
+For reading frame +2 of query sequence:
+
+Query_3  2     LFADLGGEYWVWAKLFSWYIWRIN-LTDPHIHYEQMAVGGHFSQAPKWKYCMVETAKKDS  178
+3        21    LFADLSGESWVWAKLFSWYIWRIN-LTDPHIHYEQMAVGAHFSQAPKWKYCMVETAKKDS  79
+4        228                    WWMWKVTYFTFGNCHPEDMSCG                       249
+
+Query_3  179   DKEWKDAKTFRGCDCETWKQKYFCLLWRQERATTNVFMHWPHCWEIKQKHFSYVMLIMVQ  358
+3        80    GKEWKDAKTFRGCDCETWKQKYFCLLWRQERATTNVFMHWPHCWEIKQIHFSYVMLIMVL  139
+1        102                                          WPEAWEI                108
+
+Query_3  359   NFQNINRRLIVYVNMVCAPEDPHQHDVMLSNADFIRECAHFLKLQGRFYCCNVNKHAYYP  538
+3        140   NFQNINRRVIVYVNMVCAPEDPHQHDVMLSNADFIRECAHFITLQGRFYCCNVNKHAYYP  199
+
+Query_3  539   PYKKMGVHIMVCDMPACQKLCLHTVSKDHHWWVSAIYSTGPYLRYQSFKEWSGDVKRCAW  718
+3        200   PYKRMGVHIMVCDMPACQKLCLHTVSKDHHWWVSYIYSTGPYLRYQSFKIWSGDVKRCAW  259
+
+Query_3  719   VQFAGAAYLHCSLTICMPDTDDTGPEDRPMIMEHTHSISKAICNETLTNVAYQHQYLTQT  898
+3        260   VQFAGAAYLHCSLTICCpdtddtgpedepMIMEHTHSISKAICNETLTNVCYQHQYLTCQ  319
+
+Query_3  899   IIVKQSDVNRKFCSIIQPEHQEMGGETRFEDPDHCMPFFTQVNDKYQRKWENRLTKMTCC  1078
+3        320   IIVKQSDVNRKFKSIIQPEHQEMGGDTRFFDPLHCMPFRTQVNDQYKRKWSNRWTKMTCC  379
+
+Query_3  1079  G  1081
+3        380   G  380
+
+For reading frame +3 of query sequence:
+
+Query_3  648  TLQGHIYGINRSKSGVVM*KGAHGYSSLARR------TCIVPSPYACQTLMTPARRIGR*  809
+3        182  TLQGRFYCCNVNK---------HAYYPPYKRMGVHIMVCDMP---ACQKLCLHTVSKDHH  229
+
+Query_3  810  LWNIHTVSQRPY  845
+3        230  WWVSYIYSTGPY  241
+
+For reading frame -1 of query sequence:
+
+Query_3  172  LLGCFNHAVFPFRCLRKM  119
+0        147  IMGCYMSQLVNKRCVQQL  164
+
+For reading frame -2 of query sequence:
+
+Query_3  747  CKYAAPANCTHAHLFTSPLHSLND*YRKYGPVEYIALTHQ*WSLETVCKQSFWHAGISQT  568
+2        83   CKYCNPRVCT-GRDFNDHMDHIND                                      105
+
+Query_3  567  MMWTPIFL*GG*YACLLTLQQ*KRP*SLRKWAHSLIKSAFDSMTSC*CGSSGAQTIFTYT  388
+
+Query_3  387  IRRRFMF*KFWTIISIT*LKCFCLISQQCGQCINTFVVALS*RHNKQKYFCFHVSQSHPR  208
+3        98                                                KQKYFCL          104
+
+Query_3  207  NVLASFHSLSESFLAVSTMQYFHLGAC  127
+4        223          LSFQMWWMWKVTYFTFGNC  241
+
+For reading frame -3 of query sequence:
+
+Query_3  584  RAYHKP*CGHPSFYKVGSMRAY*HYSSRSDLEV*GSGHILL*SPRSIA*HHVDAGLRGRR  405
+1        183  QGYHHKQCGH                                                    192
+
+Query_3  404  PYLRIQLGADLCSESFGPLLALHS*SVFV*SPSNAANA*TRLSLLFLDatisksisastS  225
+
+Query_3  224  HNHILGTF*HLSIPCPNPSW  165
+1        229            MSLICPEPYW  238
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 438486
+
+
+Query= bx5trc
+
+Length=450
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+p5 random for hand masks                                              266     1e-93
+p7 PA block                                                           16.2    2.2  
+p1 Q block and SG block                                               16.2    2.5  
+p3 EK head and K tail                                                 15.8    3.4  
+p2 random                                                             15.0    5.5  
+p6 p1 homolog                                                         14.6    7.8  
+
+
+
+For reading frame +2 of query sequence:
+
+Query_4  395  CKYHAPANCT  424
+2        83   CKYCNPRVCT  92
+
+For reading frame +3 of query sequence:
+
+Query_4  3    EQCGHS*DPTL*KAPYLLKYHNtsssstdystfsytdHLLVS*TAYNGGGQRTACLLPFL  182
+1        188  KQCGHN                                                        193
+
+Query_4  183  GAHRE*SF*ISDSHPIA*QWLGKSSIDVDNLRLSTSRYRWPLKSSAYAPLSLAHLQDLYP  362
+5        17                                                             YP  18
+4        23                                                         MDELWP  28
+
+Query_4  363  WCPDNIW*D----CNASTTRLQTAPRHTALR  443
+5        19   LCPD                             22
+4        29   NMPNNAGWDNCQSCQNCYTTMSESPKPGAWR  59
+
+For reading frame -1 of query sequence:
+
+Query_4  444  DVKRCAWVQFAGAWYLHCSLTICCPDTTDTGPEDEPMIMEHTHSISKAICNETLTNVSYQ  265
+3        253  DVKRCAWVQFAGAAYLHCSLTICCpdtddtgpedepMIMEHTHSISKAICNETLTNVCYQ  312
+5        11                    CLNSHCYPLCPDTSP                              25
+1        103                                     PEAWEILHNMAAAFYEKEWRG---R  124
+
+Query_4  264  HQYLTCQAIVKQSDVNRKFKRIILYEHQEMGGDTRFFDPLHCMPFRTQVNDQYKRKWSNR  85
+3        313  HQYLTCQIIVKQSDVNRKFKSIIQPEHQEMGGDTRFFDPLHCMPFRTQVNDQYKRKWSNR  372
+1        125  HGYPICHAI                                                     133
+
+Query_4  84   WTKMTCCGTSADTVPFIGWGLRSGHTAR  1
+3        373  WTKMTCCGTSADTVPFIGWGLRSGHVAR  400
+
+For reading frame -2 of query sequence:
+
+Query_4  377  VVRTPRIQVLKMSQ  336
+0        141  VEDNPRIMGCYMSQ  154
+
+For reading frame -3 of query sequence:
+
+Query_4  445  RRKAVCLGAVCRRVVLALQSYHMLSGHHGYRS*R*ANDNGAYALDFKGHL*RDVDKRKLS  266
+0        251                                                          RMQR  254
+2        73   RRKELQLHPLCK                                                  84
+
+Query_4  265  TSILDLPSHCQAIGCESEI*KDHSL*APRNGRRHAVL*PPPLYAVQDTSK*sv*ekve*s  86
+0        255  DSYMDLCTHC                                                    264
+
+Query_4  85   vdeddVLWYFSRYGAFHRVGSQEWPHC  5
+3        119                         WPHC  122
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 166144
+
+
+Query= bx4
+
+Length=360
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+p1 Q block and SG block                                               15.0    4.6  
+
+
+
+Query_5  111  WR*RIELWGWF  143
+0        58   WRCTLEHWGDF  68
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 126380
+
+
+  Database: seg masks v5 without p4
+  Masked using: 'seg', options: 'window=12; locut=2.2; hicut=2.5'
+    Posted date:  Nov 21, 2026  4:28 AM
+  Number of letters in database: 1,600
+  Number of sequences in database:  6
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 12
+Window for multiple hits: 40

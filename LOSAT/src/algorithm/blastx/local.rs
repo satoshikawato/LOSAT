@@ -59,7 +59,7 @@ pub fn run_local(
     // NCBI's options factory checks the task first (`TaskParser::check`); the command line's
     // parser has checked it, a caller of `run_local` has not.
     super::args::BLASTX_TASK.check(&mut args.task)?;
-    let requested = requested_formats(&args, outputs);
+    let requested = requested_formats(outputs);
     let (choices, resolutions) = read_options(&args, &requested)?;
     crate::utils::threading::validate_threads(args.num_threads as usize)?;
     let archive_requested = choices.iter().any(|choice| choice.number == 11);
@@ -158,6 +158,9 @@ fn search_records(
         xml_matrix,
     )?;
     write_empty_subject_warnings(&subjects, &mut **diagnostics)?;
+    // NCBI's error of an XInclude format without a file name, where the command line gives it
+    // (`native::run_inner`, blastx_app.cpp:251).
+    outputs.xinclude_check(args.out.as_deref())?;
     // The environment of a search of subject records, after the subjects' warnings
     // (`native::run_inner`).
     app::check_search_environment("BLASTX", true)?;
@@ -1007,7 +1010,7 @@ pub fn run_local_database(
     // parser has checked it, a caller of `run_local` has not.
     super::args::BLASTX_TASK.check(&mut args.task)?;
     args.matrix_search = Some(settings.matrix_search.clone());
-    let requested = requested_formats(&args, outputs);
+    let requested = requested_formats(outputs);
     let (choices, resolutions) = read_format_options(&args, &requested)?;
     let archive_requested = choices.iter().any(|choice| choice.number == 11);
     let archive = archive::handle_for(
@@ -1058,7 +1061,7 @@ fn search_database(
     // (`native::run_inner`).
     let list = args
         .db_filter
-        .resolve(&settings, &mut *outputs.diagnostics)?;
+        .resolve(&settings, "blastx", &mut *outputs.diagnostics)?;
     // `-out` (`run_to_file`) is made where the command line opens it (`native::run`).
     outputs.open_out()?;
     check_filtering(args)?;
@@ -1070,6 +1073,7 @@ fn search_database(
         name,
         &settings,
         list.as_ref(),
+        args.db_mask.option().as_ref(),
         &mut *outputs.diagnostics,
         super::args::ProgramName::BLASTX.upper,
     )?
@@ -1124,8 +1128,26 @@ fn search_database(
     }
     // The letters of a reader batch (`native::run_inner`).
     let batch_size = app::query_batch_size(BATCH_SIZE as u32)? as usize;
+    // The formatter resolves the database masking before its other work (`native::run_inner`).
+    if let Some(option) = args.db_mask.option() {
+        let mask =
+            database.resolve_mask_option(&option, archive, None, &mut *outputs.diagnostics)?;
+        if let Some(mask) = &mask {
+            database.check_mask_limits(mask)?;
+        }
+        for options in &mut resolved {
+            options.db_mask = mask.clone();
+        }
+    }
+    // NCBI's error of an XInclude format without a file name, where the command line gives it
+    // (`native::run_inner`, blastx_app.cpp:251).
+    outputs.xinclude_check(args.out.as_deref())?;
     app::check_search_environment("BLASTX", false)?;
-    let pairwise = database.pairwise_database();
+    let pairwise = database.pairwise_database_masked(
+        resolved
+            .first()
+            .and_then(|options| options.db_mask.as_ref()),
+    );
     let no_reported = ReportedSubjects::default();
     let shown = ShownSubjects::Database {
         name: database.name(),
@@ -1197,10 +1219,10 @@ fn search_database(
 /// so for an argv and records that both fail the run reports the records' error.
 ///
 /// Outfmt 13 and 14 are read as in a run that gives them the caller's receiver of their side files
-/// (`OutputSink::Files`, which LOSAT Web gives them).
+/// (`OutputSink::Files`, which LOSAT Web gives them): a run without one gives NCBI's error after the
+/// records are read (`ReportOutputs::xinclude_check`).
 pub fn check_options(args: &BlastxArgs, outfmts: &[&str]) -> Result<()> {
-    let requested: Vec<(&str, bool)> = outfmts.iter().map(|&outfmt| (outfmt, true)).collect();
-    let (choices, resolutions) = read_options(args, &requested)?;
+    let (choices, resolutions) = read_options(args, outfmts)?;
     crate::utils::threading::validate_threads(args.num_threads as usize)?;
     parse_subject_range(args)?;
     check_filtering(args)?;
@@ -1239,7 +1261,7 @@ fn parse_query_range(args: &BlastxArgs) -> Result<Option<SequenceRange>> {
 /// subjects are read (`native::run_inner`).
 fn read_options(
     args: &BlastxArgs,
-    outfmts: &[(&str, bool)],
+    outfmts: &[&str],
 ) -> Result<(Vec<app::FormatChoice>, Vec<Result<ResolvedOptions>>)> {
     // The host has no database files; LOSAT Web searches the records it gives.
     if args.db.is_some() {
@@ -1252,44 +1274,23 @@ fn read_options(
     read_format_options(args, outfmts)
 }
 
-/// The `-outfmt` value of each output of `outputs`, and whether the side files of outfmt 13 and 14
-/// have somewhere to go: a file next to which they are written (`api::run_to_file`), or the
-/// caller's receiver of them (`FormatOutput::side_out`).
-fn requested_formats<'o>(
-    args: &BlastxArgs,
-    outputs: &'o ReportOutputs<'_>,
-) -> Vec<(&'o str, bool)> {
-    outputs
-        .formats
-        .iter()
-        .map(|format| {
-            (
-                format.outfmt,
-                format.side_out(args.out.as_deref()).is_some(),
-            )
-        })
-        .collect()
+/// The `-outfmt` value of each output of `outputs`.
+fn requested_formats<'o>(outputs: &'o ReportOutputs<'_>) -> Vec<&'o str> {
+    outputs.formats.iter().map(|format| format.outfmt).collect()
 }
 
-/// `read_options` without its refusals of what a search of records in memory cannot do: each
-/// format comes with whether its side files have somewhere to go (`requested_formats`).
+/// `read_options` without its refusals of what a search of records in memory cannot do. Outfmt 13
+/// and 14 whose side files have no file name to go by get NCBI's error later, where the command
+/// line gives it (`ReportOutputs::xinclude_check`).
 fn read_format_options(
     args: &BlastxArgs,
-    outfmts: &[(&str, bool)],
+    outfmts: &[&str],
 ) -> Result<(Vec<app::FormatChoice>, Vec<Result<ResolvedOptions>>)> {
     // NCBI parses -outfmt before its option handlers read the subjects (`native::run_inner`).
     let mut choices = Vec::with_capacity(outfmts.len());
-    for &(outfmt, side_files) in outfmts {
+    for &outfmt in outfmts {
         let choice = app::parse_formatting_string(outfmt)?;
         app::report_format(&choice, Program::Blastx, args.out.as_deref())?;
-        // No NCBI counterpart: the side files of outfmt 13 and 14 have nowhere to go without a file
-        // or a receiver of them.
-        if !side_files && matches!(choice.number, 13 | 14) {
-            bail!(
-                "output format {} is not supported in memory for BLASTX",
-                choice.number
-            );
-        }
         choices.push(choice);
     }
     ensure!(!choices.is_empty(), "no output format was requested");

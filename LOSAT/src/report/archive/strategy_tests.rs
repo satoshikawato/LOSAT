@@ -511,10 +511,11 @@ fn a_pssm_query_is_the_pssm_as_read() {
     }
 }
 
-/// `-` and a file that is also `-out` are refused; a path that cannot be created is NCBI's
+/// `-` and a file that is also `-out` are made (the file emptied) with LOSAT's refusal, which
+/// `check_report_stream` and `write_with` raise; a path that cannot be created is NCBI's
 /// argument error.
 #[test]
-fn the_file_is_created_or_refused() {
+fn the_file_is_created_and_its_refusal_kept() {
     let dir = crate::utils::test_dir::temp_dir().join(format!(
         "losat-strategy-{}",
         crate::utils::test_dir::process_id()
@@ -522,14 +523,34 @@ fn the_file_is_created_or_refused() {
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("s.asn");
     std::fs::write(&path, b"old").unwrap();
-    drop(create_strategy_file(&path, None, "BLASTP").unwrap());
+    let made = create_strategy_file(&path, None, "BLASTP").unwrap();
+    assert!(made.file.is_some() && made.refusal.is_none());
     assert_eq!(std::fs::read(&path).unwrap(), b"");
-    let refusal = create_strategy_file(Path::new("-"), None, "BLASTP").unwrap_err();
-    assert!(refusal.to_string().contains("standard output"), "{refusal}");
-    let same = create_strategy_file(&path, Some(&path), "BLASTP").unwrap_err();
-    assert!(same.to_string().contains("also the output"), "{same}");
+    let dash = create_strategy_file(Path::new("-"), None, "BLASTP").unwrap();
+    assert!(dash.file.is_none());
+    assert!(dash.refusal.as_deref().unwrap().contains("standard output"));
+    std::fs::write(&path, b"old").unwrap();
+    let same = create_strategy_file(&path, Some(&path), "BLASTP").unwrap();
+    assert!(same.refusal.as_deref().unwrap().contains("also the output"));
+    assert_eq!(std::fs::read(&path).unwrap(), b"");
     let other = dir.join("o.txt");
-    drop(create_strategy_file(&path, Some(&other), "BLASTP").unwrap());
+    assert!(create_strategy_file(&path, Some(&other), "BLASTP")
+        .unwrap()
+        .refusal
+        .is_none());
+    // The refusal comes where the run asks for it, and before any request.
+    let export = StrategyExport::for_run(
+        create_strategy_file(Path::new("-"), None, "BLASTP").unwrap(),
+        OptionInputs::new(Program::Blastp, "blastp"),
+        Some(6),
+        HitlistArgs::default(),
+        None,
+        &OptionsHandle::default(),
+    );
+    let refusal = check_report_stream(Some(&export)).unwrap_err();
+    assert!(refusal.to_string().contains("standard output"), "{refusal}");
+    assert!(export.write_with(0..1, |_| Ok(())).is_err());
+    assert!(check_report_stream(None).is_ok());
     let missing = dir.join("no_such_dir").join("x");
     let error = create_strategy_file(&missing, None, "BLASTP").unwrap_err();
     let native = error.downcast_ref::<crate::cli::NativeError>().unwrap();
@@ -553,4 +574,53 @@ fn the_file_is_created_or_refused() {
         .unwrap(),
     );
     std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// The held report stream: the bytes wait, are dropped at the request point and are written
+/// (once, before the next write) when the run ends before it.
+#[test]
+fn held_report_stream_waits_for_the_request_point() {
+    fn held(sink: &Sink) -> (ReportHold, HeldReport<Sink>) {
+        let hold = ReportHold::default();
+        (
+            hold.clone(),
+            HeldReport {
+                inner: sink.clone(),
+                hold,
+            },
+        )
+    }
+    // Held until the run ends: nothing reaches the stream before.
+    let sink = Sink::default();
+    let (hold, mut stream) = held(&sink);
+    stream.write_all(b"prolog\n").unwrap();
+    stream.flush().unwrap();
+    assert!(sink.0.lock().unwrap().is_empty());
+    // The run ends with NCBI's error: the held bytes, then what the error writes.
+    hold.end(true);
+    stream.write_all(b"error\n").unwrap();
+    assert_eq!(&*sink.0.lock().unwrap(), b"prolog\nerror\n");
+    // The request point refuses the run: no byte ever.
+    let sink = Sink::default();
+    let (hold, mut stream) = held(&sink);
+    stream.write_all(b"prolog\n").unwrap();
+    hold.drop_held();
+    stream.write_all(b"more\n").unwrap();
+    hold.end(true);
+    drop(stream);
+    assert!(sink.0.lock().unwrap().is_empty());
+    // LOSAT's own refusal at the run's end: no byte either.
+    let sink = Sink::default();
+    let (hold, mut stream) = held(&sink);
+    stream.write_all(b"prolog\n").unwrap();
+    hold.end(false);
+    drop(stream);
+    assert!(sink.0.lock().unwrap().is_empty());
+    // A released stream writes its bytes when it is dropped without another write.
+    let sink = Sink::default();
+    let (hold, mut stream) = held(&sink);
+    stream.write_all(b"prolog\n").unwrap();
+    hold.end(true);
+    drop(stream);
+    assert_eq!(&*sink.0.lock().unwrap(), b"prolog\n");
 }

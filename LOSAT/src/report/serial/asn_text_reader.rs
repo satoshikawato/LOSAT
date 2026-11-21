@@ -12,8 +12,9 @@
 //!
 //! The text comes from an `AsnSource`: a slice (`SliceSource`, the PSSM file read whole) or a
 //! stream read in blocks (`StreamSource`, an archive of any size: only the bytes not yet read
-//! and those of the value being read are kept). The readers are generic over the source, so the
-//! slice reader is what it was before the stream existed.
+//! and those of the value being read are kept). The readers are generic over the source: both
+//! read the kept bytes that `AsnSource::rest` gives and ask `AsnSource::fill` for more at their
+//! end, so they share one code path.
 
 use crate::ncbi_exception::ThrowSite;
 use crate::ncbi_str::{is_space, string_to_double_posix, NCBI_NAN};
@@ -159,18 +160,54 @@ impl std::error::Error for AsnTextError {}
 pub(crate) type Result<T> = std::result::Result<T, AsnTextError>;
 
 /// The bytes that an ASN.1 text reader reads, by position from the start of the text.
+///
+/// A source gives the bytes it keeps as a slice (`rest`), and reads more only when a reader
+/// asks for a byte past them (`fill`). The readers hold their position and that slice in
+/// locals while they read a value, so the bytes of a value are read without loading the
+/// reader's state from memory for each byte; `byte_at` and `scan` are built on these two, one
+/// form for every source.
 pub(crate) trait AsnSource {
-    /// The byte at `pos`, `None` past the end of the text. A position before one given to
-    /// `release_before` is never asked for again.
-    fn byte_at(&mut self, pos: usize) -> Option<u8>;
-    /// The bytes `range`, all of which `byte_at` has given.
+    /// The bytes kept from `pos` on: empty when the byte at `pos` is not kept (yet). A position
+    /// before one given to `release_before` is never asked for again.
+    fn rest(&self, pos: usize) -> &[u8];
+    /// Reads more of the text until the byte at `pos` is kept; `false` when the text ends
+    /// before it.
+    fn fill(&mut self, pos: usize) -> bool;
+    /// The byte at `pos`, `None` past the end of the text.
+    #[inline]
+    fn byte_at(&mut self, pos: usize) -> Option<u8> {
+        match self.rest(pos).first() {
+            Some(&c) => Some(c),
+            None => self.byte_after_fill(pos),
+        }
+    }
+    /// `byte_at` of a byte not kept yet.
+    #[cold]
+    #[inline(never)]
+    fn byte_after_fill(&mut self, pos: usize) -> Option<u8> {
+        if !self.fill(pos) {
+            return None;
+        }
+        self.rest(pos).first().copied()
+    }
+    /// The bytes from `pos` on for which `more` is true: the position of the first byte for
+    /// which it is false and that byte, or the end of the text and `None`. The bytes are read
+    /// from the kept slice in locals; the source is asked for more only at its end.
+    #[inline]
+    fn scan(&mut self, mut pos: usize, mut more: impl FnMut(u8) -> bool) -> (usize, Option<u8>) {
+        loop {
+            let rest = self.rest(pos);
+            if let Some(i) = rest.iter().position(|&c| !more(c)) {
+                return (pos + i, Some(rest[i]));
+            }
+            pos += rest.len();
+            if !self.fill(pos) {
+                return (pos, None);
+            }
+        }
+    }
+    /// The bytes `range`, all of which are kept.
     fn bytes(&self, range: Range<usize>) -> &[u8];
-    /// `CIStreamBuffer::SkipSpaces` from `pos`: the position of the first byte at or after `pos`
-    /// that is not `' '`, or the end of the text.
-    // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:213-253
-    // (`FillBuffer` throws `CEofException` at the end of the input: the caller's `byte_at` of
-    // the position returned finds it.)
-    fn skip_spaces(&mut self, pos: usize) -> usize;
     /// The reader will not ask for a byte before `pos` again (a stream may drop them).
     #[inline]
     fn release_before(&mut self, _pos: usize) {}
@@ -189,19 +226,19 @@ impl<'a> SliceSource<'a> {
 
 impl AsnSource for SliceSource<'_> {
     #[inline]
-    fn byte_at(&mut self, pos: usize) -> Option<u8> {
-        self.text.get(pos).copied()
+    fn rest(&self, pos: usize) -> &[u8] {
+        &self.text[pos.min(self.text.len())..]
+    }
+
+    /// The whole text is kept: only a byte inside it is there.
+    #[inline]
+    fn fill(&mut self, pos: usize) -> bool {
+        pos < self.text.len()
     }
 
     #[inline]
     fn bytes(&self, range: Range<usize>) -> &[u8] {
         &self.text[range]
-    }
-
-    #[inline]
-    fn skip_spaces(&mut self, pos: usize) -> usize {
-        let rest = self.text.get(pos..).unwrap_or_default();
-        pos + spaces_at_start(rest)
     }
 }
 
@@ -273,30 +310,20 @@ impl<R: Read> StreamSource<R> {
 
 impl<R: Read> AsnSource for StreamSource<R> {
     #[inline]
-    fn byte_at(&mut self, pos: usize) -> Option<u8> {
-        let index = pos.wrapping_sub(self.base);
-        if index < self.buf.len() {
-            return Some(self.buf[index]);
-        }
-        self.fill_to(pos)
+    fn rest(&self, pos: usize) -> &[u8] {
+        // A released position wraps to past the buffer, so its slice is empty; `fill_to`'s assert
+        // then rejects it.
+        &self.buf[pos.wrapping_sub(self.base).min(self.buf.len())..]
+    }
+
+    #[inline]
+    fn fill(&mut self, pos: usize) -> bool {
+        self.fill_to(pos).is_some()
     }
 
     #[inline]
     fn bytes(&self, range: Range<usize>) -> &[u8] {
         &self.buf[range.start - self.base..range.end - self.base]
-    }
-
-    #[inline]
-    fn skip_spaces(&mut self, mut pos: usize) -> usize {
-        loop {
-            let rest = self.buf.get(pos - self.base..).unwrap_or_default();
-            let spaces = spaces_at_start(rest);
-            pos += spaces;
-            // The end of the buffer: the spaces may go on in the next block.
-            if spaces < rest.len() || self.fill_to(pos).is_none() {
-                return pos;
-            }
-        }
     }
 
     #[inline]
@@ -311,10 +338,17 @@ impl<R: Read> AsnSource for StreamSource<R> {
     }
 }
 
-/// The number of `' '` at the start of `bytes` (`AsnSource::skip_spaces`).
+/// `Reader::white_space_from`'s byte at the end of the text: more than any byte.
+const END_OF_TEXT: u32 = 0x100;
+
+/// The index of the first byte of `bytes` from `i` (at most its length) on that is not `' '`,
+/// or its length when the bytes from `i` on are all spaces.
 #[inline]
-fn spaces_at_start(bytes: &[u8]) -> usize {
-    bytes.iter().position(|&c| c != b' ').unwrap_or(bytes.len())
+fn after_spaces(bytes: &[u8], mut i: usize) -> usize {
+    while bytes.get(i) == Some(&b' ') {
+        i += 1;
+    }
+    i
 }
 
 /// `FirstIdChar` (objistrasn.cpp:118-121).
@@ -460,7 +494,7 @@ impl<S: AsnSource> Reader<S> {
 
     #[cold]
     #[inline(never)]
-    fn end_of_text(&self) -> AsnTextError {
+    pub(crate) fn end_of_text(&self) -> AsnTextError {
         AsnTextError {
             line: self.line,
             message: format!("unexpected end of the {}", self.document),
@@ -515,100 +549,229 @@ impl<S: AsnSource> Reader<S> {
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:245-274
     #[inline]
     pub(crate) fn skip_white_space(&mut self) -> Result<u8> {
-        // A value or a punctuation mark at the position: nothing to skip.
-        match self.src.byte_at(self.pos) {
-            Some(c) if !matches!(c, b' ' | b'\t' | b'\r' | b'\n' | b'-') => Ok(c),
-            _ => self.skip_white_space_from_here(),
+        let (pos, c) = self.white_space_at(self.pos)?;
+        self.pos = pos;
+        Ok(c)
+    }
+
+    // The readers below that end in `_at` read from the position they are given and return the
+    // position after what they read, so that a reader of a value keeps its position in a local
+    // from its start to its end and writes `pos` once. On an error they set `pos` to where the
+    // reading stopped (the position the error is reported at) themselves.
+
+    /// [`skip_white_space`](Self::skip_white_space) from `pos`: the position of the byte found,
+    /// and the byte.
+    #[inline]
+    pub(crate) fn white_space_at(&mut self, pos: usize) -> Result<(usize, u8)> {
+        // A value or a punctuation mark at the position: nothing to skip. A byte not kept yet is
+        // read by `white_space_from`.
+        if let Some(&c) = self.src.rest(pos).first() {
+            if !matches!(c, b' ' | b'\t' | b'\r' | b'\n' | b'-') {
+                return Ok((pos, c));
+            }
+        }
+        match self.white_space_from(pos) {
+            (pos, END_OF_TEXT) => {
+                self.pos = pos;
+                Err(self.end_of_text_in_white_space())
+            }
+            (pos, c) => Ok((pos, c as u8)),
         }
     }
 
-    /// [`skip_white_space`](Self::skip_white_space) from a byte that may be white space, a
-    /// comment or the end of the text.
+    /// [`white_space_at`](Self::white_space_at) from a byte that may be white space, a comment,
+    /// not kept yet or past the end of the text: the position of the byte found and the byte, or
+    /// the position where the text ends and [`END_OF_TEXT`]. (A pair of numbers, which a call
+    /// returns in registers.)
+    // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:207-274
+    // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:213-253
     #[inline(never)]
-    fn skip_white_space_from_here(&mut self) -> Result<u8> {
+    fn white_space_from(&mut self, mut pos: usize) -> (usize, u32) {
+        // The line ends found, added to `line` once (when there are any).
+        let mut lines = 0;
         loop {
-            self.pos = self.src.skip_spaces(self.pos);
-            let Some(c) = self.src.byte_at(self.pos) else {
-                return Err(self.end_of_text_in_white_space());
-            };
-            match c {
-                b'\t' => self.pos += 1,
-                b'\r' | b'\n' => {
-                    self.pos += 1;
-                    self.skip_end_of_line(c);
+            // Spaces, tabs and line ends are read from the kept bytes in locals; the source is
+            // asked for more only at their end.
+            let rest = self.src.rest(pos);
+            let mut i = 0;
+            // What ends the white space in `rest` when it needs another look: the end of `rest`
+            // (`None`), a `-` that starts a comment or is the last byte of `rest`, or a line end
+            // that is the last byte of `rest` (its complement may be in the next block).
+            let c = loop {
+                // A run of spaces (the indentation of a text written with line ends) in one
+                // tight loop.
+                i = after_spaces(rest, i);
+                let Some(&c) = rest.get(i) else {
+                    break None;
+                };
+                if !matches!(c, b'\t' | b'\r' | b'\n' | b'-') {
+                    // The byte found.
+                    self.add_lines(lines);
+                    return (pos + i, c.into());
                 }
-                b'-' if self.peek_white_space(1)? == b'-' => {
-                    self.pos += 2;
-                    loop {
-                        let Some(c) = self.src.byte_at(self.pos) else {
-                            return Err(self.end_of_text_in_white_space());
-                        };
-                        self.pos += 1;
-                        match c {
-                            b'\r' | b'\n' => {
-                                self.skip_end_of_line(c);
-                                break;
-                            }
-                            b'-' => {
-                                let Some(c) = self.src.byte_at(self.pos) else {
-                                    return Err(self.end_of_text_in_white_space());
-                                };
-                                self.pos += 1;
-                                match c {
-                                    b'\r' | b'\n' => {
-                                        self.skip_end_of_line(c);
-                                        break;
-                                    }
-                                    b'-' => break,
-                                    _ => {}
+                match c {
+                    b'\t' => i += 1,
+                    b'-' => match rest.get(i + 1) {
+                        // A `-` that does not start a comment (a negative number).
+                        Some(&next) if next != b'-' => {
+                            self.add_lines(lines);
+                            return (pos + i, b'-'.into());
+                        }
+                        _ => break Some(c),
+                    },
+                    // A line end.
+                    _ => {
+                        i += 1;
+                        lines += 1;
+                        match rest.get(i) {
+                            Some(&next) => {
+                                if c as u32 + next as u32 == b'\r' as u32 + b'\n' as u32 {
+                                    i += 1;
                                 }
                             }
-                            _ => {}
+                            None => break Some(c),
                         }
                     }
                 }
-                _ => return Ok(c),
+            };
+            pos += i;
+            match c {
+                None => {
+                    if !self.src.fill(pos) {
+                        break;
+                    }
+                }
+                Some(b'-') => match self.src.byte_at(pos + 1) {
+                    // The end of the text after a `-`: `PeekChar(1)` fails at the `-`.
+                    None => break,
+                    Some(b'-') => match self.comment_at(pos + 2) {
+                        Some((end, end_lines)) => (pos, lines) = (end, lines + end_lines),
+                        None => {
+                            // `comment_at` set `pos` where the text ends.
+                            self.add_lines(lines);
+                            return (self.pos, END_OF_TEXT);
+                        }
+                    },
+                    Some(_) => {
+                        self.add_lines(lines);
+                        return (pos, b'-'.into());
+                    }
+                },
+                Some(c) => pos = self.end_of_line_at(pos, c),
+            }
+        }
+        self.add_lines(lines);
+        (pos, END_OF_TEXT)
+    }
+
+    /// Adds `lines` line ends to `line` (no access to `line` when there are none).
+    #[inline]
+    fn add_lines(&mut self, lines: usize) {
+        if lines != 0 {
+            self.line += lines;
+        }
+    }
+
+    /// The rest of a comment from `pos` (after its `--`): up to the end of the line or the next
+    /// `--`. The position after it and the line ends taken (0 or 1), or `None` at the end of the
+    /// text (`pos` set there).
+    #[cold]
+    #[inline(never)]
+    fn comment_at(&mut self, mut pos: usize) -> Option<(usize, usize)> {
+        loop {
+            let (at, c) = self.src.scan(pos, |c| !matches!(c, b'\r' | b'\n' | b'-'));
+            pos = at;
+            let Some(mut c) = c else {
+                self.pos = pos;
+                return None;
+            };
+            pos += 1;
+            if c == b'-' {
+                let Some(next) = self.src.byte_at(pos) else {
+                    self.pos = pos;
+                    return None;
+                };
+                pos += 1;
+                if next == b'-' {
+                    return Some((pos, 0));
+                }
+                c = next;
+            }
+            if matches!(c, b'\r' | b'\n') {
+                return Some((self.end_of_line_at(pos, c), 1));
             }
         }
     }
 
-    /// `peek_char` inside `SkipWhiteSpace`.
+    /// `SkipEndOfLine(c)` at `pos`, after the end-of-line byte `c`, without its line count:
+    /// the position after the complement of `c` when it follows.
+    // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:526-537
     #[inline]
-    fn peek_white_space(&mut self, offset: usize) -> Result<u8> {
-        match self.src.byte_at(self.pos + offset) {
-            Some(c) => Ok(c),
-            None => Err(self.end_of_text_in_white_space()),
+    fn end_of_line_at(&mut self, pos: usize, c: u8) -> usize {
+        let next = self.src.byte_at(pos).unwrap_or(0);
+        if c as u32 + next as u32 == b'\r' as u32 + b'\n' as u32 {
+            return pos + 1;
         }
+        pos
     }
 
     /// `Expect(c, true)`.
     pub(crate) fn expect(&mut self, c: u8) -> Result<()> {
-        if self.skip_white_space()? != c {
-            return Err(self.error_at(
-                NcbiThrow::Stream(EXPECT),
-                format!("'{}' expected", c as char),
-            ));
-        }
-        self.pos += 1;
+        self.pos = self.expect_at(self.pos, c)?;
         Ok(())
+    }
+
+    /// [`expect`](Self::expect) from `pos`.
+    #[inline]
+    fn expect_at(&mut self, pos: usize, c: u8) -> Result<usize> {
+        let (pos, found) = self.white_space_at(pos)?;
+        if found != c {
+            self.pos = pos;
+            return Err(self.expected(c));
+        }
+        Ok(pos + 1)
+    }
+
+    /// `Expect`'s error.
+    #[cold]
+    #[inline(never)]
+    fn expected(&self, c: u8) -> AsnTextError {
+        self.error_at(
+            NcbiThrow::Stream(EXPECT),
+            format!("'{}' expected", c as char),
+        )
     }
 
     /// `ScanEndOfId(is_id)` at the current byte: the byte, then the identifier bytes and the `-`
     /// before one; empty when `is_id` is false. Returns the positions of the identifier.
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:276-290
     pub(crate) fn scan_end_of_id(&mut self, is_id: bool) -> Result<Range<usize>> {
+        let start = self.pos;
         if !is_id {
-            return Ok(self.pos..self.pos);
+            return Ok(start..start);
         }
-        let mut i = 1;
+        self.pos = self.end_of_id_at(start)?;
+        Ok(start..self.pos)
+    }
+
+    /// `ScanEndOfId(true)` at `start`: the end of the identifier that starts there.
+    #[inline]
+    fn end_of_id_at(&mut self, start: usize) -> Result<usize> {
+        let mut pos = start + 1;
         loop {
-            let c = self.peek_at(i);
-            if !is_id_char(c) && (c != b'-' || !is_id_char(self.peek_char(i + 1)?)) {
-                let start = self.pos;
-                self.pos += i;
-                return Ok(start..self.pos);
+            let (at, c) = self.src.scan(pos, is_id_char);
+            if c != Some(b'-') {
+                return Ok(at);
             }
-            i += 1;
+            // A `-` belongs to the identifier when an identifier byte follows it.
+            match self.src.byte_at(at + 1) {
+                Some(next) if is_id_char(next) => pos = at + 1,
+                Some(_) => return Ok(at),
+                None => {
+                    self.pos = start;
+                    return Err(self.end_of_text());
+                }
+            }
         }
     }
 
@@ -630,32 +793,54 @@ impl<S: AsnSource> Reader<S> {
 
     /// `ReadMemberId(SkipWhiteSpace())`, a name or a tag (`member_id_range`).
     pub(crate) fn member_or_tag(&mut self) -> Result<MemberId> {
-        let c = self.skip_white_space()?;
+        let (pos, id) = self.member_or_tag_at(self.pos)?;
+        self.pos = pos;
+        Ok(id)
+    }
+
+    /// [`member_or_tag`](Self::member_or_tag) from `pos`.
+    #[inline]
+    fn member_or_tag_at(&mut self, pos: usize) -> Result<(usize, MemberId)> {
+        let (pos, c) = self.white_space_at(pos)?;
         if c != b'[' {
-            return Ok(MemberId::Name(self.scan_end_of_id(c.is_ascii_lowercase())?));
+            let end = if c.is_ascii_lowercase() {
+                self.end_of_id_at(pos)?
+            } else {
+                pos
+            };
+            return Ok((end, MemberId::Name(pos..end)));
         }
-        let mut i = 1;
-        loop {
-            match self.peek_char(i)? {
-                b'\r' | b'\n' => {
-                    return Err(self.error_at(
-                        NcbiThrow::Stream(READ_MEMBER_ID),
-                        "end of line: expected ']'",
-                    ))
+        self.bracketed_member_at(pos)
+    }
+
+    /// The member id in brackets at `pos` (its `[`).
+    #[inline(never)]
+    fn bracketed_member_at(&mut self, pos: usize) -> Result<(usize, MemberId)> {
+        let (at, c) = self
+            .src
+            .scan(pos + 1, |c| !matches!(c, b'\r' | b'\n' | b']'));
+        match c {
+            Some(b']') => {
+                let id = pos + 1..at;
+                if self
+                    .bytes(id.clone())
+                    .first()
+                    .is_some_and(u8::is_ascii_digit)
+                {
+                    return Ok((at + 1, MemberId::Tag(id)));
                 }
-                b']' => {
-                    let id = self.pos + 1..self.pos + i;
-                    self.pos += i + 1;
-                    if self
-                        .bytes(id.clone())
-                        .first()
-                        .is_some_and(u8::is_ascii_digit)
-                    {
-                        return Ok(MemberId::Tag(id));
-                    }
-                    return Ok(MemberId::Name(id));
-                }
-                _ => i += 1,
+                Ok((at + 1, MemberId::Name(id)))
+            }
+            Some(_) => {
+                self.pos = pos;
+                Err(self.error_at(
+                    NcbiThrow::Stream(READ_MEMBER_ID),
+                    "end of line: expected ']'",
+                ))
+            }
+            None => {
+                self.pos = pos;
+                Err(self.end_of_text())
             }
         }
     }
@@ -755,21 +940,31 @@ impl<S: AsnSource> Reader<S> {
     /// `NextElement`: whether another element follows (its `,` taken), or the block ends. The
     /// bytes before it are not read again (`AsnSource::release_before`).
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1205-1223
+    // (Called once per element by the loops over elements, into which it is inlined.)
+    #[inline]
     pub(crate) fn next_element(&mut self, block_start: &mut bool) -> Result<bool> {
-        self.src.release_before(self.pos);
-        let c = self.skip_white_space()?;
+        let (pos, more) = self.next_element_at(self.pos, block_start)?;
+        self.pos = pos;
+        Ok(more)
+    }
+
+    /// [`next_element`](Self::next_element) from `pos`.
+    #[inline]
+    fn next_element_at(&mut self, pos: usize, block_start: &mut bool) -> Result<(usize, bool)> {
+        self.src.release_before(pos);
+        let (pos, c) = self.white_space_at(pos)?;
         if *block_start {
             *block_start = false;
-            return Ok(c != b'}');
+            return Ok((pos, c != b'}'));
         }
         if c == b',' {
-            self.pos += 1;
-            return Ok(true);
+            return Ok((pos + 1, true));
         }
         if c != b'}' {
+            self.pos = pos;
             return Err(self.error_at(NcbiThrow::Stream(NEXT_ELEMENT), "',' or '}' expected"));
         }
-        Ok(false)
+        Ok((pos, false))
     }
 
     /// `EndBlock`: the `}` that `next_element` stopped at.
@@ -792,11 +987,16 @@ impl<S: AsnSource> Reader<S> {
         members: &mut Members,
         names: &[&str],
     ) -> Result<Option<usize>> {
-        if !self.next_element(&mut members.block_start)? {
-            self.end_block()?;
+        let (pos, more) = self.next_element_at(self.pos, &mut members.block_start)?;
+        if !more {
+            self.pos = self.expect_at(pos, b'}')?;
             return Ok(None);
         }
-        let id = self.member_id_range()?;
+        let (pos, id) = self.member_or_tag_at(pos)?;
+        self.pos = pos;
+        let MemberId::Name(id) = id else {
+            return Err(self.not_supported("a member or variant named by its tag"));
+        };
         let text = self.bytes(id);
         let Some(index) = names.iter().position(|name| name.as_bytes() == text) else {
             let message = format!("unexpected member {}", String::from_utf8_lossy(text));
@@ -823,33 +1023,68 @@ impl<S: AsnSource> Reader<S> {
     /// in `min..=max`.
     // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:626-668
     pub(crate) fn integer(&mut self, min: i128, max: i128) -> Result<i128> {
-        self.skip_white_space()?;
-        let mut c = self.skip_ws()?;
+        let (pos, c) = self.white_space_at(self.pos)?;
+        let (mut pos, mut c) = self.ws_at(pos, c)?;
         let negative = c == b'-';
         if c == b'-' || c == b'+' {
-            self.pos += 1;
-            c = self.peek_char(0)?;
+            pos += 1;
+            c = self.char_at(pos)?;
         }
         if !c.is_ascii_digit() {
-            return Err(self.error_at(NcbiThrow::Buffer(BAD_NUMBER), "bad number"));
+            self.pos = pos;
+            return Err(self.bad_number());
         }
+        let limit = max.max(-min);
         let mut n: i128 = 0;
-        loop {
-            let c = self.peek_at(0);
+        let mut overflow = false;
+        let (end, _) = self.src.scan(pos, |c| {
             if !c.is_ascii_digit() {
-                break;
+                return false;
             }
-            n = n * 10 + i128::from(c - b'0');
-            if n > max.max(-min) {
-                return Err(self.error_at(NcbiThrow::Buffer(NUMBER_OVERFLOW), "number overflow"));
+            let next = n * 10 + i128::from(c - b'0');
+            if next > limit {
+                overflow = true;
+                return false;
             }
-            self.pos += 1;
+            n = next;
+            true
+        });
+        // An overflow stops at the digit that makes it, not taken.
+        self.pos = end;
+        if overflow {
+            return Err(self.number_overflow());
         }
         let n = if negative { -n } else { n };
         if n < min || n > max {
-            return Err(self.error_at(NcbiThrow::Buffer(NUMBER_OVERFLOW), "number overflow"));
+            return Err(self.number_overflow());
         }
         Ok(n)
+    }
+
+    /// `PeekChar()` at `pos`: the end of the text is [`AsnTextErrorKind::Eof`] at `pos`.
+    #[inline]
+    pub(crate) fn char_at(&mut self, pos: usize) -> Result<u8> {
+        match self.src.byte_at(pos) {
+            Some(c) => Ok(c),
+            None => {
+                self.pos = pos;
+                Err(self.end_of_text())
+            }
+        }
+    }
+
+    /// `BadNumber` of the input buffer.
+    #[cold]
+    #[inline(never)]
+    fn bad_number(&self) -> AsnTextError {
+        self.error_at(NcbiThrow::Buffer(BAD_NUMBER), "bad number")
+    }
+
+    /// `NumberOverflow` of the input buffer.
+    #[cold]
+    #[inline(never)]
+    fn number_overflow(&self) -> AsnTextError {
+        self.error_at(NcbiThrow::Buffer(NUMBER_OVERFLOW), "number overflow")
     }
 
     /// `CIStreamBuffer::SkipWs` before the first byte of a number, which `GetInt4` and the other
@@ -857,13 +1092,24 @@ impl<S: AsnSource> Reader<S> {
     /// which `SkipWhiteSpace` stops at) is skipped, line ends uncounted, comments not seen. Returns
     /// the next byte, not taken.
     // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:617-624
-    fn skip_ws(&mut self) -> Result<u8> {
-        loop {
-            let c = self.peek_char(0)?;
-            if !is_space(c) {
-                return Ok(c);
+    // `c` is the byte at `pos`, which `SkipWhiteSpace` found.
+    #[inline]
+    pub(crate) fn ws_at(&mut self, pos: usize, c: u8) -> Result<(usize, u8)> {
+        if !is_space(c) {
+            return Ok((pos, c));
+        }
+        self.spaces_from(pos + 1)
+    }
+
+    /// `ws_at` past a first `isspace` byte.
+    #[inline(never)]
+    fn spaces_from(&mut self, pos: usize) -> Result<(usize, u8)> {
+        match self.src.scan(pos, is_space) {
+            (pos, Some(c)) => Ok((pos, c)),
+            (pos, None) => {
+                self.pos = pos;
+                Err(self.end_of_text())
             }
-            self.pos += 1;
         }
     }
 
@@ -876,29 +1122,43 @@ impl<S: AsnSource> Reader<S> {
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:783-787
     // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:672-700
     pub(crate) fn uint4(&mut self) -> Result<u32> {
-        self.skip_white_space()?;
-        let mut c = self.skip_ws()?;
+        let (pos, c) = self.white_space_at(self.pos)?;
+        let (mut pos, mut c) = self.ws_at(pos, c)?;
         if c == b'+' {
-            self.pos += 1;
-            c = self.peek_char(0)?;
+            pos += 1;
+            c = self.char_at(pos)?;
         }
         if !c.is_ascii_digit() {
-            return Err(self.error_at(NcbiThrow::Buffer(BAD_NUMBER), "bad number"));
+            self.pos = pos;
+            return Err(self.bad_number());
         }
         let mut n: u32 = 0;
-        loop {
-            let c = self.peek_at(0);
+        let mut overflow = false;
+        let (end, _) = self.src.scan(pos, |c| {
             if !c.is_ascii_digit() {
-                return Ok(n);
+                return false;
             }
-            self.pos += 1;
-            n = n
+            match n
                 .checked_mul(10)
                 .and_then(|n| n.checked_add(u32::from(c - b'0')))
-                .ok_or_else(|| {
-                    self.error_at(NcbiThrow::Buffer(NUMBER_OVERFLOW), "number overflow")
-                })?;
+            {
+                Some(next) => {
+                    n = next;
+                    true
+                }
+                None => {
+                    overflow = true;
+                    false
+                }
+            }
+        });
+        if overflow {
+            // `GetUint4` takes the digit before it checks the overflow.
+            self.pos = end + 1;
+            return Err(self.number_overflow());
         }
+        self.pos = end;
+        Ok(n)
     }
 
     pub(crate) fn int8(&mut self) -> Result<i64> {
@@ -1007,8 +1267,14 @@ impl<S: AsnSource> Reader<S> {
         &mut self,
         values: &[(&'static str, i32)],
     ) -> Result<std::result::Result<(&'static str, i32), i32>> {
-        let c = self.skip_white_space()?;
-        let id = self.scan_end_of_id(c.is_ascii_lowercase())?;
+        let (pos, c) = self.white_space_at(self.pos)?;
+        let end = if c.is_ascii_lowercase() {
+            self.end_of_id_at(pos)?
+        } else {
+            pos
+        };
+        self.pos = end;
+        let id = pos..end;
         if id.is_empty() {
             let value = self.int4()?;
             return Ok(values
@@ -1059,30 +1325,49 @@ impl<S: AsnSource> Reader<S> {
 
     /// A string appended to `out`; `visible_only`: a byte outside the visible range is refused.
     fn string_value(&mut self, out: &mut Vec<u8>, visible_only: bool) -> Result<()> {
-        self.expect(b'"')?;
-        let start_line = self.line;
+        let mut pos = self.expect_at(self.pos, b'"')?;
+        let mut line = self.line;
+        let start_line = line;
         loop {
-            let Some(c) = self.src.byte_at(self.pos) else {
+            // The bytes up to the next one that needs a decision are appended at once.
+            let (end, c) = self.src.scan(pos, |c| {
+                if visible_only {
+                    c != b'"' && (b' '..=b'~').contains(&c)
+                } else {
+                    !matches!(c, b'"' | b'\r' | b'\n')
+                }
+            });
+            out.extend_from_slice(self.src.bytes(pos..end));
+            pos = end;
+            let Some(c) = c else {
+                self.pos = pos;
+                self.line = line;
                 return Err(self.unended_string(start_line));
             };
-            self.pos += 1;
+            pos += 1;
             match c {
-                b'\r' | b'\n' => self.skip_end_of_line(c),
+                b'\r' | b'\n' => {
+                    line += 1;
+                    pos = self.end_of_line_at(pos, c);
+                }
                 b'"' => {
-                    if self.peek_at(0) != b'"' {
+                    if self.src.byte_at(pos) != Some(b'"') {
+                        self.pos = pos;
+                        self.line = line;
                         return Ok(());
                     }
                     out.push(b'"');
-                    self.pos += 1;
+                    pos += 1;
                 }
                 _ => {
                     // NCBI reference (598d8ae6): c++/include/serial/impl/objistr.inl:456-459
-                    if visible_only && !(b' '..=b'~').contains(&c) {
-                        let error = self.not_supported(&format!(
-                            "a string with the byte 0x{c:x} (NCBI replaces it by '#' and posts an error)"
-                        ));
-                        self.refuse(error, ())?;
-                    }
+                    // (Only `visible_only` stops at such a byte.)
+                    self.pos = pos;
+                    self.line = line;
+                    let error = self.not_supported(&format!(
+                        "a string with the byte 0x{c:x} (NCBI replaces it by '#' and posts an error)"
+                    ));
+                    self.refuse(error, ())?;
                     out.push(c)
                 }
             }
@@ -1120,54 +1405,64 @@ impl<S: AsnSource> Reader<S> {
         skip: bool,
         bad_char: &mut dyn FnMut(usize, u8, &[u8]),
     ) -> Result<()> {
-        self.expect(b'"')?;
-        let start_line = self.line;
+        // `pos` is the start of the piece being read and `i` its bytes so far.
+        let mut pos = self.expect_at(self.pos, b'"')?;
+        let mut line = self.line;
+        let start_line = line;
         let mut i = 0usize;
         loop {
-            let Some(c) = self.src.byte_at(self.pos + i) else {
+            let room = 128 - i;
+            let mut taken = 0usize;
+            let (end, c) = self.src.scan(pos + i, |c| {
+                if taken == room || matches!(c, b'\r' | b'\n' | b'"') {
+                    return false;
+                }
+                if skip && visible && !(b' '..=b'~').contains(&c) {
+                    bad_char(line, c, &[]);
+                }
+                taken += 1;
+                true
+            });
+            i = end - pos;
+            if i == 128 {
+                self.append_piece(pos..pos + i, line, out, visible, skip, bad_char);
+                pos += i;
+                i = 0;
+                continue;
+            }
+            let Some(c) = c else {
+                self.pos = pos;
+                self.line = line;
                 return Err(self.unended_string(start_line));
             };
-            match c {
-                b'\r' | b'\n' => {
-                    self.append_piece(out, i, visible, skip, bad_char);
-                    self.pos += i + 1;
-                    i = 0;
-                    self.skip_end_of_line(c);
+            self.append_piece(pos..pos + i, line, out, visible, skip, bad_char);
+            pos += i + 1;
+            i = 0;
+            if c == b'"' {
+                if self.src.byte_at(pos) != Some(b'"') {
+                    self.pos = pos;
+                    self.line = line;
+                    return Ok(());
                 }
-                b'"' => {
-                    self.append_piece(out, i, visible, skip, bad_char);
-                    self.pos += i + 1;
-                    if self.peek_at(0) != b'"' {
-                        return Ok(());
-                    }
-                    // `""`: the second quote starts the next piece (`SkipString` takes both).
-                    if skip {
-                        self.pos += 1;
-                        i = 0;
-                    } else {
-                        i = 1;
-                    }
+                // `""`: the second quote starts the next piece (`SkipString` takes both).
+                if skip {
+                    pos += 1;
+                } else {
+                    i = 1;
                 }
-                _ => {
-                    if skip && visible && !(b' '..=b'~').contains(&c) {
-                        bad_char(self.line, c, &[]);
-                    }
-                    i += 1;
-                    if i == 128 {
-                        self.append_piece(out, i, visible, skip, bad_char);
-                        self.pos += i;
-                        i = 0;
-                    }
-                }
+            } else {
+                line += 1;
+                pos = self.end_of_line_at(pos, c);
             }
         }
     }
 
-    /// `AppendStringData` of the `count` bytes at the reader's position (not taken).
+    /// `AppendStringData` of the bytes `piece` (on line `line`).
     fn append_piece(
         &self,
+        piece: Range<usize>,
+        line: usize,
         out: &mut Vec<u8>,
-        count: usize,
         visible: bool,
         skip: bool,
         bad_char: &mut dyn FnMut(usize, u8, &[u8]),
@@ -1175,7 +1470,7 @@ impl<S: AsnSource> Reader<S> {
         if skip {
             return;
         }
-        let data = self.src.bytes(self.pos..self.pos + count);
+        let data = self.src.bytes(piece);
         if !visible {
             out.extend_from_slice(data);
             return;
@@ -1184,7 +1479,7 @@ impl<S: AsnSource> Reader<S> {
         for (i, &c) in data.iter().enumerate() {
             if !(b' '..=b'~').contains(&c) {
                 out.extend_from_slice(&data[done..i]);
-                bad_char(self.line, c, data);
+                bad_char(line, c, data);
                 out.push(b'#');
                 done = i + 1;
             }
@@ -1235,17 +1530,14 @@ impl<S: AsnSource> Reader<S> {
     /// `ReadNumber`: a sign or a digit, then digits; returns their positions.
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:315-329
     pub(crate) fn number(&mut self) -> Result<Range<usize>> {
-        let c = self.skip_white_space()?;
+        let (start, c) = self.white_space_at(self.pos)?;
         if c != b'-' && c != b'+' && !c.is_ascii_digit() {
+            self.pos = start;
             return Err(self.error("invalid number"));
         }
-        let start = self.pos;
-        let mut i = 1;
-        while self.peek_at(i).is_ascii_digit() {
-            i += 1;
-        }
-        self.pos += i;
-        Ok(start..self.pos)
+        let (end, _) = self.src.scan(start + 1, |c| c.is_ascii_digit());
+        self.pos = end;
+        Ok(start..end)
     }
 
     /// Whether the bytes from `start` begin with `name`, ignoring case: `strncasecmp` over the
@@ -1470,3 +1762,7 @@ fn ldexp(x: f64, exp: i32) -> f64 {
     let up = rest > half || (rest == half && (kept & 1) != 0);
     f64::from_bits(sign | (kept + up as u64))
 }
+
+#[cfg(test)]
+#[path = "asn_text_reader_tests.rs"]
+pub(crate) mod tests;

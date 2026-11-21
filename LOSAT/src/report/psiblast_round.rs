@@ -371,6 +371,18 @@ impl RoundSections<'_> {
     ) -> io::Result<()> {
         let config = self.config;
         let hsps = group.subject_hits[&s_idx].len();
+        if let Some(id) = config.unreadable_query_id(self.parsed_subjects, s_idx) {
+            return write_database_subject_alignments_part(
+                writer,
+                probe,
+                DatabaseHeading::Skipped(&id),
+                true,
+                &group.subject_hits[&s_idx],
+                &group.subject_hit_indices[&s_idx],
+                0..hsps,
+                |_, _| unreachable!("a skipped alignment is written by its line"),
+            );
+        }
         let parsed = self.parsed(s_idx);
         if self.database.is_some() || parsed.is_some() {
             let heading = match parsed {

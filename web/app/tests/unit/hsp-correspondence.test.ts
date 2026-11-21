@@ -2,10 +2,12 @@
 // TD-3): for every outfmt 0 fixture of the programs that LOSAT Web runs
 // (LOSAT/tests/outfmt0_manifest.tsv; BLASTX joins in SX), the serial reactor runs the
 // search in Node, and
-// - the stream 0, 6 or 7 bytes are NCBI's frozen bytes of the fixture (a fixture of an
-//   outfmt 6 or 7 field list only adds its search; for the approved
-//   -db_gencode exception, NCBI's database search outside the lines that name the database,
-//   as docs/evidence/losat_web_e2a/check_losat.py compares them),
+// - the stream 0, 6 or 7 bytes are NCBI's frozen bytes of the fixture in LOSAT's words (LOSAT
+//   states its own version, LOSAT/src/wording.rs; the frozen hash judges LOSAT's output read back
+//   in NCBI's words, `losat_wording.py hash-form`) (a fixture of an outfmt 6 or 7 field list only
+//   adds its search; for the approved -db_gencode exception, NCBI's database search in LOSAT's
+//   words outside the lines that name the database, as docs/evidence/losat_web_e2a/check_losat.py
+//   compares them),
 // - the HSP records' `out6` ranges tile the outfmt 6 text in the order of the records, and
 //   each row's coordinates are the record's,
 // - outfmt 0 has as many sections and subject headings as the records point to, except in a run
@@ -21,6 +23,7 @@
 //   linked only where the outfmt 0 search has exactly its HSPs, so there is no such order),
 // - the results screen's index (domain/result-index.ts) groups the same HSPs.
 // It needs LOSAT_WEB_REACTORS; the gate runs it (docs/evidence/losat_web_w4/run_gate.sh).
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -127,8 +130,8 @@ function search(abi: ReactorAbi, fixture: Fixture): Outputs {
   const started = abi.start(argv);
   // A run with -parse_deflines reads its inputs together for its argv (line WQA's sweep, D7, 2026-11-19), as the app's runs do.
   const together = started.ok && started.start.registerInputs ? abi.registerInputs(argv, queryBytes, subjectBytes) : undefined;
-  const query = together?.query ?? abi.register(fixture.program, ROLE_QUERY, queryBytes);
-  const subject = together?.subject ?? abi.register(fixture.program, ROLE_SUBJECT, subjectBytes);
+  const query = together?.query ?? abi.register(fixture.program, ROLE_QUERY, true, queryBytes);
+  const subject = together?.subject ?? abi.register(fixture.program, ROLE_SUBJECT, true, subjectBytes);
   try {
     abi.run(argv, query.handle, subject.handle, (stream, bytes) => parts.set(stream, [...(parts.get(stream) ?? []), bytes.slice()]));
   } finally {
@@ -149,6 +152,18 @@ function search(abi: ReactorAbi, fixture: Fixture): Outputs {
 }
 
 const sha256 = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
+
+/** The one mapping between NCBI's words and LOSAT's (LOSAT/tests/losat_wording.py, the port of
+ * LOSAT/src/wording.rs): `map-output` gives LOSAT's bytes of NCBI's output, `hash-form` LOSAT's
+ * output read back in NCBI's words (`ncbi-words: ...` when it still writes NCBI's words). */
+function wording(command: 'map-output' | 'hash-form', bytes: Uint8Array): Uint8Array | string {
+  const run = spawnSync('python3', ['-I', join(ENGINE, 'tests/losat_wording.py'), command, '-'], {
+    input: bytes,
+    maxBuffer: 1 << 30,
+  });
+  if (run.error) throw run.error;
+  return run.status === 0 ? new Uint8Array(run.stdout) : `ncbi-words: ${run.stderr.toString()}`;
+}
 
 /**
  * check_losat.py's normalize_database_lines: a report without the lines that name the
@@ -185,7 +200,8 @@ function expectFrozen(fixture: Fixture, outputs: Outputs): 'bytes' | 'database' 
   const bytes = outputs.streams.get(stream) ?? new Uint8Array();
   const label = `${fixture.id}: NCBI's frozen outfmt ${stream}`;
   if (database === undefined) {
-    expect(sha256(bytes), label).toBe(frozen);
+    const read = wording('hash-form', bytes);
+    expect(typeof read === 'string' ? read : sha256(read), label).toBe(frozen);
     return 'bytes';
   }
   const oracle = readFileSync(join(ENGINE, database));
@@ -193,8 +209,10 @@ function expectFrozen(fixture: Fixture, outputs: Outputs): 'bytes' | 'database' 
   const posted = Buffer.from(oracle.toString('latin1').replace(/^( {4}Posted date: {2}).*$/gm, '$1(the time makeblastdb ran)'), 'latin1');
   expect(sha256(posted), `${fixture.id}: ${database}`).toBe(frozen);
   const decoder = new TextDecoder();
+  const inLosatWords = wording('map-output', oracle);
+  if (typeof inLosatWords === 'string') throw new Error(inLosatWords);
   expect(withoutDatabaseLines(decoder.decode(bytes)), `${label} (database search, -db_gencode exception)`).toBe(
-    withoutDatabaseLines(decoder.decode(oracle)),
+    withoutDatabaseLines(decoder.decode(inLosatWords)),
   );
   return 'database';
 }

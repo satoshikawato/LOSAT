@@ -3,7 +3,7 @@
 
 # Introduction
 
-LOSAT is a BLAST+ compatible toolkit in one executable, `losat`. It takes the command lines of NCBI BLAST+ 2.17.0, so the search you already run with `blastn`, `blastp` or `makeblastdb` runs as `losat blastn`, `losat blastp` or `losat makeblastdb`, with the same options and the same output. Link the program names to `losat` (see [Coming from NCBI BLAST+](from-ncbi-blast.md)) and tools that look for `blastn` on your `PATH` use LOSAT without changes.
+LOSAT is a BLAST+ compatible toolkit in one executable, `losat`. It takes the command lines of NCBI BLAST+ 2.17.0, so the search you already run with `blastn`, `blastp` or `makeblastdb` runs as `losat blastn`, `losat blastp` or `losat makeblastdb`, with the same options and the same output (apart from the version line, which names LOSAT). Link the program names to `losat` (see [Coming from NCBI BLAST+](from-ncbi-blast.md)) and tools that look for `blastn` on your `PATH` use LOSAT without changes.
 
 LOSAT is written in pure Rust. Searching and building databases need nothing else: no NCBI BLAST+, no C or C++ libraries, no database to format before a pairwise search. Two things come from NCBI: the CDD data files that `rpsbproc` reads and NCBI's prebuilt databases, which are downloaded from NCBI (see [BLAST databases](databases.md)). A `-subject` search compares your query with a FASTA file directly. When you do want a database, `losat makeblastdb` writes the files that NCBI's `makeblastdb` writes, and the search programs read databases made by either tool, including NCBI's distributed ones such as `swissprot`.
 
@@ -30,7 +30,7 @@ LOSAT is written in pure Rust. Searching and building databases need nothing els
 
 The search programs read BLAST databases (`-db`) and, except `rpsblast` and `rpstblastn` (as in NCBI), FASTA subjects (`-subject`). Each can read its query from the standard input (`-query -`).
 
-On the release test set, LOSAT's output is the same as NCBI BLAST+ 2.17.0's, byte for byte. The few places where it differs, on purpose, are listed in [Differences from NCBI BLAST+](differences.md). Options LOSAT does not implement are refused with an error, never ignored; see [What LOSAT refuses](refusals.md).
+On the release test set, LOSAT's output is the same as NCBI BLAST+ 2.17.0's, byte for byte, apart from the line that names the program's version (`BLASTN (LOSAT 0.2.0)` where NCBI writes `BLASTN 2.17.0+`) and the prefix of an error message (`LOSAT engine error:` where NCBI writes `BLAST engine error:`). The few other places where it differs, on purpose, are listed in [Differences from NCBI BLAST+](differences.md). Options LOSAT does not implement are refused with an error, never ignored; see [What LOSAT refuses](refusals.md).
 
 ## Where to get it
 
@@ -43,7 +43,7 @@ The Rust library (`losat::api`) is the same crate, and the Python binding `pylos
 These are on the list for a later release:
 
 - the programs `deltablast`, `makeprofiledb` and `blast_formatter`, and the making and the conversion of counts files by `windowmasker` (`-mk_counts`, `-convert`);
-- `psiblast -phi_pattern`, and `psiblast -in_msa` with an alignment that is not in Clustal format;
+- `psiblast -phi_pattern`;
 - the `psiblast` output formats other than `0`, `6`, `7`, `10` and `20` (with `-in_pssm`: `0`, `6`, `7`);
 - the `rpsblast` output formats other than `0`, `5`, `6`, `7`, `10` and `11`, and the `rpstblastn` ones other than `0` to `7`, `10` and `11`;
 - `-html`.

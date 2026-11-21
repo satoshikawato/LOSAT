@@ -176,54 +176,17 @@ fn unsupported_formats_fail_before_searching() {
     }
 }
 
-// A library call reads a format value as given: words after outfmt 0 to 4 are a field list,
-// which these formats do not take, refused before the search (the command line drops them, as
-// NCBI's application does: `FormatChoice::normalized`; line RG T3a review N2).
+// A library call reads a format value as given, as NCBI reads `-outfmt`: the words after outfmt 0
+// to 4 are dropped (blast_args.cpp:2845-2851 keeps a field list for the tables only), so each
+// writes the report of its number alone, as the command line does (`FormatChoice::normalized`;
+// NCBI 2.17.0, line RG F/d36 review 1b S1: `"0 std"`, `"0 delim=@"`, `"00 qseqid"`,
+// `"1 qseqid"` are outfmt 0 and 1, rc 0).
 #[test]
-fn a_field_list_after_a_pairwise_format_is_refused() {
+fn the_words_after_a_pairwise_format_are_dropped() {
     let inputs = Inputs::new(1);
     let queries = queries(&inputs.query);
     let subjects = subjects(&inputs.subject);
-    for (outfmt, number) in [
-        ("0 qseqid", 0),
-        ("1 qseqid", 1),
-        ("2 std", 2),
-        ("3 delim=,", 3),
-        (" 4 qseqid sseqid ", 4),
-    ] {
-        let (mut valid, mut invalid, mut diagnostics) = (Vec::new(), Vec::new(), Vec::new());
-        let mut outputs = ReportOutputs {
-            formats: vec![
-                FormatOutput {
-                    outfmt: "6",
-                    refusal: crate::api::local_blast::FormatRefusal::FailsCall,
-                    sink: OutputSink::Writer(&mut valid),
-                },
-                FormatOutput {
-                    outfmt,
-                    refusal: crate::api::local_blast::FormatRefusal::FailsCall,
-                    sink: OutputSink::Writer(&mut invalid),
-                },
-            ],
-            diagnostics: &mut diagnostics,
-            later_warnings: None,
-            hits: None,
-            observer: None,
-        };
-        let args = blastp_args(&inputs.query, &inputs.subject, &[]);
-        let result = run_local_blastp(args, &queries, &subjects, "", "", &mut outputs);
-        drop(outputs);
-        let error = format!("{:#}", result.expect_err(outfmt));
-        assert!(
-            error.contains(&format!(
-                "blastp outfmt {number} does not accept custom field lists"
-            )),
-            "{outfmt:?}: {error}"
-        );
-        assert!(valid.is_empty() && invalid.is_empty(), "{outfmt:?}");
-    }
-    // Without words, each writes its report.
-    for outfmt in ["1", "2", " 3 ", "4"] {
+    let report_of = |outfmt: &str| {
         let (mut report, mut diagnostics) = (Vec::new(), Vec::new());
         let mut outputs = ReportOutputs {
             formats: vec![FormatOutput {
@@ -239,7 +202,26 @@ fn a_field_list_after_a_pairwise_format_is_refused() {
         let args = blastp_args(&inputs.query, &inputs.subject, &[]);
         run_local_blastp(args, &queries, &subjects, "", "", &mut outputs).expect(outfmt);
         drop(outputs);
-        assert!(report.starts_with(b"BLASTP 2.17.0+"), "{outfmt:?}");
+        (report, diagnostics)
+    };
+    for (outfmt, bare) in [
+        ("0 qseqid", "0"),
+        ("0 std", "0"),
+        ("0 delim=@", "0"),
+        ("00 qseqid", "0"),
+        ("1 qseqid", "1"),
+        ("2 std", "2"),
+        ("3 delim=,", "3"),
+        (" 4 qseqid sseqid ", "4"),
+    ] {
+        let report = report_of(outfmt);
+        assert!(
+            report
+                .0
+                .starts_with(format!("BLASTP (LOSAT {})", env!("CARGO_PKG_VERSION")).as_bytes()),
+            "{outfmt:?}"
+        );
+        assert_eq!(report, report_of(bare), "{outfmt:?}");
     }
 }
 
@@ -388,12 +370,13 @@ fn a_batch_of_queries_without_residues_stops() {
     assert_eq!(native.exit, 3);
     assert_eq!(
         native.message,
-        b"BLAST engine error: Warning: Sequence contains no data Warning: Sequence contains no data \n"
+        b"LOSAT engine error: Warning: Sequence contains no data Warning: Sequence contains no data \n"
     );
     assert!(diagnostics.is_empty());
     let prolog = String::from_utf8_lossy(&outputs[0]);
     assert!(
-        prolog.starts_with("BLASTP 2.17.0+\n") && prolog.ends_with(" total letters\n\n"),
+        prolog.starts_with(&format!("BLASTP (LOSAT {})\n", env!("CARGO_PKG_VERSION")))
+            && prolog.ends_with(" total letters\n\n"),
         "{prolog}"
     );
     assert!(outputs[1].is_empty());
@@ -837,6 +820,7 @@ fn outfmt_0_alone_refuses_the_masks_of_a_query_that_is_also_a_subject() {
         crate::api::Program::Blastp,
         &command,
         Some(false),
+        true,
         &std::fs::read(&query.0).unwrap(),
         &std::fs::read(&subject.0).unwrap(),
     )

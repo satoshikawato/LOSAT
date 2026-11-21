@@ -273,14 +273,23 @@ impl LookupFailure {
 
     /// The failure of a lookup with the error `error`: NCBI's message where it is one of NCBI's
     /// (`SeqDbError::ncbi_message`), NCBI's crash where LOSAT refuses a file that NCBI crashes on
-    /// (`SeqDbError::ncbi_crashes`), else LOSAT's text.
+    /// (`SeqDbError::ncbi_crashes`) or where a read fails after the file's first byte
+    /// (`SeqDbError::Read`: NCBI reads bytes of its mapping that the system no longer gives,
+    /// SIGBUS; line WQA D18, 2026-11-21), else LOSAT's text. A first byte that cannot be read
+    /// where the file is opened (`SeqDbError::Map`) is NCBI's failed mapping, an error that NCBI
+    /// reports: without NCBI's text for it (a code outside `utils::os_error_text` on WASI,
+    /// Windows) it is LOSAT's text, as a file that does not open (review r2 of D18, L1).
     pub fn of_error(error: &crate::seqdb::SeqDbError) -> Self {
         match error.ncbi_message() {
             Some(message) => Self::ncbi(message),
-            None if error.ncbi_crashes() => Self {
-                message: error.to_string().into_bytes(),
-                ncbi: NcbiFailure::Crashes,
-            },
+            None if error.ncbi_crashes()
+                || matches!(error, crate::seqdb::SeqDbError::Read { .. }) =>
+            {
+                Self {
+                    message: error.to_string().into_bytes(),
+                    ncbi: NcbiFailure::Crashes,
+                }
+            }
             None => Self::losat(error.to_string()),
         }
     }
@@ -1908,16 +1917,17 @@ impl FormatThrow {
     }
 
     /// What the `-outfmt` value `outfmt` does in `program`'s reports, as NCBI reads it
-    /// (`app::parse_formatting_string`; a value that NCBI refuses is refused).
-    pub fn of_outfmt(outfmt: &str, program: crate::blastinput::app::Program) -> Self {
-        use crate::blastinput::app::{parse_formatting_string, ReportFormat};
-        let Some((format, choice)) = parse_formatting_string(outfmt).ok().and_then(|choice| {
-            ReportFormat::from_number(choice.number).map(|format| (format, choice))
-        }) else {
-            return FormatThrow::Refused;
-        };
-        let spec = super::tabular::TabularSpec::of(format, &choice);
-        Self::of(format, spec.as_ref(), program)
+    /// (`app::parse_formatting_string`; a value that NCBI refuses is refused) and `app`'s
+    /// formatter writes it (`TabularSpec::of_app`).
+    pub fn of_outfmt(
+        outfmt: &str,
+        program: crate::blastinput::app::Program,
+        app: crate::report::archive::options::RequestKind,
+    ) -> Self {
+        match parsed_outfmt(outfmt, app) {
+            Some((format, spec)) => Self::of(format, spec.as_ref(), program),
+            None => FormatThrow::Refused,
+        }
     }
 
     /// The answer of two formats of one run: a refusal by either refuses, a format that reads
@@ -1954,17 +1964,97 @@ impl FormatThrow {
         }
     }
 
-    /// [`FormatThrow::of_run`] of the `-outfmt` values `outfmts` of `program`'s run.
+    /// [`FormatThrow::of_run`] of the `-outfmt` values `outfmts` of `program`'s run in `app`'s
+    /// application.
     pub fn of_outfmts<'a>(
         outfmts: impl IntoIterator<Item = &'a str>,
         program: crate::blastinput::app::Program,
+        app: crate::report::archive::options::RequestKind,
     ) -> Option<RunThrow> {
         Self::of_run(
             outfmts
                 .into_iter()
-                .map(|outfmt| Self::of_outfmt(outfmt, program)),
+                .map(|outfmt| Self::of_outfmt(outfmt, program, app)),
         )
     }
+}
+
+/// The report and field list of the `-outfmt` value `outfmt` as NCBI reads it
+/// (`app::parse_formatting_string`) and `app`'s formatter writes it (`TabularSpec::of_app`);
+/// `None` for a value that NCBI refuses.
+fn parsed_outfmt(
+    outfmt: &str,
+    app: crate::report::archive::options::RequestKind,
+) -> Option<(
+    crate::blastinput::app::ReportFormat,
+    Option<super::tabular::TabularSpec>,
+)> {
+    use crate::blastinput::app::{parse_formatting_string, ReportFormat};
+    let choice = parse_formatting_string(outfmt).ok()?;
+    let format = ReportFormat::from_number(choice.number)?;
+    Some((
+        format,
+        super::tabular::TabularSpec::of_app(format, &choice, app),
+    ))
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1146-1155 (cited at
+// `common::database::taxdb_error`)
+/// Whether `program`'s report `format` (with its field list `spec`; `None` for a format without
+/// one and for the default outfmt 6 and 7, whose `saccver` loads the subject) writes what it
+/// writes with a readable taxonomy database where a file of that database does not open
+/// (`SeqDbError::TaxdbThrows`), so that every load of a database sequence with a positive taxid
+/// and every taxid lookup throw: a table or organism report that LOSAT writes the same
+/// (`tabular::TabularSpec::unchanged_by_load_throws`),
+/// and the Seq-align and archive formats, which load no subject. Such a run's only change is the
+/// batches' prefetch, which catches the throw with its warning
+/// (`common::database::batch_prefetch`), and psiblast's PSSM, which reads no letters of such a
+/// subject (`common::database::TaxdbRun::load_throws`). The other formats read such a subject as
+/// their own `catch` decides (`Unknown` ids, `N/A` names, alignments without letters) or end the
+/// run, which LOSAT refuses.
+pub fn unchanged_by_load_throws(
+    format: crate::blastinput::app::ReportFormat,
+    spec: Option<&super::tabular::TabularSpec>,
+    program: crate::blastinput::app::Program,
+) -> bool {
+    use crate::blastinput::app::ReportFormat;
+    match format {
+        ReportFormat::Tabular
+        | ReportFormat::TabularWithComments
+        | ReportFormat::CommaSeparatedValues
+        | ReportFormat::CommaSeparatedValuesWithHeader
+        | ReportFormat::TaxFormat => {
+            spec.is_some_and(|spec| spec.unchanged_by_load_throws(program))
+        }
+        ReportFormat::AsnText
+        | ReportFormat::AsnBinary
+        | ReportFormat::ArchiveFormat
+        | ReportFormat::JsonSeqalign => true,
+        ReportFormat::Pairwise
+        | ReportFormat::QueryAnchoredIdentities
+        | ReportFormat::QueryAnchoredNoIdentities
+        | ReportFormat::FlatQueryAnchoredIdentities
+        | ReportFormat::FlatQueryAnchoredNoIdentities
+        | ReportFormat::Xml
+        | ReportFormat::Json
+        | ReportFormat::Xml2
+        | ReportFormat::JsonS
+        | ReportFormat::Xml2S
+        | ReportFormat::Sam => false,
+    }
+}
+
+/// [`unchanged_by_load_throws`] of every `-outfmt` value of `outfmts` of `program`'s run in
+/// `app`'s application (a value that NCBI refuses is not).
+pub fn unchanged_by_load_throws_outfmts<'a>(
+    outfmts: impl IntoIterator<Item = &'a str>,
+    program: crate::blastinput::app::Program,
+    app: crate::report::archive::options::RequestKind,
+) -> bool {
+    outfmts.into_iter().all(|outfmt| {
+        parsed_outfmt(outfmt, app)
+            .is_some_and(|(format, spec)| unchanged_by_load_throws(format, spec.as_ref(), program))
+    })
 }
 
 /// What NCBI's reports do at the `Hit` (outfmt 13 to 16), the rows (outfmt 6, 7, 10 and 20) or

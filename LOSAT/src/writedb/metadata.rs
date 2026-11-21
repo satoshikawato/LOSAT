@@ -297,18 +297,6 @@ pub(crate) fn metadata_user_path(prefix: Option<&str>) -> String {
     user_path
 }
 
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb.cpp:1730-1734
-// `kBlastDbDateFormat` is "b d, Y  H:m P" (seqdbcommon.hpp), the form of the date the
-// writer stores, and the ISO 8601 form is "Y-M-DTh:m:s". The stored date has no
-// seconds, so they are 00. The volumes of one build share their date.
-/// `last-updated`: the date of the index files in ISO 8601 form.
-pub(crate) fn last_updated(now: &super::time::LocalTime) -> String {
-    format!(
-        "{:04}-{:02}-{:02}T{:02}:{:02}:00",
-        now.year, now.month, now.day, now.hour, now.minute
-    )
-}
-
 /// `CIOException::EErrCode` of the serializer's buffer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum IoErrCode {

@@ -23,6 +23,9 @@ pub struct Volume {
     defline_rule: Option<LineRule>,
     /// The column files (`.?xa`...), opened on first use (`m_HaveColumns`).
     columns: OnceLock<Vec<Column>>,
+    /// The failure of NCBI's OID list that a search meets at its first read of a sequence
+    /// (`Volume::fail_sequence_reads`), none when the list can be built.
+    read_failure: Option<super::oid_list::OidListError>,
 }
 
 /// A list's rule for the definition lines of a volume's sequences, with the volume's first OID in
@@ -112,6 +115,7 @@ impl Volume {
             hdr: OnceLock::new(),
             defline_rule: None,
             columns: OnceLock::new(),
+            read_failure: None,
         })
     }
 
@@ -163,7 +167,17 @@ impl Volume {
     }
 
     fn seq_file(&self) -> Result<&DbFile, SeqDbError> {
+        if let Some(failure) = &self.read_failure {
+            return Err(failure.to_error());
+        }
         self.lazy_file(&self.seq, "sq")
+    }
+
+    /// Makes every read of the sequence file fail with `failure`, the failure of NCBI's OID
+    /// list of the database, before which a search reads no sequence
+    /// (`SeqDb::fail_search_reads_with_oid_list`).
+    pub(super) fn fail_sequence_reads(&mut self, failure: super::oid_list::OidListError) {
+        self.read_failure = Some(failure);
     }
 
     /// Opens the sequence file, as the first read of a sequence does (`seq_file`): its error
@@ -1334,11 +1348,13 @@ fn x_blastna_by_byte(
     x_overlay_runs_in_ranges(runs, ranges, seq, &NCBINA8_TO_BLASTNA8);
 }
 
-/// The decode of `nucleotide_blastna` that `LOSAT_X_BNDECODE=0` runs: each base's NCBI8na value
-/// `1 << p` from its two bits, the ambiguity `runs` in stored order (a run that ends before the
-/// sequence is skipped, the first that starts at or after its end stops the loop), then every byte
-/// mapped with `NCBINA8_TO_BLASTNA8` (`seq` holds one byte per base).
-fn x_blastna_by_base(packed: &[u8], runs: &[AmbiguityRun], seq: &mut [u8]) {
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:455-471
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:804-832
+/// `s_SeqDBMapNA2ToNA8` and `s_SeqDBRebuildDNA_NA8` over the whole sequence: each base's NCBI8na
+/// value `1 << p` from its two bits, then the ambiguity `runs` in stored order (a run that ends
+/// before the sequence is skipped, the first that starts at or after its end stops the loop) write
+/// their NCBI4na codes (`seq` holds one byte per base).
+fn ncbi4na_by_base(packed: &[u8], runs: &[AmbiguityRun], seq: &mut [u8]) {
     for (position, base) in seq.iter_mut().enumerate() {
         let code = (packed[position >> 2] >> (6 - 2 * (position & 3))) & 3;
         *base = 1 << code;
@@ -1360,6 +1376,37 @@ fn x_blastna_by_base(packed: &[u8], runs: &[AmbiguityRun], seq: &mut [u8]) {
             position += 1;
         }
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1716-1771
+// The ambiguity words are read whole (a last partial word is not read, as
+// `SequenceBlock::ambiguity_runs`), and a count that passes their end is an error where NCBI
+// reads past its vector. A sequence of no base gives no base before its ambiguity data are read.
+/// `SeqDB_UnpackAmbiguities`: the bases of a stored nucleotide (`packed`: four bases per byte,
+/// the last byte holding the count of its bases; `ambig`: the stored ambiguity data) as NCBI4na
+/// codes, one byte per base. The error is the message of a malformed sequence.
+pub(crate) fn unpack_ambiguities(packed: &[u8], ambig: &[u8]) -> Result<Vec<u8>, &'static str> {
+    let Some(&last) = packed.last() else {
+        return Err("Error: packed sequence data is not valid.");
+    };
+    let base_length = (packed.len() - 1) * 4 + usize::from(last & 3);
+    if base_length == 0 {
+        return Ok(Vec::new());
+    }
+    let words: Vec<u32> = ambig
+        .chunks_exact(4)
+        .map(|word| u32::from_be_bytes([word[0], word[1], word[2], word[3]]))
+        .collect();
+    let runs = decode_ambiguity_runs(&words)?;
+    let mut na8 = vec![0u8; base_length];
+    ncbi4na_by_base(packed, &runs, &mut na8);
+    Ok(na8)
+}
+
+/// The decode of `nucleotide_blastna` that `LOSAT_X_BNDECODE=0` runs: `ncbi4na_by_base`, then
+/// every byte mapped with `NCBINA8_TO_BLASTNA8` (`seq` holds one byte per base).
+fn x_blastna_by_base(packed: &[u8], runs: &[AmbiguityRun], seq: &mut [u8]) {
+    ncbi4na_by_base(packed, runs, seq);
     for base in seq.iter_mut() {
         *base = NCBINA8_TO_BLASTNA8[usize::from(*base & 0xF)];
     }
@@ -1527,6 +1574,16 @@ impl SequenceBlock {
             u64::from(self.seq_offsets[i]),
             u64::from(self.seq_offsets[i + 1]) - 1,
         )
+    }
+
+    /// The residues of protein `i`, to be changed in place: the copy that a fetch after the
+    /// preliminary stage of a search with `-db_hard_mask` masks
+    /// (`algorithm::common::db_mask_search::mask_protein_letters`).
+    pub fn protein_mut(&mut self, i: usize) -> &mut [u8] {
+        self.expect(SeqType::Protein);
+        let lo = (u64::from(self.seq_offsets[i]) - self.data_start) as usize;
+        let hi = (u64::from(self.seq_offsets[i + 1]) - 1 - self.data_start) as usize;
+        &mut self.data[lo..hi]
     }
 
     /// Protein `i` with the sentinel byte (NUL in a well-formed volume)

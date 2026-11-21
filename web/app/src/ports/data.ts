@@ -3,7 +3,7 @@
 // (src/infra/data-worker), so every argument and result is structured-cloneable. The
 // outputs of a run arrive over the MessagePort that `openRun` returns
 // (losat/ports: run-output.ts), not through these methods.
-import type { CUSTOM_OUTPUT, FastaParserKind, InputRole, OutputFormat, OutputPlace, ProgramId, RecordKey, RunOutput } from 'losat/domain';
+import type { CUSTOM_OUTPUT, FastaReader, OutputFormat, OutputPlace, RecordKey, RunOutput } from 'losat/domain';
 import type { HspRecord, InputCheck } from 'losat/ports';
 import type { DatasetRevision } from '../domain/dataset';
 import type { HspTable } from '../domain/hsp-table';
@@ -36,10 +36,11 @@ export interface DatasetStore {
    */
   addSource(file: File): Promise<SourceRef>;
   /**
-   * Builds the record table of a source with the index scan of `parser` and the SHA-256
-   * of every record. Rejects with the parser's error.
+   * Builds the record table of a source with the index scan of the engine's reader `reader` (its
+   * program, role and data loaders) and the SHA-256 of every record. Rejects with the reader's
+   * error, or its refusal in the CLI's words.
    */
-  indexSource(sourceId: string, parser: FastaParserKind): Promise<DatasetRevision>;
+  indexSource(sourceId: string, reader: FastaReader): Promise<DatasetRevision>;
   /** A new revision of the same record table that leaves out the records `excluded`. */
   reviseDataset(revisionId: string, excluded: readonly number[]): Promise<DatasetRevision>;
   /**
@@ -49,11 +50,11 @@ export interface DatasetStore {
    */
   buildRunInput(revisionIds: readonly string[]): Promise<RunInput>;
   /**
-   * The engine's reading of the run input of the revisions for `program` and `role`
-   * (losat/ports: input-check.ts). Resolves with the engine's verdict; rejects only when the
-   * check itself cannot run.
+   * The engine's reading of the run input of the revisions with the reader `reader` (its program,
+   * role and data loaders; losat/ports: input-check.ts). Resolves with the engine's verdict;
+   * rejects only when the check itself cannot run.
    */
-  checkInput(program: ProgramId, role: InputRole, revisionIds: readonly string[]): Promise<InputCheck>;
+  checkInput(reader: FastaReader, revisionIds: readonly string[]): Promise<InputCheck>;
   /** The first `maxBytes` bytes of a source, for its preview. */
   previewSource(sourceId: string, maxBytes: number): Promise<Uint8Array>;
   /**

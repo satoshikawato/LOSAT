@@ -114,6 +114,45 @@ fn subject_split_state_keeps_short_subjects_as_single_chunk() {
     );
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:221-276, 578-584
+// A hard-masked frame takes the chunks of its ranges in order, each with its merge overlap;
+// a chunk that runs onto the end sentinel of a frame one residue shorter than its strand's
+// first frame is cut at the frame's end.
+#[test]
+fn a_hard_masked_frame_lists_its_chunks_cut_at_the_frame() {
+    let ranges = [(0, 300), (390, 1200)];
+    let frame = |frame: i8, aa_len: usize| QueryFrame {
+        frame,
+        aa_seq: Vec::new(),
+        aa_seq_nomask: None,
+        aa_len,
+        orig_len: 1200,
+        seg_masks: Vec::new(),
+    };
+    let frames = [frame(1, 400), frame(2, 399), frame(3, 399), frame(-1, 400)];
+    let chunks = |state: &mut SubjectSplitState| {
+        std::iter::from_fn(
+            || match state.next_chunk(MAX_DBSEQ_LEN, DBSEQ_CHUNK_OVERLAP) {
+                SubjectChunkStatus::Ok(chunk) => Some((chunk.offset, chunk.length, chunk.overlap)),
+                SubjectChunkStatus::Done => None,
+            },
+        )
+        .collect::<Vec<_>>()
+    };
+    let calls = x_db_mask_calls(&ranges, true, &frames[1], &frames);
+    assert_eq!(calls[1].0.length, 270, "the frame's ranges end one past it");
+    let mut state = SubjectSplitState::listed(399, &calls);
+    assert_eq!(chunks(&mut state), [(0, 100, 100), (130, 269, 100)]);
+    let calls = x_db_mask_calls(&ranges, true, &frames[3], &frames);
+    let mut state = SubjectSplitState::listed(400, &calls);
+    assert_eq!(chunks(&mut state), [(0, 270, 100), (300, 100, 100)]);
+    // With soft masks the frame's chunk is the whole frame, scanned in its ranges.
+    let calls = x_db_mask_calls(&ranges, false, &frames[0], &frames);
+    assert_eq!(calls.len(), 1);
+    assert_eq!((calls[0].0.offset, calls[0].0.length), (0, 400));
+    assert_eq!(calls[0].1, [(0, 100), (130, 400)]);
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2857-2995
 #[test]
 fn merge_tblastx_subject_chunk_hits_keeps_previous_hits_before_overlap_strip() {

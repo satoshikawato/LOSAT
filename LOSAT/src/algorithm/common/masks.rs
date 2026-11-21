@@ -57,11 +57,23 @@ pub fn protein_to_dna_masks(masks: &[(i32, i32)], dna_length: usize, frame: i8) 
         .collect()
 }
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:983-1004
-pub fn combine_masks(mut masks: Vec<(i32, i32)>) -> Vec<(i32, i32)> {
+pub fn combine_masks(masks: Vec<(i32, i32)>) -> Vec<(i32, i32)> {
+    combine_linked(masks, 0)
+}
+
+/// `BlastSeqLocCombine(mask_loc, link_value)` of inclusive `(left, right)` intervals: sorted by
+/// their left ends, an interval joins the one before it when that one's right end plus
+/// `link_value` is past its left end (`combine_masks` with 0; the repeat masks of blastn's
+/// `-filtering_db` with `REPEAT_MASK_LINK_VALUE`, `blastn::repeat_filter`). NCBI's `qsort`
+/// compares the left ends only; the result does not depend on the order of equal ones.
+pub(crate) fn combine_linked<T>(mut masks: Vec<(T, T)>, link_value: T) -> Vec<(T, T)>
+where
+    T: Copy + Ord + std::ops::Add<Output = T>,
+{
     masks.sort_by_key(|r| r.0);
-    let mut result: Vec<(i32, i32)> = Vec::new();
+    let mut result: Vec<(T, T)> = Vec::new();
     for mask in masks {
-        if let Some(last) = result.last_mut().filter(|r| r.1 > mask.0) {
+        if let Some(last) = result.last_mut().filter(|r| r.1 + link_value > mask.0) {
             last.1 = last.1.max(mask.1);
         } else {
             result.push(mask);

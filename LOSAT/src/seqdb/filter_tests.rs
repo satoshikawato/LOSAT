@@ -748,3 +748,185 @@ fn a_rule_that_keeps_no_line_keeps_every_line() {
     lines.retain_lines(&[false]);
     assert_eq!(lines, vec![1, 3]);
 }
+
+/// NCBI BLAST+ 2.17.0's texts of an LMDB file and of a lookup file that does not open or whose
+/// bytes cannot be had (line WQA D18 probes 5-7, 2026-11-21): the LMDB error for every code,
+/// EMFILE included, and `CMemoryFile`'s exception for the lookup files.
+#[cfg(target_os = "linux")]
+#[test]
+fn unreadable_lmdb_and_lookup_files_give_ncbis_errors() {
+    let open = |code: i32| SeqDbError::Open {
+        path: PathBuf::from("/d/tm_psi.pos"),
+        source: std::io::Error::from_raw_os_error(code),
+    };
+    // The first byte, read where the file is opened (`DbFile::open`): NCBI's mapping.
+    let read = |code: i32| SeqDbError::Map {
+        path: PathBuf::from("/d/tm_psi.pos"),
+        len: 1234,
+        source: std::io::Error::from_raw_os_error(code),
+    };
+    let lmdb = |error: SeqDbError| match lmdb_file_error(error) {
+        SeqDbError::NotFound(text) => String::from_utf8(text).unwrap(),
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(
+        lmdb(open(13)),
+        "LMDB runtime error: mdb_env_open: Permission denied"
+    );
+    assert_eq!(
+        lmdb(open(24)),
+        "LMDB runtime error: mdb_env_open: Too many open files"
+    );
+    assert_eq!(
+        lmdb(read(5)),
+        "LMDB runtime error: mdb_env_open: Input/output error"
+    );
+    let lookup = |error: SeqDbError| match lookup_file_error(error) {
+        SeqDbError::Ncbi(exception) => String::from_utf8(exception.what()).unwrap(),
+        other => panic!("{other:?}"),
+    };
+    // NCBI's report in LOSAT's words (`crate::wording::losat_text`).
+    let report = |line: u32, function: &str, text: &str| {
+        crate::wording::losat_text(&format!(
+            "NCBI C++ Exception:\n    T0 \"{}/src/corelib/ncbifile.cpp\", line {line}: Error: \
+             (CFileException::eMemoryMap) ncbi::{function}() - {text}\n",
+            crate::ncbi_exception::NCBI_BUILD_ROOT
+        ))
+        .into_owned()
+    };
+    assert_eq!(
+        lookup(open(13)),
+        report(
+            5945,
+            "CMemoryFileMap::x_Open",
+            "CMemoryFile: Cannot memory map file '/d/tm_psi.pos':Permission denied"
+        )
+    );
+    assert_eq!(
+        lookup(read(5)),
+        report(
+            5650,
+            "CMemoryFileSegment::CMemoryFileSegment",
+            "Cannot map file '/d/tm_psi.pos' to memory (offset=0, length=1234): Input/output error"
+        )
+    );
+    // A first byte that cannot be read without a system code, and a read that fails after the
+    // first byte (where NCBI ends by SIGBUS), are LOSAT's own errors.
+    let short = SeqDbError::Map {
+        path: PathBuf::from("/d/tm_psi.pos"),
+        len: 1234,
+        source: std::io::Error::from(std::io::ErrorKind::UnexpectedEof),
+    };
+    assert!(matches!(lookup_file_error(short), SeqDbError::Map { .. }));
+    let later = || SeqDbError::Read {
+        path: PathBuf::from("/d/tm_psi.pos"),
+        source: std::io::Error::from_raw_os_error(5),
+    };
+    assert!(matches!(
+        lookup_file_error(later()),
+        SeqDbError::Read { .. }
+    ));
+    assert!(matches!(lmdb_file_error(later()), SeqDbError::Read { .. }));
+}
+
+/// A read of an LMDB or lookup file that fails after the file opened (its first byte was read) is
+/// LOSAT's own error, "<path> cannot be read" (`SeqDbError::Read`), not a refusal of the file's
+/// format: NCBI maps these files, so such a failure is a SIGBUS there (line WQA D18c,
+/// 2026-11-21). Each file of `tx` is read through a handle that holds only its first bytes
+/// (`file::refused_reads`): the `.pdb` of a seqid list and the `.ptf` of a taxid list keep their
+/// two meta pages (`Env::open` reads them; the open's volume list or the first lookup reads a page
+/// past them), the `.pto` its
+/// first byte, the `.pot` and `.pos` of the negative lists their OID count.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_later_read_of_an_lmdb_or_lookup_file_is_losats_own_error() {
+    let page = Env::open(&std::fs::read(tx_dir().join("tx.pdb")).unwrap())
+        .unwrap()
+        .page_size();
+    let taxids = |negative: bool| {
+        let set: BTreeSet<i32> = [100].into_iter().collect();
+        if negative {
+            TaxidList::Negative(set)
+        } else {
+            TaxidList::Positive(set)
+        }
+    };
+    let cases: [(&str, usize, Option<TaxidList>, &[u8], bool); 5] = [
+        ("pdb", 2 * page, None, b"AAA00001.1\n", false),
+        ("ptf", 2 * page, Some(taxids(false)), b"", false),
+        ("pto", 1, Some(taxids(false)), b"", false),
+        ("pot", 8, Some(taxids(true)), b"", false),
+        ("pos", 8, None, b"AAA00001.1\n", true),
+    ];
+    for (ext, keep, taxid_list, seqids, negative) in cases {
+        let dir = crate::utils::test_dir::temp_dir().join(format!(
+            "losat-filter-later-read-{ext}-{}",
+            crate::utils::test_dir::process_id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        for entry in std::fs::read_dir(tx_dir()).unwrap() {
+            let path = entry.unwrap().path();
+            let name = path.file_name().unwrap().to_str().unwrap().to_string();
+            if name.starts_with("tx.") {
+                std::fs::copy(&path, dir.join(&name)).unwrap();
+            }
+        }
+        let file = dir.join(format!("tx.{ext}"));
+        let short = dir.join("short");
+        std::fs::write(&short, &std::fs::read(&file).unwrap()[..keep]).unwrap();
+        crate::seqdb::file::refused_reads::refuse(&file, &short);
+        // The open reads the volume list of the `.pdb` past its meta pages.
+        let error = SeqDb::open(dir.join("tx").to_str().unwrap(), SeqType::Protein)
+            .and_then(|mut db| match &taxid_list {
+                Some(list) => db.restrict_taxids(list).map(drop),
+                None => db
+                    .restrict(&DbList::Seqids(list_of(seqids, negative)), &mut Vec::new())
+                    .map(drop),
+            })
+            .expect_err(ext);
+        assert!(
+            matches!(&error, SeqDbError::Read { path, .. } if path == &file),
+            "{ext}: {error:?}"
+        );
+        assert!(error.is_unreadable(), "{ext}");
+        assert!(
+            error
+                .to_string()
+                .starts_with(&format!("{} cannot be read: ", file.display())),
+            "{ext}: {error}"
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+}
+
+/// NCBI's `mdb_env_open` reads the meta pages of an LMDB file with `pread` before it maps the
+/// file: a read that fails there with a system code gives its text, as an open does; one without
+/// a code is LOSAT's own error (line WQA D18c, 2026-11-21).
+#[test]
+fn a_meta_page_that_cannot_be_read_gives_mdb_env_opens_text() {
+    let path = tx_dir().join("tx.pdb");
+    let file = DbFile::open(&path).unwrap();
+    let unreadable = |source: std::io::Error| {
+        ReadError::Unreadable(SeqDbError::Read {
+            path: path.clone(),
+            source,
+        })
+    };
+    match lmdb_open_error(&file, unreadable(std::io::Error::from_raw_os_error(5))) {
+        SeqDbError::NotFound(text) => assert_eq!(
+            text,
+            b"LMDB runtime error: mdb_env_open: Input/output error"
+        ),
+        other => panic!("{other:?}"),
+    }
+    let error = lmdb_open_error(
+        &file,
+        unreadable(std::io::Error::from(std::io::ErrorKind::UnexpectedEof)),
+    );
+    assert!(error.is_unreadable(), "{error:?}");
+    assert!(matches!(
+        lmdb_open_error(&file, ReadError::Format("LMDB: x (MDB_INVALID)".into())),
+        SeqDbError::NotFound(_)
+    ));
+}

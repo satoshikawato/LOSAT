@@ -50,20 +50,6 @@ fn strings_are_escaped_as_ncbi_s_json_writer_does() {
     );
 }
 
-#[test]
-fn the_date_is_iso_8601_without_seconds() {
-    let at = |hour, minute| super::super::time::LocalTime {
-        year: 2026,
-        month: 3,
-        day: 9,
-        hour,
-        minute,
-        second: 41,
-    };
-    assert_eq!(last_updated(&at(0, 5)), "2026-03-09T00:05:00");
-    assert_eq!(last_updated(&at(23, 59)), "2026-03-09T23:59:00");
-}
-
 /// A directory of its own under the system's temporary directory.
 struct TempDir(std::path::PathBuf);
 

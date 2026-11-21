@@ -16,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[2]
 TESTS = ROOT / "LOSAT/tests"
 sys.path.insert(0, str(TESTS))
 import db_search_fixtures
+import losat_wording  # noqa: E402  (LOSAT's words in NCBI's bytes, AGENTS.md rule 8)
 from wasm_performance import validate_thread_evidence
 
 # The output formats in which blastx reads its query file before the search (BLAST XML 5, and XML2 and JSON 13 to
@@ -353,10 +354,10 @@ def main():
     # through a wrapper that starts the command's runner in the place of the binary, as the psiblast rows above.
     # Then two runs that append to one log file, the second with a warning and an error between the log's lines:
     # each run's stdout, stderr and exit status, and the log file's bytes without the lines of the time and the
-    # path (dropin_corpus.report_without_time), must be the native command's. LOSAT writes the log through the
-    # open file of the diagnostics (LOSAT/src/writedb/makeblastdb.rs `log_of`); before, it wrote through a second
-    # handle of it, which WASI cannot make, and every such run stopped with 'Argument "logfile". File is not
-    # accessible'.
+    # path (dropin_corpus.report_without_time), must be the native command's. LOSAT opens the log a second time
+    # under the name as written, beside the diagnostics' file (LOSAT/src/writedb/makeblastdb.rs `log_of`, line WQA's
+    # D11 round 2, 2026-11-20); a copy of the diagnostics' handle (`try_clone`), which WASI cannot make, stopped
+    # every such run with 'Argument "logfile". File is not accessible'.
     import dropin_corpus
     logfile_rows = [row["row_id"] for row in dropin_corpus.read_manifest()[1]
                     if shlex.split(row["command"])[0] == "makeblastdb" and "-logfile" in shlex.split(row["command"])]
@@ -480,6 +481,8 @@ def main():
             format_label = task or program
             oracle = str(args.oracle_dir.resolve() / program) if args.oracle_dir else program
             reference, _ = execute(f"format/{format_label}-{query}-{index}/oracle", [oracle, *common])
+            # NCBI's output in LOSAT's words: its version line and prefixes (AGENTS.md rule 8).
+            reference = losat_wording.losat_output_bytes(reference)
             for kind, prefix in prefixes.items():
                 for n in ([1] if kind in ["serial", "native-serial"] else [1, 4, 8, 16]):
                     data, _ = execute(f"format/{format_label}-{query}-{index}/{kind}-n{n}", [*prefix, program, *common, "-num_threads", str(n)])

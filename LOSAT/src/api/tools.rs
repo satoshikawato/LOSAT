@@ -261,7 +261,7 @@ pub fn run_makeblastdb(
             .map(Option::as_deref)
             .map_err(String::as_str),
     )
-    .and_then(|()| makeblastdb::check_environment(&|name: &str| std::env::var_os(name)));
+    .and_then(|()| makeblastdb::check_environment(&args, &|name: &str| std::env::var_os(name)));
     if let Err(reason) = checked {
         return Err(refused(recorded, reason.as_bytes()));
     }

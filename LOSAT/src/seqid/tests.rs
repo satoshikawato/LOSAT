@@ -263,7 +263,7 @@ fn tabular_row(set: &DeflineSet, protein: bool) -> Option<Vec<String>> {
         .map(|defline| defline.title.as_deref().unwrap_or_default())
         .collect();
     let taxonomy = TabularTaxonomy::of_deflines(subject.deflines());
-    let spec = TabularSpec::of(
+    let spec = TabularSpec::of_app(
         ReportFormat::Tabular,
         &FormatChoice {
             number: 6,
@@ -271,6 +271,11 @@ fn tabular_row(set: &DeflineSet, protein: bool) -> Option<Vec<String>> {
                 "sseqid sallseqid sacc saccver sallacc sgi sallgi stitle salltitles staxid staxids"
                     .to_string(),
             delimiter: String::new(),
+        },
+        if protein {
+            crate::report::archive::options::RequestKind::Blastp
+        } else {
+            crate::report::archive::options::RequestKind::Blastn
         },
     )
     .expect("the fields");

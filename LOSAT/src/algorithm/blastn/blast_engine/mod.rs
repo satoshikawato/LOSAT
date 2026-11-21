@@ -17,6 +17,7 @@
 mod run;
 
 // Re-export the main run function
+pub(crate) use run::repeat_search_hits;
 pub use run::run;
 pub use run::run_local;
 pub use run::run_local_database;

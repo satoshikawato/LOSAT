@@ -126,34 +126,6 @@ fn test_format_percent_identity_ncbi_divides_before_scaling() {
     assert_eq!(format_percent_identity_ncbi(0, 0, 3), "0.000");
 }
 
-// ==========================================================================
-// OutputFormat tests
-// ==========================================================================
-
-#[test]
-fn test_output_format_parse() {
-    assert_eq!(
-        OutputFormat::parse("0").unwrap(),
-        (OutputFormat::Pairwise, None)
-    );
-    assert_eq!(
-        OutputFormat::parse("6").unwrap(),
-        (OutputFormat::Tabular, None)
-    );
-    assert_eq!(
-        OutputFormat::parse("7").unwrap(),
-        (OutputFormat::TabularWithComments, None)
-    );
-
-    // With custom fields
-    let (fmt, fields) = OutputFormat::parse("6 qaccver saccver").unwrap();
-    assert_eq!(fmt, OutputFormat::Tabular);
-    assert_eq!(fields, Some("qaccver saccver".to_string()));
-
-    // Invalid format
-    assert!(OutputFormat::parse("99").is_err());
-}
-
 // NCBI BLAST+ 2.17.0, `blastn -outfmt 7` (inventory range RP,
 // `scratch_RP/out/<case>/blastn_f7.out`): the query's title as the reader keeps it,
 // raw, after `# Query: `.

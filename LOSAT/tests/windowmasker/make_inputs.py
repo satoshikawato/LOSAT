@@ -119,6 +119,19 @@ def main():
           f">gnl|db|e|ref|NC_000001.1| RefSeq after general\n{wrap(dm[7000:10500])}\n"
           f">emb|AJ000009.1|gb|AB000010.1| two Textseq-ids\n{wrap(dm[10500:13000])}\n"
           f">lcl|z|gb|AB000011.1|gi|9 gi last\n{wrap(dm[13000:15000])}\n")
+    # The database wm_tx (made with -parse_seqids -taxid_map tx_taxid.txt by make_fixtures.py;
+    # line RG item D5a-t, 2026-11-21): titles that sequence::GetTitle makes from the first source
+    # (the taxids of ../seqdb/taxdb/t5: a lower case name, one with spaces around it, one with
+    # entities, one starting "TPA: ", an empty name; a taxid it does not hold), a third-party id,
+    # a patent id, a title of one comma, a title, and a title of dots.
+    tx = [("lcl|t1", "", 100001), ("lcl|t2", ".", 100003), ("lcl|t3", "", 100004),
+          ("lcl|t4", "", 100010), ("lcl|t5", "", 424242), ("tpg|BK000001.1|", "", 100001),
+          ("tpg|BK000002.1|", "", 100005), ("pat|US|1234|5", "", 100003), ("lcl|t9", ",", 100003),
+          ("lcl|t10", "titled", 100001), ("lcl|t11", "...", 100004)]
+    write("tx.fa", "".join(f">{i}{' ' + t if t else ''}\n{wrap(dm[15000 + 800 * n:15800 + 800 * n])}\n"
+                           for n, (i, t, _) in enumerate(tx)))
+    write("tx_taxid.txt", "".join(f"{i}\t{taxid}\n" for i, _, taxid in tx))
+    write("ids_tx.txt", "Uncultured\nNo\nTPA:\nSpaced\nSequence\n,\n")
     # Counts files: garbage, empty, and the ascii counts of mg1655_u9 without their ##pct lines.
     write("garbage.counts", "hello\n")
     write("empty.counts", "")

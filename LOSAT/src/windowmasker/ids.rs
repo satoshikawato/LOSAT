@@ -285,10 +285,6 @@ pub(super) enum IdSet {
     SeqId(SeqIdSet),
 }
 
-/// An id list matched as text that asks for the title of a sequence of which LOSAT does not
-/// make it (`Title::FromSource`).
-pub(super) struct TitleFromSource;
-
 impl IdSet {
     /// `empty()`.
     fn is_empty(&self) -> bool {
@@ -298,17 +294,22 @@ impl IdSet {
         }
     }
 
-    /// `find` of `record`.
-    fn find(&self, record: &Record) -> Result<bool, TitleFromSource> {
+    /// `find` of `record`: a list matched as text against its title (`Record::get_title`).
+    fn find(&self, record: &Record) -> bool {
         match self {
-            IdSet::Text(ids) => {
-                match get_title(&record.ids, record.title.as_deref(), record.any_source) {
-                    Title::Text(title) => Ok(ids.find(&title)),
-                    Title::FromSource => Err(TitleFromSource),
-                }
-            }
-            IdSet::SeqId(ids) => Ok(ids.find(&record.ids)),
+            IdSet::Text(ids) => ids.find(
+                record
+                    .get_title
+                    .as_deref()
+                    .expect("the sources give the titles of a run with a list matched as text"),
+            ),
+            IdSet::SeqId(ids) => ids.find(&record.ids),
         }
+    }
+
+    /// Whether the list is matched as text, against the titles (`CIdSet_TextMatch`).
+    fn matches_titles(&self) -> bool {
+        matches!(self, IdSet::Text(_))
     }
 }
 
@@ -323,17 +324,26 @@ impl IdLists {
     /// `CWinMaskUtil::consider` of `record` and the two lists.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_util.cpp:218-245
-    pub(super) fn consider(&self, record: &Record) -> Result<bool, TitleFromSource> {
+    pub(super) fn consider(&self, record: &Record) -> bool {
         let mut result = true;
         if let Some(ids) = self.ids.as_ref().filter(|ids| !ids.is_empty()) {
-            result = ids.find(record)?;
+            result = ids.find(record);
         }
         if let Some(exclude) = self.exclude_ids.as_ref().filter(|ids| !ids.is_empty()) {
-            if exclude.find(record)? {
+            if exclude.find(record) {
                 result = false;
             }
         }
-        Ok(result)
+        result
+    }
+
+    /// Whether `consider` reads the titles of the sequences (`Record::get_title`): a list that is
+    /// not empty is matched as text.
+    pub(super) fn match_titles(&self) -> bool {
+        [&self.ids, &self.exclude_ids]
+            .into_iter()
+            .flatten()
+            .any(|list| list.matches_titles() && !list.is_empty())
     }
 
     /// `GetSeqId()` of the access handle of a sequence whose Seq-ids are `ids` where the handle of
@@ -348,67 +358,6 @@ impl IdLists {
                 IdSet::Text(_) => None,
             })
     }
-}
-
-/// What `sequence::GetTitle` gives for a sequence of the FASTA or database reader, or
-/// the case LOSAT does not reproduce.
-#[derive(Debug, PartialEq, Eq)]
-pub(super) enum Title {
-    Text(Vec<u8>),
-    /// An empty title of a sequence with a source (a database sequence with a taxid), which NCBI
-    /// makes from the source's names (`s_TitleFromBioSource`, or "No definition line found").
-    FromSource,
-}
-
-/// `sequence::GetTitle` (flags 0) of a sequence with the Seq-ids `ids`, the title
-/// descriptor `title` and a source when `has_source`: the readers' Bioseqs have no MolInfo,
-/// no GenBank or EMBL block and no PDB descriptor, and are nucleotides of the raw or delta
-/// representation, so of the function only these steps apply.
-///
-/// NCBI reference (598d8ae6): c++/src/objmgr/util/seqtitle.cpp:131-178,286-296,371-412
-/// (The steps for an empty title from the source of an NC, NM or NR accession, from a PDB
-/// descriptor or from a protein do not apply: they need a MolInfo, a feature or a descriptor
-/// the readers do not make, or a protein. The flags add no organism.)
-pub(super) fn get_title(ids: &[ParsedSeqId], title: Option<&[u8]>, has_source: bool) -> Title {
-    let mut third_party = false;
-    let mut patent = None;
-    for id in ids {
-        match id {
-            ParsedSeqId::Tpg(_) | ParsedSeqId::Tpe(_) | ParsedSeqId::Tpd(_) => third_party = true,
-            ParsedSeqId::Patent(pat) => patent = Some(pat),
-            _ => {}
-        }
-    }
-    let mut text = title.unwrap_or_default().to_vec();
-    while matches!(text.last(), Some(b'.' | b' ')) {
-        text.pop();
-    }
-    if text.is_empty() {
-        if let Some(pat) = patent {
-            let number = match &pat.cit.id {
-                crate::seqid::model::PatentNumber::Number(number)
-                | crate::seqid::model::PatentNumber::AppNumber(number) => number,
-            };
-            text = format!("Sequence {} from Patent ", pat.seqid).into_bytes();
-            text.extend_from_slice(&pat.cit.country);
-            text.push(b' ');
-            text.extend_from_slice(number);
-        }
-    }
-    if text.is_empty() && has_source {
-        return Title::FromSource;
-    }
-    if third_party && !text.is_empty() && !starts_with_nocase(&text, b"TPA: ") {
-        let mut prefixed = b"TPA: ".to_vec();
-        prefixed.extend_from_slice(&text);
-        text = prefixed;
-    }
-    Title::Text(text)
-}
-
-/// `NStr::StartsWith(s, prefix, NStr::eNocase)`.
-fn starts_with_nocase(text: &[u8], prefix: &[u8]) -> bool {
-    text.len() >= prefix.len() && text[..prefix.len()].eq_ignore_ascii_case(prefix)
 }
 
 #[cfg(test)]

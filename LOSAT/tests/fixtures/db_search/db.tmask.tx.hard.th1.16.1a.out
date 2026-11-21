@@ -1,0 +1,618 @@
+TBLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: hand masks 1
+Masked using: 'dust', options: 'hedge mid'
+           4 sequences; 9,600 total letters
+
+
+
+Query= nx1 t1 450-899
+
+Length=450
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value  N
+
+t1 coding-like subject t1 with a CA repeat and a poly-A               172     2e-73  2
+t2 homolog of t1 300-1199                                             158     6e-69  2
+t3 long subject t3 with two repeats                                   18.9    1.6    2
+t4 random subject t4 for the hand masks                               17.6    4.1    1
+
+
+
+For reading frame +1 of query sequence:
+
+Query_1  1    LTQCCVHSGRVVPQTRCGVSSLATSAYMRTGPDRVIICLYDRGGL*SVGLhtrthththt  180
+0        451  ...............P..E.P....E.......G...........*....            600
+1        151  ...............P..E.P....E......AG..........M*....            300
+
+Query_1  181  hththahrhtSCHSYRCSLHTVFKMVLPNATWYIALYKMWTLSGVKEMSVEVISHPGGGH  360
+0        661            .....K.....D.....S..S..........R.........G.P......  810
+1        361            ...Y.K.....A.....SI.SG........A..........*.P..S...  510
+
+Query_1  361  SRCSFALAITSRLESFRMSYLDPWLQLYRV  450
+0        811  ............N.P..I...G........  900
+1        511  ............N.P..IR..G.......   597
+
+For reading frame +2 of query sequence:
+
+Query_1  2     *HNAASIVVG*CRKPVVECLLLQHRRI*EPAQIA**SVCMTGGGCNP*DYthehththth  181
+0        452   *.........*....L..S......S.*....MG**...........*..            601
+1        152   *...V.....W....L..S..S...S.*....L.**...........*..            301
+
+Query_1  182   thththtdthhaihtDVVCILFSKWCYLTQPGTSRCIKCGPFQVSKKCQWK*YPTLVAVI  361
+0        677                  N....RI....*V..A..........V.........E.......T  811
+1        377                  N....RL....*VS.A...................NE.......T  511
+2        5299                          .H....I.                              5276
+
+Query_1  362   PGAVLR*QSHPDSNPFA*VI*IHGFNSTE  448
+0        812   .A....*....ET..S.L..*V.......  898
+1        512   .A....*....ET..S.F..*V......   595
+
+For reading frame +3 of query sequence:
+
+Query_1  3     DTMLRP*W*GSAANPLWSVFSCNIGVYENRPRSRDNLFV*PGGVVIrrtthtnthththt  182
+0        453   ......*.*........R.S............WG.....*......                590
+1        153   ....C.*.*.G......R.S.R.........SW......*...D..                290
+2        2900                               ......H                          2880
+
+Query_1  183   hthtrtqthIMPFIQM*FAYCFQNGAT*RNLVHRAV*NVDPFRCQRNVSGSNIPPWWRSF  362
+0        660            .......*...G.....K*.K......*.............R.T......L  812
+1        360            ...LL..*...G....VKY.KR.....*..G..........M.T..*...L  512
+2        5757                                                         F.QPY  5743
+
+Query_1  363   PVQFCASNHIQTRILSHELFRSMASTLQS  449
+0        813   .L.........K.T.P.*...........  899
+1        513   .L...V.....K.T.P.S..........   596
+2        5742  .RTELSVI.FSYNLI..              5692
+
+For reading frame -1 of query sequence:
+
+Query_1  450  HSVELKPWI*ITHAKGFESGCDC*RKTAPGMTATRVGYYFH*HFFDT*KGPHFIQRDVPG  271
+0        900  N.......T*..N.E..V.....*....A.V.......S..*.....*T..........A  721
+1        594    ......T*..N.E..V.....*....A.V.......S..*.....*...........A  421
+2        431        ...VK.RRQ..                                             463
+
+Query_1  270  CVR*HHFENSMQTTSV*MA*cvsvcvcvcvcvcvcvcscv*SYGLQPPPVIQTDYHAIWA  91
+0        720  ..T*....IR....F.*..*                                          661
+0        594                                            ..............P...  541
+1        420  .DT*....SR....F.I..*                                          361
+1        294                                            ...H...........S..  241
+3        590                                                            .L  585
+
+Query_1  90   GSHIRRCCKRRHSTTGLRHYPTTMDAALCQ  1
+0        540  ....L......L..R...............  451
+1        240  ....L...E..L..R....H.....T....  151
+3        584  .YL*..S.RGS.                    549
+
+For reading frame -2 of query sequence:
+
+Query_1  449   TL*S*SHGSK*LMRKDSSLDVIASAKLHRE*PPPGWDITSTDISLTPERVHILYSAMYQV  270
+0        899   ..*.*...P.*....G.F.........Q..*.....G.P....................L  720
+1        596    .*.*...P.*R...G.F.....N...Q..*..L..G.H..........A........PL  420
+2        1417                         .TMA.Q.AS.TA.A.SEH.                    1473
+2        600                                          ...RQR....             629
+
+Query_1  269   ALGSTILKTVCKLHLYEWHDvclcacvcvcvcvcvcvrvCSPTDYNPPRSYKQIITRSGP  90
+0        719   ..L.....S...........                                          660
+0        599                                           ................P...  540
+1        419   .ILN....A......**...                                          360
+1        299                                           .....I..........PA..  240
+
+Query_1  89    VLIYADVAREDTPQRVCGTTLPLWTQHCV  3
+0        539   ....S....G.S..G..............  453
+1        239   ....S....G.S..G..............  153
+
+For reading frame -3 of query sequence:
+
+Query_1  448   LCRVEAMDLNNSCERIRVWM*LLAQNCTGNDRHQGGILLPLTFL*HLKGSTFYTARCTRL  269
+0        898   ...........*.G.V.F..*......S.S......VF......*..N..........S.  719
+1        595    ..........E.G.V.F..*..T...S.S...*..VFI.....*....P..........  419
+2        372                                  .....L                         389
+
+Query_1  268   R*VAPF*KQYANYICMNGMMcvcvrvcvcvcvcvcvfvcvVLRITTPPGHTNRLSRDLGR  89
+0        718   .YL...*NP...........                                          659
+0        595                                            ..............PH...  539
+1        418   .YLT..*.P......N....                                          359
+1        295                                            ....S..........Q...  239
+2        2187                                                         .T...  2201
+2        2884                                                        ......  2901
+
+Query_1  88    FSYTPMLQEKTLHNGFAALPYHYGRSIVS  2
+0        538   .........E...K...............  452
+1        238   .......R.E...K....P.....H....  152
+2        2202  TP...                          2216
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 394716
+
+
+Query= nx2 t1 1000-1299 reverse
+
+Length=300
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value  N
+
+t1 coding-like subject t1 with a CA repeat and a poly-A               179     5e-49  1
+t2 homolog of t1 300-1199                                             99.1    7e-25  1
+t3 long subject t3 with two repeats                                   23.5    0.040  1
+t4 random subject t4 for the hand masks                               17.6    2.5    1
+
+
+
+For reading frame +1 of query sequence:
+
+Query_2  7     *NCMPAEISISGvrrvrralrrllfvrSPLLEHRRFVSHIGDQSTYIS*FSLHQNflffy  186
+0        1294  *.G....N..........T..S...G...............E.*....*.......F..F  1115
+1        898                                   ....G....E.*....*L.V....F..F  815
+
+Query_2  187   ffffl*C*RIRAAL*TSA*MAESIAKLW**GLT*VDRS  300
+0        1114  .....*.*......*...*V.D..S...**...Y..T.  1001
+1        814   .....*.*......*.P.*V.YG.*...**..RY..    707
+
+For reading frame +2 of query sequence:
+
+Query_2  2     NLRTACLRKSRLAEYAGSEEHFGGYYSFARPYWSTEDS*ATLATSRRIFRDSVcirifcf  181
+0        1296   ........T.............A...V..........*....S..............F.  1120
+1        900                                    .....G....S.......*......F.  820
+2        5613  .I.MP.V.AKL.VT.                                               5657
+
+Query_2  182   fiffffcSARG*GPLYERPLEWLRASQNYGNRD*RKLI  295
+0        1119  .F.........*...........T.........*.M..  1006
+1        819   .F......V.E*.......R...T..E......*GM..  706
+
+For reading frame +3 of query sequence:
+
+Query_2  6     LELHACGNLD*RSTPGPKSTSEVIIRSLAPTGAQKIREPHWRPVDVYFVIQSASEffvfl  185
+0        1295  ..R....K..*.......N...L...................A..............F.F  1116
+1        899                                   ..........A.......EC.....F.F  816
+2        5199                ..SGTY.RRLLSDF...QTN.A.QT.                      5276
+2        5942                                      .K...                     5956
+3        652                                         ..TS.I.L                675
+
+Query_2  186   fffffvvlEDKGRSMNVRLNG*EHRKIMVIGTNV  287
+0        1115  ...................S.*Q.L.........  1014
+1        815   .........N......A.VS.LR.L.......K.  714
+
+For reading frame -1 of query sequence:
+
+Query_2  300   RPINLR*SLLP*FCDALSHSSGRS*SGPYPLALqkkkkikkqkILMQTESRNIRRLVANV  121
+0        1001  .R..I.*....*.*..V.......*.............K..K............L.L...  1180
+1        707     ..IP*....*.S..V...R...*....S.T......K..K....H.Q.....L.L...  880
+2        5459                                              .LKVGT......IS    5500
+
+Query_2  120   AHESSVLQ*GRANE**PPKCSSDPAYSANRDFRRHAVLRL  1
+0        1181  ........*...T.**A.............V.......S.  1300
+1        881   .P....                                    898
+
+For reading frame -2 of query sequence:
+
+Query_2  299   DLSTYVSPYYHNFAMLSAIQADVHRAALIL*HYkkkkk*knkKF*CRLNHEIYVDWSPMW  120
+0        1002  .V...........E....T...........*.......K.K...*.........YC....  1181
+1        705    V...L.......Q.P*.TH.G........*.......K.K...*.T.......YC....  881
+3        440    ...FL.ALL..                                                  408
+
+Query_2  119   LTNLLCSSRGERTNNNLRSALRTRRTPLIEISAGMQF*  6
+0        1182  ............P..K...V..........F....P.*  1295
+1        882   .P....                                  899
+
+For reading frame -3 of query sequence:
+
+Query_2  298   TYQLTLVPITIILRCSQPFKRTFIERPLsssttkkkknkktknSDAD*ITKYTSTGRQCG  119
+0        1135                                              ...*.......A....  1182
+0        1003  ...H...........C..L.........                                  1086
+1        703   ...H........F..RK.LT.A......                                  786
+1        835                                               ..HS.......A....  882
+2        1060                                                     HQTV...VR  1086
+
+Query_2  118   SRIFCAPVGASERIITSEVLFGPGVLR*SRFPQACSSK  5
+0        1183  ...........D...S...F.......*.S.....R..  1296
+1        883   ......                                  900
+2        1087  .TSIIR.I.FTNSGLS.                       1137
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 242736
+
+
+Query= nx3 t3 2300-2799
+
+Length=500
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value  N
+
+t3 long subject t3 with two repeats                                   154     1e-73  2
+t1 coding-like subject t1 with a CA repeat and a poly-A               16.6    8.6    1
+
+
+
+For reading frame +1 of query sequence:
+
+Query_3  43    SYTDSVDNGTGWYLASWSCSQKGSTYCLKTYIGAAGLGGPKH*TRGEDRSYVtthththt  222
+2        2343  ....TF.......Y...T..R....*...S..........E.*.........          2498
+
+Query_3  223   hththththththtpththIRDG*SEPSTGKVTMSIIRLTQ*LRVPEV*L*GFAESVTPV  402
+2        2580                     ....*.K............V..*......*.E*.E...I..  2702
+
+Query_3  403   SALSAKEPLLLLCNHWGTTSLKPNFNQYGWG*  498
+2        2703  ...N..D.VMF...Q...........K....*  2798
+
+For reading frame +2 of query sequence:
+
+Query_3  2     SHGIDSAVSKGYISPTPTQSITEQAGT*HLGAALRKALHIA*KLI*ARLD*VGPSTEPEA  181
+2        2302  ...L....C.........H........M...P.PG..Q.N.*N..*....*.........  2481
+
+Query_3  182   KTVRM*Lhththththtlthththththphtht*GMGNQNLVQVRSQCP*SDSPSSFEYL  361
+2        2581                                   *...............*.E........  2661
+2        2482  .....*                                                        2499
+
+Query_3  362   KCDYRDLQNLLPLLAH*VPKNRYCYSVTTGELLVSNQTLISTDGAR  499
+2        2662  ...*S..K...S....*M..T.*.F...S.................  2799
+
+For reading frame +3 of query sequence:
+
+Query_3  3     PTA*TPPSLKDTYllhrlsr*rnrlvlsilellserlyillKNLYRRGWTRWAQALNQRR  182
+2        2426                                           .I..........R......  2482
+2        2303  ...*....V....                                                 2341
+2        4563      .G...R.S.                                                 4589
+2        4630                                                .A.K..S         4650
+
+Query_3  183   RPFVCDYthththththshthththththththKGWVIRT*YR*GHNVHNPTHPVASST*  362
+2        2582                                   .....K.*..*.......S.......*  2662
+2        2483  ......H                                                       2503
+
+Query_3  363   SVIIGICRICYPC*RIECQRTATVTL*PLGNY*SQTKL*SVRMGL  497
+2        2663  ...RV.*......*......PGN.S.*.V...*.....**.....  2797
+
+For reading frame -1 of query sequence:
+
+Query_3  497   *PHPY*LKFGLRLVVPQWlqsnssgslalnaLTGVTDSANPYNHTSGTRSYWVSRIMDIV  318
+2        2797  *....L..........H...R.IT....F.....I...S.HS...........T......  2618
+2        4813                                           HT..PA.VQ..          4781
+
+Query_3  317   TLPVLGSDYPSLMcvcvgvcvcvcvcv*vcvcvcvcvcvVTYERSSPLVQCLGPPSPAAP  138
+2        2617  ......F......                                                 2579
+2        2497                                          ...........S........  2438
+
+Query_3  137   I*VFKQYVEPF*EQLQDAKYQPVPLSTESV*E  42
+2        2437  .*D..H.....R..V...*.......NV..*.  2342
+
+For reading frame -2 of query sequence:
+
+Query_3  496   SPIRTD*SLV*D**FPSGYRVTVAVLWHSMR*qg*qilqipiitlqvLEATG*VGLWTL*  317
+2        2796  .....Y*...*.**..T...E.LPG......                               2704
+2        2652                                                  ....*L.....*  2617
+0        1440                 .Q.GL.E.RL..                                   1475
+
+Query_3  316   PYLY*VLITHPLcvcvwvcvcvcvcvcecvcvcvcvcV*SHTNGLRLWFSAWAHLVQPRL  137
+2        2616  ....*.......                                                  2581
+2        2499                                         ............R........  2437
+
+Query_3  136   YKFlsnm*slsessskmlstsLFRYRLSRCRRYVSFRDGGVYAVG  2
+2        2436  ..                                             2431
+2        2370                        ....MC........T....*...  2302
+2        3432                           K.RDV..FRGVNS..MH.    3379
+
+For reading frame -3 of query sequence:
+
+Query_3  498   LAPSVLIKVWFETSSSPVVTE*Q*RFFGTQCANRGNRFCKSL*SHFRYSKLLGESDYGHC  319
+2        2798  .................L...KHY.V..I.....D...F...*..........D......  2619
+
+Query_3  318   DLTCTRF*LPIPYvcvcgcvcvcvcvcvsvcvcvcvcvCSHIRTVFASGSVLGPT*SSRA  139
+2        2618  .......*.....                                                 2580
+2        2498                                          ...............*....  2439
+
+Query_3  138   YISF*AICRAFLRAAPRC*VPACSVID*VGVGDMYPLETAESMPWD  1
+2        2438  ..R.*.L.*..PG.G...I.......EC.........Q....R...  2301
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 440768
+
+
+Query= nx4 t3 4650-4999 reverse
+
+Length=350
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value  N
+
+t3 long subject t3 with two repeats                                   169     7e-46  1
+
+
+
+For reading frame +1 of query sequence:
+
+Query_4  1     WD*GGTY*CYKSLRLKVHQTHTSLPFKe*eesgtltegtlRISESYYAW*ththththth  180
+2        5000  ..G....*.........D.........                                   4920
+2        4880                                          ..I....G.             4854
+
+Query_4  181   shththACNCSGLE*VCY*TNSDSPTDGWEGLV*rklklltrrstsQATEITGYG  345
+2        4799         ....V..*...*S.P.........Q.                        4722
+2        4682                                                ....S....  4656
+
+For reading frame +2 of query sequence:
+
+Query_4  2     GTEVAHTSATRVCGSRFTRPILASPLKSRRRVELLLKEHSELASRTTPGKhththththt  181
+2        4999  .....R....K..D..L..........N...E.....D....S....A.             4853
+
+Query_4  182   hththtPATVQDSSRSAIRPTQTRRQMGGKA*SSEN*NC*HDDLPLKPQKLPVTG  346
+2        4801        .....YW.....S....H.......K....*YW*...R.H....VL...  4655
+
+For reading frame +3 of query sequence:
+
+Query_4  3     GLRWHILVLQESAAQGSPDPY*PPL*RVGGEWNSY*RNTQN*RVVLRLVNththththtl  182
+2        4998  .R...V....K..T..*....*...*.I...R...*.I...Y.......H.........H  4819
+
+Query_4  183   ththtRLQLFRTRVGLLLDQLRLADRWVGRPSLAKTKTANTTIYLSSHRNYRLRVS  350
+2        4818  .....H....S.G.....V.P..T............N.G....D.T...K.W....  4651
+2        1564                     RIE.GH.....RRI.R                       1517
+
+For reading frame -1 of query sequence:
+
+Query_4  350   TDP*PVISVA*EVDrrvssfsfr*trpshpSVGESELV**QTYSSPEQLQAcvcvcecvc  171
+2        4744                                 ....G.D**.....T....            4800
+2        4651  .N.*..L...C...                                                4692
+
+Query_4  170   vcvcvcVYQA*YDslilsvpsvrvplssysLKGRLVWVW*TLSRRLL*H*YVPPQS  3
+2        4924                                 ........S.......*.*....P.  4998
+
+For reading frame -2 of query sequence:
+
+Query_4  349   LTRNR*FLWLER*IVVLAVLVFARLGLPTHLSASLSWSNSRPTRVLNscrrvcvcvsvcv  170
+2        4652  ....QY....V.S....P..............V..G.T.....P...               4792
+2        5737                        ..I...E.                                5760
+
+Query_4  169   cvcvcvftrrsttr*f*vFLQ*EFHSPPTL*RGG*YGSGEP*AADSCSTSMCHLSP  2
+2        4889                     ..*..L...I.*...*....Q.*V..F....T...R.  4999
+
+For reading frame -3 of query sequence:
+
+Query_4  348   *PVTGNFCGLRGRSSC*QF*FSLD*AFPPICRRV*VGLIADLLES*TVAGvcvcv*vcvc  169
+2        4653  *...ST....*.....Y.Y*....L.......*.W........QY*....            4802
+
+Query_4  168   vcvcvCLPGVVRLANSECsfsksstllllfKGEASMGLVNLEPQTLVALVCATSVP  1
+2        4926                                 ...........S..F....R.....  5000
+2        4851        V.A....D...                                         4883
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 289044
+
+
+Query= nx5 t4 200-799
+
+Length=600
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value  N
+
+t4 random subject t4 for the hand masks                               287     1e-96  2
+t2 homolog of t1 300-1199                                             19.9    1.2    1
+t3 long subject t3 with two repeats                                   19.4    1.6    2
+t1 coding-like subject t1 with a CA repeat and a poly-A               18.5    3.0    1
+
+
+
+For reading frame +1 of query sequence:
+
+Query_5  1     GHCDP*Q*FTSL*F*SSTHKGPAGQ*GSNWSELSERCWSHCRANYAYLSSYVPVF*TYQI  180
+3        201   .Q...K.*....*.*P.........*..D..K.                             299
+3        1020                                         .A..PTTL...FF.         1061
+
+Query_5  181   RLN*LATNRSVQ*FG*EGG*SPYYRKCVPSTLPCSEELAT*YLRG*TST*LFRAFLVTTS  360
+3        393       .....I..*C.*..**.T..G...........D...*....*PL.*..........  560
+
+Query_5  361   ARPSLQGPQPS*RAMSFTYYGTVRCV*TFSTSHFSHRPRCSAREVQIRPQSLSSQGS*EQ  540
+3        561   ......V.*..*.....P....E...C...........G......H..R........*..  740
+0        1486                                                            .K  1481
+
+Query_5  541   RPHPKRT*GPTFCEWG*AFL  600
+3        741   ....N..H.......S*...  800
+0        1480  F..N...               1460
+
+For reading frame +2 of query sequence:
+
+Query_5  2     GIATRNSDLLVSNSSRLHIRGLQVSKEVTGLSYRSVAGLTAERIMPT*ARTYRFSEPIKL  181
+3        202   .N...............................                             300
+2        1310                  .IL...KTD...                                  1275
+
+Query_5  182   G*TSWLQIGVCNSSDRKVDKAHTIGNVCRLRYLAPKNSRPNTYEDKRRPDYSGLS**QPR  361
+3        391      ......L...A.........M............T..H.....N.*.......**L..  561
+0        341                      .S..T...                                   318
+0        721                                ......                           704
+
+Query_5  362   HDRLYRDPNHHNGLCRSLITEQ*GVYEHLAPHTSPIDLAVRLGRYKFVHRASPLKAVENS  541
+3        562   ......Y.............G.K...V.............P....I..D...........  741
+
+Query_5  542   DHIPRGHKDLRSVNGVKHF  598
+3        742   ....T..M...........  798
+
+For reading frame +3 of query sequence:
+
+Query_5  3     ALRPVTVIY*SLILVVYT*GACRSVRK*LV*AIGALLVSLQSELCLPELVRTGFLNLSN*  182
+3        203   .M..E....*....A...*........*..*.                              298
+
+Query_5  183   AKLVGYKSECAIVRIGRWIKPILSEMCAVYVTLLRRTRDLIPTRINVDLIIPGFPSDNLg  362
+3        392      .....D........L..H..W............P..I.....T...........Y..  562
+2        2393                                        ..L.E.L.IM.K.           2431
+
+Query_5  363   ttvstgtptiitgYVVHLLRNSKVCMNI*HLTLLPSTSLFG*GGTNSSTEPLLSRQLRTA  542
+3        563   .......L........P...DR....Y.*........W..R*...Y..............  742
+
+Query_5  543   TTSQEDIRTYVL*MGLSIF  599
+3        743   ....Q.TW....*.E....  799
+
+For reading frame -1 of query sequence:
+
+Query_5  600  *KCLTPFTERRSLCPLGMWSLFSTALRGEALWTNLYLPSRTARSMGEV*GAKCSYTPYCS  421
+3        800  *...........M..V...............S..M....G........*....T...F.P  621
+
+Query_5  420  VISERHSPL*WLGSL*RRSCRGCH*ESPE*SGRRLSS*VLGREFFGAr*rrRHTFPIVWA  241
+3        620  ..R......*...Y.*......S.*....*..Q....*..C..V....*.........C.  441
+
+Query_5  240  LSTFLSELLHTPICSQLV*PNLIGSENRYVRAQVGIIRSAVRPATLR*LRPVTSLLTCRP  61
+3        440  ......A...N......                                             390
+3        299                                                 *............  261
+3        162        D.....M                                                 142
+1        718                                                  .V.I.IIFR..K  753
+0        410                                      ...PIHHGA.SV.K..MLW.AT.   342
+
+Query_5  60   LMCRRLELETSKSLLRVAMP  1
+3        260  ..............F...L.  201
+1        754  PLT.                  765
+
+For reading frame -2 of query sequence:
+
+Query_5  599   KNA*PHSQNVGPYVLLGCGRCSQLP*EERLCGRICTSLAEQRGRWEKCEVLNVHTHLTVP  420
+3        799   ...*L.......C............*.....R.........P...............S..  620
+3        176                          ..*FRTS.T.P.S.FSTAF.                   117
+
+Query_5  419   **VNDIARYDGWGPCRDGRAEVVTRKARNNQVDVYPRRY*VASSSEQGNVDGTHFR*YGL  240
+3        619   **G........*.T..................NG.....Y..R............P*.V.  440
+1        294                                                            ...  286
+
+Query_5  239   YPPSYPNYCTLRFVAN*FSLI**VQKTGTYELR*A*FAlq*dqqrsdssdqlLPY*PAGP  60
+3        439   .Q....H...I.....                                              392
+3        280                                                        ..*....  260
+1        285   H..                                                           277
+2        3744  H..L...                                                       3724
+
+Query_5  59    LCVDD*N*RLVNHCYGSQC  3
+3        259   ....G*.*......F..H.  203
+
+For reading frame -3 of query sequence:
+
+Query_5  598   KMLNPIHRT*VLMSSWDVVAVLNCLERRGSVDEFVPP*PNSEVDGRSVRC*MFIHTLLFR  419
+3        798   ....S....*.HV.C..................Y...*R..Q........*.Y...F.S.  619
+1        252                A..AGSHI.R.C...                                  208
+
+Query_5  418   NK*tt*pvmmvgvpvetvvPRLSLGKPGIIRSTFILVGIRSRVLRSKVT*TAHISDSMGF  239
+3        618   ..                                                            613
+3        558                       .*...........V.....M..G......*.....H..C.  439
+
+Query_5  238   IHLPIRTIAHSDL*PTSLA*FDRFRKPVRTSSGRHNSLCSETSNAPIAQTSYFLTDLQAP  59
+3        438   .N.......Q...*..                                              391
+3        300                                                 ..*..H........  259
+2        3624                                .....S                          3607
+
+Query_5  58    YV*  50
+3        258   ..*  250
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 546304
+
+
+Query= nx6 t4 950-1199 reverse
+
+Length=250
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value  N
+
+t4 random subject t4 for the hand masks                               166     3e-45  1
+t3 long subject t3 with two repeats                                   27.2    0.002  1
+t1 coding-like subject t1 with a CA repeat and a poly-A               15.7    7.0    1
+
+
+
+For reading frame +1 of query sequence:
+
+Query_6  1     *VLL*GVHATQPSRRCVSAETLAFLEFCGRAAGDPL*SLGRKCQVVWERMKTVGL*GHAL  180
+3        1200  *...*D.....L*..G.......I............*...Q..............*...R  1021
+
+Query_6  181   GANVC*ASYHRGLPLTAFVI  240
+3        1020  ..HL.*...D.....R....  961
+
+For reading frame +2 of query sequence:
+
+Query_6  2     EYCSEVYTQLSLHVDASPLKPWHSSSSAGGRLVIRCDR*DGNARSCGKE*RQ*GCRGTRL  181
+3        1199  .....M.....FD.E.......Q...............W.R........*..*......V  1020
+2        3030     ...R.R.PKYRIRAEY.M.ANAT.                                   3101
+0        1355            .I.SQE*CWS...                                       1317
+
+Query_6  182   ALMSAERLITEVFPSRRLS  238
+3        1019  ..I.....M......G...  963
+
+For reading frame +3 of query sequence:
+
+Query_6  3     SIALRCTRNSAFT*MRLR*NLGIPRVLREGGW*SAVIARTEMPGRVGKNEDSRVVGARAW  182
+3        1198  ...........L.*R...*...N.........*.....G.....................  1019
+
+Query_6  183   R*CLLSVLSQRSSPHGVCH  239
+3        1018  .SS.....*.....Q....  962
+
+For reading frame -1 of query sequence:
+
+Query_6  238   *QTP*GEDLCDKTLSRH*RQARAPTTLLSSFFPTRPGISVLAITADHQPPSRRTRGMPRF  59
+3        963   *...*.....H.....DE.H....................P...............L...  1142
+2        1911                                     ..VDLRFSVCPNRRAR.P.D.EDYS  1985
+2        5226                            ...D.A..Q                           5252
+0        39                                       ..Y...*S..                 10
+
+Query_6  58    QRRRIYVKAELRVHLRAIL  2
+3        1143  ....L..............  1199
+2        1986  A...                 1997
+
+For reading frame -2 of query sequence:
+
+Query_6  240   DDKRREGKTSVIRRSADISAKRVPLQPYCLHSFPHDLAFPS*RSQRITSRPPAELEECQG  61
+3        961   N...P...........EM..T..................L.Q..............D...  1140
+2        179                                          ..*VWPALV...GRSVA*A..  241
+2        3849       KS...FT...LPSKT*.L.                                      3905
+2        5602                                                    ..VKTS..HV  5631
+
+Query_6  60    FSGDAST*RLSCVYTSEQYS  1
+3        1141  .......SK.....I.....  1200
+2        5632  .                     5634
+
+For reading frame -3 of query sequence:
+
+Query_6  239   MTNAVRGRPL**DAQQTLAPSACPYNPTVFILSHTTWHFRPSDHSGSPAALPQNSRNAKV  60
+3        962   ....L.....S*....R*..R..................C................I...  1141
+2        4846                                  T..HT.THTHT.THT..TVQYW..S.IS  4763
+
+Query_6  59    SAETHLREG*VACTPQSNT  3
+3        1142  ....P..QS*....S....  1198
+2        4762  PTQ..RQM.            4736
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 189832
+
+
+  Database: hand masks 1
+  Masked using: 'dust', options: 'hedge mid'
+    Posted date:  Nov 21, 2026  8:36 AM
+  Number of letters in database: 9,600
+  Number of sequences in database:  4
+
+
+
+Matrix: BLOSUM62
+Neighboring words threshold: 13
+Window for multiple hits: 40

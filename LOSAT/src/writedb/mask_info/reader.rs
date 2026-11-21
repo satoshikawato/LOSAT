@@ -1597,6 +1597,12 @@ impl MaskFileReader {
         Self::from_reader(path, Box::new(std::io::Cursor::new(data)))
     }
 
+    /// The reader of the bytes `input` gives; `path` is only used in messages.
+    #[cfg(test)]
+    pub(crate) fn from_read(path: &Path, input: Box<dyn Read>) -> Result<Self, MaskFileError> {
+        Self::from_reader(path, input)
+    }
+
     /// The reader of the file `input`; `path` is only used in messages.
     fn from_reader(path: &Path, mut input: Box<dyn Read>) -> Result<Self, MaskFileError> {
         let Some((format, sample)) = guess_format(&mut input) else {

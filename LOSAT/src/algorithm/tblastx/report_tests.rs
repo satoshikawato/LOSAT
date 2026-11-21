@@ -158,6 +158,58 @@ fn row_counts_use_the_displayed_letters() {
     assert_eq!(row_counts(Blosum62Score, b"XAB*J", b"XADKI"), (2, 3));
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2650-2717 and 746-792
+// Review F1 of M4b PR 2: with `-db_hard_mask` the engine's counts (the Seq-aligns'
+// `num_ident`, `num_positives`) read a database sequence as the re-evaluation read it, `B` over
+// the masked bases, while the rows read its stored letters. Frame +2's first codon (bases 1-3,
+// `GCT`, A) has its first base masked: `BCT` is X, which scores -1 against every letter (the
+// X row of NCBI's matrices), so NCBI's re-evaluation trims it from an HSP's end (rows
+// db.tmask.tx.hard.te.11.*: no HSP keeps such a residue). The HSP here is placed over it to
+// show which letters each count reads: X for the engine's counts (neither an identity nor a
+// positive), the stored A for the rows' (an identity).
+#[test]
+fn engine_counts_read_the_hard_masked_letters() {
+    use crate::algorithm::common::db_mask_search::mask_nucleotide_store;
+    use crate::algorithm::tblastx::database::ReportedStore;
+    let code = GeneticCode::from_id(1);
+    let mut subject = b"T".to_vec();
+    subject.extend(b"GCT".repeat(10));
+    subject.extend(b"AA");
+    let query = b"GCT".repeat(10);
+    let shown = Arc::new(PackedNucleotide::from_subject_letters(&subject).expect("letters"));
+    let engine = Arc::new(mask_nucleotide_store(&shown, &[(0, 2)]));
+    let stores = [ReportedStore { shown, engine }];
+    let lengths = [subject.len() as u32];
+    let subjects = SubjectLetters::Database {
+        lengths: &lengths,
+        stores: &stores,
+    };
+    let records = [FastaRecord::new("q", b"q", &query)];
+    let mut hsp = hsp(0, 0, 10, 1.0, 0);
+    hsp.subject_frame = 2;
+    hsp.hit.num_ident = 9;
+    let counts = engine_counts(
+        std::slice::from_ref(&hsp),
+        &records,
+        subjects,
+        &code,
+        &code,
+        Blosum62Score,
+    );
+    assert_eq!(counts, [(9, 9)]);
+    let mut window = Vec::new();
+    assert_eq!(
+        subjects.engine_identities(&hsp, &query, &code, &code, &mut window),
+        9
+    );
+    assert_eq!(
+        subjects.counts(&hsp, &query, &code, &code, &mut window, Blosum62Score),
+        (10, 10)
+    );
+    let (_, subject_row) = subjects.rows(&hsp, &query, &code, &code, &mut window);
+    assert_eq!(subject_row, b"AAAAAAAAAA");
+}
+
 // The identities pass counts without the rows: the counts of a residue-by-residue loop
 // over `display_residue` (the query with code 1, the subject with code 4), on every frame
 // pair, for HSPs at the start, inside and at the end of the subject's frame, for a record and
@@ -509,7 +561,11 @@ fn outfmt7_headers_follow_print_header() {
     };
     assert_eq!(
         header(None),
-        "# TBLASTX 2.17.0+\n# Query: q1 title\n# Database: db\n"
+        concat!(
+            "# TBLASTX (LOSAT ",
+            env!("CARGO_PKG_VERSION"),
+            ")\n# Query: q1 title\n# Database: db\n"
+        )
     );
     assert!(header(Some(0)).ends_with("# Database: db\n# 0 hits found\n"));
     assert!(header(Some(2)).contains("# Fields: query acc.ver, subject acc.ver"));

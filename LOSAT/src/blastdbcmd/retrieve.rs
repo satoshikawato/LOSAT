@@ -59,13 +59,17 @@ impl Stop {
 }
 
 impl From<SeqDbError> for Stop {
-    /// A reader error inside the request: NCBI's own (`CSeqDBException`) is caught like any
-    /// exception there (exit status 1, not the 2 of an error at opening); LOSAT's is a
-    /// refusal.
+    /// A reader error inside the request: NCBI's own (`CSeqDBException`, or the `CFileException`
+    /// of a lookup file) is caught like any exception there (exit status 1, not the 2 of an error
+    /// at opening), with its message (`SeqDbError::ncbi_request_message`); LOSAT's is its error of
+    /// a file that cannot be read or a refusal (`common::database::losat_reader_error`).
     fn from(error: SeqDbError) -> Stop {
-        match error.ncbi_message() {
+        match error.ncbi_request_message() {
             Some(text) => Stop::NcbiBytes(text),
-            None => Stop::refused(error.to_string()),
+            None => Stop::Refused(crate::algorithm::common::database::losat_reader_error(
+                &error,
+                super::PROGRAM,
+            )),
         }
     }
 }
@@ -224,7 +228,14 @@ impl<'a> Source<'a> {
     pub fn tax_info(&self, taxid: i32) -> Result<(std::sync::Arc<SourceNames>, Vec<String>), Stop> {
         let mut texts = Vec::new();
         let names = self.source_names.names(taxid, &mut texts, |messages| {
-            self.taxdb.lookup(self.db, taxid, messages)?.into_names()
+            // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/blastdb_dataextract.cpp:873-886
+            // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/blastdb_dataextract.cpp:902-912
+            // The formatter's names catch any exception of the lookup, so a file of the taxonomy
+            // database that does not open gives `N/A` (line WQA D18b probe 12, `%S %L %B %K`).
+            match self.taxdb.lookup(self.db, taxid, messages) {
+                Err(SeqDbError::TaxdbThrows { .. }) => Ok(None),
+                lookup => lookup?.into_names(),
+            }
         })?;
         Ok((names, texts))
     }
@@ -310,7 +321,7 @@ enum Formatter {
 
 impl Formatter {
     /// Whether the formatter reads the definition lines of a sequence (the FASTA's `GetBioseq`,
-    /// a `%` specifier's `GetHdr`), which set NCBI's OID list up (`SeqDb::set_up_oid_list`).
+    /// a `%` specifier's `GetHdr`), which build NCBI's OID list (`SeqDb::build_oid_list`).
     fn reads_deflines(&self) -> bool {
         match self {
             Formatter::Fasta(_) => true,
@@ -856,7 +867,7 @@ impl Run<'_, '_, '_> {
         // check keeps (`SeqDb::check_oid`, `SeqDb::oid_walk`), or, for `-ipg`, the OID of a
         // PIG whose volume holds it (`PigToOid`), kept or not.
         if self.formatter.reads_deflines() {
-            self.source.db.set_up_oid_list();
+            self.source.db.build_oid_list()?;
         }
         self.formatter
             .write(self.source, oid, config, target, &mut self.output)
@@ -870,7 +881,7 @@ impl Run<'_, '_, '_> {
     /// D1a-2, survey A, pattern 3).
     fn dump_all(&mut self, config: &Config) -> Result<(), Stop> {
         let db = self.source.db;
-        for oid in db.oid_walk() {
+        for oid in db.oid_walk()? {
             self.write(oid, config, None)?;
         }
         Ok(())

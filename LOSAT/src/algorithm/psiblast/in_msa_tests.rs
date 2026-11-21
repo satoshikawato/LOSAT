@@ -40,7 +40,7 @@ fn the_master_is_a_row_without_its_gaps() {
         message(&error),
         (
             1,
-            "BLAST options error: Invalid master sequence index, please use a value between 1 and 3\n"
+            "LOSAT options error: Invalid master sequence index, please use a value between 1 and 3\n"
                 .to_string()
         )
     );
@@ -76,7 +76,7 @@ fn the_master_is_swapped_to_the_first_row() {
         message(&error),
         (
             1,
-            "BLAST options error: No sequence in the multiple sequence alignment provided matches the query sequence\n"
+            "LOSAT options error: No sequence in the multiple sequence alignment provided matches the query sequence\n"
                 .to_string()
         )
     );
@@ -177,13 +177,13 @@ fn the_score_block_reports_the_matrix_and_the_gap_costs() {
     assert!(score_block(&scoring("blosum80", 10, 1), &query).is_ok());
     assert_eq!(
         score_block_error("NOPE", 11, 1, TK_MASTER),
-        (3, "BLAST engine error: Unknown error code -1\n".to_string())
+        (3, "LOSAT engine error: Unknown error code -1\n".to_string())
     );
     assert_eq!(
         score_block_error("blosum62", 5, 5, TK_MASTER),
         (
             3,
-            "BLAST engine error: Gap existence and extension values of 5 and 5 not supported for BLOSUM62\n"
+            "LOSAT engine error: Gap existence and extension values of 5 and 5 not supported for BLOSUM62\n"
                 .to_string()
         )
     );
@@ -233,7 +233,7 @@ fn a_gap_cost_of_zero_is_the_engines_default() {
             score_block_error(matrix_name, gap_open, gap_extend, TK_MASTER),
             (
                 3,
-                format!("BLAST engine error: Gap existence and extension values of {said}\n")
+                format!("LOSAT engine error: Gap existence and extension values of {said}\n")
             ),
             "{matrix_name} {gap_open}/{gap_extend}"
         );
@@ -252,7 +252,7 @@ fn a_gap_cost_of_zero_is_the_engines_default() {
 fn the_ungapped_message_comes_before_the_gap_costs_one() {
     let ungapped = (
         3,
-        "BLAST engine error: Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options\n"
+        "LOSAT engine error: Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options\n"
             .to_string(),
     );
     let all_x = "X".repeat(20);
@@ -267,7 +267,7 @@ fn the_ungapped_message_comes_before_the_gap_costs_one() {
     assert_eq!(
         ungapped.1,
         format!(
-            "BLAST engine error: {}\n",
+            "LOSAT engine error: {}\n",
             crate::report::query_warnings::INVALID_QUERY_MESSAGE
         )
     );
@@ -280,7 +280,7 @@ fn the_ungapped_message_comes_before_the_gap_costs_one() {
         score_block_error("BLOSUM62", 5, 5, "XXXXXXXXXXXXXXXXMK"),
         (
             3,
-            "BLAST engine error: Gap existence and extension values of 5 and 5 not supported for BLOSUM62\n"
+            "LOSAT engine error: Gap existence and extension values of 5 and 5 not supported for BLOSUM62\n"
                 .to_string()
         )
     );
@@ -451,7 +451,7 @@ fn pssm_of(
         master_index,
         ignore_master,
     };
-    let pssm = pssm_from_msa(&input, scoring);
+    let pssm = pssm_from_msa(&input, scoring, &mut std::io::sink());
     let _ = std::fs::remove_dir_all(&dir);
     pssm
 }
@@ -572,7 +572,7 @@ fn a_master_that_starts_a_longer_row_above_it_is_refused() {
         message(&gap),
         (
             3,
-            "BLAST engine error: Gap existence and extension values of 5 and 5 not supported for BLOSUM62\n"
+            "LOSAT engine error: Gap existence and extension values of 5 and 5 not supported for BLOSUM62\n"
                 .to_string()
         )
     );
@@ -638,6 +638,7 @@ fn the_id_refusals_name_the_master_sequence() {
             &input,
             &scoring("BLOSUM62", 11, 1),
             crate::algorithm::pssm_search::in_pssm::PssmReader::PSIBLAST,
+            &mut std::io::sink(),
         )
         .err()
         .unwrap();

@@ -1,0 +1,268 @@
+TBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: dust masks v5
+Masked using: 'dust', options: 'window=64; level=20; linker=1'
+           4 sequences; 9,600 total letters
+
+
+
+Query= pn1 t1 450-899 frame +1
+
+Length=150
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+t1 coding-like subject t1 with a CA repeat and a poly-A               204     4e-68
+t2 homolog of t1 300-1199                                             181     5e-61
+t3 long subject t3 with two repeats                                   22.7    0.044
+
+
+
+Query_1  2     TQCCVHSGRWVPFTMCGDSPLATREYMRPGPDGVIICLQDRGGLWSVGLhththththth  61
+0        454   .........V..Q.P..E.....S....T.........Y.....*...............  633
+0        1352      I..QE.S.WHF.Q.T                                           1302
+                        \                                                  
+                        |                                                  
+                       *C
+1        154   .........V..Q.P..E.....S....T..A......Y....M*.....K.........  333
+
+Query_1  62    ththwwthtSIHSDKCSLHTDVKMVLSNASWYIAYRKMWTLPGVKEMSVEGIPHPGGGHN  121
+0        634   ....TH....C..Y.......F............LY....RS.................S  813
+1        334   ....TH....C.YY......AF.....I..G...LY...A.S........*....S...S  513
+2        1412                                                             D  1410
+2        749                                                     ...E.DQCVS  778
+2        3859                                                      ..SR...   3879
+
+Query_1  122   RCLQALAITSGNEPFRISYLGPWLQLYRV  150
+0        814   ..SF......R..................  900
+1        514   ..SF......R......R..........   597
+2        1409  .I.H..RVY.CRRDSIKQ.M...RK.     1332
+2        779   ...N                           790
+
+
+Lambda      K        H        a         alpha
+   0.323    0.139    0.480    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 344876
+
+
+Query= pn2 t1 1000-1299 frame -1
+
+Length=100
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+t1 coding-like subject t1 with a CA repeat and a poly-A               104     3e-31
+t2 homolog of t1 300-1199                                             53.5    3e-13
+t3 long subject t3 with two repeats                                   15.0    7.0  
+
+
+
+Query_2  2     TWNGMPAECSISGvrrvrrtlrsllFGRSPLLEMRRFVSHIGEQLTYISMDSLHQWffff  61
+0        1297  .*......N........................H..........*....*F....N....  1118
+1        895                                     ...G......*....*L.V..N....  818
+
+Query_2  62    fffffLRCARIRAALWTSAGVADSISKLWTSGAQYVDTS  100
+0        1117  ......*.*......*...*.........**.LT.....  1001
+1        817   ......*.*......*.P.*..YG.*...**.LR....   704
+2        1918                              .I.VS..AR.   1947
+
+
+Lambda      K        H        a         alpha
+   0.322    0.131    0.440    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 202224
+
+
+Query= pn3 t3 2301-2800 frame +2
+
+Length=166
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+t3 long subject t3 with two repeats                                   180     2e-56
+
+
+
+Query_3  1     SHGLDSACCKGYMSPTPTNSITEQCGTMHLGFPPGKAQHNAKNLIRARLDNVGPSTEPEA  60
+2        2302  .......V....I.....H.....A......PA........*...*....*.........  2481
+
+Query_3  61    KTVRMYPhththththththththtemftfthtGGMGNQNLVQLRYQCPMSVSPSSIEYl  120
+2        2482  .....*...................HTH.H...*.........V.S...*.E....F...  2661
+
+Query_3  121   kcddsdlknllsllAHEMPKTRLCFSVTSGELLVSNQTLISTDQA  165
+2        2662  ...*............*.....*....................G.  2796
+
+
+Lambda      K        H        a         alpha
+   0.314    0.129    0.389    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 390144
+
+
+Query= pn4 t3 4650-5000 frame -2
+
+Length=116
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+t3 long subject t3 with two repeats                                   130     4e-40
+
+
+
+Query_4  1     WDGGGTYICYKSLMLKVDQTHNSLPFCEGEERGTLIEGSLRIIESYYGWYTMthththth  60
+2        5000  .......*.....R.......T....K.*......................H........  4821
+2        413    E.TRN.T.KS...                                                375
+
+Query_4  61    thththtCNCSVTEAVCYESYPDSPTSGWEGQVDIMLILPtrrststatestGYGL  116
+2        4820  ............L.*...*.N.....D......*RK...V......Q.........  4653
+2        1946                       .E...A                               1963
+
+
+Lambda      K        H        a         alpha
+   0.319    0.140    0.469    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 247860
+
+
+Query= pn5 t4 200-499 frame +3
+
+Length=100
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+t4 random subject t4 for the hand masks                               167     2e-55
+t1 coding-like subject t1 with a CA repeat and a poly-A               20.4    0.12 
+t3 long subject t3 with two repeats                                   15.0    7.5  
+
+
+
+Query_5  1     GQCDPKQEFTSLSCFPSTHKGPAGQMGSDWSKTSERCWSHCRANYAYLSSYVPLFTTNVI  60
+3        201   .......*....*F*..........*......L......................*....  380
+3        996                                  ..LS.DER.A..PTTL...FF.         1061
+0        1320                                               .L..G.AK.------  1294
+2        3314                    .T..T.R                                     3334
+
+Query_5  61    RLNFLATNRIVQYCGCEGNGSTYYGKCVPSTLPCSEDLAT  100
+3        381   ...*........*..*..**....................  500
+0        1293  .TAC.RKT.LAE.A.S.EHFGA..SVAR.             1207
+0        757                     ....F.                  740
+
+
+Lambda      K        H        a         alpha
+   0.319    0.133    0.447    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 202224
+
+
+Query= pn6 t4 550-849 frame -3
+
+Length=100
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+t4 random subject t4 for the hand masks                               156     2e-51
+t1 coding-like subject t1 with a CA repeat and a poly-A               16.2    2.9  
+t3 long subject t3 with two repeats                                   15.8    4.6  
+
+
+
+Query_6  1     FLMYFSSVEASVAGRTCKYAWLHSLNVGPCELTGCGRCSQLPTEERLCHRIKTSLREQPG  60
+3        850   ..*G..............N.*...Q.....V.L.........*.....R..C...A....  671
+0        79                                                 .DP..VHIIK.SK..  35
+0        1042                                               .C.QPL.RTFI.R.   1083
+2        3052                          ..I.SVQSIR..                          3087
+
+Query_6  61    RLEKCEVLNVHTHLSVPKMGNFIARYDGMGTCRDGRAEVV  100
+3        670   .W...............**..D......*...........  551
+0        34    V.                                        29
+2        1452                    ...K*...                1475
+
+
+Lambda      K        H        a         alpha
+   0.324    0.137    0.445    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 202224
+
+
+Query= pn7 t4 1000-1199 frame +1
+
+Length=66
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+t4 random subject t4 for the hand masks                               119     6e-38
+t3 long subject t3 with two repeats                                   20.4    0.059
+t1 coding-like subject t1 with a CA repeat and a poly-A               15.8    2.5  
+t2 homolog of t1 300-1199                                             14.6    5.1  
+
+
+
+Query_7  1     AQQRGAPRACPWNPTVFILSHMTWHFCTSDHSGSPAALPQNSRIHKVSAETPLRQSRVAC  60
+3        1001  ....*......Y.........T.....P................A...........*...  1180
+2        2319                                  .V*.VG.DS..L.QK...LRR.H.      2248
+2        3912                    .RA...RHKS.VVVS...                          3965
+2        109        .N.P.VYS..                                               138
+2        3589       ...RVT..                                                 3566
+0        810                        LPLQ..A.N.                               839
+0        1322                         ....                                   1311
+1        522                            ..V.N.                               539
+
+Query_7  61    TSQSNT  66
+3        1181  ......  1198
+
+
+Lambda      K        H        a         alpha
+   0.318    0.124    0.410    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 114108
+
+
+  Database: dust masks v5
+  Masked using: 'dust', options: 'window=64; level=20; linker=1'
+    Posted date:  Nov 21, 2026  8:36 AM
+  Number of letters in database: 9,600
+  Number of sequences in database:  4
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 13
+Window for multiple hits: 40

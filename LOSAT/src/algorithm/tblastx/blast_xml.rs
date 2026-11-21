@@ -181,11 +181,12 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
         None,
         args.seg_spec()?.filter_options(),
         None,
+        None,
         args.soft_masking(),
     );
     let xml_run = XmlRun {
         program: "tblastx",
-        version: concat!("TBLASTX ", crate::ncbi_blast_version!()),
+        version: concat!("TBLASTX ", crate::wording::report_version!()),
         reference: REFERENCE_GAPPED_BLAST,
         db_name,
         matrix: Some(matrix),

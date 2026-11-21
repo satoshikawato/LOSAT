@@ -694,7 +694,7 @@ fn a_profile_of_the_reported_seq_id_past_the_cut_is_reported() {
     let error = report_ordinal_ids(db, &mut unfound, 1, PROGRAM).unwrap_err();
     assert!(
         error.to_string().contains(&format!(
-            "a hit of the profile of OID {twin} outside the RPS-BLAST database's alias file FIRST_OID and LAST_OID (NCBI BLAST+ 2.17.0's report does not find it"
+            "a hit of the profile of OID {twin} outside the RPS-BLAST database's alias files' FIRST_OID, LAST_OID and OIDLIST (NCBI BLAST+ 2.17.0's report does not find it"
         )),
         "{error}"
     );
@@ -723,7 +723,7 @@ fn a_profile_of_the_reported_seq_id_past_the_cut_is_reported() {
         let error = report_ordinal_ids(db, &mut found_other, 1, PROGRAM).unwrap_err();
         assert!(
             error.to_string().contains(&format!(
-                "a hit of the profile of OID {copy} outside the RPS-BLAST database's alias file FIRST_OID and LAST_OID, whose Seq-id NCBI BLAST+ 2.17.0's report finds in another record or other letters (the profile of OID {twin})"
+                "a hit of the profile of OID {copy} outside the RPS-BLAST database's alias files' FIRST_OID, LAST_OID and OIDLIST, whose Seq-id NCBI BLAST+ 2.17.0's report finds in another record or other letters (the profile of OID {twin})"
             )),
             "{copy_dir}: {error}"
         );

@@ -478,13 +478,14 @@ pub(super) fn write_xml(
     let version = format!(
         "{} {}",
         args.app.ncbi_name().to_ascii_uppercase(),
-        crate::NCBI_BLAST_VERSION
+        crate::wording::REPORT_VERSION
     );
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:414-417
     // `-soft_masking true` (`mask_at_hash`) ends the filter string with `m;`.
     let filter = crate::report::blast_xml::filter::filter_string(
         None,
         args.seg.filter_options(),
+        None,
         None,
         args.soft_masking,
     );
@@ -674,6 +675,24 @@ pub(super) fn write_pairwise(
         protein_matrix: args.scoring.matrix,
         sort: view.report_sort(args.sort),
         view,
+        // psiblast's PSSM query of the molecule `other` (`PsiSearch::query_other_coding`).
+        unreadable_query: args
+            .psi_search
+            .as_ref()
+            .and_then(|search| search.query_other_coding)
+            .map(|_| crate::report::pairwise::UnreadableQuery {
+                oids: listed_subjects
+                    .as_ref()
+                    .zip(database)
+                    .map(|(listed, database)| {
+                        let oids = database.oid_map();
+                        listed
+                            .ordinals
+                            .iter()
+                            .map(|&ordinal| oids.oid(ordinal).get())
+                            .collect()
+                    }),
+            }),
     };
     // psiblast `-in_pssm`: the footer prints the PSSM's `kbp_psi` and `kbp_gap_psi`
     // (the file's values).
@@ -704,7 +723,7 @@ pub(super) fn write_pairwise(
         })
         .collect();
     let pairwise_report = BlastpPairwiseReport {
-        version: crate::NCBI_BLAST_VERSION.to_string(),
+        version: crate::wording::REPORT_VERSION.to_string(),
         database_name: blastp_scan_mode_definition(subject_input_label).into(),
         database_num_sequences: shown_num_sequences,
         database_total_letters: shown_total_letters,
@@ -769,6 +788,37 @@ pub(super) fn write_pairwise(
             Some(hits) => std::borrow::Cow::Borrowed(hits.as_slice()),
             None => std::borrow::Cow::Owned(rows_of(window.clone())?),
         };
+        // `-db_soft_mask` and `-db_hard_mask`: the subjects' stored masks that meet the
+        // query's HSPs with them, by NCBI's Seq-id, shown in lower case as `-lcase_masking`
+        // shows a FASTA subject's (`db_mask_search::shown_db_subject_masks`).
+        let db_subject_masks = match (
+            args.db_mask_resolved.as_ref(),
+            database,
+            listed_subjects.as_ref(),
+        ) {
+            (Some(mask), Some(database), Some(listed)) => {
+                use crate::algorithm::common::db_mask_search as db_mask;
+                let ordinal = |rank: u32| listed.ordinals.get(rank as usize).copied();
+                let stored = db_mask::read_shown_stored(
+                    &rows,
+                    database.seqdb(),
+                    mask.id,
+                    args.app.name(),
+                    ordinal,
+                )?;
+                Some(db_mask::shown_db_subject_masks(
+                    &rows,
+                    |rank| stored.get(&rank).map(Vec::as_slice),
+                    |rank| {
+                        db_mask::subject_id_keys(
+                            listed_parsed.get(rank as usize).and_then(Option::as_deref),
+                            database.oid_map().oid(listed.ordinals[rank as usize]),
+                        )
+                    },
+                ))
+            }
+            _ => None,
+        };
         // Outfmt 1 to 4: the sections read the sequences and their masks
         // (`anchored`), not the rows' letters.
         let anchored_sequences =
@@ -795,7 +845,7 @@ pub(super) fn write_pairwise(
                             ranges.subject_placements,
                         )
                     } else {
-                        Default::default()
+                        db_subject_masks.clone().unwrap_or_default()
                     },
                 }
             });
@@ -810,6 +860,10 @@ pub(super) fn write_pairwise(
                     subject_records,
                     ranges.subject_placements,
                 ));
+            }
+            if let Some(masks) = db_subject_masks.as_ref() {
+                rows =
+                    std::borrow::Cow::Owned(x_soft_subject::lower_case_subject_rows(&rows, masks));
             }
         }
         // psiblast's rounds: the round's report (`psiblast_round`), without the
@@ -968,7 +1022,7 @@ pub(super) fn write_custom_tabular(
     let program_version = format!(
         "{} {}",
         args.app.ncbi_name().to_uppercase(),
-        crate::NCBI_BLAST_VERSION
+        crate::wording::REPORT_VERSION
     );
     let tab = tabular::BlastpTabular {
         spec,
@@ -1002,6 +1056,10 @@ pub(super) fn write_custom_tabular(
         },
         names: names.as_ref(),
         engine_counts,
+        query_other_coding: args
+            .psi_search
+            .as_ref()
+            .and_then(|search| search.query_other_coding),
     };
     // Outfmt 18, the organism report: the `Query=` block shows the query record's
     // length, also with `-query_loc` (as outfmt 0's, `pairwise_queries`).
@@ -1098,6 +1156,9 @@ pub(super) fn write_text(
         // psiblast's round (`psi_round`), 1 outside the rounds.
         (args.app == BlastpApp::Psiblast)
             .then(|| reports.psi_round.map_or(1, |io| io.state.number())),
+        args.psi_search
+            .as_ref()
+            .and_then(|search| search.query_other_coding),
     )?;
     // NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:4086
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:134-146

@@ -72,6 +72,7 @@ impl Search {
             program,
             &command(),
             Some(false),
+            true,
             &std::fs::read(&self.query.0).expect("query"),
             &std::fs::read(&self.subject.0).expect("subject"),
         )

@@ -19,7 +19,7 @@
 
 **LOSAT** runs the local search programs and database tools of NCBI BLAST+ 2.17.0 with their command lines and writes their output. It is one executable written in Rust: it needs no BLAST+ installation, and it does not call NCBI's programs or libraries. `losat --install-shims` puts it in place of BLAST+ in an existing pipeline, so scripts that call `blastn` or `makeblastdb` run unchanged. The same engine is also a Rust library, a Python package (`pylosat`) and a WebAssembly package for the browser.
 
-On the v0.2.0 release test set, LOSAT writes the same output as NCBI BLAST+ 2.17.0, apart from the [differences listed in the manual](docs/manual/src/differences.md), and the same output at every `-num_threads`. It searches FASTA subjects (`-subject`) on all the threads you give it, where NCBI BLAST+ uses one, reads gzip, bzip2 and Zstandard FASTA directly, and keeps its memory small on large databases: a search of `core_nt` (319.4 GB) peaked at 407 MiB of resident memory, where NCBI BLAST+ peaked at 257.4 GiB (LOSAT `095ff0c16`, an earlier development build; NCBI BLAST+ maps the database files into memory, so its figure includes file pages the system can drop).
+On the v0.2.0 release test set, LOSAT writes the same output as NCBI BLAST+ 2.17.0, apart from the [differences listed in the manual](docs/manual/src/differences.md) (among them the line that names the program's version, which says `BLASTN (LOSAT 0.2.0)` where NCBI writes `BLASTN 2.17.0+`), and the same output at every `-num_threads`. It searches FASTA subjects (`-subject`) on all the threads you give it, where NCBI BLAST+ uses one, reads gzip, bzip2 and Zstandard FASTA directly, and keeps its memory small on large databases: a search of `core_nt` (319.4 GB) peaked at 407 MiB of resident memory, where NCBI BLAST+ peaked at 257.4 GiB (LOSAT `095ff0c16`, an earlier development build; NCBI BLAST+ maps the database files into memory, so its figure includes file pages the system can drop).
 
 <p align="center">
   <picture>
@@ -83,7 +83,7 @@ cargo build --release
 
 ### Platforms
 
-Linux (x86_64, aarch64), macOS (arm64, x86_64), Windows (x86_64) and the WASI serial module are **Supported**: they match NCBI BLAST+ 2.17.0 on the release test set. The WASI threads module is **Supported** and tested in CI, outside that comparison. LOSAT Web, the search page that runs in the browser, is a **Preview**. Details, and the one macOS difference (the last digit of a full-precision E value): [Platforms](docs/manual/src/platforms.md).
+Linux (x86_64, aarch64), macOS (arm64, x86_64), Windows (x86_64) and the WASI serial module are **Supported**: they match NCBI BLAST+ 2.17.0 on the release test set (apart from the version line, which names LOSAT). The WASI threads module is **Supported** and tested in CI, outside that comparison. LOSAT Web, the search page that runs in the browser, is a **Preview**. Details, and the one macOS difference (the last digit of a full-precision E value): [Platforms](docs/manual/src/platforms.md).
 
 ---
 
@@ -143,7 +143,7 @@ Every search program reads BLAST databases (`-db`, versions 4 and 5, found throu
 
 ## Benchmarks and pipelines
 
-Published tools and workflow managers run unchanged with LOSAT under the NCBI names (`--install-shims`), and their BLAST steps wrote the same output in every case compared (where NCBI BLAST+'s own output changes with the thread count, as in BUSCO and QIIME 2, the same as its 1-thread output):
+Published tools and workflow managers run unchanged with LOSAT under the NCBI names (`--install-shims`), and their BLAST steps wrote the same output in every case compared (where NCBI BLAST+'s own output changes with the thread count, as in BUSCO and QIIME 2, the same as its 1-thread output), apart from the line that names the program's version in the formats that have one:
 
 <p align="center">
   <picture>
@@ -172,7 +172,7 @@ Published tools and workflow managers run unchanged with LOSAT under the NCBI na
   - [Introduction](docs/manual/src/introduction.md) • [Quick start](docs/manual/src/quick-start.md) • [Common workflows](docs/manual/src/workflows.md) • [Installation](docs/manual/src/installation.md)
   - [Coming from NCBI BLAST+](docs/manual/src/from-ncbi-blast.md) • [Upgrading from LOSAT v0.1](docs/manual/src/from-losat-v0-1.md) • [Threads, speed and memory](docs/manual/src/performance.md)
   - [Differences from NCBI BLAST+](docs/manual/src/differences.md) • [What LOSAT refuses](docs/manual/src/refusals.md) • [Databases](docs/manual/src/databases.md) • [Output formats](docs/manual/src/output-formats.md) • [Environment variables](docs/manual/src/environment.md)
-- **Not in v0.2.0:** `deltablast`, `makeprofiledb`, `blast_formatter`, `windowmasker -mk_counts` and `-convert`, `psiblast -phi_pattern` and `psiblast -in_msa` with an alignment that is not in Clustal format, and `-html`; options that need NCBI's servers or its GI and IPG lists (`-remote`, `-entrez_query`, `-gilist`, `-negative_gilist`, `-ipglist`, `-negative_ipglist`) and `-import_search_strategy`. LOSAT stops with an error naming the option before it searches. See [What LOSAT refuses](docs/manual/src/refusals.md).
+- **Not in v0.2.0:** `deltablast`, `makeprofiledb`, `blast_formatter`, `windowmasker -mk_counts` and `-convert`, `psiblast -phi_pattern`, and `-html`; options that need NCBI's servers or its GI and IPG lists (`-remote`, `-entrez_query`, `-gilist`, `-negative_gilist`, `-ipglist`, `-negative_ipglist`) and `-import_search_strategy`. LOSAT stops with an error naming the option before it searches. See [What LOSAT refuses](docs/manual/src/refusals.md).
 - [v0.2.0 release record](docs/release/v0.2.0.md) • [Contributor guide](AGENTS.md)
 
 ## References

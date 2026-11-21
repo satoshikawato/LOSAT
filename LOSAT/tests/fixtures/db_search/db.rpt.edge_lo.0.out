@@ -1,0 +1,248 @@
+BLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: s60k Sakai 2000001-2060000 mutated
+           1 sequences; 59,980 total letters
+
+
+
+Query= wm_mq13 len4528
+
+Length=4592
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s60k Sakai 2000001-2060000 mutated                                    3161    0.0  
+
+
+>s60k Sakai 2000001-2060000 mutated
+Length=59980
+
+ Score = 3161 bits (3505),  Expect = 0.0
+ Identities = 1788/1805 (99%), Gaps = 5/1805 (0%)
+ Strand=Plus/Plus
+
+Query  1199  gtgttactgacgaaggtgatttgttaggtatgtcaggaaagcagggaattaaccaaacgg  1258
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  4552  GTGTTACTGACGAAGGTGATTTGTTAGGTATGTCAGGAAAGCAGGGAATTAACCAAACGG  4611
+
+Query  1259  ggatctatagagtagccaattccacttatcttacatggtttactatgcaaagttgtgaaa  1318
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  4612  GGATCTATAGAGTAGCCAATTCCACTTATCTTACATGGTTTACTATGCAAAGTTGTGAAA  4671
+
+Query  1319  ttcataaaaataAAATGATCGAACATTATGTTATTGCCACGTCAAATGATGTTATTGATG  1378
+             ||||||||||||||||||||||||| ||||||||||||||||||||||||||||||||||
+Sbjct  4672  TTCATAAAAATAAAATGATCGAACAGTATGTTATTGCCACGTCAAATGATGTTATTGATG  4731
+
+Query  1379  TTTTATCAACAGTTTCTCCGCAAATAGTGTATGACTAAAACCAGTGTCTGGTTCGCGATG  1438
+             |||||||||||||||||||||||||||||||||||||||||||||| |||||||||||||
+Sbjct  4732  TTTTATCAACAGTTTCTCCGCAAATAGTGTATGACTAAAACCAGTGCCTGGTTCGCGATG  4791
+
+Query  1439  GCGAGATAGAAAAAGCATTATCTTCCTTTCAGAGTGCTCCGCTTCTCACTATTATCTCAC  1498
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  4792  GCGAGATAGAAAAAGCATTATCTTCCTTTCAGAGTGCTCCGCTTCTCACTATTATCTCAC  4851
+
+Query  1499  GCAGTATTCTTAAGGGAACGATAAGGAGGAACCATGAACATTACCCCGTTTCCGACGCTT  1558
+             |||||||| |||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  4852  GCAGTATTGTTAAGGGAACGATAAGGAGGAACCATGAACATTACCCCGTTTCCGACGCTT  4911
+
+Query  1559  TCGACGGCAACTATAGATGCCATAAATGTTATCGGACAGTGGCTGGCGCAGGATGATTTC  1618
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  4912  TCGACGGCAACTATAGATGCCATAAATGTTATCGGACAGTGGCTGGCGCAGGATGATTTC  4971
+
+Query  1619  TCCGGTGAGGTGCCGTATCAGGCTGATTGCGTCATACTTGCAGGAAATGCGGTTATGCCG  1678
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  4972  TCCGGTGAGGTGCCGTATCAGGCTGATTGCGTCATACTTGCAGGAAATGCGGTTATGCCG  5031
+
+Query  1679  ACTATCGATGCGGCATGTAAGATTGCTCGCGATCAGCAAATTCCTTTACTGATTAGTGGT  1738
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  5032  ACTATCGATGCGGCATGTAAGATTGCTCGCGATCAGCAAATTCCTTTACTGATTAGTGGT  5091
+
+Query  1739  GGTATCGGTCACT-CGACCACTTTTTTGTATAGCGCCATCGCACAGCATCCGCACTACAA  1797
+             ||||||||||||| ||||||||||||||||||| ||||||||||||||||||||||||||
+Sbjct  5092  GGTATCGGTCACTGCGACCACTTTTTTGTATAG-GCCATCGCACAGCATCCGCACTACAA  5150
+
+Query  1798  CACTATCCGCACCACTGGCAGAGCAGAAGCGACCATCCTGGCGGATATCGCTCATCAGTT  1857
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  5151  CACTATCCGCACCACTGGCAGAGCAGAAGCGACCATCCTGGCGGATATCGCTCATCAGTT  5210
+
+Query  1858  CTGGCATATTCCGCATGAAAAAATCTGGATTGAAGACCAGTCAACAAACTGCGGTGAAAA  1917
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  5211  CTGGCATATTCCGCATGAAAAAATCTGGATTGAAGACCAGTCAACAAACTGCGGTGAAAA  5270
+
+Query  1918  CGCACGCTTTAGCATCGCGCTATTGAATCAGGCCGTAGAACGAGTTCACACAGCTATCGT  1977
+             |||||||||||||||||| || ||||||||||||||||||||||||||||||||||||||
+Sbjct  5271  CGCACGCTTTAGCATCGCACTGTTGAATCAGGCCGTAGAACGAGTTCACACAGCTATCGT  5330
+
+Query  1978  TGTACAGGACCCCACCATGCAGCGGCGCACGATGGCGACGTTCCGCCGTATGACCGGGGA  2037
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  5331  TGTACAGGACCCCACCATGCAGCGGCGCACGATGGCGACGTTCCGCCGTATGACCGGGGA  5390
+
+Query  2038  CAATCCCGATGTACCACGCTGGTTAAGTTATCC-CGGATTCGTTCCTCAGTTAGGAAATA  2096
+             ||||||||||||||||||||||||||||||||| ||||||||||||||||||||||||||
+Sbjct  5391  CAATCCCGATGTACCACGCTGGTTAAGTTATCCTCGGATTCGTTCCTCAGTTAGGAAATA  5450
+
+Query  2097  ACGCAGACAGTGTAATCTTTATTAATCAGTTACAAGGATTATGGCCGGTTGAGCGTTATC  2156
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  5451  ACGCAGACAGTGTAATCTTTATTAATCAGTTACAAGGATTATGGCCGGTTGAGCGTTATC  5510
+
+Query  2157  TCTCACTACTCACTGGCGAGCTGCCGCGTTTACGCGATGATAGCGATGGCTACGGTCCCC  2216
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  5511  TCTCACTACTCACTGGCGAGCTGCCGCGTTTACGCGATGATAGCGATGGCTACGGTCCCC  5570
+
+Query  2217  GCGGGCGAGATTTTATCGTTCACGTTGATTTTCCGGCAGAAGTCATCCATGCATGGCAAA  2276
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  5571  GCGGGCGAGATTTTATCGTTCACGTTGATTTTCCGGCAGAAGTCATCCATGCATGGCAAA  5630
+
+Query  2277  CGCTGAAACACGATGCGGTGCTCATCGAGGCGATGGAAAGTCGCTCGTTACGTTAAAAAT  2336
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  5631  CGCTGAAACACGATGCGGTGCTCATCGAGGCGATGGAAAGTCGCTCGTTACGTTAAAAAT  5690
+
+Query  2337  TGCCCGTTTGTGAACCACTTGTTTGCAAACGGGCATAACTCCTGCCTTTTATTTCTGCCT  2396
+             ||||||| ||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  5691  TGCCCGTCTGTGAACCACTTGTTTGCAAACGGGCATAACTCCTGCCTTTTATTTCTGCCT  5750
+
+Query  2397  CTTATTCCTTTTACACTTGTTTTTATGAAGCCCTTCACAGAATTGTCCTTTCATGATGCC  2456
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  5751  CTTATTCCTTTTACACTTGTTTTTATGAAGCCCTTCACAGAATTGTCCTTTCATGATGCC  5810
+
+Query  2457  GTCTCTATGATGATTGATGTTAATTAACAATGTATTTGCCAAAAACAAACATATAAATCA  2516
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  5811  GTCTCTATGATGATTGATGTTAATTAACAATGTATTTGCCAAAAACAAACATATAAATCA  5870
+
+Query  2517  CAGGAGTCGCCCATGTCAGTACCCGTTCAACATCCTATGTATATTGATGGACAG-TTTGT  2575
+             ||||||||||||||||||||| || |||||||||||||||||||| |||||||| |||||
+Sbjct  5871  CAGGAGTCGCCCATGTCAGTA-CCATTCAACATCCTATGTATATTAATGGACAGCTTTGT  5929
+
+Query  2576  TACCTGGCGTGGAGACGCATGGATTGATGTGGTAAACCCTGCTACAGAGGCTGTCATTTC  2635
+              |||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  5930  AACCTGGCGTGGAGACGCATGGATTGATGTGGTAAACCCTGCTACAGAGGCTGTCATTTC  5989
+
+Query  2636  CCGCATTCCCGATGGTCAGGCCGAGGATGCCCGTAAGGCAATCGATGCAGCAGAACGTGC  2695
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  5990  CCGCATTCCCGATGGTCAGGCCGAGGATGCCCGTAAGGCAATCGATGCAGCAGAACGTGC  6049
+
+Query  2696  ACAACCAGAATGGGAAGCGTTGCCTGCAATTGAACGCGCCAGTTGGTTGCGCAAAATCTC  2755
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  6050  ACAACCAGAATGGGAAGCGTTGCCTGCAATTGAACGCGCCAGTTGGTTGCGCAAAATCTC  6109
+
+Query  2756  CGCCGGGATCCGCGAACGCGCCAGTGAAATCAGTGCGCTGATTGTTGAAGAAGGGGGCAA  2815
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  6110  CGCCGGGATCCGCGAACGCGCCAGTGAAATCAGTGCGCTGATTGTTGAAGAAGGGGGCAA  6169
+
+Query  2816  GATCCAGCAGCTGGCTGAAGTCGAAGTGGCTTTTACTGCCGACTATATCGATTACATGGC  2875
+             ||||||||||||||||||||| | ||||||||||||||||||||||||||||||||||||
+Sbjct  6170  GATCCAGCAGCTGGCTGAAGTAGTAGTGGCTTTTACTGCCGACTATATCGATTACATGGC  6229
+
+Query  2876  GGAGTGGGCACGGCGTTACGAGGGCGAGATTATTCAAAGCGATCGTCCAGGAGAAAATAT  2935
+             |||||||||||||||||||||| |||||||||||||||||||||||||||||||||||||
+Sbjct  6230  GGAGTGGGCACGGCGTTACGAGTGCGAGATTATTCAAAGCGATCGTCCAGGAGAAAATAT  6289
+
+Query  2936  TCTTCTGTTTAAACGTGCGCTTGGTGTGACTACCGGCATTCTGCCGTGGAACTTCCCGTT  2995
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  6290  TCTTCTGTTTAAACGTGCGCTTGGTGTGACTACCGGCATTCTGCCGTGGAACTTCCCGTT  6349
+
+Query  2996  CTTCC  3000
+             |||||
+Sbjct  6350  CTTCC  6354
+
+
+ Score = 28.3 bits (30),  Expect = 0.32
+ Identities = 18/20 (90%), Gaps = 0/20 (0%)
+ Strand=Plus/Minus
+
+Query  2777   CAGTGAAATCAGTGCGCTGA  2796
+              ||| ||||||||||| ||||
+Sbjct  32967  CAGAGAAATCAGTGCTCTGA  32948
+
+
+ Score = 26.5 bits (28),  Expect = 1.1
+ Identities = 14/14 (100%), Gaps = 0/14 (0%)
+ Strand=Plus/Minus
+
+Query  1578   CCATAAATGTTATC  1591
+              ||||||||||||||
+Sbjct  10778  CCATAAATGTTATC  10765
+
+
+ Score = 26.5 bits (28),  Expect = 1.1
+ Identities = 14/14 (100%), Gaps = 0/14 (0%)
+ Strand=Plus/Plus
+
+Query  1867   TCCGCATGAAAAAA  1880
+              ||||||||||||||
+Sbjct  16448  TCCGCATGAAAAAA  16461
+
+
+ Score = 26.5 bits (28),  Expect = 1.1
+ Identities = 17/19 (89%), Gaps = 0/19 (0%)
+ Strand=Plus/Plus
+
+Query  1429   GTTCGCGATGGCGAGATAG  1447
+              ||| || ||||||||||||
+Sbjct  56851  GTTGGCAATGGCGAGATAG  56869
+
+
+ Score = 25.6 bits (27),  Expect = 3.8
+ Identities = 15/16 (94%), Gaps = 0/16 (0%)
+ Strand=Plus/Minus
+
+Query  2745   CGCAAAATCTCCGCCG  2760
+              |||| |||||||||||
+Sbjct  13383  CGCAGAATCTCCGCCG  13368
+
+
+ Score = 24.7 bits (26),  Expect = 3.8
+ Identities = 13/13 (100%), Gaps = 0/13 (0%)
+ Strand=Plus/Plus
+
+Query  2789   TGCGCTGATTGTT  2801
+              |||||||||||||
+Sbjct  22962  TGCGCTGATTGTT  22974
+
+
+ Score = 24.7 bits (26),  Expect = 3.8
+ Identities = 13/13 (100%), Gaps = 0/13 (0%)
+ Strand=Plus/Plus
+
+Query  2181   CGCGTTTACGCGA  2193
+              |||||||||||||
+Sbjct  37261  CGCGTTTACGCGA  37273
+
+
+ Score = 24.7 bits (26),  Expect = 3.8
+ Identities = 13/13 (100%), Gaps = 0/13 (0%)
+ Strand=Plus/Minus
+
+Query  1344   TTATGTTATTGCC  1356
+              |||||||||||||
+Sbjct  41048  TTATGTTATTGCC  41036
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 106848720
+
+
+  Database: s60k Sakai 2000001-2060000 mutated
+    Posted date:  Oct 25, 2026  11:46 AM
+  Number of letters in database: 59,980
+  Number of sequences in database:  1
+
+
+
+Matrix: blastn matrix 2 -3
+Gap Penalties: Existence: 5, Extension: 2

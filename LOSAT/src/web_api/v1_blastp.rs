@@ -43,7 +43,7 @@ const V1_TABULAR_FIELDS: [&str; 30] = [
 /// token that is not a field).
 fn check_web_v1_request(args: &BlastpArgs) -> Result<()> {
     check_options(args)?;
-    let (format, fields) = OutputFormat::parse(&args.outfmt).map_err(anyhow::Error::msg)?;
+    let (format, fields) = v1_output_format(&args.outfmt).map_err(anyhow::Error::msg)?;
     if let Some(fields) = fields {
         if format == OutputFormat::Pairwise {
             bail!("blastp outfmt 0 does not accept custom field lists");
@@ -55,6 +55,29 @@ fn check_web_v1_request(args: &BlastpArgs) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// ABI v1's reading of a BLASTP `-outfmt`, frozen with its errors (plan TD-1): the number as the
+/// text `0`, `6` or `7`, and the words after it. The engine reads the number as NCBI does
+/// (`blast_engine::blastp_text_format`: `06` is 6); moved here from `report::outfmt6` (line RG
+/// item D-36, review 1 S1).
+pub(super) fn v1_output_format(
+    s: &str,
+) -> std::result::Result<(OutputFormat, Option<String>), String> {
+    let (fmt_str, fields) = OutputFormat::split_fields(s);
+    let fields = fields.map(str::to_string);
+    let format = match fmt_str {
+        "0" => OutputFormat::Pairwise,
+        "6" => OutputFormat::Tabular,
+        "7" => OutputFormat::TabularWithComments,
+        _ => {
+            return Err(format!(
+                "Unsupported output format: {}. Supported: 0, 6, 7",
+                fmt_str
+            ))
+        }
+    };
+    Ok((format, fields))
 }
 
 pub(super) fn run_web_pair_bytes(

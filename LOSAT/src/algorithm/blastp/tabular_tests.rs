@@ -58,13 +58,14 @@ fn report(
     hit_lists: &[Option<BlastpHitList>],
 ) -> (String, String) {
     let format = ReportFormat::from_number(number).unwrap();
-    let spec = TabularSpec::of(
+    let spec = TabularSpec::of_app(
         format,
         &FormatChoice {
             number,
             spec: fields.to_string(),
             delimiter: String::new(),
         },
+        app.request_kind(),
     )
     .unwrap();
     let ids: Vec<crate::algorithm::common::tabular::SubjectId> =
@@ -96,6 +97,7 @@ fn report(
         taxdb_found: false,
         names: None,
         engine_counts: &crate::algorithm::blastp::seqalign::EngineCounts::default(),
+        query_other_coding: None,
     };
     let (mut out, mut err) = (Vec::new(), Vec::new());
     let before = [crate::report::diag_log::Posts::of_lines(
@@ -147,6 +149,41 @@ fn rows_and_comment_lines_are_ncbis() {
     assert_eq!(err, format!("Warning: q1\n{warning}{warning}{warning}"));
     let (out, _) = report(20, "qseqid evalue", BlastpApp::Blastp, &lists);
     assert_eq!(out, "qseqid,evalue\nq1,1.00e-10\nq1,1.00e-10\n");
+}
+
+// NCBI 2.17.0 (line RG F/d36 probes bp.f20at, bp.f6at, ps.f20at, ps.f6at, ps.f7comma,
+// rps.f10at, rps.f6at): blastp's reports take `delim=`, psiblast's and rpsblast's keep the
+// format's delimiter, and their `6 delim=@` and `7 delim=,` are the default reports; the value
+// is the command line's or the library's as given.
+#[test]
+fn the_spec_is_the_apps_formatters() {
+    let spec = custom_tabular_spec("20 delim=@ qseqid evalue", BlastpApp::Blastp).unwrap();
+    assert_eq!(
+        (spec.kind, spec.delimiter.as_str()),
+        (TabularKind::CsvWithHeader, "@")
+    );
+    assert_eq!(
+        custom_tabular_spec("6 delim=@", BlastpApp::Blastp).map(|spec| spec.delimiter.as_str()),
+        Some("@")
+    );
+    assert_eq!(
+        custom_tabular_spec("10 delim=@ qseqid", BlastpApp::Blastp)
+            .map(|spec| spec.delimiter.as_str()),
+        Some("@")
+    );
+    for app in [BlastpApp::Psiblast, BlastpApp::Rpsblast] {
+        let spec = custom_tabular_spec("20 delim=@ qseqid evalue", app).unwrap();
+        assert_eq!(
+            (spec.kind, spec.delimiter.as_str(), spec.fields.len()),
+            (TabularKind::CsvWithHeader, ",", 2),
+            "{app:?}"
+        );
+        let spec = custom_tabular_spec("10 delim=@ qseqid", app).unwrap();
+        assert_eq!(spec.delimiter, ",", "{app:?}");
+        assert!(custom_tabular_spec("6 delim=@", app).is_none(), "{app:?}");
+        assert!(custom_tabular_spec("7 delim=,", app).is_none(), "{app:?}");
+        assert!(custom_tabular_spec("6", app).is_none(), "{app:?}");
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:773-780 (an ungapped HSP's

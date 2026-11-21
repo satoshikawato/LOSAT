@@ -1119,7 +1119,7 @@ fn output_formats_raise_ncbis_errors_where_ncbi_does() {
         (
             1,
             format!(
-                "BLAST query/options error: {text}\n{}\n",
+                "LOSAT query/options error: {text}\n{}\n",
                 crate::wording::USER_MANUAL_FOOTER
             ),
         )
@@ -1255,16 +1255,9 @@ fn output_formats_raise_ncbis_errors_where_ncbi_does() {
             }
         }
     }
-    // An ungapped search writes the Seq-aligns (8, 9, 11, 12: Dense-diags) and refuses only
-    // SAM (17), whose line of a subject joins its HSPs.
-    for (outfmt, refused) in [
-        ("8", false),
-        ("9", false),
-        ("11", false),
-        ("12", false),
-        ("17", true),
-        ("17 SR", true),
-    ] {
+    // An ungapped search writes the Seq-aligns (8, 9, 11, 12: Dense-diags) and SAM (17, a
+    // subject's HSPs joined into one record).
+    for outfmt in ["8", "9", "11", "12", "17", "17 SR"] {
         let mut diagnostics = Vec::new();
         let mut sink = Vec::new();
         let mut outputs =
@@ -1274,15 +1267,7 @@ fn output_formats_raise_ncbis_errors_where_ncbi_does() {
             &mut outputs,
         );
         drop(outputs);
-        if refused {
-            assert_eq!(
-                result.unwrap_err().to_string(),
-                "output format 17 with -ungapped (an ungapped search) is not supported by LOSAT's BLASTN",
-                "{outfmt}"
-            );
-        } else {
-            result.unwrap();
-        }
+        result.unwrap_or_else(|error| panic!("{outfmt}: {error}"));
     }
     // `run_local`'s formats that NCBI rejects later are left out, as the command line's
     // (`cli_output_formats`): NCBI's formatting handler (`process_options`, above) and
@@ -1539,7 +1524,7 @@ fn losat_chunks(
     let mut state = SubjectSplitState::new(length as usize, soft_ranges);
     let mut hard_state = HardSplitState::default();
     if let Some(hard) = hard {
-        hard_state.start(length as usize, hard.to_vec());
+        hard_state.start(length as usize, hard.to_vec(), true);
     }
     let mut scratch = Vec::new();
     let mut chunks = Vec::new();
@@ -1707,7 +1692,7 @@ fn hard_masked_chunks_follow_ncbi_s_get_next_subject_chunk() {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:221-310, 579-584 (quoted
 // at `SubjectSplitState::next_chunk`); na_ungapped.c:1647-1668, masksubj.inl:43-58,
-// blast_engine.c:493-500, 565 and blast_hits.c:2873-2911, 2956 (cited at `HardMaskShape::of`)
+// blast_engine.c:493-500, 565 and blast_hits.c:2873-2911, 2956 (cited at `HardMaskShape::of_scan`)
 // The refusals of `-db_hard_mask` against NCBI's chunks (the model above, not the chunker
 // that the refusals run; reviews F1-F3 and T1 of M4a-2b, review 2 F1 and T1): a shape is
 // refused as `TailMask` exactly when a chunk shorter than the sequence scans the full range
@@ -1725,7 +1710,7 @@ fn hard_masked_chunks_follow_ncbi_s_get_next_subject_chunk() {
 // are cut into several chunks and the final chunk can follow a full chunk of its own range.
 #[test]
 fn hard_mask_refusals_are_the_merges_that_ncbi_decides_past_its_list() {
-    use crate::blastinput::db_mask::{HardMaskShape, TAIL_MASK_SEARCHED_WORD};
+    use crate::blastinput::db_mask::{HardMaskShape, HardScan, TAIL_MASK_SEARCHED_WORD};
     let mut seed = 0x2545_F491_4F6C_DD1Du64;
     let mut next = |bound: u64| {
         seed ^= seed << 13;
@@ -1800,16 +1785,19 @@ fn hard_mask_refusals_are_the_merges_that_ncbi_decides_past_its_list() {
             .iter()
             .map(|&(start, end)| (start as u32, end as u32))
             .collect();
-        let shape = HardMaskShape::of(&stored, None, &|| Some(length as usize), word as usize);
+        let scan = HardScan::Nucleotide {
+            scanned_word: word as usize,
+        };
+        let shape = HardMaskShape::of_scan(&stored, None, &|| Some(length as usize), scan);
         // The same shape from the bounds of the length that the index gives (the packed bytes
         // and 0 to 3 letters in the last one; review 2 S4).
         let low = (length - length % 4) as usize;
         assert_eq!(
-            HardMaskShape::of(
+            HardMaskShape::of_scan(
                 &stored,
                 Some((low, low + 3)),
                 &|| Some(length as usize),
-                word as usize
+                scan
             ),
             shape,
             "{length} {masks:?} word {word}: bounds"

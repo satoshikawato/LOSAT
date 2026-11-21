@@ -128,7 +128,8 @@ pub(super) fn search_rounds(
                             .is_none_or(|stop| stop.after_round_files())
                 });
             if let Some(input) = plan.input.as_ref().filter(|_| search_error) {
-                let (asn, ascii) = input.files(&plan.request)?;
+                let (asn, ascii, posts) = input.files(&plan.request)?;
+                write_file_posts(args, &posts, outputs)?;
                 RoundFiles::new(
                     &plan.request,
                     args.out.as_deref().filter(|path| path.as_os_str() != "-"),
@@ -179,12 +180,23 @@ fn write_round_pssm(
     current: &QueryPssm,
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
-    if !current.asn_posts.is_empty() {
-        crate::algorithm::psiblast::pssm::file_posts(args.app.ncbi_name(), &current.asn_posts)
+    write_file_posts(args, &current.asn_posts, outputs)?;
+    files.write(current.asn.as_deref(), current.ascii.as_deref())
+}
+
+/// NCBI's posts of the bytes that its ASN.1 text stream replaces in a PSSM file
+/// (`pssm::file_posts`), made as the file is written.
+fn write_file_posts(
+    args: &ResolvedBlastpArgs,
+    replaced: &[crate::report::serial::encoder::ReplacedChar],
+    outputs: &mut ReportOutputs<'_>,
+) -> Result<()> {
+    if !replaced.is_empty() {
+        crate::algorithm::psiblast::pssm::file_posts(args.app.ncbi_name(), replaced)
             .write(&mut *outputs.diagnostics, args.archive.as_ref())?;
         outputs.diagnostics.flush()?;
     }
-    files.write(current.asn.as_deref(), current.ascii.as_deref())
+    Ok(())
 }
 
 /// The composition-based mode of the options' reader (`in_pssm::setup_messages`).
@@ -316,7 +328,12 @@ fn run_queries(
             let round = state.number();
             match (&pssm, input_files.as_mut()) {
                 (Some(current), _) => write_round_pssm(args, &mut files, current, outputs)?,
-                (None, Some((asn, ascii))) if round == 1 => {
+                (None, Some((asn, ascii, posts))) if round == 1 => {
+                    // NCBI's posts of the bytes replaced in the search strategy request (written
+                    // above, before round 1) come before those of the PSSM file that round 1
+                    // writes.
+                    super::write_request_posts(args, &mut *outputs.diagnostics)?;
+                    write_file_posts(args, posts, outputs)?;
                     // NCBI's prolog comes before the rounds (`PrintProlog`), so before a file
                     // that cannot be written stops the run here.
                     if let Err(error) = files.write(asn.as_deref(), ascii.as_deref()) {
@@ -366,6 +383,12 @@ fn run_queries(
                     .psi_search
                     .as_deref()
                     .and_then(|psi| psi.bioseq_letters.clone());
+                // And its molecule: a query of the molecule `other` is unreadable for the
+                // reports of every round (`PsiSearch::query_other_coding`).
+                search.query_other_coding = args
+                    .psi_search
+                    .as_deref()
+                    .and_then(|psi| psi.query_other_coding);
                 // A query that NCBI splits: round 1's query, which the round searches, and the query
                 // of its set-up (`RoundQuery::split`).
                 let (query_now, split_setup) = if split {
@@ -509,8 +532,9 @@ fn run_queries(
         if plan.save_last {
             match (&pssm, &plan.input, &input_files, searched_input) {
                 (Some(current), _, _, _) => write_round_pssm(args, &mut files, current, outputs)?,
-                (None, Some(input), Some((_, ascii)), Some((ungapped, gapped))) => {
-                    let asn = input.written_back(&plan.request, ungapped, gapped)?;
+                (None, Some(input), Some((_, ascii, _)), Some((ungapped, gapped))) => {
+                    let (asn, posts) = input.written_back(&plan.request, ungapped, gapped)?;
+                    write_file_posts(args, &posts, outputs)?;
                     files.write(asn.as_deref(), ascii.as_deref())?;
                 }
                 _ => {}
@@ -723,7 +747,7 @@ fn write_round_epilogs(
         None => args.subject_taxdb_found,
     };
     for format in outputs.formats.iter_mut() {
-        if let Some(spec) = super::super::tabular::custom_tabular_spec(format.outfmt) {
+        if let Some(spec) = super::super::tabular::custom_tabular_spec(format.outfmt, args.app) {
             let mut writer = format.sink.open()?;
             super::super::tabular::write_tabular_round_epilog(
                 spec,
@@ -748,7 +772,7 @@ fn write_round_epilogs(
             _ => continue,
         }
         let report = crate::report::BlastpPairwiseReport {
-            version: crate::NCBI_BLAST_VERSION.to_string(),
+            version: crate::wording::REPORT_VERSION.to_string(),
             database_name: blastp_database_name(args, subject_label).into(),
             database_num_sequences: num_sequences,
             database_total_letters: total_letters,
@@ -988,7 +1012,8 @@ impl SubjectKeys<'_> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:445-450
     /// NCBI's warning for each Seq-align whose letters the PSSM cannot read, by subject
     /// (`query_pssm`'s `unread`): the Seq-align id as a FASTA string, each with its subject. Only
-    /// subjects with parsed Seq-ids can fail to be read.
+    /// a database's subjects can fail to be read: one with parsed Seq-ids by that id, one without
+    /// them by its ordinal id `gnl|BL_ORD_ID|<oid>` where its load throws (`PssmReads`).
     pub(super) fn unread_warnings(
         &self,
         program: &str,
@@ -996,18 +1021,26 @@ impl SubjectKeys<'_> {
         out: &mut crate::algorithm::psiblast::pssm::PssmReadMessages,
     ) {
         for &s_idx in unread {
-            if let Some(subject) = self.parsed.get(s_idx as usize).and_then(Option::as_deref) {
-                let mut text = b"Failed to retrieve sequence ".to_vec();
-                text.extend_from_slice(&subject.alignment_fasta());
-                // A post of NCBI's main thread (`ncbi_exception::post_line`).
-                let line = crate::ncbi_exception::post_line(
-                    crate::ncbi_exception::Severity::Warning,
-                    None,
-                    Some(program),
-                    &text,
-                );
-                out.push(s_idx, line);
-            }
+            let id = match self.parsed.get(s_idx as usize).and_then(Option::as_deref) {
+                Some(subject) => subject.alignment_fasta(),
+                None => match self.listed_ordinals {
+                    Some((ordinals, oids)) => {
+                        format!("gnl|BL_ORD_ID|{}", oids.oid(ordinals[s_idx as usize]).get())
+                            .into_bytes()
+                    }
+                    None => continue,
+                },
+            };
+            let mut text = b"Failed to retrieve sequence ".to_vec();
+            text.extend_from_slice(&id);
+            // A post of NCBI's main thread (`ncbi_exception::post_line`).
+            let line = crate::ncbi_exception::post_line(
+                crate::ncbi_exception::Severity::Warning,
+                None,
+                Some(program),
+                &text,
+            );
+            out.push(s_idx, line);
         }
     }
     pub(super) fn key(&self, s_idx: u32) -> SetKey {

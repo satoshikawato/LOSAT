@@ -370,7 +370,7 @@ fn malformed_fasta_reports_parse_error() {
     assert_eq!(output.status.code(), Some(1), "malformed FASTA should fail");
     assert_eq!(
         String::from_utf8_lossy(&output.stderr),
-        "BLAST query error: CFastaReader: Near line 2, there's a line that doesn't look like plausible data, but it's not marked as defline or comment.\n"
+        "LOSAT query error: CFastaReader: Near line 2, there's a line that doesn't look like plausible data, but it's not marked as defline or comment.\n"
     );
 }
 
@@ -557,7 +557,7 @@ fn concatenated_parts_are_read_whole_with_the_plain_line_numbers() {
         assert_eq!(bad.status.code(), Some(1), "{format}");
         assert_eq!(
             String::from_utf8_lossy(&bad.stderr),
-            "BLAST query error: CFastaReader: Near line 2, there's a line that doesn't look like plausible data, but it's not marked as defline or comment.\n",
+            "LOSAT query error: CFastaReader: Near line 2, there's a line that doesn't look like plausible data, but it's not marked as defline or comment.\n",
             "{format}"
         );
     }
@@ -765,15 +765,18 @@ fn a_reader_error_in_a_later_query_batch_follows_the_earlier_reports() {
     let first = run(None);
     let _ = fs::remove_file(&query);
     let _ = fs::remove_file(&subject);
-    let error = "BLAST query error: CFastaReader: Near line 8, there's a line that doesn't look like plausible data, but it's not marked as defline or comment.\n";
+    let error = "LOSAT query error: CFastaReader: Near line 8, there's a line that doesn't look like plausible data, but it's not marked as defline or comment.\n";
     for output in [&later, &first] {
         assert_eq!(output.status.code(), Some(1));
         assert_eq!(String::from_utf8_lossy(&output.stderr), error);
     }
     let report = String::from_utf8_lossy(&later.stdout);
     assert!(
-        report.starts_with("# BLASTN 2.17.0+\n# Query: q1\n")
-            && !report.contains("# BLAST processed"),
+        report.starts_with(concat!(
+            "# BLASTN (LOSAT ",
+            env!("CARGO_PKG_VERSION"),
+            ")\n# Query: q1\n"
+        )) && !report.contains("# BLAST processed"),
         "{report}"
     );
     assert!(first.stdout.is_empty(), "{:?}", first.stdout);
@@ -875,7 +878,7 @@ fn ncbi_version_is_two_lines_for_every_program() {
         ("psiblast", "psiblast"),
         ("makeblastdb", "makeblastdb"),
     ] {
-        let expected = format!("{printed}: 2.17.0+\n{package}");
+        let expected = format!("{printed}: LOSAT {}\n{package}", env!("CARGO_PKG_VERSION"));
         for words in [
             vec![name, "-version"],
             vec![name, "-out", "-version"],
@@ -1091,7 +1094,7 @@ fn makeblastdb_parse_seqids_hash_index_and_taxid_map() {
     ]);
     assert_eq!(output.status.code(), Some(1), "{output:?}");
     assert!(String::from_utf8_lossy(&output.stderr).starts_with(
-        "BLAST Database creation error: Input id list not in ascending oid order: the sequence gi|42 (OID 1)"
+        "LOSAT database creation error: Input id list not in ascending oid order: the sequence gi|42 (OID 1)"
     ));
     assert!(!std::path::Path::new(&format!("{base_text}.psq")).exists());
     remove(&V5);
@@ -1431,15 +1434,25 @@ fn use_index_true_runs_as_ncbi_and_an_indexed_database_is_refused() {
     let without = run(&[&megablast[..], &template_args].concat());
     assert_eq!(output.stdout, without.stdout);
     fs::remove_file(dir.join("db/plain.shd")).unwrap();
-    // An index: a new-style superheader of a volume, or an old-style index volume.
-    for file in ["db/plain.shd", "db/plain.00.idx", "db/plain.42.idx"] {
+    // A super header that NCBI does not read (not 16 bytes) is no index: the same warning
+    // (`GetIndexSuperHeader` throws, posted at the level Info).
+    fs::write(dir.join("db/plain.shd"), b"").unwrap();
+    let output = run(&[&megablast[..], &["-use_index", "true"]].concat());
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(output.stdout, plain_megablast.stdout);
+    assert_eq!(String::from_utf8_lossy(&output.stderr), warning);
+    fs::remove_file(dir.join("db/plain.shd")).unwrap();
+    // An empty old-style index volume of the database's name: NCBI's loader finds it and
+    // crashes reading its header, which LOSAT refuses.
+    for file in ["db/plain.00.idx", "db/plain.42.idx"] {
         fs::write(dir.join(file), b"").unwrap();
         let output = run(&[&megablast[..], &["-use_index", "true"]].concat());
         let error = String::from_utf8_lossy(&output.stderr);
         assert_eq!(output.status.code(), Some(1), "{file}: {error}");
         assert!(output.stdout.is_empty(), "{file}");
         assert!(
-            error.contains("-use_index true with a database that has a MegaBLAST index")
+            error.contains("-use_index true with an empty MegaBLAST index volume (")
+                && error.contains(file)
                 && error.contains("is not supported by LOSAT's BLASTN"),
             "{file}: {error}"
         );
@@ -1465,7 +1478,7 @@ fn blastx_seg_error_comes_from_the_filtering_handler() {
         ">p\nMKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQFEVV\n",
     )
     .unwrap();
-    let error = "BLAST query/options error: Invalid number of arguments to filtering option\nPlease refer to the LOSAT user manual.\n";
+    let error = "LOSAT query/options error: Invalid number of arguments to filtering option\nPlease refer to the LOSAT user manual.\n";
     for extra in [&["-num_descriptions", "5"][..], &["-query_loc", "5-1"], &[]] {
         let output = clean_losat_command()
             .current_dir(&dir)

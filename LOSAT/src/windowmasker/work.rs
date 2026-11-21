@@ -19,10 +19,11 @@ use crate::seqmasks_io::run::{
     finish, post_read_texts, serial_write_failure, write_failure, RunFailure,
 };
 use crate::seqmasks_io::writer::{MaskWriter, MaskedBioseq, Serial, WriteError};
+use crate::sequence::title::get_title_without_source;
 use crate::utils::winmask::{MaskerParams, PctSettings, SeqMasker, UnitCounts, WinMaskError};
 use crate::writedb::fasta_source::reader::ReaderWarning;
 
-use super::ids::{IdLists, TitleFromSource};
+use super::ids::IdLists;
 use super::sdust::{merge_mask_info, SDustMasker};
 
 /// The settings of the masking run, as `CWinMaskConfig` reads them from NCBI's `CArgs`.
@@ -46,8 +47,9 @@ pub(super) struct Record {
     pub title: Option<Vec<u8>>,
     pub taxname: Option<Arc<[u8]>>,
     pub has_source: bool,
-    /// Whether the Bioseq has a source (`BdbRecord::any_source`), for `GetTitle`.
-    pub any_source: bool,
+    /// `sequence::GetTitle` of the Bioseq, which a list matched as text reads; made when the
+    /// source was asked for it (`SequenceSource::make_titles`).
+    pub get_title: Option<Vec<u8>>,
     pub iupac: Vec<u8>,
     pub texts: Vec<String>,
 }
@@ -153,6 +155,8 @@ pub(super) trait SequenceSource {
         out: &mut Ostream<'_>,
         diag: &mut Diag,
     ) -> Result<Option<Record>, Failure>;
+    /// From now on the records carry their titles (`Record::get_title`).
+    fn make_titles(&mut self);
 }
 
 /// The reader of `-infmt` (`CWinMaskConfig`'s `reader`): `CMaskFastaReader` of the opened input
@@ -168,7 +172,10 @@ pub(super) fn reader<'a, R: Read + 'a>(
         ("fasta", Some(input)) => {
             let reader =
                 MaskFastaReader::new(input, false, options.parse_seqids).map_err(read_failure)?;
-            Ok(Some(Box::new(FastaSource { reader })))
+            Ok(Some(Box::new(FastaSource {
+                reader,
+                titles: false,
+            })))
         }
         ("blastdb", _) => Ok(Some(Box::new(DatabaseSource::open(
             options.input,
@@ -186,6 +193,8 @@ fn read_failure(error: std::io::Error) -> Failure {
 
 struct FastaSource<R: Read> {
     reader: MaskFastaReader<R>,
+    /// `make_titles` was called.
+    titles: bool,
 }
 
 impl<R: Read> SequenceSource for FastaSource<R> {
@@ -220,15 +229,22 @@ impl<R: Read> SequenceSource for FastaSource<R> {
             MaskReadError::OutOfMemory => Failure::Std("std::bad_alloc".to_string()),
             MaskReadError::Refused(what) => Failure::Refused(unsupported(&what)),
         })?;
+        let titles = self.titles;
         Ok(record.map(|record| Record {
+            get_title: titles.then(|| {
+                get_title_without_source(&record.ids, record.title.as_deref().unwrap_or_default())
+            }),
             ids: record.ids,
             title: record.title,
             taxname: None,
             has_source: false,
-            any_source: false,
             iupac: record.letters,
             texts: Vec::new(),
         }))
+    }
+
+    fn make_titles(&mut self) {
+        self.titles = true;
     }
 }
 
@@ -285,10 +301,14 @@ impl SequenceSource for DatabaseSource {
             title: Some(record.title),
             taxname: record.taxname,
             has_source: record.has_source,
-            any_source: record.any_source,
+            get_title: record.get_title,
             iupac: record.residues,
             texts: record.texts,
         }))
+    }
+
+    fn make_titles(&mut self) {
+        self.reader.ask_get_title();
     }
 }
 
@@ -424,7 +444,7 @@ fn mask_input(
     let mut duster = options.dust_level.map(SDustMasker::new);
     while let Some(record) = source.next_record(out, diag)? {
         post_read_texts::<Failure>(&record.texts, out, diag)?;
-        if record.iupac.is_empty() || !considered(lists, &record)? {
+        if record.iupac.is_empty() || !lists.consider(&record) {
             continue;
         }
         let mut mask = masker
@@ -447,14 +467,4 @@ fn mask_input(
         serial_write_failure::<Failure>(out, options.outfmt, super::PROGRAM)?;
     }
     Ok(())
-}
-
-/// `CWinMaskUtil::consider` of `record` (`IdLists::consider`), or LOSAT's refusal of a title
-/// that a list matched as text asks for and LOSAT does not make.
-fn considered(lists: &IdLists, record: &Record) -> Result<bool, Failure> {
-    lists.consider(record).map_err(|TitleFromSource| {
-        Failure::Refused(unsupported(
-            "-ids or -exclude_ids matched as text (-text_match T) with a database sequence without a title whose definition line has a tax id (NCBI matches the ids against a title made from the taxonomy names)",
-        ))
-    })
 }

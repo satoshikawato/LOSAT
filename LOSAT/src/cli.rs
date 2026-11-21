@@ -1,5 +1,6 @@
 //! Public CLI v2 boundary. Clap's double-dash representation is internal only.
 
+use crate::wording::{DATABASE_ERROR, QUERY_OPTIONS_ERROR};
 use std::{ffi::OsString, fmt};
 
 use clap::{error::ErrorKind, CommandFactory, Parser, Subcommand};
@@ -265,10 +266,10 @@ where
     try_parse_from_command(T::command(), argv)
 }
 
-/// `try_parse_from` for a caller whose calls run an NCBI application start of their own: the
-/// library API (`api::start`) and LOSAT Web's ABI v2 (`web_adapter::start_run`). `-logfile`,
-/// `-conffile` and `-dryrun` are taken; the versions and `-xmlhelp`, whose texts only the command
-/// line writes, are refused (`version_word_error`, `xml_help_refusal`).
+/// `try_parse_from` for a caller whose calls run an NCBI application start of their own and return
+/// reports: the library API (`api::start`). `-logfile`, `-conffile` and `-dryrun` are taken; the
+/// versions and `-xmlhelp`, whose texts the library has no place for, are refused
+/// (`version_word_error`, `xml_help_refusal`).
 pub(crate) fn try_parse_with_own_start<T, I, S>(argv: I) -> Result<T, clap::Error>
 where
     T: Parser + CommandFactory,
@@ -276,6 +277,22 @@ where
     S: Into<OsString>,
 {
     parse_command(T::command(), argv, Reader::OwnStart)
+}
+
+/// `try_parse_from` for LOSAT Web's ABI v2, whose runs make their own NCBI application start
+/// (`web_adapter::start_run`) and give the host the text that the command line prints in place of
+/// a run (stream 11; line WQA's D14, 2026-11-20): `-logfile`, `-conffile` and `-dryrun` are taken,
+/// and `-xmlhelp` stops the reader with the request whose XML the run prints (`printed_text`), as
+/// on the command line. The versions are printed before the arguments are read
+/// (`ncbi_version_request`, `api::start::CallerStart::version`), so a version word that reaches
+/// this reader is refused (`version_word_error`).
+pub(crate) fn try_parse_with_printing_start<T, I, S>(argv: I) -> Result<T, clap::Error>
+where
+    T: Parser + CommandFactory,
+    I: IntoIterator<Item = S>,
+    S: Into<OsString>,
+{
+    parse_command(T::command(), argv, Reader::PrintingStart)
 }
 
 /// `try_parse_from` after the command line's application start `start` of the program that
@@ -315,17 +332,20 @@ enum Reader<'a> {
     /// A caller that runs no NCBI application start (LOSAT Web's ABI v1): the toolkit's words,
     /// the versions and `-xmlhelp` are refused.
     NoStart,
-    /// The library API and LOSAT Web's ABI v2, whose calls run a start of their own
-    /// (`api::start`, `web_adapter::start_run`): `-logfile`, `-conffile` and `-dryrun` are taken;
-    /// the versions and `-xmlhelp` are refused.
+    /// The library API, whose calls run a start of their own (`api::start`): `-logfile`,
+    /// `-conffile` and `-dryrun` are taken; the versions and `-xmlhelp` are refused.
     OwnStart,
+    /// LOSAT Web's ABI v2, whose runs make a start of their own (`web_adapter::start_run`) and
+    /// print the command line's texts: the toolkit's words are taken, and `-xmlhelp` is the
+    /// request whose XML the run prints, as on the command line.
+    PrintingStart,
     /// The command line's entry with its application start: `-xmlhelp` is the request whose XML
     /// the entry prints.
     CommandLine(&'a crate::blastinput::ncbi_environment::ApplicationStart),
 }
 
-/// The reader of `try_parse_from`, `try_parse_with_own_start`, `try_parse_from_start` and
-/// `try_parse_from_command`.
+/// The reader of `try_parse_from`, `try_parse_with_own_start`, `try_parse_with_printing_start`,
+/// `try_parse_from_start` and `try_parse_from_command`.
 fn parse_command<T, I, S>(
     command: clap::Command,
     argv: I,
@@ -443,9 +463,10 @@ where
         // `ncbi_xmlhelp`)
         // `-xmlhelp` (`s_AutoHelpXml`) stops the reader as `-help` does, the words before it
         // read: the command line's entry prints the program's arguments in NCBI's XML
-        // (`xml_help_program`, `ncbi_xmlhelp::print`; line RG item E2x). The library API and the
-        // Web engine, which write no help of NCBI's, refuse it there, after the words before it
-        // (`xml_help_refusal`).
+        // (`xml_help_program`, `ncbi_xmlhelp::print`; line RG item E2x), and so does a run of
+        // LOSAT Web's ABI v2 (`printed_text`; line WQA's D14, 2026-11-20). The library API and the
+        // Web engine's ABI v1, which write no help of NCBI's, refuse it there, after the words
+        // before it (`xml_help_refusal`).
         if stops_at_help && text == "-xmlhelp" {
             translated.push("--help".into());
             xml_help = Some(scope.get_name().to_string());
@@ -556,7 +577,7 @@ where
         Err(error) if error.kind() == ErrorKind::DisplayHelp && xml_help.is_some() => {
             let program = xml_help.unwrap_or_default();
             return Err(match reader {
-                Reader::CommandLine(_) => xml_help_request(program),
+                Reader::CommandLine(_) | Reader::PrintingStart => xml_help_request(program),
                 Reader::NoStart | Reader::OwnStart => clap::Error::raw(
                     ErrorKind::InvalidValue,
                     xml_help_refusal(&refusal_program_name(&program)),
@@ -750,14 +771,13 @@ fn render_rpsbproc_text(text: &str) -> String {
 // (AGENTS.md rule 2: explicit unsupported errors). `-db` and `-dbsize` are implemented
 // (`blastn/args.rs`), as are the X-drops, `-window_size`, `-off_diagonal_range`, `-no_greedy`
 // (DI-6), `-min_raw_gapped_score` (DI-6b), the database masks (`blastinput::db_mask`, series
-// NP M4a-2) and `-best_hit_overhang` / `-best_hit_score_edge` (series NP O6a).
+// NP M4a-2), `-filtering_db` (`algorithm::blastn::repeat_filter`, line RG item D4) and
+// `-best_hit_overhang` / `-best_hit_score_edge` (series NP O6a).
 const UNPORTED_BLASTN_ARGS: &[&str] = &[
     "entrez_query",
-    "filtering_db",
     "gilist",
     "html",
     "import_search_strategy",
-    "index_name",
     "negative_gilist",
     "remote",
 ];
@@ -768,12 +788,9 @@ fn is_unported_blastn_arg(name: &str) -> bool {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastp_args.cpp:44-50
 // The options of NCBI blastp 2.17.0+ (-help) that LOSAT's BLASTP does not implement
-// (AGENTS.md rule 2: explicit unsupported errors).
+// (AGENTS.md rule 2: explicit unsupported errors). `-best_hit_overhang` / `-best_hit_score_edge`
+// are implemented (series NP O6a-2, psiblast's too).
 const UNPORTED_BLASTP_ARGS: &[&str] = &[
-    "best_hit_overhang",
-    "best_hit_score_edge",
-    "db_hard_mask",
-    "db_soft_mask",
     "entrez_query",
     "gilist",
     "html",
@@ -794,14 +811,14 @@ fn is_unported_blastp_arg(name: &str) -> bool {
 /// psiblast's NCBI arguments that LOSAT does not run: PHI-BLAST (PS8; the ASCII and ASN.1 PSSM
 /// files are PS2's and PS3's, `algorithm::psiblast::pssm`, `-in_pssm` PS4's,
 /// `algorithm::psiblast::in_pssm`, the MSA inputs PS6's, `algorithm::psiblast::in_msa`), and the arguments that blastp's engine does
-/// not run either (`is_unported_blastp_arg`; psiblast has no database masks and no `-mt_mode`).
+/// not run either (`is_unported_blastp_arg`; psiblast has no database masks, NCBI's unknown
+/// arguments of its parser, and no `-mt_mode`).
 /// The search strategy file is written, of a FASTA query and of `-in_pssm` (items F1b-1 and F1b-2
 /// of line RG).
 const UNPORTED_PSIBLAST_OWN_ARGS: &[&str] = &["phi_pattern"];
 
 fn is_unported_psiblast_arg(name: &str) -> bool {
-    UNPORTED_PSIBLAST_OWN_ARGS.contains(&name)
-        || (is_unported_blastp_arg(name) && !matches!(name, "db_hard_mask" | "db_soft_mask"))
+    UNPORTED_PSIBLAST_OWN_ARGS.contains(&name) || is_unported_blastp_arg(name)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpsblast_args.cpp:85-127 (cited at
@@ -982,15 +999,9 @@ where
     match crate::blastinput::ncbi_environment::preparse(&tokens[2..]) {
         crate::blastinput::ncbi_environment::Preparsed::Version(request) => {
             // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:388
-            // rpsbproc's own version (0.5.1), not BLAST's; the second line names the BLAST+
-            // toolkit that bioconda builds it on (orchestrator's choice, Owner-delegated
-            // 2026-11-11).
-            let version = if name == "rpsbproc" {
-                crate::rpsbproc::VERSION
-            } else {
-                crate::NCBI_BLAST_VERSION
-            };
-            Some(crate::ncbi_version::print(request, name, version))
+            // Every program prints LOSAT's version (NCBI's rpsbproc its own 0.5.1, the BLAST+
+            // programs 2.17.0+; the Owner 2026-11-21 「Q1=B」).
+            Some(crate::ncbi_version::print(request, name))
         }
         _ => None,
     }
@@ -1125,12 +1136,13 @@ fn toolkit_option_name(word: &str) -> &str {
 
 // No NCBI counterpart: NCBI's application prints the versions before its arguments
 // (ncbiapp.cpp:926-1001, cited at `ncbi_environment::preparse`). The library API of the search
-// programs returns reports, and the Web engine shows them: neither has a place for the text
-// (line RG DECISIONS E3-2; the library's tools print it to their output, `ncbi_app::run_with`,
-// `api::run_makeblastdb`, so their refusal names the Web engine alone).
+// programs returns reports and has no place for the text (line RG DECISIONS E3-2; the library's
+// tools print it to their output, `ncbi_app::run_with`, `api::run_makeblastdb`), nor has the Web
+// engine's ABI v1. A run of the Web engine's ABI v2 prints it on its stream of the command line's
+// standard output (`api::start::CallerStart::version`; line WQA's D14, 2026-11-20).
 /// LOSAT's refusal of the version word `word` (`-version` or a full version) in `program` where
 /// the parser's caller prints no version: the library API of the search programs and the Web
-/// engine.
+/// engine's ABI v1.
 fn version_word_error(program: &str, word: &str) -> clap::Error {
     clap::Error::raw(ErrorKind::InvalidValue, version_word_refusal(program, word))
 }
@@ -1140,6 +1152,9 @@ pub(crate) fn version_word_refusal(program: &str, word: &str) -> String {
     let name = toolkit_option_name(word);
     let shown = refusal_program_name(program);
     let (places, refusers) = match library_part(program) {
+        LibraryPart::Search if WEB_V2_PROGRAMS.contains(&program) => {
+            ("the command line and in LOSAT Web", "the library API does")
+        }
         LibraryPart::Search => ("the command line", "the library API and the Web engine do"),
         LibraryPart::Tool => (
             "the command line and in the library API",
@@ -1162,16 +1177,26 @@ fn refusal_program_name(program: &str) -> String {
 }
 
 // No NCBI counterpart: NCBI has no library API. NCBI's application prints the XML of `-xmlhelp`
-// (ncbiapp.cpp:685-690, cited at `ncbi_xmlhelp`); LOSAT's library and the Web engine refuse it
-// (line RG DECISIONS E2x-1, the Owner's choice of 2026-11-13). Only the command line's entries
-// reach the XML (`xml_help_text`, `ncbi_app::run`), so the library and the Web engine do not carry
-// it (E2x-2).
+// (ncbiapp.cpp:685-690, cited at `ncbi_xmlhelp`); LOSAT's library refuses it (line RG DECISIONS
+// E2x-1, the Owner's choice of 2026-11-13). The command line's entries reach the XML
+// (`xml_help_text`, `ncbi_app::run`), and so does a run of the Web engine's ABI v2, which prints it
+// on its stream of the command line's standard output (`printed_text`; line WQA's D14 and Q-XML=A,
+// the Owner's choice of 2026-11-20, which takes the XML into the Web engine where E2x-1 and E2x-2
+// left it out); the library and the Web engine's ABI v1 refuse it.
 /// LOSAT's refusal of `-xmlhelp` where no command line's entry prints it: the library API and the
-/// Web engine of `shown` (`refusal_program_name`, `ncbi_app::Tool::refusal_name`).
+/// Web engine's ABI v1 of `shown` (`refusal_program_name`, `ncbi_app::Tool::refusal_name`).
 pub(crate) fn xml_help_refusal(shown: &str) -> String {
-    format!(
-        "the option -xmlhelp runs on the command line of LOSAT's {shown} only: the library API and the Web engine do not write NCBI's XML description of the arguments"
-    )
+    let web = WEB_V2_PROGRAMS
+        .iter()
+        .any(|program| program.eq_ignore_ascii_case(shown));
+    match web {
+        true => format!(
+            "the option -xmlhelp runs on the command line and in LOSAT Web of LOSAT's {shown} only: the library API does not write NCBI's XML description of the arguments"
+        ),
+        false => format!(
+            "the option -xmlhelp runs on the command line of LOSAT's {shown} only: the library API and the Web engine do not write NCBI's XML description of the arguments"
+        ),
+    }
 }
 
 /// The help request that `try_parse_from_start` returns where `-xmlhelp` stopped the reader of
@@ -1193,6 +1218,21 @@ pub(crate) fn xml_help_program(error: &clap::Error) -> Option<&str> {
         }
         _ => None,
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:685-697
+// NCBI's application writes the help and the XML of `-xmlhelp` to its standard output and exits
+// with status 0.
+/// What the command line prints to its standard output, exit status 0, where its argument reader
+/// stopped with `error` (`cli::main_entry`): the XML of `-xmlhelp` (`xml_help_program`,
+/// `xml_help_text`), or the help that stopped the reader (`-h`, `-help`, `-help-full`, `--help`;
+/// `command_line_message`, `rpsbproc` as there). `None` for an error, which the command line writes
+/// to its standard error. LOSAT Web's ABI v2 prints the same text (stream 11; line WQA's D14,
+/// 2026-11-20): one producer of the text for both.
+pub fn printed_text(error: &clap::Error, rpsbproc: bool) -> Option<String> {
+    xml_help_program(error)
+        .and_then(xml_help_text)
+        .or_else(|| (!error.use_stderr()).then(|| command_line_message(error, rpsbproc)))
 }
 
 /// What `losat <program> -xmlhelp` prints: NCBI's XML of `program` without the arguments that its
@@ -1254,8 +1294,6 @@ fn with_toolkit_file_args(mut command: clap::Command) -> clap::Command {
 const UNPORTED_TBLASTN_ARGS: &[&str] = &[
     "best_hit_overhang",
     "best_hit_score_edge",
-    "db_hard_mask",
-    "db_soft_mask",
     "entrez_query",
     "gilist",
     "html",
@@ -1275,8 +1313,6 @@ fn is_unported_tblastn_arg(name: &str) -> bool {
 const UNPORTED_TBLASTX_ARGS: &[&str] = &[
     "best_hit_overhang",
     "best_hit_score_edge",
-    "db_hard_mask",
-    "db_soft_mask",
     "entrez_query",
     "gilist",
     "html",
@@ -1296,8 +1332,6 @@ const UNPORTED_BLASTX_ARGS: &[&str] = &[
     "gilist",
     "negative_gilist",
     "entrez_query",
-    "db_soft_mask",
-    "db_hard_mask",
     "ipglist",
     "negative_ipglist",
     "best_hit_overhang",
@@ -1368,7 +1402,7 @@ impl NativeError {
         if e.kind().starts_with("CSeqDBException::") {
             return NativeError {
                 exit: 2,
-                message: [b"BLAST Database error: ".as_slice(), e.get_msg(), b"\n"].concat(),
+                message: [DATABASE_ERROR.as_bytes(), b" ", e.get_msg(), b"\n"].concat(),
             };
         }
         NativeError {
@@ -1410,12 +1444,18 @@ pub struct ReportStream {
 
 impl ReportStream {
     /// The command line's report stream: the `-out` file `out_file` (`None`: standard output),
-    /// behind NCBI's buffer for the organism report (`tax_report`, `report_destination`).
-    pub fn of_cli(out_file: Option<std::io::BufWriter<std::fs::File>>, tax_report: bool) -> Self {
+    /// behind NCBI's buffer for the organism report (`tax_report`, `report_destination`) and the
+    /// hold of a run whose strategy file `strategy` LOSAT refuses (`report_destination`).
+    pub fn of_cli(
+        out_file: Option<std::io::BufWriter<std::fs::File>>,
+        tax_report: bool,
+        strategy: Option<&crate::report::archive::strategy::StrategyExport>,
+    ) -> Self {
         ReportStream {
             inner: report_destination(
                 out_file.map(|file| Box::new(file) as Box<dyn std::io::Write + Send>),
                 tax_report,
+                strategy,
             ),
             failed: false,
         }
@@ -1696,14 +1736,19 @@ impl<'a> NcbiOstream<'a> {
     /// The organism report's standard output on blastx's command line: NCBI's buffer of `cout`
     /// (`NcbiReportBuffer::standard_output`) before the process's standard output
     /// (`report_standard_output`). Nothing comes before the buffer or between it and the device.
-    pub(crate) fn standard_output() -> Self {
-        Self::new(report_destination(None, true))
+    pub(crate) fn standard_output(
+        strategy: Option<&crate::report::archive::strategy::StrategyExport>,
+    ) -> Self {
+        Self::new(report_destination(None, true, strategy))
     }
 
     /// The organism report's `-out` file `file` on blastx's command line: NCBI's `basic_filebuf`
     /// (`NcbiReportBuffer::file`) before the file, as `standard_output`'s.
-    pub(crate) fn file(file: std::fs::File) -> Self {
-        Self::new(report_destination(Some(Box::new(file)), true))
+    pub(crate) fn file(
+        file: std::fs::File,
+        strategy: Option<&crate::report::archive::strategy::StrategyExport>,
+    ) -> Self {
+        Self::new(report_destination(Some(Box::new(file)), true, strategy))
     }
 
     /// The stream of a format other than the organism report on blastx's command line
@@ -1760,8 +1805,25 @@ pub fn tie_standard_output() -> std::io::Result<()> {
 /// `write_all` of the stream, which `std::io::Stderr` writes under one lock of standard error, so
 /// that no other thread's message comes inside it. An empty write is no write of NCBI's to `cerr`
 /// (a query without warnings, whose `ERR_POST` NCBI does not make): it writes nothing of the
-/// report.
+/// report. Where the standard error is the file of `-logfile` (tblastx's, rpsblast's and
+/// rpstblastn's run, `DiagTarget::into_standard_error`), a failed write is dropped, as NCBI's
+/// handler of that file drops it: `CFileHandleDiagHandler::Post` ignores what the write returns
+/// (NCBI BLAST+ 2.17.0 tblastx `-logfile /dev/full` runs and writes its report; line WQA's D11
+/// round 2, 2026-11-20).
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:6695-6696
 pub struct CliStderr(std::io::Stderr);
+
+impl CliStderr {
+    /// `result` of a write, dropped where the standard error is the file of `-logfile`.
+    fn logged<T: Default>(result: std::io::Result<T>) -> std::io::Result<T> {
+        match result {
+            Err(_) if crate::blastinput::ncbi_environment::terminal_stderr().is_some() => {
+                Ok(T::default())
+            }
+            result => result,
+        }
+    }
+}
 
 impl CliStderr {
     /// The process's standard error.
@@ -1776,7 +1838,7 @@ impl std::io::Write for CliStderr {
             return Ok(0);
         }
         tie_standard_output()?;
-        self.0.write(buf)
+        Self::logged(self.0.write_all(buf)).map(|()| buf.len())
     }
 
     fn write_all(&mut self, buf: &[u8]) -> std::io::Result<()> {
@@ -1784,7 +1846,7 @@ impl std::io::Write for CliStderr {
             return Ok(());
         }
         tie_standard_output()?;
-        self.0.write_all(buf)
+        Self::logged(self.0.write_all(buf))
     }
 
     fn write_fmt(&mut self, args: std::fmt::Arguments<'_>) -> std::io::Result<()> {
@@ -1797,16 +1859,23 @@ impl std::io::Write for CliStderr {
 }
 
 /// The report stream's writer of a run: the `-out` file `file` (`None`: standard output), behind
-/// NCBI's buffer for the organism report (`tax_report`, `NcbiReportBuffer`).
+/// NCBI's buffer for the organism report (`tax_report`, `NcbiReportBuffer`) and, nearest the
+/// destination, the hold of a run whose strategy file `strategy` LOSAT refuses
+/// (`strategy::hold_report_send`).
 pub fn report_destination(
     file: Option<Box<dyn std::io::Write + Send>>,
     tax_report: bool,
+    strategy: Option<&crate::report::archive::strategy::StrategyExport>,
 ) -> Box<dyn std::io::Write + Send> {
+    use crate::report::archive::strategy::hold_report_send;
     match (file, tax_report) {
-        (Some(file), true) => Box::new(NcbiReportBuffer::file(file)),
-        (Some(file), false) => file,
-        (None, true) => Box::new(NcbiReportBuffer::standard_output(report_standard_output())),
-        (None, false) => report_standard_output(),
+        (Some(file), true) => Box::new(NcbiReportBuffer::file(hold_report_send(strategy, file))),
+        (Some(file), false) => hold_report_send(strategy, file),
+        (None, true) => Box::new(NcbiReportBuffer::standard_output(hold_report_send(
+            strategy,
+            report_standard_output(),
+        ))),
+        (None, false) => hold_report_send(strategy, report_standard_output()),
     }
 }
 
@@ -1863,16 +1932,15 @@ pub(crate) fn create_out_file(
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:251-255
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:160-163
 /// Writes the text of the run's `NativeError` to standard error and exits with its code; a text
-/// that the run already wrote (`post_native_error`) is not written again.
+/// that the run already wrote (`post_native_error`) is not written again. A failed write is
+/// dropped, as NCBI's post drops it (`eprint!` would abort: tblastx `-evalue 0 -logfile /dev/full`
+/// exits with 1 and writes nothing in NCBI BLAST+ 2.17.0; line WQA's D11 round 2, 2026-11-20).
 pub fn exit_on_native_error(error: &anyhow::Error) {
     if let Some(e) = error.downcast_ref::<NativeError>() {
         if !posted(&e.message) {
-            // `eprint!` of the bytes: a failed write panics as `eprint!`'s does.
-            if let Err(error) =
-                std::io::Write::write_all(&mut std::io::stderr(), catch_all_text(&e.message))
-            {
-                panic!("failed printing to stderr: {error}");
-            }
+            let mut stderr = std::io::stderr();
+            let _ = std::io::Write::write_all(&mut stderr, catch_all_text(&e.message));
+            let _ = std::io::Write::flush(&mut stderr);
         }
         if e.exit < 0 {
             std::process::abort();
@@ -1893,7 +1961,7 @@ pub(crate) fn catch_all_text(message: &[u8]) -> &[u8] {
     if message.is_empty() || !crate::ncbi_exception::main_diag_failbit() {
         return message;
     }
-    if message.starts_with(b"BLAST query/options error: ")
+    if message.starts_with(QUERY_OPTIONS_ERROR.as_bytes())
         && message
             .strip_suffix(b"\n")
             .and_then(|s| s.strip_suffix(crate::wording::USER_MANUAL_FOOTER.as_bytes()))

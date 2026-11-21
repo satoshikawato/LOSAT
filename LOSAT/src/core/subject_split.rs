@@ -6,7 +6,7 @@
 //! The one owner of the hard chunks (series NP, M4a-2b review S1): BLASTN's preliminary stage
 //! searches these chunks (`algorithm::blastn::blast_engine::run::next_hard_chunk` turns each into
 //! the engine's chunk), and LOSAT's refusals of `-db_hard_mask` read them
-//! (`blastinput::db_mask::HardMaskShape::of`), so the two cannot disagree. The chunks of a subject
+//! (`blastinput::db_mask::HardMaskShape::of_scan`), so the two cannot disagree. The chunks of a subject
 //! without hard ranges (unmasked or soft-masked, `run::SubjectSplitState::next_chunk`) keep their
 //! own copy of the same arithmetic on `&full_range`, for the default path's code: the one
 //! function for both cost the chunk loop's closure 280,200 more instructions (14 per subject) in
@@ -51,7 +51,7 @@ pub fn complement_masks(masks: &[(u32, u32)], length: usize, ranges: &mut Vec<(i
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct HardChunk {
     /// `backup->offset`: the chunk's first letter in the subject, a multiple of
-    /// `COMPRESSION_RATIO`.
+    /// `COMPRESSION_RATIO` in BLASTN (`next` itself in the protein programs).
     pub offset: usize,
     /// `subject->length`: the chunk's letters.
     pub length: usize,
@@ -91,17 +91,23 @@ pub struct HardSplitState {
     pub ranges: Vec<(i32, i32)>,
     hm_index: usize,
     next: i32,
+    /// `is_nucleotide` (`Blast_ProgramIsNucleotide`): BLASTN's chunks start at a multiple of
+    /// `COMPRESSION_RATIO`, those of the protein programs (`residual` 0) at the range's left.
+    nucleotide: bool,
 }
 
 impl HardSplitState {
     /// The hard ranges `ranges` (never empty: the complement has one range more than the masks)
-    /// of a subject of `subject_len` letters, from its first chunk.
-    pub fn start(&mut self, subject_len: usize, ranges: Vec<(i32, i32)>) {
+    /// of a subject of `subject_len` letters, from its first chunk; `nucleotide` is NCBI's
+    /// `is_nucleotide` of the program (BLASTN; not the protein programs, whose letters are not
+    /// packed: blast_engine.c:448, `Blast_ProgramIsNucleotide`).
+    pub fn start(&mut self, subject_len: usize, ranges: Vec<(i32, i32)>, nucleotide: bool) {
         debug_assert!(!ranges.is_empty());
         self.full_right = subject_len as i32;
         self.ranges = ranges;
         self.hm_index = 0;
         self.next = 0;
+        self.nucleotide = nucleotide;
     }
 
     /// The end of the subject's chunks: no hard ranges (the buffer is kept).
@@ -114,10 +120,11 @@ impl HardSplitState {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:578-584
     /// The next chunk of the subject (`None`: `SUBJECT_SPLIT_DONE`): one chunk per hard range (a
     /// range above `MAX_DBSEQ_LEN` in overlapping chunks of `MAX_DBSEQ_LEN` letters), from `next -
-    /// next % 4`, of `right - offset` letters (0 for a hard range of no letters: a mask at 0,
-    /// masks that touch), scanned from the residual (NCBI scans the full range in the "no
-    /// chunking" branch, [`HardChunk::full_range`]); with the overlap of the merge after it
-    /// ([`HardChunk::overlap`], [`HardChunk::overlap_past_list`]). NCBI's `Int4` arithmetic: the
+    /// next % 4` (from `next` in a protein program), of `right - offset` letters (0 for a hard
+    /// range of no letters: a mask at 0, masks that touch), scanned from the residual (NCBI scans
+    /// the full range in the "no chunking" branch, [`HardChunk::full_range`]); with the overlap of
+    /// the merge after it ([`HardChunk::overlap`], [`HardChunk::overlap_past_list`]). NCBI's
+    /// `Int4` arithmetic: the
     /// hard ranges of sorted masks never go back, so no length is negative (masks out of order
     /// are refused before the search, `HardMaskShape::Unsorted`); a negative one would be clamped
     /// to 0, where NCBI moves the diagonal offset back by it.
@@ -125,7 +132,11 @@ impl HardSplitState {
         if self.next >= self.full_right {
             return None;
         }
-        let residual = self.next % COMPRESSION_RATIO as i32;
+        let residual = if self.nucleotide {
+            self.next % COMPRESSION_RATIO as i32
+        } else {
+            0
+        };
         let offset = self.next - residual;
         let range = self.hm_index;
         let hard_right = self.ranges[range].1;

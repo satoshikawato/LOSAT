@@ -180,7 +180,11 @@ impl RpsblastArgs {
     /// blastp's arguments of the RPS-BLAST search, after LOSAT's refusal of the output formats of
     /// a later item.
     pub fn into_blastp_args(self) -> Result<BlastpArgs> {
-        Self::check_outfmt(&self.outfmt)?;
+        Self::check_outfmt(
+            &self.outfmt,
+            self.out.as_deref(),
+            self.export_search_strategy.is_some(),
+        )?;
         let requested_cbs = rps_composition_mode(&self.comp_based_stats);
         let request_inputs = Some(Box::new(self.option_inputs()));
         Ok(BlastpArgs {
@@ -188,6 +192,8 @@ impl RpsblastArgs {
             subject: None,
             db: self.db,
             db_filter: Default::default(),
+            // rpsblast has no database masks (NCBI's unknown arguments).
+            db_mask: Default::default(),
             dbsize: self.dbsize,
             show_gis: self.show_gis,
             parse_deflines: self.parse_deflines,
@@ -213,6 +219,9 @@ impl RpsblastArgs {
             max_hsps_per_subject: None,
             qcov_hsp_perc: None,
             culling_limit: None,
+            // rpsblast has no `-best_hit_*` (NCBI's parser neither).
+            best_hit_overhang: None,
+            best_hit_score_edge: None,
             subject_besthit: false,
             ungapped: false,
             // rpsblast's X-drops are its RPS engine's (`rps`).
@@ -290,35 +299,56 @@ impl RpsblastArgs {
 
     /// NCBI parses `-outfmt` before the option handlers (`app::parse_formatting_string`, its
     /// errors are NCBI's); the formats that NCBI runs and LOSAT's RPSBLAST does not write yet are
-    /// refused (item PS15a, `check_rps_outfmt`).
-    pub fn check_outfmt(outfmt: &str) -> Result<()> {
-        check_rps_outfmt(outfmt, "RPSBLAST", false)
+    /// refused (item PS15a, `check_rps_outfmt`), with `-out` `out` (`strategy`: the run writes a
+    /// search strategy file).
+    pub fn check_outfmt(outfmt: &str, out: Option<&std::path::Path>, strategy: bool) -> Result<()> {
+        check_rps_outfmt(outfmt, "RPSBLAST", out, strategy)
     }
 }
 
 /// The refusal of an `-outfmt` that NCBI's RPS programs run and LOSAT's `program` (RPSBLAST,
 /// RPSTBLASTN) does not write yet (item PS15a): every format but 0, 6, 7 and 10, and RPSTBLASTN's
-/// query-anchored formats 1 to 4, which BLASTX's report writes for it (line RG item T3c). Outfmt
-/// 17 goes on to NCBI's own error (`formatting_handler_check`), and with `xinclude_to_ncbi` outfmt
-/// 13 and 14 too (to the standard output: NCBI's "Please provide a file name",
-/// `app::xinclude_check_for`).
-pub(crate) fn check_rps_outfmt(outfmt: &str, program: &str, xinclude_to_ncbi: bool) -> Result<()> {
-    use crate::blastinput::app::ReportFormat;
-    let choice = crate::blastinput::app::parse_formatting_string(outfmt)?;
+/// query-anchored formats 1 to 4, which BLASTX's report writes for it (line RG item T3c). A value
+/// that NCBI refuses itself later (`app::ncbi_refuses_format`: outfmt 17, a custom delimiter that
+/// the field list uses, outfmt 13 and 14 without a file name in `-out` `out`) goes on to NCBI's
+/// error at its place, after the arguments' own errors (`-query` not accessible) and before the
+/// database is opened (NCBI 2.17.0, line RG F/d36 probes rps.conf20, rps.conf20.q,
+/// rps.conf20.nodb, rpst.conf20, rps.o14, rpst.o14), and never runs the format. `strategy`: the
+/// run writes a search strategy file (`-export_search_strategy`), before which NCBI reads no
+/// `-outfmt`.
+pub(crate) fn check_rps_outfmt(
+    outfmt: &str,
+    program: &str,
+    out: Option<&std::path::Path>,
+    strategy: bool,
+) -> Result<()> {
+    use crate::blastinput::app::{Program, ReportFormat};
+    // A value not read yet (`EarlyFormat::Deferred`) is the formatting handler's.
+    let Some(choice) = crate::blastinput::app::early_format_choice(outfmt, strategy)?
+        .parsed()
+        .cloned()
+    else {
+        return Ok(());
+    };
+    // RPSBLAST searches with blastp's options, RPSTBLASTN with blastx's (neither writes SAM).
+    let search = if program == "RPSTBLASTN" {
+        Program::Blastx
+    } else {
+        Program::Blastp
+    };
+    if crate::blastinput::app::ncbi_refuses_format(&choice, search, out) {
+        return Ok(());
+    }
     if let Some(format) = ReportFormat::from_number(choice.number) {
-        let ncbi_error =
-            xinclude_to_ncbi && matches!(format, ReportFormat::Json | ReportFormat::Xml2);
         let query_anchored =
             program == "RPSTBLASTN" && crate::report::pairwise::PairwiseView::of(format).is_some();
-        if !ncbi_error
-            && !query_anchored
+        if !query_anchored
             && !matches!(
                 format,
                 ReportFormat::Pairwise
                     | ReportFormat::Tabular
                     | ReportFormat::TabularWithComments
                     | ReportFormat::CommaSeparatedValues
-                    | ReportFormat::Sam
                     | ReportFormat::ArchiveFormat
                     | ReportFormat::Xml
             )

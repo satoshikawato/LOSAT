@@ -191,6 +191,7 @@ pub(super) fn write_sam(
             };
             sam::add_blastn_sam(
                 target.document,
+                report.ungapped,
                 hit_lists,
                 &names,
                 report.queries_before,
@@ -216,6 +217,7 @@ pub(super) fn write_sam(
             };
             sam::add_blastn_sam(
                 target.document,
+                report.ungapped,
                 hit_lists,
                 &names,
                 report.queries_before,
@@ -309,10 +311,11 @@ pub(super) fn write_structured_xml(
             messages
         })
         .collect();
-    let version = format!("BLASTN {}", crate::NCBI_BLAST_VERSION);
+    let version = format!("BLASTN {}", crate::wording::REPORT_VERSION);
     let filter = crate::report::blast_xml::filter::filter_string(
         report.dust,
         None,
+        report.repeat_filter,
         report.window_masker,
         report.soft_masking,
     );

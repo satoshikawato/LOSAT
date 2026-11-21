@@ -125,7 +125,7 @@ fn formatting_strings_are_read_as_ncbi_reads_them() {
         .contains("Delimiter format is invalid"));
     assert_eq!(
         message(parse_formatting_string("abc").unwrap_err()),
-        "1 BLAST query/options error: 'abc' is not a valid output format\nPlease refer to the LOSAT user manual.\n"
+        "1 LOSAT query/options error: 'abc' is not a valid output format\nPlease refer to the LOSAT user manual.\n"
     );
     assert_eq!(
         message(parse_formatting_string("22").unwrap_err()),
@@ -303,7 +303,7 @@ fn ncbis_later_format_errors_are_its_messages() {
         delimiter: String::new(),
     };
     let options =
-        |text: &str| format!("1 BLAST query/options error: {text}\n{USER_MANUAL_FOOTER}\n");
+        |text: &str| format!("1 LOSAT query/options error: {text}\n{USER_MANUAL_FOOTER}\n");
     for program in PROGRAMS {
         let sam = formatting_handler_check(&choice(SAM), program);
         if program.is_sam() {
@@ -440,4 +440,31 @@ fn environment_values_are_converted_as_ncbis_string_to_int() {
             "{text:?}"
         );
     }
+}
+
+/// A format NCBI cannot read is left to the formatting handler when a strategy file is asked
+/// for (`early_format_choice`), which reads it again and fails there; a readable one is as it
+/// was read, and without a strategy file the error comes at once.
+#[test]
+fn an_unreadable_format_is_deferred_with_a_strategy_file() {
+    for outfmt in ["99", "abc", "6 delimx", " -1"] {
+        let message = |error: anyhow::Error| error.to_string();
+        assert!(early_format_choice(outfmt, false).is_err(), "{outfmt}");
+        let choice = early_format_choice(outfmt, true).unwrap();
+        assert_eq!(choice, EarlyFormat::Deferred, "{outfmt}");
+        assert_eq!(choice.number(), None, "{outfmt}");
+        assert!(choice
+            .report_format(Program::Blastp, None)
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            message(choice.at_formatting_handler(outfmt).unwrap_err()),
+            message(parse_formatting_string(outfmt).unwrap_err()),
+            "{outfmt}"
+        );
+    }
+    let choice = early_format_choice("6 qseqid", true).unwrap();
+    let parsed = choice.parsed().unwrap().clone();
+    assert_eq!(choice.number(), Some(6));
+    assert_eq!(choice.at_formatting_handler("99").unwrap(), parsed);
 }

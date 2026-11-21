@@ -44,7 +44,9 @@ fn parsed(text: &str) -> Time {
 
 fn time_exception(text: &str) -> String {
     match parse_blast_db_date(text) {
-        Err(ParseFailure::TimeException(reason)) => reason,
+        Err(ParseFailure::TimeException(exception)) => {
+            String::from_utf8_lossy(exception.get_msg()).into_owned()
+        }
         other => panic!("{text:?}: expected a CTimeException, got {other:?}"),
     }
 }
@@ -220,9 +222,11 @@ fn number_without_digit_is_caught_and_keeps_current_date() {
         "Oct 12, 2026  3:",      // minute at the end of the string
         "Oct ",                  // day at the end of the string
     ] {
-        assert_eq!(
-            parse_blast_db_date(bad),
-            Err(ParseFailure::StringException),
+        assert!(
+            matches!(
+                parse_blast_db_date(bad),
+                Err(ParseFailure::StringException(_))
+            ),
             "{bad:?}"
         );
         assert_eq!(date_of(&[PM_322, bad]), PM_322, "{bad:?}");
@@ -248,13 +252,9 @@ fn current_date_without_digit_is_caught_and_stays() {
 fn time_exception_is_an_error() {
     // t2: CTimeException is not a CStringException, so it leaves GetDate.
     let err = database_date(&[PM_322, "not a date"]).unwrap_err();
-    assert_eq!(
-        err,
-        DateError {
-            date: "not a date".to_owned(),
-            reason: too_short("not a date"),
-        }
-    );
+    assert_eq!(err.date, "not a date");
+    assert_eq!(err.reason, too_short("not a date"));
+    assert_eq!(err.exception.get_msg(), too_short("not a date").as_bytes());
     assert_eq!(
         err.to_string(),
         "BLAST database volume date 'not a date' is rejected: \
@@ -511,8 +511,45 @@ fn non_ascii_text_is_rejected_without_panic() {
     let text = "\u{6642}\u{9593} 12, 2026  3:22 PM";
     assert_eq!(time_exception(text), too_short(text));
     // No digit after the white space: CStringException.
-    assert_eq!(
+    assert!(matches!(
         parse_blast_db_date("Oct \u{ff11}\u{ff12}, 2026  3:22 PM"),
-        Err(ParseFailure::StringException)
-    );
+        Err(ParseFailure::StringException(_))
+    ));
+}
+
+/// The rows of `tests/fixtures/makeblastdb_failure/index_dates.tsv`: NCBI's `blastdbcmd
+/// -metadata` on index files whose date is a prefix of the written one (a failed write).
+#[test]
+fn the_dates_of_a_cut_short_index_are_read_as_ncbi_reads_them() {
+    let table = include_str!("../../tests/fixtures/makeblastdb_failure/index_dates.tsv");
+    let mut rows = 0;
+    for line in table.lines().filter(|line| !line.starts_with('#')) {
+        let columns: Vec<&str> = line.split('\t').collect();
+        let result = iso8601_date_time_exception(columns[0]);
+        match columns[1] {
+            "ok" => assert_eq!(result.as_deref(), Ok(columns[2]), "{:?}", columns[0]),
+            _ => {
+                let exception = result.expect_err(columns[0]);
+                let site = exception.site();
+                assert_eq!(
+                    (
+                        site.line.to_string(),
+                        site.kind,
+                        site.function.unwrap_or(""),
+                        exception.get_msg()
+                    ),
+                    (
+                        columns[2].to_string(),
+                        columns[3],
+                        columns[4],
+                        columns[5].as_bytes()
+                    ),
+                    "{:?}",
+                    columns[0]
+                );
+            }
+        }
+        rows += 1;
+    }
+    assert_eq!(rows, 95);
 }

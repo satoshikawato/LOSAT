@@ -1,6 +1,7 @@
 //! `losat blastdbcmd -list DIR`: the databases of a directory (`FindBlastDBs`) written with
 //! `-list_outfmt` (`CBlastDbFormatter`).
 
+use crate::wording::{DATABASE_ERROR, OPTIONS_ERROR};
 use std::collections::BTreeSet;
 use std::io::Write;
 use std::path::Path;
@@ -269,8 +270,11 @@ impl From<SeqDbError> for ListStop {
             return ListStop::Ncbi([b"Error: ".as_slice(), &exception.what()].concat(), 255);
         }
         match error.ncbi_message() {
-            Some(text) => ListStop::Ncbi([b"BLAST Database error: ".as_slice(), &text].concat(), 2),
-            None => ListStop::Refused(refusal(&error.to_string())),
+            Some(text) => ListStop::Ncbi([DATABASE_ERROR.as_bytes(), b" ", &text].concat(), 2),
+            None => ListStop::Refused(crate::algorithm::common::database::losat_reader_error(
+                &error,
+                super::PROGRAM,
+            )),
         }
     }
 }
@@ -332,7 +336,7 @@ fn disk_usage(db: &FoundDb, version5: bool, path: &SearchPath) -> Result<u64, Li
         if name.split(' ').filter(|piece| !piece.is_empty()).count() > 1 {
             return Err(ListStop::Ncbi(
                 format!(
-                    "BLAST Database error: Cannot compute disk usage for multiple BLASTDBs \
+                    "{DATABASE_ERROR} Cannot compute disk usage for multiple BLASTDBs \
                      (i.e.: '{name}') at once. Please try again using one BLASTDB at a time."
                 )
                 .into_bytes(),
@@ -407,7 +411,7 @@ fn write_line(format: &ListFormat, db: &FoundDb, path: &SearchPath) -> Result<Ve
             .to_vec(),
             other => {
                 let mut message =
-                    b"BLAST options error: Unrecognized format specification: '%".to_vec();
+                    format!("{OPTIONS_ERROR} Unrecognized format specification: '%").into_bytes();
                 message.push(other);
                 message.push(b'\'');
                 return Err(ListStop::Ncbi(message, 1));
@@ -438,7 +442,7 @@ pub(super) fn list(args: &Args, path: &SearchPath, diag: &mut Diag, out: &mut Os
     let fmt = args.value("list_outfmt").unwrap_or("%f %p");
     let Ok(format) = ListFormat::parse(fmt.as_bytes()) else {
         // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:167-171
-        diag.post("BLAST options error: Invalid format specification");
+        diag.post(&format!("{OPTIONS_ERROR} Invalid format specification"));
         return 1;
     };
     let mut text = Vec::new();

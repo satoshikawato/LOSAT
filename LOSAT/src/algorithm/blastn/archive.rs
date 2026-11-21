@@ -77,6 +77,7 @@ pub(crate) fn option_inputs(args: &BlastnArgs, dust: Option<&str>) -> OptionInpu
             },
         });
     inputs.soft_masking = Some(args.soft_masking());
+    inputs.filtering_db = args.filtering_db.clone();
     inputs.window_masker_db = args.window_masker_db.clone();
     inputs.window_masker_taxid = args.window_masker_taxid;
     inputs.culling_limit = args.culling_limit;
@@ -90,7 +91,9 @@ pub(crate) fn option_inputs(args: &BlastnArgs, dust: Option<&str>) -> OptionInpu
     inputs.xdrop_gap_final = args.xdrop_gap_final;
     inputs.window_size = args.window_size;
     inputs.no_greedy = args.no_greedy;
-    inputs.mb_index_name = args.megablast_index_name().map(str::to_string);
+    inputs.mb_index_name = args
+        .megablast_index_name()
+        .map(|(name, _)| name.to_string());
     inputs.hitlist_size = args
         .max_target_seqs
         .or(args.num_alignments)
@@ -149,6 +152,10 @@ pub(crate) struct CallBatches<'a> {
     /// made for every query; with `-window_masker_db` (`window_masker`) the WindowMasker masks.
     /// Only the archive reads them (empty without it).
     pub dust_masks: &'a [Vec<MaskedInterval>],
+    /// With `-filtering_db`, the repeat hits of the call's queries (0-based, inclusive, in the
+    /// searched letters; `repeat_filter::RepeatFilter::hits`), empty for a query without one.
+    /// Only the archive reads them (empty without it or without the option).
+    pub repeat_hits: &'a [Vec<(usize, usize)>],
     pub unsearched: &'a [bool],
     pub lcase_masking: bool,
     pub window_masker: bool,
@@ -299,6 +306,42 @@ fn lcase_mask_intervals(
         .collect()
 }
 
+/// The `LCaseMask` intervals of a query whose repeat search (`-filtering_db`) found `hits` (in the
+/// searched letters, which start at `offset`): the query vector's masks before the search (the
+/// lower case of the whole record with `-lcase_masking`, DUST's of the searched letters) combined
+/// with the hits (`repeat_filter::combine`), in ascending order, each interval for both strands,
+/// whatever `-strand` is.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/repeats_filter_cxx.cpp:290-304
+fn repeat_mask_intervals(
+    record: &FastaRecord,
+    dust: &[MaskedInterval],
+    offset: usize,
+    lcase_masking: bool,
+    hits: &[(usize, usize)],
+) -> Vec<(i32, i32)> {
+    let mut all: Vec<(usize, usize)> = if lcase_masking {
+        collect_lowercase_masks(record.archive_letters())
+            .iter()
+            .map(|mask| (mask.start, mask.end - 1))
+            .collect()
+    } else {
+        Vec::new()
+    };
+    all.extend(
+        dust.iter()
+            .map(|mask| (mask.start + offset, mask.end + offset - 1)),
+    );
+    all.extend(hits.iter().map(|&(from, to)| (from + offset, to + offset)));
+    super::repeat_filter::combine(all)
+        .into_iter()
+        .flat_map(|(from, to)| {
+            let interval = (from as i32, to as i32);
+            [interval, interval]
+        })
+        .collect()
+}
+
 /// Calls `each` with the queries and the archive of each batch of `call`, in order
 /// (`BatchArchive`: its request, `RunRequests::with_batch`, and its results).
 /// `first_context(first_query)` gives the values of a batch's first query.
@@ -352,15 +395,24 @@ pub(crate) fn for_each_batch(
             }
             // The `LCaseMask` parameters are the masks of NCBI's query vector, which every
             // query has, valid or not and searched or not (`x_CalculateMasks`).
-            let intervals = lcase_mask_intervals(
-                record,
-                &call.dust_masks[index],
-                offset,
-                call.lcase_masking,
-                call.window_masker,
-                call.both_strands,
-                call.minus_strand,
-            );
+            let intervals = match call.repeat_hits.get(index).filter(|hits| !hits.is_empty()) {
+                Some(hits) => repeat_mask_intervals(
+                    record,
+                    &call.dust_masks[index],
+                    offset,
+                    call.lcase_masking,
+                    hits,
+                ),
+                None => lcase_mask_intervals(
+                    record,
+                    &call.dust_masks[index],
+                    offset,
+                    call.lcase_masking,
+                    call.window_masker,
+                    call.both_strands,
+                    call.minus_strand,
+                ),
+            };
             if !intervals.is_empty() {
                 lcase_masks.push(MaskEntry {
                     id: record.local_id.clone(),

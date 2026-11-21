@@ -167,7 +167,11 @@ pub(crate) fn tokens<'a>(str: &'a [u8], delims: &[u8]) -> Tokens<'a> {
 /// when there is none), `str2` (after it; after the run of delimiters with `fSplit_MergeDelimiters`, `merge`) and
 /// whether a delimiter was found. `CStrTokenizeBase::Advance` (cited at [`tokens`]) without
 /// `fSplit_Truncate_Begin` keeps an empty `str1` before a leading delimiter.
-fn split_in_two<'a>(str: &'a [u8], delims: &[u8], merge: bool) -> (&'a [u8], &'a [u8], bool) {
+pub(crate) fn split_in_two<'a>(
+    str: &'a [u8],
+    delims: &[u8],
+    merge: bool,
+) -> (&'a [u8], &'a [u8], bool) {
     match str.iter().position(|c| delims.contains(c)) {
         None => (str, &[], false),
         Some(at) => {

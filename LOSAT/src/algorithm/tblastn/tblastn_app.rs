@@ -157,6 +157,7 @@ fn refused_batch_setup_error(
         subject_set,
         engine_positives,
         culling_limit: resolved.culling_limit,
+        subject_besthit: resolved.subject_besthit,
         pssm: None,
         fetch_excluded: None,
         max_intron_length: resolved.max_intron_length,

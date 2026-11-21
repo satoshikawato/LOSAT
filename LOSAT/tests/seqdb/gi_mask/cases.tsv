@@ -59,6 +59,13 @@ x09	same	nucl.fa dust_nucl_noparse.asnb	-in	nucl.fa	-dbtype	nucl	-parse_seqids	-
 x10_1	same	nucl.fa dust_nucl.asnb	-in	nucl.fa	-dbtype	nucl	-parse_seqids	-out	db	-title	t	-mask_data	dust_nucl.asnb
 x10_2	same	^ ncbi_single.nal=>db.nal	-in	nucl.fa	-dbtype	nucl	-parse_seqids	-out	db	-title	t	-mask_data	dust_nucl.asnb	-gi_mask	-gi_mask_name	gm1
 x10_3	same	^ ncbi_single.nal=>db.nal	-in	nucl.fa	-dbtype	nucl	-parse_seqids	-out	db	-title	t	-mask_data	dust_nucl.asnb
+x11_1	same	nucl.fa dust_nucl.asnb dust10_nucl_nogionly.asnb	-in	nucl.fa	-dbtype	nucl	-parse_seqids	-out	db	-title	t	-mask_data	dust_nucl.asnb,dust10_nucl_nogionly.asnb	-gi_mask	-gi_mask_name	x,x
+x11_2	same	nucl.fa dust_nucl.asnb dust10_nucl_nogionly.asnb	-in	nucl.fa	-dbtype	nucl	-parse_seqids	-out	db	-title	t	-mask_data	dust10_nucl_nogionly.asnb,dust_nucl.asnb	-gi_mask	-gi_mask_name	x,x
+x12	same	big.fa dust_big.asnb dust10_big_late.asnb	-in	big.fa	-dbtype	nucl	-parse_seqids	-out	db	-title	t	-max_file_sz	4000	-mask_data	dust_big.asnb,dust10_big_late.asnb	-gi_mask	-gi_mask_name	x,x
+s01	same	src4.naa src4.nab src4.nac src4.nhr src4.nin src4.njs src4.nnd src4.nni src4.nog src4.nsd src4.nsi src4.nsq	-input_type	blastdb	-in	src4	-dbtype	nucl	-parse_seqids	-out	db	-title	t	-gi_mask
+s02	same	src4.naa src4.nab src4.nac src4.nhr src4.nin src4.njs src4.nnd src4.nni src4.nog src4.nsd src4.nsi src4.nsq dust10_nucl.asnb	-input_type	blastdb	-in	src4	-dbtype	nucl	-parse_seqids	-out	db	-title	t	-gi_mask	-mask_data	dust10_nucl.asnb	-gi_mask_name	m
+e10	parser	nucl.fa dust_nucl.asnb	-in	nucl.fa	-taxid	1	-taxid_map	nucl.fa	-parse_seqids	-out	db
+e11	parser	nucl.fa dust_nucl.asnb	-in	nucl.fa	-gi_mask	-mask_id	foo	-mask_data	dust_nucl.asnb	-parse_seqids	-out	db
 m01	same	nucl.fa dust_nucl.asnb dust10_nucl.asnb	-in	nucl.fa	-dbtype	nucl	-parse_seqids	-out	db	-title	t	-max_file_sz	400	-mask_data	dust_nucl.asnb,dust10_nucl.asnb	-gi_mask	-gi_mask_name	m1,m2
 m03	same	nucl.fa dust_nucl.asnb	-in	nucl.fa	-dbtype	nucl	-parse_seqids	-out	db	-title	t	-max_file_sz	400	-gi_mask
 m04	refuse	nucl.fa dust_nucl.asnb dust10_nucl.asnb	-in	nucl.fa	-dbtype	nucl	-parse_seqids	-out	db	-title	t	-max_file_sz	400	-mask_data	dust_nucl.asnb,dust10_nucl.asnb	-gi_mask	-gi_mask_name	x,x

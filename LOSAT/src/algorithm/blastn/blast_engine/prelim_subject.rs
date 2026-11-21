@@ -1397,7 +1397,17 @@ pub(super) fn prelim_subject<const UNGAPPED: bool>(
         }
     }
 
-    if s_len_full < effective_word_size {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1429-1432
+    // NCBI skips only an empty subject. A subject shorter than a word has no word to scan
+    // (`BlastNaWordFinder`'s scan range ends below its start), so the scan's searches end here;
+    // the seeds of a MegaBLAST database index can run past the end of a short sequence (into the
+    // next one of the index's local id), so an indexed search searches it.
+    let shortest = if batch.mb_index.is_some() {
+        1
+    } else {
+        effective_word_size
+    };
+    if s_len_full < shortest {
         if db_masked {
             subject_scratch.db_soft_ranges = soft_ranges;
             subject_scratch.db_hard_split.end();

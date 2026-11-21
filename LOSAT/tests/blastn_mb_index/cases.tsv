@@ -101,6 +101,7 @@ al_sp_vb	makembindex -input v1 -nmer 8 ; makembindex -input b2 -nmer 8	-query qa
 f_old0	makembindex -input db.fa -iformat fasta -old_style_index true -output oidx -nmer 8	-query q.fa -outfmt 0 -use_index true -db v1 -index_name oidx
 f_oldcomma	makembindex -input db.fa -iformat fasta -old_style_index true -output oidx -nmer 8	-query q.fa -outfmt 6 -use_index true -db v1 -index_name oidx,,0,0
 oo_i	makembindex -input first3.fa -iformat fasta -old_style_index true -output o3 -nmer 8	-query q.fa -outfmt 6 -use_index true -db v1 -index_name o3
+oo_i_batch2	makembindex -input first3.fa -iformat fasta -old_style_index true -output o3 -nmer 8	BATCH_SIZE=1 -query q.fa -outfmt 6 -use_index true -db v1 -index_name o3	an old-style MegaBLAST index of fewer sequences than the database (@CWD@/o3.00.idx) and more than one query batch or query chunk
 sm_i_none	makembindex -input sm -nmer 8	-query qsm.fa -outfmt 6 -use_index true -db sm -dust no
 sm_i_soft	makembindex -input sm -nmer 8	-query qsm.fa -outfmt 6 -use_index true -db sm -dust no -db_soft_mask 11
 sm_mi_none	makembindex -input sm -nmer 8 -db_mask 11	-query qsm.fa -outfmt 6 -use_index true -db sm -dust no

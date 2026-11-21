@@ -15,6 +15,8 @@
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_search.cpp:99-1441
 
+use std::sync::atomic::AtomicU32;
+
 use super::volume::IndexVolume;
 use super::{code_bits, Word, CR};
 
@@ -73,6 +75,23 @@ impl VolumeSeeds {
         self.by_id(self.map_subject(subj, chunk))
     }
 
+    /// Whether chunk `chunk` of the volume's sequence `subj` is one of the sequence's chunks in
+    /// the index (a sequence past the volume's has none, and NCBI's `GetResults` gives it
+    /// nothing). A database sequence with more chunks than the index's sequence (an index not
+    /// made from the database) reads the next sequence's seeds, which NCBI's `GetResults` moves
+    /// out of the next sequence's list: what that sequence finds depends on the order of the
+    /// search threads.
+    pub(crate) fn chunk_in_sequence(&self, subj: u32, chunk: u32) -> bool {
+        let Some(&first) = self.map.get(subj as usize) else {
+            return true;
+        };
+        let end = match self.map.get(subj as usize + 1) {
+            Some(&next) => next,
+            None => (self.results.len() as u32).wrapping_add(1),
+        };
+        u64::from(first) + u64::from(chunk) < u64::from(end)
+    }
+
     /// `CheckResults(subj)`: whether a chunk of the volume's sequence `subj` has seeds; the
     /// chunk ids from the sequence's first to the next sequence's (to the last chunk for the
     /// last sequence, and from id 0 for a sequence without chunks).
@@ -109,6 +128,8 @@ pub(crate) struct IndexedVolume {
 pub(crate) struct LoadedIndex {
     pub(crate) old_style: bool,
     pub(crate) volumes: Vec<IndexedVolume>,
+    /// The searches of the index so far (`DoPreSearch` calls: one a query batch or query chunk).
+    pub(crate) searches: AtomicU32,
 }
 
 impl LoadedIndex {
@@ -449,7 +470,12 @@ impl Search<'_> {
                 while off_it.next(offsets)? {
                     let offset = off_it.offset;
                     if u64::from(offset) < self.min_offset {
-                        off_it.next(offsets)?;
+                        // The offset that a boundary code qualifies; a list that ends after the
+                        // code is corrupt (NCBI's iterator then reads the next list with a pass
+                        // of 0, a division by zero).
+                        if !off_it.next(offsets)? {
+                            return Err(Corrupt);
+                        }
                         let soff = self.decode_offset(off_it.offset)?;
                         let r1 = SeedRoot {
                             qoff: self.qoff,

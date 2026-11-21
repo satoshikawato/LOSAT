@@ -151,9 +151,12 @@ pub(crate) fn extend_hit_ungapped_exact_ported(
     let q_start = q_beg as usize;
     let s_start = s_off - (q_off - q_start);
 
-    let q_avail = q_len - q_off;
-    let s_avail = subject_len - s_off;
+    // NCBI's `Int4` `s_avail` is negative for a seed past the subject's last letter (a seed of a
+    // MegaBLAST database index in the last byte of its sequence); it is not below `q_avail`.
+    let q_avail = (q_len - q_off) as isize;
+    let s_avail = subject_len as isize - s_off as isize;
     let (sf_idx, remainder) = if q_avail < s_avail {
+        let q_avail = q_avail as usize;
         let pos = s_off + q_avail;
         (
             (pos / COMPRESSION_RATIO) as isize,
@@ -466,7 +469,10 @@ pub(crate) fn extend_hit_ungapped_approx_ncbi(
     // Right extension in 4-base blocks.
     let mut q_idx = q_ext as isize;
     let mut s_idx = (s_ext / COMPRESSION_RATIO) as isize;
-    let right_len = (q_len - q_ext).min(subject_len - s_ext) / COMPRESSION_RATIO;
+    // NCBI's `Int4` lengths: one below 0 (`s_ext` past the subject's last letter, from a seed of
+    // a MegaBLAST database index in the last byte of its sequence) gives no block.
+    let right_len =
+        q_len.saturating_sub(q_ext).min(subject_len.saturating_sub(s_ext)) / COMPRESSION_RATIO;
     sum = 0;
     new_q = q_idx;
 

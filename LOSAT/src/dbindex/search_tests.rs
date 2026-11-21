@@ -1,3 +1,5 @@
+use std::sync::atomic::AtomicU32;
+
 use super::*;
 use crate::dbindex::{test_letters, test_volume, Options};
 
@@ -130,6 +132,7 @@ fn an_oid_is_located_in_its_volume() {
     let new = LoadedIndex {
         old_style: false,
         volumes: vec![volume(0, 3), volume(3, 2), volume(5, 4)],
+        searches: AtomicU32::new(0),
     };
     assert_eq!(new.locate(0), (0, 0));
     assert_eq!(new.locate(4), (1, 1));
@@ -138,9 +141,28 @@ fn an_oid_is_located_in_its_volume() {
     let old = LoadedIndex {
         old_style: true,
         volumes: new.volumes.clone(),
+        searches: AtomicU32::new(0),
     };
     assert_eq!(old.locate(4), (1, 1));
     assert_eq!(old.locate(8), (2, 3));
     // Past every volume: the first volume, with the OID itself.
     assert_eq!(old.locate(9), (0, 9));
+}
+
+/// The chunks of a sequence are its chunk ids up to the next sequence's first (to the last id for
+/// the last sequence); a sequence past the volume's has none to read.
+#[test]
+fn a_chunk_past_the_sequences_chunks_is_not_in_the_sequence() {
+    let seeds = VolumeSeeds {
+        word_size: 28,
+        map: vec![1, 3, 4],
+        results: vec![None; 4],
+    };
+    assert!(seeds.chunk_in_sequence(0, 1));
+    assert!(!seeds.chunk_in_sequence(0, 2));
+    assert!(seeds.chunk_in_sequence(1, 0));
+    assert!(!seeds.chunk_in_sequence(1, 1));
+    assert!(seeds.chunk_in_sequence(2, 0));
+    assert!(!seeds.chunk_in_sequence(2, 1));
+    assert!(seeds.chunk_in_sequence(3, 5));
 }

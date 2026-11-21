@@ -10,8 +10,9 @@
 //!
 //! A row with a refusal is one where NCBI searches with an index in a way that LOSAT does not
 //! (a mixed search, a two-hit search, `-db_hard_mask`), or reads the index in a way that leaves
-//! the search undefined: LOSAT refuses it with that text, and NCBI's output is kept for the lines
-//! that take these searches.
+//! the search undefined or fails: LOSAT refuses it with that text, after the output of the query
+//! batches before (NCBI's output up to there), and NCBI's output is kept for the lines that take
+//! these searches.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -219,8 +220,12 @@ fn rows_that_differ() -> Vec<String> {
                     "-use_index true with {} is not supported by LOSAT's BLASTN",
                     here(refusal, &dir)
                 );
+                let ncbi_out = fs::read(fixtures().join("ncbi").join(format!("{}.out", case.name)))
+                    .unwrap();
+                let ncbi_out = here(&String::from_utf8(ncbi_out).unwrap(), &dir);
                 output.status.code() == Some(1)
-                    && output.stdout.is_empty()
+                    && losat::wording::losat_output_bytes(ncbi_out.as_bytes())
+                        .starts_with(&output.stdout)
                     && stderr.contains(&line)
             }
             None => {

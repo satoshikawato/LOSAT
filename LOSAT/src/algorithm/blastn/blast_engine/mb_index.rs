@@ -271,6 +271,7 @@ impl Loaded {
         Ok(LoadedIndex {
             old_style: self.old_style,
             volumes,
+            searches: std::sync::atomic::AtomicU32::new(0),
         })
     }
 }

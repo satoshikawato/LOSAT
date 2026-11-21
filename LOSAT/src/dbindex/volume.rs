@@ -13,7 +13,7 @@
 use std::path::Path;
 
 use super::format::{Header, HEADER_SIZE};
-use super::{min_offset, Word, STRIDE, VERSION};
+use super::{min_offset, Word, MAX_STRIDE, STRIDE, VERSION};
 use crate::utils::mapped_file::MappedFile;
 
 /// The word size hint of a legacy index (`CDbIndex::WS_HINT`, used in place of the header's).
@@ -86,8 +86,13 @@ impl IndexVolume {
                 u64::from(header.ws_hint_word),
             )
         };
-        if stride == 0 {
-            return Err("a stride of 0".to_string());
+        // makembindex writes neither; NCBI's search of an Nmer length of 0 takes `hkey_width - 1`
+        // below 0, and `GetMinOffset` of a stride from 2^15 on shifts an `int` by 32 bits or more.
+        if header.hkey_width == 0 {
+            return Err("an Nmer length of 0".to_string());
+        }
+        if stride == 0 || stride >= MAX_STRIDE {
+            return Err(format!("a stride of {stride}"));
         }
         let total_words = bytes.len() / 4;
         let mut at = HEADER_SIZE / 4;

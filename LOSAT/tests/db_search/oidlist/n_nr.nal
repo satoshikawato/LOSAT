@@ -1,0 +1,5 @@
+TITLE oidlist n range
+DBLIST ../taxfilter/tfn
+OIDLIST n.msk
+FIRST_OID 10
+LAST_OID 14

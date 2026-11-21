@@ -23,6 +23,9 @@ pub struct Volume {
     defline_rule: Option<LineRule>,
     /// The column files (`.?xa`...), opened on first use (`m_HaveColumns`).
     columns: OnceLock<Vec<Column>>,
+    /// The failure of NCBI's OID list that a search meets at its first read of a sequence
+    /// (`Volume::fail_sequence_reads`), none when the list can be built.
+    read_failure: Option<super::oid_list::OidListError>,
 }
 
 /// A list's rule for the definition lines of a volume's sequences, with the volume's first OID in
@@ -112,6 +115,7 @@ impl Volume {
             hdr: OnceLock::new(),
             defline_rule: None,
             columns: OnceLock::new(),
+            read_failure: None,
         })
     }
 
@@ -163,7 +167,17 @@ impl Volume {
     }
 
     fn seq_file(&self) -> Result<&DbFile, SeqDbError> {
+        if let Some(failure) = &self.read_failure {
+            return Err(failure.to_error());
+        }
         self.lazy_file(&self.seq, "sq")
+    }
+
+    /// Makes every read of the sequence file fail with `failure`, the failure of NCBI's OID
+    /// list of the database, before which a search reads no sequence
+    /// (`SeqDb::fail_search_reads_with_oid_list`).
+    pub(super) fn fail_sequence_reads(&mut self, failure: super::oid_list::OidListError) {
+        self.read_failure = Some(failure);
     }
 
     /// Opens the sequence file, as the first read of a sequence does (`seq_file`): its error

@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.63
+- Version: 1.64
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -244,27 +244,36 @@
   1.59 2026-11-21 (BLASTP `-use_sw_tback`, line RG item X4-excl: a match whose subject NCBI's
   fetch excludes sets the batch's status back to 0 unless NCBI's early termination skips it, so a
   failed Smith-Waterman redo before it neither fails the batch nor crashes NCBI, reproduced, rule 2;
-  Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered after 1.58)
+  Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered after 1.58);
   1.60 2026-11-21 (`losat makembindex`, line RG item D5a: the explicit rejections, rule 3, of a
   `-legacy false` index whose `Save` NCBI never finishes (a stride above `-ws_hint` − `-nmer` + 1)
   and of a stride of 32768 or more, whose offsets NCBI computes by shifting an `int` past its
   width; the explicit rejection, rule 2, of an index volume of more than 4 GiB of packed
   sequences, whose sizes NCBI writes wrapped at 32 bits; Owner-delegated, standing instruction
-  2026-09-29, restated 2026-10-07)
+  2026-09-29, restated 2026-10-07);
   1.61 2026-11-21 (`losat makembindex`, line RG item D5a-t: the explicit rejection, rule 3, of a
   database sequence without letters, whose null Bioseq NCBI dereferences; Owner-delegated,
-  standing instruction 2026-09-29, restated 2026-10-07)
+  standing instruction 2026-09-29, restated 2026-10-07);
   1.62 2026-11-21 (makeblastdb, an index file that a failed write left empty or cut short: the
   outcomes NCBI reaches through its mapping of the file reproduced, rule 2, and the explicit
   rejections, rule 3, of an index file of no bytes, which NCBI maps as a null pointer and crashes
   on, and of a header field that reaches past the file's last page, where NCBI's result depends
   on its memory map; line LIB-O item O1e, PR #1433; Owner-delegated, standing instruction
-  2026-09-29, restated 2026-10-07; numbered after 1.61)
-  1.63 2026-11-21 (approved exception 18, the Owner's answers of 2026-11-21 to questions Q1 and Q2
+  2026-09-29, restated 2026-10-07; numbered after 1.61);
+  1.63 2026-11-21 (alias files with `OIDLIST`, line RG item D1b-1: the explicit rejections of an empty
+  OID list file, of bits past the memory page after it and of a file of its header alone, rule 3, and
+  the two RPSBLAST and RPSTBLASTN rejections of D1a-4 extended to the profiles `OIDLIST` leaves out
+  and to the totals of its scan; the explicit rejection of an alias file's `FIRST_OID`-`LAST_OID`
+  range outside the bit array of the ranges below it, where NCBI clears bits outside that array
+  (before it a crash, SIGSEGV, probes D1a_P and D1a_R of review A of D1b-1; past it writes over
+  NCBI's heap, probes RB9 of review B), rule 3; Owner-delegated, standing instruction 2026-09-29,
+  restated 2026-10-07);
+  1.64 2026-11-21 (approved exception 18, the Owner's answers of 2026-11-21 to questions Q1 and Q2
   of line NP's M4b, 「すべて推奨通りで」: with `-db_hard_mask`, BLASTP, BLASTX, TBLASTN and TBLASTX
   search a sequence whose first mask runs to its end (in TBLASTN and TBLASTX, a reading frame whose
   first part runs into such a mask) over the part before the mask, as NCBI's normal chunks search the
-  near input, the masked letters staying masked; the refusals of those shapes removed; line NP item M4b-3; numbered after 1.62)
+  near input, the masked letters staying masked; the refusals of those shapes removed; line NP item
+  M4b-3; numbered after 1.63)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1006,7 +1015,7 @@ every query (NCBI's bytes for a query with a next query are deterministic, rule 
     (`LOSAT/src/algorithm/blastp/kappa.rs`), `a_heap_without_early_end_is_never_filled_to_its_cutoff`
     (`LOSAT/src/algorithm/blastp/hsp.rs`).
 
-## Approved exception 18 (BLASTP, BLASTX, TBLASTN and TBLASTX `-db_hard_mask`, a mask that runs to the end, version 1.63)
+## Approved exception 18 (BLASTP, BLASTX, TBLASTN and TBLASTX `-db_hard_mask`, a mask that runs to the end, version 1.64)
 
 The Owner decided on 2026-11-21 (words 「すべて推奨通りで」, line NP `M/m4b/OWNER_QUESTIONS.md`) questions
 Q1 and Q2 of M4b: option B of each, the search over the part before the mask as a normal chunk for
@@ -2078,7 +2087,8 @@ a crash. Its version is in the list at the top; elsewhere it is cited by its num
   X-short-tbx-link).
 
 - RPSBLAST and RPSTBLASTN over an alias file whose `FIRST_OID` and `LAST_OID` leave out profiles of
-  its volumes (2026-11-17, line RG item D1a-4, Owner-delegated): NCBI's RPS search
+  its volumes (2026-11-17, line RG item D1a-4, Owner-delegated), or whose `OIDLIST` does (line RG
+  D1b-1, 2026-11-21: the same form, probes R5 and R7 of D1b): NCBI's RPS search
   ignores the range (its lookup table holds every profile of a volume, `blast_aalookup.c:182-184`;
   the volumes of several are searched bare), while its formatter opens the `-db` name with its keys,
   whose `SeqidToOids` keeps only the OIDs of the range (`seqdbimpl.cpp:1414-1418`): a hit of a
@@ -2087,7 +2097,7 @@ a crash. Its version is in the list at the top; elsewhere it is cited by its num
   of 0 (the class of rule 2's version 1.10, exit status 0), and `sacc`, `saccver` and the default
   fields of outfmt 6, 7 and 10 stop with a null pointer exception, exit status 255 (the class of
   1.37; probes p6_1v_fo22 and p6b_fo22 of line RG D1a-4). LOSAT refuses (exit 1, "a hit of the
-  profile of OID N outside the RPS-BLAST database's alias file FIRST_OID and LAST_OID ... is not
+  profile of OID N outside the RPS-BLAST database's alias files' FIRST_OID, LAST_OID and OIDLIST ... is not
   supported by LOSAT's RPSBLAST", one text for both programs) where a query's reported profiles
   hold such a profile: the profiles of the first `-max_target_seqs` subjects of its hit list (the
   hit list size, `PruneSeqalign` with `m_HitlistSize`, `blast_format.cpp:810-813`, which counts
@@ -2105,7 +2115,8 @@ a crash. Its version is in the list at the top; elsewhere it is cited by its num
   `PRE_FETCH_SEQS_LIMIT`'s count), as NCBI counts the whole merged set (probes r1_3v_fo3 and
   r1_3v_fo11 of review A of D1a-4). A run whose reported hits are all in the range is NCBI's
   (fixture rows `db.rps.rej.fo22`, `db.rpstbn.rej.fo22`, `db.rpstbn.fo11.e5.6`, `db.rps.1v.fo3.*`,
-  `db.rps.3v.fo3.*`, `db.rpstbn.3v.fo11.*`).
+  `db.rps.3v.fo3.*`, `db.rpstbn.3v.fo11.*`; for `OIDLIST` `db.ol.rps.rej.no2w`, `db.ol.rps.rej.only2w`,
+  `db.ol.rtbn.rej.no2w` and `db.ol.rps.only2w.mts1.6`).
 
 - RPSBLAST and RPSTBLASTN over one volume whose alias file's `LENGTH` and `NSEQ` make the
   concatenated length `Lc = (Int4)(LENGTH + NSEQ)` shorter than the profiles (2026-11-17, line RG
@@ -2127,6 +2138,10 @@ a crash. Its version is in the list at the top; elsewhere it is cited by its num
   region in each tree NCBI ends, and LOSAT gives its bytes: the truncated extensions to the right
   and the diagonal table of `Lc` (fixture rows `db.rps.rej.l0`, `db.rpstbn.rej.l0`,
   `db.rps.rej.nm300`, `db.rpstbn.rej.nm300`, and the one-volume rows that end).
+  An alias file's `OIDLIST` without `NSEQ` and `LENGTH` above it makes NCBI's constructor scan the
+  profiles its list keeps, and the scan's total and count are `LENGTH` and `NSEQ` here (line RG D1b-1,
+  2026-11-21, probe R1 of D1b: `BLAST ran out of memory`, exit 4; LOSAT's text names the list; rows
+  `db.ol.rps.rej.no2`, `db.ol.rtbn.rej.no2`).
 
 - RPSBLAST and RPSTBLASTN over one volume whose concatenated length `Lc` is longer than the profiles
   (an alias file's `LENGTH` and `NSEQ`, or `-db "a x"` with an alias `a` of the volume `x`, which counts
@@ -2193,6 +2208,32 @@ a crash. Its version is in the list at the top; elsewhere it is cited by its num
   whose first sequence's offsets were patched to 0 letters; `-idmap` true or false). LOSAT refuses
   (exit 1) at that sequence. windowmasker skips such a sequence, as NCBI's, and makes no title or
   taxonomy lookup for it.
+
+- An alias file's `OIDLIST` file (line RG D1b-1, 2026-11-21, Owner-delegated; DECISIONS D1b1-1 of line RG) that
+  is empty: NCBI maps nothing and reads the 4-byte header through a null pointer (SIGSEGV, probe G5 of
+  D1b); or whose bits NCBI copies for a volume past the memory page after the file's end (a volume
+  of more OIDs than the file's page holds bits for, under a header that does not stop the copy): NCBI
+  reads memory that is not the file's. A read inside that page reads the page's zeros, as NCBI does
+  (probes H2 and H7, not refused). A file of 1 to 4 bytes fails NCBI's assertion that the file is
+  longer than its header, whose text names a line of NCBI's source: LOSAT's words, refused where NCBI's constructor
+  reads the file (its scan; exit 2 in NCBI), and NCBI's `Database memory map file error` (exit 3) at
+  a search's first read under `NSEQ` and `LENGTH`, as for the column files' assertions
+  (`seqdb::column`). Rows `db.ol.bp.rej.empty`, `db.ol.bp.rej.hdr` and `db.ol.bp.hdrl.6`.
+
+- An alias file's `FIRST_OID`-`LAST_OID` range that lies outside the bit array of the OIDs that the
+  ranges of the alias files below it keep (line RG D1b-1, 2026-11-21, Owner-delegated; DECISIONS
+  D1b1-10 of line RG): NCBI's intersection clears the array's bits outside the range at the OID less
+  the array's first, so a range that ends before the array's first OID wraps that index below 0 and
+  writes far outside the array (SIGSEGV where the OID list is built: `blastdbcmd -entry all`, probes
+  D1a_P and D1a_R of review A of D1b-1; `-info` builds no list and works), and one that starts past
+  the array's bytes writes past them, over NCBI's heap: NCBI aborts (`free(): invalid pointer`, a
+  failed assertion of glibc's allocator) or crashes (SIGSEGV, a reference counter's overflow) where
+  the clearing reaches 24 to 2,500 bytes from the array's first (probes RB9_T200 to RB9_T19990,
+  RB9_U5000 and RB9_U19990 of review B of D1b-1), and keeps no OID with exit status 0 where it
+  overwrote nothing it uses next (RB_pc, RB9_T21, RB9_U300; DECISIONS D1b1-13): a result of NCBI's
+  allocator, not of its reader, refused as the reads past an OID list file's page above. Inside the array's last byte the
+  clearing is harmless and no OID is kept (probe D1a_Q, case A237). LOSAT refuses where the list is
+  first used (cases A238 and A241 of `blastdbcmd_alias_keys.rs`, `alias::OidSet::clears_outside`).
 
 ## Explicit rejections of a taxonomy record past NCBI's mapping (rule 3, version 1.43)
 

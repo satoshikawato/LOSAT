@@ -320,19 +320,17 @@ pub fn check_registry_settings(
 }
 
 /// The `SetDependency` calls of makeblastdb's `Init`, in their order (makeblastdb.cpp:276-329,
-/// quoted at `MakedbArgs`).
-fn makeblastdb_dependencies() -> Vec<(&'static str, Dep, &'static str)> {
-    vec![
-        ("mask_id", Dep::Requires, "mask_data"),
-        ("mask_desc", Dep::Requires, "mask_id"),
-        ("gi_mask", Dep::Excludes, "mask_id"),
-        ("gi_mask", Dep::Requires, "parse_seqids"),
-        ("gi_mask_name", Dep::Requires, "mask_data"),
-        ("gi_mask_name", Dep::Requires, "gi_mask"),
-        ("taxid", Dep::Excludes, "taxid_map"),
-        ("taxid_map", Dep::Requires, "parse_seqids"),
-    ]
-}
+/// cited at `MakedbArgs`).
+const MAKEBLASTDB_DEPENDENCIES: [(&str, Dep, &str); 8] = [
+    ("mask_id", Dep::Requires, "mask_data"),
+    ("mask_desc", Dep::Requires, "mask_id"),
+    ("gi_mask", Dep::Excludes, "mask_id"),
+    ("gi_mask", Dep::Requires, "parse_seqids"),
+    ("gi_mask_name", Dep::Requires, "mask_data"),
+    ("gi_mask_name", Dep::Requires, "gi_mask"),
+    ("taxid", Dep::Excludes, "taxid_map"),
+    ("taxid_map", Dep::Requires, "parse_seqids"),
+];
 
 /// The arguments that a dependency of makeblastdb requires, in the order its `Init` declares
 /// them (makeblastdb.cpp:246-288): the order `x_PostCheck` looks for missing ones in.
@@ -364,8 +362,16 @@ fn given(args: &MakedbArgs, name: &str) -> bool {
 /// its sentence. The one check of the dependencies: LOSAT's parser calls it on the command line
 /// (`crate::cli`, exit status 2) and `check_arguments` for the library's callers.
 pub(crate) fn dependency_error(given: &dyn Fn(&str) -> bool) -> Option<String> {
+    // A dependency is checked only for an argument that is given (both sides of an exclusion):
+    // when none of them is, nothing can fail, and the multimap is not built.
+    if !MAKEBLASTDB_DEPENDENCIES
+        .iter()
+        .any(|&(first, dep, second)| given(first) || (dep == Dep::Excludes && given(second)))
+    {
+        return None;
+    }
     let mut require: Vec<(&str, &str)> = Vec::new();
-    for (first, dep, second) in dependency_multimap(makeblastdb_dependencies()) {
+    for (first, dep, second) in dependency_multimap(MAKEBLASTDB_DEPENDENCIES.to_vec()) {
         if !given(first) {
             continue;
         }

@@ -610,6 +610,7 @@ error: the NCBI BLAST+ option -randomize is not supported by LOSAT's makeblastdb
 | A command-line word that is not UTF-8 | Refused. |
 | The database sequences, definition lines and titles that `dustmasker` refuses | Refused, as for `dustmasker`. |
 | A FASTA record of 4,294,967,296 letters or more (`-old_style_index true`) | Refused. |
+| An index volume of more than 4 GiB of packed sequences, which needs a `-volsize` of about 18,000 or more and more than 16 Gbp of sequences in one index volume | Refused when the sequence that passes 4 GiB is read. NCBI writes an index whose sizes and positions wrap at 32 bits. |
 
 ## Programs LOSAT does not provide
 

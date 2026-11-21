@@ -616,9 +616,6 @@ fn integer_value(tool: &Tool, desc: &Desc, value: &str) -> Result<i32, ArgsError
     })
 }
 
-// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:460-469
-// As for `CArg_Int8`, the conversion's exception is the predecessor (its text is the first
-// message: `Cannot convert string 'abc' to double (m_Pos = 0)`).
 /// The value of an `eBoolean` key (`CArg_Boolean`): `NStr::StringToBool`, whose exception
 /// (`String cannot be converted to bool`, position 0) is the predecessor of the reader's.
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:489-498
@@ -637,6 +634,9 @@ fn boolean_value(desc: &Desc, value: &str) -> Result<Number, ArgsError> {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:460-469
+// As for `CArg_Int8`, the conversion's exception is the predecessor (its text is the first
+// message: `Cannot convert string 'abc' to double (m_Pos = 0)`).
 /// The number of an `eDouble` key (`CArg_Double`).
 fn double_value(desc: &Desc, value: &str) -> Result<Number, ArgsError> {
     match crate::ncbi_str::string_to_double_posix_or_local(value.as_bytes()) {

@@ -102,16 +102,16 @@ pub(crate) fn code_bits(stride: u64) -> u64 {
     }
 }
 
-/// `GetMinOffset(stride)`: `1 << (2 * GetCodeBits(stride))`, a shift of NCBI's `int`; defined
-/// for a stride below 32768 (`code_bits` 15 or less), which `makembindex` checks first
-/// (`MAX_STRIDE`).
+/// `GetMinOffset(stride)`: 4 to the power `code_bits(stride)`, which NCBI computes by shifting
+/// an `int`; defined for a stride below 32768 (`code_bits` 15 or less), which `makembindex`
+/// checks first (`MAX_STRIDE`).
 // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex.cpp:446-447
 pub(crate) fn min_offset(stride: u64) -> u64 {
     1u64 << (2 * code_bits(stride))
 }
 
-/// The strides below this one are those of a defined `GetMinOffset` (NCBI shifts its `int` 1
-/// by 32 or more bits for larger ones).
+/// The strides below this one are those of a defined `GetMinOffset`: for larger ones NCBI
+/// shifts an `int` by 32 bits or more, which C++ leaves undefined.
 pub(crate) const MAX_STRIDE: u64 = 1 << 15;
 
 /// `CIndexSuperHeader<INDEX_FORMAT_VERSION_1>::Save(fname)`: the endianness (0, little), the

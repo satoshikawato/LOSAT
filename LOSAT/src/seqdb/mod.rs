@@ -962,21 +962,34 @@ impl SeqDb {
     }
 
     /// The order in which NCBI searches and numbers the volumes of a database
-    /// (`SeqDB_CompareVolume`, the sort at the end of `FindVolumePaths`): by file name (the
-    /// text after the last path separator), then by the whole path. For volumes in one
-    /// directory it is the byte order of the paths.
+    /// (`SeqDB_CompareVolume`, the sort at the end of `FindVolumePaths`): by base name (the
+    /// text after the last path separator, without an extension `.nal`, `.pal`, `.nin`,
+    /// `.pin`, `.ndb` or `.pdb` after at least one other byte), then by the whole path. For
+    /// volumes in one directory it is the byte order of the paths.
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:190-197
+    /// NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbgeneral.hpp:975-979
+    /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:76-108
     pub fn compare_volume_paths(a: &Path, b: &Path) -> std::cmp::Ordering {
         fn bytes(path: &Path) -> &[u8] {
             path.as_os_str().as_encoded_bytes()
         }
         fn base_name(path: &[u8]) -> &[u8] {
             let separator = |byte: &u8| *byte == b'/' || (cfg!(windows) && *byte == b'\\');
-            match path.iter().rposition(separator) {
+            let name = match path.iter().rposition(separator) {
                 Some(at) => &path[at + 1..],
                 None => path,
+            };
+            if name.len() > 4 {
+                let (stem, extension) = name.split_at(name.len() - 4);
+                if extension[0] == b'.'
+                    && matches!(extension[1], b'n' | b'p')
+                    && matches!(&extension[2..], b"al" | b"in" | b"db")
+                {
+                    return stem;
+                }
             }
+            name
         }
         let (a, b) = (bytes(a), bytes(b));
         base_name(a).cmp(base_name(b)).then_with(|| a.cmp(b))

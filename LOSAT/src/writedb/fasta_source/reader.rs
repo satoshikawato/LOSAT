@@ -1,12 +1,14 @@
-//! NCBI's `CFastaReader` with the flags of `CFastaBioseqSource` (makeblastdb) or of
-//! `CMaskFastaReader` (dustmasker, segmasker, windowmasker): [`ReaderFlags`].
+//! NCBI's `CFastaReader` with the flags of `CFastaBioseqSource` (makeblastdb), of
+//! `CMaskFastaReader` (dustmasker, segmasker, windowmasker), of convert2blastmask's
+//! `CMaskFromFasta` or of makembindex's `CSequenceIStreamFasta`: [`ReaderFlags`].
 //!
 //! What differs from the reader of the BLAST programs (`blastinput::fasta_reader`, with
 //! `fDLOptional | fNoSplit | fHyphensIgnoreAndWarn`): a definition line is required; a
 //! hyphen is a residue, or a gap in a nucleotide sequence with `fParseGaps`; the residues
 //! are split and packed into a delta sequence (`pack`); the definition line is kept in a
-//! user object for the database's title (`title`); no lowercase mask is recorded
-//! (`m_CurrentMask` is empty: `SaveMask` is never called).
+//! user object for the database's title (`title`); lowercase masks are recorded only for
+//! convert2blastmask and makembindex (`ReaderFlags::lower_case_masks`: the others never call
+//! `SaveMask`, so `m_CurrentMask` stays empty).
 
 use std::io::Read;
 
@@ -179,8 +181,8 @@ impl ReaderFlags {
     /// nucleotide reader without `-parse_seqids` (`mask_fasta_reader`: its `fOneSeq` acts on
     /// `ReadSet` only, and `fParseRawID` on ids that are not parsed).
     // NCBI reference (598d8ae6): c++/include/objtools/readers/fasta.hpp:90-93
-    // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/sequence_istream_fasta.cpp:47-51
-    // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/sequence_istream_fasta.cpp:116-123
+    // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/sequence_istream_fasta.cpp:47-52
+    // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/sequence_istream_fasta.cpp:107-113
     pub(crate) const fn dbindex_fasta() -> Self {
         Self {
             lower_case_masks: true,
@@ -582,11 +584,13 @@ impl<R: Read> FastaReader<R> {
         self.state.flags.parse_ids
     }
 
-    /// With `ReaderFlags::mask_from_fasta`, `CMaskFromFasta::GetMask()` of the record that
-    /// `read_one_seq` read last (after an error, what it had read of that record): the
-    /// intervals of its lower case letters and of its interval lines (0-based, inclusive), in
-    /// the order in which they were closed or read; empty otherwise. The intervals stay with the reader (not in `Record`) so that the
-    /// records of the other programs, which never have any, are not made larger.
+    /// With `ReaderFlags::lower_case_masks`, the masks of the record that `read_one_seq` read
+    /// last (after an error, what it had read of that record): the intervals of its lower case
+    /// letters and, with `ReaderFlags::mask_from_fasta`, of its interval lines (0-based,
+    /// inclusive), in the order in which they were closed or read (convert2blastmask's
+    /// `CMaskFromFasta::GetMask()`, makembindex's `SaveMask` location); empty otherwise. The
+    /// intervals stay with the reader (not in `Record`) so that the records of the other
+    /// programs, which never have any, are not made larger.
     pub(crate) fn take_masks(&mut self) -> Vec<(u32, u32)> {
         std::mem::take(&mut self.state.masks)
     }
@@ -610,6 +614,10 @@ impl<R: Read> FastaReader<R> {
     /// none. Without `fDLOptional` data before a definition line is the `eNoDefline`
     /// error. `CBadResiduesException` comes only with `fValidate`, which is not set.
     pub(crate) fn read_one_seq(&mut self, warn: ReaderWarn<'_>) -> Result<Record, ReadError> {
+        debug_assert!(
+            self.state.flags.lower_case_masks || !self.state.flags.mask_from_fasta,
+            "convert2blastmask's reader keeps the lower case masks"
+        );
         match (
             self.state.flags.lower_case_masks,
             self.state.flags.mask_from_fasta,
@@ -1030,8 +1038,9 @@ impl RecordState {
     /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:939-955
     /// NCBI reference (598d8ae6): c++/include/objtools/readers/fasta.hpp:494-500
     /// `CMaskFromFasta` keeps its own copy of each interval (`x_OpenMask`, `x_CloseMask`,
-    /// cited at `close_mask`). Only `parse_data_line::<true>` (convert2blastmask) calls it,
-    /// once for each run of residues, so it is not cold: the other readers' instance has no call.
+    /// cited at `close_mask`). Only `parse_data_line` with `MASKS` (convert2blastmask,
+    /// makembindex) calls it, once for each run of residues, so it is not cold: the other
+    /// readers' instance has no call.
     fn mask_run(&mut self, run: &[u8]) {
         let base = self.current_pos_with_gaps();
         for (i, byte) in run.iter().enumerate() {
@@ -1051,8 +1060,10 @@ impl RecordState {
     /// `CloseMask()`: the open interval ends before the current position.
     ///
     /// NCBI reference (598d8ae6): c++/src/app/blastdb/convert2blastmask.cpp:94-105
-    /// (`CFastaReader::x_CloseMask` adds the same interval to `m_CurrentMask`, which
-    /// convert2blastmask does not read.)
+    /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1079-1092
+    /// (convert2blastmask keeps its own copy of the interval; `CFastaReader::x_CloseMask` adds
+    /// the same interval to `m_CurrentMask`, the location of `SaveMask` that makembindex
+    /// reads.)
     fn close_mask(&mut self) {
         if let Some(start) = self.mask_start.take() {
             let end = self.current_pos_with_gaps().wrapping_sub(1);

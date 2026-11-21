@@ -64,6 +64,7 @@ None in the files or the messages of a normal run.
 
 - `-legacy false` with a `-stride` above `-ws_hint` − `-nmer` + 1 (for example `-stride 20` with the default `-ws_hint 28` and `-nmer 12`). NCBI's `makembindex` never finishes such an index; LOSAT stops before writing it.
 - `-legacy false` with a `-stride` of 32768 or more, where NCBI's index has no defined result.
+- An index volume of more than 4 GiB of packed sequences (a `-volsize` of about 18,000 or more and more than 16 Gbp of sequences in one index volume), where NCBI's index sizes wrap at 32 bits.
 - A command-line word that is not UTF-8.
 - The database cases that `dustmasker` refuses, such as a sequence whose title NCBI cannot read.
 

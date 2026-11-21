@@ -68,7 +68,7 @@ pub(super) fn run(
     }
 }
 
-/// `ERR_POST(Warning << message)` (makembindex posts from severity Warning on).
+/// A post of severity Warning (makembindex posts from that severity on).
 fn warning(diag: &mut Diag, message: &str) {
     diag.write_text(&post_line(
         Severity::Warning,
@@ -161,9 +161,9 @@ fn make_volumes(
                 diag.cerr(b"\n");
                 return Err(Failure::Refused(reason));
             }
-            Err(Stop::Unfinished) => {
+            Err(Stop::NoDefinedIndex) => {
                 diag.cerr(b"\n");
-                return Err(Failure::Refused(unfinished(options)));
+                return Err(Failure::Refused(no_defined_index(options)));
             }
         }
         num_seq = num_seq.wrapping_add(stop.wrapping_sub(start));
@@ -176,13 +176,15 @@ fn make_volumes(
     }
 }
 
-/// LOSAT's refusal of a volume that NCBI's makembindex does not finish: a stride of 32768 or
-/// more (its `int` shift past the width), or a stride above `ws_hint - nmer + 1` (a zero
-/// `mult_`: its `Save` does not end).
-fn unfinished(options: &Options) -> String {
+/// LOSAT's refusal of a volume for which NCBI's makembindex gives no defined index: a stride
+/// of 32768 or more (NCBI's offsets then come from a shift past an `int`'s width, undefined in
+/// C++; its x86 build finishes with what that build computes), or a stride above `ws_hint -
+/// nmer + 1` (a zero `mult_`: NCBI's `Save` does not end).
+fn no_defined_index(options: &Options) -> String {
     if options.stride >= MAX_STRIDE {
         unsupported(&format!(
-            "-stride {} (32768 or more, where NCBI's index shifts an int past its width)",
+            "-stride {} (32768 or more, where NCBI's index has no defined result: its offsets \
+             come from shifting an int past its width)",
             options.stride
         ))
     } else {
@@ -195,7 +197,7 @@ fn unfinished(options: &Options) -> String {
 }
 
 /// `CSequenceIStreamFasta(name)`: the file, or `failed to open input stream`.
-// NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/sequence_istream_fasta.cpp:55-70
+// NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/sequence_istream_fasta.cpp:55-71
 fn fasta_file(name: &str, titles: bool) -> Result<FastaStream<'static>, Failure> {
     match open_text_file(name) {
         Ok(file) => Ok(FastaStream::new(file, titles)),
@@ -247,7 +249,7 @@ fn run_index<'a>(
         };
         if args.flag("show_filters") {
             let db = BlastDbStream::open(input, Filter::None, registry, false)?;
-            let descriptions = db.supported_filters()?;
+            let descriptions = db.descriptions()?;
             let _ = out.write_all(format!("{descriptions}\n").as_bytes());
             let _ = out.flush();
             return Ok(0);

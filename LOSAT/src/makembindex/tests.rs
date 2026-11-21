@@ -89,8 +89,8 @@ fn a_stride_that_ncbi_does_not_finish_is_refused() {
     assert_eq!((status, files), (0, vec!["o.00.idx".to_string()]));
 }
 
-/// A stride of 32768 or more, where NCBI shifts its `int` 1 by 32 bits or more (`GetMinOffset`):
-/// refused when the volume has a sequence.
+/// A stride of 32768 or more, where NCBI's `GetMinOffset` shifts an `int` by 32 bits or more
+/// (undefined in C++): refused when the volume has a sequence.
 #[test]
 fn a_stride_past_ncbi_s_shift_is_refused() {
     let words = [
@@ -107,8 +107,9 @@ fn a_stride_past_ncbi_s_shift_is_refused() {
     assert_eq!((status, files.len()), (1, 0));
     assert!(
         err.ends_with(
-            "Error: -stride 32768 (32768 or more, where NCBI's index shifts an int past its \
-             width) is not supported by LOSAT's MAKEMBINDEX\n"
+            "Error: -stride 32768 (32768 or more, where NCBI's index has no defined result: \
+             its offsets come from shifting an int past its width) is not supported by LOSAT's \
+             MAKEMBINDEX\n"
         ),
         "{err}"
     );

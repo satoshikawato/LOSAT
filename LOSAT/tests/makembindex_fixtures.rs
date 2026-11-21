@@ -8,7 +8,9 @@
 //!
 //! `gen/` holds what the freeze made from the generator below (`gen_big.py` of the probe): two
 //! FASTA files, the databases that `makeblastdb` builds of them (here LOSAT's, there NCBI's: an
-//! index reads only their sequences and masks) and the lower case masks of `big.fa`.
+//! index reads only their sequences and masks) and the lower case masks of `big.fa`. `spill/`
+//! holds one more FASTA file of the generator, apart from `gen/` (28 MB, copied only for the row
+//! that reads it).
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -31,6 +33,8 @@ struct Case {
     stdin: Option<String>,
     /// Whether the row reads `gen/`.
     generated: bool,
+    /// Whether the row reads `spill/`.
+    spill: bool,
 }
 
 /// The rows of the table.
@@ -48,6 +52,7 @@ fn cases() -> Vec<Case> {
             words,
             stdin,
             generated: arguments.contains("gen/"),
+            spill: arguments.contains("spill/"),
         });
     }
     cases
@@ -110,6 +115,34 @@ fn generated_fasta() -> (Vec<u8>, Vec<u8>) {
         record(&mut many, &format!("m{i} generated {i}"), &letters);
     }
     (big, many)
+}
+
+/// `spill/spill.fa`: 2,200,000 records of the one letter `A` (one local id of `-stride 1` whose
+/// offsets reach into the local id's bits), then `X` of 1,900,000 letters, `Y` of 100,000 and `R`
+/// of 1,000,000 from a new generator (the volume of `-volsize 12` rolls back over `R`).
+fn spill_fasta() -> Vec<u8> {
+    let mut spill = Vec::new();
+    for i in 0..2_200_000 {
+        spill.extend_from_slice(format!(">t{i}\nA\n").as_bytes());
+    }
+    let mut lcg = Lcg(1);
+    record(&mut spill, "X", &lcg.letters(1_900_000, false));
+    record(&mut spill, "Y", &lcg.letters(100_000, false));
+    record(&mut spill, "R", &lcg.letters(1_000_000, false));
+    spill
+}
+
+/// The directory that holds `spill/`, made once.
+fn spill() -> &'static Path {
+    static DIR: OnceLock<PathBuf> = OnceLock::new();
+    DIR.get_or_init(|| {
+        let root = Path::new(env!("CARGO_TARGET_TMPDIR"))
+            .join(format!("makembindex-spill-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("spill")).unwrap();
+        fs::write(root.join("spill/spill.fa"), spill_fasta()).unwrap();
+        root
+    })
 }
 
 /// FNV-1a 64 of `bytes`.
@@ -255,6 +288,9 @@ fn run(binary: &Path, case: &Case, tag: &str) -> (Run, PathBuf) {
     if case.generated {
         copy_tree(&generated().join("gen"), &dir.join("gen"));
     }
+    if case.spill {
+        copy_tree(&spill().join("spill"), &dir.join("spill"));
+    }
     let before = files_below(&dir);
     let stdin = match &case.stdin {
         Some(file) => Stdio::from(fs::File::open(dir.join(file)).unwrap()),
@@ -383,5 +419,10 @@ fn the_generated_inputs_are_the_freeze_s() {
     assert_eq!(
         (many.len(), fnv1a64(&many)),
         (1_066_698, 0x36e7_8e4b_02be_1c36)
+    );
+    let spill = spill_fasta();
+    assert_eq!(
+        (spill.len(), fnv1a64(&spill)),
+        (28_326_399, 0xfdd8_1e8e_25df_89ba)
     );
 }

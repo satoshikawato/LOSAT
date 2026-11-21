@@ -22,20 +22,6 @@ use super::{
 // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_factory.cpp:1537
 const MEGABYTE: u64 = 1024 * 1024;
 
-/// `base_value(r)`: 1 + the NCBI2na value of an IUPACna letter `A`, `C`, `G`, `T`; 0 for any
-/// other letter.
-// NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_factory.cpp:103-112
-#[inline]
-fn base_value(r: u8) -> u8 {
-    match r {
-        b'A' => 1,
-        b'C' => 2,
-        b'G' => 3,
-        b'T' => 4,
-        _ => 0,
-    }
-}
-
 /// `CSubjectMap_Factory_Base::CMaskHelper`: an iterator over the masked intervals of a sequence
 /// (the packed locations of its `mask_locs_`, each a list of `(from, to)`), which `In` moves
 /// forward and `Adjust` back, as NCBI's does (the chunks of a long sequence overlap).
@@ -252,9 +238,7 @@ impl SubjectMap {
 
     /// `c_seq_.size()`, a `TSeqPos`.
     fn seq_len(&self) -> u32 {
-        self.c_seq
-            .as_ref()
-            .map_or(0, |seq| seq.letters.len() as u32)
+        self.c_seq.as_ref().map_or(0, |seq| seq.bases.len() as u32)
     }
 
     /// `NewSequenceInit(sd, start_chunk)` (with the lengths table of `CSubjectMap_Factory`):
@@ -290,13 +274,17 @@ impl SubjectMap {
         let chunk_len = chunk_end - chunk_start;
         let mut segs: Vec<(u32, u32)> = Vec::new();
         if chunk_len > 0 {
-            let letters = &self.c_seq.as_ref().expect("a sequence").letters;
+            let invalid = self.c_seq.as_ref().expect("a sequence").bases.invalid();
+            let mut run = invalid.partition_point(|&(_, to)| to <= chunk_start);
             let mut inside = false;
             self.mask_helper.adjust(chunk_start);
             for pos in chunk_start..chunk_end {
-                let letter = base_value(letters[pos as usize]);
-                // `in1 || mask_helper_->In(pos)`: the masks are asked of valid letters only.
-                let in1 = letter == 0 || self.mask_helper.contains(pos);
+                while run < invalid.len() && invalid[run].1 <= pos {
+                    run += 1;
+                }
+                let valid = run == invalid.len() || pos < invalid[run].0;
+                // The masks are asked of the letters A, C, G and T only, as NCBI asks them.
+                let in1 = !valid || self.mask_helper.contains(pos);
                 if in1 && !inside {
                     if segs.is_empty() {
                         segs.push((0, 0));
@@ -368,33 +356,14 @@ impl SubjectMap {
         lid.end = chunks;
         lid.seq_end = lid.seq_start.wrapping_add(self.cur_lid_len);
         if starting && seq_len > 0 {
+            let packed = self.c_seq.as_ref().expect("a sequence").bases.packed();
             // The packed sequences are indexed by NCBI's 32-bit words (`seq_start_`).
-            let packed = (seq_len as usize).div_ceil(CR as usize);
-            if self.seq_store.len() + packed > u32::MAX as usize {
+            if self.seq_store.len() + packed.len() > u32::MAX as usize {
                 return Err(StreamError::Refused(super::unsupported(
                     "an index volume of more than 4 GiB of packed sequences (-volsize)",
                 )));
             }
-            let letters = &self.c_seq.as_ref().expect("a sequence").letters;
-            self.seq_store.reserve(packed);
-            let mut chunks = letters.chunks_exact(CR as usize);
-            for group in &mut chunks {
-                let mut accum = 0u8;
-                for &r in group {
-                    accum = (accum << 2) + base_value(r).saturating_sub(1);
-                }
-                self.seq_store.push(accum);
-            }
-            let rest = chunks.remainder();
-            if !rest.is_empty() {
-                // `accum <<= (CR - lc)*2`: the letters before them leave the byte.
-                let mut accum = 0u8;
-                for &r in rest {
-                    accum = (accum << 2) + base_value(r).saturating_sub(1);
-                }
-                accum <<= (CR as usize - rest.len()) * 2;
-                self.seq_store.push(accum);
-            }
+            self.seq_store.extend_from_slice(packed);
         }
         Ok((true, false))
     }
@@ -652,19 +621,14 @@ impl OffsetData {
     }
 
     /// `TruncateList(offset, total_)` of the list of `nmer`: the entries from the first that is
-    /// at least `offset` are dropped, with the code before it. The lists grow in the order of
-    /// the positions, so a list whose last entry (always an offset) is below `offset` keeps all.
+    /// at least `offset` are dropped, with the code before it. Every list is read from its
+    /// start, as NCBI reads it: a list is not always in increasing order (with `-stride 1` a
+    /// local id of many short sequences has positions whose offsets reach into the local id's
+    /// bits, above the offsets of a later local id).
     // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_factory.cpp:1262-1286
     fn truncate_list(&mut self, nmer: usize, offset: Word) {
         let size = self.sizes[nmer] as usize;
         if size == 0 {
-            return;
-        }
-        let last = {
-            let tail = self.pool.block(self.tails[nmer]);
-            tail.data[(size - 1) % UNIT]
-        };
-        if last < offset {
             return;
         }
         let min_offset = self.min_offset;
@@ -811,7 +775,8 @@ impl OffsetData {
             } else if u64::from(word) % self.mult == 0 {
                 write_word(os, word)?;
             } else {
-                let class = (1..self.mult)
+                // The largest divisor below `mult_` (`word` itself when `word` is below it).
+                let class = (1..=(self.mult - 1).min(u64::from(word)))
                     .rev()
                     .find(|&m| u64::from(word) % m == 0)
                     .expect("1 divides every offset");
@@ -904,8 +869,10 @@ fn save_header(
 /// Why a volume was not made, after what NCBI's would have posted.
 pub(crate) enum Stop {
     Stream(StreamError),
-    /// A volume that NCBI's makembindex does not finish (its `Save` loops on a zero `mult_`).
-    Unfinished,
+    /// A volume for which NCBI's makembindex gives no defined index: its `Save` does not end
+    /// (a zero `mult_`), or its offsets come from a shift past an `int`'s width (a stride of
+    /// 32768 or more, C++ undefined behaviour).
+    NoDefinedIndex,
 }
 
 impl From<StreamError> for Stop {
@@ -963,11 +930,12 @@ pub(crate) fn make_index(
             stop_chunk = 0;
             break;
         }
-        // NCBI's `Save` of a zero `mult_` loops without end (`while( --m > 0 )` from 0), and a
-        // stride of 32768 or more shifts NCBI's `int` past its width (`GetMinOffset`): no
-        // volume with a sequence is made then (`makembindex` refuses it).
+        // NCBI gives no defined volume with a sequence for a zero `mult_` (the loop over the
+        // divisor classes of its `Save` starts below 1 and never ends) or a stride of 32768 or
+        // more (`GetMinOffset` shifts an `int` by 32 bits or more, which C++ leaves undefined):
+        // `makembindex` refuses them here, at the volume's first sequence.
         if offset_data.mult == 0 || options.stride >= super::MAX_STRIDE {
-            return Err(Stop::Unfinished);
+            return Err(Stop::NoDefinedIndex);
         }
         loop {
             let (added, overflow) = subject_map.add_sequence_chunk()?;
@@ -996,8 +964,8 @@ pub(crate) fn make_index(
         start_chunk = 0;
         i = i.wrapping_add(1);
     }
-    // `CNcbiOfstream os( oname.c_str(), IOS_BASE::binary )`: a file that does not open, or a
-    // write that fails, is not reported (no exceptions are enabled on the stream).
+    // NCBI opens the volume as a binary output stream without exceptions: a file that does not
+    // open, or a write that fails, is not reported.
     if let Ok(file) = File::create(oname) {
         let mut os = BufWriter::with_capacity(1 << 20, file);
         let _ = save_header(&mut os, options, [start, start_chunk, *stop, stop_chunk])

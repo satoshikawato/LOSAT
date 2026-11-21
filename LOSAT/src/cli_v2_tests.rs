@@ -1908,7 +1908,6 @@ fn values_on_which_ncbi_crashes_are_rejected_with_the_options() {
         &["-evalue", "+inf"][..],
         &["-evalue", "1e999"],
         &["-evalue", "1.7976931348623157e308"],
-        &["-max_target_seqs", "1073741799"],
     ] {
         let error = format!("{:#}", blastp(words).unwrap_err());
         assert!(
@@ -1921,6 +1920,8 @@ fn values_on_which_ncbi_crashes_are_rejected_with_the_options() {
         &["-evalue", "1.7976931348623156e308"],
         &["-max_target_seqs", "2147483647"],
         &["-max_target_seqs", "1073741798"],
+        // Past NCBI's `int` overflow of the preliminary hit list size (LOSAT computes it without).
+        &["-max_target_seqs", "1073741799"],
     ] {
         blastp(words).unwrap();
     }

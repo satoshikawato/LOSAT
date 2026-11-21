@@ -1285,16 +1285,12 @@ fn run_local_search_with_pool(
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:43-70;
     // c++/src/algo/blast/core/hspfilter_collector.c:105-161:
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:43-70:
-    // The size is NCBI's `int` (`blastn/hsp.rs` `get_prelim_hitlist_size`); a size that is
-    // not positive (NCBI crashes) is rejected with the options (`args.rs`).
-    let prelim_size = usize::try_from(crate::algorithm::blastn::hsp::get_prelim_hitlist_size(
+    // Computed without NCBI's `int` overflow (`blastn/hsp.rs` `get_prelim_hitlist_size`).
+    let prelim_size = crate::algorithm::blastn::hsp::get_prelim_hitlist_size(
         profile.max_target_seqs,
         compo_adjust_mode.is_enabled(),
         true,
-    ))
-    .ok()
-    .filter(|&size| size > 0)
-    .context("TBLASTN preliminary hit list size is not positive")?;
+    );
     let query_refs: Vec<_> = queries.iter().map(Vec::as_slice).collect();
     let protein_split =
         crate::algorithm::blastp::protein_query_split::protein_query_split_sizes(20000)?;

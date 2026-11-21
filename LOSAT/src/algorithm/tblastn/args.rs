@@ -610,7 +610,6 @@ pub(super) fn check_search_limits(args: &ResolvedTblastnArgs) -> Result<()> {
                 || args.matrix_name.eq_ignore_ascii_case("identity"),
         )?;
     }
-    let (compo_adjust_mode, _) = composition(args);
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:409,3687
     // A list whose HSPs all fail keeps the best e-value DBL_MAX, so an -evalue of DBL_MAX
     // or more (+inf, 1e999, 1.7976931348623157e308) puts an empty list into the hit list,
@@ -624,16 +623,6 @@ pub(super) fn check_search_limits(args: &ResolvedTblastnArgs) -> Result<()> {
             args.evalue
         );
     }
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:43-70 (the
-    // preliminary hit list size through NCBI's `int`; `blastn/hsp.rs`)
-    // A hit list size whose preliminary size is not positive crashes NCBI.
-    crate::algorithm::blastn::hsp::check_prelim_hitlist_size(
-        args.hitlist_size,
-        args.max_target_seqs_given,
-        compo_adjust_mode.is_enabled(),
-        true,
-        "TBLASTN",
-    )?;
     Ok(())
 }
 

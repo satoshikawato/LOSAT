@@ -66,6 +66,13 @@ The other items are rare cases in which NCBI BLAST+ crashes, reads outside its m
 - **Why.** NCBI's behaviour is a signed overflow, which is undefined in C. LOSAT computes the sum without overflow.
 - **Record.** [The decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
 
+### Hit list sizes from 2^30
+
+- **What you see.** A hit list size (`-max_target_seqs`, or the `-num_descriptions` or `-num_alignments` that sets it in `-outfmt` 0 to 4) of 2^30 or more, or 2^30 - 25 or more with composition-based statistics, keeps every hit, as 2^30 - 26 does. NCBI computes the preliminary hit list size in a signed 32-bit integer, which overflows there: NCBI keeps 10 hits per query (without composition-based statistics, up to 2^31 - 51) or 2 to 48 (with them, from 2147483624), and crashes at the other sizes.
+- **When.** Gapped `blastn`, `blastp`, `psiblast`, `rpsblast`, `blastx`, `rpstblastn` and `tblastn` searches with such a size. Ungapped searches and `tblastx` keep the size itself, as NCBI does. Every smaller size matches NCBI.
+- **Why.** NCBI's behaviour is a signed overflow, which is undefined in C. LOSAT computes the size without overflow.
+- **Record.** [The decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
+
 ### `gb`, `emb` and `dbj` ids
 
 - **What you see.** LOSAT prints the id type that is stored. NCBI can print `gb|AF000002.1|` for a sequence stored as `emb|AF000002.1|`.

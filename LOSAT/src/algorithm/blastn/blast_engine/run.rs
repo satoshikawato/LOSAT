@@ -5267,7 +5267,7 @@ fn finish_query_hit_list(
             hit_list,
             query_len,
             culling_limit,
-            usize::try_from(get_prelim_hitlist_size(hitlist_size, false, !ungapped)).unwrap_or(0),
+            get_prelim_hitlist_size(hitlist_size, false, !ungapped),
         );
     }
     // NCBI's best hit pipe is there in its place (`-best_hit_overhang`, `-best_hit_score_edge`;
@@ -5278,7 +5278,7 @@ fn finish_query_hit_list(
             hit_list,
             query_len,
             params,
-            usize::try_from(get_prelim_hitlist_size(hitlist_size, false, !ungapped)).unwrap_or(0),
+            get_prelim_hitlist_size(hitlist_size, false, !ungapped),
         );
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:836-867

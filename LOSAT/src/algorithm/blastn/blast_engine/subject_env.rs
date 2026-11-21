@@ -151,9 +151,7 @@ pub(super) fn subject_search_env<const UNGAPPED: bool>(
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2960-2968
     let hitlist_size = args.report_counts.hitlist_size;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:43-70 (GetPrelimHitlistSize)
-    let prelim_hitlist_size =
-        usize::try_from(get_prelim_hitlist_size(hitlist_size, false, !UNGAPPED))
-            .map_err(|_| anyhow::anyhow!("the preliminary hit list size overflows"))?;
+    let prelim_hitlist_size = get_prelim_hitlist_size(hitlist_size, false, !UNGAPPED);
 
     // Debug mode: set BLEMIR_DEBUG=1 to enable, BLEMIR_DEBUG_WINDOW="q_start-q_end,s_start-s_end" to focus on a region
     let debug_mode = crate::utils::xdiag::var("BLEMIR_DEBUG").is_ok();

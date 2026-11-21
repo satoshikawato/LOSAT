@@ -663,8 +663,7 @@ impl ResolvedBlastpArgs {
                 self.max_target_seqs,
                 self.comp_based_stats.is_enabled(),
                 true,
-            )
-            .max(1) as usize,
+            ),
         }
     }
 

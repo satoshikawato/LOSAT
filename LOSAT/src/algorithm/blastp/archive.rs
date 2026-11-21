@@ -464,6 +464,9 @@ pub(crate) fn apply_strategy(
                 out.max_hsps_per_subject = usize::try_from(*n).ok().filter(|n| *n > 0)
             }
             Setter::QueryCovHspPerc(v) => out.qcov_hsp_perc = Some(*v),
+            Setter::SubjectBestHit => out.subject_besthit = true,
+            Setter::BestHitOverhang(v) => out.best_hit_overhang = Some(*v),
+            Setter::BestHitScoreEdge(v) => out.best_hit_score_edge = Some(*v),
             Setter::MaskAtHash(on) => out.soft_masking = Some(*on),
             Setter::SmithWatermanMode(on) => out.use_sw_tback = *on,
             Setter::GappedMode(gapped) => out.ungapped = !*gapped,

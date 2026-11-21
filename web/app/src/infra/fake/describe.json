@@ -631,6 +631,16 @@
     "takes_value": true
    },
    {
+    "flag": "-best_hit_overhang",
+    "help": "Best Hit algorithm overhang value (recommended value: 0.1)",
+    "takes_value": true
+   },
+   {
+    "flag": "-best_hit_score_edge",
+    "help": "Best Hit algorithm score edge value (recommended value: 0.1)",
+    "takes_value": true
+   },
+   {
     "flag": "-subject_besthit",
     "help": "Return only the best HSP for each non overlapping query region",
     "takes_value": false,

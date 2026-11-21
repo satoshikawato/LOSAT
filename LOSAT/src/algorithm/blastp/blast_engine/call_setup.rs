@@ -39,11 +39,11 @@ use super::{
     blastp_prelim_evalue, blastp_preliminary_cutoff_subject_length, blastp_query_anchored_view,
     blastp_query_frames_marked, blastp_seqalign_format, blastp_x_dropoff_init_for_context,
     blastp_xml2_kind, build_blastp_concatenated_query, build_redone_match_heaps,
-    compute_blosum62_ideal_karlin_params, compute_diag_table_shape, culling, database,
+    compute_blosum62_ideal_karlin_params, compute_diag_table_shape, database,
     prepare_blastp_subjects_preserving_order, psi_round, pssm_hooks, rps_hooks, split_option_space,
     x_blocks_contexts, x_ih_pool, x_lookup_ahead, x_prelim_block_plan, x_soft_subject,
     BlastpContextLookupBounds, BlastpPrelimCutoffs, BlastpRanges, BlastpReport, BlastpReports,
-    BlastpRuntimeLookup, BlastpSubjectParameters, BlastpSumStats, PrelimOnly,
+    BlastpRuntimeLookup, BlastpSubjectParameters, BlastpSumStats, PrelimFilter, PrelimOnly,
 };
 use crate::algorithm::blastp::args::{
     BlastpCompositionMode, BlastpLookupTableType, ResolvedBlastpArgs,
@@ -1298,13 +1298,14 @@ fn one_subject<const UNGAPPED: bool>(
     })
 }
 
-/// What the call's preliminary stage and redo write (`prelim_sinks`): the culling writer, the first
+/// What the call's preliminary stage and redo write (`prelim_sinks`): the writer of a filtering
+/// option (`-culling_limit`, `-best_hit_*`), the first
 /// overflow of a subject's search space, the count of lists freed by the redo, the redo's heaps,
 /// the preliminary hit lists (full and compact) and the diagnostic counters at their start.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:286-287
 pub(super) struct BlastpPrelimSinks {
-    pub(super) culling: Option<culling::PrelimCulling>,
+    pub(super) prelim_filter: Option<PrelimFilter>,
     pub(super) subject_space_overflow: crate::stats::setup::SubjectSpaceOverflow,
     pub(super) x_prelim_freed: usize,
     pub(super) redone_matches: Vec<BlastCompoHeap>,
@@ -1314,8 +1315,8 @@ pub(super) struct BlastpPrelimSinks {
     pub(super) x_compact_hit_lists: Vec<Option<BlastpHitList<XPrelimHsp>>>,
 }
 
-/// The call's `BlastpPrelimSinks` for its `query_count` queries (the culling writer only where the
-/// preliminary stage does not run in blocks, `x_blocks`, LOSAT_X_BPQBLOCK).
+/// The call's `BlastpPrelimSinks` for its `query_count` queries (a filtering option's writer only
+/// where the preliminary stage does not run in blocks, `x_blocks`, LOSAT_X_BPQBLOCK).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:291-293
 pub(super) fn prelim_sinks(
@@ -1324,13 +1325,16 @@ pub(super) fn prelim_sinks(
     prelim_hitlist_size: usize,
     query_count: usize,
 ) -> BlastpPrelimSinks {
-    // `-culling_limit`: NCBI's culling writer takes the place of the collector (`CreateHspWriter`,
-    // setup_factory.cpp:318-342). The choice is made once for this call: the whole search, a block
-    // of query batches, or one chunk of a split query, each with its own writer.
+    // `-culling_limit` and `-best_hit_*`: NCBI's culling writer or best hit writer takes the place
+    // of the collector (`CreateHspWriter`, setup_factory.cpp:305-342). The choice is made once for
+    // this call: the whole search, a block of query batches, or one chunk of a split query, each
+    // with its own writer.
     // EXPERIMENT (LOSAT_X_BPQBLOCK): with the preliminary stage in blocks (`x_blocks`) each block's
     // call has its own writer, as NCBI's batch.
-    let culling = (args.culling_limit > 0 && x_blocks.is_none())
-        .then(|| culling::PrelimCulling::new(prelim_hitlist_size, args.culling_limit));
+    let prelim_filter = x_blocks
+        .is_none()
+        .then(|| PrelimFilter::of_options(args, prelim_hitlist_size))
+        .flatten();
     // The first overflow of a subject's search space (`subject_parameters`), noted by the kernel.
     let subject_space_overflow = crate::stats::setup::SubjectSpaceOverflow::default();
     // `x_prelim_free.rs`.
@@ -1347,7 +1351,7 @@ pub(super) fn prelim_sinks(
     let x_compact_hit_lists: Vec<Option<BlastpHitList<XPrelimHsp>>> =
         std::iter::repeat_with(|| None).take(query_count).collect();
     BlastpPrelimSinks {
-        culling,
+        prelim_filter,
         subject_space_overflow,
         x_prelim_freed,
         redone_matches,

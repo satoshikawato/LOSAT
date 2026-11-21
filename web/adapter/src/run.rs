@@ -2020,7 +2020,11 @@ mod tests {
         ));
         assert!(parse(&["psiblast", "-query", "q", "-subject", "s"]).is_err());
         // An unknown program and a parser error are the CLI's messages.
-        for words in [&["nosuch"][..], &["tblastx", "-query", "q"][..]] {
+        for words in [
+            &["nosuch"][..],
+            &["tblastx", "-query"][..],
+            &["tblastx", "-query", "q", "-subject", "s"][..],
+        ] {
             let cli = losat::web_adapter::try_parse_cli(
                 std::iter::once("losat").chain(words.iter().copied()),
             )
@@ -2028,6 +2032,11 @@ mod tests {
             .map_err(|error| losat::web_adapter::command_line_message(&error, false));
             assert_eq!(parse(words).map(|_| ()), cli, "{words:?}");
         }
+        // An argv without subjects is NCBI's error after the parse (line WQA's D14, 2026-11-21).
+        assert_eq!(
+            parse(&["tblastx", "-query", "q"]).map(|_| ()),
+            Err(format!("{:#}", losat::web_adapter::missing_subject_error()))
+        );
         assert_eq!(Program::Tblastx.formats(), &[0, 6, 7]);
         assert_eq!(Program::Blastx.formats(), &[0, 6, 7]);
         // validate rejects BLASTN scoring that NCBI rejects, with NCBI's message.

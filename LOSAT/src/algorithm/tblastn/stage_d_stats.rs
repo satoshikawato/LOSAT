@@ -332,7 +332,6 @@ pub(super) fn local_parameters_for_blocks(
     // NCBI lowers the hit cutoffs for sum statistics in a gapped search only: an ungapped search
     // keeps the cutoffs of its e-value.
     if let Some(link_params) = link.filter(|_| gapped) {
-    if let Some(link_params) = link {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:950-976:
         // concat_qlen = last.query_offset + last.query_length;
         let concat_qlen: usize = query_contexts

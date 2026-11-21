@@ -1395,7 +1395,7 @@ const SHARED: &[&str] = ALL;
 const OUT_OF_RANGE: Outfmt = Outfmt::Ncbi(255, "Error: Formatting choice is out of range\n");
 const INVALID_DELIMITER: Outfmt = Outfmt::Ncbi(
     1,
-    "BLAST query/options error: Delimiter format is invalid. Valid format is delim=<delimiter value>\nPlease refer to the LOSAT user manual.\n",
+    "LOSAT query/options error: Delimiter format is invalid. Valid format is delim=<delimiter value>\nPlease refer to the LOSAT user manual.\n",
 );
 
 /// The programs, `-outfmt` value, `-out` file and result of each case. A change that makes a
@@ -1437,11 +1437,11 @@ const OUTFMT_ROWS: &[(&[&str], &str, Option<&str>, Outfmt)] = {
         (SHARED, "7 delim=/ frames", None, WritesThenNcbi(TabularWithComments, "Your custom record separator (/) is also used by the format specifier (frames) to separate multiple entries. Please use a different record separator (delim keyword).")),
         (SHARED, "10 delim=<> salltitles", None, WritesThenNcbi(CommaSeparatedValues, "Your custom record separator (<>) is also used by the format specifier (salltitles) to separate multiple entries. Please use a different record separator (delim keyword).")),
         // NCBI's errors when it reads the value (the delimiter is read before the number).
-        (ALL, "abc", None, Ncbi(1, "BLAST query/options error: 'abc' is not a valid output format\nPlease refer to the LOSAT user manual.\n")),
-        (ALL, "0x6", None, Ncbi(1, "BLAST query/options error: '0x6' is not a valid output format\nPlease refer to the LOSAT user manual.\n")),
-        (ALL, "6\u{a0}", None, Ncbi(1, "BLAST query/options error: '6\u{a0}' is not a valid output format\nPlease refer to the LOSAT user manual.\n")),
-        (ALL, "6\tqseqid", None, Ncbi(1, "BLAST query/options error: '6\tqseqid' is not a valid output format\nPlease refer to the LOSAT user manual.\n")),
-        (ALL, " ", None, Ncbi(1, "BLAST query/options error: '' is not a valid output format\nPlease refer to the LOSAT user manual.\n")),
+        (ALL, "abc", None, Ncbi(1, "LOSAT query/options error: 'abc' is not a valid output format\nPlease refer to the LOSAT user manual.\n")),
+        (ALL, "0x6", None, Ncbi(1, "LOSAT query/options error: '0x6' is not a valid output format\nPlease refer to the LOSAT user manual.\n")),
+        (ALL, "6\u{a0}", None, Ncbi(1, "LOSAT query/options error: '6\u{a0}' is not a valid output format\nPlease refer to the LOSAT user manual.\n")),
+        (ALL, "6\tqseqid", None, Ncbi(1, "LOSAT query/options error: '6\tqseqid' is not a valid output format\nPlease refer to the LOSAT user manual.\n")),
+        (ALL, " ", None, Ncbi(1, "LOSAT query/options error: '' is not a valid output format\nPlease refer to the LOSAT user manual.\n")),
         (ALL, "-1", None, OUT_OF_RANGE),
         (ALL, "22", None, OUT_OF_RANGE),
         (ALL, "99", None, OUT_OF_RANGE),
@@ -1561,7 +1561,7 @@ fn output_formats_follow_the_format_table() {
                         native(error),
                         (
                             1,
-                            format!("BLAST query/options error: {message}\nPlease refer to the LOSAT user manual.\n")
+                            format!("LOSAT query/options error: {message}\nPlease refer to the LOSAT user manual.\n")
                         ),
                         "{case}"
                     );
@@ -1573,7 +1573,7 @@ fn output_formats_follow_the_format_table() {
                         native(error),
                         (
                             1,
-                            format!("BLAST query/options error: {message}\nPlease refer to the LOSAT user manual.\n")
+                            format!("LOSAT query/options error: {message}\nPlease refer to the LOSAT user manual.\n")
                         ),
                         "{case}"
                     );
@@ -2566,9 +2566,11 @@ fn help_full_is_help_and_the_reader_stops_at_a_help_flag() {
 fn ncbi_version_request_reads_the_word_before_the_arguments() {
     use crate::cli::ncbi_version_request;
     let version = |words: &[&str]| ncbi_version_request(words.iter().copied());
+    // LOSAT's version where NCBI's programs print their own (`crate::wording::LOSAT_VERSION`).
+    let losat = format!("LOSAT {}", env!("CARGO_PKG_VERSION"));
     let text = version(&["losat", "blastn", "-version"]).unwrap();
     assert!(
-        text.starts_with("blastn: 2.17.0+\n Package: LOSAT "),
+        text.starts_with(&format!("blastn: {losat}\n Package: LOSAT ")),
         "{text}"
     );
     assert!(
@@ -2577,7 +2579,7 @@ fn ncbi_version_request_reads_the_word_before_the_arguments() {
     );
     assert!(version(&["losat", "makeblastdb", "-x", "-version"])
         .unwrap()
-        .starts_with("makeblastdb: 2.17.0+\n"));
+        .starts_with(&format!("makeblastdb: {losat}\n")));
     // Where another option expects its value, and next to invalid arguments.
     assert!(version(&["losat", "blastx", "-out", "-version"]).is_some());
     assert!(version(&["losat", "blastp", "-evalue", "x", "-version", "-bogus"]).is_some());
@@ -2601,7 +2603,7 @@ fn ncbi_version_request_reads_the_word_before_the_arguments() {
     ])
     .unwrap();
     assert!(
-        full.starts_with("blastn: 2.17.0+\n Package: LOSAT ")
+        full.starts_with(&format!("blastn: {losat}\n Package: LOSAT "))
             && full.ends_with(
                 ", output compatible with blast 2.17.0\n Package-Config:  \n GI-64bit:  TRUE\n"
             ),
@@ -2609,13 +2611,23 @@ fn ncbi_version_request_reads_the_word_before_the_arguments() {
     );
     assert!(version(&["losat", "makeblastdb", "-title", "-version-full-xml"])
         .unwrap()
-        .contains("<appname>makeblastdb</appname>\n<version_info major=\"2\" minor=\"17\" patch_level=\"0\"/>\n"));
+        .contains(&format!(
+            "<appname>makeblastdb</appname>\n<version_info major=\"{}\" minor=\"{}\" patch_level=\"{}\"",
+            env!("CARGO_PKG_VERSION_MAJOR"),
+            env!("CARGO_PKG_VERSION_MINOR"),
+            env!("CARGO_PKG_VERSION_PATCH")
+        )));
     assert!(version(&["losat", "rpsbproc", "-version-full-json", "-version"])
         .unwrap()
-        .contains("\"appname\": \"rpsbproc\",\n    \"version_info\": {\"major\": 0, \"minor\": 5, \"patch_level\": 1},\n"));
+        .contains(&format!(
+            "\"appname\": \"rpsbproc\",\n    \"version_info\": {{\"major\": {}, \"minor\": {}, \"patch_level\": {}",
+            env!("CARGO_PKG_VERSION_MAJOR"),
+            env!("CARGO_PKG_VERSION_MINOR"),
+            env!("CARGO_PKG_VERSION_PATCH")
+        )));
     assert!(version(&["losat", "rpstblastn", "-version-full"])
         .unwrap()
-        .starts_with("rpstblastn: 2.17.0+\n"));
+        .starts_with(&format!("rpstblastn: {losat}\n")));
     assert!(version(&["losat", "blastn", "--", "-version-full"]).is_none());
     assert!(version(&["losat", "blastn", "-logfile", "-version-full"]).is_none());
     assert!(version(&["losat", "-version"]).is_none());

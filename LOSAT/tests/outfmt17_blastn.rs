@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 mod temp_support;
-use temp_support::{home_and_worker_log, unique_dir, Finished, RunFiles};
+use temp_support::{expected_losat_bytes, home_and_worker_log, unique_dir, Finished, RunFiles};
 
 fn fixtures() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/outfmt17")
@@ -64,7 +64,7 @@ fn without_cl(document: &[u8]) -> Vec<u8> {
             .position(|window| window == needle)
             .map(|at| at + from)
     };
-    let head: &[u8] = b"\n@PG\tID:0\tVN:2.17.0+";
+    let head: &[u8] = concat!("\n@PG\tID:0\tVN:LOSAT ", env!("CARGO_PKG_VERSION")).as_bytes();
     let Some(at) = find(&[head, b"\tCL:"].concat(), 0) else {
         return document.to_vec();
     };
@@ -87,7 +87,9 @@ fn mode_args<'a>(mode: &str, db: &'a str) -> [&'a str; 2] {
 }
 
 fn frozen(name: &str, extension: &str) -> Option<Vec<u8>> {
-    fs::read(fixtures().join(format!("{name}.{extension}"))).ok()
+    fs::read(fixtures().join(format!("{name}.{extension}")))
+        .ok()
+        .map(expected_losat_bytes)
 }
 
 /// LOSAT at `threads` threads writes the stdout (CL tag aside), stderr and exit status that NCBI
@@ -475,7 +477,8 @@ fn the_pg_line_shows_the_command_line() {
     let text = String::from_utf8_lossy(&output.stdout);
     let pg = text.lines().find(|line| line.starts_with("@PG")).unwrap();
     let expected = format!(
-        "@PG\tID:0\tVN:2.17.0+\tCL:{} blastn -query qnucl_valid.fna -subject {SUBJECT} -outfmt 17 SQ \tPN:blastn",
+        "@PG\tID:0\tVN:LOSAT {}\tCL:{} blastn -query qnucl_valid.fna -subject {SUBJECT} -outfmt 17 SQ \tPN:blastn",
+        env!("CARGO_PKG_VERSION"),
         env!("CARGO_BIN_EXE_losat")
     );
     assert_eq!(pg, expected);

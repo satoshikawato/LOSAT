@@ -3,6 +3,7 @@
 //! sequences of existing databases (`-input_type blastdb`), and a database of format version 5
 //! or 4.
 
+use crate::wording::DATABASE_ERROR;
 use std::io::{BufRead, Read, Write};
 
 use clap::Args;
@@ -190,7 +191,8 @@ impl MakedbError {
                 format!("losat makeblastdb: {error}").into_bytes()
             }
             MakedbError::Database(SeqDbError::Ncbi(exception)) => [
-                b"BLAST Database error: ".as_slice(),
+                DATABASE_ERROR.as_bytes(),
+                b" ",
                 exception.what().trim_ascii_end(),
             ]
             .concat(),
@@ -199,8 +201,8 @@ impl MakedbError {
             // of it; `SeqDbError::NotFound` is bytes), and any other is LOSAT's error in its
             // own words.
             MakedbError::Database(error) => match error.ncbi_message() {
-                Some(text) => [b"BLAST Database error: ".as_slice(), &text].concat(),
-                None => format!("BLAST Database error: {error}").into_bytes(),
+                Some(text) => [DATABASE_ERROR.as_bytes(), b" ", &text].concat(),
+                None => format!("{DATABASE_ERROR} {error}").into_bytes(),
             },
             MakedbError::Unsupported(message) => format!("losat makeblastdb: {message}").into(),
             MakedbError::Output(message) => {

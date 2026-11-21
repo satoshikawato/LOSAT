@@ -331,12 +331,12 @@ fn the_registry_assigns_ids_as_ncbi_does() {
     // A second set of default options is refused whatever the file is called.
     assert_eq!(
         algo(&mut r, FILTER_PROGRAM_DUST, "", "other name"),
-        "BLAST Database creation error: Masking algorithm with default arguments already provided"
+        "LOSAT database creation error: Masking algorithm with default arguments already provided"
     );
     // The same program, name and options is a duplicate.
     assert_eq!(
         algo(&mut r, FILTER_PROGRAM_DUST, "-a 1", "d1"),
-        "BLAST Database creation error: Duplicate masking algorithm found."
+        "LOSAT database creation error: Duplicate masking algorithm found."
     );
     assert_eq!(algo(&mut r, FILTER_PROGRAM_SEG, "", "s"), "20");
     assert_eq!(
@@ -358,13 +358,13 @@ fn the_registry_assigns_ids_as_ncbi_does() {
     assert_eq!(r.add_id(b"alpha").unwrap(), 102);
     assert_eq!(
         r.add_id(b"alpha").unwrap_err().to_string(),
-        "BLAST Database creation error: Duplicate masking algorithm found."
+        "LOSAT database creation error: Duplicate masking algorithm found."
     );
     // Programs that are not filtering programs.
     for (program, shown) in [(0, "0"), (55, "55"), (255, "255"), (-1, "-1")] {
         assert_eq!(
             algo(&mut r, program, "", "x"),
-            format!("BLAST Database creation error: Invalid filtering program: {shown}")
+            format!("LOSAT database creation error: Invalid filtering program: {shown}")
         );
     }
 }
@@ -387,7 +387,7 @@ fn the_registry_runs_out_of_ids_in_each_range() {
     }
     assert_eq!(
         algo(&mut r, FILTER_PROGRAM_DUST, "-x 10", "f"),
-        "BLAST Database creation error: Too many IDs in range 11-20"
+        "LOSAT database creation error: Too many IDs in range 11-20"
     );
     // repeat: 40 to 99.
     let mut r = MaskInfoRegistry::default();
@@ -400,7 +400,7 @@ fn the_registry_runs_out_of_ids_in_each_range() {
     }
     assert_eq!(
         algo(&mut r, FILTER_PROGRAM_REPEAT, "", "r60"),
-        "BLAST Database creation error: Too many IDs in range 40-100"
+        "LOSAT database creation error: Too many IDs in range 40-100"
     );
     // -mask_id: 100 to 254.
     let mut r = MaskInfoRegistry::default();
@@ -409,7 +409,7 @@ fn the_registry_runs_out_of_ids_in_each_range() {
     }
     assert_eq!(
         r.add_id(b"m155").unwrap_err().to_string(),
-        "BLAST Database creation error: Too many IDs in range 100-255"
+        "LOSAT database creation error: Too many IDs in range 100-255"
     );
 }
 
@@ -454,7 +454,7 @@ fn set_mask_data_checks_what_ncbi_checks() {
     }];
     assert_eq!(
         db.set_mask_data(&one, &[]).unwrap_err().to_string(),
-        "BLAST Database creation error: Need sequence data."
+        "LOSAT database creation error: Need sequence data."
     );
     let id = db
         .register_mask_algorithm(FILTER_PROGRAM_SEG, b"", b"seg")
@@ -468,7 +468,7 @@ fn set_mask_data_checks_what_ncbi_checks() {
     }];
     assert_eq!(
         db.set_mask_data(&unknown, &[]).unwrap_err().to_string(),
-        "BLAST Database creation error: Error: Algorithm IDs must be registered before use. \
+        "LOSAT database creation error: Error: Algorithm IDs must be registered before use. \
          Unknown algorithm ID = 21"
     );
     // A range with end before start, or past the end of the sequence.
@@ -479,7 +479,7 @@ fn set_mask_data_checks_what_ncbi_checks() {
         }];
         assert_eq!(
             db.set_mask_data(&bad, &[]).unwrap_err().to_string(),
-            "BLAST Database creation error: Error: Masked data offsets out of bounds."
+            "LOSAT database creation error: Error: Masked data offsets out of bounds."
         );
     }
     // Ranges of an unregistered id with no offsets are skipped.
@@ -491,7 +491,7 @@ fn set_mask_data_checks_what_ncbi_checks() {
     // The blobs of a sequence are set once.
     assert_eq!(
         db.set_mask_data(&one, &[]).unwrap_err().to_string(),
-        "BLAST Database creation error: Error: Already have blob for this sequence and column"
+        "LOSAT database creation error: Error: Already have blob for this sequence and column"
     );
 }
 

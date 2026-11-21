@@ -392,17 +392,17 @@ fn errors_end_with_makeblastdb_s_exit_codes_and_prefixes() {
         (
             MakedbError::Build(WriteDbError::Options("o".into())),
             1,
-            "BLAST options error: o",
+            "LOSAT options error: o",
         ),
         (
             MakedbError::Build(WriteDbError::Creation("c".into())),
             1,
-            "BLAST Database creation error: c",
+            "LOSAT database creation error: c",
         ),
         (
             MakedbError::Database(SeqDbError::NotFound("d".into())),
             2,
-            "BLAST Database error: d",
+            "LOSAT database error: d",
         ),
         (
             MakedbError::Build(WriteDbError::OutOfMemory),

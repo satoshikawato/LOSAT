@@ -539,9 +539,15 @@ fn write_residue(text: &mut [u8], at: i64, c: u8) -> Result<(), ProcessError> {
 /// libstdc++'s `basic_string::replace(pos, n1, str, pos2, n2)`: `n1` bytes from `pos` (fewer at
 /// the end) replaced by `n2` bytes of `str` from `pos2` (fewer at its end); the string may grow.
 /// Its `std::out_of_range` when a position is past its string's length, `pos2` checked first.
-// libstdc++ (GCC 13): include/c++/13/bits/basic_string.h:395-402,2311-2316,2352-2358
-// (`_M_limit(pos, n)` is `min(n, size() - pos)`. `qf`, an `int` (its value past `int`'s range
-// where exception 12 took it there), is the `size_t` `pos`: a negative one is beyond any length.)
+// The C++ standard's `basic_string::replace` takes `min(n1, size() - pos)` and
+// `min(n2, str.size() - pos2)` bytes and throws `out_of_range` for a position past the string's
+// length; `pos2` is checked first because C++17 defines this overload as
+// `replace(pos, n1, basic_string_view(str).substr(pos2, n2))`. The texts are observed: NCBI's
+// rpsbproc printed `basic_string::replace: __pos (which is N) > this->size() (which is M)` and
+// exited with status 3, the fixtures `tests/fixtures/rpsbproc/oracle/x.h_ntqlen1500.both.err`,
+// `x.h_ntframe4.doms.err` and `x.h_qfmin1.doms.err`. `qf`, an `int` (its value past `int`'s
+// range where exception 12 took it there), is the `size_t` `pos`: a negative one is beyond any
+// length.
 fn string_replace(
     text: &mut Vec<u8>,
     pos: i64,

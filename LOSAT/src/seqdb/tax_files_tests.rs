@@ -179,19 +179,28 @@ fn missing_tables_give_ncbi_texts() {
     // a .ptf has no volume or accession table; a .pdb has no taxid table
     let ptf = File::open(format!("{FX}/p5.ptf")).unwrap();
     let env = Env::open(&ptf).unwrap();
-    assert_eq!(volumes(&env).unwrap_err(), "DB contains no vol info.");
     assert_eq!(
-        acc_first_oid(&env, b"x").unwrap_err(),
+        volumes(&env).unwrap_err().to_string(),
+        "DB contains no vol info."
+    );
+    assert_eq!(
+        acc_first_oid(&env, b"x").unwrap_err().to_string(),
         "DB contains no accession info."
     );
-    assert_eq!(acc_oids(&env, b"x").unwrap_err(), NO_ACCESSION_INFO);
+    assert_eq!(
+        acc_oids(&env, b"x").unwrap_err().to_string(),
+        NO_ACCESSION_INFO
+    );
     let pdb = File::open(format!("{FX}/p5.pdb")).unwrap();
     let env = Env::open(&pdb).unwrap();
     let nto: Vec<u8> = Vec::new();
     let e = get_oids_for_tax_ids(&env, &nto, 7, &set(&[1])).unwrap_err();
-    assert_eq!(e, TaxError::NoTaxInfo);
+    assert!(matches!(e, TaxError::NoTaxInfo), "{e:?}");
     assert_eq!(e.message(b"p5.ptf"), b"No taxonomy info found in p5.ptf");
-    assert_eq!(get_db_tax_ids(&env).unwrap_err(), TaxError::NoTaxInfo);
+    assert!(matches!(
+        get_db_tax_ids(&env).unwrap_err(),
+        TaxError::NoTaxInfo
+    ));
     assert_eq!(
         accessions_lookup_error(b"p5.pdb"),
         b"Accessions to Oids lookup error in p5.pdb"
@@ -600,11 +609,17 @@ fn corrupt_lookup_files_are_errors() {
     assert!(get_oids_for_tax_ids(&ntf, &bad, 5, &set(&[562])).is_err());
     // .not: empty file, truncated, bad header, ends going backwards
     assert_eq!(
-        OidTaxIds::open(&Vec::<u8>::new()).err().unwrap(),
+        OidTaxIds::open(&Vec::<u8>::new())
+            .err()
+            .unwrap()
+            .to_string(),
         "Failed to open oid-to-taxids lookup file"
     );
     assert_eq!(
-        OidSeqIds::open(&Vec::<u8>::new()).err().unwrap(),
+        OidSeqIds::open(&Vec::<u8>::new())
+            .err()
+            .unwrap()
+            .to_string(),
         "Failed to open oid-to-seqid lookup file"
     );
     let not = std::fs::read(format!("{FX}/n5.not")).unwrap();
@@ -619,6 +634,7 @@ fn corrupt_lookup_files_are_errors() {
         .unwrap()
         .taxids(1)
         .unwrap_err()
+        .to_string()
         .contains("go backwards"));
     let mut b = not.clone();
     b[0..8].copy_from_slice(&u64::MAX.to_le_bytes());
@@ -659,6 +675,7 @@ fn seqid_list_forms() {
         .unwrap()
         .seqids(0)
         .unwrap_err()
+        .to_string()
         .contains("runs past"));
     // truncated file
     assert!(OidSeqIds::open(&file[..file.len() - 10])
@@ -673,6 +690,7 @@ fn seqid_list_forms() {
         .unwrap()
         .seqids(2)
         .unwrap_err()
+        .to_string()
         .contains("truncated"));
 }
 

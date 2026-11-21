@@ -157,7 +157,10 @@ impl Request {
 
 fn engine_error(result: Result<ImportedOptions, NcbiException>) -> (&'static str, String) {
     let error = result.expect_err("NCBI's builder fails");
-    (error.kind(), error.get_msg().to_string())
+    (
+        error.kind(),
+        String::from_utf8_lossy(error.get_msg()).into_owned(),
+    )
 }
 
 #[test]
@@ -308,7 +311,7 @@ fn cutoff_score_fails_in_ncbis_getter() {
     ] {
         let error = request.import().unwrap_err();
         assert_eq!(
-            error.what(),
+            String::from_utf8_lossy(&error.what()),
             crate::wording::losat_text(&format!(
                 "NCBI C++ Exception:\n    T0 \"{NCBI_BUILD_ROOT}/src/objects/blast/Blast4_value_.cpp\", \
                  line 252: Error: (CInvalidChoiceSelection::eFail) CBlast4_value::GetInteger(): \
@@ -361,11 +364,11 @@ fn the_program_and_service_are_ncbis_combinations() {
     );
     assert_eq!(
         compute_program(b"BLASTZ", b"Foo").unwrap_err().get_msg(),
-        "Unsupported combination of program (BLASTZ) and service (Foo)."
+        b"Unsupported combination of program (BLASTZ) and service (Foo)."
     );
     assert_eq!(
         compute_program(b"BLASTZ", b"plain").unwrap_err().get_msg(),
-        "Program type 'blastz' not supported"
+        b"Program type 'blastz' not supported"
     );
     for (program, service, expected) in [
         ("blastp", "rpsblast", EProgram::RpsBlast),
@@ -474,7 +477,7 @@ fn web_step_number_makes_psiblast_and_its_iterations() {
     assert_eq!(error.kind(), "CInvalidChoiceSelection::eFail");
     assert_eq!(
         error.get_msg(),
-        "CBlast4_value::GetString(): Invalid choice selection: NCBI-Blast4::Blast4-value.boolean"
+        b"CBlast4_value::GetString(): Invalid choice selection: NCBI-Blast4::Blast4-value.boolean"
     );
     // The other PSI-BLAST parameters, and the first that tells: dc-megablast before psiblast.
     for name in ["Web_RunPsiBlast", "IgnoreMsaMaster"] {

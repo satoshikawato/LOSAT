@@ -52,6 +52,7 @@ Choose a task with `-task`. Options you leave out take the default of the task.
 | `-window_size` | 40 (15 for `blastp-short`) | Two-hit window; 0 selects the one-hit method |
 | `-dbsize`, `-searchsp` | from the data | Set the effective database size or search space for the E-value |
 | `-culling_limit` | 0 (off) | Delete a hit that at least this many higher-scoring hits envelop |
+| `-subject_besthit` | off | Keep only the best alignment of each subject for each part of the query |
 
 For every option: `losat blastp -help`.
 
@@ -86,7 +87,7 @@ Formats 6, 7, 10 and 20 write twelve fields by default: `qaccver saccver pident 
 LOSAT stops with an error for these `blastp` settings instead of running something else. The full list is on [What LOSAT refuses](../refusals.md).
 
 - `-ungapped`, and `-use_sw_tback` without composition-based statistics (`-comp_based_stats 0`).
-- `-subject_besthit`, `-best_hit_overhang` and `-best_hit_score_edge`.
+- `-best_hit_overhang` and `-best_hit_score_edge`.
 - `-matrix IDENTITY` with word sizes 5 to 7 (the default of `-task blastp-fast`).
 - `-threshold` values that overflow NCBI's word-table buffers when the word size is 5 to 7.
 - `-html`, `-remote`, `-entrez_query`, `-gilist` and `-ipglist`.

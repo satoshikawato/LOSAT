@@ -56,7 +56,7 @@ fn every_probed_query_set_is_written_as_ncbi_wrote_it() {
             },
             ("same", None, Some(exception)) => match got {
                 Err(RenderError::Exception(e)) => assert_eq!(
-                    e.what_in(PROBE_BUILD_ROOT),
+                    String::from_utf8_lossy(&e.what_in(PROBE_BUILD_ROOT)),
                     crate::wording::losat_text(&String::from_utf8(exception).unwrap()),
                     "{case}"
                 ),
@@ -81,7 +81,7 @@ fn fills_of_a_long_seq_data_end_at_1024_letter_steps() {
         match render(text.as_bytes()) {
             Err(RenderError::Exception(e)) => assert_eq!(
                 e.get_msg(),
-                format!("reference out of range of Seq-inst data: {end}")
+                format!("reference out of range of Seq-inst data: {end}").as_bytes()
             ),
             other => panic!("{length}: {other:?}"),
         }
@@ -105,7 +105,10 @@ fn a_segment_that_passes_the_length_is_filled_up_to_it() {
     }
     match render(text(1600).as_bytes()) {
         Err(RenderError::Exception(e)) => {
-            assert_eq!(e.get_msg(), "reference out of range of Seq-inst data: 1600")
+            assert_eq!(
+                e.get_msg(),
+                b"reference out of range of Seq-inst data: 1600"
+            )
         }
         other => panic!("{other:?}"),
     }

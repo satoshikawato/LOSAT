@@ -114,18 +114,7 @@ pub(crate) fn x_bp_clut_scan_bf() -> bool {
 }
 
 /// `x_seed_fused_compressed::x_scan_two_hit_compressed` on the flat table (same arguments).
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-518
-// ```c
-//         /* for each hit, */
-//         for (i = 0; i < hits; ++i) {
-//             Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
-//             Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
-//
-//             /* calculate the diagonal associated with this query-subject pair
-//              */
-//
-//             diag_coord = (query_offset - subject_offset) & diag_mask;
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:508-518
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn x_scan_two_hit_compressed_flat<const CALLER: u8, F>(
     lookup: &XFlatCompressedLookup,
@@ -290,7 +279,7 @@ fn x_scan_flat_fseed<const CALLER: u8, F>(
 /// header).
 /// Out of line, and with a closure of its own type, so that the loops without it are compiled as
 /// without this one (see [`x_scan_flat_bf`]).
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:513-552 (quoted at
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:513-552 (cited at
 // `x_seed_fused::x_test_hit`)
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
@@ -346,7 +335,7 @@ struct XStage {
 /// The test of [`x_scan_flat_fseed_loop`] on staged hits in
 /// order (`diffs[i] = q - s`, `heres[i] = s + diag_offset`), out of line so that its loop keeps
 /// its own registers.
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:513-552 (quoted at
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:513-552 (cited at
 // `x_seed_fused::x_test_hit`)
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
@@ -387,7 +376,7 @@ fn x_stage_test<F>(
 ///
 /// `lookup.x_pairs_fit(subject, subject_length)` holds (the scan reads without bounds checks, and
 /// the slice bounds of every listed index exist).
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-518 (quoted at
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-518 (cited at
 // `x_scan_two_hit_compressed_flat`)
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
@@ -474,7 +463,7 @@ struct XLeanAt {
 /// Every index in `cells` is below `starts.len() - 1` (the slice bounds are read without bounds
 /// checks), as in the list of `x_list_pairs_lean` where `x_pairs_fit` holds and the zero entries
 /// past it.
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-518 (quoted at
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-518 (cited at
 // `x_scan_two_hit_compressed_flat`)
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
@@ -545,7 +534,7 @@ const _: () = assert!(X_RUN == 8);
 /// # Safety
 ///
 /// `diffs` and `heres` have `staged + X_RUN` places (`k < end` is the caller's, for the length).
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-518 (quoted at
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-518 (cited at
 // `x_scan_two_hit_compressed_flat`)
 #[inline(always)]
 #[allow(clippy::too_many_arguments)]
@@ -591,7 +580,7 @@ unsafe fn x_lean_run(
 }
 
 /// The loop of [`x_scan_two_hit_compressed_flat`]; `BRANCH_FREE` is `for_each_cell`'s.
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-518 (quoted at
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-518 (cited at
 // `x_scan_two_hit_compressed_flat`)
 #[inline(always)]
 #[allow(clippy::too_many_arguments)]
@@ -680,17 +669,6 @@ mod tests {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:513-552
-    // ```c
-    //             diag_coord = (query_offset - subject_offset) & diag_mask;
-    //             /* If the reset bit is set, an extension just happened. */
-    //             if (diag_array[diag_coord].flag) {
-    //             ...
-    //                 if (diff >= window) {
-    //             ...
-    //                 if (diff < wordsize) {
-    //                     continue;
-    //                 }
-    // ```
     // Queries of few letters and low thresholds (cells of many hits, several lookup segments),
     // subjects with letters outside the alphabet and copies of the query, small diagonal tables: the
     // loop on the flat table makes the candidates and leaves the diagonal table of the loop of

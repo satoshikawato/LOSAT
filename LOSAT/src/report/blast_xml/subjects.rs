@@ -118,26 +118,7 @@ impl SubjectNames {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:399-407
-    // ```c++
-    //     } catch (const CException&) {
-    //         // If Bioseq handle didn't return some of the information, and not all
-    //         // mandatory couldn't be filled, skip this hit completely.
-    //         //hit.Reset(NULL);
-    //         hit->SetId(kSeqId.AsFastaString());
-    //         hit->SetDef("Unknown");
-    //         hit->SetAccession("Unknown");
-    //         hit->SetLen(0);
-    //     };
-    // ```
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:412-417
-    // ```c++
-    //     } catch (const CException&) {
-    //     	CRef<blastxml2::CHitDescr> hit_exp(new blastxml2::CHitDescr);
-    //     	hit_exp->SetId(kSeqId.AsFastaString());
-    //         hit->SetDescription().push_back(hit_exp);
-    //         hit->SetLen(sequence::GetLength(kSeqId, scope));
-    //     };
-    // ```
     /// The names of a `-subject` record whose `GenerateDefline` threw (`NStr::HtmlDecode` cannot
     /// guess its title's encoding), as NCBI's catch writes them: outfmt 5's `Hit_id`
     /// `kSeqId.AsFastaString()` (`fasta_id`), `Hit_def` and `Hit_accession` `Unknown` and `Hit_len`
@@ -183,17 +164,6 @@ impl SubjectNames {
             return Err(Refusal::ReadsPastEnd);
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:393-406
-        // ```c++
-        //         	CRef<CSeq_id> best_id = FindBestChoice(ids, CSeq_id::Score);
-        //         	if(!best_id->IsLocal()) {
-        //         		CSeq_id_Handle id_handle = CSeq_id_Handle::GetHandle(*best_id);
-        //         		string accession = CAlignFormatUtil::GetLabel(id_handle.GetSeqId());
-        //         		if(accession != kEmptyStr)
-        //         			hit_exp->SetAccession(accession);
-        //         	}
-        //
-        //    			hit_exp->SetTitle(sequence::CDeflineGenerator().GenerateDefline(subj_handle));
-        // ```
         // The XML2 `HitDescr` of a record whose best id is not local has its accession too.
         let descriptions = if subject.has_local_best_id() {
             Vec::new()
@@ -239,24 +209,7 @@ impl SubjectNames {
         }
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:380-388, 422-428
-    // ```c++
-    //         		if(defline.IsSetTaxid() && defline.GetTaxid() != ZERO_TAX_ID) {
-    //         			TTaxId tax_id = defline.GetTaxid();
-    //        				hit_exp->SetTaxid(tax_id);
-    //         			if(hasTaxDB) {
-    //         				 SSeqDBTaxInfo taxinfo;
-    //         				 CSeqDB::GetTaxInfo(tax_id, taxinfo);
-    //         				 hit_exp->SetSciname(taxinfo.scientific_name);
-    //         			}
-    //         		}
-    //         		descr_list.push_back(hit_exp);
-    //     ...
-    //     } catch (const CException&) {
-    //     	CRef<blastxml2::CHitDescr> hit_exp(new blastxml2::CHitDescr);
-    //     	hit_exp->SetId(kSeqId.AsFastaString());
-    //         hit->SetDescription().push_back(hit_exp);
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:380-415,422-428
     /// The names of a database sequence with parsed Seq-ids (`ParsedSubject::xml_hit` and
     /// `hit_descriptions`): `Hit_id`, `Hit_def` and `Hit_accession` of outfmt 5, and the
     /// `HitDescr` of each definition line of XML2 and JSON with what the taxonomy database said
@@ -295,7 +248,7 @@ impl SubjectNames {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:357-360, 412-417
-// (quoted at `report::db_subject::ParsedSubject::lookup_throws`: the `Hit` loads its subject by
+// (cited at `report::db_subject::ParsedSubject::lookup_throws`: the `Hit` loads its subject by
 // the Seq-align id, and a lookup that throws there throws again outside the hit's `catch`)
 /// What a `Hit` shows of its subject, made before the report (`SubjectNameCache`, and TBLASTN's
 /// and BLASTX's names of the subjects with hits), by what the reports do at it
@@ -437,29 +390,6 @@ impl XmlSubjects<'_> {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:465-487
-// ```c++
-//     int index = 1;
-//     bool incremental_output = (bool)out_stream;
-//     while (iter != alnset.Get().end()) {
-//         CRef<CHit> new_hit;
-//         // Retrieve the next set of results for a single subject sequence.
-//         // If the next Seq-align is discontinuous, then take it as is,
-//         // otherwise go along the chain of Seq-aligns until the subject Seq-id
-//         // changes, then wrap the single subject list into a discontinuous
-//         // Seq-align.
-//         if ((*iter)->GetSegs().IsDisc()) {
-//             s_SeqAlignToXMLHit(new_hit, *(*iter), scope, matrix, mask_info,
-//                                ungapped, master_gentice_code, slave_genetic_code);
-//             ++iter;
-//         } else {
-//             CSeq_align_set one_subject_alnset;
-//             CConstRef<CSeq_id> current_id(s_GetSubjectId(*(*iter)));
-//             for ( ; iter != alnset.Get().end(); ++iter) {
-//                 CConstRef<CSeq_id> next_id(s_GetSubjectId(*(*iter)));
-//                 if (!current_id->Match(*next_id)) {
-//                     break;
-//                 }
-// ```
 // (XML2 and JSON: blastxml2_format.cpp:480-497, the same.)
 /// The HSP lists of a query's hit list `lists` that the XML, XML2 and JSON reports show as one
 /// `Hit` each, in order: ranges of the lists, each of a subject and the copies that follow it

@@ -153,14 +153,7 @@ impl XLinkWindow {
         }
     }
 
-    // NCBI reference: c++/src/algo/blast/core/link_hsps.c:1713-1723
-    // ```c
-    //        for (index1 = hsp_index_left; index1 < hsp_index_right; ++index1) {
-    //            BlastLinkedHSPSet* lhsp = offset_hsp_array[index1];
-    //            ...
-    //            if (s_LinkedHSPSetsAdmissible(head_hsp, lhsp,
-    //                                          link_hsp_params, program)) {
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1713-1723
     // The same candidates in the same order, less those `s_LinkedHSPSetsAdmissible` refuses
     // whatever their query offsets (see the module text).
     /// The candidates of the head set `head` among `offset_order[left..right]`, in that order:
@@ -531,12 +524,7 @@ mod tests {
         expected.hsps.iter().filter(|hsp| hsp.num > 1).count()
     }
 
-    // NCBI reference: c++/src/algo/blast/core/link_hsps.c:1414-1491 (s_LinkedHSPSetsAdmissible)
-    // ```c
-    // if (left_hsp->hsp->subject.end < right_hsp->hsp->subject.offset - gap_s) break;
-    // if (left_hsp->hsp->subject.end > right_hsp->hsp->subject.offset + overlap || ...
-    //     left_hsp->hsp->subject.offset >= right_hsp->hsp->subject.offset || ...) break;
-    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1414-1491 (s_LinkedHSPSetsAdmissible)
     // The chosen candidates give NCBI's links: on random lists and on lists of repeat copies
     // (many small sets over the whole subject, several contexts) the linked list (order, sets,
     // numbers, E-value bits, best E-value) is the one of the whole window, with

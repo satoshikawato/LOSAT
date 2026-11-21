@@ -3,16 +3,6 @@
 //! Windows; other targets (wasm32) read the file into a 4-byte-aligned buffer.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/api/rps_aux.cpp:252-262
-//! ```c++
-//! CRpsMmappedFile::CRpsMmappedFile(const string& filename)
-//! {
-//!     try { m_MmappedFile.reset(new CMemoryFile(filename)); }
-//!     catch (const CFileException& e) {
-//!         NCBI_RETHROW(e, CBlastException, eRpsInit,
-//!              "Cannot memory map RPS-BLAST database file: " + filename);
-//!     }
-//! }
-//! ```
 //! A file changed while it is mapped can end the process (SIGBUS), as it can end NCBI's.
 
 use std::io;

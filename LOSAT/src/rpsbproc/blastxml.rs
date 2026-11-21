@@ -6,89 +6,6 @@
 //! HSP by HSP as the text is read: no document is held as text.
 //!
 //! NCBI reference (598d8ae6): c++/src/objects/blastxml/blastxml.asn:3-81
-//! ```text
-//! NCBI-BlastOutput DEFINITIONS ::=
-//! BEGIN
-//!
-//! BlastOutput ::= SEQUENCE {
-//! 	program VisibleString ,		-- BLAST program: blastp, tblastx etc.
-//! 	version VisibleString ,		-- Program version
-//! 	reference VisibleString ,	-- Steven, David, Tom and others
-//! 	db VisibleString ,		-- BLAST Database name
-//! 	query-ID VisibleString ,	-- SeqId of query
-//! 	query-def VisibleString ,	-- Definition line of query
-//! 	query-len INTEGER ,		-- length of query sequence
-//! 	query-seq VisibleString OPTIONAL ,	-- query sequence itself
-//! 	param Parameters,		-- search parameters
-//!         iterations SEQUENCE OF Iteration,
-//!         mbstat Statistics OPTIONAL        -- Mega BLAST search statistics
-//! }
-//! Iteration ::= SEQUENCE {
-//! 	iter-num INTEGER ,	         -- iteration number
-//! 	query-ID VisibleString OPTIONAL, -- SeqId of query
-//! 	query-def VisibleString OPTIONAL,-- Definition line of query
-//! 	query-len INTEGER OPTIONAL ,	 -- length of query sequence
-//! 	hits SEQUENCE OF Hit OPTIONAL,	 -- Hits one for every db sequence
-//! 	stat Statistics OPTIONAL,	 -- search statistics
-//!         message VisibleString OPTIONAL   -- Some (error?) information
-//! }
-//! Parameters ::= SEQUENCE {
-//! 	matrix VisibleString OPTIONAL ,	-- Matrix used (-M)
-//! 	expect REAL ,			-- Expectation threshold (-e)
-//! 	include REAL OPTIONAL ,		-- Inclusion threshold (-h)
-//! 	sc-match INTEGER OPTIONAL ,	-- match score for NT (-r)
-//! 	sc-mismatch INTEGER OPTIONAL ,	-- mismatch score for NT (-q)
-//! 	gap-open INTEGER ,		-- Gap opening cost (-G)
-//! 	gap-extend INTEGER ,		-- Gap extension cost (-E)
-//! 	filter VisibleString OPTIONAL,  -- Filtering options (-F)
-//! 	pattern VisibleString OPTIONAL,	-- PHI-BLAST pattern
-//!         entrez-query VisibleString OPTIONAL -- Limit of request to Entrez query
-//! }
-//!
-//! Statistics ::= SEQUENCE {
-//! 	db-num INTEGER ,		-- Number of sequences in BLAST db
-//! 	db-len BigInt ,	                -- Length of BLAST db
-//! 	hsp-len INTEGER ,		-- Effective HSP length
-//! 	eff-space REAL,			-- Effective search space
-//!         kappa REAL,                     -- Karlin-Altschul parameter K
-//!         lambda REAL,                    -- Karlin-Altschul parameter Lambda
-//!         entropy REAL                    -- Karlin-Altschul parameter H
-//! }
-//!
-//! Hit ::= SEQUENCE {
-//! 	num INTEGER ,			-- hit number
-//! 	id VisibleString ,		-- SeqId of subject
-//! 	def VisibleString ,		-- definition line of subject
-//! 	accession VisibleString ,       -- accession
-//! 	len INTEGER ,			-- length of subject
-//! 	hsps SEQUENCE OF Hsp OPTIONAL	-- all HSP regions for the given subject
-//! }
-//!
-//! Hsp ::= SEQUENCE {
-//! 	num INTEGER ,			-- HSP number
-//! 	bit-score REAL ,		-- score (in bits) of HSP
-//! 	score REAL ,			-- score of HSP
-//! 	evalue REAL ,			-- e-value of HSP
-//! 	query-from INTEGER ,		-- start of HSP in query
-//! 	query-to INTEGER ,		-- end of HSP
-//! 	hit-from INTEGER,		-- start of HSP in subject
-//! 	hit-to INTEGER ,		-- end of HSP in subject
-//! 	pattern-from INTEGER OPTIONAL ,	-- start of PHI-BLAST pattern
-//! 	pattern-to INTEGER OPTIONAL ,	-- end of PHI-BLAST pattern
-//! 	query-frame INTEGER OPTIONAL ,	-- translation frame of query
-//! 	hit-frame INTEGER OPTIONAL ,	-- translation frame of subject
-//! 	identity INTEGER OPTIONAL ,	-- number of identities in HSP
-//! 	positive INTEGER OPTIONAL ,	-- number of positives in HSP
-//! 	gaps INTEGER OPTIONAL ,		-- number of gaps in HSP
-//! 	align-len INTEGER OPTIONAL ,	-- length of the alignment used
-//! 	density INTEGER OPTIONAL ,	-- score density
-//! 	qseq VisibleString ,		-- alignment string for the query (with gaps)
-//! 	hseq VisibleString,		-- alignment string for subject (with gaps)
-//! 	midline VisibleString OPTIONAL	-- formating middle line
-//! }
-//!
-//! END
-//! ```
 //! (The classes that datatool generates from this module read each member as its type:
 //! VisibleString, INTEGER (`Int4`), BigInt (`Int8`), REAL; a member of a SEQUENCE type is that
 //! class, a SEQUENCE OF a named type is a list of that class. Getters of OPTIONAL members
@@ -215,44 +132,9 @@ impl<R: Read> XmlStream<R> {
     /// The next document (`ObjStreamIn<CBlastOutput>`) with its queries for the E-value cutoff
     /// `evcut` and the data `data`; `Ok(None)` when it does not read, where rpsbproc's loop ends
     /// (and after); `Err` with LOSAT's refusal.
-    // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:744-755
-    // ```c++
-    // 		if (eSerial_Xml == m_sfmt)
-    // 		{
-    // 			//list<_TOfflDomQuery> qobjs;
-    // 			while (m_istream->good())
-    // 			{
-    // 				CBlastOutput objBlastOutput;
-    // 				try
-    // 				{
-    // 					ObjStreamIn<CBlastOutput> ((*m_istream), objBlastOutput, eSerial_Xml);
-    // 				}
-    // 				catch (...)
-    // 				{
-    // 					break;
-    // 				}
-    // ```
-    // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/objutils.hpp:76-84
-    // ```c++
-    // template<class BioObj>
-    // void ObjStreamIn(ncbi::CNcbiIstream& is, BioObj& rBioObj, ncbi::ESerialDataFormat eFormat = ncbi::eSerial_AsnText)
-    // {
-    //
-    // 	ncbi::CObjectIStream *pIStream = CreateObjIStream(is, eFormat);
-    //
-    // 	*pIStream >> rBioObj;
-    // 	delete pIStream;
-    // }
-    // ```
+    // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/rpsbproc_main.cpp:741-755
+    // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/objutils.hpp:75-84
     // NCBI reference (598d8ae6): c++/src/util/bytesrc.cpp:194-199
-    // ```c++
-    // bool CStreamByteSourceReader::Pushback(const char* data, size_t size)
-    // {
-    //     CStreamUtils::Stepback(*m_Stream, (CT_CHAR_TYPE*) data, (streamsize) size);
-    //     m_Stream->clear();
-    //     return true;
-    // }
-    // ```
     // (After a document the object stream gives back the bytes it did not read and clears the
     // stream's state, so the loop reads the next document from the byte after its last `>`.
     // When the input ends there, `good()` may be false: the loop ends as a read of nothing
@@ -378,7 +260,7 @@ fn read_hit<S: AsnSource>(
         3 => {
             reader.string(scratch)?;
             // `(unsigned int)atoi((*iterHit)->GetAccession().c_str())`
-            // (offl_cd_align_proc.cpp:155, quoted at `OfflineQuery::parse_hsp`).
+            // (offl_cd_align_proc.cpp:155, cited at `OfflineQuery::parse_hsp`).
             pssm_id = c_atoi(scratch) as u32;
             Ok(())
         }

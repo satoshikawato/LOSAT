@@ -32,14 +32,7 @@
 //! letters at one and four threads; `blastp_hsp_tie_order.rs` runs a four-thread search of one
 //! query against one subject (one match, no windows), whose list is expanded before the redo.
 //!
-//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1523-1539
-//! ```c
-//!          Blast_HSPListGetEvalues(program_number, query_info,
-//!                                  stat_length, hsp_list,
-//!                                  gapped_calculation, FALSE,
-//!                                  sbp, 0, 1.0);
-//!          status = s_Blast_HSPListReapByPrelimEvalue(hsp_list, hit_params);
-//! ```
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1522-1539
 
 use std::path::{Path, PathBuf};
 use std::process::Command;

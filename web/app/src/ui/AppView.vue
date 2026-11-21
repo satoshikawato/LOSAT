@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef, useId, watchEffect, type Ref } from 'vue';
-import type { Attention } from '../application/attention';
+import { holdsResults, type Attention } from '../application/attention';
 import { withRemedy, type Availability } from '../application/availability';
 import type { Coordinator } from '../application/coordinator';
 import type { SearchDraft } from '../application/draft';
@@ -38,7 +38,7 @@ const availabilityState = useStore(props.availability.state);
  */
 const unavailable = computed(() => {
   const problem = availabilityState.value.problem;
-  return problem === undefined ? undefined : withRemedy(problem, state.value.runs.some((run) => run.status === 'completed'));
+  return problem === undefined ? undefined : withRemedy(problem, state.value.runs.some(holdsResults));
 });
 /** The tab shown. Choosing one goes through the page's history, so Back on the results returns to the form (tab-history.ts). */
 const shown = ref<MainTab>('search');

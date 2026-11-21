@@ -167,7 +167,7 @@ fn every_ncbi_strategy_file_builds_the_setters_it_records() {
             let error = imported.expect_err(&case);
             assert_eq!(
                 error.get_msg(),
-                "Internal: Error processing option [WindowMaskerDatabase] type [12].",
+                b"Internal: Error processing option [WindowMaskerDatabase] type [12].",
                 "{case}"
             );
             refused += 1;
@@ -259,9 +259,15 @@ fn the_crafted_files_of_the_survey_end_as_ncbis() {
             let error = imported.expect_err(case);
             let ncbi = std::fs::read_to_string(dir.join(format!("{case}.err"))).unwrap();
             let report = if ncbi.starts_with("BLAST engine error: ") {
-                format!("BLAST engine error: {}\n", error.get_msg())
+                format!(
+                    "BLAST engine error: {}\n",
+                    String::from_utf8_lossy(error.get_msg())
+                )
             } else {
-                format!("Error: {}\n", error.what_in(PROBE_BUILD_ROOT))
+                format!(
+                    "Error: {}\n",
+                    String::from_utf8_lossy(&error.what_in(PROBE_BUILD_ROOT))
+                )
             };
             assert_eq!(report, crate::wording::losat_text(&ncbi), "{case}");
             checked += 1;

@@ -146,7 +146,7 @@ test('a failed TBLASTX run keeps the file of its -logfile, with NCBI\'s error, u
   await expect(status).toHaveAttribute('data-run-status', 'failed');
   await expect(status).toContainText('Run 1 failed: ');
   await expect(status).toContainText(AVERAGE_TOO_SHORT);
-  await expect(status).toContainText('A failed run keeps no results. It keeps the file of its -logfile, run.log.');
+  await expect(status).toContainText('It keeps the outputs written before the error. It keeps the file of its -logfile, run.log.');
   const file = page.getByTestId('run-files').getByTestId('run-file-0');
   await expect(file.getByTestId('run-file-name')).toHaveText('run.log');
   await expect(file.getByTestId('run-file-text')).toContainText(AVERAGE_TOO_SHORT);

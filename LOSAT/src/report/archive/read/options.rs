@@ -121,11 +121,9 @@ fn blast4_value(value: &Value) -> (ValueType, &Value) {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/objects/blast/Blast4_value_.cpp:250-253
-// The report has no function (NCBI BLAST+ 2.17.0 `E.blastn.cutoff_score`, line RG F2 probes:
-// `T0 "<build>/src/objects/blast/Blast4_value_.cpp", line 252: Error:
-// (CInvalidChoiceSelection::eFail) CBlast4_value::GetInteger(): Invalid choice selection:
-// NCBI-Blast4::Blast4-value.cutoff`).
+// The report has no function (NCBI BLAST+ 2.17.0 `E.blastn.cutoff_score`, line RG F2 probes: the
+// generated Blast4-value accessor fails with `CInvalidChoiceSelection::eFail`, an invalid choice
+// selection, `NCBI-Blast4::Blast4-value.cutoff`).
 const BLAST4_VALUE_SELECTION: ThrowSite = ThrowSite {
     file: "src/objects/blast/Blast4_value_.cpp",
     line: 252,

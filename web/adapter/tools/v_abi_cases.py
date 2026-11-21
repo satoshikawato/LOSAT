@@ -501,6 +501,38 @@ def own_search() -> list[dict]:
     return searches
 
 
+def failed_outputs() -> list[dict]:
+    """Runs that fail after the CLI wrote part of its output (line WQA's sweep, D15, 2026-11-20): the
+    run sends what the output of the argv's own `-outfmt` held, so that it is the CLI's file byte for
+    byte, and drops the other outputs (abi_v2.md §5). BLASTP with a query of two batches whose second
+    has no residues (`tests/fixtures/failed_outputs`): the CLI writes the first batch's hits, then
+    NCBI's `Sequence contains no data` ends the run, in outfmt 0, 6, 7, and 5 and `6 qseqid sseqid`
+    (the output of the argv's own, stream 4); and BLASTN with `-parse_deflines` on a record that is
+    both a query and a subject and has masks, whose outfmt 0 LOSAT refuses after its prolog, where the
+    CLI's outfmt 6 and 7 complete (their streams are dropped with the failed run's)."""
+    batch = "web/adapter/tests/fixtures/failed_outputs"
+    searches = []
+    # The archives of outfmt 13 and 14: the CLI leaves `results` empty (no side file, the first batch's report
+    # is not written before the error), and the run's archive holds that master file as an empty entry.
+    for outfmt, name in ((None, "outfmt0"), ("6", "outfmt6"), ("7", "outfmt7"), ("5", "outfmt5"),
+                         ("6 qseqid sseqid", "outfmt6_fields"), ("13", "outfmt13"), ("14", "outfmt14")):
+        searches.append({"program": "blastp",
+                         "argv": ["blastp", "-query", f"{batch}/later_batch.q.faa", "-subject", f"{batch}/later_batch.s.faa"],
+                         "cwd": str(REPO), "cases": [f"failed_outputs.blastp.later_batch.{name}"], "frozen": {},
+                         "expect": "failure", **({"outfmt": outfmt} if outfmt else {}),
+                         **({"files": True} if outfmt in ("13", "14") else {})})
+    searches.append({"program": "blastn",
+                     "argv": ["blastn", "-query", f"{batch}/later_batch.q.fna", "-subject", f"{batch}/later_batch.s.fna"],
+                     "cwd": str(REPO), "cases": ["failed_outputs.blastn.later_batch.outfmt13"], "frozen": {},
+                     "expect": "failure", "outfmt": "13", "files": True})
+    searches.append({"program": "blastn",
+                     "argv": ["blastn", "-query", "tests/fasta/outfmt0/pd_self_n.fna", "-subject", "tests/fasta/outfmt0/pd_self_n.fna",
+                              "-parse_deflines", "-dust", "yes"],
+                     "cwd": str(REPO / "LOSAT"), "cases": ["failed_outputs.blastn.pd_self.outfmt0"], "frozen": {},
+                     "expect": "failure"})
+    return searches
+
+
 def quick() -> list[dict]:
     cases = []
     blastp = capture.audit_blastp_v010.load_manifest(capture.TESTS / "blastp_v010_parity_manifest.tsv", REPO)
@@ -577,6 +609,7 @@ def main() -> int:
         searches.append(direct_tblastx())
         searches += window_masker()
         searches += own_search()
+        searches += failed_outputs()
     args.out.write_text(json.dumps(searches, indent=2) + "\n")
     print(f"{len(searches)} searches -> {args.out}")
     return 0

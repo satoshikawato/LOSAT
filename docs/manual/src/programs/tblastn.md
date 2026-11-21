@@ -74,6 +74,7 @@ This matters when your subject FASTA uses a non-standard code, for example a mit
 | `-max_intron_length` | 0 | Longest intron allowed when linking alignments |
 | `-window_size` | 40 | Two-hit window; 0 selects the one-hit method |
 | `-culling_limit` | 0 (off) | Delete a hit that at least this many higher-scoring hits envelop |
+| `-subject_besthit` | off | Keep only the best alignment of each subject for each part of the query |
 
 For every option: `losat tblastn -help`.
 
@@ -111,7 +112,7 @@ Formats 6, 7, 10 and 20 write twelve fields by default: `qaccver saccver pident 
 
 LOSAT stops with an error for these `tblastn` settings instead of running something else. The full list is on [What LOSAT refuses](../refusals.md).
 
-- `-ungapped`, `-use_sw_tback` and `-subject_besthit`.
+- `-ungapped` and `-use_sw_tback`.
 - `-best_hit_overhang` and `-best_hit_score_edge`.
 - An `-evalue` of 1.7976931348623157e308 or more.
 - `-matrix IDENTITY` with word sizes 5 to 7 (the default of `-task tblastn-fast`).

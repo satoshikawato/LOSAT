@@ -4,24 +4,6 @@
 //! the two-hit test taken without a branch. A child module of x_pair_par.rs.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:518-552
-//! ```c
-//! if (diag_array[diag_coord].flag) {
-//! ...
-//! }
-//! else {
-//!     last_hit = diag_array[diag_coord].last_hit - diag_offset;
-//!     diff = subject_offset - last_hit;
-//!
-//!     if (diff >= window) {
-//!         diag_array[diag_coord].last_hit =
-//!             subject_offset + diag_offset;
-//!         continue;
-//!     }
-//!
-//!     if (diff < wordsize) {
-//!         continue;
-//!     }
-//! ```
 //! In the reference loop most hits end in one of these two `continue`s (on AP027131 x AP027133,
 //! 80 % too far and 16 % overlap), and which one is taken depends on the data: the too-far test
 //! was mispredicted 0.14 times per hit there (v4-R6 REPORT, workstation). `x_hits_bf` computes
@@ -128,14 +110,7 @@ pub(super) fn x_reach_not_taken() {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:510-552 (module doc)
-// ```c
-// for (i = 0; i < hits; ++i) {
-//     Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
-//     Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
-// ...
-//     diag_coord = (query_offset - subject_offset) & diag_mask;
-// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-552 (module doc)
 // The hit loop of `scan_unit` over one batch: the cell of each hit as there (the raw diagonal minus
 // the unit's lowest one), the too-far and overlap outcomes of the flag-0 branch from one
 // subtraction with the cell's next value selected (module doc), and `rare` for a flag-1 cell or a
@@ -916,6 +891,7 @@ mod tests {
                 s_len: 999,
                 failure: &crate::algorithm::tblastx::subjects::XReadFailure::new(),
                 passed: None,
+                subject_besthit: false,
             };
             let mut scratch = XScratch::new(false);
             for (f, s_frame) in s_frames.iter().enumerate() {

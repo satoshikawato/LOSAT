@@ -89,6 +89,30 @@ pub trait StrategySink: Write + Send {
     fn can_cut(&self) -> bool;
 }
 
+/// The sink of a strategy file that LOSAT refuses before any request (`-`, NCBI's standard
+/// output): it never gets a byte (`StrategyExport::write_with`).
+struct NoSink;
+
+impl Write for NoSink {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl StrategySink for NoSink {
+    fn truncate(&mut self, _len: u64) -> std::io::Result<()> {
+        Ok(())
+    }
+
+    fn can_cut(&self) -> bool {
+        true
+    }
+}
+
 impl StrategySink for std::io::BufWriter<std::fs::File> {
     fn truncate(&mut self, len: u64) -> std::io::Result<()> {
         self.flush()?;
@@ -138,6 +162,11 @@ struct Shared {
     request: ArchiveRequest,
     /// The run's options handle, shared with the run's archive (`OptionsHandle`).
     options: OptionsHandle,
+    /// LOSAT's refusal of the file (`create_strategy_file`, `check_report_stream`).
+    refusal: Option<String>,
+    /// The report stream's bytes, held from the run's start until NCBI's first request
+    /// (`ReportHold`): only for a file that LOSAT refuses.
+    hold: Option<ReportHold>,
     state: Mutex<State>,
 }
 
@@ -153,6 +182,15 @@ impl std::fmt::Debug for StrategyExport {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3560-3569
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3624-3627
+/// A strategy file made where NCBI's `SetOptions` makes it (`create_strategy_file`): the file
+/// (`None` for `-`, NCBI's standard output) and LOSAT's refusal of it, if any, which the run
+/// raises where NCBI writes its first request (`check_report_stream`).
+#[derive(Debug)]
+pub struct StrategyFile {
+    file: Option<std::fs::File>,
+    refusal: Option<String>,
+}
+
 /// Creates (and empties) the strategy file where NCBI's `SetOptions` does: after the argument
 /// parser accepted the command line and before any option handler runs, so before the
 /// `-outfmt` text is read, the database list is resolved, and `-subject`, `-query` and `-out`
@@ -162,20 +200,192 @@ impl std::fmt::Debug for StrategyExport {
 /// (`-`) or the same file as the standard output or `-out`: NCBI writes each request to the
 /// output's stream before the batch's report (`-`), or to a second stream on the same file,
 /// whose bytes then replace or are replaced by the report's as the two buffers are flushed.
-pub fn create_strategy_file(path: &Path, out: Option<&Path>, label: &str) -> Result<std::fs::File> {
+/// NCBI writes its first request only after its formatter is made, its prolog written and the
+/// first batch read (the first `SaveSearchStrategy`, blastp_app.cpp:262), so every run that NCBI
+/// ends before that point (an empty query, a database error, an option or format error, a first
+/// batch it cannot read) writes no request, and its bytes are NCBI's. The refusal is therefore
+/// only recorded here and raised where NCBI makes its first request (`check_report_stream`);
+/// until then the run goes on as NCBI's, its report stream held back (`hold_report`).
+pub fn create_strategy_file(path: &Path, out: Option<&Path>, label: &str) -> Result<StrategyFile> {
     if path.as_os_str() == "-" {
-        anyhow::bail!(
-            "-export_search_strategy - (the search strategy on the standard output, between the parts of the report) is not supported by LOSAT's {label}; give a file name"
-        );
+        return Ok(StrategyFile {
+            file: None,
+            refusal: Some(format!(
+                "-export_search_strategy - (the search strategy on the standard output, between the parts of the report) is not supported by LOSAT's {label}; give a file name"
+            )),
+        });
     }
     let file = std::fs::File::create(path)
         .map_err(|_| crate::cli::inaccessible("export_search_strategy", path))?;
-    if is_same_as_output(&file, path, out) {
-        anyhow::bail!(
+    let refusal = is_same_as_output(&file, path, out).then(|| {
+        format!(
             "an -export_search_strategy file that is also the output (-out or the standard output) is not supported by LOSAT's {label}: NCBI writes both through separate streams and the file's bytes follow the order of their flushes"
-        );
+        )
+    });
+    Ok(StrategyFile {
+        file: Some(file),
+        refusal,
+    })
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:250-262 (the same order in
+// blastn_app.cpp:255-282, blastx_app.cpp:251-264, tblastn_app.cpp:267-280, tblastx_app.cpp:170-181,
+// psiblast_app.cpp:503-517 and :340, rpsblast_app.cpp:188-199, rpstblastn_app.cpp:185-196)
+/// LOSAT's refusal of the run's strategy file (`create_strategy_file`: the standard output, or
+/// the file of the output), raised where NCBI writes its first request: after its formatter and
+/// its prolog, once the first batch is read and before it is searched (`SaveSearchStrategy`).
+/// Every stop of NCBI's before that point (an empty query, a database or option error, a query
+/// that cannot be read, a bad `BATCH_SIZE`, psiblast's `-in_pssm` with `-subject`) comes first
+/// with NCBI's own bytes: the run's report stream holds what the run writes meanwhile
+/// (`hold_report`), and `end_run` writes it before the error. Here the held bytes are dropped
+/// and the run refuses, so the stream has no byte of the report before the refusal. The
+/// programs call it where they make the first batch's request (`StrategyExport::write_with`
+/// calls it too, so no request is ever written to such a file) and, where they write that
+/// request after searching, at NCBI's point (BLASTP's `search`).
+pub fn check_report_stream(strategy: Option<&StrategyExport>) -> Result<()> {
+    let Some(strategy) = strategy else {
+        return Ok(());
+    };
+    match strategy.0.refusal.as_deref() {
+        Some(refusal) => {
+            if let Some(hold) = &strategy.0.hold {
+                hold.drop_held();
+            }
+            Err(anyhow::anyhow!("{refusal}"))
+        }
+        None => Ok(()),
     }
-    Ok(file)
+}
+
+/// What a report stream gets of the bytes held back until NCBI's first request
+/// (`check_report_stream`).
+enum HoldState {
+    /// The run's bytes so far.
+    Holding(Vec<u8>),
+    /// The run ended without the request (`end_run`): the bytes wait to be written, once, before
+    /// the next write or flush of the stream.
+    Released(Vec<u8>),
+    /// The request point refused the run: the stream takes no byte.
+    Dropped,
+}
+
+/// The shared state of the held report stream of a run whose strategy file LOSAT refuses.
+#[derive(Clone)]
+struct ReportHold(Arc<Mutex<HoldState>>);
+
+impl Default for ReportHold {
+    fn default() -> Self {
+        ReportHold(Arc::new(Mutex::new(HoldState::Holding(Vec::new()))))
+    }
+}
+
+/// What a write of the held stream does (`ReportHold::step`).
+enum HoldStep {
+    /// The bytes are kept (or, dropped, thrown away).
+    Kept,
+    /// Write these bytes first, then the write itself.
+    Through(Vec<u8>),
+}
+
+impl ReportHold {
+    fn with_state<R>(&self, f: impl FnOnce(&mut HoldState) -> R) -> R {
+        f(&mut self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner))
+    }
+
+    /// A write of `bytes` (a flush writes none).
+    fn step(&self, bytes: &[u8]) -> HoldStep {
+        self.with_state(|state| match state {
+            HoldState::Holding(held) => {
+                held.extend_from_slice(bytes);
+                HoldStep::Kept
+            }
+            HoldState::Released(held) => HoldStep::Through(std::mem::take(held)),
+            HoldState::Dropped => HoldStep::Kept,
+        })
+    }
+
+    fn drop_held(&self) {
+        self.with_state(|state| *state = HoldState::Dropped);
+    }
+
+    /// The run ended: the held bytes are the stream's, as NCBI's error left them, unless
+    /// `keep` is false (LOSAT's refusal, which has no byte before it).
+    fn end(&self, keep: bool) {
+        self.with_state(|state| {
+            if let HoldState::Holding(held) = state {
+                *state = if keep {
+                    HoldState::Released(std::mem::take(held))
+                } else {
+                    HoldState::Dropped
+                };
+            }
+        });
+    }
+}
+
+/// The destination of a report stream (`cli::report_destination`) behind its hold.
+struct HeldReport<W: Write> {
+    inner: W,
+    hold: ReportHold,
+}
+
+impl<W: Write> Write for HeldReport<W> {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        match self.hold.step(bytes) {
+            HoldStep::Kept => Ok(bytes.len()),
+            HoldStep::Through(held) => {
+                self.inner.write_all(&held)?;
+                self.inner.write(bytes)
+            }
+        }
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        match self.hold.step(&[]) {
+            HoldStep::Kept => Ok(()),
+            HoldStep::Through(held) => {
+                self.inner.write_all(&held)?;
+                self.inner.flush()
+            }
+        }
+    }
+}
+
+impl<W: Write> Drop for HeldReport<W> {
+    fn drop(&mut self) {
+        let _ = Write::flush(self);
+    }
+}
+
+/// The destination `inner` of the command line's report stream (the `-out` file or standard
+/// output) behind the hold of a run whose strategy file LOSAT refuses (`strategy`): from the
+/// run's start until NCBI's first request (`check_report_stream`) the stream's bytes are held,
+/// not written. NCBI writes nothing to the stream before its formatter, and its first request
+/// only after its prolog, so what is held is the prolog (and the reports of the stops that come
+/// first); the run's end writes them before its error (`end_run`), the request point drops them
+/// and refuses. The destination as it is, without a hold or a cost.
+pub(crate) fn hold_report<'a>(
+    strategy: Option<&StrategyExport>,
+    inner: Box<dyn Write + 'a>,
+) -> Box<dyn Write + 'a> {
+    match strategy.and_then(|strategy| strategy.0.hold.clone()) {
+        Some(hold) => Box::new(HeldReport { inner, hold }),
+        None => inner,
+    }
+}
+
+/// `hold_report` of a destination that can move between threads.
+pub(crate) fn hold_report_send(
+    strategy: Option<&StrategyExport>,
+    inner: Box<dyn Write + Send>,
+) -> Box<dyn Write + Send> {
+    match strategy.and_then(|strategy| strategy.0.hold.clone()) {
+        Some(hold) => Box::new(HeldReport { inner, hold }),
+        None => inner,
+    }
 }
 
 /// Whether the created strategy `file` is the file of `-out` (which exists then: NCBI creates
@@ -252,20 +462,23 @@ pub(crate) fn hitlist_size(outfmt: i32, counts: HitlistArgs) -> i32 {
 /// creates it (`create_strategy_file`), or `None` without the argument. A file name that is not
 /// UTF-8 is refused first (`check_utf8_file_name`). `out` is the `-out` argument; `label` names
 /// the program in a refusal.
+///
+/// With a strategy file NCBI skips its early reading of `-outfmt` (blast_args.cpp:3624-3627,
+/// cited at `create_strategy_file`'s callers): a value its parser refuses (`99`, `abc`) fails
+/// only in the formatting handler, the last of the handlers, so `-subject`, `-subject_loc`,
+/// `-query`, `-out` and `-query_loc` come first, in the order of the other arguments. The
+/// callers read the value with `app::early_format_choice`, which leaves it to their own
+/// formatting handler, and make `-out` where they always do (line RG F/d36 review 2c B1).
 pub fn open_strategy_file(
     path: Option<&Path>,
     out: Option<&Path>,
     label: &str,
-) -> Result<Option<std::fs::File>> {
-    path.map(|path| {
-        crate::blastinput::input_files::check_utf8_file_name(
-            path,
-            "export_search_strategy",
-            label,
-        )?;
-        create_strategy_file(path, out, label)
-    })
-    .transpose()
+) -> Result<Option<StrategyFile>> {
+    let Some(path) = path else {
+        return Ok(None);
+    };
+    crate::blastinput::input_files::check_utf8_file_name(path, "export_search_strategy", label)?;
+    create_strategy_file(path, out, label).map(Some)
 }
 
 impl StrategyExport {
@@ -279,9 +492,21 @@ impl StrategyExport {
         database: Option<&str>,
         options: OptionsHandle,
     ) -> Self {
+        Self::with_refusal(sink, inputs, database, options, None)
+    }
+
+    fn with_refusal(
+        sink: Box<dyn StrategySink>,
+        inputs: &OptionInputs,
+        database: Option<&str>,
+        options: OptionsHandle,
+        refusal: Option<String>,
+    ) -> Self {
         Self(Arc::new(Shared {
             request: ArchiveRequest::for_inputs(inputs, database),
             options,
+            hold: refusal.is_some().then(ReportHold::default),
+            refusal,
             state: Mutex::new(State {
                 held: (!sink.can_cut()).then(std::collections::VecDeque::new),
                 sink,
@@ -300,22 +525,26 @@ impl StrategyExport {
     /// The export of a run into its strategy file (`open_strategy_file`), buffered: the program's
     /// recorded options `inputs` with the `HitlistSize` of the run's format `outfmt` and `counts`
     /// (the archive's is outfmt 11's), and the run's options handle `options` (made once per run
-    /// and given to its archive too, `ArchiveHandle::for_program`).
+    /// and given to its archive too, `ArchiveHandle::for_program`). `outfmt` is none for a
+    /// `-outfmt` value that was not read (`app::EarlyFormat::Deferred`): the run stops at its
+    /// formatting handler before any request, so the options keep their own hitlist size.
     pub fn for_run(
-        file: std::fs::File,
+        file: StrategyFile,
         mut inputs: OptionInputs,
-        outfmt: i32,
+        outfmt: Option<i32>,
         counts: HitlistArgs,
         database: Option<&str>,
         options: &OptionsHandle,
     ) -> Self {
-        inputs.hitlist_size = hitlist_size(outfmt, counts);
-        Self::new(
-            Box::new(std::io::BufWriter::new(file)),
-            &inputs,
-            database,
-            options.clone(),
-        )
+        if let Some(outfmt) = outfmt {
+            inputs.hitlist_size = hitlist_size(outfmt, counts);
+        }
+        // A refused file gets no request (`check_report_stream`, `write_with`); `-` has none.
+        let sink: Box<dyn StrategySink> = match file.file {
+            Some(file) => Box::new(std::io::BufWriter::new(file)),
+            None => Box::new(NoSink),
+        };
+        Self::with_refusal(sink, &inputs, database, options.clone(), file.refusal)
     }
 
     /// The run's options handle.
@@ -369,6 +598,7 @@ impl StrategyExport {
         queries: Range<usize>,
         make: impl FnOnce(&mut dyn FnMut(&RequestInputs<'_>) -> Result<()>) -> Result<()>,
     ) -> Result<bool> {
+        check_report_stream(Some(self))?;
         self.with_state(|state| {
             if !state.takes(&queries) {
                 return Ok(false);
@@ -561,6 +791,12 @@ pub fn end_run(strategy: Option<&StrategyExport>, result: Result<()>) -> Result<
         return result;
     };
     let native = matches!(&result, Err(error) if error.is::<crate::cli::NativeError>());
+    // The report stream's held bytes (`hold_report`): where the run ends before NCBI's first
+    // request they are NCBI's, written before its error (or its success); LOSAT's refusal has
+    // none before it.
+    if let Some(hold) = &strategy.0.hold {
+        hold.end(result.is_ok() || native);
+    }
     let ended = strategy.with_state(|state| -> std::io::Result<()> {
         state.unreached.clear();
         if !native {

@@ -920,13 +920,15 @@ pub(crate) enum MaskError {
 /// The masks of the queries: their DUST masks and, with `-lcase_masking`, their lower-case
 /// letters, then with `-filtering_db` the hits of the repeat search (`repeat_filter`); with
 /// `-window_masker_db` the masks of WindowMasker, which replace DUST's and the lower case
-/// (`window_masker`; the options exclude `-filtering_db`).
+/// (`window_masker`; the options exclude `-filtering_db`). With the masks, the repeat search's
+/// hits of each query (`RepeatFilter::add_masks`; empty without `-filtering_db`).
+#[allow(clippy::type_complexity)]
 pub(crate) fn query_masks<L: QueryLetters + ?Sized>(
     args: &BlastnArgs,
     queries: &L,
     outside: &mut [super::repeat_filter::MasksOutside],
     pool: &SearchPool<'_>,
-) -> Result<Vec<Vec<MaskedInterval>>, MaskError> {
+) -> Result<(Vec<Vec<MaskedInterval>>, Vec<Vec<(usize, usize)>>), MaskError> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:216-224
     // After DUST, and `query.SetMaskedRegions(mqr)` (winmask_filter.cpp:311) replaces the
     // query's masks: DUST's and the lower case are not made.
@@ -935,6 +937,7 @@ pub(crate) fn query_masks<L: QueryLetters + ?Sized>(
         return (0..queries.count())
             .map(|index| queries.read(index, |letters| window_masker.masks(letters, minus)))
             .collect::<Result<_, _>>()
+            .map(|masks| (masks, Vec::new()))
             .map_err(MaskError::WindowMasker);
     }
     let mut query_masks = apply_dust_masking(args, queries, pool);
@@ -951,12 +954,13 @@ pub(crate) fn query_masks<L: QueryLetters + ?Sized>(
         }
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:206-214
-    if let Some(filter) = &args.repeat_filter {
-        filter
+    let repeat_hits = match &args.repeat_filter {
+        Some(filter) => filter
             .add_masks(&args.strand, queries, &mut query_masks, outside, pool)
-            .map_err(MaskError::Repeats)?;
-    }
-    Ok(query_masks)
+            .map_err(MaskError::Repeats)?,
+        None => Vec::new(),
+    };
+    Ok((query_masks, repeat_hits))
 }
 
 /// The masks of the query parts of a query chunk: the DUST masks of each part added to the
@@ -981,7 +985,7 @@ pub(crate) fn chunk_query_masks<R: InputRecord + Sync>(
     // A chunk's query data is made with the options (`MakeLocalQueryData(m_Options)`), so its
     // query source calculates the masks of the chunk's parts again, WindowMasker last.
     if args.window_masker.is_some() {
-        return query_masks(args, parts, &mut [], pool);
+        return query_masks(args, parts, &mut [], pool).map(|(masks, _)| masks);
     }
     let mut masks: Vec<Vec<MaskedInterval>> = apply_dust_masking(args, parts, pool)
         .into_iter()
@@ -991,6 +995,7 @@ pub(crate) fn chunk_query_masks<R: InputRecord + Sync>(
             merge_mask_intervals(masks)
         })
         .collect();
+    // The chunk's hits are its parts' own: the archive reads those of the batch (`query_masks`).
     if let Some(filter) = &args.repeat_filter {
         filter
             .add_masks(&args.strand, parts, &mut masks, outside, pool)

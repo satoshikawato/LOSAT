@@ -65,7 +65,9 @@ use std::rc::Rc;
 pub enum ReadError {
     /// The bytes are not those of the expected format, or a range passes the end of the source.
     Format(String),
-    /// The system failed to give bytes of a file that opened ([`super::SeqDbError::is_unreadable`]).
+    /// The system failed to give bytes of a file after its first byte ([`super::SeqDbError::Read`]:
+    /// where NCBI reads its mapping, a SIGBUS, which `report::db_subject::LookupFailure::of_error`
+    /// takes as NCBI's crash; line WQA D18 round 3).
     Unreadable(super::SeqDbError),
 }
 
@@ -155,12 +157,9 @@ impl ReadAt for super::file::DbFile {
         super::file::DbFile::len(self)
     }
     fn read_exact_at(&self, buf: &mut [u8], offset: u64) -> Result<(), ReadError> {
-        super::file::DbFile::read_exact_at(self, buf, offset).map_err(|error| {
-            if error.is_unreadable() {
-                ReadError::Unreadable(error)
-            } else {
-                ReadError::Format(error.to_string())
-            }
+        super::file::DbFile::read_exact_at(self, buf, offset).map_err(|error| match error {
+            super::SeqDbError::Read { .. } => ReadError::Unreadable(error),
+            other => ReadError::Format(other.to_string()),
         })
     }
 }

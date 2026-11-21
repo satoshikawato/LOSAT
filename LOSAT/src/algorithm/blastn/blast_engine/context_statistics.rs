@@ -222,6 +222,43 @@ fn karlin_blocks<const UNGAPPED: bool>(
 
 /// The checks of the set-up on the subjects (a database without sequences, the average subject
 /// length) and on the greedy gap costs, then the blocks the search reads for each context and the
+/// LOSAT's refusals of the greedy set-up of `BLAST_GapAlignSetUp` (`s_BlastGreedyAlignMemAlloc`),
+/// which NCBI reaches with a valid context only (with no valid context, NCBI extends nothing):
+/// gap costs that the tables accept but LOSAT's greedy extension does not (`scoring.rs`;
+/// gapped searches), then matrix-only scoring with the greedy extension, where NCBI divides by
+/// zero or does not end (`check_greedy_matrix_only`; an ungapped search sets it up too).
+pub(super) fn greedy_setup_refusal(args: &BlastnArgs, ungapped: bool) -> Option<anyhow::Error> {
+    if !ungapped {
+        if let Err(error) = check_greedy_gap_costs(args) {
+            return Some(error);
+        }
+    }
+    check_greedy_matrix_only(args, ungapped).err()
+}
+
+/// An error of the set-up of a batch with a valid context, NCBI's or LOSAT's refusal where NCBI
+/// crashes or LOSAT does not follow it, where NCBI meets it: in a batch after the first, the
+/// batches before had no valid query (one with a valid query would have raised it), and NCBI
+/// has written their reports (`run_in_pool`), before a crash too (a statistics count of 0,
+/// D1a-5; matrix-only scoring with gap costs 0 and 0, D1a-6 of line RG); in the first batch,
+/// after the prolog.
+pub(super) fn setup_failure(
+    error: anyhow::Error,
+    first_batch: bool,
+    outputs: BatchOutputs<'_, '_>,
+    intro: BlastnIntro,
+    shown: &ShownSubjects,
+) -> anyhow::Error {
+    if !first_batch {
+        return ErrorAfterInvalidBatches(error).into();
+    }
+    let (outputs, output_formats) = outputs.expect(FIRST_BATCH_OUTPUTS);
+    match write_pairwise_prologs(outputs, output_formats, intro, shown, false) {
+        Ok(()) => error,
+        Err(write_error) => write_error,
+    }
+}
+
 /// effective search space of each context.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:887-999
@@ -333,7 +370,7 @@ fn effective_search_spaces<const UNGAPPED: bool>(
     // then `The average subject length is too short`). The search spaces of the batch below
     // (`SplitQuery_SetEffectiveSearchSpace`) check nothing.
     // `BLAST_GapAlignSetUp` of this batch or chunk: the subjects first, then the greedy
-    // set-up below (blast_setup.c:976-979 before :993, `BLAST_GapAlignStructNew`).
+    // set-up below (blast_setup.c:969-979 before :993, `BLAST_GapAlignStructNew`).
     let gap_align_setup = any_valid_context && !split;
     if gap_align_setup {
         if let SubjectSource::Database(database) = subjects {
@@ -394,33 +431,15 @@ fn effective_search_spaces<const UNGAPPED: bool>(
                         .into(),
                     })
                 })
-        });
+        })
+        // The greedy set-up after the subjects: NCBI 2.17.0 reports `The average subject
+        // length is too short` (exit status 3) with gap costs or scores that LOSAT refuses for
+        // the greedy extension, also in a split query batch (each chunk checks them,
+        // `CHUNK_SIZE=200`; line RG D1a-6).
+        .or_else(|| greedy_setup_refusal(args, UNGAPPED));
         if let Some(error) = setup_error {
-            // A batch after the first: the batches before had no valid query (one with a
-            // valid query would have raised the error), and NCBI has written their reports
-            // (`run_in_pool`).
-            if !first_batch {
-                return Err(ErrorAfterInvalidBatches(error).into());
-            }
-            let (outputs, output_formats) = outputs.expect(FIRST_BATCH_OUTPUTS);
-            write_pairwise_prologs(outputs, output_formats, intro, shown, false)?;
-            return Err(error);
+            return Err(setup_failure(error, first_batch, outputs, intro, shown));
         }
-    }
-    // Gap costs that the tables accept but LOSAT's greedy extension does not (`scoring.rs`);
-    // with no valid context, NCBI extends nothing. A split batch checks them in each chunk,
-    // after the chunk's subjects: NCBI 2.17.0 reports `The average subject length is too
-    // short` (exit status 3) for a split query with these gap costs or matrix-only scoring
-    // (`CHUNK_SIZE=200`, a database whose average length is too short; line RG D1a-6).
-    if gap_align_setup && !UNGAPPED {
-        check_greedy_gap_costs(args)?;
-    }
-    // Matrix-only scoring with the greedy extension, where NCBI divides by zero or does not end
-    // (`check_greedy_matrix_only`): NCBI meets it in the greedy set-up of `BLAST_GapAlignSetUp`
-    // (`s_BlastGreedyAlignMemAlloc`), which it reaches with a valid context only, for an ungapped
-    // search too.
-    if gap_align_setup {
-        check_greedy_matrix_only(args, UNGAPPED)?;
     }
     let search_karlin: Vec<ContextKarlin> = {
         let fallback = context_karlin

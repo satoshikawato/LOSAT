@@ -295,9 +295,11 @@ impl BlastDbStream {
     }
 
     /// `seqdb_->GetMaskAlgorithmId(name)`; its `CSeqDBException` is thrown again as a
-    /// `CSequenceIStream_Exception`.
+    /// `CSequenceIStream_Exception`. Its text is the reader's (`MaskAlgorithms::id_of`): the
+    /// remapper's for mask columns, the names table of `MASKLIST` for GI-indexed masks.
     // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/sequence_istream_bdb.cpp:78-94
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2261-2266
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2292-2296
     fn named_id(&self, name: &str) -> Result<i32, StreamError> {
         let found = self
             .reader
@@ -305,10 +307,10 @@ impl BlastDbStream {
             .mask_algorithms()
             .map(|algorithms| algorithms.id_of(name))
             .map_err(|error| bdb_error(self.reader.database_error(error)))?;
-        if let Some(id) = found {
-            return Ok(id);
-        }
-        let message = "Cannot find string algorithm id in algorithm map.";
+        let message = match found {
+            Ok(id) => return Ok(id),
+            Err(message) => message,
+        };
         let site = crate::seqdb::throw_site(message.as_bytes())
             .unwrap_or(ThrowSite::generated("CSeqDBException::eInvalid"));
         Err(StreamError::Ncbi(

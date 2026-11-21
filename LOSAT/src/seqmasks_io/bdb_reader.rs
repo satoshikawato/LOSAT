@@ -194,6 +194,8 @@ impl MaskBdbReader {
         self.oid += 1;
         let program = self.program;
         let error = |error| database_error(error, program);
+        // `GetBioseq` builds NCBI's OID list first (`SeqDb::build_oid_list`).
+        self.db.build_oid_list().map_err(error)?;
         let set = self.db.defline_set(oid).map_err(error)?;
         if set
             .deflines
@@ -340,7 +342,7 @@ fn database_error(error: SeqDbError, program: &str) -> BdbError {
     if let Some(exception) = error.ncbi_exception() {
         return BdbError::Ncbi(exception.clone());
     }
-    match error.ncbi_message() {
+    match error.ncbi_request_message() {
         Some(text) => {
             let site = crate::seqdb::throw_site(&text)
                 .unwrap_or(ThrowSite::generated("CSeqDBException::eInvalid"));

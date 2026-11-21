@@ -144,7 +144,7 @@ fn every_search_call_starts_at_its_beginning() {
     assert!(matches!(call.log, Some(DiagTarget::Stderr)));
     assert!(diagnostics.is_empty());
     // With `-conffile` the start loads the file, and its settings are kept for the call.
-    let dir = scratch("nostart");
+    let dir = scratch("everycall");
     let conffile = dir.join("c.ini");
     std::fs::write(&conffile, "[BLAST]\n").unwrap();
     let search = validate(Program::Blastp, &["-conffile", path_text(&conffile)]).unwrap();

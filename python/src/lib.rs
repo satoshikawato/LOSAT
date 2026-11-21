@@ -39,7 +39,7 @@ pyo3::create_exception!(
 
 /// The Python exception of an API error: its message is the error's text (`Display`: one U+FFFD
 /// per maximal ill-formed subpart), and its attribute `message_bytes` the error's bytes
-/// (`Error::message`), what the command line writes.
+/// (`Error::message`, made from what the command line writes by the rules of `api::Error`).
 pub(crate) fn exception(error: api::Error) -> PyErr {
     let text = error.to_string();
     let raised = match &error {

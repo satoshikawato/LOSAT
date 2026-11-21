@@ -36,8 +36,8 @@ The other items are rare cases in which NCBI BLAST+ crashes, reads outside its m
 ### `tblastx` with very many short queries against one subject
 
 - **What you see.** LOSAT writes linked hits. NCBI BLAST+ 2.17.0 crashes (exit status 139) and writes nothing.
-- **When.** `tblastx` against a single subject sequence (`-subject` with one sequence, or a database of one), when one query batch holds so many very short queries that the batch's average translated length rounds down to 0: for example a 1,200-nt query with 1,300 queries of 3 nt, or with `-strand plus` or `minus` only 300 of them. With two or more subjects LOSAT and NCBI give the same bytes.
-- **Why.** NCBI's statistics for linking hits then give a cutoff of minus infinity, and a sum with it overflows a 32-bit integer. LOSAT computes the same sums in 64-bit integers, so it links first the chains with the most hits. No run that NCBI completes can check these rows: NCBI's nearest one, with a second subject that has no hits, links the hits differently.
+- **When.** `tblastx` against a single subject sequence (`-subject` with one sequence, or a database of one; other subjects of fewer than 3 bases in all count as none), when one query batch holds so many very short queries that the batch's average translated length rounds down to 0: for example a 1,200-nt query with 1,300 queries of 3 nt, or with `-strand plus` or `minus` only 300 of them. When the other subjects add at least one codon, LOSAT and NCBI give the same results (apart from the version line, which names LOSAT).
+- **Why.** NCBI's statistics for linking hits then give a cutoff of minus infinity, and a sum with it overflows a 32-bit integer. LOSAT links the hits by NCBI's rules with the sums in 64-bit integers. No run that NCBI completes can check these rows: NCBI's nearest one, with a second subject that has no hits, links the hits differently.
 - **Record.** [The decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
 
 ### One-hit gapped starts past the end of a sequence
